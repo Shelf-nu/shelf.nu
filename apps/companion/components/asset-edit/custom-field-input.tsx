@@ -202,11 +202,20 @@ export function CustomFieldInput({
 }
 
 /**
+ * Option lists longer than this get a search box. Same threshold as the web
+ * advanced filter's value picker (`ENUM_SEARCH_THRESHOLD` in
+ * `apps/webapp/app/components/assets/assets-index/advanced-filters/value-field.tsx`).
+ */
+const OPTION_SEARCH_THRESHOLD = 8;
+
+/**
  * Dropdown picker for `OPTION` custom fields.
  *
  * Matches the look-and-feel of the Category / Location pickers in `new.tsx`:
  * a `TouchableOpacity` showing the current selection that expands inline
- * into a scrollable list. If `field.options` is missing or empty (server
+ * into a scrollable list, in the order the field's options are saved. A list
+ * longer than {@link OPTION_SEARCH_THRESHOLD} gets a search box styled like the
+ * location picker's. If `field.options` is missing or empty (server
  * misconfiguration or older data), gracefully degrades to a plain text
  * input so the user is never locked out of editing the field.
  */
@@ -226,8 +235,20 @@ function OptionDropdown({
   const { colors } = useTheme();
   const styles = useStyles();
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
 
   const options = field.options ?? [];
+  const hasSearch = options.length > OPTION_SEARCH_THRESHOLD;
+  const needle = query.trim().toLowerCase();
+  // Each entry keeps its position in `field.options`, which keys its row.
+  const visibleOptions = options
+    .map((opt, index) => ({ opt, index }))
+    .filter(({ opt }) => !needle || opt.toLowerCase().includes(needle));
+
+  const close = () => {
+    setOpen(false);
+    setQuery("");
+  };
 
   // Degraded fallback: if no options are configured, render a plain text
   // input so the screen is still usable.
@@ -249,7 +270,7 @@ function OptionDropdown({
     <View>
       <TouchableOpacity
         style={styles.pickerButton}
-        onPress={() => setOpen((o) => !o)}
+        onPress={() => (open ? close() : setOpen(true))}
         accessibilityRole="button"
         accessibilityLabel={
           value
@@ -272,9 +293,46 @@ function OptionDropdown({
       </TouchableOpacity>
 
       {open && (
-        <View style={styles.pickerDropdown}>
+        <View
+          style={[
+            styles.pickerDropdown,
+            hasSearch && styles.pickerDropdownWithSearch,
+          ]}
+        >
+          {hasSearch && (
+            <View style={styles.optionSearch}>
+              <Ionicons name="search" size={18} color={colors.mutedLight} />
+              <TextInput
+                style={styles.optionSearchInput}
+                value={query}
+                onChangeText={setQuery}
+                placeholder="Search options..."
+                placeholderTextColor={colors.placeholderText}
+                autoCorrect={false}
+                accessibilityLabel={`Search ${field.name} options`}
+              />
+              {query.length > 0 && (
+                <TouchableOpacity
+                  onPress={() => setQuery("")}
+                  accessibilityLabel="Clear search"
+                  accessibilityRole="button"
+                >
+                  <Ionicons
+                    name="close-circle"
+                    size={18}
+                    color={colors.mutedLight}
+                  />
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
           <ScrollView nestedScrollEnabled keyboardShouldPersistTaps="handled">
-            {options.map((opt, index) => {
+            {visibleOptions.length === 0 && (
+              <Text style={styles.optionSearchEmpty}>
+                No options match your search
+              </Text>
+            )}
+            {visibleOptions.map(({ opt, index }) => {
               const selected = opt === value;
               return (
                 <TouchableOpacity
@@ -289,7 +347,7 @@ function OptionDropdown({
                   ]}
                   onPress={() => {
                     onChange(selected ? "" : opt);
-                    setOpen(false);
+                    close();
                   }}
                   accessibilityRole="button"
                   accessibilityState={{ selected }}
@@ -311,7 +369,7 @@ function OptionDropdown({
               style={styles.pickerClear}
               onPress={() => {
                 onChange("");
-                setOpen(false);
+                close();
               }}
               accessibilityRole="button"
               accessibilityLabel={`Clear ${field.name}`}
@@ -595,6 +653,35 @@ const useStyles = createStyles((colors, shadows) => ({
     fontSize: fontSize.sm,
     color: colors.error,
     fontWeight: "500",
+  },
+  // Room for the search box on top of about four rows.
+  pickerDropdownWithSearch: {
+    maxHeight: 280,
+  },
+  // Search box inside a long option list (mirrors the location picker's).
+  optionSearch: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.white,
+    margin: spacing.sm,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colors.gray300,
+    gap: spacing.sm,
+    ...shadows.sm,
+  },
+  optionSearchInput: {
+    flex: 1,
+    fontSize: fontSize.lg,
+    color: colors.foreground,
+  },
+  optionSearchEmpty: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: fontSize.base,
+    color: colors.muted,
   },
 
   // Inline DateTimePicker (iOS) wrapper — gives the calendar room to
