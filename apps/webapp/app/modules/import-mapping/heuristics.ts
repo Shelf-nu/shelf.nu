@@ -4,9 +4,7 @@
  * Proposes a Shelf destination for every column of an uploaded spreadsheet
  * without any network call: exact header names first, then case- and
  * separator-insensitive names, then the workspace's existing custom fields,
- * then a synonym table. Anything unmatched is skipped. This always runs; the
- * model only improves on it (see `model.server.ts`), so the import page works
- * the same with no API key.
+ * then a synonym table (`synonyms.ts`). Anything unmatched is skipped.
  *
  * Pure: no database, no I/O.
  *

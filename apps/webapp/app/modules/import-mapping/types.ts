@@ -1,6 +1,6 @@
 /**
- * Import mapping: data shapes shared by the matcher, the model call, the route
- * and the review table.
+ * Import mapping: data shapes shared by the matcher, the route and the review
+ * table.
  *
  * A mapping says, for every column of an uploaded spreadsheet, which Shelf
  * header it becomes. Applying it only renames and drops columns; cell values
@@ -43,7 +43,7 @@ export type ColumnMapping = {
   /** Exact header text from the file, trimmed. */
   source: string;
   target: ColumnTarget;
-  /** high = exact or synonym match, or the model was sure. */
+  /** high = exact, case-insensitive, existing-field or synonym match. */
   confidence: "high" | "low";
   /** Up to 3 non-empty cells, each cut to 60 chars. Shown in the UI only. */
   sample: string[];
@@ -55,8 +55,8 @@ export type MappingProposal = {
   columns: ColumnMapping[];
   /** At most 5 short warnings about value formats. */
   notes: string[];
-  /** Which proposer produced the final answer. */
-  source: "rules" | "model";
+  /** Which proposer produced the answer. Only the rule-based one exists. */
+  source: "rules";
 };
 
 /**

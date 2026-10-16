@@ -3,11 +3,10 @@
  * `content` intent with and without a reviewed mapping.
  *
  * The importer itself is mocked: these tests assert which rows it is handed.
- * The mapping modules run for real, and the Anthropic client is mocked at its
- * single entry point so no network call is made.
+ * The mapping modules run for real.
  *
  * @see {@link file://./../../../app/routes/_layout+/assets.import.tsx}
- * @see {@link file://./../../../app/modules/import-mapping/model.server.ts}
+ * @see {@link file://./../../../app/modules/import-mapping/propose.ts}
  */
 import { createCustomField } from "@factories";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -51,12 +50,6 @@ vi.mock("~/modules/asset/service.server", async () => ({
   createAssetsFromContentImport: vi.fn(),
 }));
 
-// why: the Anthropic API is an external network call; tests choose whether a
-// client exists and what it answers.
-vi.mock("~/modules/import-mapping/client.server", () => ({
-  getImportMappingClient: vi.fn(),
-}));
-
 // why: analytics goes to PostHog over the network; tests assert what is sent.
 vi.mock("~/integrations/posthog/client.server", () => ({
   captureServerEvent: vi.fn(),
@@ -65,7 +58,6 @@ vi.mock("~/integrations/posthog/client.server", () => ({
 import { db } from "~/database/db.server";
 import { captureServerEvent } from "~/integrations/posthog/client.server";
 import { createAssetsFromContentImport } from "~/modules/asset/service.server";
-import { getImportMappingClient } from "~/modules/import-mapping/client.server";
 import type { ColumnMapping } from "~/modules/import-mapping/types";
 import { csvDataFromRequest } from "~/utils/csv.server";
 import { requirePermission } from "~/utils/roles.server";
@@ -135,7 +127,6 @@ describe("assets import route", () => {
       createCustomField({ name: "Serial number", type: "TEXT" }),
     ]);
     vi.mocked(createAssetsFromContentImport).mockResolvedValue(true as never);
-    vi.mocked(getImportMappingClient).mockReturnValue(null);
   });
 
   describe("analyze", () => {
@@ -164,18 +155,6 @@ describe("assets import route", () => {
           { source: "Legacy ID", target: { kind: "skip" } },
         ],
       });
-    });
-
-    it("falls back to the rules when the model call fails", async () => {
-      const parse = vi.fn().mockRejectedValue(new Error("timeout"));
-      vi.mocked(getImportMappingClient).mockReturnValue({
-        messages: { parse },
-      } as never);
-
-      const result = body(await action(importArgs({ intent: "analyze" })));
-
-      expect(parse).toHaveBeenCalledTimes(1);
-      expect(result.proposal).toMatchObject({ source: "rules" });
     });
 
     it("says when the file already matches Shelf's format", async () => {

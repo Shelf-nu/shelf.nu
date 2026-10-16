@@ -16,7 +16,7 @@ import {
   buildColumnSamples,
   isAlreadyShelfFormat,
 } from "~/modules/import-mapping/heuristics";
-import { proposeMapping } from "~/modules/import-mapping/model.server";
+import { proposeMapping } from "~/modules/import-mapping/propose";
 import type { ColumnMapping } from "~/modules/import-mapping/types";
 import {
   MAX_MAPPED_COLUMNS,
@@ -93,7 +93,6 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
         await loadExistingCustomFields(organizationId);
       const rowCount = csvData.length - 1;
       const proposal = await proposeMapping({
-        organizationId,
         headers,
         samples,
         existingCustomFields,
