@@ -3,6 +3,14 @@
 -- this makes the column required too. It runs unattended, so it also settles
 -- every row that still has no workspace.
 
+-- One transaction, so a failure leaves nothing half-done. The lock blocks
+-- writes to "Scan" (reads carry on) from the cleanup until the constraint is
+-- in place: an older writer still serving could otherwise insert a row with
+-- no workspace after the DELETE, and SET NOT NULL would fail on it.
+BEGIN;
+
+LOCK TABLE "Scan" IN SHARE ROW EXCLUSIVE MODE;
+
 -- Stamp rows whose QR still exists with the asset, kit and workspace it points
 -- at. These are QR scans recorded by code that did not stamp the scan itself:
 -- rows written between the previous migration and the deploy that followed
@@ -24,3 +32,5 @@ DELETE FROM "Scan" WHERE "organizationId" IS NULL;
 
 -- AlterTable
 ALTER TABLE "Scan" ALTER COLUMN "organizationId" SET NOT NULL;
+
+COMMIT;
