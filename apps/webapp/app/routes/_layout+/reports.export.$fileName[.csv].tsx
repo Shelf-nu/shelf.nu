@@ -7,8 +7,10 @@
  * @see {@link file://../../modules/reports/helpers.server.ts}
  */
 
+import { AUDIT_STATUS_LABELS } from "@shelf/labels";
 import { data, type LoaderFunctionArgs } from "react-router";
 
+import { auditCompletionReport } from "~/modules/reports/audit-completion.server";
 import { formatDateForCsv } from "~/modules/reports/csv-format";
 import {
   resolveTimeframe,
@@ -23,8 +25,10 @@ import {
   assetActivityReport,
   assetDistributionReport,
   monthlyBookingTrendsReport,
+  type BookingComplianceSortColumn,
 } from "~/modules/reports/helpers.server";
 import { getReportById } from "~/modules/reports/registry";
+import type { AuditCompletionRow } from "~/modules/reports/types";
 import type {
   TimeframePreset,
   BookingComplianceRow,
@@ -44,13 +48,25 @@ import { csvResponse } from "~/utils/csv-utf8";
 import { type ResolvedFormatPrefs } from "~/utils/date-format";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { error, getCurrentSearchParams } from "~/utils/http.server";
+import {
+  buildContentDisposition,
+  error,
+  getCurrentSearchParams,
+} from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { getIntParam } from "~/utils/search-params-number";
 
+/**
+ * Builds the report named by `?reportId` as a CSV download, applying the same
+ * filters as the report page but reading up to 10,000 rows instead of one page.
+ *
+ * @returns The CSV as an attachment, or the failure with its status — 400 without
+ *   a report id, 404 for an unknown report, 403 for one that does not export
+ */
 export const loader = async ({
   context,
   request,
@@ -60,12 +76,16 @@ export const loader = async ({
   const { userId } = authSession;
 
   try {
-    const { organizationId } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.asset,
-      action: PermissionAction.export,
-    });
+    // `currentOrganization` supplies the workspace currency for the reports
+    // whose KPI strings carry money values.
+    const { organizationId, currentOrganization, access } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.reports,
+        action: PermissionAction.export,
+      });
+    const currency = currentOrganization.currency;
 
     const searchParams = getCurrentSearchParams(request);
     const reportId = searchParams.get("reportId");
@@ -119,11 +139,22 @@ export const loader = async ({
       formatPrefs
     );
 
-    // Generate CSV based on report type
+    // Generate CSV based on report type. Each case parses the same filter
+    // params its page-loader counterpart honors (see reports.$reportId.tsx)
+    // and hands them to the same query function — the client forwards the
+    // page's full query string, so the CSV contains exactly the rows the
+    // filtered page shows. Paging is the one deliberate difference: exports
+    // always read page 1 with a 10k page size.
     let csvString: string;
 
     switch (reportId) {
       case "booking-compliance": {
+        // Sort params mirror the page so the CSV row order matches the table.
+        const sortBy = (searchParams.get("sortBy") ||
+          "scheduledEnd") as BookingComplianceSortColumn;
+        const sortOrder = (searchParams.get("sortOrder") || "desc") as
+          | "asc"
+          | "desc";
         const reportData = await bookingComplianceReport({
           organizationId,
           timeframe,
@@ -131,6 +162,8 @@ export const loader = async ({
           timeZone: formatPrefs.timeZone,
           page: 1,
           pageSize: 10000, // Export up to 10k rows
+          sortBy,
+          sortOrder,
         });
         csvString = generateBookingComplianceCsv(
           reportData.rows as BookingComplianceRow[],
@@ -142,6 +175,9 @@ export const loader = async ({
       case "custody-snapshot": {
         const reportData = await custodySnapshotReport({
           organizationId,
+          currency,
+          teamMemberId: searchParams.get("teamMember") || undefined,
+          locationId: searchParams.get("location") || undefined,
           page: 1,
           pageSize: 10000,
         });
@@ -155,6 +191,8 @@ export const loader = async ({
       case "overdue-items": {
         const reportData = await overdueItemsReport({
           organizationId,
+          currency,
+          custodianId: searchParams.get("custodian") || undefined,
           page: 1,
           pageSize: 10000,
         });
@@ -166,10 +204,16 @@ export const loader = async ({
       }
 
       case "idle-assets": {
-        const idleThreshold = parseInt(searchParams.get("days") || "30", 10);
+        // Same floor as the report page, so the CSV matches what was on screen.
+        const idleThreshold = getIntParam(searchParams, "days", 30, {
+          min: 1,
+        });
         const reportData = await idleAssetsReport({
           organizationId,
+          currency,
           idleThresholdDays: idleThreshold,
+          categoryId: searchParams.get("category") || undefined,
+          locationId: searchParams.get("location") || undefined,
           page: 1,
           pageSize: 10000,
         });
@@ -184,6 +228,8 @@ export const loader = async ({
         const reportData = await topBookedAssetsReport({
           organizationId,
           timeframe,
+          categoryId: searchParams.get("category") || undefined,
+          locationId: searchParams.get("location") || undefined,
           page: 1,
           pageSize: 10000,
         });
@@ -209,6 +255,16 @@ export const loader = async ({
       case "asset-inventory": {
         const reportData = await assetInventoryReport({
           organizationId,
+          currency,
+          categoryIds:
+            searchParams.get("categories")?.split(",").filter(Boolean) ||
+            undefined,
+          locationIds:
+            searchParams.get("locations")?.split(",").filter(Boolean) ||
+            undefined,
+          statuses:
+            searchParams.get("statuses")?.split(",").filter(Boolean) ||
+            undefined,
           page: 1,
           pageSize: 10000,
         });
@@ -223,6 +279,8 @@ export const loader = async ({
         const reportData = await assetUtilizationReport({
           organizationId,
           timeframe,
+          categoryId: searchParams.get("category") || undefined,
+          locationId: searchParams.get("location") || undefined,
           page: 1,
           pageSize: 10000,
         });
@@ -236,6 +294,8 @@ export const loader = async ({
         const reportData = await assetActivityReport({
           organizationId,
           timeframe,
+          assetId: searchParams.get("asset") || undefined,
+          categoryId: searchParams.get("category") || undefined,
           page: 1,
           pageSize: 10000,
         });
@@ -249,6 +309,7 @@ export const loader = async ({
       case "distribution": {
         const reportData = await assetDistributionReport({
           organizationId,
+          currency,
           page: 1,
           pageSize: 10000,
         });
@@ -257,6 +318,10 @@ export const loader = async ({
       }
 
       case "monthly-booking-trends": {
+        // why: the page's category/location params are deliberately NOT
+        // forwarded — `monthlyBookingTrendsReport` accepts but ignores them,
+        // and forwarding dead filters would claim a filtering this export
+        // does not perform.
         const reportData = await monthlyBookingTrendsReport({
           organizationId,
           timeframe,
@@ -265,6 +330,24 @@ export const loader = async ({
         });
         csvString = generateMonthlyBookingTrendsCsv(
           reportData.rows as MonthlyBookingTrendRow[]
+        );
+        break;
+      }
+
+      case "audit-completion": {
+        const reportData = await auditCompletionReport({
+          organizationId,
+          // The CSV carries the same assignment scoping as the page: an
+          // export is just the page's data in a file.
+          userId,
+          assignedOnly: !access.audits.seeAll,
+          timeframe,
+          page: 1,
+          pageSize: 10000,
+        });
+        csvString = generateAuditCompletionCsv(
+          reportData.rows as AuditCompletionRow[],
+          formatPrefs
         );
         break;
       }
@@ -283,7 +366,10 @@ export const loader = async ({
 
     return csvResponse(csvString, {
       headers: {
-        "content-disposition": `attachment; filename="${fileName}.csv"`,
+        "content-disposition": buildContentDisposition(null, {
+          fallback: `${reportId}-export`,
+          filename: `${fileName}.csv`,
+        }),
         "cache-control": "no-cache",
       },
     });
@@ -345,7 +431,9 @@ function generateCustodySnapshotCsv(
     "Assigned To",
     "Assigned Date",
     "Days Held",
-    "Valuation",
+    "Units Held",
+    "Unit Value",
+    "Total Value",
   ];
 
   const csvRows = rows.map((row) => [
@@ -357,7 +445,13 @@ function generateCustodySnapshotCsv(
     // Datetime column: include the time part.
     formatDateForCsv(row.assignedAt, prefs, { includeTime: true }),
     row.daysInCustody.toString(),
+    // Units held in THIS custody row (`Custody.quantity`), the multiplier
+    // for this surface; null means one unit.
+    (row.quantity ?? 1).toString(),
     row.valuation?.toString() || "",
+    row.valuation == null
+      ? ""
+      : (row.valuation * (row.quantity ?? 1)).toString(),
   ]);
 
   return buildCsv(headers, csvRows);
@@ -601,7 +695,9 @@ function generateAssetInventoryCsv(
     "Location",
     "Status",
     "Custodian",
-    "Valuation",
+    "Quantity",
+    "Unit Value",
+    "Total Value",
     "Created Date",
     "QR Code ID",
   ];
@@ -613,7 +709,12 @@ function generateAssetInventoryCsv(
     row.location || "",
     formatAssetStatus(row.status),
     row.custodian || "",
+    // Workspace stock, the value multiplier for this surface; null means one.
+    (row.quantity ?? 1).toString(),
     row.valuation?.toString() || "",
+    row.valuation == null
+      ? ""
+      : (row.valuation * (row.quantity ?? 1)).toString(),
     // Date-only column: no time part.
     formatDateForCsv(row.createdAt, prefs),
     row.qrId || "",
@@ -744,6 +845,59 @@ function generateDistributionCsv(breakdown: DistributionBreakdown): string {
   ];
 
   return buildCsv(headers, allRows);
+}
+
+/**
+ * Generate CSV for the Audit Completion report.
+ *
+ * Columns match the UI table: raw counters, accuracy, and the lifecycle
+ * dates. Status uses the shared `AUDIT_STATUS_LABELS` words so the export
+ * reads the same as every badge in the app.
+ */
+function generateAuditCompletionCsv(
+  rows: AuditCompletionRow[],
+  prefs: ResolvedFormatPrefs
+): string {
+  const headers = [
+    "Audit ID",
+    "Name",
+    "Status",
+    "Expected",
+    "Found",
+    "Missing",
+    "Unexpected",
+    "Accuracy",
+    "Created By",
+    "Started",
+    "Due Date",
+    "Completed",
+  ];
+
+  const csvRows = rows.map((row) => [
+    row.id,
+    row.name,
+    AUDIT_STATUS_LABELS[row.status] || row.status,
+    row.expectedAssetCount.toString(),
+    row.foundAssetCount.toString(),
+    // Null until completion (counter still counts "not scanned"): empty cell.
+    row.missingAssetCount !== null ? row.missingAssetCount.toString() : "",
+    row.unexpectedAssetCount.toString(),
+    // Null accuracy (0 expected assets) exports as an empty cell, not "0%".
+    row.accuracy !== null ? `${row.accuracy}%` : "",
+    row.createdByName,
+    // Datetime columns: include the time part; empty when unset.
+    row.startedAt
+      ? formatDateForCsv(row.startedAt, prefs, { includeTime: true })
+      : "",
+    row.dueDate
+      ? formatDateForCsv(row.dueDate, prefs, { includeTime: true })
+      : "",
+    row.completedAt
+      ? formatDateForCsv(row.completedAt, prefs, { includeTime: true })
+      : "",
+  ]);
+
+  return buildCsv(headers, csvRows);
 }
 
 /**

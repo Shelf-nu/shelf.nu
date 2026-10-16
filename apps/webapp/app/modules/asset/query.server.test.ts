@@ -738,6 +738,80 @@ describe("generateWhereClause - special filter values", () => {
   });
 });
 
+/**
+ * Custom-field OPTION values are free text: an option can legitimately contain a
+ * double quote, a backslash or a comma. Binding them as parameters is the only
+ * way to get them to Postgres intact — a hand-assembled `{"a","b"}` literal
+ * cannot survive a value that contains the literal's own delimiters.
+ */
+describe("generateWhereClause - custom-field OPTION containsAny quoting", () => {
+  const orgId = "org-1";
+
+  /** Builds a containsAny OPTION filter over the given comma-joined values. */
+  function optionFilter(value: string) {
+    return {
+      name: "cf_Size",
+      type: "customField",
+      fieldType: "OPTION",
+      operator: "containsAny",
+      value,
+    } as Filter;
+  }
+
+  it("binds an option value containing a double quote as a parameter", () => {
+    const result = generateWhereClause(orgId, null, [
+      optionFilter('12" monitor,plain'),
+    ]);
+
+    expect(result.values).toContain('12" monitor');
+    expect(result.values).toContain("plain");
+  });
+
+  it("does not assemble a Postgres array literal from the values", () => {
+    const result = generateWhereClause(orgId, null, [
+      optionFilter('12" monitor,plain'),
+    ]);
+
+    // The literal the old build produced. Postgres rejects it: the quote inside
+    // the value closes the element early.
+    expect(result.values).not.toContain('{"12" monitor","plain"}');
+  });
+
+  it("keeps a backslash in an option value intact", () => {
+    const result = generateWhereClause(orgId, null, [
+      optionFilter("back\\slash"),
+    ]);
+
+    expect(result.values).toContain("back\\slash");
+  });
+
+  it("still matches a plain single option", () => {
+    const result = generateWhereClause(orgId, null, [optionFilter("Large")]);
+
+    expect(result.values).toContain("Large");
+    expect(getSqlString(result)).toContain("ANY(ARRAY[");
+  });
+
+  /**
+   * An empty list has to stay valid SQL that matches nothing. A bare `ARRAY[]`
+   * is a Postgres syntax error — the element type is not inferable — so the
+   * cast is load-bearing, not decoration.
+   */
+  it("emits a typed empty array when there are no values to match", () => {
+    const filter = {
+      name: "cf_Size",
+      type: "customField",
+      fieldType: "OPTION",
+      operator: "containsAny",
+      value: [],
+    } as unknown as Filter;
+
+    const sql = getSqlString(generateWhereClause(orgId, null, [filter]));
+
+    expect(sql).toContain("ANY(ARRAY[]::text[])");
+  });
+});
+
 describe("generateWhereClause - built-in date filter timezone", () => {
   const orgId = "test-org-id";
 
@@ -770,7 +844,7 @@ describe("generateWhereClause - built-in date filter timezone", () => {
       null,
       [filter],
       undefined,
-      false,
+      null,
       "Asia/Tokyo"
     );
 
@@ -814,7 +888,7 @@ describe("generateWhereClause - built-in date filter timezone", () => {
       null,
       [filter],
       undefined,
-      false,
+      null,
       "Asia/Tokyo"
     );
 
@@ -1093,6 +1167,10 @@ describe("assetQueryFragment", () => {
       // Per-slice pivot metadata the fold reads (booked units, kit membership).
       expect(sql).toContain('atb."assetKitId"');
       expect(sql).toContain('atb."quantity"');
+      // Slice markers the returned rule reads: the bar of an asset that is
+      // back from a live booking ends at its check-in, not the booking's end.
+      expect(sql).toContain(`'checkedOutAt', atb."checkedOutAt"`);
+      expect(sql).toContain(`'checkedInAt', atb."checkedInAt"`);
       // Kit name resolved through org-scoped AssetKit -> Kit joins, using
       // aliases (bk_ak/bk_kit) distinct from the outer query's own-kit ak/k.
       expect(sql).toContain("'kitName', bk_kit.name");
@@ -1111,6 +1189,7 @@ describe("assetQueryFragment", () => {
       // Default (table views) must not pay for the availability-only subquery.
       expect(sql).not.toContain("AS bookings");
       expect(sql).not.toContain('atb."assetKitId"');
+      expect(sql).not.toContain('atb."checkedInAt"');
       expect(sql).not.toContain("'kitName', bk_kit.name");
     });
   });
@@ -1243,6 +1322,23 @@ describe("generateWhereClause - tag EXISTS-ification (slim-phase enabler)", () =
   });
 });
 
+describe("generateWhereClause - list scope", () => {
+  const orgId = "test-org-id";
+
+  it("lists every asset when there is no scope", () => {
+    const sql = getSqlString(generateWhereClause(orgId, null, []));
+    expect(sql).not.toContain("availableToBook");
+  });
+
+  it("keeps bookable assets and the ones the viewer holds", () => {
+    const sql = getSqlString(
+      generateWhereClause(orgId, null, [], undefined, { holderUserId: "u-1" })
+    );
+    expect(sql).toContain(`AND (a."availableToBook" = true OR EXISTS`);
+    expect(sql).toContain(`FROM "Custody" scope_cu`);
+  });
+});
+
 describe("generateWhereClause - lowStockOnly", () => {
   const orgId = "test-org-id";
 
@@ -1253,9 +1349,9 @@ describe("generateWhereClause - lowStockOnly", () => {
   });
 
   it("does NOT emit the low-stock predicate when explicitly false", () => {
-    // Args: (org, search, filters, assetIds, availableToBookOnly, timeZone, lowStockOnly)
+    // Args: (org, search, filters, assetIds, bookableScope, timeZone, lowStockOnly)
     const sql = getSqlString(
-      generateWhereClause(orgId, null, [], undefined, false, "UTC", false)
+      generateWhereClause(orgId, null, [], undefined, null, "UTC", false)
     );
     expect(sql).not.toContain("QUANTITY_TRACKED");
     expect(sql).not.toContain("minQuantity");
@@ -1263,7 +1359,7 @@ describe("generateWhereClause - lowStockOnly", () => {
 
   it("emits the low-stock predicate when the flag is set", () => {
     const sql = getSqlString(
-      generateWhereClause(orgId, null, [], undefined, false, "UTC", true)
+      generateWhereClause(orgId, null, [], undefined, null, "UTC", true)
     );
     expect(sql).toContain(`a."type" = 'QUANTITY_TRACKED'`);
     expect(sql).toContain(`a."minQuantity" IS NOT NULL`);

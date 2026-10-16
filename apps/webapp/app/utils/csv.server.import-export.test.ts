@@ -67,6 +67,8 @@ vi.mock("~/modules/custom-field/service.server", () => ({
   ),
 }));
 
+import { getAdvancedPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
+import { ALL_SELECTED_KEY } from "~/utils/list";
 import { exportAssetsForImportToCsv } from "./csv.server";
 
 const ORG = { id: "org1", barcodesEnabled: false, currency: "USD" } as const;
@@ -99,5 +101,40 @@ describe("exportAssetsForImportToCsv", () => {
     });
     // With empty visible columns, "visible" would drop category; "all" keeps it.
     expect(csv.split("\r\n")[0]).toContain('"category"');
+  });
+
+  it("exports hand-picked rows whatever their archive state", async () => {
+    await exportAssetsForImportToCsv({
+      request: new Request("http://localhost/assets/export/x.csv"),
+      assetIds: "a1,a2",
+      settings: { mode: "ADVANCED", columns: [] } as never,
+      currentOrganization: ORG,
+      assetIndexCurrentSearchParams: null,
+      columnScope: "all",
+    });
+
+    expect(getAdvancedPaginatedAndFilterableAssets).toHaveBeenLastCalledWith(
+      expect.objectContaining({ assetIds: ["a1", "a2"], archivedFilter: "all" })
+    );
+  });
+
+  it("lets a select-all follow the view it was started from", async () => {
+    await exportAssetsForImportToCsv({
+      request: new Request("http://localhost/assets/export/x.csv"),
+      assetIds: ALL_SELECTED_KEY,
+      settings: { mode: "ADVANCED", columns: [] } as never,
+      currentOrganization: ORG,
+      assetIndexCurrentSearchParams: "archived=archived",
+      columnScope: "all",
+    });
+
+    expect(getAdvancedPaginatedAndFilterableAssets).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        takeAll: true,
+        honorArchivedView: true,
+        archivedFilter: undefined,
+        filters: "archived=archived",
+      })
+    );
   });
 });

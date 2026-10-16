@@ -30,7 +30,13 @@
  * @see {@link file://./unassigned-model-units-pill.tsx} — index row signal
  */
 import type { ReactNode } from "react";
-import { Package as PackageIcon } from "lucide-react";
+import { useState } from "react";
+import {
+  ChevronLeft as ChevronLeftIcon,
+  ChevronRight as ChevronRightIcon,
+  Package as PackageIcon,
+} from "lucide-react";
+import { Button } from "~/components/shared/button";
 import { BADGE_COLORS } from "~/utils/badge-colors";
 import {
   countReservedModelUnits,
@@ -84,6 +90,17 @@ type BookingModelReservationsSectionProps = {
    * ever render live bookings.
    */
   canAssign?: boolean;
+  /**
+   * Reservations the booking's dates can no longer fill (see
+   * `findModelRequestShortfallsForBooking`), e.g. after a unit was archived
+   * with "Archive anyway". Each is flagged on its row, and the header says
+   * what happens if nothing changes. Omitted by surfaces that do not measure.
+   */
+  shortfalls?: Array<{
+    assetModelId: string;
+    available: number;
+    short: number;
+  }>;
   /** Extra classes for the outer wrapper (surface-specific spacing). */
   className?: string;
 };
@@ -127,6 +144,17 @@ function describeOutstanding(
 }
 
 /**
+ * Reservations shown per page.
+ *
+ * The section sits ABOVE the Assets & Kits list, so its height is spent from
+ * the same screen as the list it introduces. A booking reserving dozens of
+ * models would otherwise push that list — and every control below it — past
+ * the bottom of the page. Ten rows state the shape of the outstanding work
+ * without displacing what follows.
+ */
+const RESERVATIONS_PAGE_SIZE = 10;
+
+/**
  * Renders the outstanding reservations for a booking, or `null` when there is
  * no outstanding work (so callers need no guard of their own).
  */
@@ -135,8 +163,11 @@ export function BookingModelReservationsSection({
   renderAction,
   headerAction,
   canAssign = true,
+  shortfalls,
   className,
 }: BookingModelReservationsSectionProps) {
+  const [page, setPage] = useState(1);
+
   const outstanding = getOutstandingModelRequests(modelRequests);
 
   if (outstanding.length === 0) {
@@ -145,6 +176,24 @@ export function BookingModelReservationsSection({
 
   const units = countUnassignedModelUnits(modelRequests);
   const reserved = countReservedModelUnits(modelRequests);
+  const shortfallByModelId = new Map(
+    (canAssign ? shortfalls ?? [] : []).map((s) => [s.assetModelId, s])
+  );
+
+  const totalPages = Math.max(
+    1,
+    Math.ceil(outstanding.length / RESERVATIONS_PAGE_SIZE)
+  );
+  // Assigning units removes rows, so the list can shrink underneath a reader
+  // sitting on the last page. Resolving the page on each render — rather than
+  // storing a corrected one — keeps that from rendering an empty table.
+  const currentPage = Math.min(page, totalPages);
+  const firstIndex = (currentPage - 1) * RESERVATIONS_PAGE_SIZE;
+  const visible = outstanding.slice(
+    firstIndex,
+    firstIndex + RESERVATIONS_PAGE_SIZE
+  );
+  const isPaged = outstanding.length > RESERVATIONS_PAGE_SIZE;
 
   return (
     <div className={tw("overflow-hidden rounded border bg-white", className)}>
@@ -162,13 +211,19 @@ export function BookingModelReservationsSection({
             {canAssign ? "still to assign" : "never assigned"}, across{" "}
             {outstanding.length} {outstanding.length === 1 ? "model" : "models"}
           </p>
+          {shortfallByModelId.size > 0 ? (
+            <p className="mt-1 text-sm font-medium text-error-600">
+              Not enough units are free for this booking&apos;s dates. Reduce
+              the reservation to what can be assigned.
+            </p>
+          ) : null}
         </div>
         {headerAction ? <div className="shrink-0">{headerAction}</div> : null}
       </div>
 
       <table className="w-full border-collapse">
         <tbody>
-          {outstanding.map((request) => (
+          {visible.map((request) => (
             <tr
               key={`model-reservation-${request.id}`}
               className="border-b border-gray-200 last:border-b-0"
@@ -200,6 +255,9 @@ export function BookingModelReservationsSection({
                     >
                       {describeOutstanding(request, canAssign)}
                     </span>
+                    <ShortfallChip
+                      shortfall={shortfallByModelId.get(request.assetModelId)}
+                    />
                   </div>
                 </div>
               </td>
@@ -213,6 +271,70 @@ export function BookingModelReservationsSection({
           ))}
         </tbody>
       </table>
+
+      {/* Pager appears only once the list outgrows a page, so a booking with a
+          handful of reservations reads exactly as it always has. */}
+      {isPaged ? (
+        <div className="flex items-center justify-between gap-3 border-t border-gray-200 p-4 md:px-6">
+          <p className="text-sm text-gray-600">
+            Showing {firstIndex + 1}-{firstIndex + visible.length} of{" "}
+            {outstanding.length} models
+          </p>
+
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              aria-label="Go to previous page"
+              disabled={currentPage === 1}
+              onClick={() => setPage(currentPage - 1)}
+            >
+              <ChevronLeftIcon className="size-4" />
+            </Button>
+
+            <span className="text-sm tabular-nums text-gray-600">
+              {currentPage} / {totalPages}
+            </span>
+
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              aria-label="Go to next page"
+              disabled={currentPage === totalPages}
+              onClick={() => setPage(currentPage + 1)}
+            >
+              <ChevronRightIcon className="size-4" />
+            </Button>
+          </div>
+        </div>
+      ) : null}
     </div>
+  );
+}
+
+/**
+ * Says how far a reservation is short, beside its "still to assign" chip, so
+ * the row that cannot be filled is the one that looks wrong.
+ */
+function ShortfallChip({
+  shortfall,
+}: {
+  shortfall: { available: number; short: number } | undefined;
+}) {
+  if (!shortfall) return null;
+  return (
+    <span
+      className="ml-2 mt-1 inline-flex items-center rounded-2xl px-2 py-[2px] text-xs font-medium"
+      style={{
+        backgroundColor: BADGE_COLORS.red.bg,
+        color: BADGE_COLORS.red.text,
+      }}
+    >
+      {shortfall.available > 0
+        ? `${shortfall.short} short: only ${shortfall.available} free`
+        : `${shortfall.short} short: none free`}
+    </span>
   );
 }

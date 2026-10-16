@@ -15,6 +15,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createActionArgs, createLoaderArgs } from "@mocks/remix";
+import { accessFor } from "@helpers/role-access";
 
 import { action, loader } from "~/routes/_layout+/bookings.$bookingId.activity";
 import { db } from "~/database/db.server";
@@ -102,15 +103,13 @@ describe("bookings.$bookingId.activity action — organization scoping", () => {
     // The attacker's session org (Org A)
     vi.mocked(rolesServer.requirePermission).mockResolvedValue({
       organizationId: "org-attacker",
-      isSelfServiceOrBase: false,
       organizations: [],
       currentOrganization: {} as any,
       role: {} as any,
       userOrganizations: [],
-      canSeeAllBookings: false,
-      canSeeAllCustody: false,
       canUseBarcodes: false,
       canUseAudits: false,
+      access: accessFor(["BASE"]),
     });
 
     vi.mocked(httpServer.getParams).mockReturnValue({
@@ -366,15 +365,13 @@ describe("bookings.$bookingId.activity action — organization scoping", () => {
   it("allows a POST on another user's booking when the requester can see all bookings", async () => {
     vi.mocked(rolesServer.requirePermission).mockResolvedValue({
       organizationId: "org-attacker",
-      isSelfServiceOrBase: false,
       organizations: [],
       currentOrganization: {} as any,
       role: {} as any,
       userOrganizations: [],
-      canSeeAllBookings: true,
-      canSeeAllCustody: false,
       canUseBarcodes: false,
       canUseAudits: false,
+      access: accessFor(["ADMIN"]),
     });
     vi.mocked(db.booking.findFirst).mockResolvedValue({
       id: "someone-elses-booking",
@@ -409,7 +406,7 @@ describe("bookings.$bookingId.activity loader — custody scoping", () => {
 
     vi.mocked(rolesServer.requirePermission).mockResolvedValue({
       organizationId: "org-attacker",
-      canSeeAllBookings: false,
+      access: accessFor(["BASE"]),
     } as any);
 
     vi.mocked(httpServer.getParams).mockReturnValue({
@@ -499,7 +496,7 @@ describe("bookings.$bookingId.activity loader — custody scoping", () => {
   it("reads another user's booking when the caller can see all bookings", async () => {
     vi.mocked(rolesServer.requirePermission).mockResolvedValue({
       organizationId: "org-attacker",
-      canSeeAllBookings: true,
+      access: accessFor(["ADMIN"]),
     } as any);
     vi.mocked(bookingService.getBooking).mockResolvedValue({
       id: "victim-booking",

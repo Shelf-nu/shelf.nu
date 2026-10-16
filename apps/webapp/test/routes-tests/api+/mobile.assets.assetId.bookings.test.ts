@@ -2,6 +2,7 @@
 
 import { OrganizationRoles } from "@prisma/client";
 import { loader } from "~/routes/api+/mobile+/assets.$assetId.bookings";
+import { accessFor } from "@helpers/role-access";
 import { createLoaderArgs } from "@mocks/remix";
 
 // why: mocking Remix's data() so the loader returns real Response objects
@@ -69,13 +70,6 @@ vi.mock("~/utils/error", () => ({
   },
 }));
 
-vi.mock("~/utils/booking-authorization.server", () => ({
-  // why: mirrors the real resolver — the most privileged role wins, so a
-  // membership ordered [SELF_SERVICE, ADMIN] resolves to ADMIN.
-  resolveMostPrivilegedRole: (roles: string[]) =>
-    roles.includes("ADMIN") || roles.includes("OWNER") ? "ADMIN" : roles[0],
-}));
-
 import { db } from "~/database/db.server";
 import {
   custodianScopeClause,
@@ -130,14 +124,20 @@ function mobileUser(overrides: Partial<MobileAuth["user"]> = {}): MobileAuth {
   } as MobileAuth;
 }
 
-function mobileContext(overrides: Partial<MobileContext> = {}): MobileContext {
+/**
+ * A mobile context whose `access` is resolved by the real policy table from
+ * the given roles and workspace toggles, so the two can never disagree.
+ */
+function mobileContext(
+  roles: OrganizationRoles[] = [OrganizationRoles.ADMIN],
+  workspace: Parameters<typeof accessFor>[1] = {}
+): MobileContext {
   return {
-    roles: [OrganizationRoles.ADMIN],
+    roles,
+    access: accessFor(roles, workspace),
     canUseBarcodes: true,
     canUseAudits: true,
-    canSeeAllCustody: true,
-    ...overrides,
-  } as MobileContext;
+  };
 }
 
 function request(qs = "orgId=org-1", assetId = "asset-1") {
@@ -165,14 +165,12 @@ describe("GET /api/mobile/assets/:assetId/bookings", () => {
 
   describe("custodian scope", () => {
     it("matches a SELF_SERVICE user through the shared scope, not the user link alone", async () => {
-      // why: this is the regression. Matching only `custodianUserId` hides a
-      // booking whose custodian was assigned by picking a TEAM MEMBER rather
-      // than a user — it shows on the website and vanishes on the phone, for
-      // the very user it belongs to. On this screen it misfires worse than on
-      // a list, because the section then states "This asset has never been
-      // booked", which is a claim rather than an empty list.
+      // why: matching only `custodianUserId` hides a booking whose custodian
+      // was assigned by picking a TEAM MEMBER rather than a user, and the
+      // section then states "This asset has never been booked", which is a
+      // claim rather than an empty list.
       vi.mocked(getMobileUserContext).mockResolvedValue(
-        mobileContext({ roles: [OrganizationRoles.SELF_SERVICE] })
+        mobileContext([OrganizationRoles.SELF_SERVICE])
       );
 
       await loader(createLoaderArgs({ request: request(), ...ARGS }));
@@ -188,13 +186,13 @@ describe("GET /api/mobile/assets/:assetId/bookings", () => {
 
       const where = lastWhere();
       expect(where.AND).toContainEqual({ __custodianClause: true });
-      // The old shape must be gone, not merely supplemented.
+      // The user-link-only shape must not sit beside the shared scope.
       expect(where.custodianUserId).toBeUndefined();
     });
 
     it("applies the same scope to BASE", async () => {
       vi.mocked(getMobileUserContext).mockResolvedValue(
-        mobileContext({ roles: [OrganizationRoles.BASE] })
+        mobileContext([OrganizationRoles.BASE])
       );
 
       await loader(createLoaderArgs({ request: request(), ...ARGS }));
@@ -209,9 +207,7 @@ describe("GET /api/mobile/assets/:assetId/bookings", () => {
       // and scope them to their own bookings, so the screen would tell a real
       // admin the asset has never been booked.
       vi.mocked(getMobileUserContext).mockResolvedValue(
-        mobileContext({
-          roles: [OrganizationRoles.SELF_SERVICE, OrganizationRoles.ADMIN],
-        })
+        mobileContext([OrganizationRoles.SELF_SERVICE, OrganizationRoles.ADMIN])
       );
 
       await loader(createLoaderArgs({ request: request(), ...ARGS }));
@@ -225,6 +221,72 @@ describe("GET /api/mobile/assets/:assetId/bookings", () => {
 
       expect(resolveCustodianScope).not.toHaveBeenCalled();
       expect(lastWhere().AND).not.toContainEqual({ __custodianClause: true });
+    });
+
+    it("does not scope a SELF_SERVICE user the workspace lets see all bookings", async () => {
+      vi.mocked(getMobileUserContext).mockResolvedValue(
+        mobileContext([OrganizationRoles.SELF_SERVICE], {
+          selfServiceCanSeeBookings: true,
+        })
+      );
+
+      await loader(createLoaderArgs({ request: request(), ...ARGS }));
+
+      expect(resolveCustodianScope).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("custodian name", () => {
+    /** One booking held by someone other than the caller. */
+    const othersBooking = {
+      id: "b-1",
+      name: "Shoot",
+      status: "ONGOING",
+      from: new Date("2026-10-01T09:00:00Z"),
+      to: new Date("2026-10-02T09:00:00Z"),
+      custodianUser: {
+        id: "user-2",
+        firstName: "Legal",
+        lastName: "Name",
+        displayName: "Sam",
+        profilePicture: "https://example.com/sam.png",
+      },
+      custodianTeamMember: { name: "Sam", userId: "user-2" },
+    };
+
+    async function firstRow() {
+      const res = await loader(
+        createLoaderArgs({ request: request(), ...ARGS })
+      );
+      const body = (await (res as unknown as Response).json()) as {
+        bookings: { custodianName: string | null; custodianImage: unknown }[];
+      };
+      return body.bookings[0];
+    }
+
+    it("withholds another member's name and face without custody visibility", async () => {
+      // why: seeing that a booking exists is a separate override from seeing
+      // who holds it; this workspace grants the first and not the second.
+      vi.mocked(getMobileUserContext).mockResolvedValue(
+        mobileContext([OrganizationRoles.SELF_SERVICE], {
+          selfServiceCanSeeBookings: true,
+        })
+      );
+      mockDb.booking.findMany.mockResolvedValue([othersBooking]);
+
+      const row = await firstRow();
+
+      expect(row.custodianName).toBe("private");
+      expect(row.custodianImage).toBeNull();
+    });
+
+    it("names the custodian by display name for a member who may see custody", async () => {
+      mockDb.booking.findMany.mockResolvedValue([othersBooking]);
+
+      const row = await firstRow();
+
+      expect(row.custodianName).toBe("Sam");
+      expect(row.custodianImage).toBe("https://example.com/sam.png");
     });
   });
 

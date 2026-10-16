@@ -1,17 +1,19 @@
 /**
  * Tests for the booking permission helpers in `./bookings`.
  *
- * These two helpers look interchangeable and are not. Adding items and
- * removing them have deliberately different rules, and the pair is easy to
- * mix up at a call site — so the difference is pinned here.
+ * These helpers look interchangeable and are not. Adding items and removing
+ * them have deliberately different rules, and role is a separate axis again —
+ * all three are easy to mix up at a call site, so the differences are pinned here.
  *
  * @see {@link file://./bookings.ts}
  */
-import { BookingStatus } from "@prisma/client";
+import { BookingStatus, OrganizationRoles } from "@prisma/client";
 import { describe, expect, it } from "vitest";
+import { accessFor } from "@helpers/role-access";
 import {
-  canUserManageBookingAssets,
+  bookingCustodianIsSelf,
   canUserRemoveBookingAssets,
+  mayRemoveBookingItems,
 } from "./bookings";
 
 /** The statuses in which a booking is a closed record. */
@@ -50,27 +52,73 @@ describe("canUserRemoveBookingAssets", () => {
   });
 });
 
-describe("canUserManageBookingAssets", () => {
-  // Guards the distinction: the ADD path stays stricter than the remove path.
-  // If these ever converge, the self-service remove-from-own-reserved-booking
-  // behaviour silently disappears.
-  it("keeps self-service restricted to DRAFT, unlike the remove helper", () => {
-    const reserved = {
-      status: BookingStatus.RESERVED,
-      from: new Date(),
-      to: new Date(),
-    };
+const R = OrganizationRoles;
 
-    expect(canUserManageBookingAssets(reserved, true)).toBe(false);
-    expect(canUserRemoveBookingAssets(reserved)).toBe(true);
+describe("mayRemoveBookingItems", () => {
+  it("needs the booking:update grant as well as the status rule", () => {
+    expect(
+      mayRemoveBookingItems({
+        canUpdateBooking: false,
+        access: accessFor([R.ADMIN]),
+        bookingStatus: "DRAFT",
+      })
+    ).toBe(false);
   });
 
-  it("allows non-self-service on a live booking", () => {
+  it("stops BASE at DRAFT and SELF_SERVICE at RESERVED", () => {
+    const may = (
+      role: OrganizationRoles,
+      bookingStatus: "DRAFT" | "RESERVED" | "ONGOING"
+    ) =>
+      mayRemoveBookingItems({
+        canUpdateBooking: true,
+        access: accessFor([role]),
+        bookingStatus,
+      });
+
+    expect([may(R.BASE, "DRAFT"), may(R.BASE, "RESERVED")]).toEqual([
+      true,
+      false,
+    ]);
+    expect([
+      may(R.SELF_SERVICE, "RESERVED"),
+      may(R.SELF_SERVICE, "ONGOING"),
+    ]).toEqual([true, false]);
+    expect(may(R.ADMIN, "ONGOING")).toBe(true);
+  });
+
+  it("lets MANAGER remove items in every open status, like ADMIN", () => {
+    for (const bookingStatus of OPEN_STATUSES) {
+      expect(
+        mayRemoveBookingItems({
+          canUpdateBooking: true,
+          access: accessFor([R.MANAGER]),
+          bookingStatus,
+        })
+      ).toBe(
+        mayRemoveBookingItems({
+          canUpdateBooking: true,
+          access: accessFor([R.ADMIN]),
+          bookingStatus,
+        })
+      );
+    }
     expect(
-      canUserManageBookingAssets(
-        { status: BookingStatus.ONGOING, from: new Date(), to: new Date() },
-        false
-      )
+      mayRemoveBookingItems({
+        canUpdateBooking: true,
+        access: accessFor([R.MANAGER]),
+        bookingStatus: "OVERDUE",
+      })
     ).toBe(true);
+  });
+});
+
+describe("bookingCustodianIsSelf", () => {
+  it("fixes the custodian for SELF_SERVICE and BASE only", () => {
+    expect(
+      [R.OWNER, R.ADMIN, R.MANAGER, R.SELF_SERVICE, R.BASE].map((r) =>
+        bookingCustodianIsSelf(accessFor([r]))
+      )
+    ).toEqual([false, false, false, true, true]);
   });
 });

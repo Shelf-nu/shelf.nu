@@ -1,4 +1,6 @@
 import type { AuditNote, User, AuditSession } from "@prisma/client";
+import type { ITXClientDenyList } from "@prisma/client/runtime/library";
+import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 
@@ -16,13 +18,16 @@ export async function createAuditNote({
   type,
   userId,
   auditSessionId,
+  tx,
 }: Pick<AuditNote, "content"> & {
   type?: AuditNote["type"];
   userId: User["id"];
   auditSessionId: AuditSession["id"];
+  /** Runs the insert inside the caller's transaction when given. */
+  tx?: Omit<ExtendedPrismaClient, ITXClientDenyList>;
 }) {
   try {
-    return await db.auditNote.create({
+    return await (tx ?? db).auditNote.create({
       data: {
         content,
         type: type || "COMMENT",

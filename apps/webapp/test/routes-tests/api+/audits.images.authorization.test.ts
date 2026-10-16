@@ -21,6 +21,7 @@
  */
 
 import { OrganizationRoles } from "@prisma/client";
+import { accessFor } from "@helpers/role-access";
 
 // why: React Router v7 single fetch — `data()` must return a real Response so
 // the error path has an assertable status.
@@ -102,8 +103,8 @@ describe("audit image evidence authorization", () => {
     mockDeleteAuditImage.mockResolvedValue(true);
     mockRequirePermission.mockResolvedValue({
       organizationId: ORG_ID,
-      isSelfServiceOrBase: true,
       role: OrganizationRoles.BASE,
+      access: accessFor([OrganizationRoles.BASE]),
     });
   });
 
@@ -158,13 +159,13 @@ describe("audit image evidence authorization", () => {
     await loader(args());
 
     // ADMIN/OWNER short-circuit inside the guard, so the route must forward
-    // `isSelfServiceOrBase` rather than assuming everyone is restricted.
+    // `assignedOnly` rather than assuming everyone is restricted.
     expect(mockRequireAuditAssignee).toHaveBeenCalledWith(
       expect.objectContaining({
         auditSessionId: AUDIT_ID,
         organizationId: ORG_ID,
         userId: "user-1",
-        isSelfServiceOrBase: true,
+        assignedOnly: true,
       })
     );
   });

@@ -79,7 +79,7 @@ describe("resolveMobileAssetSearchWhere", () => {
 
   it("id-shaped searches now resolve via the same single UNION (superset, pre-approved)", async () => {
     // Previously ID-shaped terms took a narrow 5-column fast path with a
-    // full-clause fallback on zero rows. The UNION always searches all 10
+    // full-clause fallback on zero rows. The UNION always searches all 11
     // sources in one query, so an ID-shaped search now returns the (larger,
     // more correct) full result set directly — no second query.
     await expect(

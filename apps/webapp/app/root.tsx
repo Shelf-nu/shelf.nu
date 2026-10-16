@@ -34,6 +34,11 @@ import nProgressCustomStyles from "./styles/nprogress.css?url";
 import pmDocStylesheetUrl from "./styles/pm-doc.css?url";
 import styles from "./tailwind.css?url";
 import {
+  BROWSER_SUPPORT_CHECK_SCRIPT,
+  BROWSER_SUPPORT_GATE_STYLES,
+  UNSUPPORTED_BROWSER_SCREEN_ID,
+} from "./utils/browser-support";
+import {
   ClientHintCheck,
   detectFormatPrefsForPersistence,
   getClientHint,
@@ -197,6 +202,17 @@ export function Layout({ children }: { children: ReactNode }) {
             the Shelf Companion App Store listing (id6765639874), or "Open" if
             installed. Apple-hosted, zero-maintenance, no CLS, no cookie. */}
         <meta name="apple-itunes-app" content="app-id=6765639874" />
+        {/* why: a classic inline script runs even in browsers that cannot
+            execute the module bundle, so they get the "browser out of date"
+            screen below instead of a spinner. The inline style keeps that
+            screen hidden until the script flags the document, without relying
+            on a linked stylesheet. See `utils/browser-support.ts`. */}
+        <style nonce={nonce}>{BROWSER_SUPPORT_GATE_STYLES}</style>
+        <script
+          nonce={nonce}
+          // eslint-disable-next-line react/no-danger
+          dangerouslySetInnerHTML={{ __html: BROWSER_SUPPORT_CHECK_SCRIPT }}
+        />
         <ClientHintCheck nonce={nonce} />
         <style data-fullcalendar />
         <Meta />
@@ -204,6 +220,16 @@ export function Layout({ children }: { children: ReactNode }) {
         <Clarity />
       </head>
       <body suppressHydrationWarning>
+        {/* Hidden by the inline gate styles in <head> and revealed when the
+            inline check there flags the browser; hydration is skipped then. */}
+        <div id={UNSUPPORTED_BROWSER_SCREEN_ID}>
+          <BlockInteractions
+            title="Your browser is out of date"
+            content="Shelf needs a current browser. Please update your browser, or switch to the latest Chrome, Firefox, Edge or Safari."
+            icon="x"
+          />
+        </div>
+
         <noscript>
           <BlockInteractions
             title="JavaScript is disabled"

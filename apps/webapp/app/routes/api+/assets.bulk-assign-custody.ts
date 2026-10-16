@@ -4,6 +4,13 @@ import { bulkCheckOutAssets } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import {
+  assertAssignableQuantities,
+  assignQuantities,
+  QUANTITY_CUSTODIAN_SELECT,
+  quantityRefusalsError,
+  splitQuantityAssetIds,
+} from "~/modules/custody/quantity-custody.server";
+import {
   getTeamMember,
   scopeCustodianFilterIds,
 } from "~/modules/team-member/service.server";
@@ -30,7 +37,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId, role, canUseBarcodes, canSeeAllCustody } =
+    const { organizationId, role, canUseBarcodes, access } =
       await requirePermission({
         request,
         userId,
@@ -48,23 +55,42 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const formData = await request.formData();
 
-    const { assetIds, custodian, currentSearchParams } = parseData(
+    const {
+      assetIds,
+      custodian,
+      currentSearchParams,
+      quantities,
+      sourceLocations,
+    } = parseData(
       formData,
       BulkAssignCustodySchema.and(CurrentSearchParamsSchema)
     );
 
     /**
-     * Validate the custodian belongs to the same organization (early 404).
-     * We don't keep the result around any more — the SELF_SERVICE
-     * "assign-to-self" guard moved into `bulkCheckOutAssets` (web + mobile
-     * share one implementation). The lookup here is still needed: it 404s
-     * the request if the requested custodianId is from another org or
-     * doesn't exist.
+     * Units per quantity-tracked asset, sent only by the scanner.
+     *
+     * Bulk custody skips quantity-tracked assets because selecting rows on the
+     * assets index gives no way to say how many units each hand-over covers.
+     * The scanner does: it shows one row per scan with its own quantity input.
+     * So an asset named here is assigned unit by unit, the way the asset page
+     * does it, and the bulk call below never sees it. An index submission
+     * sends no quantities and is unchanged.
      */
-    await getTeamMember({
+    const { quantityAssetIds, bulkAssetIds } = splitQuantityAssetIds(
+      assetIds,
+      quantities
+    );
+
+    /**
+     * Validate the custodian belongs to the same organization (early 404).
+     * The "assign only to yourself" guard (`access.custody.assign`) lives in
+     * the services, not here.
+     * The name fields are what the per-unit audit notes render.
+     */
+    const custodianRecord = await getTeamMember({
       id: custodian.id,
       organizationId,
-      select: { id: true },
+      select: QUANTITY_CUSTODIAN_SELECT,
     }).catch((cause) => {
       throw new ShelfError({
         cause,
@@ -83,9 +109,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
     });
 
     /**
-     * The SELF_SERVICE "assign-to-self" guard now lives inside
-     * `bulkCheckOutAssets` itself (centralised so web + mobile share
-     * one source of truth). We just pass `role` through.
+     * The caller's custody scope is enforced inside the services themselves:
+     * `bulkCheckOutAssets` for whole assets and `checkOutQuantity` for the
+     * per-unit path, so web and mobile share one source of truth. The route
+     * passes `access.custody.assign` through to both.
      */
     // Acting user's timezone: when "select all" is active the affected set is
     // resolved from the current date filters, which must truncate the day in
@@ -95,32 +122,64 @@ export async function action({ context, request }: ActionFunctionArgs) {
       getClientHint(request)
     );
 
-    const { skippedQuantityTracked } = await bulkCheckOutAssets({
-      userId,
-      role,
-      assetIds,
-      custodianId: custodian.id,
-      custodianName: custodian.name,
+    // Every per-unit assignment is checked before anything is written,
+    // including the "assign only to yourself" rule and, for a pool placed at
+    // two or more locations, what the scanner's chosen location has left.
+    await assertAssignableQuantities({
+      quantityAssetIds,
+      quantities,
+      sourceLocations,
       organizationId,
-      currentSearchParams,
-      settings,
-      timeZone,
-      // `asset: custody` is a SELF_SERVICE permission, so narrow the
-      // select-all custodian filter to the caller's own custody — otherwise a
-      // self-service user could act on exactly the set a colleague holds.
-      allowedTeamMemberIds: await scopeCustodianFilterIds({
-        teamMemberIds: new URLSearchParams(currentSearchParams ?? "").getAll(
-          "teamMember"
-        ),
-        canSeeAllCustody,
-        userId,
-        organizationId,
-      }),
+      custodian: custodianRecord,
+      custodyAssign: access.custody.assign,
+      userId,
     });
+
+    /**
+     * The whole-asset call runs before the per-unit writes: it validates and
+     * writes in one transaction, so if it refuses, nothing has been written.
+     * The per-unit writes after it were checked above; a refusal there can
+     * only come from a concurrent change, and is reported by asset.
+     */
+    const { skippedQuantityTracked } = bulkAssetIds.length
+      ? await bulkCheckOutAssets({
+          userId,
+          custodyAssign: access.custody.assign,
+          assetIds: bulkAssetIds,
+          custodianId: custodian.id,
+          custodianName: custodian.name,
+          organizationId,
+          currentSearchParams,
+          settings,
+          timeZone,
+          // `asset: custody` is a SELF_SERVICE permission, so narrow the
+          // select-all custodian filter to the caller's own custody, otherwise a
+          // self-service user could act on exactly the set a colleague holds.
+          allowedTeamMemberIds: await scopeCustodianFilterIds({
+            teamMemberIds: new URLSearchParams(
+              currentSearchParams ?? ""
+            ).getAll("teamMember"),
+            canSeeAllCustody: access.custody.seeAll,
+            userId,
+            organizationId,
+          }),
+        })
+      : { skippedQuantityTracked: 0 };
+
+    const refusals = await assignQuantities({
+      quantityAssetIds,
+      quantities,
+      sourceLocations,
+      custodian: custodianRecord,
+      userId,
+      organizationId,
+      custodyAssign: access.custody.assign,
+    });
+    if (refusals.length) throw quantityRefusalsError("assigned", refusals);
 
     const skippedNote =
       skippedQuantityTracked > 0
-        ? ` ${skippedQuantityTracked} quantity-tracked asset(s) were skipped — assign custody individually.`
+        ? ` ${skippedQuantityTracked} quantity-tracked asset(s) were skipped. Assign custody individually.`
         : "";
 
     sendNotification({

@@ -37,17 +37,26 @@ type BulkListHeaderProps = ThHTMLAttributes<HTMLTableCellElement> & {
    * @returns An array of ListItemData to be used in the header
    */
   itemsGetter?: (data: LoaderData) => ListItemData[];
+
+  /**
+   * The rows on screen, when they are not the loader's `items` — a list
+   * rendering rows from another key (the asset index's model view) must pass
+   * them, or this checkbox ticks a set nobody can see.
+   */
+  items?: ListItemData[];
 };
 
 export default function BulkListHeader({
   itemsGetter,
+  items: itemsProp,
   ...rest
 }: BulkListHeaderProps) {
   const loaderData = useLoaderData<Record<string, ListItemData[]>>();
   const items =
-    typeof itemsGetter === "function"
+    itemsProp ??
+    (typeof itemsGetter === "function"
       ? itemsGetter(loaderData)
-      : loaderData.items;
+      : loaderData.items);
 
   const { modeIsAdvanced } = useAssetIndexViewState();
   const freezeColumn = useAssetIndexFreezeColumn();

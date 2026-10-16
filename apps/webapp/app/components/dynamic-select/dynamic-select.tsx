@@ -429,6 +429,25 @@ export default function DynamicSelect({
               }}
               align="center"
               sideOffset={5}
+              // A modal Radix Dialog — every `Sheet`, so every route rendered
+              // through `ContextualSidebar` — mounts `react-remove-scroll`,
+              // which cancels any `wheel` whose target sits outside the dialog
+              // content. This popover is portalled to `document.body`, so the
+              // option list counts as outside and the wheel does nothing;
+              // dragging the scrollbar is a pointer interaction and still
+              // works, which is what makes the breakage look selective.
+              //
+              // React attaches portal listeners to the portal container, and
+              // `document.body` is a descendant of the `document` that
+              // remove-scroll listens on — so stopping here is what keeps the
+              // list scrollable. Removing these makes wheel scrolling dead
+              // inside every sheet.
+              onWheel={(event) => {
+                event.stopPropagation();
+              }}
+              onTouchMove={(event) => {
+                event.stopPropagation();
+              }}
             >
               <div className="flex items-center justify-between p-3">
                 <div className="text-xs font-semibold text-gray-700">
@@ -636,14 +655,26 @@ export default function DynamicSelect({
 }
 
 /**
+ * Phone widths: every width below Tailwind's `sm` breakpoint (640px), written
+ * as the exact complement of `sm` like `SHEET_MEDIA_QUERY` is of `md`. From
+ * `sm` up, tablets included, the panel is a regular dropdown under its field.
+ */
+export const PICKER_PHONE_MEDIA_QUERY = "not all and (min-width: 640px)";
+
+/**
  * Mobile-specific CSS overrides for the Radix popper used by this select.
+ *
+ * Lifts the panel above the dim overlay `MobileStyles` renders and pins it to
+ * the top of the screen. The overlay shows below `sm` (`sm:hidden`) and sits
+ * above the panel's own z-index, so this rule must cover the same widths
+ * (`PICKER_PHONE_MEDIA_QUERY`): wherever the overlay shows without it, the
+ * overlay covers the options and a tap on one only closes the select.
  *
  * Uses React's native `<style>{css}</style>` child form (safe text child)
  * instead of an injected-HTML approach, so there is no XSS concern and the
  * `react/no-danger` rule stays clean.
- * PR history: https://github.com/Shelf-nu/shelf.nu/pull/304
  */
-const MOBILE_POPPER_CSS = `@media (max-width: 640px) {
+const MOBILE_POPPER_CSS = `@media ${PICKER_PHONE_MEDIA_QUERY} {
   body {
     overflow: hidden;
   }
@@ -660,13 +691,19 @@ const MOBILE_POPPER_CSS = `@media (max-width: 640px) {
   }
 }`;
 
+/**
+ * Dim overlay plus {@link MOBILE_POPPER_CSS}, rendered while a `DynamicSelect`
+ * or `DynamicDropdown` panel is open.
+ *
+ * @param props.open - Whether the panel is open; nothing renders while closed.
+ */
 export const MobileStyles = ({ open }: { open: boolean }) =>
   open && (
     <>
       <div
         // eslint-disable-next-line tailwindcss/migration-from-tailwind-2
         className={tw(
-          "extra-overlay fixed right-0 top-0 z-[999] h-screen w-screen cursor-pointer bg-black bg-opacity-50 backdrop-blur transition duration-300 ease-in-out md:hidden",
+          "extra-overlay fixed right-0 top-0 z-[999] h-screen w-screen cursor-pointer bg-black bg-opacity-50 backdrop-blur transition duration-300 ease-in-out sm:hidden",
           open ? "visible" : "invisible opacity-0"
         )}
       ></div>

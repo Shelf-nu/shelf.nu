@@ -98,4 +98,15 @@ describe("MarkdownViewer", () => {
       expect(container.querySelector("img")).toBeNull();
     });
   });
+
+  it("shows a Markdoc example in an author's code span exactly as typed", () => {
+    const { container } = renderNote(
+      'Use `{% link to="C:\\tmp" text="x" /%}` here.',
+      true
+    );
+
+    expect(container.querySelector("code")).toHaveTextContent(
+      '{% link to="C:\\tmp" text="x" /%}'
+    );
+  });
 });

@@ -77,6 +77,7 @@ export type IconType =
   | "plus"
   | "trash"
   | "archive"
+  | "reinstate"
   | "mail"
   | "search"
   | "spinner"
@@ -137,6 +138,8 @@ export type IconType =
   | "unavailable"
   | "change"
   | "booking-exist"
+  | "model-bookings"
+  | "model-booking-exist"
   | "download-qr"
   | "qr-code"
   | "mouse-pointer-click"
@@ -154,6 +157,7 @@ export const iconsMap: IconsMap = {
   plus: <PlusIcon />,
   trash: <TrashIcon />,
   archive: <ArchiveIcon />,
+  reinstate: <RefreshIcon />,
   mail: <MailIcon />,
   search: <SearchIcon />,
   spinner: <Spinner />,
@@ -211,6 +215,11 @@ export const iconsMap: IconsMap = {
   unavailable: <UnavailableIcon />,
   change: <ChangeIcon />,
   "booking-exist": <CalendarCheck />,
+  // The model view's two booking entries do the same thing as the asset
+  // index's, so they carry the same icons. `Icon` resolves by dialog type, so
+  // a missing key here renders nothing at all beside the menu label.
+  "model-bookings": <BookingsIcon />,
+  "model-booking-exist": <CalendarCheck />,
   "download-qr": <DownloadIcon />,
   "qr-code": <QrCode />,
   "mouse-pointer-click": <MousePointerClick />,

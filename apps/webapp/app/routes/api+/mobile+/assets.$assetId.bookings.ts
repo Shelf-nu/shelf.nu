@@ -1,4 +1,4 @@
-import { BookingStatus, OrganizationRoles } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import {
@@ -12,7 +12,10 @@ import {
   custodianScopeClause,
   resolveCustodianScope,
 } from "~/modules/booking/service.server";
-import { resolveMostPrivilegedRole } from "~/utils/booking-authorization.server";
+import {
+  canSeeBookingCustodian,
+  resolveBookingCustodianName,
+} from "~/utils/booking-authorization.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   PermissionAction,
@@ -24,17 +27,19 @@ import {
  *
  * The bookings this ONE asset appears in — the phone answer to "when is this
  * thing out, and where has it been?", asked while standing in front of it.
- * Web has had this as a Bookings tab on the asset page
- * (`assets.$assetId.bookings.tsx`) since long before the companion existed;
- * the app had no way to ask the question at all, because even the bookings
- * list endpoint cannot filter by asset.
+ * Mirrors the Bookings tab on the web asset page
+ * (`assets.$assetId.bookings.tsx`); the bookings list endpoint cannot filter
+ * by asset, so this is the phone's only way to ask.
  *
  * Scoping mirrors `bookings.ts`, because the same rules apply to a per-asset
  * slice of the same data:
  *   - organisation scoped
- *   - SELF_SERVICE / BASE see only bookings they are custodian of, matched
- *     through `resolveCustodianScope` + `custodianScopeClause` — the user link
- *     OR any of their team-member links, never the user link alone
+ *   - members without `access.bookings.seeAll` see only bookings they are
+ *     custodian of, matched through `resolveCustodianScope` +
+ *     `custodianScopeClause`: the user link OR any of their team-member links,
+ *     never the user link alone
+ *   - the custodian's name and face follow `access.custody.seeAll`, a separate
+ *     workspace override from the booking scope
  *   - DRAFT bookings stay private to their creator
  *
  * Statuses match the web tab's `BOOKING_STATUS_TO_SHOW`: everything except
@@ -76,6 +81,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // Prove the asset is in this workspace before reporting anything about it,
     // so a guessed id from another org cannot be probed through this route.
     const asset = await db.asset.findFirst({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: the asset's own screen shows archived assets, and their booking history with them
       where: { id: assetId, organizationId },
       select: { id: true },
     });
@@ -119,32 +125,27 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       ? requestedPage
       : 1;
 
-    const { roles } = await getMobileUserContext(user.id, organizationId);
     /**
-     * A membership can carry several roles. Custodian scoping must be decided
-     * by the most privileged one, or an admin who also holds SELF_SERVICE is
-     * scoped to their own bookings and told the asset has never been booked.
+     * Two independent questions, two independent workspace overrides, the same
+     * pair the bookings list reads: `access.bookings.seeAll` decides WHICH ROWS
+     * exist for this caller, `access.custody.seeAll` whether the custodian's
+     * name may be shown on a row that does.
      */
-    const effectiveRole = resolveMostPrivilegedRole(roles);
-    const isSelfServiceOrBase =
-      effectiveRole === OrganizationRoles.SELF_SERVICE ||
-      effectiveRole === OrganizationRoles.BASE;
+    const { access } = await getMobileUserContext(user.id, organizationId);
 
     /**
-     * Custodian scope (web parity). Web matches a self-service or base user's
-     * bookings through their user link OR any of their team-member links.
-     * Matching only the user link hides a booking whose custodian was assigned
-     * by picking a TEAM MEMBER rather than a user — it shows on the website and
-     * vanishes on the phone, for the very user it belongs to. On this screen
-     * that misfires worse than on a list: the section states "This asset has
-     * never been booked", which is a claim, not an empty list.
+     * Custodian scope (web parity): a restricted member's bookings match
+     * through their user link OR any of their team-member links. Matching the
+     * user link alone hides a booking whose custodian was picked as a team
+     * member, and this section would then state "This asset has never been
+     * booked", which is a claim rather than an empty list.
      *
      * Same helpers the bookings list and the calendar use. When you touch one
      * of the three, check the other two.
      */
-    const custodianScope = isSelfServiceOrBase
-      ? await resolveCustodianScope({ userId: user.id, organizationId })
-      : null;
+    const custodianScope = access.bookings.seeAll
+      ? null
+      : await resolveCustodianScope({ userId: user.id, organizationId });
 
     const where = {
       organizationId,
@@ -178,16 +179,22 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           from: true,
           to: true,
           custodianUser: {
-            select: { firstName: true, lastName: true, profilePicture: true },
+            select: {
+              // `id` here and `userId` on the team member answer "is the
+              // custodian the caller?", which keeps a restricted user's own
+              // name visible to them.
+              id: true,
+              firstName: true,
+              lastName: true,
+              displayName: true,
+              profilePicture: true,
+            },
           },
-          custodianTeamMember: { select: { name: true } },
+          custodianTeamMember: { select: { name: true, userId: true } },
         },
         /**
-         * Newest start date first, and deliberately NOT web's order.
-         *
-         * The previous comment here claimed two things that cannot both be
-         * true of one sort, and a web parity that does not exist: web's asset
-         * bookings tab defaults to `from` ASCENDING. Ascending is wrong for
+         * Newest start date first, and deliberately NOT web's order: web's
+         * asset bookings tab defaults to `from` ASCENDING. Ascending is wrong for
          * this surface though, because the phone previews only the first three
          * rows — an asset with any history would show three old bookings and
          * hide the one it is out on today. Descending puts today's booking in
@@ -212,13 +219,21 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         status: b.status,
         from: b.from,
         to: b.to,
-        custodianName:
-          b.custodianTeamMember?.name ||
-          [b.custodianUser?.firstName, b.custodianUser?.lastName]
-            .filter(Boolean)
-            .join(" ") ||
-          null,
-        custodianImage: b.custodianUser?.profilePicture || null,
+        // Shared with the bookings list and the calendar: a name, null for
+        // "no custodian", or the withheld sentinel.
+        custodianName: resolveBookingCustodianName({
+          canSeeAllCustody: access.custody.seeAll,
+          booking: b,
+          userId: user.id,
+        }),
+        // The face is as identifying as the name, so it follows the same gate.
+        custodianImage: canSeeBookingCustodian({
+          canSeeAllCustody: access.custody.seeAll,
+          booking: b,
+          userId: user.id,
+        })
+          ? b.custodianUser?.profilePicture || null
+          : null,
       })),
       page,
       perPage,
