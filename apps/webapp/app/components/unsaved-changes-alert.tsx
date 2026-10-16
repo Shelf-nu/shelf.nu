@@ -19,7 +19,22 @@ type UnsavedChangesAlertProps = {
   onCancel: () => void;
   onYes?: () => void;
   children: ReactNode;
+  /** Dialog title. Default "Unsaved changes". */
+  title?: string;
+  /** Label of the secondary button that runs `onCancel`. */
+  cancelLabel?: string;
+  /** Label of the primary button that runs `onYes`. */
+  confirmLabel?: string;
 };
+
+/**
+ * Confirmation dialog shown when unsaved work is about to be lost.
+ *
+ * The secondary button runs `onCancel` and closes the dialog; the primary
+ * button runs `onYes`. Labels default to the manage-* tab-switch wording.
+ *
+ * @param props - See {@link UnsavedChangesAlertProps}
+ */
 
 export default function UnsavedChangesAlert({
   className,
@@ -29,13 +44,16 @@ export default function UnsavedChangesAlert({
   onCancel,
   onYes,
   children,
+  title = "Unsaved changes",
+  cancelLabel = "No, discard changes",
+  confirmLabel = "Yes, confirm change",
 }: UnsavedChangesAlertProps) {
   const disabled = useDisabled();
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent className={className} style={style}>
         <AlertDialogHeader>
-          <AlertDialogTitle>Unsaved changes</AlertDialogTitle>
+          <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>{children}</AlertDialogDescription>
         </AlertDialogHeader>
 
@@ -48,7 +66,7 @@ export default function UnsavedChangesAlert({
                 onClick={onCancel}
                 disabled={disabled}
               >
-                No, discard changes
+                {cancelLabel}
               </Button>
             </AlertDialogCancel>
 
@@ -58,7 +76,7 @@ export default function UnsavedChangesAlert({
               disabled={disabled}
               variant="primary"
             >
-              Yes, confirm change
+              {confirmLabel}
             </Button>
           </div>
         </AlertDialogFooter>

@@ -12,6 +12,7 @@ import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
+import { useDiscardRemount } from "~/hooks/use-discard-remount";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { useReservationIsRequest } from "~/hooks/use-reservation-is-request";
@@ -51,6 +52,7 @@ import CheckinDropdown from "../checkin-dropdown";
 import CheckoutDropdown from "../checkout-dropdown";
 import type { BookingFormSchemaType } from "./forms-schema";
 import { BookingFormSchema } from "./forms-schema";
+import { UnsavedChangesGuard } from "../../forms/unsaved-changes-bar";
 
 /**
  * How many blocking assets the Reserve tooltip names before it stops.
@@ -147,8 +149,38 @@ type BookingFormData = {
   action?: string;
 };
 
+/**
+ * Edit form on the booking overview, with the unsaved-changes bar.
+ *
+ * Discard remounts the inner form (see `useDiscardRemount`), which resets
+ * the dates, custodian, tags and editor back to the loaded booking.
+ *
+ * @param props - The booking to edit and an optional form action
+ */
+export function EditBookingForm(props: BookingFormData) {
+  const { key, discard, discarded } = useDiscardRemount();
+  return (
+    <EditBookingFormInner
+      key={key}
+      {...props}
+      onDiscard={discard}
+      autoFocusName={!discarded}
+    />
+  );
+}
+
 // react-doctor:no-giant-component — deferred for follow-up refactor
-export function EditBookingForm({ booking, action }: BookingFormData) {
+function EditBookingFormInner({
+  booking,
+  action,
+  onDiscard,
+  autoFocusName,
+}: BookingFormData & {
+  /** Resets the form to the loaded values (remounts it). */
+  onDiscard: () => void;
+  /** Focus the Name field on mount; false after a Discard. */
+  autoFocusName: boolean;
+}) {
   const navigation = useNavigation();
   const {
     id,
@@ -273,15 +305,23 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
    * resolved when the user opens check-in/check-out dialogs. Using zo.form
    * (which reads a ref) can return null on the first render cycle. */
   const [formElement, setFormElement] = useState<HTMLFormElement | null>(null);
+  /** The header Save button; the unsaved-changes bar submits through it. */
+  const saveButtonRef = useRef<HTMLButtonElement>(null);
+  /** The same element as a ref, for the unsaved-changes tracking. */
+  const formElementRef = useRef<HTMLFormElement | null>(null);
   const formRef = useCallback(
     (node: HTMLFormElement | null) => {
       zo.ref(node);
       setFormElement(node);
+      formElementRef.current = node;
     },
     [zo]
   );
 
   const actionData = useActionData<BookingPageActionData>();
+  /** Changes only when an action succeeds, so a failed save stays dirty. */
+  const savedToken =
+    actionData && actionData.error == null ? actionData : undefined;
   /** This handles server side errors in case client side validation fails */
   const validationErrors = getValidationErrors<BookingFormSchemaType>(
     actionData?.error
@@ -350,6 +390,15 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
     defaultTeamMember?.userId === userId ||
     defaultTeamMember?.id === userId;
 
+  /** The header Save button exists only while the booking can be edited. */
+  const isEditable =
+    canSeeActions &&
+    !(
+      bookingStatus?.isCompleted ||
+      bookingStatus?.isCancelled ||
+      bookingStatus?.isArchived
+    );
+
   return (
     <Form
       ref={formRef}
@@ -358,6 +407,16 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
       className="edit-booking-form"
       id="edit-booking-form"
     >
+      {isEditable ? (
+        <UnsavedChangesGuard
+          formRef={formElementRef}
+          savedToken={savedToken}
+          onDiscard={onDiscard}
+          // why: the action routes on `intent`, so the bar submits through
+          // the header Save button to send intent=save
+          getSubmitter={() => saveButtonRef.current}
+        />
+      ) : null}
       {/* Render the actions on top only when the form is in edit mode */}
       {canSeeActions ? (
         <AbsolutePositionedHeaderActions>
@@ -391,6 +450,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                   (e.g. Reserve) override this default without any client-side JS.
                 */}
                 <Button
+                  ref={saveButtonRef}
                   type="submit"
                   disabled={disabled || isLoadingWorkingHours}
                   variant="secondary"
@@ -603,6 +663,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                     validationErrors?.name?.message || zo.errors.name()?.message
                   }
                   onChange={updateName}
+                  autoFocus={autoFocusName}
                 />
               </div>
               <div className="mt-[10px]">

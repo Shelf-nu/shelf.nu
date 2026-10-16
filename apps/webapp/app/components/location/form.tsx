@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type { Location } from "@prisma/client";
 import { useAtom, useAtomValue } from "jotai";
 import { useActionData } from "react-router";
@@ -8,6 +8,7 @@ import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, defaultValidateFileAtom } from "~/atoms/file";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
+import { useDiscardRemount } from "~/hooks/use-discard-remount";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import type { action as editLocationAction } from "~/routes/_layout+/locations.$locationId_.edit";
 import type { action as newLocationAction } from "~/routes/_layout+/locations.new";
@@ -20,6 +21,7 @@ import { Form } from "../custom-form";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import { RefererRedirectInput } from "../forms/referer-redirect-input";
+import { UnsavedChangesGuard } from "../forms/unsaved-changes-bar";
 import { AbsolutePositionedHeaderActions } from "../layout/header/absolute-positioned-header-actions";
 import { Button } from "../shared/button";
 import { ButtonGroup } from "../shared/button-group";
@@ -78,10 +80,30 @@ interface Props {
  * Create and edit form for locations. Renders as a full page, or compact
  * inside a dialog when `onSuccess` is passed (inline creation).
  *
+ * The full-page form shows the unsaved-changes bar and remounts on Discard
+ * (see `useDiscardRemount`). The inline dialog is never tracked.
+ *
  * @param props - See {@link Props}; image props show the saved image when editing
  */
+export function LocationForm(props: Props) {
+  const { key, discard, discarded } = useDiscardRemount();
+  // why: the inline dialog (onSuccess) sits inside another form's page, so
+  // it is never tracked and never remounted from here
+  if (typeof props.onSuccess === "function") {
+    return <LocationFormInner {...props} />;
+  }
+  return (
+    <LocationFormInner
+      key={key}
+      {...props}
+      onDiscard={discard}
+      autoFocusName={!discarded}
+    />
+  );
+}
+
 // react-doctor:no-giant-component — deferred for follow-up refactor
-export const LocationForm = ({
+const LocationFormInner = ({
   className,
   name,
   address,
@@ -94,8 +116,26 @@ export const LocationForm = ({
   referer,
   excludeLocationId,
   onCancel,
-}: Props) => {
+  onDiscard,
+  autoFocusName = true,
+}: Props & {
+  /** Resets the form to the loaded values (remounts it). Page form only. */
+  onDiscard?: () => void;
+  /** Focus the Name field on mount; false after a Discard. */
+  autoFocusName?: boolean;
+}) => {
   const zo = useZorm("NewQuestionWizardScreen", NewLocationFormSchema);
+
+  /** The form element, shared by Zorm and the unsaved-changes tracking. */
+  const formRef = useRef<HTMLFormElement | null>(null);
+  const zormRef = zo.ref;
+  const setFormRef = useCallback(
+    (node: HTMLFormElement | null) => {
+      zormRef(node);
+      formRef.current = node;
+    },
+    [zormRef]
+  );
   const fetcher = useFetcherWithReset<{
     success?: boolean;
     location?: NewLocationPayload;
@@ -117,7 +157,9 @@ export const LocationForm = ({
   // jsx-a11y/no-autofocus. When the form is rendered inside a dialog,
   // the dialog's `data-dialog-initial-focus` handler typically wins;
   // otherwise this provides the intentional initial focus.
-  const nameInputRef = useAutoFocus<HTMLInputElement>();
+  const nameInputRef = useAutoFocus<HTMLInputElement>({
+    when: autoFocusName,
+  });
 
   useEffect(() => {
     if (!hasOnSuccessFunc) return;
@@ -150,6 +192,10 @@ export const LocationForm = ({
 
   const FormComponent = hasOnSuccessFunc ? fetcher.Form : Form;
 
+  /** Changes only when a save succeeds, so a failed save stays dirty. */
+  const savedToken =
+    actionData && actionData.error == null ? actionData : undefined;
+
   return (
     <Card
       className={tw(
@@ -158,8 +204,15 @@ export const LocationForm = ({
         className
       )}
     >
+      {onDiscard && !hasOnSuccessFunc ? (
+        <UnsavedChangesGuard
+          formRef={formRef}
+          savedToken={savedToken}
+          onDiscard={onDiscard}
+        />
+      ) : null}
       <FormComponent
-        ref={zo.ref}
+        ref={setFormRef}
         method="post"
         className="flex w-full max-w-full flex-col gap-2"
         encType="multipart/form-data"
