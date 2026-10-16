@@ -164,7 +164,7 @@ describe("parseScanData", () => {
       userId: "user-1",
     });
 
-    expect(result?.scannedBy).toBe("Dana Reeves(dana@example.com)");
+    expect(result?.scannedBy).toBe("Dana Reeves (dana@example.com)");
   });
 
   it("does not name a scanner from another workspace", () => {
@@ -200,7 +200,7 @@ describe("parseScanData", () => {
       userId: "user-1",
     });
 
-    expect(result?.scannedBy).toBe("Dana Reeves(dana@example.com)");
+    expect(result?.scannedBy).toBe("Dana Reeves (dana@example.com)");
   });
 
   it("exposes the scanned value for a barcode or SAM ID, never for a QR", () => {

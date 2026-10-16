@@ -141,7 +141,7 @@ export function parseScanData({
       const scanOrganizationId = scan.organizationId ?? scan.qr?.organizationId;
       const scannedBy =
         user && isValidUser(user.userOrganizations, scanOrganizationId)
-          ? `${resolveUserDisplayName(user)}(${user.email})`
+          ? `${resolveUserDisplayName(user)} (${user.email})`
           : "Unknown";
       const hasOwnLocation = Boolean(scan.latitude && scan.longitude);
       const location = hasOwnLocation ? scan : locatedScan;

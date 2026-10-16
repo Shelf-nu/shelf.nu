@@ -84,7 +84,7 @@ describe("getLastScanForViewer", () => {
       expect(scanFindFirst).toHaveBeenCalledTimes(1);
       expect(result).toEqual(
         expect.objectContaining({
-          scannedBy: "Dana Reeves(dana@example.com)",
+          scannedBy: "Dana Reeves (dana@example.com)",
           coordinates: "52.3676, 4.9041",
         })
       );
