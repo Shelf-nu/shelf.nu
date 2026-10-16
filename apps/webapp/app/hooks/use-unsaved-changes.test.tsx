@@ -105,13 +105,16 @@ function renderForm(action: () => unknown = () => ({ ok: true })) {
 const status = () => screen.getByTestId("status").textContent;
 
 async function makeDirtyByTyping() {
-  // why: the baseline is taken one frame after mount
+  // why: the baseline is taken one frame after mount; two frames make sure
+  // it exists before the change, even on a loaded machine
   await waitFor(() => expect(status()).toBe("clean"));
+  await new Promise((resolve) => requestAnimationFrame(resolve));
   await new Promise((resolve) => requestAnimationFrame(resolve));
   fireEvent.change(screen.getByLabelText("Name"), {
     target: { value: "Makita drill 18V" },
   });
-  await waitFor(() => expect(status()).toBe("dirty"));
+  // why: under a full validate run frames and the 1 s interval arrive late
+  await waitFor(() => expect(status()).toBe("dirty"), { timeout: 3000 });
 }
 
 describe("useUnsavedChanges", () => {
