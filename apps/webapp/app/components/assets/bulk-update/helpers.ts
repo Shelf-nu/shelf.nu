@@ -18,8 +18,11 @@ import { getDefinitionFromCsvHeader } from "~/utils/custom-fields";
  */
 export const ACCEPTED_ID_COLUMNS = ["Asset ID", "ID"] as const;
 
-/** Maximum number of asset change rows to display in the preview */
-export const PREVIEW_DISPLAY_LIMIT = 50;
+/**
+ * Maximum number of rows shown in an import preview. Defined with the asset
+ * import constants and re-exported so the update flow keeps its import path.
+ */
+export { PREVIEW_DISPLAY_LIMIT } from "~/modules/asset-import/constants";
 
 /** What {@link splitCsvRecords} found in a CSV document. */
 export interface CsvRecordSplit {

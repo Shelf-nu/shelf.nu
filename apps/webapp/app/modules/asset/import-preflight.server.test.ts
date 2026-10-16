@@ -129,7 +129,30 @@ describe("validateContentImportRows", () => {
 
     expect(errors).toHaveLength(1);
     expect(errors[0].row).toBe(0);
-    expect(errors[0].message).toContain(String(MAX_CONTENT_IMPORT_ROWS));
+    expect(errors[0].message).toContain(
+      MAX_CONTENT_IMPORT_ROWS.toLocaleString("en-US")
+    );
+  });
+
+  it("accepts files up to a caller's higher row cap", () => {
+    const data = Array.from({ length: MAX_CONTENT_IMPORT_ROWS + 1 }, () =>
+      row()
+    );
+
+    expect(
+      validateContentImportRows({
+        data,
+        existingCustomFields: [],
+        maxRows: 10_000,
+      }).errors
+    ).toEqual([]);
+    expect(
+      validateContentImportRows({
+        data,
+        existingCustomFields: [],
+        maxRows: 1000,
+      }).errors[0].message
+    ).toContain("1,000");
   });
 
   it("caps the listed errors but still counts the rest", () => {

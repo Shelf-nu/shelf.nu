@@ -38,7 +38,10 @@ import {
 import { validateQtyTrackedFields } from "./qty-validation.server";
 import type { CreateAssetFromContentImportPayload } from "./types";
 
-/** The largest content-import file accepted, in data rows. */
+/**
+ * The largest content-import file accepted by the synchronous importer, in
+ * data rows. The background importer passes its own, higher `maxRows`.
+ */
 export const MAX_CONTENT_IMPORT_ROWS = 1000;
 
 // The row-error shape is shared by every CSV import; re-exported so this
@@ -93,17 +96,24 @@ function cell(
 export function validateContentImportRows({
   data,
   existingCustomFields,
+  maxRows = MAX_CONTENT_IMPORT_ROWS,
 }: {
   data: CreateAssetFromContentImportPayload[];
   existingCustomFields: Pick<CustomField, "name" | "type">[];
+  /** Largest number of data rows accepted; defaults to the synchronous cap. */
+  maxRows?: number;
 }): ImportPreflightResult {
-  if (data.length > MAX_CONTENT_IMPORT_ROWS) {
+  if (data.length > maxRows) {
     return {
       errors: [
         {
           row: 0,
           title: "File too large",
-          message: `This file has ${data.length} rows, but the maximum is ${MAX_CONTENT_IMPORT_ROWS}. Please split it into smaller files and import them one at a time.`,
+          message: `This file has ${data.length.toLocaleString(
+            "en-US"
+          )} rows, but the maximum is ${maxRows.toLocaleString(
+            "en-US"
+          )}. Please split it into smaller files and import them one at a time.`,
         },
       ],
       totalErrors: 1,

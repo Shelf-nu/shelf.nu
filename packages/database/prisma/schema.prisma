@@ -105,6 +105,7 @@ model User {
   contact            UserContact?
   businessIntel      UserBusinessIntel?
   auditsCreated      AuditSession[]
+  assetImports       AssetImport[]
   auditAssignments   AuditAssignment[]
   auditAssetsScanned AuditAsset[]
   auditScans         AuditScan[]
@@ -1047,6 +1048,7 @@ model Organization {
 
   auditSessions      AuditSession[]
   auditImages        AuditImage[]
+  assetImports       AssetImport[]
 
   usersWithLastSelected User[] @relation("lastSelectedOrg")
   
@@ -2461,6 +2463,72 @@ model AuditSession {
   @@index([organizationId, status])
   @@index([createdById])
   @@index([status, createdAt])
+}
+
+/// Lifecycle of a background asset import.
+enum AssetImportStatus {
+  /// Parsed and validated, waiting for the user to confirm. Never processed.
+  DRAFT
+  /// Confirmed; a job is on the queue.
+  QUEUED
+  /// A worker is processing it.
+  RUNNING
+  /// Every row imported.
+  COMPLETED
+  /// A step exhausted its retries or stalled. Can be resumed.
+  FAILED
+}
+
+/// Which step of the background import runs next (or failed).
+enum AssetImportPhase {
+  /// Claim QR codes and find-or-create categories, locations, tags, kits,
+  /// custodians, custom fields and asset models.
+  PREPARE
+  /// Create assets, one chunk per job.
+  ROWS
+  /// Assign kit custody, mark complete, send the email.
+  FINALIZE
+}
+
+/// One CSV content import. Holds the parsed rows from preview until the import
+/// completes, so the job imports exactly the file the user previewed.
+/// A partial unique index on (organizationId) WHERE status IN (QUEUED, RUNNING) allows one
+/// active import per workspace. Prisma cannot express it; it lives in migration
+/// 20261015120100_asset_import_one_active_per_workspace.
+model AssetImport {
+  id             String            @id @default(cuid())
+  status         AssetImportStatus @default(DRAFT)
+  phase          AssetImportPhase  @default(PREPARE)
+  fileName       String?
+  totalRows      Int
+  /// Rows committed so far. Advanced in the same transaction as each chunk.
+  processedRows  Int               @default(0)
+  /// Parsed rows (`StoredImportRow[]`). Cleared when the import completes.
+  rows           Json?
+  /// Name to id maps written by the PREPARE step (`ResolvedImportEntities`).
+  resolved       Json?
+  canUseBarcodes Boolean           @default(false)
+  /// User-facing reason the import failed. Null unless status is FAILED.
+  errorMessage   String?
+  /// Rows imported without a conflicting piece (`ImportWarning[]`), capped at 500.
+  warnings       Json?
+  /// Exact number of warnings, including any beyond the stored cap.
+  warningCount   Int               @default(0)
+  /// A step holds the import until this time. Null when no step is running.
+  lockedUntil    DateTime?
+  confirmedAt    DateTime?
+  startedAt      DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  createdBy      User         @relation(fields: [createdById], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  createdById    String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  organizationId String
+
+  @@index([organizationId, status])
+  @@index([createdById, organizationId, status])
 }
 
 model AuditAssignment {
