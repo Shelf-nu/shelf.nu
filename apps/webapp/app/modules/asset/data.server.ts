@@ -651,15 +651,12 @@ async function getAssetModelRollupPage({
     ? getArchivedFilterFromParams(searchParams)
     : "active";
   const cookie = await updateCookieWithPerPage(request, perPageParam);
-  // Clamp once, here, and report the clamped value. `per_page` reaches the
-  // cookie straight from the URL with no upper bound, while the rollup caps its
-  // own LIMIT at 100 — so reporting the raw value would advertise a page size
-  // larger than any page can hold and strand every row past the first hundred.
-  // Mirrors `getAdvancedPaginatedAndFilterableAssets`'s `take` / `perPage: take`.
+  // The rollup caps its own LIMIT at 100, so the reported size must never
+  // exceed it or rows past the first hundred would be stranded. The cookie only
+  // holds sizes the per-page menu offers (all within 100); this clamp keeps the
+  // rollup safe if that list ever grows. Written back so the loader serializes
+  // the same value it reports.
   const perPage = Math.min(Math.max(cookie.perPage, 1), 100);
-  // Written back, not just used locally: this same object is serialized into
-  // the user's cookie by the loader, so leaving the raw value on it would
-  // persist a page size no page can hold into the next request.
   cookie.perPage = perPage;
 
   const { rows, totalModels, totalGroups, totalRollupAssets } =
