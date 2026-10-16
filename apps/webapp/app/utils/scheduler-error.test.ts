@@ -5,7 +5,10 @@
  * @see {@link file://./scheduler-error.ts}
  */
 import { describe, expect, it } from "vitest";
-import { toSchedulerErrorCause } from "./scheduler-error";
+import {
+  connectionSecretsFrom,
+  toSchedulerErrorCause,
+} from "./scheduler-error";
 
 /** A pg-pool idle-connection error: the failure plus the whole idle client */
 function idleClientError() {
@@ -81,5 +84,52 @@ describe("toSchedulerErrorCause", () => {
   it("passes a non-object through unchanged", () => {
     expect(toSchedulerErrorCause("boom")).toBe("boom");
     expect(toSchedulerErrorCause(null)).toBeNull();
+  });
+});
+
+describe("connection values in error text", () => {
+  const secrets = connectionSecretsFrom(
+    "postgres://postgres.project-ref:s3cret-pw@pooler.example.com:6543/postgres"
+  );
+
+  it("reads the user, password and host from the connection string", () => {
+    expect(secrets).toEqual(
+      expect.arrayContaining([
+        "postgres.project-ref",
+        "s3cret-pw",
+        "pooler.example.com",
+      ])
+    );
+  });
+
+  it("removes the user from an authentication failure", () => {
+    const error = new Error(
+      'password authentication failed for user "postgres.project-ref"'
+    );
+
+    const safe = toSchedulerErrorCause(error, secrets) as Error;
+
+    expect(safe.message).toBe(
+      'password authentication failed for user "[redacted]"'
+    );
+    expect(safe.stack).not.toContain("postgres.project-ref");
+  });
+
+  it("removes the host from a DNS failure, nested ones included", () => {
+    const aggregate = new AggregateError(
+      [new Error("getaddrinfo ENOTFOUND pooler.example.com")],
+      ""
+    );
+
+    const safe = toSchedulerErrorCause(aggregate, secrets);
+
+    expect(JSON.stringify(safe)).not.toContain("pooler.example.com");
+    expect((safe as { errors: Error[] }).errors[0].message).toBe(
+      "getaddrinfo ENOTFOUND [redacted]"
+    );
+  });
+
+  it("returns no values for an unreadable connection string", () => {
+    expect(connectionSecretsFrom("not a url")).toEqual([]);
   });
 });

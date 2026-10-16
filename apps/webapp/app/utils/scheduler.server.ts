@@ -1,7 +1,10 @@
 import PgBoss from "pg-boss";
 import { ShelfError } from "./error";
 import { Logger } from "./logger";
-import { toSchedulerErrorCause } from "./scheduler-error";
+import {
+  connectionSecretsFrom,
+  toSchedulerErrorCause,
+} from "./scheduler-error";
 import { DATABASE_URL, NODE_ENV } from "../utils/env";
 
 export enum QueueNames {
@@ -55,12 +58,14 @@ export const init = async () => {
     // this guard each reload attaches another listener (MaxListenersExceededWarning
     // + duplicate logs). Attaching only when none exists is idempotent.
     if (pgBossInstance.listenerCount("error") === 0) {
+      // The connection's own user, password and host, to scrub from error text
+      const connectionSecrets = connectionSecretsFrom(DATABASE_URL);
       pgBossInstance.on("error", (cause: unknown) => {
         Logger.error(
           new ShelfError({
             // The raw payload can carry the pg client and its connection
             // parameters; only the failure itself may reach Sentry.
-            cause: toSchedulerErrorCause(cause),
+            cause: toSchedulerErrorCause(cause, connectionSecrets),
             message: "pg-boss worker error",
             label: "Scheduler",
             shouldBeCaptured: true,
