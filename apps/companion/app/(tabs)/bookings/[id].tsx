@@ -17,6 +17,7 @@ import {
   Platform,
   ActionSheetIOS,
   Modal,
+  type AccessibilityActionEvent,
   type LayoutChangeEvent,
 } from "react-native";
 import * as Haptics from "expo-haptics";
@@ -211,6 +212,18 @@ function BookingDetailScreen({ id }: { id: string }) {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isActioning, setIsActioning] = useState(false);
+  /**
+   * The quantity-tracked row whose booked quantity is being changed (null =
+   * sheet closed). `max` is what the booking's window still has free with this
+   * booking excluded — the same cap the web "Adjust quantity" dialog uses.
+   */
+  const [qtyEdit, setQtyEdit] = useState<{
+    assetId: string;
+    title: string;
+    current: number;
+    max: number;
+    unitOfMeasure: string | null;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // The asset ids picked in the current selection mode. A kit enters as the
@@ -1012,6 +1025,54 @@ function BookingDetailScreen({ id }: { id: string }) {
   }, []);
 
   /**
+   * Open the booked-quantity sheet for a quantity-tracked row. Asks the
+   * server for the cap first so the sheet never offers more than the booking
+   * may take; the current amount is the fallback when that read fails.
+   */
+  const openQtyEdit = useCallback(
+    async (item: BookingAsset) => {
+      if (!booking || !currentOrg) return;
+      const current = item.quantity ?? 1;
+      const { data } = await api.bookingAssetAvailability(
+        currentOrg.id,
+        booking.id,
+        [item.id]
+      );
+      const bookable = data?.availability?.[0]?.bookable;
+      setQtyEdit({
+        assetId: item.id,
+        title: item.title,
+        current,
+        max: Math.max(1, bookable ?? current),
+        unitOfMeasure: item.unitOfMeasure ?? null,
+      });
+    },
+    [booking, currentOrg]
+  );
+
+  const handleQtyEditSubmit = async (quantity: number) => {
+    if (!qtyEdit || !booking || !currentOrg) return;
+    const target = qtyEdit;
+    setQtyEdit(null);
+    if (quantity === target.current) return;
+    setIsActioning(true);
+    const { error: err } = await api.adjustBookingAssetQuantity(
+      currentOrg.id,
+      booking.id,
+      target.assetId,
+      quantity
+    );
+    setIsActioning(false);
+    if (err) {
+      Alert.alert("Couldn't change quantity", err);
+      return;
+    }
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    markBookingsListDirty();
+    fetchBooking();
+  };
+
+  /**
    * The whole booking as rows: one header per kit, its members beneath when
    * open, and every ungrouped asset where the server put it.
    *
@@ -1167,6 +1228,18 @@ function BookingDetailScreen({ id }: { id: string }) {
       const selectable =
         !inKit && isBookingAssetSelectable(item, selectMode, checkedInAssetIds);
 
+      // Web parity: the booked amount of a standalone quantity-tracked slice
+      // can be changed under the same rule that lets items be added. A
+      // kit-driven slice takes its amount from the kit.
+      const canEditQuantity =
+        item.type === "QUANTITY_TRACKED" &&
+        !selectMode &&
+        !inKit &&
+        !item.kit &&
+        !(item.slices && item.slices.length > 1) &&
+        !!booking &&
+        canAddItemsToBooking(access, booking.status, currentOrg?.roles);
+
       return (
         <TouchableOpacity
           style={[
@@ -1190,11 +1263,28 @@ function BookingDetailScreen({ id }: { id: string }) {
           accessibilityLabel={`${item.title}${
             item.location ? `, at ${item.location.name}` : ""
           }${describeSliceSourcesForA11y(item)}, ${stateLabel}${
-            isCheckedIn ? ", checked in" : ""
-          }${isSelected ? ", selected" : ""}${
-            selectable ? ". Tap to select" : ""
-          }`}
+            item.type === "QUANTITY_TRACKED" && item.quantity != null
+              ? `, ${item.quantity} ${item.unitOfMeasure || "units"} booked`
+              : ""
+          }${isCheckedIn ? ", checked in" : ""}${
+            isSelected ? ", selected" : ""
+          }${selectable ? ". Tap to select" : ""}`}
           accessibilityRole="button"
+          // The card is one accessibility element, so the nested "change
+          // quantity" button below is unreachable by a screen reader; expose
+          // it as a custom action on the card instead.
+          {...(canEditQuantity
+            ? {
+                accessibilityActions: [
+                  { name: "changeQuantity", label: "Change booked quantity" },
+                ],
+                onAccessibilityAction: (event: AccessibilityActionEvent) => {
+                  if (event.nativeEvent.actionName === "changeQuantity") {
+                    void openQtyEdit(item);
+                  }
+                },
+              }
+            : {})}
         >
           {selectable && (
             <View
@@ -1258,11 +1348,30 @@ function BookingDetailScreen({ id }: { id: string }) {
             ) : (
               <>
                 {item.type === "QUANTITY_TRACKED" && (
-                  <QuantityBadge
-                    value={item.quantity}
-                    unitOfMeasure={item.unitOfMeasure}
-                    label="booked"
-                  />
+                  <View style={styles.qtyRow}>
+                    <QuantityBadge
+                      value={item.quantity}
+                      unitOfMeasure={item.unitOfMeasure}
+                      label="booked"
+                    />
+                    {canEditQuantity ? (
+                      <TouchableOpacity
+                        testID={`adjust-booked-quantity-${item.id}`}
+                        onPress={() => void openQtyEdit(item)}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Change booked quantity of ${
+                          item.title
+                        }, currently ${item.quantity ?? 0}`}
+                      >
+                        <Ionicons
+                          name="create-outline"
+                          size={16}
+                          color={colors.primary}
+                        />
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
                 )}
                 {/* Where a checked-out pool's units left from, as the web
                     booking row shows it. Only a pool kept at two or more
@@ -1325,6 +1434,9 @@ function BookingDetailScreen({ id }: { id: string }) {
       statusBadge,
       bookingStatusBadge,
       booking?.status,
+      access,
+      currentOrg?.roles,
+      openQtyEdit,
       styles,
     ]
   );
@@ -2528,6 +2640,24 @@ function BookingDetailScreen({ id }: { id: string }) {
         </TouchableOpacity>
       </Modal>
 
+      {/* Booked-quantity editor for one quantity-tracked row */}
+      {qtyEdit && (
+        <QuantityInputSheet
+          key={qtyEdit.assetId}
+          visible
+          title="Change booked quantity"
+          subtitle={`${qtyEdit.title} · ${qtyEdit.max} ${
+            qtyEdit.unitOfMeasure || "units"
+          } available`}
+          max={qtyEdit.max}
+          defaultValue={qtyEdit.current}
+          unitOfMeasure={qtyEdit.unitOfMeasure}
+          confirmLabel="Save"
+          onSubmit={(quantity) => void handleQtyEditSubmit(quantity)}
+          onClose={() => setQtyEdit(null)}
+        />
+      )}
+
       {/* Check-out quantity picker: walks the selected QT assets one at a
           time, defaulting to "all remaining" so one tap takes the whole line.
           Hidden (not cleared) while the source sheet is open, since two page
@@ -3122,6 +3252,11 @@ const useStyles = createStyles((colors, shadows) => ({
     fontSize: fontSize.base,
     fontWeight: "600",
     color: colors.foreground,
+  },
+  qtyRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
   },
   assetKit: {
     fontSize: fontSize.xs,

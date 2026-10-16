@@ -1,6 +1,7 @@
 /**
  * Contract tests for the mobile add-to-booking endpoint: how a scanned kit is
- * routed, what a scan is allowed to write twice, and what the response says
+ * routed, what a scan is allowed to write twice, how a `quantities` map books
+ * or changes units of a quantity-tracked asset, and what the response says
  * actually happened.
  *
  * A kit's members have to reach the booking as kit-driven slices, each naming
@@ -30,6 +31,10 @@ import {
   requireOrganizationAccess,
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
+import {
+  noteBookedQuantityChange,
+  setStandaloneBookedQuantity,
+} from "~/modules/booking/booked-quantity.server";
 import type * as BookingServiceServer from "~/modules/booking/service.server";
 import { addScannedAssetsToBooking } from "~/modules/booking/service.server";
 
@@ -96,6 +101,13 @@ vi.mock("~/modules/booking/service.server", async () => {
     addScannedAssetsToBooking: vi.fn().mockResolvedValue(undefined),
   };
 });
+
+// why: the booked-amount change for an asset already on the booking is the
+// shared helper's job (own suite); here we assert only WHAT the route hands it.
+vi.mock("~/modules/booking/booked-quantity.server", () => ({
+  setStandaloneBookedQuantity: vi.fn(),
+  noteBookedQuantityChange: vi.fn(),
+}));
 
 // why: rate limiting is infra, not the behaviour under test — no-op it.
 vi.mock("~/utils/rate-limit.server", () => ({
@@ -190,6 +202,7 @@ function successBody(response: unknown) {
     success: boolean;
     added: { assets: number; kitSlices: number; kits: number };
     skipped: { assets: number; kits: number };
+    updated: number;
     archivedKitMembersLeftOut: number;
   };
 }
@@ -359,9 +372,9 @@ describe("POST /api/mobile/bookings/add-scanned-assets — re-scanning what is a
     expect(successBody(response).added.assets).toBe(0);
   });
 
-  it("drops a quantity-tracked re-scan too, since a scan carries no quantity", async () => {
-    // A second row would be worth one more unit, which is not what re-scanning
-    // an asset asks for; changing the held quantity is a separate control.
+  it("drops a quantity-tracked re-scan that names no quantity", async () => {
+    // A second row would duplicate the slice; without a quantity the re-scan
+    // asks for nothing the booking does not already hold.
     assetsExist(["asset-9"]);
     bookingHoldsLoose([{ assetId: "asset-9", type: "QUANTITY_TRACKED" }]);
 
@@ -397,6 +410,7 @@ describe("POST /api/mobile/bookings/add-scanned-assets — what the response rep
       success: true,
       added: { assets: 1, kitSlices: 2, kits: 1 },
       skipped: { assets: 0, kits: 0 },
+      updated: 0,
       archivedKitMembersLeftOut: 0,
     });
   });
@@ -418,6 +432,7 @@ describe("POST /api/mobile/bookings/add-scanned-assets — what the response rep
       success: true,
       added: { assets: 0, kitSlices: 0, kits: 0 },
       skipped: { assets: 1, kits: 1 },
+      updated: 0,
       archivedKitMembersLeftOut: 0,
     });
   });
@@ -623,5 +638,138 @@ describe("POST /api/mobile/bookings/add-scanned-assets: archived assets", () => 
       organizationId: "org-1",
     });
     expect(addScannedAssetsToBookingMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/mobile/bookings/add-scanned-assets: quantities", () => {
+  const setBookedQuantityMock = vi.mocked(setStandaloneBookedQuantity);
+  const noteBookedQuantityMock = vi.mocked(noteBookedQuantityChange);
+
+  /** The standalone slice the booking already holds of a quantity-tracked asset. */
+  function bookingHoldsQuantitySlice() {
+    bookingAssetFindManyMock.mockResolvedValue([
+      {
+        id: "slice-1",
+        assetId: "asset-9",
+        quantity: 2,
+        asset: {
+          title: "Cords",
+          type: "QUANTITY_TRACKED",
+          unitOfMeasure: "pcs",
+        },
+      },
+    ] as never);
+  }
+
+  beforeEach(() => {
+    setBookedQuantityMock.mockResolvedValue({ previousQuantity: 2 });
+    noteBookedQuantityMock.mockResolvedValue(undefined);
+  });
+
+  it("forwards the caller's quantities map to the service", async () => {
+    assetsExist(["asset-9"]);
+
+    await post({ assetIds: ["asset-9"], quantities: { "asset-9": 3 } });
+
+    expect(serviceCall()).toMatchObject({
+      assetIds: ["asset-9"],
+      quantities: { "asset-9": 3 },
+    });
+  });
+
+  it("defaults quantities to an empty map when the body omits it", async () => {
+    // Older companion builds never send `quantities`; the service books one
+    // unit per asset for any id missing from the map.
+    assetsExist(["asset-9"]);
+
+    await post({ assetIds: ["asset-9"] });
+
+    expect(serviceCall().quantities).toEqual({});
+  });
+
+  it.each([
+    ["zero", 0],
+    ["a fraction", 1.5],
+  ])(
+    "rejects %s units with a 400 without reaching the service",
+    async (_label, units) => {
+      const response = await post({
+        assetIds: ["asset-9"],
+        quantities: { "asset-9": units },
+      });
+
+      assertIsDataWithResponseInit(response);
+      expect(response.init?.status).toBe(400);
+      expect(addScannedAssetsToBookingMock).not.toHaveBeenCalled();
+    }
+  );
+
+  it("changes the booked amount of a quantity-tracked asset already on the booking", async () => {
+    assetsExist(["asset-9"]);
+    bookingHoldsQuantitySlice();
+
+    const response = await post({
+      assetIds: ["asset-9"],
+      quantities: { "asset-9": 5 },
+    });
+
+    expect(setBookedQuantityMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingAssetId: "slice-1",
+        assetId: "asset-9",
+        bookingId: BOOKING_ID,
+        organizationId: "org-1",
+        quantity: 5,
+        window: {
+          from: new Date("2026-01-01T00:00:00.000Z"),
+          to: new Date("2026-01-02T00:00:00.000Z"),
+        },
+      })
+    );
+    expect(noteBookedQuantityMock).toHaveBeenCalledWith(
+      expect.objectContaining({ previousQuantity: 2, quantity: 5 })
+    );
+    // Never re-inserted: the service gets no standalone id for it.
+    expect(serviceCall().assetIds).toEqual([]);
+    const body = successBody(response);
+    expect(body.updated).toBe(1);
+    expect(body.added.assets).toBe(0);
+    expect(body.skipped.assets).toBe(0);
+  });
+
+  it("leaves the booked amount alone when the named quantity is unchanged", async () => {
+    assetsExist(["asset-9"]);
+    bookingHoldsQuantitySlice();
+
+    const response = await post({
+      assetIds: ["asset-9"],
+      quantities: { "asset-9": 2 },
+    });
+
+    expect(setBookedQuantityMock).not.toHaveBeenCalled();
+    const body = successBody(response);
+    expect(body.updated).toBe(0);
+    expect(body.skipped.assets).toBe(1);
+  });
+
+  it("adds the new ids and changes the existing one in the same call", async () => {
+    assetsExist(["asset-8", "asset-9"]);
+    bookingHoldsQuantitySlice();
+
+    const response = await post({
+      assetIds: ["asset-9", "asset-8"],
+      quantities: { "asset-9": 4, "asset-8": 3 },
+    });
+
+    expect(setBookedQuantityMock).toHaveBeenCalledWith(
+      expect.objectContaining({ assetId: "asset-9", quantity: 4 })
+    );
+    expect(serviceCall()).toMatchObject({
+      assetIds: ["asset-8"],
+      quantities: { "asset-9": 4, "asset-8": 3 },
+    });
+    const body = successBody(response);
+    expect(body.added.assets).toBe(1);
+    expect(body.updated).toBe(1);
   });
 });

@@ -1301,6 +1301,28 @@ export type UpdateBookingPayload = {
   tags?: string[];
 };
 
+/**
+ * Free units per quantity-tracked asset for one booking's window, this booking
+ * excluded. `bookable` is the cap for a quantity prompt.
+ */
+export type BookingAssetAvailability = {
+  assetId: string;
+  total: number;
+  bookable: number;
+  reserved: number;
+  inCustody: number;
+};
+
+export type BookingAssetAvailabilityResponse = {
+  availability: BookingAssetAvailability[];
+};
+
+export type AdjustBookingAssetQuantityResponse = {
+  success: boolean;
+  quantity: number;
+  previousQuantity: number;
+};
+
 export type RemoveBookingAssetsResponse = {
   booking: {
     id: string;
@@ -1326,6 +1348,18 @@ export type AvailableAsset = {
    * the exact unit. Null when the asset has no resolvable code.
    */
   displayCode?: { value: string; label: string } | null;
+  /**
+   * Quantity-tracked metadata (additive; older servers omit it). `type` gates
+   * the quantity prompt, `quantity` is the pool, `availableQuantity` is what
+   * the booking's window still has free with this booking excluded — the cap
+   * the web picker applies to its quantity input.
+   */
+  type?: "INDIVIDUAL" | "QUANTITY_TRACKED";
+  quantity?: number | null;
+  unitOfMeasure?: string | null;
+  availableQuantity?: number | null;
+  /** Units this booking already holds of the row (standalone slice), if any. */
+  bookedQuantity?: number | null;
 };
 
 export type AvailableAssetsResponse = {
