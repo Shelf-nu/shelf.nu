@@ -203,8 +203,10 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
     }
 
     if (!auditSessionId) {
-      // Non-fatal: a failed record never fails the resolve.
-      await recordScanNonFatal({
+      // Non-fatal: a failed record never fails the resolve. Not awaited: a
+      // drawer row needs only the resolved item, and a scanner list resolves
+      // one code per scan.
+      void recordScanNonFatal({
         codeType: ScanCodeType.BARCODE,
         code: value,
         source: ScanSource.WEB_DRAWER,

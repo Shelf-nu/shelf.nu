@@ -3,10 +3,12 @@
  *
  * The companion app sends the device's position with a resolve as
  * `X-Scan-Latitude` / `X-Scan-Longitude`. This parses them into the string
- * format the `Scan` model stores.
+ * format the `Scan` model stores. The same validation guards the web "Update
+ * GPS coordinates" form, whose values are also written into an asset note.
  *
  * @see {@link file://./../../routes/api+/mobile+/qr.$qrId.ts}
  * @see {@link file://./../../routes/api+/mobile+/barcode.$value.ts}
+ * @see {@link file://./../../routes/api+/asset.scan.ts}
  */
 import { z } from "zod";
 
@@ -33,6 +35,18 @@ const ScanGeolocationSchema = z.object({
     .transform(Number)
     .refine((v) => Number.isFinite(v) && v >= -180 && v <= 180),
 });
+
+/**
+ * A latitude/longitude pair submitted as strings, validated as above and
+ * normalized to the string format the `Scan` model stores. For a form that
+ * requires the coordinates: an invalid pair fails the parse.
+ */
+export const ScanCoordinatesSchema = ScanGeolocationSchema.transform(
+  ({ latitude, longitude }) => ({
+    latitude: String(latitude),
+    longitude: String(longitude),
+  })
+);
 
 /**
  * Parses the optional `X-Scan-Latitude`/`X-Scan-Longitude` headers into the string
@@ -62,14 +76,9 @@ export function parseScanGeolocation(
     return null;
   }
 
-  const parsed = ScanGeolocationSchema.safeParse({
+  const parsed = ScanCoordinatesSchema.safeParse({
     latitude,
     longitude,
   });
-  if (!parsed.success) return null;
-
-  return {
-    latitude: String(parsed.data.latitude),
-    longitude: String(parsed.data.longitude),
-  };
+  return parsed.success ? parsed.data : null;
 }

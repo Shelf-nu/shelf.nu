@@ -221,4 +221,51 @@ describe("parseScanData", () => {
     expect(sam).toMatchObject({ codeType: "SAM_ID", code: "SAM-0007" });
     expect(qr).toMatchObject({ codeType: "QR", code: null });
   });
+
+  describe("location", () => {
+    const earlierFix = {
+      latitude: "52.3676",
+      longitude: "4.9041",
+      createdAt: new Date("2026-06-01T08:00:00Z"),
+    };
+
+    it("uses the last scan's own location, with no separate date", () => {
+      const result = parseScanData({
+        scan: createScanWithRelations(),
+        userId: "user-1",
+      });
+
+      expect(result?.coordinates).toBe("51.97956847999077, 5.981302259884078");
+      expect(result?.locatedAt).toBeNull();
+    });
+
+    it("places a scan with no location at the newest earlier located scan", () => {
+      // A drawer or audit scan carries no coordinates; the card still reports
+      // it, and says when the location shown was recorded.
+      const result = parseScanData({
+        scan: createScanWithRelations({
+          latitude: null,
+          longitude: null,
+          source: "WEB_DRAWER",
+        }),
+        locatedScan: earlierFix,
+        userId: "user-1",
+      });
+
+      expect(result?.coordinates).toBe("52.3676, 4.9041");
+      expect(result?.locatedAt).toEqual(earlierFix.createdAt);
+      // The date and time are still the last scan's.
+      expect(result?.dateTime).toEqual(createScanWithRelations().createdAt);
+    });
+
+    it("reports an unknown location when no scan ever had one", () => {
+      const result = parseScanData({
+        scan: createScanWithRelations({ latitude: null, longitude: null }),
+        userId: "user-1",
+      });
+
+      expect(result?.coordinates).toBe("Unknown location");
+      expect(result?.locatedAt).toBeNull();
+    });
+  });
 });

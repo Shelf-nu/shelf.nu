@@ -99,24 +99,38 @@ export type ScanWithRelations = Scan & {
 } & { qr: Qr | null };
 
 /**
+ * The newest scan that carried a location, when it is older than the last
+ * scan (see `getLastScanForTarget`).
+ */
+export type LocatedScan = Pick<Scan, "latitude" | "longitude" | "createdAt">;
+
+/**
  * Shapes a scan row for the "Last scan" card.
  *
+ * The card reports the last scan. Its location is the last scan's own when it
+ * has one, otherwise the newest earlier located scan's, and `locatedAt` then
+ * says when that location was recorded.
+ *
  * @param args.scan - The scan with its relations, or null when never scanned
+ * @param args.locatedScan - The newest located scan, when the last scan has no
+ *   location of its own
  * @param args.userId - The viewer
  * @returns The card payload, or null when there is no scan
  * @throws {ShelfError} If the row cannot be parsed
  */
 export function parseScanData({
   scan,
+  locatedScan = null,
   userId,
 }: {
   scan: ScanWithRelations | null;
+  locatedScan?: LocatedScan | null;
   userId: string;
 }) {
   try {
     /**
      * A few things we need to do to prepare the data for the client
-     * 1. Coordinates - if they are null, we don't render the map, print unknown location
+     * 1. Coordinates - with no location on this scan or an earlier one, we don't render the map, print unknown location
      * 2. User - Scanned by: You || Unknown
      */
     if (scan) {
@@ -129,10 +143,15 @@ export function parseScanData({
         user && isValidUser(user.userOrganizations, scanOrganizationId)
           ? `${resolveUserDisplayName(user)}(${user.email})`
           : "Unknown";
+      const hasOwnLocation = Boolean(scan.latitude && scan.longitude);
+      const location = hasOwnLocation ? scan : locatedScan;
       const coordinates =
-        scan.latitude && scan.longitude
-          ? `${scan.latitude}, ${scan.longitude}`
+        location?.latitude && location.longitude
+          ? `${location.latitude}, ${location.longitude}`
           : "Unknown location";
+      // When the location comes from an earlier scan, the card says when.
+      const locatedAt =
+        !hasOwnLocation && locatedScan ? locatedScan.createdAt : null;
 
       const ua =
         parseCompanionUserAgent(scan.userAgent) ?? parser(scan.userAgent || "");
@@ -140,6 +159,7 @@ export function parseScanData({
       return {
         scannedBy,
         coordinates,
+        locatedAt,
         dateTime: scan.createdAt,
         ua,
         manuallyGenerated: scan.manuallyGenerated,

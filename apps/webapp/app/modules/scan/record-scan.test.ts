@@ -183,7 +183,7 @@ describe("recordScan: what each code type writes", () => {
 });
 
 describe("recordScan: repeated scans", () => {
-  it("looks for the same user, code and entity inside the window", async () => {
+  it("looks for the same user, code, entity and source inside the window", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-29T12:00:30.000Z"));
 
@@ -196,6 +196,7 @@ describe("recordScan: repeated scans", () => {
           code: "BC-0042",
           assetId: "asset-1",
           kitId: null,
+          source: "WEB_DRAWER",
           createdAt: {
             gte: new Date(Date.now() - SCAN_DEDUPE_WINDOW_MS),
           },
@@ -204,6 +205,24 @@ describe("recordScan: repeated scans", () => {
     );
     expect(SCAN_DEDUPE_WINDOW_MS).toBe(30_000);
     vi.useRealTimers();
+  });
+
+  it("does not fold a note-writing scan into a recent drawer row", async () => {
+    // The drawer row wrote no note and carries no GPS: a "View asset" of the
+    // same code is its own scan, with its own note.
+    await recordScan(scanArgs({ source: "WEB_SCANNER", writeNote: true }));
+
+    const { where } = mocks.scanFindFirst.mock.calls[0][0];
+    expect(where.source).toBe("WEB_SCANNER");
+    expect(mocks.scanCreate).toHaveBeenCalledTimes(1);
+    expect(mocks.createNote).toHaveBeenCalledTimes(1);
+  });
+
+  it("looks across every source for an audit scan, to relabel its resolve", async () => {
+    await recordScan(scanArgs({ source: "AUDIT" }));
+
+    const { where } = mocks.scanFindFirst.mock.calls[0][0];
+    expect(where).not.toHaveProperty("source");
   });
 
   it("takes one lock per user, code and entity before looking", async () => {
@@ -350,6 +369,29 @@ describe("recordScan: the note on the asset", () => {
     expect(tags).toEqual([]);
   });
 
+  it("strips Markdoc tags from manually entered coordinates", async () => {
+    await recordScan(
+      scanArgs({
+        codeType: "QR",
+        code: "qr-1",
+        qrId: "qr-1",
+        source: "GPS_UPDATE",
+        manuallyGenerated: true,
+        latitude: '{% booking_status status="COMPLETE" /%}',
+        longitude: "4.9",
+        writeNote: true,
+      })
+    );
+
+    const content = noteContent();
+    expect(content).toContain("manually updated the GPS coordinates");
+    // The actor link is the one tag the note is built with.
+    const tags = [...Markdoc.parse(content).walk()].filter(
+      (node) => node.type === "tag" && node.tag !== "link"
+    );
+    expect(tags).toEqual([]);
+  });
+
   it("writes no note when the caller asks for none", async () => {
     await recordScan(scanArgs({ writeNote: false }));
 
@@ -424,23 +466,50 @@ describe("recordAuditScanNonFatal", () => {
     expect(createdData()).toMatchObject({ codeType: "QR", qrId: "qr-1" });
   });
 
-  it("records one of the asset's barcodes", async () => {
-    mocks.barcodeFindFirst.mockResolvedValue({ id: "barcode-1" });
+  it("records one of the asset's barcodes, by its value as scanned", async () => {
+    mocks.barcodeFindFirst.mockResolvedValue({
+      id: "barcode-1",
+      value: "BC-0042",
+    });
 
     await recordAuditScanNonFatal({ ...base, code: "bc-0042" });
 
     expect(mocks.barcodeFindFirst).toHaveBeenCalledWith({
       where: {
-        OR: [{ value: "bc-0042" }, { value: "BC-0042" }],
+        OR: [{ value: "bc-0042" }, { value: "BC-0042" }, { id: "bc-0042" }],
         assetId: "asset-1",
         organizationId: "org-1",
       },
-      select: { id: true },
+      select: { id: true, value: true },
     });
     expect(createdData()).toMatchObject({
       codeType: "BARCODE",
+      code: "bc-0042",
       barcodeId: "barcode-1",
     });
+  });
+
+  it("records a barcode the companion sent by its row id, under its value", async () => {
+    // The companion audit posts the barcode row's id. The row records the
+    // value, so it folds into the resolve that recorded the same value.
+    mocks.barcodeFindFirst.mockResolvedValue({
+      id: "barcode-1",
+      value: "BC-0042",
+    });
+    mocks.scanFindFirst.mockResolvedValue({
+      id: "scan-recent",
+      source: "COMPANION",
+    });
+
+    await recordAuditScanNonFatal({ ...base, code: "barcode-1" });
+
+    const { where } = mocks.scanFindFirst.mock.calls[0][0];
+    expect(where.code).toBe("BC-0042");
+    expect(mocks.scanUpdate).toHaveBeenCalledWith({
+      where: { id: "scan-recent" },
+      data: { source: "AUDIT" },
+    });
+    expect(mocks.scanCreate).not.toHaveBeenCalled();
   });
 
   it("records nothing for a value that is none of the asset's codes", async () => {

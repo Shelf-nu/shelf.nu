@@ -8,7 +8,7 @@ import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.
 import { getUserOrganizations } from "~/modules/organization/service.server";
 import { getQr } from "~/modules/qr/service.server";
 import {
-  recordScan,
+  recordScanNonFatal,
   updateScan,
   updateScanGeolocation,
 } from "~/modules/scan/service.server";
@@ -46,10 +46,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * workspace. A QR no workspace has claimed is not recorded: no one could
      * ever read that scan. The row's id rides the redirects below as
      * `scanId`, for the follow-up geolocation post; with no row there is no
-     * `scanId`, and no post.
+     * `scanId`, and no post. Non-fatal: a failed record must never stop the
+     * scanner reaching the asset, so it simply leaves no `scanId`.
      */
     const scan = qr.organizationId
-      ? await recordScan({
+      ? await recordScanNonFatal({
           codeType: ScanCodeType.QR,
           code: id,
           source: ScanSource.QR_LINK,

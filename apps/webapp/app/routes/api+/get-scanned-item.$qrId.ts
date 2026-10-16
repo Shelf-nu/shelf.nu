@@ -239,6 +239,10 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
     /**
      * Records this resolve as a scan, unless an audit is scanning (its writer
      * records instead). Non-fatal: a failed record never fails the resolve.
+     *
+     * A drawer row does not wait for the record: a scanner list resolves one
+     * code per scan, and the row needs only the resolved item. The scanner's
+     * "View asset" waits, so its note is on the asset page it opens.
      */
     const recordResolvedScan = async (
       resolved: Pick<
@@ -247,7 +251,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       >
     ) => {
       if (auditSessionId) return;
-      await recordScanNonFatal({
+      const recording = recordScanNonFatal({
         ...resolved,
         code: qrId,
         source: isScannerView ? ScanSource.WEB_SCANNER : ScanSource.WEB_DRAWER,
@@ -256,6 +260,9 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
         organizationId,
         writeNote: isScannerView,
       });
+      if (isScannerView) {
+        await recording;
+      }
     };
 
     // SECURITY (CWE-94 / overfetch): assetExtraInclude/kitExtraInclude are

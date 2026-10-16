@@ -5,7 +5,8 @@
  * A phone camera and the web scanner's QR "View asset" both land here. Every
  * hit records a `QR_LINK` scan stamped with the asset or kit and workspace the
  * QR points at, with a note on the asset, before any redirect: even a
- * signed-out visitor's scan is kept, with no user.
+ * signed-out visitor's scan is kept, with no user. A failed record never
+ * stops the scanner reaching the asset.
  *
  * @see {@link file://./../../../../app/routes/qr+/_public+/$qrId.tsx}
  */
@@ -14,14 +15,14 @@ const { mockGetQr } = vi.hoisted(() => ({ mockGetQr: vi.fn() }));
 // why: the QR lookup reads the database.
 vi.mock("~/modules/qr/service.server", () => ({ getQr: mockGetQr }));
 
-const { mockRecordScan, mockUpdateScan } = vi.hoisted(() => ({
-  mockRecordScan: vi.fn(),
+const { mockRecordScanNonFatal, mockUpdateScan } = vi.hoisted(() => ({
+  mockRecordScanNonFatal: vi.fn(),
   mockUpdateScan: vi.fn(),
 }));
 // why: recording writes to the database; its own behaviour is covered in
 // record-scan.test.ts. Here we assert what the route asks it for.
 vi.mock("~/modules/scan/service.server", () => ({
-  recordScan: mockRecordScan,
+  recordScanNonFatal: mockRecordScanNonFatal,
   updateScan: mockUpdateScan,
   updateScanGeolocation: vi.fn(),
 }));
@@ -64,7 +65,7 @@ async function open({ signedIn }: { signedIn: boolean }) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockRecordScan.mockResolvedValue({ id: "scan-1" });
+  mockRecordScanNonFatal.mockResolvedValue({ id: "scan-1" });
   mockGetQr.mockResolvedValue({
     id: "qr-1",
     assetId: "asset-1",
@@ -77,7 +78,7 @@ describe("GET /qr/:qrId records the scan", () => {
   it("records a QR link scan against the asset, with a note", async () => {
     const response = await open({ signedIn: true });
 
-    expect(mockRecordScan).toHaveBeenCalledWith({
+    expect(mockRecordScanNonFatal).toHaveBeenCalledWith({
       codeType: "QR",
       code: "qr-1",
       source: "QR_LINK",
@@ -96,9 +97,20 @@ describe("GET /qr/:qrId records the scan", () => {
   it("records a signed-out visitor's scan as anonymous", async () => {
     await open({ signedIn: false });
 
-    expect(mockRecordScan).toHaveBeenCalledWith(
+    expect(mockRecordScanNonFatal).toHaveBeenCalledWith(
       expect.objectContaining({ userId: "anonymous", source: "QR_LINK" })
     );
+  });
+
+  it("still opens the item, with no scanId, when the record fails", async () => {
+    // The non-fatal recorder logs a failure and returns null.
+    mockRecordScanNonFatal.mockResolvedValue(null);
+
+    const response = await open({ signedIn: true });
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("Location")).not.toContain("scanId");
+    expect(mockUpdateScan).not.toHaveBeenCalled();
   });
 
   describe("a QR no workspace has claimed", () => {
@@ -114,7 +126,7 @@ describe("GET /qr/:qrId records the scan", () => {
     it("records nothing and opens the claim page with no scanId", async () => {
       const response = await open({ signedIn: true });
 
-      expect(mockRecordScan).not.toHaveBeenCalled();
+      expect(mockRecordScanNonFatal).not.toHaveBeenCalled();
       expect(mockUpdateScan).not.toHaveBeenCalled();
       expect(response.headers.get("Location")).toBe("claim");
     });
@@ -122,7 +134,7 @@ describe("GET /qr/:qrId records the scan", () => {
     it("sends a signed-out visitor to log in with no scanId", async () => {
       const response = await open({ signedIn: false });
 
-      expect(mockRecordScan).not.toHaveBeenCalled();
+      expect(mockRecordScanNonFatal).not.toHaveBeenCalled();
       expect(response.headers.get("Location")).toBe(
         "not-logged-in?redirectTo=%2Fqr%2Fqr-1"
       );

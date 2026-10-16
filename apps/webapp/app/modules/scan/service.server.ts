@@ -103,10 +103,11 @@ function authenticatedUserIdOf(userId: string | null | undefined) {
  * `organizationId`), so the last scan of an asset or kit reads by the entity
  * whichever code was used.
  *
- * A repeat by the same user of the same code on the same asset or kit within
- * {@link SCAN_DEDUPE_WINDOW_MS} does not insert: the recent row stands for it.
- * An `AUDIT` repeat instead relabels that row as an audit scan, because the
- * resolve that preceded the audit already recorded it under another source.
+ * A repeat by the same user of the same code on the same asset or kit, from
+ * the same source, within {@link SCAN_DEDUPE_WINDOW_MS} does not insert: the
+ * recent row stands for it. An `AUDIT` scan folds into a recent row of any
+ * source and relabels it as an audit scan, because the resolve that preceded
+ * the audit already recorded it under another source.
  * Anonymous scans are never folded (there is no user to match on), nor are
  * the sources in {@link SOURCES_NEVER_DEDUPED}.
  *
@@ -199,6 +200,11 @@ export async function recordScan(args: RecordScanArgs): Promise<Scan> {
           code,
           assetId,
           kitId,
+          // A repeat folds only into a row from the same surface: sources
+          // differ in whether they write a note and carry GPS, so a scan from
+          // another surface is its own record. An audit is the exception: it
+          // follows its own resolve, recorded under another source.
+          ...(source === ScanSource.AUDIT ? {} : { source }),
           createdAt: { gte: new Date(Date.now() - SCAN_DEDUPE_WINDOW_MS) },
         },
         orderBy: { createdAt: "desc" },
@@ -335,10 +341,13 @@ async function identifyScannedCodeOfAsset({
   code,
   asset,
   organizationId,
-}: Pick<
-  RecordAuditScanArgs,
-  "code" | "asset" | "organizationId"
->): Promise<Pick<RecordScanArgs, "codeType" | "qrId" | "barcodeId"> | null> {
+}: Pick<RecordAuditScanArgs, "code" | "asset" | "organizationId">): Promise<
+  | (Pick<RecordScanArgs, "codeType" | "qrId" | "barcodeId"> & {
+      /** The value to record when it differs from the one sent */
+      code?: string;
+    })
+  | null
+> {
   const sequentialId = parseSequentialId(code);
   if (sequentialId && sequentialId === asset.sequentialId) {
     return { codeType: ScanCodeType.SAM_ID };
@@ -353,17 +362,24 @@ async function identifyScannedCodeOfAsset({
   }
 
   // Barcode values match original case first, then uppercased, as in
-  // `getBarcodeByValue`.
+  // `getBarcodeByValue`. The companion audit sends the barcode row's id
+  // instead of its value, so the id matches too. A match by id records the
+  // barcode's value, which is what the label says and what the resolve before
+  // the audit recorded; a match by value keeps the value as scanned.
   const barcode = await db.barcode.findFirst({
     where: {
-      OR: [{ value: code }, { value: code.toUpperCase() }],
+      OR: [{ value: code }, { value: code.toUpperCase() }, { id: code }],
       assetId: asset.id,
       organizationId,
     },
-    select: { id: true },
+    select: { id: true, value: true },
   });
   if (barcode) {
-    return { codeType: ScanCodeType.BARCODE, barcodeId: barcode.id };
+    return {
+      codeType: ScanCodeType.BARCODE,
+      barcodeId: barcode.id,
+      code: barcode.id === code ? barcode.value : code,
+    };
   }
 
   return null;
@@ -401,8 +417,8 @@ export async function recordAuditScanNonFatal({
     }
 
     return await recordScanNonFatal({
-      ...identified,
       code,
+      ...identified,
       source: ScanSource.AUDIT,
       userAgent,
       userId,
@@ -427,21 +443,31 @@ export async function recordAuditScanNonFatal({
 export type ScanTarget = { assetId: string } | { kitId: string };
 
 /**
- * The most recent scan of an asset or kit, whichever code was scanned.
+ * The most recent scan of an asset or kit, whichever code was scanned, and
+ * the most recent one that carries a location.
+ *
+ * Drawer and audit scans carry no coordinates, so the newest scan often has
+ * none. The card still reports that scan, and places it on the map at the
+ * newest location known. `locatedScan` is only read when the newest scan has
+ * no location, and is null when it has one (the newest scan is the located
+ * one) or when no scan ever had one.
  *
  * Served by the `[assetId, createdAt]` / `[kitId, createdAt]` indexes.
  *
  * @param target - The asset or kit to read
- * @returns The latest scan with the relations `parseScanData` needs, or null
+ * @returns The latest scan with the relations `parseScanData` needs (null when
+ *   never scanned) and the latest located scan, when that is an older one
  * @throws {ShelfError} If the read fails
  */
 export async function getLastScanForTarget(target: ScanTarget) {
   try {
-    return await db.scan.findFirst({
-      where:
-        "assetId" in target
-          ? { assetId: target.assetId }
-          : { kitId: target.kitId },
+    const where: Prisma.ScanWhereInput =
+      "assetId" in target
+        ? { assetId: target.assetId }
+        : { kitId: target.kitId };
+
+    const scan = await db.scan.findFirst({
+      where,
       orderBy: { createdAt: "desc" },
       include: {
         user: {
@@ -452,6 +478,21 @@ export async function getLastScanForTarget(target: ScanTarget) {
         qr: true,
       },
     });
+
+    const locatedScan =
+      scan && !(scan.latitude && scan.longitude)
+        ? await db.scan.findFirst({
+            where: {
+              ...where,
+              latitude: { not: null },
+              longitude: { not: null },
+            },
+            orderBy: { createdAt: "desc" },
+            select: { latitude: true, longitude: true, createdAt: true },
+          })
+        : null;
+
+    return { scan, locatedScan };
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -510,10 +551,8 @@ export async function getLastScanForViewer({
     return null;
   }
 
-  return parseScanData({
-    scan: (await getLastScanForTarget(target)) || null,
-    userId,
-  });
+  const { scan, locatedScan } = await getLastScanForTarget(target);
+  return parseScanData({ scan, locatedScan, userId });
 }
 
 /**
@@ -593,7 +632,9 @@ export async function createScanNote({
       });
       const actor = wrapUserLinkForNote({ ...scanningUser, id: userId });
       const message = manuallyGenerated
-        ? `${actor} manually updated the GPS coordinates to *${latitude}, ${longitude}*.`
+        ? `${actor} manually updated the GPS coordinates to *${stripMarkdocDelimiters(
+            String(latitude)
+          )}, ${stripMarkdocDelimiters(String(longitude))}*.`
         : `${actor} performed a scan of ${scannedCode}.`;
 
       return await createNote({

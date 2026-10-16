@@ -1,7 +1,7 @@
 // @vitest-environment node
 /**
- * Tests for `getLastScanForViewer`: the `scan:read` gate and the read by
- * asset or kit.
+ * Tests for `getLastScanForViewer`: the `scan:read` gate, the read by asset
+ * or kit, and the fallback to the newest located scan for the card's map.
  *
  * The parsed payload carries the scanner's display name and EMAIL, the scan's
  * GPS COORDINATES and the device user-agent. BASE and SELF_SERVICE hold
@@ -113,6 +113,41 @@ describe("getLastScanForViewer", () => {
     expect(scanFindFirst).toHaveBeenCalledWith(
       expect.objectContaining({ where: { kitId: "kit-1" } })
     );
+  });
+
+  it("reads no second row when the last scan has a location", async () => {
+    await getLastScanForViewer(args([OrganizationRoles.OWNER]));
+
+    expect(scanFindFirst).toHaveBeenCalledTimes(1);
+  });
+
+  it("places a scan with no location at the newest located scan of the asset", async () => {
+    const located = {
+      latitude: "48.8566",
+      longitude: "2.3522",
+      createdAt: new Date("2026-06-01T08:00:00Z"),
+    };
+    scanFindFirst
+      .mockResolvedValueOnce({ ...scanRow, latitude: null, longitude: null })
+      .mockResolvedValueOnce(located);
+
+    const result = await getLastScanForViewer(args([OrganizationRoles.OWNER]));
+
+    expect(scanFindFirst).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: {
+          assetId: "asset-1",
+          latitude: { not: null },
+          longitude: { not: null },
+        },
+        orderBy: { createdAt: "desc" },
+      })
+    );
+    expect(result).toMatchObject({
+      coordinates: "48.8566, 2.3522",
+      locatedAt: located.createdAt,
+      dateTime: scanRow.createdAt,
+    });
   });
 
   it("returns null when the asset has never been scanned", async () => {

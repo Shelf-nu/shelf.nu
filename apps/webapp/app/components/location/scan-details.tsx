@@ -34,8 +34,10 @@ export function describeScanSource(
 }
 
 /**
- * The "Last scan" card on the asset overview and the kit page: a map of the
- * scan's coordinates and who scanned it, when, from which device and how.
+ * The "Last scan" card on the asset overview and the kit page: who scanned
+ * it, when, from which device and how, and a map of where. A scan with no
+ * location of its own is placed at the newest earlier located scan, and the
+ * card says when that one was.
  *
  * @param props.lastScan - The parsed last scan, or null when never scanned
  */
@@ -83,7 +85,15 @@ export function ScanDetails({
             </div>
             <div className="flex justify-between py-2">
               <p>Coordinates</p>
-              <p>{lastScan.coordinates}</p>
+              <p>
+                {lastScan.coordinates}
+                {lastScan.locatedAt ? (
+                  <span className="block text-xs text-gray-500">
+                    From the scan on{" "}
+                    <DateS date={lastScan.locatedAt} includeTime />
+                  </span>
+                ) : null}
+              </p>
             </div>
             <div className="flex justify-between py-2">
               <p>Device</p>

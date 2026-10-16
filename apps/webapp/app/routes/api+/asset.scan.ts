@@ -2,6 +2,7 @@ import { ScanCodeType, ScanSource } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { getAsset } from "~/modules/asset/service.server";
+import { ScanCoordinatesSchema } from "~/modules/scan/geolocation.server";
 import { recordScan } from "~/modules/scan/service.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
@@ -30,15 +31,17 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const { assetId, latitude, longitude, manuallyGenerated } = parseData(
       await request.formData(),
-      z.object({
-        assetId: z.string(),
-        latitude: z.string(),
-        longitude: z.string(),
-        manuallyGenerated: z
-          .string()
-          .optional()
-          .transform((val) => (val === "yes" ? true : false)),
-      })
+      z
+        .object({
+          assetId: z.string(),
+          manuallyGenerated: z
+            .string()
+            .optional()
+            .transform((val) => (val === "yes" ? true : false)),
+        })
+        // The coordinates are written into the asset's note, so they must be
+        // real numbers in range, never free text.
+        .and(ScanCoordinatesSchema)
     );
 
     // The detail-page "Update GPS coordinates" action posts here with
