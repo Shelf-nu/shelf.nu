@@ -8,7 +8,9 @@
  * and the reviewed mapping as JSON.
  *
  * The file input stays mounted through both steps (hidden while reviewing), so
- * the same File object is posted again. Picking another file starts over.
+ * the same File object is posted again. Picking another file starts over. The
+ * review section sits outside the form, so no input in it can submit the
+ * analyze step by pressing Enter.
  *
  * @see {@link file://./../../../routes/_layout+/assets.import.tsx} the action
  * @see {@link file://./mapping-review.tsx} the review table
@@ -177,37 +179,41 @@ export function MappingImportForm() {
   const analyzeError = analyzeFetcher.data?.error;
 
   return (
-    <analyzeFetcher.Form
-      className="mt-4 w-full"
-      method="post"
-      ref={formRef}
-      encType="multipart/form-data"
-    >
-      {/* Hidden, not unmounted, while reviewing: the File is posted again. */}
-      <div className={tw(state.stage === "review" && "hidden")}>
-        <Input
-          type="file"
-          name="file"
-          label="Select a csv file"
-          required
-          onChange={handleFileChange}
-          accept=".csv"
-        />
-        <input type="hidden" name="intent" value="analyze" />
-        <Button type="submit" disabled={isAnalyzing} className="my-4">
-          {isAnalyzing ? "Reading your file..." : "Continue"}
-        </Button>
-        {analyzeError ? (
-          <div
-            role="alert"
-            className="rounded-md border border-error-200 bg-error-25 p-4 text-[14px] text-error-700"
-          >
-            <p className="font-semibold">{analyzeError.title}</p>
-            <p>{analyzeError.message}</p>
-          </div>
-        ) : null}
-      </div>
+    <div className="mt-4 w-full">
+      <analyzeFetcher.Form
+        className="w-full"
+        method="post"
+        ref={formRef}
+        encType="multipart/form-data"
+      >
+        {/* Hidden, not unmounted, while reviewing: the File is posted again. */}
+        <div className={tw(state.stage === "review" && "hidden")}>
+          <Input
+            type="file"
+            name="file"
+            label="Select a csv file"
+            required
+            onChange={handleFileChange}
+            accept=".csv"
+          />
+          <input type="hidden" name="intent" value="analyze" />
+          <Button type="submit" disabled={isAnalyzing} className="my-4">
+            {isAnalyzing ? "Reading your file..." : "Continue"}
+          </Button>
+          {analyzeError ? (
+            <div
+              role="alert"
+              className="rounded-md border border-error-200 bg-error-25 p-4 text-[14px] text-error-700"
+            >
+              <p className="font-semibold">{analyzeError.title}</p>
+              <p>{analyzeError.message}</p>
+            </div>
+          ) : null}
+        </div>
+      </analyzeFetcher.Form>
 
+      {/* Outside the form on purpose: Enter in any review input must never
+          submit the analyze form, which would re-run it and drop every edit. */}
       {state.stage === "review" ? (
         <section aria-labelledby="mapping-review-title">
           <h4 id="mapping-review-title">Check how your columns map</h4>
@@ -270,6 +276,6 @@ export function MappingImportForm() {
           </div>
         </section>
       ) : null}
-    </analyzeFetcher.Form>
+    </div>
   );
 }

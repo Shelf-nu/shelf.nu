@@ -61,6 +61,10 @@ export function CustomFieldTarget({
           aria-invalid={Boolean(nameError)}
           aria-describedby={nameError ? `${id}-name-error` : undefined}
           onChange={(event) => onChange({ ...value, name: event.target.value })}
+          // Enter must not submit an enclosing form: the review keeps its edits.
+          onKeyDown={(event) => {
+            if (event.key === "Enter") event.preventDefault();
+          }}
         />
         {nameError ? (
           <p id={`${id}-name-error`} className="mt-1 text-xs text-error-600">
