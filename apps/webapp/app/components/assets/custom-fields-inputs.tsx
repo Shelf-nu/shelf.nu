@@ -413,7 +413,8 @@ function OptionSelect({
                 return (
                   <div
                     id={`option-${index}`}
-                    key={option}
+                    // Legacy fields can hold the same option twice.
+                    key={`${index}-${option}`}
                     className={tw(
                       "flex items-center justify-between px-4 py-3 text-[14px] text-gray-600 hover:cursor-pointer hover:bg-gray-50",
                       isHighlighted && [
