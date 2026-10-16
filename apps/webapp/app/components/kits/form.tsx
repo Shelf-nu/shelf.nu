@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { Barcode, Kit } from "@prisma/client";
 import { useAtom, useAtomValue } from "jotai";
 import { useActionData, useLocation } from "react-router";
@@ -8,6 +8,7 @@ import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, assetImageValidateFileAtom } from "~/atoms/file";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
+import { useDiscardRemount } from "~/hooks/use-discard-remount";
 import type { action as editKitAction } from "~/routes/_layout+/kits.$kitId_.edit";
 import type { action as createKitAction } from "~/routes/_layout+/kits.new";
 import { resolveCancelTo } from "~/utils/cancel-destination";
@@ -27,6 +28,7 @@ import {
 } from "../forms/image-file-field";
 import Input from "../forms/input";
 import { RefererRedirectInput } from "../forms/referer-redirect-input";
+import { UnsavedChangesGuard } from "../forms/unsaved-changes-bar";
 import ImageWithPreview from "../image-with-preview/image-with-preview";
 import InlineEntityCreationDialog from "../inline-entity-creation-dialog/inline-entity-creation-dialog";
 import { Button } from "../shared/button";
@@ -64,11 +66,19 @@ type KitFormProps = Partial<
 
 /**
  * Create and edit form for kits: name, description, category, location,
- * image and barcodes.
+ * image and barcodes, with the unsaved-changes bar.
+ *
+ * Discard remounts the inner form (see `useDiscardRemount`), which resets
+ * every widget that keeps its value in React state.
  *
  * @param props - Current values when editing; omit them to create a kit
  */
-export default function KitsForm({
+export default function KitsForm(props: KitFormProps) {
+  const { key, discard } = useDiscardRemount();
+  return <KitsFormInner key={key} {...props} onDiscard={discard} />;
+}
+
+function KitsFormInner({
   className,
   id,
   name,
@@ -80,7 +90,11 @@ export default function KitsForm({
   image,
   imageExpiration,
   referer,
-}: KitFormProps) {
+  onDiscard,
+}: KitFormProps & {
+  /** Resets the form to the loaded values (remounts it). */
+  onDiscard: () => void;
+}) {
   const disabled = useDisabled();
   const { canUseBarcodes } = useBarcodePermissions();
   const barcodesInputRef = useRef<BarcodesInputRef>(null);
@@ -118,6 +132,21 @@ export default function KitsForm({
 
   const zo = useZorm("NewKitForm", NewKitFormSchema);
 
+  /** The form element, shared by Zorm and the unsaved-changes tracking. */
+  const formRef = useRef<HTMLFormElement | null>(null);
+  const zormRef = zo.ref;
+  const setFormRef = useCallback(
+    (node: HTMLFormElement | null) => {
+      zormRef(node);
+      formRef.current = node;
+    },
+    [zormRef]
+  );
+
+  /** Changes only when a save succeeds, so a failed save stays dirty. */
+  const savedToken =
+    actionData && actionData.error == null ? actionData : undefined;
+
   const serverValidationErrors = getValidationErrors(actionData?.error);
   const nameErrorMessage =
     serverValidationErrors?.name?.message ?? zo.errors.name()?.message;
@@ -131,8 +160,13 @@ export default function KitsForm({
 
   return (
     <Card className={tw("w-full md:w-min", className)}>
+      <UnsavedChangesGuard
+        formRef={formRef}
+        savedToken={savedToken}
+        onDiscard={onDiscard}
+      />
       <Form
-        ref={zo.ref}
+        ref={setFormRef}
         method="post"
         className="flex w-full flex-col gap-2"
         encType="multipart/form-data"
