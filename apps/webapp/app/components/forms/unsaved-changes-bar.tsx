@@ -65,8 +65,11 @@ function useContentBounds(active: boolean) {
  * Renders the unsaved-changes pill while a form is dirty, and the leave
  * dialog while a navigation is blocked. Renders nothing on a clean form.
  *
- * Desktop: fixed near the top, centred over the page content. Mobile (below
- * `md`): fixed to the bottom, full width, above the safe-area inset.
+ * Wide screens (`xl`): a pill fixed near the top, centred over the page
+ * content. Below `xl` the breadcrumb row is too narrow to share with the
+ * form's header actions, so from `md` the pill floats at the bottom
+ * instead. Below `md`: a full-width strip at the bottom, above the
+ * safe-area inset.
  *
  * @param props - See {@link UnsavedChangesBarProps}
  */
@@ -96,7 +99,7 @@ export function UnsavedChangesBar({
         <div
           role="region"
           aria-label="Unsaved changes"
-          className="pointer-events-none fixed inset-x-0 bottom-0 z-30 flex justify-center pb-[env(safe-area-inset-bottom)] md:bottom-auto md:left-[var(--unsaved-bar-left)] md:right-auto md:top-3 md:w-[var(--unsaved-bar-width)] md:pb-0"
+          className="pointer-events-none fixed inset-x-0 bottom-0 z-30 flex justify-center pb-[env(safe-area-inset-bottom)] md:bottom-4 md:left-[var(--unsaved-bar-left)] md:right-auto md:w-[var(--unsaved-bar-width)] md:pb-0 xl:bottom-auto xl:top-3"
           style={
             bounds
               ? ({
@@ -106,7 +109,7 @@ export function UnsavedChangesBar({
               : undefined
           }
         >
-          <div className="motion-reduce:animate-none pointer-events-auto flex w-full items-center justify-between gap-4 bg-gray-900 px-4 py-3 text-white shadow-lg duration-200 animate-in fade-in slide-in-from-bottom-2 md:w-auto md:rounded-full md:py-2 md:pl-5 md:pr-2 md:slide-in-from-top-2">
+          <div className="motion-reduce:animate-none pointer-events-auto flex w-full items-center justify-between gap-4 bg-gray-900 px-4 py-3 text-white shadow-lg duration-200 animate-in fade-in slide-in-from-bottom-2 md:w-auto md:rounded-full md:py-2 md:pl-5 md:pr-2 xl:slide-in-from-top-2">
             <span className="text-sm font-semibold">
               {isSaving ? "Saving..." : "Unsaved changes"}
             </span>
