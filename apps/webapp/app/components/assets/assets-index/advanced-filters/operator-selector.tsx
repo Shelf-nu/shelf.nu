@@ -63,6 +63,39 @@ export const operatorsPerType: FilterDefinition = {
   customField: [], // empty array as customField operators are determined by the actual field type
 };
 
+/**
+ * Returns the operators a filter row offers, in display order.
+ *
+ * Starts from `operatorsPerType` for the row's field type, then applies the
+ * per-column rules: `location` gets its own ordering (including hierarchy),
+ * `type` only has two values so it is limited to is/isNot, and `lastAuditDate`
+ * adds `isEmpty` ("Never audited") because an asset may have no audit at all.
+ *
+ * @param filter - The filter row to list operators for
+ * @returns The operators to show in the operator selector
+ */
+export function getOperatorsForFilter(filter: Filter): FilterOperator[] {
+  const baseOperators = operatorsPerType[filter.type];
+  const locationOperatorOrder: FilterOperator[] = [
+    "is",
+    "withinHierarchy",
+    "containsAny",
+    "isNot",
+  ];
+  const typeOnlyOperators: FilterOperator[] = ["is", "isNot"];
+
+  if (filter.name === "location") {
+    return locationOperatorOrder.filter((op) => baseOperators.includes(op));
+  }
+  if (filter.name === "type") {
+    return typeOnlyOperators;
+  }
+  const operators = baseOperators.filter((op) => op !== "withinHierarchy");
+  return filter.name === "lastAuditDate"
+    ? [...operators, "isEmpty"]
+    : operators;
+}
+
 export function OperatorSelector({
   filter,
   setFilter,
@@ -79,22 +112,7 @@ export function OperatorSelector({
   // a redundant useState/useEffect pair.
   const operator: FilterOperator | undefined = filter.operator;
 
-  /** Get the correct operators, based on the field type */
-  const baseOperators = operatorsPerType[filter.type];
-  const locationOperatorOrder: FilterOperator[] = [
-    "is",
-    "withinHierarchy",
-    "containsAny",
-    "isNot",
-  ];
-  /** Tracking type only has 2 values — restrict to is/isNot */
-  const typeOnlyOperators: FilterOperator[] = ["is", "isNot"];
-  const operators =
-    filter.name === "location"
-      ? locationOperatorOrder.filter((op) => baseOperators.includes(op))
-      : filter.name === "type"
-      ? typeOnlyOperators
-      : baseOperators.filter((op) => op !== "withinHierarchy");
+  const operators = getOperatorsForFilter(filter);
 
   /** Scroll an option index into view inside the popover list. */
   const scrollIndexIntoView = (index: number) => {

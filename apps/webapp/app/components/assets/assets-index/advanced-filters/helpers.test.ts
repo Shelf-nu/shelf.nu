@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Column } from "~/modules/asset-index-settings/helpers";
 
 import { getDefaultValueForFieldType, getUIFieldType } from "./helpers";
+import { getOperatorsForFilter } from "./operator-selector";
+import type { Filter } from "./schema";
 
 describe("getUIFieldType", () => {
   it("treats updatedAt as a date field", () => {
@@ -99,6 +101,23 @@ describe("getDefaultValueForFieldType — date defaults use the user's timezone"
 
     expect(getDefaultValueForFieldType(nameColumn, null, "Asia/Tokyo")).toBe(
       ""
+    );
+  });
+});
+
+describe("getOperatorsForFilter", () => {
+  const dateFilter = (name: string) =>
+    ({ name, type: "date", operator: "is", value: "" }) as Filter;
+
+  it("offers isEmpty for lastAuditDate", () => {
+    expect(getOperatorsForFilter(dateFilter("lastAuditDate"))).toContain(
+      "isEmpty"
+    );
+  });
+
+  it("does not offer isEmpty for other date columns", () => {
+    expect(getOperatorsForFilter(dateFilter("createdAt"))).not.toContain(
+      "isEmpty"
     );
   });
 });

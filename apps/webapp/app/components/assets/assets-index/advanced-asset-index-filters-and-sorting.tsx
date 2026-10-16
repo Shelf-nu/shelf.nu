@@ -381,7 +381,28 @@ function AdvancedFilter() {
                                 setFilter={(operator) => {
                                   setFilters((prev) => {
                                     const newFilters = [...prev];
-                                    newFilters[index].operator = operator;
+                                    const previous = newFilters[index];
+                                    const column = availableColumns.find(
+                                      (c) => c.name === previous.name
+                                    );
+                                    newFilters[index] = {
+                                      ...previous,
+                                      operator,
+                                      // `isEmpty` takes no value. Leaving it
+                                      // re-seeds the default, since "" is not a
+                                      // valid value for the other operators.
+                                      value:
+                                        operator === "isEmpty"
+                                          ? ""
+                                          : previous.operator === "isEmpty" &&
+                                            column
+                                          ? getDefaultValueForFieldType(
+                                              column,
+                                              customFields,
+                                              timeZone
+                                            )
+                                          : previous.value,
+                                    };
                                     return newFilters;
                                   });
                                   setHasUnappliedChanges(true);
