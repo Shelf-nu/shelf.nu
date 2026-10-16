@@ -33,6 +33,7 @@ import {
   requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
+import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import {
   UNCATEGORIZED_SENTINEL,
   buildMobileCustomFieldPayload,
@@ -40,6 +41,7 @@ import {
 import { updateAsset } from "~/modules/asset/service.server";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { buildTagsSet } from "~/modules/tag/service.server";
+import { assetDescriptionSchema } from "~/utils/asset-description";
 import { extractCustomFieldValuesFromPayload } from "~/utils/custom-fields";
 import { makeShelfError } from "~/utils/error";
 import { assertTagsAssignableToAssets } from "~/utils/org-validation.server";
@@ -86,7 +88,6 @@ export async function action({ request }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const body = await request.json();
     const {
       assetId,
       title,
@@ -97,14 +98,14 @@ export async function action({ request }: ActionFunctionArgs) {
       tags,
       valuation,
       customFields,
-    } = z
-      .object({
+    } = await parseMobileBody(
+      z.object({
         assetId: z.string().min(1, "Asset ID is required"),
         title: z
           .string()
           .min(2, "Title must be at least 2 characters")
           .optional(),
-        description: z.string().optional(),
+        description: assetDescriptionSchema.optional(),
         categoryId: z.string().optional(),
         newLocationId: z.string().optional(),
         currentLocationId: z.string().optional(),
@@ -120,8 +121,10 @@ export async function action({ request }: ActionFunctionArgs) {
             })
           )
           .optional(),
-      })
-      .parse(body);
+      }),
+      request,
+      "Assets"
+    );
 
     // why: validate custom-field values against the org's active definitions.
     // Bypassing this lets a mobile client smuggle arbitrary JSON (or values
@@ -143,6 +146,7 @@ export async function action({ request }: ActionFunctionArgs) {
         categoryId === UNCATEGORIZED_SENTINEL ? null : categoryId ?? null;
       if (categoryId === undefined) {
         const existing = await db.asset.findUnique({
+          // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: category lookup ahead of updateAsset, whose archive guard must see the row to refuse with the archived message
           where: { id: assetId, organizationId },
           select: { categoryId: true },
         });

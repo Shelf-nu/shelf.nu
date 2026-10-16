@@ -154,6 +154,7 @@ describe("getTeamMemberCommandValue", () => {
     email: "jane@example.com",
     firstName: "Jane",
     lastName: "Smith",
+    displayName: null,
     userId: "user-123",
   };
 
@@ -165,6 +166,18 @@ describe("getTeamMemberCommandValue", () => {
     expect(value).toContain("jane@example.com");
     expect(value).toContain("Jane");
     expect(value).toContain("Smith");
+  });
+
+  it("includes displayName so a display-name match survives cmdk filtering", () => {
+    // cmdk re-filters client-side against this value. Omit displayName and a
+    // row the server matched on it is scored out and never rendered — worse
+    // than showing the wrong name, because the result disappears entirely.
+    const value = getTeamMemberCommandValue({
+      ...baseMember,
+      displayName: "Janey Smith",
+    });
+
+    expect(value).toContain("Janey Smith");
   });
 
   it("falls back gracefully when optional fields are missing", () => {
@@ -188,6 +201,7 @@ describe("getTeamMemberHref", () => {
     email: "jane@example.com",
     firstName: "Jane",
     lastName: "Smith",
+    displayName: null,
     userId: "user-123",
   };
 
@@ -197,6 +211,7 @@ describe("getTeamMemberHref", () => {
     email: null,
     firstName: null,
     lastName: null,
+    displayName: null,
     userId: null,
   };
 

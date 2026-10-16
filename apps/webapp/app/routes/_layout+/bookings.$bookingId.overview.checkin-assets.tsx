@@ -1,4 +1,3 @@
-import { OrganizationRoles } from "@prisma/client";
 import { useSetAtom } from "jotai";
 import type {
   MetaFunction,
@@ -17,8 +16,9 @@ import { CodeScanner } from "~/components/scanner/code-scanner";
 import PartialCheckinDrawer from "~/components/scanner/drawer/uses/partial-checkin-drawer";
 import { db } from "~/database/db.server";
 import { useBookingCheckinSessionInitialization } from "~/hooks/use-booking-checkin-session-initialization";
+import { useFillViewportHeight } from "~/hooks/use-fill-viewport-height";
 import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
-import { useViewportHeight } from "~/hooks/use-viewport-height";
+import { resolveAssetImage } from "~/modules/asset/image-resolution";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import {
   attributeCategorizedDispositionsByBookingAsset,
@@ -29,7 +29,6 @@ import {
 import { calculatePartialCheckinProgress } from "~/modules/booking/utils.server";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { canUserManageBookingAssets } from "~/utils/bookings";
 
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
@@ -38,12 +37,75 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { canPartialCheckInOut } from "~/utils/permissions/role-access";
+import type { RoleAccess } from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
-import { tw } from "~/utils/tw";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: scannerCss },
 ];
+
+/**
+ * Check-in guard shared by the loader and the action of the partial
+ * check-in page.
+ *
+ * `canPartialCheckInOut` answers it: the manage-items rule, or, for roles
+ * whose policy has `bookings.partialScanAsCustodian`, an ONGOING or OVERDUE
+ * booking the caller is the custodian of. Creating the booking is not
+ * enough. It MUST run in the action as well as the loader: an action can be
+ * POSTed directly, and `booking:checkin` alone lets SELF_SERVICE reach any
+ * booking in the workspace.
+ *
+ * @throws {ShelfError} 403 when the caller may not check in this booking
+ * @returns the loaded booking, so the loader can reuse it
+ */
+async function assertUserCanCheckinBooking({
+  bookingId,
+  organizationId,
+  userId,
+  access,
+  userOrganizations,
+  request,
+}: {
+  bookingId: string;
+  organizationId: string;
+  userId: string;
+  access: RoleAccess;
+  userOrganizations: Awaited<
+    ReturnType<typeof requirePermission>
+  >["userOrganizations"];
+  request: Request;
+}) {
+  const booking = await getBooking({
+    id: bookingId,
+    organizationId,
+    userOrganizations,
+    request,
+  });
+
+  const canCheckin = canPartialCheckInOut({
+    access,
+    booking: {
+      status: booking.status,
+      custodianUserId: booking.custodianUserId,
+    },
+    userId,
+    direction: "checkin",
+  });
+
+  if (!canCheckin) {
+    throw new ShelfError({
+      cause: null,
+      message:
+        "You cannot check in assets for this booking at the moment. The booking may not be ongoing or you may not have permission to manage its assets.",
+      label: "Booking",
+      status: 403,
+      shouldBeCaptured: false,
+    });
+  }
+
+  return booking;
+}
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -54,46 +116,22 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, role, userOrganizations } = await requirePermission(
-      {
+    const { organizationId, access, userOrganizations } =
+      await requirePermission({
         userId,
         request,
         entity: PermissionEntity.booking,
         action: PermissionAction.checkin,
-      }
-    );
+      });
 
-    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
-
-    const booking = await getBooking({
-      id: bookingId,
+    const booking = await assertUserCanCheckinBooking({
+      bookingId,
       organizationId,
+      userId,
+      access,
       userOrganizations,
       request,
     });
-
-    // For check-in, self-service users are allowed when the booking is
-    // ongoing or overdue (check-in eligible states) AND they are the
-    // custodian. The generic canUserManageBookingAssets blocks self-service
-    // on non-draft bookings, but that restriction is for adding/removing
-    // assets, not for checking in.
-    const isCheckinEligible =
-      booking.status === "ONGOING" || booking.status === "OVERDUE";
-    const isCustodian = booking.custodianUserId === userId;
-    const canCheckin =
-      isSelfService && isCheckinEligible && isCustodian
-        ? true
-        : canUserManageBookingAssets(booking, isSelfService);
-
-    if (!canCheckin) {
-      throw new ShelfError({
-        cause: null,
-        message:
-          "You cannot check in assets for this booking at the moment. The booking may not be ongoing or you may not have permission to manage its assets.",
-        label: "Booking",
-        shouldBeCaptured: false,
-      });
-    }
 
     // Always fetch partial check-in data for scanner validation
     // We need this data to detect blockers for already checked-in assets/kits
@@ -300,8 +338,23 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           id: asset.id,
           bookingAssetId: ba.id,
           title: asset.title,
-          mainImage: asset.mainImage ?? null,
-          thumbnailImage: asset.thumbnailImage ?? null,
+          // Collapse the model-image cascade into the flat fields the
+          // scanner drawer reads (`thumbnailImage || mainImage`), so an
+          // asset with no image of its own renders its model's cover.
+          // `null` stays `null` for the true no-image case — the drawer's
+          // own placeholder branch handles it.
+          ...(() => {
+            const image = resolveAssetImage({
+              mainImage: asset.mainImage ?? null,
+              thumbnailImage: asset.thumbnailImage ?? null,
+              assetModel: asset.assetModel ?? null,
+            });
+            const isPlaceholder = image.source === "placeholder";
+            return {
+              mainImage: isPlaceholder ? null : image.fullUrl,
+              thumbnailImage: isPlaceholder ? null : image.thumbnailUrl,
+            };
+          })(),
           kitId: sourceKit?.id ?? null,
           kitName: sourceKit?.name ?? null,
         };
@@ -401,15 +454,29 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId } = await requirePermission({
+    const { organizationId, access, userOrganizations } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.checkin,
+      });
+
+    // The action is directly POST-able, so it re-applies the loader's guard.
+    await assertUserCanCheckinBooking({
+      bookingId,
+      organizationId,
       userId,
+      access,
+      userOrganizations,
       request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.checkin,
     });
 
     const formData = await request.formData();
 
+    // Everything on this page went through the scanner, except the slices the
+    // drawer names in `selectedBookingAssetIds`: those were checked "without
+    // scanning" and are recorded as selected.
     return await checkinAssets({
       formData,
       request,
@@ -417,6 +484,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       organizationId,
       userId,
       authSession,
+      provenance: { surface: "web", method: "scanned" },
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
@@ -455,8 +523,10 @@ export default function CheckinAssetsFromBooking() {
     expectedAssets,
   });
 
-  const { vh, isMd } = useViewportHeight();
-  const height = isMd ? vh - 67 : vh - 100;
+  // Fills the screen below wherever the layout's chrome ends, measured rather
+  // than subtracted, so the page itself never scrolls behind the drawer.
+  const { ref: scannerContainerRef, height } =
+    useFillViewportHeight<HTMLDivElement>();
 
   const savedCameraId = useScannerCameraId();
 
@@ -475,7 +545,11 @@ export default function CheckinAssetsFromBooking() {
 
       <PartialCheckinDrawer isLoading={isLoading} defaultExpanded={true} />
 
-      <div className="-mx-4 flex flex-col" style={{ height: `${height}px` }}>
+      <div
+        ref={scannerContainerRef}
+        className="-mx-4 flex flex-col overflow-hidden"
+        style={height === undefined ? undefined : { height: `${height}px` }}
+      >
         <CodeScanner
           isLoading={isLoading}
           onCodeDetectionSuccess={handleCodeDetectionSuccess}
@@ -484,9 +558,6 @@ export default function CheckinAssetsFromBooking() {
           allowNonShelfCodes
           paused={false}
           setPaused={() => {}}
-          scannerModeClassName={(mode) =>
-            tw(mode === "scanner" && "justify-start pt-[100px]")
-          }
           savedCameraId={savedCameraId}
         />
       </div>

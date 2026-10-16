@@ -5,7 +5,10 @@ import { z } from "zod";
 import { resolveAssetIdsForBulkOperation } from "~/modules/asset/bulk-operations-helper.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
-import { addAssetsToAudit } from "~/modules/audit/service.server";
+import {
+  addAssetsToAudit,
+  requireAuditAssignee,
+} from "~/modules/audit/service.server";
 import { scopeCustodianFilterIds } from "~/modules/team-member/service.server";
 import { getClientHint } from "~/utils/client-hints";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
@@ -29,7 +32,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId, canUseBarcodes, role, canSeeAllCustody } =
+    const { organizationId, canUseBarcodes, role, access } =
       await requirePermission({
         userId,
         request,
@@ -50,6 +53,17 @@ export async function action({ request, context }: ActionFunctionArgs) {
         additionalData: { organizationId, userId },
       }
     );
+
+    // `audit: update` authorizes updating audits in general, never THIS audit.
+    // Without this a member limited to assigned audits could widen the scope
+    // of any pending audit in the workspace, adding assets to one they were
+    // never assigned to. Callers who see every audit are unrestricted.
+    await requireAuditAssignee({
+      auditSessionId: auditId,
+      organizationId,
+      userId,
+      assignedOnly: !access.audits.seeAll,
+    });
 
     // Determine if we're selecting all items across multiple pages
     const isSelectingAll =
@@ -87,7 +101,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           teamMemberIds: new URLSearchParams(currentSearchParams ?? "").getAll(
             "teamMember"
           ),
-          canSeeAllCustody,
+          canSeeAllCustody: access.custody.seeAll,
           userId,
           organizationId,
         }),

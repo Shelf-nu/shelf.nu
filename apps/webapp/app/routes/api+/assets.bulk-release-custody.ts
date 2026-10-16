@@ -1,10 +1,16 @@
-import { OrganizationRoles } from "@prisma/client";
+import { AssetType } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { BulkReleaseCustodySchema } from "~/components/assets/bulk-release-custody-dialog";
 import { db } from "~/database/db.server";
 import { bulkCheckInAssets } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
+import {
+  quantityRefusalsError,
+  releaseQuantities,
+  resolveQuantityReleases,
+  splitQuantityAssetIds,
+} from "~/modules/custody/quantity-custody.server";
 import { scopeCustodianFilterIds } from "~/modules/team-member/service.server";
 import { getClientHint } from "~/utils/client-hints";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
@@ -24,7 +30,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId, role, canUseBarcodes, canSeeAllCustody } =
+    const { organizationId, role, canUseBarcodes, access } =
       await requirePermission({
         userId,
         request,
@@ -42,24 +48,43 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
     const formData = await request.formData();
 
-    const { assetIds, currentSearchParams } = parseData(
+    const { assetIds, currentSearchParams, quantities } = parseData(
       formData,
       BulkReleaseCustodySchema.and(CurrentSearchParamsSchema)
     );
 
     /**
-     * Phase 2 widened Custody from 1:1 to 1:many to support multi-custodian
-     * QUANTITY_TRACKED assets. SELF_SERVICE users may only release custody
-     * on rows assigned to their own user — guard before delegating to the
-     * bulk service so we fail fast and don't leak counts via partial work.
-     * Symmetric with the SELF_SERVICE assign-side guard centralised inside
-     * `bulkCheckOutAssets` (see asset/service.server.ts).
+     * Units per quantity-tracked asset, sent only by the scanner. See the
+     * field's note on `BulkReleaseCustodySchema`. Named assets are released
+     * unit by unit, the way the asset page does it, and never reach the bulk
+     * call. An index submission sends none, so its behaviour is unchanged.
      */
-    if (role === OrganizationRoles.SELF_SERVICE) {
+    const { quantityAssetIds, bulkAssetIds } = splitQuantityAssetIds(
+      assetIds,
+      quantities
+    );
+
+    /**
+     * A caller whose scope is `self` may release only custody assigned to
+     * them; checked here before delegating so a refused request does no
+     * partial work. Custody is 1:many (several custodians on a
+     * QUANTITY_TRACKED asset), so every row is checked.
+     */
+    if (access.custody.assign === "self") {
       const custodies = await db.custody.findMany({
         where: {
           assetId: { in: assetIds },
-          asset: { organizationId },
+          asset: {
+            organizationId,
+            // Only the assets this release will actually touch.
+            // `bulkCheckInAssets` skips QUANTITY_TRACKED rows — they are
+            // released individually, with a quantity — and it reports the count
+            // it skipped. Judging them here refuses the whole request over
+            // custody nobody was going to release: a `self`-scoped caller
+            // selecting their own individual asset alongside a qty-tracked one
+            // that a colleague holds units of would get a 403 for the lot.
+            type: { not: AssetType.QUANTITY_TRACKED },
+          },
         },
         select: { custodian: { select: { id: true, userId: true } } },
       });
@@ -86,30 +111,57 @@ export async function action({ request, context }: ActionFunctionArgs) {
       getClientHint(request)
     );
 
-    const { skippedQuantityTracked } = await bulkCheckInAssets({
-      userId,
-      role,
-      assetIds,
+    // Each per-unit release is resolved to its single holder and checked
+    // before anything is written.
+    const resolvedReleases = await resolveQuantityReleases({
+      quantityAssetIds,
+      quantities,
       organizationId,
-      currentSearchParams,
-      settings,
-      timeZone,
-      // `asset: custody` is a SELF_SERVICE permission, so narrow the
-      // select-all custodian filter to the caller's own custody — otherwise a
-      // self-service user could act on exactly the set a colleague holds.
-      allowedTeamMemberIds: await scopeCustodianFilterIds({
-        teamMemberIds: new URLSearchParams(currentSearchParams ?? "").getAll(
-          "teamMember"
-        ),
-        canSeeAllCustody,
-        userId,
-        organizationId,
-      }),
+      custodyAssign: access.custody.assign,
+      userId,
     });
+
+    const { skippedQuantityTracked } = bulkAssetIds.length
+      ? await bulkCheckInAssets({
+          userId,
+          custodyAssign: access.custody.assign,
+          assetIds: bulkAssetIds,
+          organizationId,
+          currentSearchParams,
+          settings,
+          timeZone,
+          // `asset: custody` is a SELF_SERVICE permission, so narrow the
+          // select-all custodian filter to the caller's own custody, otherwise a
+          // self-service user could act on exactly the set a colleague holds.
+          allowedTeamMemberIds: await scopeCustodianFilterIds({
+            teamMemberIds: new URLSearchParams(
+              currentSearchParams ?? ""
+            ).getAll("teamMember"),
+            canSeeAllCustody: access.custody.seeAll,
+            userId,
+            organizationId,
+          }),
+        })
+      : { skippedQuantityTracked: 0 };
+
+    /**
+     * The whole-asset call runs before the per-unit writes: it validates and
+     * writes in one transaction, so if it refuses, nothing has been written.
+     * The per-unit releases after it were checked above; a refusal there can
+     * only come from a concurrent change, and is reported by asset.
+     */
+    const refusals = await releaseQuantities({
+      releases: resolvedReleases,
+      quantities,
+      userId,
+      organizationId,
+      custodyAssign: access.custody.assign,
+    });
+    if (refusals.length) throw quantityRefusalsError("released", refusals);
 
     const skippedNote =
       skippedQuantityTracked > 0
-        ? ` ${skippedQuantityTracked} quantity-tracked asset(s) were skipped — release custody individually.`
+        ? ` ${skippedQuantityTracked} quantity-tracked asset(s) were skipped. Release custody individually.`
         : "";
 
     sendNotification({

@@ -291,6 +291,14 @@ export type AssetForUpdate = {
   id: string;
   title: string;
   /**
+   * Non-null = archived, which makes the asset read-only (issue #382).
+   * `fetchAssetsForUpdate` uses a top-level `include`, so every Asset scalar
+   * already comes back and this needed no query change — only the type.
+   * The preview reads it so an archived row is reported as a failure up front
+   * instead of being promised and then refused at apply time.
+   */
+  archivedAt?: Date | null;
+  /**
    * Plain scalar, no side-effects — round-trippable like `title`/`valuation`.
    * `fetchAssetsForUpdate` already pulls this via Prisma's `include` (which
    * selects all scalar columns), so no query change was needed to add it

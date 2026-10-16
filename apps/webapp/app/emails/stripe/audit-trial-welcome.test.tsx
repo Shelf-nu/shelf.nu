@@ -78,6 +78,7 @@ describe("sendAuditTrialWelcomeEmail", () => {
   it("calls sendEmail with correct to, subject, and content", async () => {
     await sendAuditTrialWelcomeEmail({
       firstName: "Alice",
+      displayName: null,
       email: "alice@example.com",
       hasPaymentMethod: false,
     });
@@ -102,6 +103,7 @@ describe("sendAuditTrialWelcomeEmail", () => {
     await expect(
       sendAuditTrialWelcomeEmail({
         firstName: "Alice",
+        displayName: null,
         email: "alice@example.com",
         hasPaymentMethod: false,
       })

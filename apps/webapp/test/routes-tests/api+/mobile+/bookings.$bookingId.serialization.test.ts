@@ -21,20 +21,35 @@ import {
 } from "~/modules/api/mobile-auth.server";
 
 import { loader } from "~/routes/api+/mobile+/bookings.$bookingId";
+import { hasPermission } from "~/utils/permissions/permission.validator.server";
 
 import { assertIsDataWithResponseInit } from "@helpers/assertions";
+import { findModelRequestShortfallsForBooking } from "~/modules/booking-model-request/service.server";
+import { mobileUserContext } from "@helpers/mobile-user-context";
 
 // @vitest-environment node
 
 vi.mock("~/database/db.server", () => ({
   db: {
     booking: { findFirst: vi.fn() },
-    // why: lifecycle-progress roll-up queries the partial-checkout log to
-    // decide whether an asset was ever checked out. Not relevant to the
-    // model-request serialization under test — stub to an empty log. (Survives
+    // why: the lifecycle-progress roll-up reads the slice markers
+    // (BookingAsset.checkedOutAt/checkedInAt) plus the checkout sessions to
+    // judge dispatched units per asset. Not relevant to the model-request
+    // serialization under test — stub both to empty. (Survives
     // `clearAllMocks`, which clears call history but keeps implementations.)
+    bookingAsset: { findMany: vi.fn().mockResolvedValue([]) },
     partialBookingCheckout: { findMany: vi.fn().mockResolvedValue([]) },
   },
+}));
+
+// why: measuring whether a reservation still fits reads the model's pool
+// through several tables; its own suite covers that. Here only the payload
+// field matters, so every reservation fits unless a test says otherwise.
+vi.mock("~/modules/booking-model-request/service.server", async () => ({
+  ...(await vi.importActual<object>(
+    "~/modules/booking-model-request/service.server"
+  )),
+  findModelRequestShortfallsForBooking: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock("~/modules/api/mobile-auth.server", async () => {
@@ -73,12 +88,9 @@ beforeEach(() => {
     user: { id: "user-1" },
   } as Awaited<ReturnType<typeof requireMobileAuth>>);
   requireOrganizationAccessMock.mockResolvedValue("org-1");
-  getMobileUserContextMock.mockResolvedValue({
-    role: OrganizationRoles.ADMIN,
-    canUseBarcodes: true,
-    canUseAudits: true,
-    canSeeAllCustody: true,
-  });
+  getMobileUserContextMock.mockResolvedValue(
+    mobileUserContext({ roles: [OrganizationRoles.ADMIN] })
+  );
 });
 
 describe("GET /api/mobile/bookings/:bookingId — model requests", () => {
@@ -88,7 +100,7 @@ describe("GET /api/mobile/bookings/:bookingId — model requests", () => {
       id: "booking-1",
       name: "Shoot",
       description: null,
-      status: "DRAFT", // DRAFT → skips getPartiallyCheckedInAssetIds
+      status: "DRAFT", // DRAFT → skips getDetailedPartialCheckinData
       from: null,
       to: null,
       createdAt: new Date("2026-01-01T00:00:00.000Z"),
@@ -142,6 +154,7 @@ describe("GET /api/mobile/bookings/:bookingId — model requests", () => {
         }>;
         modelRequestCount: number;
         outstandingModelUnitCount: number;
+        modelReservationShortfalls: unknown[];
       };
     };
 
@@ -163,6 +176,122 @@ describe("GET /api/mobile/bookings/:bookingId — model requests", () => {
     // Roll-ups: 2 distinct models, 2 units still to assign (2 + 0).
     expect(body.booking.modelRequestCount).toBe(2);
     expect(body.booking.outstandingModelUnitCount).toBe(2);
+    // Every reservation fits here; the app reads this field to warn.
+    expect(body.booking.modelReservationShortfalls).toEqual([]);
+  });
+
+  it("ships a reservation the booking's dates can no longer fill", async () => {
+    vi.mocked(findModelRequestShortfallsForBooking).mockResolvedValueOnce([
+      {
+        assetModelId: "model-1",
+        modelName: "Dell XPS",
+        outstanding: 2,
+        available: 1,
+        short: 1,
+      },
+    ]);
+    findFirstMock.mockResolvedValue({
+      id: "booking-1",
+      name: "Laptops",
+      description: null,
+      status: "RESERVED",
+      from: new Date("2026-01-01T00:00:00Z"),
+      to: new Date("2026-01-03T00:00:00Z"),
+      createdAt: new Date("2025-12-31T00:00:00Z"),
+      updatedAt: new Date("2025-12-31T00:00:00Z"),
+      creator: null,
+      custodianUser: null,
+      custodianTeamMember: null,
+      tags: [],
+      bookingAssets: [],
+      modelRequests: [
+        {
+          id: "mr-1",
+          assetModelId: "model-1",
+          quantity: 2,
+          fulfilledQuantity: 0,
+          fulfilledAt: null,
+          assetModel: { id: "model-1", name: "Dell XPS" },
+        },
+      ],
+      _count: { bookingAssets: 0 },
+    } as never);
+
+    const response = await loader({
+      request: new Request("http://localhost/api/mobile/bookings/booking-1"),
+      params: { bookingId: "booking-1" },
+      context: {},
+    } as never);
+
+    assertIsDataWithResponseInit(response);
+    const body = response.data as {
+      booking: { modelReservationShortfalls: unknown[] };
+    };
+    expect(body.booking.modelReservationShortfalls).toEqual([
+      expect.objectContaining({ assetModelId: "model-1", short: 1 }),
+    ]);
+  });
+
+  it("offers check-out while reserved units are still unassigned", async () => {
+    // why: `canCheckout` is state AND permission; grant the permission so the
+    // assertion is about the model-request state alone.
+    vi.mocked(hasPermission).mockResolvedValue(true);
+    findFirstMock.mockResolvedValue({
+      id: "booking-1",
+      name: "Shoot",
+      description: null,
+      status: "RESERVED",
+      from: new Date("2026-01-03T09:00:00.000Z"),
+      to: new Date("2026-01-04T17:00:00.000Z"),
+      createdAt: new Date("2026-01-01T00:00:00.000Z"),
+      updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+      creator: null,
+      custodianUser: null,
+      custodianTeamMember: null,
+      tags: [],
+      bookingAssets: [
+        {
+          id: "ba-1",
+          quantity: 1,
+          assetKitId: null,
+          asset: {
+            id: "asset-1",
+            title: "Dell XPS #1",
+            type: "INDIVIDUAL",
+            status: "AVAILABLE",
+            mainImage: null,
+            thumbnailImage: null,
+            assetModel: null,
+            assetKits: [],
+          },
+        },
+      ],
+      modelRequests: [
+        {
+          id: "mr-1",
+          assetModelId: "model-a",
+          // Nothing assigned yet. The booking still holds an item, and one
+          // item going out is all a check-out needs.
+          quantity: 2,
+          fulfilledQuantity: 0,
+          fulfilledAt: null,
+          assetModel: { id: "model-a", name: "Dell XPS" },
+        },
+      ],
+      _count: { bookingAssets: 1 },
+    } as never);
+
+    const response = await loader(
+      createLoaderArgs({
+        request: new Request(
+          "http://localhost:3000/api/mobile/bookings/booking-1"
+        ),
+        params: { bookingId: "booking-1" },
+      })
+    );
+
+    assertIsDataWithResponseInit(response);
+    expect((response.data as { canCheckout: boolean }).canCheckout).toBe(true);
   });
 
   it("returns empty model-request fields when the booking reserves no models", async () => {

@@ -5,8 +5,15 @@
  * is too short or does not match a known image signature.
  *
  * Supported formats: PNG, JPEG, GIF, WebP, BMP.
+ *
+ * Takes `Uint8Array` rather than `Buffer` so it also accepts bytes read back
+ * from Prisma, which hydrates a `Bytes` column as a plain `Uint8Array`.
+ *
+ * This module is imported by `crop-image`, which every storage upload runs
+ * through. Keep it free of imports so that hot path does not pull a module
+ * graph along with it.
  */
-export function detectImageFormat(buffer: Buffer): string | null {
+export function detectImageFormat(buffer: Uint8Array): string | null {
   if (buffer.length < 4) return null;
 
   // PNG: 89 50 4E 47

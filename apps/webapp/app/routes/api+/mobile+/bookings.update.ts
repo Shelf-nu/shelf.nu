@@ -1,5 +1,4 @@
-import { BookingStatus, OrganizationRoles } from "@prisma/client";
-import { DateTime } from "luxon";
+import { BookingStatus } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { BookingFormSchema } from "~/components/booking/forms/forms-schema";
@@ -11,12 +10,15 @@ import {
   getMobileUserContext,
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
+import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { updateBasicBooking } from "~/modules/booking/service.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
+import { bookingCustodianIsSelf } from "~/utils/bookings";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
-import { DATE_TIME_FORMAT } from "~/utils/constants";
+import { isValidTimeZone } from "~/utils/date-format";
+import { prefsForDeclaredZone } from "~/utils/date-format.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   PermissionAction,
@@ -37,8 +39,9 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  * - Validation runs through the shared {@link BookingFormSchema} with
  *   `action: "save"` + the booking's current status (so active bookings only
  *   validate name/custodian/tags, DRAFTs validate dates too).
- * - SELF_SERVICE / BASE users may only edit their own bookings and may only
- *   assign themselves as custodian.
+ * - A caller who does not write every booking may only edit bookings they are
+ *   the custodian of; one whose booking custodian is fixed to themselves may
+ *   only assign themselves as custodian.
  * - Bookings are a TEAM-plan feature (`assertMobileCanUseBookings`).
  *
  * Reschedules of a *non-DRAFT* booking are intentionally out of scope here —
@@ -60,7 +63,11 @@ const BodySchema = z.object({
   custodianTeamMemberId: z.string().min(1, "Please select a custodian"),
   startDate: z.string().min(1, "Start date is required"),
   endDate: z.string().min(1, "End date is required"),
-  timeZone: z.string().min(1, "Time zone is required"),
+  // Must be a real IANA zone — see `bookings.create.ts`.
+  timeZone: z
+    .string()
+    .min(1, "Time zone is required")
+    .refine(isValidTimeZone, "Time zone must be a valid IANA zone"),
   tags: z.array(z.string()).optional().default([]),
 });
 
@@ -83,13 +90,10 @@ export async function action({ request }: ActionFunctionArgs) {
 
     await assertMobileCanUseBookings(organizationId);
 
-    const body = BodySchema.parse(await request.json());
+    const body = await parseMobileBody(BodySchema, request);
 
-    const { role } = await getMobileUserContext(user.id, organizationId);
-    const isSelfServiceOrBase =
-      role === OrganizationRoles.SELF_SERVICE ||
-      role === OrganizationRoles.BASE;
-    const isAdminOrOwner = !isSelfServiceOrBase;
+    // The caller's access, judged by the membership's effective role.
+    const { access } = await getMobileUserContext(user.id, organizationId);
 
     // Org-scoped lookup — gives us the current status (drives validation +
     // which fields actually apply) and the custodian for the ownership check.
@@ -105,8 +109,9 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
-    // Self-service / base users may only edit their own bookings.
-    if (isSelfServiceOrBase && existing.custodianUserId !== user.id) {
+    // A caller who does not write every booking may only edit bookings they
+    // are the custodian of.
+    if (!access.bookings.writeAll && existing.custodianUserId !== user.id) {
       throw new ShelfError({
         cause: null,
         message: "You can only edit your own bookings.",
@@ -135,8 +140,9 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     });
 
-    // Self-service / base may only assign a booking to themselves.
-    if (isSelfServiceOrBase && custodian.userId !== user.id) {
+    // A member whose booking custodian is fixed to themself may only assign
+    // a booking to themself.
+    if (bookingCustodianIsSelf(access) && custodian.userId !== user.id) {
       throw new ShelfError({
         cause: null,
         message: "Self user can assign booking to themselves only.",
@@ -151,6 +157,12 @@ export async function action({ request }: ActionFunctionArgs) {
       timeZone: body.timeZone,
     };
 
+    // Decode the wall-clock in the zone the client DECLARED it in, not the
+    // user's preference zone. See `bookings.create.ts` — and note the edit
+    // screen re-submits the value it rendered device-local, so a preference-zone
+    // decode here would shift the booking again on every save.
+    const prefs = prefsForDeclaredZone(body.timeZone);
+
     // Business-rule validation via the shared web schema. The "save" action +
     // current status picks the right rule set (active bookings skip the date
     // rules; DRAFTs validate future/buffer/working-hours/max-length).
@@ -158,14 +170,15 @@ export async function action({ request }: ActionFunctionArgs) {
     const bookingSettings =
       await getBookingSettingsForOrganization(organizationId);
 
+    let parsedBooking;
     try {
-      BookingFormSchema({
-        hints,
+      parsedBooking = BookingFormSchema({
+        prefs,
         action: "save",
         status: existing.status,
         workingHours,
         bookingSettings,
-        isAdminOrOwner,
+        bypassTimeLimits: access.policy.bookings.bypassTimeLimits,
       }).parse({
         id: body.bookingId,
         name: body.name,
@@ -193,18 +206,28 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     // Dates + custodian only apply to DRAFT bookings (updateBasicBooking
-    // re-gates this internally); parse the dates only when they will be used.
+    // re-gates this internally), so only carry them through for a draft.
+    //
+    // Use the instants the schema already produced rather than re-parsing the
+    // raw body: `coerceLocalDate` accepts second precision via `fromISO`, while
+    // DATE_TIME_FORMAT is minute-only, so re-parsing could reject a payload the
+    // schema had just accepted. Reusing the result also guarantees the stored
+    // instant is the one that was validated, in the same declared zone.
     const isDraft = existing.status === BookingStatus.DRAFT;
-    const from = isDraft
-      ? DateTime.fromFormat(body.startDate, DATE_TIME_FORMAT, {
-          zone: body.timeZone,
-        }).toJSDate()
-      : undefined;
-    const to = isDraft
-      ? DateTime.fromFormat(body.endDate, DATE_TIME_FORMAT, {
-          zone: body.timeZone,
-        }).toJSDate()
-      : undefined;
+    const from = isDraft ? parsedBooking.startDate : undefined;
+    const to = isDraft ? parsedBooking.endDate : undefined;
+
+    // A DRAFT validates through the full schema, so both dates are present;
+    // assert it rather than handing `undefined` to the service as "unchanged".
+    if (isDraft && (!from || !to)) {
+      throw new ShelfError({
+        cause: null,
+        message: "Invalid booking start or end date.",
+        label: "Booking",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
 
     const booking = await updateBasicBooking({
       id: body.bookingId,

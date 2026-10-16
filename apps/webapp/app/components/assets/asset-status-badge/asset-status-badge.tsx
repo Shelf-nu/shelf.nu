@@ -21,7 +21,6 @@
 import { useMemo, useState } from "react";
 import type { Booking } from "@prisma/client";
 import { AssetStatus } from "@prisma/client";
-import { HoverCardPortal } from "@radix-ui/react-hover-card";
 import useApiQuery from "~/hooks/use-api-query";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import type { ExtendedAssetStatus } from "~/utils/booking-assets";
@@ -41,6 +40,7 @@ import {
 } from "../../shared/hover-card";
 import { UnavailableBadge } from "../../shared/unavailable-badge";
 import When from "../../when/when";
+import { ArchivedBadge } from "../archived-badge";
 
 export function AssetStatusBadge({
   id,
@@ -48,10 +48,18 @@ export function AssetStatusBadge({
   suppressQtyAware = false,
   availableToBook = true,
   asset,
+  isArchived = false,
 }: {
   id: string;
   status: ExtendedAssetStatus;
   availableToBook: boolean;
+  /**
+   * When `true`, renders an "Archived" chip alongside the status badge. The
+   * asset's live status is still shown (archiving is orthogonal to status),
+   * so a historical/completed booking row reads e.g. "Available · Archived".
+   * Defaults to `false` so existing callers are unaffected.
+   */
+  isArchived?: boolean;
   /**
    * Booking-row escape hatch for the qty-aware treatment. When `true`
    * AND the asset is `QUANTITY_TRACKED`, the badge:
@@ -135,6 +143,18 @@ export function AssetStatusBadge({
   }, [data, status]);
 
   /**
+   * Archived dominates the status display. When an asset is archived we show a
+   * single, calm "Archived" badge and suppress the live status + the
+   * "unavailable for bookings" indicator: the asset can't be booked or used
+   * while archived, so surfacing its underlying status (e.g. "Available")
+   * alongside would be misleading and force the reader to reconcile two states.
+   * One clear signal, everywhere the asset appears (issue #382).
+   */
+  if (isArchived) {
+    return <ArchivedBadge />;
+  }
+
+  /**
    * For quantity-tracked assets, render the qty-aware branch even before
    * the lazy fetch resolves. The label falls back to the asset's bare
    * status until the breakdown lands; on resolve, "Checked out" may refine
@@ -198,14 +218,12 @@ export function AssetStatusBadge({
               `suppressQtyAware`, or no data yet), the chip is plain and
               the breakdown popover would be misleading — hide it. */}
           {!useCallerStatus && (
-            <HoverCardPortal>
-              <HoverCardContent
-                side="bottom"
-                className="w-[26rem] max-w-[calc(100vw-2rem)]"
-              >
-                <QuantityTooltipContent data={quantityData} />
-              </HoverCardContent>
-            </HoverCardPortal>
+            <HoverCardContent
+              side="bottom"
+              className="w-[26rem] max-w-[calc(100vw-2rem)]"
+            >
+              <QuantityTooltipContent data={quantityData} />
+            </HoverCardContent>
           )}
         </HoverCard>
         {!availableToBook && (
@@ -232,17 +250,15 @@ export function AssetStatusBadge({
       </HoverCardTrigger>
 
       <When truthy={!!bookingToShow}>
-        <HoverCardPortal>
-          <HoverCardContent side="top" className="w-max min-w-36 max-w-72">
-            <Button
-              variant="link-gray"
-              to={`/bookings/${bookingToShow?.id}`}
-              target="_blank"
-            >
-              {bookingToShow?.name}
-            </Button>
-          </HoverCardContent>
-        </HoverCardPortal>
+        <HoverCardContent side="top" className="w-max min-w-36 max-w-72">
+          <Button
+            variant="link-gray"
+            to={`/bookings/${bookingToShow?.id}`}
+            target="_blank"
+          >
+            {bookingToShow?.name}
+          </Button>
+        </HoverCardContent>
       </When>
     </HoverCard>
   );

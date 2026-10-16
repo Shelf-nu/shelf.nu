@@ -1,7 +1,6 @@
-import { TierId, OrganizationRoles, OrganizationType } from "@prisma/client";
+import { TierId } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data, useNavigate, useLoaderData } from "react-router";
-import type Stripe from "stripe";
 import { StatusFilter } from "~/components/booking/status-filter";
 import { ErrorContent } from "~/components/errors";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -12,10 +11,10 @@ import { DateS } from "~/components/shared/date";
 import { Td, Th } from "~/components/table";
 import { config } from "~/config/shelf.config";
 import { useDateFormatter } from "~/hooks/use-date-formatter";
+import type { SubscriptionForAccountStatus } from "~/modules/user/account-status";
+import { getAccountStatus } from "~/modules/user/account-status";
 import { getPaginatedAndFilterableUsers } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { formatDate } from "~/utils/date-format";
-import type { ResolvedFormatPrefs } from "~/utils/date-format";
 import { makeShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
@@ -100,101 +99,6 @@ export const meta: MetaFunction<typeof loader> = ({ loaderData }) => [
   { title: loaderData ? appendToMetaTitle(loaderData.header.title) : "" },
 ];
 
-// Type for users returned from the service with organization data
-type UserFromService = Awaited<
-  ReturnType<typeof getPaginatedAndFilterableUsers>
->["users"][number];
-
-// Type for users with subscription data added
-type UserWithSubscription = UserFromService & {
-  subscription: Stripe.Subscription | null;
-};
-
-/**
- * Determines account status prioritizing team workspaces over personal ones.
- * Admins need to see billing-relevant status for conversion tracking.
- */
-function getAccountStatus(
-  user: UserWithSubscription,
-  prefs: ResolvedFormatPrefs
-): string {
-  // Priority 1: Team workspace owner (billing decision maker)
-  const teamOrgWhereOwner = user.userOrganizations.find(
-    (uo) =>
-      uo.organization.type === OrganizationType.TEAM &&
-      (uo.roles.includes(OrganizationRoles.OWNER) ||
-        uo.organization.userId === user.id)
-  );
-
-  if (teamOrgWhereOwner) {
-    return formatOwnerStatus(user, prefs);
-  }
-
-  // Priority 2: Team workspace member (invited user)
-  const teamOrgWhereMember = user.userOrganizations.find(
-    (uo) =>
-      uo.organization.type === OrganizationType.TEAM &&
-      !uo.roles.includes(OrganizationRoles.OWNER)
-  );
-
-  if (teamOrgWhereMember) {
-    return formatMemberStatus(user);
-  }
-
-  // Priority 3: Personal workspace only - check if they're on Plus
-  if (user.tierId === TierId.tier_1) {
-    return "Owner (Paid - Plus)";
-  }
-
-  return "Owner (Free)";
-}
-
-function formatOwnerStatus(
-  user: UserWithSubscription,
-  prefs: ResolvedFormatPrefs
-): string {
-  // Note: This function is only called for team workspace owners
-
-  // Check if on trial
-  const isTrial =
-    user.subscription?.status === "trialing" && !!user.subscription?.trial_end;
-
-  if (isTrial && user.subscription?.trial_end) {
-    const trialEndDate = new Date(user.subscription.trial_end * 1000);
-    const formattedDate = formatDate(trialEndDate, prefs, {
-      month: "short",
-      day: "numeric",
-    });
-    return `Owner (Trial - ends ${formattedDate})`;
-  }
-
-  // Paid tiers (typical for team workspace owners)
-  if (user.tierId === TierId.tier_1) return "Owner (Paid - Plus)";
-  if (user.tierId === TierId.tier_2) return "Owner (Paid - Team)";
-  if (user.tierId === TierId.custom) return "Owner (Paid - Custom)";
-
-  // Fallback for edge cases (team workspace created but not yet paid)
-  return "Owner (Free)";
-}
-
-function formatMemberStatus(user: UserWithSubscription): string {
-  // Check if team is on trial
-  const isTrial =
-    user.subscription?.status === "trialing" && !!user.subscription?.trial_end;
-
-  if (isTrial) {
-    return "Member (Invited to trial)";
-  }
-
-  // Member of paid team
-  if (user.tierId !== TierId.free) {
-    return "Member (Invited to paid)";
-  }
-
-  // Member invited but team not yet paid
-  return "Member (Invited to team)";
-}
-
 export default function Area51() {
   const navigate = useNavigate();
   const { tierItems } = useLoaderData<typeof loader>();
@@ -227,6 +131,14 @@ export default function Area51() {
     </div>
   );
 }
+
+/**
+ * One row of the admin user list: what the service selects, plus the Stripe
+ * subscription the loader attaches per user.
+ */
+type UserWithSubscription = Awaited<
+  ReturnType<typeof getPaginatedAndFilterableUsers>
+>["users"][number] & { subscription: SubscriptionForAccountStatus };
 
 const ListUserContent = ({ item }: { item: UserWithSubscription }) => {
   // Trial-end labels in the account status are formatted via the acting

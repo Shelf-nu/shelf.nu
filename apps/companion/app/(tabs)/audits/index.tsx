@@ -24,15 +24,27 @@ import { ErrorBoundary } from "@/components/error-boundary";
 import { AuditListSkeleton } from "@/components/skeleton-loader";
 import { useSwipeFilters } from "@/lib/use-swipe-filters";
 import { announce } from "@/lib/a11y";
-import { userCanSeeOrgWideAudits } from "@/lib/permissions";
+import { useRoleAccess } from "@/hooks/use-role-access";
 
 const PAGE_SIZE = 20;
 const auditKeyExtractor = (item: AuditListItem) => item.id;
 
+/**
+ * Status filter pills.
+ *
+ * why: chips that name a single status read from `@shelf/labels`; "Active" and
+ * "All" group several statuses, so they stay prose. The COMPLETED label matched
+ * its literal already — wiring it anyway means a wording change in the package
+ * moves this chip and the audit badges together, which is the point of having
+ * the package at all.
+ */
 const STATUS_FILTERS: { label: string; value: string }[] = [
   { label: "Active", value: "PENDING,ACTIVE" },
-  { label: "Completed", value: "COMPLETED" },
-  { label: "All", value: "PENDING,ACTIVE,COMPLETED,CANCELLED" },
+  { label: AUDIT_STATUS_LABELS.COMPLETED, value: "COMPLETED" },
+  { label: AUDIT_STATUS_LABELS.ARCHIVED, value: "ARCHIVED" },
+  // "All" really means all: an empty filter takes the server's
+  // everything path, which is also the correctly paginated one.
+  { label: "All", value: "" },
 ];
 
 export default function AuditsListScreen() {
@@ -60,12 +72,11 @@ function AuditsListContent() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState(0);
-  // BASE/SELF_SERVICE roles are server-side-scoped to their own
-  // assignments regardless of the flag; showing them an "All audits"
-  // toggle would be a lie (the chip flips visually, the result set
-  // never widens). For those roles we hide the toggle entirely and
-  // force `assignedToMe` to true. See `canWidenScope` below.
-  const canWidenScope = userCanSeeOrgWideAudits(currentOrg?.roles);
+  // Members whose audit scope is "assigned" are scoped to their assignments
+  // by the server whatever the flag, so the "All audits" toggle is hidden for
+  // them and `assignedToMe` is forced to true (see the effect below).
+  const access = useRoleAccess();
+  const canWidenScope = access.audits.seeAll;
   // why: default to the FULL workspace list (not "assigned to me"). The
   // original dead-end was an admin assigned to 0–1 audits out of many
   // landing on an empty "nothing assigned to you" screen — when in fact
@@ -606,20 +617,20 @@ function AuditsListContent() {
                 color={colors.border}
               />
               <Text style={styles.emptyTitle}>
+                {/* why the label check: "All" would interpolate to the
+                    ungrammatical "No all audits". Keyed on the label so the
+                    chip list can grow without touching this. */}
                 {assignedToMe
                   ? activeFilter === 0
                     ? "No active audits assigned to you"
-                    : activeFilter === 2
-                    ? // why: STATUS_FILTERS[2] is "All", which would
-                      // interpolate to the ungrammatical "No all
-                      // audits assigned to you". Special-case it.
-                      "No audits assigned to you"
+                    : STATUS_FILTERS[activeFilter].label === "All"
+                    ? "No audits assigned to you"
                     : `No ${STATUS_FILTERS[
                         activeFilter
                       ].label.toLowerCase()} audits assigned to you`
                   : activeFilter === 0
                   ? "No active audits"
-                  : activeFilter === 2
+                  : STATUS_FILTERS[activeFilter].label === "All"
                   ? "No audits"
                   : `No ${STATUS_FILTERS[
                       activeFilter

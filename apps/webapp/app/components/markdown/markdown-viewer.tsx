@@ -111,8 +111,8 @@ export const MarkdownViewer = ({
   // ordinary Markdown link/image syntax into NATIVE `a`/`img` nodes that never
   // reach our custom tag components, so `[x](https://evil.example)` inside a
   // stored note would otherwise render as a working anchor and an image would
-  // fire an off-origin request on load. Sanitizing here — rather than during
-  // parsing — also covers pre-parsed `RenderableTreeNodes` passed straight in,
+  // fire an off-origin request on load. Sanitizing here, rather than during
+  // parsing, also covers pre-parsed `RenderableTreeNodes` passed straight in,
   // and protects notes already stored in the database.
   const parsedContent = React.useMemo(() => {
     const tree =

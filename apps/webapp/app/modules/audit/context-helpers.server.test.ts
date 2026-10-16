@@ -121,9 +121,12 @@ describe("resolveAssetIdsForLocationSelection", () => {
     });
 
     expect(result).toEqual(["a1"]);
-    // one asset query; its `assetLocations` pivot relation mirrors the active
-    // list filter. Post-pivot, the asset→location join goes through
-    // `assetLocations.some.location` (was the direct `location` relation).
+    // One asset query, whose `assetLocations` pivot relation carries the SAME
+    // predicate the locations list applies — all three searchable text fields,
+    // via the shared `getLocationsWhereInput`. Matching fewer of them here
+    // would expand "select all" to a smaller set than the operator was looking
+    // at, and then audit that. The asset→location join goes through
+    // `assetLocations.some.location`.
     expect(assetFindMany).toHaveBeenCalledWith({
       where: {
         organizationId: ORG,
@@ -131,7 +134,11 @@ describe("resolveAssetIdsForLocationSelection", () => {
           some: {
             location: {
               organizationId: ORG,
-              name: { contains: "seaham", mode: "insensitive" },
+              OR: [
+                { name: { contains: "seaham", mode: "insensitive" } },
+                { description: { contains: "seaham", mode: "insensitive" } },
+                { address: { contains: "seaham", mode: "insensitive" } },
+              ],
             },
           },
         },

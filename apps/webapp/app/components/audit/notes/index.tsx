@@ -2,6 +2,10 @@ import { useFetcher, useLoaderData } from "react-router";
 import { Note, type NoteWithUser } from "~/components/assets/notes/note";
 import { Button } from "~/components/shared/button";
 import { useUserData } from "~/hooks/use-user-data";
+import {
+  AUDIT_CLOSED_TO_COMMENTS_MESSAGE,
+  auditAcceptsComments,
+} from "~/modules/audit/comment-policy";
 import type { loader } from "~/routes/_layout+/audits.$auditId.activity";
 import { isFormProcessing } from "~/utils/form";
 import { ActionsDropdown } from "./actions-dropdown";
@@ -36,12 +40,10 @@ export const AuditNotes = () => {
           content: onSubmissionContent,
           type: "COMMENT",
           createdAt: new Date().toISOString(),
-          user: user
-            ? {
-                firstName: user.firstName || "",
-                lastName: user.lastName || "",
-              }
-            : undefined,
+          // Pass the row through: re-listing the name fields here drops
+          // `displayName` and the author's own comment renders under their
+          // legal name until the next revalidation.
+          user: user ?? undefined,
         }
       : null;
 
@@ -60,7 +62,13 @@ export const AuditNotes = () => {
           Export activity CSV
         </Button>
       ) : null}
-      <NewNote fetcher={fetcher} />
+      {auditAcceptsComments(session.status) ? (
+        <NewNote fetcher={fetcher} />
+      ) : (
+        <p className="text-sm text-gray-500">
+          {AUDIT_CLOSED_TO_COMMENTS_MESSAGE}
+        </p>
+      )}
       {hasNotes ? (
         <ul className="notes-list mt-8 w-full">
           {/* Render optimistic note using the same Note component */}

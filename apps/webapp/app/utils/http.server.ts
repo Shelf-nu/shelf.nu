@@ -1,3 +1,4 @@
+/** Shared HTTP request, response, and header utilities for the web application. */
 import { data, type Params } from "react-router";
 import { parseFormAny } from "react-zorm";
 import type { ZodType } from "zod";
@@ -12,6 +13,7 @@ import {
 } from "./error";
 import type { ValidationError } from "./http";
 import { Logger } from "./logger";
+import { redactSensitive } from "./redact";
 
 export function getCurrentPath(request: Request) {
   return new URL(request.url).pathname;
@@ -172,7 +174,12 @@ export function parseData<Schema extends ZodType<any, any, any>>(
       ...options,
       additionalData: {
         ...options?.additionalData,
-        data,
+        // Redacted: this is the WHOLE submitted payload, and additionalData is
+        // written to the log line verbatim (and to Sentry `extra` when
+        // captured). On the password-reset form the payload carries the OTP and
+        // the user's new password, so an ordinary mistyped confirmation logged
+        // both in plaintext. See ~/utils/redact.
+        data: redactSensitive(data),
         validationErrors,
       },
     });
@@ -372,15 +379,35 @@ export type DataOrErrorResponse<T extends ResponsePayload = ResponsePayload> =
  * Builds a Content-Disposition header value safe for non-ASCII filenames.
  * Uses RFC 5987 filename* parameter for Unicode support, with an
  * ASCII-only filename as fallback for older clients.
+ *
+ * The filename is either generated as `<name><suffix>-<timestamp>.csv`, or
+ * taken as-is from `opts.filename`. Pass `filename` when the client already
+ * chose the download name (a route's `$fileName` param), so a direct hit on
+ * the URL and an in-app download produce the same file. When `filename` is
+ * set, `name` and `suffix` are ignored.
+ *
+ * Control characters are removed from either form before encoding.
+ *
+ * @param name - entity name the generated filename starts with; blank falls
+ *   back to `opts.fallback`
+ * @param opts.fallback - used when `name` is blank, and when the sanitized
+ *   ASCII filename would otherwise be empty
+ * @param opts.suffix - appended to the name in the generated form
+ * @param opts.filename - finished filename, including its extension
+ * @returns the header value, e.g. `attachment; filename="..."; filename*=UTF-8''...`
  */
 export function buildContentDisposition(
   name: string | null | undefined,
-  opts: { fallback: string; suffix?: string }
+  opts: { fallback: string; suffix?: string; filename?: string }
 ): string {
-  const { fallback, suffix = "" } = opts;
+  const { fallback, suffix = "", filename } = opts;
   const source = name && name.trim().length > 0 ? name : fallback;
   const timestamp = new Date().toISOString().replace(/[:.]/g, "").slice(0, 15);
-  const fullName = `${source}${suffix}-${timestamp}.csv`;
+  const fullName = (
+    filename && filename.trim().length > 0
+      ? filename
+      : `${source}${suffix}-${timestamp}.csv`
+  ).replace(/\p{Cc}/gu, "");
 
   // ASCII-safe version: strip non-ASCII, replace unsafe chars
   const asciiName =

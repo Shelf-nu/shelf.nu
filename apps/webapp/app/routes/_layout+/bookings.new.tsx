@@ -1,5 +1,5 @@
+import { archivedAssetsLeftOut } from "@shelf/labels";
 import { useAtomValue } from "jotai";
-import { DateTime } from "luxon";
 import type {
   ActionFunctionArgs,
   LinksFunction,
@@ -14,11 +14,13 @@ import { newBookingHeader } from "~/components/booking/new-booking-header";
 import Header from "~/components/layout/header";
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { useUserData } from "~/hooks/use-user-data";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import type { KitSliceSpec } from "~/modules/booking/service.server";
 import {
   buildKitSlicesForBooking,
+  countArchivedKitMembers,
   createBooking,
   updateBookingNotificationRecipients,
 } from "~/modules/booking/service.server";
@@ -36,8 +38,8 @@ import {
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
 import styles from "~/styles/layout/bookings.new.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { getClientHint, getHints } from "~/utils/client-hints";
-import { DATE_TIME_FORMAT } from "~/utils/constants";
+import { bookingCustodianIsSelf } from "~/utils/bookings";
+import { getClientHint } from "~/utils/client-hints";
 import { setCookie } from "~/utils/cookies.server";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -64,7 +66,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, currentOrganization, isSelfServiceOrBase } =
+    const { organizationId, currentOrganization, access } =
       await requirePermission({
         userId: authSession?.userId,
         request,
@@ -91,7 +93,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       getTeamMemberForForm({
         organizationId,
         userId,
-        isSelfServiceOrBase,
+        access,
         getAll:
           searchParams.has("getAll") &&
           hasGetAllValue(searchParams, "teamMember"),
@@ -108,7 +110,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         currentOrganization,
         header: newBookingHeader,
         showModal: false,
-        isSelfServiceOrBase,
         ...teamMembersData,
         // For consistency, also provide teamMembersForForm
         teamMembersForForm: teamMembersData.teamMembers,
@@ -145,7 +146,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, currentOrganization, isSelfServiceOrBase } =
+    const { organizationId, currentOrganization, access } =
       await requirePermission({
         userId: authSession?.userId,
         request,
@@ -170,31 +171,27 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const formData = await request.formData();
     const intent = formData.get("intent") as string;
-    const hints = getHints(request);
     // TIMEZONE FIX: parse the submitted wall-clock date in the acting user's
     // RESOLVED timezone preference (the same one date DISPLAY uses), not the
     // browser hint. When the two differ (e.g. pref Europe/London, browser
     // UTC+3) the browser hint interprets the typed wall-clock in the wrong
-    // zone and stores the wrong UTC instant. Locale still comes from `hints`.
-    const prefTimeZone = (
-      await resolveUserFormatPrefsById(userId, getClientHint(request))
-    ).timeZone;
-    const hintsWithPrefTz = { ...hints, timeZone: prefTimeZone };
+    // zone and stores the wrong UTC instant.
+    const prefs = await resolveUserFormatPrefsById(
+      userId,
+      getClientHint(request)
+    );
     const workingHours = await getWorkingHoursForOrganization(organizationId);
     const bookingSettings =
       await getBookingSettingsForOrganization(organizationId);
 
-    // ADMIN/OWNER users bypass time restrictions (bufferStartTime, maxBookingLength)
-    const isAdminOrOwner = !isSelfServiceOrBase;
-
     const payload = parseData(
       formData,
       BookingFormSchema({
-        hints: hintsWithPrefTz,
+        prefs,
         action: "new",
         workingHours,
         bookingSettings,
-        isAdminOrOwner,
+        bypassTimeLimits: access.policy.bookings.bypassTimeLimits,
       }),
       {
         // Expected user-input validation (e.g. "Start date must be at least N
@@ -211,6 +208,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
       assetIds,
       description,
       tags: commaSeparatedTags,
+      // Use the schema-coerced instants rather than re-parsing the raw form
+      // field: `coerceLocalDate` accepts second precision via `fromISO`, while
+      // DATE_TIME_FORMAT is minute-only, so a value the schema accepted could
+      // re-parse to an Invalid Date and reach the service. Same reasoning as
+      // the duplicate dialog and the extend branch.
+      startDate: from,
+      endDate: to,
     } = payload;
 
     // Validate that the custodian belongs to the same organization
@@ -230,10 +234,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
     });
 
     /**
-     * Validate if the user is self user and is assigning the booking to
-     * him/herself only.
+     * A member whose booking custodian is fixed to themself may only name
+     * themself as the custodian.
      */
-    if (isSelfServiceOrBase && custodianFromDb.userId !== userId) {
+    if (bookingCustodianIsSelf(access) && custodianFromDb.userId !== userId) {
       throw new ShelfError({
         cause: null,
         message: "Self user can assign booking to themselves only.",
@@ -241,21 +245,20 @@ export async function action({ context, request }: ActionFunctionArgs) {
       });
     }
 
-    const from = DateTime.fromFormat(
-      formData.get("startDate")!.toString()!,
-      DATE_TIME_FORMAT,
-      {
-        zone: prefTimeZone,
-      }
-    ).toJSDate();
-
-    const to = DateTime.fromFormat(
-      formData.get("endDate")!.toString()!,
-      DATE_TIME_FORMAT,
-      {
-        zone: prefTimeZone,
-      }
-    ).toJSDate();
+    // `BookingFormSchema` returns a union across its action branches, so the
+    // coerced dates widen to `Date | undefined` even though the "new" branch
+    // makes both required. Assert that at runtime rather than with `!`: a
+    // missing date is a 400, never an Invalid Date handed to `createBooking`.
+    if (!from || !to) {
+      throw new ShelfError({
+        cause: null,
+        message: "Booking start and end dates are required.",
+        additionalData: { userId, organizationId },
+        label: "Booking",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
 
     const tags = buildTagsSet(commaSeparatedTags).set;
 
@@ -281,9 +284,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
     // `assetIds` and `kitSlices` stays empty (behavior unchanged).
     let kitSlices: KitSliceSpec[] = [];
     let standaloneAssetIds = assetIds?.length ? assetIds : [];
+    /** Archived kit members left out of the booking, for the toast below. */
+    let archivedMembersLeftOut = 0;
 
     if (kitIds.length > 0) {
-      kitSlices = await buildKitSlicesForBooking({ kitIds, organizationId });
+      [kitSlices, archivedMembersLeftOut] = await Promise.all([
+        buildKitSlicesForBooking({ kitIds, organizationId }),
+        countArchivedKitMembers({ kitIds, organizationId }),
+      ]);
       // Fail fast when a kit-originated submission resolves to no slices (stale
       // page, deleted/emptied kit, or tampered input). The form pre-filled
       // `assetIds` with the kit's members, so silently falling through would
@@ -300,9 +308,16 @@ export async function action({ context, request }: ActionFunctionArgs) {
           shouldBeCaptured: false,
         });
       }
-      const kitMemberIds = new Set(kitSlices.map((s) => s.assetId));
       // Subtract kit members so a kit member is never written as BOTH a kit
       // slice and a standalone row (which would duplicate it on the booking).
+      // Read the membership itself, not `kitSlices`: those leave out archived
+      // members (a kit books without them), and an archived member left in the
+      // standalone bucket makes `createBooking` refuse the whole booking.
+      const kitMemberships = await db.assetKit.findMany({
+        where: { kitId: { in: kitIds }, kit: { organizationId } },
+        select: { assetId: true },
+      });
+      const kitMemberIds = new Set(kitMemberships.map((m) => m.assetId));
       standaloneAssetIds = standaloneAssetIds.filter(
         (id) => !kitMemberIds.has(id)
       );
@@ -329,12 +344,15 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     // Parse per-booking notification recipient IDs from the form.
     // The MultiSelect submits a comma-separated string of team member IDs.
-    // Only admin/owner users can set these; the field is hidden for
-    // self-service/base users, but we guard server-side as well.
+    // Only members who manage booking recipients may set these; the field is
+    // hidden for everyone else and this guards a crafted POST.
     const notificationRecipientIdsRaw = formData.get(
       "notificationRecipientIds"
     ) as string | null;
-    if (notificationRecipientIdsRaw && !isSelfServiceOrBase) {
+    if (
+      notificationRecipientIdsRaw &&
+      access.policy.notifications.manageBookingRecipients
+    ) {
       const recipientIds = notificationRecipientIdsRaw
         .split(",")
         .filter(Boolean);
@@ -349,7 +367,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     sendNotification({
       title: "Booking saved",
-      message: "Your booking has been saved successfully",
+      message: `Your booking has been saved successfully.${
+        archivedMembersLeftOut > 0
+          ? ` ${archivedAssetsLeftOut(archivedMembersLeftOut)}`
+          : ""
+      }`,
       icon: { name: "success", variant: "success" },
       senderId: authSession.userId,
     });
@@ -380,7 +402,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
       if (standaloneAssetIds.length === 1) {
         const [singleAssetId] = standaloneAssetIds;
         const addedAsset = await db.asset.findFirst({
-          where: { id: singleAssetId, organizationId },
+          // createBooking already refused archived assets.
+          where: { id: singleAssetId, organizationId, archivedAt: null },
           select: { id: true, type: true },
         });
         if (addedAsset && isQuantityTracked(addedAsset)) {
@@ -413,19 +436,14 @@ export const handle = {
 };
 
 export default function NewBooking() {
-  const {
-    header,
-    isSelfServiceOrBase,
-    teamMembers,
-    assetIds,
-    kitId,
-    showModal,
-  } = useLoaderData<typeof loader>();
+  const { header, teamMembers, assetIds, kitId, showModal } =
+    useLoaderData<typeof loader>();
   const user = useUserData();
+  const roleAccess = useRoleAccess();
   const dynamicTitle = useAtomValue(dynamicTitleAtom);
 
   // The loader already takes care of returning only the current user so we just get the first and only element in the array
-  const custodianRef = isSelfServiceOrBase
+  const custodianRef = bookingCustodianIsSelf(roleAccess)
     ? teamMembers.find((tm) => tm.userId === user!.id)?.id
     : undefined;
 

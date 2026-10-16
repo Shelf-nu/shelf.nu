@@ -2,11 +2,11 @@ import type { MetaFunction } from "react-router";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import type { HeaderData } from "~/components/layout/header/types";
+import { decorateBookingsForList } from "~/modules/booking/list-flags.server";
 import {
   getBookings,
   resolveCustodianScope,
 } from "~/modules/booking/service.server";
-import { decorateBookingsWithStockConflicts } from "~/modules/booking/stock-conflicts.server";
 import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -69,11 +69,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const cookie = await updateCookieWithPerPage(request, perPageParam);
     const { perPage } = cookie;
 
-    // Scopes to the profile being viewed, NOT the viewer — this route renders
-    // one user's bookings and is gated above by a `teamMemberProfile.read` check
-    // (self-service/base users cannot reach other profiles). Do not substitute
-    // the caller's id here. Resolves all of the viewed user's team-member links
-    // so legacy team-member-linked bookings show, matching their own index.
+    // Scopes to the profile being viewed, NOT the viewer: this route renders
+    // one user's bookings. Only roles that see every booking can open another
+    // member's profile (`teamMemberProfile:read` implies
+    // `bookings.see === "all"`, pinned in
+    // `packages/permissions/src/policies.test.ts`), so no visibility filter
+    // applies here. Do not substitute the caller's id. Resolves all of the
+    // viewed user's team-member links so legacy team-member-linked bookings
+    // show, matching their own index.
     const custodianScope = await resolveCustodianScope({
       userId: selectedUserId,
       organizationId,
@@ -92,7 +95,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           statuses: [status],
         }),
         tags: filterTags,
+        // PERF: the list renders booking-level fields plus an asset COUNT. The
+        // per-booking `bookingAssets` payload existed only for the assets
+        // drawer, which now fetches it from
+        // `/api/bookings/:bookingId/assets-sidebar` when a row is expanded.
+        includeAssets: false,
         extraInclude: {
+          // Asset count for the row's drawer trigger, now that the pivot rows
+          // themselves are no longer loaded.
+          _count: { select: { bookingAssets: true } },
           tags: TAG_WITH_COLOR_SELECT,
           // The unassigned-units pill reads `item.modelRequests`, and this
           // route renders the shared bookings row via `BookingsIndexPage`.
@@ -112,7 +123,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // Flag bookings whose QUANTITY_TRACKED assets are over-committed in their
     // window, so the shared list renders the amber "Stock conflict" pill here
     // too (see `~/modules/booking/stock-conflicts.server`).
-    const decoratedBookings = await decorateBookingsWithStockConflicts({
+    const decoratedBookings = await decorateBookingsForList({
       bookings,
       organizationId,
     });

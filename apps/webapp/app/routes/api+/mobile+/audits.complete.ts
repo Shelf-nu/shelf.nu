@@ -6,6 +6,7 @@ import {
   requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
+import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import {
   completeAuditSession,
   requireAuditAssignee,
@@ -46,7 +47,7 @@ export async function action({ request }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const { role, canUseAudits } = await getMobileUserContext(
+    const { access, canUseAudits } = await getMobileUserContext(
       user.id,
       organizationId
     );
@@ -61,24 +62,23 @@ export async function action({ request }: ActionFunctionArgs) {
         { status: 403 }
       );
     }
-    const isSelfServiceOrBase = role === "SELF_SERVICE" || role === "BASE";
-
-    const body = await request.json();
-    const { sessionId, completionNote, timeZone } = z
-      .object({
+    const { sessionId, completionNote, timeZone } = await parseMobileBody(
+      z.object({
         sessionId: z.string().min(1),
         completionNote: z.string().optional(),
         timeZone: z.string().optional(),
-      })
-      .parse(body);
+      }),
+      request,
+      "Audit"
+    );
 
-    // Assignee-gated (matches webapp behavior): ADMIN/OWNER may complete any
-    // audit, BASE/SELF_SERVICE only when assigned.
+    // Assignee-gated (matches webapp behavior): callers who see every audit
+    // may complete any audit, everyone else only when assigned.
     await requireAuditAssignee({
       auditSessionId: sessionId,
       organizationId,
       userId: user.id,
-      isSelfServiceOrBase,
+      assignedOnly: !access.audits.seeAll,
     });
 
     // Derive hints the standard way: locale from the request's Accept-Language

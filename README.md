@@ -5,7 +5,7 @@
 <h3 align="center">Open-source asset management infrastructure for everyone.</h3>
 
 <p align="center">
-  <a href="https://github.com/Shelf-nu/shelf.nu/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Shelf-nu/shelf.nu?label=License" alt="License" /></a>
+  <a href="https://github.com/Shelf-nu/shelf.nu/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-AGPL--3.0%2C%20companion%20app%20excluded-blue" alt="License: AGPL-3.0, companion app excluded" /></a>
   <a href="https://github.com/Shelf-nu/shelf.nu/actions/workflows/deploy.yml"><img src="https://github.com/Shelf-nu/shelf.nu/actions/workflows/deploy.yml/badge.svg" alt="Deploy" /></a>
   <a href="https://github.com/Shelf-nu/shelf.nu/stargazers"><img src="https://img.shields.io/github/stars/Shelf-nu/shelf.nu" alt="Stars" /></a>
   <a href="https://discord.gg/8he9W7aTJu"><img src="https://img.shields.io/badge/Discord-community-blue?logo=discord&logoColor=white" alt="Discord" /></a>
@@ -170,4 +170,8 @@ Join the [Discord](https://discord.gg/8he9W7aTJu) if you have questions or want 
 
 ## License
 
-Shelf.nu is licensed under [AGPL-3.0](./LICENSE).
+Shelf.nu is licensed under [AGPL-3.0](./LICENSE), with one exception.
+
+The companion mobile app in [`apps/companion/`](./apps/companion) is **not open source**. Its source is available under the [PolyForm Internal Use License 1.0.0](./apps/companion/LICENSE). You may read it, build it and change it for the internal business operations of your own company. You may not distribute it. Publishing the app, or an app based on it, on the Apple App Store, Google Play or any other store is distribution.
+
+This section is a summary. The license files are the binding terms.

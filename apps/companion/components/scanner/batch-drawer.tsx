@@ -1,3 +1,14 @@
+/**
+ * BatchDrawer: the bottom drawer that lists scanned items with submit and
+ * clear controls. Used by the batch scan modes and the booking scan modes.
+ *
+ * A row can carry a quantity (quantity-tracked assets in the custody modes):
+ * it then shows a "n / max" chip that opens the caller's quantity sheet. A row
+ * the last submit refused shows the server's reason under its title.
+ *
+ * @see {@link file://./../../app/(tabs)/scanner.tsx} the host screen
+ * @see {@link file://./batch-blockers.tsx} the blocker card above the submit
+ */
 import {
   View,
   Text,
@@ -10,7 +21,14 @@ import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import type { BlockerGroup } from "@/lib/batch-blockers";
 import { createStyles } from "@/lib/create-styles";
-import { fontSize, spacing, borderRadius, hitSlop } from "@/lib/constants";
+import {
+  fontSize,
+  spacing,
+  borderRadius,
+  hitSlop,
+  formatStatus,
+} from "@/lib/constants";
+import { formatQuantity } from "@/lib/quantity-format";
 import { useTheme } from "@/lib/theme-context";
 import { BatchBlockers } from "./batch-blockers";
 
@@ -28,6 +46,13 @@ type ScannedItem = {
   kitId: string | null;
   /** Kits only: number of contained assets (shown in the row meta line). */
   assetCount?: number;
+  /**
+   * Quantity rows only: the units this row will move, out of `max`. When set,
+   * the row shows a chip that calls `onEditQuantity`.
+   */
+  quantity?: { value: number; max: number; unitOfMeasure: string | null };
+  /** Why the last submit did not move this row, shown under its title. */
+  error?: string;
 };
 
 type BatchDrawerProps = {
@@ -53,13 +78,9 @@ type BatchDrawerProps = {
   onResolveBlocker?: (group: BlockerGroup) => void;
   /** Removes every blocked item from the scan list. */
   onResolveAllBlockers?: () => void;
+  /** Opens the quantity sheet for a row, by its key field. */
+  onEditQuantity?: (id: string) => void;
 };
-
-function formatStatus(status: string) {
-  if (status === "IN_CUSTODY") return "In Custody";
-  if (status === "AVAILABLE") return "Available";
-  return status.replace(/_/g, " ");
-}
 
 /**
  * Bottom drawer showing a list of scanned items with submit and clear
@@ -79,6 +100,7 @@ export function BatchDrawer({
   blockers = [],
   onResolveBlocker,
   onResolveAllBlockers,
+  onEditQuantity,
 }: BatchDrawerProps) {
   const styles = useStyles();
   const { colors } = useTheme();
@@ -145,7 +167,33 @@ export function BatchDrawer({
                     : label;
                 })()}
               </Text>
+              {item.error ? (
+                <Text style={styles.drawerItemError} accessibilityRole="alert">
+                  {item.error}
+                </Text>
+              ) : null}
             </View>
+            {item.quantity && onEditQuantity ? (
+              <TouchableOpacity
+                testID={`batch-quantity-${item[keyField]}`}
+                style={styles.quantityChip}
+                onPress={() => onEditQuantity(item[keyField])}
+                hitSlop={hitSlop.md}
+                accessibilityRole="button"
+                accessibilityLabel={`Units for ${item.title}: ${
+                  item.quantity.value
+                } of ${maxLabel(item.quantity)}`}
+                accessibilityHint="Opens a sheet to change the number of units"
+              >
+                <Text style={styles.quantityChipValue}>
+                  {item.quantity.value}
+                </Text>
+                <Text style={styles.quantityChipMax}>
+                  {`/ ${maxLabel(item.quantity)}`}
+                </Text>
+                <Ionicons name="pencil" size={12} color={colors.muted} />
+              </TouchableOpacity>
+            ) : null}
             <TouchableOpacity
               onPress={() => onRemove(item[keyField])}
               hitSlop={hitSlop.md}
@@ -191,6 +239,13 @@ export function BatchDrawer({
         )}
       </TouchableOpacity>
     </View>
+  );
+}
+
+/** "46 m" for a row's cap, or "46" when the asset has no unit. */
+function maxLabel(quantity: { max: number; unitOfMeasure: string | null }) {
+  return (
+    formatQuantity(quantity.max, quantity.unitOfMeasure) ?? String(quantity.max)
   );
 }
 
@@ -260,6 +315,31 @@ const useStyles = createStyles((colors, shadows) => ({
     fontSize: fontSize.xs,
     color: colors.muted,
     marginTop: 1,
+  },
+  drawerItemError: {
+    fontSize: fontSize.xs,
+    color: colors.errorText,
+    marginTop: 2,
+  },
+  quantityChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.backgroundSecondary,
+  },
+  quantityChipValue: {
+    fontSize: fontSize.base,
+    fontWeight: "700",
+    color: colors.foreground,
+  },
+  quantityChipMax: {
+    fontSize: fontSize.xs,
+    color: colors.muted,
   },
   drawerSubmitBtn: {
     flexDirection: "row",

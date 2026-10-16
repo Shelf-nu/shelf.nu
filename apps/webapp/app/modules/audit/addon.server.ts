@@ -2,9 +2,17 @@ import type { User } from "@prisma/client";
 import type Stripe from "stripe";
 import type { PriceWithProduct } from "~/components/subscription/prices";
 import { db } from "~/database/db.server";
+import {
+  assertPriceIsForAddon,
+  isAddonProduct,
+} from "~/modules/billing/price-validation.server";
 import type { ErrorLabel } from "~/utils/error";
-import { ShelfError } from "~/utils/error";
-import { premiumIsEnabled, stripe } from "~/utils/stripe.server";
+import { ShelfError, rethrowIfClientError } from "~/utils/error";
+import {
+  customerHasOtherActiveAddonSubscription,
+  premiumIsEnabled,
+  stripe,
+} from "~/utils/stripe.server";
 
 const label: ErrorLabel = "Stripe";
 
@@ -23,6 +31,12 @@ export async function createAuditAddonCheckoutSession({
   organizationId: string;
 }): Promise<string> {
   try {
+    // The caller supplies `priceId` from the request, and an add-on price is
+    // distinguishable from a TIER price only by its product metadata. Without
+    // this, any active recurring price bought the add-on -- see
+    // ~/modules/billing/price-validation.server for why that granted it permanently.
+    await assertPriceIsForAddon({ priceId, addonType: "audits" });
+
     if (!stripe) {
       throw new ShelfError({
         cause: null,
@@ -55,6 +69,8 @@ export async function createAuditAddonCheckoutSession({
     }
     return url;
   } catch (cause) {
+    rethrowIfClientError(cause);
+
     throw new ShelfError({
       cause,
       message:
@@ -77,7 +93,22 @@ export async function createAuditAddonTrialSubscription({
   userId: User["id"];
   organizationId: string;
 }) {
+  /**
+   * Whether the Stripe subscription request has been sent.
+   *
+   * A failure before this flips is provably harmless — nothing was created.
+   * After it, the outcome is unknown: Stripe may hold a real subscription
+   * whose response never reached us.
+   */
+  let subscriptionCreateAttempted = false;
+
   try {
+    // The caller supplies `priceId` from the request, and an add-on price is
+    // distinguishable from a TIER price only by its product metadata. Without
+    // this, any active recurring price bought the add-on -- see
+    // ~/modules/billing/price-validation.server for why that granted it permanently.
+    await assertPriceIsForAddon({ priceId, addonType: "audits" });
+
     if (!stripe) {
       throw new ShelfError({
         cause: null,
@@ -98,28 +129,50 @@ export async function createAuditAddonTrialSubscription({
 
     const defaultPaymentMethod = paymentMethods.data[0]?.id;
 
-    const subscription = await stripe.subscriptions.create({
-      customer: customerId,
-      items: [{ price: priceId }],
-      trial_period_days: 7,
-      trial_settings: {
-        end_behavior: {
-          missing_payment_method: "pause",
+    // Past this point a subscription may exist at Stripe even if this call
+    // ends up throwing — a lost response looks identical to a refusal from
+    // here. Callers read this back off the error to decide whether returning
+    // the workspace's trial is safe.
+    subscriptionCreateAttempted = true;
+
+    const subscription = await stripe.subscriptions.create(
+      {
+        customer: customerId,
+        items: [{ price: priceId }],
+        trial_period_days: 7,
+        trial_settings: {
+          end_behavior: {
+            missing_payment_method: "pause",
+          },
         },
+        ...(defaultPaymentMethod && {
+          default_payment_method: defaultPaymentMethod,
+        }),
+        metadata: { userId, organizationId },
       },
-      ...(defaultPaymentMethod && {
-        default_payment_method: defaultPaymentMethod,
-      }),
-      metadata: { userId, organizationId },
-    });
+      {
+        // A workspace gets exactly one audit trial, so this key can never
+        // collide with a legitimate second subscription — and it means a retry
+        // after a lost response returns the SAME subscription instead of
+        // opening a second one. Stripe holds the key for 24 hours.
+        idempotencyKey: `addon-trial:audits:${organizationId}`,
+      }
+    );
 
     return { subscription, hasPaymentMethod: !!defaultPaymentMethod };
   } catch (cause) {
+    rethrowIfClientError(cause);
+
     throw new ShelfError({
       cause,
       message:
         "Something went wrong while creating audit add-on trial. Please try again later or contact support.",
-      additionalData: { customerId, priceId, userId },
+      additionalData: {
+        customerId,
+        priceId,
+        userId,
+        subscriptionCreateAttempted,
+      },
       label,
     });
   }
@@ -139,13 +192,9 @@ export async function getAuditAddonPrices() {
       limit: 100,
     });
 
-    const auditPrices = pricesResponse.data.filter((p) => {
-      const product = p.product as Stripe.Product;
-      return (
-        product?.metadata?.product_type === "addon" &&
-        product?.metadata?.addon_type === "audits"
-      );
-    }) as PriceWithProduct[];
+    const auditPrices = pricesResponse.data.filter((p) =>
+      isAddonProduct(p.product, "audits")
+    ) as PriceWithProduct[];
 
     const monthlyPrice =
       auditPrices.find((p) => p.recurring?.interval === "month") || null;
@@ -215,10 +264,7 @@ export async function linkAuditAddonToOrganization({
         if (!productId) continue;
 
         const product = await stripe.products.retrieve(productId);
-        if (
-          product.metadata?.product_type === "addon" &&
-          product.metadata?.addon_type === "audits"
-        ) {
+        if (isAddonProduct(product, "audits")) {
           auditSubscription = sub;
           break;
         }
@@ -299,10 +345,7 @@ export async function getAuditSubscriptionInfo({
         if (!productId) continue;
 
         const product = await stripe.products.retrieve(productId);
-        if (
-          product.metadata?.product_type === "addon" &&
-          product.metadata?.addon_type === "audits"
-        ) {
+        if (isAddonProduct(product, "audits")) {
           return {
             interval:
               (item.price.recurring?.interval as "month" | "year") || "year",
@@ -321,8 +364,42 @@ export async function getAuditSubscriptionInfo({
 }
 
 /**
+ * Whether switching audits off has to wait because another live subscription
+ * of the same customer still carries the add-on for this workspace (bundled
+ * on the Team subscription and standalone, for instance).
+ *
+ * @param subscription - The subscription the event is about. Without it, or
+ *   without its customer, there is nothing to compare against and the flag is
+ *   switched off as before.
+ * @param organizationId - The workspace whose flag is at stake
+ * @returns `true` if the add-on must stay on
+ */
+async function auditsStillCoveredElsewhere(
+  subscription: Stripe.Subscription | undefined,
+  organizationId: string
+) {
+  const customer = subscription?.customer;
+  const customerId = typeof customer === "string" ? customer : customer?.id;
+  if (!subscription || !customerId) return false;
+
+  return customerHasOtherActiveAddonSubscription({
+    customerId,
+    organizationId,
+    addonType: "audits",
+    exceptSubscriptionId: subscription.id,
+  });
+}
+
+/**
  * Handles audit add-on subscription webhook events.
  * Sets auditsEnabled and usedAuditTrial flags on the Organization.
+ * The add-on stays on while another live subscription of the customer still
+ * carries it for this workspace.
+ *
+ * The add-on follows the same lapse rules as the tier: a `past_due` renewal
+ * leaves it on, and it is switched off by a pause, a cancellation or an
+ * `invoice.overdue` for the subscription carrying it. Paying that invoice
+ * switches it back on through the `invoice.paid` safety net.
  */
 export async function handleAuditAddonWebhook({
   eventType,
@@ -354,9 +431,19 @@ export async function handleAuditAddonWebhook({
       break;
     }
     case "customer.subscription.updated": {
+      // A failed renewal keeps the add-on, like it keeps the tier: it ends on
+      // `invoice.overdue` once the overdue window set in Stripe runs out, or
+      // on cancellation if dunning gives up first.
+      if (subscription?.status === "past_due") break;
       const isActive =
         subscription?.status === "active" ||
         subscription?.status === "trialing";
+      if (
+        !isActive &&
+        (await auditsStillCoveredElsewhere(subscription, organizationId))
+      ) {
+        break;
+      }
       await db.organization.update({
         where: { id: organizationId },
         data: { auditsEnabled: isActive },
@@ -365,7 +452,11 @@ export async function handleAuditAddonWebhook({
       break;
     }
     case "customer.subscription.paused":
-    case "customer.subscription.deleted": {
+    case "customer.subscription.deleted":
+    case "invoice.overdue": {
+      if (await auditsStillCoveredElsewhere(subscription, organizationId)) {
+        break;
+      }
       await db.organization.update({
         where: { id: organizationId },
         data: { auditsEnabled: false },

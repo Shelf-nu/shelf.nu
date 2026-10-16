@@ -293,33 +293,41 @@ describe("note service", () => {
   });
 
   describe("deleteNote", () => {
-    it("deletes a note for a specific user", async () => {
+    it("scopes the delete to the caller's organization, via the asset", async () => {
       vi.mocked(db.note.deleteMany).mockResolvedValue({ count: 1 });
 
       const result = await deleteNote({
         id: "note-1",
         userId: "user-1",
+        organizationId: "org-1",
       });
 
+      // Note has no organizationId column, so the scope comes through the
+      // parent asset. `userId` alone let an author delete a note in an
+      // organization they had since left.
       expect(db.note.deleteMany).toHaveBeenCalledWith({
         where: {
           id: "note-1",
           userId: "user-1",
+          asset: { organizationId: "org-1" },
         },
       });
 
       expect(result.count).toBe(1);
     });
 
-    it("returns count of 0 when note doesn't exist or user doesn't own it", async () => {
+    it("throws 403 rather than silently reporting nothing deleted", async () => {
+      // A miss now means "not yours" -- wrong author or wrong organization.
+      // Returning count 0 let a refused cross-org delete read as a no-op.
       vi.mocked(db.note.deleteMany).mockResolvedValue({ count: 0 });
 
-      const result = await deleteNote({
-        id: "nonexistent-note",
-        userId: "user-1",
-      });
-
-      expect(result.count).toBe(0);
+      await expect(
+        deleteNote({
+          id: "someone-elses-note",
+          userId: "user-1",
+          organizationId: "org-1",
+        })
+      ).rejects.toMatchObject({ status: 403 });
     });
 
     it("throws ShelfError when database operation fails", async () => {
@@ -331,6 +339,7 @@ describe("note service", () => {
         deleteNote({
           id: "note-1",
           userId: "user-1",
+          organizationId: "org-1",
         })
       ).rejects.toThrow(ShelfError);
 
@@ -338,6 +347,7 @@ describe("note service", () => {
         deleteNote({
           id: "note-1",
           userId: "user-1",
+          organizationId: "org-1",
         })
       ).rejects.toThrow("Something went wrong while deleting the note");
     });

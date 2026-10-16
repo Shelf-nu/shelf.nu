@@ -17,7 +17,7 @@ import {
   getAllEntriesForCreateAndEdit,
   updateAssetMainImage,
 } from "~/modules/asset/service.server";
-import { getPrimaryLocation } from "~/modules/asset/utils";
+import { getInitialPlacementNoteContent } from "~/modules/asset/utils.server";
 import {
   getAssetModel,
   getAssetModels,
@@ -42,7 +42,7 @@ import {
   getRefererPath,
   parseData,
 } from "~/utils/http.server";
-import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
+import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import {
   PermissionAction,
   PermissionEntity,
@@ -299,11 +299,10 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       unitOfMeasure,
     });
 
-    const actor = wrapUserLinkForNote({
-      id: authSession.userId,
-      firstName: asset.user.firstName,
-      lastName: asset.user.lastName,
-    });
+    // `asset.user` is the full User row (createAsset includes `user: true`), so
+    // it is passed whole: `wrapUserLinkForNote` prefers `displayName`, and
+    // hand-picking first+last renamed anyone who had set one.
+    const actor = wrapUserLinkForNote(asset.user);
 
     // Run independent post-creation tasks in parallel
     const postCreationTasks: Promise<unknown>[] = [
@@ -323,17 +322,14 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       }),
     ];
 
-    // The note only references the single primary location set at creation time;
-    // qty-tracked assets can hold multiple AssetLocation rows but only one is primary.
-    const primaryLocation = getPrimaryLocation(asset);
-    if (primaryLocation) {
-      const locationLink = wrapLinkForNote(
-        `/locations/${primaryLocation.id}`,
-        primaryLocation.name.trim()
-      );
+    // Shared with the mobile create route — the primary-placement selection, the
+    // QT-aware phrasing and the actor mapping all live in the helper, so the two
+    // routes cannot drift on how they name the person or count the units.
+    const placementNote = getInitialPlacementNoteContent(asset);
+    if (placementNote) {
       postCreationTasks.push(
         createNote({
-          content: `${actor} set the location to ${locationLink}.`,
+          content: placementNote,
           type: "UPDATE",
           userId: authSession.userId,
           assetId: asset.id,

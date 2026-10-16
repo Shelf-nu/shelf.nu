@@ -10,18 +10,19 @@ import { useFetcher, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
-import { fileErrorAtom, defaultValidateFileAtom } from "~/atoms/file";
+import { fileErrorAtom } from "~/atoms/file";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import type { loader } from "~/routes/_layout+/account-details.workspace.$workspaceId.edit";
-import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
+import { SSO_GROUP_ROLE, type SsoGroupField } from "~/utils/sso-group-roles";
 import { tw } from "~/utils/tw";
 import { zodFieldIsRequired } from "~/utils/zod";
 import CurrencySelector from "./currency-selector";
 import QrIdDisplayPreferenceSelector from "./qr-id-display-preference-selector";
+import { WorkspaceLogoField } from "./workspace-logo-field";
 import FormRow from "../forms/form-row";
 import { InnerLabel } from "../forms/inner-label";
 import Input from "../forms/input";
@@ -85,6 +86,13 @@ export const EditGeneralWorkspaceSettingsFormSchema = (
         return value === "on";
       })
       .optional(),
+    showQrCodesOnPdfs: z
+      .union([z.literal("on"), z.literal("off"), z.undefined()])
+      .transform((value) => {
+        if (value === undefined) return undefined;
+        return value === "on";
+      })
+      .optional(),
   });
 
 export const WorkspaceEditForms = ({
@@ -119,8 +127,10 @@ const WorkspaceGeneralEditForms = ({
   const { organization, isPersonalWorkspace, canHideShelfBranding } =
     useLoaderData<typeof loader>();
 
-  // Focus the Name input on mount, but skip when the field is disabled
-  // (personal workspaces don't allow renaming).
+  // Focus the Name input on mount, but skip it when the field is disabled
+  // (personal workspaces don't allow renaming). Arriving via a section anchor
+  // (e.g. /settings/general#transfer-ownership) no longer needs a guard here:
+  // useAutoFocus focuses with `preventScroll`, so the anchor scroll survives.
   const nameInputRef = useAutoFocus<HTMLInputElement>({
     when: !isPersonalWorkspace,
   });
@@ -130,7 +140,6 @@ const WorkspaceGeneralEditForms = ({
   const fetcher = useFetcher({ key: "general" });
   const disabled = useDisabled(fetcher);
   const fileError = useAtomValue(fileErrorAtom);
-  const [, validateFile] = useAtom(defaultValidateFileAtom);
   const [, updateTitle] = useAtom(updateDynamicTitleAtom);
 
   const fetcherError = (
@@ -186,26 +195,11 @@ const WorkspaceGeneralEditForms = ({
         </FormRow>
 
         <FormRow rowLabel={"Main image"} className="border-b-0">
-          <div>
-            <p className="hidden lg:block">
-              Accepts PNG, JPG, JPEG, or WebP (max.4 MB)
-            </p>
-            <Input
-              // disabled={disabled}
-              accept={ACCEPT_SUPPORTED_IMAGES}
-              name="image"
-              type="file"
-              onChange={validateFile}
-              label={"Main image"}
-              hideLabel
-              error={imageError}
-              className="mt-2"
-              inputClassName="border-0 shadow-none p-0 rounded-none"
-            />
-            <p className="mt-2 lg:hidden">
-              Accepts PNG, JPG, JPEG, or WebP (max.4 MB)
-            </p>
-          </div>
+          <WorkspaceLogoField
+            imageId={organization.imageId}
+            updatedAt={organization.updatedAt}
+            error={imageError}
+          />
         </FormRow>
 
         <div>
@@ -315,6 +309,49 @@ const WorkspaceGeneralEditForms = ({
                 className="text-[14px] text-gray-600"
               >
                 Toggle Shelf branding on downloadable QR and barcode labels.
+              </p>
+            </div>
+          </div>
+        </FormRow>
+
+        <FormRow
+          rowLabel={"Code images on PDFs"}
+          className={"border-b-0"}
+          subHeading={
+            <p>
+              Control whether each item's code is printed as a picture on the
+              booking checklist and the audit receipt.
+            </p>
+          }
+        >
+          <div className="flex items-center gap-3">
+            <input
+              type="hidden"
+              name={zo.fields.showQrCodesOnPdfs()}
+              value="off"
+            />
+            <Switch
+              id="showQrCodesOnPdfs"
+              name={zo.fields.showQrCodesOnPdfs()}
+              defaultChecked={organization.showQrCodesOnPdfs ?? true}
+              aria-labelledby="showQrCodesOnPdfs-label"
+              aria-describedby="showQrCodesOnPdfs-desc"
+            />
+            <div>
+              <label
+                id="showQrCodesOnPdfs-label"
+                htmlFor="showQrCodesOnPdfs"
+                className="cursor-pointer text-[14px] font-medium text-gray-700"
+              >
+                Print code images on PDFs
+              </label>
+              <p
+                id="showQrCodesOnPdfs-desc"
+                className="text-[14px] text-gray-600"
+              >
+                Prints the same code as the text: a QR code, or the barcode your
+                workspace uses. Turn this off when people should scan the label
+                on the item itself. The code still prints as text either way.
               </p>
             </div>
           </div>
@@ -524,18 +561,22 @@ export const EditWorkspaceSSOSettingsFormSchema = (sso: boolean = false) =>
   z
     .object({
       id: z.string(),
+      adminGroupId: z.string().optional(),
+      managerGroupId: z.string().optional(),
       selfServiceGroupId: z.string().optional(),
       baseUserGroupId: z.string().optional(),
-      adminGroupId: z.string().optional(),
     })
     .superRefine((data, ctx) => {
       if (!sso) return;
 
-      const hasAtLeastOneGroup = [
-        data.adminGroupId,
-        data.selfServiceGroupId,
-        data.baseUserGroupId,
-      ].some((value) => value != null && value.trim().length > 0);
+      /* Every group-id column counts, so a workspace that maps only one role
+         (whichever it is) passes. */
+      const hasAtLeastOneGroup = (
+        Object.keys(SSO_GROUP_ROLE) as SsoGroupField[]
+      ).some((field) => {
+        const value = data[field];
+        return value != null && value.trim().length > 0;
+      });
 
       if (!hasAtLeastOneGroup) {
         ctx.addIssue({
@@ -549,7 +590,7 @@ export const EditWorkspaceSSOSettingsFormSchema = (sso: boolean = false) =>
 
 const WorkspaceSSOEditForm = ({ className }: Props) => {
   const { organization } = useLoaderData<typeof loader>();
-  const { isOwner } = useUserRoleHelper();
+  const { ownsWorkspace: isOwner } = useRoleAccess();
   const fetcher = useFetcher({ key: "sso" });
   const schema = EditWorkspaceSSOSettingsFormSchema(organization.enabledSso);
   const zo = useZorm("NewQuestionWizardScreen", schema);
@@ -646,6 +687,29 @@ const WorkspaceSSOEditForm = ({ className }: Props) => {
         </FormRow>
 
         <FormRow
+          rowLabel={`Manager role group`}
+          subHeading={
+            <div>
+              The group identifier that should be mapped to the <b>Manager</b>{" "}
+              role.
+            </div>
+          }
+          className="border-b-0 pb-[10px]"
+        >
+          <Input
+            label={"Manager role group"}
+            hideLabel
+            className="w-full"
+            name={zo.fields.managerGroupId()}
+            error={
+              validationErrors?.managerGroupId?.message ||
+              zo.errors.managerGroupId()?.message
+            }
+            defaultValue={organization.ssoDetails.managerGroupId || undefined}
+          />
+        </FormRow>
+
+        <FormRow
           rowLabel={`Self service role group`}
           subHeading={
             <div>
@@ -711,7 +775,7 @@ const WorkspaceScimTokensSection = ({
   className?: string;
 }) => {
   const { organization } = useLoaderData<typeof loader>();
-  const { isOwner } = useUserRoleHelper();
+  const { ownsWorkspace: isOwner } = useRoleAccess();
   const generateFetcher = useFetcher({ key: "generateScimToken" });
   const deleteFetcher = useFetcher({ key: "deleteScimToken" });
   const generateDisabled = useDisabled(generateFetcher);

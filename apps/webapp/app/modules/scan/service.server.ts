@@ -271,7 +271,7 @@ export async function createScanNote({
 
       if (hasAccess && authenticatedUserId) {
         // User has access - log their name
-        const { firstName, lastName } = await getUserByID(authenticatedUserId, {
+        const scanningUser = await getUserByID(authenticatedUserId, {
           select: {
             firstName: true,
             lastName: true,
@@ -279,9 +279,8 @@ export async function createScanNote({
           } satisfies Prisma.UserSelect,
         });
         const actor = wrapUserLinkForNote({
+          ...scanningUser,
           id: authenticatedUserId,
-          firstName,
-          lastName,
         });
         if (manuallyGenerated) {
           message = `${actor} manually updated the GPS coordinates to *${latitude}, ${longitude}*.`;

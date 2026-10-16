@@ -48,6 +48,8 @@ export const ASSET_LOCATIONS_INCLUDE = {
 
 export const KITS_INCLUDE_FIELDS = {
   _count: { select: { assetKits: true } },
+  // `Kit.custody` is a single optional record, not a list — there is nothing
+  // to order, and nothing here reaches `getPrimaryCustody`.
   custody: {
     select: {
       custodian: {
@@ -68,23 +70,66 @@ export const KITS_INCLUDE_FIELDS = {
   },
 } satisfies Prisma.KitInclude;
 
-export const getAssetOverviewFields = (
-  assetId: string,
-  canUseBarcodes: boolean = false
-) => {
+/**
+ * Narrows an asset's `bookingAssets` to the booking the asset is out on now.
+ *
+ * The slice markers are the record of that: the slice left (`checkedOutAt`)
+ * and nothing has brought it back (`checkedInAt`). Booking status alone does
+ * not answer it — an asset out on an overdue booking can also be booked onto a
+ * later booking that has since started, and both are ONGOING or OVERDUE — and
+ * check-in sessions record scan batches, not what is out.
+ *
+ * Readers take the first row. Newest departure first keeps that row the live
+ * one should a second slice ever still read as out.
+ *
+ * Shared by the web asset overview and the mobile asset endpoint, so the two
+ * name the same booking for the same asset.
+ *
+ * @see {@link file://./../../../../../.claude/rules/booking-checkout-is-recorded-per-slice.md}
+ */
+export const CURRENT_BOOKING_SLICE_FILTER = {
+  where: {
+    checkedOutAt: { not: null },
+    checkedInAt: null,
+    booking: { status: { in: ["ONGOING", "OVERDUE"] } },
+  },
+  orderBy: { checkedOutAt: "desc" },
+} satisfies Pick<Prisma.Asset$bookingAssetsArgs, "where" | "orderBy">;
+
+/**
+ * The relations the web asset overview loads.
+ *
+ * @param canUseBarcodes - Whether the workspace has the barcodes add-on: the
+ *   full barcode rows when it does, only their count when it does not
+ * @returns The `include` for the overview's asset query
+ */
+export const getAssetOverviewFields = (canUseBarcodes: boolean = false) => {
   const baseFields = {
     category: true,
     qrCodes: true,
     tags: true,
     assetLocations: ASSET_LOCATIONS_INCLUDE,
     custody: {
+      // Ordered so `getPrimaryCustody` picks the same row every time;
+      // without it a multi-custodian asset can show a different holder
+      // on each request.
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       select: {
+        // Keys each release dialog's fetcher: one person can hold several
+        // rows (one per source location), so the holder's id is not unique.
+        id: true,
         createdAt: true,
         quantity: true,
+        // The location the units were taken from (NULL: unplaced, or with
+        // `sourceUnknown` not recorded). The custody breakdown lists it per
+        // holder and the release dialog asks per location when there are
+        // several.
+        location: { select: { id: true, name: true } },
+        sourceUnknown: true,
         // why: kit-allocated custody rows must not be released directly
         // from the asset's custody-breakdown card. The UI uses
         // `kitCustodyId` to swap the Release button for a "held via kit"
-        // badge — releasing the parent kit is the only correct path.
+        // badge: releasing the parent kit is the only correct path.
         kitCustodyId: true,
         kitCustody: {
           select: {
@@ -151,28 +196,16 @@ export const getAssetOverviewFields = (
       },
     },
     bookingAssets: {
-      where: {
-        booking: {
-          status: { in: ["ONGOING", "OVERDUE"] },
-          // Exclude bookings where this asset has been partially checked in
-          NOT: {
-            partialCheckins: {
-              some: {
-                assetIds: { has: assetId },
-              },
-            },
-          },
-        },
-      },
+      ...CURRENT_BOOKING_SLICE_FILTER,
       include: {
         booking: {
           select: {
             id: true,
             name: true,
             from: true,
-            // Narrowed from `true` on both — that shipped the whole
-            // TeamMember row and the ENTIRE User row (email, Stripe
-            // `customerId`, billing flags). `userId` stays for the redaction.
+            // Only what the custody card reads, plus the ids the redaction
+            // and the card's "is it yours" check need. The whole TeamMember and
+            // User rows carry email, Stripe `customerId` and billing flags.
             custodianTeamMember: {
               select: { id: true, name: true, userId: true },
             },
@@ -230,7 +263,12 @@ export const assetIndexFields = ({
   unavailableBookingStatuses?: BookingStatus[];
 } = {}) => {
   const fields = {
-    assetKits: { select: { kit: true } },
+    // Oldest membership first, the same "primary kit" the advanced index's
+    // raw SQL picks, so `getRowKitStatus` reads one kit in both modes.
+    assetKits: {
+      select: { kit: true },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    },
     category: true,
     tags: true,
     // Cover image of the asset's model, rendered when the asset has none of
@@ -239,6 +277,10 @@ export const assetIndexFields = ({
     ...ASSET_MODEL_IMAGE_SELECT,
     assetLocations: ASSET_LOCATIONS_INCLUDE,
     custody: {
+      // Ordered so `getPrimaryCustody` picks the same row every time;
+      // without it a multi-custodian asset can show a different holder
+      // on each request.
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       select: {
         quantity: true,
         custodian: {
@@ -366,7 +408,12 @@ export const assetIndexFields = ({
 
 export const advancedAssetIndexFields = () => {
   const fields = {
-    assetKits: { select: { kit: true } },
+    // Oldest membership first, the same "primary kit" the advanced index's
+    // raw SQL picks, so `getRowKitStatus` reads one kit in both modes.
+    assetKits: {
+      select: { kit: true },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    },
     category: true,
     tags: true,
     // Cover image of the asset's model, rendered when the asset has none of
@@ -380,6 +427,10 @@ export const advancedAssetIndexFields = () => {
       },
     },
     custody: {
+      // Ordered so `getPrimaryCustody` picks the same row every time;
+      // without it a multi-custodian asset can show a different holder
+      // on each request.
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       select: {
         custodian: {
           select: {

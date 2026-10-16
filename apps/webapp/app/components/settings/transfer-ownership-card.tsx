@@ -1,16 +1,15 @@
 import { useState } from "react";
-import { Roles } from "@prisma/client";
 import { Form, Link, useActionData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
+import { useCanTransferOwnership } from "~/hooks/use-can-transfer-ownership";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useDisabled } from "~/hooks/use-disabled";
-import { useUserData } from "~/hooks/use-user-data";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
 import type { OwnerSubscriptionInfo } from "~/utils/stripe.server";
 import { tw } from "~/utils/tw";
+import type { UserNameFields } from "~/utils/user";
 import { resolveTeamMemberName } from "~/utils/user";
 import { InnerLabel } from "../forms/inner-label";
 import Input from "../forms/input";
@@ -37,10 +36,8 @@ import {
 import { WarningBox } from "../shared/warning-box";
 import When from "../when/when";
 
-type Admin = {
+type Admin = UserNameFields & {
   id: string;
-  firstName: string | null;
-  lastName: string | null;
   email: string;
 };
 
@@ -113,8 +110,7 @@ export default function TransferOwnershipCard({
   premiumIsEnabled,
   isPersonalWorkspace = false,
 }: TransferOwnershipCardProps) {
-  const { isOwner } = useUserRoleHelper();
-  const user = useUserData();
+  const canTransferOwnership = useCanTransferOwnership();
   const [confirmationInput, setConfirmationInput] = useState("");
   const [selectedOwner, setSelectedOwner] = useState<Admin | null>(null);
   const [transferSubscription, setTransferSubscription] = useState(false);
@@ -138,8 +134,6 @@ export default function TransferOwnershipCard({
   const validationErrors = getValidationErrors<typeof TransferOwnershipSchema>(
     actionData?.error
   );
-
-  const isShelfAdmin = user?.roles?.some((role) => role.name === Roles.ADMIN);
 
   // Check if current owner has subscriptions that could be transferred
   const ownerHasSubscription =
@@ -173,7 +167,7 @@ export default function TransferOwnershipCard({
   }
 
   /** Non-owners cannot transfer, but must still be able to discover who can */
-  if (!isOwner && !isShelfAdmin) {
+  if (!canTransferOwnership) {
     return (
       <Card className={tw(className)} id="transfer-ownership">
         <h4 className="mb-1 text-text-lg font-semibold">

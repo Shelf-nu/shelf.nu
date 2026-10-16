@@ -1,5 +1,7 @@
 import { action } from "~/routes/api+/mobile+/bulk-assign-custody";
 import { createActionArgs } from "@mocks/remix";
+import { accessFor } from "@helpers/role-access";
+import { ALL_SELECTED_KEY } from "~/utils/list";
 
 // @vitest-environment node
 
@@ -24,6 +26,12 @@ vitest.mock("react-router", async () => {
     data: createDataMock(),
   };
 });
+
+// why: the archived pre-check is a database read. These cases are about
+// other rules, so no requested asset is archived unless a test says so.
+vitest.mock("~/modules/api/mobile-archived.server", () => ({
+  findMobileArchivedRefusal: vitest.fn().mockResolvedValue(null),
+}));
 
 // why: external auth — we don't want to hit Supabase in tests
 vitest.mock("~/modules/api/mobile-auth.server", () => ({
@@ -75,6 +83,7 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { bulkCheckOutAssets } from "~/modules/asset/service.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
+import { findMobileArchivedRefusal } from "~/modules/api/mobile-archived.server";
 
 const mockUser = {
   id: "user-1",
@@ -116,7 +125,7 @@ describe("POST /api/mobile/bulk-assign-custody", () => {
     (requireMobilePermission as any).mockResolvedValue(undefined);
 
     (getMobileUserContext as any).mockResolvedValue({
-      role: "ADMIN",
+      access: accessFor(["ADMIN"]),
       canUseBarcodes: false,
     });
 
@@ -124,6 +133,39 @@ describe("POST /api/mobile/bulk-assign-custody", () => {
       id: "custodian-1",
       name: "Jane Doe",
     });
+  });
+
+  it("rejects the select-all sentinel instead of expanding it org-wide", async () => {
+    // Mobile has no select-all control and sends no `currentSearchParams`, so
+    // the sentinel would expand against an empty filter — every AVAILABLE asset
+    // in the organization. SELF_SERVICE holds `asset:custody`, so this is
+    // reachable by a restricted role, not just an admin.
+    const request = createBulkAssignRequest({
+      assetIds: [ALL_SELECTED_KEY],
+      custodianId: "custodian-1",
+    });
+
+    const result = await action(createActionArgs({ request }));
+
+    // 400, not 500: an expected client error must not be reported as a server
+    // outage, or it drowns in Sentry alongside real faults.
+    expect((result as unknown as Response).status).toBe(400);
+    // The write must never be reached
+    expect(bulkCheckOutAssets).not.toHaveBeenCalled();
+  });
+
+  it("rejects the sentinel even when mixed with real ids", async () => {
+    // The service checks `ids.includes(ALL_SELECTED_KEY)`, so one sentinel
+    // anywhere switches the whole request to select-all.
+    const request = createBulkAssignRequest({
+      assetIds: ["asset-1", ALL_SELECTED_KEY],
+      custodianId: "custodian-1",
+    });
+
+    const result = await action(createActionArgs({ request }));
+
+    expect((result as unknown as Response).status).toBe(400);
+    expect(bulkCheckOutAssets).not.toHaveBeenCalled();
   });
 
   it("should bulk assign custody successfully", async () => {
@@ -147,7 +189,7 @@ describe("POST /api/mobile/bulk-assign-custody", () => {
         custodianId: "custodian-1",
         custodianName: "Jane Doe",
         organizationId: "org-1",
-        role: "ADMIN",
+        custodyAssign: "anyone",
       })
     );
   });
@@ -173,14 +215,18 @@ describe("POST /api/mobile/bulk-assign-custody", () => {
     expect(body.skippedQuantityTracked).toBe(2);
   });
 
-  it("forwards SELF_SERVICE role so the service-level guard fires (hex r3202162994)", async () => {
-    // Pre-fix the mobile route resolved `role` but never passed it to
-    // `bulkCheckOutAssets`; the service's "self-service can only assign
-    // to themselves" guard never ran. This regression guard asserts the
-    // route now plumbs `role` through.
+  it("forwards a SELF_SERVICE caller's `self` custody scope so the service-level guard fires", async () => {
+    // `bulkCheckOutAssets` refuses assignments to anyone but the caller when
+    // the scope is `self`; the route must forward the scope for that to run.
     (getMobileUserContext as any).mockResolvedValue({
-      role: "SELF_SERVICE",
+      access: accessFor(["SELF_SERVICE"]),
       canUseBarcodes: false,
+    });
+    // Assigning to themselves, so the route's own scope check lets it through.
+    (getTeamMember as any).mockResolvedValue({
+      id: "custodian-1",
+      name: "Test User",
+      user: { id: mockUser.id },
     });
 
     const request = createBulkAssignRequest({
@@ -191,7 +237,7 @@ describe("POST /api/mobile/bulk-assign-custody", () => {
     await action(createActionArgs({ request }));
 
     expect(bulkCheckOutAssets).toHaveBeenCalledWith(
-      expect.objectContaining({ role: "SELF_SERVICE" })
+      expect.objectContaining({ custodyAssign: "self" })
     );
   });
 
@@ -229,5 +275,58 @@ describe("POST /api/mobile/bulk-assign-custody", () => {
     expect((result as unknown as Response).status).toBe(403);
     const body = await (result as unknown as Response).json();
     expect(body.error.message).toContain("Permission denied");
+  });
+
+  it("names the archived assets and writes nothing when the scan holds one", async () => {
+    // The phone marks only the rows the server names, so the ids must reach it.
+    const refusal = {
+      message:
+        "Archived assets are read-only. Reinstate them before making changes.",
+      reason: "archived" as const,
+      archivedAssetIds: ["asset-2"],
+    };
+    (findMobileArchivedRefusal as any).mockResolvedValueOnce(refusal);
+
+    const request = createBulkAssignRequest({
+      assetIds: ["asset-1", "asset-2"],
+      custodianId: "custodian-1",
+    });
+    const result = (await action(
+      createActionArgs({ request })
+    )) as unknown as Response;
+
+    expect(result.status).toBe(400);
+    expect(await result.json()).toEqual({ error: refusal });
+    expect(findMobileArchivedRefusal).toHaveBeenCalledWith({
+      assetIds: ["asset-1", "asset-2"],
+      organizationId: "org-1",
+    });
+    expect(bulkCheckOutAssets).not.toHaveBeenCalled();
+  });
+
+  it("refuses a self-scope caller assigning to someone else before looking at archived rows", async () => {
+    // Removing the archived row would not help: the scope refuses the request
+    // whatever the list holds, so that is the answer the phone gets first.
+    (getMobileUserContext as any).mockResolvedValue({
+      access: accessFor(["SELF_SERVICE"]),
+      canUseBarcodes: false,
+    });
+    (getTeamMember as any).mockResolvedValue({
+      id: "custodian-1",
+      name: "Jane Doe",
+      user: { id: "someone-else" },
+    });
+
+    const request = createBulkAssignRequest({
+      assetIds: ["asset-1", "asset-archived"],
+      custodianId: "custodian-1",
+    });
+    const result = (await action(
+      createActionArgs({ request })
+    )) as unknown as Response;
+
+    expect(result.status).toBe(403);
+    expect(findMobileArchivedRefusal).not.toHaveBeenCalled();
+    expect(bulkCheckOutAssets).not.toHaveBeenCalled();
   });
 });

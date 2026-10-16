@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import type { Booking, TeamMember, User } from "@prisma/client";
 import type { useLoaderData } from "react-router";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import type { KitIndexLoaderData } from "~/routes/_layout+/kits._index";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { useHints } from "~/utils/client-hints";
@@ -16,7 +16,7 @@ type Items = NonNullable<
 >;
 
 export function useKitAvailabilityData(items: Items) {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const organization = useCurrentOrganization();
   const canSeeAllCustody = userHasCustodyViewPermission({
     roles,
@@ -33,6 +33,15 @@ export function useKitAvailabilityData(items: Items) {
         mainImage: item.image,
         thumbnailImage: item.imageExpiration,
         status: item.status,
+        // Passed through to `resourceLabelContent` so the calendar shows the
+        // same code chip as the list view. The kits loader already carries
+        // these (KITS_INCLUDE_FIELDS); they were simply not forwarded, which
+        // is why the calendar was the one kit surface with no chip despite
+        // having the data. Mirrors use-asset-availability-data.ts.
+        // Kit has no sequentialId / preferredBarcodeId — the resolver treats
+        // both as absent and falls back to the QR id.
+        qrCodes: item.qrCodes ?? [],
+        barcodes: item.barcodes ?? [],
         // why: match the list view's semantic in kits._index.tsx — a kit is
         // bookable only when ALL slices are bookable (booking reserves the
         // whole kit). Undefined assetKits is treated as not-bookable since we

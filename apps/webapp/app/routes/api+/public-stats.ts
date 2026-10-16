@@ -6,7 +6,8 @@ import { payload, error } from "~/utils/http.server";
 export async function loader() {
   try {
     const [totalAssets, totalUsers, totalQrCodes] = await Promise.all([
-      db.asset.count(),
+      // Public stat: count active (non-archived) assets only.
+      db.asset.count({ where: { archivedAt: null } }),
       db.user.count(),
       db.qr.count(),
     ]);

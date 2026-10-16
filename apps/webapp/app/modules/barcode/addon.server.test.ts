@@ -7,7 +7,7 @@ const { mockStripe } = vi.hoisted(() => ({
   mockStripe: {
     checkout: { sessions: { create: vi.fn() } },
     subscriptions: { create: vi.fn(), list: vi.fn(), update: vi.fn() },
-    prices: { list: vi.fn() },
+    prices: { list: vi.fn(), retrieve: vi.fn() },
     products: { retrieve: vi.fn() },
     paymentMethods: { list: vi.fn() },
   },
@@ -18,8 +18,15 @@ const { mockPremiumIsEnabled } = vi.hoisted(() => ({
   mockPremiumIsEnabled: { value: true },
 }));
 
+// why: the other-subscription check is a Stripe round trip of its own; each
+// test states whether another live subscription still carries the add-on
+const { mockHasOtherActiveAddonSubscription } = vi.hoisted(() => ({
+  mockHasOtherActiveAddonSubscription: vi.fn(),
+}));
+
 vi.mock("~/utils/stripe.server", () => ({
   stripe: mockStripe,
+  customerHasOtherActiveAddonSubscription: mockHasOtherActiveAddonSubscription,
   get premiumIsEnabled() {
     return mockPremiumIsEnabled.value;
   },
@@ -49,6 +56,19 @@ import {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // why: `assertPriceIsForAddon` resolves the price server-side before any
+  // subscription is created, so every path here needs a valid add-on price.
+  mockStripe.prices.retrieve.mockResolvedValue({
+    id: "price_123",
+    active: true,
+    type: "recurring",
+    product: {
+      id: "prod_1",
+      deleted: false,
+      active: true,
+      metadata: { product_type: "addon", addon_type: "barcodes" },
+    },
+  });
   mockPremiumIsEnabled.value = true;
   mockOrgUpdate.mockResolvedValue({ id: "org_1" });
 });
@@ -71,6 +91,7 @@ const baseTrialParams = {
 function makeBarcodeProduct(overrides: Partial<Stripe.Product> = {}) {
   return {
     id: "prod_barcode",
+    active: true,
     metadata: { product_type: "addon", addon_type: "barcodes" },
     ...overrides,
   };
@@ -79,6 +100,7 @@ function makeBarcodeProduct(overrides: Partial<Stripe.Product> = {}) {
 function makeNonBarcodeProduct() {
   return {
     id: "prod_other",
+    active: true,
     metadata: { product_type: "plan", addon_type: undefined },
   };
 }
@@ -170,7 +192,10 @@ describe("createBarcodeAddonTrialSubscription", () => {
       expect.objectContaining({
         trial_period_days: 7,
         default_payment_method: "pm_123",
-      })
+      }),
+      // Keyed on the workspace: a retry after a lost response returns this
+      // same subscription instead of opening a second one.
+      { idempotencyKey: "addon-trial:barcodes:org_1" }
     );
   });
 
@@ -511,6 +536,10 @@ describe("getBarcodeSubscriptionInfo", () => {
 });
 
 describe("handleBarcodeAddonWebhook", () => {
+  beforeEach(() => {
+    mockHasOtherActiveAddonSubscription.mockResolvedValue(false);
+  });
+
   it("checkout.session.completed enables barcodesEnabled + barcodesEnabledAt", async () => {
     await handleBarcodeAddonWebhook({
       eventType: "checkout.session.completed",
@@ -627,6 +656,54 @@ describe("handleBarcodeAddonWebhook", () => {
     );
   });
 
+  it("subscription.updated (past_due) leaves the add-on as it is", async () => {
+    await handleBarcodeAddonWebhook({
+      eventType: "customer.subscription.updated",
+      subscription: {
+        id: "sub_1",
+        customer: "cus_xyz",
+        status: "past_due",
+      } as any,
+      organizationId: "org_1",
+    });
+
+    expect(mockOrgUpdate).not.toHaveBeenCalled();
+  });
+
+  it("invoice.overdue switches the add-on off", async () => {
+    await handleBarcodeAddonWebhook({
+      eventType: "invoice.overdue",
+      subscription: {
+        id: "sub_1",
+        customer: "cus_xyz",
+        status: "past_due",
+      } as any,
+      organizationId: "org_1",
+    });
+
+    expect(mockOrgUpdate).toHaveBeenCalledWith({
+      where: { id: "org_1" },
+      data: { barcodesEnabled: false },
+      select: { id: true },
+    });
+  });
+
+  it("invoice.overdue keeps the add-on on while another live subscription carries it", async () => {
+    mockHasOtherActiveAddonSubscription.mockResolvedValue(true);
+
+    await handleBarcodeAddonWebhook({
+      eventType: "invoice.overdue",
+      subscription: {
+        id: "sub_1",
+        customer: "cus_xyz",
+        status: "past_due",
+      } as any,
+      organizationId: "org_1",
+    });
+
+    expect(mockOrgUpdate).not.toHaveBeenCalled();
+  });
+
   it("unknown event makes no database call", async () => {
     await handleBarcodeAddonWebhook({
       eventType: "some.unknown.event",
@@ -634,5 +711,145 @@ describe("handleBarcodeAddonWebhook", () => {
     });
 
     expect(mockOrgUpdate).not.toHaveBeenCalled();
+  });
+
+  it("keeps barcodes on when another live subscription still carries the add-on for this workspace", async () => {
+    mockHasOtherActiveAddonSubscription.mockResolvedValue(true);
+
+    await handleBarcodeAddonWebhook({
+      eventType: "customer.subscription.paused",
+      subscription: {
+        id: "sub_bundled",
+        customer: "cus_1",
+        status: "paused",
+      } as any,
+      organizationId: "org_1",
+    });
+
+    expect(mockHasOtherActiveAddonSubscription).toHaveBeenCalledWith({
+      customerId: "cus_1",
+      organizationId: "org_1",
+      addonType: "barcodes",
+      exceptSubscriptionId: "sub_bundled",
+    });
+    expect(mockOrgUpdate).not.toHaveBeenCalled();
+  });
+
+  it("keeps barcodes on through an inactive status change while another subscription covers it", async () => {
+    mockHasOtherActiveAddonSubscription.mockResolvedValue(true);
+
+    await handleBarcodeAddonWebhook({
+      eventType: "customer.subscription.updated",
+      subscription: {
+        id: "sub_bundled",
+        customer: { id: "cus_1" },
+        status: "canceled",
+      } as any,
+      organizationId: "org_1",
+    });
+
+    expect(mockHasOtherActiveAddonSubscription).toHaveBeenCalledWith(
+      expect.objectContaining({ customerId: "cus_1" })
+    );
+    expect(mockOrgUpdate).not.toHaveBeenCalled();
+  });
+
+  it("does not consult other subscriptions when the status change keeps the add-on active", async () => {
+    await handleBarcodeAddonWebhook({
+      eventType: "customer.subscription.updated",
+      subscription: { id: "sub_1", customer: "cus_1", status: "active" } as any,
+      organizationId: "org_1",
+    });
+
+    expect(mockHasOtherActiveAddonSubscription).not.toHaveBeenCalled();
+    expect(mockOrgUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { barcodesEnabled: true } })
+    );
+  });
+});
+
+describe("add-on price validation (entitlement bypass)", () => {
+  /**
+   * A TIER price is an ordinary active recurring price, so before this guard
+   * it was accepted here. The route enables the feature flag eagerly, and the
+   * resulting subscription carries a tierId — which makes `isAddonSubscription`
+   * return false, so the add-on webhook that would clear the flag never runs.
+   * Net effect: a one-time 7-day trial granted the paid feature permanently.
+   *
+   * detail.dev finding D094.
+   */
+  it("surfaces the price-validation message, not the generic wrapper text", async () => {
+    // The wrapping catch used to rewrite every failure to "Please try again
+    // later", handing back a 400 that asks the user to retry a request which
+    // can never succeed.
+    mockStripe.prices.retrieve.mockResolvedValue({
+      id: "price_tier",
+      active: true,
+      type: "recurring",
+      product: {
+        id: "prod_tier",
+        deleted: false,
+        active: true,
+        metadata: { shelf_tier: "tier_2" },
+      },
+    });
+
+    await expect(
+      createBarcodeAddonTrialSubscription({
+        customerId: "cus_123",
+        priceId: "price_tier",
+        userId: "user_1",
+        organizationId: "org_1",
+      })
+    ).rejects.toMatchObject({
+      status: 400,
+      message: "The selected plan is not available for this add-on.",
+    });
+  });
+
+  it("refuses a tier price and never creates a subscription", async () => {
+    mockStripe.prices.retrieve.mockResolvedValue({
+      id: "price_tier",
+      active: true,
+      type: "recurring",
+      product: {
+        id: "prod_tier",
+        deleted: false,
+        active: true,
+        metadata: { shelf_tier: "tier_2" },
+      },
+    });
+
+    await expect(
+      createBarcodeAddonTrialSubscription({
+        ...baseTrialParams,
+        priceId: "price_tier",
+      })
+    ).rejects.toBeInstanceOf(ShelfError);
+
+    expect(mockStripe.subscriptions.create).not.toHaveBeenCalled();
+  });
+
+  it("refuses a tier price on the checkout path too", async () => {
+    mockStripe.prices.retrieve.mockResolvedValue({
+      id: "price_tier",
+      active: true,
+      type: "recurring",
+      product: {
+        id: "prod_tier",
+        deleted: false,
+        active: true,
+        metadata: { shelf_tier: "tier_2" },
+      },
+    });
+
+    await expect(
+      createBarcodeAddonCheckoutSession({
+        ...baseCheckoutParams,
+        priceId: "price_tier",
+      })
+    ).rejects.toBeInstanceOf(ShelfError);
+
+    expect(mockStripe.checkout.sessions.create).not.toHaveBeenCalled();
   });
 });

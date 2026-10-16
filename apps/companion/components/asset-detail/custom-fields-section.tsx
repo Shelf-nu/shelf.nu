@@ -2,7 +2,12 @@ import { memo } from "react";
 import { View, Text } from "react-native";
 import type { AssetDetail } from "@/lib/api";
 import { createStyles } from "@/lib/create-styles";
-import { fontSize, spacing, borderRadius } from "@/lib/constants";
+import {
+  fontSize,
+  spacing,
+  borderRadius,
+  formatCurrency,
+} from "@/lib/constants";
 import { useDateFormatter } from "@/lib/use-date-formatter";
 
 type CustomField = AssetDetail["customFields"][0];
@@ -17,7 +22,10 @@ function formatCustomFieldValue(
   // Bound to the acting user's date format + timezone via useDateFormatter().
   // DATE custom fields are absolute calendar dates, so the bare raw value is
   // passed through unchanged (the date-only path does not tz-shift).
-  formatDate: (v: string | Date) => string
+  formatDate: (v: string | Date) => string,
+  // Workspace currency for AMOUNT fields, matching the web overview's
+  // formatCurrency rendering.
+  currency: string
 ): string {
   const val = cf.value;
   if (val === null || val === undefined) return "\u2014";
@@ -33,7 +41,16 @@ function formatCustomFieldValue(
       return val?.raw || val?.valueText || "\u2014";
     case "AMOUNT": {
       const amount = val?.raw ?? val?.valueText;
-      return amount != null ? String(amount) : "\u2014";
+      // A blank string is a missing value, not zero — Number("") is 0.
+      if (
+        amount == null ||
+        (typeof amount === "string" && amount.trim() === "")
+      )
+        return "\u2014";
+      const numeric = typeof amount === "number" ? amount : Number(amount);
+      return Number.isFinite(numeric)
+        ? formatCurrency(numeric, currency)
+        : String(amount);
     }
     default:
       return (
@@ -44,6 +61,7 @@ function formatCustomFieldValue(
 
 export const CustomFieldsSection = memo(function CustomFieldsSection({
   customFields,
+  currency,
 }: CustomFieldsSectionProps) {
   const styles = useStyles();
   const { formatDate } = useDateFormatter();
@@ -58,7 +76,7 @@ export const CustomFieldsSection = memo(function CustomFieldsSection({
           <View key={cf.id} style={styles.customFieldRow}>
             <Text style={styles.customFieldLabel}>{cf.customField.name}</Text>
             <Text style={styles.customFieldValue} numberOfLines={3}>
-              {formatCustomFieldValue(cf, formatDate)}
+              {formatCustomFieldValue(cf, formatDate, currency)}
             </Text>
           </View>
         ))}

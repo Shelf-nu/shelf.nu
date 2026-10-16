@@ -1,12 +1,14 @@
 import { useState } from "react";
 import type { Prisma } from "@prisma/client";
+import { kitWithoutActiveAssetsReason } from "@shelf/labels";
 import { MapPinIcon } from "lucide-react";
 import { useLoaderData } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { StartAuditFromContextDialog } from "~/components/audit/start-audit-from-context-dialog";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { useUserData } from "~/hooks/use-user-data";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { loader } from "~/routes/_layout+/kits.$kitId";
 import {
   PermissionAction,
@@ -53,7 +55,7 @@ export default function ActionsDropdown({
 }
 
 function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
-  const { kit } = useLoaderData<typeof loader>();
+  const { kit, archivedMemberCount } = useLoaderData<typeof loader>();
   const kitCanBeReleased = kit.custody;
   const kitIsCheckedOut = kit.status === "CHECKED_OUT";
 
@@ -73,12 +75,26 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
       ak.asset.type !== "QUANTITY_TRACKED" && ak.asset.status !== "AVAILABLE"
   );
 
-  const { roles, isSelfService } = useUserRoleHelper();
+  // `kit.assetKits` holds the active members only. A kit without one (all
+  // archived, or empty) has nothing to put into custody, which the server
+  // refuses too.
+  const assignCustodyDisabled =
+    kit.assetKits.length === 0
+      ? {
+          reason: kitWithoutActiveAssetsReason({
+            hasArchivedAssets: archivedMemberCount > 0,
+            action: "custody",
+          }),
+        }
+      : someAssetIsNotAvailable;
+
+  const roles = useOrganizationRoles();
+  const assignsSelfOnly = useRoleAccess().custody.assign === "self";
   const user = useUserData();
 
   const {
     ref: dropdownRef,
-    defaultApplied,
+    onOpenChange,
     open,
     defaultOpen,
     setOpen,
@@ -88,7 +104,7 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
   const [isStartAuditOpen, setIsStartAuditOpen] = useState(false);
 
   const disableReleaseForSelfService =
-    isSelfService && kitCustody?.custodian?.userId !== user?.id;
+    assignsSelfOnly && kitCustody?.custodian?.userId !== user?.id;
 
   return (
     <>
@@ -102,15 +118,13 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
 
       <DropdownMenu
         modal={false}
-        onOpenChange={(open) => {
-          if (defaultApplied && window.innerWidth <= 640) setOpen(open);
-        }}
+        onOpenChange={onOpenChange}
         open={open}
         defaultOpen={defaultOpen}
       >
         <DropdownMenuTrigger
           className={tw(
-            "actions-dropdown hidden sm:flex",
+            "actions-dropdown hidden md:flex",
             fullWidth ? "w-full" : ""
           )}
           onClick={() => setOpen(!open)}
@@ -131,7 +145,7 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
         <Button
           type="button"
           variant="secondary"
-          className="actions-dropdown sm:hidden"
+          className="actions-dropdown md:hidden"
           width="full"
           onClick={() => setOpen(true)}
           aria-label="Actions Trigger"
@@ -143,6 +157,7 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
 
         <MobileDropdownStyles open={open} />
         <DropdownMenuContent
+          data-mobile-sheet
           asChild
           align="end"
           className="order actions-dropdown static w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[230px] md:rounded-t-[4px]"
@@ -180,12 +195,12 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
                     className="justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
                     width="full"
                     onClick={() => setOpen(false)}
-                    disabled={someAssetIsNotAvailable}
+                    disabled={assignCustodyDisabled}
                     aria-label="Assign/Take Custody"
                   >
                     <span className="flex items-center gap-2">
                       <Icon icon="assign-custody" />{" "}
-                      {isSelfService ? "Take" : "Assign"} custody
+                      {assignsSelfOnly ? "Take" : "Assign"} custody
                     </span>
                   </Button>
                 )}
@@ -284,7 +299,7 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
               </DropdownMenuItem>
             </When>
 
-            <When truthy={!isSelfService}>
+            <When truthy={!assignsSelfOnly}>
               {kitIsCheckedOut || someAssetIsNotAvailable ? (
                 <div className=" border-t p-2 text-left text-xs">
                   Some actions are disabled due to asset(s) not being Available.
@@ -307,7 +322,8 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
         contextType="kit"
         contextId={kit.id}
         contextName={kit.name}
-        assetCount={kit.assetKits.length}
+        // An audit started from a kit lists its archived members too.
+        assetCount={kit.assetKits.length + archivedMemberCount}
         open={isStartAuditOpen}
         onClose={() => setIsStartAuditOpen(false)}
         showTrigger={false}

@@ -1,5 +1,6 @@
 import { format, formatISO, parseISO } from "date-fns";
 import { fromZonedTime, toZonedTime } from "date-fns-tz";
+import { DateTime } from "luxon";
 import { formatDate, type ResolvedFormatPrefs } from "~/utils/date-format";
 
 export function getDifferenceInSeconds(
@@ -13,13 +14,23 @@ export function getDifferenceInSeconds(
   return secondsDifference;
 }
 
-/** Prepares a date to be passed as default value for input with type `datetime-local` */
-export const dateForDateTimeInputValue = (date: Date) => {
-  const localDate = new Date(
-    date.getTime() - date.getTimezoneOffset() * 60 * 1000
-  );
-  return localDate.toISOString().slice(0, 19);
-};
+/**
+ * Renders an instant as the wall-clock wire string a datetime-local input takes.
+ *
+ * `timeZone` is REQUIRED and must be the acting user's RESOLVED preference zone
+ * — the same zone the field displays in and the server parses submissions in.
+ * This previously converted with `getTimezoneOffset()`, i.e. the DEVICE zone, so
+ * any user whose preference differed from their device got a seed offset by the
+ * difference between the two. Making the parameter required turns that mistake
+ * into a compile error rather than a silently wrong default.
+ *
+ * @param date - The instant to render.
+ * @param timeZone - IANA zone the wall clock should be read in.
+ * @returns `YYYY-MM-DDTHH:mm:ss` in `timeZone`. The shared `DateTimePicker`
+ *   normalises this to the minute-precision `DATE_TIME_FORMAT` on submit.
+ */
+export const dateForDateTimeInputValue = (date: Date, timeZone: string) =>
+  DateTime.fromJSDate(date).setZone(timeZone).toFormat("yyyy-MM-dd'T'HH:mm:ss");
 
 export function calcTimeDifference(
   date1: Date,

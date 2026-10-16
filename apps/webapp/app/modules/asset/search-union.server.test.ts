@@ -5,7 +5,7 @@
  * The webapp vitest harness has no real DB, so these assert the generated SQL
  * STRING and bound params (the @map-column guard from
  * .claude/rules/raw-sql-respects-prisma-map.md), not row-level results.
- * Row-level parity (UNION id-set == the old buildFullAssetSearchOr id-set) is
+ * Row-level parity (UNION id-set == the old Prisma OR clause's id-set) is
  * verified out-of-harness against a staging copy of a large org, plus the
  * post-deploy EXPLAIN ANALYZE — see the PR's verification notes.
  */
@@ -24,7 +24,7 @@ function sqlText(sql: Prisma.Sql): string {
 describe("buildAssetSearchUnion", () => {
   const orgId = "org_123";
 
-  it("scopes every branch to the organization and covers all 10 sources", () => {
+  it("scopes every branch to the organization and covers all 11 sources", () => {
     const text = sqlText(
       buildAssetSearchUnion({ organizationId: orgId, terms: ["chair"] })
     );
@@ -35,6 +35,7 @@ describe("buildAssetSearchUnion", () => {
     expect(text).toContain('a."title"');
     expect(text).toContain('a."sequentialId"');
     expect(text).toContain('a."description"');
+    expect(text).toContain('"AssetModel"');
     expect(text).toContain('"Category"');
     expect(text).toContain('"AssetLocation"');
     expect(text).toContain('"_AssetToTag"');
@@ -58,12 +59,46 @@ describe("buildAssetSearchUnion", () => {
     expect(text).toContain('JOIN public."Asset" a ON a."id" = cu."assetId"'); // Custody
   });
 
+  it("matches an asset by its asset model's name, org-scoped on both sides", () => {
+    const text = sqlText(
+      buildAssetSearchUnion({ organizationId: orgId, terms: ["dell"] })
+    );
+
+    // Reaches Asset through the direct `assetModelId` FK and reads the model's
+    // own name column. Without this branch a model-name term matches nothing,
+    // and the model view reports every model as holding 0 assets.
+    expect(text).toContain('FROM public."AssetModel" am');
+    expect(text).toContain(
+      'JOIN public."Asset" a ON a."assetModelId" = am."id"'
+    );
+    expect(text).toContain('am."name" ILIKE');
+
+    // Both predicates live inside this one branch: scoping only the model side
+    // leaves the Asset join unbounded across tenants, which is the cross-org
+    // sequential scan the UNION shape exists to avoid.
+    const fromAssetModel = text.slice(
+      text.indexOf('FROM public."AssetModel" am')
+    );
+    const assetModelBranch = fromAssetModel.slice(
+      0,
+      fromAssetModel.indexOf("UNION")
+    );
+    expect(assetModelBranch).toContain('am."organizationId" =');
+    expect(assetModelBranch).toContain('a."organizationId" =');
+  });
+
   it("uses @map DB column names, not Prisma field names", () => {
     const text = sqlText(
       buildAssetSearchUnion({ organizationId: orgId, terms: ["x"] })
     );
     expect(text).toContain('b."value"'); // Barcode.value (not "barcode")
     expect(text).toContain('q."id"'); // Qr.id
+    // Custodian names: `User.displayName` carries no @map, so the SQL column is
+    // the field name verbatim. It sits alongside first/last name because it is
+    // what the custody chip renders for users who set one.
+    expect(text).toContain('u."firstName"');
+    expect(text).toContain('u."lastName"');
+    expect(text).toContain('u."displayName"');
     // custom-field jsonb paths
     for (const path of CUSTOM_FIELD_SEARCH_PATHS) {
       expect(text).toContain(`'{${path}}'`);

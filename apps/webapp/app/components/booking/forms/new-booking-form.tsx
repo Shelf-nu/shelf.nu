@@ -7,15 +7,16 @@ import { TagsAutocomplete } from "~/components/tag/tags-autocomplete";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { useWorkingHours } from "~/hooks/use-working-hours";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getBookingDefaultStartEndTimes } from "~/modules/working-hours/utils";
 import type {
   NewBookingActionReturnType,
   NewBookingLoaderReturnType,
 } from "~/routes/_layout+/bookings.new";
-import { useHints } from "~/utils/client-hints";
 
+import { bookingCustodianIsSelf } from "~/utils/bookings";
 import { getValidationErrors } from "~/utils/http";
 import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { tw } from "~/utils/tw";
@@ -62,10 +63,9 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
   const [, updateName] = useAtom(updateDynamicTitleAtom);
 
   const disabled = useDisabled(fetcher);
-  const hints = useHints();
   // TIMEZONE FIX: client-side date validation must use the user's RESOLVED
   // timezone preference (the same one display uses), not the browser hint, so
-  // it agrees with the server parse. Locale still comes from `hints`.
+  // it agrees with the server parse.
   const prefs = useFormatPrefs();
 
   // Fetch working hours for validation
@@ -73,14 +73,15 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
   const { workingHours } = workingHoursData;
   const bookingSettings = useBookingSettings();
 
-  const { roles, isBaseOrSelfService, isAdministratorOrOwner } =
-    useUserRoleHelper();
+  const roles = useOrganizationRoles();
+  const roleAccess = useRoleAccess();
 
   const { startDate: defaultStartDate, endDate: defaultEndDate } =
     getBookingDefaultStartEndTimes(
       workingHours,
       bookingSettings.bufferStartTime,
-      isAdministratorOrOwner
+      roleAccess.policy.bookings.bypassTimeLimits,
+      prefs
     );
 
   const [startDate, setStartDate] = useState(defaultStartDate);
@@ -89,11 +90,11 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
   const zo = useZorm(
     "NewQuestionWizardScreen",
     BookingFormSchema({
-      hints: { ...hints, timeZone: prefs.timeZone },
+      prefs,
       action: "new",
       workingHours: workingHours,
       bookingSettings,
-      isAdminOrOwner: isAdministratorOrOwner,
+      bypassTimeLimits: roleAccess.policy.bookings.bypassTimeLimits,
     })
   );
 
@@ -167,7 +168,7 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
               <Card className="field-card m-0">
                 <CustodianField
                   defaultTeamMember={defaultTeamMember}
-                  disabled={disabled || isBaseOrSelfService}
+                  disabled={disabled || bookingCustodianIsSelf(roleAccess)}
                   userCanSeeCustodian={userCanSeeCustodian}
                   isNewBooking={true}
                   error={
@@ -200,7 +201,6 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
               <Card className="field-card m-0 overflow-visible">
                 <NotificationRecipientsField
                   disabled={disabled}
-                  isAdminOrOwner={isAdministratorOrOwner}
                   creatorName="You"
                 />
               </Card>
