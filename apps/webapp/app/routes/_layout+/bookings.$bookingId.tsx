@@ -15,6 +15,7 @@ import { BookingStatusBadge } from "~/components/booking/booking-status-badge";
 import { TimeRemaining } from "~/components/booking/time-remaining";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
+import { RecordNavigation } from "~/components/layout/header/record-navigation";
 import type { HeaderData } from "~/components/layout/header/types";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { Button } from "~/components/shared/button";
@@ -25,6 +26,7 @@ import {
   TooltipTrigger,
 } from "~/components/shared/tooltip";
 import { useDisabled } from "~/hooks/use-disabled";
+import { useRecordNavigation } from "~/hooks/use-list-context";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { getBookingHeaderData } from "~/modules/booking/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
@@ -143,6 +145,12 @@ export default function AssetDetailsPage() {
     "booking.overview.checkout-assets",
   ].includes(currentRoute?.handle?.name);
 
+  const recordNavigation = useRecordNavigation({
+    entity: "booking",
+    id: booking.id,
+    enabled: !shouldHideHeader,
+  });
+
   return (
     <div className="relative">
       {!shouldHideHeader && (
@@ -168,7 +176,9 @@ export default function AssetDetailsPage() {
             slots={{
               "right-of-title": <AddToCalendar booking={booking} />,
             }}
-          />
+          >
+            <RecordNavigation navigation={recordNavigation} />
+          </Header>
           <HorizontalTabs items={items} />
         </>
       )}

@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import type { Prisma } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data } from "react-router";
@@ -15,7 +16,12 @@ import { LocationDescriptionColumn } from "~/components/location/location-descri
 import LocationQuickActions from "~/components/location/location-quick-actions";
 import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
+import {
+  type ListContextLinkState,
+  useListContextLinkState,
+} from "~/hooks/use-list-context";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { LIST_DETAIL_PATH } from "~/modules/list-navigation/list-context";
 import type { LOCATION_LIST_INCLUDE } from "~/modules/location/service.server";
 import { getLocations } from "~/modules/location/service.server";
 import { LOCATION_SORTING_OPTIONS } from "~/modules/location/utils";
@@ -101,6 +107,11 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 export default function LocationsIndexPage() {
   const roles = useOrganizationRoles();
   const showRowActions = useShowLocationRowActions();
+  const linkState = useListContextLinkState("location");
+  const listItemProps = useMemo(
+    () => ({ showRowActions, linkState }),
+    [showRowActions, linkState]
+  );
   // The bulk menu offers Delete and Create audit.
   const showBulkActions =
     userHasPermission({
@@ -162,7 +173,7 @@ export default function LocationsIndexPage() {
                 }
           }
           ItemComponent={ListItemContent}
-          extraItemComponentProps={{ showRowActions }}
+          extraItemComponentProps={listItemProps}
           headerChildren={
             <>
               <Th>Description</Th>
@@ -184,8 +195,11 @@ const ListItemContent = ({
   extraProps,
 }: {
   item: Prisma.LocationGetPayload<{ include: typeof LOCATION_LIST_INCLUDE }>;
-  /** Decided once by the page, so the row cells always match the header. */
-  extraProps: { showRowActions: boolean };
+  /**
+   * `showRowActions` is decided once by the page, so the row cells always
+   * match the header. `linkState` lets the location page step through this list.
+   */
+  extraProps: { showRowActions: boolean; linkState: ListContextLinkState };
 }) => (
   <>
     <Td className="w-full p-0 md:p-0">
@@ -200,7 +214,8 @@ const ListItemContent = ({
           </div>
           <div className="flex flex-row items-center gap-2 md:flex-col md:items-start md:gap-0">
             <Button
-              to={`${item.id}/assets`}
+              to={LIST_DETAIL_PATH.location(item.id)}
+              state={extraProps.linkState}
               variant="link"
               className="text-left font-medium text-gray-900 hover:text-gray-700"
             >
