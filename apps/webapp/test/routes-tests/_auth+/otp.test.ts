@@ -182,6 +182,26 @@ describe("otp action — account resolution", () => {
     expect(createUser).not.toHaveBeenCalled();
   });
 
+  it("forgets the list settings the browser kept from an earlier account", async () => {
+    // @ts-expect-error missing vitest type
+    findUserById.mockResolvedValue({ id: USER_ID, onboarded: true });
+    const request = otpRequest(USER_EMAIL);
+    request.headers.set(
+      "Cookie",
+      "org-9_bookingFilter_v2=cz1aWg%3D%3D; user-prefs=e30%3D"
+    );
+
+    const response = (await action(actionArgs(request))) as Response;
+    const setCookies = response.headers.getSetCookie();
+
+    expect(setCookies).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^org-9_bookingFilter_v2=;.*Max-Age=0/),
+        expect.stringMatching(/^user-prefs=.*Max-Age=0/),
+      ])
+    );
+  });
+
   it("carries on when a concurrent sign-in created the account first", async () => {
     // why: first read finds nothing, the create then loses the race, and the
     // second read finds the row the other request wrote.
