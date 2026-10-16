@@ -5,6 +5,7 @@ import { ShelfError } from "~/utils/error";
 vi.mock("~/database/db.server", () => ({
   db: {
     $transaction: vi.fn(),
+    $queryRaw: vi.fn(),
     customField: {
       findFirst: vi.fn(),
       delete: vi.fn(),
@@ -22,18 +23,23 @@ vi.mock("~/database/db.server", () => ({
 }));
 
 const mockRemoveCustomFieldFromAssetIndexSettings = vi.fn();
+const mockUpdateAssetIndexSettingsAfterCfUpdate = vi.fn();
 
 vi.mock("../asset-index-settings/service.server", () => ({
   removeCustomFieldFromAssetIndexSettings:
     mockRemoveCustomFieldFromAssetIndexSettings,
-  updateAssetIndexSettingsAfterCfUpdate: vi.fn(),
+  updateAssetIndexSettingsAfterCfUpdate:
+    mockUpdateAssetIndexSettingsAfterCfUpdate,
   updateAssetIndexSettingsWithNewCustomFields: vi.fn(),
 }));
 
 const { db } = await import("~/database/db.server");
-const { softDeleteCustomField, upsertCustomField } = await import(
-  "./service.server"
-);
+const {
+  getOptionUsageCounts,
+  softDeleteCustomField,
+  updateCustomField,
+  upsertCustomField,
+} = await import("./service.server");
 
 const dbTransactionMock = vi.mocked(db.$transaction);
 
@@ -327,5 +333,153 @@ describe("upsertCustomField", () => {
       },
     });
     expect(customFields.Serial_No.id).toBe("cf-serial");
+  });
+});
+
+describe("updateCustomField", () => {
+  const savedField = {
+    id: "cf-brand",
+    name: "Brand",
+    organizationId: "org-1",
+    type: "OPTION",
+    options: ["Sony ", "Canon", "sony"],
+  };
+
+  /** A transaction client that records what the callback does with it. */
+  function mockTransaction() {
+    const tx = {
+      customField: {
+        findFirstOrThrow: vi.fn().mockResolvedValue(savedField),
+        update: vi.fn().mockImplementation(({ data }) => ({
+          ...savedField,
+          options: data.options,
+        })),
+      },
+      $executeRaw: vi.fn().mockResolvedValue(3),
+    };
+    dbTransactionMock.mockImplementation((callback: any) => callback(tx));
+    return tx;
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("rewrites renamed and merged values in the transaction that saves the options", async () => {
+    const tx = mockTransaction();
+
+    await updateCustomField({
+      id: "cf-brand",
+      organizationId: "org-1",
+      options: ["Sony", "Canon"],
+      optionRenames: [
+        { from: "Sony ", to: "Sony" },
+        { from: "sony", to: "Sony" },
+      ],
+    });
+
+    expect(tx.customField.update).toHaveBeenCalledWith({
+      where: { id: "cf-brand", organizationId: "org-1" },
+      data: expect.objectContaining({ options: ["Sony", "Canon"] }),
+    });
+    expect(db.customField.update).not.toHaveBeenCalled();
+    expect(tx.$executeRaw).toHaveBeenCalledTimes(1);
+
+    const statement = tx.$executeRaw.mock.calls[0][0];
+    expect(statement.values).toEqual([
+      "Sony ",
+      "Sony",
+      "sony",
+      "Sony",
+      "cf-brand",
+    ]);
+    expect(statement.text).toContain('UPDATE "AssetCustomFieldValue" AS v');
+    expect(statement.text).toContain(`'{valueOption}'`);
+    expect(statement.text).toContain(`'{raw}'`);
+    expect(statement.text).toContain(`v."customFieldId" = $5`);
+
+    expect(mockUpdateAssetIndexSettingsAfterCfUpdate).toHaveBeenCalledWith({
+      oldField: savedField,
+      newField: { ...savedField, options: ["Sony", "Canon"] },
+    });
+  });
+
+  it("saves without rewriting values when no spelling changes", async () => {
+    const tx = mockTransaction();
+
+    await updateCustomField({
+      id: "cf-brand",
+      organizationId: "org-1",
+      options: ["Canon", "Sony ", "sony"],
+      optionRenames: [{ from: "Canon", to: "Canon" }],
+    });
+
+    expect(tx.customField.update).toHaveBeenCalledWith({
+      where: { id: "cf-brand", organizationId: "org-1" },
+      data: expect.objectContaining({ options: ["Canon", "Sony ", "sony"] }),
+    });
+    expect(tx.$executeRaw).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      case: "a from that is not a saved option",
+      options: ["Sony", "Canon", "sony"],
+      optionRenames: [{ from: "Sony", to: "Canon" }],
+    },
+    {
+      case: "a to that is not one of the new options",
+      options: ["Sony", "Canon"],
+      optionRenames: [{ from: "Sony ", to: "Sony Pictures" }],
+    },
+    {
+      case: "two renames from the same spelling",
+      options: ["Sony", "Canon", "SONY"],
+      optionRenames: [
+        { from: "sony", to: "Sony" },
+        { from: "sony", to: "SONY" },
+      ],
+    },
+  ])("refuses $case without writing", async ({ options, optionRenames }) => {
+    const tx = mockTransaction();
+
+    await expect(
+      updateCustomField({
+        id: "cf-brand",
+        organizationId: "org-1",
+        options,
+        optionRenames,
+      })
+    ).rejects.toMatchObject({
+      status: 400,
+      message:
+        "The options of this field changed since you opened it. Reload the page and try again.",
+    });
+    expect(tx.customField.update).not.toHaveBeenCalled();
+    expect(tx.$executeRaw).not.toHaveBeenCalled();
+  });
+});
+
+describe("getOptionUsageCounts", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("counts stored values of one field in one organization", async () => {
+    vi.mocked(db.$queryRaw).mockResolvedValue([
+      { option: "Sony", count: 4 },
+      { option: "sony", count: 1 },
+    ] as never);
+
+    const counts = await getOptionUsageCounts({
+      customFieldId: "cf-brand",
+      organizationId: "org-1",
+    });
+
+    expect(counts).toEqual({ Sony: 4, sony: 1 });
+    const query = vi.mocked(db.$queryRaw).mock.calls[0][0] as any;
+    expect(query.values).toEqual(["cf-brand", "org-1"]);
+    expect(query.text).toContain(`cf."organizationId" = $2`);
+    expect(query.text).toContain(`v."value"->>'valueOption'`);
   });
 });
