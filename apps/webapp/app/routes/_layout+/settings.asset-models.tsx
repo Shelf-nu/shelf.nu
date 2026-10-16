@@ -15,10 +15,12 @@ import { z } from "zod";
 import { BulkDeleteAssetModelSchema } from "~/components/asset-model/bulk-delete-dialog";
 import { ErrorContent } from "~/components/errors";
 import {
+  assertAssetModelDeleteConfirmed,
   bulkDeleteAssetModels,
   deleteAssetModel,
 } from "~/modules/asset-model/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { DeleteConfirmationSchema } from "~/utils/delete-confirmation";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
@@ -37,11 +39,14 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
+    // The settings section manages the catalogue of models, so it asks for
+    // `update`, not `read`: roles that only read models (to pick one on an
+    // asset or a booking) must not reach this page.
     await requirePermission({
       userId: authSession.userId,
       request,
       entity: PermissionEntity.assetModel,
-      action: PermissionAction.read,
+      action: PermissionAction.update,
     });
 
     return payload(null);
@@ -67,7 +72,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const intent = formData.get("intent");
 
     if (intent === "bulk-delete") {
-      const { assetModelIds, currentSearchParams } = parseData(
+      const { assetModelIds, confirmation, currentSearchParams } = parseData(
         formData,
         BulkDeleteAssetModelSchema.extend({
           currentSearchParams: z.string().optional(),
@@ -79,6 +84,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
         assetModelIds,
         organizationId,
         currentSearchParams,
+        userId,
+        confirmation,
       });
 
       sendNotification({
@@ -92,17 +99,22 @@ export async function action({ context, request }: ActionFunctionArgs) {
     }
 
     /** Default: single asset model delete */
-    const { id } = parseData(
+    const { id, confirmation } = parseData(
       formData,
-      z.object({
-        id: z.string(),
-      }),
+      z
+        .object({
+          id: z.string(),
+        })
+        .merge(DeleteConfirmationSchema),
       {
         additionalData: { userId },
       }
     );
 
-    await deleteAssetModel({ id, organizationId });
+    // The dialog asks for the model's name; refuse a request that skipped it.
+    await assertAssetModelDeleteConfirmed({ id, organizationId, confirmation });
+
+    await deleteAssetModel({ id, organizationId, userId });
 
     sendNotification({
       title: "Asset model deleted",

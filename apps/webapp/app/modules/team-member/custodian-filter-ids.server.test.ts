@@ -147,6 +147,45 @@ describe("scopeCustodianFilterIds", () => {
     expect(out).toEqual([CUSTODY_FILTER_REFUSED]);
   });
 
+  it("treats a blank id as nothing requested", async () => {
+    // `?teamMember=` arrives as `[""]`, from a cleared filter or a stale link.
+    // Counted as a request it becomes the sentinel, which filters an unfiltered
+    // list down to nothing.
+    const out = await scopeCustodianFilterIds({
+      teamMemberIds: [""],
+      canSeeAllCustody: false,
+      userId: USER,
+      organizationId: ORG,
+    });
+
+    expect(out).toEqual([]);
+  });
+
+  it("treats a blank id as nothing requested for a caller who sees all custody", async () => {
+    // The common case, and the one a fix applied only to the refusal count
+    // misses: narrowing returns the requested ids untouched for this caller, so
+    // the blank would survive all the way into the custody clause.
+    const out = await scopeCustodianFilterIds({
+      teamMemberIds: [""],
+      canSeeAllCustody: true,
+      userId: USER,
+      organizationId: ORG,
+    });
+
+    expect(out).toEqual([]);
+  });
+
+  it("ignores a blank id beside a real one", async () => {
+    const out = await scopeCustodianFilterIds({
+      teamMemberIds: ["", MY_TEAM_MEMBER],
+      canSeeAllCustody: false,
+      userId: USER,
+      organizationId: ORG,
+    });
+
+    expect(out).toEqual([MY_TEAM_MEMBER]);
+  });
+
   it("leaves 'nothing requested' as an empty list", async () => {
     const out = await scopeCustodianFilterIds({
       teamMemberIds: [],

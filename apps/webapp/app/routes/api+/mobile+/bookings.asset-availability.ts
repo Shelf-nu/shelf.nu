@@ -91,10 +91,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
       );
     }
 
-    // Only this workspace's quantity-tracked assets are answered. INDIVIDUAL
-    // assets have no pool to measure, and a foreign id must not leak counts.
+    // Only this workspace's active quantity-tracked assets are answered.
+    // INDIVIDUAL assets have no pool to measure, an archived asset takes no
+    // new units, and a foreign id must not leak counts.
     const ownedQtyAssets = await db.asset.findMany({
-      where: { id: { in: assetIds }, organizationId, type: "QUANTITY_TRACKED" },
+      where: {
+        id: { in: assetIds },
+        organizationId,
+        type: "QUANTITY_TRACKED",
+        archivedAt: null,
+      },
       select: { id: true },
     });
     const ownedIds = ownedQtyAssets.map((a) => a.id);

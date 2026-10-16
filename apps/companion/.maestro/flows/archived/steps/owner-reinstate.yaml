@@ -1,0 +1,41 @@
+appId: com.shelf.companion.carlos
+---
+# Steps: an owner reinstates an archived asset from its screen. It becomes
+# active again in place: the notice goes, the status is back, and custody is
+# offered. Leaves the asset ACTIVE; `seed-e2e.sh archived-up` re-archives it.
+# No login (see ../01-owner.yaml).
+
+- openLink: "shelf://assets/${SHELF_TEST_ARCHIVED_ASSET_ID}"
+- extendedWaitUntil:
+    visible: "E2E Archived Camera"
+    timeout: 20000
+# A screen already on the stack keeps its last data; pull to refresh so it
+# reads the fixture's archived state.
+- swipe:
+    start: "50%,35%"
+    end: "50%,75%"
+    duration: 600
+- extendedWaitUntil:
+    visible: "Reinstate asset"
+    timeout: 20000
+# A screen already on the stack refetches on focus; let it settle first.
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    text: "Reinstate asset"
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible: "Reinstate asset\\?"
+    timeout: 5000
+- tapOn: "^Reinstate$"
+- extendedWaitUntil:
+    notVisible: "This asset is archived.*"
+    timeout: 30000
+- assertVisible: "Available"
+- assertVisible:
+    text: "Assign custody of asset"
+    enabled: true
+- assertVisible:
+    text: "Edit asset"
+    enabled: true
+- takeScreenshot: archived-owner-reinstated

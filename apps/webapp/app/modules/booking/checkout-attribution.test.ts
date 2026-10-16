@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   attributeSessionCheckoutToSlices,
   checkoutSessionsToLogsByAsset,
+  computeUnitsStillOutBySlice,
 } from "./checkout-attribution";
 
 /**
@@ -235,5 +236,45 @@ describe("attributeSessionCheckoutToSlices", () => {
       claims: [{ assetId: "i", bookingAssetId: null, quantity: 1 }],
     });
     expect(out.get("i1")).toBe(1);
+  });
+});
+
+describe("computeUnitsStillOutBySlice", () => {
+  const slice = {
+    id: "s1",
+    quantity: 10,
+    assetKitId: null,
+    checkedOutAt: null,
+    checkedOutQuantity: 10,
+  };
+
+  it("never reports more out than the slice booked", () => {
+    const out = computeUnitsStillOutBySlice({
+      slices: [{ ...slice, checkedOutQuantity: 30 }],
+      checkoutClaims: [],
+      dispositions: [],
+    });
+
+    expect(out.get("s1")).toBe(10);
+  });
+
+  it("never goes below zero when more is logged back than went out", () => {
+    const out = computeUnitsStillOutBySlice({
+      slices: [slice],
+      checkoutClaims: [],
+      dispositions: [{ bookingAssetId: "s1", quantity: 12 }],
+    });
+
+    expect(out.get("s1")).toBe(0);
+  });
+
+  it("reads nothing out for a slice with no departure on record", () => {
+    const out = computeUnitsStillOutBySlice({
+      slices: [{ ...slice, checkedOutQuantity: 0 }],
+      checkoutClaims: [],
+      dispositions: [],
+    });
+
+    expect(out.get("s1")).toBe(0);
   });
 });

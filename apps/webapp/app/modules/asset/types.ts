@@ -114,42 +114,6 @@ export interface CreateAssetFromContentImportPayload
   consumptionType?: "ONE_WAY" | "TWO_WAY";
 }
 
-export interface CreateAssetFromBackupImportPayload
-  extends Record<string, any> {
-  id: string;
-  title: string;
-  description?: string;
-  category:
-    | {
-        id: string;
-        name: string;
-        description: string;
-        color: string;
-        createdAt: string;
-        updatedAt: string;
-        userId: string;
-      }
-    | {};
-  tags: {
-    name: string;
-  }[];
-  location:
-    | {
-        name: string;
-        description?: string;
-        address?: string;
-        createdAt: string;
-        updatedAt: string;
-      }
-    | {};
-  customFields: AssetCustomFieldsValuesWithFields[];
-}
-
-export type AssetCustomFieldsValuesWithFields =
-  ShelfAssetCustomFieldValueType & {
-    customField: CustomField;
-  };
-
 /** Item returned by getAssetsFromView */
 export type AssetsFromViewItem = Prisma.AssetGetPayload<{
   include: Return<typeof assetIndexFields>;
@@ -181,6 +145,15 @@ export type AdvancedAssetBooking = Pick<
   /** Kit name for THIS slice (null when standalone), resolved via
    * AssetKit → Kit.name. Availability view only. */
   kitName?: string | null;
+  /** BookingAsset.checkedOutAt of THIS slice: null until the slice goes out.
+   * Advanced mode delivers an ISO string (jsonb), simple mode a Date.
+   * Availability view only. */
+  checkedOutAt?: string | Date | null;
+  /** BookingAsset.checkedInAt of THIS slice: set once the slice is fully
+   * reconciled, cleared again by a second departure. The calendar reads it
+   * together with `checkedOutAt` to decide whether the bar reads as returned.
+   * Availability view only. */
+  checkedInAt?: string | Date | null;
 };
 
 /** Type for advanced index query. We cannot infer it because we do a raw query so we need to create it ourselves. */
@@ -206,6 +179,7 @@ export type AdvancedIndexAsset = Pick<
   | "minQuantity"
   | "consumptionType"
   | "availableToBook"
+  | "archivedAt"
 > & {
   qrId: string; // QR code will always be available
   assetModelId?: string | null;
@@ -290,3 +264,12 @@ export interface CustomFieldSorting {
   alias: string;
   fieldType?: CustomFieldType;
 }
+
+/**
+ * The "active vs archived" view dimension for asset lists. This is orthogonal
+ * to the per-status (AVAILABLE/IN_CUSTODY/CHECKED_OUT) filter — see issue #382.
+ * - `active`   → only non-archived assets (the default everywhere).
+ * - `archived` → only archived assets (the "Archived" view).
+ * - `all`      → both.
+ */
+export type ArchivedFilter = "active" | "archived" | "all";

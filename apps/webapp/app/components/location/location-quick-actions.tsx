@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 import type { Location } from "@prisma/client";
 import { MapIcon, PencilIcon, QrCodeIcon, Trash2Icon } from "lucide-react";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import {
   PermissionAction,
   PermissionEntity,
@@ -23,7 +23,7 @@ export default function LocationQuickActions({
   style,
   location,
 }: LocationQuickActionsProps) {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
 
   const canUpdate = userHasPermission({
     roles,

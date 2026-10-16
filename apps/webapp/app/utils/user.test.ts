@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { resolveUserDisplayName, resolveTeamMemberName } from "./user";
+import {
+  resolveBookingHolderName,
+  resolveUserDisplayName,
+  resolveTeamMemberName,
+} from "./user";
 
 describe("resolveUserDisplayName", () => {
   it("returns displayName when set", () => {
@@ -183,5 +187,49 @@ describe("resolveTeamMemberName", () => {
         user: { displayName: null },
       })
     ).toBe("Stored Name");
+  });
+});
+
+describe("resolveBookingHolderName", () => {
+  // The two links normally name the same person the same way, because setting
+  // a display name also syncs `TeamMember.name`. These fixtures make them
+  // differ so each assertion shows which link the answer came from.
+  const custodianUser = {
+    displayName: "Caz",
+    firstName: "Carol",
+    lastName: "Legal",
+  };
+
+  it("names the team-member link when the booking has both", () => {
+    expect(
+      resolveBookingHolderName({
+        custodianTeamMember: { name: "Carol Member" },
+        custodianUser,
+      })
+    ).toBe("Carol Member");
+  });
+
+  it("names the user link's display name when there is no team member", () => {
+    expect(
+      resolveBookingHolderName({ custodianTeamMember: null, custodianUser })
+    ).toBe("Caz");
+  });
+
+  it("falls back to the user link when the team member's name is empty", () => {
+    expect(
+      resolveBookingHolderName({
+        custodianTeamMember: { name: "" },
+        custodianUser,
+      })
+    ).toBe("Caz");
+  });
+
+  it("returns null when the booking has no custodian", () => {
+    expect(
+      resolveBookingHolderName({
+        custodianTeamMember: null,
+        custodianUser: null,
+      })
+    ).toBeNull();
   });
 });

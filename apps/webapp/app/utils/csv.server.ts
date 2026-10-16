@@ -8,19 +8,15 @@ import type {
   TeamMember,
 } from "@prisma/client";
 import { CustomFieldType } from "@prisma/client";
-import {
-  MaxFileSizeExceededError,
-  parseFormData,
-} from "@remix-run/form-data-parser";
+import { parseFormData } from "@remix-run/form-data-parser";
 
 import chardet from "chardet";
 import { CsvError, parse } from "csv-parse";
 import iconv from "iconv-lite";
+import type { BookingsList } from "~/components/booking/bookings-list-fields";
+import type { SortingDirection } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
-import {
-  fetchAssetsForExport,
-  getAdvancedPaginatedAndFilterableAssets,
-} from "~/modules/asset/service.server";
+import { getAdvancedPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import type {
   AdvancedIndexAsset,
   ShelfAssetCustomFieldValueType,
@@ -39,7 +35,7 @@ import { BOOKING_COMMON_INCLUDE } from "~/modules/booking/constants";
 import {
   bookingDraftVisibilityClause,
   getBookings,
-  getBookingsFilterData,
+  getBookingsListWhereParams,
   resolveCustodianScope,
 } from "~/modules/booking/service.server";
 import type { BookingWithCustodians } from "~/modules/booking/types";
@@ -57,6 +53,8 @@ import { formatDate, type ResolvedFormatPrefs } from "./date-format";
 import { resolveUserFormatPrefsById } from "./date-format.server";
 import { SERVER_URL } from "./env";
 import { isLikeShelfError, ShelfError } from "./error";
+import { isMaxFileSizeError } from "./form-data-parse-errors.server";
+import { getCurrentSearchParams } from "./http.server";
 import {
   buildImportReadyCsvFromAssets,
   type ColumnScope,
@@ -69,10 +67,19 @@ import { resolveTeamMemberName, resolveUserDisplayName } from "./user";
 
 export type CSVData = [string[], ...string[][]] | [];
 
-/** Guesses the delimiter of csv based on the most common delimiter found in the file */
+/**
+ * Guesses the delimiter of csv based on the most common delimiter found in the
+ * file.
+ *
+ * Only delimiters BETWEEN cells count. A quoted cell may hold any number of
+ * commas and semicolons — an exported note, a JSON relation, a tag named
+ * "Berlin, DE" — and counting those would let one verbose cell outvote the
+ * structure of every row.
+ */
 function guessDelimiters(csv: string, delimiters: string[]) {
+  const structure = csv.replace(/"(?:[^"]|"")*"/g, "");
   const delimiterCounts = delimiters.map(
-    (delimiter) => csv.split(delimiter).length
+    (delimiter) => structure.split(delimiter).length
   );
 
   const max = Math.max(...delimiterCounts);
@@ -123,13 +130,6 @@ function isEmptyRow(row: string[]): boolean {
   return row.every((cell) => cell.trim() === "");
 }
 
-/** Walks the cause chain to check if a MaxFileSizeExceededError is present */
-function isMaxFileSizeError(error: unknown): boolean {
-  if (error instanceof MaxFileSizeExceededError) return true;
-  const cause = (error as { cause?: unknown })?.cause;
-  return cause ? isMaxFileSizeError(cause) : false;
-}
-
 /** Takes a request object and extracts the file from it and parses it as csvData */
 export const csvDataFromRequest = async ({ request }: { request: Request }) => {
   try {
@@ -173,141 +173,6 @@ export const csvDataFromRequest = async ({ request }: { request: Request }) => {
     });
   }
 };
-
-export const buildCsvBackupDataFromAssets = ({
-  assets,
-  keysToSkip,
-}: {
-  assets: Asset[];
-  keysToSkip: string[];
-}) => {
-  if (!assets.length) return [] as unknown as CSVData;
-  return assets.map((asset) => {
-    const toExport: string[] = [];
-
-    /** Itterate over the values to create teh export object */
-    Object.entries(asset).forEach(([key, value]) => {
-      /** Skip keys that are not needed. These are foreign keys for the related entries */
-      if (keysToSkip.includes(key)) return;
-
-      /** If the value is null, push an empty string
-       * We have a bit of a special case, for the relations that are objects, we need to push an empty object instead of an empty string.
-       * This way we prevent the import from failing when importing the file again due to "Invalid JSON"
-       * This needs to be done for all one-to-one relations
-       */
-      if (value === null) {
-        if (["custody", "location", "category", "assetModel"].includes(key)) {
-          return toExport.push("{}");
-        }
-        return toExport.push("");
-      }
-
-      /** Special handling for category and location.
-       *
-       * Phase A5: `assetModel` is included here — backup-export emits it
-       * as a JSON `{ name }` object so the backup-import path can resolve
-       * (or create) the model by name on restore (symmetric with the
-       * `category` / `location` handling above). */
-      switch (key) {
-        case "location":
-        case "category":
-        case "notes":
-        case "tags":
-        case "custody":
-        case "organization":
-        case "valuation":
-        case "customFields":
-        case "assetModel":
-          toExport.push(
-            JSON.stringify(value, (_key, value) => {
-              /** Custom replacer function.
-               * We do this to ensure that in the result we have emtpy strings instead of null values
-               */
-              if (value === null) {
-                return "";
-              }
-              return value;
-            })
-          );
-          break;
-        case "description":
-          toExport.push(`"${String(value).replace(/\n|\r/g, "")}"`);
-          break;
-        default:
-          toExport.push(String(value));
-      }
-    });
-
-    return toExport;
-  });
-};
-
-/* There are some keys that need to be skipped and require special handling */
-const keysToSkip = [
-  "userId",
-  "organizationId",
-  "categoryId",
-  "locationId",
-  "customFieldId",
-  "mainImage",
-  "mainImageExpiration",
-  // Phase A5: backup-export now emits the resolved `assetModel` object
-  // (`{ name }`) so cross-org restore can find / create the model by
-  // name. The opaque FK column would only resolve in the source org and
-  // can be safely dropped from the backup.
-  "assetModelId",
-];
-
-export async function exportAssetsBackupToCsv({
-  organizationId,
-}: {
-  organizationId: string;
-}) {
-  try {
-    const assets = await fetchAssetsForExport({ organizationId });
-
-    const csvData = buildCsvBackupDataFromAssets({
-      assets,
-      keysToSkip,
-    });
-
-    if (!csvData || !csvData.length) {
-      throw new ShelfError({
-        cause: null,
-        title: "No assets to export",
-        message:
-          "Your workspace doesn't have any assets so there is nothing to export.",
-        label: "CSV",
-        shouldBeCaptured: false,
-      });
-    }
-
-    /** Get the headers from the first row and filter out the keys to skip */
-    const headers = Object.keys(assets[0]).filter(
-      (header) => !keysToSkip.includes(header)
-    );
-
-    /** Add the header column */
-    csvData.unshift(headers);
-
-    /** Convert the data to a string */
-    const csvRows = csvData.map((row) => row.join(";"));
-
-    /** Join the rows with a new line */
-    const csvString = csvRows.join("\n");
-
-    return csvString;
-  } catch (cause) {
-    throw new ShelfError({
-      cause,
-      message: isLikeShelfError(cause)
-        ? cause.message
-        : "Something went wrong while exporting the assets.",
-      additionalData: { organizationId },
-      label: "CSV",
-    });
-  }
-}
 
 /**
  * Resolves the assets to export, honoring the select-all sentinel and the
@@ -374,6 +239,14 @@ async function resolveExportAssets({
     assetIds: takeAll ? undefined : ids,
     canUseBarcodes: currentOrganization.barcodesEnabled ?? false,
     timeZone,
+    // The export reproduces the index view it was started from, Archived and
+    // All included (issue #382). Reaching it takes `asset: export`, which only
+    // ADMIN and OWNER hold, the same members who hold `asset: archive`.
+    honorArchivedView: true,
+    // Hand-picked rows carry no view (only a select-all forwards the index's
+    // params), so the ids alone decide: an archived row the user ticked in
+    // the Archived or All view is exported, not dropped by the Active default.
+    archivedFilter: takeAll ? undefined : "all",
   });
 
   return { assets };
@@ -858,10 +731,10 @@ const formatCustomFieldForCsv = (
  * `custodianTeamMemberId` with a null `custodianUserId` — for example a booking
  * assigned while no user was attached to the team member, the two being linked
  * only later when the invite was accepted. The bookings index matches those
- * rows (see `getBookingsFilterData`, which resolves the same team-member ids
- * into `getBookings`' `custodianScope`), so restricting the export to the user
- * link alone would silently drop rows the user can see on screen and selected
- * for export.
+ * rows (the loaders resolve the same team-member ids with
+ * `resolveCustodianScope` into `getBookings`' `custodianScope`), so
+ * restricting the export to the user link alone would silently drop rows the
+ * user can see on screen and selected for export.
  *
  * This never widens access: `teamMemberIds` are resolved server-side from the
  * authenticated `userId`, never from request input, so both halves describe the
@@ -900,10 +773,12 @@ async function buildExportCustodyScopeClause({
 /**
  * Builds the bookings CSV string for the export route.
  *
- * Resolves which bookings to export — either the explicit `bookingsIds`, or,
- * when the select-all sentinel is present, every booking matching the index's
- * current filters — then enriches them with batched partial check-in state and
- * delegates row construction to {@link buildCsvExportDataFromBookings}.
+ * Resolves which bookings to export, then enriches them with batched partial
+ * check-in state and delegates row construction to
+ * {@link buildCsvExportDataFromBookings}. The bookings are either the explicit
+ * `bookingsIds`, or with the select-all sentinel every booking `list` holds at
+ * the request's filters, resolved with {@link getBookingsListWhereParams} like
+ * that list's loader.
  *
  * @param request - The incoming request (carries filters, locale, timezone)
  * @param userId - The acting user; scopes custody and DRAFT visibility on both
@@ -912,7 +787,9 @@ async function buildExportCustodyScopeClause({
  * @param bookingsIds - Selected booking IDs, or `[ALL_SELECTED_KEY]` for all
  * @param canSeeAllBookings - Whether the user may export bookings they don't own
  * @param organizationId - The active workspace; scopes every booking read
+ * @param list - The list select-all stands for; `null` when the request named none
  * @returns The CSV body as a single CRLF-joined string
+ * @throws {ShelfError} 400 when a select-all names no list
  * @throws {ShelfError} If fetching bookings or building rows fails
  */
 export async function exportBookingsFromIndexToCsv({
@@ -921,12 +798,14 @@ export async function exportBookingsFromIndexToCsv({
   bookingsIds,
   canSeeAllBookings,
   organizationId,
+  list,
 }: {
   request: Request;
   userId: string;
   bookingsIds: string[];
   canSeeAllBookings: boolean;
   organizationId: string;
+  list: BookingsList | null;
 }) {
   try {
     const hasSelectAll = bookingsIds.includes(ALL_SELECTED_KEY);
@@ -934,36 +813,38 @@ export async function exportBookingsFromIndexToCsv({
     /** If all are selected in the list, then we have to consider filter to get the entries */
     let bookings;
     if (hasSelectAll) {
-      // Here we need to use the getBookings the same way as in the index with all filters and everything
-      const {
-        page,
-        search,
-        status,
-        teamMemberIds,
-        orderBy,
-        orderDirection,
-        selfServiceData,
-      } = await getBookingsFilterData({
-        request,
-        canSeeAllBookings,
-        organizationId,
-        userId,
-      });
+      if (!list) {
+        // Without the list, guessing could export bookings the user never saw.
+        throw new ShelfError({
+          cause: null,
+          title: "Nothing was exported",
+          message:
+            "This page is out of date. Reload it and select the bookings again.",
+          additionalData: { organizationId },
+          label: "Booking",
+          status: 400,
+          shouldBeCaptured: false,
+        });
+      }
 
+      const searchParams = getCurrentSearchParams(request);
       const bookingsData = await getBookings({
-        page,
-        takeAll: true,
-        organizationId,
-        search,
-        userId,
-        ...(status && {
-          // If status is in the params, we filter based on it
-          statuses: [status],
+        ...getBookingsListWhereParams({
+          list,
+          searchParams,
+          organizationId,
+          userId,
+          custodianScope: canSeeAllBookings
+            ? null
+            : await resolveCustodianScope({ userId, organizationId }),
         }),
-        custodianTeamMemberIds: teamMemberIds,
-        ...selfServiceData,
-        orderBy,
-        orderDirection,
+        page: 1,
+        takeAll: true,
+        // The export never reads the total.
+        skipCount: true,
+        orderBy: searchParams.get("orderBy") ?? "from",
+        orderDirection: (searchParams.get("orderDirection") ??
+          "asc") as SortingDirection,
         extraInclude: { tags: { select: { name: true } } },
       });
       bookings = bookingsData.bookings;
@@ -979,8 +860,8 @@ export async function exportBookingsFromIndexToCsv({
            * `booking.export`) can export any booking in the organization by
            * supplying its id.
            *
-           * Mirrors the restriction the index applies via
-           * {@link getBookingsFilterData} + {@link getBookings}, so a user can
+           * Mirrors the restriction the bookings lists apply via
+           * {@link getBookingsListWhereParams} + {@link getBookings}, so a user can
            * export exactly the rows they can see — no more, and no fewer.
            */
           AND: [

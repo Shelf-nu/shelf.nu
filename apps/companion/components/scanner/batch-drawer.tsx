@@ -1,3 +1,14 @@
+/**
+ * BatchDrawer: the bottom drawer that lists scanned items with submit and
+ * clear controls. Used by the batch scan modes and the booking scan modes.
+ *
+ * A row can carry a quantity (quantity-tracked assets in the custody modes):
+ * it then shows a "n / max" chip that opens the caller's quantity sheet. A row
+ * the last submit refused shows the server's reason under its title.
+ *
+ * @see {@link file://./../../app/(tabs)/scanner.tsx} the host screen
+ * @see {@link file://./batch-blockers.tsx} the blocker card above the submit
+ */
 import {
   View,
   Text,
@@ -17,6 +28,7 @@ import {
   hitSlop,
   formatStatus,
 } from "@/lib/constants";
+import { formatQuantity } from "@/lib/quantity-format";
 import { useTheme } from "@/lib/theme-context";
 import { BatchBlockers } from "./batch-blockers";
 
@@ -35,12 +47,12 @@ type ScannedItem = {
   /** Kits only: number of contained assets (shown in the row meta line). */
   assetCount?: number;
   /**
-   * Quantity-tracked assets scanned into a booking: the units to book. Shown
-   * as a tappable "× N" chip so the amount can be changed before submit,
-   * the way the web scan drawer's per-row quantity input can.
+   * Quantity rows only: the units this row will move, out of `max`. When set,
+   * the row shows a chip that calls `onEditQuantity`.
    */
-  quantity?: number;
-  unitOfMeasure?: string | null;
+  quantity?: { value: number; max: number; unitOfMeasure: string | null };
+  /** Why the last submit did not move this row, shown under its title. */
+  error?: string;
 };
 
 type BatchDrawerProps = {
@@ -66,10 +78,7 @@ type BatchDrawerProps = {
   onResolveBlocker?: (group: BlockerGroup) => void;
   /** Removes every blocked item from the scan list. */
   onResolveAllBlockers?: () => void;
-  /**
-   * Opens the quantity prompt for a quantity-tracked row (booking add mode).
-   * When absent, quantities render as plain text.
-   */
+  /** Opens the quantity sheet for a row, by its key field. */
   onEditQuantity?: (id: string) => void;
 };
 
@@ -158,25 +167,31 @@ export function BatchDrawer({
                     : label;
                 })()}
               </Text>
-            </View>
-            {item.quantity != null ? (
-              <TouchableOpacity
-                style={styles.quantityChip}
-                onPress={
-                  onEditQuantity
-                    ? () => onEditQuantity(item[keyField])
-                    : undefined
-                }
-                disabled={!onEditQuantity}
-                hitSlop={hitSlop.sm}
-                accessibilityRole="button"
-                accessibilityLabel={`${item.quantity} ${
-                  item.unitOfMeasure || "units"
-                }${onEditQuantity ? ", tap to change quantity" : ""}`}
-              >
-                <Text style={styles.quantityChipText}>
-                  × {item.quantity} {item.unitOfMeasure || "units"}
+              {item.error ? (
+                <Text style={styles.drawerItemError} accessibilityRole="alert">
+                  {item.error}
                 </Text>
+              ) : null}
+            </View>
+            {item.quantity && onEditQuantity ? (
+              <TouchableOpacity
+                testID={`batch-quantity-${item[keyField]}`}
+                style={styles.quantityChip}
+                onPress={() => onEditQuantity(item[keyField])}
+                hitSlop={hitSlop.md}
+                accessibilityRole="button"
+                accessibilityLabel={`Units for ${item.title}: ${
+                  item.quantity.value
+                } of ${maxLabel(item.quantity)}`}
+                accessibilityHint="Opens a sheet to change the number of units"
+              >
+                <Text style={styles.quantityChipValue}>
+                  {item.quantity.value}
+                </Text>
+                <Text style={styles.quantityChipMax}>
+                  {`/ ${maxLabel(item.quantity)}`}
+                </Text>
+                <Ionicons name="pencil" size={12} color={colors.muted} />
               </TouchableOpacity>
             ) : null}
             <TouchableOpacity
@@ -224,6 +239,13 @@ export function BatchDrawer({
         )}
       </TouchableOpacity>
     </View>
+  );
+}
+
+/** "46 m" for a row's cap, or "46" when the asset has no unit. */
+function maxLabel(quantity: { max: number; unitOfMeasure: string | null }) {
+  return (
+    formatQuantity(quantity.max, quantity.unitOfMeasure) ?? String(quantity.max)
   );
 }
 
@@ -294,17 +316,30 @@ const useStyles = createStyles((colors, shadows) => ({
     color: colors.muted,
     marginTop: 1,
   },
-  quantityChip: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-    borderRadius: borderRadius.pill,
-    backgroundColor: colors.primaryBg,
-    marginRight: spacing.sm,
-  },
-  quantityChipText: {
+  drawerItemError: {
     fontSize: fontSize.xs,
-    fontWeight: "600",
-    color: colors.primary,
+    color: colors.errorText,
+    marginTop: 2,
+  },
+  quantityChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.backgroundSecondary,
+  },
+  quantityChipValue: {
+    fontSize: fontSize.base,
+    fontWeight: "700",
+    color: colors.foreground,
+  },
+  quantityChipMax: {
+    fontSize: fontSize.xs,
+    color: colors.muted,
   },
   drawerSubmitBtn: {
     flexDirection: "row",

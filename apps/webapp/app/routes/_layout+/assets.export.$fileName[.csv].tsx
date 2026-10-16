@@ -1,14 +1,17 @@
-import { AssetIndexMode } from "@prisma/client";
+/** CSV export route for the asset index: standard and import-ready downloads. */
 import { data, type LoaderFunctionArgs } from "react-router";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { csvResponse } from "~/utils/csv-utf8";
 import {
-  exportAssetsBackupToCsv,
   exportAssetsForImportToCsv,
   exportAssetsFromIndexToCsv,
 } from "~/utils/csv.server";
-import { makeShelfError } from "~/utils/error";
-import { error, getCurrentSearchParams } from "~/utils/http.server";
+import { ShelfError, makeShelfError } from "~/utils/error";
+import {
+  buildContentDisposition,
+  error,
+  getCurrentSearchParams,
+} from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -16,7 +19,12 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 import { assertUserCanExportAssets } from "~/utils/subscription.server";
 
-export const loader = async ({ context, request }: LoaderFunctionArgs) => {
+/** Exports the requested asset selection as a CSV download. */
+export const loader = async ({
+  context,
+  request,
+  params,
+}: LoaderFunctionArgs) => {
   const authSession = context.getSession();
   const { userId } = authSession;
 
@@ -41,7 +49,6 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
         role,
       }),
     ]);
-    const { mode } = settings;
 
     const searchParams = getCurrentSearchParams(request);
     const assetIds = searchParams.get("assetIds");
@@ -53,41 +60,51 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
     const exportType =
       searchParams.get("exportType") === "import" ? "import" : "standard";
     // `columnScope=all` exports every configured column regardless of the
-    // user's current visibility settings; defaults to "visible" (existing
-    // behavior) when absent.
+    // user's current visibility settings; defaults to "visible" when absent.
     const columnScope =
       searchParams.get("columnScope") === "all" ? "all" : "visible";
-    const isBackupRequest = assetIds === null;
 
-    /** Join the rows with a new line */
-    let csvString: string;
-    if (isBackupRequest) {
-      csvString = await exportAssetsBackupToCsv({ organizationId });
-    } else if (exportType === "import") {
-      // Import-ready works in both index modes (scope forced to "all" in SIMPLE).
-      csvString = await exportAssetsForImportToCsv({
-        request,
-        assetIds,
-        settings,
-        currentOrganization,
-        assetIndexCurrentSearchParams,
-        columnScope,
+    // Every export starts from an index selection: explicit ids or the
+    // select-all sentinel.
+    if (!assetIds) {
+      throw new ShelfError({
+        cause: null,
+        title: "No assets selected",
+        message: "Select the assets you want to export from the asset index.",
+        label: "CSV",
+        status: 400,
+        shouldBeCaptured: false,
       });
-    } else if (mode === AssetIndexMode.ADVANCED) {
-      csvString = await exportAssetsFromIndexToCsv({
-        request,
-        userId,
-        assetIds,
-        settings,
-        currentOrganization,
-        assetIndexCurrentSearchParams,
-        columnScope,
-      });
-    } else {
-      csvString = await exportAssetsBackupToCsv({ organizationId });
     }
 
-    return csvResponse(csvString);
+    const csvString =
+      exportType === "import"
+        ? await exportAssetsForImportToCsv({
+            request,
+            assetIds,
+            settings,
+            currentOrganization,
+            assetIndexCurrentSearchParams,
+            columnScope,
+          })
+        : await exportAssetsFromIndexToCsv({
+            request,
+            userId,
+            assetIds,
+            settings,
+            currentOrganization,
+            assetIndexCurrentSearchParams,
+            columnScope,
+          });
+
+    return csvResponse(csvString, {
+      headers: {
+        "content-disposition": buildContentDisposition(null, {
+          fallback: "assets",
+          filename: params.fileName ? `${params.fileName}.csv` : undefined,
+        }),
+      },
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });

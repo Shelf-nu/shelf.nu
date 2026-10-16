@@ -1,4 +1,3 @@
-import { OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
@@ -16,12 +15,12 @@ import {
   setStandaloneBookedQuantity,
 } from "~/modules/booking/booked-quantity.server";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
-import { canUserManageBookingAssets } from "~/utils/bookings";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { canManageBookingItems } from "~/utils/permissions/role-access";
 import { enforceUserRateLimit } from "~/utils/rate-limit.server";
 
 /**
@@ -38,8 +37,10 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  *   the booking's own `[from, to]` window, with this booking excluded.
  * - The asset row is locked for the read-then-write, so two concurrent edits
  *   cannot both pass the guard and oversubscribe the pool.
- * - COMPLETE / ARCHIVED / CANCELLED bookings reject; SELF_SERVICE and BASE
- *   users may only touch their own DRAFT bookings.
+ * - The status rule is the add-items one (`canManageBookingItems`):
+ *   COMPLETE / ARCHIVED / CANCELLED bookings reject, and callers held to DRAFT
+ *   may only touch a DRAFT booking. Callers who do not write every booking may
+ *   only touch their own.
  *
  * Body: { bookingId: string, assetId: string, quantity: number }
  * Response: { success: true, quantity, previousQuantity }
@@ -118,27 +119,27 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
-    const { role } = await getMobileUserContext(user.id, organizationId);
-    const isSelfServiceOrBase =
-      role === OrganizationRoles.SELF_SERVICE ||
-      role === OrganizationRoles.BASE;
+    const { access } = await getMobileUserContext(user.id, organizationId);
 
-    // `booking:update` is granted to SELF_SERVICE / BASE; without this they
-    // could resize another user's reservation by id (same guard as web).
-    if (isSelfServiceOrBase) {
-      validateBookingOwnership({
-        booking: {
-          creatorId: bookingAsset.booking.creatorId,
-          custodianUserId: bookingAsset.booking.custodianUserId,
-        },
-        userId: user.id,
-        role,
-        action: "adjust asset quantity on",
-      });
-    }
+    // `booking:update` reaches callers who may only write their own bookings;
+    // without this they could resize another user's reservation by id (same
+    // guard as web). A no-op when `access.bookings.writeAll`.
+    validateBookingOwnership({
+      booking: {
+        creatorId: bookingAsset.booking.creatorId,
+        custodianUserId: bookingAsset.booking.custodianUserId,
+      },
+      userId: user.id,
+      access,
+      action: "adjust asset quantity on",
+    });
 
+    // The same status rule that governs adding items (`canManageBookingItems`).
     if (
-      !canUserManageBookingAssets(bookingAsset.booking, isSelfServiceOrBase)
+      !canManageBookingItems({
+        access,
+        bookingStatus: bookingAsset.booking.status,
+      })
     ) {
       throw new ShelfError({
         cause: null,

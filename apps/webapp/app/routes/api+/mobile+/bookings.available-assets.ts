@@ -27,7 +27,11 @@ import {
   resolveAssetImage,
   serializeImageExpiration,
 } from "~/modules/asset/image-resolution";
-import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
+import {
+  ASSET_IMAGE_RESIGN_LIMITS,
+  getPaginatedAndFilterableAssets,
+  refreshExpiredAssetImages,
+} from "~/modules/asset/service.server";
 import {
   resolveDisplayCode,
   labelForPreference,
@@ -110,15 +114,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
       pickerParams.set("per_page", String(MOBILE_PICKER_MAX_PAGE_SIZE));
     }
 
-    const { assets, page, perPage, totalAssets, totalPages } =
-      await getPaginatedAndFilterableAssets({
-        request,
-        organizationId,
-        // Mobile asset picker: ignores the custodian-filter seed, so scope it
-        // rather than fetch a roster the response never returns.
-        canSeeAllCustody: false,
-        filters: pickerParams.toString(),
-      });
+    const {
+      assets: storedAssets,
+      page,
+      perPage,
+      totalAssets,
+      totalPages,
+    } = await getPaginatedAndFilterableAssets({
+      request,
+      organizationId,
+      // Mobile asset picker: ignores the custodian-filter seed, so scope it
+      // rather than fetch a roster the response never returns.
+      canSeeAllCustody: false,
+      filters: pickerParams.toString(),
+    });
+
+    const assets = await refreshExpiredAssetImages(storedAssets, {
+      organizationId,
+      ...ASSET_IMAGE_RESIGN_LIMITS,
+    });
 
     // Resolve the workspace's display code (QR Code ID by default, or a SAM ID
     // / barcode per the org's preference) for each asset so the mobile picker
@@ -136,7 +150,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       }),
       assetIds.length > 0
         ? db.asset.findMany({
-            where: { id: { in: assetIds }, organizationId },
+            // Bookable pool: archived assets are out of service.
+            where: { id: { in: assetIds }, organizationId, archivedAt: null },
             select: {
               id: true,
               sequentialId: true,

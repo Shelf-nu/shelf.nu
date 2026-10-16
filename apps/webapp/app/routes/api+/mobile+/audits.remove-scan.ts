@@ -11,7 +11,6 @@ import {
   removeAuditScan,
   requireAuditAssignee,
 } from "~/modules/audit/service.server";
-import { resolveMostPrivilegedRole } from "~/utils/booking-authorization.server";
 import { makeShelfError } from "~/utils/error";
 import {
   PermissionAction,
@@ -35,21 +34,17 @@ import {
  *   - assetId: string — the asset whose scan is being removed
  *
  * Gated exactly like record-scan: audits enabled for the workspace, `audit:
- * update` permission, and ADMIN/OWNER act on any audit while BASE/SELF_SERVICE
- * must be assignees.
+ * update` permission, and callers who see every audit act on any audit while
+ * everyone else must be an assignee.
  */
 export async function action({ request }: ActionFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
-    const { canUseAudits, roles } = await getMobileUserContext(
+    const { canUseAudits, access } = await getMobileUserContext(
       user.id,
       organizationId
     );
-    // A membership can carry several roles in any order; gate on the most
-    // privileged one, or an actual admin ordered [SELF_SERVICE, ADMIN] would
-    // be treated as restricted.
-    const role = resolveMostPrivilegedRole(roles);
     if (!canUseAudits) {
       return data(
         {
@@ -85,7 +80,7 @@ export async function action({ request }: ActionFunctionArgs) {
       auditSessionId,
       organizationId,
       userId: user.id,
-      isSelfServiceOrBase: role === "SELF_SERVICE" || role === "BASE",
+      assignedOnly: !access.audits.seeAll,
     });
 
     const {

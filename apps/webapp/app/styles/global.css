@@ -89,8 +89,14 @@ p {
   display: none;
 }
 
+/*
+ * pointer-events-auto is load-bearing, not cosmetic. A modal Radix overlay
+ * (the Sheet) sets `pointer-events: none` on <body> and re-enables it only
+ * inside its own content. This dialog portals to <body>, so without this it
+ * renders normally and silently ignores every click.
+ */
 .dialog-backdrop {
-  @apply fixed inset-0 z-[100] backdrop-blur-sm flex items-center justify-center bg-black/50;
+  @apply pointer-events-auto fixed inset-0 z-[100] backdrop-blur-sm flex items-center justify-center bg-black/50;
 }
 /*
  * why h-[100dvh]: on iOS Safari `h-full` resolves to the LARGE viewport (LVH),
@@ -329,6 +335,31 @@ div[data-radix-popper-content-wrapper] > div[data-side="bottom"] {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+/*
+ * Bottom sheets (`data-mobile-sheet`, see
+ * `components/shared/mobile-dropdown-styles.tsx`) fade in instead of sliding
+ * below `md`. On a popover sheet the slide's `transform` lands on the element
+ * that wraps the fixed sheet and anchors the sheet to it for the length of the
+ * animation. The rule lives here, not in the styles injected while a menu is
+ * open, so the animation name stays the same when the menu closes: Radix reads
+ * a changed name as an exit animation and keeps the closed sheet on screen
+ * until it ends. The query is `SHEET_MEDIA_QUERY`.
+ */
+@media not all and (min-width: 768px) {
+  [data-mobile-sheet] {
+    animation-name: mobileSheetFadeIn !important;
+  }
+}
+
+@keyframes mobileSheetFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
   }
 }
 

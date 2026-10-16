@@ -1,6 +1,7 @@
 import type { KeyboardEvent } from "react";
 import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { Mock } from "vitest";
 import { useKeyboardReorder } from "./use-keyboard-reorder";
 
 interface TestItem {
@@ -15,8 +16,12 @@ describe("useKeyboardReorder", () => {
     { id: "3", name: "Third" },
   ];
 
-  let mockOnReorder: ReturnType<typeof vi.fn>;
-  let mockOnItemMoved: ReturnType<typeof vi.fn>;
+  // `unknown[]` rather than one item type: the suite reorders several item
+  // shapes, and a callback taking unknown[] accepts every one of them.
+  let mockOnReorder: Mock<(newItems: unknown[]) => void>;
+  let mockOnItemMoved: Mock<
+    (itemName: string, oldIndex: number, newIndex: number) => void
+  >;
 
   beforeEach(() => {
     mockOnReorder = vi.fn();

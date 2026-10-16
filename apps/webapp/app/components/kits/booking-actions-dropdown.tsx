@@ -1,3 +1,4 @@
+import { kitWithoutActiveAssetsReason } from "@shelf/labels";
 import { useLoaderData } from "react-router";
 import type { BookLink } from "~/components/shared/generic-add-to-bookings-actions-dropdown";
 import { GenericBookActionsDropdown } from "~/components/shared/generic-add-to-bookings-actions-dropdown";
@@ -6,11 +7,14 @@ import type { loader } from "~/routes/_layout+/kits.$kitId";
 import { isPersonalOrg } from "~/utils/organization";
 
 export default function BookingActionsDropdown() {
-  const { kit } = useLoaderData<typeof loader>();
+  const { kit, archivedMemberCount } = useLoaderData<typeof loader>();
   const organization = useCurrentOrganization();
 
   if (isPersonalOrg(organization)) return null;
 
+  // `kit.assetKits` holds the active members only: archived ones are left out
+  // of kit bookings, so a kit whose members are all archived has nothing to
+  // book, and an archived member never blocks the rest.
   const noAssets = kit.assetKits.length === 0;
   const someAssetIsNotAvailable = kit.assetKits.some(
     (ak) => !ak.asset.availableToBook
@@ -18,8 +22,10 @@ export default function BookingActionsDropdown() {
 
   const disabled = noAssets
     ? {
-        reason:
-          "Kit has no assets. Please add some assets to be able to book this kit.",
+        reason: kitWithoutActiveAssetsReason({
+          hasArchivedAssets: archivedMemberCount > 0,
+          action: "booking",
+        }),
       }
     : false;
 

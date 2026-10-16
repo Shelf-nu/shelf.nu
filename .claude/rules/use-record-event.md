@@ -1,11 +1,9 @@
 ---
 description: Every state-changing mutation must call recordEvent inside the same transaction as the mutation
-globs:
-  [
-    "apps/webapp/app/modules/**/*.ts",
-    "apps/webapp/app/routes/**/*.ts",
-    "apps/webapp/app/routes/**/*.tsx",
-  ]
+paths:
+  - "apps/webapp/app/modules/**/*.ts"
+  - "apps/webapp/app/routes/**/*.ts"
+  - "apps/webapp/app/routes/**/*.tsx"
 ---
 
 When a mutation writes a system note (`type: "UPDATE"`) or changes persisted
