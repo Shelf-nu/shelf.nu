@@ -16,10 +16,7 @@ import {
   getOwnerSubscriptionInfo,
   userHasActiveSubscription,
 } from "~/utils/stripe.server";
-import {
-  canExportAssets,
-  canHideShelfBranding,
-} from "~/utils/subscription.server";
+import { canHideShelfBranding } from "~/utils/subscription.server";
 
 // why: mock parseFormData to avoid actual file upload in tests
 vi.mock("@remix-run/form-data-parser", () => ({
@@ -60,7 +57,6 @@ vi.mock("~/utils/roles.server", () => ({
 }));
 
 vi.mock("~/utils/subscription.server", () => ({
-  canExportAssets: vi.fn(),
   canHideShelfBranding: vi.fn(),
 }));
 
@@ -80,7 +76,6 @@ const getOrganizationTierLimitMock = vi.mocked(getOrganizationTierLimit);
 const getOrganizationAdminsMock = vi.mocked(getOrganizationAdmins);
 const updateOrganizationMock = vi.mocked(updateOrganization);
 const requirePermissionMock = vi.mocked(requirePermission);
-const canExportAssetsMock = vi.mocked(canExportAssets);
 const canHideShelfBrandingMock = vi.mocked(canHideShelfBranding);
 const getOwnerSubscriptionInfoMock = vi.mocked(getOwnerSubscriptionInfo);
 const userHasActiveSubscriptionMock = vi.mocked(userHasActiveSubscription);
@@ -151,7 +146,6 @@ describe("settings.general loader", () => {
     } as any);
 
     getOrganizationAdminsMock.mockResolvedValue([]);
-    canExportAssetsMock.mockReturnValue(true);
     canHideShelfBrandingMock.mockReturnValue(true);
     // why: mock Stripe subscription functions to return default values
     getOwnerSubscriptionInfoMock.mockResolvedValue({

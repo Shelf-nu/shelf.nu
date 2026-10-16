@@ -908,6 +908,8 @@ export async function transferOwnership({
         cause: null,
         message: "Personal workspaces cannot be transferred.",
         label,
+        status: 400,
+        shouldBeCaptured: false,
       });
     }
 
@@ -1000,6 +1002,8 @@ export async function transferOwnership({
         cause: null,
         message: "Current user is not the owner of the organization.",
         label,
+        status: 403,
+        shouldBeCaptured: false,
       });
     }
 
@@ -1011,6 +1015,8 @@ export async function transferOwnership({
         cause: null,
         message: "New owner is not a member of the organization.",
         label,
+        status: 400,
+        shouldBeCaptured: false,
       });
     }
 
@@ -1025,6 +1031,8 @@ export async function transferOwnership({
         cause: null,
         message: "New owner is not an admin of the organization.",
         label,
+        status: 400,
+        shouldBeCaptured: false,
       });
     }
 
@@ -1040,6 +1048,8 @@ export async function transferOwnership({
           message:
             "Cannot transfer ownership to a user who already has an active subscription.",
           label,
+          status: 400,
+          shouldBeCaptured: false,
         });
       }
     }

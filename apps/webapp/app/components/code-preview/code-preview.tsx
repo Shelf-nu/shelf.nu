@@ -351,8 +351,9 @@ export const CodePreview = ({
                   ? {
                       reason: isOwner ? (
                         <>
-                          Your workspace doesn't have the barcodes addon
-                          enabled.{" "}
+                          Shelf QR codes are included in every plan. Adding
+                          other barcodes, like Code128 or a QR code from another
+                          system, needs the Alternative Barcodes add-on.{" "}
                           <UnlockBarcodesModal
                             triggerVariant="link"
                             triggerLabel="Learn more"
@@ -360,9 +361,10 @@ export const CodePreview = ({
                         </>
                       ) : (
                         <>
-                          Your workspace doesn't currently support barcodes.
-                          Contact your workspace owner to enable this feature,
-                          or get in touch with{" "}
+                          Shelf QR codes are included in every plan. Adding
+                          other barcodes needs the Alternative Barcodes add-on:
+                          contact your workspace owner to enable it, or get in
+                          touch with{" "}
                           <CrispButton variant="link">sales</CrispButton>.
                         </>
                       ),
