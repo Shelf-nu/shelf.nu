@@ -1877,6 +1877,12 @@ export type AssetQueryOptions = {
   withBookings?: boolean;
   withBarcodes?: boolean;
   /**
+   * Include the `lastAuditDate` scalar (latest completed audit that covered
+   * the asset). Off by default so callers that do not render the column pay
+   * nothing for it.
+   */
+  withLastAuditDate?: boolean;
+  /**
    * When true (default), includes full custom field definitions (helpText,
    * required, options, categories) in each custom field value — matching
    * the AdvancedIndexAsset type contract. Set to false for table views
@@ -1889,6 +1895,12 @@ export type AssetQueryOptions = {
 export type AssetReturnOptions = {
   withBookings?: boolean;
   withBarcodes?: boolean;
+  /**
+   * Include the `lastAuditDate` scalar (latest completed audit that covered
+   * the asset). Off by default so callers that do not render the column pay
+   * nothing for it.
+   */
+  withLastAuditDate?: boolean;
   /**
    * When provided, the emitted `json_agg` orders its elements by this SQL
    * expression: `json_agg(jsonb_build_object(...) ORDER BY <orderBy>)`. The
@@ -1959,13 +1971,33 @@ const utcJsonTimestamp = (
     | 'aq."assetUpdatedAt"'
     | 'aq."assetMainImageExpiration"'
     | 'ar."alertDateTime"'
+    | 'aq."lastAuditDate"'
 ) => Prisma.raw(`to_char(${column}, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`);
+
+/**
+ * Scalar subquery returning the completion time of the latest finished audit
+ * that covered the outer asset (`a`). Only COMPLETED and ARCHIVED sessions
+ * count, and `completedAt IS NOT NULL` drops archived audits that were never
+ * completed. The `s."organizationId" = a."organizationId"` predicate keeps the
+ * lookup inside the asset's workspace. References only `a.id` and
+ * `a."organizationId"`, so it needs no GROUP BY additions.
+ */
+export const LAST_AUDIT_DATE_SQL = Prisma.sql`(
+  SELECT MAX(s."completedAt")
+  FROM public."AuditAsset" aa
+  JOIN public."AuditSession" s ON s.id = aa."auditSessionId"
+  WHERE aa."assetId" = a.id
+    AND s."organizationId" = a."organizationId"
+    AND s.status IN ('COMPLETED', 'ARCHIVED')
+    AND s."completedAt" IS NOT NULL
+)`;
 
 // Convert to functions that accept options
 export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
   const {
     withBookings = false,
     withBarcodes = false,
+    withLastAuditDate = false,
     withCustomFieldDefinitions = true,
   } = options;
 
@@ -2078,6 +2110,11 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
   // Everything between the backticks below is a template literal, so a stray
   // backtick or dollar-brace anywhere in it — SQL comments included — ends the
   // literal and reinterprets the rest of the query as JavaScript.
+  const lastAuditDateSelect = withLastAuditDate
+    ? Prisma.sql`,
+    ${LAST_AUDIT_DATE_SQL} AS "lastAuditDate"`
+    : Prisma.sql``;
+
   const barcodesSelect = withBarcodes
     ? Prisma.sql`,
     (
@@ -2296,7 +2333,7 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
         ORDER BY 
           ar."alertDateTime" ASC
         LIMIT 1
-      ) AS upcomingReminder${bookingsSelect}${barcodesSelect}
+      ) AS upcomingReminder${bookingsSelect}${barcodesSelect}${lastAuditDateSelect}
   `;
 };
 
@@ -2436,11 +2473,21 @@ export const assetQueryJoins = Prisma.sql`
  * @returns Prisma.Sql fragment that safely handles no results
  */
 export const assetReturnFragment = (options: AssetReturnOptions = {}) => {
-  const { withBookings = false, withBarcodes = false, orderBy } = options;
+  const {
+    withBookings = false,
+    withBarcodes = false,
+    withLastAuditDate = false,
+    orderBy,
+  } = options;
 
   const bookingsField = withBookings
     ? Prisma.sql`,
         'bookings', COALESCE(aq.bookings, '[]'::jsonb)`
+    : Prisma.sql``;
+
+  const lastAuditDateField = withLastAuditDate
+    ? Prisma.sql`,
+        'lastAuditDate', ${utcJsonTimestamp('aq."lastAuditDate"')}`
     : Prisma.sql``;
 
   const barcodesField = withBarcodes
@@ -2518,7 +2565,7 @@ export const assetReturnFragment = (options: AssetReturnOptions = {}) => {
           'locations', COALESCE(aq.locations, '[]'::jsonb),
           'custody', aq.custody,
           'customFields', COALESCE(aq."customFields", '[]'::jsonb),
-          'upcomingReminder', aq.upcomingReminder${bookingsField}${barcodesField}
+          'upcomingReminder', aq.upcomingReminder${bookingsField}${barcodesField}${lastAuditDateField}
         )${aggOrderBy}
       ) FILTER (WHERE aq."assetId" IS NOT NULL),
       '[]'
@@ -2775,6 +2822,8 @@ export type BuildAdvancedAssetsQueryParams = {
   withBookings: boolean;
   /** Include the barcodes jsonb aggregation. */
   withBarcodes: boolean;
+  /** Include the `lastAuditDate` scalar subquery. */
+  withLastAuditDate: boolean;
   /** `LIMIT/OFFSET` fragment, or `Prisma.empty` for takeAll (full export). */
   paginationClause: Prisma.Sql;
 };
@@ -2806,6 +2855,7 @@ export function buildAdvancedAssetsQuery({
   parsedFilters,
   withBookings,
   withBarcodes,
+  withLastAuditDate,
   paginationClause,
 }: BuildAdvancedAssetsQueryParams): Prisma.Sql {
   const customFieldSelect = generateCustomFieldSelect(customFieldSortings);
@@ -2928,6 +2978,7 @@ export function buildAdvancedAssetsQuery({
         ${assetReturnFragment({
           withBookings,
           withBarcodes,
+          withLastAuditDate,
           orderBy: rankOrderBy,
         })}
       FROM sorted_asset_query saq
@@ -2936,6 +2987,7 @@ export function buildAdvancedAssetsQuery({
         ${assetQueryFragment({
           withBookings,
           withBarcodes,
+          withLastAuditDate,
           withCustomFieldDefinitions: false,
         })}
         ${assetQueryJoins}

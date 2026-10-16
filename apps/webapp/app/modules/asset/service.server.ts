@@ -1191,6 +1191,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
       parsedFilters,
       withBookings: getBookings || isUpcomingBookingsColumnVisible,
       withBarcodes: canUseBarcodes,
+      withLastAuditDate: false,
       paginationClause,
     });
 

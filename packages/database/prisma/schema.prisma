@@ -2565,6 +2565,7 @@ model AuditAsset {
   @@unique([auditSessionId, assetId])
   @@index([status])
   @@index([scannedById])
+  @@index([assetId])
 }
 
 model AuditScan {

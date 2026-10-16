@@ -5,7 +5,9 @@ import type { Filter } from "~/components/assets/assets-index/advanced-filters/s
 import { ShelfError } from "~/utils/error";
 import {
   assetQueryFragment,
+  LAST_AUDIT_DATE_SQL,
   assetQueryJoins,
+  assetReturnFragment,
   buildAdvancedAssetsQuery,
   generateCustomFieldSelect,
   generateWhereClause,
@@ -1397,6 +1399,7 @@ describe("buildAdvancedAssetsQuery", () => {
       parsedFilters,
       withBookings: overrides?.withBookings ?? false,
       withBarcodes: overrides?.withBarcodes ?? false,
+      withLastAuditDate: false,
       paginationClause: Prisma.sql`LIMIT ${100} OFFSET ${0}`,
     });
   }
@@ -1657,5 +1660,41 @@ describe("custodian display name", () => {
     const groupBy = sql.match(/GROUP BY [^\n]*/)?.[0] ?? "";
 
     expect(groupBy).toContain('bu."displayName"');
+  });
+});
+
+describe("lastAuditDate", () => {
+  const text = (sql: Prisma.Sql) => sql.strings.join("?");
+
+  it("counts only finished audits inside the asset's workspace", () => {
+    const sql = text(LAST_AUDIT_DATE_SQL);
+    expect(sql).toContain("'COMPLETED'");
+    expect(sql).toContain("'ARCHIVED'");
+    expect(sql).toContain('MAX(s."completedAt")');
+    expect(sql).toContain('s."organizationId" = a."organizationId"');
+    expect(sql).not.toContain("'CANCELLED'");
+    expect(sql).not.toContain("'PENDING'");
+    expect(sql).not.toContain("'ACTIVE'");
+  });
+
+  it("excludes archived audits that were never completed", () => {
+    expect(text(LAST_AUDIT_DATE_SQL)).toContain('"completedAt" IS NOT NULL');
+  });
+
+  it("selects the column only when withLastAuditDate is set", () => {
+    expect(text(assetQueryFragment({ withLastAuditDate: true }))).toContain(
+      'AS "lastAuditDate"'
+    );
+    expect(
+      text(assetQueryFragment({ withLastAuditDate: false }))
+    ).not.toContain('AS "lastAuditDate"');
+    expect(text(assetQueryFragment())).not.toContain('AS "lastAuditDate"');
+  });
+
+  it("emits the JSON key only when withLastAuditDate is set", () => {
+    expect(text(assetReturnFragment({ withLastAuditDate: true }))).toContain(
+      "'lastAuditDate'"
+    );
+    expect(text(assetReturnFragment())).not.toContain("'lastAuditDate'");
   });
 });
