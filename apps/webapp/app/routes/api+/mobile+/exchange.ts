@@ -3,12 +3,13 @@
  *
  * Back-channel of the native-app SSO login: the companion app posts the
  * single-use authorization code it received via the `shelf://auth-callback`
- * deeplink and receives a fresh, independent Supabase session in the JSON body
- * (tokens never travel in a URL). Deliberately NOT behind `requireMobileAuth` —
- * the caller has no session yet; the single-use code IS the credential.
+ * deeplink and receives the SSO session the web sign-in produced, refreshed, in
+ * the JSON body (tokens never travel in a URL). Deliberately NOT behind
+ * `requireMobileAuth`: the caller has no session yet, and the single-use code
+ * IS the credential.
  *
- * @see apps/webapp/app/modules/auth/mobile-sso.server.ts — redeem + mint
- * @see apps/webapp/app/routes/_auth+/oauth.callback.mobile.tsx — issues the code
+ * @see apps/webapp/app/modules/auth/mobile-sso.server.ts (redeem)
+ * @see apps/webapp/app/routes/_auth+/oauth.callback.mobile.tsx (issues the code)
  */
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
@@ -22,21 +23,21 @@ import { getActionMethod, logException } from "~/utils/http.server";
 const ExchangeSchema = z.object({
   code: z.string().min(1, "Authorization code is required"),
   // PKCE verifier (RFC 7636: 43–128 chars, base64url unreserved charset).
-  // Optional — only codes minted by a PKCE-capable app build carry a challenge
-  // that requires it. The charset is constrained to mirror the strict S256
-  // `code_challenge` validation at `/sso-login`; a non-conforming verifier could
-  // never hash to a stored challenge anyway, so we reject it up front.
-  codeVerifier: z
-    .string()
-    .regex(/^[A-Za-z0-9_-]{43,128}$/)
-    .optional(),
+  // REQUIRED: every code is minted bound to a challenge, and redemption refuses
+  // an unbound one, so a request without a verifier can never succeed. The
+  // charset mirrors the strict S256 `code_challenge` validation at
+  // `/sso-login` — a non-conforming verifier could never hash to a stored
+  // challenge anyway, so it is rejected up front.
+  codeVerifier: z.string().regex(/^[A-Za-z0-9_-]{43,128}$/),
 });
 
 /**
  * POST /api/mobile/exchange
  *
- * Body: `{ code: string, codeVerifier?: string }` — the single-use code from
- * the SSO deeplink, plus the PKCE verifier when the app build supports it.
+ * Body: `{ code: string, codeVerifier: string }` — the single-use code from
+ * the SSO deeplink, plus the PKCE verifier that proves ownership of it. Both
+ * are mandatory: every code is minted bound to an S256 challenge, so a request
+ * without a matching verifier can never succeed.
  *
  * @param args - React Router action args (carrying the incoming request)
  * @returns `{ accessToken, refreshToken }` on success (the app passes them to
@@ -79,7 +80,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const reason = makeShelfError(cause);
     // why: this resource route returns failures as JSON (the companion app
     // parses `{ error }`) and never re-throws, so without an explicit log a
-    // genuine 5xx (Supabase mint outage, broken auth contract, DB fault) would
+    // genuine 5xx (Supabase outage, broken auth contract, DB fault) would
     // never reach Sentry. `logException` mirrors `error()`'s logging (5xx →
     // Sentry, handled 4xx → low-severity trail, client aborts skipped). NOTE:
     // every route under `api+/mobile+/` swallows 5xx this same way and none log

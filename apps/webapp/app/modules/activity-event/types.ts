@@ -28,6 +28,7 @@ export type FieldChangeAction =
   | "ASSET_NAME_CHANGED"
   | "ASSET_DESCRIPTION_CHANGED"
   | "ASSET_CATEGORY_CHANGED"
+  | "ASSET_MODEL_CHANGED"
   | "ASSET_KIT_CHANGED"
   | "ASSET_LOCATION_CHANGED"
   | "ASSET_TAGS_CHANGED"
@@ -39,6 +40,7 @@ export type FieldChangeAction =
   | "ASSET_PREFERRED_BARCODE_CHANGED"
   | "BOOKING_STATUS_CHANGED"
   | "BOOKING_DATES_CHANGED"
+  | "BOOKING_MODEL_REQUEST_CHANGED"
   | "AUDIT_DUE_DATE_CHANGED"
   // Not named `*_CHANGED`, but shaped like one on purpose: this is a per-field
   // audit change (today only `status`, when a scan resumes a PENDING audit that
@@ -99,6 +101,7 @@ export type CustodyEventInput = BaseEventInput & {
 export type AssetLifecycleAction =
   | "ASSET_CREATED"
   | "ASSET_ARCHIVED"
+  | "ASSET_UNARCHIVED"
   | "ASSET_DELETED";
 
 export type AssetLifecycleEventInput = BaseEventInput & {
@@ -150,6 +153,35 @@ export type BookingAssetItemEventInput = BaseEventInput & {
 };
 
 /**
+ * Non-field-change actions for booking model-level reservations
+ * (Book-by-Model). `BOOKING_MODEL_REQUEST_CHANGED` is deliberately NOT here —
+ * it lives in {@link FieldChangeAction} so the compiler forces the
+ * `field`/`fromValue`/`toValue` triple on every quantity / fulfilledAt edit.
+ */
+export type BookingModelRequestAction =
+  | "BOOKING_MODEL_REQUESTED"
+  | "BOOKING_MODEL_REQUEST_REMOVED"
+  | "BOOKING_MODEL_REQUEST_FULFILLED";
+
+/**
+ * Event for a model-level reservation on a booking. The entity is the BOOKING
+ * (that's where the reservation lives and where the activity feed reads from);
+ * the reserved `AssetModel` travels in `meta` because `ActivityEvent` has no
+ * `assetModelId` cross-ref column.
+ *
+ * `BOOKING_MODEL_REQUEST_FULFILLED` is emitted once per UNIT assigned by a
+ * scan and sets `assetId` to the concrete asset that satisfied it — that is
+ * the join back from "3 × Dell were promised" to "these three serial numbers
+ * went out".
+ */
+export type BookingModelRequestEventInput = BaseEventInput & {
+  action: BookingModelRequestAction;
+  entityType: "BOOKING";
+  entityId: string;
+  bookingId: string;
+};
+
+/**
  * All remaining actions — the base shape is sufficient.
  * These are actions without specific cross-ref requirements beyond the base fields.
  */
@@ -164,6 +196,7 @@ export type GenericEventInput = BaseEventInput & {
     | BookingLifecycleAction
     | "BOOKING_ASSETS_ADDED"
     | "BOOKING_ASSETS_REMOVED"
+    | BookingModelRequestAction
   >;
   entityType: ActivityEntity;
   entityId: string;
@@ -182,4 +215,5 @@ export type ActivityEventInput =
   | AuditEventInput
   | BookingLifecycleEventInput
   | BookingAssetItemEventInput
+  | BookingModelRequestEventInput
   | GenericEventInput;

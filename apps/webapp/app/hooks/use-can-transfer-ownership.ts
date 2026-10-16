@@ -1,5 +1,5 @@
 import { useIsShelfAdmin } from "~/hooks/use-is-shelf-admin";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useRoleAccess } from "~/hooks/use-role-access";
 
 /**
  * Whether the viewer may run the workspace ownership transfer.
@@ -23,7 +23,7 @@ import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
  * @see {@link file://./../routes/_layout+/admin-dashboard+/org.$organizationId.transfer-ownership.tsx}
  */
 export function useCanTransferOwnership() {
-  const { isOwner } = useUserRoleHelper();
+  const { ownsWorkspace: isOwner } = useRoleAccess();
   const isShelfAdmin = useIsShelfAdmin();
 
   return isOwner || isShelfAdmin;

@@ -2,15 +2,17 @@ import type { AssetIndexSettings } from "@prisma/client";
 import { createCookie } from "react-router"; // or cloudflare/deno
 
 import type { Cookie } from "react-router";
-import type {
+import type { AllowedPathname } from "~/hooks/search-params";
+import {
+  ADVANCED_ASSET_FILTER_COOKIE_SUFFIX,
   ALLOWED_FILTER_PATHNAMES,
-  AllowedPathname,
+  cleanParamsForFilterCookie,
 } from "~/hooks/search-params";
-import { cleanParamsForCookie } from "~/hooks/search-params";
 import { advancedFilterFormatSchema } from "~/modules/asset/utils.server";
 import type { Column } from "~/modules/asset-index-settings/helpers";
 import { COOKIE_DOMAIN } from "./env";
 import { getCurrentSearchParams } from "./http.server";
+import { DEFAULT_PER_PAGE, isPerPageOption } from "./per-page";
 
 // find cookie by name from request headers
 export function getCookie(name: string, headers: Headers) {
@@ -95,53 +97,90 @@ export const userPrefs = createCookie("user-prefs", {
 });
 
 /**
- * Expires the old host-only `user-prefs` cookie that was set before the
- * `domain` attribute was added. Without this, browsers carry two cookies
- * with the same name (one host-only, one domain-scoped) for up to 7 days.
+ * Expires the old host-only `user-prefs` cookie left over from before the
+ * `domain` attribute was added, so a browser does not carry two cookies of the
+ * same name for up to 7 days.
  *
- * Safe to call on every request — it's a no-op once the old cookie is gone.
- * @TODO Can be removed after rollout (≥ 1 week post-deploy).
+ * Only emitted when {@link COOKIE_DOMAIN} is set. Without a domain the real
+ * cookie IS host-only, so this would delete the very cookie the same response
+ * is writing — which is every deployment that leaves `COOKIE_DOMAIN` unset,
+ * local development included, where it silently discards every user preference
+ * on each page load.
+ *
+ * Returns a list so a caller can spread it and emit nothing at all.
+ *
+ * @returns The expiry header, or an empty list when there is nothing to expire
+ * @TODO Can be removed once every session predating the domain attribute has
+ * aged out (the cookie's own lifetime is a week).
  */
-export function expireHostOnlyUserPrefsCookie(): [string, string] {
-  return ["Set-Cookie", "user-prefs=; Path=/; Max-Age=0; SameSite=Lax"];
+export function expireHostOnlyUserPrefsCookie(): Array<[string, string]> {
+  if (!COOKIE_DOMAIN) {
+    return [];
+  }
+
+  return [["Set-Cookie", "user-prefs=; Path=/; Max-Age=0; SameSite=Lax"]];
 }
 
+/**
+ * Resolves the page size to remember for a list request.
+ *
+ * A `per_page` from the URL is remembered only when the per-page menu offers
+ * it. Otherwise the stored size stands, and a stored size the menu does not
+ * offer falls back to the default.
+ *
+ * @param request - The list request, carrying the `user-prefs` cookie
+ * @param perPageParam - `per_page` from the URL, 0 when absent
+ * @returns The `user-prefs` value to serialize back, with a supported `perPage`
+ */
 export async function updateCookieWithPerPage(
   request: Request,
   perPageParam: number
 ) {
-  /* Get the cookie header */
   const cookieHeader = request.headers.get("Cookie");
-
   const cookie = (await userPrefs.parse(cookieHeader)) || {};
-  /** If the cookie doesn't have perPage, adding perPage attribute and setting it to its default value 20*/
-  if (!cookie.perPage) {
-    cookie.perPage = 20;
-  }
-  /** If the perPageParam is different from the cookie, we update the cookie */
-  if (cookie && perPageParam !== cookie.perPage && perPageParam !== 0) {
+
+  if (isPerPageOption(perPageParam)) {
     cookie.perPage = perPageParam;
+  } else if (!isPerPageOption(cookie.perPage)) {
+    cookie.perPage = DEFAULT_PER_PAGE;
   }
   return cookie;
 }
 
 /**
- * Used to set the perPage cookie on the first load of the page if it doesn't exist
+ * Makes sure `user-prefs` holds a supported page size on every page load, so
+ * a missing or unsupported value is replaced with the default.
  *
+ * @param request - The layout request, carrying the `user-prefs` cookie
+ * @returns The `user-prefs` value to serialize back
  */
 export async function initializePerPageCookieOnLayout(request: Request) {
   const cookieHeader = request.headers.get("Cookie");
   const cookie = (await userPrefs.parse(cookieHeader)) || {};
-  if (!cookie.perPage) {
-    cookie.perPage = 20;
+  if (!isPerPageOption(cookie.perPage)) {
+    cookie.perPage = DEFAULT_PER_PAGE;
   }
   return cookie;
 }
 
 /**
+ * Attributes every list filter cookie is written with. Expiring one must use
+ * the same path, so {@link expireFilterCookie} reads them from here too.
+ *
+ * No secrets: filter cookies are UI preferences, and unsigned cookies work
+ * with RR7 single fetch.
+ */
+const FILTER_COOKIE_OPTIONS = {
+  sameSite: "lax",
+  secure: process.env.NODE_ENV === "production",
+  maxAge: 60 * 60 * 24 * 365, // 1 year
+} as const;
+
+/**
  * Index FILTER COOKIE
  * This cookie is used to store the current search params for an index page.
- * It is used to persist filters across page loads and sessions.
+ * It is used to persist filters across page loads. It never holds the typed
+ * search, and signing out or in expires it (see {@link expireListPreferenceCookies}).
  * It is created with a 1 year max age and is stored in the root path of the organization.
  * The cookie is created with the organization ID and filter name to avoid conflicts between different organizations.
  * IMPORTANT: When using this to add new cookies, make sure to update ALLOWED_FILTER_PATHNAMES in useSearchParams hook
@@ -159,15 +198,54 @@ export const createFilterCookie = ({
   orgId: string;
   name: string;
   path: string;
-}) =>
-  createCookie(`${orgId}_${name}`, {
-    path,
-    sameSite: "lax",
-    // No secrets - filter cookies don't need signing (just UI preferences)
-    // This ensures they work correctly in RR7 single fetch mode
-    secure: process.env.NODE_ENV === "production",
-    maxAge: 60 * 60 * 24 * 365, // 1 year
-  });
+}) => createCookie(`${orgId}_${name}`, { ...FILTER_COOKIE_OPTIONS, path });
+
+/**
+ * Serializes the expiry of a root-path list filter cookie.
+ *
+ * @param name - The full cookie name (`<orgId>_<suffix>`)
+ * @returns The `Set-Cookie` value that deletes it
+ */
+function expireFilterCookie(name: string) {
+  return createCookie(name, { ...FILTER_COOKIE_OPTIONS, path: "/" }).serialize(
+    "",
+    { maxAge: 0 }
+  );
+}
+
+/**
+ * Names of the cookies a request carries.
+ *
+ * @param cookieHeader - The request's Cookie header
+ */
+function getCookieNames(cookieHeader: string | null) {
+  return new Set(
+    (cookieHeader ?? "").split(";").map((pair) => pair.trim().split("=")[0])
+  );
+}
+
+/**
+ * The `Set-Cookie` value for a list whose URL has params: the cleaned filters
+ * to remember, or an expiry when nothing is left to remember (a URL holding
+ * only a search), so an older cookie cannot bring back filters the URL dropped.
+ *
+ * @param filterCookie - The list's filter cookie
+ * @param cleanedFilters - The URL params after {@link cleanParamsForFilterCookie}
+ * @param cookieHeader - The request's Cookie header
+ * @returns The value to send, or null when there is nothing to write
+ */
+async function serializeFilterCookieForUrl(
+  filterCookie: Cookie,
+  cleanedFilters: string,
+  cookieHeader: string | null
+) {
+  if (cleanedFilters) {
+    return filterCookie.serialize(cleanedFilters);
+  }
+  return getCookieNames(cookieHeader).has(filterCookie.name)
+    ? expireFilterCookie(filterCookie.name)
+    : null;
+}
 
 type FilterCookieConfig = {
   [K in AllowedPathname]: {
@@ -189,7 +267,7 @@ export async function getFiltersFromRequest(
   organizationId: string,
   cookie: FilterCookieConfig
 ) {
-  // Get filters from URL query parameters (e.g., "status=AVAILABLE&search=laptop")
+  // Get filters from URL query parameters (e.g., "status=AVAILABLE&s=laptop")
   let filters = getCurrentSearchParams(request).toString();
   const cookieHeader = request.headers.get("Cookie");
 
@@ -202,12 +280,12 @@ export async function getFiltersFromRequest(
   // CASE 1: URL has filters
   // Save them to cookie and return (no redirect needed, URL already has filters)
   if (filters) {
-    // Remove sensitive params (page, getAll, etc.) before saving to cookie
-    const cleanedFilters = cleanParamsForCookie(filters);
-    // Serialize to Set-Cookie header if we have filters after cleaning
-    const serializedCookie = cleanedFilters
-      ? await filterCookie.serialize(cleanedFilters)
-      : null;
+    // Remove pagination, one-off keys and the typed search before saving
+    const serializedCookie = await serializeFilterCookieForUrl(
+      filterCookie,
+      cleanParamsForFilterCookie(filters),
+      cookieHeader
+    );
 
     // Return original filters for current request, cleaned version for cookie
     return { filters, serializedCookie };
@@ -217,8 +295,8 @@ export async function getFiltersFromRequest(
   else if (cookieHeader) {
     // Parse cookie to get saved filters
     filters = (await filterCookie.parse(cookieHeader)) || {};
-    // Remove sensitive params before applying
-    const cleanedFilters = cleanParamsForCookie(filters);
+    // Apply the same rule to what an older cookie may still hold
+    const cleanedFilters = cleanParamsForFilterCookie(filters);
 
     // Redirect to add filters to URL if we have any
     return {
@@ -234,13 +312,9 @@ export async function getFiltersFromRequest(
 
 /** ASSET FILTER COOKIE - ADVANCED MODE */
 export const createAdvancedAssetFilterCookie = (orgId: string) =>
-  createCookie(`${orgId}_advancedAssetFilter_v2`, {
+  createCookie(`${orgId}_${ADVANCED_ASSET_FILTER_COOKIE_SUFFIX}`, {
+    ...FILTER_COOKIE_OPTIONS,
     path: "/", // Use root path so cookie is sent with RR7 single fetch .data requests
-    sameSite: "lax",
-    // No secrets - filter cookies don't need signing (just UI preferences)
-    // This ensures they work correctly in RR7 single fetch mode
-    secure: process.env.NODE_ENV === "production",
-    maxAge: 60 * 60 * 24 * 365, // 1 year
   });
 
 /**
@@ -314,14 +388,16 @@ export async function getAdvancedFiltersFromRequest(
   if (filters) {
     const validatedParams = normalizeAdvancedFilterParams(filters, columnNames);
     const validatedParamsString = validatedParams.toString();
-    const cleanedFilters = cleanParamsForCookie(validatedParamsString);
+    const serializedCookie = await serializeFilterCookieForUrl(
+      advancedAssetFilterCookie,
+      cleanParamsForFilterCookie(validatedParamsString),
+      cookieHeader
+    );
 
     return {
       filters: validatedParamsString,
       // Save validated filters to cookie for next visit
-      serializedCookie: cleanedFilters
-        ? await advancedAssetFilterCookie.serialize(cleanedFilters)
-        : undefined,
+      serializedCookie: serializedCookie ?? undefined,
       // Redirect needed if validation changed the params
       redirectNeeded: validatedParamsString !== filters,
     };
@@ -338,7 +414,7 @@ export async function getAdvancedFiltersFromRequest(
         columnNames
       );
       const validatedParamsString = validatedParams.toString();
-      const cleanedFilters = cleanParamsForCookie(validatedParamsString);
+      const cleanedFilters = cleanParamsForFilterCookie(validatedParamsString);
 
       return {
         filters: cleanedFilters || undefined,
@@ -357,4 +433,79 @@ export async function getAdvancedFiltersFromRequest(
     serializedCookie: undefined,
     redirectNeeded: false,
   };
+}
+
+/** Name suffixes of every list filter cookie, simple and Advanced. */
+const LIST_FILTER_COOKIE_SUFFIXES = [
+  ...Object.values(ALLOWED_FILTER_PATHNAMES),
+  ADVANCED_ASSET_FILTER_COOKIE_SUFFIX,
+];
+
+/**
+ * Whether a cookie name is a list filter cookie (`<orgId>_<suffix>`).
+ *
+ * @param name - A cookie name from the request
+ */
+function isListFilterCookieName(name: string) {
+  return LIST_FILTER_COOKIE_SUFFIXES.some((suffix) =>
+    name.endsWith(`_${suffix}`)
+  );
+}
+
+/**
+ * Expires the list preferences this browser remembers, which are not tied to
+ * an account: the filter cookies of the assets (simple and Advanced), bookings
+ * and kits lists for every workspace, and the page size in `user-prefs`.
+ *
+ * - **Sign-out** expires the whole `user-prefs` cookie: the next person on the
+ *   browser also gets the default sidebar, scanner camera, onboarding
+ *   checklist and banners.
+ * - **Sign-in** drops only `perPage` from `user-prefs` and keeps the other UI
+ *   choices, so a person signing in again keeps their own. It still resets the
+ *   lists, which covers a session that ended without a sign-out.
+ *
+ * Only cookies the request carries are touched. Filter cookies are named per
+ * workspace, so the Cookie header is where they are found; they all live on the
+ * root path, which every request carries.
+ *
+ * @param request - The sign-out or sign-in request
+ * @param options.event - Whether the response signs a person out or in
+ * @returns `Set-Cookie` tuples to spread into the response headers
+ */
+export async function expireListPreferenceCookies(
+  request: Request,
+  { event }: { event: "sign-in" | "sign-out" }
+): Promise<Array<[string, string]>> {
+  const cookieHeader = request.headers.get("Cookie");
+  const cookieNames = getCookieNames(cookieHeader);
+
+  const filterExpiries = await Promise.all(
+    [...cookieNames]
+      .filter(isListFilterCookieName)
+      .map(async (name) => setCookie(await expireFilterCookie(name)))
+  );
+
+  if (!cookieNames.has(userPrefs.name)) {
+    return filterExpiries;
+  }
+
+  const prefs: unknown = await userPrefs.parse(cookieHeader);
+  const keptPrefs =
+    event === "sign-in" && prefs && typeof prefs === "object"
+      ? { ...(prefs as Record<string, unknown>) }
+      : {};
+  delete keptPrefs.perPage;
+
+  // Rewriting keeps the deployment's cookie domain from `userPrefs`
+  if (Object.keys(keptPrefs).length > 0) {
+    return [...filterExpiries, setCookie(await userPrefs.serialize(keptPrefs))];
+  }
+
+  // `userPrefs` carries the deployment's cookie domain, so this expiry reaches
+  // the domain-scoped cookie; the shim clears a host-only leftover.
+  return [
+    ...filterExpiries,
+    setCookie(await userPrefs.serialize({}, { maxAge: 0 })),
+    ...expireHostOnlyUserPrefsCookie(),
+  ];
 }

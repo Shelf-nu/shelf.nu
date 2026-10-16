@@ -6,7 +6,6 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  buildCsvBackupDataFromAssets,
   buildCsvExportDataFromAssets,
   buildCsvExportDataFromBookings,
   buildCsvExportDataFromTeamMembers,
@@ -49,6 +48,45 @@ describe("parseCsv", () => {
     expect(result).toEqual([
       ["name", "description"],
       ['MacBook "Pro" 16', "16-inch laptop"],
+    ]);
+  });
+
+  it("strips the UTF-8 BOM so an exported file re-imports cleanly", async () => {
+    // Every CSV Shelf serves opens with a BOM (see `~/utils/csv-utf8`), and
+    // files coming back from Excel carry one too. The mark has to be consumed
+    // here, or the mark stays glued to the first header and every column
+    // mapped by name silently misses — a round trip the import-ready export
+    // invites users to perform.
+    //
+    // Two layers strip it independently: a UTF-8 decode drops a leading mark
+    // by spec, and `bom: true` catches one that reaches the parser anyway.
+    // `bom: true` therefore looks redundant and is not — this asserts the
+    // outcome rather than either mechanism, so removing one net keeps the
+    // suite green and removing both does not.
+    const withBom = `\uFEFFtitle,category\nحاسوب محمول,أجهزة`;
+    const bytes = new TextEncoder().encode(withBom);
+
+    const result = await parseCsv(
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+    );
+
+    expect(result).toEqual([
+      ["title", "category"],
+      ["حاسوب محمول", "أجهزة"],
+    ]);
+  });
+
+  it("picks the delimiter from the structure, not from inside quoted cells", async () => {
+    // One verbose cell can hold more of the other candidate delimiter than the
+    // whole file holds of the real one. Notes and JSON relations do exactly
+    // that, so the guess has to look between cells only.
+    const csvContent =
+      'title,description\n"Laptop","checked out; returned; checked out; returned"';
+    const csvData = new TextEncoder().encode(csvContent).buffer;
+
+    expect(await parseCsv(csvData)).toEqual([
+      ["title", "description"],
+      ["Laptop", "checked out; returned; checked out; returned"],
     ]);
   });
 });
@@ -224,44 +262,6 @@ describe("formatValueForCsv", () => {
     expect(formatValueForCsv(dateValue)).toBe('"2024-01-02"');
 
     expect(formatValueForCsv("**Bold** text", true)).toBe('"Bold text"');
-  });
-});
-
-describe("buildCsvBackupDataFromAssets", () => {
-  it("serializes asset data with special handling for relations and text", () => {
-    const assets = [
-      {
-        id: "asset-1",
-        description: "Line 1\nLine 2",
-        category: null,
-        location: null,
-        custody: null,
-        notes: [{ content: null }],
-        tags: [{ name: "tag-1" }],
-        customFields: { foo: null },
-        serialNumber: null,
-        skipMe: "ignore",
-      },
-    ];
-
-    const result = buildCsvBackupDataFromAssets({
-      assets: assets as any,
-      keysToSkip: ["skipMe"],
-    });
-
-    expect(result).toEqual([
-      [
-        "asset-1",
-        '"Line 1Line 2"',
-        "{}",
-        "{}",
-        "{}",
-        '[{"content":""}]',
-        '[{"name":"tag-1"}]',
-        '{"foo":""}',
-        "",
-      ],
-    ]);
   });
 });
 

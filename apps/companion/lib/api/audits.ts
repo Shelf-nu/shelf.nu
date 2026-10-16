@@ -2,10 +2,12 @@ import { apiFetch, apiUpload } from "./client";
 import type {
   AuditsResponse,
   AuditDetailResponse,
+  AuditEvidenceResponse,
   RecordScanResponse,
   CompleteAuditResponse,
   CreateAuditNoteResponse,
   UploadAuditImageResponse,
+  RemoveScanResponse,
 } from "./types";
 
 export const auditsApi = {
@@ -22,9 +24,10 @@ export const auditsApi = {
    *   - `page` / `perPage` — pagination knobs.
    *   - `search` — free-text search over name / description.
    *   - `assignedToMe` — when `true`, restricts the result to audits
-   *     the caller is assigned to. For BASE/SELF_SERVICE users this is
-   *     already implicit server-side; for admins/owners it's the
-   *     companion's "Assigned to me" toggle.
+   *     the caller is assigned to. For roles limited to assigned audits
+   *     (`access.audits.seeAll` false) this is already implicit
+   *     server-side; for the others it is the companion's "Assigned to
+   *     me" toggle.
    * @param signal AbortSignal for in-flight cancellation on rapid
    *   filter toggling (the list re-fires on every chip tap; aborting
    *   the previous request stops a slow earlier response from
@@ -63,6 +66,42 @@ export const auditsApi = {
       `/api/mobile/audits/${auditId}?orgId=${orgId}`
     ),
 
+  /**
+   * Get every note and photo recorded on an audit, for READING.
+   *
+   * The write halves (`addAuditNote`, `uploadAuditImage`) have always
+   * existed; this is the read half. Without it the app knew evidence
+   * existed — the detail payload carries counts — but could not show any of
+   * it, so a completed audit surfaced none of the work the field worker had
+   * just done.
+   *
+   * Fetched separately from the detail payload rather than folded into it:
+   * this is heavier (image URLs, note bodies, authors) and only needed when
+   * someone actually opens a row, so the audit list and detail stay cheap.
+   *
+   * @param auditId Audit session id.
+   * @param orgId Active organization id from `useOrg`.
+   * @param signal AbortSignal so navigating away mid-flight cancels.
+   */
+  auditEvidence: (
+    auditId: string,
+    orgId: string,
+    signal?: AbortSignal,
+    /**
+     * Narrows the response to one audited asset. Pass it whenever the caller
+     * is showing a single row: the audit-wide response carries every note and
+     * photo in the audit, which is the heavy half of this feature.
+     */
+    auditAssetId?: string | null
+  ) =>
+    apiFetch<AuditEvidenceResponse>(
+      `/api/mobile/audits/${auditId}/evidence?orgId=${orgId}` +
+        (auditAssetId
+          ? `&auditAssetId=${encodeURIComponent(auditAssetId)}`
+          : ""),
+      { signal }
+    ),
+
   /** Record a scan during an audit (idempotent) */
   recordAuditScan: (
     orgId: string,
@@ -75,6 +114,32 @@ export const auditsApi = {
   ) =>
     apiFetch<RecordScanResponse>(
       `/api/mobile/audits/record-scan?orgId=${orgId}`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }
+    ),
+
+  /**
+   * Remove a recorded scan from a live audit — the undo for a mis-scan.
+   *
+   * Idempotent: removing a scan that is already gone answers `removed: false`
+   * rather than failing. The response carries the recomputed session counts,
+   * which the caller should adopt wholesale.
+   *
+   * @param orgId Active organization ID
+   * @param payload.auditSessionId The audit the scan belongs to
+   * @param payload.assetId The asset whose scan is being undone
+   */
+  removeAuditScan: (
+    orgId: string,
+    payload: {
+      auditSessionId: string;
+      assetId: string;
+    }
+  ) =>
+    apiFetch<RemoveScanResponse>(
+      `/api/mobile/audits/remove-scan?orgId=${orgId}`,
       {
         method: "POST",
         body: JSON.stringify(payload),
@@ -123,6 +188,10 @@ export const auditsApi = {
       {
         method: "POST",
         body: JSON.stringify(payload),
+        // why: not retried. Each call records a new note, so a request that
+        // timed out after the server had already written it would leave two
+        // on the audit, and the PDF report shows both.
+        retry: false,
       }
     ),
 

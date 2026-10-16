@@ -47,6 +47,13 @@ import { createStyles } from "@/lib/create-styles";
 import { labelForRequired } from "@/lib/a11y";
 import { CustomFieldInput } from "@/components/asset-edit/custom-field-input";
 import { TagPickerField } from "@/components/asset-edit/tag-picker-field";
+import { CharacterCount } from "@/components/shared/character-count";
+import {
+  ASSET_DESCRIPTION_MAX_LENGTH,
+  ASSET_DESCRIPTION_TOO_LONG_MESSAGE,
+  countCharacters,
+  isAssetDescriptionTooLong,
+} from "@/lib/asset-description";
 
 // expo-image-picker requires native module — lazy-loaded to avoid crash
 // if the dev client hasn't been rebuilt yet
@@ -64,7 +71,11 @@ try {
 
 export default function CreateAssetScreen() {
   const router = useRouter();
-  const { qrId } = useLocalSearchParams<{ qrId?: string }>();
+  const { qrId: qrIdParam } = useLocalSearchParams<{ qrId?: string }>();
+  // A scanned QR links only ONE asset: the server ignores a qrId that is
+  // already claimed. Held as state so "Create Another" can drop it — the next
+  // asset is not linked, and the banner must stop saying it will be.
+  const [qrId, setQrId] = useState(qrIdParam);
   const { currentOrg } = useOrg();
   const { colors } = useTheme();
   const styles = useStyles();
@@ -421,11 +432,17 @@ export default function CreateAssetScreen() {
       .filter((cf): cf is { id: string; value: string } => cf !== null);
   }, [customFieldDefs, customFieldValues]);
 
+  const descriptionTooLong = isAssetDescriptionTooLong(description);
+
   // ── Submit ──────────────────────────────────────
   const handleSubmit = async () => {
     const trimmedTitle = title.trim();
     if (trimmedTitle.length < 2) {
       Alert.alert("Validation", "Title must be at least 2 characters.");
+      return;
+    }
+    if (descriptionTooLong) {
+      Alert.alert("Validation", ASSET_DESCRIPTION_TOO_LONG_MESSAGE);
       return;
     }
     if (!currentOrg) return;
@@ -528,6 +545,10 @@ export default function CreateAssetScreen() {
           setImageUri(null);
           setImageMimeType("image/jpeg");
           setCustomFieldValues({});
+          setQrId(undefined);
+          // The route still carries the old qrId; clear it too, or a screen
+          // remount would re-seed the state and resurrect the banner.
+          router.setParams({ qrId: undefined });
         },
       },
     ]);
@@ -535,6 +556,7 @@ export default function CreateAssetScreen() {
 
   const canSubmit =
     title.trim().length >= 2 &&
+    !descriptionTooLong &&
     !isSubmitting &&
     !isCustomFieldsLoading &&
     !customFieldsError;
@@ -645,9 +667,21 @@ export default function CreateAssetScreen() {
             multiline
             numberOfLines={3}
             textAlignVertical="top"
-            maxLength={500}
             accessibilityLabel="Description"
           />
+          <CharacterCount
+            count={countCharacters(description)}
+            max={ASSET_DESCRIPTION_MAX_LENGTH}
+          />
+          {descriptionTooLong && (
+            <Text
+              style={styles.errorHint}
+              accessibilityRole="alert"
+              accessibilityLiveRegion="polite"
+            >
+              {ASSET_DESCRIPTION_TOO_LONG_MESSAGE}
+            </Text>
+          )}
         </View>
 
         {/* ── Category Picker ──────────────────────── */}

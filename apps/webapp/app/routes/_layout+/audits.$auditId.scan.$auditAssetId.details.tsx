@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { useSetAtom } from "jotai";
-import { MessageSquare, Paperclip } from "lucide-react";
+import { MessageSquare, ImageIcon } from "lucide-react";
 import type {
   LoaderFunctionArgs,
   ActionFunctionArgs,
@@ -28,6 +28,10 @@ import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
 import { useDisabled } from "~/hooks/use-disabled";
 import {
+  AUDIT_CLOSED_TO_COMMENTS_MESSAGE,
+  auditAcceptsComments,
+} from "~/modules/audit/comment-policy";
+import {
   createAuditAssetImagesAddedNote,
   createAuditImageEvidenceNote,
 } from "~/modules/audit/helpers.server";
@@ -37,8 +41,11 @@ import {
 } from "~/modules/audit/image.service.server";
 import { stripMarkdocDelimiters } from "~/modules/audit/note-content.server";
 import {
+  assertAuditAcceptsComments,
+  assertAuditAcceptsCommentsOnLockedRow,
+  createWhileAuditAcceptsComments,
   requireAuditAssignee,
-  requireAuditAssigneeForBaseSelfService,
+  requireAuditAssigneeForScopedViewer,
 } from "~/modules/audit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -72,7 +79,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const { organizationId, isSelfServiceOrBase } = permissionResult;
+    const { organizationId, access } = permissionResult;
 
     // Fetch audit asset with notes and images
     const auditAsset = await db.auditAsset.findFirst({
@@ -97,6 +104,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         },
         auditSession: {
           select: {
+            status: true,
             assignments: {
               select: { userId: true },
             },
@@ -115,18 +123,27 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
     }
 
-    requireAuditAssigneeForBaseSelfService({
+    requireAuditAssigneeForScopedViewer({
       audit: auditAsset.auditSession,
       userId,
-      isSelfServiceOrBase,
+      assignedOnly: !access.audits.seeAll,
       auditId,
     });
 
-    // Fetch notes for this audit asset
+    // Fetch the notes a PERSON wrote about this audit asset.
+    //
+    // why the type filter: uploading photos without typing a caption writes an
+    // UPDATE note against this same asset (helpers.server.ts,
+    // createAuditAssetImagesAddedNote), whose body is the Markdoc
+    // `{% audit_images %}` tag. Without the filter this panel counted that row
+    // in its Notes badge and rendered the photos twice — once inside the note,
+    // once in the Images grid below — and it disagreed with the count on the
+    // row that opened it, which asks for COMMENT only.
     const notes = await db.auditNote.findMany({
       where: {
         auditSessionId: auditId,
         auditAssetId: auditAssetId,
+        type: "COMMENT",
       },
       select: {
         id: true,
@@ -195,14 +212,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   );
 
   try {
-    const { organizationId, isSelfServiceOrBase } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.audit,
       action: PermissionAction.update,
     });
 
-    // The loader gates the read with `requireAuditAssigneeForBaseSelfService`;
+    // The loader gates the read with `requireAuditAssigneeForScopedViewer`;
     // this action did not gate the writes. Every intent below mutates the
     // audit — notes, condition, evidence deletion — so the guard is hoisted
     // here rather than repeated per intent, and a new intent inherits it.
@@ -210,7 +227,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       auditSessionId: auditId,
       organizationId,
       userId,
-      isSelfServiceOrBase,
+      assignedOnly: !access.audits.seeAll,
     });
 
     // …and prove the audit asset actually belongs to that audit. Both ids come
@@ -267,26 +284,32 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
 
-      const note = await db.auditNote.create({
-        data: {
-          content,
-          auditSessionId: auditId,
-          auditAssetId: auditAssetId,
-          userId,
-        },
-        include: {
-          user: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              displayName: true,
-              email: true,
-              profilePicture: true,
+      // Created only while the audit still accepts comments, checked on the
+      // locked row so a completion cannot slip in between.
+      const note = await createWhileAuditAcceptsComments(
+        { auditSessionId: auditId, organizationId },
+        (tx) =>
+          tx.auditNote.create({
+            data: {
+              content,
+              auditSessionId: auditId,
+              auditAssetId: auditAssetId,
+              userId,
             },
-          },
-        },
-      });
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  firstName: true,
+                  lastName: true,
+                  displayName: true,
+                  email: true,
+                  profilePicture: true,
+                },
+              },
+            },
+          })
+      );
 
       return payload({ note });
     }
@@ -361,6 +384,22 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
 
     if (intent === "upload-image" || intent === "upload-images") {
+      // Evidence reaches the feed as a note, so a finished audit refuses the
+      // whole upload. Checked before the files are stored — the note write
+      // below re-checks on the locked row, and refusing only there would leave
+      // the uploaded images behind.
+      const auditForUpload = await db.auditSession.findFirst({
+        where: { id: auditId, organizationId },
+        select: { status: true },
+      });
+
+      if (auditForUpload) {
+        assertAuditAcceptsComments(auditForUpload.status, {
+          auditSessionId: auditId,
+          organizationId,
+        });
+      }
+
       // Get optional note content
       const noteContent = formData.get("content") as string | null;
 
@@ -410,6 +449,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
       // Create a note in a transaction to track the image uploads.
       await db.$transaction(async (tx) => {
+        await assertAuditAcceptsCommentsOnLockedRow(tx, {
+          auditSessionId: auditId,
+          organizationId,
+        });
+
         const imageIds = uploadedImages.map((img) => img.id);
 
         if (intent === "upload-image") {
@@ -777,6 +821,7 @@ export default function AuditAssetDetails() {
     images,
     auditAsset,
   } = useLoaderData<typeof loader>();
+  const acceptsComments = auditAcceptsComments(auditAsset.auditSession.status);
   const actionData = useActionData<typeof action>();
 
   const imageUploadFetcher = useFetcher<typeof action>();
@@ -989,24 +1034,37 @@ export default function AuditAssetDetails() {
 
   return (
     <div className="flex h-full flex-col">
-      {/* Add note form */}
+      {/* Add note form — only while the audit is still open */}
       <div className="shrink-0 border-b border-gray-200 px-6 py-4">
-        <Form method="post" ref={noteFormRef}>
-          <input type="hidden" name="intent" value="create-note" />
-          <div className="space-y-2">
-            <textarea
-              name="content"
-              placeholder="Add a note..."
-              rows={3}
-              className="w-full resize-none rounded-md border border-gray-300 p-2 text-sm focus:border-gray-500 focus:outline-none"
-            />
-            <div className="flex justify-end">
-              <Button type="submit" size="sm" disabled={disabled}>
-                {disabled ? "Adding Note..." : "Add Note"}
-              </Button>
+        {acceptsComments ? (
+          <Form method="post" ref={noteFormRef}>
+            <input type="hidden" name="intent" value="create-note" />
+            <div className="space-y-2">
+              <textarea
+                name="content"
+                placeholder="Add a note..."
+                rows={3}
+                className="w-full resize-none rounded-md border border-gray-300 p-2 text-sm focus:border-gray-500 focus:outline-none"
+              />
+              <div className="flex justify-end">
+                <Button type="submit" size="sm" disabled={disabled}>
+                  {disabled ? "Adding Note..." : "Add Note"}
+                </Button>
+              </div>
             </div>
-          </div>
-        </Form>
+          </Form>
+        ) : (
+          <p className="text-sm text-gray-500">
+            {AUDIT_CLOSED_TO_COMMENTS_MESSAGE}
+          </p>
+        )}
+        {/* A page opened while the audit was still running can submit after it
+            closed, so the server's refusal is rendered here rather than lost. */}
+        {actionData && "error" in actionData && actionData.error ? (
+          <p className="mt-2 text-sm text-error-500" role="alert">
+            {actionData.error.message}
+          </p>
+        ) : null}
       </div>
 
       {/* Notes section - scrollable, takes remaining space */}
@@ -1043,7 +1101,7 @@ export default function AuditAssetDetails() {
       {/* Images section - fixed height at bottom */}
       <div className="h-68 shrink-0 overflow-y-auto  border-gray-200 px-6 py-4">
         <div className="mb-3 flex items-center gap-2">
-          <Paperclip className="size-5 text-gray-600" />
+          <ImageIcon className="size-5 text-gray-600" />
           <h3 className="text-base font-semibold text-gray-900">Images</h3>
           <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
             {localImages.length}

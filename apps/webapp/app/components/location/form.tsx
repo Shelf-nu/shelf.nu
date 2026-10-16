@@ -14,6 +14,7 @@ import type { action as newLocationAction } from "~/routes/_layout+/locations.ne
 import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
 import { tw } from "~/utils/tw";
 import { zodFieldIsRequired } from "~/utils/zod";
+import { LocationImageField } from "./location-image-field";
 import { LocationSelect } from "./location-select";
 import { Form } from "../custom-form";
 import FormRow from "../forms/form-row";
@@ -59,6 +60,10 @@ interface Props {
   name?: Location["name"];
   address?: Location["address"];
   description?: Location["description"];
+  /** Saved image of the location being edited, shown next to the file input. */
+  imageUrl?: Location["imageUrl"];
+  /** Saved thumbnail of the location being edited. */
+  thumbnailUrl?: Location["thumbnailUrl"];
   apiUrl?: string;
   /** Callback function to handle cancel action when form is used inline (e.g., in a dialog). When provided, Cancel button will call this instead of navigating. */
   onCancel?: () => void;
@@ -69,12 +74,20 @@ interface Props {
   excludeLocationId?: Location["id"];
 }
 
+/**
+ * Create and edit form for locations. Renders as a full page, or compact
+ * inside a dialog when `onSuccess` is passed (inline creation).
+ *
+ * @param props - See {@link Props}; image props show the saved image when editing
+ */
 // react-doctor:no-giant-component — deferred for follow-up refactor
 export const LocationForm = ({
   className,
   name,
   address,
   description,
+  imageUrl,
+  thumbnailUrl,
   apiUrl,
   onSuccess,
   parentId,
@@ -243,26 +256,12 @@ export const LocationForm = ({
           truthy={hasOnSuccessFunc}
           fallback={
             <FormRow rowLabel={"Main image"}>
-              <div>
-                <p className="hidden lg:block">
-                  Accepts PNG, JPG, JPEG, or WebP (max.4 MB)
-                </p>
-                <Input
-                  disabled={disabled}
-                  accept={ACCEPT_SUPPORTED_IMAGES}
-                  name="image"
-                  type="file"
-                  onChange={validateFile}
-                  label={"Main image"}
-                  hideLabel
-                  error={imageError}
-                  className="mt-2"
-                  inputClassName="border-0 shadow-none p-0 rounded-none"
-                />
-                <p className="mt-2 lg:hidden">
-                  Accepts PNG, JPG, JPEG, or WebP (max.4 MB)
-                </p>
-              </div>
+              <LocationImageField
+                imageUrl={imageUrl}
+                thumbnailUrl={thumbnailUrl}
+                error={imageError}
+                disabled={disabled}
+              />
             </FormRow>
           }
         >

@@ -2,52 +2,81 @@ import type { Booking, Currency } from "@prisma/client";
 import { BookingStatus } from "@prisma/client";
 import { BADGE_COLORS, type BadgeColorScheme } from "./badge-colors";
 import { formatCurrency } from "./currency";
+import { canRemoveBookingItems } from "./permissions/role-access";
+import type { BookingStatusName, RoleAccess } from "./permissions/role-access";
+import type { UserNameFields } from "./user";
 import { resolveTeamMemberName } from "./user";
 
-export function canUserManageBookingAssets(
-  booking: Pick<Booking, "status" | "from" | "to">,
-  isSelfService: boolean
-) {
-  const isCompleted = booking.status === BookingStatus.COMPLETE;
-  const isArchived = booking.status === BookingStatus.ARCHIVED;
-  const isCancelled = booking.status === BookingStatus.CANCELLED;
-
-  const cantManageAssetsAsSelfService =
-    isSelfService && booking.status !== BookingStatus.DRAFT;
-
-  return (
-    !isCompleted &&
-    !isArchived &&
-    !isCancelled &&
-    !cantManageAssetsAsSelfService
-  );
-}
+/**
+ * The statuses a booking is still open to item removal in: every status that
+ * is not a closed record (COMPLETE, ARCHIVED, CANCELLED).
+ */
+const REMOVABLE_STATUSES: BookingStatus[] = [
+  BookingStatus.DRAFT,
+  BookingStatus.RESERVED,
+  BookingStatus.ONGOING,
+  BookingStatus.OVERDUE,
+];
 
 /**
  * Whether items may still be REMOVED from a booking in its current status.
  *
- * Removal stays open until the booking is finished — a booking that is
+ * Removal stays open until the booking is finished: a booking that is
  * COMPLETE, ARCHIVED or CANCELLED is a closed record and its contents must not
  * change.
  *
- * Deliberately status-only, unlike {@link canUserManageBookingAssets}. Who may
- * remove is a separate question that the callers already answer, and answer
- * differently from "who may add": a self-service custodian may remove items
- * from their own RESERVED booking, which a role+status check with no notion of
- * custodianship cannot express. Ownership is enforced by the caller — the web
- * UI's `canSeeActions` gating and the mobile endpoint's own-booking 403.
+ * Status-only: every remove path needs it, including services with no caller
+ * in scope. Surfaces acting for a user add the caller's policy through
+ * `canRemoveBookingItems` / `mayRemoveBookingItems`.
+ *
+ * Ownership remains the caller's to enforce either way.
  *
  * @param booking - The booking being modified; only `status` is consulted
  * @returns `true` when the booking is still open to item removal
  */
 export function canUserRemoveBookingAssets(booking: Pick<Booking, "status">) {
-  const closedStatuses: BookingStatus[] = [
-    BookingStatus.COMPLETE,
-    BookingStatus.ARCHIVED,
-    BookingStatus.CANCELLED,
-  ];
+  return REMOVABLE_STATUSES.includes(booking.status);
+}
 
-  return !closedStatuses.includes(booking.status);
+/**
+ * Whether a surface should offer removing items from a booking in this status.
+ *
+ * Every remove path is gated on `booking:update`, which BASE holds, so the
+ * matrix grant alone does not settle it: the status half comes from the
+ * caller's policy (`canRemoveBookingItems`). The grant is passed in rather than
+ * derived here so this stays pure; callers compute it with `userHasPermission`,
+ * which denies while the session's roles are still loading.
+ *
+ * Ownership is still the caller's to enforce.
+ *
+ * @param args.canUpdateBooking - The caller holds `booking:update`
+ * @param args.access - The caller's access
+ * @param args.bookingStatus - The booking's status
+ * @returns `true` when removal may be offered
+ */
+export function mayRemoveBookingItems({
+  canUpdateBooking,
+  access,
+  bookingStatus,
+}: {
+  canUpdateBooking: boolean;
+  access: RoleAccess;
+  bookingStatus: BookingStatusName;
+}): boolean {
+  return canUpdateBooking && canRemoveBookingItems({ access, bookingStatus });
+}
+
+/**
+ * Whether the booking custodian is fixed to the caller themself: the booking
+ * form's custodian picker, its seed, and the server guards on create and edit.
+ *
+ * @param access - The caller's access
+ * @returns `true` when the caller may only book for themself
+ */
+export function bookingCustodianIsSelf(
+  access: Pick<RoleAccess, "policy">
+): boolean {
+  return access.policy.bookings.custodianPicker === "self";
 }
 
 export const bookingStatusColorMap: {
@@ -83,10 +112,7 @@ export const bookingStatusColorMap: {
 /** Resolve custodian display name from booking data */
 export function getBookingCustodianName(booking: {
   custodianTeamMember?: { name: string } | null;
-  custodianUser?: {
-    firstName?: string | null;
-    lastName?: string | null;
-  } | null;
+  custodianUser?: UserNameFields | null;
 }): string | null {
   if (booking.custodianTeamMember) {
     return resolveTeamMemberName({

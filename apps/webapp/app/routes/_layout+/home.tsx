@@ -33,6 +33,7 @@ import UpcomingReminders from "~/components/home/upcoming-reminders";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { db } from "~/database/db.server";
+import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { getUpcomingRemindersForHomePage } from "~/modules/asset-reminder/service.server";
 import { getBookings } from "~/modules/booking/service.server";
 
@@ -103,6 +104,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       locationDistribution,
       locationsCount,
       categoriesCount,
+      // Onboarding checklist booleans
+      checklistData,
       // Cookie
       cookieResult,
     ] = await Promise.all([
@@ -110,10 +113,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       // QT-aware: multiplies valuation × quantity so qty-tracked assets are not silently underreported.
       // `aggregate({_sum: { valuation }})` would only sum the per-unit price; QT assets with
       // quantity > 1 would silently underreport. `$queryRaw` lets us express the multiplication.
+      // Archived assets are excluded from both halves (issue #382) — the dashboard
+      // reflects active inventory, mirroring the default-hide on the asset index.
       Promise.all([
         db.asset
           .aggregate({
-            where: { organizationId },
+            where: { organizationId, archivedAt: null },
             _count: { _all: true },
           })
           .catch((cause) => {
@@ -136,6 +141,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             SELECT COALESCE(SUM(COALESCE(value, 0) * COALESCE(quantity, 1)), 0) AS total
             FROM "Asset"
             WHERE "organizationId" = ${organizationId}
+              AND "archivedAt" IS NULL
           `
           )
           .catch((cause) => {
@@ -153,17 +159,20 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
       // 1a. Count of assets with known valuation
       db.asset.count({
-        where: { organizationId, valuation: { not: null } },
+        where: { organizationId, valuation: { not: null }, archivedAt: null },
       }),
 
       // 1b. Assets grouped by status
       db.asset.groupBy({
         by: ["status"],
-        where: { organizationId },
+        where: { organizationId, archivedAt: null },
         _count: { _all: true },
       }),
 
       // 1c. Monthly asset creation counts (last 12 months)
+      // Archived assets count here (issue #382): the chart says when assets
+      // were added, so archiving one must not rewrite a past month. Its last
+      // point can sit above the active-assets KPI beside it, by design.
       db.$queryRaw<{ month_start: Date; assets_created: number }[]>`
         SELECT date_trunc('month', "createdAt") AS month_start,
                COUNT(*)::int AS assets_created
@@ -175,7 +184,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
       // 1c. Baseline count (assets before the 12-month window)
       db.asset.count({
-        where: { organizationId, createdAt: { lt: twelveMonthsAgo } },
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: growth history counts every asset ever added, archived included, so past months stay fixed
+        where: {
+          organizationId,
+          createdAt: { lt: twelveMonthsAgo },
+        },
       }),
 
       // 1d. Team members with direct custody counts
@@ -198,12 +211,19 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       }),
 
       // 1d. Ongoing + overdue bookings for custodian merge
+      // The four booking calls below render booking scalars, the custodian and
+      // `_count.bookingAssets` — never an asset row — so they all skip the
+      // per-booking asset payload.
       getBookings({
         organizationId,
         userId,
         page: 1,
-        perPage: 1000,
+        // `perPage` is clamped to 20 for anything over 100, so the previous
+        // `perPage: 1000` merged custodians from the first 20 active bookings
+        // only. `takeCap` is the bounded escape hatch that sees them all.
+        takeCap: 1000,
         statuses: ["ONGOING", "OVERDUE"],
+        includeAssets: false,
         extraInclude: {
           custodianTeamMember: true,
           custodianUser: true,
@@ -221,6 +241,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         statuses: ["RESERVED"],
         bookingFrom: new Date(),
         bookingTo: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+        includeAssets: false,
         extraInclude: {
           custodianTeamMember: true,
           custodianUser: true,
@@ -235,6 +256,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         page: 1,
         perPage: 5,
         statuses: ["OVERDUE"],
+        includeAssets: false,
         extraInclude: {
           custodianTeamMember: true,
           custodianUser: true,
@@ -249,6 +271,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         page: 1,
         perPage: 5,
         statuses: ["ONGOING"],
+        includeAssets: false,
         extraInclude: {
           custodianTeamMember: true,
           custodianUser: true,
@@ -256,15 +279,18 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         },
       }),
 
-      // 1e. Newest 5 assets
+      // 1e. Newest 5 assets (exclude archived — issue #382)
       db.asset
         .findMany({
-          where: { organizationId },
+          where: { organizationId, archivedAt: null },
           orderBy: { createdAt: "desc" },
           take: 5,
           include: {
             category: true,
             custody: { select: { quantity: true } },
+            // Model cover image — `<AssetImage>` renders it for assets with
+            // no image of their own.
+            ...ASSET_MODEL_IMAGE_SELECT,
           },
         })
         .catch((cause) => {
@@ -300,27 +326,42 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       }),
 
       // Location distribution (top 5)
-      db.location
-        .findMany({
-          where: { organizationId },
-          select: {
-            id: true,
-            name: true,
-            // Count pivot rows (one per asset placed at this location).
-            _count: { select: { assetLocations: true } },
-          },
-          orderBy: { assetLocations: { _count: "desc" } },
-          take: 5,
-        })
-        .then((locs) =>
-          locs
-            .filter((l) => l._count.assetLocations > 0)
-            .map((l) => ({
-              locationId: l.id,
-              locationName: l.name,
-              assetCount: l._count.assetLocations,
-            }))
-        ),
+      //
+      // Raw SQL because neither Prisma shape can express what this widget
+      // needs. `location._count.assetLocations` cannot exclude archived assets
+      // (issue #382) and Prisma cannot order by a FILTERED relation count; a
+      // groupBy on the pivot fixes both but counts ROWS, and the pivot is not
+      // one row per (asset, location) — its partial uniques allow one manual
+      // placement (assetKitId IS NULL) alongside kit-driven rows at the same
+      // location, so an asset in a kit could be counted twice. COUNT(DISTINCT)
+      // is the only form that gets the number and the ranking right together.
+      db
+        .$queryRaw<
+          { locationId: string; locationName: string; assetCount: number }[]
+        >(
+          Prisma.sql`
+            SELECT al."locationId"                     AS "locationId",
+                   l.name                              AS "locationName",
+                   COUNT(DISTINCT al."assetId")::int   AS "assetCount"
+            FROM "AssetLocation" al
+            JOIN "Location" l ON l.id = al."locationId"
+            JOIN "Asset" a ON a.id = al."assetId"
+            WHERE al."organizationId" = ${organizationId}
+              AND a."archivedAt" IS NULL
+            GROUP BY al."locationId", l.name
+            HAVING COUNT(DISTINCT al."assetId") > 0
+            ORDER BY COUNT(DISTINCT al."assetId") DESC
+            LIMIT 5
+          `
+        )
+        .catch((cause) => {
+          throw new ShelfError({
+            cause,
+            message: "Failed to load location distribution",
+            additionalData: { userId, organizationId },
+            label: "Dashboard",
+          });
+        }),
 
       // KPI: total locations
       db.location.count({
@@ -331,6 +372,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       db.category.count({
         where: { organizationId },
       }),
+
+      // Onboarding checklist counts
+      // Joins this `Promise.all` rather than being awaited after it: nothing
+      // above feeds it, so serialising it just added a round trip to the
+      // loader's critical path.
+      checklistOptions({ organizationId }),
 
       // Cookie
       userPrefs.parse(request.headers.get("Cookie")).then((c: any) => c || {}),
@@ -375,10 +422,15 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             content: parseMarkdownToReact(announcement.content),
           }
         : null,
-      checklistOptions: await checklistOptions({
+      checklistOptions: {
         hasAssets: totalAssets > 0,
-        organizationId,
-      }),
+        // `directCustodians` is already the "team members holding custody"
+        // query, with the same where clause the dropped `custodiesCount`
+        // used — `take: 20` cannot change a `> 0` test — so counting them
+        // again server-side was a redundant round trip.
+        hasCustodies: directCustodians.length > 0,
+        ...checklistData,
+      },
     });
   } catch (cause) {
     const reason = makeShelfError(cause);

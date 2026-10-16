@@ -1,5 +1,6 @@
 import type { BookingStatus } from "@prisma/client";
 import { atom } from "jotai";
+import type { Getter, Setter } from "jotai";
 import { getPrimaryLocation } from "~/modules/asset/utils";
 import type {
   AssetFromQr,
@@ -40,6 +41,67 @@ export const scannedItemsAtom = atom<ScanListItems>({});
  *   atoms below so removing an item also drops its qty entry.
  */
 export const scannedAssetQuantitiesAtom = atom<Record<string, number>>({});
+
+/**
+ * The "From location" a scanned pool's units come from, keyed by `assetId`:
+ * a location id or `"unplaced"`. Set only when the operator picks one; the
+ * assign drawer falls back to the pre-selected location (the one with the
+ * most units left) for rows without an entry. Every remove and clear path
+ * drops an asset's entry together with its quantity, so a rescan starts from
+ * the pre-selection again.
+ */
+export const scannedAssetSourcesAtom = atom<Record<string, string>>({});
+
+/**
+ * Drops the per-asset entries (quantity and picked source) of assets that
+ * left the scan list. Both maps are keyed by `assetId`, not by `qrId`.
+ */
+function dropScannedAssetEntries(get: Getter, set: Setter, assetIds: string[]) {
+  if (assetIds.length === 0) return;
+  const quantities = { ...get(scannedAssetQuantitiesAtom) };
+  const sources = { ...get(scannedAssetSourcesAtom) };
+  for (const id of assetIds) {
+    delete quantities[id];
+    delete sources[id];
+  }
+  set(scannedAssetQuantitiesAtom, quantities);
+  set(scannedAssetSourcesAtom, sources);
+}
+
+/**
+ * Writer for {@link scannedAssetSourcesAtom}: one asset's picked source.
+ * Pass `maxQuantity`, the new source's cap, to lower an entered quantity
+ * that no longer fits in the same update. A cap below 1 leaves the quantity
+ * alone: the row then shows no input, and the bulk route's up-front check
+ * names the location.
+ */
+export const setScannedAssetSourceAtom = atom(
+  null,
+  (
+    get,
+    set,
+    payload: { assetId: string; source: string; maxQuantity?: number }
+  ) => {
+    const { assetId, source, maxQuantity } = payload;
+    set(scannedAssetSourcesAtom, {
+      ...get(scannedAssetSourcesAtom),
+      [assetId]: source,
+    });
+    const quantities = get(scannedAssetQuantitiesAtom);
+    const entered = quantities[assetId];
+    if (
+      maxQuantity !== undefined &&
+      maxQuantity >= 1 &&
+      entered !== undefined &&
+      entered > maxQuantity
+    ) {
+      set(scannedAssetQuantitiesAtom, {
+        ...quantities,
+        [assetId]: maxQuantity,
+      });
+    }
+  }
+);
 
 /**
  * Writer atom that updates a single asset's scanned quantity. Drawer
@@ -192,16 +254,12 @@ export const updateScannedItemAtom = atom(
 // Remove item based on key
 export const removeScannedItemAtom = atom(null, (get, set, qrId: string) => {
   const currentItems = get(scannedItemsAtom);
-  // Drop the matching scanned-item entry plus any qty entry for the
-  // removed asset (qty map is keyed by assetId, not qrId).
+  // Drop the matching scanned-item entry plus the removed asset's qty and
+  // source entries (both keyed by assetId, not qrId).
   const removedAssetId = currentItems[qrId]?.data?.id;
   const { [qrId]: _, ...rest } = currentItems;
   set(scannedItemsAtom, rest);
-  if (removedAssetId) {
-    const currentQty = get(scannedAssetQuantitiesAtom);
-    const { [removedAssetId]: __, ...qtyRest } = currentQty;
-    set(scannedAssetQuantitiesAtom, qtyRest);
-  }
+  if (removedAssetId) dropScannedAssetEntries(get, set, [removedAssetId]);
 });
 
 // Remove multiple items based on key array
@@ -217,14 +275,7 @@ export const removeMultipleScannedItemsAtom = atom(
       delete updatedItems[qrId];
     });
     set(scannedItemsAtom, updatedItems);
-    if (removedAssetIds.length > 0) {
-      const currentQty = get(scannedAssetQuantitiesAtom);
-      const qtyRest = { ...currentQty };
-      removedAssetIds.forEach((id) => {
-        delete qtyRest[id];
-      });
-      set(scannedAssetQuantitiesAtom, qtyRest);
-    }
+    dropScannedAssetEntries(get, set, removedAssetIds);
   }
 );
 
@@ -240,12 +291,7 @@ export const removeScannedItemsByAssetIdAtom = atom(
       }
     });
     set(scannedItemsAtom, updatedItems);
-    const currentQty = get(scannedAssetQuantitiesAtom);
-    const qtyRest = { ...currentQty };
-    ids.forEach((id) => {
-      delete qtyRest[id];
-    });
-    set(scannedAssetQuantitiesAtom, qtyRest);
+    dropScannedAssetEntries(get, set, ids);
   }
 );
 
@@ -253,6 +299,7 @@ export const removeScannedItemsByAssetIdAtom = atom(
 export const clearScannedItemsAtom = atom(null, (_get, set) => {
   set(scannedItemsAtom, {}); // Resets the atom to an empty object
   set(scannedAssetQuantitiesAtom, {}); // Drop any qty entries too.
+  set(scannedAssetSourcesAtom, {}); // And any picked source locations.
 });
 
 /*******************************/
@@ -723,6 +770,40 @@ export type ExpectedModelRequest = {
 };
 
 /**
+ * One concrete `BookingAsset` already on a booking before a scan session
+ * starts. Both the Check Out drawer and the Scan to Assign screen render
+ * these in an "already included" section, so the shape is shared even
+ * though each screen seeds its own atom from it.
+ */
+export type AlreadyIncludedRow = {
+  id: string;
+  title: string;
+  mainImage: string | null;
+  thumbnailImage: string | null;
+  assetModelId: string | null;
+  /**
+   * Whether this asset's standalone row still carries no reservation stamp,
+   * so scanning it could answer a reserved unit. The server decides it; the
+   * drawer only reads it to tell a countable scan from a plain duplicate.
+   */
+  claimable: boolean;
+  kitId: string | null;
+  /**
+   * `BookingAsset.quantity` on this booking: `1` for INDIVIDUAL
+   * assets, `N` for QUANTITY_TRACKED. Lets the "Already included"
+   * collapser render `"Pens × 20"` for qty-tracked rows instead
+   * of hiding the unit count entirely.
+   */
+  bookedQuantity: number;
+  /**
+   * Asset type so the renderer knows whether to show the quantity
+   * suffix (`QUANTITY_TRACKED`) or suppress it (`INDIVIDUAL`, which
+   * is implicitly `× 1`).
+   */
+  type: "INDIVIDUAL" | "QUANTITY_TRACKED";
+};
+
+/**
  * Fulfil-and-checkout session metadata. Null when no session is
  * active. `bookingFrom` is kept as ISO string because the atom layer
  * shouldn't own `Date` instances (they serialize poorly across
@@ -734,6 +815,19 @@ export type FulfilSessionInfo = {
   bookingName: string;
   /** ISO string — drives `isBookingEarlyCheckout` in the submit path. */
   bookingFrom: string;
+  /**
+   * Booking status when the scanner opened. Only a RESERVED booking's first
+   * check-out can move its start date, so only then is the operator asked.
+   */
+  bookingStatus: BookingStatus;
+  /**
+   * Whether submit sends out only the scanned items. True under the explicit
+   * check-out requirement and on a booking that is no longer RESERVED;
+   * otherwise every item on the booking goes out. Decides what counts as
+   * "something to check out" and whether scanning an item already on the
+   * booking is a check-out of it.
+   */
+  checksOutScannedOnly: boolean;
   expectedModelRequests: ExpectedModelRequest[];
   /**
    * Concrete BookingAssets already on the booking before this
@@ -742,27 +836,7 @@ export type FulfilSessionInfo = {
    * picture (mirrors the audit expected-list UX). Never mutated
    * client-side — the server owns these rows.
    */
-  alreadyIncluded: Array<{
-    id: string;
-    title: string;
-    mainImage: string | null;
-    thumbnailImage: string | null;
-    assetModelId: string | null;
-    kitId: string | null;
-    /**
-     * `BookingAsset.quantity` on this booking — `1` for INDIVIDUAL
-     * assets, `N` for QUANTITY_TRACKED. Lets the "Already included"
-     * collapser render `"Pens × 20"` for qty-tracked rows instead
-     * of hiding the unit count entirely.
-     */
-    bookedQuantity: number;
-    /**
-     * Asset type so the renderer knows whether to show the quantity
-     * suffix (`QUANTITY_TRACKED`) or suppress it (`INDIVIDUAL`, which
-     * is implicitly `× 1`).
-     */
-    type: "INDIVIDUAL" | "QUANTITY_TRACKED";
-  }>;
+  alreadyIncluded: AlreadyIncludedRow[];
 } | null;
 
 /** Current fulfil-and-checkout session metadata. */
@@ -807,3 +881,16 @@ export const endFulfilSessionAtom = atom(null, (_get, set) => {
   set(expectedModelRequestsAtom, []);
   set(scannedItemsAtom, {});
 });
+
+/**
+ * Assets already on the booking before the current Scan to Assign session.
+ *
+ * A separate atom rather than a read through `fulfilSessionAtom`: the Check
+ * Out drawer owns that atom's lifecycle, and pointing Scan to Assign's
+ * "already included" list at it would make one screen's teardown clear the
+ * other screen's data. `expectedModelRequestsAtom` is shared because both
+ * screens already agree on its lifecycle; this is the one piece that had no
+ * shared home yet. Seeded and cleared by
+ * `useBookingAssignSessionInitialization`.
+ */
+export const assignAlreadyIncludedAtom = atom<AlreadyIncludedRow[]>([]);

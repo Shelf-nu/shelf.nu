@@ -1,4 +1,4 @@
-import { addDays, format, differenceInHours } from "date-fns";
+import { differenceInHours } from "date-fns";
 import { DateTime } from "luxon";
 import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import type { ResolvedFormatPrefs } from "~/utils/date-format";
@@ -66,10 +66,10 @@ function atWallClock(zoned: DateTime, time: string): DateTime {
  * Working hours overrides represent an absolute calendar date with no time
  * component — the DB column is `@db.Date`, which Prisma hydrates as a Date at
  * UTC midnight. That Date is only a transport artifact: formatting it in the
- * runtime's local timezone shifts it one day back for users west of UTC, which
- * used to make an override for day D match bookings on day D-1. Reading the
- * date from UTC (or treating an already-YYYY-MM-DD string as-is) preserves the
- * absolute-date meaning.
+ * runtime's local timezone shifts it one day back for users west of UTC, making
+ * an override for day D match bookings on day D-1. Reading the date from UTC
+ * (or treating an already-YYYY-MM-DD string as-is) preserves the absolute-date
+ * meaning.
  *
  * Contract: string inputs must be either date-only ("YYYY-MM-DD") or a UTC ISO
  * timestamp ("YYYY-MM-DD…Z"). Offset-style strings like
@@ -180,8 +180,8 @@ interface NextWorkingDayResult {
  * If no working day is found within 14 days, it defaults to tomorrow's 9 AM - 6 PM.
  * All calendar-day and wall-clock reasoning happens in `timeZone`, so "tomorrow"
  * and "9 AM" mean what the user means. Reading them off a device-local `Date`
- * put the search on the wrong day whenever the device and preference zones
- * straddled midnight.
+ * instead puts the search on the wrong day whenever the device and preference
+ * zones straddle midnight.
  *
  * @param currentDate - The date from which to start searching for the next working day.
  * @param workingHours - The working hours data containing weekly schedules and overrides.
@@ -271,7 +271,8 @@ interface DefaultTimesResult {
  * If working hours are enabled, it checks today's schedule and overrides to determine the next available booking time.
  * Buffer time is applied from current time - the start time will be whichever is later: buffer expiry or next available working time.
  *
- * For ADMIN/OWNER users, buffer time restrictions are automatically bypassed (effective buffer = 0).
+ * When the caller's policy sets `bypassTimeLimits`, buffer time restrictions are
+ * bypassed (effective buffer = 0).
  *
  * Every calendar-day and wall-clock decision here is made in the acting user's
  * PREFERENCE zone, which is the zone the form field displays and the server
@@ -280,8 +281,8 @@ interface DefaultTimesResult {
  * day's working hours entirely.
  *
  * @param workingHoursData - The working hours data containing weekly schedules and overrides.
- * @param bufferStartTime - Buffer time in hours from current time. Bypassed for admin/owner users.
- * @param isAdminOrOwner - Whether the user is an ADMIN or OWNER (bypasses buffer time restrictions).
+ * @param bufferStartTime - Buffer time in hours from current time. Skipped when `bypassTimeLimits` is set.
+ * @param bypassTimeLimits - The caller's policy skips the buffer start time (`bookings.bypassTimeLimits`).
  * @param prefs - The acting user's resolved format prefs. Typed as
  *   {@link ResolvedFormatPrefs} rather than a bare zone string so a browser-hint
  *   object (`{ locale, timeZone }`) cannot satisfy it — the device zone is
@@ -291,15 +292,15 @@ interface DefaultTimesResult {
 export function getBookingDefaultStartEndTimes(
   workingHoursData: WorkingHoursData | null | undefined,
   bufferStartTime: number,
-  isAdminOrOwner: boolean,
+  bypassTimeLimits: boolean,
   prefs: ResolvedFormatPrefs
 ): DefaultTimesResult {
   const { timeZone } = prefs;
   const nowInstant = new Date();
   const now = DateTime.fromJSDate(nowInstant).setZone(timeZone);
 
-  // Admin/Owner users bypass buffer time restrictions
-  const effectiveBufferStartTime = isAdminOrOwner ? 0 : bufferStartTime;
+  // Callers whose policy bypasses time limits skip the buffer
+  const effectiveBufferStartTime = bypassTimeLimits ? 0 : bufferStartTime;
 
   // If no working hours data or working hours are disabled, use the original logic
   if (!workingHoursData || !workingHoursData.enabled) {
@@ -423,65 +424,6 @@ function getOriginalDefaultTimes(
 }
 
 /**
- * Calculates the effective end date for a booking by extending the duration
- * to skip closed days when maxBookingLengthSkipClosedDays is enabled.
- *
- * @param startDate - The start date of the booking
- * @param endDate - The end date of the booking
- * @param workingHoursData - Working hours configuration with schedules and overrides
- * @param skipClosedDays - Whether to skip closed days in the calculation
- * @returns Effective end date for validation (or original endDate if not skipping)
- */
-export function calculateEffectiveEndDate(
-  startDate: Date,
-  endDate: Date,
-  workingHoursData: WorkingHoursData | null | undefined,
-  skipClosedDays: boolean
-): Date {
-  // If not skipping closed days or no working hours data, use original endDate
-  if (!skipClosedDays || !workingHoursData?.enabled) {
-    return endDate;
-  }
-
-  let closedDaysCount = 0;
-  const currentDate = new Date(startDate);
-  const originalEndDate = new Date(endDate);
-
-  // Count closed days between start and original end date
-  while (currentDate < originalEndDate) {
-    const dateString = format(currentDate, "yyyy-MM-dd");
-    const dayOfWeek = currentDate.getDay().toString();
-
-    // Check for date-specific override first
-    const override = workingHoursData.overrides.find(
-      (override) => getOverrideDateKey(override.date) === dateString
-    );
-
-    let isOpen: boolean;
-
-    if (override) {
-      isOpen = override.isOpen;
-    } else {
-      const daySchedule = workingHoursData.weeklySchedule[dayOfWeek];
-      isOpen = daySchedule?.isOpen || false;
-    }
-
-    // If this day is closed, count it
-    if (!isOpen) {
-      closedDaysCount++;
-    }
-
-    // Move to next day
-    currentDate.setTime(addDays(currentDate, 1).getTime());
-  }
-
-  // Extend the end date by the number of closed days
-  const finalEndDate = addDays(originalEndDate, closedDaysCount);
-
-  return finalEndDate;
-}
-
-/**
  * Calculates the effective booking duration by subtracting closed days from calendar hours.
  *
  * Example: Fri 3PM → Mon 3PM = 72 calendar hours
@@ -490,56 +432,53 @@ export function calculateEffectiveEndDate(
  * @param startDate - The start date of the booking
  * @param endDate - The end date of the booking
  * @param workingHoursData - Working hours configuration with schedules and overrides
+ * @param timeZone - IANA zone that decides which calendar day each hour belongs
+ *   to, and where midnight falls. Pass the acting user's resolved preference
+ *   zone — see `.claude/rules/working-hours-are-location-local.md` for why that
+ *   is the accepted proxy, and why leaving it to the ambient clock is worse
+ *   (it differs between the browser and the server for the same submission).
  * @returns Calendar hours minus closed days hours
  */
 export function calculateBusinessHoursDuration(
   startDate: Date,
   endDate: Date,
-  workingHoursData: WorkingHoursData
+  workingHoursData: WorkingHoursData,
+  timeZone: string
 ): number {
-  // Start with total calendar hours
+  // Total calendar hours is pure instant arithmetic — no zone involved.
   const totalCalendarHours = differenceInHours(endDate, startDate);
   let closedDaysHours = 0;
 
-  const currentDate = new Date(startDate);
+  let cursor = DateTime.fromJSDate(startDate).setZone(timeZone);
+  const end = DateTime.fromJSDate(endDate).setZone(timeZone);
 
   // Process each day from start to end to count closed days
-  while (currentDate < endDate) {
-    const nextDay = addDays(currentDate, 1);
-    nextDay.setHours(0, 0, 0, 0); // Start of next day
+  while (cursor < end) {
+    // Midnight is a WALL-CLOCK boundary, so it has to be taken in `timeZone`.
+    // `setHours(0,0,0,0)` cut the day on the device clock, which sliced the
+    // window on the wrong boundary for anyone whose device differed from their
+    // preference zone — and shifted how many hours got attributed to a closed
+    // day.
+    const nextDay = cursor.plus({ days: 1 }).startOf("day");
 
-    // Get the actual time window for this day (intersection of booking with day)
-    const windowStart = currentDate;
-    const windowEnd = nextDay > endDate ? endDate : nextDay;
+    // Intersection of the booking with this day
+    const windowEnd = nextDay > end ? end : nextDay;
 
-    // Check if this day is closed
-    const dateString = format(windowStart, "yyyy-MM-dd");
-    const dayOfWeek = windowStart.getDay().toString();
-
-    // Check for date-specific override first
-    const override = workingHoursData.overrides.find(
-      (override) => getOverrideDateKey(override.date) === dateString
-    );
-
-    let isOpen: boolean;
-    if (override) {
-      isOpen = override.isOpen;
-    } else {
-      const daySchedule = workingHoursData.weeklySchedule[dayOfWeek];
-      isOpen = daySchedule?.isOpen || false;
-    }
+    const isOpen =
+      resolveDaySchedule(cursor, workingHoursData)?.isOpen ?? false;
 
     if (!isOpen) {
-      // This day is closed, subtract its hours from the total
-      const hoursInThisDay = differenceInHours(windowEnd, windowStart);
-      closedDaysHours += hoursInThisDay;
+      // This day is closed, subtract its hours from the total. Kept on
+      // `differenceInHours` so the truncation matches the calendar-hours total
+      // it is subtracted from.
+      closedDaysHours += differenceInHours(
+        windowEnd.toJSDate(),
+        cursor.toJSDate()
+      );
     }
 
-    // Move to next day
-    currentDate.setTime(nextDay.getTime());
+    cursor = nextDay;
   }
 
-  const effectiveHours = totalCalendarHours - closedDaysHours;
-
-  return effectiveHours;
+  return totalCalendarHours - closedDaysHours;
 }

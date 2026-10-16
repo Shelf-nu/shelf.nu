@@ -65,11 +65,14 @@ export default function AuditTeamMemberSelector({
     }
 
     const normalizedQuery = searchQuery.toLowerCase().trim();
+    // `displayName` is matched alongside first/last name: it replaces them in
+    // the row for users who set one, so it is the name a searcher can see.
     return data.teamMembers.filter(
       (tm) =>
         tm.name.toLowerCase().includes(normalizedQuery) ||
         tm.user?.firstName?.toLowerCase().includes(normalizedQuery) ||
         tm.user?.lastName?.toLowerCase().includes(normalizedQuery) ||
+        tm.user?.displayName?.toLowerCase().includes(normalizedQuery) ||
         tm.user?.email?.includes(normalizedQuery)
     );
   }, [data, searchQuery]);

@@ -95,6 +95,14 @@ export default function CompleteAuditDialog({
                 . This action cannot be undone.
               </p>
 
+              {stats.foundCount + stats.unexpectedCount === 0 ? (
+                <div className="rounded-lg border border-warning-300 bg-warning-25 p-3 text-sm text-warning-700">
+                  No assets were scanned. Completing now marks all{" "}
+                  <span className="font-semibold">{stats.expectedCount}</span>{" "}
+                  expected assets as missing.
+                </div>
+              ) : null}
+
               <div className="rounded-lg bg-gray-50 p-4">
                 <h4 className="mb-2 text-sm font-semibold text-gray-700">
                   Audit Summary

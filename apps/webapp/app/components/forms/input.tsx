@@ -1,8 +1,12 @@
-import type { RefObject, InputHTMLAttributes } from "react";
-import { forwardRef } from "react";
+import type { ChangeEvent, RefObject, InputHTMLAttributes } from "react";
+import { forwardRef, useState } from "react";
 
+import { countCharacters } from "~/utils/count-characters";
+
+import { withNumberInputWheelGuard } from "~/utils/number-input-wheel-guard";
 import { tw } from "~/utils/tw";
 import { InnerLabel } from "./inner-label";
+import { CharacterCount } from "../shared/character-count";
 import type { IconType } from "../shared/icons-map";
 import iconsMap from "../shared/icons-map";
 
@@ -19,10 +23,10 @@ export interface InputProps
    */
   inputType?: "input" | "textarea";
 
-  /** Weather the label is hidden */
+  /** Whether the label is hidden */
   hideLabel?: boolean;
 
-  /** Weather the label is hidden on md */
+  /** Whether the label is hidden on md */
   hideMd?: boolean;
 
   /** name of any icon available in icons map */
@@ -49,6 +53,15 @@ export interface InputProps
   /** Needed for input type textarea */
   rows?: number;
 
+  /**
+   * Textarea only. The most characters the field accepts, shown as a live
+   * counter under the field. Typing past it is allowed (the counter turns red)
+   * so the limit has to be enforced by the form's validation. A textarea with
+   * a `characterLimit` gets no `maxLength`, so text already longer than the
+   * limit stays editable.
+   */
+  characterLimit?: number;
+
   /** Sometimes you want to append a button to the input field. Set this to true to manage the style */
   hasAttachedButton?: boolean;
 
@@ -62,6 +75,12 @@ export interface InputProps
   autoComplete?: string;
 }
 
+/**
+ * Shared form field: label, optional icon or add-on, error text and the app's
+ * input styling. Renders a `<textarea>` when `inputType` is "textarea". Number
+ * inputs ignore the mouse wheel while focused, so scrolling a form cannot
+ * change their value.
+ */
 const Input = forwardRef(function Input(
   {
     className,
@@ -78,10 +97,19 @@ const Input = forwardRef(function Input(
     icon,
     iconClassName,
     required = false,
+    characterLimit,
     ...rest
   }: InputProps,
   ref
 ) {
+  const [typedLength, setTypedLength] = useState(() =>
+    countCharacters(String(rest.defaultValue ?? ""))
+  );
+  const characterCount =
+    rest.value !== undefined
+      ? countCharacters(String(rest.value))
+      : typedLength;
+
   /**
    * @TODO
    * Add automatic server side validation for error messages using getValidationErrors so we dont have to server side errors manually but only pass client side useZorm errors
@@ -120,22 +148,50 @@ const Input = forwardRef(function Input(
     ...rest,
   };
 
+  // why: a React onWheel cannot cancel the browser's wheel step (React attaches
+  // wheel passively); the guard adds a native listener while the input is focused.
+  const wheelGuard =
+    rest.type === "number" ? withNumberInputWheelGuard(rest) : {};
+
   let input = (
     <input
       {...inputProps}
+      {...wheelGuard}
       aria-label={label}
       ref={ref as RefObject<HTMLInputElement> | undefined}
     />
   );
 
+  /**
+   * Links the textarea to its counter for assistive tech, so the count (and
+   * the fact that it is over the limit) is read out with the field.
+   */
+  const characterCountId =
+    inputType === "textarea" && characterLimit
+      ? `${inputProps.name ?? "textarea"}-character-count`
+      : undefined;
+
   if (inputType === "textarea") {
+    const countedOnChange = characterLimit
+      ? (event: ChangeEvent<HTMLTextAreaElement>) => {
+          setTypedLength(countCharacters(event.target.value));
+          onChange?.(event);
+        }
+      : onChange;
+
     input = (
       <textarea
         {...inputProps}
-        maxLength={rest.maxLength || 250}
+        onChange={countedOnChange}
+        maxLength={characterLimit ? undefined : rest.maxLength || 250}
         rows={rest.rows || 8}
         ref={ref as RefObject<HTMLTextAreaElement> | undefined}
         aria-label={label}
+        aria-describedby={
+          [rest["aria-describedby"], characterCountId]
+            .filter(Boolean)
+            .join(" ") || undefined
+        }
       />
     );
   }
@@ -158,6 +214,15 @@ const Input = forwardRef(function Input(
         {/* Input */}
         {input}
       </div>
+
+      {inputType === "textarea" && characterLimit ? (
+        <CharacterCount
+          id={characterCountId}
+          count={characterCount}
+          max={characterLimit}
+          className="mt-1 self-end"
+        />
+      ) : null}
 
       {/* Error */}
       {!hideErrorText && error && (

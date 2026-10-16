@@ -16,8 +16,15 @@ const { mockPremiumIsEnabled } = vi.hoisted(() => ({
   mockPremiumIsEnabled: { value: true },
 }));
 
+// why: the other-subscription check is a Stripe round trip of its own; each
+// test states whether another live subscription still carries the add-on
+const { mockHasOtherActiveAddonSubscription } = vi.hoisted(() => ({
+  mockHasOtherActiveAddonSubscription: vi.fn(),
+}));
+
 vi.mock("~/utils/stripe.server", () => ({
   stripe: mockStripe,
+  customerHasOtherActiveAddonSubscription: mockHasOtherActiveAddonSubscription,
   get premiumIsEnabled() {
     return mockPremiumIsEnabled.value;
   },
@@ -141,16 +148,21 @@ describe("createAuditAddonTrialSubscription", () => {
 
     await createAuditAddonTrialSubscription(trialParams);
 
-    expect(mockStripe.subscriptions.create).toHaveBeenCalledWith({
-      customer: "cus_xyz",
-      items: [{ price: "price_123" }],
-      trial_period_days: 7,
-      trial_settings: {
-        end_behavior: { missing_payment_method: "pause" },
+    expect(mockStripe.subscriptions.create).toHaveBeenCalledWith(
+      {
+        customer: "cus_xyz",
+        items: [{ price: "price_123" }],
+        trial_period_days: 7,
+        trial_settings: {
+          end_behavior: { missing_payment_method: "pause" },
+        },
+        default_payment_method: "pm_abc",
+        metadata: { userId: "user_abc", organizationId: "org_456" },
       },
-      default_payment_method: "pm_abc",
-      metadata: { userId: "user_abc", organizationId: "org_456" },
-    });
+      // Keyed on the workspace: a retry after a lost response returns this
+      // same subscription instead of opening a second one.
+      { idempotencyKey: "addon-trial:audits:org_456" }
+    );
   });
 
   it("creates subscription without default_payment_method when none exists", async () => {
@@ -162,15 +174,18 @@ describe("createAuditAddonTrialSubscription", () => {
 
     await createAuditAddonTrialSubscription(trialParams);
 
-    expect(mockStripe.subscriptions.create).toHaveBeenCalledWith({
-      customer: "cus_xyz",
-      items: [{ price: "price_123" }],
-      trial_period_days: 7,
-      trial_settings: {
-        end_behavior: { missing_payment_method: "pause" },
+    expect(mockStripe.subscriptions.create).toHaveBeenCalledWith(
+      {
+        customer: "cus_xyz",
+        items: [{ price: "price_123" }],
+        trial_period_days: 7,
+        trial_settings: {
+          end_behavior: { missing_payment_method: "pause" },
+        },
+        metadata: { userId: "user_abc", organizationId: "org_456" },
       },
-      metadata: { userId: "user_abc", organizationId: "org_456" },
-    });
+      { idempotencyKey: "addon-trial:audits:org_456" }
+    );
     // Ensure default_payment_method is NOT in the call
     const callArgs = mockStripe.subscriptions.create.mock.calls[0][0];
     expect(callArgs).not.toHaveProperty("default_payment_method");
@@ -557,6 +572,7 @@ describe("handleAuditAddonWebhook", () => {
 
   beforeEach(() => {
     mockOrgUpdate.mockResolvedValue({ id: orgId });
+    mockHasOtherActiveAddonSubscription.mockResolvedValue(false);
   });
 
   it("checkout.session.completed enables auditsEnabled + auditsEnabledAt", async () => {
@@ -669,6 +685,54 @@ describe("handleAuditAddonWebhook", () => {
     });
   });
 
+  it("subscription.updated (past_due) leaves the add-on as it is", async () => {
+    await handleAuditAddonWebhook({
+      eventType: "customer.subscription.updated",
+      subscription: {
+        id: "sub_1",
+        customer: "cus_xyz",
+        status: "past_due",
+      } as any,
+      organizationId: orgId,
+    });
+
+    expect(mockOrgUpdate).not.toHaveBeenCalled();
+  });
+
+  it("invoice.overdue switches the add-on off", async () => {
+    await handleAuditAddonWebhook({
+      eventType: "invoice.overdue",
+      subscription: {
+        id: "sub_1",
+        customer: "cus_xyz",
+        status: "past_due",
+      } as any,
+      organizationId: orgId,
+    });
+
+    expect(mockOrgUpdate).toHaveBeenCalledWith({
+      where: { id: orgId },
+      data: { auditsEnabled: false },
+      select: { id: true },
+    });
+  });
+
+  it("invoice.overdue keeps the add-on on while another live subscription carries it", async () => {
+    mockHasOtherActiveAddonSubscription.mockResolvedValue(true);
+
+    await handleAuditAddonWebhook({
+      eventType: "invoice.overdue",
+      subscription: {
+        id: "sub_1",
+        customer: "cus_xyz",
+        status: "past_due",
+      } as any,
+      organizationId: orgId,
+    });
+
+    expect(mockOrgUpdate).not.toHaveBeenCalled();
+  });
+
   it("unknown event makes no database call", async () => {
     await handleAuditAddonWebhook({
       eventType: "some.unknown.event",
@@ -676,6 +740,60 @@ describe("handleAuditAddonWebhook", () => {
     });
 
     expect(mockOrgUpdate).not.toHaveBeenCalled();
+  });
+
+  it("keeps audits on when another live subscription still carries the add-on for this workspace", async () => {
+    mockHasOtherActiveAddonSubscription.mockResolvedValue(true);
+
+    await handleAuditAddonWebhook({
+      eventType: "customer.subscription.paused",
+      subscription: {
+        id: "sub_bundled",
+        customer: "cus_1",
+        status: "paused",
+      } as any,
+      organizationId: orgId,
+    });
+
+    expect(mockHasOtherActiveAddonSubscription).toHaveBeenCalledWith({
+      customerId: "cus_1",
+      organizationId: orgId,
+      addonType: "audits",
+      exceptSubscriptionId: "sub_bundled",
+    });
+    expect(mockOrgUpdate).not.toHaveBeenCalled();
+  });
+
+  it("keeps audits on through an inactive status change while another subscription covers it", async () => {
+    mockHasOtherActiveAddonSubscription.mockResolvedValue(true);
+
+    await handleAuditAddonWebhook({
+      eventType: "customer.subscription.updated",
+      subscription: {
+        id: "sub_bundled",
+        customer: { id: "cus_1" },
+        status: "canceled",
+      } as any,
+      organizationId: orgId,
+    });
+
+    expect(mockHasOtherActiveAddonSubscription).toHaveBeenCalledWith(
+      expect.objectContaining({ customerId: "cus_1" })
+    );
+    expect(mockOrgUpdate).not.toHaveBeenCalled();
+  });
+
+  it("does not consult other subscriptions when the status change keeps the add-on active", async () => {
+    await handleAuditAddonWebhook({
+      eventType: "customer.subscription.updated",
+      subscription: { id: "sub_1", customer: "cus_1", status: "active" } as any,
+      organizationId: orgId,
+    });
+
+    expect(mockHasOtherActiveAddonSubscription).not.toHaveBeenCalled();
+    expect(mockOrgUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { auditsEnabled: true } })
+    );
   });
 });
 

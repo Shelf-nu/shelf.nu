@@ -2,6 +2,7 @@ import { transporter } from "~/emails/transporter.server";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
+import { redactEmailPayloadForLog } from "./redact-email-payload";
 import type { EmailPayloadType } from "./types";
 import { SMTP_FROM, SUPPORT_EMAIL } from "../utils/env";
 
@@ -51,7 +52,7 @@ export const registerEmailWorkers = async () => {
               cause,
               message: "Email permanently failed after exhausting all retries",
               additionalData: {
-                payload: job.data,
+                payload: redactEmailPayloadForLog(job.data),
                 retryCount: job.retrycount,
                 retryLimit: job.retrylimit,
               },

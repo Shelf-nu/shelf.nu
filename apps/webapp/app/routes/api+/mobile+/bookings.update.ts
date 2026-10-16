@@ -1,4 +1,4 @@
-import { BookingStatus, OrganizationRoles } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { BookingFormSchema } from "~/components/booking/forms/forms-schema";
@@ -15,6 +15,7 @@ import { updateBasicBooking } from "~/modules/booking/service.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
+import { bookingCustodianIsSelf } from "~/utils/bookings";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { isValidTimeZone } from "~/utils/date-format";
 import { prefsForDeclaredZone } from "~/utils/date-format.server";
@@ -38,8 +39,9 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  * - Validation runs through the shared {@link BookingFormSchema} with
  *   `action: "save"` + the booking's current status (so active bookings only
  *   validate name/custodian/tags, DRAFTs validate dates too).
- * - SELF_SERVICE / BASE users may only edit their own bookings and may only
- *   assign themselves as custodian.
+ * - A caller who does not write every booking may only edit bookings they are
+ *   the custodian of; one whose booking custodian is fixed to themselves may
+ *   only assign themselves as custodian.
  * - Bookings are a TEAM-plan feature (`assertMobileCanUseBookings`).
  *
  * Reschedules of a *non-DRAFT* booking are intentionally out of scope here —
@@ -90,11 +92,8 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const body = await parseMobileBody(BodySchema, request);
 
-    const { role } = await getMobileUserContext(user.id, organizationId);
-    const isSelfServiceOrBase =
-      role === OrganizationRoles.SELF_SERVICE ||
-      role === OrganizationRoles.BASE;
-    const isAdminOrOwner = !isSelfServiceOrBase;
+    // The caller's access, judged by the membership's effective role.
+    const { access } = await getMobileUserContext(user.id, organizationId);
 
     // Org-scoped lookup — gives us the current status (drives validation +
     // which fields actually apply) and the custodian for the ownership check.
@@ -110,8 +109,9 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
-    // Self-service / base users may only edit their own bookings.
-    if (isSelfServiceOrBase && existing.custodianUserId !== user.id) {
+    // A caller who does not write every booking may only edit bookings they
+    // are the custodian of.
+    if (!access.bookings.writeAll && existing.custodianUserId !== user.id) {
       throw new ShelfError({
         cause: null,
         message: "You can only edit your own bookings.",
@@ -140,8 +140,9 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     });
 
-    // Self-service / base may only assign a booking to themselves.
-    if (isSelfServiceOrBase && custodian.userId !== user.id) {
+    // A member whose booking custodian is fixed to themself may only assign
+    // a booking to themself.
+    if (bookingCustodianIsSelf(access) && custodian.userId !== user.id) {
       throw new ShelfError({
         cause: null,
         message: "Self user can assign booking to themselves only.",
@@ -177,7 +178,7 @@ export async function action({ request }: ActionFunctionArgs) {
         status: existing.status,
         workingHours,
         bookingSettings,
-        isAdminOrOwner,
+        bypassTimeLimits: access.policy.bookings.bypassTimeLimits,
       }).parse({
         id: body.bookingId,
         name: body.name,

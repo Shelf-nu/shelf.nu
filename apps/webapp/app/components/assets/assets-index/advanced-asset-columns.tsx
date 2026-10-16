@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { RenderableTreeNode } from "@markdoc/markdoc";
-import type { AssetStatus, QrIdDisplayPreference } from "@prisma/client";
+import type { AssetStatus } from "@prisma/client";
 import { CustomFieldType } from "@prisma/client";
 import {
   Popover,
@@ -36,21 +36,19 @@ import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useDateFormatter } from "~/hooks/use-date-formatter";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import type {
   AdvancedIndexAsset,
   ShelfAssetCustomFieldValueType,
 } from "~/modules/asset/types";
 import { isQuantityTracked } from "~/modules/asset/utils";
-import type {
-  ColumnLabelKey,
-  BarcodeField,
-} from "~/modules/asset-index-settings/helpers";
+import type { ColumnLabelKey } from "~/modules/asset-index-settings/helpers";
 import { formatCustodyList } from "~/modules/custody/utils";
 import { type AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { formatAssetValueWithBreakdown } from "~/utils/asset-value";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { formatCurrency } from "~/utils/currency";
+import { buildCustomFieldLinkHref } from "~/utils/custom-field-link";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { cleanMarkdownFormatting } from "~/utils/markdown-cleaner";
 import { isLink } from "~/utils/misc";
@@ -61,16 +59,16 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
+import { truncateText } from "~/utils/truncate-text";
 import { tw } from "~/utils/tw";
 import { resolveUserDisplayName } from "~/utils/user";
-import { AssetCodeBadge } from "../asset-code-badge";
+import { BarcodeCell } from "./advanced-columns/barcode-cell";
 import { QrIdCell } from "./advanced-columns/qr-id-cell";
 import { SamIdCell } from "./advanced-columns/sam-id-cell";
 import { Td } from "./advanced-columns/td";
 import AssetQuickActions from "./asset-quick-actions";
 import { freezeColumnClassNames } from "./freeze-column-classes";
 import { ListItemTagsColumn } from "./list-item-tags-column";
-import { CodePreviewDialog } from "../../code-preview/code-preview-dialog";
 import { AssetImage } from "../asset-image/component";
 import { AssetStatusBadge } from "../asset-status-badge";
 import { CategoryBadge } from "../category-badge";
@@ -141,7 +139,7 @@ export function AdvancedIndexColumn({
             variant="link"
             className="text-gray text-end font-normal underline hover:text-gray-600"
             target="_blank"
-            to={`${customFieldDisplayValue}?ref=shelf-webapp`}
+            to={buildCustomFieldLinkHref(customFieldDisplayValue as string)}
           >
             {customFieldDisplayValue as string}
           </Button>
@@ -231,6 +229,7 @@ export function AdvancedIndexColumn({
           status={item.status}
           availableToBook={item.availableToBook}
           asset={item}
+          isArchived={!!item.archivedAt}
         />
       );
 
@@ -293,7 +292,18 @@ export function AdvancedIndexColumn({
       return <CustodyColumn custody={item.custody} />;
 
     case "availableToBook":
-      return <TextColumn value={item.availableToBook ? "Yes" : "No"} />;
+      // An archived asset can't be booked, whatever its stored setting.
+      return (
+        <TextColumn
+          value={
+            item.archivedAt
+              ? "No (archived)"
+              : item.availableToBook
+              ? "Yes"
+              : "No"
+          }
+        />
+      );
 
     case "upcomingReminder":
       return (
@@ -316,7 +326,7 @@ export function AdvancedIndexColumn({
     case "barcode_ExternalQR":
     case "barcode_EAN13":
       return (
-        <BarcodeColumn
+        <BarcodeCell
           column={column}
           item={item}
           workspacePreference={currentOrganization.qrIdDisplayPreference}
@@ -422,11 +432,13 @@ function StatusColumn({
   status,
   availableToBook,
   asset,
+  isArchived = false,
 }: {
   id: string;
   status: AssetStatus;
   availableToBook?: boolean;
   asset?: AdvancedIndexAsset;
+  isArchived?: boolean;
 }) {
   return (
     <Td className="w-full max-w-none whitespace-nowrap">
@@ -435,20 +447,27 @@ function StatusColumn({
         status={status}
         availableToBook={availableToBook ?? true}
         asset={asset}
+        isArchived={isArchived}
       />
     </Td>
   );
 }
 
+/** The most description characters the index tooltip shows. */
+const DESCRIPTION_TOOLTIP_MAX_LENGTH = 600;
+
 /**
  * Displays a truncated plain-text preview of the asset description and shows
- * the full markdown-rendered content inside a tooltip on hover.
+ * the markdown-rendered content inside a tooltip on hover. The tooltip shows
+ * at most {@link DESCRIPTION_TOOLTIP_MAX_LENGTH} characters and points to the
+ * asset page for the rest.
  * Description column component - exported for reuse in other index pages
  */
 export function DescriptionColumn({ value }: { value: string }) {
   const plainPreview = cleanMarkdownFormatting(value ?? "");
   const hasContent = Boolean(value && value.trim().length > 0);
   const previewText = plainPreview.length > 0 ? plainPreview : value.trim();
+  const isTooltipTruncated = value.length > DESCRIPTION_TOOLTIP_MAX_LENGTH;
 
   return (
     <Td className="max-w-62 min-w-60 whitespace-pre-wrap">
@@ -467,7 +486,15 @@ export function DescriptionColumn({ value }: { value: string }) {
                   textarea and rendered as plain text on the asset page, so
                   they are not a markdown surface. Links here would also be
                   unreachable — Radix tooltip content is not interactive. */}
-              <MarkdownViewer content={value} className="mt-2 text-sm" />
+              <MarkdownViewer
+                content={truncateText(value, DESCRIPTION_TOOLTIP_MAX_LENGTH)}
+                className="mt-2 text-sm"
+              />
+              {isTooltipTruncated ? (
+                <p className="mt-2 text-xs text-gray-500">
+                  Open the asset to read the full description
+                </p>
+              ) : null}
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
@@ -523,7 +550,7 @@ function TagsColumn({ tags }: { tags: AdvancedIndexAsset["tags"] }) {
  * INDIVIDUAL assets to keep the row clean).
  *
  * Multiple custodians: renders the primary custodian's badge plus a
- * `+N more` chip; hovering the chip reveals a tooltip listing every
+ * `+N` chip; hovering the chip reveals a tooltip listing every
  * custodian on its own line so the full custody breakdown stays one
  * hover away without inflating row height.
  */
@@ -532,7 +559,7 @@ export function CustodyColumn({
 }: {
   custody: AdvancedIndexAsset["custody"];
 }) {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const { primary, others, total } = formatCustodyList(custody ?? []);
 
   return (
@@ -562,7 +589,7 @@ function CustodyQuantitySuffix({ quantity }: { quantity?: number }) {
   return <span className="ml-1 text-gray-500">({quantity})</span>;
 }
 
-/** Renders the badge + optional `+N more` chip. Split out so the empty
+/** Renders the badge + optional `+N` chip. Split out so the empty
  * state can short-circuit before the tooltip provider mounts. */
 function CustodyColumnContent({
   primary,
@@ -590,12 +617,16 @@ function CustodyColumnContent({
       <TooltipProvider>
         <Tooltip>
           <TooltipTrigger asChild>
-            <span
-              className="shrink-0 cursor-help whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"
+            <button
+              type="button"
+              className="shrink-0 cursor-help whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-1"
               data-testid="custody-more-chip"
+              aria-label={`+${others.length} more custodian${
+                others.length === 1 ? "" : "s"
+              }`}
             >
-              +{others.length} more
-            </span>
+              +{others.length}
+            </button>
           </TooltipTrigger>
           <TooltipContent
             className="max-w-xs"
@@ -629,7 +660,7 @@ function CustodyColumnContent({
  *
  * Single kit: renders the primary kit name as a link to the kit page.
  * Multiple kits (qty-tracked split across kits): renders the primary
- * kit link plus a "+N more" chip; hovering the chip reveals a tooltip
+ * kit link plus a "+N" chip; hovering the chip reveals a tooltip
  * listing every kit name on its own line. Mirrors `CustodyColumn` so
  * the asset-index never silently hides kit membership 2..N.
  */
@@ -676,12 +707,16 @@ function KitColumnContent({
       <TooltipProvider>
         <Tooltip>
           <TooltipTrigger asChild>
-            <span
-              className="shrink-0 cursor-help whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"
+            <button
+              type="button"
+              className="shrink-0 cursor-help whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-1"
               data-testid="kit-more-chip"
+              aria-label={`+${others.length} more kit${
+                others.length === 1 ? "" : "s"
+              }`}
             >
-              +{others.length} more
-            </span>
+              +{others.length}
+            </button>
           </TooltipTrigger>
           <TooltipContent className="max-w-xs" data-testid="kit-more-tooltip">
             <ul className="flex flex-col gap-1 text-sm">
@@ -702,7 +737,7 @@ function KitColumnContent({
  * Single location: renders the primary placement as a LocationBadge
  * wrapped in a link to the location page.
  * Multiple locations (qty-tracked split across locations): renders the
- * primary location plus a "+N more" chip with a hover tooltip listing
+ * primary location plus a "+N" chip with a hover tooltip listing
  * every location. Mirror of `KitColumn` / `CustodyColumn`.
  */
 export function LocationColumn({
@@ -759,12 +794,16 @@ function LocationColumnContent({
       <TooltipProvider>
         <Tooltip>
           <TooltipTrigger asChild>
-            <span
-              className="shrink-0 cursor-help whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"
+            <button
+              type="button"
+              className="shrink-0 cursor-help whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-1"
               data-testid="location-more-chip"
+              aria-label={`+${others.length} more location${
+                others.length === 1 ? "" : "s"
+              }`}
             >
-              +{others.length} more
-            </span>
+              +{others.length}
+            </button>
           </TooltipTrigger>
           <TooltipContent
             className="max-w-xs"
@@ -811,128 +850,12 @@ function UpcomingReminderColumn({
   );
 }
 
-function BarcodeColumn({
-  column,
-  item,
-  workspacePreference,
-}: {
-  column: BarcodeField;
-  item: AdvancedIndexAsset;
-  workspacePreference: QrIdDisplayPreference;
-}) {
-  // Map column names to actual enum values
-  const typeMapping: Record<string, string> = {
-    Code128: "Code128",
-    Code39: "Code39",
-    DataMatrix: "DataMatrix",
-    ExternalQR: "ExternalQR",
-    EAN13: "EAN13",
-  };
-
-  const columnType = column.split("_")[1];
-  const actualBarcodeType = typeMapping[columnType] || columnType;
-
-  const barcodes =
-    item.barcodes?.filter((b) => b.type === actualBarcodeType) || [];
-
-  if (barcodes.length === 0) {
-    return (
-      <Td>
-        <EmptyTableValue />
-      </Td>
-    );
-  }
-
-  // If only one barcode, show as a single clickable chip — same visual
-  // language as the qrId column: AssetCodeBadge inside a button so the
-  // CodePreviewDialog still opens on click, with hover/focus affordances
-  // and the trailing "expand" glyph (`interactive`) signaling clickability.
-  if (barcodes.length === 1) {
-    const barcode = barcodes[0];
-    return (
-      <CodePreviewDialog
-        item={{
-          id: item.id,
-          title: item.title,
-          qrId: item.qrId,
-          type: "asset",
-          sequentialId: item.sequentialId,
-        }}
-        selectedBarcodeId={barcode.id}
-        trigger={
-          <Td className="w-full max-w-none !overflow-visible whitespace-nowrap">
-            <button
-              type="button"
-              aria-label={`Show code preview for ${item.title}`}
-              className="rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-1"
-            >
-              <AssetCodeBadge
-                value={barcode.value}
-                type={barcode.type}
-                isFallback={false}
-                workspacePreference={workspacePreference}
-                interactive
-                // Explicit column: barcode column shows literal barcode values,
-                // not the workspace-preferred one. Tooltip simplifies to
-                // "<Type>: <value>".
-                explicit
-                className="cursor-pointer transition-colors hover:bg-gray-200"
-              />
-            </button>
-          </Td>
-        }
-      />
-    );
-  }
-
-  // If multiple barcodes of this type, show each as its own clickable chip in
-  // a flex row. Replaces the previous comma-separated link list — chips have
-  // their own padding so commas would be redundant visual noise.
-  return (
-    <Td className="w-full max-w-none !overflow-visible whitespace-nowrap">
-      <div className="flex flex-wrap items-center gap-1.5">
-        {barcodes.map((barcode) => (
-          <CodePreviewDialog
-            key={barcode.id}
-            item={{
-              id: item.id,
-              title: item.title,
-              sequentialId: item.sequentialId,
-              qrId: item.qrId,
-              type: "asset",
-            }}
-            selectedBarcodeId={barcode.id}
-            trigger={
-              <button
-                type="button"
-                aria-label={`Show code preview for ${item.title} (${barcode.value})`}
-                className="rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-1"
-              >
-                <AssetCodeBadge
-                  value={barcode.value}
-                  type={barcode.type}
-                  isFallback={false}
-                  workspacePreference={workspacePreference}
-                  interactive
-                  // Explicit column: see single-barcode case above.
-                  explicit
-                  className="cursor-pointer transition-colors hover:bg-gray-200"
-                />
-              </button>
-            }
-          />
-        ))}
-      </div>
-    </Td>
-  );
-}
-
 function UpcomingBookingsColumn({
   bookings,
 }: {
   bookings: AdvancedIndexAsset["bookings"];
 }) {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const organization = useCurrentOrganization();
   const canSeeAllCustody = userHasCustodyViewPermission({
     roles,
@@ -1000,28 +923,13 @@ function UpcomingBookingsColumn({
                         end: booking.to,
                         custodian: {
                           name: custodianName ?? "",
-                          user: booking.custodianUser
-                            ? {
-                                id: booking.custodianUser.id,
-                                firstName: booking.custodianUser.firstName,
-                                lastName: booking.custodianUser.lastName,
-                                profilePicture:
-                                  booking.custodianUser.profilePicture,
-                              }
-                            : null,
+                          user: booking.custodianUser ?? null,
                         },
                         creator: {
                           name: booking.creator
                             ? resolveUserDisplayName(booking.creator)
                             : "Unknown",
-                          user: booking.creator
-                            ? {
-                                id: booking.creator.id,
-                                firstName: booking.creator.firstName,
-                                lastName: booking.creator.lastName,
-                                profilePicture: booking.creator.profilePicture,
-                              }
-                            : null,
+                          user: booking.creator ?? null,
                         },
                       }}
                     />

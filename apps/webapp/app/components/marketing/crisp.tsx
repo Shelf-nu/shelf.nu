@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Crisp } from "crisp-sdk-web";
 import { useUserData } from "~/hooks/use-user-data";
+import { resolveUserDisplayName } from "~/utils/user";
 import type { HTMLButtonProps } from "../shared/button";
 import { Button } from "../shared/button";
 
@@ -14,9 +15,7 @@ export function useCrisp() {
       /** Set some user data in crisp */
       Crisp.user.setEmail(user.email);
       Crisp.user.setNickname(
-        `${user?.firstName ? user.firstName : ""} ${
-          user?.lastName ? user.lastName : ""
-        } (${user.username}) `
+        `${resolveUserDisplayName(user)} (${user.username}) `
       );
     }
   }, [user]);

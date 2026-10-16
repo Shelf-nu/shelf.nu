@@ -1,3 +1,19 @@
+---
+description: Working hours are the physical location's wall clock; override dates are absolute (getOverrideDateKey), times use the acting user's preference zone
+paths:
+  - "apps/webapp/app/modules/working-hours/**"
+  - "apps/webapp/app/modules/booking/**"
+  - "apps/webapp/app/components/booking/**"
+  - "apps/webapp/app/components/working-hours/**"
+  - "apps/webapp/app/routes/**/*working-hours*"
+  - "apps/webapp/app/components/assets/assets-index/**"
+  - "apps/webapp/app/modules/organization/**"
+  - "apps/webapp/app/routes/**/*booking*"
+  - "packages/database/prisma/schema.prisma"
+  - "apps/webapp/test/**/*booking*"
+  - "apps/webapp/test/**/*working-hours*"
+---
+
 # Working Hours Are Local To The Physical Location
 
 Working hours describe when a **physical place** is open. Both halves are
@@ -46,7 +62,29 @@ is a stored location zone, not a different user-side zone. The UI states the
 semantics at the two places users meet them — the Weekly Schedule settings form
 and the booking form's working-hours info box.
 
+**The accepted proxy is the acting user's resolved preference zone, and it is
+mandatory — not merely tolerated.** Every working-hours TIME evaluation reads
+that one zone, so a single submission is judged the same way at every step. The
+alternative is not "no zone": a bare `getDay()` / `setHours()` / `format()` runs
+against the **ambient clock**, which is the device in the browser and UTC on the
+server. That is strictly worse than the proxy — the same booking can be measured
+in two different zones on either side of one validation.
+
+So the two directions are not symmetrical, and only one of them is a violation:
+
+| Change                                        | Verdict                                           |
+| --------------------------------------------- | ------------------------------------------------- |
+| ambient device/server clock → preference zone | **bug fix** — makes the accepted proxy consistent |
+| preference zone → some other user-side zone   | violation — a second proxy is drift, not a fix    |
+| preference zone → stored location zone        | the real fix, if we ever build the column         |
+
+Switching a calculation off the ambient clock and onto `prefs.timeZone` is
+therefore expected when you touch this code, and reviewing it as "keying working
+hours to the viewer's timezone" is a false positive.
+
 When you touch working-hours code, ask which half you are in: a **date** must
-stay absolute (use the helper), a **time** is on-site wall clock and needs no
-conversion at all. See [[quantity-semantics-per-surface]] for the same
-"name what this value means before reaching for a helper" discipline.
+stay absolute (use `getOverrideDateKey()`); a **time** means on-site wall clock
+and is evaluated in the accepted proxy above — never in whatever zone the
+machine running the code happens to be in. See [[quantity-semantics-per-surface]]
+for the same "name what this value means before reaching for a helper"
+discipline.

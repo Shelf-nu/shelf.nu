@@ -67,15 +67,17 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const { assetId, custodianId } = parsed.data;
 
-    // Get user context (role + barcode access) for asset index settings
-    const { role, canUseBarcodes, canSeeAllCustody } =
-      await getMobileUserContext(user.id, organizationId);
+    // Caller's access (effective role, custody scope) and barcode access
+    const { canUseBarcodes, access } = await getMobileUserContext(
+      user.id,
+      organizationId
+    );
 
     const settings = await getAssetIndexSettings({
       userId: user.id,
       organizationId,
       canUseBarcodes,
-      role,
+      role: access.role,
     });
 
     // Validate custodian belongs to the organization
@@ -96,7 +98,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     await bulkCheckOutAssets({
       userId: user.id,
-      role,
+      custodyAssign: access.custody.assign,
       assetIds: [assetId],
       custodianId,
       custodianName: teamMember.name,
@@ -111,7 +113,7 @@ export async function action({ request }: ActionFunctionArgs) {
        * custodian filter. Swap in `scopeCustodianFilterIds` at that point, so
        * they can still filter by their OWN custody.
        */
-      allowedTeamMemberIds: canSeeAllCustody ? "all" : [],
+      allowedTeamMemberIds: access.custody.seeAll ? "all" : [],
     });
 
     return data({ success: true });

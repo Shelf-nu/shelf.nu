@@ -4,10 +4,14 @@ import { db } from "~/database/db.server";
 
 /**
  * Minimal user name shape used when composing note content.
+ *
+ * Carries every column `resolveUserDisplayName` reads, so a consumer can pass
+ * the row straight through to the note wrappers instead of re-listing fields.
  */
 export type BasicUserName = {
   firstName: string | null;
   lastName: string | null;
+  displayName: string | null;
 };
 
 /**

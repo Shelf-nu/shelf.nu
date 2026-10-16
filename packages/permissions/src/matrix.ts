@@ -15,13 +15,23 @@ import { PermissionAction, PermissionEntity } from "./vocabulary";
  * everything regardless of what their entries say (e.g. no role's entry lists
  * `qr:update`, yet both hold it), and that short-circuit lives in
  * {@link roleHasPermission}. Reading the map alone gives the wrong answer for
- * two of the four roles. Call the resolver instead.
+ * the two roles the resolver allows everything (ADMIN and OWNER): they hold
+ * more than their entries list.
+ * Call the resolver instead.
+ *
+ * The outer key is required: every role must have a complete entry, so a
+ * role missing from the map is a compile error rather than an `undefined`
+ * lookup at runtime.
  */
 export const Role2PermissionMap: {
-  [K in OrganizationRole]?: Record<PermissionEntity, PermissionAction[]>;
+  [K in OrganizationRole]: Record<PermissionEntity, PermissionAction[]>;
 } = {
   BASE: {
     [PermissionEntity.asset]: [PermissionAction.read],
+    // Reports aggregate org-wide custody, booking and value data; the
+    // sidebar offers them to admins and owners only, and the server gate
+    // matches that. Empty = no access.
+    [PermissionEntity.reports]: [],
     [PermissionEntity.assetIndexSettings]: [PermissionAction.read],
     [PermissionEntity.booking]: [
       PermissionAction.create,
@@ -60,6 +70,7 @@ export const Role2PermissionMap: {
     [PermissionEntity.custody]: [],
     [PermissionEntity.assetReminders]: [],
     [PermissionEntity.teamMemberNote]: [],
+    [PermissionEntity.nonRegisteredMember]: [],
     [PermissionEntity.assetModel]: [PermissionAction.read],
     [PermissionEntity.emailSettings]: [],
     [PermissionEntity.userData]: [
@@ -71,6 +82,7 @@ export const Role2PermissionMap: {
   },
   SELF_SERVICE: {
     [PermissionEntity.asset]: [PermissionAction.read, PermissionAction.custody],
+    [PermissionEntity.reports]: [],
     [PermissionEntity.assetIndexSettings]: [PermissionAction.read],
     [PermissionEntity.booking]: [
       PermissionAction.create,
@@ -114,6 +126,7 @@ export const Role2PermissionMap: {
     [PermissionEntity.custody]: [],
     [PermissionEntity.assetReminders]: [],
     [PermissionEntity.teamMemberNote]: [],
+    [PermissionEntity.nonRegisteredMember]: [],
     [PermissionEntity.assetModel]: [],
     [PermissionEntity.emailSettings]: [],
     [PermissionEntity.userData]: [
@@ -124,6 +137,10 @@ export const Role2PermissionMap: {
     [PermissionEntity.commandPaletteSearch]: [PermissionAction.read],
   },
   ADMIN: {
+    [PermissionEntity.reports]: [
+      PermissionAction.read,
+      PermissionAction.export,
+    ],
     [PermissionEntity.asset]: [
       PermissionAction.create,
       PermissionAction.read,
@@ -250,6 +267,14 @@ export const Role2PermissionMap: {
       PermissionAction.read,
       PermissionAction.create,
       PermissionAction.delete,
+    ],
+    [PermissionEntity.nonRegisteredMember]: [
+      PermissionAction.create,
+      PermissionAction.read,
+      PermissionAction.update,
+      PermissionAction.delete,
+      PermissionAction.import,
+      PermissionAction.export,
     ],
     [PermissionEntity.assetModel]: [
       PermissionAction.create,
@@ -268,7 +293,99 @@ export const Role2PermissionMap: {
     [PermissionEntity.update]: [PermissionAction.read],
     [PermissionEntity.commandPaletteSearch]: [PermissionAction.read],
   },
+  /**
+   * The Manager holds no allow-all shortcut: every grant is listed.
+   * Bookings, custody and audits as an Administrator; read-only catalogue,
+   * team and locations; notes, reminders and non-registered members to
+   * support the hand-overs and audits it runs.
+   */
+  MANAGER: {
+    [PermissionEntity.asset]: [PermissionAction.read, PermissionAction.custody],
+    [PermissionEntity.reports]: [],
+    [PermissionEntity.assetIndexSettings]: [
+      PermissionAction.read,
+      PermissionAction.update, // per-user column and mode settings only
+    ],
+    [PermissionEntity.booking]: [
+      PermissionAction.create,
+      PermissionAction.read,
+      PermissionAction.update,
+      PermissionAction.delete,
+      PermissionAction.checkout,
+      PermissionAction.checkin,
+      PermissionAction.archive,
+      PermissionAction.manageAssets,
+      PermissionAction.manageKits,
+      PermissionAction.cancel,
+      PermissionAction.extend,
+      PermissionAction.export,
+    ],
+    [PermissionEntity.bookingNote]: [
+      PermissionAction.read,
+      PermissionAction.create,
+      PermissionAction.update,
+      PermissionAction.delete,
+    ],
+    [PermissionEntity.auditNote]: [
+      PermissionAction.read,
+      PermissionAction.create,
+      PermissionAction.update,
+      PermissionAction.delete,
+    ],
+    [PermissionEntity.audit]: [
+      PermissionAction.create,
+      PermissionAction.read,
+      PermissionAction.update,
+      PermissionAction.delete,
+      PermissionAction.archive,
+    ],
+    [PermissionEntity.qr]: [PermissionAction.read],
+    [PermissionEntity.category]: [],
+    [PermissionEntity.customField]: [],
+    [PermissionEntity.location]: [PermissionAction.read],
+    [PermissionEntity.locationNote]: [],
+    [PermissionEntity.tag]: [],
+    [PermissionEntity.teamMember]: [PermissionAction.read],
+    [PermissionEntity.teamMemberProfile]: [PermissionAction.read],
+    [PermissionEntity.workspace]: [],
+    [PermissionEntity.dashboard]: [],
+    [PermissionEntity.generalSettings]: [],
+    [PermissionEntity.workingHours]: [PermissionAction.read],
+    [PermissionEntity.subscription]: [],
+    [PermissionEntity.kit]: [PermissionAction.read, PermissionAction.custody],
+    [PermissionEntity.note]: [
+      PermissionAction.read,
+      PermissionAction.create,
+      PermissionAction.delete, // own notes only; the service scopes delete to the author
+    ],
+    [PermissionEntity.scan]: [PermissionAction.read],
+    [PermissionEntity.custody]: [PermissionAction.read],
+    [PermissionEntity.assetReminders]: [
+      PermissionAction.create,
+      PermissionAction.read,
+      PermissionAction.update,
+      PermissionAction.delete,
+    ],
+    [PermissionEntity.teamMemberNote]: [],
+    [PermissionEntity.nonRegisteredMember]: [
+      PermissionAction.read,
+      PermissionAction.create,
+      PermissionAction.update,
+    ],
+    [PermissionEntity.assetModel]: [PermissionAction.read],
+    [PermissionEntity.emailSettings]: [],
+    [PermissionEntity.userData]: [
+      PermissionAction.read,
+      PermissionAction.update,
+    ],
+    [PermissionEntity.update]: [PermissionAction.read],
+    [PermissionEntity.commandPaletteSearch]: [PermissionAction.read],
+  },
   OWNER: {
+    [PermissionEntity.reports]: [
+      PermissionAction.read,
+      PermissionAction.export,
+    ],
     [PermissionEntity.asset]: [
       PermissionAction.create,
       PermissionAction.read,
@@ -397,6 +514,14 @@ export const Role2PermissionMap: {
       PermissionAction.read,
       PermissionAction.create,
       PermissionAction.delete,
+    ],
+    [PermissionEntity.nonRegisteredMember]: [
+      PermissionAction.create,
+      PermissionAction.read,
+      PermissionAction.update,
+      PermissionAction.delete,
+      PermissionAction.import,
+      PermissionAction.export,
     ],
     [PermissionEntity.assetModel]: [
       PermissionAction.create,

@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { TagUseFor } from "@prisma/client";
+import { archivedAssetBlockedReason } from "@shelf/labels";
 import { useAtomValue } from "jotai";
 import type {
   ActionFunctionArgs,
@@ -43,6 +44,7 @@ import {
   parseData,
   safeRedirect,
 } from "~/utils/http.server";
+import { userCanReinstateAssets } from "~/utils/org-validation.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -100,6 +102,23 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userOrganizations,
       request,
     });
+
+    // An archived asset is read-only (issue #382), and Save would be refused.
+    // Say so before the form is filled in, and send the user back to the asset.
+    if (asset.archivedAt) {
+      sendNotification({
+        title: "Asset is archived",
+        message: archivedAssetBlockedReason({
+          canReinstate: await userCanReinstateAssets({
+            userId,
+            organizationId,
+          }),
+        }),
+        icon: { name: "trash", variant: "error" },
+        senderId: userId,
+      });
+      return redirect(`/assets/${id}/overview`);
+    }
 
     const [
       { categories, totalCategories, tags, locations, totalLocations },
@@ -252,10 +271,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     /** This checks if tags are passed and build the  */
     const tags = buildTagsSet(parsedData.tags);
 
-    /** Extract barcode data from form */
+    /**
+     * Barcodes are only read when the workspace holds the add-on. Without it
+     * the form has no barcode section, so `undefined` leaves the asset's
+     * existing barcodes untouched: `updateAsset` only reconciles a list it is
+     * given, and an empty list would read as "remove every barcode".
+     */
     const barcodes = canUseBarcodes
       ? extractBarcodesFromFormData(formData)
-      : [];
+      : undefined;
 
     await updateAsset({
       id,

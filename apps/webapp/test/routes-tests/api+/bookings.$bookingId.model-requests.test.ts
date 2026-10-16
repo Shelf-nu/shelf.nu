@@ -9,6 +9,7 @@
  */
 
 import { OrganizationRoles } from "@prisma/client";
+import { permissionContext } from "@helpers/role-access";
 import type { ActionFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -50,7 +51,7 @@ vi.mock("~/database/db.server", () => ({
 }));
 
 // why: we never want the real permission machinery to run — each test
-// supplies the (organizationId, role, isSelfServiceOrBase) it needs.
+// supplies the caller's access through `permissionContext`.
 vi.mock("~/utils/roles.server", () => ({
   requirePermission: vi.fn(),
 }));
@@ -105,11 +106,9 @@ beforeEach(() => {
 
 describe("api/bookings/:bookingId/model-requests — ownership guard", () => {
   it("rejects SELF_SERVICE user upserting on someone else's booking with 403", async () => {
-    requirePermissionMock.mockResolvedValue({
-      organizationId: "org-1",
-      role: OrganizationRoles.SELF_SERVICE,
-      isSelfServiceOrBase: true,
-    } as any);
+    requirePermissionMock.mockResolvedValue(
+      permissionContext({ roles: [OrganizationRoles.SELF_SERVICE] }) as never
+    );
 
     dbMocks.bookingFindFirst.mockResolvedValue({
       creatorId: "someone-else",
@@ -130,11 +129,9 @@ describe("api/bookings/:bookingId/model-requests — ownership guard", () => {
   });
 
   it("rejects SELF_SERVICE user deleting on someone else's booking with 403", async () => {
-    requirePermissionMock.mockResolvedValue({
-      organizationId: "org-1",
-      role: OrganizationRoles.SELF_SERVICE,
-      isSelfServiceOrBase: true,
-    } as any);
+    requirePermissionMock.mockResolvedValue(
+      permissionContext({ roles: [OrganizationRoles.SELF_SERVICE] }) as never
+    );
 
     dbMocks.bookingFindFirst.mockResolvedValue({
       creatorId: "someone-else",
@@ -150,11 +147,9 @@ describe("api/bookings/:bookingId/model-requests — ownership guard", () => {
   });
 
   it("returns 404 when SELF_SERVICE hits a bookingId in another org", async () => {
-    requirePermissionMock.mockResolvedValue({
-      organizationId: "org-1",
-      role: OrganizationRoles.SELF_SERVICE,
-      isSelfServiceOrBase: true,
-    } as any);
+    requirePermissionMock.mockResolvedValue(
+      permissionContext({ roles: [OrganizationRoles.SELF_SERVICE] }) as never
+    );
 
     dbMocks.bookingFindFirst.mockResolvedValue(null);
 
@@ -172,11 +167,9 @@ describe("api/bookings/:bookingId/model-requests — ownership guard", () => {
   });
 
   it("allows SELF_SERVICE user to upsert on their own (creator) booking", async () => {
-    requirePermissionMock.mockResolvedValue({
-      organizationId: "org-1",
-      role: OrganizationRoles.SELF_SERVICE,
-      isSelfServiceOrBase: true,
-    } as any);
+    requirePermissionMock.mockResolvedValue(
+      permissionContext({ roles: [OrganizationRoles.SELF_SERVICE] }) as never
+    );
 
     dbMocks.bookingFindFirst.mockResolvedValue({
       creatorId: "user-current",
@@ -203,11 +196,9 @@ describe("api/bookings/:bookingId/model-requests — ownership guard", () => {
   });
 
   it("allows SELF_SERVICE user when they're the custodian (not creator)", async () => {
-    requirePermissionMock.mockResolvedValue({
-      organizationId: "org-1",
-      role: OrganizationRoles.SELF_SERVICE,
-      isSelfServiceOrBase: true,
-    } as any);
+    requirePermissionMock.mockResolvedValue(
+      permissionContext({ roles: [OrganizationRoles.SELF_SERVICE] }) as never
+    );
 
     dbMocks.bookingFindFirst.mockResolvedValue({
       creatorId: "admin-user",
@@ -224,11 +215,9 @@ describe("api/bookings/:bookingId/model-requests — ownership guard", () => {
   });
 
   it("rejects BASE user manipulating someone else's booking with 403", async () => {
-    requirePermissionMock.mockResolvedValue({
-      organizationId: "org-1",
-      role: OrganizationRoles.BASE,
-      isSelfServiceOrBase: true,
-    } as any);
+    requirePermissionMock.mockResolvedValue(
+      permissionContext({ roles: [OrganizationRoles.BASE] }) as never
+    );
 
     dbMocks.bookingFindFirst.mockResolvedValue({
       creatorId: "someone-else",
@@ -249,11 +238,9 @@ describe("api/bookings/:bookingId/model-requests — ownership guard", () => {
   });
 
   it("skips the ownership probe entirely for ADMIN users", async () => {
-    requirePermissionMock.mockResolvedValue({
-      organizationId: "org-1",
-      role: OrganizationRoles.ADMIN,
-      isSelfServiceOrBase: false,
-    } as any);
+    requirePermissionMock.mockResolvedValue(
+      permissionContext({ roles: [OrganizationRoles.ADMIN] }) as never
+    );
 
     serviceMocks.upsertBookingModelRequest.mockResolvedValue({
       id: "req-2",
@@ -278,11 +265,9 @@ describe("api/bookings/:bookingId/model-requests — ownership guard", () => {
   });
 
   it("skips the ownership probe entirely for OWNER users", async () => {
-    requirePermissionMock.mockResolvedValue({
-      organizationId: "org-1",
-      role: OrganizationRoles.OWNER,
-      isSelfServiceOrBase: false,
-    } as any);
+    requirePermissionMock.mockResolvedValue(
+      permissionContext({ roles: [OrganizationRoles.OWNER] }) as never
+    );
 
     serviceMocks.removeBookingModelRequest.mockResolvedValue(undefined);
 
