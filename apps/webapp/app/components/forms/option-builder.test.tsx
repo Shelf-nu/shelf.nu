@@ -56,6 +56,15 @@ describe("resolveOptionEntry", () => {
     });
   });
 
+  it("rejects a duplicate that differs only by case or inner spaces", () => {
+    expect(resolveOptionEntry("sony", ["Sony"])).toEqual({
+      status: "duplicate",
+    });
+    expect(
+      resolveOptionEntry("Blackmagic  design", ["Blackmagic Design"])
+    ).toEqual({ status: "duplicate" });
+  });
+
   it("treats options differing in inner text as distinct", () => {
     expect(resolveOptionEntry("Large box", ["Large"])).toEqual({
       status: "add",

@@ -26,6 +26,7 @@ import type {
 import {
   buildOptionRenames,
   findDuplicateGroups,
+  normalizeOptionKey,
   resolveOptionRename,
   sortOptionsAlphabetically,
   summarizeOptionUsage,
@@ -74,8 +75,8 @@ export type OptionEntryResolution =
  * keeps in `AssetCustomFieldValue`, validated later by exact membership, so
  * rewriting one outside a rename would orphan the assets pointing at it.
  *
- * Duplicates are compared on the trimmed text, because "Large" and " Large "
- * render as two rows an operator cannot tell apart.
+ * Duplicates are compared with {@link normalizeOptionKey}, the same rule as
+ * renames and "Merge duplicates", so "sony" cannot be added next to "Sony".
  *
  * @param raw - The text currently in the input.
  * @param options - The options already added.
@@ -92,7 +93,8 @@ export function resolveOptionEntry(
     return { status: "ignore" };
   }
 
-  if (options.some((existing) => existing.trim() === option)) {
+  const key = normalizeOptionKey(option);
+  if (options.some((existing) => normalizeOptionKey(existing) === key)) {
     return { status: "duplicate" };
   }
 

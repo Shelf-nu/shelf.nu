@@ -1,7 +1,9 @@
+import type { Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ShelfError } from "~/utils/error";
 
-// Mock the database and dependencies
+// why: these are unit tests of the service's control flow; the rename SQL and
+// counts need a real Postgres, so the client is replaced with spies.
 vi.mock("~/database/db.server", () => ({
   db: {
     $transaction: vi.fn(),
@@ -25,6 +27,8 @@ vi.mock("~/database/db.server", () => ({
 const mockRemoveCustomFieldFromAssetIndexSettings = vi.fn();
 const mockUpdateAssetIndexSettingsAfterCfUpdate = vi.fn();
 
+// why: index-settings updates are their own module with their own tests; here
+// we only check that a field update hands them the old and new field.
 vi.mock("../asset-index-settings/service.server", () => ({
   removeCustomFieldFromAssetIndexSettings:
     mockRemoveCustomFieldFromAssetIndexSettings,
@@ -345,7 +349,8 @@ describe("updateCustomField", () => {
     options: ["Sony ", "Canon", "sony"],
   };
 
-  /** A transaction client that records what the callback does with it. */
+  // why: records which client the transaction callback writes through, so the
+  // tests can prove the field update and the value rewrite share one transaction.
   function mockTransaction() {
     const tx = {
       customField: {
@@ -357,7 +362,9 @@ describe("updateCustomField", () => {
       },
       $executeRaw: vi.fn().mockResolvedValue(3),
     };
-    dbTransactionMock.mockImplementation((callback: any) => callback(tx));
+    dbTransactionMock.mockImplementation(((
+      callback: (client: typeof tx) => unknown
+    ) => callback(tx)) as never);
     return tx;
   }
 
@@ -477,9 +484,11 @@ describe("getOptionUsageCounts", () => {
     });
 
     expect(counts).toEqual({ Sony: 4, sony: 1 });
-    const query = vi.mocked(db.$queryRaw).mock.calls[0][0] as any;
+    const query = vi.mocked(db.$queryRaw).mock
+      .calls[0][0] as unknown as Prisma.Sql;
     expect(query.values).toEqual(["cf-brand", "org-1"]);
     expect(query.text).toContain(`cf."organizationId" = $2`);
     expect(query.text).toContain(`v."value"->>'valueOption'`);
+    expect(query.text).toContain(`COUNT(DISTINCT v."assetId")`);
   });
 });

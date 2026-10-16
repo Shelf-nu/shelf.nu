@@ -476,7 +476,7 @@ export async function getOptionUsageCounts({
   try {
     const rows = await db.$queryRaw<{ option: string; count: number }[]>(
       Prisma.sql`
-        SELECT v."value"->>'valueOption' AS "option", COUNT(*)::int AS "count"
+        SELECT v."value"->>'valueOption' AS "option", COUNT(DISTINCT v."assetId")::int AS "count"
         FROM "AssetCustomFieldValue" AS v
         JOIN "CustomField" AS cf ON cf.id = v."customFieldId"
         WHERE cf.id = ${customFieldId}
