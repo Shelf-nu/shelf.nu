@@ -104,6 +104,37 @@ export type ScanWithRelations = Scan & {
 export type LocatedScan = Pick<Scan, "latitude" | "longitude" | "createdAt">;
 
 /**
+ * Names the person who made a scan, for a reader in the scan's workspace.
+ *
+ * Only a member of the workspace the code resolved in is named. Anyone else,
+ * and an anonymous scan, is "Unknown", so a reader never sees the name or
+ * email of someone outside their workspace.
+ *
+ * @param user - The scanning user with their memberships, or null
+ * @param organizationId - The workspace the scan belongs to
+ * @returns `Name (email)` or "Unknown"
+ */
+export function describeScanner(
+  user: ScanWithRelations["user"],
+  organizationId: string
+): string {
+  return user && isValidUser(user.userOrganizations, organizationId)
+    ? `${resolveUserDisplayName(user)} (${user.email})`
+    : "Unknown";
+}
+
+/**
+ * Parses a scan's user agent: the companion app's own format first, any
+ * other agent through ua-parser-js.
+ *
+ * @param userAgent - The stored user agent, or null
+ * @returns The parsed device, browser and OS
+ */
+export function parseScanUserAgent(userAgent: string | null): IResult {
+  return parseCompanionUserAgent(userAgent) ?? parser(userAgent || "");
+}
+
+/**
  * Shapes a scan row for the "Last scan" card.
  *
  * The card reports the last scan. Its location is the last scan's own when it
@@ -136,10 +167,7 @@ export function parseScanData({
       const user = scan.user;
       // The scanner is named only when they belong to the workspace the code
       // resolved in.
-      const scannedBy =
-        user && isValidUser(user.userOrganizations, scan.organizationId)
-          ? `${resolveUserDisplayName(user)} (${user.email})`
-          : "Unknown";
+      const scannedBy = describeScanner(user, scan.organizationId);
       const hasOwnLocation = Boolean(scan.latitude && scan.longitude);
       const location = hasOwnLocation ? scan : locatedScan;
       const coordinates =
@@ -150,8 +178,7 @@ export function parseScanData({
       const locatedAt =
         !hasOwnLocation && locatedScan ? locatedScan.createdAt : null;
 
-      const ua =
-        parseCompanionUserAgent(scan.userAgent) ?? parser(scan.userAgent || "");
+      const ua = parseScanUserAgent(scan.userAgent);
 
       return {
         scannedBy,
