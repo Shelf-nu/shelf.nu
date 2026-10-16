@@ -1,7 +1,8 @@
 /**
  * @file Import content components for CSV asset import.
- * Provides the main ImportContent layout and FileForm for file upload
- * with client-side validation, preview, and confirmation flow.
+ * Provides the main ImportContent layout (instructions plus the two-step
+ * mapping form), the shared "I AGREE" confirmation dialog, and FileForm, the
+ * one-step upload the admin dashboard uses.
  *
  * @see {@link file://./../../routes/_layout+/assets.import.tsx} Route handler
  */
@@ -29,8 +30,8 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "../shared/modal";
-import { WarningBox } from "../shared/warning-box";
 import { Table, Td, Th, Tr } from "../table";
+import { MappingImportForm } from "./import-mapping/mapping-import-form";
 import When from "../when/when";
 
 /**
@@ -79,13 +80,11 @@ export const ImportContent = () => {
         — each row becomes a new asset.
       </p>
 
-      <WarningBox className="my-4">
-        <>
-          <strong>IMPORTANT</strong>: Use the template provided above, or a file
-          exported as Import-ready from the asset index. Any other file will
-          produce corrupted data.
-        </>
-      </WarningBox>
+      <p className="my-4 text-[14px] text-gray-600">
+        Already have a spreadsheet from another tool? Upload it as it is. Before
+        anything is imported, you will check how each of its columns maps to a
+        Shelf field.
+      </p>
 
       <div className="my-5 flex flex-col gap-4">
         {/* Base rules */}
@@ -336,25 +335,40 @@ export const ImportContent = () => {
         .
       </p>
 
-      <FileForm intent={"content"} />
+      <MappingImportForm />
     </div>
   );
 };
 
+/** The fetcher that posts the import, typed by the import route's action. */
+export type ImportFetcher = ReturnType<
+  typeof useFetcherWithReset<typeof action>
+>;
+
 /**
- * File upload form with confirmation dialog for CSV asset import.
- * Handles file selection, "I AGREE" confirmation, and displays
- * import errors or success state.
+ * The "I AGREE" confirmation dialog of the asset import, with the importer's
+ * error tables and the success state.
  *
- * @param intent - The form intent value sent to the action
+ * @param props.fetcher - The fetcher whose response the dialog shows
+ * @param props.onSubmit - Posts the import; called once the user agrees
+ * @param props.triggerDisabled - Disables the button that opens the dialog
+ * @param props.triggerLabel - Text of that button
  */
-export const FileForm = ({ intent }: { intent: string }) => {
+export function ImportConfirmDialog({
+  fetcher,
+  onSubmit,
+  triggerDisabled,
+  triggerLabel = "Confirm asset import",
+}: {
+  fetcher: ImportFetcher;
+  onSubmit: () => void;
+  triggerDisabled: boolean;
+  triggerLabel?: string;
+}) {
   // Widened to `string` so toUpperCase() doesn't need a cast.
   // The "I AGREE" check happens at submit time.
   const [agreed, setAgreed] = useState("");
-  const formRef = useRef<HTMLFormElement>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const fetcher = useFetcherWithReset<typeof action>();
 
   const { data } = fetcher;
   const isSubmitting = useDisabled(fetcher);
@@ -365,7 +379,6 @@ export const FileForm = ({ intent }: { intent: string }) => {
   const { rowErrors, totalRowErrors } = readImportRowErrors(
     data?.error?.additionalData
   );
-  //
 
   // Focus the "I AGREE" confirmation input when the dialog opens (replaces
   // `autoFocus`). Re-focuses each time the dialog re-opens; skipped while
@@ -373,6 +386,252 @@ export const FileForm = ({ intent }: { intent: string }) => {
   const agreeInputRef = useAutoFocus<HTMLInputElement>({
     when: isDialogOpen && !isSuccessful,
   });
+
+  return (
+    <AlertDialog
+      onOpenChange={(open) => {
+        setIsDialogOpen(open);
+        if (!open) {
+          // Reset form state when dialog is closed
+          setAgreed("");
+          fetcher.reset();
+        }
+      }}
+    >
+      <AlertDialogTrigger asChild>
+        <Button
+          type="button"
+          title={triggerLabel}
+          disabled={triggerDisabled}
+          className="my-4"
+        >
+          {triggerLabel}
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent className="max-w-[600px]">
+        <AlertDialogHeader>
+          <AlertDialogTitle>Confirm asset import</AlertDialogTitle>
+          {!isSuccessful ? (
+            <>
+              <AlertDialogDescription>
+                You need to type: <b>"I AGREE"</b> in the field below to accept
+                the import. By doing this you agree that you have read the
+                requirements and you understand the limitations and consequences
+                of using this feature.
+              </AlertDialogDescription>
+              <Input
+                type="text"
+                label={"Confirmation"}
+                ref={agreeInputRef}
+                name="agree"
+                value={agreed}
+                onChange={(e) => setAgreed(e.target.value.toUpperCase())}
+                placeholder="I AGREE"
+                pattern="^I AGREE$" // We use a regex to make sure the user types the exact string
+                required
+                onKeyDown={(e) => {
+                  if (e.key == "Enter") {
+                    e.preventDefault();
+                    // Because we use a Dialog the submit buttons is outside of the form so we submit using the fetcher directly
+                    if (!disabled) {
+                      onSubmit();
+                    }
+                  }
+                }}
+              />
+            </>
+          ) : null}
+        </AlertDialogHeader>
+
+        <When truthy={!!data?.error}>
+          <div className="overflow-y-scroll">
+            <h5 className="text-red-500">{data?.error?.title}</h5>
+            <p className="text-red-500">{data?.error?.message}</p>
+            {data?.error?.additionalData?.duplicateCodes ? (
+              <BrokenQrCodesTable
+                title="Duplicate codes"
+                data={
+                  data.error.additionalData
+                    .duplicateCodes as QRCodePerImportedAsset[]
+                }
+              />
+            ) : null}
+            {data?.error?.additionalData?.nonExistentCodes ? (
+              <BrokenQrCodesTable
+                title="Non existent codes"
+                data={
+                  data.error.additionalData
+                    .nonExistentCodes as QRCodePerImportedAsset[]
+                }
+              />
+            ) : null}
+            {data?.error?.additionalData?.linkedCodes ? (
+              <BrokenQrCodesTable
+                title="Already linked codes"
+                data={
+                  data.error.additionalData
+                    .linkedCodes as QRCodePerImportedAsset[]
+                }
+              />
+            ) : null}
+            {data?.error?.additionalData?.connectedToOtherOrgs ? (
+              <BrokenQrCodesTable
+                title="Some codes do not belong to this organization"
+                data={
+                  data.error.additionalData
+                    .connectedToOtherOrgs as QRCodePerImportedAsset[]
+                }
+              />
+            ) : null}
+
+            {data?.error?.additionalData?.duplicateBarcodes ? (
+              <DuplicateBarcodesTable
+                data={
+                  data.error.additionalData
+                    .duplicateBarcodes as DuplicateBarcode[]
+                }
+              />
+            ) : null}
+
+            {data?.error?.additionalData?.kitCustodyConflicts ? (
+              <table className="mt-4 w-full rounded-md border text-left text-sm">
+                <thead className="bg-error-100 text-xs">
+                  <tr>
+                    <th scope="col" className="px-2 py-1">
+                      Asset
+                    </th>
+                    <th scope="col" className="px-2 py-1">
+                      Custodian
+                    </th>
+                    <th scope="col" className="px-2 py-1">
+                      Kit
+                    </th>
+                    <th scope="col" className="px-2 py-1">
+                      Issue
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(
+                    data.error.additionalData.kitCustodyConflicts as Array<{
+                      asset: string;
+                      custodian: string;
+                      kit: string;
+                      issue: string;
+                    }>
+                  ).map((conflict) => (
+                    <tr
+                      // Compose a stable key from the conflict fields —
+                      // the backend can surface the same asset twice
+                      // for different issues, so include `issue` too.
+                      key={`${conflict.asset}-${conflict.kit}-${conflict.custodian}-${conflict.issue}`}
+                      className="border-b"
+                    >
+                      <td className="px-2 py-1">{conflict.asset}</td>
+                      <td className="px-2 py-1">{conflict.custodian}</td>
+                      <td className="px-2 py-1">{conflict.kit}</td>
+                      <td className="px-2 py-1">{conflict.issue}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : null}
+
+            {Array.isArray(data?.error?.additionalData?.defectedHeaders) ? (
+              <table className="mt-4 w-full rounded-md border text-left text-sm">
+                <thead className="bg-error-100 text-xs">
+                  <tr>
+                    <th scope="col" className="px-2 py-1">
+                      Incorrect Header
+                    </th>
+                    <th scope="col" className="px-2 py-1">
+                      Error
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data?.error?.additionalData?.defectedHeaders?.map(
+                    (data: {
+                      incorrectHeader: string;
+                      errorMessage: string;
+                    }) => (
+                      <tr key={data.incorrectHeader}>
+                        <td className="px-2 py-1">{data.incorrectHeader}</td>
+                        <td className="px-2 py-1">{data.errorMessage}</td>
+                      </tr>
+                    )
+                  )}
+                </tbody>
+              </table>
+            ) : null}
+
+            {rowErrors ? (
+              <ImportRowErrorsTable
+                rowErrors={rowErrors}
+                totalRowErrors={totalRowErrors}
+              />
+            ) : null}
+
+            <p className="mt-2">
+              Please fix your CSV file and try again. If the issue persists,
+              don't hesitate to get in touch with us.
+            </p>
+          </div>
+        </When>
+
+        <When truthy={isSuccessful}>
+          <div>
+            <b className="text-green-500">Success!</b>
+            <p>Your assets have been imported.</p>
+          </div>
+        </When>
+
+        <AlertDialogFooter>
+          {isSuccessful ? (
+            <div className="flex gap-2">
+              <AlertDialogCancel asChild>
+                <Button type="button" variant="secondary" width="full">
+                  Close
+                </Button>
+              </AlertDialogCancel>
+              <Button to="/assets" width="full" className="whitespace-nowrap">
+                View new assets
+              </Button>
+            </div>
+          ) : (
+            <>
+              <AlertDialogCancel asChild>
+                <Button type="button" variant="secondary">
+                  Cancel
+                </Button>
+              </AlertDialogCancel>
+              <Button
+                type="submit"
+                onClick={() => {
+                  // Because we use a Dialog the submit buttons is outside of the form so we submit using the fetcher directly
+                  onSubmit();
+                }}
+                disabled={disabled}
+              >
+                {isSubmitting ? "Importing..." : "Import"}
+              </Button>
+            </>
+          )}
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+/**
+ * File upload form with confirmation dialog for CSV asset import, used by the
+ * admin dashboard. Posts the file as-is, without a column mapping.
+ *
+ * @param intent - The form intent value sent to the action
+ */
+export const FileForm = ({ intent }: { intent: string }) => {
+  const formRef = useRef<HTMLFormElement>(null);
+  const fetcher = useFetcherWithReset<typeof action>();
 
   /** We use a controlled field for the file, because of the confirmation dialog we have.
    * That way we can disabled the confirmation dialog button until a file is selected
@@ -402,238 +661,14 @@ export const FileForm = ({ intent }: { intent: string }) => {
       />
       <input type="hidden" name="intent" value={intent} />
 
-      <AlertDialog
-        onOpenChange={(open) => {
-          setIsDialogOpen(open);
-          if (!open) {
-            // Reset form state when dialog is closed
-            setAgreed("");
-            fetcher.reset();
-          }
+      <ImportConfirmDialog
+        fetcher={fetcher}
+        triggerDisabled={!selectedFile}
+        onSubmit={() => {
+          // The dialog's buttons sit outside the form, so submit through the fetcher.
+          void fetcher.submit(formRef.current);
         }}
-      >
-        <AlertDialogTrigger asChild>
-          <Button
-            type="button"
-            title={"Confirm asset import"}
-            disabled={!selectedFile}
-            className="my-4"
-          >
-            Confirm asset import
-          </Button>
-        </AlertDialogTrigger>
-        <AlertDialogContent className="max-w-[600px]">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Confirm asset import</AlertDialogTitle>
-            {!isSuccessful ? (
-              <>
-                <AlertDialogDescription>
-                  You need to type: <b>"I AGREE"</b> in the field below to
-                  accept the import. By doing this you agree that you have read
-                  the requirements and you understand the limitations and
-                  consequences of using this feature.
-                </AlertDialogDescription>
-                <Input
-                  type="text"
-                  label={"Confirmation"}
-                  ref={agreeInputRef}
-                  name="agree"
-                  value={agreed}
-                  onChange={(e) => setAgreed(e.target.value.toUpperCase())}
-                  placeholder="I AGREE"
-                  pattern="^I AGREE$" // We use a regex to make sure the user types the exact string
-                  required
-                  onKeyDown={(e) => {
-                    if (e.key == "Enter") {
-                      e.preventDefault();
-                      // Because we use a Dialog the submit buttons is outside of the form so we submit using the fetcher directly
-                      if (!disabled) {
-                        void fetcher.submit(formRef.current);
-                      }
-                    }
-                  }}
-                />
-              </>
-            ) : null}
-          </AlertDialogHeader>
-
-          <When truthy={!!data?.error}>
-            <div className="overflow-y-scroll">
-              <h5 className="text-red-500">{data?.error?.title}</h5>
-              <p className="text-red-500">{data?.error?.message}</p>
-              {data?.error?.additionalData?.duplicateCodes ? (
-                <BrokenQrCodesTable
-                  title="Duplicate codes"
-                  data={
-                    data.error.additionalData
-                      .duplicateCodes as QRCodePerImportedAsset[]
-                  }
-                />
-              ) : null}
-              {data?.error?.additionalData?.nonExistentCodes ? (
-                <BrokenQrCodesTable
-                  title="Non existent codes"
-                  data={
-                    data.error.additionalData
-                      .nonExistentCodes as QRCodePerImportedAsset[]
-                  }
-                />
-              ) : null}
-              {data?.error?.additionalData?.linkedCodes ? (
-                <BrokenQrCodesTable
-                  title="Already linked codes"
-                  data={
-                    data.error.additionalData
-                      .linkedCodes as QRCodePerImportedAsset[]
-                  }
-                />
-              ) : null}
-              {data?.error?.additionalData?.connectedToOtherOrgs ? (
-                <BrokenQrCodesTable
-                  title="Some codes do not belong to this organization"
-                  data={
-                    data.error.additionalData
-                      .connectedToOtherOrgs as QRCodePerImportedAsset[]
-                  }
-                />
-              ) : null}
-
-              {data?.error?.additionalData?.duplicateBarcodes ? (
-                <DuplicateBarcodesTable
-                  data={
-                    data.error.additionalData
-                      .duplicateBarcodes as DuplicateBarcode[]
-                  }
-                />
-              ) : null}
-
-              {data?.error?.additionalData?.kitCustodyConflicts ? (
-                <table className="mt-4 w-full rounded-md border text-left text-sm">
-                  <thead className="bg-error-100 text-xs">
-                    <tr>
-                      <th scope="col" className="px-2 py-1">
-                        Asset
-                      </th>
-                      <th scope="col" className="px-2 py-1">
-                        Custodian
-                      </th>
-                      <th scope="col" className="px-2 py-1">
-                        Kit
-                      </th>
-                      <th scope="col" className="px-2 py-1">
-                        Issue
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(
-                      data.error.additionalData.kitCustodyConflicts as Array<{
-                        asset: string;
-                        custodian: string;
-                        kit: string;
-                        issue: string;
-                      }>
-                    ).map((conflict) => (
-                      <tr
-                        // Compose a stable key from the conflict fields —
-                        // the backend can surface the same asset twice
-                        // for different issues, so include `issue` too.
-                        key={`${conflict.asset}-${conflict.kit}-${conflict.custodian}-${conflict.issue}`}
-                        className="border-b"
-                      >
-                        <td className="px-2 py-1">{conflict.asset}</td>
-                        <td className="px-2 py-1">{conflict.custodian}</td>
-                        <td className="px-2 py-1">{conflict.kit}</td>
-                        <td className="px-2 py-1">{conflict.issue}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              ) : null}
-
-              {Array.isArray(data?.error?.additionalData?.defectedHeaders) ? (
-                <table className="mt-4 w-full rounded-md border text-left text-sm">
-                  <thead className="bg-error-100 text-xs">
-                    <tr>
-                      <th scope="col" className="px-2 py-1">
-                        Incorrect Header
-                      </th>
-                      <th scope="col" className="px-2 py-1">
-                        Error
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data?.error?.additionalData?.defectedHeaders?.map(
-                      (data: {
-                        incorrectHeader: string;
-                        errorMessage: string;
-                      }) => (
-                        <tr key={data.incorrectHeader}>
-                          <td className="px-2 py-1">{data.incorrectHeader}</td>
-                          <td className="px-2 py-1">{data.errorMessage}</td>
-                        </tr>
-                      )
-                    )}
-                  </tbody>
-                </table>
-              ) : null}
-
-              {rowErrors ? (
-                <ImportRowErrorsTable
-                  rowErrors={rowErrors}
-                  totalRowErrors={totalRowErrors}
-                />
-              ) : null}
-
-              <p className="mt-2">
-                Please fix your CSV file and try again. If the issue persists,
-                don't hesitate to get in touch with us.
-              </p>
-            </div>
-          </When>
-
-          <When truthy={isSuccessful}>
-            <div>
-              <b className="text-green-500">Success!</b>
-              <p>Your assets have been imported.</p>
-            </div>
-          </When>
-
-          <AlertDialogFooter>
-            {isSuccessful ? (
-              <div className="flex gap-2">
-                <AlertDialogCancel asChild>
-                  <Button type="button" variant="secondary" width="full">
-                    Close
-                  </Button>
-                </AlertDialogCancel>
-                <Button to="/assets" width="full" className="whitespace-nowrap">
-                  View new assets
-                </Button>
-              </div>
-            ) : (
-              <>
-                <AlertDialogCancel asChild>
-                  <Button type="button" variant="secondary">
-                    Cancel
-                  </Button>
-                </AlertDialogCancel>
-                <Button
-                  type="submit"
-                  onClick={() => {
-                    // Because we use a Dialog the submit buttons is outside of the form so we submit using the fetcher directly
-                    void fetcher.submit(formRef.current);
-                  }}
-                  disabled={disabled}
-                >
-                  {isSubmitting ? "Importing..." : "Import"}
-                </Button>
-              </>
-            )}
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      />
     </fetcher.Form>
   );
 };

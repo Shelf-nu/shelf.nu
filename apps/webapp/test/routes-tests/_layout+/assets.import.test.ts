@@ -22,7 +22,11 @@ vi.mock("lottie-react", () => ({
 
 // why: existing custom fields are read through Prisma; each test sets them.
 vi.mock("~/database/db.server", () => ({
-  db: { customField: { findMany: vi.fn() } },
+  db: {
+    customField: { findMany: vi.fn() },
+    category: { findMany: vi.fn() },
+    location: { findMany: vi.fn() },
+  },
 }));
 
 // why: requirePermission reads the caller's membership from the database.
@@ -127,6 +131,8 @@ describe("assets import route", () => {
       createCustomField({ name: "Serial number", type: "TEXT" }),
     ]);
     vi.mocked(createAssetsFromContentImport).mockResolvedValue(true as never);
+    vi.mocked(db.category.findMany).mockResolvedValue([]);
+    vi.mocked(db.location.findMany).mockResolvedValue([]);
   });
 
   describe("analyze", () => {
@@ -139,6 +145,14 @@ describe("assets import route", () => {
         select: { name: true, type: true },
       });
       expect(result.rowCount).toBe(2);
+      expect(result.existingCustomFields).toEqual([
+        expect.objectContaining({ name: "Serial number", type: "TEXT" }),
+      ]);
+      expect(result.columnStats).toEqual([
+        { newCategories: 2, newLocations: 2 },
+        { newCategories: 2, newLocations: 2 },
+        { newCategories: 2, newLocations: 2 },
+      ]);
       expect(result.alreadyMatches).toBe(false);
       expect(result.proposal).toMatchObject({
         source: "rules",

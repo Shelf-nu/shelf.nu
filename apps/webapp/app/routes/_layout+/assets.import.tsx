@@ -18,6 +18,7 @@ import {
   isAlreadyShelfFormat,
 } from "~/modules/import-mapping/heuristics";
 import { proposeMapping } from "~/modules/import-mapping/propose";
+import { buildColumnStats } from "~/modules/import-mapping/summary";
 import type { ColumnMapping } from "~/modules/import-mapping/types";
 import {
   MAX_MAPPED_COLUMNS,
@@ -92,8 +93,17 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
         });
       }
 
-      const existingCustomFields =
-        await loadExistingCustomFields(organizationId);
+      const [existingCustomFields, categories, locations] = await Promise.all([
+        loadExistingCustomFields(organizationId),
+        db.category.findMany({
+          where: { organizationId },
+          select: { name: true },
+        }),
+        db.location.findMany({
+          where: { organizationId },
+          select: { name: true },
+        }),
+      ]);
       const rowCount = csvData.length - 1;
       const proposal = await proposeMapping({
         headers,
@@ -119,6 +129,11 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
         proposal,
         rowCount,
         alreadyMatches: isAlreadyShelfFormat(proposal.columns),
+        columnStats: buildColumnStats(csvData, {
+          categories: categories.map(({ name }) => name),
+          locations: locations.map(({ name }) => name),
+        }),
+        existingCustomFields,
       });
     }
 
