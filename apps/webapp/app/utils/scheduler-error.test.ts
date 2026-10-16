@@ -129,6 +129,30 @@ describe("connection values in error text", () => {
     );
   });
 
+  it("scrubs string causes too, at the top and nested", () => {
+    expect(
+      toSchedulerErrorCause("connect to pooler.example.com failed", secrets)
+    ).toBe("connect to [redacted] failed");
+
+    const nested = toSchedulerErrorCause(
+      Object.assign(new Error("outer"), {
+        cause: 'role "postgres.project-ref" does not exist',
+      }),
+      secrets
+    );
+    const aggregate = toSchedulerErrorCause(
+      new AggregateError(["getaddrinfo ENOTFOUND pooler.example.com"], ""),
+      secrets
+    );
+
+    expect(JSON.stringify([nested, aggregate])).not.toMatch(
+      /postgres\.project-ref|pooler\.example\.com/
+    );
+    expect((nested as { cause: string }).cause).toBe(
+      'role "[redacted]" does not exist'
+    );
+  });
+
   it("returns no values for an unreadable connection string", () => {
     expect(connectionSecretsFrom("not a url")).toEqual([]);
   });

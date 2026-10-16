@@ -66,13 +66,17 @@ function scrub(text: string, secrets: readonly string[]): string {
  * @param secrets - Connection values to redact from the text, as returned by
  *   {@link connectionSecretsFrom}
  * @param depth - Nesting level of this cause; callers omit it
- * @returns A safe-to-log Error, or the input unchanged when it is not an object
+ * @returns A safe-to-log Error; a string cause comes back scrubbed, and any
+ *   other non-object unchanged
  */
 export function toSchedulerErrorCause(
   cause: unknown,
   secrets: readonly string[] = [],
   depth = 0
 ): unknown {
+  if (typeof cause === "string") {
+    return scrub(cause, secrets);
+  }
   if (!cause || typeof cause !== "object") {
     return cause;
   }
