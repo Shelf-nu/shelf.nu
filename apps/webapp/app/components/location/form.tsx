@@ -86,13 +86,20 @@ interface Props {
  * @param props - See {@link Props}; image props show the saved image when editing
  */
 export function LocationForm(props: Props) {
-  const { key, discard } = useDiscardRemount();
+  const { key, discard, discarded } = useDiscardRemount();
   // why: the inline dialog (onSuccess) sits inside another form's page, so
   // it is never tracked and never remounted from here
   if (typeof props.onSuccess === "function") {
     return <LocationFormInner {...props} />;
   }
-  return <LocationFormInner key={key} {...props} onDiscard={discard} />;
+  return (
+    <LocationFormInner
+      key={key}
+      {...props}
+      onDiscard={discard}
+      autoFocusName={!discarded}
+    />
+  );
 }
 
 // react-doctor:no-giant-component — deferred for follow-up refactor
@@ -110,9 +117,12 @@ const LocationFormInner = ({
   excludeLocationId,
   onCancel,
   onDiscard,
+  autoFocusName = true,
 }: Props & {
   /** Resets the form to the loaded values (remounts it). Page form only. */
   onDiscard?: () => void;
+  /** Focus the Name field on mount; false after a Discard. */
+  autoFocusName?: boolean;
 }) => {
   const zo = useZorm("NewQuestionWizardScreen", NewLocationFormSchema);
 
@@ -147,7 +157,9 @@ const LocationFormInner = ({
   // jsx-a11y/no-autofocus. When the form is rendered inside a dialog,
   // the dialog's `data-dialog-initial-focus` handler typically wins;
   // otherwise this provides the intentional initial focus.
-  const nameInputRef = useAutoFocus<HTMLInputElement>();
+  const nameInputRef = useAutoFocus<HTMLInputElement>({
+    when: autoFocusName,
+  });
 
   useEffect(() => {
     if (!hasOnSuccessFunc) return;

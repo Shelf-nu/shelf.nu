@@ -20,7 +20,10 @@ import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
  * puts back the query string the form was opened with when a picker
  * rewrote it (picking an asset model sets `?category=`).
  *
- * @returns `key` for the inner form and `discard` to pass as its `onDiscard`
+ * @returns `key` for the inner form, `discard` to pass as its `onDiscard`,
+ * and `discarded`, true once the form has been remounted by a Discard. Forms
+ * skip their mount focus then: focusing a field after Discard would open the
+ * keyboard on phones.
  */
 export function useDiscardRemount() {
   const [epoch, setEpoch] = useState(0);
@@ -43,5 +46,5 @@ export function useDiscardRemount() {
     ).then(remount);
   }, [initialSearch, location.search, navigate, setDynamicTitle]);
 
-  return { key: epoch, discard };
+  return { key: epoch, discard, discarded: epoch > 0 };
 }

@@ -74,8 +74,15 @@ type KitFormProps = Partial<
  * @param props - Current values when editing; omit them to create a kit
  */
 export default function KitsForm(props: KitFormProps) {
-  const { key, discard } = useDiscardRemount();
-  return <KitsFormInner key={key} {...props} onDiscard={discard} />;
+  const { key, discard, discarded } = useDiscardRemount();
+  return (
+    <KitsFormInner
+      key={key}
+      {...props}
+      onDiscard={discard}
+      autoFocusName={!discarded}
+    />
+  );
 }
 
 function KitsFormInner({
@@ -91,9 +98,12 @@ function KitsFormInner({
   imageExpiration,
   referer,
   onDiscard,
+  autoFocusName,
 }: KitFormProps & {
   /** Resets the form to the loaded values (remounts it). */
   onDiscard: () => void;
+  /** Focus the Name field on mount; false after a Discard. */
+  autoFocusName: boolean;
 }) {
   const disabled = useDisabled();
   const { canUseBarcodes } = useBarcodePermissions();
@@ -121,7 +131,9 @@ function KitsFormInner({
 
   // Focus the Name field on mount so create/edit pages start the user
   // typing immediately instead of relying on a removed autoFocus prop.
-  const nameInputRef = useAutoFocus<HTMLInputElement>();
+  const nameInputRef = useAutoFocus<HTMLInputElement>({
+    when: autoFocusName,
+  });
 
   const actionData = useActionData<
     typeof createKitAction | typeof editKitAction

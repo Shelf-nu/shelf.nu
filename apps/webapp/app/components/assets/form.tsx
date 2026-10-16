@@ -276,8 +276,15 @@ type Props = Partial<
  * @param props - Current values when editing; omit them to create an asset
  */
 export function AssetForm(props: Props) {
-  const { key, discard } = useDiscardRemount();
-  return <AssetFormInner key={key} {...props} onDiscard={discard} />;
+  const { key, discard, discarded } = useDiscardRemount();
+  return (
+    <AssetFormInner
+      key={key}
+      {...props}
+      onDiscard={discard}
+      autoFocusName={!discarded}
+    />
+  );
 }
 
 // react-doctor:no-giant-component — deferred for follow-up refactor
@@ -305,9 +312,12 @@ const AssetFormInner = ({
   referer,
   bulkMode = false,
   onDiscard,
+  autoFocusName,
 }: Props & {
   /** Resets the form to the loaded values (remounts it). */
   onDiscard: () => void;
+  /** Focus the Name field on mount; false after a Discard. */
+  autoFocusName: boolean;
 }) => {
   const navigation = useNavigation();
   const { canUseBarcodes } = useBarcodePermissions();
@@ -372,7 +382,9 @@ const AssetFormInner = ({
 
   // Focus the asset Title field on mount so create/edit pages start
   // ready for typing instead of relying on the removed autoFocus prop.
-  const titleInputRef = useAutoFocus<HTMLInputElement>();
+  const titleInputRef = useAutoFocus<HTMLInputElement>({
+    when: autoFocusName,
+  });
 
   // Extract custom field errors into a plain object to pass to AssetCustomFields
   // This avoids passing the complex zo object which causes React 19 issues

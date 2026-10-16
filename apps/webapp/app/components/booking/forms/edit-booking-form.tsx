@@ -158,8 +158,15 @@ type BookingFormData = {
  * @param props - The booking to edit and an optional form action
  */
 export function EditBookingForm(props: BookingFormData) {
-  const { key, discard } = useDiscardRemount();
-  return <EditBookingFormInner key={key} {...props} onDiscard={discard} />;
+  const { key, discard, discarded } = useDiscardRemount();
+  return (
+    <EditBookingFormInner
+      key={key}
+      {...props}
+      onDiscard={discard}
+      autoFocusName={!discarded}
+    />
+  );
 }
 
 // react-doctor:no-giant-component — deferred for follow-up refactor
@@ -167,9 +174,12 @@ function EditBookingFormInner({
   booking,
   action,
   onDiscard,
+  autoFocusName,
 }: BookingFormData & {
   /** Resets the form to the loaded values (remounts it). */
   onDiscard: () => void;
+  /** Focus the Name field on mount; false after a Discard. */
+  autoFocusName: boolean;
 }) {
   const navigation = useNavigation();
   const {
@@ -653,6 +663,7 @@ function EditBookingFormInner({
                     validationErrors?.name?.message || zo.errors.name()?.message
                   }
                   onChange={updateName}
+                  autoFocus={autoFocusName}
                 />
               </div>
               <div className="mt-[10px]">
