@@ -1,6 +1,7 @@
 import { useMemo, useEffect } from "react";
 import NProgress from "nprogress";
 import { useNavigation, useFetchers } from "react-router";
+import { RECORD_NAVIGATION_FETCHER_PREFIX } from "./use-list-context";
 
 export function useNprogress() {
   const transition = useNavigation();
@@ -30,7 +31,8 @@ export function useNprogress() {
       !fetcher.key.startsWith("delete-preset-") &&
       !fetcher.key.startsWith("audit-asset-note-") &&
       !fetcher.key.startsWith("quick-image-upload-") &&
-      !fetcher.key.startsWith("mark-update-read-")
+      !fetcher.key.startsWith("mark-update-read-") &&
+      !fetcher.key.startsWith(RECORD_NAVIGATION_FETCHER_PREFIX)
   );
 
   const state = useMemo<"idle" | "loading">(
