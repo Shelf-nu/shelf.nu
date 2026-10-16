@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useFetcher, useLocation, useNavigate } from "react-router";
 import type {
   ListContext,
@@ -77,7 +77,23 @@ export function useRecordNavigation({
   const stateContext = readListContext(
     (location.state as { listContext?: unknown } | null)?.listContext
   );
-  const search = stateContext?.entity === entity ? stateContext.search : null;
+  const searchFromState =
+    stateContext?.entity === entity ? stateContext.search : null;
+
+  /**
+   * The context outlives navigations inside the same record: a tab link
+   * (Overview, Activity, ...) carries no history state, yet the user is still
+   * on the record they opened from the list. Kept per record id, so opening
+   * another record without a context still disables the arrows.
+   */
+  const [kept, setKept] = useState<{ id: string; search: string } | null>(null);
+  if (
+    searchFromState !== null &&
+    (kept?.id !== id || kept.search !== searchFromState)
+  ) {
+    setKept({ id, search: searchFromState });
+  }
+  const search = searchFromState ?? (kept?.id === id ? kept.search : null);
 
   const fetcher = useFetcher<NeighboursResponse>({
     key: `${RECORD_NAVIGATION_FETCHER_PREFIX}${entity}-${id}`,

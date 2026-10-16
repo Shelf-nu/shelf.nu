@@ -8,7 +8,13 @@
  */
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { createRoutesStub, useLocation, useParams } from "react-router";
+import {
+  createRoutesStub,
+  Link,
+  Outlet,
+  useLocation,
+  useParams,
+} from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useRecordNavigation } from "~/hooks/use-list-context";
 import type { Neighbours } from "~/modules/list-navigation/list-context";
@@ -30,18 +36,28 @@ function AssetPage() {
   return (
     <div>
       <RecordNavigation navigation={navigation} />
+      <Link to="activity">Activity</Link>
+      <Link to="/assets/a3/overview">Unrelated link to a3</Link>
       <input aria-label="Search activity" />
       <p data-testid="where">{location.pathname}</p>
       <p data-testid="context">
         {JSON.stringify(location.state?.listContext ?? null)}
       </p>
+      <Outlet />
     </div>
   );
 }
 
 function renderAt(entry: { pathname: string; state?: unknown }) {
   const Stub = createRoutesStub([
-    { path: "/assets/:assetId/overview", Component: AssetPage },
+    {
+      path: "/assets/:assetId",
+      Component: AssetPage,
+      children: [
+        { path: "overview", Component: () => null },
+        { path: "activity", Component: () => null },
+      ],
+    },
     { path: "/api/list-neighbours", loader: neighboursLoader },
   ]);
   return render(<Stub initialEntries={[entry]} />);
@@ -122,5 +138,29 @@ describe("RecordNavigation", () => {
     expect(
       screen.getByRole("textbox", { name: "Search activity" })
     ).toHaveValue("]");
+  });
+
+  it("keeps the arrows on a tab switch inside the same record, but not on another record", async () => {
+    const user = userEvent.setup();
+    renderAt({ pathname: "/assets/a2/overview", state: FROM_LIST });
+    const next = screen.getByRole("button", { name: "Next in list" });
+    await waitFor(() => expect(next).toBeEnabled());
+
+    await user.click(screen.getByRole("link", { name: "Activity" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("where")).toHaveTextContent(
+        "/assets/a2/activity"
+      )
+    );
+    expect(screen.getByRole("button", { name: "Next in list" })).toBeEnabled();
+
+    await user.click(
+      screen.getByRole("link", { name: "Unrelated link to a3" })
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Next in list" })
+      ).toHaveAttribute("aria-disabled", "true")
+    );
   });
 });
