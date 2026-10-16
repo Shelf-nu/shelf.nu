@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type { Asset, Barcode, Qr } from "@prisma/client";
 import { AssetType, ConsumptionType } from "@prisma/client";
 import {
@@ -27,6 +27,7 @@ import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, assetImageValidateFileAtom } from "~/atoms/file";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
+import { useDiscardRemount } from "~/hooks/use-discard-remount";
 import { getPrimaryKit, isQuantityTracked } from "~/modules/asset/utils";
 import type {
   AssetEditLoaderData,
@@ -68,6 +69,7 @@ import {
 } from "../forms/image-file-field";
 import Input from "../forms/input";
 import { RefererRedirectInput } from "../forms/referer-redirect-input";
+import { UnsavedChangesGuard } from "../forms/unsaved-changes-bar";
 import ImageWithPreview from "../image-with-preview/image-with-preview";
 import InlineEntityCreationDialog from "../inline-entity-creation-dialog/inline-entity-creation-dialog";
 import { Button } from "../shared/button";
@@ -265,8 +267,21 @@ type Props = Partial<
   bulkMode?: boolean;
 };
 
+/**
+ * Create and edit form for assets, with the unsaved-changes bar.
+ *
+ * Discard remounts the inner form (see `useDiscardRemount`), which resets
+ * every widget that keeps its value in React state.
+ *
+ * @param props - Current values when editing; omit them to create an asset
+ */
+export function AssetForm(props: Props) {
+  const { key, discard } = useDiscardRemount();
+  return <AssetFormInner key={key} {...props} onDiscard={discard} />;
+}
+
 // react-doctor:no-giant-component — deferred for follow-up refactor
-export const AssetForm = ({
+const AssetFormInner = ({
   id,
   sequentialId,
   title,
@@ -289,7 +304,11 @@ export const AssetForm = ({
   preferredBarcodeId,
   referer,
   bulkMode = false,
-}: Props) => {
+  onDiscard,
+}: Props & {
+  /** Resets the form to the loaded values (remounts it). */
+  onDiscard: () => void;
+}) => {
   const navigation = useNavigation();
   const { canUseBarcodes } = useBarcodePermissions();
   // Workspace's current code-display preference — used by PreferredBarcodeSelector
@@ -340,6 +359,17 @@ export const AssetForm = ({
   const zo = useZorm("NewAssetFormScreen", FormSchema);
   const disabled = isFormProcessing(navigation.state);
 
+  /** The form element, shared by Zorm and the unsaved-changes tracking. */
+  const formRef = useRef<HTMLFormElement | null>(null);
+  const zormRef = zo.ref;
+  const setFormRef = useCallback(
+    (node: HTMLFormElement | null) => {
+      zormRef(node);
+      formRef.current = node;
+    },
+    [zormRef]
+  );
+
   // Focus the asset Title field on mount so create/edit pages start
   // ready for typing instead of relying on the removed autoFocus prop.
   const titleInputRef = useAutoFocus<HTMLInputElement>();
@@ -384,6 +414,10 @@ export const AssetForm = ({
   const validationErrors = getValidationErrors<typeof NewAssetFormSchema>(
     actionData?.error
   );
+
+  /** Changes only when a save succeeds, so a failed save stays dirty. */
+  const savedToken =
+    actionData && actionData.error == null ? actionData : undefined;
 
   const fileError = useAtomValue(fileErrorAtom);
   const [, updateDynamicTitle] = useAtom(updateDynamicTitleAtom);
@@ -659,8 +693,16 @@ export const AssetForm = ({
         success={actionData?.bulkSuccess}
         sampleTitles={bulkPreviewTitles}
       />
+      {/* Bulk create has its own success modal flow, so it is not tracked. */}
+      {bulkMode ? null : (
+        <UnsavedChangesGuard
+          formRef={formRef}
+          savedToken={savedToken}
+          onDiscard={onDiscard}
+        />
+      )}
       <Form
-        ref={zo.ref}
+        ref={setFormRef}
         method="post"
         action="."
         className="flex w-full flex-col gap-2"

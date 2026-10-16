@@ -11,10 +11,13 @@
  * @see {@link file://./../../hooks/use-unsaved-changes.ts}
  */
 import { useEffect, useRef, useState } from "react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useDisabled } from "~/hooks/use-disabled";
-import type { UnsavedChangesState } from "~/hooks/use-unsaved-changes";
+import {
+  useUnsavedChanges,
+  type UnsavedChangesState,
+} from "~/hooks/use-unsaved-changes";
 import { Button } from "../shared/button";
 import UnsavedChangesAlert from "../unsaved-changes-alert";
 
@@ -76,7 +79,9 @@ export function UnsavedChangesBar({
   const disabled = useDisabled();
   const visible = state.status !== "clean";
   const bounds = useContentBounds(visible);
-  const isSaving = state.status === "submitting" || disabled;
+  /** Only this form's own submission reads as saving; any navigation
+   * (a picker reloading the page) still disables the buttons. */
+  const isSaving = state.status === "submitting";
   /**
    * Set while "Leave page" runs. The secondary button also closes the
    * dialog, and that close must not cancel the navigation it just allowed.
@@ -111,7 +116,7 @@ export function UnsavedChangesBar({
                 variant="secondary"
                 size="xs"
                 onClick={onDiscard}
-                disabled={isSaving}
+                disabled={disabled || isSaving}
               >
                 Discard
               </Button>
@@ -120,7 +125,7 @@ export function UnsavedChangesBar({
                 variant="primary"
                 size="xs"
                 onClick={onSave}
-                disabled={isSaving}
+                disabled={disabled || isSaving}
               >
                 {isSaving ? "Saving..." : saveLabel}
               </Button>
@@ -150,5 +155,53 @@ export function UnsavedChangesBar({
         You have changes that are not saved. Leave this page and lose them?
       </UnsavedChangesAlert>
     </>
+  );
+}
+
+type UnsavedChangesGuardProps = {
+  /** The form whose submitted values are tracked. */
+  formRef: RefObject<HTMLFormElement | null>;
+  /** See `useUnsavedChanges`: a new truthy value re-takes the baseline. */
+  savedToken?: unknown;
+  /** Puts every field back to the loaded values (the form remounts). */
+  onDiscard: () => void;
+  /** Field names excluded from the comparison, on top of the defaults. */
+  ignore?: string[];
+  /** Button whose name/value the bar's Save must send, if any. */
+  getSubmitter?: () => HTMLElement | null;
+  /** Label of the Save button. Default "Save". */
+  saveLabel?: string;
+};
+
+/**
+ * Tracks a form with `useUnsavedChanges` and renders its bar.
+ *
+ * Mount it only where tracking applies, never with tracking switched off:
+ * React Router honours only the most recently registered blocker, so a
+ * mounted guard inside a dialog would override the page form's guard.
+ *
+ * @param props - See {@link UnsavedChangesGuardProps}
+ */
+export function UnsavedChangesGuard({
+  formRef,
+  savedToken,
+  onDiscard,
+  ignore,
+  getSubmitter,
+  saveLabel,
+}: UnsavedChangesGuardProps) {
+  const { state, discard, save } = useUnsavedChanges({
+    formRef,
+    savedToken,
+    onDiscard,
+    ignore,
+  });
+  return (
+    <UnsavedChangesBar
+      state={state}
+      onDiscard={discard}
+      onSave={() => save(getSubmitter?.())}
+      saveLabel={saveLabel}
+    />
   );
 }

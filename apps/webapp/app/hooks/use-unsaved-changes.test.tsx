@@ -4,6 +4,7 @@ import {
   createRoutesStub,
   Form,
   Link,
+  redirect,
   useActionData,
   useLocation,
 } from "react-router";
@@ -60,12 +61,12 @@ function EditPage() {
   return <EditForm key={epoch} onDiscard={() => setEpoch((e) => e + 1)} />;
 }
 
-function renderForm() {
+function renderForm(action: () => unknown = () => ({ ok: true })) {
   const Stub = createRoutesStub([
     {
       path: "/edit",
       Component: EditPage,
-      action: () => ({ ok: true }),
+      action,
     },
     { path: "/other", Component: () => <p>Other page loaded</p> },
   ]);
@@ -139,6 +140,14 @@ describe("useUnsavedChanges", () => {
 
   it("does not block its own submit and is clean after a successful save", async () => {
     renderForm();
+    await makeDirtyByTyping();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(status()).toBe("clean"));
+    expect(screen.getByLabelText("Name")).toHaveValue("Makita drill 18V");
+  });
+
+  it("is clean after a save that redirects back to the same page", async () => {
+    renderForm(() => redirect("/edit?saved=1"));
     await makeDirtyByTyping();
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(status()).toBe("clean"));

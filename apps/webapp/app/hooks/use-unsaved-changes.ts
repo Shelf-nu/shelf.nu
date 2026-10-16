@@ -76,7 +76,11 @@ type UseUnsavedChangesOptions = {
   formRef: RefObject<HTMLFormElement | null>;
   /** Field names excluded from the comparison, on top of the defaults. */
   ignore?: string[];
-  /** Bump to re-take the baseline, for example after a successful save. */
+  /**
+   * Re-takes the baseline whenever it changes to a new truthy value, for
+   * example the action data of a successful save. Falsy values are ignored,
+   * so pass `undefined` for a failed save and the form stays dirty.
+   */
   savedToken?: unknown;
   /** When false the hook tracks nothing and never blocks. Default true. */
   enabled?: boolean;
@@ -165,7 +169,7 @@ export function useUnsavedChanges({
 
   const lastSavedToken = useRef(savedToken);
   useEffect(() => {
-    if (Object.is(lastSavedToken.current, savedToken)) return;
+    if (!savedToken || Object.is(lastSavedToken.current, savedToken)) return;
     lastSavedToken.current = savedToken;
     markClean();
   }, [savedToken, markClean]);
@@ -179,6 +183,24 @@ export function useUnsavedChanges({
     navigation.formAction !== undefined &&
     new URL(navigation.formAction, "http://localhost").pathname ===
       location.pathname;
+
+  /**
+   * Location entry this form's submission started from. A submission that
+   * ends on a different entry was redirected, which these actions only do on
+   * success, so the form is clean even though no action data arrives (for
+   * example a redirect back to this same edit page).
+   */
+  const submitStartKey = useRef<string | null>(null);
+  useEffect(() => {
+    if (isSubmitting) {
+      submitStartKey.current ??= location.key;
+      return;
+    }
+    const startKey = submitStartKey.current;
+    if (startKey === null) return;
+    submitStartKey.current = null;
+    if (location.key !== startKey) requestAnimationFrame(markClean);
+  }, [isSubmitting, location.key, markClean]);
 
   const shouldGuard = enabled && isDirty && !isSubmitting;
 
