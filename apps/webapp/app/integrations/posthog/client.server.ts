@@ -24,6 +24,7 @@
 
 import { PostHog } from "posthog-node";
 
+import type { ImportFailureReason } from "~/modules/import-mapping/failure";
 import type { SignupIntentEventProperties } from "~/modules/signup-intent/analytics";
 import { POSTHOG_API_KEY, POSTHOG_HOST } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
@@ -129,8 +130,6 @@ export type ServerAnalyticsEvent =
         columns: number;
         /** Columns proposed with low confidence. */
         lowConfidence: number;
-        /** Which proposer produced the mapping. */
-        source: ImportMappingSource;
       };
     }
   | {
@@ -143,7 +142,6 @@ export type ServerAnalyticsEvent =
         changedByUser: number;
         /** Custom fields the mapping will create. */
         newCustomFields: number;
-        source: ImportMappingSource;
       };
     }
   | {
@@ -153,13 +151,16 @@ export type ServerAnalyticsEvent =
         organizationId: string;
         /** Assets created. */
         rows: number;
-        /** The mapping's proposer, or `none` when no mapping was posted. */
-        source: ImportMappingSource | "none";
+      };
+    }
+  | {
+      /** An import (or its mapping step) was refused after the access gates. */
+      event: "import_failed";
+      properties: {
+        organizationId: string;
+        reason: ImportFailureReason;
       };
     };
-
-/** Which proposer produced an import column mapping. */
-export type ImportMappingSource = "rules" | "model";
 
 /**
  * Emit a server-side analytics event to PostHog. Best-effort: it does not

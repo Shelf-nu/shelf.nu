@@ -12,6 +12,7 @@ import { captureServerEvent } from "~/integrations/posthog/client.server";
 import { createAssetsFromContentImport } from "~/modules/asset/service.server";
 import { ASSET_CSV_HEADERS } from "~/modules/asset/utils.server";
 import { applyMapping } from "~/modules/import-mapping/apply";
+import { classifyImportFailure } from "~/modules/import-mapping/failure";
 import {
   buildColumnSamples,
   isAlreadyShelfFormat,
@@ -38,6 +39,8 @@ import { optionalNumberFromString } from "~/utils/zod-numeric";
 export const action = async ({ context, request }: ActionFunctionArgs) => {
   const authSession = context.getSession();
   const { userId } = authSession;
+  /** Set once the access gates pass; only later failures are reported. */
+  let gatedOrganizationId: string | null = null;
 
   try {
     const { organizationId, organizations, canUseBarcodes } =
@@ -49,15 +52,14 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
       });
 
     await assertUserCanImportAssets({ organizationId, organizations });
+    gatedOrganizationId = organizationId;
 
-    const { intent, mapping, mappingSource, mappingChanged } = parseData(
+    const { intent, mapping, mappingChanged } = parseData(
       await request.clone().formData(),
       z.object({
         intent: z.enum(["analyze", "content"]),
         /** JSON of the reviewed ColumnMapping[]; absent on the legacy path. */
         mapping: z.string().max(200_000).optional(),
-        /** Which proposer the reviewed mapping started from (analytics only). */
-        mappingSource: z.enum(["rules", "model"]).optional(),
         /** Columns the user changed in the review (analytics only). */
         mappingChanged: optionalNumberFromString({ blank: undefined }).pipe(
           z.number().int().min(0).max(1000).optional()
@@ -70,7 +72,7 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
       throw new ShelfError({
         cause: null,
         message: "CSV file is empty",
-        additionalData: { intent },
+        additionalData: { intent, failureReason: "empty_file" },
         label: "Assets",
         shouldBeCaptured: false,
       });
@@ -83,6 +85,7 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
           cause: null,
           title: "Too many columns",
           message: `This file has ${headers.length} columns, but the maximum is ${MAX_MAPPED_COLUMNS}. Remove the columns you do not need and try again.`,
+          additionalData: { failureReason: "too_many_columns" },
           label: "Assets",
           status: 400,
           shouldBeCaptured: false,
@@ -109,7 +112,6 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
           lowConfidence: proposal.columns.filter(
             (column) => column.confidence === "low"
           ).length,
-          source: proposal.source,
         },
       });
 
@@ -142,7 +144,6 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
               target.kind === "customField" &&
               !existingNames.has(target.name.trim().toLowerCase())
           ).length,
-          source: mappingSource ?? "rules",
         },
       });
     }
@@ -165,12 +166,21 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
       properties: {
         organizationId,
         rows: contentData.length,
-        source: mapping ? mappingSource ?? "rules" : "none",
       },
     });
     return payload({ success: true });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
+    if (gatedOrganizationId) {
+      captureServerEvent({
+        distinctId: userId,
+        event: "import_failed",
+        properties: {
+          organizationId: gatedOrganizationId,
+          reason: classifyImportFailure(reason),
+        },
+      });
+    }
     return data(error(reason), { status: reason.status });
   }
 };
@@ -210,6 +220,7 @@ function parseMapping(raw: string): ColumnMapping[] {
       title: "Invalid column mapping",
       message:
         "The column mapping could not be read. Pick the file again to get a fresh mapping.",
+      additionalData: { failureReason: "invalid_mapping" },
       label: "Assets",
       status: 400,
       shouldBeCaptured: false,

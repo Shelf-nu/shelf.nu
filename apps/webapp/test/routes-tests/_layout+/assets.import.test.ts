@@ -177,7 +177,6 @@ describe("assets import route", () => {
           organizationId: ORG_ID,
           columns: 3,
           lowConfidence: 1,
-          source: "rules",
         },
       });
     });
@@ -199,7 +198,6 @@ describe("assets import route", () => {
         importArgs({
           intent: "content",
           mapping: JSON.stringify(withNewField),
-          mappingSource: "model",
           mappingChanged: "1",
         })
       );
@@ -212,24 +210,58 @@ describe("assets import route", () => {
           columns: 3,
           changedByUser: 1,
           newCustomFields: 1,
-          source: "model",
         },
       });
       expect(captureServerEvent).toHaveBeenCalledWith({
         distinctId: USER_ID,
         event: "import_completed",
-        properties: { organizationId: ORG_ID, rows: 2, source: "model" },
+        properties: { organizationId: ORG_ID, rows: 2 },
       });
     });
 
-    it("reports a legacy import with source none", async () => {
+    it("reports a refused import with its reason only", async () => {
+      await action(importArgs({ intent: "content" }));
+      expect(captureServerEvent).toHaveBeenCalledWith({
+        distinctId: USER_ID,
+        event: "import_failed",
+        properties: { organizationId: ORG_ID, reason: "invalid_headers" },
+      });
+    });
+
+    it("reports a clashing mapping as duplicate_targets", async () => {
+      const clash = MAPPING.map((column) =>
+        column.source === "Legacy ID"
+          ? {
+              ...column,
+              target: { kind: "field" as const, name: "title" as const },
+            }
+          : column
+      );
+      await action(
+        importArgs({ intent: "content", mapping: JSON.stringify(clash) })
+      );
+      expect(captureServerEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: "import_failed",
+          properties: { organizationId: ORG_ID, reason: "duplicate_targets" },
+        })
+      );
+    });
+
+    it("reports nothing when the member may not import", async () => {
+      vi.mocked(requirePermission).mockRejectedValue(new Error("forbidden"));
+      await action(importArgs({ intent: "content" }));
+      expect(captureServerEvent).not.toHaveBeenCalled();
+    });
+
+    it("reports a plain import without a mapping event", async () => {
       vi.mocked(csvDataFromRequest).mockResolvedValue([["title"], ["Camera"]]);
       await action(importArgs({ intent: "content" }));
       expect(captureServerEvent).toHaveBeenCalledTimes(1);
       expect(captureServerEvent).toHaveBeenCalledWith(
         expect.objectContaining({
           event: "import_completed",
-          properties: { organizationId: ORG_ID, rows: 1, source: "none" },
+          properties: { organizationId: ORG_ID, rows: 1 },
         })
       );
     });

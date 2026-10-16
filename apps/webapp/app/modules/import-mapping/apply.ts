@@ -43,7 +43,11 @@ export function applyMapping(
       title: "Mapping does not match the file",
       message:
         "The column mapping does not match the columns of this file. Pick the file again to get a fresh mapping.",
-      additionalData: { fileColumns: headers.length, mapped: columns.length },
+      additionalData: {
+        fileColumns: headers.length,
+        mapped: columns.length,
+        failureReason: "invalid_mapping",
+      },
       label: "Assets",
       status: 400,
       shouldBeCaptured: false,
@@ -61,7 +65,10 @@ export function applyMapping(
       message: `Each Shelf field can take one column only. Change the mapping for ${clashes.join(
         "; "
       )}.`,
-      additionalData: { duplicateColumns: clashes },
+      additionalData: {
+        duplicateColumns: clashes,
+        failureReason: "duplicate_targets",
+      },
       label: "Assets",
       status: 400,
       shouldBeCaptured: false,
@@ -79,6 +86,7 @@ export function applyMapping(
       title: "Nothing to import",
       message:
         "Every column is set to Skip. Map at least one column to a Shelf field.",
+      additionalData: { failureReason: "invalid_mapping" },
       label: "Assets",
       status: 400,
       shouldBeCaptured: false,
