@@ -36,6 +36,7 @@ import { db } from "~/database/db.server";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { getUpcomingRemindersForHomePage } from "~/modules/asset-reminder/service.server";
 import { getBookings } from "~/modules/booking/service.server";
+import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 
 import styles from "~/styles/layout/skeleton-loading.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -54,19 +55,22 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
+import { canImportAssets } from "~/utils/subscription.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
   try {
-    const { organizationId, currentOrganization } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.dashboard,
-      action: PermissionAction.read,
-    });
+    const { organizationId, currentOrganization, organizations, role } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.dashboard,
+        action: PermissionAction.read,
+      });
 
     const twelveMonthsAgo = new Date();
     twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 11);
@@ -108,6 +112,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       checklistData,
       // Cookie
       cookieResult,
+      // Whether this member may import a spreadsheet (tier and role)
+      tierLimit,
+      canImport,
     ] = await Promise.all([
       // 1a. Asset count + total valuation
       // QT-aware: multiplies valuation × quantity so qty-tracked assets are not silently underreported.
@@ -381,6 +388,15 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
       // Cookie
       userPrefs.parse(request.headers.get("Cookie")).then((c: any) => c || {}),
+
+      getOrganizationTierLimit({ organizationId, organizations }),
+      hasPermission({
+        organizationId,
+        userId,
+        roles: role ? [role] : [],
+        entity: PermissionEntity.asset,
+        action: PermissionAction.import,
+      }),
     ]);
 
     const totalAssets = assetAggregation._count._all;
@@ -410,6 +426,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       valueKnownAssets,
       newAssets,
       skipOnboardingChecklist: cookieResult.skipOnboardingChecklist,
+      canImportAssets: canImportAssets(tierLimit) && canImport,
       custodiansData: getCustodiansOrderedByTotalCustodies({
         directCustodians,
         bookings: ongoingAndOverdueBookings as any,
