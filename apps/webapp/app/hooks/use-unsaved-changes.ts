@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { RefObject } from "react";
 import { useBlocker, useLocation, useNavigation } from "react-router";
 
@@ -63,12 +70,23 @@ export function serializeFormSnapshot(
 }
 
 /**
- * True when `next` is the same page or a child route of `current`, for
- * example a booking's manage-assets modal under the booking pathname.
+ * True when `next` is the form's page or a child route of it, for example a
+ * booking's manage-assets modal under the booking pathname, or closing that
+ * modal back to the booking.
  */
-function staysOnPage(current: string, next: string) {
-  const base = current.endsWith("/") ? current.slice(0, -1) : current;
-  return next === current || next === base || next.startsWith(`${base}/`);
+function staysOnPage(page: string, next: string) {
+  const base = page.endsWith("/") ? page.slice(0, -1) : page;
+  return next === page || next === base || next.startsWith(`${base}/`);
+}
+
+/**
+ * Pathname of the page a form lives on: its resolved `action` attribute.
+ * React Router resolves it against the route that renders the form, so it
+ * stays the form's page while a child route (a modal) is open.
+ */
+function formPagePathname(form: HTMLFormElement | null, fallback: string) {
+  const action = form?.getAttribute("action");
+  return action ? new URL(action, "http://localhost").pathname : fallback;
 }
 
 type UseUnsavedChangesOptions = {
@@ -122,16 +140,35 @@ export function useUnsavedChanges({
     [ignoreKey]
   );
 
+  const navigation = useNavigation();
+  /**
+   * True while any navigation runs. Forms disable their inputs meanwhile,
+   * and `FormData` leaves disabled fields out, so a snapshot taken then
+   * would differ from the baseline although nothing changed.
+   */
+  const navigatingRef = useRef(false);
+
   const check = useCallback(() => {
     const form = formRef.current;
-    if (!form || baselineRef.current === null) return;
+    if (!form || baselineRef.current === null || navigatingRef.current) {
+      return;
+    }
     setIsDirty(serializeFormSnapshot(form, ignored) !== baselineRef.current);
   }, [formRef, ignored]);
 
+  /** Set when a re-baseline is asked for mid-navigation; runs on idle. */
+  const pendingCleanRef = useRef(false);
+
   const markClean = useCallback(() => {
+    setIsDirty(false);
+    // why: inputs are disabled until the navigation settles, so a baseline
+    // read now would be missing them
+    if (navigatingRef.current) {
+      pendingCleanRef.current = true;
+      return;
+    }
     const form = formRef.current;
     baselineRef.current = form ? serializeFormSnapshot(form, ignored) : null;
-    setIsDirty(false);
   }, [formRef, ignored]);
 
   useEffect(() => {
@@ -174,7 +211,19 @@ export function useUnsavedChanges({
     markClean();
   }, [savedToken, markClean]);
 
-  const navigation = useNavigation();
+  // why: a layout effect, so the flag is set before the next frame's check
+  // reads a DOM that already has its inputs disabled
+  useLayoutEffect(() => {
+    navigatingRef.current = navigation.state !== "idle";
+    if (navigatingRef.current) return;
+    if (pendingCleanRef.current) {
+      pendingCleanRef.current = false;
+      markClean();
+    } else {
+      check();
+    }
+  }, [navigation.state, check, markClean]);
+
   const location = useLocation();
   const isSubmitting =
     navigation.state !== "idle" &&
@@ -208,8 +257,11 @@ export function useUnsavedChanges({
     useCallback(
       ({ currentLocation, nextLocation }) =>
         shouldGuard &&
-        !staysOnPage(currentLocation.pathname, nextLocation.pathname),
-      [shouldGuard]
+        !staysOnPage(
+          formPagePathname(formRef.current, currentLocation.pathname),
+          nextLocation.pathname
+        ),
+      [shouldGuard, formRef]
     )
   );
 

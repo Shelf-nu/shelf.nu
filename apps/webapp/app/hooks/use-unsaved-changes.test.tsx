@@ -4,9 +4,11 @@ import {
   createRoutesStub,
   Form,
   Link,
+  Outlet,
   redirect,
   useActionData,
   useLocation,
+  useNavigation,
 } from "react-router";
 import { describe, expect, it } from "vitest";
 import { useUnsavedChanges } from "./use-unsaved-changes";
@@ -28,7 +30,12 @@ function EditForm({ onDiscard }: { onDiscard: () => void }) {
 
   return (
     <Form ref={formRef} method="post">
-      <input aria-label="Name" name="title" defaultValue="Makita drill" />
+      <input
+        aria-label="Name"
+        name="title"
+        defaultValue="Makita drill"
+        disabled={useNavigation().state !== "idle"}
+      />
       <input type="hidden" name="tags" value={hidden} />
       <input type="hidden" name="redirectTo" value="/assets" />
       <span data-testid="status">{state.status}</span>
@@ -51,6 +58,9 @@ function EditForm({ onDiscard }: { onDiscard: () => void }) {
       ) : null}
       <Link to="/other">Other page</Link>
       <Link to="?q=1">Same page</Link>
+      <Link to="?slow=1">Slow reload</Link>
+      <Link to="/edit/child">Open child</Link>
+      <Outlet />
     </Form>
   );
 }
@@ -67,6 +77,25 @@ function renderForm(action: () => unknown = () => ({ ok: true })) {
       path: "/edit",
       Component: EditPage,
       action,
+      // why: a slow reload keeps the navigation (and the disabled input)
+      // around long enough for the interval check to run during it
+      loader: async ({ request }) => {
+        if (new URL(request.url).searchParams.has("slow")) {
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+        }
+        return null;
+      },
+      children: [
+        {
+          path: "child",
+          Component: () => (
+            <div>
+              <p>Child modal</p>
+              <Link to="/edit">Close child</Link>
+            </div>
+          ),
+        },
+      ],
     },
     { path: "/other", Component: () => <p>Other page loaded</p> },
   ]);
@@ -152,5 +181,32 @@ describe("useUnsavedChanges", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(status()).toBe("clean"));
     expect(screen.getByLabelText("Name")).toHaveValue("Makita drill 18V");
+  });
+
+  it("does not block opening or closing a child route of the form's page", async () => {
+    renderForm();
+    await makeDirtyByTyping();
+    fireEvent.click(screen.getByRole("link", { name: "Open child" }));
+    await screen.findByText("Child modal");
+    fireEvent.click(screen.getByRole("link", { name: "Close child" }));
+    await waitFor(() =>
+      expect(screen.queryByText("Child modal")).not.toBeInTheDocument()
+    );
+    expect(status()).toBe("dirty");
+    expect(screen.getByLabelText("Name")).toHaveValue("Makita drill 18V");
+  });
+
+  it("stays clean while a navigation disables the inputs", async () => {
+    renderForm();
+    await waitFor(() => expect(status()).toBe("clean"));
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    fireEvent.click(screen.getByRole("link", { name: "Slow reload" }));
+    await waitFor(() => expect(screen.getByLabelText("Name")).toBeDisabled());
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    expect(status()).toBe("clean");
+    await waitFor(() => expect(screen.getByLabelText("Name")).toBeEnabled(), {
+      timeout: 2000,
+    });
+    expect(status()).toBe("clean");
   });
 });
