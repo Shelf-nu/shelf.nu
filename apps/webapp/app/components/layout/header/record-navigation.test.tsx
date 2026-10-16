@@ -40,6 +40,7 @@ function AssetPage() {
       <Link to="/assets/a3/overview">Unrelated link to a3</Link>
       <input aria-label="Search activity" />
       <p data-testid="where">{location.pathname}</p>
+      <p data-testid="status">{navigation.status}</p>
       <p data-testid="context">
         {JSON.stringify(location.state?.listContext ?? null)}
       </p>
@@ -162,5 +163,35 @@ describe("RecordNavigation", () => {
         screen.getByRole("button", { name: "Next in list" })
       ).toHaveAttribute("aria-disabled", "true")
     );
+  });
+
+  it("ignores ] while a menu is open", async () => {
+    const user = userEvent.setup();
+    renderAt({ pathname: "/assets/a2/overview", state: FROM_LIST });
+    const next = screen.getByRole("button", { name: "Next in list" });
+    await waitFor(() => expect(next).toBeEnabled());
+
+    const menu = document.createElement("div");
+    menu.setAttribute("role", "menu");
+    document.body.appendChild(menu);
+    await user.keyboard("]");
+    menu.remove();
+
+    expect(screen.getByTestId("where")).toHaveTextContent(
+      "/assets/a2/overview"
+    );
+  });
+
+  it("settles as ready with no neighbours when a load ends without data", async () => {
+    neighboursLoader.mockImplementation(() => undefined);
+    renderAt({ pathname: "/assets/a2/overview", state: FROM_LIST });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("status")).toHaveTextContent("ready")
+    );
+    expect(screen.getByRole("button", { name: "Next in list" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Previous in list" })
+    ).toBeDisabled();
   });
 });

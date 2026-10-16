@@ -1,3 +1,7 @@
+/**
+ * Finds the records before and after one record in the list a detail page
+ * was opened from, for `GET /api/list-neighbours`.
+ */
 import type { ListEntity, Neighbours } from "./list-context";
 import { readPage, withPage } from "./list-context";
 import type { ListNavigationCaller } from "./registry.server";
@@ -49,10 +53,11 @@ export async function getListNeighbours({
   request: Request;
   caller: ListNavigationCaller;
 }): Promise<Neighbours> {
-  const { indexPath, fetchPageIds } = LIST_NAVIGATION_REGISTRY[entity];
+  const { indexPath, createPageFetcher } = LIST_NAVIGATION_REGISTRY[entity];
   const page = readPage(filters);
   const origin = new URL(request.url).origin;
   const pageNumbers = [page - 1, page, page + 1].filter((p) => p >= 1);
+  const fetchPageIds = await createPageFetcher({ request, filters, caller });
 
   const pages = await Promise.all(
     pageNumbers.map(async (pageNumber) => {
@@ -63,7 +68,6 @@ export async function getListNeighbours({
       const ids = await fetchPageIds({
         listRequest,
         filters: search.slice(1),
-        caller,
       });
       return { page: pageNumber, ids };
     })

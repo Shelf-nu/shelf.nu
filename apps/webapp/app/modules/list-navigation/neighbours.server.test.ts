@@ -3,12 +3,17 @@ import { getListNeighbours, pickNeighbours } from "./neighbours.server";
 import type { ListNavigationCaller } from "./registry.server";
 
 const fetchPageIds = vi.hoisted(() => vi.fn());
+const createPageFetcher = vi.hoisted(() => vi.fn());
 
 // why: the list queries are each index's own and are not under test here;
 // this pins which pages are asked for and how their ids are stitched
 vi.mock("./registry.server", () => ({
   LIST_NAVIGATION_REGISTRY: {
-    asset: { permissionEntity: "asset", indexPath: "/assets", fetchPageIds },
+    asset: {
+      permissionEntity: "asset",
+      indexPath: "/assets",
+      createPageFetcher,
+    },
   },
 }));
 
@@ -48,6 +53,8 @@ describe("getListNeighbours", () => {
   const caller = { organizationId: "org-1" } as ListNavigationCaller;
 
   beforeEach(() => {
+    createPageFetcher.mockReset();
+    createPageFetcher.mockResolvedValue(fetchPageIds);
     fetchPageIds.mockReset();
     fetchPageIds.mockImplementation(({ filters }: { filters: string }) => {
       const page = new URLSearchParams(filters).get("page") ?? "";
@@ -85,7 +92,11 @@ describe("getListNeighbours", () => {
       "http://localhost/assets?s=drill&page=1"
     );
     expect(calls[0].listRequest.headers.get("accept-language")).toBe("de");
-    expect(calls[0].caller).toBe(caller);
+    // The page-independent work runs once per lookup, not once per page.
+    expect(createPageFetcher).toHaveBeenCalledTimes(1);
+    expect(createPageFetcher).toHaveBeenCalledWith(
+      expect.objectContaining({ filters: "s=drill&page=2", caller })
+    );
   });
 
   it("never asks for page 0 when the list is on page 1", async () => {

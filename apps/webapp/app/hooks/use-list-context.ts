@@ -1,3 +1,8 @@
+/**
+ * List context for detail pages: the row links of an index attach it as
+ * history state, and the detail page reads it to step to the previous or
+ * next record with `RecordNavigation`.
+ */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useFetcher, useLocation, useNavigate } from "react-router";
 import type {
@@ -113,13 +118,26 @@ export function useRecordNavigation({
     if (enabled && url) void load(url);
   }, [enabled, url, load]);
 
+  /**
+   * The url a load has started for. A load that ends with no data (a network
+   * failure) leaves the fetcher idle with `data` undefined; once a load for
+   * this url has run, that reads as "ready, no neighbours" rather than
+   * loading forever.
+   */
+  const [startedUrl, setStartedUrl] = useState<string | null>(null);
+  if (fetcher.state !== "idle" && url !== null && startedUrl !== url) {
+    setStartedUrl(url);
+  }
+
   const data = fetcher.data;
   const status: RecordNavigationState["status"] =
     search === null
       ? "no-context"
-      : fetcher.state !== "idle" || data === undefined
+      : fetcher.state !== "idle"
       ? "loading"
-      : "ready";
+      : data !== undefined || startedUrl === url
+      ? "ready"
+      : "loading";
   // A failed load leaves both arrows disabled, like the ends of the list.
   const prev = status === "ready" && !data?.error ? data?.prev ?? null : null;
   const next = status === "ready" && !data?.error ? data?.next ?? null : null;
@@ -142,9 +160,8 @@ export function useRecordNavigation({
       if (event.key !== "[" && event.key !== "]") return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       if (event.defaultPrevented || isTypingTarget(event.target)) return;
-      if (document.querySelector('[role="dialog"], [role="alertdialog"]')) {
-        return;
-      }
+      // An open dialog, menu, listbox or popover owns the keyboard.
+      if (document.querySelector(OVERLAY_SELECTOR)) return;
       const neighbour = event.key === "[" ? prev : next;
       if (!neighbour) return;
       event.preventDefault();
@@ -157,6 +174,10 @@ export function useRecordNavigation({
 
   return { status, prev, next, goTo };
 }
+
+/** Open overlays that own the keyboard while they are on screen. */
+const OVERLAY_SELECTOR =
+  '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]';
 
 /** `true` when a key press is typing into a field rather than a shortcut. */
 function isTypingTarget(target: EventTarget | null): boolean {

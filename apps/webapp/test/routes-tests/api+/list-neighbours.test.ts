@@ -13,6 +13,13 @@ import { ShelfError } from "~/utils/error";
 
 const requirePermission = vi.hoisted(() => vi.fn());
 const fetchPageIds = vi.hoisted(() => vi.fn());
+const createPageFetcher = vi.hoisted(() => vi.fn());
+const sendNotification = vi.hoisted(() => vi.fn());
+
+// why: a refused or stale lookup must not toast; the arrows already show it
+vi.mock("~/utils/emitter/send-notification.server", () => ({
+  sendNotification,
+}));
 
 // why: the permission gate is under test only as "was it asked, and does a
 // refusal stop the lookup"; its matrix is tested in @shelf/permissions
@@ -22,17 +29,21 @@ vi.mock("~/utils/roles.server", () => ({ requirePermission }));
 // to them and stitch their ids
 vi.mock("~/modules/list-navigation/registry.server", () => ({
   LIST_NAVIGATION_REGISTRY: {
-    asset: { permissionEntity: "asset", indexPath: "/assets", fetchPageIds },
+    asset: {
+      permissionEntity: "asset",
+      indexPath: "/assets",
+      createPageFetcher,
+    },
     booking: {
       permissionEntity: "booking",
       indexPath: "/bookings",
-      fetchPageIds,
+      createPageFetcher,
     },
-    kit: { permissionEntity: "kit", indexPath: "/kits", fetchPageIds },
+    kit: { permissionEntity: "kit", indexPath: "/kits", createPageFetcher },
     location: {
       permissionEntity: "location",
       indexPath: "/locations",
-      fetchPageIds,
+      createPageFetcher,
     },
   },
 }));
@@ -60,6 +71,7 @@ describe("GET /api/list-neighbours", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     requirePermission.mockResolvedValue({ organizationId: "org-1" });
+    createPageFetcher.mockResolvedValue(fetchPageIds);
     fetchPageIds.mockImplementation(
       async ({ filters }: { filters: string }) =>
         PAGES[new URLSearchParams(filters).get("page") ?? ""] ?? []
@@ -84,11 +96,13 @@ describe("GET /api/list-neighbours", () => {
         action: "read",
       })
     );
-    expect(fetchPageIds).toHaveBeenCalledWith(
+    expect(createPageFetcher).toHaveBeenCalledWith(
       expect.objectContaining({
-        filters: "status=RESERVED&page=1",
         caller: { organizationId: "org-1", userId: "user-1" },
       })
+    );
+    expect(fetchPageIds).toHaveBeenCalledWith(
+      expect.objectContaining({ filters: "status=RESERVED&page=1" })
     );
   });
 
@@ -113,7 +127,8 @@ describe("GET /api/list-neighbours", () => {
 
     expect(status).toBe(403);
     expect(body).toHaveProperty("error");
-    expect(fetchPageIds).not.toHaveBeenCalled();
+    expect(createPageFetcher).not.toHaveBeenCalled();
+    expect(sendNotification).not.toHaveBeenCalled();
   });
 
   it("answers 400 for a list that has no arrows", async () => {

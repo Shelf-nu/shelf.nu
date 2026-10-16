@@ -59,6 +59,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     return data(payload(neighbours));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return data(error(reason), { status: reason.status });
+    // No toast: the arrows already show the failure by staying disabled, and
+    // a stale list context is ordinary, not an error the user must act on.
+    return data(error(reason, false), { status: reason.status });
   }
 }

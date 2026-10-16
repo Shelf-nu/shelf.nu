@@ -1,3 +1,12 @@
+/**
+ * The lists a detail page can step through with its previous/next arrows.
+ *
+ * Each entry names the permission its index route requires and loads one
+ * page of ids through the index's OWN query function, with the same
+ * access-derived arguments, so the order and visibility match the list the
+ * user saw. Never replace those calls with a hand-written `where`: the index
+ * functions carry the bookable scope, custody and archived-view rules.
+ */
 import { canViewArchivedAssets } from "~/modules/asset/data.server";
 import { resolveBookableListScope } from "~/modules/asset/list-scope.server";
 import {
@@ -23,6 +32,7 @@ import { isPersonalOrg } from "~/utils/organization";
 import { PermissionEntity } from "~/utils/permissions/permission.data";
 import type { requirePermission } from "~/utils/roles.server";
 import type { ListEntity } from "./list-context";
+import { readPage, withPage } from "./list-context";
 
 /** The caller, as the neighbours endpoint resolved them. */
 export type ListNavigationCaller = Awaited<
@@ -35,6 +45,17 @@ export type FetchPageIdsArgs = {
   listRequest: Request;
   /** The list's search string at the wanted page, without the leading `?`. */
   filters: string;
+};
+
+/** The ids on one page of a list, in list order. */
+export type PageIdsFetcher = (args: FetchPageIdsArgs) => Promise<string[]>;
+
+/** What a list may resolve once per neighbours lookup, before loading pages. */
+export type CreatePageFetcherArgs = {
+  /** The incoming request, whose headers (cookies, client hints) the list reads. */
+  request: Request;
+  /** The list's search string, without the leading `?` and with any page. */
+  filters: string;
   caller: ListNavigationCaller;
 };
 
@@ -45,11 +66,12 @@ export type ListNavigationEntry = {
   /** The list's index path, used to build its request. */
   indexPath: string;
   /**
-   * The ids on one page of the list, in list order. Calls the same query
+   * Resolves what every page of the list shares (settings, preferences)
+   * once, and returns the page loader. The page loader calls the same query
    * function, with the same access-derived arguments, as the list's index
    * loader, so the order and visibility are exactly what the user saw.
    */
-  fetchPageIds: (args: FetchPageIdsArgs) => Promise<string[]>;
+  createPageFetcher: (args: CreatePageFetcherArgs) => Promise<PageIdsFetcher>;
 };
 
 /** One entry per list a detail page can step through. */
@@ -58,31 +80,41 @@ export const LIST_NAVIGATION_REGISTRY: Record<ListEntity, ListNavigationEntry> =
     asset: {
       permissionEntity: PermissionEntity.asset,
       indexPath: "/assets",
-      fetchPageIds: fetchAssetPageIds,
+      createPageFetcher: createAssetPageFetcher,
     },
     booking: {
       permissionEntity: PermissionEntity.booking,
       indexPath: "/bookings",
-      fetchPageIds: fetchBookingPageIds,
+      createPageFetcher: ({ caller }) =>
+        Promise.resolve((page) => fetchBookingPageIds({ ...page, caller })),
     },
     kit: {
       permissionEntity: PermissionEntity.kit,
       indexPath: "/kits",
-      fetchPageIds: fetchKitPageIds,
+      createPageFetcher: ({ caller }) =>
+        Promise.resolve((page) => fetchKitPageIds({ ...page, caller })),
     },
     location: {
       permissionEntity: PermissionEntity.location,
       indexPath: "/locations",
-      fetchPageIds: fetchLocationPageIds,
+      createPageFetcher: ({ caller }) =>
+        Promise.resolve((page) => fetchLocationPageIds({ ...page, caller })),
     },
   };
 
-/** Mirrors the `/assets` index loader: picks the simple or advanced query like it does. */
-async function fetchAssetPageIds({
-  listRequest,
+/** A page load with the caller attached. */
+type CallerPageArgs = FetchPageIdsArgs & { caller: ListNavigationCaller };
+
+/**
+ * Mirrors the `/assets` index loader: picks the simple or advanced query like
+ * it does. The index settings, the advanced filter normalisation and the
+ * caller's time zone are page-independent, so they resolve once here.
+ */
+async function createAssetPageFetcher({
+  request,
   filters,
   caller,
-}: FetchPageIdsArgs): Promise<string[]> {
+}: CreatePageFetcherArgs): Promise<PageIdsFetcher> {
   const {
     userId,
     organizationId,
@@ -103,48 +135,57 @@ async function fetchAssetPageIds({
   if (settings.mode === "ADVANCED") {
     // The index refuses the advanced mode to a role without it, so there is
     // no list to step through.
-    if (!access.policy.ui.advancedAssetIndex) return [];
+    if (!access.policy.ui.advancedAssetIndex) return () => Promise.resolve([]);
 
-    const { filters: advancedFilters } = await getAdvancedFiltersFromRequest(
-      listRequest,
-      organizationId,
-      settings
+    const origin = new URL(request.url).origin;
+    const [{ filters: advancedFilters = "" }, { timeZone }] = await Promise.all(
+      [
+        getAdvancedFiltersFromRequest(
+          new Request(`${origin}/assets?${filters}`, {
+            headers: request.headers,
+          }),
+          organizationId,
+          settings
+        ),
+        resolveUserFormatPrefsById(userId, getClientHint(request)),
+      ]
     );
-    const { timeZone } = await resolveUserFormatPrefsById(
-      userId,
-      getClientHint(listRequest)
-    );
-    const { assets } = await getAdvancedPaginatedAndFilterableAssets({
-      request: listRequest,
-      organizationId,
-      timeZone,
-      filters: advancedFilters,
-      settings,
-      canUseBarcodes: currentOrganization.barcodesEnabled ?? false,
-      bookableScope,
-      honorArchivedView,
-    });
-    return assets.map((asset) => asset.id);
+
+    return async ({ listRequest, filters: pageFilters }) => {
+      const { assets } = await getAdvancedPaginatedAndFilterableAssets({
+        request: listRequest,
+        organizationId,
+        timeZone,
+        filters: withPage(advancedFilters, readPage(pageFilters)).slice(1),
+        settings,
+        canUseBarcodes: currentOrganization.barcodesEnabled ?? false,
+        bookableScope,
+        honorArchivedView,
+      });
+      return assets.map((asset) => asset.id);
+    };
   }
 
-  const { assets } = await getPaginatedAndFilterableAssets({
-    request: listRequest,
-    organizationId,
-    canSeeAllCustody: access.custody.seeAll,
-    honorArchivedView,
-    honorLowStockFilter: true,
-    filters,
-    bookableScope,
-    userId,
-  });
-  return assets.map((asset) => asset.id);
+  return async ({ listRequest, filters: pageFilters }) => {
+    const { assets } = await getPaginatedAndFilterableAssets({
+      request: listRequest,
+      organizationId,
+      canSeeAllCustody: access.custody.seeAll,
+      honorArchivedView,
+      honorLowStockFilter: true,
+      filters: pageFilters,
+      bookableScope,
+      userId,
+    });
+    return assets.map((asset) => asset.id);
+  };
 }
 
 /** Mirrors the `/bookings` index loader. */
 async function fetchBookingPageIds({
   listRequest,
   caller,
-}: FetchPageIdsArgs): Promise<string[]> {
+}: CallerPageArgs): Promise<string[]> {
   const { userId, organizationId, access, currentOrganization } = caller;
   // The index refuses personal workspaces, so there is no list to step through.
   if (isPersonalOrg(currentOrganization)) return [];
@@ -185,7 +226,7 @@ async function fetchBookingPageIds({
 async function fetchKitPageIds({
   listRequest,
   caller,
-}: FetchPageIdsArgs): Promise<string[]> {
+}: CallerPageArgs): Promise<string[]> {
   const { userId, organizationId, access } = caller;
   const { kits } = await getPaginatedAndFilterableKits({
     request: listRequest,
@@ -209,7 +250,7 @@ async function fetchLocationPageIds({
   listRequest,
   filters,
   caller,
-}: FetchPageIdsArgs): Promise<string[]> {
+}: CallerPageArgs): Promise<string[]> {
   const { page, perPageParam, search, orderBy, orderDirection } =
     getParamsValues(new URLSearchParams(filters));
   const { perPage } = await updateCookieWithPerPage(listRequest, perPageParam);

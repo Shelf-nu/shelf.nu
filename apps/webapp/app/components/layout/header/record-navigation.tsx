@@ -1,3 +1,8 @@
+/**
+ * Previous/next record arrows for detail page headers. Presentational: the
+ * state, the neighbours load and the `[` / `]` shortcuts live in
+ * `useRecordNavigation` (`~/hooks/use-list-context`).
+ */
 import type { ReactNode } from "react";
 import { ChevronDownIcon, ChevronUpIcon } from "lucide-react";
 import { Button } from "~/components/shared/button";
