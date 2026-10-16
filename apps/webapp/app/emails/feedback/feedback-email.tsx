@@ -13,7 +13,7 @@ import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { LogoForEmail } from "../logo";
 import { sendEmail } from "../mail.server";
-import { parseRecipientList } from "../recipient-list";
+import { formatRecipientList, parseRecipientList } from "../recipient-list";
 import { styles } from "../styles";
 
 interface FeedbackEmailProps {
@@ -61,7 +61,7 @@ export function resolveFeedbackRecipients(
   supportEmail: string | undefined
 ) {
   const configured = feedbackEmail?.trim() ? feedbackEmail : supportEmail;
-  return parseRecipientList(configured).join(", ");
+  return formatRecipientList(parseRecipientList(configured));
 }
 
 /**

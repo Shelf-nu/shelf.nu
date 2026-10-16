@@ -2,7 +2,7 @@ import { transporter } from "~/emails/transporter.server";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
-import { parseRecipientList } from "./recipient-list";
+import { formatRecipientList, parseRecipientList } from "./recipient-list";
 import { redactEmailPayloadForLog } from "./redact-email-payload";
 import type { EmailPayloadType } from "./types";
 import { SMTP_FROM, SUPPORT_EMAIL } from "../utils/env";
@@ -88,7 +88,7 @@ export const triggerEmail = async ({
   const deliverableRecipients = recipients.filter(
     // Lower-cased first: domains are case-insensitive, so an address stored
     // as "@DELETED.SHELF.NU" is the same dead inbox and must not be mailed
-    (address) => !address.toLowerCase().endsWith(SOFT_DELETED_EMAIL_DOMAIN)
+    ({ address }) => !address.toLowerCase().endsWith(SOFT_DELETED_EMAIL_DOMAIN)
   );
 
   if (recipients.length > 0 && deliverableRecipients.length === 0) {
@@ -99,7 +99,7 @@ export const triggerEmail = async ({
   }
 
   const toHeader = deliverableRecipients.length
-    ? deliverableRecipients.join(", ")
+    ? formatRecipientList(deliverableRecipients)
     : to;
 
   try {

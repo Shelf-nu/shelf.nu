@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Logger } from "~/utils/logger";
 import { registerEmailWorkers, triggerEmail } from "./email.worker.server";
 
@@ -30,6 +30,30 @@ const basePayload = {
 };
 
 describe("triggerEmail", () => {
+  beforeEach(() => {
+    vi.mocked(transporter.sendMail).mockClear();
+  });
+
+  it("keeps a display name that contains a comma intact", async () => {
+    await triggerEmail({
+      ...basePayload,
+      to: '"Doe, Jane" <jane@example.com>, gone@deleted.shelf.nu',
+    });
+
+    expect(transporter.sendMail).toHaveBeenCalledWith(
+      expect.objectContaining({ to: '"Doe, Jane" <jane@example.com>' })
+    );
+  });
+
+  it("skips a soft-deleted address written with a display name", async () => {
+    await triggerEmail({
+      ...basePayload,
+      to: "Former User <deleted+abc123@deleted.shelf.nu>",
+    });
+
+    expect(transporter.sendMail).not.toHaveBeenCalled();
+  });
+
   it("skips sending email to soft-deleted users", async () => {
     await triggerEmail({
       ...basePayload,
@@ -52,8 +76,6 @@ describe("triggerEmail", () => {
   });
 
   it("sends to every address of a comma separated list", async () => {
-    vi.mocked(transporter.sendMail).mockClear();
-
     await triggerEmail({
       ...basePayload,
       to: "support@shelf.nu, product@shelf.nu",
@@ -65,8 +87,6 @@ describe("triggerEmail", () => {
   });
 
   it("drops only the soft-deleted address from a list", async () => {
-    vi.mocked(transporter.sendMail).mockClear();
-
     await triggerEmail({
       ...basePayload,
       to: "support@shelf.nu, deleted+abc123@deleted.shelf.nu",
@@ -81,8 +101,6 @@ describe("triggerEmail", () => {
   });
 
   it("skips soft-deleted addresses whatever the domain casing", async () => {
-    vi.mocked(transporter.sendMail).mockClear();
-
     await triggerEmail({
       ...basePayload,
       to: "support@shelf.nu, deleted+abc123@DELETED.SHELF.NU",
@@ -95,8 +113,6 @@ describe("triggerEmail", () => {
   });
 
   it("skips sending when every address in a list is soft-deleted", async () => {
-    vi.mocked(transporter.sendMail).mockClear();
-
     await triggerEmail({
       ...basePayload,
       to: "a@deleted.shelf.nu, b@deleted.shelf.nu",
