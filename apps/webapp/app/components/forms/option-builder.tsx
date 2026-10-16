@@ -370,7 +370,7 @@ function OptionListItem({
         ref={handleRef}
         onPointerDown={(event) => dragControls.start(event)}
         onKeyDown={onHandleKeyDown}
-        className="flex cursor-grab touch-none items-center p-1 text-gray-500 focus:outline-none focus:ring-2 focus:ring-primary"
+        className="flex cursor-grab touch-none items-center p-1 text-gray-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         aria-label={`Reorder ${label}`}
         aria-describedby={instructionsId}
         aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
@@ -395,7 +395,7 @@ function OptionListItem({
             ref={nameRef}
             type="button"
             onClick={() => setIsEditing(true)}
-            className="group flex max-w-full items-center gap-2 rounded text-left text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary"
+            className="group flex max-w-full items-center gap-2 rounded text-left text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             aria-label={`Rename ${label}`}
             title="Click to rename"
           >
@@ -422,7 +422,7 @@ function OptionListItem({
       <button
         type="button"
         onClick={onRemove}
-        className="rounded text-gray-500 hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary"
+        className="rounded text-gray-500 hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         aria-label={`Remove ${label}`}
       >
         <CrossCircledIcon className="size-6" />
