@@ -1,4 +1,4 @@
-import { BookingStatus } from "@prisma/client";
+import { BookingStatus, type Prisma } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import {
@@ -7,15 +7,13 @@ import {
   requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
+import { parseMobilePagination } from "~/modules/api/mobile-pagination";
 import {
-  bookingDraftVisibilityClause,
-  custodianScopeClause,
+  buildBookingsWhere,
+  getBookingsListWhereParams,
   resolveCustodianScope,
 } from "~/modules/booking/service.server";
-import {
-  canSeeBookingCustodian,
-  resolveBookingCustodianName,
-} from "~/utils/booking-authorization.server";
+import { resolveBookingCustodianName } from "~/utils/booking-authorization.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   PermissionAction,
@@ -25,35 +23,58 @@ import {
 /**
  * GET /api/mobile/assets/:assetId/bookings
  *
- * The bookings this ONE asset appears in — the phone answer to "when is this
- * thing out, and where has it been?", asked while standing in front of it.
- * Mirrors the Bookings tab on the web asset page
- * (`assets.$assetId.bookings.tsx`); the bookings list endpoint cannot filter
- * by asset, so this is the phone's only way to ask.
+ * The bookings one asset appears in: the phone's answer to "when is this out,
+ * and where has it been?", asked while standing in front of it.
  *
- * Scoping mirrors `bookings.ts`, because the same rules apply to a per-asset
- * slice of the same data:
- *   - organisation scoped
- *   - members without `access.bookings.seeAll` see only bookings they are
- *     custodian of, matched through `resolveCustodianScope` +
- *     `custodianScopeClause`: the user link OR any of their team-member links,
- *     never the user link alone
- *   - the custodian's name and face follow `access.custody.seeAll`, a separate
- *     workspace override from the booking scope
- *   - DRAFT bookings stay private to their creator
+ * Which bookings the list holds is decided by the web asset page's Bookings tab
+ * (`getBookingsListWhereParams` with an asset list, then `buildBookingsWhere`),
+ * so the phone and the web always agree. That covers the organization, the
+ * tab's statuses (every status but ARCHIVED and CANCELLED), draft privacy, and
+ * the custodian scope for members without `access.bookings.seeAll`. The
+ * custodian's name follows `access.custody.seeAll`, a separate workspace
+ * override.
  *
- * Statuses match the web tab's `BOOKING_STATUS_TO_SHOW`: everything except
- * CANCELLED and ARCHIVED, so COMPLETE is included. Past bookings are half of
- * what the tab is for.
+ * Two lists come back:
+ *   - `bookings`: one page of every booking, newest start first
+ *   - `activeBookings`: the ONGOING and OVERDUE ones, whatever page they fall
+ *     on, so a preview can lead with the booking the asset is out on now even
+ *     when future reservations fill the first page
  *
  * Query params:
  *   - orgId (required): organization ID
  *   - page (optional): page number (default 1)
  *   - perPage (optional): items per page (default 20, max 50)
  *
- * @see {@link file://./bookings.ts} the workspace-wide list this mirrors
+ * @see {@link file://./bookings.ts} the workspace-wide list
  * @see {@link file://./../../_layout+/assets.$assetId.bookings.tsx} web's tab
  */
+
+/** Upper bound on `activeBookings`; a quantity-tracked pool can be out on several. */
+const ACTIVE_BOOKINGS_LIMIT = 10;
+
+/** The statuses that mean the asset is out on the booking right now. */
+const ACTIVE_STATUSES: BookingStatus[] = [
+  BookingStatus.ONGOING,
+  BookingStatus.OVERDUE,
+];
+
+/**
+ * The columns a row needs. `custodianUser.id` and `custodianTeamMember.userId`
+ * answer "is the custodian the caller?", which keeps a restricted user's own
+ * name visible to them.
+ */
+const BOOKING_ROW_SELECT = {
+  id: true,
+  name: true,
+  status: true,
+  from: true,
+  to: true,
+  custodianUser: {
+    select: { id: true, firstName: true, lastName: true, displayName: true },
+  },
+  custodianTeamMember: { select: { name: true, userId: true } },
+} satisfies Prisma.BookingSelect;
+
 export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
@@ -93,148 +114,77 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       );
     }
 
-    const url = new URL(request.url);
-
-    /**
-     * Pagination is caller-supplied, so it has to survive nonsense.
-     * `Number("1.5")` is 1.5 and `Number("Infinity")` is Infinity; both reach
-     * Prisma as a fractional or non-finite `skip`/`take`, which it rejects with
-     * a 500. Floor to a finite integer and fall back to the default rather than
-     * failing the request over a bad query string.
-     */
-    const positiveInt = (raw: string | null, fallback: number): number => {
-      const parsed = Number(raw);
-      if (!Number.isFinite(parsed)) return fallback;
-      const floored = Math.floor(parsed);
-      return floored >= 1 ? floored : fallback;
-    };
-
-    const perPage = Math.min(
-      50,
-      positiveInt(url.searchParams.get("perPage"), 20)
+    const { page, perPage, skip } = parseMobilePagination(
+      new URL(request.url).searchParams
     );
-    const requestedPage = positiveInt(url.searchParams.get("page"), 1);
 
     /**
-     * Validating the inputs is not enough: `skip` is a product, and a page like
-     * 1.79e308 is a perfectly finite integer that overflows to Infinity once
-     * multiplied by perPage. Prisma rejects that exactly as it rejects a
-     * fraction, so the product has to be checked, not only its operands.
-     */
-    const page = Number.isSafeInteger((requestedPage - 1) * perPage)
-      ? requestedPage
-      : 1;
-
-    /**
-     * Two independent questions, two independent workspace overrides, the same
-     * pair the bookings list reads: `access.bookings.seeAll` decides WHICH ROWS
-     * exist for this caller, `access.custody.seeAll` whether the custodian's
-     * name may be shown on a row that does.
+     * `access.bookings.seeAll` decides WHICH ROWS exist for this caller,
+     * `access.custody.seeAll` whether a row may name its custodian. A workspace
+     * may grant either without the other, so neither stands in for the other.
      */
     const { access } = await getMobileUserContext(user.id, organizationId);
 
-    /**
-     * Custodian scope (web parity): a restricted member's bookings match
-     * through their user link OR any of their team-member links. Matching the
-     * user link alone hides a booking whose custodian was picked as a team
-     * member, and this section would then state "This asset has never been
-     * booked", which is a claim rather than an empty list.
-     *
-     * Same helpers the bookings list and the calendar use. When you touch one
-     * of the three, check the other two.
-     */
     const custodianScope = access.bookings.seeAll
       ? null
       : await resolveCustodianScope({ userId: user.id, organizationId });
 
-    const where = {
+    // No URL filters: the phone shows the tab's default view.
+    const listParams = getBookingsListWhereParams({
+      list: { kind: "asset", assetId },
+      searchParams: new URLSearchParams(),
       organizationId,
-      // Web's BOOKING_STATUS_TO_SHOW for this tab.
-      status: {
-        in: [
-          BookingStatus.DRAFT,
-          BookingStatus.RESERVED,
-          BookingStatus.ONGOING,
-          BookingStatus.OVERDUE,
-          BookingStatus.COMPLETE,
-        ],
-      },
-      // The whole point of the route: bookings containing THIS asset. Covers
-      // both standalone rows and kit-driven slices, since both are BookingAsset
-      // rows pointing at the asset.
-      bookingAssets: { some: { assetId } },
-      AND: [
-        bookingDraftVisibilityClause(user.id),
-        ...(custodianScope ? [custodianScopeClause(custodianScope)] : []),
-      ],
-    };
+      userId: user.id,
+      custodianScope,
+    });
+    const where = buildBookingsWhere(listParams);
+    const activeWhere = buildBookingsWhere({
+      ...listParams,
+      statuses: ACTIVE_STATUSES,
+    });
 
-    const [bookings, totalCount] = await Promise.all([
+    const [bookings, activeBookings, totalCount] = await Promise.all([
       db.booking.findMany({
         where,
-        select: {
-          id: true,
-          name: true,
-          status: true,
-          from: true,
-          to: true,
-          custodianUser: {
-            select: {
-              // `id` here and `userId` on the team member answer "is the
-              // custodian the caller?", which keeps a restricted user's own
-              // name visible to them.
-              id: true,
-              firstName: true,
-              lastName: true,
-              displayName: true,
-              profilePicture: true,
-            },
-          },
-          custodianTeamMember: { select: { name: true, userId: true } },
-        },
+        select: BOOKING_ROW_SELECT,
         /**
-         * Newest start date first, and deliberately NOT web's order: web's
-         * asset bookings tab defaults to `from` ASCENDING. Ascending is wrong for
-         * this surface though, because the phone previews only the first three
-         * rows — an asset with any history would show three old bookings and
-         * hide the one it is out on today. Descending puts today's booking in
-         * the visible three for every asset whose future is not already full
-         * of reservations.
-         *
-         * A true relevance order (out-now, then next-out, then history) needs
-         * a computed discriminator this query cannot express. If the preview
-         * ever grows past three rows, revisit.
+         * Newest start first, unlike the web tab's ascending default: the
+         * phone previews a few rows, and ascending would fill them with an
+         * asset's oldest history. `activeBookings` covers the booking that is
+         * out now, which this order can push off the first rows.
          */
         orderBy: [{ from: "desc" }],
-        skip: (page - 1) * perPage,
+        skip,
         take: perPage,
+      }),
+      db.booking.findMany({
+        where: activeWhere,
+        select: BOOKING_ROW_SELECT,
+        orderBy: [{ from: "asc" }],
+        take: ACTIVE_BOOKINGS_LIMIT,
       }),
       db.booking.count({ where }),
     ]);
 
+    /** One row as the companion's `AssetBookingRow` reads it. */
+    const toRow = (b: (typeof bookings)[number]) => ({
+      id: b.id,
+      name: b.name,
+      status: b.status,
+      from: b.from,
+      to: b.to,
+      // Shared with the bookings list and the calendar: a name, null for "no
+      // custodian", or the withheld sentinel.
+      custodianName: resolveBookingCustodianName({
+        canSeeAllCustody: access.custody.seeAll,
+        booking: b,
+        userId: user.id,
+      }),
+    });
+
     return data({
-      bookings: bookings.map((b) => ({
-        id: b.id,
-        name: b.name,
-        status: b.status,
-        from: b.from,
-        to: b.to,
-        // Shared with the bookings list and the calendar: a name, null for
-        // "no custodian", or the withheld sentinel.
-        custodianName: resolveBookingCustodianName({
-          canSeeAllCustody: access.custody.seeAll,
-          booking: b,
-          userId: user.id,
-        }),
-        // The face is as identifying as the name, so it follows the same gate.
-        custodianImage: canSeeBookingCustodian({
-          canSeeAllCustody: access.custody.seeAll,
-          booking: b,
-          userId: user.id,
-        })
-          ? b.custodianUser?.profilePicture || null
-          : null,
-      })),
+      bookings: bookings.map(toRow),
+      activeBookings: activeBookings.map(toRow),
       page,
       perPage,
       totalCount,

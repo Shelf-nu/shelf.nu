@@ -260,13 +260,19 @@ export const assetsApi = {
     }),
 
   /**
-   * Bookings this asset appears in — past and upcoming. Mirrors web's
-   * Bookings tab on the asset page.
+   * Bookings this asset appears in, past and upcoming, as the web asset page's
+   * Bookings tab lists them.
+   *
+   * @param assetId - The asset
+   * @param orgId - The active workspace
+   * @param params.page - Page number (default 1)
+   * @param params.perPage - Rows per page (default 20, max 50)
+   * @param params.signal - Abandons the request when a newer one replaces it
    */
   assetBookings: (
     assetId: string,
     orgId: string,
-    params: { page?: number; perPage?: number } = {}
+    params: { page?: number; perPage?: number; signal?: AbortSignal } = {}
   ) => {
     const qs = new URLSearchParams({ orgId });
     if (params.page) qs.set("page", String(params.page));
@@ -274,7 +280,8 @@ export const assetsApi = {
     return apiFetch<AssetBookingsResponse>(
       `/api/mobile/assets/${encodeURIComponent(
         assetId
-      )}/bookings?${qs.toString()}`
+      )}/bookings?${qs.toString()}`,
+      { signal: params.signal }
     );
   },
 };

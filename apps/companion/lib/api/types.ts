@@ -1925,8 +1925,12 @@ export type CalendarBookingsResponse = {
 };
 
 /**
- * One row of an asset's booking history — the phone answer to "when is this
+ * One row of an asset's booking history: the phone's answer to "when is this
  * asset out, and where has it been?".
+ *
+ * `custodianName` has three answers: a name, `null` when the booking has no
+ * custodian, or `WITHHELD_CUSTODIAN_NAME` (`@shelf/labels`) when the viewer may
+ * not see who holds it.
  *
  * @see {@link file://../../../webapp/app/routes/api+/mobile+/assets.$assetId.bookings.ts}
  */
@@ -1937,12 +1941,15 @@ export type AssetBookingRow = {
   from: string;
   to: string;
   custodianName: string | null;
-  custodianImage: string | null;
 };
 
-/** Paginated response of {@link AssetBookingRow}. */
+/**
+ * One page of an asset's bookings, newest start first, plus the bookings the
+ * asset is out on now (ONGOING and OVERDUE) wherever they fall in the paging.
+ */
 export type AssetBookingsResponse = {
   bookings: AssetBookingRow[];
+  activeBookings: AssetBookingRow[];
   page: number;
   perPage: number;
   totalCount: number;

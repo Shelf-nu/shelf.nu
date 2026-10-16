@@ -1,6 +1,7 @@
 // @vitest-environment node
 
 import { OrganizationRoles } from "@prisma/client";
+import { WITHHELD_CUSTODIAN_NAME } from "@shelf/labels";
 import { loader } from "~/routes/api+/mobile+/assets.$assetId.bookings";
 import { accessFor } from "@helpers/role-access";
 import { createLoaderArgs } from "@mocks/remix";
@@ -24,7 +25,7 @@ vi.mock("react-router", async () => {
   return { ...actual, data: createDataMock() };
 });
 
-// why: external auth — no Supabase in tests
+// why: external auth, no Supabase in tests
 vi.mock("~/modules/api/mobile-auth.server", () => ({
   requireMobileAuth: vi.fn(),
   requireOrganizationAccess: vi.fn(),
@@ -32,21 +33,24 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
   getMobileUserContext: vi.fn(),
 }));
 
-// why: sentinels, not reimplementations. WHICH bookings a self-service user
-// may see is decided by these shared helpers, and the bookings list and the
-// calendar use the same pair. This route's job is to delegate to them, so
-// that is what is asserted; copying their logic here would only test the copy.
-vi.mock("~/modules/booking/service.server", () => ({
-  bookingDraftVisibilityClause: vi.fn(() => ({ __draftClause: true })),
-  resolveCustodianScope: vi.fn(async () => ({
-    userId: "user-1",
-    teamMemberIds: ["tm-1"],
-  })),
-  custodianScopeClause: vi.fn(() => ({ __custodianClause: true })),
-}));
+// why: resolveCustodianScope reads the caller's team-member links from the
+// database. The where builders stay real: which bookings the list holds is
+// exactly what this route delegates to them, so they are what is under test.
+vi.mock("~/modules/booking/service.server", async () => {
+  const actual = await vi.importActual<
+    typeof import("~/modules/booking/service.server")
+  >("~/modules/booking/service.server");
+  return {
+    ...actual,
+    resolveCustodianScope: vi.fn(async () => ({
+      userId: "user-1",
+      teamMemberIds: ["tm-1"],
+    })),
+  };
+});
 
 // why: no Postgres in unit tests, and the mock is also how the assertions read
-// the exact `where` the booking query was built with.
+// the exact query the loader ran.
 vi.mock("~/database/db.server", () => ({
   db: {
     asset: { findFirst: vi.fn() },
@@ -54,25 +58,12 @@ vi.mock("~/database/db.server", () => ({
   },
 }));
 
-// why: keeps ShelfError status codes observable in the response without the
-// real error pipeline logging through them.
-vi.mock("~/utils/error", () => ({
-  makeShelfError: vi.fn((cause: unknown) => {
-    const err = cause as { message?: string; status?: number } | null;
-    return { message: err?.message ?? "error", status: err?.status ?? 500 };
-  }),
-  ShelfError: class ShelfError extends Error {
-    status: number;
-    constructor(opts: { message: string; status?: number }) {
-      super(opts.message);
-      this.status = opts.status ?? 500;
-    }
-  },
-}));
-
 import { db } from "~/database/db.server";
+import { ShelfError } from "~/utils/error";
 import {
+  buildBookingsWhere,
   custodianScopeClause,
+  getBookingsListWhereParams,
   resolveCustodianScope,
 } from "~/modules/booking/service.server";
 import {
@@ -90,23 +81,24 @@ const mockDb = db as unknown as {
   };
 };
 
-/** The `where` the loader handed Prisma on its last booking query. */
-function lastWhere() {
-  return mockDb.booking.findMany.mock.calls.at(-1)?.[0]?.where;
+/** The arguments of the paged booking query (the first findMany). */
+function pageQuery() {
+  return mockDb.booking.findMany.mock.calls[0]?.[0];
+}
+
+/** The arguments of the active-bookings query (the second findMany). */
+function activeQuery() {
+  return mockDb.booking.findMany.mock.calls[1]?.[0];
 }
 
 /**
- * Fixtures for the loader's inputs.
- *
- * Typed off the real return types rather than hand-rolled object literals, so
- * a mock that no longer matches what the function actually resolves fails to
- * compile instead of drifting quietly. Each takes overrides so a test states
- * only the field it cares about.
+ * Fixtures for the loader's inputs, typed off the real return types so a mock
+ * that no longer matches what the function resolves fails to compile.
  */
 type MobileAuth = Awaited<ReturnType<typeof requireMobileAuth>>;
 type MobileContext = Awaited<ReturnType<typeof getMobileUserContext>>;
 
-function mobileUser(overrides: Partial<MobileAuth["user"]> = {}): MobileAuth {
+function mobileUser(): MobileAuth {
   return {
     user: {
       id: "user-1",
@@ -119,7 +111,6 @@ function mobileUser(overrides: Partial<MobileAuth["user"]> = {}): MobileAuth {
       timeFormat: null,
       weekStart: null,
       timeZone: null,
-      ...overrides,
     },
   } as MobileAuth;
 }
@@ -143,13 +134,38 @@ function mobileContext(
 function request(qs = "orgId=org-1", assetId = "asset-1") {
   return new Request(
     `http://localhost/api/mobile/assets/${assetId}/bookings?${qs}`,
-    {
-      headers: { Authorization: "Bearer token" },
-    }
+    { headers: { Authorization: "Bearer token" } }
   );
 }
 
 const ARGS = { params: { assetId: "asset-1" } };
+
+/** Runs the loader and returns the response and its parsed body. */
+async function run(qs?: string) {
+  const res = (await loader(
+    createLoaderArgs({ request: request(qs), ...ARGS })
+  )) as unknown as Response;
+  return { res, body: await res.json() };
+}
+
+/** A booking row as the query returns it, held by someone other than the caller. */
+function bookingRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "b-1",
+    name: "Shoot",
+    status: "ONGOING",
+    from: new Date("2026-10-01T09:00:00Z"),
+    to: new Date("2026-10-02T09:00:00Z"),
+    custodianUser: {
+      id: "user-2",
+      firstName: "Legal",
+      lastName: "Name",
+      displayName: "Sam",
+    },
+    custodianTeamMember: { name: "Sam", userId: "user-2" },
+    ...overrides,
+  };
+}
 
 describe("GET /api/mobile/assets/:assetId/bookings", () => {
   beforeEach(() => {
@@ -163,31 +179,103 @@ describe("GET /api/mobile/assets/:assetId/bookings", () => {
     mockDb.booking.count.mockResolvedValue(0);
   });
 
+  describe("which bookings", () => {
+    it("holds exactly the bookings the web asset tab holds", async () => {
+      await run();
+
+      const expected = buildBookingsWhere(
+        getBookingsListWhereParams({
+          list: { kind: "asset", assetId: "asset-1" },
+          searchParams: new URLSearchParams(),
+          organizationId: "org-1",
+          userId: "user-1",
+          custodianScope: null,
+        })
+      );
+      expect(pageQuery().where).toEqual(expected);
+      expect(mockDb.booking.count).toHaveBeenCalledWith({ where: expected });
+    });
+
+    it("stays inside the caller's workspace and on this asset", async () => {
+      await run();
+
+      const where = pageQuery().where;
+      expect(where.organizationId).toBe("org-1");
+      expect(where.bookingAssets).toEqual({
+        some: { assetId: { in: ["asset-1"] } },
+      });
+    });
+
+    it("excludes CANCELLED and ARCHIVED, and keeps COMPLETE", async () => {
+      // why: past bookings are half of what this section is for.
+      await run();
+
+      const statuses = pageQuery().where.status.in;
+      expect(statuses).toContain("COMPLETE");
+      expect(statuses).not.toContain("CANCELLED");
+      expect(statuses).not.toContain("ARCHIVED");
+    });
+
+    it("orders the page newest start first", async () => {
+      await run();
+
+      expect(pageQuery().orderBy).toEqual([{ from: "desc" }]);
+    });
+  });
+
+  describe("active bookings", () => {
+    it("fetches the asset's ONGOING and OVERDUE bookings under the same rules", async () => {
+      await run();
+
+      const page = pageQuery().where;
+      const active = activeQuery().where;
+      expect(active.status).toEqual({ in: ["ONGOING", "OVERDUE"] });
+      // Everything but the status matches the page's where.
+      expect({ ...active, status: undefined }).toEqual({
+        ...page,
+        status: undefined,
+      });
+    });
+
+    it("returns them beside the page", async () => {
+      mockDb.booking.findMany
+        .mockResolvedValueOnce([
+          bookingRow({ id: "future", status: "RESERVED" }),
+        ])
+        .mockResolvedValueOnce([bookingRow({ id: "now" })]);
+
+      const { body } = await run();
+
+      expect(body.bookings.map((b: { id: string }) => b.id)).toEqual([
+        "future",
+      ]);
+      expect(body.activeBookings.map((b: { id: string }) => b.id)).toEqual([
+        "now",
+      ]);
+    });
+  });
+
   describe("custodian scope", () => {
-    it("matches a SELF_SERVICE user through the shared scope, not the user link alone", async () => {
-      // why: matching only `custodianUserId` hides a booking whose custodian
-      // was assigned by picking a TEAM MEMBER rather than a user, and the
-      // section then states "This asset has never been booked", which is a
-      // claim rather than an empty list.
+    it("scopes a SELF_SERVICE user through the shared custodian clause", async () => {
+      // why: matching only the user link hides a booking whose custodian was
+      // picked as a team member, and the section then states "This asset has
+      // never been booked", which is a claim rather than an empty list.
       vi.mocked(getMobileUserContext).mockResolvedValue(
         mobileContext([OrganizationRoles.SELF_SERVICE])
       );
 
-      await loader(createLoaderArgs({ request: request(), ...ARGS }));
+      await run();
 
       expect(resolveCustodianScope).toHaveBeenCalledWith({
         userId: "user-1",
         organizationId: "org-1",
       });
-      expect(custodianScopeClause).toHaveBeenCalledWith({
+      const clause = custodianScopeClause({
         userId: "user-1",
         teamMemberIds: ["tm-1"],
       });
-
-      const where = lastWhere();
-      expect(where.AND).toContainEqual({ __custodianClause: true });
-      // The user-link-only shape must not sit beside the shared scope.
-      expect(where.custodianUserId).toBeUndefined();
+      expect(pageQuery().where.AND).toContainEqual(clause);
+      expect(activeQuery().where.AND).toContainEqual(clause);
     });
 
     it("applies the same scope to BASE", async () => {
@@ -195,32 +283,27 @@ describe("GET /api/mobile/assets/:assetId/bookings", () => {
         mobileContext([OrganizationRoles.BASE])
       );
 
-      await loader(createLoaderArgs({ request: request(), ...ARGS }));
+      await run();
 
       expect(resolveCustodianScope).toHaveBeenCalled();
-      expect(lastWhere().AND).toContainEqual({ __custodianClause: true });
     });
 
     it("does not scope an admin whose membership also carries SELF_SERVICE", async () => {
-      // why: a membership can hold several roles, and the array order is not
-      // meaningful. Reading roles[0] would resolve this admin to SELF_SERVICE
-      // and scope them to their own bookings, so the screen would tell a real
-      // admin the asset has never been booked.
+      // why: a membership can hold several roles in any order; the most
+      // privileged one decides the reach.
       vi.mocked(getMobileUserContext).mockResolvedValue(
         mobileContext([OrganizationRoles.SELF_SERVICE, OrganizationRoles.ADMIN])
       );
 
-      await loader(createLoaderArgs({ request: request(), ...ARGS }));
+      await run();
 
       expect(resolveCustodianScope).not.toHaveBeenCalled();
-      expect(lastWhere().AND).not.toContainEqual({ __custodianClause: true });
     });
 
-    it("does not scope an ADMIN to their own bookings", async () => {
-      await loader(createLoaderArgs({ request: request(), ...ARGS }));
+    it("does not scope an ADMIN", async () => {
+      await run();
 
       expect(resolveCustodianScope).not.toHaveBeenCalled();
-      expect(lastWhere().AND).not.toContainEqual({ __custodianClause: true });
     });
 
     it("does not scope a SELF_SERVICE user the workspace lets see all bookings", async () => {
@@ -230,41 +313,60 @@ describe("GET /api/mobile/assets/:assetId/bookings", () => {
         })
       );
 
-      await loader(createLoaderArgs({ request: request(), ...ARGS }));
+      await run();
 
       expect(resolveCustodianScope).not.toHaveBeenCalled();
     });
   });
 
-  describe("custodian name", () => {
-    /** One booking held by someone other than the caller. */
-    const othersBooking = {
-      id: "b-1",
-      name: "Shoot",
-      status: "ONGOING",
-      from: new Date("2026-10-01T09:00:00Z"),
-      to: new Date("2026-10-02T09:00:00Z"),
-      custodianUser: {
-        id: "user-2",
-        firstName: "Legal",
-        lastName: "Name",
-        displayName: "Sam",
-        profilePicture: "https://example.com/sam.png",
-      },
-      custodianTeamMember: { name: "Sam", userId: "user-2" },
-    };
+  describe("draft privacy", () => {
+    it("keeps another member's drafts out", async () => {
+      await run();
 
-    async function firstRow() {
-      const res = await loader(
-        createLoaderArgs({ request: request(), ...ARGS })
+      // The draft rule names the caller as the only creator whose drafts show.
+      expect(JSON.stringify(pageQuery().where.AND)).toContain('"user-1"');
+      expect(JSON.stringify(pageQuery().where.AND)).toContain("DRAFT");
+    });
+  });
+
+  describe("response shape", () => {
+    it("emits exactly the fields the companion's AssetBookingRow reads", async () => {
+      // why: the companion casts this payload with no runtime check, so a
+      // renamed or dropped field would compile there and render blanks.
+      mockDb.booking.findMany.mockResolvedValueOnce([bookingRow()]);
+      mockDb.booking.count.mockResolvedValue(41);
+
+      const { body } = await run("orgId=org-1&perPage=20");
+
+      expect(Object.keys(body).sort()).toEqual(
+        [
+          "activeBookings",
+          "bookings",
+          "page",
+          "perPage",
+          "totalCount",
+          "totalPages",
+        ].sort()
       );
-      const body = (await (res as unknown as Response).json()) as {
-        bookings: { custodianName: string | null; custodianImage: unknown }[];
-      };
-      return body.bookings[0];
-    }
+      expect(body).toMatchObject({
+        page: 1,
+        perPage: 20,
+        totalCount: 41,
+        totalPages: 3,
+      });
+      expect(body.bookings[0]).toEqual({
+        id: "b-1",
+        name: "Shoot",
+        status: "ONGOING",
+        from: "2026-10-01T09:00:00.000Z",
+        to: "2026-10-02T09:00:00.000Z",
+        custodianName: "Sam",
+      });
+    });
+  });
 
-    it("withholds another member's name and face without custody visibility", async () => {
+  describe("custodian name", () => {
+    it("withholds another member's name without custody visibility", async () => {
       // why: seeing that a booking exists is a separate override from seeing
       // who holds it; this workspace grants the first and not the second.
       vi.mocked(getMobileUserContext).mockResolvedValue(
@@ -272,162 +374,84 @@ describe("GET /api/mobile/assets/:assetId/bookings", () => {
           selfServiceCanSeeBookings: true,
         })
       );
-      mockDb.booking.findMany.mockResolvedValue([othersBooking]);
+      mockDb.booking.findMany.mockResolvedValueOnce([bookingRow()]);
 
-      const row = await firstRow();
+      const { body } = await run();
 
-      expect(row.custodianName).toBe("private");
-      expect(row.custodianImage).toBeNull();
+      expect(body.bookings[0].custodianName).toBe(WITHHELD_CUSTODIAN_NAME);
     });
 
     it("names the custodian by display name for a member who may see custody", async () => {
-      mockDb.booking.findMany.mockResolvedValue([othersBooking]);
+      mockDb.booking.findMany.mockResolvedValueOnce([bookingRow()]);
 
-      const row = await firstRow();
+      const { body } = await run();
 
-      expect(row.custodianName).toBe("Sam");
-      expect(row.custodianImage).toBe("https://example.com/sam.png");
+      expect(body.bookings[0].custodianName).toBe("Sam");
+    });
+
+    it("reports a booking with no custodian as null, not withheld", async () => {
+      mockDb.booking.findMany.mockResolvedValueOnce([
+        bookingRow({ custodianUser: null, custodianTeamMember: null }),
+      ]);
+
+      const { body } = await run();
+
+      expect(body.bookings[0].custodianName).toBeNull();
     });
   });
 
-  describe("draft privacy", () => {
-    it("always applies the shared draft clause", async () => {
-      await loader(createLoaderArgs({ request: request(), ...ARGS }));
+  describe("guards", () => {
+    it("requires booking read permission", async () => {
+      await run();
 
-      expect(lastWhere().AND).toContainEqual({ __draftClause: true });
+      expect(requireMobilePermission).toHaveBeenCalledWith({
+        userId: "user-1",
+        organizationId: "org-1",
+        entity: "booking",
+        action: "read",
+      });
     });
-  });
 
-  describe("cross-org protection", () => {
-    it("404s for an asset outside the caller's workspace, without querying bookings", async () => {
-      // why: proves the id cannot be probed through this route — a guessed id
-      // from another org must not reveal whether it exists by returning a
-      // different shape or an empty list.
-      mockDb.asset.findFirst.mockResolvedValue(null);
-
-      const response = await loader(
-        createLoaderArgs({ request: request(), ...ARGS })
+    it("answers with the permission error's status when it is refused", async () => {
+      vi.mocked(requireMobilePermission).mockRejectedValue(
+        new ShelfError({
+          cause: null,
+          message: "Forbidden",
+          label: "Permission",
+          status: 403,
+          shouldBeCaptured: false,
+        })
       );
 
-      // why: `data()` is mocked to return a real Response; the loader's typed
-      // return is the DataWithResponseInit union, hence the cast — the same
-      // shape the sibling mobile route tests use.
-      expect((response as unknown as Response).status).toBe(404);
+      const { res } = await run();
+
+      expect(res.status).toBe(403);
+      expect(mockDb.booking.findMany).not.toHaveBeenCalled();
+    });
+
+    it("404s for an asset outside the caller's workspace, without querying bookings", async () => {
+      // why: a guessed id from another org must not reveal whether it exists.
+      mockDb.asset.findFirst.mockResolvedValue(null);
+
+      const { res } = await run();
+
+      expect(res.status).toBe(404);
+      expect(mockDb.asset.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: "asset-1", organizationId: "org-1" },
+        })
+      );
       expect(mockDb.booking.findMany).not.toHaveBeenCalled();
     });
   });
 
-  describe("which bookings", () => {
-    it("matches bookings containing this asset, covering kit-driven slices", async () => {
-      await loader(createLoaderArgs({ request: request(), ...ARGS }));
+  describe("pagination", () => {
+    it("pages the booking query with the parsed page", async () => {
+      // Parsing edge cases are pinned by mobile-pagination.test.ts.
+      const { body } = await run("orgId=org-1&page=2.5");
 
-      expect(lastWhere().bookingAssets).toEqual({
-        some: { assetId: "asset-1" },
-      });
-    });
-
-    it("excludes CANCELLED and ARCHIVED, and keeps COMPLETE", async () => {
-      // why: past bookings are half of what this section is for.
-      await loader(createLoaderArgs({ request: request(), ...ARGS }));
-
-      const statuses = lastWhere().status.in;
-      expect(statuses).toContain("COMPLETE");
-      expect(statuses).not.toContain("CANCELLED");
-      expect(statuses).not.toContain("ARCHIVED");
-    });
-  });
-
-  describe("pagination survives a hostile query string", () => {
-    /** The `skip`/`take` the booking query actually ran with. */
-    function lastPaging() {
-      const call = mockDb.booking.findMany.mock.calls.at(-1)?.[0];
-      return { skip: call?.skip, take: call?.take };
-    }
-
-    /** What the endpoint reported back to the caller. */
-    async function body(res: unknown) {
-      return (await (res as Response).json()) as {
-        page: number;
-        perPage: number;
-      };
-    }
-
-    it("floors a fractional page rather than falling back to page 1", async () => {
-      // 2.5 discriminates: flooring gives page 2, a fallback would give 1.
-      // `page=1.5` could not tell the two apart - both land on skip 0.
-      const res = await loader(
-        createLoaderArgs({ request: request("orgId=org-1&page=2.5"), ...ARGS })
-      );
-
-      expect((await body(res)).page).toBe(2);
-      expect(lastPaging().skip).toBe(20);
-    });
-
-    it("floors a fractional perPage to the page size it reports", async () => {
-      const res = await loader(
-        createLoaderArgs({
-          request: request("orgId=org-1&perPage=2.5"),
-          ...ARGS,
-        })
-      );
-
-      expect((await body(res)).perPage).toBe(2);
-      expect(lastPaging().take).toBe(2);
-    });
-
-    it("does not let a huge page overflow the computed skip", async () => {
-      // 1.79e308 is finite AND an integer, so validating the input alone lets
-      // it through; the overflow only appears once it is multiplied by perPage.
-      const res = await loader(
-        createLoaderArgs({
-          request: request("orgId=org-1&page=1.7976931348623157e308"),
-          ...ARGS,
-        })
-      );
-
-      const { skip } = lastPaging();
-      expect(Number.isSafeInteger(skip)).toBe(true);
-      expect(skip).toBe(0);
-      expect((await body(res)).page).toBe(1);
-    });
-
-    it("ignores a non-finite page, and says so in the response", async () => {
-      const res = await loader(
-        createLoaderArgs({
-          request: request("orgId=org-1&page=Infinity"),
-          ...ARGS,
-        })
-      );
-
-      // The caller-visible answer matters as much as the query: a client
-      // paging on the reported page would otherwise loop on Infinity.
-      expect((await body(res)).page).toBe(1);
-      expect(lastPaging().skip).toBe(0);
-    });
-
-    it.each(["0", "-3", "abc", ""])(
-      "falls back to the first page for page=%s",
-      async (bad) => {
-        await loader(
-          createLoaderArgs({
-            request: request(`orgId=org-1&page=${bad}`),
-            ...ARGS,
-          })
-        );
-
-        expect(lastPaging().skip).toBe(0);
-      }
-    );
-
-    it("keeps perPage within its ceiling", async () => {
-      await loader(
-        createLoaderArgs({
-          request: request("orgId=org-1&perPage=999"),
-          ...ARGS,
-        })
-      );
-
-      expect(lastPaging().take).toBe(50);
+      expect(body.page).toBe(2);
+      expect(pageQuery()).toMatchObject({ skip: 20, take: 20 });
     });
   });
 });

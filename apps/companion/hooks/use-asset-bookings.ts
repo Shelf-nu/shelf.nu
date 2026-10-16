@@ -1,60 +1,134 @@
 /**
- * useAssetBookings — the bookings one asset appears in.
+ * useAssetBookings: the bookings one asset appears in.
  *
  * Backs the Bookings section on the asset detail screen, which answers the two
  * questions a field worker asks while holding the thing: when is it out next,
- * and where has it been. Web has had this as a tab on the asset page for a long
- * time; the companion had no way to ask at all, since even the bookings list
- * endpoint cannot filter by asset.
+ * and where has it been. Mirrors the Bookings tab on the web asset page.
  *
- * Fetches lazily — only once the section is opened — so the asset screen keeps
- * its current load cost for the majority of visits that never expand it.
+ * Nothing is fetched until the screen calls `load()`, so the asset screen keeps
+ * its load cost for the visits that never open the section. After that, every
+ * `load()` re-fetches: the newest request wins and an older answer still in
+ * flight is dropped, so a refresh can never be overwritten by the request it
+ * replaced. Switching to another asset or workspace clears what was loaded.
  *
  * @see {@link file://../lib/api/assets.ts} `assetsApi.assetBookings`
+ * @see {@link file://../lib/asset-bookings-view.ts} what the section draws from it
  */
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef } from "react";
 import { api } from "@/lib/api";
 import type { AssetBookingRow } from "@/lib/api/types";
+import { createLatestRequest } from "@/lib/latest-request";
 
+/** Rows requested per load: enough history for the expanded list. */
+const BOOKINGS_PER_PAGE = 20;
+
+/** What {@link useAssetBookings} returns. */
 type UseAssetBookingsResult = {
+  /** One page of the asset's bookings, newest start first */
   bookings: AssetBookingRow[];
+  /** The bookings the asset is out on now, wherever they fall in the paging */
+  activeBookings: AssetBookingRow[];
+  /** How many bookings the asset has in all */
   totalCount: number;
   isLoading: boolean;
-  /** Set once a fetch has completed, so an empty list renders as "none". */
+  /** Set once a fetch has completed, so an empty list renders as "none" */
   hasLoaded: boolean;
   error: string | null;
-  /** Idempotent: safe to call on every expand. */
+  /** Fetches (or re-fetches) the bookings; supersedes any load in flight */
   load: () => Promise<void>;
 };
 
+type State = Omit<UseAssetBookingsResult, "load">;
+
+type Action =
+  | { type: "start" }
+  | {
+      type: "success";
+      bookings: AssetBookingRow[];
+      activeBookings: AssetBookingRow[];
+      totalCount: number;
+    }
+  | { type: "error"; error: string }
+  | { type: "reset" };
+
+const INITIAL_STATE: State = {
+  bookings: [],
+  activeBookings: [],
+  totalCount: 0,
+  isLoading: false,
+  hasLoaded: false,
+  error: null,
+};
+
+function reducer(state: State, action: Action): State {
+  switch (action.type) {
+    case "start":
+      return { ...state, isLoading: true, error: null };
+    case "success":
+      return {
+        bookings: action.bookings,
+        activeBookings: action.activeBookings,
+        totalCount: action.totalCount,
+        isLoading: false,
+        hasLoaded: true,
+        error: null,
+      };
+    case "error":
+      // Keeps rows already on screen: a failed refresh should not blank them.
+      return { ...state, isLoading: false, error: action.error };
+    case "reset":
+      return INITIAL_STATE;
+  }
+}
+
+/**
+ * Loads the bookings one asset appears in, on demand.
+ *
+ * @param assetId - The asset on screen; nothing loads while it is undefined
+ * @param orgId - The active workspace; nothing loads while it is undefined
+ * @returns The loaded bookings, the load state and `load()`
+ */
 export function useAssetBookings(
   assetId: string | undefined,
   orgId: string | undefined
 ): UseAssetBookingsResult {
-  const [bookings, setBookings] = useState<AssetBookingRow[]>([]);
-  const [totalCount, setTotalCount] = useState(0);
-  const [isLoading, setIsLoading] = useState(false);
-  const [hasLoaded, setHasLoaded] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [state, dispatch] = useReducer(reducer, INITIAL_STATE);
+  const latestRequest = useRef(createLatestRequest()).current;
+
+  // Another asset or workspace: an answer about the old one must not land.
+  useEffect(() => {
+    latestRequest.cancel();
+    dispatch({ type: "reset" });
+  }, [assetId, orgId, latestRequest]);
 
   const load = useCallback(async () => {
-    if (!assetId || !orgId || isLoading) return;
+    if (!assetId || !orgId) return;
 
-    setIsLoading(true);
-    setError(null);
+    const signal = latestRequest.begin();
+    dispatch({ type: "start" });
 
-    const res = await api.assetBookings(assetId, orgId, { perPage: 20 });
+    const res = await api.assetBookings(assetId, orgId, {
+      perPage: BOOKINGS_PER_PAGE,
+      signal,
+    });
 
-    if (res.error) {
-      setError(res.error);
-    } else if (res.data) {
-      setBookings(res.data.bookings);
-      setTotalCount(res.data.totalCount);
-      setHasLoaded(true);
+    if (signal.aborted) return;
+
+    if (res.data) {
+      dispatch({
+        type: "success",
+        bookings: res.data.bookings,
+        activeBookings: res.data.activeBookings,
+        totalCount: res.data.totalCount,
+      });
+    } else {
+      // Never leave the section spinning on an answer with neither half.
+      dispatch({
+        type: "error",
+        error: res.error ?? "Could not load this asset's bookings.",
+      });
     }
+  }, [assetId, orgId, latestRequest]);
 
-    setIsLoading(false);
-  }, [assetId, orgId, isLoading]);
-
-  return { bookings, totalCount, isLoading, hasLoaded, error, load };
+  return { ...state, load };
 }
