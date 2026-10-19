@@ -9765,6 +9765,16 @@ describe("revertBookingToDraft", () => {
   });
 });
 
+/**
+ * `mockBookingData` ends in the future; an extension must land after the
+ * stored end, so these cases start from a booking that ends before the ends
+ * they extend to.
+ */
+const extendableBookingData = {
+  ...mockBookingData,
+  to: new Date("2025-01-01T17:00:00Z"),
+};
+
 describe("extendBooking", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
@@ -9774,7 +9784,7 @@ describe("extendBooking", () => {
     expect.assertions(3);
 
     const mockBooking = {
-      ...mockBookingData,
+      ...extendableBookingData,
       status: BookingStatus.ONGOING,
       bookingAssets: [
         {
@@ -9820,7 +9830,7 @@ describe("extendBooking", () => {
 
     expect(db.booking.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: "booking-1" },
+        where: expect.objectContaining({ id: "booking-1" }),
         data: expect.objectContaining({
           to: expect.any(Date),
         }),
@@ -9839,11 +9849,11 @@ describe("extendBooking", () => {
     );
   });
 
-  it("under requireLaterEnd, writes only where the stored end is still earlier and returns the row it re-reads", async () => {
-    expect.assertions(4);
+  it("writes only where the stored row is still extendable and ends earlier", async () => {
+    expect.assertions(3);
     const newEndDate = new Date("2025-01-02T17:00:00Z");
     const mockBooking = {
-      ...mockBookingData,
+      ...extendableBookingData,
       status: BookingStatus.ONGOING,
       bookingAssets: [
         {
@@ -9861,7 +9871,7 @@ describe("extendBooking", () => {
     //@ts-expect-error missing vitest type
     db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
     //@ts-expect-error missing vitest type
-    db.booking.updateMany.mockResolvedValue({ count: 1 });
+    db.booking.update.mockResolvedValue(stored);
     // The end stored after the commit is this request's, under a job another
     // write stored meanwhile.
     //@ts-expect-error missing vitest type
@@ -9869,10 +9879,6 @@ describe("extendBooking", () => {
       to: newEndDate,
       activeSchedulerReference: "live-job",
     });
-    //@ts-expect-error missing vitest type
-    db.booking.findUniqueOrThrow.mockResolvedValueOnce(mockBooking);
-    //@ts-expect-error missing vitest type
-    db.booking.findUniqueOrThrow.mockResolvedValueOnce(stored);
 
     const result = await extendBooking({
       id: "booking-1",
@@ -9882,42 +9888,35 @@ describe("extendBooking", () => {
       userId: "user-1",
       access: accessFor([OrganizationRoles.ADMIN]),
       roles: [OrganizationRoles.ADMIN],
-      requireLaterEnd: true,
     });
 
-    expect(db.booking.updateMany).toHaveBeenCalledWith({
-      where: {
-        id: "booking-1",
-        organizationId: "org-1",
-        status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
-        to: { lt: newEndDate },
-      },
-      data: { status: BookingStatus.ONGOING, to: newEndDate },
-    });
-    // The scheduler bookkeeping after the commit still goes through `update`;
-    // the end itself must not.
-    expect(db.booking.update).not.toHaveBeenCalledWith(
+    expect(db.booking.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ to: expect.any(Date) }),
+        where: {
+          id: "booking-1",
+          organizationId: "org-1",
+          status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
+          to: { lt: newEndDate },
+        },
+        data: { status: BookingStatus.ONGOING, to: newEndDate },
       })
     );
     expect(result).toEqual(stored);
     expect(scheduler.cancel).toHaveBeenCalledWith("live-job");
   });
 
-  it("under requireLaterEnd, leaves the reminder to the extension whose end is stored", async () => {
+  it("leaves the reminder to the extension whose end is stored", async () => {
     expect.assertions(3);
     const newEndDate = new Date("2025-01-02T17:00:00Z");
     const mockBooking = {
-      ...mockBookingData,
+      ...extendableBookingData,
       status: BookingStatus.ONGOING,
-      activeSchedulerReference: "job-read-before-write",
       bookingAssets: [
         {
           asset: { id: "asset-1", status: AssetStatus.CHECKED_OUT },
           assetId: "asset-1",
           quantity: 1,
-          id: "ba-t152",
+          id: "ba-t151",
           checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
           checkedInAt: null,
         },
@@ -9926,11 +9925,9 @@ describe("extendBooking", () => {
     };
     const stored = { ...mockBooking, to: newEndDate };
     //@ts-expect-error missing vitest type
-    db.booking.findUniqueOrThrow.mockResolvedValueOnce(mockBooking);
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
     //@ts-expect-error missing vitest type
-    db.booking.findUniqueOrThrow.mockResolvedValueOnce(stored);
-    //@ts-expect-error missing vitest type
-    db.booking.updateMany.mockResolvedValue({ count: 1 });
+    db.booking.update.mockResolvedValue(stored);
     // A later extension committed after this one: its end is the one stored.
     //@ts-expect-error missing vitest type
     db.booking.findUnique.mockResolvedValueOnce({
@@ -9946,7 +9943,6 @@ describe("extendBooking", () => {
       userId: "user-1",
       access: accessFor([OrganizationRoles.ADMIN]),
       roles: [OrganizationRoles.ADMIN],
-      requireLaterEnd: true,
     });
 
     expect(result).toEqual(stored);
@@ -9954,17 +9950,18 @@ describe("extendBooking", () => {
     expect(scheduler.sendAfter).not.toHaveBeenCalled();
   });
 
-  it("under requireLaterEnd, refuses when another extension already moved the end past the new one", async () => {
-    expect.assertions(2);
+  it("refuses when the booking changed between the read and the write", async () => {
+    expect.assertions(1);
+    const newEndDate = new Date("2025-01-02T17:00:00Z");
     const mockBooking = {
-      ...mockBookingData,
+      ...extendableBookingData,
       status: BookingStatus.ONGOING,
       bookingAssets: [
         {
           asset: { id: "asset-1", status: AssetStatus.CHECKED_OUT },
           assetId: "asset-1",
           quantity: 1,
-          id: "ba-t151",
+          id: "ba-t152",
           checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
           checkedInAt: null,
         },
@@ -9973,19 +9970,59 @@ describe("extendBooking", () => {
     };
     //@ts-expect-error missing vitest type
     db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    // No row matches the guarded write: another extension or a close landed.
     //@ts-expect-error missing vitest type
-    db.booking.updateMany.mockResolvedValue({ count: 0 });
+    db.booking.update.mockRejectedValue(
+      Object.assign(new Error("No record was found"), { code: "P2025" })
+    );
 
     await expect(
       extendBooking({
         id: "booking-1",
         organizationId: "org-1",
-        newEndDate: new Date("2025-01-02T17:00:00Z"),
+        newEndDate,
         hints: mockClientHints,
         userId: "user-1",
         access: accessFor([OrganizationRoles.ADMIN]),
         roles: [OrganizationRoles.ADMIN],
-        requireLaterEnd: true,
+      })
+    ).rejects.toMatchObject({
+      message:
+        "The booking changed while you were extending it. Reload it and try again.",
+      status: 400,
+    });
+  });
+
+  it("refuses an end at or before the current end", async () => {
+    expect.assertions(2);
+    const newEndDate = new Date("2025-01-01T17:00:00Z");
+    const mockBooking = {
+      ...extendableBookingData,
+      status: BookingStatus.ONGOING,
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-t153",
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
+        },
+      ],
+      partialCheckins: [],
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+
+    await expect(
+      extendBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        newEndDate,
+        hints: mockClientHints,
+        userId: "user-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
+        roles: [OrganizationRoles.ADMIN],
       })
     ).rejects.toMatchObject({
       message: "The new end date must be after the current end date.",
@@ -9998,7 +10035,7 @@ describe("extendBooking", () => {
     expect.assertions(1);
     const newEndDate = new Date("2025-01-02T17:00:00Z");
     const mockBooking = {
-      ...mockBookingData,
+      ...extendableBookingData,
       status: BookingStatus.ONGOING,
       bookingAssets: [
         {
@@ -10068,7 +10105,7 @@ describe("extendBooking", () => {
   it("keeps the end date when the model guard refuses the extended window", async () => {
     expect.assertions(2);
     const mockBooking = {
-      ...mockBookingData,
+      ...extendableBookingData,
       status: BookingStatus.ONGOING,
       bookingAssets: [
         {
@@ -10125,7 +10162,7 @@ describe("extendBooking", () => {
     const newEndDate = new Date("2025-01-02T17:00:00Z");
 
     const mockBooking = {
-      ...mockBookingData,
+      ...extendableBookingData,
       status: BookingStatus.ONGOING,
       bookingAssets: [
         {
@@ -10172,7 +10209,10 @@ describe("extendBooking", () => {
   it("should throw error when booking cannot be extended", async () => {
     expect.assertions(1);
 
-    const mockBooking = { ...mockBookingData, status: BookingStatus.COMPLETE };
+    const mockBooking = {
+      ...extendableBookingData,
+      status: BookingStatus.COMPLETE,
+    };
     //@ts-expect-error missing vitest type
     db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
 
@@ -10193,7 +10233,7 @@ describe("extendBooking", () => {
     expect.assertions(1);
 
     const mockBooking = {
-      ...mockBookingData,
+      ...extendableBookingData,
       status: BookingStatus.ONGOING,
       creatorId: "user-1",
       custodianUserId: "user-1",
@@ -10236,7 +10276,7 @@ describe("extendBooking", () => {
     expect.assertions(1);
 
     const mockBooking = {
-      ...mockBookingData,
+      ...extendableBookingData,
       status: BookingStatus.ONGOING,
       creatorId: "user-2",
       custodianUserId: "user-2",
@@ -10262,7 +10302,7 @@ describe("extendBooking", () => {
     expect.assertions(1);
 
     const mockBooking = {
-      ...mockBookingData,
+      ...extendableBookingData,
       status: BookingStatus.ONGOING,
     };
 
@@ -10286,7 +10326,7 @@ describe("extendBooking", () => {
     expect.assertions(1);
 
     const mockBooking = {
-      ...mockBookingData,
+      ...extendableBookingData,
       status: BookingStatus.ONGOING,
       creatorId: "user-2", // Different user created it
       custodianUserId: "user-2", // Different user is custodian
@@ -10331,7 +10371,7 @@ describe("extendBooking", () => {
     expect.assertions(1);
 
     const mockBooking = {
-      ...mockBookingData,
+      ...extendableBookingData,
       status: BookingStatus.ONGOING,
       creatorId: "user-2", // Different creator
       custodianUserId: "user-1", // But user is custodian
@@ -10376,7 +10416,7 @@ describe("extendBooking", () => {
     expect.assertions(1);
 
     const mockBooking = {
-      ...mockBookingData,
+      ...extendableBookingData,
       status: BookingStatus.ONGOING,
       creatorId: "user-1", // User is creator
       custodianUserId: "user-2", // But different custodian
@@ -10421,7 +10461,7 @@ describe("extendBooking", () => {
     expect.assertions(1);
 
     const mockBooking = {
-      ...mockBookingData,
+      ...extendableBookingData,
       status: BookingStatus.ONGOING,
       to: new Date("2025-01-01T17:00:00Z"),
       bookingAssets: [
@@ -10476,7 +10516,7 @@ describe("extendBooking", () => {
     expect.assertions(1);
 
     const mockBooking = {
-      ...mockBookingData,
+      ...extendableBookingData,
       status: BookingStatus.ONGOING,
       bookingAssets: [
         {
@@ -10519,7 +10559,7 @@ describe("extendBooking", () => {
     expect.assertions(3);
 
     const mockBooking = {
-      ...mockBookingData,
+      ...extendableBookingData,
       status: BookingStatus.OVERDUE,
       to: new Date("2025-01-01T17:00:00Z"),
       bookingAssets: [
@@ -10587,7 +10627,7 @@ describe("extendBooking", () => {
     expect.assertions(3);
 
     const mockBooking = {
-      ...mockBookingData,
+      ...extendableBookingData,
       status: BookingStatus.ONGOING,
       to: new Date("2025-01-01T17:00:00Z"),
       bookingAssets: [
@@ -10661,7 +10701,7 @@ describe("extendBooking", () => {
     expect.assertions(2);
 
     const mockBooking = {
-      ...mockBookingData,
+      ...extendableBookingData,
       status: BookingStatus.ONGOING,
       to: new Date("2025-01-01T17:00:00Z"),
       bookingAssets: [
@@ -10719,7 +10759,7 @@ describe("extendBooking", () => {
     expect.assertions(1);
 
     const mockBooking = {
-      ...mockBookingData,
+      ...extendableBookingData,
       status: BookingStatus.ONGOING,
       to: new Date("2025-01-01T17:00:00Z"),
       bookingAssets: [
@@ -10775,7 +10815,7 @@ describe("extendBooking", () => {
     expect.assertions(1);
 
     const mockBooking = {
-      ...mockBookingData,
+      ...extendableBookingData,
       status: BookingStatus.ONGOING,
       to: new Date("2025-01-01T17:00:00Z"),
       bookingAssets: [
@@ -10929,7 +10969,7 @@ describe("extendBooking", () => {
       mockReservationOfCase();
       //@ts-expect-error missing vitest type
       db.booking.findUniqueOrThrow.mockResolvedValue({
-        ...mockBookingData,
+        ...extendableBookingData,
         status: BookingStatus.ONGOING,
         to: new Date("2025-01-01T17:00:00Z"),
         bookingAssets: [
@@ -10953,7 +10993,7 @@ describe("extendBooking", () => {
       //@ts-expect-error missing vitest type
       db.booking.findMany.mockResolvedValue([]); // No clashing bookings
       const mockBooking = {
-        ...mockBookingData,
+        ...extendableBookingData,
         status: BookingStatus.ONGOING,
         to: new Date("2025-01-01T17:00:00Z"),
         bookingAssets: [
@@ -10984,7 +11024,7 @@ describe("extendBooking", () => {
       mockCaseMemberships();
       mockReservationOfCase();
       const mockBooking = {
-        ...mockBookingData,
+        ...extendableBookingData,
         status: BookingStatus.ONGOING,
         to: new Date("2025-01-01T17:00:00Z"),
         bookingAssets: [

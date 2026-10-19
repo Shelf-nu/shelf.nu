@@ -175,12 +175,18 @@ describe("POST /api/mobile/bookings/extend", () => {
     expect(extendBooking).not.toHaveBeenCalled();
   });
 
-  it("refuses a new end that is not after the current end", async () => {
-    // 14:30 in Kuala Lumpur (UTC+8) is exactly the booking's current end.
-    vi.mocked(db.booking.findFirst).mockResolvedValue({
-      ...ONGOING_BOOKING,
-      to: new Date("2030-06-01T06:30:00.000Z"),
-    } as never);
+  it("passes the service's refusal of an end that is not after the current end through as a 400", async () => {
+    // The rule lives in the service, for web and phone alike; the phone sees
+    // its message and status unchanged.
+    vi.mocked(extendBooking).mockRejectedValueOnce(
+      new ShelfError({
+        cause: null,
+        message: "The new end date must be after the current end date.",
+        label: "Booking",
+        status: 400,
+        shouldBeCaptured: false,
+      })
+    );
 
     const { status, body } = await extendToKualaLumpurAfternoon();
 
@@ -188,7 +194,6 @@ describe("POST /api/mobile/bookings/extend", () => {
     expect(body.error.message).toBe(
       "The new end date must be after the current end date."
     );
-    expect(extendBooking).not.toHaveBeenCalled();
   });
 
   it("refuses a new end in the past with the shared schema's message", async () => {
@@ -244,7 +249,6 @@ describe("POST /api/mobile/bookings/extend", () => {
     expect(args.newEndDate).toEqual(new Date("2030-06-01T06:30:00.000Z"));
     expect(args.hints.timeZone).toBe("Asia/Kuala_Lumpur");
     expect(args.roles).toEqual([OrganizationRoles.OWNER]);
-    expect(args.requireLaterEnd).toBe(true);
   });
 
   it("names the clashing bookings in the message the phone shows", async () => {

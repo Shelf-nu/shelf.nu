@@ -44,10 +44,8 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  *   (future date with buffer, working hours, maximum length), with the
  *   booking's stored start as the schema's start date.
  *
- * Stricter than web: the new end must be after the current end. Web lets an
- * extension shorten a booking as long as the new end is in the future; the
- * phone only ever moves it later. Mobile must never be more permissive than
- * web.
+ * - The service refuses an end at or before the current end and a write that
+ *   races another extension or a close, for web and phone alike.
  *
  * `endDate` is a wall clock with no offset, decoded in the `timeZone` the
  * client declares (see `bookings.update.ts`). The response's `to` is read from
@@ -166,16 +164,6 @@ export async function action({ request }: ActionFunctionArgs) {
       throw cause;
     }
 
-    if (parsed.endDate <= booking.to) {
-      throw new ShelfError({
-        cause: null,
-        message: "The new end date must be after the current end date.",
-        label: "Booking",
-        status: 400,
-        shouldBeCaptured: false,
-      });
-    }
-
     const hints: ClientHint = {
       ...getClientHint(request),
       timeZone: body.timeZone,
@@ -189,9 +177,6 @@ export async function action({ request }: ActionFunctionArgs) {
       userId: user.id,
       access,
       roles,
-      // The check above read `booking.to` outside the service's transaction;
-      // this makes the write itself refuse an end that is no longer later.
-      requireLaterEnd: true,
     });
 
     return data({

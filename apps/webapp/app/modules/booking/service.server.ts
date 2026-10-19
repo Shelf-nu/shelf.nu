@@ -12605,15 +12605,12 @@ export async function revertBookingToDraft({
  * @param params.access - The caller's access, for the ownership gate
  * @param params.roles - Every role on the caller's membership, for the
  *   `booking:extend` grant
- * @param params.requireLaterEnd - When true, the write only lands if the end
- *   stored at that moment is still before `newEndDate`, so two extensions
- *   that overlap cannot move the end backwards. The mobile endpoint sets it;
- *   web lets an extension shorten a booking.
  * @returns The updated booking
  * @throws {ShelfError} 403 when the caller lacks `booking:extend` or does not
  *   own the booking
- * @throws {ShelfError} 400 under `requireLaterEnd` when the stored end is no
- *   longer before `newEndDate`
+ * @throws {ShelfError} 400 when `newEndDate` is not after the booking's end,
+ *   or when the booking changed between the read and the write (another
+ *   extension landed, or the booking was closed)
  */
 export async function extendBooking({
   id,
@@ -12623,14 +12620,12 @@ export async function extendBooking({
   userId,
   access,
   roles,
-  requireLaterEnd = false,
 }: Pick<Booking, "id" | "organizationId"> & {
   newEndDate: Date;
   hints: ClientHint;
   userId: string;
   access: RoleAccess;
   roles: OrganizationRoles[];
-  requireLaterEnd?: boolean;
 }) {
   try {
     const booking = await db.booking
@@ -12704,6 +12699,18 @@ export async function extendBooking({
         cause: null,
         label,
         message: "Extending booking is not allowed for current status.",
+      });
+    }
+
+    // An extension only ever moves the end later; an earlier end is a
+    // different operation.
+    if (newEndDate <= booking.to) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message: "The new end date must be after the current end date.",
+        status: 400,
+        shouldBeCaptured: false,
       });
     }
 
@@ -12834,60 +12841,47 @@ export async function extendBooking({
         tx,
       });
 
-      const data: Prisma.BookingUpdateInput = {
-        /**
-         * If booking is currently OVERDUE we have to make it ONGOING
-         */
-        status:
-          booking.status === BookingStatus.OVERDUE
-            ? BookingStatus.ONGOING
-            : undefined,
-        /**
-         * Only the LIVE end date moves. `originalTo` holds the end date the
-         * booking was planned for, and extension is allowed only once the
-         * booking has started (ONGOING/OVERDUE), so the plan is already
-         * fixed: moving it here would erase the deadline the custodian
-         * actually agreed to, and with it every late return from Booking
-         * Compliance.
-         */
-        to: newEndDate,
-      };
-
-      if (requireLaterEnd) {
-        // The filters are judged on the row as it is when the lock is taken:
-        // an extension that landed since the read above makes this a no-op
-        // instead of moving the end back, and a booking closed meanwhile is
-        // left closed. Either live status reads ONGOING once extended.
-        const { count } = await tx.booking.updateMany({
+      // The filters are judged on the row as it is when the lock is taken:
+      // an extension that landed since the read above, or a booking closed
+      // meanwhile, leaves no row to update instead of being overwritten.
+      // Either live status reads ONGOING once extended.
+      return tx.booking
+        .update({
           where: {
             id: booking.id,
             organizationId,
             status: { in: allowedStatus },
             to: { lt: newEndDate },
           },
-          data: { ...data, status: BookingStatus.ONGOING },
-        });
-        if (count === 0) {
-          throw new ShelfError({
-            cause: null,
-            label,
-            message: "The new end date must be after the current end date.",
-            status: 400,
-            shouldBeCaptured: false,
-          });
-        }
-        return tx.booking.findUniqueOrThrow({
-          where: { id: booking.id, organizationId },
+          data: {
+            status: BookingStatus.ONGOING,
+            /**
+             * Only the LIVE end date moves. `originalTo` holds the end date
+             * the booking was planned for, and extension is allowed only
+             * once the booking has started (ONGOING/OVERDUE), so the plan is
+             * already fixed: moving it here would erase the deadline the
+             * custodian actually agreed to, and with it every late return
+             * from Booking Compliance.
+             */
+            to: newEndDate,
+          },
           include: BOOKING_INCLUDE_FOR_EMAIL,
+        })
+        .catch((cause) => {
+          if (isNotFoundError(cause)) {
+            // `cause: null`: a Prisma not-found cause would turn this into a
+            // 404, and the booking does exist; its row just moved on.
+            throw new ShelfError({
+              cause: null,
+              label,
+              message:
+                "The booking changed while you were extending it. Reload it and try again.",
+              status: 400,
+              shouldBeCaptured: false,
+            });
+          }
+          throw cause;
         });
-      }
-
-      return tx.booking.update({
-        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) at L2853; this is the write on that same proven id
-        where: { id: booking.id },
-        data,
-        include: BOOKING_INCLUDE_FOR_EMAIL,
-      });
     });
 
     // Add activity log for booking extension
@@ -13002,24 +12996,21 @@ export async function extendBooking({
      * In case of ONGOING, a checkin reminder should have be scheduled. So we have to reschedule it.
      * And in case of OVERDUE all the jobs are completed, so we have to reschedule the checkin reminder.
      */
-    if (requireLaterEnd) {
-      // Two extensions can both commit when each is later than the end they
-      // read. The reminder belongs to the one whose end is stored now, and
-      // it cancels the job stored now, not the one it read before writing.
-      const live = await db.booking.findUnique({
-        where: { id: booking.id, organizationId },
-        select: { to: true, activeSchedulerReference: true },
-      });
-      if (!live || live.to.getTime() !== newEndDate.getTime()) {
-        return updatedBooking;
-      }
-      await cancelScheduler({
-        id: booking.id,
-        activeSchedulerReference: live.activeSchedulerReference,
-      });
-    } else {
-      await cancelScheduler(booking);
+    // Two extensions can both commit when each is later than the end it read.
+    // The reminder belongs to the one whose end is stored now, and it cancels
+    // the job stored now, not the one it read before writing.
+    const live = await db.booking.findUnique({
+      where: { id: booking.id, organizationId },
+      select: { to: true, activeSchedulerReference: true },
+    });
+    if (live && live.to.getTime() !== newEndDate.getTime()) {
+      return updatedBooking;
     }
+    await cancelScheduler({
+      id: booking.id,
+      activeSchedulerReference:
+        live?.activeSchedulerReference ?? booking.activeSchedulerReference,
+    });
 
     const { hours } = calcTimeDifference(newEndDate, new Date());
 
