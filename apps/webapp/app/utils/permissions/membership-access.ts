@@ -92,8 +92,8 @@ export function roleChangeRequiresOwner(role: OrganizationRole): boolean {
 }
 
 /**
- * Whether an actor may assign a role, through an invite (single, CSV, resend)
- * or a role change.
+ * Whether an actor may move an existing member to a role through a role change.
+ * Invites use {@link canInviteRole}.
  *
  * @param args.actorOwnsWorkspace - `access.ownsWorkspace` of the acting member
  * @param args.role - The role being assigned
@@ -139,4 +139,24 @@ export function roleChangeTransfers({
     ownership: transfersOwnershipOnRoleChange({ from, to }),
     bookingsCreatedForOthers: transfersBookingsOnRoleChange({ from, to }),
   };
+}
+
+/**
+ * Whether an actor may grant a role through an invite (single, CSV import or
+ * resend). Role changes on existing members use {@link canAssignRole}.
+ *
+ * @param args.actorOwnsWorkspace - `access.ownsWorkspace` of the acting member
+ * @param args.role - The role the invite grants
+ * @returns `true` when the actor may invite someone with it
+ */
+export function canInviteRole({
+  actorOwnsWorkspace,
+  role,
+}: {
+  actorOwnsWorkspace: boolean;
+  role: OrganizationRole;
+}): boolean {
+  return (
+    actorOwnsWorkspace || !ROLE_POLICIES[role].membership.inviteRequiresOwner
+  );
 }

@@ -30,7 +30,7 @@ import { useDisabled } from "~/hooks/use-disabled";
 import { useRoleAccess } from "~/hooks/use-role-access";
 import { useUserData } from "~/hooks/use-user-data";
 import {
-  canAssignRole,
+  canInviteRole,
   roleChangeRequiresOwner,
 } from "~/utils/permissions/membership-access";
 import { ROLE_LABELS } from "~/utils/permissions/role-access";
@@ -82,12 +82,13 @@ export function TeamUsersActionsDropdown({
   const isCurrentUser = currentUser?.id === userId;
   const { ownsWorkspace } = useRoleAccess();
   /**
-   * Only the workspace owner may change, revoke or re-invite a member whose
-   * role needs the owner (Administrator). A member holding OWNER anywhere in
-   * their membership owns the workspace.
+   * Only the workspace owner may change or revoke a member whose role needs
+   * the owner (Administrator). A member holding OWNER anywhere in their
+   * membership owns the workspace.
    */
   const needsOwner = !ownsWorkspace && roleChangeRequiresOwner(roleEnum);
-  const canResend = canAssignRole({
+  /** Resending is an invite, so it follows the invite rule, not the role-change one. */
+  const canResend = canInviteRole({
     actorOwnsWorkspace: ownsWorkspace,
     role: roleEnum,
   });

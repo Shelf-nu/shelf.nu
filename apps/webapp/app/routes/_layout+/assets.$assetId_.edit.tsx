@@ -40,7 +40,7 @@ import {
   error,
   getCurrentSearchParams,
   getParams,
-  getRefererPath,
+  getRefererPathExcludingSelf,
   parseData,
   safeRedirect,
 } from "~/utils/http.server";
@@ -161,7 +161,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       totalAssetModels,
       currency: currentOrganization?.currency,
       customFields,
-      referer: getRefererPath(request),
+      referer: getRefererPathExcludingSelf(request),
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
