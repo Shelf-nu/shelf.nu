@@ -9839,6 +9839,103 @@ describe("extendBooking", () => {
     );
   });
 
+  it("under requireLaterEnd, writes only where the stored end is still earlier and returns the row it re-reads", async () => {
+    expect.assertions(3);
+    const newEndDate = new Date("2025-01-02T17:00:00Z");
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-t150",
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
+        },
+      ],
+      partialCheckins: [],
+    };
+    const stored = { ...mockBooking, to: newEndDate };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.updateMany.mockResolvedValue({ count: 1 });
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValueOnce(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValueOnce(stored);
+
+    const result = await extendBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      newEndDate,
+      hints: mockClientHints,
+      userId: "user-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
+      roles: [OrganizationRoles.ADMIN],
+      requireLaterEnd: true,
+    });
+
+    expect(db.booking.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "booking-1",
+        organizationId: "org-1",
+        to: { lt: newEndDate },
+      },
+      data: { status: undefined, to: newEndDate },
+    });
+    // The scheduler bookkeeping after the commit still goes through `update`;
+    // the end itself must not.
+    expect(db.booking.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ to: expect.any(Date) }),
+      })
+    );
+    expect(result).toEqual(stored);
+  });
+
+  it("under requireLaterEnd, refuses when another extension already moved the end past the new one", async () => {
+    expect.assertions(2);
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-t151",
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
+        },
+      ],
+      partialCheckins: [],
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(
+      extendBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        newEndDate: new Date("2025-01-02T17:00:00Z"),
+        hints: mockClientHints,
+        userId: "user-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
+        roles: [OrganizationRoles.ADMIN],
+        requireLaterEnd: true,
+      })
+    ).rejects.toMatchObject({
+      message: "The new end date must be after the current end date.",
+      status: 400,
+    });
+    expect(db.booking.update).not.toHaveBeenCalled();
+  });
+
   it("measures the booking's named model units against the extended window", async () => {
     expect.assertions(1);
     const newEndDate = new Date("2025-01-02T17:00:00Z");

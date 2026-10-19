@@ -188,6 +188,9 @@ export async function action({ request }: ActionFunctionArgs) {
       userId: user.id,
       access,
       roles,
+      // The check above read `booking.to` outside the service's transaction;
+      // this makes the write itself refuse an end that is no longer later.
+      requireLaterEnd: true,
     });
 
     return data({

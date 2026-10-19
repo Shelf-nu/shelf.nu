@@ -12605,9 +12605,15 @@ export async function revertBookingToDraft({
  * @param params.access - The caller's access, for the ownership gate
  * @param params.roles - Every role on the caller's membership, for the
  *   `booking:extend` grant
+ * @param params.requireLaterEnd - When true, the write only lands if the end
+ *   stored at that moment is still before `newEndDate`, so two extensions
+ *   that overlap cannot move the end backwards. The mobile endpoint sets it;
+ *   web lets an extension shorten a booking.
  * @returns The updated booking
  * @throws {ShelfError} 403 when the caller lacks `booking:extend` or does not
  *   own the booking
+ * @throws {ShelfError} 400 under `requireLaterEnd` when the stored end is no
+ *   longer before `newEndDate`
  */
 export async function extendBooking({
   id,
@@ -12617,12 +12623,14 @@ export async function extendBooking({
   userId,
   access,
   roles,
+  requireLaterEnd = false,
 }: Pick<Booking, "id" | "organizationId"> & {
   newEndDate: Date;
   hints: ClientHint;
   userId: string;
   access: RoleAccess;
   roles: OrganizationRoles[];
+  requireLaterEnd?: boolean;
 }) {
   try {
     const booking = await db.booking
@@ -12826,27 +12834,52 @@ export async function extendBooking({
         tx,
       });
 
+      const data: Prisma.BookingUpdateInput = {
+        /**
+         * If booking is currently OVERDUE we have to make it ONGOING
+         */
+        status:
+          booking.status === BookingStatus.OVERDUE
+            ? BookingStatus.ONGOING
+            : undefined,
+        /**
+         * Only the LIVE end date moves. `originalTo` holds the end date the
+         * booking was planned for, and extension is allowed only once the
+         * booking has started (ONGOING/OVERDUE), so the plan is already
+         * fixed: moving it here would erase the deadline the custodian
+         * actually agreed to, and with it every late return from Booking
+         * Compliance.
+         */
+        to: newEndDate,
+      };
+
+      if (requireLaterEnd) {
+        // The `to` filter is judged on the row as it is when the lock is
+        // taken, so an extension that landed since the read above makes
+        // this a no-op instead of moving the end back.
+        const { count } = await tx.booking.updateMany({
+          where: { id: booking.id, organizationId, to: { lt: newEndDate } },
+          data,
+        });
+        if (count === 0) {
+          throw new ShelfError({
+            cause: null,
+            label,
+            message: "The new end date must be after the current end date.",
+            status: 400,
+            shouldBeCaptured: false,
+          });
+        }
+        return tx.booking.findUniqueOrThrow({
+          where: { id: booking.id, organizationId },
+          include: BOOKING_INCLUDE_FOR_EMAIL,
+        });
+      }
+
       return tx.booking.update({
         // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) at L2853; this is the write on that same proven id
         where: { id: booking.id },
-        data: {
-          /**
-           * If booking is currently OVERDUE we have to make it ONGOING
-           */
-          status:
-            booking.status === BookingStatus.OVERDUE
-              ? BookingStatus.ONGOING
-              : undefined,
-          /**
-           * Only the LIVE end date moves. `originalTo` holds the end date the
-           * booking was planned for, and extension is allowed only once the
-           * booking has started (ONGOING/OVERDUE), so the plan is already
-           * fixed: moving it here would erase the deadline the custodian
-           * actually agreed to, and with it every late return from Booking
-           * Compliance.
-           */
-          to: newEndDate,
-        },
+        data,
         include: BOOKING_INCLUDE_FOR_EMAIL,
       });
     });

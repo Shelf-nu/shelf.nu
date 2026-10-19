@@ -244,6 +244,7 @@ describe("POST /api/mobile/bookings/extend", () => {
     expect(args.newEndDate).toEqual(new Date("2030-06-01T06:30:00.000Z"));
     expect(args.hints.timeZone).toBe("Asia/Kuala_Lumpur");
     expect(args.roles).toEqual([OrganizationRoles.OWNER]);
+    expect(args.requireLaterEnd).toBe(true);
   });
 
   it("names the clashing bookings in the message the phone shows", async () => {
