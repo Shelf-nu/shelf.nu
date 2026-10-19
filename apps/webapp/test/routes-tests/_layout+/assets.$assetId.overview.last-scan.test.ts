@@ -65,8 +65,10 @@ describe("asset overview loader: last scan", () => {
           roles: [OrganizationRoles.ADMIN],
         },
       ],
-      currentOrganization: { id: "org-1" },
+      currentOrganization: { id: "org-1", auditsEnabled: false },
       canUseBarcodes: true,
+      // Audits off: the last audit card stays out of this test's way.
+      access: { audits: { seeAll: false } },
     });
     mockGetAsset.mockResolvedValue({ id: "asset-1" });
     mockGenerateQrObj.mockRejectedValue(new Error("stop after the scan read"));

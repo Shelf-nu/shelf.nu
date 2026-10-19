@@ -10,6 +10,7 @@ import { data, useFetcher, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { CustodyCard } from "~/components/assets/asset-custody-card";
+import { AssetLastAuditCard } from "~/components/assets/asset-last-audit-card";
 import { AssetReminderCards } from "~/components/assets/asset-reminder-cards";
 import { MoveUnitsDialog } from "~/components/assets/move-units-dialog";
 import { QuantityCustodyList } from "~/components/assets/quantity-custody-list";
@@ -51,6 +52,7 @@ import { usePosition } from "~/hooks/use-position";
 import { useRoleAccess } from "~/hooks/use-role-access";
 import { getAssetAvailability } from "~/modules/asset/availability.server";
 import { getAssetOverviewFields } from "~/modules/asset/fields";
+import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
 import {
   MOVE_UNITS_INTENT_FIELD,
   type MoveAxis,
@@ -77,6 +79,7 @@ import {
   isQuantityTracked,
 } from "~/modules/asset/utils";
 import { getRemindersForOverviewPage } from "~/modules/asset-reminder/service.server";
+import { getAssetAuditHistory } from "~/modules/audit/asset-audit-history.server";
 import { getCustodyCardHolderUserId } from "~/modules/custody/utils";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { moveAssetKitUnits } from "~/modules/kit/service.server";
@@ -195,6 +198,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       organizationId,
       roles,
     });
+
+    /**
+     * The "Last audit" card. Gated server-side by the same rule as the "Last
+     * audit date" column: only callers who see every audit, in a workspace
+     * with the audits add-on, receive it. Everyone else gets null and no card,
+     * so no audit dates reach roles whose audits are assignment-scoped.
+     */
+    const auditHistory =
+      lastAuditDateAccessFor(access, currentOrganization) === "available"
+        ? await getAssetAuditHistory({ assetId: asset.id, organizationId })
+        : null;
 
     const qrObj = await generateQrObj({
       assetId: asset.id,
@@ -409,6 +423,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       currentOrganization,
       userId,
       lastScan,
+      auditHistory,
       header,
       locale,
       timeZone,
@@ -779,6 +794,7 @@ export default function AssetOverview() {
     locale,
     qrObj,
     lastScan,
+    auditHistory,
     currentOrganization,
     userId,
     quantityData,
@@ -1536,6 +1552,8 @@ export default function AssetOverview() {
           </When>
 
           <AssetReminderCards className="my-2" />
+
+          <AssetLastAuditCard assetId={asset.id} history={auditHistory} />
 
           {(() => {
             /**

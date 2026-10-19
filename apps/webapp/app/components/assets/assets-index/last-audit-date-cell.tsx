@@ -10,10 +10,9 @@
  * @see {@link file://./../../../routes/api+/assets.$assetId.audit-history.ts}
  */
 import { useState } from "react";
-import { auditAssetStatusLabel } from "@shelf/labels";
 import { Link } from "react-router";
-import { AuditAssetStatusBadge } from "~/components/audit/audit-asset-status-badge";
-import { AuditStatusBadge } from "~/components/audit/audit-status-badge";
+import type { AuditHistoryListItem } from "~/components/audit/asset-audit-history-list";
+import { AssetAuditHistoryList } from "~/components/audit/asset-audit-history-list";
 import { DateS } from "~/components/shared/date";
 import {
   HoverCard,
@@ -22,71 +21,17 @@ import {
 } from "~/components/shared/hover-card";
 import useApiQuery from "~/hooks/use-api-query";
 import type { LastAuditDateAccess } from "~/modules/asset/last-audit-date-access";
-import type { AssetAuditHistoryItem } from "~/modules/audit/asset-audit-history.server";
 import { Td } from "./advanced-columns/td";
-
-/** An audit history item as it arrives over JSON (dates are ISO strings). */
-type SerializedAuditHistoryItem = Omit<
-  AssetAuditHistoryItem,
-  "completedAt" | "dueDate"
-> & {
-  completedAt: string | null;
-  dueDate: string | null;
-};
 
 /**
  * Response body of the audit-history endpoint. A failed request answers with
  * an `error` object and no lists; a successful one stamps `error: null`.
  */
 type AuditHistoryData = {
-  recent?: SerializedAuditHistoryItem[];
-  upcoming?: SerializedAuditHistoryItem[];
+  recent?: AuditHistoryListItem[];
+  upcoming?: AuditHistoryListItem[];
   error?: unknown;
 };
-/** One audit row inside the hover card. */
-function AuditRow({
-  item,
-  section,
-}: {
-  item: SerializedAuditHistoryItem;
-  section: "recent" | "upcoming";
-}) {
-  const isActive = item.status === "ACTIVE";
-  return (
-    <li>
-      <Link
-        to={`/audits/${item.id}`}
-        className="flex flex-col gap-1 rounded p-1 hover:bg-gray-50"
-      >
-        <span className="truncate text-sm font-medium text-gray-900">
-          {item.name}
-        </span>
-        <span className="flex flex-wrap items-center gap-1 text-xs text-gray-600">
-          {section === "recent" ? (
-            <>
-              {item.completedAt ? <DateS date={item.completedAt} /> : null}
-              <AuditAssetStatusBadge
-                status={auditAssetStatusLabel(item.assetStatus, true)}
-              />
-            </>
-          ) : isActive ? (
-            <>
-              <span>In progress</span>
-              <AuditStatusBadge status={item.status} />
-              <AuditAssetStatusBadge
-                status={auditAssetStatusLabel(item.assetStatus, false)}
-              />
-            </>
-          ) : item.dueDate ? (
-            <span>
-              Due <DateS date={item.dueDate} />
-            </span>
-          ) : null}
-        </span>
-      </Link>
-    </li>
-  );
-}
 
 /** Body of the hover card: loading, empty and populated states. */
 function HistoryBody({
@@ -116,38 +61,11 @@ function HistoryBody({
   }
 
   return (
-    <div className="flex flex-col gap-3">
-      {recent.length > 0 ? (
-        <section>
-          <h4 className="mb-1 text-xs font-semibold uppercase text-gray-500">
-            Recent
-          </h4>
-          <ul>
-            {recent.map((item) => (
-              <AuditRow key={item.id} item={item} section="recent" />
-            ))}
-          </ul>
-        </section>
-      ) : null}
-      {upcoming.length > 0 ? (
-        <section>
-          <h4 className="mb-1 text-xs font-semibold uppercase text-gray-500">
-            Upcoming
-          </h4>
-          <ul>
-            {upcoming.map((item) => (
-              <AuditRow key={item.id} item={item} section="upcoming" />
-            ))}
-          </ul>
-        </section>
-      ) : null}
-      <Link
-        to={`/audits?assetId=${assetId}`}
-        className="text-sm font-medium text-primary-700 hover:underline"
-      >
-        View all audits
-      </Link>
-    </div>
+    <AssetAuditHistoryList
+      assetId={assetId}
+      recent={recent}
+      upcoming={upcoming}
+    />
   );
 }
 
