@@ -19,6 +19,7 @@ import {
   SheetDescription,
   SheetHeader,
   SheetTitle,
+  SheetTrigger,
 } from "~/components/shared/sheet";
 import { Spinner } from "~/components/shared/spinner";
 import type {
@@ -112,14 +113,14 @@ export function ScanHistoryButton({
 
   return (
     <Sheet open={open} onOpenChange={handleOpenChange}>
-      <Button
-        type="button"
-        variant="secondary"
-        className="w-full"
-        onClick={() => handleOpenChange(true)}
-      >
-        View all scans
-      </Button>
+      {/* A real trigger, so Radix returns focus to it when the sheet closes
+          and exposes aria-expanded / aria-controls. Opening goes through
+          `onOpenChange`, which requests the first page. */}
+      <SheetTrigger asChild>
+        <Button type="button" variant="secondary" className="w-full">
+          View all scans
+        </Button>
+      </SheetTrigger>
       <SheetContent className="w-full overflow-y-auto sm:max-w-md">
         <SheetHeader>
           <SheetTitle>Scan history</SheetTitle>

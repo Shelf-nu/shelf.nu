@@ -47,6 +47,14 @@ const ScanHistoryQuerySchema = z
   });
 
 /**
+ * Opt out of revalidation: the sheet loads on demand through a keyed fetcher,
+ * and re-running its last URL after every unrelated action is wasted work.
+ */
+export function shouldRevalidate() {
+  return false;
+}
+
+/**
  * Returns one page of scan history for an asset or kit in the caller's
  * active workspace.
  *

@@ -98,6 +98,16 @@ describe("ScanHistoryButton", () => {
     expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
   });
 
+  it("marks the button expanded while the sheet is open", async () => {
+    renderSheet();
+    const trigger = screen.getByRole("button", { name: "View all scans" });
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+
+    await userEvent.click(trigger);
+
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+  });
+
   it("appends the next page once, after the rows already shown", async () => {
     const view = renderSheet();
     const rerender = () =>

@@ -95,7 +95,7 @@ describe("getLastScanForViewer", () => {
 
     expect(scanFindFirst).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { assetId: "asset-1" },
+        where: { assetId: "asset-1", organizationId: "org-1" },
         orderBy: { createdAt: "desc" },
       })
     );
@@ -110,7 +110,9 @@ describe("getLastScanForViewer", () => {
     });
 
     expect(scanFindFirst).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { kitId: "kit-1" } })
+      expect.objectContaining({
+        where: { kitId: "kit-1", organizationId: "org-1" },
+      })
     );
   });
 
@@ -136,6 +138,7 @@ describe("getLastScanForViewer", () => {
       expect.objectContaining({
         where: {
           assetId: "asset-1",
+          organizationId: "org-1",
           latitude: { not: null },
           longitude: { not: null },
         },
