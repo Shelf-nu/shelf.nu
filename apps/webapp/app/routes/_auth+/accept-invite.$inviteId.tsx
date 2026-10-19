@@ -28,7 +28,7 @@ import {
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { detectFormatPrefsForPersistence } from "~/utils/client-hints";
-import { setCookie } from "~/utils/cookies.server";
+import { expireListPreferenceCookies, setCookie } from "~/utils/cookies.server";
 import { INVITE_TOKEN_SECRET, SUPPORT_EMAIL } from "~/utils/env";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import {
@@ -240,6 +240,9 @@ export async function action({ context, params, request }: LoaderFunctionArgs) {
       ),
       {
         headers: [
+          // A new session: whatever lists this browser remembers belong to
+          // whoever used it last.
+          ...(await expireListPreferenceCookies(request, { event: "sign-in" })),
           setCookie(
             await setSelectedOrganizationIdCookie(updatedInvite.organizationId)
           ),

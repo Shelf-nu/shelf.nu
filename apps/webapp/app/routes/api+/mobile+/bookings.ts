@@ -6,6 +6,7 @@ import {
   requireMobileAuth,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
+import { parseMobilePagination } from "~/modules/api/mobile-pagination";
 import {
   bookingDraftVisibilityClause,
   custodianScopeClause,
@@ -35,14 +36,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const url = new URL(request.url);
     const statusParam = url.searchParams.get("status");
     const search = (url.searchParams.get("search") || "").trim().slice(0, 100);
-    const page = Math.max(
-      1,
-      parseInt(url.searchParams.get("page") || "1", 10) || 1
-    );
-    const perPage = Math.min(
-      50,
-      Math.max(1, parseInt(url.searchParams.get("perPage") || "20", 10) || 20)
-    );
+    const { page, perPage, skip } = parseMobilePagination(url.searchParams);
 
     // Sort: allowlisted column + direction (mirrors the web list's sortable
     // columns). Defaults to the original `from asc` so existing callers are
@@ -186,7 +180,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           },
         },
         orderBy: [{ [sortBy]: sortOrder }],
-        skip: (page - 1) * perPage,
+        skip,
         take: perPage,
       }),
       db.booking.count({ where }),

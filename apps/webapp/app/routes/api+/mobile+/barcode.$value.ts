@@ -13,6 +13,7 @@
  * @see {@link file://./qr.$qrId.ts} the QR twin of this route
  * @see {@link file://./../../../modules/api/mobile-auth.server.ts} MOBILE_ASSET_SELECT and the shape helpers
  */
+import { ScanCodeType, ScanSource } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
@@ -25,6 +26,8 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { shapeScannedAssetForViewer } from "~/modules/api/mobile-code-resolve.server";
 import { getBarcodeByValue } from "~/modules/barcode/service.server";
+import { parseScanGeolocation } from "~/modules/scan/geolocation.server";
+import { recordScanNonFatal } from "~/modules/scan/service.server";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
 import { readRawLastPathSegment } from "~/utils/raw-path-param";
@@ -39,6 +42,12 @@ import { canUseBarcodes } from "~/utils/subscription.server";
  * Requires the workspace to hold the barcode capability (`canUseBarcodes`),
  * which every workspace holds on a self-hosted deployment — there is no
  * billing there to gate on.
+ *
+ * Records the scan as `COMPANION` with a note on a scanned asset. The
+ * companion's audit scanner resolves barcodes here too: it marks those calls
+ * with `X-Scan-Context: audit`, which records the scan as `AUDIT` with no note
+ * (the audit keeps its own trail). Optional `X-Scan-Latitude` /
+ * `X-Scan-Longitude` headers are stored as the scan's position.
  *
  * @returns 200 with the barcode, its owning `organizationId`, and the linked
  *   asset or kit; 403 when the workspace lacks the capability; 404 when the
@@ -197,6 +206,25 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         { status: 422 }
       );
     }
+
+    const isAuditScan =
+      request.headers.get("x-scan-context")?.toLowerCase() === "audit";
+
+    // Non-fatal: a failed record never fails the resolve. The note and the
+    // row belong to the workspace that owns the barcode.
+    await recordScanNonFatal({
+      codeType: ScanCodeType.BARCODE,
+      code: value,
+      source: isAuditScan ? ScanSource.AUDIT : ScanSource.COMPANION,
+      userAgent: request.headers.get("user-agent") ?? "mobile-companion",
+      userId: user.id,
+      barcodeId: foundBarcode.id,
+      assetId: foundBarcode.assetId,
+      kitId: foundBarcode.kitId,
+      organizationId: foundOrganizationId,
+      ...(parseScanGeolocation(request.headers) ?? {}),
+      writeNote: !isAuditScan,
+    });
 
     return data({
       barcode: {

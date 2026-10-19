@@ -43,12 +43,54 @@ export function cleanParamsForCookie(params: URLSearchParams | string): string {
   return searchParams.toString();
 }
 
+/**
+ * Free-text search keys of the lists that remember their filters (assets in
+ * both modes, bookings, kits). Each of them types its search into `s`.
+ *
+ * A typed search answers one question at one moment, so a filter cookie never
+ * stores it and a later visit never restores it. Column filters, sorting and
+ * the page size are deliberate choices and stay remembered. Saved filter
+ * presets are a different thing: a person names and saves them on purpose, so
+ * they keep the search (they use {@link cleanParamsForCookie}).
+ */
+export const FREE_TEXT_SEARCH_KEYS = ["s"] as const;
+
+/**
+ * Reduces a list's params to what its filter cookie may remember: no
+ * pagination or one-off keys, and no typed search.
+ *
+ * Every reader and writer of a list filter cookie goes through this, on the
+ * server and in the browser, so an older cookie that still holds a search is
+ * not restored either.
+ *
+ * @param params - The list's current params, or a stored cookie value
+ * @returns The params string to store or restore
+ */
+export function cleanParamsForFilterCookie(
+  params: URLSearchParams | string
+): string {
+  // Copy, so a caller's URLSearchParams is never mutated
+  const searchParams = new URLSearchParams(params);
+  [...SEARCH_PARAMS_KEYS_TO_EXCLUDE, ...FREE_TEXT_SEARCH_KEYS].forEach(
+    (key) => {
+      searchParams.delete(key);
+    }
+  );
+  return searchParams.toString();
+}
+
 // Allowed pathnames for cookie naming
 export const ALLOWED_FILTER_PATHNAMES = {
   assets: "assetFilter_v2",
   bookings: "bookingFilter_v2",
   kits: "kitFilter_v2",
 } as const;
+
+/**
+ * Name suffix of the Advanced assets filter cookie (`<orgId>_<suffix>`).
+ * The simple lists' suffixes are in {@link ALLOWED_FILTER_PATHNAMES}.
+ */
+export const ADVANCED_ASSET_FILTER_COOKIE_SUFFIX = "advancedAssetFilter_v2";
 
 export type AllowedPathname = keyof typeof ALLOWED_FILTER_PATHNAMES;
 type CookieNameSuffix = (typeof ALLOWED_FILTER_PATHNAMES)[AllowedPathname];
@@ -86,7 +128,7 @@ export function getCookieName(
   pathname: string
 ): string {
   if (modeIsAdvanced) {
-    return `${organizationId}_advancedAssetFilter_v2`;
+    return `${organizationId}_${ADVANCED_ASSET_FILTER_COOKIE_SUFFIX}`;
   }
 
   const validatedPathname = getValidatedPathname(pathname);
@@ -276,6 +318,19 @@ export function deleteKeysInSearchParams(
 }
 
 /**
+ * Encodes a filter cookie value the way the server's `createCookie` writes
+ * and reads it: JSON, as UTF-8 bytes, in base64. A raw query string would not
+ * decode on the server, which then restores no filters at all.
+ *
+ * @param value - The params string to remember
+ * @returns The cookie value the server can parse back to `value`
+ */
+export function encodeFilterCookieValue(value: string) {
+  const bytes = new TextEncoder().encode(JSON.stringify(value));
+  return btoa(String.fromCharCode(...bytes));
+}
+
+/**
  * Function to delete specific keys from the cookie search parameters and update the cookie.
  *
  * @param {string} cookieName - The name of the cookie to update.
@@ -289,17 +344,14 @@ export function destroyCookieValues(
   cookieSearchParams: URLSearchParams,
   cookiePath?: string
 ) {
-  // Always remove excluded keys and the specifically requested keys
+  // Remove the specifically requested keys
   keys.forEach((key) => {
     cookieSearchParams.delete(key);
   });
 
-  // Ensure all excluded keys are removed
-  SEARCH_PARAMS_KEYS_TO_EXCLUDE.forEach((key) => {
-    cookieSearchParams.delete(key);
-  });
-
-  const finalCookieValue = cookieSearchParams.toString();
+  // The rewritten cookie follows the same rule as the server: no pagination,
+  // no one-off keys and no typed search.
+  const finalCookieValue = cleanParamsForFilterCookie(cookieSearchParams);
 
   // Always use root path to ensure cookies are sent with RR7 single fetch .data requests
   // Client-side must match server-side cookie path
@@ -321,7 +373,7 @@ export function destroyCookieValues(
     Cookies.remove(cookieName, { path: "/bookings", ...cookieOptions });
     Cookies.remove(cookieName, { path: "/kits", ...cookieOptions });
   } else {
-    Cookies.set(cookieName, finalCookieValue, {
+    Cookies.set(cookieName, encodeFilterCookieValue(finalCookieValue), {
       path,
       ...cookieOptions,
       expires: 365, // 1 year
