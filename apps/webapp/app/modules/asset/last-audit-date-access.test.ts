@@ -4,6 +4,7 @@ import { getQueryFieldType } from "./field-type-mapping";
 import {
   canQueryLastAuditDate,
   filterQueryableColumns,
+  isLastAuditDateParam,
   resolveLastAuditDateAccess,
   stripHiddenAuditColumns,
 } from "./last-audit-date-access";
@@ -78,4 +79,13 @@ describe("filterQueryableColumns", () => {
       ]);
     }
   );
+});
+
+describe("isLastAuditDateParam", () => {
+  it("matches the last audit date filter and sort, nothing else", () => {
+    expect(isLastAuditDateParam("lastAuditDate", "isEmpty:")).toBe(true);
+    expect(isLastAuditDateParam("sortBy", "lastAuditDate:asc")).toBe(true);
+    expect(isLastAuditDateParam("sortBy", "createdAt:desc")).toBe(false);
+    expect(isLastAuditDateParam("createdAt", "before:2026-01-01")).toBe(false);
+  });
 });

@@ -8,6 +8,10 @@
  * then feeds the asset query AND the model rollup, so this is the only guard
  * for the rollup.
  *
+ * A caller who may not query the column also has stale audit-date params
+ * stripped from the URL and the saved filter cookie, since the UI gives them
+ * no chip or sort to clear those with.
+ *
  * This asserts the WIRING only. The loader goes on to read a dozen other
  * things, so the first read after the gate (`getAllSelectedValuesFromFilters`)
  * records its arguments and rejects on purpose, and the loader stops there.
@@ -63,7 +67,9 @@ vi.mock("~/utils/subscription.server", async (importOriginal) => ({
   canUseAudits: (org: { auditsEnabled: boolean }) => org.auditsEnabled,
 }));
 
+import { getAdvancedFiltersFromRequest } from "~/utils/cookies.server";
 import { advancedModeLoader } from "./data.server";
+import { isLastAuditDateParam } from "./last-audit-date-access";
 
 const columns = [
   { name: "category", visible: true, position: 1 },
@@ -98,7 +104,9 @@ async function load(roles: OrganizationRoles[], auditsEnabled: boolean) {
   const handedOn = (
     mockSelectedValues.mock.calls[0][3] as { name: string }[]
   ).map((f) => f.name);
-  return { parsedAgainst, handedOn };
+  // The fourth argument strips stale audit-date params from the URL and cookie.
+  const dropParam = vi.mocked(getAdvancedFiltersFromRequest).mock.calls[0][3];
+  return { parsedAgainst, handedOn, dropParam };
 }
 
 describe("advancedModeLoader: last audit date gate", () => {
@@ -112,32 +120,35 @@ describe("advancedModeLoader: last audit date gate", () => {
   });
 
   it("keeps the column and the filter when audits are available", async () => {
-    const { parsedAgainst, handedOn } = await load(
+    const { parsedAgainst, handedOn, dropParam } = await load(
       [OrganizationRoles.ADMIN],
       true
     );
 
     expect(parsedAgainst).toContain("lastAuditDate");
     expect(handedOn).toEqual(["lastAuditDate", "category"]);
+    expect(dropParam).toBeUndefined();
   });
 
   it("keeps the column but drops the filter when audits are locked", async () => {
-    const { parsedAgainst, handedOn } = await load(
+    const { parsedAgainst, handedOn, dropParam } = await load(
       [OrganizationRoles.ADMIN],
       false
     );
 
     expect(parsedAgainst).toContain("lastAuditDate");
     expect(handedOn).toEqual(["category"]);
+    expect(dropParam).toBe(isLastAuditDateParam);
   });
 
   it.each([OrganizationRoles.BASE, OrganizationRoles.SELF_SERVICE])(
     "removes the column and drops the filter for a %s caller",
     async (role) => {
-      const { parsedAgainst, handedOn } = await load([role], true);
+      const { parsedAgainst, handedOn, dropParam } = await load([role], true);
 
       expect(parsedAgainst).not.toContain("lastAuditDate");
       expect(handedOn).toEqual(["category"]);
+      expect(dropParam).toBe(isLastAuditDateParam);
     }
   );
 });

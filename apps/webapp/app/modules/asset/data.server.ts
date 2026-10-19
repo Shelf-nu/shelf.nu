@@ -43,6 +43,7 @@ import {
   type LastAuditDateAccess,
   LAST_AUDIT_DATE_COLUMN,
   canQueryLastAuditDate,
+  isLastAuditDateParam,
   stripHiddenAuditColumns,
 } from "./last-audit-date-access";
 import { lastAuditDateAccessFor } from "./last-audit-date-access.server";
@@ -738,7 +739,16 @@ export async function advancedModeLoader({
     filters,
     serializedCookie: filtersCookie,
     redirectNeeded,
-  } = await getAdvancedFiltersFromRequest(request, organizationId, settings);
+  } = await getAdvancedFiltersFromRequest(
+    request,
+    organizationId,
+    settings,
+    // A caller who may not query the last audit date has no chip or sort to
+    // clear a stale one with, so it is stripped from the URL and the cookie.
+    canQueryLastAuditDate(lastAuditDateAccess)
+      ? undefined
+      : isLastAuditDateParam
+  );
 
   const currentFilterParams = new URLSearchParams(filters || "");
   const searchParams = filters

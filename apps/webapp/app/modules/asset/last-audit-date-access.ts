@@ -78,3 +78,22 @@ export function filterQueryableColumns<T extends { name: string }>(
   if (canQueryLastAuditDate(access)) return columns;
   return columns.filter((column) => column.name !== LAST_AUDIT_DATE_COLUMN);
 }
+
+/**
+ * Whether a URL search param filters or sorts by the last audit date.
+ *
+ * Callers who may not query the column strip these from the index URL and the
+ * saved filter cookie. The filter UI hides the column from them, so they have
+ * no chip or "Clear all" that could remove a param that is already there
+ * (a saved preset, a shared link, a workspace that lost the audits add-on).
+ *
+ * @param key - The search param name
+ * @param value - The search param value
+ * @returns True for a `lastAuditDate` filter or a `sortBy=lastAuditDate:*`
+ */
+export function isLastAuditDateParam(key: string, value: string): boolean {
+  return (
+    key === LAST_AUDIT_DATE_COLUMN ||
+    (key === "sortBy" && value.startsWith(`${LAST_AUDIT_DATE_COLUMN}:`))
+  );
+}
