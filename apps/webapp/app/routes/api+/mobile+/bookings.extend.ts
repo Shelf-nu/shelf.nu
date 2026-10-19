@@ -1,4 +1,3 @@
-import { BookingStatus } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { ExtendBookingSchema } from "~/components/booking/forms/forms-schema";
@@ -11,6 +10,7 @@ import {
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
 import { parseMobileBody } from "~/modules/api/mobile-body.server";
+import { isExtendableStatus } from "~/modules/booking/extend-eligibility";
 import { extendBooking } from "~/modules/booking/service.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
@@ -67,12 +67,6 @@ const BodySchema = z.object({
     .refine(isValidTimeZone, "Time zone must be a valid IANA zone"),
 });
 
-/** Statuses a booking can be extended from, the same set the service allows. */
-const EXTENDABLE_STATUSES: BookingStatus[] = [
-  BookingStatus.ONGOING,
-  BookingStatus.OVERDUE,
-];
-
 export async function action({ request }: ActionFunctionArgs) {
   let userId: string | undefined;
 
@@ -127,7 +121,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // Checked before the dates: a closed booking answers with its status, not
     // with a date rule it could never satisfy.
-    if (!EXTENDABLE_STATUSES.includes(booking.status)) {
+    if (!isExtendableStatus(booking.status)) {
       throw new ShelfError({
         cause: null,
         message: "Extending booking is not allowed for current status.",

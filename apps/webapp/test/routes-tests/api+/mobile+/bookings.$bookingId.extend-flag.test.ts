@@ -1,9 +1,9 @@
 /**
  * Response-contract test for `bookingActions.canExtend`, the flag the companion
  * reads to offer "Extend booking". It must agree with the gates the extend
- * endpoint makes: the booking is ONGOING or OVERDUE, the caller holds
- * `booking:extend` (BASE does not), and the caller writes this booking
- * (seeing it through a workspace toggle is not enough).
+ * endpoint makes: the booking is ONGOING or OVERDUE with something still out,
+ * the caller holds `booking:extend` (BASE does not), and the caller writes this
+ * booking (seeing it through a workspace toggle is not enough).
  *
  * The permission matrix is the real one: `hasPermission` with the
  * membership's roles is a pure lookup.
@@ -34,7 +34,7 @@ import { mobileUserContext } from "@helpers/mobile-user-context";
 
 // why: the module instantiates a real Prisma client at load and would try to
 // connect; the suite runs with no database. The booking read returns a fixed
-// row with no assets, so every other read returns nothing.
+// row with one individual asset, so every other read returns nothing.
 vi.mock("~/database/db.server", () => ({
   db: {
     booking: { findFirst: vi.fn() },
@@ -93,12 +93,18 @@ const CALLER = "user-1";
 const SOMEONE_ELSE = "user-2";
 
 /**
- * A booking with no assets in `status`, held by `custodianUserId`.
+ * A booking in `status`, held by `custodianUserId`, holding one individual
+ * asset in `assetStatus`.
  *
  * @param status - The booking status
  * @param custodianUserId - Who holds the booking through the user link
+ * @param assetStatus - The asset's status; CHECKED_OUT keeps it out
  */
-function bookingRow(status: string, custodianUserId: string) {
+function bookingRow(
+  status: string,
+  custodianUserId: string,
+  assetStatus = "CHECKED_OUT"
+) {
   return {
     id: "booking-1",
     name: "Site survey",
@@ -113,9 +119,34 @@ function bookingRow(status: string, custodianUserId: string) {
     custodianUser: null,
     custodianTeamMember: null,
     tags: [],
-    bookingAssets: [],
+    bookingAssets: [
+      {
+        id: "ba-1",
+        quantity: 1,
+        assetKitId: null,
+        sourceKitId: null,
+        sourceLocationId: null,
+        asset: {
+          id: "asset-1",
+          title: "Camera",
+          status: assetStatus,
+          availableToBook: true,
+          archivedAt: null,
+          type: "INDIVIDUAL",
+          unitOfMeasure: null,
+          consumptionType: null,
+          mainImage: null,
+          thumbnailImage: null,
+          mainImageExpiration: null,
+          assetModel: null,
+          category: null,
+          assetKits: [],
+          assetLocations: [],
+        },
+      },
+    ],
     modelRequests: [],
-    _count: { bookingAssets: 0 },
+    _count: { bookingAssets: 1 },
   } as never;
 }
 
@@ -175,6 +206,17 @@ describe("GET /api/mobile/bookings/:bookingId: canExtend", () => {
         bookingRow("OVERDUE", SOMEONE_ELSE)
       )
     ).toBe(true);
+  });
+
+  it("is false for the OWNER on an ONGOING booking with everything returned", async () => {
+    // The service refuses this one: a booking with nothing out is completed,
+    // not extended.
+    expect(
+      await canExtendFor(
+        [OrganizationRoles.OWNER],
+        bookingRow("ONGOING", SOMEONE_ELSE, "AVAILABLE")
+      )
+    ).toBe(false);
   });
 
   it("is false for the OWNER on a RESERVED booking", async () => {

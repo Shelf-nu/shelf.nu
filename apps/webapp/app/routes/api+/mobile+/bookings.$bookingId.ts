@@ -47,6 +47,10 @@ import {
   loadSliceSourceLocations,
 } from "~/modules/booking/checkout-source-location.server";
 import type { SliceSourceLocation } from "~/modules/booking/checkout-source-location.server";
+import {
+  hasItemsStillOutToExtend,
+  isExtendableStatus,
+} from "~/modules/booking/extend-eligibility";
 import { isBookingArchivable } from "~/modules/booking/helpers";
 import {
   bookingDraftVisibilityClause,
@@ -834,10 +838,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           booking.status === "DRAFT") &&
         writesBooking &&
         canDeletePerm,
-      // Extend: ONGOING/OVERDUE + extend permission, the gate the extend
-      // endpoint makes.
+      // Extend: the service's state rules (started, something still out) +
+      // extend permission, so the app never offers an extension it refuses.
       canExtend:
-        (booking.status === "ONGOING" || booking.status === "OVERDUE") &&
+        isExtendableStatus(booking.status) &&
+        hasItemsStillOutToExtend({
+          assets: booking.bookingAssets.map((ba) => ba.asset),
+          checkedInAssetIds,
+          slices: sliceRows,
+        }) &&
         writesBooking &&
         canExtendPerm,
     };

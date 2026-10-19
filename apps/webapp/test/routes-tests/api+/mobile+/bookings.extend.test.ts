@@ -2,11 +2,12 @@
  * POST /api/mobile/bookings/extend: what a direct request from the phone is
  * held to before the shared `extendBooking` service runs, and what it answers.
  *
- * The workspace lookup, ownership, the status gate, the shared extend schema,
- * the declared time zone and the after-current-end rule each refuse with their
- * own message. A clash the service reports names the clashing bookings in the
- * message, the only field the phone reads. On success the response carries the
- * end date the service stored.
+ * The `booking:extend` permission, the workspace lookup, ownership, the status
+ * gate, the shared extend schema, the declared time zone and the
+ * after-current-end rule each refuse with their own message. A clash the
+ * service reports names the clashing bookings in the message, the only field
+ * the phone reads. On success the response carries the end date the service
+ * stored.
  *
  * @see {@link file://../../../../app/routes/api+/mobile+/bookings.extend.ts}
  */
@@ -63,8 +64,15 @@ vi.mock("~/modules/booking-settings/service.server", () => ({
 }));
 
 import { db } from "~/database/db.server";
-import { getMobileUserContext } from "~/modules/api/mobile-auth.server";
+import {
+  getMobileUserContext,
+  requireMobilePermission,
+} from "~/modules/api/mobile-auth.server";
 import { extendBooking } from "~/modules/booking/service.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
 import { action } from "~/routes/api+/mobile+/bookings.extend";
 
 // @vitest-environment node
@@ -120,6 +128,33 @@ describe("POST /api/mobile/bookings/extend", () => {
       mobileUserContext({ roles: [OrganizationRoles.OWNER] }) as never
     );
     vi.mocked(db.booking.findFirst).mockResolvedValue(ONGOING_BOOKING as never);
+  });
+
+  it("gates on booking:extend and refuses before touching the booking", async () => {
+    vi.mocked(requireMobilePermission).mockRejectedValueOnce(
+      new ShelfError({
+        cause: null,
+        message: "You are not authorized to extend bookings.",
+        label: "Permission",
+        status: 403,
+        shouldBeCaptured: false,
+      })
+    );
+
+    const { status, body } = await extendToKualaLumpurAfternoon();
+
+    expect(status).toBe(403);
+    expect(body.error.message).toBe(
+      "You are not authorized to extend bookings."
+    );
+    expect(requireMobilePermission).toHaveBeenCalledWith({
+      userId: "user-1",
+      organizationId: "org-1",
+      entity: PermissionEntity.booking,
+      action: PermissionAction.extend,
+    });
+    expect(db.booking.findFirst).not.toHaveBeenCalled();
+    expect(extendBooking).not.toHaveBeenCalled();
   });
 
   it("answers 404 for a booking that is not in the caller's workspace", async () => {

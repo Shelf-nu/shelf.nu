@@ -1,8 +1,10 @@
 /**
  * ExtendBookingSheet: picks a new, later end for an ONGOING or OVERDUE booking.
  *
- * Opens on the booking's current end. The user moves it with the date-time
- * picker or with the "+1 hour", "+4 hours" and "+1 day" steps, then confirms.
+ * Opens on the booking's current end, or on now when that end has passed (an
+ * OVERDUE booking), and never offers an earlier end. The user moves it with
+ * the date-time picker or with the "+1 hour", "+4 hours" and "+1 day" steps,
+ * then confirms.
  * The request runs with the sheet still open: a refusal (working hours, the
  * maximum length, a clash with another booking) shows inline and in an alert,
  * with the picked end kept for another try. The caller closes the sheet once
@@ -35,7 +37,12 @@ import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { useSheetColumnStyle } from "@/lib/use-content-gutter";
 import { submitFromSheet } from "@/lib/sheet-submit";
-import { newEndError, shiftEnd, type ExtendPreset } from "@/lib/booking-extend";
+import {
+  extendFloor,
+  newEndError,
+  shiftEnd,
+  type ExtendPreset,
+} from "@/lib/booking-extend";
 import { DateTimeField } from "@/components/date-time-field";
 
 type Props = {
@@ -43,7 +50,7 @@ type Props = {
   visible: boolean;
   /** The booking being extended, shown so the user knows which one. */
   bookingName: string;
-  /** The booking's end now; the sheet opens on it and only accepts later. */
+  /** The booking's end now; the sheet only accepts a later one. */
   currentEnd: Date;
   /** The preference zone the picker reads and a "day" step counts in. */
   timeZone: string;
@@ -70,6 +77,11 @@ const PRESETS: { preset: ExtendPreset; label: string; testID: string }[] = [
 ];
 
 type SheetState = {
+  /**
+   * Where the sheet opened and the picker's earliest end: the current end, or
+   * the moment the sheet opened when that end has passed.
+   */
+  floor: Date;
   /** The end the user is proposing. */
   newEnd: Date;
   /** Whether the user has moved the end since the sheet opened. */
@@ -83,7 +95,7 @@ type SheetState = {
 };
 
 type SheetAction =
-  | { type: "open"; end: Date; pickerOpen: boolean }
+  | { type: "open"; floor: Date; pickerOpen: boolean }
   | { type: "picked"; end: Date }
   | { type: "shifted"; end: Date }
   | { type: "togglePicker" }
@@ -96,7 +108,8 @@ function reducer(state: SheetState, action: SheetAction): SheetState {
     case "open":
       return {
         ...state,
-        newEnd: action.end,
+        floor: action.floor,
+        newEnd: action.floor,
         touched: false,
         pickerOpen: action.pickerOpen,
         serverError: null,
@@ -148,6 +161,7 @@ export function ExtendBookingSheet({
   const sheetColumn = useSheetColumnStyle();
   const lock = useRef(false);
   const [state, dispatch] = useReducer(reducer, {
+    floor: currentEnd,
     newEnd: currentEnd,
     touched: false,
     pickerOpen: Platform.OS === "ios",
@@ -155,20 +169,22 @@ export function ExtendBookingSheet({
     submitting: false,
   });
 
-  // Each opening starts from the booking's end as it is now. iOS shows the
-  // inline picker straight away; Android's picker is a pair of dialogs the
-  // row opens on request.
+  // Each opening starts from the booking's end as it is now, or from now when
+  // that end has passed, so a step never lands on a time already gone. iOS
+  // shows the inline picker straight away; Android's picker is a pair of
+  // dialogs the row opens on request.
   const currentEndMs = currentEnd.getTime();
   useEffect(() => {
     if (!visible) return;
     dispatch({
       type: "open",
-      end: new Date(currentEndMs),
+      floor: extendFloor(new Date(currentEndMs), new Date()),
       pickerOpen: Platform.OS === "ios",
     });
   }, [visible, currentEndMs]);
 
-  const localError = newEndError(state.newEnd, currentEnd);
+  // The opening instant stands in for now: the server judges the real one.
+  const localError = newEndError(state.newEnd, currentEnd, state.floor);
   // An untouched sheet holds the current end, which is not yet an answer, so
   // its rule stays quiet until the user moves the end.
   const shownError = (state.touched ? localError : null) ?? state.serverError;
@@ -256,7 +272,7 @@ export function ExtendBookingSheet({
             <DateTimeField
               value={state.newEnd}
               timeZoneName={timeZone}
-              minimumDate={currentEnd}
+              minimumDate={state.floor}
               onConfirm={(end) => dispatch({ type: "picked", end })}
               onCancel={() => dispatch({ type: "closePicker" })}
               inlineStyle={styles.dateInlineWrap}

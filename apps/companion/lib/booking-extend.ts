@@ -1,16 +1,19 @@
 /**
  * Booking extension rules for the "Extend booking" sheet.
  *
- * Reads the booking detail endpoint's `bookingActions.canExtend` flag, moves a
- * proposed end by the sheet's preset steps, and checks the one rule the sheet
- * can judge before sending: the new end must be after the current end.
+ * Reads the booking detail endpoint's `bookingActions.canExtend` flag, picks
+ * where the sheet opens, moves a proposed end by the sheet's preset steps,
+ * checks the two rules the sheet can judge before sending (the new end must be
+ * after the current end, and in the future), and builds the request body.
  *
- * `newEndError` is a MIRROR of the after-current-end check in
- * `apps/webapp/app/routes/api+/mobile+/bookings.extend.ts`, cosmetic only: it
- * spares a round trip, and the server enforces the rule along with working
- * hours, the booking buffer, the maximum length and clashes, none of which the
- * phone can see. Extraction target: a pure `packages/*` booking module (none
- * yet).
+ * `newEndError` is a MIRROR of two server checks, cosmetic only: the
+ * after-current-end check in `extendBooking`
+ * (`apps/webapp/app/modules/booking/service.server.ts`) and the future-date
+ * check in `ExtendBookingSchema`
+ * (`apps/webapp/app/components/booking/forms/forms-schema.ts`). It spares a
+ * round trip; the server enforces both along with working hours, the booking
+ * buffer, the maximum length and clashes, none of which the phone can see.
+ * Extraction target: a pure `packages/*` booking module (none yet).
  *
  * This runs under Node's test runner too, so it must not import React Native,
  * Expo, or `@/`-aliased paths.
@@ -18,8 +21,8 @@
  * @see {@link file://./../components/bookings/extend-booking-sheet.tsx} - the sheet
  * @see {@link file://./../app/(tabs)/bookings/[id].tsx} - the booking screen
  */
-import { addDaysInZone } from "@shelf/datetime";
-import type { BookingDetailResponse } from "./api/types";
+import { addDaysInZone, wallClockWireInZone } from "@shelf/datetime";
+import type { BookingDetailResponse, ExtendBookingPayload } from "./api/types";
 
 /** The quick steps the sheet offers for moving the end later. */
 export type ExtendPreset = "hour" | "fourHours" | "day";
@@ -53,16 +56,54 @@ export function canOfferExtend(
 }
 
 /**
+ * Where the sheet opens, and the earliest end its picker offers: the booking's
+ * current end, or now when that end has already passed (an OVERDUE booking).
+ *
+ * @param currentEnd - The booking's end now
+ * @param now - The current instant
+ * @returns The later of the two
+ */
+export function extendFloor(currentEnd: Date, now: Date): Date {
+  return currentEnd > now ? currentEnd : now;
+}
+
+/**
  * Why a proposed end cannot be sent, or `null` when it can.
  *
  * @param newEnd - The end the user picked
  * @param currentEnd - The booking's end now
+ * @param now - The current instant
  * @returns The message to show, or `null`
  */
-export function newEndError(newEnd: Date, currentEnd: Date): string | null {
-  return newEnd <= currentEnd
-    ? "The new end must be after the current end."
-    : null;
+export function newEndError(
+  newEnd: Date,
+  currentEnd: Date,
+  now: Date
+): string | null {
+  if (newEnd <= currentEnd) return "The new end must be after the current end.";
+  if (newEnd <= now) return "The new end must be in the future.";
+  return null;
+}
+
+/**
+ * The extend endpoint's request body. The end travels as a wall clock with no
+ * offset, decoded on the server in the zone sent beside it.
+ *
+ * @param bookingId - The booking to extend
+ * @param newEnd - The end the user confirmed
+ * @param timeZone - The preference zone the sheet's picker edits in
+ * @returns The body for `POST /api/mobile/bookings/extend`
+ */
+export function buildExtendPayload(
+  bookingId: string,
+  newEnd: Date,
+  timeZone: string
+): ExtendBookingPayload {
+  return {
+    bookingId,
+    endDate: wallClockWireInZone(newEnd, timeZone),
+    timeZone,
+  };
 }
 
 /**

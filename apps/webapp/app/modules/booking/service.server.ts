@@ -227,6 +227,12 @@ import {
   sendCheckinReminder,
 } from "./email-helpers";
 import {
+  EXTENDABLE_BOOKING_STATUSES,
+  getAssetsStillOutForExtend,
+  getKitMembershipIdsStillOut,
+  isExtendableStatus,
+} from "./extend-eligibility";
+import {
   buildAddToActiveBookingBlockerWhere,
   hasAssetBookingConflicts,
   isBookingArchivable,
@@ -12688,13 +12694,7 @@ export async function extendBooking({
 
     validateBookingOwnership({ booking, userId, access, action: "extend" });
 
-    /** Extending booking is allowed only for these status */
-    const allowedStatus: BookingStatus[] = [
-      BookingStatus.ONGOING,
-      BookingStatus.OVERDUE,
-    ];
-
-    if (!allowedStatus.includes(booking.status)) {
+    if (!isExtendableStatus(booking.status)) {
       throw new ShelfError({
         cause: null,
         label,
@@ -12714,31 +12714,15 @@ export async function extendBooking({
       });
     }
 
-    /** Get assets that have been returned via partial check-in */
-    const checkedInAssetIds = booking.partialCheckins.flatMap(
-      (checkin) => checkin.assetIds
+    /** Assets still out, not returned through partial check-in */
+    const activeAssets = getAssetsStillOutForExtend(
+      booking.bookingAssets.map((ba) => ba.asset),
+      booking.partialCheckins.flatMap((checkin) => checkin.assetIds)
     );
 
-    /** Filter to only assets that are actively checked out (not returned) */
-    const activeAssets = booking.bookingAssets
-      .map((ba) => ba.asset)
-      .filter(
-        (asset) =>
-          (asset.status === AssetStatus.CHECKED_OUT ||
-            asset.status === AssetStatus.IN_CUSTODY) &&
-          !checkedInAssetIds.includes(asset.id)
-      );
-
-    /**
-     * Kit memberships this booking still has out, read from the slice markers.
-     *
-     * A kit is one physical case, so one still out stays exclusive to this
-     * booking through the extension. The markers answer for quantity-tracked
-     * members too, whose asset status only flips to CHECKED_OUT once every unit
-     * booked on the asset has left.
-     */
-    const kitMembershipIdsStillOut = booking.bookingAssets.flatMap((ba) =>
-      ba.assetKitId && ba.checkedOutAt && !ba.checkedInAt ? [ba.assetKitId] : []
+    /** Kit memberships still out, read from the slice markers */
+    const kitMembershipIdsStillOut = getKitMembershipIdsStillOut(
+      booking.bookingAssets
     );
 
     /** Validate that there are still active assets to extend the booking for */
@@ -12850,7 +12834,7 @@ export async function extendBooking({
           where: {
             id: booking.id,
             organizationId,
-            status: { in: allowedStatus },
+            status: { in: [...EXTENDABLE_BOOKING_STATUSES] },
             to: { lt: newEndDate },
           },
           data: {

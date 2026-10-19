@@ -4,7 +4,6 @@ import {
   DELETE_CONSEQUENCE_LABELS,
   EXPLICIT_REQUIREMENT_LABELS,
 } from "@shelf/labels";
-import { wallClockWireInZone } from "@shelf/datetime";
 import { useState, useCallback, useMemo, useRef } from "react";
 import {
   View,
@@ -78,7 +77,7 @@ import { announce } from "@/lib/a11y";
 import { submitFromSheet } from "@/lib/sheet-submit";
 import { maybeAskForReview } from "@/lib/review-prompt";
 import { canOfferQuickCheckout } from "@/lib/booking-quick-actions";
-import { canOfferExtend } from "@/lib/booking-extend";
+import { buildExtendPayload, canOfferExtend } from "@/lib/booking-extend";
 import { BOOKING_METHOD } from "@/lib/booking-method";
 import { CheckoutSourceSheet } from "@/components/checkout-source-sheet";
 import ConfirmDeleteSheet from "@/components/confirm-delete-sheet";
@@ -937,11 +936,10 @@ function BookingDetailScreen({ id }: { id: string }) {
    */
   const performExtend = async (newEnd: Date): Promise<string | null> => {
     if (!booking || !currentOrg) return "Please try again.";
-    const { data, error: err } = await api.extendBooking(currentOrg.id, {
-      bookingId: booking.id,
-      endDate: wallClockWireInZone(newEnd, prefs.timeZone),
-      timeZone: prefs.timeZone,
-    });
+    const { data, error: err } = await api.extendBooking(
+      currentOrg.id,
+      buildExtendPayload(booking.id, newEnd, prefs.timeZone)
+    );
     if (err || !data) return err || "Please try again.";
     setShowExtendSheet(false);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
