@@ -35,7 +35,7 @@ On the **Configure SAML** step, fill in the **General** section:
 | --------------------------- | -------------------------------------------------------------------- |
 | Single sign-on URL          | `https://nmmqcuiasekdacmhwsxk.supabase.co/auth/v1/sso/saml/acs`      |
 | Audience URI (SP Entity ID) | `https://nmmqcuiasekdacmhwsxk.supabase.co/auth/v1/sso/saml/metadata` |
-| Default RelayState          | `https://app.shelf.nu/oauthcallback`                                 |
+| Default RelayState          | `https://app.shelf.nu/oauth/callback`                                |
 | Name ID format              | `EmailAddress`                                                       |
 | Application username        | `Email`                                                              |
 

@@ -1,13 +1,12 @@
 // @vitest-environment node
 /**
- * Authorization tests for `getLastScanForViewer`.
+ * Tests for `getLastScanForViewer`: the `scan:read` gate, the read by asset
+ * or kit, and the fallback to the newest located scan for the card's map.
  *
- * The asset overview loader used to fetch and return the parsed last scan
- * unconditionally, and the component hid `<ScanDetails>` behind a client-side
- * `scan:read` check. The parsed payload carries the scanner's display name and
- * EMAIL, the scan's GPS COORDINATES and the device user-agent, so for BASE and
- * SELF_SERVICE (both `scan: []`) that was PII sitting in the page payload,
- * hidden only by React.
+ * The parsed payload carries the scanner's display name and EMAIL, the scan's
+ * GPS COORDINATES and the device user-agent. BASE and SELF_SERVICE hold
+ * `scan: []`, so for them it must never be read, let alone returned: hiding
+ * `<ScanDetails>` in React would leave it in the page payload.
  *
  * These tests drive the real `Role2PermissionMap` through the real
  * `hasPermission`, so they assert the actual matrix rather than a restatement
@@ -28,7 +27,7 @@ vi.mock("~/database/db.server", () => ({
 
 import { getLastScanForViewer } from "./service.server";
 
-/** A scan row shaped as `getScanByQrId` returns it, carrying real PII. */
+/** A scan row shaped as `getLastScanForTarget` returns it, carrying real PII. */
 const scanRow = {
   id: "scan-1",
   userId: "user-9",
@@ -36,8 +35,10 @@ const scanRow = {
   longitude: "4.9041",
   userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)",
   manuallyGenerated: false,
+  codeType: "BARCODE",
+  code: "BC-0042",
+  organizationId: "org-1",
   createdAt: new Date("2026-07-01T10:00:00Z"),
-  qr: { id: "qr-1", organizationId: "org-1" },
   user: {
     id: "user-9",
     firstName: "Dana",
@@ -50,7 +51,7 @@ const scanRow = {
 
 function args(roles: OrganizationRoles[]) {
   return {
-    qrId: "qr-1",
+    target: { assetId: "asset-1" },
     userId: "user-1",
     organizationId: "org-1",
     roles,
@@ -82,24 +83,76 @@ describe("getLastScanForViewer", () => {
       expect(scanFindFirst).toHaveBeenCalledTimes(1);
       expect(result).toEqual(
         expect.objectContaining({
-          scannedBy: "Dana Reeves(dana@example.com)",
+          scannedBy: "Dana Reeves (dana@example.com)",
           coordinates: "52.3676, 4.9041",
         })
       );
     }
   );
 
-  it("returns null without touching the DB when the asset has no QR code", async () => {
-    const result = await getLastScanForViewer({
-      ...args([OrganizationRoles.OWNER]),
-      qrId: undefined,
-    });
+  it("reads the latest scan of the asset, whichever code was scanned", async () => {
+    const result = await getLastScanForViewer(args([OrganizationRoles.OWNER]));
 
-    expect(result).toBeNull();
-    expect(scanFindFirst).not.toHaveBeenCalled();
+    expect(scanFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { assetId: "asset-1", organizationId: "org-1" },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      })
+    );
+    // A barcode scan has no QR; the card still names the code.
+    expect(result).toMatchObject({ codeType: "BARCODE", code: "BC-0042" });
   });
 
-  it("returns null when the asset has a QR but has never been scanned", async () => {
+  it("reads a kit's last scan by the kit", async () => {
+    await getLastScanForViewer({
+      ...args([OrganizationRoles.ADMIN]),
+      target: { kitId: "kit-1" },
+    });
+
+    expect(scanFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { kitId: "kit-1", organizationId: "org-1" },
+      })
+    );
+  });
+
+  it("reads no second row when the last scan has a location", async () => {
+    await getLastScanForViewer(args([OrganizationRoles.OWNER]));
+
+    expect(scanFindFirst).toHaveBeenCalledTimes(1);
+  });
+
+  it("places a scan with no location at the newest located scan of the asset", async () => {
+    const located = {
+      latitude: "48.8566",
+      longitude: "2.3522",
+      createdAt: new Date("2026-06-01T08:00:00Z"),
+    };
+    scanFindFirst
+      .mockResolvedValueOnce({ ...scanRow, latitude: null, longitude: null })
+      .mockResolvedValueOnce(located);
+
+    const result = await getLastScanForViewer(args([OrganizationRoles.OWNER]));
+
+    expect(scanFindFirst).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: {
+          assetId: "asset-1",
+          organizationId: "org-1",
+          latitude: { not: null },
+          longitude: { not: null },
+        },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      })
+    );
+    expect(result).toMatchObject({
+      coordinates: "48.8566, 2.3522",
+      locatedAt: located.createdAt,
+      dateTime: scanRow.createdAt,
+    });
+  });
+
+  it("returns null when the asset has never been scanned", async () => {
     scanFindFirst.mockResolvedValue(null);
 
     const result = await getLastScanForViewer(args([OrganizationRoles.OWNER]));

@@ -179,8 +179,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
 
     /**
-     * We get the first QR code(for now we can only have 1)
-     * And using the ID of tha qr code, we find the latest scan.
+     * The latest scan of this asset, whichever code was scanned (QR, barcode
+     * or SAM ID).
      *
      * `getLastScanForViewer` applies the `scan:read` gate SERVER-SIDE and
      * returns null without it. The parsed scan carries the scanner's name and
@@ -190,7 +190,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * receiving all of it in the page payload.
      */
     const lastScan = await getLastScanForViewer({
-      qrId: asset.qrCodes[0]?.id,
+      target: { assetId: asset.id },
       userId,
       organizationId,
       roles,
@@ -1934,7 +1934,11 @@ export default function AssetOverview() {
               action: PermissionAction.read,
             })}
           >
-            <ScanDetails lastScan={lastScan} />
+            <ScanDetails
+              lastScan={lastScan}
+              target={{ assetId: asset.id }}
+              itemName={asset.title}
+            />
           </When>
         </div>
       </div>

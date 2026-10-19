@@ -27,6 +27,7 @@ import {
   createAssetNotesForAuditAddition,
   createAssetNotesForAuditRemoval,
 } from "~/modules/note/service.server";
+import { recordAuditScanNonFatal } from "~/modules/scan/service.server";
 import { USER_NAME_SELECT } from "~/modules/user/fields";
 import type { ClientHint } from "~/utils/client-hints";
 import type { RawFormatPrefs } from "~/utils/date-format";
@@ -307,6 +308,8 @@ export type RecordAuditScanInput = {
   userId: string;
   /** The organization ID for security validation */
   organizationId: string;
+  /** The scanning device's User-Agent, stored on the asset's scan record */
+  userAgent?: string | null;
 };
 
 /**
@@ -1386,7 +1389,8 @@ function isAuditAssetFkViolation(cause: unknown): boolean {
 export async function recordAuditScan(
   input: RecordAuditScanInput
 ): Promise<RecordAuditScanResult> {
-  const { auditSessionId, qrId, assetId, userId, organizationId } = input;
+  const { auditSessionId, qrId, assetId, userId, organizationId, userAgent } =
+    input;
 
   try {
     // Verify the audit session exists and belongs to the organization
@@ -1426,7 +1430,12 @@ export async function recordAuditScan(
       db.asset.findUnique({
         // eslint-disable-next-line local-rules/require-org-scope-on-id-queries, local-rules/require-archived-at-check-on-asset-queries -- idor-safe: deliberate fetch-then-verify — organizationId is selected and explicitly checked immediately below (`if (!scannedAsset || scannedAsset.organizationId !== organizationId) throw 404`), giving a clean cross-org message instead of a raw P2003.; why: a scanned label must resolve to its asset even when archived; audits badge archived assets
         where: { id: assetId },
-        select: { id: true, title: true, organizationId: true },
+        select: {
+          id: true,
+          title: true,
+          organizationId: true,
+          sequentialId: true,
+        },
       }),
     ]);
 
@@ -1818,6 +1827,18 @@ export async function recordAuditScan(
       },
       { timeout: 15000 }
     );
+
+    // The audit scan is also a scan of the asset, so it counts towards the
+    // asset's scan record and "Last scan". Recorded once per audit scan (the
+    // duplicate short-circuit above returns before this), after the audit
+    // commits, and non-fatally: it must never fail or roll back the audit.
+    await recordAuditScanNonFatal({
+      code: qrId,
+      asset: scannedAsset,
+      organizationId,
+      userId,
+      userAgent,
+    });
 
     return result;
   } catch (cause) {

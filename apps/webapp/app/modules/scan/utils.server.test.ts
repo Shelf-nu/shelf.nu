@@ -1,5 +1,5 @@
 /**
- * Tests for scan UA attribution.
+ * Tests for scan UA attribution and the "Last scan" card payload.
  *
  * The companion app sends `ShelfCompanion/<version> (<device>; <os>)` on
  * every API call; parseCompanionUserAgent must recognize exactly that and
@@ -8,9 +8,10 @@
  *
  * @see apps/companion/lib/api/user-agent.ts
  */
+import type { UserOrganization } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
-import { createScanWithRelations } from "@factories";
+import { createScanWithRelations, createUser } from "@factories";
 
 import { parseCompanionUserAgent, parseScanData } from "./utils.server";
 
@@ -124,5 +125,123 @@ describe("parseScanData", () => {
     // why: the UA change must not disturb the other fields the panel reads.
     expect(result?.coordinates).toBe("51.97956847999077, 5.981302259884078");
     expect(result?.manuallyGenerated).toBe(false);
+  });
+
+  /** A scanning user who is a member of exactly one workspace. */
+  function scannerIn(organizationId: string) {
+    const membership: UserOrganization = {
+      id: "uo-1",
+      userId: "user-9",
+      organizationId,
+      roles: ["ADMIN"],
+      createdAt: new Date("2026-01-01"),
+      updatedAt: new Date("2026-01-01"),
+      calendarTokenId: null,
+    };
+    return {
+      ...createUser({
+        id: "user-9",
+        firstName: "Dana",
+        lastName: "Reeves",
+        displayName: "Dana Reeves",
+        email: "dana@example.com",
+      }),
+      userOrganizations: [membership],
+    };
+  }
+
+  it("names a member of the workspace the scan resolved in, with no QR on the row", () => {
+    // A barcode scan carries no QR: the scan's own workspace decides.
+    const result = parseScanData({
+      scan: createScanWithRelations({
+        codeType: "BARCODE",
+        code: "BC-0042",
+        qrId: null,
+        rawQrId: null,
+        organizationId: "org-1",
+        user: scannerIn("org-1"),
+      }),
+      userId: "user-1",
+    });
+
+    expect(result?.scannedBy).toBe("Dana Reeves (dana@example.com)");
+  });
+
+  it("does not name a scanner from another workspace", () => {
+    const result = parseScanData({
+      scan: createScanWithRelations({
+        organizationId: "org-1",
+        user: scannerIn("org-2"),
+      }),
+      userId: "user-1",
+    });
+
+    expect(result?.scannedBy).toBe("Unknown");
+  });
+
+  it("exposes the scanned value for a barcode or SAM ID, never for a QR", () => {
+    const barcode = parseScanData({
+      scan: createScanWithRelations({ codeType: "BARCODE", code: "BC-0042" }),
+      userId: "user-1",
+    });
+    const sam = parseScanData({
+      scan: createScanWithRelations({ codeType: "SAM_ID", code: "SAM-0007" }),
+      userId: "user-1",
+    });
+    const qr = parseScanData({
+      scan: createScanWithRelations({ codeType: "QR", code: "qr-1" }),
+      userId: "user-1",
+    });
+
+    expect(barcode).toMatchObject({ codeType: "BARCODE", code: "BC-0042" });
+    expect(sam).toMatchObject({ codeType: "SAM_ID", code: "SAM-0007" });
+    expect(qr).toMatchObject({ codeType: "QR", code: null });
+  });
+
+  describe("location", () => {
+    const earlierFix = {
+      latitude: "52.3676",
+      longitude: "4.9041",
+      createdAt: new Date("2026-06-01T08:00:00Z"),
+    };
+
+    it("uses the last scan's own location, with no separate date", () => {
+      const result = parseScanData({
+        scan: createScanWithRelations(),
+        userId: "user-1",
+      });
+
+      expect(result?.coordinates).toBe("51.97956847999077, 5.981302259884078");
+      expect(result?.locatedAt).toBeNull();
+    });
+
+    it("places a scan with no location at the newest earlier located scan", () => {
+      // A drawer or audit scan carries no coordinates; the card still reports
+      // it, and says when the location shown was recorded.
+      const result = parseScanData({
+        scan: createScanWithRelations({
+          latitude: null,
+          longitude: null,
+          source: "WEB_DRAWER",
+        }),
+        locatedScan: earlierFix,
+        userId: "user-1",
+      });
+
+      expect(result?.coordinates).toBe("52.3676, 4.9041");
+      expect(result?.locatedAt).toEqual(earlierFix.createdAt);
+      // The date and time are still the last scan's.
+      expect(result?.dateTime).toEqual(createScanWithRelations().createdAt);
+    });
+
+    it("reports an unknown location when no scan ever had one", () => {
+      const result = parseScanData({
+        scan: createScanWithRelations({ latitude: null, longitude: null }),
+        userId: "user-1",
+      });
+
+      expect(result?.coordinates).toBe("Unknown location");
+      expect(result?.locatedAt).toBeNull();
+    });
   });
 });

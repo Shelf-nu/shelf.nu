@@ -39,7 +39,7 @@ import {
   payload,
   error,
   getCurrentSearchParams,
-  getRefererPath,
+  getRefererPathExcludingSelf,
   parseData,
 } from "~/utils/http.server";
 import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
@@ -113,7 +113,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
        * (assets index, a location, a kit, …). Best-effort: `null` when the
        * Referer header is absent, which the form resolves to its own
        * fallback. @see AssetForm's `cancelTo` */
-      referer: getRefererPath(request),
+      referer: getRefererPathExcludingSelf(request),
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
