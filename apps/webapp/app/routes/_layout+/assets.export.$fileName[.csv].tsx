@@ -81,6 +81,7 @@ export const loader = async ({
       exportType === "import"
         ? await exportAssetsForImportToCsv({
             request,
+            userId,
             assetIds,
             settings,
             currentOrganization,

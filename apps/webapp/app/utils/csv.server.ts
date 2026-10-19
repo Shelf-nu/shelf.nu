@@ -190,8 +190,8 @@ export const csvDataFromRequest = async ({ request }: { request: Request }) => {
  * @param args.assetIndexCurrentSearchParams - The index's current URL search
  *   params, used instead of cookie filters when select-all is active.
  * @param args.timeZone - Acting user's IANA timezone; forwarded to the fetch so
- *   built-in date-column filters truncate the day in the user's tz (avoids an
- *   off-by-one). Defaults to "UTC" (import-ready export has no acting user).
+ *   date-column filters truncate the day in the user's tz, matching the rows
+ *   the index showed. Both exports pass it; "UTC" is only a fallback.
  * @param args.lastAuditDateAccess - How the last audit date may be used. The
  *   service defaults to `hidden`, which also drops an active last audit date
  *   filter. Both exports pass the resolved level so a select-all export
@@ -374,6 +374,8 @@ export async function exportAssetsFromIndexToCsv({
  * forced to "all".
  *
  * @param args.request - The incoming request (filters, locale, timezone).
+ * @param args.userId - The acting user; their time zone resolves the day of
+ *   every select-all date filter, so the rows match the index.
  * @param args.assetIds - Comma-separated asset ids, or the select-all sentinel.
  * @param args.settings - The asset index settings (mode + column config).
  * @param args.currentOrganization - The active workspace; scopes the fetch.
@@ -390,6 +392,7 @@ export async function exportAssetsFromIndexToCsv({
  */
 export async function exportAssetsForImportToCsv({
   request,
+  userId,
   assetIds,
   settings,
   currentOrganization,
@@ -398,6 +401,8 @@ export async function exportAssetsForImportToCsv({
   access,
 }: {
   request: Request;
+  /** The acting user; their time zone resolves the day of every date filter. */
+  userId: string;
   assetIds: string;
   settings: AssetIndexSettings;
   currentOrganization: Pick<
@@ -415,6 +420,12 @@ export async function exportAssetsForImportToCsv({
     access,
     currentOrganization
   );
+  // The file holds raw values, so the prefs only supply the time zone that a
+  // select-all's date filters resolve the day in, the same as the index.
+  const { timeZone } = await resolveUserFormatPrefsById(
+    userId,
+    getClientHint(request)
+  );
   const [{ assets }, activeCustomFields] = await Promise.all([
     resolveExportAssets({
       request,
@@ -422,6 +433,7 @@ export async function exportAssetsForImportToCsv({
       settings,
       currentOrganization,
       assetIndexCurrentSearchParams,
+      timeZone,
       lastAuditDateAccess,
     }),
     getActiveCustomFields({

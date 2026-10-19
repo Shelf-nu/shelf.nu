@@ -73,6 +73,15 @@ vi.mock("~/modules/asset/last-audit-date-access.server", () => ({
   lastAuditDateAccessFor: vi.fn(() => "available"),
 }));
 
+// why: format prefs are read from the user row in the DB; the export only
+// forwards the resolved time zone to the asset query.
+vi.mock("./date-format.server", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  resolveUserFormatPrefsById: vi.fn(() =>
+    Promise.resolve({ timeZone: "Pacific/Auckland" })
+  ),
+}));
+
 import { getAdvancedPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import { exportAssetsForImportToCsv } from "./csv.server";
@@ -91,6 +100,7 @@ describe("exportAssetsForImportToCsv", () => {
   it("produces importer-native headers including active custom fields", async () => {
     const csv = await exportAssetsForImportToCsv({
       request: new Request("http://localhost/assets/export/x.csv"),
+      userId: "user-1",
       assetIds: "a1",
       settings: { mode: "ADVANCED", columns: [] } as never,
       currentOrganization: ORG,
@@ -108,6 +118,7 @@ describe("exportAssetsForImportToCsv", () => {
   it("forces all columns in SIMPLE index mode even when scope is 'visible'", async () => {
     const csv = await exportAssetsForImportToCsv({
       request: new Request("http://localhost/assets/export/x.csv"),
+      userId: "user-1",
       assetIds: "a1",
       settings: { mode: "SIMPLE", columns: [] } as never,
       currentOrganization: ORG,
@@ -122,6 +133,7 @@ describe("exportAssetsForImportToCsv", () => {
   it("exports hand-picked rows whatever their archive state", async () => {
     await exportAssetsForImportToCsv({
       request: new Request("http://localhost/assets/export/x.csv"),
+      userId: "user-1",
       assetIds: "a1,a2",
       settings: { mode: "ADVANCED", columns: [] } as never,
       currentOrganization: ORG,
@@ -138,6 +150,7 @@ describe("exportAssetsForImportToCsv", () => {
   it("lets a select-all follow the view it was started from", async () => {
     await exportAssetsForImportToCsv({
       request: new Request("http://localhost/assets/export/x.csv"),
+      userId: "user-1",
       assetIds: ALL_SELECTED_KEY,
       settings: { mode: "ADVANCED", columns: [] } as never,
       currentOrganization: ORG,
@@ -159,6 +172,7 @@ describe("exportAssetsForImportToCsv", () => {
   it("keeps an active last audit date filter when the access is available", async () => {
     await exportAssetsForImportToCsv({
       request: new Request("http://localhost/assets/export/x.csv"),
+      userId: "user-1",
       assetIds: ALL_SELECTED_KEY,
       settings: { mode: "ADVANCED", columns: [] } as never,
       currentOrganization: ORG,
@@ -171,6 +185,26 @@ describe("exportAssetsForImportToCsv", () => {
       expect.objectContaining({
         filters: "lastAuditDate=isEmpty:",
         lastAuditDateAccess: "available",
+      })
+    );
+  });
+
+  it("resolves select-all date filters in the acting user's time zone", async () => {
+    await exportAssetsForImportToCsv({
+      request: new Request("http://localhost/assets/export/x.csv"),
+      userId: "user-1",
+      assetIds: ALL_SELECTED_KEY,
+      settings: { mode: "ADVANCED", columns: [] } as never,
+      currentOrganization: ORG,
+      assetIndexCurrentSearchParams: "lastAuditDate=before:2026-08-01",
+      columnScope: "all",
+      access: ACCESS,
+    });
+
+    expect(getAdvancedPaginatedAndFilterableAssets).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        filters: "lastAuditDate=before:2026-08-01",
+        timeZone: "Pacific/Auckland",
       })
     );
   });
