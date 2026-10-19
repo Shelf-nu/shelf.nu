@@ -121,7 +121,7 @@ export function ScanHistoryButton({
           View all scans
         </Button>
       </SheetTrigger>
-      <SheetContent className="w-full overflow-y-auto sm:max-w-md">
+      <SheetContent className="w-full overflow-y-auto bg-white sm:max-w-md">
         <SheetHeader>
           <SheetTitle>Scan history</SheetTitle>
           <SheetDescription>{itemName}</SheetDescription>
