@@ -64,6 +64,36 @@ export function getRefererPath(request: Request): string | null {
   }
 }
 
+/**
+ * Like {@link getRefererPath}, but returns `null` when the referer is the page
+ * being requested.
+ *
+ * A page that navigates within itself (an asset form adding `?category=<id>`
+ * when a model is picked) or revalidates its loader sends a request whose
+ * Referer is that same page. Returning there after a save is never where the
+ * user came from, and the stale query string can preselect values the user
+ * never saved. Only the pathname is compared, so a filtered list
+ * (`/assets?search=x`) is still a valid destination from `/assets/new`. This
+ * is the server-side twin of `resolveCancelTo` in `~/utils/cancel-destination`.
+ *
+ * @param request - The request object
+ * @returns The referer's pathname + search, or `null` when it is missing,
+ *   invalid, or points at the requested page
+ */
+export function getRefererPathExcludingSelf(request: Request): string | null {
+  const refererPath = getRefererPath(request);
+  if (!refererPath) {
+    return null;
+  }
+
+  const [refererPathname] = refererPath.split("?");
+  if (refererPathname === new URL(request.url).pathname) {
+    return null;
+  }
+
+  return refererPath;
+}
+
 export function isGet(request: Request) {
   return request.method.toLowerCase() === "get";
 }
