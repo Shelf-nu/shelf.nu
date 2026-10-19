@@ -12,7 +12,7 @@ import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { getScanHistory } from "~/modules/scan/history.server";
 import type { ScanTarget } from "~/modules/scan/service.server";
-import { makeShelfError } from "~/utils/error";
+import { badRequest, makeShelfError } from "~/utils/error";
 import {
   error,
   getCurrentSearchParams,
@@ -26,6 +26,13 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 
 /**
+ * The refusal shown for any malformed scan history query. It covers a missing
+ * or doubled target and an empty cursor alike, so it names the whole contract.
+ */
+const INVALID_QUERY_MESSAGE =
+  "Invalid scan history query: ask for one asset or one kit.";
+
+/**
  * Query for the scan history: exactly one of an asset or a kit, plus the
  * optional cursor (the id of the last scan already shown).
  */
@@ -36,7 +43,7 @@ const ScanHistoryQuerySchema = z
     cursor: z.string().min(1).optional(),
   })
   .refine((query) => Boolean(query.assetId) !== Boolean(query.kitId), {
-    message: "Ask for the scans of one asset or one kit.",
+    message: INVALID_QUERY_MESSAGE,
   });
 
 /**
@@ -59,17 +66,24 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
+    // A malformed query is a client error, not a fault: it is returned as a
+    // 400 and kept out of Sentry (shouldBeCaptured: false).
     const { assetId, kitId, cursor } = parseData(
       getCurrentSearchParams(request),
       ScanHistoryQuerySchema,
-      { message: "Ask for the scans of one asset or one kit." }
+      { message: INVALID_QUERY_MESSAGE, shouldBeCaptured: false }
     );
 
-    // The schema guarantees exactly one of the two; the branch narrows the
-    // type without an assertion.
-    const target: ScanTarget = assetId
-      ? { assetId }
-      : { kitId: kitId as string };
+    // The schema has already refused a query with neither or both targets.
+    // The guard keeps the branches exhaustive without a cast.
+    let target: ScanTarget;
+    if (assetId) {
+      target = { assetId };
+    } else if (kitId) {
+      target = { kitId };
+    } else {
+      throw badRequest(INVALID_QUERY_MESSAGE, { shouldBeCaptured: false });
+    }
 
     const page = await getScanHistory({ target, organizationId, cursor });
 

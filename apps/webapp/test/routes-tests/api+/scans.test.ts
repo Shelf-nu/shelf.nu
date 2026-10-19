@@ -27,6 +27,24 @@ vi.mock("~/utils/roles.server", () => ({
   requirePermission: mockRequirePermission,
 }));
 
+const { mockLoggerError } = vi.hoisted(() => ({
+  mockLoggerError: vi.fn(),
+}));
+// why: Logger.error is the hand-off to Sentry. Whether a refusal is captured
+// is decided downstream by the beforeSend hook, which reads the
+// `shouldBeCaptured` flag on the error passed here. The test reads that flag
+// at the hand-off instead of standing up Sentry.
+vi.mock("~/utils/logger", () => ({
+  Logger: {
+    error: mockLoggerError,
+    handledClientError: vi.fn(),
+    warn: vi.fn(),
+    info: vi.fn(),
+    log: vi.fn(),
+    dev: vi.fn(),
+  },
+}));
+
 import { toScanHistoryRow } from "~/modules/scan/history.server";
 import { loader } from "~/routes/api+/scans";
 
@@ -98,11 +116,18 @@ describe("GET /api/scans", () => {
   it.each([
     ["neither an asset nor a kit", ""],
     ["both an asset and a kit", "assetId=asset-1&kitId=kit-1"],
-  ])("refuses %s", async (_case, query) => {
+    ["an empty cursor", "assetId=asset-1&cursor="],
+  ])("refuses %s as a 400 that is not captured", async (_case, query) => {
     const { status } = await get(query);
 
     expect(status).toBe(400);
     expect(mockFindMany).not.toHaveBeenCalled();
+    expect(mockLoggerError).toHaveBeenCalledTimes(1);
+    expect(mockLoggerError.mock.calls[0][0]).toMatchObject({
+      status: 400,
+      shouldBeCaptured: false,
+      message: "Invalid scan history query: ask for one asset or one kit.",
+    });
   });
 
   it("returns 25 rows and the cursor to the next page when there are more", async () => {
