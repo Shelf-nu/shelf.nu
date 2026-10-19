@@ -111,8 +111,17 @@ type RolePolicyShape = {
   membership: {
     /** Ownership tier: moving to a LOWER tier transfers ownership columns. Equal tiers never do. */
     ownershipTier: number;
-    /** Granting, changing or revoking this role requires the workspace owner. */
+    /**
+     * Promoting a member to this role, changing a member who holds it, or
+     * revoking their access requires the workspace owner.
+     */
     changeRequiresOwner: boolean;
+    /**
+     * Granting this role through an invite (single, CSV import or resend)
+     * requires the workspace owner. Separate from `changeRequiresOwner`: an
+     * invite adds a new member, a role change acts on an existing one.
+     */
+    inviteRequiresOwner: boolean;
     /** May receive entities transferred on another member's removal or demotion. */
     canReceiveTransfers: boolean;
     /** May be chosen as the new owner in an ownership transfer. */
@@ -180,6 +189,7 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
     membership: {
       ownershipTier: 3,
       changeRequiresOwner: true,
+      inviteRequiresOwner: true,
       canReceiveTransfers: true,
       eligibleAsNewOwner: false,
       invitable: false,
@@ -221,6 +231,7 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
     membership: {
       ownershipTier: 2,
       changeRequiresOwner: true,
+      inviteRequiresOwner: false,
       canReceiveTransfers: true,
       eligibleAsNewOwner: true,
       invitable: true,
@@ -269,6 +280,7 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       // ownership columns (a creator reference, granting no access).
       ownershipTier: 2,
       changeRequiresOwner: false,
+      inviteRequiresOwner: false,
       canReceiveTransfers: false,
       eligibleAsNewOwner: false,
       invitable: true,
@@ -310,6 +322,7 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
     membership: {
       ownershipTier: 1,
       changeRequiresOwner: false,
+      inviteRequiresOwner: false,
       canReceiveTransfers: false,
       eligibleAsNewOwner: false,
       invitable: true,
@@ -351,6 +364,7 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
     membership: {
       ownershipTier: 1,
       changeRequiresOwner: false,
+      inviteRequiresOwner: false,
       canReceiveTransfers: false,
       eligibleAsNewOwner: false,
       invitable: true,

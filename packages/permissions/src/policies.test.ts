@@ -116,6 +116,7 @@ describe("ROLE_POLICIES", () => {
     assert.deepEqual(manager.membership, {
       ownershipTier: 2,
       changeRequiresOwner: false,
+      inviteRequiresOwner: false,
       canReceiveTransfers: false,
       eligibleAsNewOwner: false,
       invitable: true,
