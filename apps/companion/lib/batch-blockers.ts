@@ -405,8 +405,11 @@ function candidatesFor(
       ...archivedForBooking,
       {
         key: "asset-already-in-booking",
-        affected: assets.filter((i) =>
-          bookingCtx.bookedAssetIds.has(i.targetId)
+        // A plain add of a quantity-tracked asset the booking holds sets its
+        // new total (the server resizes the held slice), so only whole assets
+        // are refused there. Fulfil sends no quantity, so it refuses both.
+        affected: (action === "booking_add" ? wholeAssets : assets).filter(
+          (i) => bookingCtx.bookedAssetIds.has(i.targetId)
         ),
         message: (n) => `${countNoun(n, "asset")} already in this booking.`,
       },
