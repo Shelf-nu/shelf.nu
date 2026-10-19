@@ -39,7 +39,7 @@ export const MAX_SAMPLE_LENGTH = 60;
 /** Most notes a proposal carries. */
 export const MAX_PROPOSAL_NOTES = 5;
 
-/** Longest custom field name a mapping may create. */
+/** Longest custom field name the review lets a user type for a new field. */
 export const MAX_CUSTOM_FIELD_NAME_LENGTH = 100;
 
 /** Where one source column goes. The review table edits exactly this. */
@@ -72,12 +72,14 @@ export type MappingProposal = {
 /**
  * Custom field names travel inside a `cf:<name>, type:<type>` header, which
  * the importer splits on commas, so a comma in the name would break it.
+ * Existing fields can have longer names than the review lets a user type, so
+ * the bound here is the heading limit, not {@link MAX_CUSTOM_FIELD_NAME_LENGTH}.
  */
 export const customFieldNameSchema = z
   .string()
   .trim()
   .min(1, "Custom field name is required")
-  .max(MAX_CUSTOM_FIELD_NAME_LENGTH)
+  .max(MAX_HEADER_LENGTH)
   .refine((name) => !name.includes(","), {
     message: "Custom field names cannot contain a comma",
   });

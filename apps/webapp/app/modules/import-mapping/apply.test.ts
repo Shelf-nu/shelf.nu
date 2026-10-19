@@ -100,6 +100,14 @@ describe("columnMappingListSchema", () => {
     expect(row).toMatchObject({ "cf:type: model, type:text": "X1" });
   });
 
+  it("accepts an existing custom field with a name over 100 characters", () => {
+    const longName = "Long field ".repeat(15).trim();
+    const result = columnMappingListSchema.safeParse([
+      col("a", { kind: "customField", name: longName, type: "TEXT" }),
+    ]);
+    expect(result.success).toBe(true);
+  });
+
   it("rejects custom field names the importer cannot parse", () => {
     const result = columnMappingListSchema.safeParse([
       col("a", { kind: "customField", name: "Size, cm", type: "TEXT" }),

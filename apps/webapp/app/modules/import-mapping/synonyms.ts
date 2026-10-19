@@ -33,7 +33,9 @@ export function normalizeHeader(text: string): string {
       // Drop accents, so "Número" and "Ubicación" compare as "numero" and "ubicacion".
       .replace(/[\u0300-\u036f]/g, "")
       .toLowerCase()
-      .replace(/[^a-z0-9]+/g, " ")
+      // Unicode-aware, so "品名" or "Größe" keep their letters instead of
+      // collapsing to nothing.
+      .replace(/[^\p{L}\p{N}]+/gu, " ")
       .trim()
   );
 }

@@ -228,6 +228,38 @@ describe("existing custom fields with look-alike names", () => {
   });
 });
 
+describe("headings in non-Latin scripts", () => {
+  it("never matches an existing field just because both have no Latin letters", () => {
+    const proposal = propose(
+      [["数量"], ["3"]],
+      [{ name: "品名", type: CustomFieldType.TEXT }]
+    );
+    expect(proposal.columns[0].target).not.toEqual(
+      expect.objectContaining({ kind: "customField", name: "品名" })
+    );
+  });
+
+  it("matches an existing field written in the same script", () => {
+    const proposal = propose(
+      [["品名"], ["ドリル"]],
+      [{ name: "品名", type: CustomFieldType.TEXT }]
+    );
+    expect(proposal.columns[0].target).toEqual({
+      kind: "customField",
+      name: "品名",
+      type: "TEXT",
+    });
+  });
+
+  it("does not match a punctuation-only heading to anything", () => {
+    const proposal = propose(
+      [["---"], ["x"]],
+      [{ name: "***", type: CustomFieldType.TEXT }]
+    );
+    expect(proposal.columns[0].target).toEqual({ kind: "skip" });
+  });
+});
+
 describe("cf: headers against existing custom fields", () => {
   it("takes the stored type when the header's type contradicts it", () => {
     const proposal = propose(

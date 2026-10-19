@@ -139,7 +139,10 @@ function buildExistingFieldLookup(
     find: (name) => {
       const match = exact(name);
       if (match) return match;
-      const folded = byFolded.get(normalizeHeader(name)) ?? [];
+      const key = normalizeHeader(name);
+      // A heading with no letters or digits says nothing about which field.
+      if (key === "") return undefined;
+      const folded = byFolded.get(key) ?? [];
       return folded.length === 1 ? folded[0] : undefined;
     },
   };
