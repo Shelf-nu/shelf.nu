@@ -1,3 +1,14 @@
+/**
+ * Check-in confirmation for a booking.
+ *
+ * Every check-in goes through this dialog, so a single click can never
+ * complete a booking. It also owns the early check-in rule: more than 15
+ * minutes before the end, the user picks whether the end date moves to now.
+ *
+ * @see {@link file://./checkin-dropdown.tsx} the booking header's Check-in menu
+ * @see {@link file://./bulk-partial-checkin-dialog.tsx} final partial check-in
+ * @see {@link file://../scanner/drawer/uses/partial-checkin-drawer.tsx} scanner
+ */
 import type { Booking } from "@prisma/client";
 import { Zap } from "lucide-react";
 import { useDisabled } from "~/hooks/use-disabled";
@@ -49,6 +60,17 @@ type CheckinDialogProps = {
   fullWidth?: boolean;
 };
 
+/**
+ * Trigger button plus "Check in booking" dialog. The dialog submits
+ * `formId` with `intent` and, depending on timing:
+ *
+ * - not early: no `checkinIntentChoice`, the end date is kept
+ * - early, after the start: "Don't Adjust Date" or "Adjust Date"
+ * - early, before the start: `without-adjusted-date`, because the end date
+ *   cannot move to a time before the start
+ *
+ * @param props - See {@link CheckinDialogProps}
+ */
 export default function CheckinDialog({
   disabled,
   booking,

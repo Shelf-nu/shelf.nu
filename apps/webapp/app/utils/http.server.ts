@@ -2,6 +2,7 @@
 import { data, type Params } from "react-router";
 import { parseFormAny } from "react-zorm";
 import type { ZodType } from "zod";
+import { isSelfReferer } from "./cancel-destination";
 import { sendNotification } from "./emitter/send-notification.server";
 import { SERVER_URL, URL_SHORTENER } from "./env";
 import type { Options } from "./error";
@@ -73,8 +74,8 @@ export function getRefererPath(request: Request): string | null {
  * Referer is that same page. Returning there after a save is never where the
  * user came from, and the stale query string can preselect values the user
  * never saved. Only the pathname is compared, so a filtered list
- * (`/assets?search=x`) is still a valid destination from `/assets/new`. This
- * is the server-side twin of `resolveCancelTo` in `~/utils/cancel-destination`.
+ * (`/assets?search=x`) is still a valid destination from `/assets/new`. The
+ * comparison is `isSelfReferer`, shared with `resolveCancelTo`.
  *
  * @param request - The request object
  * @returns The referer's pathname + search, or `null` when it is missing,
@@ -82,12 +83,7 @@ export function getRefererPath(request: Request): string | null {
  */
 export function getRefererPathExcludingSelf(request: Request): string | null {
   const refererPath = getRefererPath(request);
-  if (!refererPath) {
-    return null;
-  }
-
-  const [refererPathname] = refererPath.split("?");
-  if (refererPathname === new URL(request.url).pathname) {
+  if (!refererPath || isSelfReferer(refererPath, getCurrentPath(request))) {
     return null;
   }
 

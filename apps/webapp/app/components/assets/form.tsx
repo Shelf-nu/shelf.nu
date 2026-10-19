@@ -503,13 +503,11 @@ export const AssetForm = ({
   /**
    * Where Cancel goes. The referer is best-effort and unusable in three
    * separate cases (absent prop, no Referer header, and self-reference).
-   * `resolveCancelTo` owns all three — see its JSDoc.
+   * `resolveCancelTo` owns all three, see its JSDoc.
    *
-   * The self-reference guard is still load-bearing even with the snapshot
-   * above: if this form ever mounts *after* an in-route navigation, the very
-   * first value it captures is already self-referential. Worst case it falls
-   * back to the index, which is exactly the pre-snapshot behaviour, so the
-   * snapshot can only ever improve the destination, never worsen it.
+   * The asset loaders already drop a self-referer, so the guard here is a
+   * fallback for any caller that passes one: the destination becomes the
+   * asset (or the index), never the form itself.
    */
   const cancelTo = resolveCancelTo({
     referer: initialReferer,
