@@ -91,8 +91,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     // Optional asset scope, set by the "View all audits" link on an asset.
     // An empty value is ignored. The asset must belong to this workspace;
-    // the title feeds the filter chip.
-    const assetIdParam = searchParams.get("assetId")?.trim();
+    // the title feeds the filter chip. Only callers who see every audit may
+    // scope by asset (the same rule as the last audit date column); for
+    // anyone else the parameter is ignored, so it cannot reveal an asset's
+    // name or existence outside their own asset scope.
+    const assetIdParam = access.audits.seeAll
+      ? searchParams.get("assetId")?.trim()
+      : undefined;
     let assetFilter: { id: string; title: string } | null = null;
     if (assetIdParam) {
       const asset = await db.asset.findFirst({

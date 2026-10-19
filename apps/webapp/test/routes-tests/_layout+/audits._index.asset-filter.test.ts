@@ -3,7 +3,9 @@
  *
  * `/audits?assetId=<id>` lists one asset's audits, archived ones included. The
  * asset must belong to the caller's workspace; a foreign id is a 404 that
- * reveals nothing about the asset.
+ * reveals nothing about the asset. Only callers who see every audit may scope
+ * by asset; for anyone else the parameter is ignored, so it cannot reveal an
+ * asset's name or existence.
  *
  * @see {@link file://../../../app/routes/_layout+/audits._index.tsx}
  */
@@ -130,4 +132,28 @@ describe("audits index loader asset filter", () => {
     expect(db.asset.findFirst).not.toHaveBeenCalled();
     expect(r.data).toMatchObject({ assetFilter: null });
   });
+
+  it.each(["BASE", "SELF_SERVICE"] as const)(
+    "ignores assetId for a %s caller who cannot see every audit",
+    async (role) => {
+      vi.mocked(requirePermission).mockResolvedValue(
+        permissionContext({ roles: [role] }) as unknown as Awaited<
+          ReturnType<typeof requirePermission>
+        >
+      );
+
+      const r = await load("?assetId=asset-1");
+
+      expect(r.status).toBe(200);
+      expect(db.asset.findFirst).not.toHaveBeenCalled();
+      expect(r.data).toMatchObject({ assetFilter: null });
+      expect(getAuditsForOrganization).toHaveBeenCalledWith(
+        expect.objectContaining({
+          assignedOnly: true,
+          assetId: null,
+          includeArchived: false,
+        })
+      );
+    }
+  );
 });
