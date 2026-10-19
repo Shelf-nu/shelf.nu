@@ -2600,6 +2600,17 @@ export async function getAuditsForOrganization(params: {
    * webapp uses its own column-sort UI.
    */
   prioritizeDeadlines?: boolean;
+  /**
+   * Restricts the result to audits whose expected or scanned assets include
+   * this asset. The caller must already have verified the asset belongs to
+   * `organizationId`.
+   */
+  assetId?: string | null;
+  /**
+   * Keeps ARCHIVED audits in the result when no explicit `status` is given.
+   * Off by default so every other list keeps hiding archived audits.
+   */
+  includeArchived?: boolean;
 }) {
   const {
     organizationId,
@@ -2613,6 +2624,8 @@ export async function getAuditsForOrganization(params: {
     orderDirection = "desc",
     assignedToUserId,
     prioritizeDeadlines = false,
+    assetId,
+    includeArchived = false,
   } = params;
 
   // why: a caller limited to assigned audits MUST pass `userId`: without it
@@ -2655,10 +2668,16 @@ export async function getAuditsForOrganization(params: {
       ];
     }
 
-    // Add status filter — exclude ARCHIVED by default when no filter is set
+    // Only audits that list this asset (expected or scanned)
+    if (assetId) {
+      where.assets = { some: { assetId } };
+    }
+
+    // An explicit status always wins. With none, ARCHIVED audits are hidden
+    // unless the caller opts in through `includeArchived`.
     if (status) {
       where.status = status;
-    } else {
+    } else if (!includeArchived) {
       where.status = { notIn: [AuditStatus.ARCHIVED] };
     }
 

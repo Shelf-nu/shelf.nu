@@ -7,7 +7,7 @@ import {
   isAuditCompleted,
 } from "@shelf/labels";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
-import { data, useLoaderData } from "react-router";
+import { data, Link, useLoaderData } from "react-router";
 import { DescriptionColumn } from "~/components/assets/assets-index/advanced-asset-columns";
 import AuditIndexBulkActionsDropdown from "~/components/audit/audit-index-bulk-actions-dropdown";
 import { AuditStatusBadgeWithOverdue } from "~/components/audit/audit-status-badge-with-overdue";
@@ -23,9 +23,12 @@ import { SortBy } from "~/components/list/filters/sort-by";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
 import { EmptyTableValue } from "~/components/shared/empty-table-value";
+import { iconsMap } from "~/components/shared/icons-map";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { UserBadge } from "~/components/shared/user-badge";
 import { Td, Th } from "~/components/table";
+import { db } from "~/database/db.server";
+import { useSearchParams } from "~/hooks/search-params";
 import type { AUDIT_LIST_INCLUDE } from "~/modules/audit/service.server";
 import { getAuditsForOrganization } from "~/modules/audit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -34,7 +37,7 @@ import {
   updateCookieWithPerPage,
   userPrefs,
 } from "~/utils/cookies.server";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import { payload, error, getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import {
@@ -86,6 +89,29 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const orderDirection = (searchParams.get("orderDirection") ??
       "desc") as SortingDirection;
 
+    // Optional asset scope, set by the "View all audits" link on an asset.
+    // An empty value is ignored. The asset must belong to this workspace;
+    // the title feeds the filter chip.
+    const assetIdParam = searchParams.get("assetId")?.trim();
+    let assetFilter: { id: string; title: string } | null = null;
+    if (assetIdParam) {
+      const asset = await db.asset.findFirst({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: audit history applies to archived assets too
+        where: { id: assetIdParam, organizationId },
+        select: { id: true, title: true },
+      });
+      if (!asset) {
+        throw new ShelfError({
+          cause: null,
+          message: "The asset to filter by could not be found.",
+          label: "Audit",
+          status: 404,
+          shouldBeCaptured: false,
+        });
+      }
+      assetFilter = asset;
+    }
+
     const { audits, totalAudits } = await getAuditsForOrganization({
       organizationId,
       userId,
@@ -96,6 +122,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       status,
       orderBy,
       orderDirection,
+      assetId: assetFilter?.id ?? null,
+      // An asset's history includes archived audits; an explicit status
+      // selection keeps its usual meaning.
+      includeArchived: Boolean(assetFilter) && !status,
     });
 
     const totalPages = Math.ceil(totalAudits / perPage);
@@ -119,6 +149,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         totalPages,
         perPage,
         modelName,
+        assetFilter,
         canCreateAudits: roleHasPermission({
           roles,
           entity: PermissionEntity.audit,
@@ -152,11 +183,13 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 export type AuditsIndexLoaderData = typeof loader;
 
 export default function AuditsIndexPage() {
-  const { canCreateAudits, canBulkActAudits } = useLoaderData<typeof loader>();
+  const { canCreateAudits, canBulkActAudits, assetFilter } =
+    useLoaderData<typeof loader>();
   return (
     <>
       <Header>{canCreateAudits && <NewAuditInfoDialog />}</Header>
       <ListContentWrapper>
+        <AssetFilterChip title={assetFilter?.title ?? null} />
         <Filters
           slots={{
             "left-of-search": (
@@ -225,6 +258,40 @@ export default function AuditsIndexPage() {
         />
       </ListContentWrapper>
     </>
+  );
+}
+
+/**
+ * Removable chip showing the asset the audits list is scoped to. The link
+ * keeps every other search param and drops `assetId` (and `page`, which no
+ * longer applies to the wider list).
+ *
+ * Renders nothing when `title` is null, so it can sit directly inside
+ * `ListContentWrapper`, which only accepts element children.
+ *
+ * @param props.title - The filtered asset's title, or null when unscoped
+ */
+function AssetFilterChip({ title }: { title: string | null }) {
+  const [searchParams] = useSearchParams();
+  if (title === null) return <></>;
+  const next = new URLSearchParams(searchParams);
+  next.delete("assetId");
+  next.delete("page");
+  const query = next.toString();
+
+  return (
+    <div className="mb-3 flex">
+      <span className="inline-flex max-w-full items-center gap-1 rounded-full border border-gray-300 bg-gray-50 py-1 pl-3 pr-2 text-sm text-gray-700">
+        <span className="truncate">Asset: {title}</span>
+        <Link
+          to={query ? `?${query}` : "."}
+          aria-label="Remove asset filter"
+          className="inline-flex size-5 items-center justify-center rounded-full text-gray-500 hover:bg-gray-200 hover:text-gray-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+        >
+          {iconsMap.x}
+        </Link>
+      </span>
+    </div>
   );
 }
 
