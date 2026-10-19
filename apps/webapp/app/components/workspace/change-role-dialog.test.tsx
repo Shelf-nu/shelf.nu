@@ -12,6 +12,11 @@ import { OrganizationRoles } from "@prisma/client";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  ROLE_DESCRIPTIONS,
+  ROLES_HELP_URL,
+} from "~/utils/permissions/role-access";
+
 import { ChangeRoleDialog } from "./change-role-dialog";
 
 /** Whether the viewer owns the workspace, per case. */
@@ -38,8 +43,8 @@ vi.mock("~/hooks/use-role-access", () => ({
   useRoleAccess: () => ({ ownsWorkspace: viewer.ownsWorkspace }),
 }));
 
-/** Opens the role picker and returns the labels it offers. */
-function offeredRoles() {
+/** Opens the role picker and returns the options it offers. */
+function openRolePicker() {
   render(
     <ChangeRoleDialog
       userId="member-1"
@@ -50,7 +55,14 @@ function offeredRoles() {
     />
   );
   fireEvent.click(document.getElementById("role-select")!);
-  return screen.getAllByRole("option").map((option) => option.textContent);
+  return screen.getAllByRole("option");
+}
+
+/** Opens the role picker and returns the role names it offers. */
+function offeredRoles() {
+  return openRolePicker().map(
+    (option) => option.querySelector("span")?.textContent
+  );
 }
 
 describe("ChangeRoleDialog role options", () => {
@@ -60,6 +72,19 @@ describe("ChangeRoleDialog role options", () => {
 
   it("does not offer Administrator to an administrator", () => {
     expect(offeredRoles()).toEqual(["Manager", "Self service", "Base"]);
+  });
+
+  it("explains each role under its name and links to the roles article", () => {
+    const options = openRolePicker();
+
+    expect(options.map((option) => option.textContent)).toEqual([
+      `Manager${ROLE_DESCRIPTIONS.MANAGER}`,
+      `Self service${ROLE_DESCRIPTIONS.SELF_SERVICE}`,
+      `Base${ROLE_DESCRIPTIONS.BASE}`,
+    ]);
+    expect(
+      screen.getByRole("link", { name: "Learn more about roles" })
+    ).toHaveAttribute("href", ROLES_HELP_URL);
   });
 
   it("offers Administrator to the workspace owner", () => {

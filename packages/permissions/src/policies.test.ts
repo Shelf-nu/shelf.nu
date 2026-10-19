@@ -16,7 +16,7 @@ import {
 } from "./policies";
 import { resolveRole } from "./resolve-role";
 import { roleHasPermission } from "./resolver";
-import { ORGANIZATION_ROLES, ROLE_LABELS } from "./roles";
+import { ORGANIZATION_ROLES, ROLE_DESCRIPTIONS, ROLE_LABELS } from "./roles";
 
 describe("ROLE_POLICIES", () => {
   test("every role has a policy with a unique rank", () => {
@@ -86,6 +86,27 @@ describe("ROLE_POLICIES", () => {
       SELF_SERVICE: "Self service",
       BASE: "Base",
     });
+  });
+
+  test("every role has a one-sentence description", () => {
+    for (const role of ORGANIZATION_ROLES) {
+      const description = ROLE_DESCRIPTIONS[role];
+      assert.ok(description.length > 0, `${role} has no description`);
+      // One sentence: a single full stop, at the end.
+      assert.ok(
+        description.endsWith("."),
+        `${role} description must end with a full stop`
+      );
+      assert.equal(
+        description.indexOf("."),
+        description.length - 1,
+        `${role} description must be a single sentence`
+      );
+      assert.ok(
+        !/[\u2013\u2014]/.test(description),
+        `${role} description must not use a dash`
+      );
+    }
   });
 
   test("the Manager reaches every booking, custody and audit, like an Administrator", () => {

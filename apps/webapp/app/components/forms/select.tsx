@@ -157,10 +157,18 @@ const SelectLabel = React.forwardRef<
   );
 });
 
+type SelectItemProps = ComponentPropsWithoutRef<typeof SelectPrimitive.Item> & {
+  /**
+   * A second line under the item's text. Rendered outside the item text, so
+   * the trigger shows only `children` once the item is chosen.
+   */
+  description?: React.ReactNode;
+};
+
 const SelectItem = React.forwardRef<
   ElementRef<typeof SelectPrimitive.Item>,
-  ComponentPropsWithoutRef<typeof SelectPrimitive.Item>
->(function SelectItem({ className, children, ...props }, ref) {
+  SelectItemProps
+>(function SelectItem({ className, children, description, ...props }, ref) {
   return (
     <SelectPrimitive.Item
       ref={ref}
@@ -171,7 +179,14 @@ const SelectItem = React.forwardRef<
       {...props}
     >
       <div className="flex w-full items-center justify-between">
-        <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
+        <div className="flex min-w-0 flex-col">
+          <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
+          {description ? (
+            <span className="text-xs font-normal text-gray-500">
+              {description}
+            </span>
+          ) : null}
+        </div>
 
         <span className="mr-[10px] flex size-3.5 h-auto w-[18px] items-center justify-center text-primary">
           <SelectPrimitive.ItemIndicator>

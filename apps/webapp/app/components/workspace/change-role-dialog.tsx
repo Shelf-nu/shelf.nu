@@ -17,7 +17,12 @@ import {
   roleChangeTransfers,
 } from "~/utils/permissions/membership-access";
 import type { OrganizationRole } from "~/utils/permissions/role-access";
-import { INVITABLE_ROLES, ROLE_LABELS } from "~/utils/permissions/role-access";
+import {
+  INVITABLE_ROLES,
+  ROLE_DESCRIPTIONS,
+  ROLE_LABELS,
+  ROLES_HELP_URL,
+} from "~/utils/permissions/role-access";
 import { tw } from "~/utils/tw";
 import { Button } from "../shared/button";
 import {
@@ -318,12 +323,25 @@ export function ChangeRoleDialog({
                             dispatch({ type: "selectRole", role: k })
                           )}
                         >
-                          {ROLE_LABELS[k]}
+                          <span className="block text-gray-900">
+                            {ROLE_LABELS[k]}
+                          </span>
+                          <span className="block text-xs font-normal text-gray-500">
+                            {ROLE_DESCRIPTIONS[k]}
+                          </span>
                         </div>
                       ))}
                     </PopoverContent>
                   </PopoverPortal>
                 </Popover>
+                <a
+                  href={ROLES_HELP_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-1 inline-block text-sm font-semibold text-primary-700 hover:text-primary-800"
+                >
+                  Learn more about roles
+                </a>
 
                 {showDemotion ? (
                   <div className="mt-4 rounded-md border border-warning-200 bg-warning-25 p-3">
