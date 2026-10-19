@@ -511,3 +511,41 @@ test("a scanned kit's active members decide its custody and availability flags",
   assert.equal(facts.hasUnavailableAssets, true);
   assert.equal(facts.archivedAssetCount, undefined);
 });
+
+test("booking_add lets a quantity-tracked asset the booking holds through", () => {
+  // Re-scanning it sets the booking's new total for the asset; the server
+  // resizes the held slice rather than inserting a second one.
+  const held = quantityRow({ targetId: "asset-q" });
+  const booked: BookingBlockerContext = {
+    ...ctx,
+    bookedAssetIds: new Set(["asset-q"]),
+  };
+  assert.deepEqual(computeBlockers("booking_add", [held], booked), []);
+});
+
+test("booking_add still blocks an individual asset the booking holds", () => {
+  const held = asset({ targetId: "asset-a" });
+  const booked: BookingBlockerContext = {
+    ...ctx,
+    bookedAssetIds: new Set(["asset-a"]),
+  };
+  assert.deepEqual(
+    computeBlockers("booking_add", [held], booked).map((g) => g.key),
+    ["asset-already-in-booking"]
+  );
+});
+
+test("booking_fulfil still blocks a quantity-tracked asset the booking holds", () => {
+  // Fulfil assigns scanned units to reservations and sends no quantity, so a
+  // held asset is not a resize there.
+  const held = quantityRow({ targetId: "asset-q" });
+  const booked: BookingBlockerContext = {
+    ...ctx,
+    bookedAssetIds: new Set(["asset-q"]),
+  };
+  assert.ok(
+    computeBlockers("booking_fulfil", [held], booked).some(
+      (g) => g.key === "asset-already-in-booking"
+    )
+  );
+});
