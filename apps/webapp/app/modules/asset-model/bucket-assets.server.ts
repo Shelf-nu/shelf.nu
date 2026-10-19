@@ -28,7 +28,7 @@ import { AssetType } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
 import { data } from "react-router";
 import { db } from "~/database/db.server";
-import { resolveLastAuditDateAccess } from "~/modules/asset/last-audit-date-access";
+import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
 import {
   bookableListScopeWhere,
   resolveBookableListScope,
@@ -51,7 +51,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { canUseAudits } from "~/utils/subscription.server";
 import { applyAssetModelBucketFilters } from "./bucket";
 import type { AssetModelBucket } from "./bucket";
 import {
@@ -253,10 +252,10 @@ export async function loadAssetModelBucketAssets({
         honorArchivedView,
         // Same rule as the index loader, so a forwarded `lastAuditDate`
         // filter is honoured only where the index itself would honour it.
-        lastAuditDateAccess: resolveLastAuditDateAccess({
-          seeAllAudits: access.audits.seeAll,
-          auditsUsable: canUseAudits(currentOrganization),
-        }),
+        lastAuditDateAccess: lastAuditDateAccessFor(
+          access,
+          currentOrganization
+        ),
       });
 
     // Only an empty sheet has a use for this, and only an empty sheet pays for

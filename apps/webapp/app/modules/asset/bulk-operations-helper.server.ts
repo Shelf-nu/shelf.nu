@@ -3,6 +3,11 @@ import { Prisma } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import { getParamsValues, ALL_SELECTED_KEY } from "~/utils/list";
+import {
+  LAST_AUDIT_DATE_COLUMN,
+  canQueryLastAuditDate,
+} from "./last-audit-date-access";
+import type { LastAuditDateAccess } from "./last-audit-date-access";
 import type { BookableListScope } from "./list-scope.server";
 import { generateWhereClause, parseFiltersWithHierarchy } from "./query.server";
 import type { AllowedCustodianFilterIds } from "./utils.server";
@@ -76,6 +81,8 @@ export function buildAdvancedFilteredAssetIdsQuery(
  *   day in the user's tz (avoids an off-by-one). Defaults to "UTC".
  * @param honorArchivedView - Apply the `?archived=` view; otherwise active
  *   assets only. See {@link resolveAssetIdsForBulkOperation}.
+ * @param lastAuditDateAccess - How the caller may use the last audit date. A
+ *   `lastAuditDate` filter without `available` access refuses the selection.
  * @returns Promise resolving to array of asset IDs matching the filters
  */
 async function getAdvancedFilteredAssetIds({
@@ -85,6 +92,7 @@ async function getAdvancedFilteredAssetIds({
   bookableScope = null,
   timeZone = "UTC",
   honorArchivedView = false,
+  lastAuditDateAccess,
 }: {
   organizationId: string;
   filters: string;
@@ -92,6 +100,7 @@ async function getAdvancedFilteredAssetIds({
   bookableScope?: BookableListScope | null;
   timeZone?: string;
   honorArchivedView?: boolean;
+  lastAuditDateAccess: LastAuditDateAccess;
 }): Promise<string[]> {
   try {
     const searchParams = new URLSearchParams(filters);
@@ -107,6 +116,16 @@ async function getAdvancedFilteredAssetIds({
       settingColumns,
       organizationId
     );
+
+    // A last audit date filter from a caller who may not query it would turn
+    // "select all" into an audit-date oracle. Refuse the whole selection;
+    // dropping the filter would widen the bulk action beyond what was shown.
+    if (
+      !canQueryLastAuditDate(lastAuditDateAccess) &&
+      parsedFilters.some((f) => f.name === LAST_AUDIT_DATE_COLUMN)
+    ) {
+      return [];
+    }
 
     // Generate WHERE clause (reuses existing logic)
     const whereClause = generateWhereClause(
@@ -156,6 +175,7 @@ async function getAdvancedFilteredAssetIds({
  * @param timeZone - Acting user's IANA timezone; forwarded to the advanced
  *   filter query so built-in date-column filters truncate the day in the
  *   user's tz (avoids an off-by-one). Defaults to "UTC".
+ * @param lastAuditDateAccess - How the caller may use the last audit date
  * @returns Promise resolving to array of asset IDs to operate on
  *
  * @example
@@ -185,6 +205,7 @@ export async function resolveAssetIdsForBulkOperation({
   settings,
   timeZone = "UTC",
   allowedTeamMemberIds,
+  lastAuditDateAccess,
   honorArchivedView = false,
 }: {
   assetIds: Asset["id"][];
@@ -208,6 +229,13 @@ export async function resolveAssetIdsForBulkOperation({
    * read back exactly which assets a named colleague holds.
    */
   allowedTeamMemberIds: AllowedCustodianFilterIds;
+  /**
+   * How the caller may use the last audit date. Required, with no default, for
+   * the same reason as `allowedTeamMemberIds`: "select all" resolves through
+   * caller-supplied filters, and an audit date filter would reveal audit data
+   * to a caller who may not see it. Resolve it with `lastAuditDateAccessFor`.
+   */
+  lastAuditDateAccess: LastAuditDateAccess;
 }): Promise<string[]> {
   // Case 1: Specific selection - return IDs as-is
   if (!assetIds.includes(ALL_SELECTED_KEY)) {
@@ -246,6 +274,7 @@ export async function resolveAssetIdsForBulkOperation({
       settings,
       timeZone,
       honorArchivedView,
+      lastAuditDateAccess,
     });
   } else {
     // SIMPLE MODE: Use simple where clause

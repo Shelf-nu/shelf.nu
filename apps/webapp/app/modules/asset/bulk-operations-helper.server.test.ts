@@ -94,6 +94,7 @@ describe("resolveAssetIdsForBulkOperation - timezone forwarding", () => {
     const tokyoIds = await resolveAssetIdsForBulkOperation({
       // Not the subject of these tests; the narrowing has its own suite.
       allowedTeamMemberIds: "all" as const,
+      lastAuditDateAccess: "available" as const,
       assetIds: [ALL_SELECTED_KEY],
       organizationId: "org-1",
       currentSearchParams: "createdAt=is:2026-07-20",
@@ -104,6 +105,7 @@ describe("resolveAssetIdsForBulkOperation - timezone forwarding", () => {
     const utcIds = await resolveAssetIdsForBulkOperation({
       // Not the subject of these tests; the narrowing has its own suite.
       allowedTeamMemberIds: "all" as const,
+      lastAuditDateAccess: "available" as const,
       assetIds: [ALL_SELECTED_KEY],
       organizationId: "org-1",
       currentSearchParams: "createdAt=is:2026-07-20",
@@ -126,6 +128,7 @@ describe("resolveAssetIdsForBulkOperation - timezone forwarding", () => {
     const ids = await resolveAssetIdsForBulkOperation({
       // Not the subject of these tests; the narrowing has its own suite.
       allowedTeamMemberIds: "all" as const,
+      lastAuditDateAccess: "available" as const,
       assetIds: [ALL_SELECTED_KEY],
       organizationId: "org-1",
       currentSearchParams: "createdAt=is:2026-07-20",
@@ -134,6 +137,77 @@ describe("resolveAssetIdsForBulkOperation - timezone forwarding", () => {
 
     expect(capturedQueries[0]?.values).toContain("UTC");
     expect(ids).toEqual(["utc-only-asset"]);
+  });
+});
+
+describe("resolveAssetIdsForBulkOperation - lastAuditDate gating", () => {
+  const capturedQueries: Prisma.Sql[] = [];
+
+  const lastAuditFilter: Filter = {
+    name: "lastAuditDate",
+    type: "date",
+    operator: "before",
+    value: "2026-01-01",
+  };
+
+  const resolve = (
+    lastAuditDateAccess: "available" | "locked" | "hidden",
+    currentSearchParams: string
+  ) =>
+    resolveAssetIdsForBulkOperation({
+      // Not the subject of these tests; the narrowing has its own suite.
+      allowedTeamMemberIds: "all" as const,
+      lastAuditDateAccess,
+      assetIds: [ALL_SELECTED_KEY],
+      organizationId: "org-1",
+      currentSearchParams,
+      settings: advancedSettings,
+    });
+
+  beforeEach(() => {
+    capturedQueries.length = 0;
+    vi.mocked(db.$queryRaw).mockImplementation(((query: Prisma.Sql) => {
+      capturedQueries.push(query);
+      return Promise.resolve([{ id: "asset-1" }]);
+    }) as unknown as typeof db.$queryRaw);
+  });
+
+  it("refuses a lastAuditDate select-all when access is hidden", async () => {
+    vi.mocked(parseFiltersWithHierarchy).mockResolvedValue([lastAuditFilter]);
+
+    const ids = await resolve("hidden", "lastAuditDate=before:2026-01-01");
+
+    expect(ids).toEqual([]);
+    expect(capturedQueries).toHaveLength(0);
+  });
+
+  it("refuses a lastAuditDate select-all when access is locked", async () => {
+    vi.mocked(parseFiltersWithHierarchy).mockResolvedValue([lastAuditFilter]);
+
+    const ids = await resolve("locked", "lastAuditDate=before:2026-01-01");
+
+    expect(ids).toEqual([]);
+    expect(capturedQueries).toHaveLength(0);
+  });
+
+  it("applies the lastAuditDate filter when access is available", async () => {
+    vi.mocked(parseFiltersWithHierarchy).mockResolvedValue([lastAuditFilter]);
+
+    const ids = await resolve("available", "lastAuditDate=before:2026-01-01");
+
+    expect(ids).toEqual(["asset-1"]);
+    expect(capturedQueries[0]?.strings.join("?")).toContain('"completedAt"');
+  });
+
+  it("still resolves a select-all without a lastAuditDate filter when hidden", async () => {
+    vi.mocked(parseFiltersWithHierarchy).mockResolvedValue([createdAtFilter]);
+
+    const ids = await resolve("hidden", "createdAt=is:2026-07-20");
+
+    expect(ids).toEqual(["asset-1"]);
+    expect(capturedQueries[0]?.strings.join("?")).not.toContain(
+      '"completedAt"'
+    );
   });
 });
 

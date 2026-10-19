@@ -24,6 +24,7 @@ import {
   advancedModeLoader,
   simpleModeLoader,
 } from "~/modules/asset/data.server";
+import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
 import { bulkDeleteAssets } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import {
@@ -194,7 +195,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
       "toggle-star-preset": PermissionAction.read,
     };
 
-    const { organizationId, canUseBarcodes, role } = await requirePermission({
+    const {
+      organizationId,
+      canUseBarcodes,
+      role,
+      access,
+      currentOrganization,
+    } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
@@ -230,6 +237,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
           userId,
           currentSearchParams,
           settings,
+          lastAuditDateAccess: lastAuditDateAccessFor(
+            access,
+            currentOrganization
+          ),
           confirmation,
           timeZone,
         });

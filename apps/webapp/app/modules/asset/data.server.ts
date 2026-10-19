@@ -36,15 +36,15 @@ import {
 } from "~/utils/permissions/permission.data";
 import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import type { RoleAccess } from "~/utils/permissions/role-access";
-import { canImportAssets, canUseAudits } from "~/utils/subscription.server";
+import { canImportAssets } from "~/utils/subscription.server";
 import type { UserNameFields } from "~/utils/user";
 import { resolveUserDisplayName } from "~/utils/user";
 import {
   LAST_AUDIT_DATE_COLUMN,
   canQueryLastAuditDate,
-  resolveLastAuditDateAccess,
   stripHiddenAuditColumns,
 } from "./last-audit-date-access";
+import { lastAuditDateAccessFor } from "./last-audit-date-access.server";
 import { resolveBookableListScope } from "./list-scope.server";
 import type { BookableListScope } from "./list-scope.server";
 import { getStillOutBookingRowsByAsset } from "./quantity-breakdown.server";
@@ -714,10 +714,10 @@ export async function advancedModeLoader({
 
   // The last audit date follows audit visibility and availability. Strip the
   // column before anything parses filters or renders columns from the settings.
-  const lastAuditDateAccess = resolveLastAuditDateAccess({
-    seeAllAudits: access.audits.seeAll,
-    auditsUsable: canUseAudits(currentOrganization),
-  });
+  const lastAuditDateAccess = lastAuditDateAccessFor(
+    access,
+    currentOrganization
+  );
   const settings: AssetIndexSettings = {
     ...loadedSettings,
     columns: stripHiddenAuditColumns(
