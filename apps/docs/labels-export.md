@@ -6,7 +6,7 @@ The URL is stable. It depends only on the code's id and the server's shortener s
 
 Where it is exported:
 
-- **Asset index CSV export** (simple and advanced mode, selection or select-all): a `QR URL` column right after `QR ID`, shown whenever `QR ID` is. Empty for an asset without a code. The import-ready export has no QR columns.
+- **Asset index CSV export** (Export selection, advanced mode only: simple mode has no export button; picked rows or select-all, visible or all columns): a `QR URL` column right after `QR ID`, shown whenever `QR ID` is. Empty for an asset without a code. The import-ready export has no QR columns.
 - **Asset Inventory report CSV**: a `QR Code URL` column after `QR Code ID`.
 - **Bulk QR download zip** (selected assets): a `labels.csv` at the zip root with `Asset name, SAM ID, QR ID, QR URL, Category, Location`, one row per asset, UTF-8 with BOM. A missing category or location is an empty cell, not "Uncategorized", so nothing stray prints on a label. A name starting with `=`, `+`, `-` or `@` gets a leading `'` so spreadsheets do not run it as a formula. The images are unchanged.
 
