@@ -8,18 +8,21 @@
  *    Ownership moves only through `transferOwnership`. Callers validate their
  *    input first, but the guard refuses these itself so a caller that forgets
  *    cannot write an OWNER invite.
- * 2. A role whose policy says `membership.changeRequiresOwner`, when the actor
+ * 2. A role whose policy says `membership.inviteRequiresOwner`, when the actor
  *    is not the workspace owner.
+ *
+ * Role changes on existing members follow `membership.changeRequiresOwner`
+ * instead, in `changeUserRole`.
  *
  * The check runs before any read or write, so a refused request leaves no
  * trace.
  *
- * @see {@link file://./membership-access.ts} canAssignRole
+ * @see {@link file://./membership-access.ts} canInviteRole
  * @see {@link file://./../../modules/invite/service.server.ts}
  * @see {@link file://./../../modules/user/utils.server.ts}
  */
 import { ShelfError } from "~/utils/error";
-import { canAssignRole } from "./membership-access";
+import { canInviteRole } from "./membership-access";
 import type { OrganizationRole } from "./role-access";
 import { INVITABLE_ROLES, ROLE_LABELS } from "./role-access";
 
@@ -61,7 +64,7 @@ export function assertCanAssignRoles({
   }
 
   const refused = uniqueRoles.filter(
-    (role) => !canAssignRole({ actorOwnsWorkspace, role })
+    (role) => !canInviteRole({ actorOwnsWorkspace, role })
   );
   if (refused.length === 0) return;
 
