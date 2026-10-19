@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Asset, Barcode, Qr } from "@prisma/client";
 import { AssetType, ConsumptionType } from "@prisma/client";
 import {
@@ -372,6 +372,17 @@ const AssetFormInner = ({
 
   /** The form element, shared by Zorm and the unsaved-changes tracking. */
   const { formRef, setFormRef } = useTrackedFormRef(zo.ref);
+
+  // Zorm stops the submit when client validation fails, so a rejected Save
+  // otherwise looks like nothing happened when the failing field (often a
+  // required custom field at the bottom) sits below the fold. Bring the
+  // first rendered error message into view instead. Every field error in
+  // this form renders through the `text-error-500` message element.
+  useEffect(() => {
+    if (zo.validation?.success !== false) return;
+    const firstError = formRef.current?.querySelector(".text-error-500");
+    firstError?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [zo.validation, formRef]);
 
   // Focus the asset Title field on mount so create/edit pages start
   // ready for typing instead of relying on the removed autoFocus prop.

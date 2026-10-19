@@ -130,7 +130,11 @@ export default function AssetCustomFields({
           </span>
         </label>
 
-        <OptionSelect field={field} getCustomFieldVal={getCustomFieldVal} />
+        <OptionSelect
+          field={field}
+          getCustomFieldVal={getCustomFieldVal}
+          error={getFieldError(field.id)}
+        />
       </>
     ),
     MULTILINE_TEXT: (field) => {
@@ -296,13 +300,24 @@ export default function AssetCustomFields({
   );
 }
 
-/** Component that renders select for CustomField OPTION fields */
+/**
+ * Component that renders select for CustomField OPTION fields.
+ *
+ * The value travels in a hidden input, so the browser never flags it as
+ * invalid on its own: the validation message has to be rendered here,
+ * under the trigger, or a required option field that is left empty blocks
+ * the save with nothing on screen to explain why.
+ *
+ * @param error - Validation message for this field, shown under the trigger
+ */
 function OptionSelect({
   field,
   getCustomFieldVal,
+  error,
 }: {
   field: CustomField;
   getCustomFieldVal: (id: string) => string;
+  error?: string;
 }) {
   // State for popover, search, selection
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
@@ -373,8 +388,13 @@ function OptionSelect({
           <Button
             type="button"
             variant="secondary"
-            className="w-full justify-start truncate whitespace-nowrap font-normal [&_span]:w-full [&_span]:max-w-full [&_span]:truncate [&_span]:text-left"
+            className={tw(
+              "w-full justify-start truncate whitespace-nowrap font-normal [&_span]:w-full [&_span]:max-w-full [&_span]:truncate [&_span]:text-left",
+              error && "border-error-300 focus:border-error-300"
+            )}
             ref={triggerRef}
+            aria-invalid={error ? true : undefined}
+            aria-describedby={error ? `cf-${field.id}-error` : undefined}
           >
             <div className="flex w-full items-center justify-between">
               <span className={value === "" ? "text-gray-500" : ""}>
@@ -449,6 +469,11 @@ function OptionSelect({
           </PopoverContent>
         </PopoverPortal>
       </Popover>
+      {error ? (
+        <div id={`cf-${field.id}-error`} className="text-sm text-error-500">
+          {error}
+        </div>
+      ) : null}
     </>
   );
 }
