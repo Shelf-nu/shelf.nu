@@ -5,6 +5,7 @@ import {
 } from "@remix-run/form-data-parser";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { stripHiddenAuditColumns } from "~/modules/asset/last-audit-date-access";
 import {
   buildCsvExportDataFromAssets,
   buildCsvExportDataFromBookings,
@@ -15,7 +16,8 @@ import {
 } from "~/utils/csv.server";
 import { ShelfError } from "~/utils/error";
 
-import { HARDCODED_DEFAULT_PREFS } from "./date-format";
+
+import { HARDCODED_DEFAULT_PREFS, formatDate } from "./date-format";
 
 // why: mock parseFormData to control file upload parsing in tests
 // while keeping MaxFileSizeExceededError available
@@ -487,6 +489,73 @@ describe("buildCsvExportDataFromAssets", () => {
 
     expect(headers).toEqual(['"Name"', '"Value"', '"Total value"']);
     expect(row).toEqual(['"Pens"', '"$1.00"', '"$100.00"']);
+  });
+});
+
+describe("buildCsvExportDataFromAssets last audit date", () => {
+  const organization = {
+    id: "org-1",
+    barcodesEnabled: false,
+    currency: "USD" as const,
+  };
+  const columns = [
+    { name: "name", visible: true, position: 0 },
+    { name: "lastAuditDate", visible: true, position: 1 },
+  ];
+  const build = (
+    assets: Array<{ id: string; title: string; lastAuditDate: string | null }>,
+    cols = columns
+  ) =>
+    buildCsvExportDataFromAssets({
+      assets: assets as unknown as Parameters<
+        typeof buildCsvExportDataFromAssets
+      >[0]["assets"],
+      columns: cols as Parameters<
+        typeof buildCsvExportDataFromAssets
+      >[0]["columns"],
+      currentOrganization: organization,
+      prefs: HARDCODED_DEFAULT_PREFS,
+    });
+
+  it("exports the last audit date formatted with the user's prefs", () => {
+    const iso = "2026-09-30T10:00:00.000Z";
+    const [headers, row] = build([
+      { id: "a1", title: "Pens", lastAuditDate: iso },
+    ]);
+
+    expect(headers).toEqual(['"Name"', '"Last audit date"']);
+    expect(row[1]).toBe(
+      formatValueForCsv(
+        formatDate(new Date(iso), HARDCODED_DEFAULT_PREFS, {
+          includeTime: true,
+        })
+      )
+    );
+  });
+
+  it("exports an empty value for a never-audited asset", () => {
+    const [, row] = build([{ id: "a1", title: "Pens", lastAuditDate: null }]);
+
+    expect(row[1]).toBe(formatValueForCsv(""));
+  });
+
+  it("has no Last audit date header once the column is stripped as hidden", () => {
+    const [headers] = build(
+      [{ id: "a1", title: "Pens", lastAuditDate: null }],
+      stripHiddenAuditColumns(columns, "hidden")
+    );
+
+    expect(headers).toEqual(['"Name"']);
+  });
+
+  it("keeps the column with empty values when access is locked", () => {
+    const [headers, row] = build(
+      [{ id: "a1", title: "Pens", lastAuditDate: null }],
+      stripHiddenAuditColumns(columns, "locked")
+    );
+
+    expect(headers).toEqual(['"Name"', '"Last audit date"']);
+    expect(row[1]).toBe(formatValueForCsv(""));
   });
 });
 

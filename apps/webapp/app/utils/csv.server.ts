@@ -16,6 +16,9 @@ import iconv from "iconv-lite";
 import type { BookingsList } from "~/components/booking/bookings-list-fields";
 import type { SortingDirection } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
+import { stripHiddenAuditColumns } from "~/modules/asset/last-audit-date-access";
+import type { LastAuditDateAccess } from "~/modules/asset/last-audit-date-access";
+import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
 import { getAdvancedPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import type {
   AdvancedIndexAsset,
@@ -43,6 +46,7 @@ import { calculatePartialCheckinProgress } from "~/modules/booking/utils.server"
 import { getPrimaryCustody } from "~/modules/custody/utils";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { getNrmSelectionWhere } from "~/modules/team-member/nrm-scope";
+import type { RoleAccess } from "~/utils/permissions/role-access";
 import { getAssetTotalValue } from "./asset-value";
 import { getBookingAssetCheckinLabel } from "./booking-assets";
 import { checkExhaustiveSwitch } from "./check-exhaustive-switch";
@@ -188,6 +192,11 @@ export const csvDataFromRequest = async ({ request }: { request: Request }) => {
  * @param args.timeZone - Acting user's IANA timezone; forwarded to the fetch so
  *   built-in date-column filters truncate the day in the user's tz (avoids an
  *   off-by-one). Defaults to "UTC" (import-ready export has no acting user).
+ * @param args.lastAuditDateAccess - How the last audit date may be used. The
+ *   import-ready export omits it: the date is not importable, so it is never
+ *   queried (the service defaults to `hidden`).
+ * @param args.includeHiddenColumns - Compute the last audit date even when the
+ *   column is hidden in the user's settings (the "All columns" scope).
  * @returns The full filtered asset set (no pagination when selecting all).
  */
 async function resolveExportAssets({
@@ -197,6 +206,8 @@ async function resolveExportAssets({
   currentOrganization,
   assetIndexCurrentSearchParams,
   timeZone = "UTC",
+  lastAuditDateAccess,
+  includeHiddenColumns,
 }: {
   request: Request;
   assetIds: string;
@@ -207,6 +218,8 @@ async function resolveExportAssets({
   >;
   assetIndexCurrentSearchParams: string | null;
   timeZone?: string;
+  lastAuditDateAccess?: LastAuditDateAccess;
+  includeHiddenColumns?: boolean;
 }): Promise<{ assets: AdvancedIndexAsset[] }> {
   /** Make an array of the ids and check if we have to take all */
   const ids = assetIds.split(",");
@@ -239,6 +252,8 @@ async function resolveExportAssets({
     assetIds: takeAll ? undefined : ids,
     canUseBarcodes: currentOrganization.barcodesEnabled ?? false,
     timeZone,
+    lastAuditDateAccess,
+    includeHiddenColumns,
     // The export reproduces the index view it was started from, Archived and
     // All included (issue #382). Reaching it takes `asset: export`, which only
     // ADMIN and OWNER hold, the same members who hold `asset: archive`.
@@ -266,6 +281,9 @@ async function resolveExportAssets({
  * @param args.columnScope - `"visible"` (default) exports only the columns
  *   the user currently has shown; `"all"` exports every configured column
  *   regardless of visibility.
+ * @param args.access - The caller's role access. With the workspace's audit
+ *   add-on it decides the last audit date access: `hidden` drops the column,
+ *   `locked` keeps it with empty values (it is never queried).
  * @returns The CSV file contents (CRLF-joined rows).
  */
 export async function exportAssetsFromIndexToCsv({
@@ -276,6 +294,7 @@ export async function exportAssetsFromIndexToCsv({
   currentOrganization,
   assetIndexCurrentSearchParams,
   columnScope = "visible",
+  access,
 }: {
   request: Request;
   userId: string;
@@ -283,11 +302,16 @@ export async function exportAssetsFromIndexToCsv({
   settings: AssetIndexSettings;
   currentOrganization: Pick<
     Organization,
-    "id" | "barcodesEnabled" | "currency"
+    "id" | "barcodesEnabled" | "currency" | "auditsEnabled"
   >;
   assetIndexCurrentSearchParams: string | null;
   columnScope?: ColumnScope;
+  access: RoleAccess;
 }) {
+  const lastAuditDateAccess = lastAuditDateAccessFor(
+    access,
+    currentOrganization
+  );
   // Acting user's prefs: this export was triggered by userId, so their
   // date/time preferences drive every humanized column AND the timezone the
   // built-in date-column filters resolve the day in. Resolved before the fetch
@@ -304,9 +328,16 @@ export async function exportAssetsFromIndexToCsv({
     currentOrganization,
     assetIndexCurrentSearchParams,
     timeZone: prefs.timeZone,
+    lastAuditDateAccess,
+    // "All columns" exports hidden columns too, so the date is computed even
+    // when the user has hidden it in their settings.
+    includeHiddenColumns: columnScope === "all",
   });
 
-  const baseColumns = settings.columns as Column[];
+  const baseColumns = stripHiddenAuditColumns(
+    settings.columns as Column[],
+    lastAuditDateAccess
+  );
   // "All columns" for the human export = every configured column, visible or
   // not (actions is still dropped downstream in buildCsvExportDataFromAssets).
   const scopedColumns =
