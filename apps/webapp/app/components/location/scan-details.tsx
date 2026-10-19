@@ -168,7 +168,18 @@ export function ScanDetails({
                 See in Google Maps
               </Button>
             ) : null}
-            <ScanHistoryButton target={target} itemName={itemName} />
+            {/* Keyed by the item: moving between two assets or kits keeps
+                this card mounted, and the history must start over for the
+                new item rather than show the last one's scans. */}
+            <ScanHistoryButton
+              key={
+                "assetId" in target
+                  ? `asset:${target.assetId}`
+                  : `kit:${target.kitId}`
+              }
+              target={target}
+              itemName={itemName}
+            />
           </div>
         </>
       ) : (

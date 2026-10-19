@@ -56,6 +56,33 @@ describe("ScanDetails", () => {
     ).toBeInTheDocument();
   });
 
+  it("starts the history afresh when the card moves to another item", () => {
+    // Moving between two assets only changes the route param, so the page
+    // keeps this card mounted. The history must not: a new element means its
+    // open state and loaded rows started over for the new item.
+    const view = render(
+      <ScanDetails
+        lastScan={lastScan}
+        target={{ assetId: "asset-1" }}
+        itemName="Laptop"
+      />,
+      { wrapper: MemoryRouter }
+    );
+    const first = screen.getByRole("button", { name: /View all scans/ });
+
+    view.rerender(
+      <ScanDetails
+        lastScan={lastScan}
+        target={{ assetId: "asset-2" }}
+        itemName="Camera"
+      />
+    );
+
+    expect(screen.getByRole("button", { name: /View all scans/ })).not.toBe(
+      first
+    );
+  });
+
   it("offers no history before the first scan", () => {
     render(
       <ScanDetails
