@@ -34,7 +34,7 @@ import {
   useState,
 } from "react";
 import type { RefCallback, RefObject } from "react";
-import { useBlocker, useLocation, useNavigation } from "react-router";
+import { useBlocker, useNavigation } from "react-router";
 
 /**
  * Where a form stands relative to what was loaded.
@@ -82,8 +82,19 @@ export function serializeFormSnapshot(
   form: HTMLFormElement,
   ignored: ReadonlySet<string>
 ): string {
+  return serializeEntries(new FormData(form), ignored);
+}
+
+/**
+ * Serializes `FormData` entries the way {@link serializeFormSnapshot} does,
+ * so a navigation's submitted `formData` can be matched against a snapshot.
+ */
+function serializeEntries(
+  formData: FormData,
+  ignored: ReadonlySet<string>
+): string {
   const entries: string[] = [];
-  for (const [name, value] of new FormData(form)) {
+  for (const [name, value] of formData) {
     if (ignored.has(name)) continue;
     const serialized =
       typeof value === "string"
@@ -132,12 +143,21 @@ type UseUnsavedChangesOptions = {
   /** Field names excluded from the comparison, on top of the defaults. */
   ignore?: string[];
   /**
-   * The route's `useActionData()`. A new successful result (no `error`)
-   * re-takes the baseline; an `error` result keeps the form dirty. A
-   * submission that settles with no action data was redirected, which these
-   * actions only do on success, so the form is clean then too.
+   * The route's `useActionData()`. When this form's own saving submission
+   * settles with a successful result (no `error`) the baseline is re-taken;
+   * an `error` result keeps the form dirty. Settling with no action data
+   * means the action redirected, which these actions only do on success, so
+   * the form is clean then too. Results of other forms on the page never
+   * touch the baseline.
    */
   actionData?: unknown;
+  /**
+   * `intent` values whose submission saves this form's fields. Omit it when
+   * every submission of the form is a save. Forms that also submit other
+   * intents (a booking's check-out) list only the saving ones, so those
+   * other submissions keep the form dirty.
+   */
+  saveIntents?: readonly string[];
   /**
    * Puts every field back to the loaded values. Forms remount themselves
    * here (a `key` bump), which resets widget state that lives in React.
@@ -164,6 +184,7 @@ export function useUnsavedChanges({
   formRef,
   ignore,
   actionData,
+  saveIntents,
   onDiscard,
 }: UseUnsavedChangesOptions) {
   const [isDirty, setIsDirty] = useState(false);
@@ -232,6 +253,12 @@ export function useUnsavedChanges({
       doc.addEventListener(type, scheduleCheck, true)
     );
     const interval = setInterval(check, CHECK_INTERVAL_MS);
+    // why: fires for the form's own Save buttons, requestSubmit and a
+    // submitter elsewhere on the page (`form=` attribute), and for nothing
+    // else, so it tells this form's submissions apart from other forms'
+    const onSubmit = () =>
+      setSubmittedSnapshot(serializeFormSnapshot(form, ignored));
+    form.addEventListener("submit", onSubmit);
     return () => {
       cancelAnimationFrame(baselineFrame);
       cancelAnimationFrame(pendingFrame);
@@ -239,15 +266,9 @@ export function useUnsavedChanges({
         doc.removeEventListener(type, scheduleCheck, true)
       );
       clearInterval(interval);
+      form.removeEventListener("submit", onSubmit);
     };
-  }, [formRef, check, markClean]);
-
-  const lastActionData = useRef(actionData);
-  useEffect(() => {
-    if (Object.is(lastActionData.current, actionData)) return;
-    lastActionData.current = actionData;
-    if (isSuccessfulActionData(actionData)) markClean();
-  }, [actionData, markClean]);
+  }, [formRef, check, markClean, ignored]);
 
   // why: a layout effect, so the flag is set before the next frame's check
   // reads a DOM that already has its inputs disabled
@@ -262,32 +283,58 @@ export function useUnsavedChanges({
     }
   }, [navigation.state, check, markClean]);
 
-  const location = useLocation();
-  const isSubmitting =
+  /**
+   * What this form held when it last fired `submit`. A navigation is this
+   * form's submission only when its `formData` matches it; any other form
+   * on the page (a booking's remove-asset row, its archive action) submits
+   * different entries.
+   */
+  const [submittedSnapshot, setSubmittedSnapshot] = useState<string | null>(
+    null
+  );
+  const submittedFormData =
     navigation.state !== "idle" &&
     navigation.formMethod !== undefined &&
-    navigation.formMethod.toUpperCase() !== "GET" &&
-    navigation.formAction !== undefined &&
-    new URL(navigation.formAction, "http://localhost").pathname ===
-      location.pathname;
+    navigation.formMethod.toUpperCase() !== "GET"
+      ? navigation.formData
+      : undefined;
+  const navigationSnapshot = useMemo(
+    () =>
+      submittedFormData ? serializeEntries(submittedFormData, ignored) : null,
+    [submittedFormData, ignored]
+  );
+  const isSubmitting =
+    navigationSnapshot !== null && navigationSnapshot === submittedSnapshot;
+  const saveIntentsKey = (saveIntents ?? []).join(",");
+  const submittedIntent = submittedFormData?.get("intent");
+  /** This form's submission saves its fields (see `saveIntents`). */
+  const isSaving =
+    isSubmitting &&
+    (saveIntents === undefined ||
+      (typeof submittedIntent === "string" &&
+        saveIntentsKey.split(",").includes(submittedIntent)));
 
   /**
-   * Set while this form's submission runs. When it settles with no action
-   * data the action redirected (React Router clears action data on a
-   * redirect), so the form is clean, for example after a redirect back to
-   * this same edit page. A failed save always settles with an `error`
-   * payload and stays dirty.
+   * Set while this form's submission runs, with whether it saves. When a
+   * saving submission settles with a successful result, or with no action
+   * data at all (React Router clears action data on a redirect, for example
+   * back to this same edit page), the form is clean. A failed save settles
+   * with an `error` payload and stays dirty.
    */
-  const submittingRef = useRef(false);
+  const submissionRef = useRef<{ saves: boolean } | null>(null);
   useEffect(() => {
     if (isSubmitting) {
-      submittingRef.current = true;
+      submissionRef.current = { saves: isSaving };
       return;
     }
-    if (!submittingRef.current) return;
-    submittingRef.current = false;
+    const submission = submissionRef.current;
+    if (!submission) return;
+    submissionRef.current = null;
+    setSubmittedSnapshot(null);
+    if (!submission.saves) return;
     if (actionData === undefined) requestAnimationFrame(markClean);
-  }, [isSubmitting, actionData, markClean]);
+    else if (isSuccessfulActionData(actionData)) markClean();
+  }, [isSubmitting, isSaving, actionData, markClean]);
 
   const shouldGuard = isDirty && !isSubmitting;
 

@@ -151,6 +151,13 @@ type BookingFormData = {
 };
 
 /**
+ * Booking action intents that persist the form's name, description, tags and
+ * dates. Check-out, check-in and the other overview actions submit this form
+ * too but do not save those fields, so they leave the form dirty.
+ */
+const BOOKING_SAVE_INTENTS = ["save", "reserve"] as const;
+
+/**
  * Edit form on the booking overview, with the unsaved-changes bar.
  *
  * Discard remounts the inner form (see `useDiscardRemount`), which resets
@@ -409,6 +416,7 @@ function EditBookingFormInner({
         <UnsavedChangesGuard
           formRef={formElementRef}
           actionData={actionData}
+          saveIntents={BOOKING_SAVE_INTENTS}
           onDiscard={onDiscard}
           // why: the action routes on `intent`, so the bar submits through
           // the header Save button to send intent=save

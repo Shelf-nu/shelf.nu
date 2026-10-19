@@ -223,6 +223,8 @@ type UnsavedChangesGuardProps = {
   formRef: RefObject<HTMLFormElement | null>;
   /** The route's `useActionData()`; see `useUnsavedChanges`. */
   actionData?: unknown;
+  /** `intent` values that save this form; see `useUnsavedChanges`. */
+  saveIntents?: readonly string[];
   /** Puts every field back to the loaded values (the form remounts). */
   onDiscard: () => void;
   /** Field names excluded from the comparison, on top of the defaults. */
@@ -247,6 +249,7 @@ type UnsavedChangesGuardProps = {
 export function UnsavedChangesGuard({
   formRef,
   actionData,
+  saveIntents,
   onDiscard,
   ignore,
   getSubmitter,
@@ -256,6 +259,7 @@ export function UnsavedChangesGuard({
   const { state, discard, save } = useUnsavedChanges({
     formRef,
     actionData,
+    saveIntents,
     onDiscard,
     ignore,
   });

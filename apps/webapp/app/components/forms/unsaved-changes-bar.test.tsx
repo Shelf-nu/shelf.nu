@@ -7,7 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import { createRoutesStub, Form, useActionData } from "react-router";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { UnsavedChangesState } from "~/hooks/use-unsaved-changes";
 import { UnsavedChangesBar, UnsavedChangesGuard } from "./unsaved-changes-bar";
 
@@ -117,6 +117,9 @@ function IntentForm({ saveDisabled }: { saveDisabled: boolean }) {
 }
 
 function renderGuard(saveDisabled: boolean) {
+  // why: a pass-through spy, so the test can wait for the frame in which the
+  // guard reads its baseline instead of counting frames
+  const rafSpy = vi.spyOn(globalThis, "requestAnimationFrame");
   const action = vi.fn(async ({ request }: { request: Request }) => ({
     intent: String((await request.formData()).get("intent")),
   }));
@@ -128,14 +131,20 @@ function renderGuard(saveDisabled: boolean) {
     },
   ]);
   render(<Stub initialEntries={["/booking"]} />);
-  return { action };
+  return { action, rafSpy };
 }
 
-/** Types into Name once the baseline exists and waits for the bar. */
-async function editName() {
+afterEach(() => vi.restoreAllMocks());
+
+/**
+ * Types into Name once the baseline exists and waits for the bar.
+ *
+ * @param rafSpy - The spy from `renderGuard`; its first call is the baseline
+ * frame, and frames run in the order they were requested
+ */
+async function editName(rafSpy: { mock: { calls: unknown[] } }) {
   const name = await screen.findByLabelText("Name");
-  // why: the baseline is read one frame after mount
-  await new Promise((resolve) => requestAnimationFrame(resolve));
+  await waitFor(() => expect(rafSpy.mock.calls.length).toBeGreaterThan(0));
   await new Promise((resolve) => requestAnimationFrame(resolve));
   fireEvent.change(name, { target: { value: "Field day 2" } });
   return screen.findByRole(
@@ -149,8 +158,8 @@ async function editName() {
 
 describe("UnsavedChangesGuard", () => {
   it("saves through the form's submitter so its intent is sent", async () => {
-    const { action } = renderGuard(false);
-    const bar = await editName();
+    const { action, rafSpy } = renderGuard(false);
+    const bar = await editName(rafSpy);
 
     fireEvent.click(within(bar).getByRole("button", { name: "Save" }));
 
@@ -161,8 +170,8 @@ describe("UnsavedChangesGuard", () => {
   });
 
   it("disables Save while the form's own Save is disabled", async () => {
-    const { action } = renderGuard(true);
-    const bar = await editName();
+    const { action, rafSpy } = renderGuard(true);
+    const bar = await editName(rafSpy);
 
     const save = within(bar).getByRole("button", { name: "Save" });
     expect(save).toBeDisabled();

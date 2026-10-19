@@ -10,7 +10,8 @@ import {
   useLocation,
   useNavigation,
 } from "react-router";
-import { describe, expect, it } from "vitest";
+import type { MockInstance } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   serializeFormSnapshot,
   UNSAVED_CHANGES_DEFAULT_IGNORE,
@@ -20,7 +21,13 @@ import {
 /** Lets a test change a hidden input with no DOM event, as widgets do. */
 let setHiddenValue: (value: string) => void = () => {};
 
-function EditForm({ onDiscard }: { onDiscard: () => void }) {
+function EditForm({
+  onDiscard,
+  saveIntents,
+}: {
+  onDiscard: () => void;
+  saveIntents?: string[];
+}) {
   const formRef = useRef<HTMLFormElement>(null);
   const [hidden, setHidden] = useState("drills");
   setHiddenValue = setHidden;
@@ -30,56 +37,80 @@ function EditForm({ onDiscard }: { onDiscard: () => void }) {
     formRef,
     actionData,
     onDiscard,
+    saveIntents,
   });
 
   return (
-    <Form ref={formRef} method="post">
-      <input
-        aria-label="Name"
-        name="title"
-        defaultValue="Makita drill"
-        disabled={useNavigation().state !== "idle"}
-      />
-      <input type="hidden" name="tags" value={hidden} />
-      <input type="hidden" name="redirectTo" value="/assets" />
-      <span data-testid="status">{state.status}</span>
-      <span data-testid="query">
-        {new URLSearchParams(search).get("q") ?? ""}
-      </span>
-      <button type="button" onClick={discard}>
-        Discard
-      </button>
-      <button type="submit">Save</button>
-      {state.status === "blocked" ? (
-        <>
-          <button type="button" onClick={state.proceed}>
-            Leave page
-          </button>
-          <button type="button" onClick={state.stay}>
-            Stay
-          </button>
-        </>
-      ) : null}
-      <Link to="/other">Other page</Link>
-      <Link to="?q=1">Same page</Link>
-      <Link to="?slow=1">Slow reload</Link>
-      <Link to="/edit/child">Open child</Link>
-      <Outlet />
-    </Form>
+    <>
+      <Form ref={formRef} method="post">
+        <input
+          aria-label="Name"
+          name="title"
+          defaultValue="Makita drill"
+          disabled={useNavigation().state !== "idle"}
+        />
+        <input type="hidden" name="tags" value={hidden} />
+        <input type="hidden" name="redirectTo" value="/assets" />
+        <span data-testid="status">{state.status}</span>
+        <span data-testid="query">
+          {new URLSearchParams(search).get("q") ?? ""}
+        </span>
+        <button type="button" onClick={discard}>
+          Discard
+        </button>
+        <button type="submit" name="intent" value="save">
+          Save
+        </button>
+        <button type="submit" name="intent" value="checkOut">
+          Check out
+        </button>
+        {state.status === "blocked" ? (
+          <>
+            <button type="button" onClick={state.proceed}>
+              Leave page
+            </button>
+            <button type="button" onClick={state.stay}>
+              Stay
+            </button>
+          </>
+        ) : null}
+        <Link to="/other">Other page</Link>
+        <Link to="?q=1">Same page</Link>
+        <Link to="?slow=1">Slow reload</Link>
+        <Link to="/edit/child">Open child</Link>
+        <Outlet />
+      </Form>
+      {/* Another form on the same page, like a booking's remove-asset row. */}
+      <Form method="post">
+        <input type="hidden" name="assetId" value="asset-1" />
+        <button type="submit" name="intent" value="removeAsset">
+          Remove asset
+        </button>
+      </Form>
+    </>
   );
 }
 
 /** Keys the form so Discard remounts it, the way the real forms do. */
-function EditPage() {
+function EditPage({ saveIntents }: { saveIntents?: string[] }) {
   const [epoch, setEpoch] = useState(0);
-  return <EditForm key={epoch} onDiscard={() => setEpoch((e) => e + 1)} />;
+  return (
+    <EditForm
+      key={epoch}
+      onDiscard={() => setEpoch((e) => e + 1)}
+      saveIntents={saveIntents}
+    />
+  );
 }
 
-function renderForm(action: () => unknown = () => ({ ok: true })) {
+function renderForm(
+  action: () => unknown = () => ({ ok: true }),
+  saveIntents?: string[]
+) {
   const Stub = createRoutesStub([
     {
       path: "/edit",
-      Component: EditPage,
+      Component: () => <EditPage saveIntents={saveIntents} />,
       action,
       // why: a slow reload keeps the navigation (and the disabled input)
       // around long enough for the interval check to run during it
@@ -108,12 +139,26 @@ function renderForm(action: () => unknown = () => ({ ok: true })) {
 
 const status = () => screen.getByTestId("status").textContent;
 
-async function makeDirtyByTyping() {
-  // why: the baseline is taken one frame after mount; two frames make sure
-  // it exists before the change, even on a loaded machine
+let rafSpy: MockInstance<typeof requestAnimationFrame>;
+beforeEach(() => {
+  // why: a pass-through spy. The hook schedules its baseline read with
+  // requestAnimationFrame once the routed form mounts, which happens outside
+  // act(), so the tests wait for that call instead of counting frames.
+  rafSpy = vi.spyOn(globalThis, "requestAnimationFrame");
+});
+afterEach(() => rafSpy.mockRestore());
+
+/** Resolves once the hook has read its baseline snapshot. */
+async function waitForBaseline() {
   await waitFor(() => expect(status()).toBe("clean"));
+  await waitFor(() => expect(rafSpy).toHaveBeenCalled());
+  // why: frames run in the order they were requested, so this one runs
+  // after the baseline frame
   await new Promise((resolve) => requestAnimationFrame(resolve));
-  await new Promise((resolve) => requestAnimationFrame(resolve));
+}
+
+async function makeDirtyByTyping() {
+  await waitForBaseline();
   fireEvent.change(screen.getByLabelText("Name"), {
     target: { value: "Makita drill 18V" },
   });
@@ -129,8 +174,7 @@ describe("useUnsavedChanges", () => {
 
   it("picks up a hidden input changed with no DOM event", async () => {
     renderForm();
-    await waitFor(() => expect(status()).toBe("clean"));
-    await new Promise((resolve) => requestAnimationFrame(resolve));
+    await waitForBaseline();
     setHiddenValue("drills,cordless");
     await waitFor(() => expect(status()).toBe("dirty"), { timeout: 2000 });
   });
@@ -195,6 +239,34 @@ describe("useUnsavedChanges", () => {
     expect(screen.getByLabelText("Name")).toHaveValue("Makita drill 18V");
   });
 
+  it("stays dirty when another form on the page saves", async () => {
+    renderForm();
+    await makeDirtyByTyping();
+    fireEvent.click(screen.getByRole("button", { name: "Remove asset" }));
+    await waitFor(() => expect(screen.getByLabelText("Name")).toBeDisabled());
+    await waitFor(() => expect(screen.getByLabelText("Name")).toBeEnabled());
+    // why: a wrongly re-taken baseline lands after the submit settles
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(status()).toBe("dirty");
+  });
+
+  it("stays dirty after its own submit with an intent that does not save it", async () => {
+    renderForm(() => ({ ok: true }), ["save"]);
+    await makeDirtyByTyping();
+    fireEvent.click(screen.getByRole("button", { name: "Check out" }));
+    await waitFor(() => expect(screen.getByLabelText("Name")).toBeDisabled());
+    await waitFor(() => expect(screen.getByLabelText("Name")).toBeEnabled());
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(status()).toBe("dirty");
+  });
+
+  it("is clean after its own submit with a saving intent", async () => {
+    renderForm(() => ({ ok: true }), ["save"]);
+    await makeDirtyByTyping();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(status()).toBe("clean"));
+  });
+
   it("is clean after a save that redirects back to the same page", async () => {
     renderForm(() => redirect("/edit"));
     await makeDirtyByTyping();
@@ -231,8 +303,7 @@ describe("useUnsavedChanges", () => {
 
   it("stays clean while a navigation disables the inputs", async () => {
     renderForm();
-    await waitFor(() => expect(status()).toBe("clean"));
-    await new Promise((resolve) => requestAnimationFrame(resolve));
+    await waitForBaseline();
     fireEvent.click(screen.getByRole("link", { name: "Slow reload" }));
     await waitFor(() => expect(screen.getByLabelText("Name")).toBeDisabled());
     await new Promise((resolve) => setTimeout(resolve, 1200));
