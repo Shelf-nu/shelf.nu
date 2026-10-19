@@ -250,9 +250,8 @@ describe("action (adjust-asset-quantity)", () => {
     // Current row already holds 8 units. Two OTHER bookings concurrently
     // reserve 8 units each, overlapping the current booking's window —
     // peak-concurrent reserved = 16, so physicalAvailable(10) - reserved(16)
-    // = a negative `bookable`. Before the fix, comparing the absolute
-    // submitted quantity against this negative availability threw even for
-    // a reduction. Submitting 1 (< current 8) must now succeed.
+    // = a negative `bookable`. A reduction never competes for availability,
+    // so submitting 1 (< current 8) succeeds.
     const bookingAsset = buildBookingAssetFixture({ quantity: 8 });
     // @ts-expect-error mocked
     db.bookingAsset.findFirst.mockResolvedValue(bookingAsset);
@@ -373,10 +372,8 @@ describe("action (adjust-asset-quantity)", () => {
     if (response.data.error !== null) throw new Error("expected success");
     expect(response.data.success).toBe(true);
 
-    expect(tx.bookingAsset.update).toHaveBeenCalledWith({
-      where: { id: BOOKING_ASSET_ID },
-      data: { quantity: 5 },
-    });
+    // Nothing changed, so nothing is written.
+    expect(tx.bookingAsset.update).not.toHaveBeenCalled();
     // increase = 5 - 5 = 0 → the directional guard's "reductions & no-ops
     // always allowed" early return; no availability read should occur.
     expect(tx.bookingAsset.findMany).not.toHaveBeenCalled();
@@ -388,8 +385,8 @@ describe("action (adjust-asset-quantity)", () => {
     // Submitting 6 looks like a REDUCTION against the stale 8 (6 <= 8, which
     // the directional guard would wave through), but is actually a +4 INCREASE
     // against the committed 2. With one other booking reserving 7 of the 10,
-    // bookable = 3, so the real increase (4) must be REJECTED. Before the
-    // re-read fix, the stale snapshot let this oversubscribe the pool.
+    // bookable = 3, so the real increase (4) must be REJECTED. Measured against
+    // the stale snapshot instead, it would oversubscribe the pool.
     const bookingAsset = buildBookingAssetFixture({ quantity: 8 });
     // @ts-expect-error mocked
     db.bookingAsset.findFirst.mockResolvedValue(bookingAsset);
@@ -426,7 +423,7 @@ describe("action (adjust-asset-quantity)", () => {
     // reduction against the stale 8), and the write did NOT happen.
     expect(tx.bookingAsset.findUnique).toHaveBeenCalledWith({
       where: { id: BOOKING_ASSET_ID },
-      select: { quantity: true },
+      select: { quantity: true, checkedOutAt: true },
     });
     expect(tx.bookingAsset.findMany).toHaveBeenCalled();
     expect(tx.bookingAsset.update).not.toHaveBeenCalled();

@@ -17967,12 +17967,21 @@ export async function addScannedAssetsToBooking({
   quantities = {},
   kitSlices = [],
   access,
+  inSameTransaction,
 }: {
   assetIds: Asset["id"][];
   kitIds?: string[];
   bookingId: Booking["id"];
   organizationId: Booking["organizationId"];
   userId: string;
+  /**
+   * Further writes that must commit or roll back with the add. Runs inside
+   * the add's transaction, after its writes and before its notes, so a
+   * refusal here leaves the booking exactly as it was.
+   */
+  inSameTransaction?: (
+    tx: Parameters<Parameters<typeof db.$transaction>[0]>[0]
+  ) => Promise<void>;
   /**
    * The caller's access. Its add-items rule is enforced inside the write
    * transaction against the locked booking status. `null` only for a flow
@@ -18007,16 +18016,16 @@ export async function addScannedAssetsToBooking({
      * status-sync behaviour used in manage-assets. The pure-tx body lives in
      * {@link addScannedAssetsToBookingWithinTx} so the fulfil-and-checkout
      * flow can reuse the same writes under a shared transaction. The
-     * overlap-conflict guard main added inline here was moved INTO the helper
-     * so both call sites get it atomically with the writes.
+     * overlap-conflict guard lives in the helper, so both call sites get it
+     * atomically with the writes.
      */
     const {
       booking: updatedBooking,
       addedAssetIds,
       claimedAssetIds,
       archivedKitMembersLeftOut,
-    } = await db.$transaction(async (tx) =>
-      addScannedAssetsToBookingWithinTx(tx, {
+    } = await db.$transaction(async (tx) => {
+      const result = await addScannedAssetsToBookingWithinTx(tx, {
         assetIds,
         kitIds,
         bookingId,
@@ -18025,8 +18034,10 @@ export async function addScannedAssetsToBooking({
         quantities,
         kitSlices,
         callerAccess: access ?? undefined,
-      })
-    );
+      });
+      await inSameTransaction?.(tx);
+      return result;
+    });
 
     /**
      * Step 2: Create activity notes, for the assets that actually arrived.

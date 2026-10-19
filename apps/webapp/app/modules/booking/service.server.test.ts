@@ -16452,6 +16452,69 @@ describe("addScannedAssetsToBooking", () => {
     );
   });
 
+  describe("inSameTransaction", () => {
+    beforeEach(() => {
+      //@ts-expect-error missing vitest type
+      db.asset.findMany.mockResolvedValue([
+        {
+          id: "asset-scan-1",
+          title: "Scanned Asset 1",
+          type: AssetType.INDIVIDUAL,
+          assetModelId: null,
+        },
+      ]);
+      //@ts-expect-error missing vitest type
+      db.booking.update.mockResolvedValue({
+        id: "booking-scan",
+        name: "Scan Booking",
+        status: BookingStatus.DRAFT,
+      });
+    });
+
+    const scan = {
+      assetIds: ["asset-scan-1"],
+      kitIds: [],
+      bookingId: "booking-scan",
+      organizationId: "org-1",
+      userId: "user-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
+    };
+
+    it("runs after the add's writes, inside the same transaction", async () => {
+      const hook = vitest.fn().mockResolvedValue(undefined);
+
+      await addScannedAssetsToBooking({ ...scan, inSameTransaction: hook });
+
+      expect(db.$transaction).toHaveBeenCalledTimes(1);
+      expect(hook).toHaveBeenCalledTimes(1);
+      expect(
+        vitest.mocked(db.booking.update).mock.invocationCallOrder[0]
+      ).toBeLessThan(hook.mock.invocationCallOrder[0]);
+    });
+
+    it("fails the whole add when the hook refuses, keeping its status", async () => {
+      const hook = vitest.fn().mockRejectedValue(
+        new ShelfError({
+          cause: null,
+          status: 400,
+          label: "Booking",
+          message: "Only 3 units are available.",
+          shouldBeCaptured: false,
+        })
+      );
+
+      await expect(
+        addScannedAssetsToBooking({ ...scan, inSameTransaction: hook })
+      ).rejects.toMatchObject({
+        status: 400,
+        message: "Only 3 units are available.",
+      });
+      // The refusal is thrown inside the transaction callback, which is what
+      // rolls the add's writes back; no activity note narrates them.
+      expect(bookingNoteService.createSystemBookingNote).not.toHaveBeenCalled();
+    });
+  });
+
   it("resolves a kit slice's sourceKitId from the AssetKit row, ignoring the client-supplied kitId", async () => {
     // The scan drawer's `kitId` is untrusted JSON and `BookingAsset.sourceKitId`
     // has an FK that accepts ANY kit — including another org's. The server must
