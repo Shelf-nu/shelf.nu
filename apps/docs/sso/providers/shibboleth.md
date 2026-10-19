@@ -27,7 +27,7 @@ Register these Shelf SP values in your `metadata-providers.xml`:
 | ------------------------ | -------------------------------------------------------------------- |
 | ACS URL                  | `https://nmmqcuiasekdacmhwsxk.supabase.co/auth/v1/sso/saml/acs`      |
 | Entity ID / Metadata URL | `https://nmmqcuiasekdacmhwsxk.supabase.co/auth/v1/sso/saml/metadata` |
-| Relay State              | `https://app.shelf.nu/oauthcallback`                                 |
+| Relay State              | `https://app.shelf.nu/oauth/callback`                                |
 
 > [!NOTE]
 > Shelf's SP metadata is a live URL, so add it as an `HTTPMetadataProvider` (or download it once as a `FilesystemMetadataProvider`).

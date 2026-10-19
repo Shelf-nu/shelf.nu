@@ -10,6 +10,7 @@
  */
 import {
   canAssignRole,
+  canInviteRole,
   holdsRoleWhere,
   resolveMembershipAccess,
   roleChangeRequiresOwner,
@@ -107,6 +108,26 @@ describe("roleChangeRequiresOwner / canAssignRole", () => {
     );
     expect(canAssignRole({ actorOwnsWorkspace: false, role: "BASE" })).toBe(
       true
+    );
+  });
+});
+
+describe("canInviteRole", () => {
+  it("lets an Administrator invite another Administrator", () => {
+    expect(canInviteRole({ actorOwnsWorkspace: false, role: "ADMIN" })).toBe(
+      true
+    );
+    expect(canInviteRole({ actorOwnsWorkspace: true, role: "ADMIN" })).toBe(
+      true
+    );
+    expect(canInviteRole({ actorOwnsWorkspace: false, role: "BASE" })).toBe(
+      true
+    );
+  });
+
+  it("keeps promoting an existing member to Administrator owner-only", () => {
+    expect(canAssignRole({ actorOwnsWorkspace: false, role: "ADMIN" })).toBe(
+      false
     );
   });
 });

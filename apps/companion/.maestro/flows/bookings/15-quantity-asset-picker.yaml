@@ -1,0 +1,90 @@
+appId: com.shelf.companion.carlos
+name: "Bookings - Quantity-tracked asset books a NUMBER of units from the picker"
+tags:
+  - bookings
+  - quantity
+  - high-impact
+
+---
+# Test: adding a quantity-tracked asset from the booking picker asks how many
+# units to book (web parity: the manage-assets picker's per-row quantity
+# input, default 1, capped at the units free in the booking's window), shows
+# the chosen amount on the row, and the booking then holds that many.
+#
+# Requires (in the test org): GRANULAR WORKSPACE (TEAM) with the team member
+# "Dr. Sarah Mitchell" and the quantity-tracked asset
+# "Companion QT Test Tripod" (10 pcs, none in custody or reserved in the window).
+# Creates a DRAFT booking "ZZ Qty parity picker"; delete it afterwards.
+
+- runFlow: ../../shared/login.yaml
+- runFlow: ../../shared/switch-to-team-ws.yaml
+
+# ── A fresh DRAFT booking to add to ──
+- tapOn: "Bookings"
+- extendedWaitUntil:
+    visible: "Create booking"
+    timeout: 15000
+- tapOn: "Create booking"
+- extendedWaitUntil:
+    visible: "Booking name, required"
+    timeout: 15000
+- tapOn: "Booking name, required"
+- inputText: "ZZ Qty parity picker"
+- tapOn: "Description"
+- scrollUntilVisible:
+    element:
+      text: "Select a custodian"
+    direction: DOWN
+    timeout: 10000
+- tapOn: "Select a custodian"
+- extendedWaitUntil:
+    visible: "Select Team Member"
+    timeout: 15000
+- tapOn: ".*Sarah Mitchell.*"
+- extendedWaitUntil:
+    visible: "Create booking"
+    timeout: 10000
+- tapOn: "Create booking"
+- extendedWaitUntil:
+    visible: "Reserve this booking"
+    timeout: 20000
+
+# ── Picker: the row says it is quantity tracked, selecting it asks how many ──
+- tapOn: "Browse available assets and kits to add"
+- extendedWaitUntil:
+    visible: "Search available assets"
+    timeout: 15000
+- tapOn: "Search available assets"
+- inputText: "Companion QT"
+- extendedWaitUntil:
+    visible: ".*Companion QT Test Tripod.*quantity tracked.*available.*"
+    timeout: 15000
+- takeScreenshot: qty-picker-row
+- tapOn: ".*Companion QT Test Tripod.*tap to choose a quantity.*"
+- extendedWaitUntil:
+    visible: "How many to book?"
+    timeout: 10000
+# Default is 1 (web parity); step up to 3.
+- tapOn: "Increase quantity"
+- tapOn: "Increase quantity"
+- takeScreenshot: qty-picker-sheet
+- tapOn: "Select 3 pcs"
+
+# ── The row is selected with its amount, and the add bar counts it ──
+# The row is one accessibility element (the chip folds into it), so assert
+# the row's own label: selected, with the chosen amount.
+- extendedWaitUntil:
+    visible: ".*Companion QT Test Tripod.*selected, 3 pcs.*"
+    timeout: 10000
+- takeScreenshot: qty-picker-selected
+- tapOn: "Add 1 selected to booking"
+
+# ── The booking holds 3 units, not 1 ──
+- extendedWaitUntil:
+    visible: "ZZ Qty parity picker"
+    timeout: 20000
+# The asset card is one accessibility element; its label carries the amount.
+- extendedWaitUntil:
+    visible: ".*Companion QT Test Tripod.*3 pcs booked.*"
+    timeout: 15000
+- takeScreenshot: qty-picker-booked

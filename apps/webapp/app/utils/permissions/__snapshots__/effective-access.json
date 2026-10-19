@@ -9987,6 +9987,20 @@
     "MANAGER",
     "SELF_SERVICE"
   ],
+  "D-04:invite-guard": {
+    "OWNER": {
+      "ADMIN": "allowed",
+      "BASE": "allowed",
+      "MANAGER": "allowed",
+      "SELF_SERVICE": "allowed"
+    },
+    "ADMIN": {
+      "ADMIN": "allowed",
+      "BASE": "allowed",
+      "MANAGER": "allowed",
+      "SELF_SERVICE": "allowed"
+    }
+  },
   "D-10:labels": {
     "ADMIN": "Administrator",
     "OWNER": "Owner",

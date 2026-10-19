@@ -140,7 +140,7 @@ describe("TeamUsersActionsDropdown: owner-only targets", () => {
   );
 
   it.each([
-    ["ADMIN", R.ADMIN, true, [R.ADMIN]],
+    ["ADMIN", R.ADMIN, false, [R.ADMIN]],
     ["ADMIN+OWNER", R.ADMIN, false, [R.ADMIN, R.OWNER]],
     ["OWNER", R.ADMIN, false, [R.OWNER]],
     ["ADMIN", R.SELF_SERVICE, false, [R.ADMIN]],
