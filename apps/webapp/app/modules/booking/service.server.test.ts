@@ -9840,7 +9840,7 @@ describe("extendBooking", () => {
   });
 
   it("under requireLaterEnd, writes only where the stored end is still earlier and returns the row it re-reads", async () => {
-    expect.assertions(3);
+    expect.assertions(4);
     const newEndDate = new Date("2025-01-02T17:00:00Z");
     const mockBooking = {
       ...mockBookingData,
@@ -9862,6 +9862,13 @@ describe("extendBooking", () => {
     db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
     //@ts-expect-error missing vitest type
     db.booking.updateMany.mockResolvedValue({ count: 1 });
+    // The end stored after the commit is this request's, under a job another
+    // write stored meanwhile.
+    //@ts-expect-error missing vitest type
+    db.booking.findUnique.mockResolvedValueOnce({
+      to: newEndDate,
+      activeSchedulerReference: "live-job",
+    });
     //@ts-expect-error missing vitest type
     db.booking.findUniqueOrThrow.mockResolvedValueOnce(mockBooking);
     //@ts-expect-error missing vitest type
@@ -9882,9 +9889,10 @@ describe("extendBooking", () => {
       where: {
         id: "booking-1",
         organizationId: "org-1",
+        status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
         to: { lt: newEndDate },
       },
-      data: { status: undefined, to: newEndDate },
+      data: { status: BookingStatus.ONGOING, to: newEndDate },
     });
     // The scheduler bookkeeping after the commit still goes through `update`;
     // the end itself must not.
@@ -9894,6 +9902,56 @@ describe("extendBooking", () => {
       })
     );
     expect(result).toEqual(stored);
+    expect(scheduler.cancel).toHaveBeenCalledWith("live-job");
+  });
+
+  it("under requireLaterEnd, leaves the reminder to the extension whose end is stored", async () => {
+    expect.assertions(3);
+    const newEndDate = new Date("2025-01-02T17:00:00Z");
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      activeSchedulerReference: "job-read-before-write",
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-t152",
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
+        },
+      ],
+      partialCheckins: [],
+    };
+    const stored = { ...mockBooking, to: newEndDate };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValueOnce(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValueOnce(stored);
+    //@ts-expect-error missing vitest type
+    db.booking.updateMany.mockResolvedValue({ count: 1 });
+    // A later extension committed after this one: its end is the one stored.
+    //@ts-expect-error missing vitest type
+    db.booking.findUnique.mockResolvedValueOnce({
+      to: new Date("2025-01-03T09:00:00Z"),
+      activeSchedulerReference: "job-of-the-later-extension",
+    });
+
+    const result = await extendBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      newEndDate,
+      hints: mockClientHints,
+      userId: "user-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
+      roles: [OrganizationRoles.ADMIN],
+      requireLaterEnd: true,
+    });
+
+    expect(result).toEqual(stored);
+    expect(scheduler.cancel).not.toHaveBeenCalled();
+    expect(scheduler.sendAfter).not.toHaveBeenCalled();
   });
 
   it("under requireLaterEnd, refuses when another extension already moved the end past the new one", async () => {

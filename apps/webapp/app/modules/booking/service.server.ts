@@ -12854,12 +12854,18 @@ export async function extendBooking({
       };
 
       if (requireLaterEnd) {
-        // The `to` filter is judged on the row as it is when the lock is
-        // taken, so an extension that landed since the read above makes
-        // this a no-op instead of moving the end back.
+        // The filters are judged on the row as it is when the lock is taken:
+        // an extension that landed since the read above makes this a no-op
+        // instead of moving the end back, and a booking closed meanwhile is
+        // left closed. Either live status reads ONGOING once extended.
         const { count } = await tx.booking.updateMany({
-          where: { id: booking.id, organizationId, to: { lt: newEndDate } },
-          data,
+          where: {
+            id: booking.id,
+            organizationId,
+            status: { in: allowedStatus },
+            to: { lt: newEndDate },
+          },
+          data: { ...data, status: BookingStatus.ONGOING },
         });
         if (count === 0) {
           throw new ShelfError({
@@ -12996,7 +13002,24 @@ export async function extendBooking({
      * In case of ONGOING, a checkin reminder should have be scheduled. So we have to reschedule it.
      * And in case of OVERDUE all the jobs are completed, so we have to reschedule the checkin reminder.
      */
-    await cancelScheduler(booking);
+    if (requireLaterEnd) {
+      // Two extensions can both commit when each is later than the end they
+      // read. The reminder belongs to the one whose end is stored now, and
+      // it cancels the job stored now, not the one it read before writing.
+      const live = await db.booking.findUnique({
+        where: { id: booking.id, organizationId },
+        select: { to: true, activeSchedulerReference: true },
+      });
+      if (!live || live.to.getTime() !== newEndDate.getTime()) {
+        return updatedBooking;
+      }
+      await cancelScheduler({
+        id: booking.id,
+        activeSchedulerReference: live.activeSchedulerReference,
+      });
+    } else {
+      await cancelScheduler(booking);
+    }
 
     const { hours } = calcTimeDifference(newEndDate, new Date());
 
