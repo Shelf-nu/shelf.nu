@@ -99,6 +99,9 @@ describe("GET /api/scans", () => {
         where: { assetId: "asset-1", organizationId: "org-1" },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         take: 26,
+        // The scanner and their memberships: without them every row's
+        // scanner reads as Unknown.
+        include: { user: { include: { userOrganizations: true } } },
       })
     );
     expect(mockFindMany.mock.calls[0][0]).not.toHaveProperty("cursor");

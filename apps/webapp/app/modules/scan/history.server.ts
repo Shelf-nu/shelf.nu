@@ -12,8 +12,13 @@
 import type { IResult } from "ua-parser-js";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
-import { describeScannedCodeLabel, describeScanSourceLabel } from "./labels";
-import type { ScanTarget } from "./service.server";
+import {
+  describeDeviceHardware,
+  describeScanHeadline,
+  describeScanOrigin,
+} from "./labels";
+import type { ScanTarget } from "./target";
+import { scanTargetFilter } from "./target";
 import type { ScanWithRelations } from "./utils.server";
 import { identifyScanner, parseScanUserAgent } from "./utils.server";
 
@@ -42,10 +47,7 @@ export type ScanHistoryRow = {
  * @returns The device and browser, or "Unknown device" when neither is known
  */
 function describeDevice(ua: IResult): string {
-  const hardware =
-    ua.device.vendor && ua.device.model
-      ? `${ua.device.vendor} ${ua.device.model}`
-      : null;
+  const hardware = describeDeviceHardware(ua.device);
   const parts = [hardware, ua.browser?.name ?? null].filter(
     (part): part is string => Boolean(part)
   );
@@ -71,8 +73,8 @@ export function toScanHistoryRow(scan: ScanWithRelations): ScanHistoryRow {
     id: scan.id,
     scannedAt: scan.createdAt.toISOString(),
     ...scannerFields(scan),
-    code: describeScannedCodeLabel(scan.codeType, scan.code),
-    source: describeScanSourceLabel(scan.source),
+    code: describeScanHeadline(scan),
+    source: describeScanOrigin(scan),
     coordinates:
       scan.latitude && scan.longitude
         ? { latitude: scan.latitude, longitude: scan.longitude }
@@ -116,10 +118,7 @@ export async function getScanHistory({
 }): Promise<ScanHistoryPage> {
   try {
     const scans = await db.scan.findMany({
-      where:
-        "assetId" in target
-          ? { assetId: target.assetId, organizationId }
-          : { kitId: target.kitId, organizationId },
+      where: { ...scanTargetFilter(target), organizationId },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: SCAN_HISTORY_PAGE_SIZE + 1,
       ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),

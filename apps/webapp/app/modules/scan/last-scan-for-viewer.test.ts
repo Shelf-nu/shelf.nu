@@ -96,7 +96,7 @@ describe("getLastScanForViewer", () => {
     expect(scanFindFirst).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { assetId: "asset-1", organizationId: "org-1" },
-        orderBy: { createdAt: "desc" },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       })
     );
     // A barcode scan has no QR; the card still names the code.
@@ -142,7 +142,7 @@ describe("getLastScanForViewer", () => {
           latitude: { not: null },
           longitude: { not: null },
         },
-        orderBy: { createdAt: "desc" },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       })
     );
     expect(result).toMatchObject({

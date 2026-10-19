@@ -47,6 +47,27 @@ describe("toScanHistoryRow", () => {
     ).toBe("Not recorded");
   });
 
+  it("names a manual GPS update as what it is, not as a QR scan", () => {
+    const row = toScanHistoryRow(
+      createScanWithRelations({
+        codeType: "QR",
+        source: "GPS_UPDATE",
+        manuallyGenerated: true,
+      })
+    );
+
+    expect(row.code).toBe("Manual GPS update");
+    expect(row.source).toBe("GPS update");
+  });
+
+  it("labels an older manual GPS update, written before sources were tracked, as a GPS update", () => {
+    const row = toScanHistoryRow(
+      createScanWithRelations({ source: null, manuallyGenerated: true })
+    );
+
+    expect(row.source).toBe("GPS update");
+  });
+
   it("names the code: a QR without its id, a barcode or SAM ID with its value", () => {
     expect(
       toScanHistoryRow(

@@ -11,7 +11,7 @@
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { getScanHistory } from "~/modules/scan/history.server";
-import type { ScanTarget } from "~/modules/scan/service.server";
+import type { ScanTarget } from "~/modules/scan/target";
 import { badRequest, makeShelfError } from "~/utils/error";
 import {
   error,

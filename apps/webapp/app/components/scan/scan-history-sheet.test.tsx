@@ -98,6 +98,40 @@ describe("ScanHistoryButton", () => {
     expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
   });
 
+  it("loads a kit's scans by the kit", async () => {
+    render(
+      <ScanHistoryButton target={{ kitId: "kit-1" }} itemName="Camera kit" />,
+      { wrapper: MemoryRouter }
+    );
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "View all scans" })
+    );
+
+    expect(fetcher.load).toHaveBeenCalledWith("/api/scans?kitId=kit-1");
+  });
+
+  it("announces the first page loading, with no empty list beside it", async () => {
+    renderSheet();
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "View all scans" })
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent("Loading");
+    expect(screen.queryByRole("list")).toBeNull();
+  });
+
+  it("returns focus to the button when the sheet closes", async () => {
+    renderSheet();
+    const button = screen.getByRole("button", { name: "View all scans" });
+
+    await userEvent.click(button);
+    await userEvent.keyboard("{Escape}");
+
+    expect(button).toHaveFocus();
+  });
+
   it("marks the button expanded while the sheet is open", async () => {
     renderSheet();
     const trigger = screen.getByRole("button", { name: "View all scans" });

@@ -1,6 +1,12 @@
 import { ScanHistoryButton } from "~/components/scan/scan-history-sheet";
 import { Button } from "~/components/shared/button";
-import type { ScanTarget } from "~/modules/scan/service.server";
+import {
+  describeDeviceHardware,
+  describeScanHeadline,
+} from "~/modules/scan/labels";
+import { googleMapsSearchUrl } from "~/modules/scan/maps-link";
+import type { ScanTarget } from "~/modules/scan/target";
+import { scanTargetKey } from "~/modules/scan/target";
 import type { parseScanData } from "~/modules/scan/utils.server";
 import { tw } from "~/utils/tw";
 import { ShelfMap } from "./map";
@@ -13,8 +19,9 @@ import { InfoTooltip } from "../shared/info-tooltip";
 type LastScan = NonNullable<ReturnType<typeof parseScanData>>;
 
 /**
- * Names how the last scan was made, including the scanned value for a barcode
- * or SAM ID so the reader can tell which label it was.
+ * Names how the last scan was made, in the same words as the scan history's
+ * headline: the scanned value for a barcode or SAM ID, "QR code" for a QR,
+ * and "Manual GPS update" for a location entered by hand.
  *
  * @param lastScan - The card payload
  * @returns The text for the card's "Source" row
@@ -22,17 +29,7 @@ type LastScan = NonNullable<ReturnType<typeof parseScanData>>;
 export function describeScanSource(
   lastScan: Pick<LastScan, "manuallyGenerated" | "codeType" | "code">
 ) {
-  if (lastScan.manuallyGenerated) {
-    return "Manually updated";
-  }
-  switch (lastScan.codeType) {
-    case "BARCODE":
-      return lastScan.code ? `Barcode scan: ${lastScan.code}` : "Barcode scan";
-    case "SAM_ID":
-      return lastScan.code ? `SAM ID scan: ${lastScan.code}` : "SAM ID scan";
-    default:
-      return "QR code scan";
-  }
+  return describeScanHeadline(lastScan);
 }
 
 /**
@@ -107,9 +104,7 @@ export function ScanDetails({
             <div className="flex justify-between py-2">
               <p>Device</p>
               <p>
-                {lastScan.ua.device.model && lastScan.ua.device.vendor
-                  ? `${lastScan.ua.device.vendor} - ${lastScan.ua.device.model}`
-                  : "Unknown device"}
+                {describeDeviceHardware(lastScan.ua.device) ?? "Unknown device"}
               </p>
             </div>
             <div className="flex justify-between py-2">
@@ -142,7 +137,7 @@ export function ScanDetails({
                       </p>
                       <ul className="text-xs font-medium text-gray-500 ">
                         <li>
-                          <strong>1. Manually updated:</strong> User manually
+                          <strong>1. Manual GPS update:</strong> User manually
                           updated the location data.
                         </li>
                         <li>
@@ -159,7 +154,7 @@ export function ScanDetails({
           <div className="flex w-full flex-col gap-2 px-4 py-3">
             {hasLocation ? (
               <Button
-                to={`https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}&zoom=15&markers=${latitude},${longitude}`}
+                to={googleMapsSearchUrl(String(latitude), String(longitude))}
                 variant="secondary"
                 target="_blank"
                 rel="nofollow noopener noreferrer"
@@ -172,11 +167,7 @@ export function ScanDetails({
                 this card mounted, and the history must start over for the
                 new item rather than show the last one's scans. */}
             <ScanHistoryButton
-              key={
-                "assetId" in target
-                  ? `asset:${target.assetId}`
-                  : `kit:${target.kitId}`
-              }
+              key={scanTargetKey(target)}
               target={target}
               itemName={itemName}
             />

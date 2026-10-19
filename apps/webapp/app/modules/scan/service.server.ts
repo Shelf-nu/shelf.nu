@@ -22,6 +22,8 @@ import {
 } from "~/utils/permissions/permission.data";
 import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import { parseSequentialId } from "~/utils/sequential-id";
+import type { ScanTarget } from "./target";
+import { scanTargetFilter } from "./target";
 import { parseScanData } from "./utils.server";
 import { createNote } from "../note/service.server";
 import { getOrganizationById } from "../organization/service.server";
@@ -439,8 +441,7 @@ export async function recordAuditScanNonFatal({
   }
 }
 
-/** The entity whose last scan is read: an asset or a kit, never both. */
-export type ScanTarget = { assetId: string } | { kitId: string };
+export type { ScanTarget } from "./target";
 
 /**
  * The most recent scan of an asset or kit, whichever code was scanned, and
@@ -467,14 +468,16 @@ export async function getLastScanForTarget(
   organizationId: string
 ) {
   try {
-    const where: Prisma.ScanWhereInput =
-      "assetId" in target
-        ? { assetId: target.assetId, organizationId }
-        : { kitId: target.kitId, organizationId };
+    const where: Prisma.ScanWhereInput = {
+      ...scanTargetFilter(target),
+      organizationId,
+    };
 
     const scan = await db.scan.findFirst({
       where,
-      orderBy: { createdAt: "desc" },
+      // Same order as the scan history, so the card's scan is the history's
+      // first row even when two scans share a timestamp.
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       include: {
         user: {
           include: {
@@ -492,7 +495,7 @@ export async function getLastScanForTarget(
               latitude: { not: null },
               longitude: { not: null },
             },
-            orderBy: { createdAt: "desc" },
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
             select: { latitude: true, longitude: true, createdAt: true },
           })
         : null;

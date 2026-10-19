@@ -55,3 +55,59 @@ export function describeScannedCodeLabel(
       return "QR code";
   }
 }
+
+/** Shown for "Update GPS coordinates": a location entered by hand. */
+export const MANUAL_GPS_UPDATE_LABEL = "Manual GPS update";
+
+/**
+ * Names what a scan was, for its headline. A manual GPS update is recorded
+ * against the asset's QR code but nothing was scanned, so it is named as what
+ * it is rather than as a QR scan.
+ *
+ * @param scan.manuallyGenerated - Whether the location was entered by hand
+ * @param scan.codeType - What kind of code was scanned
+ * @param scan.code - The value as scanned, or null
+ * @returns The headline for the reader
+ */
+export function describeScanHeadline(scan: {
+  manuallyGenerated: boolean;
+  codeType: ScanCodeType;
+  code: string | null;
+}): string {
+  return scan.manuallyGenerated
+    ? MANUAL_GPS_UPDATE_LABEL
+    : describeScannedCodeLabel(scan.codeType, scan.code);
+}
+
+/**
+ * Names the surface that recorded a scan, by its stored source or, on a
+ * manual GPS update written before sources were tracked, by what it was.
+ *
+ * @param scan.source - The stored source, or null on an older row
+ * @param scan.manuallyGenerated - Whether the location was entered by hand
+ * @returns The label for the reader
+ */
+export function describeScanOrigin(scan: {
+  source: ScanSource | null;
+  manuallyGenerated: boolean;
+}): string {
+  if (!scan.source && scan.manuallyGenerated) {
+    return SCAN_SOURCE_LABELS.GPS_UPDATE;
+  }
+  return describeScanSourceLabel(scan.source);
+}
+
+/**
+ * Names the hardware a scan came from, from its parsed user agent.
+ *
+ * @param device - The parsed device
+ * @returns "<vendor> <model>", or null when either is unknown
+ */
+export function describeDeviceHardware(device: {
+  vendor?: string;
+  model?: string;
+}): string | null {
+  return device.vendor && device.model
+    ? `${device.vendor} ${device.model}`
+    : null;
+}

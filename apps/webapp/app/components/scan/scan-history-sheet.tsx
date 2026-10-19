@@ -27,7 +27,9 @@ import type {
   ScanHistoryPage,
   ScanHistoryRow,
 } from "~/modules/scan/history.server";
-import type { ScanTarget } from "~/modules/scan/service.server";
+import { googleMapsSearchUrl } from "~/modules/scan/maps-link";
+import type { ScanTarget } from "~/modules/scan/target";
+import { scanTargetFilter, scanTargetKey } from "~/modules/scan/target";
 import { BADGE_COLORS } from "~/utils/badge-colors";
 import {
   INITIAL_SCAN_HISTORY_STATE,
@@ -41,9 +43,7 @@ type ScanHistoryResponse =
 
 /** The endpoint URL for one page of the target's scans. */
 function scanHistoryUrl(target: ScanTarget, cursor: string | null) {
-  const search = new URLSearchParams(
-    "assetId" in target ? { assetId: target.assetId } : { kitId: target.kitId }
-  );
+  const search = new URLSearchParams(scanTargetFilter(target));
   if (cursor) {
     search.set("cursor", cursor);
   }
@@ -68,9 +68,8 @@ export function ScanHistoryButton({
     scanHistoryReducer,
     INITIAL_SCAN_HISTORY_STATE
   );
-  const targetId = "assetId" in target ? target.assetId : target.kitId;
   const fetcher = useFetcher<ScanHistoryResponse>({
-    key: `scan-history-${targetId}`,
+    key: `scan-history-${scanTargetKey(target)}`,
   });
   /**
    * The response already on the fetcher when the current request started, so
@@ -78,6 +77,12 @@ export function ScanHistoryButton({
    * for the one in flight. A new `load` on the same fetcher key supersedes any
    * request still pending, so a response from an abandoned request cannot land
    * after it.
+   *
+   * why: not `useFetcherOutcomeSinceOpen`. That hook takes one baseline per
+   * opening and reports one outcome for it, which fits a dialog that submits
+   * once. This sheet makes a request per page within one opening, so each
+   * request needs its own baseline, or a "Load more" answer could not be told
+   * from the first page.
    */
   const dataAtRequestRef = useRef<unknown>(undefined);
 
@@ -133,13 +138,16 @@ export function ScanHistoryButton({
           <p className="py-6 text-center text-sm text-gray-600">
             Not scanned yet
           </p>
-        ) : (
+        ) : null}
+        {/* Only a list with rows: an empty one is announced as "list, 0
+            items" beside the loading or error message. */}
+        {state.rows.length > 0 ? (
           <ol className="mt-2 flex flex-col divide-y divide-gray-100">
             {state.rows.map((row) => (
               <ScanHistoryItem key={row.id} row={row} />
             ))}
           </ol>
-        )}
+        ) : null}
 
         <div className="flex flex-col items-center gap-2 py-4">
           {state.phase === "loading" ? (
@@ -216,7 +224,10 @@ function ScanHistoryItem({ row }: { row: ScanHistoryRow }) {
           {row.coordinates ? (
             <a
               className="text-primary-700 underline-offset-2 hover:underline"
-              href={`https://www.google.com/maps/search/?api=1&query=${row.coordinates.latitude},${row.coordinates.longitude}`}
+              href={googleMapsSearchUrl(
+                row.coordinates.latitude,
+                row.coordinates.longitude
+              )}
               target="_blank"
               rel="nofollow noopener noreferrer"
             >
