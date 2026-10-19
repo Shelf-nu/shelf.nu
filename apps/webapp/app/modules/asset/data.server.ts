@@ -40,6 +40,7 @@ import { canImportAssets } from "~/utils/subscription.server";
 import type { UserNameFields } from "~/utils/user";
 import { resolveUserDisplayName } from "~/utils/user";
 import {
+  type LastAuditDateAccess,
   LAST_AUDIT_DATE_COLUMN,
   canQueryLastAuditDate,
   stripHiddenAuditColumns,
@@ -492,6 +493,9 @@ export async function simpleModeLoader({
   return data(
     payload({
       header,
+      // Simple mode never shows the last audit date column; the field keeps
+      // the loader union uniform for the shared column renderer.
+      lastAuditDateAccess: "hidden" as LastAuditDateAccess,
       /**
        * `TeamMemberBadge` only decides whether to DRAW the custodian; the name
        * and `user.email` shipped in this payload regardless, so a restricted
