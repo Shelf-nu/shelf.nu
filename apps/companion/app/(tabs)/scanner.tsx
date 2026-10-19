@@ -287,6 +287,10 @@ function ScannerContent() {
   // all the add-mode scan capture / blockers / list rendering apply to both.
   const isBookingAddMode =
     isBookingMode && (bookingAction === "add" || bookingAction === "fulfil");
+  // Only a plain add books a NUMBER of units of a quantity-tracked asset.
+  // Fulfil assigns each scanned unit to a reservation and sends no quantity,
+  // so it never asks for one.
+  const isBookingQuantityMode = isBookingMode && bookingAction === "add";
   // Progressive check-out flow: the twin of check-in. Assets already on the
   // booking are scanned one at a time to take them out, batched into the same
   // list, and submitted to the partial-checkout endpoint. Available on
@@ -616,6 +620,8 @@ function ScannerContent() {
     // The booking belongs to the workspace that was open. Its refetch bails
     // on failure, so without this a stale context would survive the switch.
     setBookingCtx(null);
+    // A quantity sheet open for the previous workspace's asset closes with it.
+    setQtyPrompt(null);
     // Also invalidates any in-flight claim continuation: claimQrAndProceed
     // compares its originating org against this ref after its awaits and
     // drops the follow-up navigation when they differ (the claim itself may
@@ -1530,7 +1536,7 @@ function ScannerContent() {
             // A quantity-tracked asset books ONE number, so scanning it again
             // is not another unit — reopen the amount instead of refusing.
             if (
-              isBookingAddMode &&
+              isBookingQuantityMode &&
               existingItem.assetType === "QUANTITY_TRACKED"
             ) {
               setQtyPrompt({
@@ -1583,7 +1589,11 @@ function ScannerContent() {
             // quantity input, capped at `pickerMeta.maxAllowed`). The row joins
             // the list only when the sheet is confirmed. An archived one skips
             // the sheet and joins flagged, like any archived scan.
-            if (newItem.assetType === "QUANTITY_TRACKED" && !newItem.archived) {
+            if (
+              isBookingQuantityMode &&
+              newItem.assetType === "QUANTITY_TRACKED" &&
+              !newItem.archived
+            ) {
               finalizeScan();
               void promptQuantityForScan(newItem, asset.quantity ?? null);
               return;
@@ -2155,11 +2165,15 @@ function ScannerContent() {
     poolQuantity: number | null
   ) => {
     if (!currentOrg || !bookingId) return;
+    const originOrgId = currentOrg.id;
     const { data } = await api.bookingAssetAvailability(
       currentOrg.id,
       bookingId,
       [item.targetId]
     );
+    // The workspace changed while this was in flight: the asset belongs to
+    // the one that was open, so it must not reach the new one's list.
+    if (activeOrgIdRef.current !== originOrgId) return;
     const facts = data?.availability?.[0];
     const held = facts?.bookedQuantity ?? undefined;
     const cap = bookingQuantityCap({
@@ -2996,7 +3010,7 @@ function ScannerContent() {
     ...item,
     status: item.archived ? ARCHIVED_BADGE_STATUS : item.status,
     quantity:
-      isBookingAddMode && item.bookingQuantity != null
+      isBookingQuantityMode && item.bookingQuantity != null
         ? {
             value: item.bookingQuantity,
             max: item.bookingQuantityMax ?? item.bookingQuantity,
@@ -3383,7 +3397,7 @@ function ScannerContent() {
               items={bookingDrawerItems}
               keyField="targetId"
               onEditQuantity={
-                isBookingAddMode ? editBookingItemQuantity : undefined
+                isBookingQuantityMode ? editBookingItemQuantity : undefined
               }
               title={
                 isBookingAddMode

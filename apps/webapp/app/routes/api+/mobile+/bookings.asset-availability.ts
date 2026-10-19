@@ -63,7 +63,10 @@ const QuerySchema = z.object({
             .filter(Boolean)
         )
       )
-    ),
+    )
+    // Judged after normalizing: ",," passes the raw length check but names
+    // no asset.
+    .pipe(z.array(z.string()).min(1)),
 });
 
 /** Hard cap on ids per call: the scanner asks for one, the booking screen for one. */

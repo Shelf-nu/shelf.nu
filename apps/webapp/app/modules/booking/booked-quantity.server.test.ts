@@ -17,9 +17,9 @@ import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 
 import {
-  assertBookedQuantitiesChangeable,
   noteBookedQuantityChanges,
   setStandaloneBookedQuantities,
+  setStandaloneBookedQuantitiesWithinTx,
   setStandaloneBookedQuantity,
   type BookedQuantityChange,
 } from "./booked-quantity.server";
@@ -32,13 +32,9 @@ const tx = {
 };
 
 // why: the database is the integration boundary. `$transaction` hands the
-// service a recording client so reads and writes inside it are observable,
-// and `db.bookingAsset.findUnique` backs the unlocked pre-check.
+// service a recording client so reads and writes inside it are observable.
 vi.mock("~/database/db.server", () => ({
-  db: {
-    $transaction: vi.fn(),
-    bookingAsset: { findUnique: vi.fn() },
-  },
+  db: { $transaction: vi.fn() },
 }));
 
 // why: the row lock is a raw `SELECT … FOR UPDATE`; only its order and
@@ -103,7 +99,6 @@ function slicesHold(
     );
   };
   tx.bookingAsset.findUnique.mockImplementation(read);
-  vi.mocked(db.bookingAsset.findUnique).mockImplementation(read as never);
 }
 
 beforeEach(() => {
@@ -249,6 +244,24 @@ describe("setStandaloneBookedQuantities", () => {
   });
 });
 
+describe("setStandaloneBookedQuantitiesWithinTx", () => {
+  it("writes inside the caller's transaction instead of opening one", async () => {
+    slicesHold({ "slice-a": { quantity: 2 } });
+
+    await setStandaloneBookedQuantitiesWithinTx(tx as never, {
+      ...SCOPE,
+      changes: [change("a", 5)],
+    });
+
+    expect(db.$transaction).not.toHaveBeenCalled();
+    expect(lockAssetForQuantityUpdate).toHaveBeenCalledWith(tx, "a", "org-1");
+    expect(tx.bookingAsset.update).toHaveBeenCalledWith({
+      where: { id: "slice-a" },
+      data: { quantity: 5 },
+    });
+  });
+});
+
 describe("setStandaloneBookedQuantity", () => {
   it("returns the amount the slice held before", async () => {
     slicesHold({ "slice-a": { quantity: 3 } });
@@ -256,38 +269,6 @@ describe("setStandaloneBookedQuantity", () => {
     await expect(
       setStandaloneBookedQuantity({ ...SCOPE, ...change("a", 7) })
     ).resolves.toEqual({ previousQuantity: 3 });
-  });
-});
-
-describe("assertBookedQuantitiesChangeable", () => {
-  it("checks without locking or writing", async () => {
-    slicesHold({ "slice-a": { quantity: 2 } });
-
-    await assertBookedQuantitiesChangeable({
-      ...SCOPE,
-      changes: [change("a", 5)],
-    });
-
-    expect(assertAssetQuantityAvailable).toHaveBeenCalledWith(
-      expect.objectContaining({
-        tx: db,
-        currentQuantity: 2,
-        requestedQuantity: 5,
-      })
-    );
-    expect(db.$transaction).not.toHaveBeenCalled();
-    expect(lockAssetForQuantityUpdate).not.toHaveBeenCalled();
-    expect(tx.bookingAsset.update).not.toHaveBeenCalled();
-  });
-
-  it("refuses a checked-out slice before anything is written", async () => {
-    slicesHold({
-      "slice-a": { quantity: 4, checkedOutAt: new Date("2026-09-10T10:00Z") },
-    });
-
-    await expect(
-      assertBookedQuantitiesChangeable({ ...SCOPE, changes: [change("a", 1)] })
-    ).rejects.toMatchObject({ status: 400 });
   });
 });
 

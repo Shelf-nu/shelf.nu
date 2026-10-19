@@ -29,6 +29,8 @@ import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
  *   and raising it would count units as out that never left.
  * - The asset row is locked for the read-then-write, and the slice is re-read
  *   under that lock, so two concurrent edits cannot both pass the guard.
+ * - A set of changes lands together: in a transaction of its own, or inside
+ *   the caller's when it must commit with other writes (the mobile re-add).
  *
  * A kit-driven slice is never changed here: its amount belongs to the kit.
  *
@@ -65,6 +67,11 @@ export type AppliedBookedQuantityChange = {
   quantity: number;
 };
 
+/** The interactive transaction client `db.$transaction` hands its callback. */
+export type BookedQuantityTx = Parameters<
+  Parameters<typeof db.$transaction>[0]
+>[0];
+
 /** The slice's current amount and whether its units have gone out. */
 type SliceState = { quantity: number; checkedOutAt: Date | null };
 
@@ -75,8 +82,7 @@ type SliceState = { quantity: number; checkedOutAt: Date | null };
  * @throws {ShelfError} 404 when the slice is gone, 400 when it is checked out
  */
 async function readChangeableSlice(
-  // The plain client for the pre-check, or the interactive transaction.
-  client: Pick<typeof db, "bookingAsset">,
+  client: Pick<BookedQuantityTx, "bookingAsset">,
   change: BookedQuantityChange
 ): Promise<SliceState> {
   const slice = await client.bookingAsset.findUnique({
@@ -108,30 +114,42 @@ async function readChangeableSlice(
 }
 
 /**
- * Checks a set of changes without locking or writing anything.
+ * Sets the booked quantity of several standalone slices inside the caller's
+ * transaction, so they commit or roll back with whatever else it writes.
  *
- * Lets a caller that writes something else first (the mobile re-add, which
- * inserts new assets before it resizes held ones) refuse the whole request
- * up front, so a resize that cannot pass never lands after the insert. The
- * locked check in {@link setStandaloneBookedQuantities} still runs; this one
- * only narrows the window in which it can fail.
+ * Asset rows are locked in id order, so two requests touching the same assets
+ * cannot deadlock. Each slice is re-read under its lock; a stale-high
+ * snapshot would otherwise let an increase pass the directional guard as a
+ * reduction.
  *
- * @param args.changes - The slices to check, with their requested amounts
- * @throws {ShelfError} the first refusal: a missing or checked-out slice, or
- *   an increase beyond what the window has free
+ * @param tx - The caller's interactive transaction
+ * @param args.changes - The slices to change, with their new amounts
+ * @returns what each change did; unchanged slices report equal quantities
+ * @throws {ShelfError} 404 when a slice vanished, 400 when one is checked out,
+ *   or the availability guard's own error when an increase exceeds what the
+ *   window has free
  */
-export async function assertBookedQuantitiesChangeable({
-  bookingId,
-  organizationId,
-  window,
-  changes,
-}: BookingScope & { changes: BookedQuantityChange[] }): Promise<void> {
-  for (const change of changes) {
-    const slice = await readChangeableSlice(db, change);
+export async function setStandaloneBookedQuantitiesWithinTx(
+  tx: BookedQuantityTx,
+  {
+    bookingId,
+    organizationId,
+    window,
+    changes,
+  }: BookingScope & { changes: BookedQuantityChange[] }
+): Promise<AppliedBookedQuantityChange[]> {
+  const ordered = [...changes].sort((a, b) =>
+    a.assetId.localeCompare(b.assetId)
+  );
+  const applied: AppliedBookedQuantityChange[] = [];
+  for (const change of ordered) {
+    await lockAssetForQuantityUpdate(tx, change.assetId, organizationId);
+    const slice = await readChangeableSlice(tx, change);
+
     await assertAssetQuantityAvailable({
       assetId: change.assetId,
       organizationId,
-      tx: db,
+      tx,
       window,
       excludeBookingId: bookingId,
       currentQuantity: slice.quantity,
@@ -139,71 +157,38 @@ export async function assertBookedQuantitiesChangeable({
       assetTitle: change.assetTitle,
       unitOfMeasure: change.unitOfMeasure,
     });
+
+    if (slice.quantity !== change.quantity) {
+      await tx.bookingAsset.update({
+        where: { id: change.bookingAssetId },
+        data: { quantity: change.quantity },
+      });
+    }
+
+    applied.push({
+      assetId: change.assetId,
+      assetTitle: change.assetTitle,
+      previousQuantity: slice.quantity,
+      quantity: change.quantity,
+    });
   }
+  return applied;
 }
 
 /**
- * Sets the booked quantity of several standalone slices in ONE transaction:
- * either every change lands or none does.
+ * Sets the booked quantity of several standalone slices in ONE transaction of
+ * their own: either every change lands or none does. See
+ * {@link setStandaloneBookedQuantitiesWithinTx} for the guards.
  *
- * Asset rows are locked in id order, so two requests touching the same assets
- * cannot deadlock. Each slice is re-read under its lock; a stale-high
- * snapshot would otherwise let an increase pass the directional guard as a
- * reduction.
- *
- * @param args.changes - The slices to change, with their new amounts
- * @returns what each change did; unchanged slices report equal quantities
- * @throws {ShelfError} 404 when a slice vanished, 400 when one is checked out,
- *   or the availability guard's own error when an increase exceeds what the
- *   window has free
+ * @returns what each change did; an empty set opens no transaction
  */
-export async function setStandaloneBookedQuantities({
-  bookingId,
-  organizationId,
-  window,
-  changes,
-}: BookingScope & {
-  changes: BookedQuantityChange[];
-}): Promise<AppliedBookedQuantityChange[]> {
-  if (changes.length === 0) return [];
-  const ordered = [...changes].sort((a, b) =>
-    a.assetId.localeCompare(b.assetId)
+export async function setStandaloneBookedQuantities(
+  args: BookingScope & { changes: BookedQuantityChange[] }
+): Promise<AppliedBookedQuantityChange[]> {
+  if (args.changes.length === 0) return [];
+  return db.$transaction((tx) =>
+    setStandaloneBookedQuantitiesWithinTx(tx, args)
   );
-
-  return db.$transaction(async (tx) => {
-    const applied: AppliedBookedQuantityChange[] = [];
-    for (const change of ordered) {
-      await lockAssetForQuantityUpdate(tx, change.assetId, organizationId);
-      const slice = await readChangeableSlice(tx, change);
-
-      await assertAssetQuantityAvailable({
-        assetId: change.assetId,
-        organizationId,
-        tx,
-        window,
-        excludeBookingId: bookingId,
-        currentQuantity: slice.quantity,
-        requestedQuantity: change.quantity,
-        assetTitle: change.assetTitle,
-        unitOfMeasure: change.unitOfMeasure,
-      });
-
-      if (slice.quantity !== change.quantity) {
-        await tx.bookingAsset.update({
-          where: { id: change.bookingAssetId },
-          data: { quantity: change.quantity },
-        });
-      }
-
-      applied.push({
-        assetId: change.assetId,
-        assetTitle: change.assetTitle,
-        previousQuantity: slice.quantity,
-        quantity: change.quantity,
-      });
-    }
-    return applied;
-  });
 }
 
 /**

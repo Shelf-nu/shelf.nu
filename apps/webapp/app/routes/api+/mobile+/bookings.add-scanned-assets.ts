@@ -12,9 +12,9 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import {
-  assertBookedQuantitiesChangeable,
   noteBookedQuantityChanges,
-  setStandaloneBookedQuantities,
+  setStandaloneBookedQuantitiesWithinTx,
+  type AppliedBookedQuantityChange,
   type BookedQuantityChange,
 } from "~/modules/booking/booked-quantity.server";
 import {
@@ -398,16 +398,9 @@ export async function action({ request }: ActionFunctionArgs) {
       unitOfMeasure: slice.asset.unitOfMeasure ?? null,
     }));
 
-    // Refuse a resize that cannot pass BEFORE anything is written, so a scan
-    // never inserts its new assets and then fails on a held one. The locked
-    // check below still decides; this only closes the common case.
-    await assertBookedQuantitiesChangeable({
-      bookingId,
-      organizationId,
-      window,
-      changes: resizes,
-    });
-
+    // The resizes run inside the add's transaction: a refused resize rolls
+    // back the new assets too, so the booking is never left half-changed.
+    let appliedResizes: AppliedBookedQuantityChange[] = [];
     await addScannedAssetsToBooking({
       assetIds: standaloneAssetIds,
       kitSlices,
@@ -418,14 +411,14 @@ export async function action({ request }: ActionFunctionArgs) {
       quantities,
       // Re-checks the add rule against the locked status inside the write.
       access,
-    });
-
-    // Every resize in one transaction: all of them land or none does.
-    const appliedResizes = await setStandaloneBookedQuantities({
-      bookingId,
-      organizationId,
-      window,
-      changes: resizes,
+      inSameTransaction: async (tx) => {
+        appliedResizes = await setStandaloneBookedQuantitiesWithinTx(tx, {
+          bookingId,
+          organizationId,
+          window,
+          changes: resizes,
+        });
+      },
     });
     await noteBookedQuantityChanges({
       userId: user.id,

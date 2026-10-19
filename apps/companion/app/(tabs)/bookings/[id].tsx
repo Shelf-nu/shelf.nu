@@ -1197,6 +1197,19 @@ function BookingDetailScreen({ id }: { id: string }) {
     [rows, selectedAssetIds, selectMode, checkedInAssetIds]
   );
 
+  /**
+   * Whether the server lets the caller write this booking: any booking with
+   * `bookings.writeAll`, otherwise only one they created or hold. Mirrors the
+   * server's `canWriteBooking` (creator OR custodian), which is wider than the
+   * custodian-only rule the add-items endpoints apply.
+   */
+  const mayWriteThisBooking =
+    !!booking &&
+    (access.bookings.writeAll ||
+      (!!user?.id &&
+        (booking.creator.id === user.id ||
+          booking.custodianUser?.id === user.id)));
+
   const renderAsset = useCallback(
     (item: BookingAsset, inKit: boolean) => {
       const fallbackBadge = {
@@ -1247,6 +1260,7 @@ function BookingDetailScreen({ id }: { id: string }) {
         !selectMode &&
         !inKit &&
         !!booking &&
+        mayWriteThisBooking &&
         canAddItemsToBooking(access, booking.status, currentOrg?.roles);
 
       return (
@@ -1445,6 +1459,7 @@ function BookingDetailScreen({ id }: { id: string }) {
       booking?.status,
       access,
       currentOrg?.roles,
+      mayWriteThisBooking,
       openQtyEdit,
       styles,
     ]
@@ -1647,9 +1662,6 @@ function BookingDetailScreen({ id }: { id: string }) {
     hasUnitsLeftToCheckOut &&
     ["RESERVED", "ONGOING", "OVERDUE"].includes(booking.status);
 
-  /** Whether the server scopes this member's booking writes to their own bookings. */
-  const isRestrictedToOwnBookings = !access.bookings.writeAll;
-
   /**
    * Whether to offer the progressive check-out affordances (scan and select).
    *
@@ -1666,10 +1678,7 @@ function BookingDetailScreen({ id }: { id: string }) {
       entity: "booking",
       action: "checkout",
     }) &&
-    (!isRestrictedToOwnBookings ||
-      (!!user?.id &&
-        (booking.creator.id === user.id ||
-          booking.custodianUser?.id === user.id)));
+    mayWriteThisBooking;
 
   /**
    * Whether the server accepts this member changing this booking's items. A

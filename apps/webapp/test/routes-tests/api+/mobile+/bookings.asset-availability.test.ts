@@ -230,6 +230,16 @@ describe("GET /api/mobile/bookings/asset-availability", () => {
     expect(availabilityBatchMock).not.toHaveBeenCalled();
   });
 
+  it("400s when assetIds holds no id once separators are dropped", async () => {
+    const response = await loader(
+      makeArgs({ bookingId: BOOKING_ID, assetIds: ", ,," })
+    );
+
+    assertIsDataWithResponseInit(response);
+    expect(response.init?.status).toBe(400);
+    expect(bookingFindFirstMock).not.toHaveBeenCalled();
+  });
+
   it("404s when the booking is not in the caller's workspace", async () => {
     bookingFindFirstMock.mockResolvedValue(null);
 
