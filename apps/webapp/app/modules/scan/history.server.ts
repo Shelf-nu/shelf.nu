@@ -9,7 +9,6 @@
  * @see {@link file://./../../routes/api+/scans.ts}
  * @see {@link file://./../../components/scan/scan-history-sheet.tsx}
  */
-import type { ScanCodeType } from "@prisma/client";
 import type { IResult } from "ua-parser-js";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
@@ -27,8 +26,6 @@ export type ScanHistoryRow = {
   scannedBy: string;
   /** The scanner's email, only for a member of the scan's workspace */
   scannedByEmail: string | null;
-  /** What kind of code was scanned, for the row's icon */
-  codeType: ScanCodeType;
   /** "QR code", "Barcode: <value>" or "SAM ID: <value>" */
   code: string;
   /** The surface that recorded the scan */
@@ -74,7 +71,6 @@ export function toScanHistoryRow(scan: ScanWithRelations): ScanHistoryRow {
     id: scan.id,
     scannedAt: scan.createdAt.toISOString(),
     ...scannerFields(scan),
-    codeType: scan.codeType,
     code: describeScannedCodeLabel(scan.codeType, scan.code),
     source: describeScanSourceLabel(scan.source),
     coordinates:

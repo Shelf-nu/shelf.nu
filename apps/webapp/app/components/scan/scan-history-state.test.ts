@@ -18,7 +18,6 @@ function row(id: string): ScanHistoryRow {
     scannedAt: "2026-10-16T10:00:00.000Z",
     scannedBy: "Unknown",
     scannedByEmail: null,
-    codeType: "QR",
     code: "QR code",
     source: "QR link",
     coordinates: null,

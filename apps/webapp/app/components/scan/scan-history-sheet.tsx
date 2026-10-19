@@ -10,8 +10,6 @@
  * @see {@link file://./scan-history-state.ts} The page state
  */
 import { useEffect, useReducer, useRef, useState } from "react";
-import type { LucideIcon } from "lucide-react";
-import { Barcode, Hash, MapPin, QrCode, Smartphone, User } from "lucide-react";
 import { useFetcher } from "react-router";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
@@ -179,92 +177,58 @@ export function ScanHistoryButton({
   );
 }
 
-/** The icon for each kind of scanned code. */
-const CODE_TYPE_ICONS: Record<ScanHistoryRow["codeType"], LucideIcon> = {
-  QR: QrCode,
-  BARCODE: Barcode,
-  SAM_ID: Hash,
-};
-
 /**
  * One scan. The headline is what was scanned, with the surface that recorded
  * it as a badge and the time below; who, where and on which device follow as
- * secondary detail lines.
+ * a lighter label and value block.
  */
 function ScanHistoryItem({ row }: { row: ScanHistoryRow }) {
-  const CodeIcon = CODE_TYPE_ICONS[row.codeType];
-
   return (
-    <li className="flex gap-3 py-4">
-      <span
-        aria-hidden="true"
-        className="flex size-8 shrink-0 items-center justify-center rounded-full bg-gray-100 text-gray-600"
-      >
-        <CodeIcon className="size-4" />
-      </span>
-
-      <div className="flex min-w-0 flex-1 flex-col gap-2">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <p className="truncate text-sm font-medium text-gray-900">
-              {row.code}
-            </p>
-            <p className="text-xs text-gray-500">
-              <DateS date={row.scannedAt} includeTime />
-            </p>
-          </div>
-          <Badge
-            color={BADGE_COLORS.gray.bg}
-            textColor={BADGE_COLORS.gray.text}
-            withDot={false}
-          >
-            {row.source}
-          </Badge>
+    <li className="flex flex-col gap-2 py-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium text-gray-900">
+            {row.code}
+          </p>
+          <p className="text-xs text-gray-500">
+            <DateS date={row.scannedAt} includeTime />
+          </p>
         </div>
-
-        <ul className="flex flex-col gap-1 text-xs text-gray-600">
-          <li className="flex min-w-0 items-center gap-1.5">
-            <User
-              aria-hidden="true"
-              className="size-3.5 shrink-0 text-gray-400"
-            />
-            <span className="sr-only">Scanned by</span>
-            <span className="truncate">
-              <span className="text-gray-700">{row.scannedBy}</span>
-              {row.scannedByEmail ? (
-                <span className="text-gray-500"> · {row.scannedByEmail}</span>
-              ) : null}
-            </span>
-          </li>
-          <li className="flex items-center gap-1.5">
-            <MapPin
-              aria-hidden="true"
-              className="size-3.5 shrink-0 text-gray-400"
-            />
-            <span className="sr-only">Location</span>
-            {row.coordinates ? (
-              <a
-                className="text-primary-700 underline-offset-2 hover:underline"
-                href={`https://www.google.com/maps/search/?api=1&query=${row.coordinates.latitude},${row.coordinates.longitude}`}
-                target="_blank"
-                rel="nofollow noopener noreferrer"
-              >
-                {row.coordinates.latitude}, {row.coordinates.longitude}
-              </a>
-            ) : (
-              <span className="text-gray-400">No location</span>
-            )}
-          </li>
-          <li className="flex min-w-0 items-center gap-1.5">
-            <Smartphone
-              aria-hidden="true"
-              className="size-3.5 shrink-0 text-gray-400"
-            />
-            <span className="sr-only">Device</span>
-            <span className="truncate">{row.device}</span>
-          </li>
-        </ul>
+        <Badge
+          color={BADGE_COLORS.gray.bg}
+          textColor={BADGE_COLORS.gray.text}
+          withDot={false}
+        >
+          {row.source}
+        </Badge>
       </div>
+
+      <dl className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">
+        <dt className="text-gray-500">Scanned by</dt>
+        <dd className="truncate text-gray-700">
+          {row.scannedBy}
+          {row.scannedByEmail ? (
+            <span className="text-gray-500"> · {row.scannedByEmail}</span>
+          ) : null}
+        </dd>
+        <dt className="text-gray-500">Location</dt>
+        <dd className="text-gray-700">
+          {row.coordinates ? (
+            <a
+              className="text-primary-700 underline-offset-2 hover:underline"
+              href={`https://www.google.com/maps/search/?api=1&query=${row.coordinates.latitude},${row.coordinates.longitude}`}
+              target="_blank"
+              rel="nofollow noopener noreferrer"
+            >
+              {row.coordinates.latitude}, {row.coordinates.longitude}
+            </a>
+          ) : (
+            <span className="text-gray-400">No location</span>
+          )}
+        </dd>
+        <dt className="text-gray-500">Device</dt>
+        <dd className="truncate text-gray-700">{row.device}</dd>
+      </dl>
     </li>
   );
 }
