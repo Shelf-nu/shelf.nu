@@ -724,7 +724,11 @@ export default function KitDetails() {
             entity: PermissionEntity.scan,
             action: PermissionAction.read,
           }) ? (
-            <ScanDetails lastScan={lastScan} />
+            <ScanDetails
+              lastScan={lastScan}
+              target={{ kitId: kit.id }}
+              itemName={kit.name}
+            />
           ) : null}
         </div>
       </div>

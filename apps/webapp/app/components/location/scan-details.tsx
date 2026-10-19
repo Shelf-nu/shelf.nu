@@ -1,4 +1,6 @@
+import { ScanHistoryButton } from "~/components/scan/scan-history-sheet";
 import { Button } from "~/components/shared/button";
+import type { ScanTarget } from "~/modules/scan/service.server";
 import type { parseScanData } from "~/modules/scan/utils.server";
 import { tw } from "~/utils/tw";
 import { ShelfMap } from "./map";
@@ -37,14 +39,21 @@ export function describeScanSource(
  * The "Last scan" card on the asset overview and the kit page: who scanned
  * it, when, from which device and how, and a map of where. A scan with no
  * location of its own is placed at the newest earlier located scan, and the
- * card says when that one was.
+ * card says when that one was. "View all scans" opens the item's full scan
+ * history.
  *
  * @param props.lastScan - The parsed last scan, or null when never scanned
+ * @param props.target - The asset or kit the card is on
+ * @param props.itemName - Its name, for the scan history sheet
  */
 export function ScanDetails({
   lastScan,
+  target,
+  itemName,
 }: {
   lastScan?: ReturnType<typeof parseScanData> | null;
+  target: ScanTarget;
+  itemName: string;
 }) {
   let latitude, longitude;
 
@@ -147,8 +156,8 @@ export function ScanDetails({
               </p>
             </div>
           </div>
-          {hasLocation ? (
-            <div className="flex w-full justify-center px-4 py-3">
+          <div className="flex w-full flex-col gap-2 px-4 py-3">
+            {hasLocation ? (
               <Button
                 to={`https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}&zoom=15&markers=${latitude},${longitude}`}
                 variant="secondary"
@@ -158,8 +167,9 @@ export function ScanDetails({
               >
                 See in Google Maps
               </Button>
-            </div>
-          ) : null}
+            ) : null}
+            <ScanHistoryButton target={target} itemName={itemName} />
+          </div>
         </>
       ) : (
         <MapPlaceholder
