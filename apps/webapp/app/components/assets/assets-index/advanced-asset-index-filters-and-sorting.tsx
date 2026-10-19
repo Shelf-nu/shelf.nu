@@ -40,6 +40,7 @@ import {
   getDefaultValueForFieldType,
   getUIFieldType,
   useInitialFilters,
+  valueForOperatorChange,
 } from "./advanced-filters/helpers";
 import {
   operatorsPerType,
@@ -394,26 +395,16 @@ function AdvancedFilter() {
                                   setFilters((prev) => {
                                     const newFilters = [...prev];
                                     const previous = newFilters[index];
-                                    const column = availableColumns.find(
-                                      (c) => c.name === previous.name
-                                    );
                                     newFilters[index] = {
                                       ...previous,
                                       operator,
-                                      // `isEmpty` takes no value. Leaving it
-                                      // re-seeds the default, since "" is not a
-                                      // valid value for the other operators.
-                                      value:
-                                        operator === "isEmpty"
-                                          ? ""
-                                          : previous.operator === "isEmpty" &&
-                                            column
-                                          ? getDefaultValueForFieldType(
-                                              column,
-                                              customFields,
-                                              timeZone
-                                            )
-                                          : previous.value,
+                                      value: valueForOperatorChange({
+                                        filter: previous,
+                                        operator,
+                                        columns: filterableColumns,
+                                        customFields,
+                                        timeZone,
+                                      }),
                                     };
                                     return newFilters;
                                   });

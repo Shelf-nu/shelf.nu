@@ -2,8 +2,8 @@
  * Audits index loader: the `assetId` scope.
  *
  * `/audits?assetId=<id>` lists one asset's audits, archived ones included. The
- * asset must belong to the caller's workspace; a foreign id is a 404 that
- * reveals nothing about the asset. Only callers who see every audit may scope
+ * asset must belong to the caller's workspace; any other id (foreign, or
+ * deleted since the link was saved) is ignored and the full list shows. Only callers who see every audit may scope
  * by asset; for anyone else the parameter is ignored, so it cannot reveal an
  * asset's name or existence.
  *
@@ -78,12 +78,13 @@ describe("audits index loader asset filter", () => {
     } as unknown as Awaited<ReturnType<typeof getAuditsForOrganization>>);
   });
 
-  it("rejects an asset from another workspace", async () => {
+  it("ignores an asset that is not in the workspace", async () => {
     vi.mocked(db.asset.findFirst).mockResolvedValue(null);
 
     const r = await load("?assetId=foreign-asset");
 
-    expect(r.status).toBe(404);
+    expect(r.status).toBe(200);
+    expect(r.data).toMatchObject({ assetFilter: null });
     expect(db.asset.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
@@ -92,7 +93,9 @@ describe("audits index loader asset filter", () => {
         }),
       })
     );
-    expect(getAuditsForOrganization).not.toHaveBeenCalled();
+    expect(getAuditsForOrganization).toHaveBeenCalledWith(
+      expect.objectContaining({ assetId: null, includeArchived: false })
+    );
   });
 
   it("scopes to a valid asset and includes archived audits", async () => {

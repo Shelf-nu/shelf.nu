@@ -175,18 +175,22 @@ describe("resolveAssetIdsForBulkOperation - lastAuditDate gating", () => {
   it("refuses a lastAuditDate select-all when access is hidden", async () => {
     vi.mocked(parseFiltersWithHierarchy).mockResolvedValue([lastAuditFilter]);
 
-    const ids = await resolve("hidden", "lastAuditDate=before:2026-01-01");
-
-    expect(ids).toEqual([]);
+    // An error, not an empty selection: the index shows every asset for this
+    // URL, so an empty result would let a bulk action "succeed" on nothing.
+    await expect(
+      resolve("hidden", "lastAuditDate=before:2026-01-01")
+    ).rejects.toMatchObject({ status: 400 });
     expect(capturedQueries).toHaveLength(0);
   });
 
   it("refuses a lastAuditDate select-all when access is locked", async () => {
     vi.mocked(parseFiltersWithHierarchy).mockResolvedValue([lastAuditFilter]);
 
-    const ids = await resolve("locked", "lastAuditDate=before:2026-01-01");
-
-    expect(ids).toEqual([]);
+    // An error, not an empty selection: the index shows every asset for this
+    // URL, so an empty result would let a bulk action "succeed" on nothing.
+    await expect(
+      resolve("locked", "lastAuditDate=before:2026-01-01")
+    ).rejects.toMatchObject({ status: 400 });
     expect(capturedQueries).toHaveLength(0);
   });
 

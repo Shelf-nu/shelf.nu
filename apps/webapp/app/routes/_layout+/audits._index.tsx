@@ -37,7 +37,7 @@ import {
   updateCookieWithPerPage,
   userPrefs,
 } from "~/utils/cookies.server";
-import { makeShelfError, ShelfError } from "~/utils/error";
+import { makeShelfError } from "~/utils/error";
 import { payload, error, getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import {
@@ -90,32 +90,22 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       "desc") as SortingDirection;
 
     // Optional asset scope, set by the "View all audits" link on an asset.
-    // An empty value is ignored. The asset must belong to this workspace;
-    // the title feeds the filter chip. Only callers who see every audit may
+    // An empty value is ignored, and so is an asset that is not in this
+    // workspace (deleted since the link was saved, or never ours): the list
+    // falls back to every audit and no chip shows. The title feeds the chip. Only callers who see every audit may
     // scope by asset (the same rule as the last audit date column); for
     // anyone else the parameter is ignored, so it cannot reveal an asset's
     // name or existence outside their own asset scope.
     const assetIdParam = access.audits.seeAll
       ? searchParams.get("assetId")?.trim()
       : undefined;
-    let assetFilter: { id: string; title: string } | null = null;
-    if (assetIdParam) {
-      const asset = await db.asset.findFirst({
-        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: audit history applies to archived assets too
-        where: { id: assetIdParam, organizationId },
-        select: { id: true, title: true },
-      });
-      if (!asset) {
-        throw new ShelfError({
-          cause: null,
-          message: "The asset to filter by could not be found.",
-          label: "Audit",
-          status: 404,
-          shouldBeCaptured: false,
-        });
-      }
-      assetFilter = asset;
-    }
+    const assetFilter: { id: string; title: string } | null = assetIdParam
+      ? await db.asset.findFirst({
+          // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: audit history applies to archived assets too
+          where: { id: assetIdParam, organizationId },
+          select: { id: true, title: true },
+        })
+      : null;
 
     const { audits, totalAudits } = await getAuditsForOrganization({
       organizationId,

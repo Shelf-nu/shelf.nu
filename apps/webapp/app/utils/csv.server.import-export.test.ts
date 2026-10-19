@@ -75,16 +75,26 @@ vi.mock("~/modules/asset/last-audit-date-access.server", () => ({
 
 // why: format prefs are read from the user row in the DB; the export only
 // forwards the resolved time zone to the asset query.
-vi.mock("./date-format.server", async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  resolveUserFormatPrefsById: vi.fn(() =>
-    Promise.resolve({ timeZone: "Pacific/Auckland" })
-  ),
-}));
+vi.mock("./date-format.server", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  const prefsForDeclaredZone = actual.prefsForDeclaredZone as (
+    timeZone: string
+  ) => unknown;
+  return {
+    ...actual,
+    resolveUserFormatPrefsById: vi.fn(() =>
+      Promise.resolve(prefsForDeclaredZone("Pacific/Auckland"))
+    ),
+  };
+});
 
+import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
 import { getAdvancedPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
-import { exportAssetsForImportToCsv } from "./csv.server";
+import {
+  exportAssetsForImportToCsv,
+  exportAssetsFromIndexToCsv,
+} from "./csv.server";
 
 const ORG = {
   id: "org1",
@@ -206,6 +216,69 @@ describe("exportAssetsForImportToCsv", () => {
         filters: "lastAuditDate=before:2026-08-01",
         timeZone: "Pacific/Auckland",
       })
+    );
+  });
+});
+
+describe("exportAssetsFromIndexToCsv", () => {
+  /** Column settings with the last audit date column visible. */
+  const settings = {
+    mode: "ADVANCED",
+    columns: [
+      { name: "category", visible: true, position: 1 },
+      { name: "lastAuditDate", visible: true, position: 2 },
+    ],
+  } as never;
+
+  /** Runs a select-all standard export with the given column scope. */
+  function exportStandard(columnScope: "visible" | "all") {
+    return exportAssetsFromIndexToCsv({
+      request: new Request("http://localhost/assets/export/x.csv"),
+      userId: "user-1",
+      assetIds: ALL_SELECTED_KEY,
+      settings,
+      currentOrganization: ORG,
+      assetIndexCurrentSearchParams: "lastAuditDate=before:2026-08-01",
+      columnScope,
+      access: ACCESS,
+    });
+  }
+
+  it("resolves select-all with the user's time zone and audit access", async () => {
+    await exportStandard("visible");
+
+    expect(getAdvancedPaginatedAndFilterableAssets).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        filters: "lastAuditDate=before:2026-08-01",
+        timeZone: "Pacific/Auckland",
+        lastAuditDateAccess: "available",
+        includeHiddenColumns: false,
+      })
+    );
+  });
+
+  it("computes hidden columns too for the All columns scope", async () => {
+    await exportStandard("all");
+
+    expect(getAdvancedPaginatedAndFilterableAssets).toHaveBeenLastCalledWith(
+      expect.objectContaining({ includeHiddenColumns: true })
+    );
+  });
+
+  it("keeps the column when audits are available", async () => {
+    const csv = await exportStandard("visible");
+
+    expect(csv.split("\r\n")[0]).toContain("Last audit date");
+  });
+
+  it("leaves the column out when the caller may not see audits", async () => {
+    vi.mocked(lastAuditDateAccessFor).mockReturnValueOnce("hidden");
+
+    const csv = await exportStandard("visible");
+
+    expect(csv.split("\r\n")[0]).not.toContain("Last audit date");
+    expect(getAdvancedPaginatedAndFilterableAssets).toHaveBeenLastCalledWith(
+      expect.objectContaining({ lastAuditDateAccess: "hidden" })
     );
   });
 });

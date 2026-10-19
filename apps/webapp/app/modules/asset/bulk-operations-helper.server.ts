@@ -1,7 +1,7 @@
 import type { Asset, AssetIndexSettings } from "@prisma/client";
 import { Prisma } from "@prisma/client";
 import { db } from "~/database/db.server";
-import { ShelfError } from "~/utils/error";
+import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { getParamsValues, ALL_SELECTED_KEY } from "~/utils/list";
 import {
   LAST_AUDIT_DATE_COLUMN,
@@ -84,6 +84,8 @@ export function buildAdvancedFilteredAssetIdsQuery(
  * @param lastAuditDateAccess - How the caller may use the last audit date. A
  *   `lastAuditDate` filter without `available` access refuses the selection.
  * @returns Promise resolving to array of asset IDs matching the filters
+ * @throws {ShelfError} 400 when the selection carries a last audit date filter
+ *   the caller may not use
  */
 async function getAdvancedFilteredAssetIds({
   organizationId,
@@ -120,11 +122,23 @@ async function getAdvancedFilteredAssetIds({
     // A last audit date filter from a caller who may not query it would turn
     // "select all" into an audit-date oracle. Refuse the whole selection;
     // dropping the filter would widen the bulk action beyond what was shown.
+    // It is an error, not an empty selection: the index drops the same filter
+    // and shows every asset, so an empty result would let a bulk action report
+    // success while changing nothing.
     if (
       !canQueryLastAuditDate(lastAuditDateAccess) &&
       parsedFilters.some((f) => f.name === LAST_AUDIT_DATE_COLUMN)
     ) {
-      return [];
+      throw new ShelfError({
+        cause: null,
+        title: "Filter not available",
+        message:
+          "The last audit date filter is not available in this workspace. Remove it from the URL and try again.",
+        additionalData: { organizationId, lastAuditDateAccess },
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+      });
     }
 
     // Generate WHERE clause (reuses existing logic)
@@ -149,6 +163,8 @@ async function getAdvancedFilteredAssetIds({
     const results = await db.$queryRaw<Array<{ id: string }>>(query);
     return results.map((r) => r.id);
   } catch (cause) {
+    // Keep a deliberate refusal's status and message.
+    if (isLikeShelfError(cause)) throw cause;
     throw new ShelfError({
       cause,
       message: "Something went wrong while fetching asset IDs",

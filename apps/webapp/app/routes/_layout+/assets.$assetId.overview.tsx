@@ -194,28 +194,30 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * `<ScanDetails>` behind the same check, but a client-side check only
      * hides the data — BASE and SELF_SERVICE hold `scan: []` and were still
      * receiving all of it in the page payload.
+     *
+     * Read alongside it: the "Last audit" card's history. Gated server-side by
+     * the same rule as the "Last audit date" column: only callers who see
+     * every audit, in a workspace with the audits add-on, receive it. Everyone
+     * else gets null and no card, so no audit dates reach roles whose audits
+     * are assignment-scoped.
      */
-    const lastScan = await getLastScanForViewer({
-      target: { assetId: asset.id },
-      userId,
-      organizationId,
-      roles,
-    });
-
-    /**
-     * The "Last audit" card. Gated server-side by the same rule as the "Last
-     * audit date" column: only callers who see every audit, in a workspace
-     * with the audits add-on, receive it. Everyone else gets null and no card,
-     * so no audit dates reach roles whose audits are assignment-scoped.
-     */
-    const auditHistory =
-      lastAuditDateAccessFor(access, currentOrganization) === "available"
-        ? await getAssetAuditHistory({
+    const canSeeAuditHistory =
+      lastAuditDateAccessFor(access, currentOrganization) === "available";
+    const [lastScan, auditHistory] = await Promise.all([
+      getLastScanForViewer({
+        target: { assetId: asset.id },
+        userId,
+        organizationId,
+        roles,
+      }),
+      canSeeAuditHistory
+        ? getAssetAuditHistory({
             assetId: asset.id,
             organizationId,
             limit: LAST_AUDIT_CARD_RECENT_LIMIT,
           })
-        : null;
+        : null,
+    ]);
 
     const qrObj = await generateQrObj({
       assetId: asset.id,
