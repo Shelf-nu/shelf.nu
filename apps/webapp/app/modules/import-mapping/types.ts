@@ -20,6 +20,16 @@ import { IMPORT_FIELD_NAMES } from "./fields";
 /** Most columns one mapping may carry. Larger files are refused. */
 export const MAX_MAPPED_COLUMNS = 200;
 
+/** Longest column heading a file may carry, in characters. */
+export const MAX_HEADER_LENGTH = 1000;
+
+/**
+ * Largest `mapping` form field accepted: every column at the longest heading,
+ * plus room for its target. Samples are not posted back.
+ */
+export const MAX_MAPPING_FIELD_LENGTH =
+  MAX_MAPPED_COLUMNS * (MAX_HEADER_LENGTH + 400);
+
 /** Most sample cells kept per column. */
 export const MAX_SAMPLES_PER_COLUMN = 3;
 
@@ -85,7 +95,7 @@ export const columnTargetSchema = z.discriminatedUnion("kind", [
 
 /** Validates a {@link ColumnMapping} as submitted by the review form. */
 export const columnMappingSchema = z.object({
-  source: z.string().max(500),
+  source: z.string().max(MAX_HEADER_LENGTH),
   target: columnTargetSchema,
   confidence: z.enum(["high", "low"]),
   sample: z

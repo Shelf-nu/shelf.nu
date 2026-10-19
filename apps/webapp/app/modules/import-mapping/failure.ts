@@ -19,6 +19,8 @@ export const IMPORT_FAILURE_REASONS = [
   "empty_file",
   "unreadable_file",
   "too_many_columns",
+  "too_many_rows",
+  "heading_too_long",
   "invalid_mapping",
   "duplicate_targets",
   "invalid_headers",

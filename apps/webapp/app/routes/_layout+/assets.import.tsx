@@ -9,6 +9,7 @@ import { ImportContent } from "~/components/assets/import-content";
 import Header from "~/components/layout/header";
 import { db } from "~/database/db.server";
 import { captureServerEvent } from "~/integrations/posthog/client.server";
+import { MAX_CONTENT_IMPORT_ROWS } from "~/modules/asset/import-preflight.server";
 import { createAssetsFromContentImport } from "~/modules/asset/service.server";
 import { ASSET_CSV_HEADERS } from "~/modules/asset/utils.server";
 import { applyMapping } from "~/modules/import-mapping/apply";
@@ -21,7 +22,9 @@ import { proposeMapping } from "~/modules/import-mapping/propose";
 import { buildColumnStats } from "~/modules/import-mapping/summary";
 import type { ColumnMapping } from "~/modules/import-mapping/types";
 import {
+  MAX_HEADER_LENGTH,
   MAX_MAPPED_COLUMNS,
+  MAX_MAPPING_FIELD_LENGTH,
   columnMappingListSchema,
 } from "~/modules/import-mapping/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -61,7 +64,7 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
         z.object({
           intent: z.enum(["analyze", "content"]),
           /** JSON of the reviewed ColumnMapping[]; absent on the legacy path. */
-          mapping: z.string().max(200_000).optional(),
+          mapping: z.string().max(MAX_MAPPING_FIELD_LENGTH).optional(),
           /** Columns the user changed in the review (analytics only). */
           mappingChanged: optionalNumberFromString({ blank: undefined }).pipe(
             z.number().int().min(0).max(1000).optional()
@@ -98,6 +101,37 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
         });
       }
 
+      // Refuse now what the importer would refuse after the review, so the
+      // user does not map a file that cannot be imported.
+      const dataRows = csvData.length - 1;
+      if (dataRows > MAX_CONTENT_IMPORT_ROWS) {
+        throw new ShelfError({
+          cause: null,
+          title: "File too large",
+          message: `This file has ${dataRows} rows, but the maximum is ${MAX_CONTENT_IMPORT_ROWS}. Please split it into smaller files and import them one at a time.`,
+          additionalData: { failureReason: "too_many_rows" },
+          label: "Assets",
+          status: 400,
+          shouldBeCaptured: false,
+        });
+      }
+      const longHeading = headers.findIndex(
+        (header) => header.length > MAX_HEADER_LENGTH
+      );
+      if (longHeading !== -1) {
+        throw new ShelfError({
+          cause: null,
+          title: "Column heading too long",
+          message: `Column ${longHeading + 1} has a heading of ${
+            headers[longHeading].length
+          } characters, but the maximum is ${MAX_HEADER_LENGTH}. Shorten it and try again.`,
+          additionalData: { failureReason: "heading_too_long" },
+          label: "Assets",
+          status: 400,
+          shouldBeCaptured: false,
+        });
+      }
+
       const [existingCustomFields, categories, locations] = await Promise.all([
         loadExistingCustomFields(organizationId),
         db.category.findMany({
@@ -109,7 +143,7 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
           select: { name: true },
         }),
       ]);
-      const rowCount = csvData.length - 1;
+      const rowCount = dataRows;
       const proposal = await proposeMapping({
         headers,
         samples,

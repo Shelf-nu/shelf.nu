@@ -19,17 +19,23 @@ import { CustomFieldType } from "@prisma/client";
 import type { AssetCsvHeader } from "./fields";
 
 /**
- * Lowercases a header and folds every run of punctuation or whitespace into
- * one space, so "Serial No.", "serial_no" and "SERIAL-NO" compare equal.
+ * Lowercases a header, drops accents and folds every run of punctuation or
+ * whitespace into one space, so "Serial No.", "serial_no" and "SERIAL-NO"
+ * compare equal.
  *
  * @param text - Header text
  * @returns The comparable form
  */
 export function normalizeHeader(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
+  return (
+    text
+      .normalize("NFD")
+      // Drop accents, so "Número" and "Ubicación" compare as "numero" and "ubicacion".
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim()
+  );
 }
 
 /** Where a synonym points, before the workspace's own fields are considered. */
@@ -56,6 +62,17 @@ export const SYNONYM_GROUPS: SynonymGroup[] = [
   {
     target: field("title"),
     headings: [
+      "artikelname",
+      "artikel",
+      "bezeichnung",
+      "gerat",
+      "nombre",
+      "articulo",
+      "equipo",
+      "nom",
+      "article",
+      "designation",
+      "objet",
       "name",
       "item",
       "item name",
@@ -74,6 +91,16 @@ export const SYNONYM_GROUPS: SynonymGroup[] = [
   {
     target: field("description"),
     headings: [
+      "beschreibung",
+      "notizen",
+      "bemerkung",
+      "bemerkungen",
+      "descripcion",
+      "notas",
+      "observaciones",
+      "remarques",
+      "commentaire",
+      "commentaires",
       "notes",
       "note",
       "comments",
@@ -88,6 +115,9 @@ export const SYNONYM_GROUPS: SynonymGroup[] = [
   {
     target: field("category"),
     headings: [
+      "kategorie",
+      "categoria",
+      "categorie",
       "categories",
       "group",
       "asset type",
@@ -106,6 +136,15 @@ export const SYNONYM_GROUPS: SynonymGroup[] = [
   {
     target: field("location"),
     headings: [
+      "standort",
+      "ort",
+      "raum",
+      "lagerort",
+      "ubicacion",
+      "lugar",
+      "emplacement",
+      "lieu",
+      "salle",
       "room",
       "site",
       "building",
@@ -125,6 +164,11 @@ export const SYNONYM_GROUPS: SynonymGroup[] = [
   {
     target: field("custodian"),
     headings: [
+      "verantwortlich",
+      "zugewiesen an",
+      "responsable",
+      "asignado a",
+      "attribue a",
       "owner",
       "assigned to",
       "assigned",
@@ -140,6 +184,13 @@ export const SYNONYM_GROUPS: SynonymGroup[] = [
   {
     target: field("valuation"),
     headings: [
+      "preis",
+      "wert",
+      "kaufpreis",
+      "precio",
+      "valor",
+      "prix",
+      "valeur",
       "value",
       "price",
       "cost",
@@ -154,6 +205,11 @@ export const SYNONYM_GROUPS: SynonymGroup[] = [
   {
     target: field("quantity"),
     headings: [
+      "anzahl",
+      "menge",
+      "bestand",
+      "cantidad",
+      "quantite",
       "qty",
       "count",
       "stock",
@@ -194,7 +250,14 @@ export const SYNONYM_GROUPS: SynonymGroup[] = [
   },
   {
     target: field("assetModel"),
-    headings: ["model", "model name", "product model"],
+    headings: [
+      "modell",
+      "modelo",
+      "modele",
+      "model",
+      "model name",
+      "product model",
+    ],
   },
   {
     target: field("qrId"),
@@ -220,6 +283,10 @@ export const SYNONYM_GROUPS: SynonymGroup[] = [
   {
     target: customField("Serial number", CustomFieldType.TEXT),
     headings: [
+      "seriennummer",
+      "numero de serie",
+      "no de serie",
+      "n de serie",
       "serial",
       "serial number",
       "serial no",
@@ -232,6 +299,10 @@ export const SYNONYM_GROUPS: SynonymGroup[] = [
   {
     target: customField("Purchase date", CustomFieldType.DATE),
     headings: [
+      "kaufdatum",
+      "anschaffungsdatum",
+      "fecha de compra",
+      "date d achat",
       "purchase date",
       "purchased",
       "date purchased",
@@ -260,7 +331,18 @@ export const SYNONYM_GROUPS: SynonymGroup[] = [
   },
   {
     target: customField("Manufacturer", CustomFieldType.TEXT),
-    headings: ["manufacturer", "brand", "make", "vendor brand"],
+    headings: [
+      "hersteller",
+      "marke",
+      "fabricante",
+      "marca",
+      "fabricant",
+      "marque",
+      "manufacturer",
+      "brand",
+      "make",
+      "vendor brand",
+    ],
   },
   {
     target: customField("Model number", CustomFieldType.TEXT),

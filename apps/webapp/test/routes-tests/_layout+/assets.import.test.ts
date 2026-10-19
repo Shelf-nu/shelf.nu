@@ -171,6 +171,48 @@ describe("assets import route", () => {
       });
     });
 
+    it("refuses a file over the row limit before any review", async () => {
+      vi.mocked(csvDataFromRequest).mockResolvedValue([
+        ["Item Name"],
+        ...Array.from({ length: 1001 }, (_, index) => [`Item ${index}`]),
+      ]);
+      const result = body(await action(importArgs({ intent: "analyze" })));
+      expect(result.error).toMatchObject({ title: "File too large" });
+      expect(captureServerEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: "import_failed",
+          properties: { organizationId: ORG_ID, reason: "too_many_rows" },
+        })
+      );
+    });
+
+    it("refuses a heading longer than the importer can carry", async () => {
+      vi.mocked(csvDataFromRequest).mockResolvedValue([
+        ["Item Name", "H".repeat(1001)],
+        ["A", "x"],
+      ]);
+      const result = body(await action(importArgs({ intent: "analyze" })));
+      expect(result.error).toMatchObject({ title: "Column heading too long" });
+    });
+
+    it("accepts a long heading under the limit all the way to import", async () => {
+      const long = "H".repeat(900);
+      vi.mocked(csvDataFromRequest).mockResolvedValue([
+        ["Item Name", long],
+        ["A", "x"],
+      ]);
+      await action(
+        importArgs({
+          intent: "content",
+          mapping: JSON.stringify([
+            MAPPING[0],
+            { ...MAPPING[2], source: long },
+          ]),
+        })
+      );
+      expect(createAssetsFromContentImport).toHaveBeenCalled();
+    });
+
     it("says when the file already matches Shelf's format", async () => {
       vi.mocked(csvDataFromRequest).mockResolvedValue([
         ["title", "category"],
@@ -340,6 +382,42 @@ describe("assets import route", () => {
       expect(body(result).error).toMatchObject({
         title: "Two columns share one Shelf field",
       });
+    });
+
+    it("rejects a mapping whose columns are reordered", async () => {
+      const result = await action(
+        importArgs({
+          intent: "content",
+          mapping: JSON.stringify([MAPPING[1], MAPPING[0], MAPPING[2]]),
+        })
+      );
+      expect(createAssetsFromContentImport).not.toHaveBeenCalled();
+      expect(body(result).error).toMatchObject({
+        title: "Mapping does not match the file",
+      });
+    });
+
+    it("rejects a mapping that targets a header the importer does not take", async () => {
+      const tampered = MAPPING.map((column, index) =>
+        index === 2
+          ? { ...column, target: { kind: "field", name: "id" } }
+          : column
+      );
+      const result = await action(
+        importArgs({ intent: "content", mapping: JSON.stringify(tampered) })
+      );
+      expect(createAssetsFromContentImport).not.toHaveBeenCalled();
+      expect(body(result).error).toMatchObject({
+        title: "Invalid column mapping",
+      });
+    });
+
+    it("rejects a mapping field larger than any real file needs", async () => {
+      const result = await action(
+        importArgs({ intent: "content", mapping: "x".repeat(300_000) })
+      );
+      expect(createAssetsFromContentImport).not.toHaveBeenCalled();
+      expect(body(result).error).toBeTruthy();
     });
 
     it("rejects a mapping that is not valid JSON", async () => {

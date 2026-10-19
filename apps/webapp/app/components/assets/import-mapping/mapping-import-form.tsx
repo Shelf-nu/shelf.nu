@@ -180,7 +180,11 @@ export function MappingImportForm() {
 
     const formData = new FormData(formRef.current);
     formData.set("intent", "content");
-    formData.set("mapping", JSON.stringify(state.columns));
+    // Samples are display-only; leaving them out keeps the post small.
+    formData.set(
+      "mapping",
+      JSON.stringify(state.columns.map((column) => ({ ...column, sample: [] })))
+    );
     formData.set("mappingChanged", String(changed));
     // The review already knows which custom fields are new; the server only
     // reports the count, so it need not load the workspace's fields again.
