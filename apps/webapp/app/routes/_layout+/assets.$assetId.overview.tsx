@@ -1961,7 +1961,11 @@ export default function AssetOverview() {
               action: PermissionAction.read,
             })}
           >
-            <ScanDetails lastScan={lastScan} />
+            <ScanDetails
+              lastScan={lastScan}
+              target={{ assetId: asset.id }}
+              itemName={asset.title}
+            />
           </When>
         </div>
       </div>

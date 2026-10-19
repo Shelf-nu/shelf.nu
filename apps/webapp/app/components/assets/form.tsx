@@ -488,29 +488,26 @@ export const AssetForm = ({
   /**
    * Snapshot of the referer as it was when this form first mounted.
    *
-   * Deliberately ignores later updates to the `referer` prop — this is not a
+   * Deliberately ignores later updates to the `referer` prop: this is not a
    * stale-state bug. The Referer header is only meaningful at the moment the
-   * user arrives. Any in-route navigation re-runs the loader and overwrites it
-   * with this page's own URL: picking a Category navigates to
-   * `/assets/new?category=<id>` (see the effect below), so the prop becomes
-   * `/assets/new` and "where I came from" is lost. ~93% of assets carry a
-   * category, so that is the normal path, not an edge case.
+   * user arrives. Any in-route navigation re-runs the loader with this page's
+   * own URL as the Referer: picking an asset model navigates to
+   * `?category=<id>` (see `handleAssetModelChange`), so the loader's referer
+   * becomes `null` (it drops self-references) and "where I came from" is lost.
    *
-   * Capturing once keeps Cancel pointing at the user's real origin (including
-   * its filters) for the whole life of the form.
+   * Capturing once keeps Cancel and the post-save redirect pointing at the
+   * user's real origin (including its filters) for the whole life of the form.
    */
   const [initialReferer] = useState(referer);
 
   /**
    * Where Cancel goes. The referer is best-effort and unusable in three
    * separate cases (absent prop, no Referer header, and self-reference).
-   * `resolveCancelTo` owns all three — see its JSDoc.
+   * `resolveCancelTo` owns all three, see its JSDoc.
    *
-   * The self-reference guard is still load-bearing even with the snapshot
-   * above: if this form ever mounts *after* an in-route navigation, the very
-   * first value it captures is already self-referential. Worst case it falls
-   * back to the index, which is exactly the pre-snapshot behaviour, so the
-   * snapshot can only ever improve the destination, never worsen it.
+   * The asset loaders already drop a self-referer, so the guard here is a
+   * fallback for any caller that passes one: the destination becomes the
+   * asset (or the index), never the form itself.
    */
   const cancelTo = resolveCancelTo({
     referer: initialReferer,
@@ -699,7 +696,7 @@ export const AssetForm = ({
         {qrId && !bulkMode ? (
           <input type="hidden" name="qrId" value={qrId} />
         ) : null}
-        <RefererRedirectInput fieldName="redirectTo" referer={referer} />
+        <RefererRedirectInput fieldName="redirectTo" referer={initialReferer} />
 
         {/* Bulk-mode discriminator + synthetic title (satisfies the
             shared schema's title.min(2) check; the action ignores it
