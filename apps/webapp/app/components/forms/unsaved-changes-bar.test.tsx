@@ -1,8 +1,15 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { createRoutesStub } from "react-router";
+import { useRef } from "react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
+import { createRoutesStub, Form, useActionData } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import type { UnsavedChangesState } from "~/hooks/use-unsaved-changes";
-import { UnsavedChangesBar } from "./unsaved-changes-bar";
+import { UnsavedChangesBar, UnsavedChangesGuard } from "./unsaved-changes-bar";
 
 /** Renders the bar inside a data router, which `useDisabled` needs. */
 function renderBar(state: UnsavedChangesState) {
@@ -64,5 +71,102 @@ describe("UnsavedChangesBar", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Leave page" }));
     expect(proceed).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves without also cancelling the navigation", async () => {
+    const proceed = vi.fn();
+    const stay = vi.fn();
+    renderBar({ status: "blocked", proceed, stay });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Leave page" }));
+
+    expect(proceed).toHaveBeenCalledTimes(1);
+    expect(stay).not.toHaveBeenCalled();
+  });
+});
+
+/** A form that routes on `intent`, like the booking edit form. */
+function IntentForm({ saveDisabled }: { saveDisabled: boolean }) {
+  const formRef = useRef<HTMLFormElement>(null);
+  const saveRef = useRef<HTMLButtonElement>(null);
+  const actionData = useActionData<{ intent: string }>();
+  return (
+    <main>
+      <UnsavedChangesGuard
+        formRef={formRef}
+        actionData={actionData}
+        onDiscard={() => {}}
+        getSubmitter={() => saveRef.current}
+        saveDisabled={saveDisabled}
+      />
+      <Form ref={formRef} method="post">
+        <input aria-label="Name" name="name" defaultValue="Field day" />
+        <button
+          ref={saveRef}
+          type="submit"
+          name="intent"
+          value="save"
+          disabled={saveDisabled}
+        >
+          Header save
+        </button>
+      </Form>
+      <p data-testid="intent">{actionData?.intent ?? ""}</p>
+    </main>
+  );
+}
+
+function renderGuard(saveDisabled: boolean) {
+  const action = vi.fn(async ({ request }: { request: Request }) => ({
+    intent: String((await request.formData()).get("intent")),
+  }));
+  const Stub = createRoutesStub([
+    {
+      path: "/booking",
+      Component: () => <IntentForm saveDisabled={saveDisabled} />,
+      action,
+    },
+  ]);
+  render(<Stub initialEntries={["/booking"]} />);
+  return { action };
+}
+
+/** Types into Name once the baseline exists and waits for the bar. */
+async function editName() {
+  const name = await screen.findByLabelText("Name");
+  // why: the baseline is read one frame after mount
+  await new Promise((resolve) => requestAnimationFrame(resolve));
+  await new Promise((resolve) => requestAnimationFrame(resolve));
+  fireEvent.change(name, { target: { value: "Field day 2" } });
+  return screen.findByRole(
+    "region",
+    { name: "Unsaved changes" },
+    {
+      timeout: 3000,
+    }
+  );
+}
+
+describe("UnsavedChangesGuard", () => {
+  it("saves through the form's submitter so its intent is sent", async () => {
+    const { action } = renderGuard(false);
+    const bar = await editName();
+
+    fireEvent.click(within(bar).getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("intent")).toHaveTextContent("save")
+    );
+    expect(action).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables Save while the form's own Save is disabled", async () => {
+    const { action } = renderGuard(true);
+    const bar = await editName();
+
+    const save = within(bar).getByRole("button", { name: "Save" });
+    expect(save).toBeDisabled();
+    fireEvent.click(save);
+    expect(action).not.toHaveBeenCalled();
   });
 });

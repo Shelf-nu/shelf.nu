@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { Asset, Barcode, Qr } from "@prisma/client";
 import { AssetType, ConsumptionType } from "@prisma/client";
 import {
@@ -28,6 +28,7 @@ import { fileErrorAtom, assetImageValidateFileAtom } from "~/atoms/file";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useDiscardRemount } from "~/hooks/use-discard-remount";
+import { useTrackedFormRef } from "~/hooks/use-unsaved-changes";
 import { getPrimaryKit, isQuantityTracked } from "~/modules/asset/utils";
 import type {
   AssetEditLoaderData,
@@ -370,15 +371,7 @@ const AssetFormInner = ({
   const disabled = isFormProcessing(navigation.state);
 
   /** The form element, shared by Zorm and the unsaved-changes tracking. */
-  const formRef = useRef<HTMLFormElement | null>(null);
-  const zormRef = zo.ref;
-  const setFormRef = useCallback(
-    (node: HTMLFormElement | null) => {
-      zormRef(node);
-      formRef.current = node;
-    },
-    [zormRef]
-  );
+  const { formRef, setFormRef } = useTrackedFormRef(zo.ref);
 
   // Focus the asset Title field on mount so create/edit pages start
   // ready for typing instead of relying on the removed autoFocus prop.
@@ -426,10 +419,6 @@ const AssetFormInner = ({
   const validationErrors = getValidationErrors<typeof NewAssetFormSchema>(
     actionData?.error
   );
-
-  /** Changes only when a save succeeds, so a failed save stays dirty. */
-  const savedToken =
-    actionData && actionData.error == null ? actionData : undefined;
 
   const fileError = useAtomValue(fileErrorAtom);
   const [, updateDynamicTitle] = useAtom(updateDynamicTitleAtom);
@@ -709,7 +698,7 @@ const AssetFormInner = ({
       {bulkMode ? null : (
         <UnsavedChangesGuard
           formRef={formRef}
-          savedToken={savedToken}
+          actionData={actionData}
           onDiscard={onDiscard}
         />
       )}

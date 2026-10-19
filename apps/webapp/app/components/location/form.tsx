@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useEffect } from "react";
 import type { Location } from "@prisma/client";
 import { useAtom, useAtomValue } from "jotai";
 import { useActionData } from "react-router";
@@ -10,6 +10,7 @@ import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useDiscardRemount } from "~/hooks/use-discard-remount";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
+import { useTrackedFormRef } from "~/hooks/use-unsaved-changes";
 import type { action as editLocationAction } from "~/routes/_layout+/locations.$locationId_.edit";
 import type { action as newLocationAction } from "~/routes/_layout+/locations.new";
 import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
@@ -127,15 +128,7 @@ const LocationFormInner = ({
   const zo = useZorm("NewQuestionWizardScreen", NewLocationFormSchema);
 
   /** The form element, shared by Zorm and the unsaved-changes tracking. */
-  const formRef = useRef<HTMLFormElement | null>(null);
-  const zormRef = zo.ref;
-  const setFormRef = useCallback(
-    (node: HTMLFormElement | null) => {
-      zormRef(node);
-      formRef.current = node;
-    },
-    [zormRef]
-  );
+  const { formRef, setFormRef } = useTrackedFormRef(zo.ref);
   const fetcher = useFetcherWithReset<{
     success?: boolean;
     location?: NewLocationPayload;
@@ -192,10 +185,6 @@ const LocationFormInner = ({
 
   const FormComponent = hasOnSuccessFunc ? fetcher.Form : Form;
 
-  /** Changes only when a save succeeds, so a failed save stays dirty. */
-  const savedToken =
-    actionData && actionData.error == null ? actionData : undefined;
-
   return (
     <Card
       className={tw(
@@ -207,7 +196,7 @@ const LocationFormInner = ({
       {onDiscard && !hasOnSuccessFunc ? (
         <UnsavedChangesGuard
           formRef={formRef}
-          savedToken={savedToken}
+          actionData={actionData}
           onDiscard={onDiscard}
         />
       ) : null}

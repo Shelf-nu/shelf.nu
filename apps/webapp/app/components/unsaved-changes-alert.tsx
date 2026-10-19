@@ -35,7 +35,6 @@ type UnsavedChangesAlertProps = {
  *
  * @param props - See {@link UnsavedChangesAlertProps}
  */
-
 export default function UnsavedChangesAlert({
   className,
   style,

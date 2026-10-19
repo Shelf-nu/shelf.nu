@@ -11,7 +11,11 @@ import {
   useNavigation,
 } from "react-router";
 import { describe, expect, it } from "vitest";
-import { useUnsavedChanges } from "./use-unsaved-changes";
+import {
+  serializeFormSnapshot,
+  UNSAVED_CHANGES_DEFAULT_IGNORE,
+  useUnsavedChanges,
+} from "./use-unsaved-changes";
 
 /** Lets a test change a hidden input with no DOM event, as widgets do. */
 let setHiddenValue: (value: string) => void = () => {};
@@ -20,11 +24,11 @@ function EditForm({ onDiscard }: { onDiscard: () => void }) {
   const formRef = useRef<HTMLFormElement>(null);
   const [hidden, setHidden] = useState("drills");
   setHiddenValue = setHidden;
-  const actionData = useActionData<{ ok: boolean }>();
+  const actionData = useActionData<{ ok?: boolean; error?: unknown }>();
   const { search } = useLocation();
   const { state, discard } = useUnsavedChanges({
     formRef,
-    savedToken: actionData,
+    actionData,
     onDiscard,
   });
 
@@ -178,8 +182,21 @@ describe("useUnsavedChanges", () => {
     expect(screen.getByLabelText("Name")).toHaveValue("Makita drill 18V");
   });
 
+  it("stays dirty after a save the server rejects", async () => {
+    renderForm(() => ({ error: { message: "Name is required" } }));
+    await makeDirtyByTyping();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.getByLabelText("Name")).toBeDisabled());
+    await waitFor(() => expect(screen.getByLabelText("Name")).toBeEnabled());
+    // why: a wrongly re-taken baseline lands a frame after the submit
+    // settles, and React renders it later still
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(status()).toBe("dirty");
+    expect(screen.getByLabelText("Name")).toHaveValue("Makita drill 18V");
+  });
+
   it("is clean after a save that redirects back to the same page", async () => {
-    renderForm(() => redirect("/edit?saved=1"));
+    renderForm(() => redirect("/edit"));
     await makeDirtyByTyping();
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(status()).toBe("clean"));
@@ -199,6 +216,19 @@ describe("useUnsavedChanges", () => {
     expect(screen.getByLabelText("Name")).toHaveValue("Makita drill 18V");
   });
 
+  it("asks the browser to confirm closing the tab only while dirty", async () => {
+    renderForm();
+    await waitFor(() => expect(status()).toBe("clean"));
+    const cleanUnload = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(cleanUnload);
+    expect(cleanUnload.defaultPrevented).toBe(false);
+
+    await makeDirtyByTyping();
+    const dirtyUnload = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(dirtyUnload);
+    expect(dirtyUnload.defaultPrevented).toBe(true);
+  });
+
   it("stays clean while a navigation disables the inputs", async () => {
     renderForm();
     await waitFor(() => expect(status()).toBe("clean"));
@@ -211,5 +241,50 @@ describe("useUnsavedChanges", () => {
       timeout: 2000,
     });
     expect(status()).toBe("clean");
+  });
+});
+
+describe("serializeFormSnapshot", () => {
+  /** Builds a detached form with the given hidden fields. */
+  function formWith(fields: Record<string, string>) {
+    const form = document.createElement("form");
+    for (const [name, value] of Object.entries(fields)) {
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = name;
+      input.value = value;
+      form.append(input);
+    }
+    return form;
+  }
+
+  const ignored = new Set([...UNSAVED_CHANGES_DEFAULT_IGNORE, "extra"]);
+
+  it("leaves out the steering fields and the caller's ignored names", () => {
+    const before = formWith({
+      title: "Drill",
+      redirectTo: "/assets",
+      intent: "save",
+      addAnother: "false",
+      nameChangeOnly: "false",
+      extra: "a",
+    });
+    const after = formWith({
+      title: "Drill",
+      redirectTo: "/kits",
+      intent: "reserve",
+      addAnother: "true",
+      nameChangeOnly: "true",
+      extra: "b",
+    });
+    expect(serializeFormSnapshot(after, ignored)).toBe(
+      serializeFormSnapshot(before, ignored)
+    );
+  });
+
+  it("differs when a submitted value changes", () => {
+    expect(
+      serializeFormSnapshot(formWith({ title: "Drill" }), ignored)
+    ).not.toBe(serializeFormSnapshot(formWith({ title: "Saw" }), ignored));
   });
 });

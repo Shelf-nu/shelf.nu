@@ -12,11 +12,13 @@ import { useCallback, useState } from "react";
 import { useSetAtom } from "jotai";
 import { useLocation, useNavigate } from "react-router";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
+import { fileErrorAtom } from "~/atoms/file";
 
 /**
  * Returns a remount key for a form and the `discard` that bumps it.
  *
- * `discard` also clears the page title that mirrors the Name field, and
+ * `discard` also clears the page title that mirrors the Name field and the
+ * shared image-file error (both live in atoms that outlive the remount), and
  * puts back the query string the form was opened with when a picker
  * rewrote it (picking an asset model sets `?category=`).
  *
@@ -31,9 +33,11 @@ export function useDiscardRemount() {
   const location = useLocation();
   const [initialSearch] = useState(location.search);
   const setDynamicTitle = useSetAtom(dynamicTitleAtom);
+  const setFileError = useSetAtom(fileErrorAtom);
 
   const discard = useCallback(() => {
     setDynamicTitle("");
+    setFileError(undefined);
     const remount = () => setEpoch((e) => e + 1);
     if (location.search === initialSearch) return remount();
     // why: remount only once the loader has returned the original values,
@@ -44,7 +48,7 @@ export function useDiscardRemount() {
         { replace: true, preventScrollReset: true }
       )
     ).then(remount);
-  }, [initialSearch, location.search, navigate, setDynamicTitle]);
+  }, [initialSearch, location.search, navigate, setDynamicTitle, setFileError]);
 
   return { key: epoch, discard, discarded: epoch > 0 };
 }

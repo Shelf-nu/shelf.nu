@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import type { Barcode, Kit } from "@prisma/client";
 import { useAtom, useAtomValue } from "jotai";
 import { useActionData, useLocation } from "react-router";
@@ -9,6 +9,7 @@ import { fileErrorAtom, assetImageValidateFileAtom } from "~/atoms/file";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useDiscardRemount } from "~/hooks/use-discard-remount";
+import { useTrackedFormRef } from "~/hooks/use-unsaved-changes";
 import type { action as editKitAction } from "~/routes/_layout+/kits.$kitId_.edit";
 import type { action as createKitAction } from "~/routes/_layout+/kits.new";
 import { resolveCancelTo } from "~/utils/cancel-destination";
@@ -145,19 +146,7 @@ function KitsFormInner({
   const zo = useZorm("NewKitForm", NewKitFormSchema);
 
   /** The form element, shared by Zorm and the unsaved-changes tracking. */
-  const formRef = useRef<HTMLFormElement | null>(null);
-  const zormRef = zo.ref;
-  const setFormRef = useCallback(
-    (node: HTMLFormElement | null) => {
-      zormRef(node);
-      formRef.current = node;
-    },
-    [zormRef]
-  );
-
-  /** Changes only when a save succeeds, so a failed save stays dirty. */
-  const savedToken =
-    actionData && actionData.error == null ? actionData : undefined;
+  const { formRef, setFormRef } = useTrackedFormRef(zo.ref);
 
   const serverValidationErrors = getValidationErrors(actionData?.error);
   const nameErrorMessage =
@@ -174,7 +163,7 @@ function KitsFormInner({
     <Card className={tw("w-full md:w-min", className)}>
       <UnsavedChangesGuard
         formRef={formRef}
-        savedToken={savedToken}
+        actionData={actionData}
         onDiscard={onDiscard}
       />
       <Form

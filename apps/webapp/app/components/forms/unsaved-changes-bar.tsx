@@ -30,6 +30,8 @@ type UnsavedChangesBarProps = {
   onSave: () => void;
   /** Label of the Save button. Default "Save". */
   saveLabel?: string;
+  /** Disables Save while the form's own Save cannot run yet. */
+  saveDisabled?: boolean;
 };
 
 /**
@@ -61,6 +63,45 @@ function useContentBounds(active: boolean) {
   return bounds;
 }
 
+/** Gap kept between the end of the page content and the bar, in px. */
+const BAR_CLEARANCE_PX = 16;
+
+/**
+ * Grows the page scroll container's bottom padding while the bar floats at
+ * the bottom of the viewport, so the form's last row can scroll out from
+ * under it. When the bar sits at the top (`xl`) nothing changes.
+ *
+ * @param active - True while the bar is shown
+ * @param barRef - The bar's visible pill
+ */
+function useReservedBottomSpace(
+  active: boolean,
+  barRef: RefObject<HTMLDivElement | null>
+) {
+  useEffect(() => {
+    const main = document.querySelector("main");
+    const bar = barRef.current;
+    if (!active || !main || !bar) return;
+    const original = main.style.paddingBottom;
+    const reserve = () => {
+      const { top } = bar.getBoundingClientRect();
+      const atBottom = top > window.innerHeight / 2;
+      main.style.paddingBottom = atBottom
+        ? `${window.innerHeight - top + BAR_CLEARANCE_PX}px`
+        : original;
+    };
+    reserve();
+    const observer = new ResizeObserver(reserve);
+    observer.observe(bar);
+    window.addEventListener("resize", reserve);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", reserve);
+      main.style.paddingBottom = original;
+    };
+  }, [active, barRef]);
+}
+
 /**
  * Renders the unsaved-changes pill while a form is dirty, and the leave
  * dialog while a navigation is blocked. Renders nothing on a clean form.
@@ -78,10 +119,13 @@ export function UnsavedChangesBar({
   onDiscard,
   onSave,
   saveLabel = "Save",
+  saveDisabled = false,
 }: UnsavedChangesBarProps) {
   const disabled = useDisabled();
   const visible = state.status !== "clean";
   const bounds = useContentBounds(visible);
+  const barRef = useRef<HTMLDivElement>(null);
+  useReservedBottomSpace(visible, barRef);
   /** Only this form's own submission reads as saving; any navigation
    * (a picker reloading the page) still disables the buttons. */
   const isSaving = state.status === "submitting";
@@ -115,7 +159,10 @@ export function UnsavedChangesBar({
               : undefined
           }
         >
-          <div className="motion-reduce:animate-none pointer-events-auto flex w-full items-center justify-between gap-6 bg-gray-900 px-4 py-3 text-white shadow-xl duration-200 animate-in fade-in slide-in-from-bottom-2 md:w-auto md:rounded-xl md:py-2 md:pl-4 md:pr-2 xl:slide-in-from-top-2">
+          <div
+            ref={barRef}
+            className="motion-reduce:animate-none pointer-events-auto flex w-full items-center justify-between gap-6 bg-gray-900 px-4 py-3 text-white shadow-xl duration-200 animate-in fade-in slide-in-from-bottom-2 md:w-auto md:rounded-xl md:py-2 md:pl-4 md:pr-2 xl:slide-in-from-top-2"
+          >
             <span className="flex items-center gap-2 text-sm font-medium text-white">
               <span
                 aria-hidden="true"
@@ -138,7 +185,7 @@ export function UnsavedChangesBar({
                 type="button"
                 variant="primary"
                 onClick={onSave}
-                disabled={disabled || isSaving}
+                disabled={disabled || isSaving || saveDisabled}
               >
                 {isSaving ? "Saving..." : saveLabel}
               </Button>
@@ -174,16 +221,18 @@ export function UnsavedChangesBar({
 type UnsavedChangesGuardProps = {
   /** The form whose submitted values are tracked. */
   formRef: RefObject<HTMLFormElement | null>;
-  /** See `useUnsavedChanges`: a new truthy value re-takes the baseline. */
-  savedToken?: unknown;
+  /** The route's `useActionData()`; see `useUnsavedChanges`. */
+  actionData?: unknown;
   /** Puts every field back to the loaded values (the form remounts). */
   onDiscard: () => void;
   /** Field names excluded from the comparison, on top of the defaults. */
   ignore?: string[];
   /** Button whose name/value the bar's Save must send, if any. */
-  getSubmitter?: () => HTMLElement | null;
+  getSubmitter?: () => HTMLButtonElement | null;
   /** Label of the Save button. Default "Save". */
   saveLabel?: string;
+  /** Disables the bar's Save while the form's own Save is disabled. */
+  saveDisabled?: boolean;
 };
 
 /**
@@ -197,15 +246,16 @@ type UnsavedChangesGuardProps = {
  */
 export function UnsavedChangesGuard({
   formRef,
-  savedToken,
+  actionData,
   onDiscard,
   ignore,
   getSubmitter,
   saveLabel,
+  saveDisabled,
 }: UnsavedChangesGuardProps) {
   const { state, discard, save } = useUnsavedChanges({
     formRef,
-    savedToken,
+    actionData,
     onDiscard,
     ignore,
   });
@@ -215,6 +265,7 @@ export function UnsavedChangesGuard({
       onDiscard={discard}
       onSave={() => save(getSubmitter?.())}
       saveLabel={saveLabel}
+      saveDisabled={saveDisabled}
     />
   );
 }

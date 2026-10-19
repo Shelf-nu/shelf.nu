@@ -33,7 +33,7 @@ import {
   useRef,
   useState,
 } from "react";
-import type { RefObject } from "react";
+import type { RefCallback, RefObject } from "react";
 import { useBlocker, useLocation, useNavigation } from "react-router";
 
 /**
@@ -97,6 +97,16 @@ export function serializeFormSnapshot(
 }
 
 /**
+ * True when an action result reports success. Shelf actions answer a failed
+ * save with an `error` payload (a validation or `ShelfError` response) and a
+ * successful one with `error` absent or `null`.
+ */
+function isSuccessfulActionData(actionData: unknown) {
+  if (typeof actionData !== "object" || actionData === null) return false;
+  return !("error" in actionData) || actionData.error == null;
+}
+
+/**
  * True when `next` is the form's page or a child route of it, for example a
  * booking's manage-assets modal under the booking pathname, or closing that
  * modal back to the booking.
@@ -122,11 +132,12 @@ type UseUnsavedChangesOptions = {
   /** Field names excluded from the comparison, on top of the defaults. */
   ignore?: string[];
   /**
-   * Re-takes the baseline whenever it changes to a new truthy value, for
-   * example the action data of a successful save. Falsy values are ignored,
-   * so pass `undefined` for a failed save and the form stays dirty.
+   * The route's `useActionData()`. A new successful result (no `error`)
+   * re-takes the baseline; an `error` result keeps the form dirty. A
+   * submission that settles with no action data was redirected, which these
+   * actions only do on success, so the form is clean then too.
    */
-  savedToken?: unknown;
+  actionData?: unknown;
   /**
    * Puts every field back to the loaded values. Forms remount themselves
    * here (a `key` bump), which resets widget state that lives in React.
@@ -152,7 +163,7 @@ type UseUnsavedChangesOptions = {
 export function useUnsavedChanges({
   formRef,
   ignore,
-  savedToken,
+  actionData,
   onDiscard,
 }: UseUnsavedChangesOptions) {
   const [isDirty, setIsDirty] = useState(false);
@@ -231,12 +242,12 @@ export function useUnsavedChanges({
     };
   }, [formRef, check, markClean]);
 
-  const lastSavedToken = useRef(savedToken);
+  const lastActionData = useRef(actionData);
   useEffect(() => {
-    if (!savedToken || Object.is(lastSavedToken.current, savedToken)) return;
-    lastSavedToken.current = savedToken;
-    markClean();
-  }, [savedToken, markClean]);
+    if (Object.is(lastActionData.current, actionData)) return;
+    lastActionData.current = actionData;
+    if (isSuccessfulActionData(actionData)) markClean();
+  }, [actionData, markClean]);
 
   // why: a layout effect, so the flag is set before the next frame's check
   // reads a DOM that already has its inputs disabled
@@ -261,22 +272,22 @@ export function useUnsavedChanges({
       location.pathname;
 
   /**
-   * Location entry this form's submission started from. A submission that
-   * ends on a different entry was redirected, which these actions only do on
-   * success, so the form is clean even though no action data arrives (for
-   * example a redirect back to this same edit page).
+   * Set while this form's submission runs. When it settles with no action
+   * data the action redirected (React Router clears action data on a
+   * redirect), so the form is clean, for example after a redirect back to
+   * this same edit page. A failed save always settles with an `error`
+   * payload and stays dirty.
    */
-  const submitStartKey = useRef<string | null>(null);
+  const submittingRef = useRef(false);
   useEffect(() => {
     if (isSubmitting) {
-      submitStartKey.current ??= location.key;
+      submittingRef.current = true;
       return;
     }
-    const startKey = submitStartKey.current;
-    if (startKey === null) return;
-    submitStartKey.current = null;
-    if (location.key !== startKey) requestAnimationFrame(markClean);
-  }, [isSubmitting, location.key, markClean]);
+    if (!submittingRef.current) return;
+    submittingRef.current = false;
+    if (actionData === undefined) requestAnimationFrame(markClean);
+  }, [isSubmitting, actionData, markClean]);
 
   const shouldGuard = isDirty && !isSubmitting;
 
@@ -329,12 +340,15 @@ export function useUnsavedChanges({
    * Submits the form as its own Save button would.
    *
    * @param submitter - Button whose name/value must be sent, for forms that
-   * route on `intent`
+   * route on `intent`. A disabled submitter means the form cannot be saved
+   * yet, so nothing is submitted.
    */
   const save = useCallback(
-    (submitter?: HTMLElement | null) => {
+    (submitter?: HTMLButtonElement | null) => {
       const form = formRef.current;
       if (!form) return;
+      // why: requestSubmit ignores the submitter's disabled state
+      if (submitter?.disabled) return;
       if (submitter) form.requestSubmit(submitter);
       else form.requestSubmit();
     },
@@ -348,4 +362,26 @@ export function useUnsavedChanges({
     save,
     markClean,
   };
+}
+
+/**
+ * A form ref shared by the unsaved-changes tracking and the form's own ref
+ * callback (Zorm's `zo.ref`, or a state setter).
+ *
+ * @param onNode - Stable callback that also receives the form element
+ * @returns `formRef` to pass to `UnsavedChangesGuard`, and `setFormRef` to
+ * pass as the form's `ref`
+ */
+export function useTrackedFormRef(
+  onNode: (node: HTMLFormElement | null) => void
+) {
+  const formRef = useRef<HTMLFormElement | null>(null);
+  const setFormRef = useCallback<RefCallback<HTMLFormElement>>(
+    (node) => {
+      onNode(node);
+      formRef.current = node;
+    },
+    [onNode]
+  );
+  return { formRef, setFormRef };
 }

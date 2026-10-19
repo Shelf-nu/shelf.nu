@@ -17,6 +17,7 @@ import { useFormatPrefs } from "~/hooks/use-format-prefs";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { useReservationIsRequest } from "~/hooks/use-reservation-is-request";
 import { useRoleAccess } from "~/hooks/use-role-access";
+import { useTrackedFormRef } from "~/hooks/use-unsaved-changes";
 import { useWorkingHours } from "~/hooks/use-working-hours";
 import type { UnavailableAssetRow } from "~/modules/booking/unavailable-assets";
 import type {
@@ -307,21 +308,18 @@ function EditBookingFormInner({
   const [formElement, setFormElement] = useState<HTMLFormElement | null>(null);
   /** The header Save button; the unsaved-changes bar submits through it. */
   const saveButtonRef = useRef<HTMLButtonElement>(null);
-  /** The same element as a ref, for the unsaved-changes tracking. */
-  const formElementRef = useRef<HTMLFormElement | null>(null);
-  const formRef = useCallback(
+  const onFormNode = useCallback(
     (node: HTMLFormElement | null) => {
       zo.ref(node);
       setFormElement(node);
-      formElementRef.current = node;
     },
     [zo]
   );
+  /** The same element as a ref, for the unsaved-changes tracking. */
+  const { formRef: formElementRef, setFormRef: formRef } =
+    useTrackedFormRef(onFormNode);
 
   const actionData = useActionData<BookingPageActionData>();
-  /** Changes only when an action succeeds, so a failed save stays dirty. */
-  const savedToken =
-    actionData && actionData.error == null ? actionData : undefined;
   /** This handles server side errors in case client side validation fails */
   const validationErrors = getValidationErrors<BookingFormSchemaType>(
     actionData?.error
@@ -410,11 +408,13 @@ function EditBookingFormInner({
       {isEditable ? (
         <UnsavedChangesGuard
           formRef={formElementRef}
-          savedToken={savedToken}
+          actionData={actionData}
           onDiscard={onDiscard}
           // why: the action routes on `intent`, so the bar submits through
           // the header Save button to send intent=save
           getSubmitter={() => saveButtonRef.current}
+          // why: mirrors the header Save, which waits for working hours
+          saveDisabled={isLoadingWorkingHours}
         />
       ) : null}
       {/* Render the actions on top only when the form is in edit mode */}
