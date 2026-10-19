@@ -9,21 +9,26 @@
  * @see {@link file://./../../routes/api+/scans.ts}
  * @see {@link file://./../../components/scan/scan-history-sheet.tsx}
  */
+import type { ScanCodeType } from "@prisma/client";
 import type { IResult } from "ua-parser-js";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import { describeScannedCodeLabel, describeScanSourceLabel } from "./labels";
 import type { ScanTarget } from "./service.server";
 import type { ScanWithRelations } from "./utils.server";
-import { describeScanner, parseScanUserAgent } from "./utils.server";
+import { identifyScanner, parseScanUserAgent } from "./utils.server";
 
 /** One row of the scan history sheet. Every field is ready to render. */
 export type ScanHistoryRow = {
   id: string;
   /** When the scan was made, as an ISO string (its shape on the wire) */
   scannedAt: string;
-  /** `Name (email)` for a member of the scan's workspace, else "Unknown" */
+  /** The scanner's name for a member of the scan's workspace, else "Unknown" */
   scannedBy: string;
+  /** The scanner's email, only for a member of the scan's workspace */
+  scannedByEmail: string | null;
+  /** What kind of code was scanned, for the row's icon */
+  codeType: ScanCodeType;
   /** "QR code", "Barcode: <value>" or "SAM ID: <value>" */
   code: string;
   /** The surface that recorded the scan */
@@ -50,6 +55,14 @@ function describeDevice(ua: IResult): string {
   return parts.length > 0 ? parts.join(" · ") : "Unknown device";
 }
 
+/** The row's scanner fields, by the member-only rule the card also uses. */
+function scannerFields(
+  scan: ScanWithRelations
+): Pick<ScanHistoryRow, "scannedBy" | "scannedByEmail"> {
+  const { name, email } = identifyScanner(scan.user, scan.organizationId);
+  return { scannedBy: name, scannedByEmail: email };
+}
+
 /**
  * Shapes a recorded scan into a scan history row.
  *
@@ -60,7 +73,8 @@ export function toScanHistoryRow(scan: ScanWithRelations): ScanHistoryRow {
   return {
     id: scan.id,
     scannedAt: scan.createdAt.toISOString(),
-    scannedBy: describeScanner(scan.user, scan.organizationId),
+    ...scannerFields(scan),
+    codeType: scan.codeType,
     code: describeScannedCodeLabel(scan.codeType, scan.code),
     source: describeScanSourceLabel(scan.source),
     coordinates:

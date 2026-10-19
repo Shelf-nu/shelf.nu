@@ -104,11 +104,29 @@ export type ScanWithRelations = Scan & {
 export type LocatedScan = Pick<Scan, "latitude" | "longitude" | "createdAt">;
 
 /**
- * Names the person who made a scan, for a reader in the scan's workspace.
+ * Identifies the person who made a scan, for a reader in the scan's
+ * workspace.
  *
  * Only a member of the workspace the code resolved in is named. Anyone else,
- * and an anonymous scan, is "Unknown", so a reader never sees the name or
- * email of someone outside their workspace.
+ * and an anonymous scan, is "Unknown" with no email, so a reader never sees
+ * the name or email of someone outside their workspace.
+ *
+ * @param user - The scanning user with their memberships, or null
+ * @param organizationId - The workspace the scan belongs to
+ * @returns The scanner's name and email, or "Unknown" and null
+ */
+export function identifyScanner(
+  user: ScanWithRelations["user"],
+  organizationId: string
+): { name: string; email: string | null } {
+  return user && isValidUser(user.userOrganizations, organizationId)
+    ? { name: resolveUserDisplayName(user), email: user.email }
+    : { name: "Unknown", email: null };
+}
+
+/**
+ * Names the person who made a scan in one line, by the rule in
+ * {@link identifyScanner}.
  *
  * @param user - The scanning user with their memberships, or null
  * @param organizationId - The workspace the scan belongs to
@@ -118,9 +136,8 @@ export function describeScanner(
   user: ScanWithRelations["user"],
   organizationId: string
 ): string {
-  return user && isValidUser(user.userOrganizations, organizationId)
-    ? `${resolveUserDisplayName(user)} (${user.email})`
-    : "Unknown";
+  const { name, email } = identifyScanner(user, organizationId);
+  return email ? `${name} (${email})` : name;
 }
 
 /**

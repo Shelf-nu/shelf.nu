@@ -73,7 +73,8 @@ describe("toScanHistoryRow", () => {
       })
     );
 
-    expect(row.scannedBy).toBe("Dana Reeves (dana@example.com)");
+    expect(row.scannedBy).toBe("Dana Reeves");
+    expect(row.scannedByEmail).toBe("dana@example.com");
   });
 
   it("shows a scanner outside the workspace as Unknown, and never their email", () => {
@@ -85,6 +86,7 @@ describe("toScanHistoryRow", () => {
     );
 
     expect(row.scannedBy).toBe("Unknown");
+    expect(row.scannedByEmail).toBeNull();
     expect(JSON.stringify(row)).not.toContain("dana@example.com");
   });
 
