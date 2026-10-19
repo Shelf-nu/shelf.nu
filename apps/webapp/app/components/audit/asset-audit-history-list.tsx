@@ -14,6 +14,7 @@ import { auditAssetStatusLabel } from "@shelf/labels";
 import { Link } from "react-router";
 import { AuditAssetStatusBadge } from "~/components/audit/audit-asset-status-badge";
 import { AuditStatusBadge } from "~/components/audit/audit-status-badge";
+import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
 import type { AssetAuditHistoryItem } from "~/modules/audit/asset-audit-history.server";
 
@@ -29,7 +30,36 @@ export type AuditHistoryListItem = Omit<
   dueDate: string | Date | null;
 };
 
-/** One audit row, linking to the audit. */
+/** What the muted second line of a row says about the audit's timing. */
+function RowWhen({
+  item,
+  section,
+}: {
+  item: AuditHistoryListItem;
+  section: "recent" | "upcoming";
+}) {
+  if (section === "recent") {
+    return item.completedAt ? (
+      <>
+        Completed <DateS date={item.completedAt} />
+      </>
+    ) : null;
+  }
+  if (item.status === "ACTIVE") return <>In progress</>;
+  return item.dueDate ? (
+    <>
+      Due <DateS date={item.dueDate} />
+    </>
+  ) : (
+    <>Scheduled</>
+  );
+}
+
+/**
+ * One audit row: the audit name as a link with its timing underneath, and the
+ * asset's result in that audit on the right. A scheduled audit has no result
+ * yet, so its row carries the audit status instead.
+ */
 function AuditRow({
   item,
   section,
@@ -37,47 +67,64 @@ function AuditRow({
   item: AuditHistoryListItem;
   section: "recent" | "upcoming";
 }) {
-  const isActive = item.status === "ACTIVE";
+  const isScheduled = section === "upcoming" && item.status === "PENDING";
   return (
-    <li>
-      <Link
-        to={`/audits/${item.id}`}
-        className="flex flex-col gap-1 rounded p-1 hover:bg-gray-50"
-      >
-        <span className="truncate text-sm font-medium text-gray-900">
+    <li className="flex items-center justify-between gap-3">
+      <div className="min-w-0">
+        <Link
+          to={`/audits/${item.id}`}
+          className="block truncate text-sm font-medium text-gray-900 hover:underline"
+        >
           {item.name}
-        </span>
-        <span className="flex flex-wrap items-center gap-1 text-xs text-gray-600">
-          {section === "recent" ? (
-            <>
-              {item.completedAt ? <DateS date={item.completedAt} /> : null}
-              <AuditAssetStatusBadge
-                status={auditAssetStatusLabel(item.assetStatus, true)}
-              />
-            </>
-          ) : isActive ? (
-            <>
-              <span>In progress</span>
-              <AuditStatusBadge status={item.status} />
-              <AuditAssetStatusBadge
-                status={auditAssetStatusLabel(item.assetStatus, false)}
-              />
-            </>
-          ) : item.dueDate ? (
-            <span>
-              Due <DateS date={item.dueDate} />
-            </span>
-          ) : null}
-        </span>
-      </Link>
+        </Link>
+        <p className="text-xs tabular-nums text-gray-500">
+          <RowWhen item={item} section={section} />
+        </p>
+      </div>
+      <div className="shrink-0">
+        {isScheduled ? (
+          <AuditStatusBadge status={item.status} />
+        ) : (
+          <AuditAssetStatusBadge
+            status={auditAssetStatusLabel(
+              item.assetStatus,
+              section === "recent"
+            )}
+          />
+        )}
+      </div>
     </li>
   );
 }
 
+/** A labelled list of audit rows. */
+function Section({
+  title,
+  items,
+  section,
+}: {
+  title: string;
+  items: AuditHistoryListItem[];
+  section: "recent" | "upcoming";
+}) {
+  return (
+    <section className="flex flex-col gap-2">
+      <h4 className="text-xs font-medium uppercase tracking-wide text-gray-500">
+        {title}
+      </h4>
+      <ul className="flex flex-col gap-2">
+        {items.map((item) => (
+          <AuditRow key={item.id} item={item} section={section} />
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 /**
- * The recent and upcoming sections, each shown only when it has audits, and
- * the "View all audits" link. Renders nothing when both lists are empty: with
- * no audits there is nothing to list or to view.
+ * The recent and upcoming sections, each shown only when it has audits and
+ * divided by a rule, then the "View all audits" button. Renders nothing when
+ * both lists are empty: with no audits there is nothing to list or to view.
  *
  * @param props.assetId - The asset; scopes the "View all audits" link
  * @param props.recent - Counted audits, newest first
@@ -97,35 +144,19 @@ export function AssetAuditHistoryList({
   return (
     <div className="flex flex-col gap-3">
       {recent.length > 0 ? (
-        <section>
-          <h4 className="mb-1 text-xs font-semibold uppercase text-gray-500">
-            Recent
-          </h4>
-          <ul>
-            {recent.map((item) => (
-              <AuditRow key={item.id} item={item} section="recent" />
-            ))}
-          </ul>
-        </section>
+        <Section title="Recent" items={recent} section="recent" />
+      ) : null}
+      {recent.length > 0 && upcoming.length > 0 ? (
+        <hr className="border-gray-200" />
       ) : null}
       {upcoming.length > 0 ? (
-        <section>
-          <h4 className="mb-1 text-xs font-semibold uppercase text-gray-500">
-            Upcoming
-          </h4>
-          <ul>
-            {upcoming.map((item) => (
-              <AuditRow key={item.id} item={item} section="upcoming" />
-            ))}
-          </ul>
-        </section>
+        <Section title="Upcoming" items={upcoming} section="upcoming" />
       ) : null}
-      <Link
-        to={`/audits?assetId=${assetId}`}
-        className="text-sm font-medium text-primary-700 hover:underline"
-      >
-        View all audits
-      </Link>
+      <div>
+        <Button to={`/audits?assetId=${assetId}`} variant="secondary" size="xs">
+          View all audits
+        </Button>
+      </div>
     </div>
   );
 }

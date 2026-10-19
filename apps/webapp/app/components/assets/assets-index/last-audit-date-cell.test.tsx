@@ -194,10 +194,16 @@ describe("LastAuditDateCell", () => {
     renderCell({ assetId: "a1", lastAuditDate: null, access: "available" });
     await openCard();
 
-    const active = await screen.findByRole("link", { name: /Audit x1/ });
+    // Each row is the audit link plus its timing line and badge.
+    const active = (
+      await screen.findByRole("link", { name: /Audit x1/ })
+    ).closest("li");
     expect(active).toHaveTextContent("In progress");
     expect(active).toHaveTextContent("Found");
-    const pending = screen.getByRole("link", { name: /Audit p1/ });
+    const pending = screen
+      .getByRole("link", { name: /Audit p1/ })
+      .closest("li");
+    expect(pending).toHaveTextContent("Scheduled");
     expect(pending).not.toHaveTextContent("In progress");
     expect(pending).not.toHaveTextContent("Due");
   });

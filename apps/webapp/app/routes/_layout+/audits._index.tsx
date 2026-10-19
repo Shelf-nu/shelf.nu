@@ -194,7 +194,6 @@ export default function AuditsIndexPage() {
     <>
       <Header>{canCreateAudits && <NewAuditInfoDialog />}</Header>
       <ListContentWrapper>
-        <AssetFilterChip title={assetFilter?.title ?? null} />
         <Filters
           slots={{
             "left-of-search": (
@@ -209,11 +208,14 @@ export default function AuditsIndexPage() {
               />
             ),
             "right-of-search": (
-              <SortBy
-                sortingOptions={AUDIT_SORTING_OPTIONS}
-                defaultSortingBy="createdAt"
-                defaultSortingDirection="desc"
-              />
+              <>
+                <SortBy
+                  sortingOptions={AUDIT_SORTING_OPTIONS}
+                  defaultSortingBy="createdAt"
+                  defaultSortingDirection="desc"
+                />
+                <AssetFilterChip title={assetFilter?.title ?? null} />
+              </>
             ),
           }}
         />
@@ -271,23 +273,25 @@ export default function AuditsIndexPage() {
  * keeps every other search param and drops `assetId` (and `page`, which no
  * longer applies to the wider list).
  *
- * Renders nothing when `title` is null, so it can sit directly inside
- * `ListContentWrapper`, which only accepts element children.
+ * Sits in the filter row beside the sort control. Renders nothing when
+ * `title` is null.
  *
  * @param props.title - The filtered asset's title, or null when unscoped
  */
 function AssetFilterChip({ title }: { title: string | null }) {
   const [searchParams] = useSearchParams();
-  if (title === null) return <></>;
+  if (title === null) return null;
   const next = new URLSearchParams(searchParams);
   next.delete("assetId");
   next.delete("page");
   const query = next.toString();
 
   return (
-    <div className="mb-3 flex">
-      <span className="inline-flex max-w-full items-center gap-1 rounded-full border border-gray-300 bg-gray-50 py-1 pl-3 pr-2 text-sm text-gray-700">
-        <span className="truncate">Asset: {title}</span>
+    <div className="flex min-w-0">
+      <span className="inline-flex max-w-full items-center gap-1 rounded-full border border-gray-300 bg-gray-50 py-1.5 pl-3 pr-1.5 text-sm text-gray-700">
+        <span className="truncate">
+          <span className="text-gray-500">Asset:</span> {title}
+        </span>
         <Link
           to={query ? `?${query}` : "."}
           aria-label="Remove asset filter"

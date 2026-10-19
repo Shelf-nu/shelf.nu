@@ -21,6 +21,7 @@ import {
 } from "~/components/shared/hover-card";
 import useApiQuery from "~/hooks/use-api-query";
 import type { LastAuditDateAccess } from "~/modules/asset/last-audit-date-access";
+import { tw } from "~/utils/tw";
 import { Td } from "./advanced-columns/td";
 
 /**
@@ -115,14 +116,18 @@ export function LastAuditDateCell({
     <Td>
       <HoverCard openDelay={200} onOpenChange={handleOpenChange}>
         <HoverCardTrigger asChild>
+          {/* The dashed underline marks the value as hoverable for details. */}
           <button
             type="button"
-            className="rounded px-1 text-left text-sm hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-600"
+            className={tw(
+              "border-b border-dashed border-gray-400 text-left text-sm leading-tight hover:border-gray-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-600",
+              !lastAuditDate && "text-gray-500"
+            )}
           >
             {lastAuditDate ? <DateS date={lastAuditDate} /> : "Never audited"}
           </button>
         </HoverCardTrigger>
-        <HoverCardContent className="w-72" align="start">
+        <HoverCardContent className="w-80 p-4" align="start">
           <HistoryBody assetId={assetId} data={data} failed={Boolean(error)} />
         </HoverCardContent>
       </HoverCard>

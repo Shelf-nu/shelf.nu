@@ -94,7 +94,7 @@ describe("AssetLastAuditCard", () => {
       />
     );
 
-    expect(screen.getByRole("heading", { name: "Last audit" })).toBeVisible();
+    expect(screen.getByText("Last audit")).toBeVisible();
     // The headline date comes from the newest recent audit.
     expect(screen.getAllByText("2026-07-31")).toHaveLength(2);
     expect(screen.getByRole("link", { name: /Q3 audit/ })).toHaveAttribute(
@@ -128,7 +128,7 @@ describe("AssetLastAuditCard", () => {
       />
     );
 
-    expect(screen.getByText("Never audited")).toBeVisible();
+    expect(screen.getByText("This asset has never been audited")).toBeVisible();
     expect(screen.getByRole("link", { name: /First audit/ })).toBeVisible();
     expect(screen.queryByText("Recent")).not.toBeInTheDocument();
   });
@@ -141,7 +141,7 @@ describe("AssetLastAuditCard", () => {
       />
     );
 
-    expect(screen.getByText("Never audited")).toBeVisible();
+    expect(screen.getByText("This asset has never been audited")).toBeVisible();
     expect(
       screen.queryByRole("link", { name: "View all audits" })
     ).not.toBeInTheDocument();

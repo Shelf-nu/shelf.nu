@@ -12,7 +12,6 @@
  */
 import type { AuditHistoryListItem } from "~/components/audit/asset-audit-history-list";
 import { AssetAuditHistoryList } from "~/components/audit/asset-audit-history-list";
-import Icon from "~/components/icons/icon";
 import { Card } from "~/components/shared/card";
 import { DateS } from "~/components/shared/date";
 
@@ -37,27 +36,31 @@ export function AssetLastAuditCard({
 
   const lastAuditedAt = history.recent[0]?.completedAt ?? null;
 
+  const hasAudits = history.recent.length > 0 || history.upcoming.length > 0;
+
   return (
-    <Card className="my-3 py-3 md:border">
-      <div className="flex items-start gap-3">
-        <div className="flex size-11 shrink-0 items-center justify-center rounded-full bg-gray-100/50">
-          <div className="flex size-7 items-center justify-center rounded-full bg-gray-200">
-            <Icon icon="start-audit" />
-          </div>
+    <Card className="my-3">
+      <div className="flex flex-col gap-4">
+        <div>
+          <p className="text-[14px] font-medium text-gray-700">Last audit</p>
+          <p className="text-[12px] text-gray-600">
+            {lastAuditedAt ? (
+              <DateS date={lastAuditedAt} />
+            ) : (
+              "This asset has never been audited"
+            )}
+          </p>
         </div>
-        <div className="flex min-w-0 flex-1 flex-col gap-3">
-          <div>
-            <h3 className="mb-1 text-sm font-semibold">Last audit</h3>
-            <p className="text-sm text-gray-700">
-              {lastAuditedAt ? <DateS date={lastAuditedAt} /> : "Never audited"}
-            </p>
-          </div>
-          <AssetAuditHistoryList
-            assetId={assetId}
-            recent={history.recent}
-            upcoming={history.upcoming}
-          />
-        </div>
+        {hasAudits ? (
+          <>
+            <hr className="border-gray-200" />
+            <AssetAuditHistoryList
+              assetId={assetId}
+              recent={history.recent}
+              upcoming={history.upcoming}
+            />
+          </>
+        ) : null}
       </div>
     </Card>
   );
