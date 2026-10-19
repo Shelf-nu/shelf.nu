@@ -44,6 +44,7 @@ import type {
   MonthlyBookingTrendRow,
 } from "~/modules/reports/types";
 import { getClientHint } from "~/utils/client-hints";
+import { neutralizeCsvFormula } from "~/utils/csv-cells";
 import { csvResponse } from "~/utils/csv-utf8";
 import { type ResolvedFormatPrefs } from "~/utils/date-format";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
@@ -537,11 +538,9 @@ function buildCsv(headers: string[], rows: string[][]): string {
  * Escape a field for CSV format.
  */
 function escapeCsvField(field: string): string {
-  // Neutralize spreadsheet formula injection (CWE-1236): a value starting with
-  // =, +, -, or @ can execute as a formula in Excel/Google Sheets. Prefix such
-  // values with a single quote so the cell is treated as literal text. Applied
-  // here in the shared helper so every report export is protected.
-  const safeField = /^[=+\-@]/.test(field) ? `'${field}` : field;
+  // Spreadsheet formula injection (CWE-1236) is neutralised by the same guard
+  // every Shelf CSV export uses.
+  const safeField = neutralizeCsvFormula(field);
   // `\r` is quoted alongside `\n`: a bare carriage return terminates a record in
   // consumers that accept CR as a line ending, so an unquoted one lets a
   // user-controlled value split the row and forge structure — which also puts

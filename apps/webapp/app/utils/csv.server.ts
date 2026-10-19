@@ -48,6 +48,7 @@ import { getBookingAssetCheckinLabel } from "./booking-assets";
 import { checkExhaustiveSwitch } from "./check-exhaustive-switch";
 import { getClientHint } from "./client-hints";
 import { getAdvancedFiltersFromRequest } from "./cookies.server";
+import { neutralizeCsvFormula, restoreCsvFormulaCell } from "./csv-cells";
 import { formatCurrency } from "./currency";
 import { formatDate, type ResolvedFormatPrefs } from "./date-format";
 import { resolveUserFormatPrefsById } from "./date-format.server";
@@ -90,7 +91,7 @@ function guessDelimiters(csv: string, delimiters: string[]) {
 
 /** Parses csv Data into an array with type {@link CSVData} */
 export const parseCsv = (csvData: ArrayBuffer) => {
-  const results = [] as CSVData;
+  const results: string[][] = [];
   /** Detect the file encoding */
   const encoding = chardet.detect(Buffer.from(csvData));
 
@@ -108,16 +109,15 @@ export const parseCsv = (csvData: ArrayBuffer) => {
       ltrim: true, // Trim whitespace from left side of cell
       relax_column_count: true, // Ignore inconsistent column count
     })
-      .on("data", (data) => {
-        // Process each row of data as it is parsed
-        // @ts-ignore
-        results.push(data);
+      .on("data", (data: string[]) => {
+        // Undo the export's formula guard so a Shelf export re-imports as-is.
+        results.push(data.map(restoreCsvFormulaCell));
       })
       .on("error", (error) => {
         reject(error);
       })
       .on("end", () => {
-        resolve(results);
+        resolve(results as CSVData);
       });
 
     parser.write(csv);
@@ -660,10 +660,10 @@ export const formatValueForCsv = (value: any, isMarkdown = false): string => {
     stringValue = cleanMarkdownFormatting(stringValue);
   }
 
-  // Escape quotes by doubling them
-  stringValue = stringValue.replace(/"/g, '""');
+  // Every caller writes member-typed text, so the formula guard is applied
+  // here rather than per column.
+  stringValue = neutralizeCsvFormula(stringValue).replace(/"/g, '""');
 
-  // Always wrap in quotes
   return `"${stringValue}"`;
 };
 

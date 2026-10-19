@@ -4,7 +4,9 @@
  * Every cell a Shelf export writes goes through {@link quoteCsvCell}, which is
  * what keeps a comma, a semicolon, a quote or a newline inside a value from
  * shifting the columns around it. On top of that, a few importer columns pack
- * several values into one cell — see {@link encodeCsvListCell}.
+ * several values into one cell (see {@link encodeCsvListCell}), and exports a
+ * spreadsheet opens guard formula-leading text with
+ * {@link neutralizeCsvFormula}, which the import parser reverses.
  *
  * Those columns are `tags` and each `barcode_<Type>`. The values themselves may
  * legally contain a comma — a tag named `Berlin, DE`, a Code128 value
@@ -125,4 +127,49 @@ export function decodeCsvListCell(cell: string): string[] {
   pushCurrent();
 
   return items;
+}
+
+/**
+ * A cell a spreadsheet would run as a formula: one starting with `=`, `+`, `-`
+ * or `@` (CWE-1236). Leading apostrophes are part of the match so that a value
+ * which already starts with `'` before one of those characters gains one more
+ * on export and loses exactly one on import, which keeps the pair lossless.
+ */
+const FORMULA_LEADING = /^'*[=+\-@]/;
+
+/**
+ * A negative number as the exports write it: `-5`, `-1,234.50`, `-$5.00`.
+ * Digits, separators and at most one symbol cannot form a formula, and leaving
+ * them alone keeps valuations and amounts summable in a spreadsheet.
+ */
+const NEGATIVE_NUMBER = /^-[$€£¥₹₽₩₪₫฿₴₦₲₵₡₺₨]?\d[\d,]*(\.\d+)?$/;
+
+/**
+ * Neutralises spreadsheet formula injection in one cell value by prefixing it
+ * with a single quote, which Excel and Google Sheets show as literal text.
+ *
+ * Apply it to the raw value, before quoting. Every importer reads the cell back
+ * through {@link restoreCsvFormulaCell}, so a guarded file re-imports unchanged.
+ *
+ * @param value - The raw cell value.
+ * @returns The value, prefixed with `'` when a spreadsheet would evaluate it.
+ */
+export function neutralizeCsvFormula(value: string): string {
+  if (!FORMULA_LEADING.test(value) || NEGATIVE_NUMBER.test(value)) {
+    return value;
+  }
+  return `'${value}`;
+}
+
+/**
+ * Reverses {@link neutralizeCsvFormula} for one parsed cell: drops the single
+ * quote it added, and leaves every other value as it is.
+ *
+ * @param cell - The cell content, after the CSV parser has unquoted the cell.
+ * @returns The value as it was before export.
+ */
+export function restoreCsvFormulaCell(cell: string): string {
+  return cell.startsWith("'") && FORMULA_LEADING.test(cell)
+    ? cell.slice(1)
+    : cell;
 }

@@ -12,7 +12,12 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { decodeCsvListCell, encodeCsvListCell } from "./csv-cells";
+import {
+  decodeCsvListCell,
+  encodeCsvListCell,
+  neutralizeCsvFormula,
+  restoreCsvFormulaCell,
+} from "./csv-cells";
 
 describe("encodeCsvListCell", () => {
   it("leaves a plain list alone", () => {
@@ -88,4 +93,33 @@ describe("round trip", () => {
   ])("survives %j", (values) => {
     expect(decodeCsvListCell(encodeCsvListCell(values))).toEqual(values);
   });
+});
+
+describe("neutralizeCsvFormula", () => {
+  it.each([
+    ["=1+1", "'=1+1"],
+    ["+31 20 123", "'+31 20 123"],
+    ["@SUM(A1)", "'@SUM(A1)"],
+    ["-2+3+cmd|' /C calc'!A0", "'-2+3+cmd|' /C calc'!A0"],
+    ["-CHF 5.00", "'-CHF 5.00"],
+    ["'=x", "''=x"],
+  ])("prefixes %s", (value, expected) => {
+    expect(neutralizeCsvFormula(value)).toBe(expected);
+  });
+
+  it.each(["-5", "-1,234.50", "-$5.00", "-€0.99", "Laptop", "a=b", "'note"])(
+    "leaves %s as it is",
+    (value) => {
+      expect(neutralizeCsvFormula(value)).toBe(value);
+    }
+  );
+});
+
+describe("restoreCsvFormulaCell", () => {
+  it.each(["=1+1", "@x", "-2+3", "'=x", "-$5.00", "'note", "it's", ""])(
+    "gives back %s after neutralizeCsvFormula",
+    (value) => {
+      expect(restoreCsvFormulaCell(neutralizeCsvFormula(value))).toBe(value);
+    }
+  );
 });
