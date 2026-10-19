@@ -30,7 +30,8 @@ export function useNprogress() {
       !fetcher.key.startsWith("delete-preset-") &&
       !fetcher.key.startsWith("audit-asset-note-") &&
       !fetcher.key.startsWith("quick-image-upload-") &&
-      !fetcher.key.startsWith("mark-update-read-")
+      !fetcher.key.startsWith("mark-update-read-") &&
+      !fetcher.key.startsWith("scan-history-")
   );
 
   const state = useMemo<"idle" | "loading">(
