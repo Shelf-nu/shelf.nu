@@ -686,6 +686,28 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
     )
   );
 
+  // B9:D-15: mobile extend (bookings.extend.ts: gate booking:extend, then
+  // ownership on the context's `access`).
+  snapshot["B9:D-15:mobile-extend"] = perRoleSet((roles) =>
+    perCase(RELATIONSHIP_NAMES, (rel) =>
+      firstRefusal([
+        ["denied:gate", () => !can(roles, E.booking, A.extend)],
+        [
+          "denied:owner",
+          () =>
+            throws(() =>
+              validateBookingOwnership({
+                booking: RELATIONSHIPS[rel],
+                userId: "caller",
+                access: accessFor(roles),
+                action: "extend",
+              })
+            ),
+        ],
+      ])
+    )
+  );
+
   // B9:D-22: mobile delete (bookings.delete.ts: gate booking:delete, then
   // `assertCanDeleteBooking` on the context's `access`: ownership first, then
   // the policy's drafts-only rule).

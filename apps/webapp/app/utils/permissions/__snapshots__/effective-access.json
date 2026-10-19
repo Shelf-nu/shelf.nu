@@ -14473,6 +14473,143 @@
       "neither": "denied:gate"
     }
   },
+  "B9:D-15:mobile-extend": {
+    "OWNER": {
+      "custodianNotCreator": "allowed",
+      "creatorNotCustodian": "allowed",
+      "neither": "allowed"
+    },
+    "ADMIN": {
+      "custodianNotCreator": "allowed",
+      "creatorNotCustodian": "allowed",
+      "neither": "allowed"
+    },
+    "MANAGER": {
+      "custodianNotCreator": "allowed",
+      "creatorNotCustodian": "allowed",
+      "neither": "allowed"
+    },
+    "SELF_SERVICE": {
+      "custodianNotCreator": "allowed",
+      "creatorNotCustodian": "allowed",
+      "neither": "denied:owner"
+    },
+    "BASE": {
+      "custodianNotCreator": "denied:gate",
+      "creatorNotCustodian": "denied:gate",
+      "neither": "denied:gate"
+    },
+    "OWNER+ADMIN": {
+      "custodianNotCreator": "allowed",
+      "creatorNotCustodian": "allowed",
+      "neither": "allowed"
+    },
+    "OWNER+MANAGER": {
+      "custodianNotCreator": "allowed",
+      "creatorNotCustodian": "allowed",
+      "neither": "allowed"
+    },
+    "OWNER+SELF_SERVICE": {
+      "custodianNotCreator": "allowed",
+      "creatorNotCustodian": "allowed",
+      "neither": "allowed"
+    },
+    "OWNER+BASE": {
+      "custodianNotCreator": "allowed",
+      "creatorNotCustodian": "allowed",
+      "neither": "allowed"
+    },
+    "ADMIN+OWNER": {
+      "custodianNotCreator": "allowed",
+      "creatorNotCustodian": "allowed",
+      "neither": "allowed"
+    },
+    "ADMIN+MANAGER": {
+      "custodianNotCreator": "allowed",
+      "creatorNotCustodian": "allowed",
+      "neither": "allowed"
+    },
+    "ADMIN+SELF_SERVICE": {
+      "custodianNotCreator": "allowed",
+      "creatorNotCustodian": "allowed",
+      "neither": "allowed"
+    },
+    "ADMIN+BASE": {
+      "custodianNotCreator": "allowed",
+      "creatorNotCustodian": "allowed",
+      "neither": "allowed"
+    },
+    "MANAGER+OWNER": {
+      "custodianNotCreator": "allowed",
+      "creatorNotCustodian": "allowed",
+      "neither": "allowed"
+    },
+    "MANAGER+ADMIN": {
+      "custodianNotCreator": "allowed",
+      "creatorNotCustodian": "allowed",
+      "neither": "allowed"
+    },
+    "MANAGER+SELF_SERVICE": {
+      "custodianNotCreator": "allowed",
+      "creatorNotCustodian": "allowed",
+      "neither": "allowed"
+    },
+    "MANAGER+BASE": {
+      "custodianNotCreator": "allowed",
+      "creatorNotCustodian": "allowed",
+      "neither": "allowed"
+    },
+    "SELF_SERVICE+OWNER": {
+      "custodianNotCreator": "allowed",
+      "creatorNotCustodian": "allowed",
+      "neither": "allowed"
+    },
+    "SELF_SERVICE+ADMIN": {
+      "custodianNotCreator": "allowed",
+      "creatorNotCustodian": "allowed",
+      "neither": "allowed"
+    },
+    "SELF_SERVICE+MANAGER": {
+      "custodianNotCreator": "allowed",
+      "creatorNotCustodian": "allowed",
+      "neither": "allowed"
+    },
+    "SELF_SERVICE+BASE": {
+      "custodianNotCreator": "allowed",
+      "creatorNotCustodian": "allowed",
+      "neither": "denied:owner"
+    },
+    "BASE+OWNER": {
+      "custodianNotCreator": "allowed",
+      "creatorNotCustodian": "allowed",
+      "neither": "allowed"
+    },
+    "BASE+ADMIN": {
+      "custodianNotCreator": "allowed",
+      "creatorNotCustodian": "allowed",
+      "neither": "allowed"
+    },
+    "BASE+MANAGER": {
+      "custodianNotCreator": "allowed",
+      "creatorNotCustodian": "allowed",
+      "neither": "allowed"
+    },
+    "BASE+SELF_SERVICE": {
+      "custodianNotCreator": "allowed",
+      "creatorNotCustodian": "allowed",
+      "neither": "denied:owner"
+    },
+    "(none)": {
+      "custodianNotCreator": "denied:gate",
+      "creatorNotCustodian": "denied:gate",
+      "neither": "denied:gate"
+    },
+    "UNKNOWN_ROLE": {
+      "custodianNotCreator": "denied:gate",
+      "creatorNotCustodian": "denied:gate",
+      "neither": "denied:gate"
+    }
+  },
   "B9:D-22:mobile-delete": {
     "OWNER": {
       "custodianNotCreator|DRAFT": "allowed",

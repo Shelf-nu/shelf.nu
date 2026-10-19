@@ -720,6 +720,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       canDeletePerm,
       canCheckoutPerm,
       canCheckinPerm,
+      canExtendPerm,
     ] = await Promise.all([
       hasPermission({
         userId: user.id,
@@ -762,6 +763,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         roles,
         entity: PermissionEntity.booking,
         action: PermissionAction.checkin,
+      }),
+      hasPermission({
+        userId: user.id,
+        organizationId,
+        roles,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.extend,
       }),
     ]);
     // State says the booking COULD be checked out or in; the role says whether
@@ -826,6 +834,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           booking.status === "DRAFT") &&
         writesBooking &&
         canDeletePerm,
+      // Extend: ONGOING/OVERDUE + extend permission, the gate the extend
+      // endpoint makes.
+      canExtend:
+        (booking.status === "ONGOING" || booking.status === "OVERDUE") &&
+        writesBooking &&
+        canExtendPerm,
     };
 
     // Flatten book-by-model reservations into a mobile-friendly shape. Each
