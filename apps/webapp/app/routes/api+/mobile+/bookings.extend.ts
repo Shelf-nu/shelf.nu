@@ -140,9 +140,10 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     const prefs = prefsForDeclaredZone(body.timeZone);
-    const workingHours = await getWorkingHoursForOrganization(organizationId);
-    const bookingSettings =
-      await getBookingSettingsForOrganization(organizationId);
+    const [workingHours, bookingSettings] = await Promise.all([
+      getWorkingHoursForOrganization(organizationId),
+      getBookingSettingsForOrganization(organizationId),
+    ]);
 
     let parsed;
     try {

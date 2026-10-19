@@ -211,6 +211,12 @@ function BookingDetailScreen({ id }: { id: string }) {
   const [showDeleteSheet, setShowDeleteSheet] = useState(false);
   // The new-end picker (see ExtendBookingSheet).
   const [showExtendSheet, setShowExtendSheet] = useState(false);
+  // One Date per stored end: the sheet hands it to the native picker as its
+  // floor, and a fresh object on every render would re-key that picker.
+  const bookingEnd = useMemo(
+    () => (booking?.to ? new Date(booking.to) : null),
+    [booking?.to]
+  );
 
   /**
    * The member's access; booking item rules below read
@@ -2818,11 +2824,11 @@ function BookingDetailScreen({ id }: { id: string }) {
           onClose={() => setShowDeleteSheet(false)}
         />
       )}
-      {booking && (
+      {booking && bookingEnd && (
         <ExtendBookingSheet
           visible={showExtendSheet}
           bookingName={booking.name}
-          currentEnd={new Date(booking.to)}
+          currentEnd={bookingEnd}
           timeZone={prefs.timeZone}
           formatDateTime={formatDateTime}
           onClose={() => setShowExtendSheet(false)}
