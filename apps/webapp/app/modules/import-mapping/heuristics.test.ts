@@ -186,6 +186,48 @@ describe("proposeByRules", () => {
   });
 });
 
+describe("existing custom fields with look-alike names", () => {
+  const fields = [
+    { name: "Asset ID", type: CustomFieldType.TEXT },
+    { name: "Asset-ID", type: CustomFieldType.NUMBER },
+  ];
+
+  it("matches the field whose name is exactly the heading", () => {
+    const proposal = propose(
+      [
+        ["Asset-ID", "asset id"],
+        ["1", "A1"],
+      ],
+      fields
+    );
+    expect(proposal.columns.map((column) => column.target)).toEqual([
+      { kind: "customField", name: "Asset-ID", type: "NUMBER" },
+      { kind: "customField", name: "Asset ID", type: "TEXT" },
+    ]);
+  });
+
+  it("does not guess between fields that differ only by punctuation", () => {
+    const proposal = propose([["Asset_ID"], ["A1"]], fields);
+    const target = proposal.columns[0].target;
+    expect(
+      target.kind === "customField" &&
+        (target.name === "Asset ID" || target.name === "Asset-ID")
+    ).toBe(false);
+  });
+
+  it("still finds a single field by its punctuation-free name", () => {
+    const proposal = propose(
+      [["warranty_cost"], ["12"]],
+      [{ name: "Warranty cost", type: CustomFieldType.AMOUNT }]
+    );
+    expect(proposal.columns[0].target).toEqual({
+      kind: "customField",
+      name: "Warranty cost",
+      type: "AMOUNT",
+    });
+  });
+});
+
 describe("cf: headers against existing custom fields", () => {
   it("takes the stored type when the header's type contradicts it", () => {
     const proposal = propose(

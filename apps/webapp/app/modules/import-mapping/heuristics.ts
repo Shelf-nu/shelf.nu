@@ -110,6 +110,41 @@ function fieldAllowed(name: AssetCsvHeader, options: RulesOptions): boolean {
   );
 }
 
+/** Finds the workspace's custom fields by name. */
+type ExistingFieldLookup = {
+  /** Trimmed, case-insensitive name match: what the importer applies. */
+  exact: (name: string) => ExistingCustomField | undefined;
+  /**
+   * The exact match, or else the one field whose name matches ignoring
+   * punctuation ("Asset ID" for "asset_id"). When several fields fold to the
+   * same name ("Asset ID" and "Asset-ID"), none is guessed.
+   */
+  find: (name: string) => ExistingCustomField | undefined;
+};
+
+/** Builds the lookup over the workspace's custom fields. */
+function buildExistingFieldLookup(
+  fields: ExistingCustomField[]
+): ExistingFieldLookup {
+  const byExact = new Map<string, ExistingCustomField>();
+  const byFolded = new Map<string, ExistingCustomField[]>();
+  for (const field of fields) {
+    byExact.set(field.name.trim().toLowerCase(), field);
+    const folded = normalizeHeader(field.name);
+    byFolded.set(folded, [...(byFolded.get(folded) ?? []), field]);
+  }
+  const exact = (name: string) => byExact.get(name.trim().toLowerCase());
+  return {
+    exact,
+    find: (name) => {
+      const match = exact(name);
+      if (match) return match;
+      const folded = byFolded.get(normalizeHeader(name)) ?? [];
+      return folded.length === 1 ? folded[0] : undefined;
+    },
+  };
+}
+
 /** One column's proposal before duplicate destinations are resolved. */
 type Candidate = Pick<ColumnMapping, "target" | "confidence">;
 
@@ -122,7 +157,7 @@ type Candidate = Pick<ColumnMapping, "target" | "confidence">;
 function proposeColumn(
   header: string,
   sample: string[],
-  existingByName: Map<string, ExistingCustomField>,
+  existing: ExistingFieldLookup,
   options: RulesOptions
 ): Candidate {
   const skip: Candidate = { target: { kind: "skip" }, confidence: "low" };
@@ -138,7 +173,8 @@ function proposeColumn(
     if (!target) return skip;
     // The importer refuses a header whose type contradicts an existing field
     // of the same name, so the stored type wins and the row asks for a check.
-    const stored = existingByName.get(normalizeHeader(target.name));
+    // Exact name only: this is the rule the importer itself applies.
+    const stored = existing.exact(target.name);
     if (stored && stored.type !== target.type) {
       return {
         target: { kind: "customField", name: stored.name, type: stored.type },
@@ -167,10 +203,14 @@ function proposeColumn(
     return skip;
   }
 
-  const existing = existingByName.get(normalizeHeader(header));
-  if (existing) {
+  const existingField = existing.find(header);
+  if (existingField) {
     return {
-      target: { kind: "customField", name: existing.name, type: existing.type },
+      target: {
+        kind: "customField",
+        name: existingField.name,
+        type: existingField.type,
+      },
       confidence: "high",
     };
   }
@@ -182,7 +222,7 @@ function proposeColumn(
       return { target: synonym, confidence: "high" };
     }
     // Prefer the workspace's own field of that name, with its stored type.
-    const sameName = existingByName.get(normalizeHeader(synonym.name));
+    const sameName = existing.find(synonym.name);
     return {
       target: sameName
         ? { kind: "customField", name: sameName.name, type: sameName.type }
@@ -268,17 +308,12 @@ export function proposeByRules(
   existingCustomFields: ExistingCustomField[],
   options: RulesOptions = {}
 ): MappingProposal {
-  const existingByName = new Map(
-    existingCustomFields.map((existing) => [
-      normalizeHeader(existing.name),
-      existing,
-    ])
-  );
+  const existing = buildExistingFieldLookup(existingCustomFields);
   const taken = new Set<string>();
 
   const columns = headers.map((source, index): ColumnMapping => {
     const sample = samples[index] ?? [];
-    const candidate = proposeColumn(source, sample, existingByName, options);
+    const candidate = proposeColumn(source, sample, existing, options);
     const key = targetKey(candidate.target);
     if (key && taken.has(key)) {
       return { source, target: { kind: "skip" }, confidence: "low", sample };

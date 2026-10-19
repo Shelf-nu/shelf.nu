@@ -49,6 +49,7 @@ import {
 } from "~/utils/dashboard.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";
+import { Logger } from "~/utils/logger";
 import { parseMarkdownToReact } from "~/utils/md";
 import {
   PermissionAction,
@@ -386,7 +387,24 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       // Cookie
       userPrefs.parse(request.headers.get("Cookie")).then((c: any) => c || {}),
 
-      resolveCanImportAssets({ organizationId, organizations, userId, role }),
+      // Only gates a checklist link: a failure here must not take the
+      // dashboard down, so it is logged and read as "cannot import".
+      resolveCanImportAssets({
+        organizationId,
+        organizations,
+        userId,
+        role,
+      }).catch((cause) => {
+        Logger.error(
+          new ShelfError({
+            cause,
+            message: "Failed to resolve import eligibility for the home page",
+            additionalData: { userId, organizationId },
+            label: "Dashboard",
+          })
+        );
+        return false;
+      }),
     ]);
 
     const totalAssets = assetAggregation._count._all;

@@ -88,6 +88,18 @@ describe("applyMapping", () => {
 });
 
 describe("columnMappingListSchema", () => {
+  it("accepts a custom field named like type: model, which the importer parses", () => {
+    const columns = [
+      col("Kind", { kind: "customField", name: "type: model", type: "TEXT" }),
+    ];
+    expect(columnMappingListSchema.safeParse(columns).success).toBe(true);
+    const [row] = extractCSVDataFromContentImport(
+      applyMapping([["Kind"], ["X1"]], columns),
+      ASSET_CSV_HEADERS
+    );
+    expect(row).toMatchObject({ "cf:type: model, type:text": "X1" });
+  });
+
   it("rejects custom field names the importer cannot parse", () => {
     const result = columnMappingListSchema.safeParse([
       col("a", { kind: "customField", name: "Size, cm", type: "TEXT" }),

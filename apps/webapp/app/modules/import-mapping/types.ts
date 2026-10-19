@@ -70,9 +70,6 @@ export const customFieldNameSchema = z
   .max(MAX_CUSTOM_FIELD_NAME_LENGTH)
   .refine((name) => !name.includes(","), {
     message: "Custom field names cannot contain a comma",
-  })
-  .refine((name) => !name.toLowerCase().startsWith("type:"), {
-    message: "Custom field names cannot start with type:",
   });
 
 /** Validates a {@link ColumnTarget}. */

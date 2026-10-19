@@ -139,7 +139,8 @@ export async function assertUserCanImportAssets({
  * @param args.organizationId - The workspace
  * @param args.organizations - The member's workspaces, as `requirePermission` returns them
  * @param args.userId - The member
- * @param args.role - The member's role in this workspace, if known
+ * @param args.role - The member's role in this workspace; when omitted, the
+ *   roles are loaded from the database
  * @returns `true` when the import page would let this member in
  */
 export async function resolveCanImportAssets({
@@ -160,7 +161,8 @@ export async function resolveCanImportAssets({
     hasPermission({
       organizationId,
       userId,
-      roles: role ? [role] : [],
+      // Without a known role, let hasPermission load the member's roles.
+      ...(role ? { roles: [role] } : {}),
       entity: PermissionEntity.asset,
       action: PermissionAction.import,
     }),
