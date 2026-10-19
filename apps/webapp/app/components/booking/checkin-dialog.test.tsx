@@ -132,6 +132,11 @@ describe("CheckinDialog", () => {
     expect(
       screen.getByText(/more than 15 minutes before the end date/)
     ).toBeInTheDocument();
+    // Both buttons proceed, so the copy ties the date change to "Adjust Date".
+    expect(
+      screen.getByText(/Adjust Date moves the end date to now/)
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/If you proceed/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Adjust Date" }));
 
     expect(submissions).toHaveLength(1);

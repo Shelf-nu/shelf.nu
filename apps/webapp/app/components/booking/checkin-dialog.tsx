@@ -155,15 +155,11 @@ export default function CheckinDialog({
               ) : (
                 <>
                   You are checking in the booking more than 15 minutes before
-                  the end date. If you proceed, the end date will be adjusted to
-                  now:{" "}
+                  the end date. Adjust Date moves the end date to now (
                   <span className="font-bold text-gray-700">
                     <DateS date={new Date()} includeTime />
                   </span>
-                  .
-                  <br />
-                  <br />
-                  Do you want to adjust the end date or keep the original date?
+                  ). Don't Adjust Date keeps the original end date.
                 </>
               )}
             </>
