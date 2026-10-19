@@ -127,6 +127,7 @@ export const SYNONYM_GROUPS: SynonymGroup[] = [
     headings: [
       "owner",
       "assigned to",
+      "assigned",
       "assignee",
       "holder",
       "who has it",
@@ -239,18 +240,23 @@ export const SYNONYM_GROUPS: SynonymGroup[] = [
       "date bought",
       "acquired",
       "acquisition date",
+      "date acquired",
     ],
   },
   {
     target: customField("Warranty expiry", CustomFieldType.DATE),
     headings: [
-      "warranty",
       "warranty expiry",
       "warranty expires",
       "warranty until",
       "warranty end",
       "warranty expiration",
     ],
+  },
+  {
+    // A bare "Warranty" column usually holds a term ("36 months"), not a date.
+    target: customField("Warranty", CustomFieldType.TEXT),
+    headings: ["warranty", "warranty period", "warranty term"],
   },
   {
     target: customField("Manufacturer", CustomFieldType.TEXT),
@@ -296,5 +302,11 @@ const BY_HEADING = new Map<string, SynonymTarget>(
  * @returns The destination, or `undefined` when the heading is not listed
  */
 export function lookupSynonym(header: string): SynonymTarget | undefined {
-  return BY_HEADING.get(normalizeHeader(header));
+  // "Price (EUR)" and "Weight [kg]" carry a unit in brackets; the heading
+  // without it is what the table lists.
+  const withoutUnit = header.replace(/\([^)]*\)|\[[^\]]*\]/g, " ");
+  return (
+    BY_HEADING.get(normalizeHeader(header)) ??
+    BY_HEADING.get(normalizeHeader(withoutUnit))
+  );
 }

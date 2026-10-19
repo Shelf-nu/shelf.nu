@@ -88,6 +88,11 @@ describe("common export headings", () => {
     ["Asset ID", "AT-1", "cf:Asset tag:TEXT"],
     ["Image", "https://x.test/a.png", "field:imageUrl"],
     ["Photo URL", "https://x.test/a.png", "field:imageUrl"],
+    ["Price (EUR)", "499", "field:valuation"],
+    ["Assigned", "Ana", "field:custodian"],
+    ["Date Acquired", "2021-03-12", "cf:Purchase date:DATE"],
+    ["Warranty", "36 months", "cf:Warranty:TEXT"],
+    ["Warranty Expires", "2026-03-01", "cf:Warranty expiry:DATE"],
   ];
 
   it.each(CASES)("maps %s", (heading, sample, expected) => {
