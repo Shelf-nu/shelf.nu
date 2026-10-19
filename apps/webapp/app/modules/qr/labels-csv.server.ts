@@ -4,10 +4,13 @@
  * Third-party label software (Brady Workstation, P-touch Editor, Dymo
  * Connect, ...) builds a label from one spreadsheet row: it re-encodes the QR
  * from the `QR URL` column and prints the other columns as text. One row per
- * asset, in the same order as the images in the zip.
+ * selected asset, in the order the loader returns them. A missing category or
+ * location is an empty cell (not "Uncategorized"), so nothing stray prints on
+ * a label.
  *
  * The file starts with a UTF-8 byte order mark so Excel decodes non-Latin
- * names correctly, and every field is quoted, like the asset index export.
+ * names correctly. Every field is quoted, and a value a spreadsheet would run
+ * as a formula is neutralised (see `quoteField`).
  *
  * @see {@link file://../../routes/api+/assets.get-assets-for-bulk-qr-download.ts}
  * @see {@link file://../../components/assets/bulk-download-qr-dialog.tsx}
@@ -40,11 +43,17 @@ export const LABELS_CSV_HEADERS = [
 /**
  * Quotes one CSV field, doubling any quote inside it.
  *
+ * Asset, category and location names are typed by workspace members, and
+ * spreadsheets run a cell that starts with `=`, `+`, `-` or `@` as a formula
+ * (CWE-1236). Such a value gets a leading `'` so it opens as plain text, the
+ * same guard the report exports apply.
+ *
  * @param value - The raw field value
  * @returns The quoted field
  */
 function quoteField(value: string) {
-  return `"${value.replace(/"/g, '""')}"`;
+  const safe = /^[=+\-@]/.test(value) ? `'${value}` : value;
+  return `"${safe.replace(/"/g, '""')}"`;
 }
 
 /**

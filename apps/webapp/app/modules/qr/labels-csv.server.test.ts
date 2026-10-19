@@ -64,6 +64,30 @@ describe("buildLabelsCsv", () => {
     expect(row).toContain('"http://localhost:3000/qr/cm4abc123"');
   });
 
+  it("opens a name that looks like a formula as plain text", () => {
+    const [, row] = linesOf(
+      buildLabelsCsv([
+        {
+          ...camera,
+          title: '=HYPERLINK("http://evil.example","Click")',
+          category: { name: "+cmd" },
+          location: { name: "@SUM(A1)" },
+        },
+      ])
+    );
+
+    expect(row.split(",")[0]).toBe(`"'=HYPERLINK(""http://evil.example""`);
+    expect(row).toContain(`"'+cmd","'@SUM(A1)"`);
+  });
+
+  it("leaves a dash inside a name alone", () => {
+    const [, row] = linesOf(
+      buildLabelsCsv([{ ...camera, title: "Freezer -80" }])
+    );
+
+    expect(row.startsWith('"Freezer -80",')).toBe(true);
+  });
+
   it("writes only the header for an empty selection", () => {
     expect(linesOf(buildLabelsCsv([]))).toEqual([
       '"Asset name","SAM ID","QR ID","QR URL","Category","Location"',

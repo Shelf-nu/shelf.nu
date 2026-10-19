@@ -196,6 +196,19 @@ describe("analyzeUpdateHeaders", () => {
     expect(result.ignoredColumns).toContain("Custody");
   });
 
+  it("ignores the export-only QR URL and Total value columns", () => {
+    // A standard asset export fed back into the update importer carries these
+    // derived columns; they must be skipped, never reported as unknown.
+    const result = analyzeUpdateHeaders(
+      ["Asset ID", "Name", "QR ID", "QR URL", "Total value"],
+      mockCustomFields
+    );
+    expect(result.ignoredColumns).toEqual(
+      expect.arrayContaining(["QR URL", "Total value"])
+    );
+    expect(result.unrecognizedColumns).toEqual([]);
+  });
+
   it("matches custom fields by name (case-insensitive)", () => {
     const result = analyzeUpdateHeaders(
       ["Asset ID", "serial number"],

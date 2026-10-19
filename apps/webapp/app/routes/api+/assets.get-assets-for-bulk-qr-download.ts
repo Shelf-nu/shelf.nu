@@ -32,7 +32,10 @@ export type BulkQrDownloadLoaderData = {
   }>;
   qrIdDisplayPreference: string;
   showShelfBranding: boolean;
-  /** `labels.csv` for the zip: one row per asset, same order as `assets`. */
+  /**
+   * `labels.csv` for the zip: one row per asset, same order as `assets`. The
+   * row is written even if that asset's image fails to render in the browser.
+   */
   labelsCsv: string;
 };
 
