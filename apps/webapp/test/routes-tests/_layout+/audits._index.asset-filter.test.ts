@@ -86,7 +86,7 @@ describe("audits index loader asset filter", () => {
       expect.objectContaining({
         where: expect.objectContaining({
           id: "foreign-asset",
-          organizationId: expect.any(String),
+          organizationId: "org-1",
         }),
       })
     );

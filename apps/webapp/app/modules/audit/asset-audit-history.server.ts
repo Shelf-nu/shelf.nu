@@ -73,7 +73,10 @@ export async function getAssetAuditHistory({
           completedAt: { not: null },
         },
       },
-      orderBy: { auditSession: { completedAt: "desc" } },
+      orderBy: [
+        { auditSession: { completedAt: "desc" } },
+        { auditSession: { createdAt: "desc" } },
+      ],
       take: limit,
       select: { status: true, auditSession: { select: auditSessionSelect } },
     }),

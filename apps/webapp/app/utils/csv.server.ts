@@ -193,8 +193,9 @@ export const csvDataFromRequest = async ({ request }: { request: Request }) => {
  *   built-in date-column filters truncate the day in the user's tz (avoids an
  *   off-by-one). Defaults to "UTC" (import-ready export has no acting user).
  * @param args.lastAuditDateAccess - How the last audit date may be used. The
- *   import-ready export omits it: the date is not importable, so it is never
- *   queried (the service defaults to `hidden`).
+ *   service defaults to `hidden`, which also drops an active last audit date
+ *   filter. Both exports pass the resolved level so a select-all export
+ *   matches the rows the index showed.
  * @param args.includeHiddenColumns - Compute the last audit date even when the
  *   column is hidden in the user's settings (the "All columns" scope).
  * @returns The full filtered asset set (no pagination when selecting all).
@@ -382,6 +383,9 @@ export async function exportAssetsFromIndexToCsv({
  *   currently has shown; `"all"` exports every importable column. Ignored
  *   (forced to `"all"`) when `settings.mode` is `SIMPLE`, which has no
  *   per-user column visibility to key off of.
+ * @param args.access - The caller's role access. It decides whether an active
+ *   last audit date filter applies; the column itself is never written to the
+ *   import-ready file.
  * @returns The CSV file contents.
  */
 export async function exportAssetsForImportToCsv({
@@ -391,17 +395,26 @@ export async function exportAssetsForImportToCsv({
   currentOrganization,
   assetIndexCurrentSearchParams,
   columnScope,
+  access,
 }: {
   request: Request;
   assetIds: string;
   settings: AssetIndexSettings;
   currentOrganization: Pick<
     Organization,
-    "id" | "barcodesEnabled" | "currency"
+    "id" | "barcodesEnabled" | "currency" | "auditsEnabled"
   >;
   assetIndexCurrentSearchParams: string | null;
   columnScope: ColumnScope;
+  access: RoleAccess;
 }): Promise<string> {
+  // The file never carries the last audit date column, but a select-all export
+  // must still honour an active last audit date filter so it matches the rows
+  // the index showed.
+  const lastAuditDateAccess = lastAuditDateAccessFor(
+    access,
+    currentOrganization
+  );
   const [{ assets }, activeCustomFields] = await Promise.all([
     resolveExportAssets({
       request,
@@ -409,6 +422,7 @@ export async function exportAssetsForImportToCsv({
       settings,
       currentOrganization,
       assetIndexCurrentSearchParams,
+      lastAuditDateAccess,
     }),
     getActiveCustomFields({
       organizationId: currentOrganization.id,

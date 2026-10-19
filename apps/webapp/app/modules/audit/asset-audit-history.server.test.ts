@@ -48,7 +48,10 @@ describe("getAssetAuditHistory", () => {
             completedAt: { not: null },
           },
         },
-        orderBy: { auditSession: { completedAt: "desc" } },
+        orderBy: [
+          { auditSession: { completedAt: "desc" } },
+          { auditSession: { createdAt: "desc" } },
+        ],
         take: 3,
       })
     );
@@ -80,15 +83,10 @@ describe("getAssetAuditHistory", () => {
   });
 
   it("maps the asset's own audit status onto each item", async () => {
-    // The upcoming query is the one ordered by a list; recent uses one key.
-    findMany.mockImplementation(
-      (args) =>
-        Promise.resolve(
-          Array.isArray(args?.orderBy)
-            ? [row("next", "ACTIVE", "PENDING")]
-            : [row("done", "COMPLETED", "FOUND")]
-        ) as never
-    );
+    // Call order matches the service: recent first, then upcoming.
+    findMany
+      .mockResolvedValueOnce([row("done", "COMPLETED", "FOUND")] as never)
+      .mockResolvedValueOnce([row("next", "ACTIVE", "PENDING")] as never);
 
     const result = await getAssetAuditHistory({
       assetId: "a1",

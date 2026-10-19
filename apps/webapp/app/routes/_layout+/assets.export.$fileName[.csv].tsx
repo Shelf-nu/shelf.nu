@@ -86,6 +86,7 @@ export const loader = async ({
             currentOrganization,
             assetIndexCurrentSearchParams,
             columnScope,
+            access,
           })
         : await exportAssetsFromIndexToCsv({
             request,

@@ -7,7 +7,7 @@
  * @see {@link file://./last-audit-date-cell.tsx}
  */
 import type { ReactNode } from "react";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -36,8 +36,14 @@ vi.mock("react-router", async (importOriginal) => {
 
 // why: useApiQuery calls fetch against the API; the test feeds it the
 // response state directly.
+// The spy records the options so tests can assert when the request is enabled.
+const apiQueryMock = vi.fn((_options: { api: string; enabled?: boolean }) => ({
+  ...query,
+  isLoading: false,
+}));
 vi.mock("~/hooks/use-api-query", () => ({
-  default: () => ({ ...query, isLoading: false }),
+  default: (options: { api: string; enabled?: boolean }) =>
+    apiQueryMock(options),
 }));
 
 // why: DateS reads request info from the root loader; render the raw value.
@@ -78,6 +84,7 @@ describe("LastAuditDateCell", () => {
   beforeEach(() => {
     query.data = undefined;
     query.error = undefined;
+    apiQueryMock.mockClear();
   });
 
   it("renders an unlock link when locked", () => {
@@ -85,6 +92,30 @@ describe("LastAuditDateCell", () => {
     expect(screen.getByRole("link", { name: "Unlock audits" })).toHaveAttribute(
       "href",
       "/audits"
+    );
+  });
+
+  it("never enables the history request when locked", async () => {
+    renderCell({ assetId: "a1", lastAuditDate: null, access: "locked" });
+    await userEvent.tab();
+    expect(apiQueryMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ enabled: true })
+    );
+  });
+
+  it("waits for the card to open before enabling the history request", async () => {
+    renderCell({ assetId: "a1", lastAuditDate: null, access: "available" });
+    expect(apiQueryMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        api: "/api/assets/a1/audit-history",
+        enabled: false,
+      })
+    );
+    await openCard();
+    await waitFor(() =>
+      expect(apiQueryMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ enabled: true })
+      )
     );
   });
 

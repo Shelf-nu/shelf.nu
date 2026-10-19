@@ -67,11 +67,25 @@ vi.mock("~/modules/custom-field/service.server", () => ({
   ),
 }));
 
+// why: the access rule reads the audit add-on and subscription env; the
+// export logic under test only forwards whatever level it resolves.
+vi.mock("~/modules/asset/last-audit-date-access.server", () => ({
+  lastAuditDateAccessFor: vi.fn(() => "available"),
+}));
+
 import { getAdvancedPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import { exportAssetsForImportToCsv } from "./csv.server";
 
-const ORG = { id: "org1", barcodesEnabled: false, currency: "USD" } as const;
+const ORG = {
+  id: "org1",
+  barcodesEnabled: false,
+  currency: "USD",
+  auditsEnabled: true,
+} as const;
+
+// why: the mocked access rule ignores it; the export only passes it through.
+const ACCESS = {} as never;
 
 describe("exportAssetsForImportToCsv", () => {
   it("produces importer-native headers including active custom fields", async () => {
@@ -82,6 +96,7 @@ describe("exportAssetsForImportToCsv", () => {
       currentOrganization: ORG,
       assetIndexCurrentSearchParams: null,
       columnScope: "all",
+      access: ACCESS,
     });
     const headerLine = csv.split("\r\n")[0];
     expect(headerLine).toContain('"title"');
@@ -98,6 +113,7 @@ describe("exportAssetsForImportToCsv", () => {
       currentOrganization: ORG,
       assetIndexCurrentSearchParams: null,
       columnScope: "visible",
+      access: ACCESS,
     });
     // With empty visible columns, "visible" would drop category; "all" keeps it.
     expect(csv.split("\r\n")[0]).toContain('"category"');
@@ -111,6 +127,7 @@ describe("exportAssetsForImportToCsv", () => {
       currentOrganization: ORG,
       assetIndexCurrentSearchParams: null,
       columnScope: "all",
+      access: ACCESS,
     });
 
     expect(getAdvancedPaginatedAndFilterableAssets).toHaveBeenLastCalledWith(
@@ -126,6 +143,7 @@ describe("exportAssetsForImportToCsv", () => {
       currentOrganization: ORG,
       assetIndexCurrentSearchParams: "archived=archived",
       columnScope: "all",
+      access: ACCESS,
     });
 
     expect(getAdvancedPaginatedAndFilterableAssets).toHaveBeenLastCalledWith(
@@ -134,6 +152,25 @@ describe("exportAssetsForImportToCsv", () => {
         honorArchivedView: true,
         archivedFilter: undefined,
         filters: "archived=archived",
+      })
+    );
+  });
+
+  it("keeps an active last audit date filter when the access is available", async () => {
+    await exportAssetsForImportToCsv({
+      request: new Request("http://localhost/assets/export/x.csv"),
+      assetIds: ALL_SELECTED_KEY,
+      settings: { mode: "ADVANCED", columns: [] } as never,
+      currentOrganization: ORG,
+      assetIndexCurrentSearchParams: "lastAuditDate=isEmpty:",
+      columnScope: "all",
+      access: ACCESS,
+    });
+
+    expect(getAdvancedPaginatedAndFilterableAssets).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        filters: "lastAuditDate=isEmpty:",
+        lastAuditDateAccess: "available",
       })
     );
   });

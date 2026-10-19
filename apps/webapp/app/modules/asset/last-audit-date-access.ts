@@ -60,3 +60,21 @@ export function stripHiddenAuditColumns<T extends { name: string }>(
 export function canQueryLastAuditDate(access: LastAuditDateAccess): boolean {
   return access === "available";
 }
+
+/**
+ * Removes the last audit date column from anything that offers or restores a
+ * filter or sort on it, unless it can be queried. A `locked` workspace shows
+ * the column but cannot filter or sort by it, and the server ignores a stale
+ * `lastAuditDate` param, so the pickers and any restored chip must agree.
+ *
+ * @param columns - Columns, filters or sorts identified by `name`
+ * @param access - The resolved access level
+ * @returns The entries that may be filtered or sorted for this access level
+ */
+export function filterQueryableColumns<T extends { name: string }>(
+  columns: T[],
+  access: LastAuditDateAccess
+): T[] {
+  if (canQueryLastAuditDate(access)) return columns;
+  return columns.filter((column) => column.name !== LAST_AUDIT_DATE_COLUMN);
+}

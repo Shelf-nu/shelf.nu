@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { getQueryFieldType } from "./field-type-mapping";
 import {
   canQueryLastAuditDate,
+  filterQueryableColumns,
   resolveLastAuditDateAccess,
   stripHiddenAuditColumns,
 } from "./last-audit-date-access";
@@ -60,4 +61,21 @@ describe("column registration", () => {
     });
     expect(getQueryFieldType("lastAuditDate")).toBe("date");
   });
+});
+
+describe("filterQueryableColumns", () => {
+  const columns = [{ name: "name" }, { name: "lastAuditDate" }];
+
+  it("keeps the column when it can be queried", () => {
+    expect(filterQueryableColumns(columns, "available")).toEqual(columns);
+  });
+
+  it.each(["locked", "hidden"] as const)(
+    "drops the column when access is %s",
+    (access) => {
+      expect(filterQueryableColumns(columns, access)).toEqual([
+        { name: "name" },
+      ]);
+    }
+  );
 });
