@@ -9775,6 +9775,12 @@ const extendableBookingData = {
   to: new Date("2025-01-01T17:00:00Z"),
 };
 
+/** The job ids `scheduler.cancel` was called with, in order. */
+function cancelledJobIds(): unknown[] {
+  //@ts-expect-error missing vitest type
+  return scheduler.cancel.mock.calls.map((call: unknown[]) => call[0]);
+}
+
 describe("extendBooking", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
@@ -9849,8 +9855,8 @@ describe("extendBooking", () => {
     );
   });
 
-  it("writes only where the stored row is still extendable and ends earlier", async () => {
-    expect.assertions(3);
+  it("writes only where the stored row is still exactly as read", async () => {
+    expect.assertions(4);
     const newEndDate = new Date("2025-01-02T17:00:00Z");
     const mockBooking = {
       ...extendableBookingData,
@@ -9879,6 +9885,10 @@ describe("extendBooking", () => {
       to: newEndDate,
       activeSchedulerReference: "live-job",
     });
+    //@ts-expect-error missing vitest type
+    scheduler.sendAfter.mockResolvedValueOnce("new-job");
+    //@ts-expect-error missing vitest type
+    db.booking.updateMany.mockResolvedValueOnce({ count: 1 });
 
     const result = await extendBooking({
       id: "booking-1",
@@ -9895,14 +9905,73 @@ describe("extendBooking", () => {
         where: {
           id: "booking-1",
           organizationId: "org-1",
-          status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
-          to: { lt: newEndDate },
+          status: BookingStatus.ONGOING,
+          to: extendableBookingData.to,
         },
         data: { status: BookingStatus.ONGOING, to: newEndDate },
       })
     );
     expect(result).toEqual(stored);
-    expect(scheduler.cancel).toHaveBeenCalledWith("live-job");
+    // The new job is stored only over the job and end it was planned for.
+    expect(db.booking.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: "booking-1",
+          to: newEndDate,
+          activeSchedulerReference: "live-job",
+        },
+        data: { activeSchedulerReference: "new-job" },
+      })
+    );
+    expect(cancelledJobIds()).toEqual(["live-job"]);
+  });
+
+  it("cancels its own new job when a later extension stored one first", async () => {
+    expect.assertions(2);
+    const newEndDate = new Date("2025-01-02T17:00:00Z");
+    const mockBooking = {
+      ...extendableBookingData,
+      status: BookingStatus.ONGOING,
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-t153",
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
+        },
+      ],
+      partialCheckins: [],
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ ...mockBooking, to: newEndDate });
+    // This extension's end is stored when it re-reads ...
+    //@ts-expect-error missing vitest type
+    db.booking.findUnique.mockResolvedValueOnce({
+      to: newEndDate,
+      activeSchedulerReference: "live-job",
+    });
+    //@ts-expect-error missing vitest type
+    scheduler.sendAfter.mockResolvedValueOnce("new-job");
+    // ... but by the time its job is stored, a later extension has moved on.
+    //@ts-expect-error missing vitest type
+    db.booking.updateMany.mockResolvedValueOnce({ count: 0 });
+
+    await extendBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      newEndDate,
+      hints: mockClientHints,
+      userId: "user-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
+      roles: [OrganizationRoles.ADMIN],
+    });
+
+    expect(cancelledJobIds()).toEqual(["live-job", "new-job"]);
+    expect(db.booking.update).toHaveBeenCalledTimes(1);
   });
 
   it("leaves the reminder to the extension whose end is stored", async () => {

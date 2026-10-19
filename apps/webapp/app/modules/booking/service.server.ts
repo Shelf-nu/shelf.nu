@@ -227,7 +227,6 @@ import {
   sendCheckinReminder,
 } from "./email-helpers";
 import {
-  EXTENDABLE_BOOKING_STATUSES,
   getAssetsStillOutForExtend,
   getKitMembershipIdsStillOut,
   isExtendableStatus,
@@ -617,12 +616,26 @@ export function getSystemActionText(
   }
 }
 
+/**
+ * Schedules a booking's next lifecycle job and stores its id as the booking's
+ * `activeSchedulerReference`.
+ *
+ * @param params.data - The job payload; `data.id` is the booking
+ * @param params.when - When the job fires
+ * @param params.expected - The booking state this job was planned for. When
+ *   given, the reference is stored only while the booking still has this end
+ *   and this reference; otherwise a concurrent write has planned its own job,
+ *   so the new one is cancelled and the booking left as it is.
+ * @throws {ShelfError} When the job cannot be sent or stored
+ */
 export async function scheduleNextBookingJob({
   data,
   when,
+  expected,
 }: {
   data: SchedulerData;
   when: Date;
+  expected?: { to: Date; activeSchedulerReference: string | null };
 }) {
   try {
     const id = await scheduler.sendAfter(
@@ -631,6 +644,21 @@ export async function scheduleNextBookingJob({
       {},
       when
     );
+    if (expected) {
+      const { count } = await db.booking.updateMany({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: internal scheduler bookkeeping; data.id always comes from a booking already org-validated by the caller and SchedulerData carries no organizationId; this only writes activeSchedulerReference, not a data read
+        where: {
+          id: data.id,
+          to: expected.to,
+          activeSchedulerReference: expected.activeSchedulerReference,
+        },
+        data: { activeSchedulerReference: id },
+      });
+      if (count === 0) {
+        await cancelScheduler({ id: data.id, activeSchedulerReference: id });
+      }
+      return;
+    }
     await db.booking.update({
       // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: internal scheduler bookkeeping; data.id always comes from a booking already org-validated by every caller (e.g. checkoutBooking L1265, reserveBooking L1020) and SchedulerData carries no organizationId; this only writes activeSchedulerReference, not a data read
       where: { id: data.id },
@@ -12825,17 +12853,18 @@ export async function extendBooking({
         tx,
       });
 
-      // The filters are judged on the row as it is when the lock is taken:
-      // an extension that landed since the read above, or a booking closed
-      // meanwhile, leaves no row to update instead of being overwritten.
-      // Either live status reads ONGOING once extended.
+      // The row must still be exactly as read when the lock is taken: an
+      // extension that landed since the read above, a booking closed, or the
+      // overdue job flipping it meanwhile leaves no row to update. So the
+      // note and the events below, built from that read, describe the change
+      // this write made. Either live status reads ONGOING once extended.
       return tx.booking
         .update({
           where: {
             id: booking.id,
             organizationId,
-            status: { in: [...EXTENDABLE_BOOKING_STATUSES] },
-            to: { lt: newEndDate },
+            status: booking.status,
+            to: booking.to,
           },
           data: {
             status: BookingStatus.ONGOING,
@@ -12980,9 +13009,9 @@ export async function extendBooking({
      * In case of ONGOING, a checkin reminder should have be scheduled. So we have to reschedule it.
      * And in case of OVERDUE all the jobs are completed, so we have to reschedule the checkin reminder.
      */
-    // Two extensions can both commit when each is later than the end it read.
-    // The reminder belongs to the one whose end is stored now, and it cancels
-    // the job stored now, not the one it read before writing.
+    // A later extension can commit after this one. The reminder belongs to
+    // the extension whose end is stored now: it cancels the job stored now,
+    // and stores its own only if neither has moved on again meanwhile.
     const live = await db.booking.findUnique({
       where: { id: booking.id, organizationId },
       select: { to: true, activeSchedulerReference: true },
@@ -12990,11 +13019,16 @@ export async function extendBooking({
     if (live && live.to.getTime() !== newEndDate.getTime()) {
       return updatedBooking;
     }
+    const storedReference =
+      live?.activeSchedulerReference ?? booking.activeSchedulerReference;
     await cancelScheduler({
       id: booking.id,
-      activeSchedulerReference:
-        live?.activeSchedulerReference ?? booking.activeSchedulerReference,
+      activeSchedulerReference: storedReference,
     });
+    const expected = {
+      to: newEndDate,
+      activeSchedulerReference: storedReference,
+    };
 
     const { hours } = calcTimeDifference(newEndDate, new Date());
 
@@ -13017,10 +13051,12 @@ export async function extendBooking({
           eventType: BOOKING_SCHEDULER_EVENTS_ENUM.overdueHandler,
         },
         when: newEndDate,
+        expected,
       });
     } else {
-      const when = newEndDate;
-      when.setHours(newEndDate.getHours() - 1);
+      // A copy: `expected.to` must stay the stored end.
+      const when = new Date(newEndDate);
+      when.setHours(when.getHours() - 1);
 
       await scheduleNextBookingJob({
         data: {
@@ -13029,6 +13065,7 @@ export async function extendBooking({
           eventType: BOOKING_SCHEDULER_EVENTS_ENUM.checkinReminder,
         },
         when,
+        expected,
       });
     }
 

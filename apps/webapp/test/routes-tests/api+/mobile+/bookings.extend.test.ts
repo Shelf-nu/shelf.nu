@@ -256,8 +256,8 @@ describe("POST /api/mobile/bookings/extend", () => {
   });
 
   it("extends to the wall clock decoded in the declared zone and returns the stored end", async () => {
-    // The service hands back its own Date, an hour earlier than the one it
-    // was given, so the response can only match it by reading the result.
+    // The service hands back a Date unlike the one it was given, so the
+    // response can only match it by reading the result.
     vi.mocked(extendBooking).mockResolvedValue({
       id: "booking-1",
       name: "Site survey",

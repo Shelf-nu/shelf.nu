@@ -49,8 +49,7 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  *
  * `endDate` is a wall clock with no offset, decoded in the `timeZone` the
  * client declares (see `bookings.update.ts`). The response's `to` is read from
- * the service's result, never from the parsed input: the service reuses that
- * Date to schedule the reminder and moves it an hour earlier in place.
+ * the service's result, the end it stored, never from the parsed input.
  *
  * Body: { bookingId: string, endDate: "yyyy-MM-ddTHH:mm", timeZone: IANA zone }
  * Query: ?orgId=...
