@@ -21,7 +21,7 @@ export function NameField({
    * the new-booking form and the create-booking dialogs. The edit form on a
    * booking's overview turns it off, because a booking opened to be read must
    * not take keystrokes (the `[` / `]` record shortcuts, or a stray key that
-   * would edit the name).
+   * would edit the name), and that holds after a Discard remount too.
    */
   focusOnMount?: boolean;
 }) {

@@ -12,10 +12,12 @@ import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
+import { useDiscardRemount } from "~/hooks/use-discard-remount";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { useReservationIsRequest } from "~/hooks/use-reservation-is-request";
 import { useRoleAccess } from "~/hooks/use-role-access";
+import { useTrackedFormRef } from "~/hooks/use-unsaved-changes";
 import { useWorkingHours } from "~/hooks/use-working-hours";
 import type { UnavailableAssetRow } from "~/modules/booking/unavailable-assets";
 import type {
@@ -51,6 +53,7 @@ import CheckinDropdown from "../checkin-dropdown";
 import CheckoutDropdown from "../checkout-dropdown";
 import type { BookingFormSchemaType } from "./forms-schema";
 import { BookingFormSchema } from "./forms-schema";
+import { UnsavedChangesGuard } from "../../forms/unsaved-changes-bar";
 
 /**
  * How many blocking assets the Reserve tooltip names before it stops.
@@ -147,8 +150,35 @@ type BookingFormData = {
   action?: string;
 };
 
+/**
+ * Booking action intents that persist the form's name, description, tags and
+ * dates. Check-out, check-in and the other overview actions submit this form
+ * too but do not save those fields, so they leave the form dirty.
+ */
+const BOOKING_SAVE_INTENTS = ["save", "reserve"] as const;
+
+/**
+ * Edit form on the booking overview, with the unsaved-changes bar.
+ *
+ * Discard remounts the inner form (see `useDiscardRemount`), which resets
+ * the dates, custodian, tags and editor back to the loaded booking.
+ *
+ * @param props - The booking to edit and an optional form action
+ */
+export function EditBookingForm(props: BookingFormData) {
+  const { key, discard } = useDiscardRemount();
+  return <EditBookingFormInner key={key} {...props} onDiscard={discard} />;
+}
+
 // react-doctor:no-giant-component — deferred for follow-up refactor
-export function EditBookingForm({ booking, action }: BookingFormData) {
+function EditBookingFormInner({
+  booking,
+  action,
+  onDiscard,
+}: BookingFormData & {
+  /** Resets the form to the loaded values (remounts it). */
+  onDiscard: () => void;
+}) {
   const navigation = useNavigation();
   const {
     id,
@@ -273,13 +303,18 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
    * resolved when the user opens check-in/check-out dialogs. Using zo.form
    * (which reads a ref) can return null on the first render cycle. */
   const [formElement, setFormElement] = useState<HTMLFormElement | null>(null);
-  const formRef = useCallback(
+  /** The header Save button; the unsaved-changes bar submits through it. */
+  const saveButtonRef = useRef<HTMLButtonElement>(null);
+  const onFormNode = useCallback(
     (node: HTMLFormElement | null) => {
       zo.ref(node);
       setFormElement(node);
     },
     [zo]
   );
+  /** The same element as a ref, for the unsaved-changes tracking. */
+  const { formRef: formElementRef, setFormRef: formRef } =
+    useTrackedFormRef(onFormNode);
 
   const actionData = useActionData<BookingPageActionData>();
   /** This handles server side errors in case client side validation fails */
@@ -350,6 +385,15 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
     defaultTeamMember?.userId === userId ||
     defaultTeamMember?.id === userId;
 
+  /** The header Save button exists only while the booking can be edited. */
+  const isEditable =
+    canSeeActions &&
+    !(
+      bookingStatus?.isCompleted ||
+      bookingStatus?.isCancelled ||
+      bookingStatus?.isArchived
+    );
+
   return (
     <Form
       ref={formRef}
@@ -358,6 +402,19 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
       className="edit-booking-form"
       id="edit-booking-form"
     >
+      {isEditable ? (
+        <UnsavedChangesGuard
+          formRef={formElementRef}
+          actionData={actionData}
+          saveIntents={BOOKING_SAVE_INTENTS}
+          onDiscard={onDiscard}
+          // why: the action routes on `intent`, so the bar submits through
+          // the header Save button to send intent=save
+          getSubmitter={() => saveButtonRef.current}
+          // why: mirrors the header Save, which waits for working hours
+          saveDisabled={isLoadingWorkingHours}
+        />
+      ) : null}
       {/* Render the actions on top only when the form is in edit mode */}
       {canSeeActions ? (
         <AbsolutePositionedHeaderActions>
@@ -391,6 +448,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                   (e.g. Reserve) override this default without any client-side JS.
                 */}
                 <Button
+                  ref={saveButtonRef}
                   type="submit"
                   disabled={disabled || isLoadingWorkingHours}
                   variant="secondary"
