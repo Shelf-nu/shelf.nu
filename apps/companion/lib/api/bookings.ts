@@ -13,6 +13,8 @@ import type {
   BookingMutationResponse,
   CreateBookingPayload,
   UpdateBookingPayload,
+  ExtendBookingPayload,
+  ExtendBookingResponse,
   RemoveBookingAssetsResponse,
   AvailableAssetsResponse,
   AvailableKitsResponse,
@@ -254,6 +256,22 @@ export const bookingsApi = {
       {
         method: "POST",
         body: JSON.stringify(payload),
+      }
+    ),
+
+  /**
+   * Move an ONGOING/OVERDUE booking's end later (conflict-checked server-side).
+   */
+  extendBooking: (orgId: string, payload: ExtendBookingPayload) =>
+    apiFetch<ExtendBookingResponse>(
+      `/api/mobile/bookings/extend?orgId=${orgId}`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+        // why: not retried. A timed-out request the server already applied
+        // would come back refused (the end is no longer after the current
+        // one) and send the extension emails a second time.
+        retry: false,
       }
     ),
 
