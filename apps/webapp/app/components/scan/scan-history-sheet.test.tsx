@@ -194,4 +194,39 @@ describe("ScanHistoryButton", () => {
     expect(screen.getByText("Barcode: BC-fresh")).toBeInTheDocument();
     expect(screen.queryByText("Barcode: BC-old")).toBeNull();
   });
+
+  it("ignores a page that lands after its request was abandoned by closing", async () => {
+    const view = renderSheet();
+    const rerender = () =>
+      view.rerender(
+        <ScanHistoryButton target={{ assetId: "asset-1" }} itemName="Laptop" />
+      );
+
+    // Open (request #1), then close before any response arrives.
+    await userEvent.click(
+      screen.getByRole("button", { name: "View all scans" })
+    );
+    await userEvent.keyboard("{Escape}");
+
+    // Page A lands while the sheet is closed.
+    respond(rerender, page(["a"], null));
+    expect(screen.queryByText("Barcode: BC-a")).toBeNull();
+
+    // Reopen (request #2): page A is still on the fetcher and is not the
+    // answer to this request.
+    await userEvent.click(
+      screen.getByRole("button", { name: "View all scans" })
+    );
+    act(() => rerender());
+    expect(screen.queryByText("Barcode: BC-a")).toBeNull();
+
+    respond(rerender, page(["b"], null));
+    expect(screen.getByText("Barcode: BC-b")).toBeInTheDocument();
+    expect(screen.queryByText("Barcode: BC-a")).toBeNull();
+  });
+
+  // Not covered: page A arriving after the reopen but before page B. A real
+  // `fetcher.load` on the same key supersedes the pending request, so React
+  // Router guarantees A never lands then; the mock cannot show that, and the
+  // component cannot tell A from B by content, so it is not asserted here.
 });

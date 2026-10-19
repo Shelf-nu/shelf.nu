@@ -139,10 +139,17 @@ export function ScanHistoryButton({
         )}
 
         <div className="flex flex-col items-center gap-2 py-4">
-          {state.phase === "loading" ? <Spinner /> : null}
+          {state.phase === "loading" ? (
+            <div role="status">
+              <Spinner />
+              <span className="sr-only">Loading</span>
+            </div>
+          ) : null}
           {state.phase === "failed" ? (
             <>
-              <p className="text-sm text-error-600">{state.errorMessage}</p>
+              <p role="alert" className="text-sm text-error-600">
+                {state.errorMessage}
+              </p>
               <Button
                 type="button"
                 variant="secondary"
