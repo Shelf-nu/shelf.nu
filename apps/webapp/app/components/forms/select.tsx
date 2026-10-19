@@ -160,7 +160,8 @@ const SelectLabel = React.forwardRef<
 type SelectItemProps = ComponentPropsWithoutRef<typeof SelectPrimitive.Item> & {
   /**
    * A second line under the item's text. Rendered outside the item text, so
-   * the trigger shows only `children` once the item is chosen.
+   * the trigger shows only `children` once the item is chosen, and linked to
+   * the option with `aria-describedby` so screen readers still announce it.
    */
   description?: React.ReactNode;
 };
@@ -169,9 +170,11 @@ const SelectItem = React.forwardRef<
   ElementRef<typeof SelectPrimitive.Item>,
   SelectItemProps
 >(function SelectItem({ className, children, description, ...props }, ref) {
+  const descriptionId = React.useId();
   return (
     <SelectPrimitive.Item
       ref={ref}
+      aria-describedby={description ? descriptionId : undefined}
       className={tw(
         "relative flex min-h-[40px] cursor-default touch-manipulation select-none items-center rounded p-1 text-sm font-medium outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 focus:bg-gray-50 md:min-h-0 ",
         className
@@ -182,7 +185,10 @@ const SelectItem = React.forwardRef<
         <div className="flex min-w-0 flex-col">
           <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
           {description ? (
-            <span className="text-xs font-normal text-gray-500">
+            <span
+              id={descriptionId}
+              className="text-xs font-normal text-gray-500"
+            >
               {description}
             </span>
           ) : null}

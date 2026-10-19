@@ -211,7 +211,7 @@ export default function InviteUserDialog({
                   </SelectTrigger>
                   <SelectContent
                     position="popper"
-                    className="w-[var(--radix-select-trigger-width)] min-w-[300px] max-w-[var(--radix-select-content-available-width)]"
+                    className="w-[var(--radix-select-trigger-width)] max-w-[var(--radix-select-content-available-width)]"
                     align="start"
                   >
                     <div className=" max-h-[320px] overflow-auto">

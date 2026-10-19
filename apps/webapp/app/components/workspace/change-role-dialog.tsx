@@ -311,6 +311,7 @@ export function ChangeRoleDialog({
                           key={k}
                           role="option"
                           aria-selected={selectedRole === k}
+                          aria-describedby={`role-option-${k}-description`}
                           tabIndex={0}
                           className={tw(
                             "px-4 py-2 text-[14px] text-gray-600 hover:cursor-pointer hover:bg-gray-50",
@@ -326,7 +327,10 @@ export function ChangeRoleDialog({
                           <span className="block text-gray-900">
                             {ROLE_LABELS[k]}
                           </span>
-                          <span className="block text-xs font-normal text-gray-500">
+                          <span
+                            id={`role-option-${k}-description`}
+                            className="block text-xs font-normal text-gray-500"
+                          >
                             {ROLE_DESCRIPTIONS[k]}
                           </span>
                         </div>
