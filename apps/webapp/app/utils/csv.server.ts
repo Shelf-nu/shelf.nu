@@ -42,6 +42,7 @@ import type { BookingWithCustodians } from "~/modules/booking/types";
 import { calculatePartialCheckinProgress } from "~/modules/booking/utils.server";
 import { getPrimaryCustody } from "~/modules/custody/utils";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
+import { getQrUrl } from "~/modules/qr/qr-url.server";
 import { getNrmSelectionWhere } from "~/modules/team-member/nrm-scope";
 import { getAssetTotalValue } from "./asset-value";
 import { getBookingAssetCheckinLabel } from "./booking-assets";
@@ -420,10 +421,16 @@ export const buildCsvExportDataFromAssets = ({
 }): string[][] => {
   if (!assets.length) return [];
 
-  // Get visible columns in the correct order
+  // Get visible columns in the correct order. The export-only `qrUrl` column
+  // rides directly behind `qrId`, so it is shown exactly when the QR ID is.
   const visibleColumns = columns
     .filter((col) => col.visible && col.name !== "actions")
-    .sort((a, b) => a.position - b.position);
+    .sort((a, b) => a.position - b.position)
+    .flatMap((col): Column[] =>
+      col.name === "qrId"
+        ? [col, { name: "qrUrl", visible: true, position: col.position }]
+        : [col]
+    );
 
   // Create headers row using column names
   const headers = visibleColumns.map((col) =>
@@ -446,7 +453,8 @@ export const buildCsvExportDataFromAssets = ({
           | FixedField
           | BarcodeField
           | "name"
-          | "total_value";
+          | "total_value"
+          | "qrUrl";
 
         switch (fieldName) {
           case "id":
@@ -457,6 +465,10 @@ export const buildCsvExportDataFromAssets = ({
             break;
           case "qrId":
             value = asset.qrId;
+            break;
+          case "qrUrl":
+            // The URL the printed code encodes; empty when the asset has none.
+            value = getQrUrl(asset.qrId);
             break;
           case "name":
             value = asset.title;

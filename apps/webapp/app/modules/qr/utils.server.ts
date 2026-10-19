@@ -4,18 +4,16 @@ import QRCode, {
   type ErrorCorrectionLevel,
 } from "qrcode-generator";
 import { db } from "~/database/db.server";
-import { SERVER_URL, URL_SHORTENER } from "~/utils/env";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { gifToPng } from "~/utils/gif-to-png";
+import { getQrBaseUrl } from "./qr-url.server";
 // eslint-disable-next-line import/no-cycle
 import { createQr, getQrByAssetId, getQrByKitId } from "./service.server";
 
 const label: ErrorLabel = "QR";
 
-export function getQrBaseUrl() {
-  return URL_SHORTENER ? `https://${URL_SHORTENER}` : `${SERVER_URL}/qr`;
-}
+export { getQrBaseUrl };
 
 export async function generateCode({
   version,

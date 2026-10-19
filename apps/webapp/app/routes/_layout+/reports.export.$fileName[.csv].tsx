@@ -10,6 +10,7 @@
 import { AUDIT_STATUS_LABELS } from "@shelf/labels";
 import { data, type LoaderFunctionArgs } from "react-router";
 
+import { getQrUrl } from "~/modules/qr/qr-url.server";
 import { auditCompletionReport } from "~/modules/reports/audit-completion.server";
 import { formatDateForCsv } from "~/modules/reports/csv-format";
 import {
@@ -700,6 +701,7 @@ function generateAssetInventoryCsv(
     "Total Value",
     "Created Date",
     "QR Code ID",
+    "QR Code URL",
   ];
 
   const csvRows = rows.map((row) => [
@@ -718,6 +720,8 @@ function generateAssetInventoryCsv(
     // Date-only column: no time part.
     formatDateForCsv(row.createdAt, prefs),
     row.qrId || "",
+    // The URL the printed code encodes, for label-printer software.
+    getQrUrl(row.qrId),
   ]);
 
   return buildCsv(headers, csvRows);
