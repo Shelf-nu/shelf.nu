@@ -1,9 +1,9 @@
 /**
  * Asset Last Audit Card UI Tests
  *
- * The sidebar card shows the asset's last audit date (or "Never audited"),
- * its recent and upcoming audits as links, and a link to every audit of the
- * asset. Without history (a caller who may not see audit dates) it renders
+ * The sidebar card heads with the asset's last audit (or "never been
+ * audited"), lists the audits before it as "Earlier" and the ones ahead as
+ * "Upcoming", and links to every audit of the asset. Without history (a caller who may not see audit dates) it renders
  * nothing.
  *
  * @see {@link file://./asset-last-audit-card.tsx}
@@ -64,7 +64,7 @@ describe("AssetLastAuditCard", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("shows the newest counted audit's date, its audits and the full list link", () => {
+  it("heads with the last audit and lists the ones before it as earlier", () => {
     render(
       <AssetLastAuditCard
         assetId="asset-1"
@@ -74,6 +74,7 @@ describe("AssetLastAuditCard", () => {
               id: "audit-new",
               name: "Q3 audit",
               completedAt: new Date("2026-07-31T08:00:00Z"),
+              assetStatus: "MISSING",
             }),
             item({
               id: "audit-old",
@@ -94,14 +95,21 @@ describe("AssetLastAuditCard", () => {
       />
     );
 
-    expect(screen.getByText("Last audit")).toBeVisible();
-    // The headline date comes from the newest recent audit.
-    expect(screen.getAllByText("2026-07-31")).toHaveLength(2);
-    expect(screen.getByRole("link", { name: /Q3 audit/ })).toHaveAttribute(
+    // The headline row is the newest audit, with its date and result.
+    const headline = screen
+      .getByRole("link", { name: "Q3 audit" })
+      .closest("li");
+    expect(headline).toHaveTextContent("Completed 2026-07-31");
+    expect(headline).toHaveTextContent("Missing");
+    expect(screen.getByRole("link", { name: "Q3 audit" })).toHaveAttribute(
       "href",
       "/audits/audit-new"
     );
-    expect(screen.getByRole("link", { name: /Q4 audit/ })).toHaveAttribute(
+    // Older audits sit under "Earlier"; the headline is not repeated there.
+    expect(screen.getByText("Earlier")).toBeVisible();
+    expect(screen.getAllByRole("link", { name: "Q3 audit" })).toHaveLength(1);
+    expect(screen.getByRole("link", { name: "Q2 audit" })).toBeVisible();
+    expect(screen.getByRole("link", { name: "Q4 audit" })).toHaveAttribute(
       "href",
       "/audits/audit-next"
     );
@@ -109,6 +117,21 @@ describe("AssetLastAuditCard", () => {
     expect(
       screen.getByRole("link", { name: "View all audits" })
     ).toHaveAttribute("href", "/audits?assetId=asset-1");
+  });
+
+  it("keeps the full list link when the last audit is the only one", () => {
+    render(
+      <AssetLastAuditCard
+        assetId="asset-1"
+        history={{
+          recent: [item({ completedAt: new Date("2026-07-31T08:00:00Z") })],
+          upcoming: [],
+        }}
+      />
+    );
+
+    expect(screen.queryByText("Earlier")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View all audits" })).toBeVisible();
   });
 
   it("says never audited and still lists an upcoming audit", () => {
@@ -130,7 +153,7 @@ describe("AssetLastAuditCard", () => {
 
     expect(screen.getByText("This asset has never been audited")).toBeVisible();
     expect(screen.getByRole("link", { name: /First audit/ })).toBeVisible();
-    expect(screen.queryByText("Recent")).not.toBeInTheDocument();
+    expect(screen.queryByText("Earlier")).not.toBeInTheDocument();
   });
 
   it("omits the audit list and link when the asset has no audits", () => {

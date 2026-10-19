@@ -102,9 +102,11 @@ describe("asset overview loader: last audit history", () => {
 
     await load();
 
+    // The headline audit plus three under "Earlier".
     expect(mockGetAssetAuditHistory).toHaveBeenCalledWith({
       assetId: "asset-1",
       organizationId: "org-1",
+      limit: 4,
     });
   });
 

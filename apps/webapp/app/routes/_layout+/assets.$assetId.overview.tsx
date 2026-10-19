@@ -10,7 +10,10 @@ import { data, useFetcher, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { CustodyCard } from "~/components/assets/asset-custody-card";
-import { AssetLastAuditCard } from "~/components/assets/asset-last-audit-card";
+import {
+  AssetLastAuditCard,
+  LAST_AUDIT_CARD_RECENT_LIMIT,
+} from "~/components/assets/asset-last-audit-card";
 import { AssetReminderCards } from "~/components/assets/asset-reminder-cards";
 import { MoveUnitsDialog } from "~/components/assets/move-units-dialog";
 import { QuantityCustodyList } from "~/components/assets/quantity-custody-list";
@@ -207,7 +210,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      */
     const auditHistory =
       lastAuditDateAccessFor(access, currentOrganization) === "available"
-        ? await getAssetAuditHistory({ assetId: asset.id, organizationId })
+        ? await getAssetAuditHistory({
+            assetId: asset.id,
+            organizationId,
+            limit: LAST_AUDIT_CARD_RECENT_LIMIT,
+          })
         : null;
 
     const qrObj = await generateQrObj({

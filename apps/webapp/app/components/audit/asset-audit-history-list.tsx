@@ -60,7 +60,7 @@ function RowWhen({
  * asset's result in that audit on the right. A scheduled audit has no result
  * yet, so its row carries the audit status instead.
  */
-function AuditRow({
+export function AuditRow({
   item,
   section,
 }: {
@@ -124,27 +124,36 @@ function Section({
 /**
  * The recent and upcoming sections, each shown only when it has audits and
  * divided by a rule, then the "View all audits" button. Renders nothing when
- * both lists are empty: with no audits there is nothing to list or to view.
+ * there is nothing to list and `showViewAll` is off.
  *
  * @param props.assetId - The asset; scopes the "View all audits" link
  * @param props.recent - Counted audits, newest first
  * @param props.upcoming - Pending or active audits, soonest due first
+ * @param props.recentTitle - Heading of the counted audits ("Recent" by default)
+ * @param props.showViewAll - Keep the button when both lists are empty, for a
+ *   caller that already shows an audit outside these lists
  */
 export function AssetAuditHistoryList({
   assetId,
   recent,
   upcoming,
+  recentTitle = "Recent",
+  showViewAll = false,
 }: {
   assetId: string;
   recent: AuditHistoryListItem[];
   upcoming: AuditHistoryListItem[];
+  recentTitle?: string;
+  showViewAll?: boolean;
 }) {
-  if (recent.length === 0 && upcoming.length === 0) return null;
+  if (recent.length === 0 && upcoming.length === 0 && !showViewAll) {
+    return null;
+  }
 
   return (
     <div className="flex flex-col gap-3">
       {recent.length > 0 ? (
-        <Section title="Recent" items={recent} section="recent" />
+        <Section title={recentTitle} items={recent} section="recent" />
       ) : null}
       {recent.length > 0 && upcoming.length > 0 ? (
         <hr className="border-gray-200" />
