@@ -135,11 +135,27 @@ function isEmptyRow(row: string[]): boolean {
   return row.every((cell) => cell.trim() === "");
 }
 
-/** Takes a request object and extracts the file from it and parses it as csvData */
-export const csvDataFromRequest = async ({ request }: { request: Request }) => {
+/**
+ * Takes a request object and extracts the file from it and parses it as csvData.
+ *
+ * @param args.request - The multipart request carrying a `file` field
+ * @param args.maxFileSize - Largest accepted upload in bytes; the multipart
+ *   parser's default (2 MB) applies when omitted
+ * @throws {ShelfError} "File too large" past the limit, or a parse error
+ */
+export const csvDataFromRequest = async ({
+  request,
+  maxFileSize,
+}: {
+  request: Request;
+  maxFileSize?: number;
+}) => {
   try {
     // Files are automatically stored in memory with parseFormData
-    const formData = await parseFormData(request);
+    const formData = await parseFormData(
+      request,
+      maxFileSize ? { maxFileSize } : undefined
+    );
 
     const csvFile = formData.get("file") as File;
 
@@ -160,9 +176,16 @@ export const csvDataFromRequest = async ({ request }: { request: Request }) => {
       throw new ShelfError({
         cause,
         title: "File too large",
-        message:
-          "The CSV file is too large. Please reduce the file size by removing empty rows or splitting it into smaller files and try again.",
+        message: maxFileSize
+          ? `The CSV file is larger than ${(
+              maxFileSize /
+              (1024 * 1024)
+            ).toLocaleString("en-US", {
+              maximumFractionDigits: 1,
+            })} MB. Split it into smaller files or remove empty rows and try again.`
+          : "The CSV file is too large. Please reduce the file size by removing empty rows or splitting it into smaller files and try again.",
         label: "CSV",
+        status: 400,
         shouldBeCaptured: false,
       });
     }

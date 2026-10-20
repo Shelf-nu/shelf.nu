@@ -3,15 +3,21 @@ import type {
   MetaFunction,
   LoaderFunctionArgs,
 } from "react-router";
-import { data, Link } from "react-router";
+import { data, Link, redirect, useLoaderData } from "react-router";
 import { z } from "zod";
-import { ImportContent } from "~/components/assets/import-content";
+import { ImportContent } from "~/components/assets/import-content/index";
 import Header from "~/components/layout/header";
 import { db } from "~/database/db.server";
 import { captureServerEvent } from "~/integrations/posthog/client.server";
-import { MAX_CONTENT_IMPORT_ROWS } from "~/modules/asset/import-preflight.server";
-import { createAssetsFromContentImport } from "~/modules/asset/service.server";
-import { ASSET_CSV_HEADERS } from "~/modules/asset/utils.server";
+import {
+  MAX_BACKGROUND_IMPORT_FILE_BYTES,
+  MAX_BACKGROUND_IMPORT_ROWS,
+} from "~/modules/asset-import/constants";
+import { buildContentImportPreview } from "~/modules/asset-import/preview.server";
+import {
+  confirmAssetImport,
+  getActiveAssetImport,
+} from "~/modules/asset-import/service.server";
 import { applyMapping } from "~/modules/import-mapping/apply";
 import { classifyImportFailure } from "~/modules/import-mapping/failure";
 import {
@@ -31,7 +37,6 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { csvDataFromRequest } from "~/utils/csv.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
-import { extractCSVDataFromContentImport } from "~/utils/import.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -40,6 +45,18 @@ import { requirePermission } from "~/utils/roles.server";
 import { assertUserCanImportAssets } from "~/utils/subscription.server";
 import { optionalNumberFromString } from "~/utils/zod-numeric";
 
+/**
+ * Import upload, column mapping and confirm.
+ *
+ * - `analyze` (multipart `file`): parses the CSV and proposes where each column
+ *   goes (see `modules/import-mapping`). Nothing is stored.
+ * - `preview` (multipart `file`, optional `mapping`): applies the reviewed
+ *   mapping when one is posted (renames and drops columns, never changes a
+ *   value), then stores the validated rows as a DRAFT import and returns the
+ *   preview. Nothing is created yet.
+ * - `confirm` (`importId`): queues the draft for the background job and sends
+ *   the user to its progress page.
+ */
 export const action = async ({ context, request }: ActionFunctionArgs) => {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -58,129 +75,88 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
     await assertUserCanImportAssets({ organizationId, organizations });
     gatedOrganizationId = organizationId;
 
-    const { intent, mapping, mappingChanged, mappingNewCustomFields } =
-      parseData(
-        await request.clone().formData(),
-        z.object({
-          intent: z.enum(["analyze", "content"]),
-          /** JSON of the reviewed ColumnMapping[]; absent on the legacy path. */
-          mapping: z.string().max(MAX_MAPPING_FIELD_LENGTH).optional(),
-          /** Columns the user changed in the review (analytics only). */
-          mappingChanged: optionalNumberFromString({ blank: undefined }).pipe(
-            z.number().int().min(0).max(1000).optional()
-          ),
-          /** Custom fields the reviewed mapping creates (analytics only). */
-          mappingNewCustomFields: optionalNumberFromString({
-            blank: undefined,
-          }).pipe(z.number().int().min(0).max(1000).optional()),
-        })
-      );
+    // The body is read from a clone: `csvDataFromRequest` consumes the original.
+    const formData = await request.clone().formData();
+    const { intent } = parseData(
+      formData,
+      z.object({
+        intent: z.enum(["analyze", "preview", "confirm"]),
+      })
+    );
 
-    const csvData = await csvDataFromRequest({ request });
-    if (csvData.length < 2) {
+    if (intent === "confirm") {
+      const { importId } = parseData(
+        formData,
+        z.object({ importId: z.string().min(1) })
+      );
+      await confirmAssetImport({
+        importId,
+        organizationId,
+        userId,
+        canUseBarcodes,
+      });
+      return redirect(`/assets/import/${importId}`);
+    }
+
+    const csvData = await csvDataFromRequest({
+      request,
+      maxFileSize: MAX_BACKGROUND_IMPORT_FILE_BYTES,
+    });
+    if (csvData.length === 0) {
       throw new ShelfError({
         cause: null,
-        message: "CSV file is empty",
+        message: "This file is empty.",
         additionalData: { intent, failureReason: "empty_file" },
         label: "Assets",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+    if (csvData.length === 1) {
+      throw new ShelfError({
+        cause: null,
+        title: "No assets in file",
+        message:
+          "This file has headers but no assets. Add at least one row below the headers.",
+        additionalData: { intent, failureReason: "empty_file" },
+        label: "Assets",
+        status: 400,
         shouldBeCaptured: false,
       });
     }
 
     if (intent === "analyze") {
-      const { headers, samples } = buildColumnSamples(csvData);
-      if (headers.length > MAX_MAPPED_COLUMNS) {
-        throw new ShelfError({
-          cause: null,
-          title: "Too many columns",
-          message: `This file has ${headers.length} columns, but the maximum is ${MAX_MAPPED_COLUMNS}. Remove the columns you do not need and try again.`,
-          additionalData: { failureReason: "too_many_columns" },
-          label: "Assets",
-          status: 400,
-          shouldBeCaptured: false,
-        });
-      }
-
-      // Refuse now what the importer would refuse after the review, so the
-      // user does not map a file that cannot be imported.
-      const dataRows = csvData.length - 1;
-      if (dataRows > MAX_CONTENT_IMPORT_ROWS) {
-        throw new ShelfError({
-          cause: null,
-          title: "File too large",
-          message: `This file has ${dataRows} rows, but the maximum is ${MAX_CONTENT_IMPORT_ROWS}. Please split it into smaller files and import them one at a time.`,
-          additionalData: { failureReason: "too_many_rows" },
-          label: "Assets",
-          status: 400,
-          shouldBeCaptured: false,
-        });
-      }
-      const longHeading = headers.findIndex(
-        (header) => header.length > MAX_HEADER_LENGTH
-      );
-      if (longHeading !== -1) {
-        throw new ShelfError({
-          cause: null,
-          title: "Column heading too long",
-          message: `Column ${longHeading + 1} has a heading of ${
-            headers[longHeading].length
-          } characters, but the maximum is ${MAX_HEADER_LENGTH}. Shorten it and try again.`,
-          additionalData: { failureReason: "heading_too_long" },
-          label: "Assets",
-          status: 400,
-          shouldBeCaptured: false,
-        });
-      }
-
-      const [existingCustomFields, categories, locations] = await Promise.all([
-        loadExistingCustomFields(organizationId),
-        db.category.findMany({
-          where: { organizationId },
-          select: { name: true },
-        }),
-        db.location.findMany({
-          where: { organizationId },
-          select: { name: true },
-        }),
-      ]);
-      const rowCount = dataRows;
-      const proposal = await proposeMapping({
-        headers,
-        samples,
-        existingCustomFields,
-        rowCount,
-        canUseBarcodes: Boolean(canUseBarcodes),
-      });
-
-      captureServerEvent({
-        distinctId: userId,
-        event: "import_mapping_proposed",
-        properties: {
-          organizationId,
-          columns: proposal.columns.length,
-          lowConfidence: proposal.columns.filter(
-            (column) => column.confidence === "low"
-          ).length,
-        },
-      });
-
       return payload({
-        proposal,
-        rowCount,
-        alreadyMatches: isAlreadyShelfFormat(proposal.columns),
-        columnStats: buildColumnStats(csvData, {
-          categories: categories.map(({ name }) => name),
-          locations: locations.map(({ name }) => name),
-        }),
-        existingCustomFields,
+        intent: "analyze" as const,
+        ...(await analyzeColumns({
+          csvData,
+          organizationId,
+          userId,
+          canUseBarcodes: Boolean(canUseBarcodes),
+        })),
       });
     }
+
+    const { mapping, mappingChanged, mappingNewCustomFields } = parseData(
+      formData,
+      z.object({
+        /** JSON of the reviewed ColumnMapping[]; absent for a file posted as-is. */
+        mapping: z.string().max(MAX_MAPPING_FIELD_LENGTH).optional(),
+        /** Columns the user changed in the review (analytics only). */
+        mappingChanged: optionalNumberFromString({ blank: undefined }).pipe(
+          z.number().int().min(0).max(1000).optional()
+        ),
+        /** Custom fields the reviewed mapping creates (analytics only). */
+        mappingNewCustomFields: optionalNumberFromString({
+          blank: undefined,
+        }).pipe(z.number().int().min(0).max(1000).optional()),
+      })
+    );
 
     let mappedCsvData: string[][] = csvData;
     if (mapping) {
       const columns = parseMapping(mapping);
       mappedCsvData = applyMapping(csvData, columns);
-
       captureServerEvent({
         distinctId: userId,
         event: "import_mapping_confirmed",
@@ -193,27 +169,16 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
       });
     }
 
-    const contentData = extractCSVDataFromContentImport(
-      mappedCsvData,
-      ASSET_CSV_HEADERS
-    );
-
-    await createAssetsFromContentImport({
-      data: contentData,
-      userId,
+    const file = formData.get("file");
+    const preview = await buildContentImportPreview({
+      csvData: mappedCsvData,
+      fileName: file instanceof File ? file.name : null,
       organizationId,
+      userId,
       canUseBarcodes,
     });
 
-    captureServerEvent({
-      distinctId: userId,
-      event: "import_completed",
-      properties: {
-        organizationId,
-        rows: contentData.length,
-      },
-    });
-    return payload({ success: true });
+    return payload({ intent: "preview" as const, preview });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     if (gatedOrganizationId) {
@@ -226,26 +191,120 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
         },
       });
     }
-    return data(error(reason), { status: reason.status });
+    // The upload form renders the error itself, so no toast repeats it.
+    return data(error(reason, false), { status: reason.status });
   }
 };
 
 /**
- * Loads the workspace's custom field names and types, matching the
- * importer's own lookup (non-deleted, active or not).
+ * Proposes a column mapping for an uploaded file and the facts the review
+ * table needs. Refuses up front what the importer would refuse after the
+ * review: too many columns, too many rows, or an over-long heading.
  *
- * @param organizationId - The caller's workspace
- * @returns Name and type of every non-deleted custom field
+ * @param args.csvData - Parsed CSV, header row first, at least one data row
+ * @param args.organizationId - The caller's workspace
+ * @param args.userId - The caller, for analytics
+ * @param args.canUseBarcodes - Whether barcode fields may be proposed
+ * @returns The proposal, row count, per-column stats and existing custom fields
+ * @throws {ShelfError} 400 for a file the importer cannot take
  */
-function loadExistingCustomFields(organizationId: string) {
-  return db.customField.findMany({
-    where: { organizationId, deletedAt: null },
-    select: { name: true, type: true },
+async function analyzeColumns({
+  csvData,
+  organizationId,
+  userId,
+  canUseBarcodes,
+}: {
+  csvData: string[][];
+  organizationId: string;
+  userId: string;
+  canUseBarcodes: boolean;
+}) {
+  const { headers, samples } = buildColumnSamples(csvData);
+  if (headers.length > MAX_MAPPED_COLUMNS) {
+    throw new ShelfError({
+      cause: null,
+      title: "Too many columns",
+      message: `This file has ${headers.length} columns, but the maximum is ${MAX_MAPPED_COLUMNS}. Remove the columns you do not need and try again.`,
+      additionalData: { failureReason: "too_many_columns" },
+      label: "Assets",
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
+
+  const rowCount = csvData.length - 1;
+  if (rowCount > MAX_BACKGROUND_IMPORT_ROWS) {
+    throw new ShelfError({
+      cause: null,
+      title: "File too large",
+      message: `This file has ${rowCount} rows, but the maximum is ${MAX_BACKGROUND_IMPORT_ROWS}. Please split it into smaller files and import them one at a time.`,
+      additionalData: { failureReason: "too_many_rows" },
+      label: "Assets",
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
+
+  const longHeading = headers.findIndex(
+    (header) => header.length > MAX_HEADER_LENGTH
+  );
+  if (longHeading !== -1) {
+    throw new ShelfError({
+      cause: null,
+      title: "Column heading too long",
+      message: `Column ${longHeading + 1} has a heading of ${
+        headers[longHeading].length
+      } characters, but the maximum is ${MAX_HEADER_LENGTH}. Shorten it and try again.`,
+      additionalData: { failureReason: "heading_too_long" },
+      label: "Assets",
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
+
+  const [existingCustomFields, categories, locations] = await Promise.all([
+    db.customField.findMany({
+      where: { organizationId, deletedAt: null },
+      select: { name: true, type: true },
+    }),
+    db.category.findMany({ where: { organizationId }, select: { name: true } }),
+    db.location.findMany({ where: { organizationId }, select: { name: true } }),
+  ]);
+
+  const proposal = await proposeMapping({
+    headers,
+    samples,
+    existingCustomFields,
+    rowCount,
+    canUseBarcodes,
   });
+
+  captureServerEvent({
+    distinctId: userId,
+    event: "import_mapping_proposed",
+    properties: {
+      organizationId,
+      columns: proposal.columns.length,
+      lowConfidence: proposal.columns.filter(
+        (column) => column.confidence === "low"
+      ).length,
+    },
+  });
+
+  return {
+    proposal,
+    rowCount,
+    alreadyMatches: isAlreadyShelfFormat(proposal.columns),
+    columnStats: buildColumnStats(csvData, {
+      categories: categories.map(({ name }) => name),
+      locations: locations.map(({ name }) => name),
+    }),
+    existingCustomFields,
+  };
 }
 
 /**
- * Reads the reviewed mapping posted with the `content` intent.
+ * Reads the reviewed mapping posted with the `preview` intent.
  *
  * @param raw - The `mapping` form field, JSON of `ColumnMapping[]`
  * @returns The validated mapping
@@ -274,6 +333,12 @@ function parseMapping(raw: string): ColumnMapping[] {
   return result.data;
 }
 
+/**
+ * Import upload page.
+ *
+ * Returns the header and the workspace's QUEUED or RUNNING import, if any, so
+ * the page can hold the upload form until that import finishes.
+ */
 export const loader = async ({ context, request }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -288,10 +353,19 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
 
     await assertUserCanImportAssets({ organizationId, organizations });
 
+    // Only one import runs per workspace at a time. The lookup also returns
+    // the viewer's recently finished import, which must not block the form.
+    const active = await getActiveAssetImport({ userId, organizationId });
+    const runningImport =
+      active && (active.status === "QUEUED" || active.status === "RUNNING")
+        ? active
+        : null;
+
     return payload({
       header: {
         title: "Import assets",
       },
+      runningImport,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
@@ -304,15 +378,17 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export const handle = {
-  breadcrumb: () => <Link to="/import">Import</Link>,
+  breadcrumb: () => <Link to="/assets/import">Import</Link>,
 };
 
 export default function AssetsImport() {
+  const { runningImport } = useLoaderData<typeof loader>();
+
   return (
     <div className="h-full">
       <Header />
       <div className="mx-auto h-auto w-full px-4 py-10">
-        <ImportContent />
+        <ImportContent runningImport={runningImport} />
       </div>
     </div>
   );

@@ -4,8 +4,14 @@ The asset importer (`/assets/import`) accepts any spreadsheet export, not only
 Shelf's template. Before anything is imported, Shelf shows a **mapping review**:
 one row per column of the file, with a few sample values, the Shelf field the
 column will become, and a dot for how sure the match is (green sure, amber a
-guess). The user adjusts the mapping, confirms the "I AGREE" dialog, and the
-existing importer runs on the renamed columns.
+guess). The user adjusts the mapping and presses **Preview import**; from there
+the import continues as before: the server validates the renamed rows into a
+draft, the preview stage shows them, and confirming queues the background
+import.
+
+The steps on `/assets/import` are: pick a file (`intent=analyze`), review the
+mapping, preview (`intent=preview` with the reviewed `mapping`), confirm
+(`intent=confirm`).
 
 A file that already uses Shelf's headers (the template, or an Import-ready
 export) shows the same review, all green, with the message "Your file already
@@ -43,7 +49,8 @@ proposer can be added later without changing the route or the review table.
 
 - Every row has a dropdown with all Shelf fields, "Custom field..." (name and
   type) and "Skip".
-- Two columns aimed at one destination are flagged inline and block Import.
+- Two columns aimed at one destination are flagged inline and block Preview
+  import.
 - A line under the table says how many rows will be imported and which custom
   fields, categories and locations will be created.
 
@@ -52,7 +59,8 @@ proposer can be added later without changing the route or the review table.
 Applying a mapping only renames and drops columns
 (`modules/import-mapping/apply.ts`). Cell values are never changed, so every
 existing import rule still applies: dates as YYYY-MM-DD, yes/no fields,
-quantity-tracked columns, barcodes, QR codes and the 1,000 row limit. Row
+quantity-tracked columns, barcodes, QR codes and the 10,000 row limit of the
+background import. Row
 problems are listed in the same error table as before, and nothing is imported
 until the whole file is valid.
 
@@ -66,7 +74,7 @@ The import route sends these PostHog events, with counts only:
 - `import_mapping_proposed`: columns, low-confidence columns.
 - `import_mapping_confirmed`: columns, columns changed in the review, new
   custom fields.
-- `import_completed`: assets created.
+- `import_completed`: assets created (sent by the background job when the import finishes).
 - `import_failed`: a reason from the fixed list in
   `modules/import-mapping/failure.ts`.
 
