@@ -28,8 +28,22 @@ import {
 // why: Sentry is a network side effect; the test asserts what would be sent.
 vi.mock("@sentry/react-router", () => ({ captureMessage: vi.fn() }));
 
+/** The origin the page is served from, as the script sees it. */
+const ORIGIN = "https://app.shelf.nu";
+
+/** A file of the app's own bundle. */
+const OWN_CHUNK = `${ORIGIN}/file-assets/abc/chunk-X1.js`;
+
+/** The Cloudflare analytics beacon, which content blockers commonly stop. */
+const THIRD_PARTY_SCRIPT =
+  "https://static.cloudflareinsights.com/beacon.min.js/vce701823e78c4301a35b7e07294d873";
+
 type FakeWindow = {
-  location: { pathname: string; reload: ReturnType<typeof vi.fn> };
+  location: {
+    origin: string;
+    pathname: string;
+    reload: ReturnType<typeof vi.fn>;
+  };
   __shelfHydrationWatchdog?: { done: () => void };
 };
 
@@ -38,7 +52,7 @@ let fakeWindow: FakeWindow;
 /** Runs the inline script the way the document `<head>` would. */
 function runWatchdog() {
   fakeWindow = {
-    location: { pathname: "/assets", reload: vi.fn() },
+    location: { origin: ORIGIN, pathname: "/assets", reload: vi.fn() },
   };
   // why: `location.reload` cannot be observed on the real window, so the
   // script gets a window whose location records it. Everything else is the
@@ -72,6 +86,16 @@ function failToLoad(element: HTMLElement) {
 function moduleScript() {
   const script = document.createElement("script");
   script.type = "module";
+  return script;
+}
+
+/**
+ * A module script with a `src`. The property is defined on the instance rather
+ * than set as an attribute, so happy-dom does not try to fetch it.
+ */
+function externalModuleScript(src: string) {
+  const script = moduleScript();
+  Object.defineProperty(script, "src", { value: src });
   return script;
 }
 
@@ -110,7 +134,7 @@ afterEach(() => {
 describe("HYDRATION_WATCHDOG_SCRIPT: a chunk fails to load", () => {
   it("reloads the page once and records why", () => {
     runWatchdog();
-    failToLoad(modulePreload("/file-assets/abc/chunk-X1.js"));
+    failToLoad(modulePreload(OWN_CHUNK));
 
     expect(fakeWindow.location.reload).toHaveBeenCalledTimes(1);
     expect(isShowingScreen()).toBe(false);
@@ -134,7 +158,11 @@ describe("HYDRATION_WATCHDOG_SCRIPT: a chunk fails to load", () => {
 
     expect(fakeWindow.location.reload).not.toHaveBeenCalled();
     expect(isShowingScreen()).toBe(true);
-    expect(storedReport()).toMatchObject({ failures: 2 });
+    // Same chain: the earlier automatic reload is still reported.
+    expect(storedReport()).toMatchObject({
+      failures: 2,
+      reloadedAt: expect.any(Number),
+    });
   });
 
   it("reloads again once the last automatic reload is old enough", () => {
@@ -161,7 +189,7 @@ describe("HYDRATION_WATCHDOG_SCRIPT: a chunk fails to load", () => {
     runWatchdog();
     const event = Object.assign(new Event("unhandledrejection"), {
       reason: new TypeError(
-        "Failed to fetch dynamically imported module: /file-assets/entry.client-X1.js"
+        `Failed to fetch dynamically imported module: ${ORIGIN}/file-assets/entry.client-X1.js`
       ),
     });
     window.dispatchEvent(event);
@@ -187,6 +215,107 @@ describe("HYDRATION_WATCHDOG_SCRIPT: a chunk fails to load", () => {
 
     expect(fakeWindow.location.reload).not.toHaveBeenCalled();
     expect(isShowingScreen()).toBe(false);
+  });
+});
+
+describe("HYDRATION_WATCHDOG_SCRIPT: files from another origin", () => {
+  it("counts a module script of our own", () => {
+    runWatchdog();
+    failToLoad(externalModuleScript(OWN_CHUNK));
+
+    expect(fakeWindow.location.reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a blocked third-party module script", () => {
+    runWatchdog();
+    failToLoad(externalModuleScript(THIRD_PARTY_SCRIPT));
+
+    expect(fakeWindow.location.reload).not.toHaveBeenCalled();
+    expect(isShowingScreen()).toBe(false);
+    expect(storedReport()).toBeNull();
+  });
+
+  it("ignores a blocked third-party modulepreload", () => {
+    runWatchdog();
+    failToLoad(modulePreload(THIRD_PARTY_SCRIPT));
+
+    expect(fakeWindow.location.reload).not.toHaveBeenCalled();
+  });
+
+  it("ignores a rejected dynamic import of a third-party file", () => {
+    runWatchdog();
+    window.dispatchEvent(
+      Object.assign(new Event("unhandledrejection"), {
+        reason: new TypeError(
+          `Failed to fetch dynamically imported module: ${THIRD_PARTY_SCRIPT}`
+        ),
+      })
+    );
+
+    expect(fakeWindow.location.reload).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "Failed to fetch dynamically imported module: data:text/javascript,export%20default%201",
+    "Failed to fetch dynamically imported module: chrome-extension://abcdef/content.js",
+    "error loading dynamically imported module: blob:https://app.shelf.nu/1234",
+  ])(
+    "ignores a rejected import that names a non-http module: %s",
+    (message) => {
+      runWatchdog();
+      window.dispatchEvent(
+        Object.assign(new Event("unhandledrejection"), {
+          reason: new TypeError(message),
+        })
+      );
+
+      expect(fakeWindow.location.reload).not.toHaveBeenCalled();
+    }
+  );
+
+  it("counts an import failure that names no module", () => {
+    runWatchdog();
+    window.dispatchEvent(
+      Object.assign(new Event("unhandledrejection"), {
+        reason: new TypeError("error loading dynamically imported module"),
+      })
+    );
+
+    expect(fakeWindow.location.reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("counts Safari's import failure, which names no URL", () => {
+    runWatchdog();
+    window.dispatchEvent(
+      Object.assign(new Event("unhandledrejection"), {
+        reason: new TypeError("Importing a module script failed."),
+      })
+    );
+
+    expect(fakeWindow.location.reload).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("HYDRATION_WATCHDOG_SCRIPT: the reload loop guard", () => {
+  it("holds after the reloaded page hydrated and sent its report", () => {
+    runWatchdog();
+    failToLoad(moduleScript());
+    expect(fakeWindow.location.reload).toHaveBeenCalledTimes(1);
+
+    // The reloaded page hydrates, which consumes and sends the report.
+    runWatchdog();
+    markHydrated();
+    fakeWindow.__shelfHydrationWatchdog?.done();
+    expect(storedReport()).toBeNull();
+
+    // The next load fails again within the window: no second reload.
+    runWatchdog();
+    failToLoad(moduleScript());
+
+    expect(fakeWindow.location.reload).not.toHaveBeenCalled();
+    expect(isShowingScreen()).toBe(true);
+    // A new chain of failures: it did not reload, so it must not say it did.
+    expect(storedReport()).toMatchObject({ failures: 1, reloadedAt: null });
   });
 });
 
