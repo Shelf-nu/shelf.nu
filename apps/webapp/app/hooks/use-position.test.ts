@@ -105,4 +105,26 @@ describe("usePosition", () => {
       expect.objectContaining({ scanId: "scan-2" })
     );
   });
+
+  it("asks for no position and posts nothing when the page recorded no scan", async () => {
+    // A QR no workspace has claimed records no scan, so its pages carry no
+    // scanId. An earlier scan's fix in the shared atom must not be posted.
+    searchParamsValue.current = new URLSearchParams({ scanId: "scan-1" });
+    getCurrentPosition.mockImplementation((onSuccess: PositionCallback) =>
+      onSuccess({ coords: coordsFor(1, 2) } as GeolocationPosition)
+    );
+    const first = renderHook(() => usePosition(), { wrapper });
+    await waitFor(() => expect(submit).toHaveBeenCalled());
+    first.unmount();
+
+    submit.mockClear();
+    getCurrentPosition.mockClear();
+    searchParamsValue.current = new URLSearchParams();
+
+    renderHook(() => usePosition(), { wrapper });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(getCurrentPosition).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
+  });
 });

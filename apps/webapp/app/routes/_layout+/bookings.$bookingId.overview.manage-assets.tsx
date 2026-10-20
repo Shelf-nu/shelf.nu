@@ -52,6 +52,7 @@ import { CategoryBadge } from "~/components/assets/category-badge";
 import { ConsumptionTypeBadge } from "~/components/assets/consumption-type-badge";
 import { AvailabilityLabel } from "~/components/booking/availability-label";
 import { AvailabilitySelect } from "~/components/booking/availability-select";
+import { IncludeChildLocationsCheckbox } from "~/components/booking/include-child-locations-checkbox";
 import { ManageModelRequests } from "~/components/booking/manage-model-requests";
 import { assetIdsBlockedByModelHeadroom } from "~/components/booking/model-headroom";
 import { StatusFilter } from "~/components/booking/status-filter";
@@ -103,12 +104,17 @@ import {
   readOwnNamedUnits,
 } from "~/modules/booking-model-request/service.server";
 import { createSystemBookingNote } from "~/modules/booking-note/service.server";
+import {
+  hasTickedLocationWithChildren,
+  resolveLocationFilterIds,
+} from "~/modules/location/child-locations-filter.server";
 import { createNotes } from "~/modules/note/service.server";
 import { scopeCustodianFilterIds } from "~/modules/team-member/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { BADGE_COLORS } from "~/utils/badge-colors";
 import { isAssetPartiallyCheckedIn } from "~/utils/booking-assets";
+import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getClientHint } from "~/utils/client-hints";
 import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import type { RowWithCustody } from "~/utils/custody-visibility.server";
@@ -133,10 +139,12 @@ import {
   wrapUserLinkForNote,
 } from "~/utils/markdoc-wrappers";
 import { numberInputWheelGuard } from "~/utils/number-input-wheel-guard";
+import { assertAssetsAreNotArchived } from "~/utils/org-validation.server";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { canManageBookingItems } from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 
@@ -248,6 +256,14 @@ export type AssetWithBooking = Asset & {
    * the row); absent on surfaces that don't project it.
    */
   fulfilsModelName?: string | null;
+  /**
+   * The location a checked-out pool slice's units left from
+   * (`BookingAsset.sourceLocationId`), shown as "from <Location>" under the
+   * title. Resolved by the booking-overview loader, and only for standalone
+   * slices of pools at two or more placements; absent on surfaces that don't
+   * project it.
+   */
+  sourceLocation?: { id: string; name: string } | null;
   // Pickup location rendered in the booking Location column. On the
   // pivot model this comes from `assetLocations[0].location` via the
   // loader's `getPrimaryLocation` normalisation.
@@ -270,6 +286,16 @@ export const meta = () => [{ title: appendToMetaTitle("Manage assets") }];
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
+/**
+ * Loads the booking's "Add assets" drawer.
+ *
+ * Returns one page of assets filtered by the URL (with the Locations filter
+ * widened to child locations when that checkbox is on), the booking, the
+ * Models tab data, and whether the child-locations checkbox is offered.
+ *
+ * @throws An error response when the caller may not update this booking or
+ *   the booking is not in this workspace
+ */
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -282,21 +308,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   );
 
   try {
-    const {
-      organizationId,
-      userOrganizations,
-      isSelfServiceOrBase,
-      canSeeAllCustody,
-    } = await requirePermission({
-      userId: authSession?.userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.update,
-    });
+    const { organizationId, userOrganizations, access } =
+      await requirePermission({
+        userId: authSession?.userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.update,
+      });
 
-    // getPaginatedAndFilterableAssets + getBooking both only need
-    // `organizationId` (from requirePermission above). They're
-    // independent — parallelise to cut a serial DB round-trip.
+    const searchParams = getCurrentSearchParams(request);
+
+    // The asset list, the booking and the checkbox flag only need
+    // `organizationId` (from requirePermission above) and the URL, so they
+    // run in parallel.
     const [
       {
         search,
@@ -313,26 +337,54 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         totalLocations,
       },
       booking,
+      tickedLocationHasChildren,
     ] = await Promise.all([
-      getPaginatedAndFilterableAssets({
-        request,
-        organizationId,
-        // Ignores the custodian-filter seed — scope it rather than fetch a
-        // roster nobody renders.
-        canSeeAllCustody: false,
-        extraInclude: {
-          assetLocations: {
-            select: { quantity: true, location: LOCATION_WITH_HIERARCHY },
-          },
-        },
-      }),
+      /**
+       * With "Include assets from child locations" on, each ticked location
+       * matches itself plus everything nested under it. `undefined` (the
+       * checkbox is off, or nothing is ticked) leaves the list on the ticked
+       * locations exactly. The action's select-all resolves the same URL
+       * through the same function, so it acts on the set this list shows.
+       */
+      resolveLocationFilterIds({ organizationId, searchParams }).then(
+        (locationIdsOverride) =>
+          getPaginatedAndFilterableAssets({
+            request,
+            organizationId,
+            // Ignores the custodian-filter seed: scope it rather than fetch a
+            // roster nobody renders.
+            canSeeAllCustody: false,
+            locationIdsOverride,
+            extraInclude: {
+              assetLocations: {
+                select: { quantity: true, location: LOCATION_WITH_HIERARCHY },
+              },
+            },
+          })
+      ),
       getBooking({
         id,
         organizationId,
         userOrganizations,
         request,
       }),
+      // Decides whether the checkbox is offered: it can only change the list
+      // when a ticked location has child locations.
+      hasTickedLocationWithChildren({ organizationId, searchParams }),
     ]);
+
+    /**
+     * `booking: update` is held by every role, so it settles nothing about
+     * THIS booking: a caller who does not write every booking may only change
+     * one they created or hold. Judged before the status, so a caller with no
+     * claim on the booking does not learn what state it is in.
+     */
+    validateBookingOwnership({
+      booking,
+      userId,
+      access,
+      action: "manage assets for",
+    });
 
     /**
      * For QUANTITY_TRACKED assets, compute available quantity via the
@@ -498,11 +550,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       plural: "assets",
     };
 
-    /** Self service can only manage assets for bookings that are DRAFT */
-    const cantManageAssetsAsBaseOrSelfService =
-      isSelfServiceOrBase && booking.status !== BookingStatus.DRAFT;
-
-    /** Changing assets is not allowed at this stage */
+    // Items can be changed while the booking is open; roles whose policy does
+    // not allow adding after DRAFT are held to DRAFT.
     const isNotAllowedStatus = (
       [
         BookingStatus.CANCELLED,
@@ -511,22 +560,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       ] as BookingStatus[]
     ).includes(booking.status);
 
-    if (cantManageAssetsAsBaseOrSelfService || isNotAllowedStatus) {
+    if (!canManageBookingItems({ access, bookingStatus: booking.status })) {
       throw new ShelfError({
         cause: null,
         label: "Booking",
         message: isNotAllowedStatus
           ? "Changing of assets is not allowed for current status of booking."
-          : isSelfServiceOrBase
-          ? "You are unable to add assets at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
-          : "Changing of assets is not allowed for current status of booking.",
+          : "You are unable to add assets at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes.",
         shouldBeCaptured: false,
-        additionalData: {
-          booking,
-          userId,
-          organizationId,
-          isSelfServiceOrBase,
-        },
+        additionalData: { booking, userId, organizationId, role: access.role },
       });
     }
 
@@ -592,7 +634,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         assetsWithAvailability as unknown as Array<
           (typeof assetsWithAvailability)[number] & RowWithCustody
         >,
-        { canSeeAllCustody, userId: authSession?.userId }
+        { canSeeAllCustody: access.custody.seeAll, userId: authSession?.userId }
       ),
       categories,
       tags,
@@ -606,6 +648,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       totalTags,
       locations,
       totalLocations,
+      tickedLocationHasChildren,
       bookingKitIds,
       modelHeadroom,
       ...modelTabData,
@@ -634,6 +677,18 @@ const quantitiesSchema = z.record(
   z.number().int().positive().max(1_000_000)
 );
 
+/**
+ * Saves the drawer's selection onto the booking.
+ *
+ * Adds the newly selected assets, removes the unselected ones and updates
+ * changed quantities, then writes the activity notes. "Select all" resolves
+ * its assets from the same URL filters the loader used, so it adds exactly
+ * the set the list showed.
+ *
+ * @returns A redirect back to the booking, or an error response when the
+ *   caller may not update this booking, its status forbids changes, or a new
+ *   asset is checked out elsewhere
+ */
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -642,13 +697,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
-    const { organizationId, isSelfServiceOrBase, canSeeAllCustody } =
-      await requirePermission({
-        userId: authSession?.userId,
-        request,
-        entity: PermissionEntity.booking,
-        action: PermissionAction.update,
-      });
+    const { organizationId, access } = await requirePermission({
+      userId: authSession?.userId,
+      request,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.update,
+    });
 
     let {
       assetIds,
@@ -727,13 +781,20 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       const assetsWhere = getAssetsWhereInput({
         organizationId,
         currentSearchParams: searchParams.toString(),
+        // Same URL, same resolver as the loader: with "Include assets from
+        // child locations" on, select-all adds the sub-location assets the
+        // list showed, not only those placed in the ticked locations.
+        locationIdsOverride: await resolveLocationFilterIds({
+          organizationId,
+          searchParams,
+        }),
         // `booking: update` is held by BASE and SELF_SERVICE. Select-all here
         // ADDS the matched assets to the booking, which then lists them — so an
         // unscoped custodian filter would hand a restricted user a readable
         // copy of exactly what a colleague holds.
         allowedTeamMemberIds: await scopeCustodianFilterIds({
           teamMemberIds: searchParams.getAll("teamMember"),
-          canSeeAllCustody,
+          canSeeAllCustody: access.custody.seeAll,
           userId: authSession?.userId,
           organizationId,
         }),
@@ -780,6 +841,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           id: true,
           name: true,
           status: true,
+          // Both custody links, needed by the ownership check below.
+          creatorId: true,
+          custodianUserId: true,
           /**
            * We need the original assets and their quantities so we can
            * compare and detect changes. Asset `title` and `type` are
@@ -810,24 +874,28 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       });
 
-    /** Self service can only manage assets for bookings that are DRAFT */
-    const cantManageAssetsAsBase =
-      isSelfServiceOrBase && booking.status !== BookingStatus.DRAFT;
+    /**
+     * `booking: update` is held by every role, so it settles nothing about
+     * THIS booking: a caller who does not write every booking may only change
+     * one they created or hold. Judged before the status, so a caller with no
+     * claim on the booking does not learn what state it is in.
+     */
+    validateBookingOwnership({
+      booking,
+      userId,
+      access,
+      action: "manage assets for",
+    });
 
-    /** Changing assets is not allowed at this stage */
-    const notAllowedStatus: BookingStatus[] = [
-      BookingStatus.CANCELLED,
-      BookingStatus.ARCHIVED,
-      BookingStatus.COMPLETE,
-    ];
-
-    if (cantManageAssetsAsBase || notAllowedStatus.includes(booking.status)) {
+    if (!canManageBookingItems({ access, bookingStatus: booking.status })) {
       throw new ShelfError({
         cause: null,
         label: "Booking",
-        message: isSelfServiceOrBase
-          ? "You are unable to manage assets at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
-          : "Changing of assets is not allowed for current status of booking.",
+        // The message names the rule that applies to this caller: members
+        // held to DRAFT get the "already reserved" explanation.
+        message: access.policy.bookings.manageItemsAfterDraft
+          ? "Changing of assets is not allowed for current status of booking."
+          : "You are unable to manage assets at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes.",
         shouldBeCaptured: false,
       });
     }
@@ -838,6 +906,19 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const newAssetIds = assetIds.filter(
       (assetId) => !existingAssetIds.includes(assetId)
     );
+
+    /**
+     * Archived assets are frozen and cannot be booked (issue #382). The picker
+     * already hides them, but `assetIds` is raw form input — a crafted POST
+     * would otherwise put an archived asset straight into the booking. Guard
+     * the newly added ids only, so a booking that already holds an asset
+     * archived after the fact can still be saved and emptied.
+     */
+    await assertAssetsAreNotArchived({
+      assetIds: newAssetIds,
+      organizationId,
+      actorUserId: userId,
+    });
 
     // Get partial check-in details to determine actual availability using context-aware status
     const { partialCheckinDetails } =
@@ -926,6 +1007,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         // attributes the BOOKING_ASSETS_ADDED events and the model-request
         // assignment notes, which are separate concerns.
         skipBookingNote: true,
+        // Re-checks the add rule against the locked booking status.
+        access,
       });
 
       /**
@@ -936,7 +1019,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
        * include asset detail.
        */
       const newAssets = await db.asset.findMany({
-        where: { id: { in: newAssetIds }, organizationId },
+        // Archived ids were already refused by updateBookingAssets above.
+        where: { id: { in: newAssetIds }, organizationId, archivedAt: null },
         select: { id: true, title: true, type: true },
       });
       const newAssetById = new Map(newAssets.map((a) => [a.id, a]));
@@ -1101,6 +1185,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         // route's own "adjusted booked quantity" note below is the truthful
         // record of what happened.
         skipBookingNote: true,
+        // Re-checks the add rule against the locked booking status.
+        access,
       });
 
       /**
@@ -1177,6 +1263,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     if (removedAssetIds.length > 0) {
       // Get the removed assets with their titles for proper note generation
       const removedAssets = await db.asset.findMany({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: removed assets may be archived; removing an archived asset from a booking stays allowed and its note needs the title
         where: {
           id: { in: removedAssetIds },
           organizationId,
@@ -1246,6 +1333,7 @@ export default function AddAssetsToNewBooking() {
     assetModels,
     modelRequests,
     modelHeadroom,
+    tickedLocationHasChildren,
   } = useLoaderData<typeof loader>();
 
   /**
@@ -1577,7 +1665,13 @@ export default function AddAssetsToNewBooking() {
             className="justify-between !border-t-0 border-b px-6 md:flex"
           />
 
-          <div className="flex justify-around gap-2 border-b p-3 lg:gap-4">
+          <div
+            className={tw(
+              "flex justify-around gap-2 p-3 lg:gap-4",
+              // The checkbox line below closes the block when it is shown.
+              tickedLocationHasChildren ? "" : "border-b"
+            )}
+          >
             <DynamicDropdown
               trigger={
                 <div className="flex h-6 cursor-pointer items-center gap-2">
@@ -1625,6 +1719,13 @@ export default function AddAssetsToNewBooking() {
               )}
             />
           </div>
+          {/* Modifies the Locations filter, so it sits under it, in the
+              filter row, never inside the dropdown's list of locations. */}
+          {tickedLocationHasChildren ? (
+            <div className="flex justify-end border-b px-3 pb-3">
+              <IncludeChildLocationsCheckbox />
+            </div>
+          ) : null}
         </>
       ) : null}
 

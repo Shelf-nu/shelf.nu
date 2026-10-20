@@ -19,12 +19,12 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createLoaderArgs } from "@mocks/remix";
 import { getUserTierLimit } from "~/modules/tier/service.server";
 import { getUserByID } from "~/modules/user/service.server";
-import { requirePermission } from "~/utils/roles.server";
+import { requireAnyPermission } from "~/utils/roles.server";
 
 // why: the CTA is about entitlement, not authorization — run the loader
 // without executing real permission checks.
 vi.mock("~/utils/roles.server", () => ({
-  requirePermission: vi.fn(),
+  requireAnyPermission: vi.fn(),
 }));
 
 // why: hits Prisma; the loader only needs the trial flag off the user.
@@ -54,7 +54,7 @@ vi.mock("~/utils/subscription.server", () => subscriptionMock);
 
 let loader: (typeof import("~/routes/_layout+/settings.team"))["loader"];
 
-const requirePermissionMock = vi.mocked(requirePermission);
+const requireAnyPermissionMock = vi.mocked(requireAnyPermission);
 const getUserByIDMock = vi.mocked(getUserByID);
 const getUserTierLimitMock = vi.mocked(getUserTierLimit);
 
@@ -71,9 +71,10 @@ describe("app/routes/_layout+/settings.team loader — upgrade CTA", () => {
     vi.clearAllMocks();
     subscriptionMock.premiumIsEnabled = true;
     cookiesMock.userPrefs.parse.mockResolvedValue({});
-    requirePermissionMock.mockResolvedValue({
+    requireAnyPermissionMock.mockResolvedValue({
       organizationId: "org-1",
       currentOrganization: { type: "PERSONAL", name: "My workspace" },
+      roles: ["OWNER"],
     } as any);
     getUserByIDMock.mockResolvedValue({ usedFreeTrial: false } as any);
     getUserTierLimitMock.mockResolvedValue({ maxOrganizations: 1 } as any);
@@ -156,9 +157,10 @@ describe("app/routes/_layout+/settings.team loader — upgrade CTA", () => {
   });
 
   it("resolves no CTA work for a Team workspace", async () => {
-    requirePermissionMock.mockResolvedValue({
+    requireAnyPermissionMock.mockResolvedValue({
       organizationId: "org-1",
       currentOrganization: { type: "TEAM", name: "Acme" },
+      roles: ["OWNER"],
     } as any);
 
     const payload = await runLoader();

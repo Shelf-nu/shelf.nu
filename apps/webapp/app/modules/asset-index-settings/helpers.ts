@@ -103,6 +103,7 @@ export const fixedFields = [
   "type",
   "upcomingBookings",
   "assetModel",
+  "lastAuditDate",
 ] as const;
 
 // Define barcode field names
@@ -168,6 +169,7 @@ export const columnsLabelsMap: { [key in ColumnLabelKey]: string } = {
   type: "Tracking method",
   upcomingBookings: "Upcoming Bookings",
   assetModel: "Asset model",
+  lastAuditDate: "Last audit date",
 };
 
 export const defaultFields: Column[] = [
@@ -193,6 +195,7 @@ export const defaultFields: Column[] = [
   { name: "type", visible: false, position: 19 },
   { name: "assetModel", visible: false, position: 20 },
   { name: "minQuantity", visible: false, position: 21 },
+  { name: "lastAuditDate", visible: true, position: 22 },
 ];
 
 /**
@@ -210,19 +213,21 @@ const followsColumn: Partial<Record<ColumnLabelKey, ColumnLabelKey>> = {
  *
  * Settings rows are per user and outlive the default list, so a fixed column
  * added to `defaultFields` is missing from every row saved before it existed.
- * Each missing column is inserted and every saved column at or after its
- * position moves down by one, so the user's own order is kept.
+ * A saved set keeps the positions its user arranged, so a missing column never
+ * takes its static default position: another column may already sit there, and
+ * two columns sharing a position order by array index.
  *
  * - A column listed in {@link followsColumn} goes right after the column it
  *   follows, wherever the saved set has that column, and is shown when that
- *   column is shown. Adding it never separates it from its partner or hides
- *   what the user already saw.
- * - Any other column goes in at the position a fresh row would give it, with
- *   its default visibility.
+ *   column is shown. Every saved column after it moves down by one, so adding
+ *   it never separates it from its partner or hides what the user already saw.
+ * - Any other column goes after every column the set already has, in default
+ *   order and with its default visibility.
  *
  * @param columns - The row's saved columns; not modified
  * @param missing - Names of the default columns to add
- * @returns A new column list with the missing default columns inserted
+ * @returns A new column list with the missing default columns added, or
+ *   `columns` itself when nothing is missing
  */
 export function insertMissingDefaultColumns(
   columns: Column[],
@@ -233,6 +238,7 @@ export function insertMissingDefaultColumns(
   const toInsert = defaultFields
     .filter((field) => missing.includes(field.name))
     .sort((a, b) => a.position - b.position);
+  if (toInsert.length === 0) return columns;
 
   return toInsert.reduce<Column[]>(
     (acc, field) => {
@@ -240,19 +246,23 @@ export function insertMissingDefaultColumns(
       const partner = partnerName
         ? acc.find((col) => col.name === partnerName)
         : undefined;
-      const position = partner ? partner.position + 1 : field.position;
 
+      if (!partner) {
+        const maxPosition = acc.reduce(
+          (max, col) => Math.max(max, col.position),
+          -1
+        );
+        return [...acc, { ...field, position: maxPosition + 1 }];
+      }
+
+      const position = partner.position + 1;
       return [
         ...acc.map((col) =>
           col.position >= position
             ? { ...col, position: col.position + 1 }
             : col
         ),
-        {
-          ...field,
-          position,
-          visible: field.visible || Boolean(partner?.visible),
-        },
+        { ...field, position, visible: field.visible || partner.visible },
       ];
     },
     [...columns]

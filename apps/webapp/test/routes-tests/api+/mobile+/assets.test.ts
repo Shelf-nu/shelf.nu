@@ -20,9 +20,11 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { accessFor } from "@helpers/role-access";
 import { createLoaderArgs } from "@mocks/remix";
 
 import { db } from "~/database/db.server";
+import { bookableListScopeWhere } from "~/modules/asset/list-scope.server";
 import { canUseBarcodes } from "~/utils/subscription.server";
 import { QR_CODES_ORDER_BY } from "~/modules/barcode/display";
 import type * as MobileAuthServer from "~/modules/api/mobile-auth.server";
@@ -73,6 +75,7 @@ vi.mock("~/modules/api/mobile-auth.server", async () => {
   const actual = await vi.importActual<typeof MobileAuthServer>(
     "~/modules/api/mobile-auth.server"
   );
+  const { accessFor } = await import("@helpers/role-access");
   return {
     ...actual,
     requireMobileAuth: vi.fn(),
@@ -81,7 +84,7 @@ vi.mock("~/modules/api/mobile-auth.server", async () => {
     // existing shape assertions to "may see all" so they keep measuring the
     // shaper, not the custody gate — which has its own tests below.
     getMobileUserContext: vi.fn().mockResolvedValue({
-      canSeeAllCustody: true,
+      access: accessFor(["ADMIN"]),
     }),
   };
 });
@@ -485,7 +488,7 @@ describe("GET /api/mobile/assets — search", () => {
 
   it("id-shaped searches also resolve via the single UNION query (superset, pre-approved)", async () => {
     // Previously ID-shaped terms took a narrow indexed fast path with a
-    // full-clause fallback on zero rows. The UNION always searches all 10
+    // full-clause fallback on zero rows. The UNION always searches all 11
     // sources in one query, so an ID-shaped search now returns the full
     // (more correct) result set directly — no second query.
     queryRawMock.mockResolvedValueOnce([{ id: "asset-9" }]);
@@ -590,7 +593,7 @@ describe("GET /api/mobile/assets — custody visibility", () => {
     // The mobile asset DETAIL route gated this; the list did not, so the same
     // holder name was readable one endpoint over.
     vi.mocked(getMobileUserContext).mockResolvedValue({
-      canSeeAllCustody: false,
+      access: accessFor(["BASE"]),
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
 
     const response = await loader(createLoaderArgs({}));
@@ -622,7 +625,7 @@ describe("GET /api/mobile/assets — custody visibility", () => {
       },
     ] as never);
     vi.mocked(getMobileUserContext).mockResolvedValue({
-      canSeeAllCustody: false,
+      access: accessFor(["BASE"]),
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
 
     const response = await loader(createLoaderArgs({}));
@@ -634,7 +637,7 @@ describe("GET /api/mobile/assets — custody visibility", () => {
 
   it("keeps custody visible for a viewer who may see all of it", async () => {
     vi.mocked(getMobileUserContext).mockResolvedValue({
-      canSeeAllCustody: true,
+      access: accessFor(["ADMIN"]),
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
 
     const response = await loader(createLoaderArgs({}));
@@ -795,5 +798,57 @@ describe("GET /api/mobile/assets — display code", () => {
         }),
       })
     );
+  });
+});
+
+describe("GET /api/mobile/assets — list scope", () => {
+  /** Runs the list as `role` and returns the where the query used. */
+  async function whereFor(role: "SELF_SERVICE" | "BASE" | "ADMIN", query = "") {
+    vi.mocked(getMobileUserContext).mockResolvedValue({
+      access: accessFor([role]),
+    } as Awaited<ReturnType<typeof getMobileUserContext>>);
+    await loader(
+      createLoaderArgs({
+        request: new Request(`http://localhost:3000/api/mobile/assets${query}`),
+      })
+    );
+    return findManyMock.mock.calls[0]![0]!.where!;
+  }
+
+  /** The list scope a bookable-only role gets (its shape is pinned in list-scope.server.test.ts). */
+  const BOOKABLE_OR_HELD = bookableListScopeWhere({
+    holderUserId: FAKE_USER_ID,
+  });
+
+  it.each(["SELF_SERVICE", "BASE"] as const)(
+    "lists bookable assets and the ones %s holds, as the web index does",
+    async (role) => {
+      const where = await whereFor(role);
+      expect(where.AND).toEqual([BOOKABLE_OR_HELD]);
+      expect(where).not.toHaveProperty("availableToBook");
+    }
+  );
+
+  it("keeps the scope beside an AVAILABLE status filter rather than replacing it", async () => {
+    const where = await whereFor("BASE", "?status=AVAILABLE");
+    expect(where.AND).toHaveLength(2);
+    expect(where.AND).toContainEqual(BOOKABLE_OR_HELD);
+  });
+
+  it.each(["SELF_SERVICE", "BASE"] as const)(
+    "lists every asset %s holds on the custody tab, bookable or not",
+    async (role) => {
+      const where = await whereFor(role, "?myCustody=true");
+      expect(where.custody).toEqual({
+        some: { custodian: { userId: FAKE_USER_ID } },
+      });
+      expect(where).not.toHaveProperty("availableToBook");
+    }
+  );
+
+  it("does not narrow the list for ADMIN", async () => {
+    const where = await whereFor("ADMIN");
+    expect(where).not.toHaveProperty("AND");
+    expect(where).not.toHaveProperty("availableToBook");
   });
 });

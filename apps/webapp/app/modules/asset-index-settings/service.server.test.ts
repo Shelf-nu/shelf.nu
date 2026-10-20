@@ -82,18 +82,19 @@ describe("getAssetIndexSettings with a column set saved before the unit column",
     { name: "type", visible: false, position: 18 },
     { name: "assetModel", visible: false, position: 19 },
     { name: "minQuantity", visible: false, position: 20 },
+    { name: "lastAuditDate", visible: true, position: 21 },
   ];
   const SAVED_BARCODES: Column[] = [
-    { name: "barcode_Code128", visible: true, position: 21 },
-    { name: "barcode_Code39", visible: true, position: 22 },
-    { name: "barcode_DataMatrix", visible: true, position: 23 },
-    { name: "barcode_ExternalQR", visible: true, position: 24 },
-    { name: "barcode_EAN13", visible: true, position: 25 },
+    { name: "barcode_Code128", visible: true, position: 22 },
+    { name: "barcode_Code39", visible: true, position: 23 },
+    { name: "barcode_DataMatrix", visible: true, position: 24 },
+    { name: "barcode_ExternalQR", visible: true, position: 25 },
+    { name: "barcode_EAN13", visible: true, position: 26 },
   ];
   const SAVED_CUSTOM_FIELD: Column = {
     name: "cf_Supplier",
     visible: true,
-    position: 26,
+    position: 27,
     cfType: "TEXT",
   };
 

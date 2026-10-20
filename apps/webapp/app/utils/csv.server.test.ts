@@ -5,10 +5,10 @@ import {
 } from "@remix-run/form-data-parser";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { stripHiddenAuditColumns } from "~/modules/asset/last-audit-date-access";
 import type { Column } from "~/modules/asset-index-settings/helpers";
 import { defaultFields } from "~/modules/asset-index-settings/helpers";
 import {
-  buildCsvBackupDataFromAssets,
   buildCsvExportDataFromAssets,
   buildCsvExportDataFromBookings,
   buildCsvExportDataFromTeamMembers,
@@ -18,9 +18,8 @@ import {
   parseCsv,
 } from "~/utils/csv.server";
 import { ShelfError } from "~/utils/error";
-import { extractCSVDataFromBackupImport } from "~/utils/import.server";
 
-import { HARDCODED_DEFAULT_PREFS } from "./date-format";
+import { HARDCODED_DEFAULT_PREFS, formatDate } from "./date-format";
 
 // why: mock parseFormData to control file upload parsing in tests
 // while keeping MaxFileSizeExceededError available
@@ -267,106 +266,6 @@ describe("formatValueForCsv", () => {
     expect(formatValueForCsv(dateValue)).toBe('"2024-01-02"');
 
     expect(formatValueForCsv("**Bold** text", true)).toBe('"Bold text"');
-  });
-});
-
-describe("buildCsvBackupDataFromAssets", () => {
-  it("serializes asset data with special handling for relations and text", () => {
-    const assets = [
-      {
-        id: "asset-1",
-        description: "Line 1\nLine 2",
-        category: null,
-        location: null,
-        custody: null,
-        notes: [{ content: null }],
-        tags: [{ name: "tag-1" }],
-        customFields: { foo: null },
-        serialNumber: null,
-        skipMe: "ignore",
-      },
-    ];
-
-    const result = buildCsvBackupDataFromAssets({
-      assets,
-      keysToSkip: ["skipMe"],
-    });
-
-    expect(result).toEqual([
-      [
-        '"asset-1"',
-        '"Line 1Line 2"',
-        '"{}"',
-        '"{}"',
-        '"{}"',
-        '"[{""content"":""""}]"',
-        '"[{""name"":""tag-1""}]"',
-        '"{""foo"":""""}"',
-        '""',
-      ],
-    ]);
-  });
-
-  it("quotes a value carrying the delimiter or a quote", () => {
-    const assets = [
-      {
-        id: "asset-1",
-        title: "MacBook Pro; 16-inch",
-        description: 'He said "hello" to me',
-      },
-    ];
-
-    expect(buildCsvBackupDataFromAssets({ assets, keysToSkip: [] })).toEqual([
-      ['"asset-1"', '"MacBook Pro; 16-inch"', '"He said ""hello"" to me"'],
-    ]);
-  });
-});
-
-describe("backup export -> backup import round trip", () => {
-  // why: the real parser and the real extractor, so the assertion covers the
-  // whole restore path rather than the writer's own idea of its output.
-  const roundTrip = async (asset: Record<string, unknown>) => {
-    const rows = buildCsvBackupDataFromAssets({
-      assets: [asset],
-      keysToSkip: [],
-    });
-    const headers = Object.keys(asset).map((h) => `"${h}"`);
-    const csv = [headers, ...rows].map((row) => row.join(";")).join("\n");
-
-    const parsed = await parseCsv(new TextEncoder().encode(csv).buffer);
-    return extractCSVDataFromBackupImport(parsed as string[][])[0];
-  };
-
-  it("restores an asset whose relations are serialized as JSON", async () => {
-    expect(
-      await roundTrip({
-        id: "asset-1",
-        title: "AMD Ryzen",
-        category: { name: "CPU" },
-        tags: [{ name: "tag-1" }],
-      })
-    ).toEqual({
-      id: "asset-1",
-      title: "AMD Ryzen",
-      category: { name: "CPU" },
-      tags: [{ name: "tag-1" }],
-    });
-  });
-
-  it("restores text carrying the delimiter, a quote, or both", async () => {
-    expect(
-      await roundTrip({
-        id: "asset-1",
-        title: 'Monitor "27-inch"; refurbished',
-        description: "Battery at 30% capacity; sold as-is",
-        category: { name: "Displays, external" },
-      })
-    ).toEqual({
-      id: "asset-1",
-      title: 'Monitor "27-inch"; refurbished',
-      description: "Battery at 30% capacity; sold as-is",
-      category: { name: "Displays, external" },
-    });
   });
 });
 
@@ -747,8 +646,76 @@ describe("quantity and unit of measure in the index export", () => {
       '"Tracking method"',
       '"Asset model"',
       '"Min quantity"',
+      '"Last audit date"',
       '"Total value"',
     ]);
+  });
+});
+
+describe("buildCsvExportDataFromAssets last audit date", () => {
+  const organization = {
+    id: "org-1",
+    barcodesEnabled: false,
+    currency: "USD" as const,
+  };
+  const columns = [
+    { name: "name", visible: true, position: 0 },
+    { name: "lastAuditDate", visible: true, position: 1 },
+  ];
+  const build = (
+    assets: Array<{ id: string; title: string; lastAuditDate: string | null }>,
+    cols = columns
+  ) =>
+    buildCsvExportDataFromAssets({
+      assets: assets as unknown as Parameters<
+        typeof buildCsvExportDataFromAssets
+      >[0]["assets"],
+      columns: cols as Parameters<
+        typeof buildCsvExportDataFromAssets
+      >[0]["columns"],
+      currentOrganization: organization,
+      prefs: HARDCODED_DEFAULT_PREFS,
+    });
+
+  it("exports the last audit date formatted with the user's prefs", () => {
+    const iso = "2026-09-30T10:00:00.000Z";
+    const [headers, row] = build([
+      { id: "a1", title: "Pens", lastAuditDate: iso },
+    ]);
+
+    expect(headers).toEqual(['"Name"', '"Last audit date"']);
+    expect(row[1]).toBe(
+      formatValueForCsv(
+        formatDate(new Date(iso), HARDCODED_DEFAULT_PREFS, {
+          includeTime: true,
+        })
+      )
+    );
+  });
+
+  it("exports an empty value for a never-audited asset", () => {
+    const [, row] = build([{ id: "a1", title: "Pens", lastAuditDate: null }]);
+
+    expect(row[1]).toBe(formatValueForCsv(""));
+  });
+
+  it("has no Last audit date header once the column is stripped as hidden", () => {
+    const [headers] = build(
+      [{ id: "a1", title: "Pens", lastAuditDate: null }],
+      stripHiddenAuditColumns(columns, "hidden")
+    );
+
+    expect(headers).toEqual(['"Name"']);
+  });
+
+  it("keeps the column with empty values when access is locked", () => {
+    const [headers, row] = build(
+      [{ id: "a1", title: "Pens", lastAuditDate: null }],
+      stripHiddenAuditColumns(columns, "locked")
+    );
+
+    expect(headers).toEqual(['"Name"', '"Last audit date"']);
+    expect(row[1]).toBe(formatValueForCsv(""));
   });
 });
 

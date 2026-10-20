@@ -11,6 +11,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createActionArgs } from "@mocks/remix";
 import { assertIsDataWithResponseInit } from "@helpers/assertions";
+import { permissionContext } from "@helpers/role-access";
 
 import {
   processBooking,
@@ -78,10 +79,9 @@ async function submit(fields: Record<string, string>) {
 describe("add assets to an existing booking", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(rolesServer.requirePermission).mockResolvedValue({
-      organizationId: "org-1",
-      role: "ADMIN",
-    } as never);
+    vi.mocked(rolesServer.requirePermission).mockResolvedValue(
+      permissionContext({ roles: ["ADMIN"], organizationId: "org-1" }) as never
+    );
     vi.mocked(processBooking).mockResolvedValue({
       finalAssetIds: ["asset-1", "asset-2"],
       bookingInfo: BOOKING_WITH_BOTH,

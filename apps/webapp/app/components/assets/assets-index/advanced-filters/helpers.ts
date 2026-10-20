@@ -83,6 +83,7 @@ export function getUIFieldType({
       break;
     case "createdAt":
     case "updatedAt":
+    case "lastAuditDate":
       fieldType = "date";
       break;
     case "tags":
@@ -212,6 +213,44 @@ export const COLUMNS_WITHOUT_FILTER: ColumnLabelKey[] = [
   "actions",
   "upcomingReminder",
 ];
+
+/**
+ * The value a filter keeps when its operator changes.
+ *
+ * `isEmpty` takes no value, so switching to it clears the value. Leaving it
+ * re-seeds the column's default, since "" is not a valid value for the other
+ * operators. Any other switch keeps the current value.
+ *
+ * @param args.filter - The filter before the change
+ * @param args.operator - The operator being switched to
+ * @param args.columns - Every column the caller may filter on. Pass the full
+ *   filterable list, not the picker's remaining columns: the filter's own
+ *   column is already in use, so the picker list leaves it out.
+ * @param args.customFields - Custom field definitions, for custom date defaults
+ * @param args.timeZone - The user's time zone, for date defaults
+ * @returns The value for the filter after the operator change
+ */
+export function valueForOperatorChange({
+  filter,
+  operator,
+  columns,
+  customFields,
+  timeZone,
+}: {
+  filter: Filter;
+  operator: FilterOperator;
+  columns: Column[];
+  customFields: CustomField[] | null;
+  timeZone: string;
+}): Filter["value"] {
+  if (operator === "isEmpty") return "";
+  if (filter.operator !== "isEmpty") return filter.value;
+
+  const column = columns.find((c) => c.name === filter.name);
+  return column
+    ? getDefaultValueForFieldType(column, customFields, timeZone)
+    : filter.value;
+}
 
 /**
  * Determines what columns are available based on already used columns and operation type

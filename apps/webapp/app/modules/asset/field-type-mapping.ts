@@ -54,6 +54,7 @@ export function getQueryFieldType(fieldName: string): QueryFieldType {
       return "boolean";
     case "createdAt":
     case "updatedAt":
+    case "lastAuditDate":
       return "date";
     case "tags":
       return "array";

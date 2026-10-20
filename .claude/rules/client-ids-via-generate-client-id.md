@@ -1,6 +1,8 @@
 ---
 description: Client code must create unique ids with generateClientId(), never crypto.randomUUID(); the browser floor lives in vite build.target plus the inline check in browser-support.ts
-globs: ["apps/webapp/app/**/*.ts", "apps/webapp/app/**/*.tsx"]
+paths:
+  - "apps/webapp/app/**/*.ts"
+  - "apps/webapp/app/**/*.tsx"
 ---
 
 # Client ids via `generateClientId()`

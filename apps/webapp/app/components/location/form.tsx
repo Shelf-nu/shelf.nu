@@ -8,17 +8,21 @@ import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, defaultValidateFileAtom } from "~/atoms/file";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
+import { useDiscardRemount } from "~/hooks/use-discard-remount";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
+import { useTrackedFormRef } from "~/hooks/use-unsaved-changes";
 import type { action as editLocationAction } from "~/routes/_layout+/locations.$locationId_.edit";
 import type { action as newLocationAction } from "~/routes/_layout+/locations.new";
 import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
 import { tw } from "~/utils/tw";
 import { zodFieldIsRequired } from "~/utils/zod";
+import { LocationImageField } from "./location-image-field";
 import { LocationSelect } from "./location-select";
 import { Form } from "../custom-form";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import { RefererRedirectInput } from "../forms/referer-redirect-input";
+import { UnsavedChangesGuard } from "../forms/unsaved-changes-bar";
 import { AbsolutePositionedHeaderActions } from "../layout/header/absolute-positioned-header-actions";
 import { Button } from "../shared/button";
 import { ButtonGroup } from "../shared/button-group";
@@ -59,6 +63,10 @@ interface Props {
   name?: Location["name"];
   address?: Location["address"];
   description?: Location["description"];
+  /** Saved image of the location being edited, shown next to the file input. */
+  imageUrl?: Location["imageUrl"];
+  /** Saved thumbnail of the location being edited. */
+  thumbnailUrl?: Location["thumbnailUrl"];
   apiUrl?: string;
   /** Callback function to handle cancel action when form is used inline (e.g., in a dialog). When provided, Cancel button will call this instead of navigating. */
   onCancel?: () => void;
@@ -69,20 +77,58 @@ interface Props {
   excludeLocationId?: Location["id"];
 }
 
+/**
+ * Create and edit form for locations. Renders as a full page, or compact
+ * inside a dialog when `onSuccess` is passed (inline creation).
+ *
+ * The full-page form shows the unsaved-changes bar and remounts on Discard
+ * (see `useDiscardRemount`). The inline dialog is never tracked.
+ *
+ * @param props - See {@link Props}; image props show the saved image when editing
+ */
+export function LocationForm(props: Props) {
+  const { key, discard, discarded } = useDiscardRemount();
+  // why: the inline dialog (onSuccess) sits inside another form's page, so
+  // it is never tracked and never remounted from here
+  if (typeof props.onSuccess === "function") {
+    return <LocationFormInner {...props} />;
+  }
+  return (
+    <LocationFormInner
+      key={key}
+      {...props}
+      onDiscard={discard}
+      autoFocusName={!discarded}
+    />
+  );
+}
+
 // react-doctor:no-giant-component — deferred for follow-up refactor
-export const LocationForm = ({
+const LocationFormInner = ({
   className,
   name,
   address,
   description,
+  imageUrl,
+  thumbnailUrl,
   apiUrl,
   onSuccess,
   parentId,
   referer,
   excludeLocationId,
   onCancel,
-}: Props) => {
+  onDiscard,
+  autoFocusName = true,
+}: Props & {
+  /** Resets the form to the loaded values (remounts it). Page form only. */
+  onDiscard?: () => void;
+  /** Focus the Name field on mount; false after a Discard. */
+  autoFocusName?: boolean;
+}) => {
   const zo = useZorm("NewQuestionWizardScreen", NewLocationFormSchema);
+
+  /** The form element, shared by Zorm and the unsaved-changes tracking. */
+  const { formRef, setFormRef } = useTrackedFormRef(zo.ref);
   const fetcher = useFetcherWithReset<{
     success?: boolean;
     location?: NewLocationPayload;
@@ -104,7 +150,9 @@ export const LocationForm = ({
   // jsx-a11y/no-autofocus. When the form is rendered inside a dialog,
   // the dialog's `data-dialog-initial-focus` handler typically wins;
   // otherwise this provides the intentional initial focus.
-  const nameInputRef = useAutoFocus<HTMLInputElement>();
+  const nameInputRef = useAutoFocus<HTMLInputElement>({
+    when: autoFocusName,
+  });
 
   useEffect(() => {
     if (!hasOnSuccessFunc) return;
@@ -145,8 +193,15 @@ export const LocationForm = ({
         className
       )}
     >
+      {onDiscard && !hasOnSuccessFunc ? (
+        <UnsavedChangesGuard
+          formRef={formRef}
+          actionData={actionData}
+          onDiscard={onDiscard}
+        />
+      ) : null}
       <FormComponent
-        ref={zo.ref}
+        ref={setFormRef}
         method="post"
         className="flex w-full max-w-full flex-col gap-2"
         encType="multipart/form-data"
@@ -243,26 +298,12 @@ export const LocationForm = ({
           truthy={hasOnSuccessFunc}
           fallback={
             <FormRow rowLabel={"Main image"}>
-              <div>
-                <p className="hidden lg:block">
-                  Accepts PNG, JPG, JPEG, or WebP (max.4 MB)
-                </p>
-                <Input
-                  disabled={disabled}
-                  accept={ACCEPT_SUPPORTED_IMAGES}
-                  name="image"
-                  type="file"
-                  onChange={validateFile}
-                  label={"Main image"}
-                  hideLabel
-                  error={imageError}
-                  className="mt-2"
-                  inputClassName="border-0 shadow-none p-0 rounded-none"
-                />
-                <p className="mt-2 lg:hidden">
-                  Accepts PNG, JPG, JPEG, or WebP (max.4 MB)
-                </p>
-              </div>
+              <LocationImageField
+                imageUrl={imageUrl}
+                thumbnailUrl={thumbnailUrl}
+                error={imageError}
+                disabled={disabled}
+              />
             </FormRow>
           }
         >

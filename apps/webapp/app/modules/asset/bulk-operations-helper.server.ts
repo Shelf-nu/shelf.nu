@@ -1,11 +1,20 @@
 import type { Asset, AssetIndexSettings } from "@prisma/client";
 import { Prisma } from "@prisma/client";
 import { db } from "~/database/db.server";
-import { ShelfError } from "~/utils/error";
+import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { getParamsValues, ALL_SELECTED_KEY } from "~/utils/list";
+import {
+  LAST_AUDIT_DATE_COLUMN,
+  canQueryLastAuditDate,
+} from "./last-audit-date-access";
+import type { LastAuditDateAccess } from "./last-audit-date-access";
+import type { BookableListScope } from "./list-scope.server";
 import { generateWhereClause, parseFiltersWithHierarchy } from "./query.server";
 import type { AllowedCustodianFilterIds } from "./utils.server";
-import { getAssetsWhereInput } from "./utils.server";
+import {
+  getArchivedFilterFromParams,
+  getAssetsWhereInput,
+} from "./utils.server";
 import type { Column } from "../asset-index-settings/helpers";
 
 const label = "Assets";
@@ -66,24 +75,34 @@ export function buildAdvancedFilteredAssetIdsQuery(
  * @param organizationId - Organization to scope query
  * @param filters - URL search params string with advanced filters
  * @param settings - Asset index settings with columns configuration
- * @param availableToBookOnly - Filter to bookable assets only (for self-service)
+ * @param bookableScope - The caller's list scope; `null` selects every asset
  * @param timeZone - Acting user's IANA timezone; forwarded to
  *   {@link generateWhereClause} so built-in date-column filters truncate the
  *   day in the user's tz (avoids an off-by-one). Defaults to "UTC".
+ * @param honorArchivedView - Apply the `?archived=` view; otherwise active
+ *   assets only. See {@link resolveAssetIdsForBulkOperation}.
+ * @param lastAuditDateAccess - How the caller may use the last audit date. A
+ *   `lastAuditDate` filter without `available` access refuses the selection.
  * @returns Promise resolving to array of asset IDs matching the filters
+ * @throws {ShelfError} 400 when the selection carries a last audit date filter
+ *   the caller may not use
  */
 async function getAdvancedFilteredAssetIds({
   organizationId,
   filters,
   settings,
-  availableToBookOnly = false,
+  bookableScope = null,
   timeZone = "UTC",
+  honorArchivedView = false,
+  lastAuditDateAccess,
 }: {
   organizationId: string;
   filters: string;
   settings: AssetIndexSettings;
-  availableToBookOnly?: boolean;
+  bookableScope?: BookableListScope | null;
   timeZone?: string;
+  honorArchivedView?: boolean;
+  lastAuditDateAccess: LastAuditDateAccess;
 }): Promise<string[]> {
   try {
     const searchParams = new URLSearchParams(filters);
@@ -100,15 +119,40 @@ async function getAdvancedFilteredAssetIds({
       organizationId
     );
 
+    // A last audit date filter from a caller who may not query it would turn
+    // "select all" into an audit-date oracle. Refuse the whole selection;
+    // dropping the filter would widen the bulk action beyond what was shown.
+    // It is an error, not an empty selection: the index drops the same filter
+    // and shows every asset, so an empty result would let a bulk action report
+    // success while changing nothing.
+    if (
+      !canQueryLastAuditDate(lastAuditDateAccess) &&
+      parsedFilters.some((f) => f.name === LAST_AUDIT_DATE_COLUMN)
+    ) {
+      throw new ShelfError({
+        cause: null,
+        title: "Filter not available",
+        message:
+          "The last audit date filter is not available in this workspace. Remove it from the URL and try again.",
+        additionalData: { organizationId, lastAuditDateAccess },
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
     // Generate WHERE clause (reuses existing logic)
     const whereClause = generateWhereClause(
       organizationId,
       search,
       parsedFilters,
       undefined, // no specific assetIds filter
-      availableToBookOnly,
+      bookableScope,
       timeZone,
-      lowStockOnly
+      lowStockOnly,
+      // The Active/Archived view, only for callers that opt in (issue #382);
+      // everyone else selects active assets whatever the URL says.
+      honorArchivedView ? getArchivedFilterFromParams(searchParams) : "active"
     );
 
     // Minimal query: only SELECT id, but include the same joins the main
@@ -119,10 +163,12 @@ async function getAdvancedFilteredAssetIds({
     const results = await db.$queryRaw<Array<{ id: string }>>(query);
     return results.map((r) => r.id);
   } catch (cause) {
+    // Keep a deliberate refusal's status and message.
+    if (isLikeShelfError(cause)) throw cause;
     throw new ShelfError({
       cause,
       message: "Something went wrong while fetching asset IDs",
-      additionalData: { organizationId, filters, availableToBookOnly },
+      additionalData: { organizationId, filters, bookableScope },
       label,
     });
   }
@@ -145,6 +191,7 @@ async function getAdvancedFilteredAssetIds({
  * @param timeZone - Acting user's IANA timezone; forwarded to the advanced
  *   filter query so built-in date-column filters truncate the day in the
  *   user's tz (avoids an off-by-one). Defaults to "UTC".
+ * @param lastAuditDateAccess - How the caller may use the last audit date
  * @returns Promise resolving to array of asset IDs to operate on
  *
  * @example
@@ -174,6 +221,8 @@ export async function resolveAssetIdsForBulkOperation({
   settings,
   timeZone = "UTC",
   allowedTeamMemberIds,
+  lastAuditDateAccess,
+  honorArchivedView = false,
 }: {
   assetIds: Asset["id"][];
   organizationId: Asset["organizationId"];
@@ -181,12 +230,28 @@ export async function resolveAssetIdsForBulkOperation({
   settings: AssetIndexSettings;
   timeZone?: string;
   /**
+   * Resolve "select all" in the `?archived=` view the user was looking at
+   * (issue #382). Off by default, so select-all acts on active assets: the
+   * view param is raw URL input, and a list only honours it for members who
+   * may see archived assets. Pass `true` only from bulk actions that work ON
+   * archived assets and are themselves gated to those members (archive,
+   * reinstate, delete), or for a caller proven to hold `asset: archive`.
+   */
+  honorArchivedView?: boolean;
+  /**
    * Custodian ids the caller may filter by. Required, with no default, so
    * every bulk operation states an answer — "select all" resolves through
    * caller-supplied filters, and a custodian filter turns that into a way to
    * read back exactly which assets a named colleague holds.
    */
   allowedTeamMemberIds: AllowedCustodianFilterIds;
+  /**
+   * How the caller may use the last audit date. Required, with no default, for
+   * the same reason as `allowedTeamMemberIds`: "select all" resolves through
+   * caller-supplied filters, and an audit date filter would reveal audit data
+   * to a caller who may not see it. Resolve it with `lastAuditDateAccessFor`.
+   */
+  lastAuditDateAccess: LastAuditDateAccess;
 }): Promise<string[]> {
   // Case 1: Specific selection - return IDs as-is
   if (!assetIds.includes(ALL_SELECTED_KEY)) {
@@ -223,8 +288,9 @@ export async function resolveAssetIdsForBulkOperation({
       organizationId,
       filters: currentSearchParams,
       settings,
-      availableToBookOnly: false, // Set based on user role if needed
       timeZone,
+      honorArchivedView,
+      lastAuditDateAccess,
     });
   } else {
     // SIMPLE MODE: Use simple where clause
@@ -233,6 +299,7 @@ export async function resolveAssetIdsForBulkOperation({
       organizationId,
       currentSearchParams,
       allowedTeamMemberIds,
+      honorArchivedView,
     });
 
     const assets = await db.asset.findMany({

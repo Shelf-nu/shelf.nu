@@ -9,6 +9,7 @@ import type {
   BarcodeResponse,
   TeamMembersResponse,
   LocationsResponse,
+  AssetBookingsResponse,
 } from "./types";
 
 export const assetsApi = {
@@ -21,7 +22,14 @@ export const assetsApi = {
       perPage?: number;
       myCustody?: boolean;
       status?: string;
-    }
+    },
+    /**
+     * Lets a screen abandon this request when a newer search, filter or page
+     * supersedes it. Without one, whichever answer lands last wins the list.
+     *
+     * @see {@link file://./../latest-request.ts}
+     */
+    options?: { signal?: AbortSignal }
   ) => {
     const searchParams = new URLSearchParams({ orgId });
     if (params?.search) searchParams.set("search", params.search);
@@ -29,7 +37,9 @@ export const assetsApi = {
     if (params?.perPage) searchParams.set("perPage", String(params.perPage));
     if (params?.myCustody) searchParams.set("myCustody", "true");
     if (params?.status) searchParams.set("status", params.status);
-    return apiFetch<AssetsResponse>(`/api/mobile/assets?${searchParams}`);
+    return apiFetch<AssetsResponse>(`/api/mobile/assets?${searchParams}`, {
+      signal: options?.signal,
+    });
   },
 
   /**
@@ -244,5 +254,34 @@ export const assetsApi = {
     apiFetch<{ note: AssetNote }>(`/api/mobile/asset/add-note?orgId=${orgId}`, {
       method: "POST",
       body: JSON.stringify({ assetId, content }),
+      // why: not retried. Each call records a new row, so a request that
+      // timed out after the server had already written it would leave two.
+      retry: false,
     }),
+
+  /**
+   * Bookings this asset appears in, past and upcoming, as the web asset page's
+   * Bookings tab lists them.
+   *
+   * @param assetId - The asset
+   * @param orgId - The active workspace
+   * @param params.page - Page number (default 1)
+   * @param params.perPage - Rows per page (default 20, max 50)
+   * @param params.signal - Abandons the request when a newer one replaces it
+   */
+  assetBookings: (
+    assetId: string,
+    orgId: string,
+    params: { page?: number; perPage?: number; signal?: AbortSignal } = {}
+  ) => {
+    const qs = new URLSearchParams({ orgId });
+    if (params.page) qs.set("page", String(params.page));
+    if (params.perPage) qs.set("perPage", String(params.perPage));
+    return apiFetch<AssetBookingsResponse>(
+      `/api/mobile/assets/${encodeURIComponent(
+        assetId
+      )}/bookings?${qs.toString()}`,
+      { signal: params.signal }
+    );
+  },
 };

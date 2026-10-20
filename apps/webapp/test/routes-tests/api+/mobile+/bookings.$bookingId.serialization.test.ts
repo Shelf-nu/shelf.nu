@@ -24,6 +24,7 @@ import { loader } from "~/routes/api+/mobile+/bookings.$bookingId";
 import { hasPermission } from "~/utils/permissions/permission.validator.server";
 
 import { assertIsDataWithResponseInit } from "@helpers/assertions";
+import { findModelRequestShortfallsForBooking } from "~/modules/booking-model-request/service.server";
 import { mobileUserContext } from "@helpers/mobile-user-context";
 
 // @vitest-environment node
@@ -39,6 +40,16 @@ vi.mock("~/database/db.server", () => ({
     bookingAsset: { findMany: vi.fn().mockResolvedValue([]) },
     partialBookingCheckout: { findMany: vi.fn().mockResolvedValue([]) },
   },
+}));
+
+// why: measuring whether a reservation still fits reads the model's pool
+// through several tables; its own suite covers that. Here only the payload
+// field matters, so every reservation fits unless a test says otherwise.
+vi.mock("~/modules/booking-model-request/service.server", async () => ({
+  ...(await vi.importActual<object>(
+    "~/modules/booking-model-request/service.server"
+  )),
+  findModelRequestShortfallsForBooking: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock("~/modules/api/mobile-auth.server", async () => {
@@ -143,6 +154,7 @@ describe("GET /api/mobile/bookings/:bookingId — model requests", () => {
         }>;
         modelRequestCount: number;
         outstandingModelUnitCount: number;
+        modelReservationShortfalls: unknown[];
       };
     };
 
@@ -164,6 +176,60 @@ describe("GET /api/mobile/bookings/:bookingId — model requests", () => {
     // Roll-ups: 2 distinct models, 2 units still to assign (2 + 0).
     expect(body.booking.modelRequestCount).toBe(2);
     expect(body.booking.outstandingModelUnitCount).toBe(2);
+    // Every reservation fits here; the app reads this field to warn.
+    expect(body.booking.modelReservationShortfalls).toEqual([]);
+  });
+
+  it("ships a reservation the booking's dates can no longer fill", async () => {
+    vi.mocked(findModelRequestShortfallsForBooking).mockResolvedValueOnce([
+      {
+        assetModelId: "model-1",
+        modelName: "Dell XPS",
+        outstanding: 2,
+        available: 1,
+        short: 1,
+      },
+    ]);
+    findFirstMock.mockResolvedValue({
+      id: "booking-1",
+      name: "Laptops",
+      description: null,
+      status: "RESERVED",
+      from: new Date("2026-01-01T00:00:00Z"),
+      to: new Date("2026-01-03T00:00:00Z"),
+      createdAt: new Date("2025-12-31T00:00:00Z"),
+      updatedAt: new Date("2025-12-31T00:00:00Z"),
+      creator: null,
+      custodianUser: null,
+      custodianTeamMember: null,
+      tags: [],
+      bookingAssets: [],
+      modelRequests: [
+        {
+          id: "mr-1",
+          assetModelId: "model-1",
+          quantity: 2,
+          fulfilledQuantity: 0,
+          fulfilledAt: null,
+          assetModel: { id: "model-1", name: "Dell XPS" },
+        },
+      ],
+      _count: { bookingAssets: 0 },
+    } as never);
+
+    const response = await loader({
+      request: new Request("http://localhost/api/mobile/bookings/booking-1"),
+      params: { bookingId: "booking-1" },
+      context: {},
+    } as never);
+
+    assertIsDataWithResponseInit(response);
+    const body = response.data as {
+      booking: { modelReservationShortfalls: unknown[] };
+    };
+    expect(body.booking.modelReservationShortfalls).toEqual([
+      expect.objectContaining({ assetModelId: "model-1", short: 1 }),
+    ]);
   });
 
   it("offers check-out while reserved units are still unassigned", async () => {

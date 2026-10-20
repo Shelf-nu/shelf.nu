@@ -1,4 +1,12 @@
+import { ScanHistoryButton } from "~/components/scan/scan-history-sheet";
 import { Button } from "~/components/shared/button";
+import {
+  describeDeviceHardware,
+  describeScanHeadline,
+} from "~/modules/scan/labels";
+import { googleMapsSearchUrl } from "~/modules/scan/maps-link";
+import type { ScanTarget } from "~/modules/scan/target";
+import { scanTargetKey } from "~/modules/scan/target";
 import type { parseScanData } from "~/modules/scan/utils.server";
 import { tw } from "~/utils/tw";
 import { ShelfMap } from "./map";
@@ -7,10 +15,42 @@ import { HelpIcon } from "../icons/library";
 import { DateS } from "../shared/date";
 import { InfoTooltip } from "../shared/info-tooltip";
 
+/** The card's payload, as the loader's `parseScanData` returns it. */
+type LastScan = NonNullable<ReturnType<typeof parseScanData>>;
+
+/**
+ * Names how the last scan was made, in the same words as the scan history's
+ * headline: the scanned value for a barcode or SAM ID, "QR code" for a QR,
+ * and "Manual GPS update" for a location entered by hand.
+ *
+ * @param lastScan - The card payload
+ * @returns The text for the card's "Source" row
+ */
+export function describeScanSource(
+  lastScan: Pick<LastScan, "manuallyGenerated" | "codeType" | "code">
+) {
+  return describeScanHeadline(lastScan);
+}
+
+/**
+ * The "Last scan" card on the asset overview and the kit page: who scanned
+ * it, when, from which device and how, and a map of where. A scan with no
+ * location of its own is placed at the newest earlier located scan, and the
+ * card says when that one was. "View all scans" opens the item's full scan
+ * history.
+ *
+ * @param props.lastScan - The parsed last scan, or null when never scanned
+ * @param props.target - The asset or kit the card is on
+ * @param props.itemName - Its name, for the scan history sheet
+ */
 export function ScanDetails({
   lastScan,
+  target,
+  itemName,
 }: {
   lastScan?: ReturnType<typeof parseScanData> | null;
+  target: ScanTarget;
+  itemName: string;
 }) {
   let latitude, longitude;
 
@@ -51,14 +91,20 @@ export function ScanDetails({
             </div>
             <div className="flex justify-between py-2">
               <p>Coordinates</p>
-              <p>{lastScan.coordinates}</p>
+              <p>
+                {lastScan.coordinates}
+                {lastScan.locatedAt ? (
+                  <span className="block text-xs text-gray-500">
+                    From the scan on{" "}
+                    <DateS date={lastScan.locatedAt} includeTime />
+                  </span>
+                ) : null}
+              </p>
             </div>
             <div className="flex justify-between py-2">
               <p>Device</p>
               <p>
-                {lastScan.ua.device.model && lastScan.ua.device.vendor
-                  ? `${lastScan.ua.device.vendor} - ${lastScan.ua.device.model}`
-                  : "Unknown device"}
+                {describeDeviceHardware(lastScan.ua.device) ?? "Unknown device"}
               </p>
             </div>
             <div className="flex justify-between py-2">
@@ -78,9 +124,7 @@ export function ScanDetails({
             <div className="flex justify-between pt-2">
               <p>Source</p>
               <p>
-                {lastScan.manuallyGenerated
-                  ? "Manually updated"
-                  : "QR code scan"}{" "}
+                {describeScanSource(lastScan)}{" "}
                 <InfoTooltip
                   icon={<HelpIcon />}
                   content={
@@ -93,12 +137,12 @@ export function ScanDetails({
                       </p>
                       <ul className="text-xs font-medium text-gray-500 ">
                         <li>
-                          <strong>1. Manually updated:</strong> User manually
+                          <strong>1. Manual GPS update:</strong> User manually
                           updated the location data.
                         </li>
                         <li>
-                          <strong>2. QR code scan:</strong> User scanned the QR
-                          code of the asset.
+                          <strong>2. Scan:</strong> User scanned the QR code, a
+                          barcode or the SAM ID of the asset.
                         </li>
                       </ul>
                     </>
@@ -107,10 +151,10 @@ export function ScanDetails({
               </p>
             </div>
           </div>
-          {hasLocation ? (
-            <div className="flex w-full justify-center px-4 py-3">
+          <div className="flex w-full flex-col gap-2 px-4 py-3">
+            {hasLocation ? (
               <Button
-                to={`https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}&zoom=15&markers=${latitude},${longitude}`}
+                to={googleMapsSearchUrl(String(latitude), String(longitude))}
                 variant="secondary"
                 target="_blank"
                 rel="nofollow noopener noreferrer"
@@ -118,8 +162,16 @@ export function ScanDetails({
               >
                 See in Google Maps
               </Button>
-            </div>
-          ) : null}
+            ) : null}
+            {/* Keyed by the item: moving between two assets or kits keeps
+                this card mounted, and the history must start over for the
+                new item rather than show the last one's scans. */}
+            <ScanHistoryButton
+              key={scanTargetKey(target)}
+              target={target}
+              itemName={itemName}
+            />
+          </div>
         </>
       ) : (
         <MapPlaceholder
