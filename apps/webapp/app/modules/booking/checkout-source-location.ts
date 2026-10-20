@@ -440,7 +440,8 @@ export function checkinPlacementSources({
 /**
  * The stock ledger events of one check-in disposition: the units consumed,
  * lost and damaged left the pool, each on its own row, tried first at the
- * place {@link checkinPlacementSources} takes them from. Returned units
+ * place {@link checkinPlacementSources} takes them from: the slice's manual
+ * source, or the unplaced units. Returned units
  * change no stock and are logged as a RETURN on their own.
  *
  * @param args.slice - The slice being checked in, or `null` when unknown
@@ -463,8 +464,8 @@ export function checkinStockEvents({
   bookingId: string;
   bookingAssetId: string | null;
 }): StockEvent[] {
-  const [source] = checkinPlacementSources({ slice, consumed: 1 });
-  const locationId = source?.locationId ?? null;
+  const locationId =
+    slice && isManualSourceSlice(slice) ? slice.sourceLocationId : null;
   const legs = [
     ["CONSUME", disposition.consumed ?? 0],
     ["LOSS", disposition.lost ?? 0],

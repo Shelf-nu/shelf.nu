@@ -27,7 +27,9 @@ import {
 import {
   checkOutQuantity,
   moveAssetLocationUnits,
+  placeUnplacedUnits,
   releaseQuantity,
+  replaceAssetPlacements,
 } from "./service.server";
 
 /* -------------------------------------------------------------------------- */
@@ -84,7 +86,7 @@ const { tables, fakeDb, counter } = vi.hoisted(() => {
       ) {
         const c = condition as Record<string, unknown>;
         if ("in" in c) return (c.in as unknown[]).includes(row[key]);
-        if ("not" in c) return row[key] !== c.not;
+        if ("not" in c) return (row[key] ?? null) !== c.not;
         return true;
       }
       return (row[key] ?? null) === condition;
@@ -134,6 +136,8 @@ const { tables, fakeDb, counter } = vi.hoisted(() => {
       },
       findMany: async ({ where }: { where: Record<string, unknown> }) =>
         tables.asset.filter((a) => matches(a, where)),
+      count: async ({ where }: { where?: Record<string, unknown> } = {}) =>
+        tables.asset.filter((a) => matches(a, where)).length,
       update: async ({
         where,
         data,
@@ -190,6 +194,34 @@ const { tables, fakeDb, counter } = vi.hoisted(() => {
           (r) => r.id !== where.id
         );
         return {};
+      },
+      deleteMany: async ({ where }: { where?: Record<string, unknown> }) => {
+        const before = tables.assetLocation.length;
+        tables.assetLocation = tables.assetLocation.filter(
+          (r) => !matches(r, where)
+        );
+        return { count: before - tables.assetLocation.length };
+      },
+      updateMany: async ({
+        where,
+        data,
+      }: {
+        where?: Record<string, unknown>;
+        data: Record<string, unknown>;
+      }) => {
+        const rows = tables.assetLocation.filter((r) => matches(r, where));
+        rows.forEach((row) => applyData(row, data));
+        return { count: rows.length };
+      },
+      createMany: async ({ data }: { data: Record<string, unknown>[] }) => {
+        for (const row of data) {
+          tables.assetLocation.push({
+            id: newId("al"),
+            assetKitId: null,
+            ...row,
+          } as Row);
+        }
+        return { count: data.length };
       },
     },
     custody: {
@@ -1199,6 +1231,74 @@ describe("stock ledger", () => {
       ["MOVE", STUDIO, 2],
     ]);
     expect(tables.asset[0].stockLedgerStartedAt).toBeInstanceOf(Date);
+    expect(replayStockLedger(tables.consumptionLog as never)).toEqual(
+      liveStock()
+    );
+  });
+
+  it("records placing unplaced units as a move out of the unplaced units", async () => {
+    seedPool({
+      total: 10,
+      placements: [[CAMERA_ROOM, 6]],
+      ledgerStarted: false,
+    });
+
+    await placeUnplacedUnits({
+      assetId: "pool-1",
+      organizationId: ORG,
+      userId: "user-1",
+      toLocationId: CAMERA_ROOM,
+      quantity: 3,
+    });
+
+    expect(
+      tables.consumptionLog.map((l) => [
+        l.category,
+        l.locationId,
+        l.stockChange,
+      ])
+    ).toEqual([
+      ["OPENING_BALANCE", null, 4],
+      ["OPENING_BALANCE", CAMERA_ROOM, 6],
+      ["MOVE", null, -3],
+      ["MOVE", CAMERA_ROOM, 3],
+    ]);
+    expect(replayStockLedger(tables.consumptionLog as never)).toEqual(
+      liveStock()
+    );
+  });
+
+  it("records a placement rewrite as moves between the places that changed", async () => {
+    seedPool({
+      total: 10,
+      placements: [
+        [CAMERA_ROOM, 6],
+        [STUDIO, 3],
+      ],
+      ledgerStarted: false,
+    });
+
+    await replaceAssetPlacements({
+      assetId: "pool-1",
+      organizationId: ORG,
+      userId: "user-1",
+      placements: [{ locationId: STUDIO, quantity: 8 }],
+    });
+
+    expect(
+      tables.consumptionLog.map((l) => [
+        l.category,
+        l.locationId,
+        l.stockChange,
+      ])
+    ).toEqual([
+      ["OPENING_BALANCE", null, 1],
+      ["OPENING_BALANCE", CAMERA_ROOM, 6],
+      ["OPENING_BALANCE", STUDIO, 3],
+      ["MOVE", null, 1],
+      ["MOVE", CAMERA_ROOM, -6],
+      ["MOVE", STUDIO, 5],
+    ]);
     expect(replayStockLedger(tables.consumptionLog as never)).toEqual(
       liveStock()
     );

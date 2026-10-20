@@ -94,7 +94,6 @@ const MOVEMENT_LOG_SELECT = {
   booking: { select: { id: true, name: true } },
 } satisfies Prisma.ConsumptionLogSelect;
 
-/** Newest first; `id` breaks ties between rows written in the same instant. */
 /**
  * Ledger rows that record no operation: a MOVE only changes where units sit,
  * and an OPENING_BALANCE restates the stock a pool already had. "What
@@ -104,6 +103,7 @@ const NOT_BOOKKEEPING: Prisma.ConsumptionLogWhereInput = {
   category: { notIn: [MOVE_CATEGORY, OPENING_BALANCE_CATEGORY] },
 };
 
+/** Newest first; `id` breaks ties between rows written in the same instant. */
 const NEWEST_FIRST: Prisma.ConsumptionLogOrderByWithRelationInput[] = [
   { createdAt: "desc" },
   { id: "desc" },
@@ -117,7 +117,9 @@ const NEWEST_FIRST: Prisma.ConsumptionLogOrderByWithRelationInput[] = [
  * names the operation; its other rows share its user and its booking or
  * custodian, within {@link MOVEMENT_GROUP_WINDOW_MS} before it. Those are the
  * keys `pickLatestMovement` groups by, so the two agree. A row with neither a
- * booking nor a custodian is a single-row write and comes back alone.
+ * booking nor a custodian is one write (an adjustment, a restock, an asset
+ * edit): it comes back with the rows of the same category written in the same
+ * instant, which is how the ledger splits one write over several places.
  *
  * @param assetId - The asset, already verified to belong to the organization
  * @returns The operation's rows, newest first; empty when the asset has none
@@ -133,7 +135,18 @@ async function loadLatestMovementRows(assetId: string) {
   }
   const bookingId = newest.booking?.id ?? null;
   if (!bookingId && !newest.custodianId) {
-    return [newest];
+    return db.consumptionLog.findMany({
+      where: {
+        assetId,
+        category: newest.category,
+        userId: newest.userId,
+        bookingId: null,
+        custodianId: null,
+        createdAt: newest.createdAt,
+      },
+      orderBy: NEWEST_FIRST,
+      select: MOVEMENT_LOG_SELECT,
+    });
   }
   return db.consumptionLog.findMany({
     where: {

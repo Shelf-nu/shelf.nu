@@ -101,6 +101,7 @@ import { createConsumptionLog } from "~/modules/consumption-log/service.server";
 import {
   readStockState,
   recordStockChanges,
+  type StockChangeInput,
 } from "~/modules/consumption-log/stock-ledger.server";
 import {
   emitAssetKitDetachmentNotes,
@@ -6229,6 +6230,14 @@ export async function checkinBooking({
         const destroyedUnitsByAssetKitId = new Map<string, number>();
 
         /**
+         * Each pool's stock before this loop's first write to it, and the
+         * ledger events of every slice that used up its units. Recorded once
+         * after the loop, so a check-in of many slices reads each pool twice
+         * in all, not twice per slice.
+         */
+        const stockChangesByAssetId = new Map<string, StockChangeInput>();
+
+        /**
          * What each ONE_WAY slice can still check out, to size the units it
          * sent out. Only read for slices that left: one that never did sent
          * nothing, and no read is needed to say so.
@@ -6400,14 +6409,16 @@ export async function checkinBooking({
             (disposition.lost ?? 0) +
             (disposition.damaged ?? 0);
 
-          /** The pool's stock before this slice's write, for the ledger. */
-          const stockBefore =
-            poolDecrement > 0
-              ? await readStockState(tx, {
-                  assetId: slice.assetId,
-                  organizationId,
-                })
-              : null;
+          if (poolDecrement > 0 && !stockChangesByAssetId.has(slice.assetId)) {
+            stockChangesByAssetId.set(slice.assetId, {
+              assetId: slice.assetId,
+              before: await readStockState(tx, {
+                assetId: slice.assetId,
+                organizationId,
+              }),
+              events: [],
+            });
+          }
 
           if (poolDecrement > 0) {
             const custodyAgg = await tx.custody.aggregate({
@@ -6499,26 +6510,18 @@ export async function checkinBooking({
             });
 
             /**
-             * Ledger rows for the destroyed units, at the places the
-             * reconcile actually took them from: the slice's source first,
-             * then the unplaced units.
+             * Ledger events for the destroyed units, tried first at the
+             * slice's source. The rows land where the reconcile actually
+             * took them from.
              */
-            await recordStockChanges(tx, {
-              organizationId,
-              userId: userId!,
-              changes: [
-                {
-                  assetId: slice.assetId,
-                  before: stockBefore,
-                  events: checkinStockEvents({
-                    slice,
-                    disposition,
-                    bookingId: id,
-                    bookingAssetId: dispBookingAssetId,
-                  }),
-                },
-              ],
-            });
+            stockChangesByAssetId.get(slice.assetId)?.events?.push(
+              ...checkinStockEvents({
+                slice,
+                disposition,
+                bookingId: id,
+                bookingAssetId: dispBookingAssetId,
+              })
+            );
             if (slice.assetKitId) {
               destroyedUnitsByAssetKitId.set(
                 slice.assetKitId,
@@ -6548,6 +6551,14 @@ export async function checkinBooking({
           existing.lost += disposition.lost ?? 0;
           existing.damaged += disposition.damaged ?? 0;
           summaryByAssetId.set(slice.assetId, existing);
+        }
+
+        if (stockChangesByAssetId.size > 0) {
+          await recordStockChanges(tx, {
+            organizationId,
+            userId: userId!,
+            changes: [...stockChangesByAssetId.values()],
+          });
         }
 
         // Flush the accumulated pool-decrement audit events atomically with
@@ -7946,6 +7957,13 @@ export async function partialCheckinBooking({
             .map((slice) => slice.id)
         );
 
+      /**
+       * Each pool's stock before this loop's first write to it, and the
+       * ledger events of every disposition that used up its units. Recorded
+       * once after the loop, as in `checkinBooking`.
+       */
+      const stockChangesByAssetId = new Map<string, StockChangeInput>();
+
       for (const disp of dispositions) {
         if (assetTypeById.get(disp.assetId) !== AssetType.QUANTITY_TRACKED) {
           continue;
@@ -8082,14 +8100,16 @@ export async function partialCheckinBooking({
         const poolDecrement =
           (disp.consumed ?? 0) + (disp.lost ?? 0) + (disp.damaged ?? 0);
 
-        /** The pool's stock before this disposition's write, for the ledger. */
-        const stockBefore =
-          poolDecrement > 0
-            ? await readStockState(tx, {
-                assetId: disp.assetId,
-                organizationId,
-              })
-            : null;
+        if (poolDecrement > 0 && !stockChangesByAssetId.has(disp.assetId)) {
+          stockChangesByAssetId.set(disp.assetId, {
+            assetId: disp.assetId,
+            before: await readStockState(tx, {
+              assetId: disp.assetId,
+              organizationId,
+            }),
+            events: [],
+          });
+        }
 
         /**
          * Pool-drain guard: `Asset.quantity` must stay ≥ current custody
@@ -8230,23 +8250,15 @@ export async function partialCheckinBooking({
             additionalData: { assetId: disp.assetId, bookingId: id },
           });
 
-          /** Same ledger rows as the full check-in path above. */
-          await recordStockChanges(tx, {
-            organizationId,
-            userId,
-            changes: [
-              {
-                assetId: disp.assetId,
-                before: stockBefore,
-                events: checkinStockEvents({
-                  slice: sourceSlice,
-                  disposition: disp,
-                  bookingId: id,
-                  bookingAssetId: dispBookingAssetId,
-                }),
-              },
-            ],
-          });
+          /** Same ledger events as the full check-in path above. */
+          stockChangesByAssetId.get(disp.assetId)?.events?.push(
+            ...checkinStockEvents({
+              slice: sourceSlice,
+              disposition: disp,
+              bookingId: id,
+              bookingAssetId: dispBookingAssetId,
+            })
+          );
         }
 
         const pendingAfter = remaining - claimed;
@@ -8264,6 +8276,14 @@ export async function partialCheckinBooking({
           lost: disp.lost ?? 0,
           damaged: disp.damaged ?? 0,
           pendingAfter,
+        });
+      }
+
+      if (stockChangesByAssetId.size > 0) {
+        await recordStockChanges(tx, {
+          organizationId,
+          userId,
+          changes: [...stockChangesByAssetId.values()],
         });
       }
 

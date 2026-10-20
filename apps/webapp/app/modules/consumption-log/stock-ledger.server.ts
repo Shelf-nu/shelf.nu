@@ -233,7 +233,15 @@ export async function recordStockChanges(
     `;
   }
   if (rows.length > 0) {
-    await tx.consumptionLog.createMany({ data: rows });
+    /**
+     * One timestamp for every row of this write: an operation the ledger
+     * split over several places is told apart from the next one by it (see
+     * `pickLatestMovement` in the low-stock mail).
+     */
+    const createdAt = new Date();
+    await tx.consumptionLog.createMany({
+      data: rows.map((row) => ({ ...row, createdAt })),
+    });
   }
 }
 

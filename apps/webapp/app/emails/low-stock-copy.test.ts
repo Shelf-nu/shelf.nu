@@ -414,6 +414,15 @@ describe("describeStockMovement: one operation that wrote several rows", () => {
     );
   });
 
+  it("sums one write the ledger split over two places", () => {
+    // One "lost 5": 2 off the unplaced units, 3 off a location, one instant.
+    const out = movement([
+      logRow({ category: "LOSS", quantity: 2 }),
+      logRow({ category: "LOSS", quantity: 3 }),
+    ]);
+    expect(out?.text).toBe(`5 Units reported lost by Dana Reyes ${WHEN}`);
+  });
+
   it("never merges single-row writes such as adjustments made seconds apart", () => {
     const out = movement([
       logRow({ category: "RESTOCK", quantity: 12 }),

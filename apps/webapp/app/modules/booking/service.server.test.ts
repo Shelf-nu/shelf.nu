@@ -44,7 +44,10 @@ import * as bookingNoteService from "~/modules/booking-note/service.server";
 import * as lowStockService from "~/modules/consumption-log/low-stock.server";
 import * as quantityLock from "~/modules/consumption-log/quantity-lock.server";
 import * as consumptionLogService from "~/modules/consumption-log/service.server";
-import { recordStockChanges } from "~/modules/consumption-log/stock-ledger.server";
+import {
+  readStockState,
+  recordStockChanges,
+} from "~/modules/consumption-log/stock-ledger.server";
 import {
   emitAssetKitDetachmentNotes,
   removeDestroyedUnitsFromKits,
@@ -14191,6 +14194,22 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     );
   });
 
+  it("reads the pool's stock before the decrement and records the ledger once after it", async () => {
+    setupQtyMocks();
+
+    await partialCheckinBooking({
+      ...baseParams,
+      checkins: [{ assetId: mockQtyAssetId, returned: 5, lost: 3, damaged: 2 }],
+    });
+
+    // Read after the write, the before-state would equal the after-state and
+    // the ledger would see no change at all.
+    expect(
+      vitest.mocked(readStockState).mock.invocationCallOrder[0]
+    ).toBeLessThan(vitest.mocked(db.asset.update).mock.invocationCallOrder[0]);
+    expect(recordStockChanges).toHaveBeenCalledTimes(1);
+  });
+
   it("emits an ASSET_QUANTITY_CHANGED event for the pool decrement (from pool → pool − decrement)", async () => {
     expect.assertions(1);
 
@@ -19871,7 +19890,7 @@ describe("checkinBooking: units destroyed out of a kit slice leave the kit", () 
   });
 
   it("consumes only the units a one-way kit slice sent out", async () => {
-    expect.assertions(3);
+    expect.assertions(4);
 
     arrangeBooking(ConsumptionType.ONE_WAY);
     // why: the sizing reads the slice and the booking's sessions. 4 of the
@@ -19902,6 +19921,10 @@ describe("checkinBooking: units destroyed out of a kit slice leave the kit", () 
         bookingAssetId: "ba-pens",
       })
     );
+    // The pool's stock is read before its decrement, for the ledger diff.
+    expect(
+      vitest.mocked(readStockState).mock.invocationCallOrder[0]
+    ).toBeLessThan(vitest.mocked(db.asset.update).mock.invocationCallOrder[0]);
     expect(db.asset.update).toHaveBeenCalledWith({
       where: { id: ASSET_ID },
       data: { quantity: { decrement: 4 } },

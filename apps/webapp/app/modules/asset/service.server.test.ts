@@ -23,7 +23,10 @@ import { getCategory } from "~/modules/category/service.server";
 import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
 import { createConsumptionLog } from "~/modules/consumption-log/service.server";
-import { recordStockChanges } from "~/modules/consumption-log/stock-ledger.server";
+import {
+  readStockState,
+  recordStockChanges,
+} from "~/modules/consumption-log/stock-ledger.server";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { bulkAssignKitCustody } from "~/modules/kit/service.server";
 import {
@@ -1381,6 +1384,33 @@ describe("createAsset quantity validation", () => {
         type: "INDIVIDUAL",
       })
     ).resolves.toEqual({ id: "asset-new" });
+    expect(recordStockChanges).not.toHaveBeenCalled();
+  });
+
+  it("records the starting stock of a quantity-tracked asset as INITIAL", async () => {
+    await createAsset({
+      title: "Test Cables",
+      description: "USB cables",
+      userId: "user-1",
+      categoryId: null,
+      valuation: null,
+      organizationId: "org-1",
+      type: "QUANTITY_TRACKED",
+      consumptionType: "ONE_WAY",
+      quantity: 100,
+    });
+
+    expect(recordStockChanges).toHaveBeenCalledWith(expect.anything(), {
+      organizationId: "org-1",
+      userId: "user-1",
+      changes: [
+        {
+          assetId: "asset-new",
+          before: { total: 0, placed: new Map(), ledgerStartedAt: null },
+          events: [{ category: "INITIAL", change: 100, locationId: undefined }],
+        },
+      ],
+    });
   });
 });
 
@@ -3280,6 +3310,13 @@ describe("updateAsset stock-lowering guard", () => {
       name: "Storage B",
     });
 
+    const stockBefore = {
+      total: 10,
+      placed: new Map([["loc-1", 10]]),
+      ledgerStartedAt: new Date("2026-10-01T00:00:00.000Z"),
+    };
+    vi.mocked(readStockState).mockResolvedValueOnce(stockBefore);
+
     await updateAsset({
       id: "asset-1",
       userId: "user-1",
@@ -3290,6 +3327,24 @@ describe("updateAsset stock-lowering guard", () => {
     } as any);
 
     expect(db.asset.update).toHaveBeenCalled();
+    // The ledger diffs the stock read under the lock, before the first write,
+    // against the stock after the placement rewrite.
+    expect(vi.mocked(readStockState).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(db.asset.update).mock.invocationCallOrder[0]
+    );
+    expect(recordStockChanges).toHaveBeenCalledWith(expect.anything(), {
+      organizationId: "org-1",
+      userId: "user-1",
+      changes: [
+        {
+          assetId: "asset-1",
+          before: stockBefore,
+          events: [
+            expect.objectContaining({ category: "ADJUSTMENT", change: -5 }),
+          ],
+        },
+      ],
+    });
   });
 
   it("refuses when the replacement placement itself exceeds the new total", async () => {
