@@ -181,6 +181,12 @@ export declare const BOOKING_RESERVE_BLOCKED_LABELS: {
 export declare const BOOKING_EMPTY_RESERVED_MESSAGE: "A reserved booking must keep at least one asset or model reservation. Cancel the booking instead, or add a replacement first.";
 
 /**
+ * The name a booking row carries in place of a custodian the viewer may not
+ * see. Distinct from `null`, which means the booking has no custodian at all.
+ */
+export declare const WITHHELD_CUSTODIAN_NAME: "private";
+
+/**
  * Title of the refusal and disabled reasons for custody of an individually
  * tracked kit member. Custody of such an asset comes from its kit. Shared by
  * the server's 400, the web menus and the companion asset screen.

@@ -5,7 +5,8 @@
  * enforcing organization membership. A SAM-shaped value the workspace has no
  * asset for falls back to its barcode table, so labels printed with a
  * SAM-shaped barcode value still resolve. It deliberately does NOT record scan
- * provenance: recording is the *caller's* (the endpoint's) decision.
+ * provenance: recording is the *caller's* (the endpoint's) decision. It
+ * returns what a recording caller should record (`scanToRecord`).
  *
  * A resolved asset carries only the custody the caller may see, by the same
  * rules as the asset detail (see {@link shapeScannedAssetForViewer}).
@@ -24,6 +25,7 @@
  * @see {@link file://./../../routes/api+/mobile+/get-scanned-item.$qrId.ts}
  */
 
+import { ScanCodeType } from "@prisma/client";
 import type { LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
@@ -39,6 +41,7 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { scopeMobileAssetCustodyToViewer } from "~/modules/api/mobile-custody-visibility.server";
 import { getBarcodeByValue } from "~/modules/barcode/service.server";
+import type { RecordScanArgs } from "~/modules/scan/service.server";
 import { getParams } from "~/utils/http.server";
 import { parseSequentialId } from "~/utils/sequential-id";
 import { canUseBarcodes } from "~/utils/subscription.server";
@@ -71,11 +74,19 @@ type ResolvedCode = {
 type ResolveMobileCodeFailureReason = "unclaimed";
 
 /**
+ * What a recording caller writes for a successful resolve: the kind of code
+ * that matched and what it resolved to, in the workspace it resolved in.
+ */
+export type ResolvedScanToRecord = Pick<
+  RecordScanArgs,
+  "codeType" | "qrId" | "barcodeId" | "assetId" | "kitId"
+> & { organizationId: string };
+
+/**
  * Discriminated result of {@link resolveMobileScannedCode}.
  *
- * On success, `recordableQrId` is the QR id a recording caller may attribute a
- * scan to, or `null` for a SAM resolve (no backing QR record, so nothing to
- * record, matching the web).
+ * On success, `scanToRecord` describes the scan a recording caller writes:
+ * a QR, a SAM ID, or a SAM-shaped barcode, whichever matched.
  *
  * On failure, `reason`/`qrId` are only present for actionable cases (see
  * {@link ResolveMobileCodeFailureReason}); plain not-found / wrong-org
@@ -91,7 +102,7 @@ export type ResolveMobileCodeResult =
       /** The scanned QR id, echoed back when `reason` is set. */
       qrId?: string;
     }
-  | { ok: true; qr: ResolvedCode; recordableQrId: string | null };
+  | { ok: true; qr: ResolvedCode; scanToRecord: ResolvedScanToRecord };
 
 /**
  * A barcode row carrying just what a mobile resolve needs.
@@ -102,6 +113,7 @@ export type ResolveMobileCodeResult =
  * returns `any`, so annotating the call site is what keeps the payload typed.
  */
 type MobileBarcodeMatch = {
+  id: string;
   value: string;
   assetId: string | null;
   kitId: string | null;
@@ -208,9 +220,13 @@ async function resolveSamShapedBarcode({
 
   return {
     ok: true,
-    // A barcode has no QR record, so there is nothing to record a scan
-    // against — same as a SAM resolve.
-    recordableQrId: null,
+    scanToRecord: {
+      codeType: ScanCodeType.BARCODE,
+      barcodeId: barcode.id,
+      assetId: barcode.assetId,
+      kitId: barcode.kitId,
+      organizationId,
+    },
     qr: {
       // The stored barcode value, which may differ in case from what was
       // scanned; the companion echoes this id back on follow-up calls.
@@ -294,8 +310,11 @@ export async function resolveMobileScannedCode({
 
     return {
       ok: true,
-      // No backing QR record, so nothing to record a scan against.
-      recordableQrId: null,
+      scanToRecord: {
+        codeType: ScanCodeType.SAM_ID,
+        assetId: asset.id,
+        organizationId,
+      },
       qr: {
         id: sequentialId,
         assetId: asset.id,
@@ -384,7 +403,13 @@ export async function resolveMobileScannedCode({
 
   return {
     ok: true,
-    recordableQrId: qr.id,
+    scanToRecord: {
+      codeType: ScanCodeType.QR,
+      qrId: qr.id,
+      assetId: qr.assetId,
+      kitId: qr.kitId,
+      organizationId: qr.organizationId,
+    },
     qr: {
       id: qr.id,
       assetId: qr.assetId,

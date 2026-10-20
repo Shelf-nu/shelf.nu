@@ -230,6 +230,13 @@ export const BOOKING_RESERVE_BLOCKED_LABELS = Object.freeze({
 export const BOOKING_EMPTY_RESERVED_MESSAGE =
   "A reserved booking must keep at least one asset or model reservation. Cancel the booking instead, or add a replacement first.";
 
+// The name a booking row carries in place of a custodian the viewer may not
+// see. The server sends it, the web badge draws it and the companion app draws
+// it, so a withheld custodian reads the same everywhere. Distinct from `null`,
+// which means the booking has no custodian at all: a client must tell the two
+// apart, or an unassigned booking reads as a hidden one.
+export const WITHHELD_CUSTODIAN_NAME = "private";
+
 // Why an individually tracked asset that belongs to a kit cannot be put into
 // custody on its own. Custody of such an asset comes from its kit: assign
 // custody to the kit, or take the asset out of the kit first. One register for

@@ -1,3 +1,4 @@
+import { WITHHELD_CUSTODIAN_NAME } from "@shelf/labels";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { useUserData } from "~/hooks/use-user-data";
@@ -73,7 +74,7 @@ export function TeamMemberBadge({
           <span className="mt-px">{resolveTeamMemberName(teamMember)}</span>
         </>
       ) : !hidePrivate ? (
-        "private"
+        WITHHELD_CUSTODIAN_NAME
       ) : null}
     </GrayBadge>
   ) : null;

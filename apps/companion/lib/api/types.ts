@@ -1203,6 +1203,13 @@ export type BookingDetailResponse = {
     canArchive: boolean;
     canDuplicate: boolean;
     canDelete: boolean;
+    /**
+     * Whether the caller may extend this booking (ONGOING or OVERDUE, the
+     * extend permission, and one they write). Optional: servers that predate
+     * the flag omit it and have no extend endpoint, so an absent flag hides
+     * the action.
+     */
+    canExtend?: boolean;
   };
   /**
    * Pools on this booking that check-out must ask "Where do the units come
@@ -1301,6 +1308,58 @@ export type UpdateBookingPayload = {
   tags?: string[];
 };
 
+/**
+ * Payload for `POST /api/mobile/bookings/extend`. `endDate` is a wall clock in
+ * `yyyy-MM-dd'T'HH:mm` (no offset), read in `timeZone`, the preference zone the
+ * picker edits in.
+ */
+export type ExtendBookingPayload = {
+  bookingId: string;
+  endDate: string;
+  timeZone: string;
+};
+
+/** Response of the extend endpoint. `to` is the stored end, an ISO instant. */
+export type ExtendBookingResponse = {
+  booking: {
+    id: string;
+    name: string;
+    status: BookingStatus;
+    to: string;
+  };
+};
+
+/**
+ * Free units per quantity-tracked asset for one booking's window, this booking
+ * excluded. `bookable` is the cap for a quantity prompt.
+ */
+export type BookingAssetAvailability = {
+  assetId: string;
+  total: number;
+  bookable: number;
+  reserved: number;
+  inCustody: number;
+  /**
+   * Units the booking's standalone slice already holds; null when none.
+   * Absent on older servers.
+   */
+  bookedQuantity?: number | null;
+};
+
+/** Response of `GET /api/mobile/bookings/asset-availability`. */
+export type BookingAssetAvailabilityResponse = {
+  availability: BookingAssetAvailability[];
+};
+
+/** Response of `POST /api/mobile/bookings/adjust-asset-quantity`. */
+export type AdjustBookingAssetQuantityResponse = {
+  success: boolean;
+  /** The booked quantity now held. */
+  quantity: number;
+  /** The booked quantity held before the change. */
+  previousQuantity: number;
+};
+
 export type RemoveBookingAssetsResponse = {
   booking: {
     id: string;
@@ -1326,6 +1385,20 @@ export type AvailableAsset = {
    * the exact unit. Null when the asset has no resolvable code.
    */
   displayCode?: { value: string; label: string } | null;
+  /**
+   * Quantity-tracked metadata (additive; older servers omit it). `type` gates
+   * the quantity prompt, `quantity` is the pool, `availableQuantity` is what
+   * the booking's window still has free with this booking excluded: the cap
+   * the web picker applies to its quantity input. A row with nothing free
+   * still arrives, with `availableQuantity: 0`, and the picker shows it as
+   * unavailable.
+   */
+  type?: "INDIVIDUAL" | "QUANTITY_TRACKED";
+  quantity?: number | null;
+  unitOfMeasure?: string | null;
+  availableQuantity?: number | null;
+  /** Units this booking already holds of the row (standalone slice), if any. */
+  bookedQuantity?: number | null;
 };
 
 export type AvailableAssetsResponse = {
@@ -1922,4 +1995,36 @@ export type CalendarBookingsResponse = {
     /** ISO date to jump to, or null when there is nothing outside. */
     jumpTo: string | null;
   };
+};
+
+/**
+ * One row of an asset's booking history: the phone's answer to "when is this
+ * asset out, and where has it been?".
+ *
+ * `custodianName` has three answers: a name, `null` when the booking has no
+ * custodian, or `WITHHELD_CUSTODIAN_NAME` (`@shelf/labels`) when the viewer may
+ * not see who holds it.
+ *
+ * @see {@link file://../../../webapp/app/routes/api+/mobile+/assets.$assetId.bookings.ts}
+ */
+export type AssetBookingRow = {
+  id: string;
+  name: string;
+  status: BookingStatus;
+  from: string;
+  to: string;
+  custodianName: string | null;
+};
+
+/**
+ * One page of an asset's bookings, newest start first, plus the bookings the
+ * asset is out on now (ONGOING and OVERDUE) wherever they fall in the paging.
+ */
+export type AssetBookingsResponse = {
+  bookings: AssetBookingRow[];
+  activeBookings: AssetBookingRow[];
+  page: number;
+  perPage: number;
+  totalCount: number;
+  totalPages: number;
 };

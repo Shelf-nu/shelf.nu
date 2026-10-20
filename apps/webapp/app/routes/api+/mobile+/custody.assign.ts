@@ -7,6 +7,7 @@ import {
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
 import { mobileIdSchema } from "~/modules/api/mobile-bulk-ids.server";
+import { resolveLastAuditDateAccess } from "~/modules/asset/last-audit-date-access";
 import { bulkCheckOutAssets } from "~/modules/asset/service.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
@@ -67,8 +68,8 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const { assetId, custodianId } = parsed.data;
 
-    // Caller's access (effective role, custody scope) and barcode access
-    const { canUseBarcodes, access } = await getMobileUserContext(
+    // Caller's access (effective role, custody scope), barcode and audit add-ons
+    const { canUseBarcodes, canUseAudits, access } = await getMobileUserContext(
       user.id,
       organizationId
     );
@@ -105,6 +106,10 @@ export async function action({ request }: ActionFunctionArgs) {
       organizationId,
       currentSearchParams: "",
       settings,
+      lastAuditDateAccess: resolveLastAuditDateAccess({
+        seeAllAudits: access.audits.seeAll,
+        auditsUsable: canUseAudits,
+      }),
       /**
        * Mobile sends no list filters (`currentSearchParams` is empty above), so
        * this never narrows anything today — the where-builder returns before it

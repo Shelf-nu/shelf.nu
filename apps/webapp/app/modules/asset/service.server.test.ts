@@ -6,6 +6,7 @@ import {
 } from "@prisma/client";
 import { describe, expect, it, vi, vitest, beforeEach } from "vitest";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
+import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import {
@@ -62,6 +63,7 @@ import {
   setKitCustodyAfterAssetImport,
   getActiveCustomFieldsForAsset,
   moveAssetLocationUnits,
+  getAdvancedPaginatedAndFilterableAssets,
   getAssets,
   parseAssetValuation,
   placeUnplacedUnits,
@@ -2207,6 +2209,7 @@ describe("bulkDeleteAssets — activity events", () => {
     ]);
 
     await bulkDeleteAssets({
+      lastAuditDateAccess: "hidden",
       assetIds: ["asset-1", "asset-2"],
       confirmation: "2",
       organizationId: "org-1",
@@ -2270,6 +2273,7 @@ describe("bulkUpdateAssetCategory — activity events", () => {
     });
 
     await bulkUpdateAssetCategory({
+      lastAuditDateAccess: "hidden",
       userId: "user-1",
       assetIds: ["asset-1", "asset-2", "asset-3"],
       organizationId: "org-1",
@@ -2308,6 +2312,7 @@ describe("bulkUpdateAssetCategory — activity events", () => {
     // categoryId: null skips the IDOR check, no need to mock category.findFirst
 
     await bulkUpdateAssetCategory({
+      lastAuditDateAccess: "hidden",
       userId: "user-1",
       assetIds: ["asset-1"],
       organizationId: "org-1",
@@ -2362,6 +2367,7 @@ describe("bulkAssignAssetTags — activity events", () => {
     ]);
 
     await bulkAssignAssetTags({
+      lastAuditDateAccess: "hidden",
       userId: "user-1",
       assetIds: ["asset-1", "asset-2"],
       organizationId: "org-1",
@@ -3876,6 +3882,7 @@ describe("bulk custody — refusals of the selection answer 400", () => {
 
   const checkOut = () =>
     bulkCheckOutAssets({
+      lastAuditDateAccess: "hidden",
       allowedTeamMemberIds: "all" as const,
       userId: "user-1",
       assetIds: ["asset-1"],
@@ -3888,6 +3895,7 @@ describe("bulk custody — refusals of the selection answer 400", () => {
 
   const checkIn = () =>
     bulkCheckInAssets({
+      lastAuditDateAccess: "hidden",
       allowedTeamMemberIds: "all" as const,
       userId: "user-1",
       assetIds: ["asset-1"],
@@ -4200,6 +4208,7 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
     let caught: unknown;
     try {
       await bulkCheckOutAssets({
+        lastAuditDateAccess: "hidden",
         allowedTeamMemberIds: "all" as const,
         userId: "user-current",
         assetIds: ["asset-1"],
@@ -4247,6 +4256,7 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
 
     await expect(
       bulkCheckOutAssets({
+        lastAuditDateAccess: "hidden",
         allowedTeamMemberIds: "all" as const,
         userId: "user-current",
         assetIds: ["asset-1"],
@@ -4290,6 +4300,7 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
     let threw403 = false;
     try {
       await bulkCheckOutAssets({
+        lastAuditDateAccess: "hidden",
         allowedTeamMemberIds: "all" as const,
         userId: "user-current",
         assetIds: ["asset-1"],
@@ -4329,6 +4340,7 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
     let threw403 = false;
     try {
       await bulkCheckOutAssets({
+        lastAuditDateAccess: "hidden",
         allowedTeamMemberIds: "all" as const,
         userId: "user-current",
         assetIds: ["asset-1"],
@@ -4368,6 +4380,7 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
     let threw403 = false;
     try {
       await bulkCheckOutAssets({
+        lastAuditDateAccess: "hidden",
         allowedTeamMemberIds: "all" as const,
         userId: "user-current",
         // why: `role` was optional pre-main; main made it required so every
@@ -4530,6 +4543,7 @@ describe("bulkUpdateAssetCategory", () => {
     });
 
     await bulkUpdateAssetCategory({
+      lastAuditDateAccess: "hidden",
       userId: "user-1",
       assetIds: ["asset-1", "asset-2", "asset-3"],
       organizationId: "org-1",
@@ -4568,6 +4582,7 @@ describe("bulkUpdateAssetCategory", () => {
     ]);
 
     await bulkUpdateAssetCategory({
+      lastAuditDateAccess: "hidden",
       userId: "user-1",
       assetIds: ["asset-1"],
       organizationId: "org-1",
@@ -4589,6 +4604,7 @@ describe("bulkUpdateAssetCategory", () => {
 
     await expect(
       bulkUpdateAssetCategory({
+        lastAuditDateAccess: "hidden",
         userId: "user-1",
         assetIds: ["asset-1"],
         organizationId: "org-1",
@@ -4643,6 +4659,7 @@ describe("bulkUpdateAssetModel", () => {
     ]);
 
     await bulkUpdateAssetModel({
+      lastAuditDateAccess: "hidden",
       userId: "user-1",
       assetIds: ["asset-1", "asset-2"],
       organizationId: "org-1",
@@ -4691,6 +4708,7 @@ describe("bulkUpdateAssetModel", () => {
     ]);
 
     const result = await bulkUpdateAssetModel({
+      lastAuditDateAccess: "hidden",
       userId: "user-1",
       assetIds: ["asset-1"],
       organizationId: "org-1",
@@ -4729,6 +4747,7 @@ describe("bulkUpdateAssetModel", () => {
     ]);
 
     await bulkUpdateAssetModel({
+      lastAuditDateAccess: "hidden",
       userId: "user-1",
       assetIds: ["asset-1"],
       organizationId: "org-1",
@@ -4776,6 +4795,7 @@ describe("bulkUpdateAssetModel", () => {
     db.asset.findMany.mockResolvedValue(rows);
 
     await bulkUpdateAssetModel({
+      lastAuditDateAccess: "hidden",
       userId: "user-1",
       assetIds: ["asset-1", "asset-2", "asset-3"],
       organizationId: "org-1",
@@ -4813,6 +4833,7 @@ describe("bulkUpdateAssetModel", () => {
     ]);
 
     await bulkUpdateAssetModel({
+      lastAuditDateAccess: "hidden",
       userId: "user-1",
       assetIds: ["asset-1"],
       organizationId: "org-1",
@@ -4836,6 +4857,7 @@ describe("bulkUpdateAssetModel", () => {
     ]);
 
     const result = await bulkUpdateAssetModel({
+      lastAuditDateAccess: "available",
       userId: "user-1",
       assetIds: ["asset-1", "asset-2", "asset-3"],
       organizationId: "org-1",
@@ -4868,6 +4890,9 @@ describe("bulkUpdateAssetModel", () => {
       // `asset: update` is ADMIN/OWNER-only, so this bulk path declares that
       // the custodian filter needs no narrowing.
       allowedTeamMemberIds: "all",
+      // The caller's access reaches the resolver unchanged, so a select-all
+      // over a last audit date filter works for those allowed to see it.
+      lastAuditDateAccess: "available",
     });
     expect(db.asset.updateMany).toHaveBeenCalledWith({
       where: { id: { in: ["asset-1", "asset-3"] }, organizationId: "org-1" },
@@ -4891,6 +4916,7 @@ describe("bulkUpdateAssetModel", () => {
     ]);
 
     const result = await bulkUpdateAssetModel({
+      lastAuditDateAccess: "hidden",
       userId: "user-1",
       assetIds: ["asset-1", "asset-2", "asset-3"],
       organizationId: "org-1",
@@ -4912,6 +4938,7 @@ describe("bulkUpdateAssetModel", () => {
     ]);
 
     const result = await bulkUpdateAssetModel({
+      lastAuditDateAccess: "hidden",
       userId: "user-1",
       assetIds: ["asset-1", "asset-2"],
       organizationId: "org-1",
@@ -4945,6 +4972,7 @@ describe("bulkUpdateAssetModel", () => {
     // Removing a model from assets that can never have had one is a no-op,
     // not a rule violation. Only the LINK direction rejects.
     const result = await bulkUpdateAssetModel({
+      lastAuditDateAccess: "hidden",
       userId: "user-1",
       assetIds: ["asset-1"],
       organizationId: "org-1",
@@ -4970,6 +4998,7 @@ describe("bulkUpdateAssetModel", () => {
 
     await expect(
       bulkUpdateAssetModel({
+        lastAuditDateAccess: "hidden",
         userId: "user-1",
         assetIds: ["asset-1"],
         organizationId: "org-1",
@@ -4995,6 +5024,7 @@ describe("bulkUpdateAssetModel", () => {
 
     await expect(
       bulkUpdateAssetModel({
+        lastAuditDateAccess: "hidden",
         userId: "user-1",
         assetIds: ["asset-1"],
         organizationId: "org-1",
@@ -5022,6 +5052,7 @@ describe("bulkUpdateAssetModel", () => {
     db.asset.findMany.mockResolvedValue([]);
 
     const result = await bulkUpdateAssetModel({
+      lastAuditDateAccess: "hidden",
       userId: "user-1",
       assetIds: ["foreign-asset-1", "foreign-asset-2"],
       organizationId: "org-1",
@@ -5038,6 +5069,7 @@ describe("bulkUpdateAssetModel", () => {
     expect.assertions(2);
 
     const result = await bulkUpdateAssetModel({
+      lastAuditDateAccess: "hidden",
       userId: "user-1",
       assetIds: [],
       organizationId: "org-1",
@@ -5088,6 +5120,7 @@ describe("bulkAssignAssetTags", () => {
       });
 
     await bulkAssignAssetTags({
+      lastAuditDateAccess: "hidden",
       userId: "user-1",
       assetIds: ["asset-1", "asset-2"],
       organizationId: "org-1",
@@ -5124,6 +5157,7 @@ describe("bulkAssignAssetTags", () => {
 
     await expect(
       bulkAssignAssetTags({
+        lastAuditDateAccess: "hidden",
         userId: "user-1",
         assetIds: ["asset-1"],
         organizationId: "org-1",
@@ -5149,6 +5183,7 @@ describe("bulkAssignAssetTags", () => {
     });
 
     await bulkAssignAssetTags({
+      lastAuditDateAccess: "hidden",
       userId: "user-1",
       assetIds: ["asset-1"],
       organizationId: "org-1",
@@ -5178,6 +5213,7 @@ describe("bulkDeleteAssets", () => {
     ]);
 
     await bulkDeleteAssets({
+      lastAuditDateAccess: "hidden",
       assetIds: ["asset-1", "asset-2"],
       confirmation: "2",
       organizationId: "org-1",
@@ -5212,6 +5248,7 @@ describe("bulkDeleteAssets", () => {
     db.asset.findMany.mockResolvedValue([]);
 
     await bulkDeleteAssets({
+      lastAuditDateAccess: "hidden",
       assetIds: [],
       confirmation: "0",
       organizationId: "org-1",
@@ -5231,6 +5268,7 @@ describe("bulkDeleteAssets", () => {
     db.asset.findMany.mockResolvedValue([{ id: "asset-1", mainImage: null }]);
 
     await bulkDeleteAssets({
+      lastAuditDateAccess: "hidden",
       assetIds: ["asset-1"],
       confirmation: "1",
       organizationId: "org-1",
@@ -5261,6 +5299,7 @@ describe("custody SELF_SERVICE self-restriction (bulk services)", () => {
 
     await expect(
       bulkCheckOutAssets({
+        lastAuditDateAccess: "hidden",
         allowedTeamMemberIds: "all" as const,
         userId: "me",
         custodyAssign: "self",
@@ -5341,6 +5380,7 @@ describe("bulkCheckOutAssets — status guard gates the batch", () => {
 
     await expect(
       bulkCheckOutAssets({
+        lastAuditDateAccess: "hidden",
         allowedTeamMemberIds: "all" as const,
         userId: "user-current",
         assetIds: ["asset-1", "asset-2"],
@@ -5360,6 +5400,7 @@ describe("bulkCheckOutAssets — status guard gates the batch", () => {
     // is the client's cue to refresh, not a server fault. `shouldBeCaptured`
     // is false for the same reason — this must not page anyone.
     const caught = await bulkCheckOutAssets({
+      lastAuditDateAccess: "hidden",
       allowedTeamMemberIds: "all" as const,
       userId: "user-current",
       assetIds: ["asset-1", "asset-2"],
@@ -5382,6 +5423,7 @@ describe("bulkCheckOutAssets — status guard gates the batch", () => {
     // Downstream note/event stubs may be incomplete; all this asserts is that
     // the gate itself did not fire and custody insertion was reached.
     await bulkCheckOutAssets({
+      lastAuditDateAccess: "hidden",
       allowedTeamMemberIds: "all" as const,
       userId: "user-current",
       assetIds: ["asset-1", "asset-2"],
@@ -6604,6 +6646,7 @@ describe("bulkArchiveAssets", () => {
     mockUpdateMany.mockResolvedValue({ count: 2 });
 
     const result = await bulkArchiveAssets({
+      lastAuditDateAccess: "hidden",
       organizationId: "org-1",
       assetIds: ["a1", "a2", "a3"],
       settings: {} as never,
@@ -6651,6 +6694,7 @@ describe("bulkArchiveAssets", () => {
     mockUpdateMany.mockResolvedValue({ count: 1 });
 
     const result = await bulkArchiveAssets({
+      lastAuditDateAccess: "hidden",
       organizationId: "org-1",
       assetIds: ["a1", "a2"],
       settings: {} as never,
@@ -6677,6 +6721,7 @@ describe("bulkArchiveAssets", () => {
     mockUpdateMany.mockResolvedValue({ count: 0 });
 
     const result = await bulkArchiveAssets({
+      lastAuditDateAccess: "hidden",
       organizationId: "org-1",
       assetIds: ["a1"],
       settings: {} as never,
@@ -6696,6 +6741,7 @@ describe("bulkArchiveAssets", () => {
     mockFindMany.mockResolvedValue([]);
 
     const result = await bulkArchiveAssets({
+      lastAuditDateAccess: "hidden",
       organizationId: "org-1",
       assetIds: ["a1", "a2"],
       settings: {} as never,
@@ -6725,6 +6771,7 @@ describe("bulkUnarchiveAssets", () => {
     mockUpdateMany.mockResolvedValue({ count: 2 });
 
     const result = await bulkUnarchiveAssets({
+      lastAuditDateAccess: "hidden",
       organizationId: "org-1",
       assetIds: ["a1", "a2"],
       settings: {} as never,
@@ -6749,6 +6796,7 @@ describe("bulkUnarchiveAssets", () => {
     mockUpdateMany.mockResolvedValue({ count: 1 });
 
     const result = await bulkUnarchiveAssets({
+      lastAuditDateAccess: "hidden",
       organizationId: "org-1",
       assetIds: ["a1", "a2"],
       settings: {} as never,
@@ -6775,6 +6823,7 @@ describe("bulkUnarchiveAssets", () => {
     mockUpdateMany.mockResolvedValue({ count: 1 });
 
     await bulkUnarchiveAssets({
+      lastAuditDateAccess: "hidden",
       organizationId: "org-1",
       assetIds: ["a1"],
       settings: {} as never,
@@ -6799,6 +6848,7 @@ describe("bulkUnarchiveAssets", () => {
       .mockResolvedValueOnce([]);
 
     const result = await bulkUnarchiveAssets({
+      lastAuditDateAccess: "hidden",
       organizationId: "org-1",
       assetIds: ["a1"],
       settings: {} as never,
@@ -6878,6 +6928,7 @@ describe("availability writes on archived assets (issue #382)", () => {
 
   it("skips assets archived after the bulk check", async () => {
     await bulkMarkAvailability({
+      lastAuditDateAccess: "hidden",
       organizationId: "org-1",
       assetIds: ["a1", "a2"],
       type: "unavailable",
@@ -6921,6 +6972,7 @@ describe("bulk archive / reinstate — upstream errors", () => {
           organizationId: "org-1",
           assetIds: ["a1"],
           settings: {} as never,
+          lastAuditDateAccess: "hidden",
         })
       ).rejects.toMatchObject({
         message: "That filter can't be applied.",
@@ -7283,6 +7335,7 @@ describe("bulk custody paths — kit-derived custody guard", () => {
     // the guard below can see it, and by then the evidence is gone — nothing
     // downstream can tell the two cases apart.
     await bulkCheckInAssets({
+      lastAuditDateAccess: "hidden",
       userId: "user-1",
       custodyAssign: "anyone",
       assetIds: ["asset-1", "asset-2"],
@@ -7303,6 +7356,7 @@ describe("bulk custody paths — kit-derived custody guard", () => {
 
     await expect(
       bulkCheckInAssets({
+        lastAuditDateAccess: "hidden",
         userId: "user-1",
         custodyAssign: "anyone",
         assetIds: ["asset-1", "asset-2"],
@@ -7342,6 +7396,7 @@ describe("bulk custody paths — kit-derived custody guard", () => {
     });
 
     await bulkCheckOutAssets({
+      lastAuditDateAccess: "hidden",
       allowedTeamMemberIds: "all" as const,
       userId: "user-1",
       assetIds: ["asset-1"],
@@ -7419,6 +7474,7 @@ describe("bulkUpdateAssetLocation — location activity notes", () => {
     );
 
     await bulkUpdateAssetLocation({
+      lastAuditDateAccess: "hidden",
       userId: "user-1",
       assetIds: ["asset-individual", "asset-qty"],
       organizationId: "org-1",
@@ -7435,5 +7491,88 @@ describe("bulkUpdateAssetLocation — location activity notes", () => {
       expect(content).toContain("asset-individual");
       expect(content).not.toContain("asset-qty");
     }
+  });
+});
+
+describe("getAdvancedPaginatedAndFilterableAssets - lastAuditDate gating", () => {
+  // why: the advanced index runs as one raw query; capturing the SQL it sends
+  // is the only way to prove which parts reach the database without a real DB.
+  const queryRawMock = vi.mocked(db.$queryRaw);
+
+  const columns = (visible: boolean) => [
+    { name: "lastAuditDate", visible, position: 0 },
+  ];
+
+  const settingsWith = (visible: boolean): AssetIndexSettings => ({
+    ...ASSET_INDEX_SETTINGS,
+    mode: "ADVANCED",
+    columns: columns(visible),
+  });
+
+  const auditFilter: Filter = {
+    name: "lastAuditDate",
+    type: "date",
+    operator: "before",
+    value: "2026-01-01",
+  };
+
+  /** Runs the loader function and returns the SQL text it sent to the db. */
+  async function runAndCaptureSql(
+    args: Partial<Parameters<typeof getAdvancedPaginatedAndFilterableAssets>[0]>
+  ) {
+    await getAdvancedPaginatedAndFilterableAssets({
+      request: new Request("http://localhost/assets"),
+      organizationId: "org-1",
+      settings: settingsWith(true),
+      filters: "sortBy=lastAuditDate%3Aasc",
+      preParsedFilters: [auditFilter],
+      ...args,
+    });
+    const query = queryRawMock.mock.calls[0][0] as unknown as {
+      strings: string[];
+    };
+    return query.strings.join("?");
+  }
+
+  beforeEach(() => {
+    queryRawMock
+      .mockReset()
+      .mockResolvedValue([{ total_count: 0, assets: [] }]);
+  });
+
+  it("drops lastAuditDate filter and sort when hidden", async () => {
+    const sql = await runAndCaptureSql({ lastAuditDateAccess: "hidden" });
+    expect(sql).not.toContain('"completedAt"');
+  });
+
+  it("drops lastAuditDate filter and sort when locked", async () => {
+    const sql = await runAndCaptureSql({ lastAuditDateAccess: "locked" });
+    expect(sql).not.toContain('"completedAt"');
+  });
+
+  it("queries lastAuditDate when available and visible", async () => {
+    const sql = await runAndCaptureSql({ lastAuditDateAccess: "available" });
+    expect(sql).toContain('"completedAt"');
+  });
+
+  it("skips the projection when the column is hidden in settings", async () => {
+    const sql = await runAndCaptureSql({
+      lastAuditDateAccess: "available",
+      settings: settingsWith(false),
+      filters: "",
+      preParsedFilters: [],
+    });
+    expect(sql).not.toContain('"completedAt"');
+  });
+
+  it("computes the date for hidden columns with includeHiddenColumns", async () => {
+    const sql = await runAndCaptureSql({
+      lastAuditDateAccess: "available",
+      settings: settingsWith(false),
+      includeHiddenColumns: true,
+      filters: "",
+      preParsedFilters: [],
+    });
+    expect(sql).toContain('"completedAt"');
   });
 });

@@ -94,6 +94,7 @@ export async function action({ request }: ActionFunctionArgs) {
         assetId,
         userId: user.id,
         organizationId,
+        userAgent: request.headers.get("user-agent"),
       });
 
     return data({

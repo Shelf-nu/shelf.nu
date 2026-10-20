@@ -1,4 +1,5 @@
-import type { Qr, Scan, User, UserOrganization } from "@prisma/client";
+import type { Scan, User, UserOrganization } from "@prisma/client";
+import { ScanCodeType } from "@prisma/client";
 import type { IResult } from "ua-parser-js";
 import parser from "ua-parser-js";
 import { ShelfError } from "~/utils/error";
@@ -78,58 +79,135 @@ export function parseCompanionUserAgent(
 
 function isValidUser(
   userOrganizations: UserOrganization[] | null | undefined,
-  organizationId: string | null | undefined
+  organizationId: string
 ) {
-  if (!userOrganizations || !organizationId) {
+  if (!userOrganizations) {
     return false;
   }
   return userOrganizations.find((uo) => uo?.organizationId === organizationId);
 }
 
 /**
- * A scan row with the relations `parseScanData` needs: the scanning user
- * (with their org memberships, to decide whether to name them) and the QR
- * (for its organization). Named so tests can build fixtures against the real
- * shape instead of casting — a schema change then fails typecheck.
+ * A scan row with the relation `parseScanData` needs: the scanning user, with
+ * their org memberships, to decide whether to name them. Named so tests can
+ * build fixtures against the real shape instead of casting: a schema change
+ * then fails typecheck.
  */
 export type ScanWithRelations = Scan & {
   user: (User & { userOrganizations: UserOrganization[] | null }) | null;
-} & { qr: Qr | null };
+};
 
+/**
+ * The newest scan that carried a location, when it is older than the last
+ * scan (see `getLastScanForTarget`).
+ */
+export type LocatedScan = Pick<Scan, "latitude" | "longitude" | "createdAt">;
+
+/**
+ * Identifies the person who made a scan, for a reader in the scan's
+ * workspace.
+ *
+ * Only a member of the workspace the code resolved in is named. Anyone else,
+ * and an anonymous scan, is "Unknown" with no email, so a reader never sees
+ * the name or email of someone outside their workspace.
+ *
+ * @param user - The scanning user with their memberships, or null
+ * @param organizationId - The workspace the scan belongs to
+ * @returns The scanner's name and email, or "Unknown" and null
+ */
+export function identifyScanner(
+  user: ScanWithRelations["user"],
+  organizationId: string
+): { name: string; email: string | null } {
+  return user && isValidUser(user.userOrganizations, organizationId)
+    ? { name: resolveUserDisplayName(user), email: user.email }
+    : { name: "Unknown", email: null };
+}
+
+/**
+ * Names the person who made a scan in one line, by the rule in
+ * {@link identifyScanner}.
+ *
+ * @param user - The scanning user with their memberships, or null
+ * @param organizationId - The workspace the scan belongs to
+ * @returns `Name (email)` or "Unknown"
+ */
+export function describeScanner(
+  user: ScanWithRelations["user"],
+  organizationId: string
+): string {
+  const { name, email } = identifyScanner(user, organizationId);
+  return email ? `${name} (${email})` : name;
+}
+
+/**
+ * Parses a scan's user agent: the companion app's own format first, any
+ * other agent through ua-parser-js.
+ *
+ * @param userAgent - The stored user agent, or null
+ * @returns The parsed device, browser and OS
+ */
+export function parseScanUserAgent(userAgent: string | null): IResult {
+  return parseCompanionUserAgent(userAgent) ?? parser(userAgent || "");
+}
+
+/**
+ * Shapes a scan row for the "Last scan" card.
+ *
+ * The card reports the last scan. Its location is the last scan's own when it
+ * has one, otherwise the newest earlier located scan's, and `locatedAt` then
+ * says when that location was recorded.
+ *
+ * @param args.scan - The scan with its relations, or null when never scanned
+ * @param args.locatedScan - The newest located scan, when the last scan has no
+ *   location of its own
+ * @param args.userId - The viewer
+ * @returns The card payload, or null when there is no scan
+ * @throws {ShelfError} If the row cannot be parsed
+ */
 export function parseScanData({
   scan,
+  locatedScan = null,
   userId,
 }: {
   scan: ScanWithRelations | null;
+  locatedScan?: LocatedScan | null;
   userId: string;
 }) {
   try {
     /**
      * A few things we need to do to prepare the data for the client
-     * 1. Coordinates - if they are null, we don't render the map, print unknown location
+     * 1. Coordinates - with no location on this scan or an earlier one, we don't render the map, print unknown location
      * 2. User - Scanned by: You || Unknown
      */
     if (scan) {
-      let scannedBy = scan.userId === userId ? "You" : "Unknown";
-      const user = scan?.user;
-      scannedBy =
-        user && isValidUser(user?.userOrganizations, scan?.qr?.organizationId)
-          ? `${resolveUserDisplayName(user)}(${user.email})`
-          : "Unknown";
+      const user = scan.user;
+      // The scanner is named only when they belong to the workspace the code
+      // resolved in.
+      const scannedBy = describeScanner(user, scan.organizationId);
+      const hasOwnLocation = Boolean(scan.latitude && scan.longitude);
+      const location = hasOwnLocation ? scan : locatedScan;
       const coordinates =
-        scan.latitude && scan.longitude
-          ? `${scan.latitude}, ${scan.longitude}`
+        location?.latitude && location.longitude
+          ? `${location.latitude}, ${location.longitude}`
           : "Unknown location";
+      // When the location comes from an earlier scan, the card says when.
+      const locatedAt =
+        !hasOwnLocation && locatedScan ? locatedScan.createdAt : null;
 
-      const ua =
-        parseCompanionUserAgent(scan.userAgent) ?? parser(scan.userAgent || "");
+      const ua = parseScanUserAgent(scan.userAgent);
 
       return {
         scannedBy,
         coordinates,
+        locatedAt,
         dateTime: scan.createdAt,
         ua,
         manuallyGenerated: scan.manuallyGenerated,
+        codeType: scan.codeType,
+        // The scanned value, shown for a barcode or SAM ID so the card says
+        // which label was scanned. A QR id means nothing to a reader.
+        code: scan.codeType === ScanCodeType.QR ? null : scan.code,
       };
     }
 

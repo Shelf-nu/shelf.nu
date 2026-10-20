@@ -28,6 +28,7 @@ import { useAssetIndexView } from "~/hooks/use-asset-index-view";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
 import { useKeyboardReorder } from "~/hooks/use-keyboard-reorder";
+import { filterQueryableColumns } from "~/modules/asset/last-audit-date-access";
 import {
   parseColumnName,
   type Column,
@@ -45,6 +46,7 @@ import {
   getDefaultValueForFieldType,
   getUIFieldType,
   useInitialFilters,
+  valueForOperatorChange,
 } from "./advanced-filters/helpers";
 import {
   operatorsPerType,
@@ -106,9 +108,16 @@ const getTriggerClasses = (
 // react-doctor:no-giant-component — deferred for follow-up refactor
 function AdvancedFilter() {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
-  const { settings, customFields } = useLoaderData<AssetIndexLoaderData>();
+  const { settings, customFields, lastAuditDateAccess } =
+    useLoaderData<AssetIndexLoaderData>();
 
   const columns = settings.columns as Column[];
+  // Filtering by the last audit date needs queryable audits; a locked workspace
+  // sees the column but is not offered a filter on it, nor a restored chip.
+  const filterableColumns = filterQueryableColumns(
+    columns,
+    lastAuditDateAccess ?? "hidden"
+  );
   // Acting user's resolved pref timezone — seeds new date filters with the
   // user's local "today" rather than the server/UTC day (avoids off-by-one).
   const { timeZone } = useFormatPrefs();
@@ -117,13 +126,17 @@ function AdvancedFilter() {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [filters, setFilters] = useState<Filter[]>([]);
-  const initialFilters = useInitialFilters(columns);
+  const initialFilters = useInitialFilters(filterableColumns);
   const [hasUnappliedChanges, setHasUnappliedChanges] = useState(false);
 
   // Track if we're applying filters internally to avoid resetting state
   const isApplyingInternally = useRef(false);
 
-  const availableColumns = getAvailableColumns(columns, filters, "filter");
+  const availableColumns = getAvailableColumns(
+    filterableColumns,
+    filters,
+    "filter"
+  );
 
   // "Low stock" quick filter: a standalone `lowStockOnly` URL param
   // (QUANTITY_TRACKED assets at/below their reorder threshold). Surfaced INSIDE
@@ -387,7 +400,18 @@ function AdvancedFilter() {
                                 setFilter={(operator) => {
                                   setFilters((prev) => {
                                     const newFilters = [...prev];
-                                    newFilters[index].operator = operator;
+                                    const previous = newFilters[index];
+                                    newFilters[index] = {
+                                      ...previous,
+                                      operator,
+                                      value: valueForOperatorChange({
+                                        filter: previous,
+                                        operator,
+                                        columns: filterableColumns,
+                                        customFields,
+                                        timeZone,
+                                      }),
+                                    };
                                     return newFilters;
                                   });
                                   setHasUnappliedChanges(true);
@@ -537,6 +561,9 @@ function AdvancedSorting() {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const [sorts, setSorts] = useState<Sort[]>([]);
   const [searchParams, setSearchParams] = useSearchParams();
+  const { lastAuditDateAccess } = useLoaderData<AssetIndexLoaderData>();
+  // A sort on the last audit date the server ignores must not show as active.
+  const sortAccess = lastAuditDateAccess ?? "hidden";
 
   const disabled = useDisabled();
 
@@ -577,19 +604,25 @@ function AdvancedSorting() {
       return;
     }
 
-    const parsedSorts = searchParams.getAll("sortBy").map((s) => {
-      const [name, direction, cfType] = s.split(":");
-      return { name, direction, cfType } as Sort;
-    });
+    const parsedSorts = filterQueryableColumns(
+      searchParams.getAll("sortBy").map((s) => {
+        const [name, direction, cfType] = s.split(":");
+        return { name, direction, cfType } as Sort;
+      }),
+      sortAccess
+    );
     setSorts(parsedSorts);
     lastSyncedUrlSorts.current = currentUrlSorts;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [relevantSearchParamsString]);
 
-  const initialSorts = searchParams.getAll("sortBy").map((s) => {
-    const [name, direction, cfType] = s.split(":");
-    return { name, direction, cfType } as Sort;
-  });
+  const initialSorts = filterQueryableColumns(
+    searchParams.getAll("sortBy").map((s) => {
+      const [name, direction, cfType] = s.split(":");
+      return { name, direction, cfType } as Sort;
+    }),
+    sortAccess
+  );
 
   const haveSortsChanged =
     JSON.stringify(initialSorts) !== JSON.stringify(sorts);
@@ -828,8 +861,16 @@ function PickAColumnToSortBy({
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
-  const { settings } = useLoaderData<AssetIndexLoaderData>();
-  const columns = settings.columns as Column[];
+  const { settings, lastAuditDateAccess } =
+    useLoaderData<AssetIndexLoaderData>();
+  const columns = useMemo(
+    () =>
+      filterQueryableColumns(
+        settings.columns as Column[],
+        lastAuditDateAccess ?? "hidden"
+      ),
+    [settings.columns, lastAuditDateAccess]
+  );
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   const availableColumns = useMemo(

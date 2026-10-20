@@ -17,6 +17,7 @@ import {
   Platform,
   ActionSheetIOS,
   Modal,
+  type AccessibilityActionEvent,
   type LayoutChangeEvent,
 } from "react-native";
 import * as Haptics from "expo-haptics";
@@ -76,9 +77,11 @@ import { announce } from "@/lib/a11y";
 import { submitFromSheet } from "@/lib/sheet-submit";
 import { maybeAskForReview } from "@/lib/review-prompt";
 import { canOfferQuickCheckout } from "@/lib/booking-quick-actions";
+import { buildExtendPayload, canOfferExtend } from "@/lib/booking-extend";
 import { BOOKING_METHOD } from "@/lib/booking-method";
 import { CheckoutSourceSheet } from "@/components/checkout-source-sheet";
 import ConfirmDeleteSheet from "@/components/confirm-delete-sheet";
+import { ExtendBookingSheet } from "@/components/bookings/extend-booking-sheet";
 import { questionsForCheckouts } from "@/lib/custody-source-options";
 import {
   hasAssetsLeftToCheckOut,
@@ -106,6 +109,10 @@ import {
   type SelectionCounts,
 } from "@/lib/booking-kit-rows";
 import { filterBookingAssets } from "@/lib/booking-search";
+import {
+  bookingQuantityCap,
+  canEditBookedQuantity,
+} from "@/lib/booking-quantity";
 
 /**
  * Segment colours for the booking lifecycle progress bar. Fixed hues matched to
@@ -150,7 +157,7 @@ function BookingDetailScreen({ id }: { id: string }) {
   const { user } = useAuth();
   const { colors, statusBadge, bookingStatusBadge } = useTheme();
   const styles = useStyles();
-  const { formatDateTime } = useDateFormatter();
+  const { formatDateTime, prefs } = useDateFormatter();
 
   const [booking, setBooking] = useState<BookingDetail | null>(null);
   const [checkedInAssetIds, setCheckedInAssetIds] = useState<string[]>([]);
@@ -187,7 +194,7 @@ function BookingDetailScreen({ id }: { id: string }) {
     questions: CheckoutSourceQuestion[];
     onConfirm: (sourceLocations: Record<string, string | null>) => void;
   } | null>(null);
-  // Per-booking lifecycle-action availability (cancel/archive/duplicate/delete),
+  // Per-booking lifecycle-action availability (extend/cancel/archive/duplicate/delete),
   // computed server-side mirroring the web ActionsDropdown gating.
   const [bookingActions, setBookingActions] = useState<
     BookingDetailResponse["bookingActions"]
@@ -201,6 +208,14 @@ function BookingDetailScreen({ id }: { id: string }) {
   const [showActionsMenu, setShowActionsMenu] = useState(false);
   // The typed-name delete confirmation (see ConfirmDeleteSheet).
   const [showDeleteSheet, setShowDeleteSheet] = useState(false);
+  // The new-end picker (see ExtendBookingSheet).
+  const [showExtendSheet, setShowExtendSheet] = useState(false);
+  // One Date per stored end: the sheet hands it to the native picker as its
+  // floor, and a fresh object on every render would re-key that picker.
+  const bookingEnd = useMemo(
+    () => (booking?.to ? new Date(booking.to) : null),
+    [booking?.to]
+  );
 
   /**
    * The member's access; booking item rules below read
@@ -211,6 +226,18 @@ function BookingDetailScreen({ id }: { id: string }) {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isActioning, setIsActioning] = useState(false);
+  /**
+   * The quantity-tracked row whose booked quantity is being changed (null =
+   * sheet closed). `max` is what the booking's window still has free with this
+   * booking excluded — the same cap the web "Adjust quantity" dialog uses.
+   */
+  const [qtyEdit, setQtyEdit] = useState<{
+    assetId: string;
+    title: string;
+    current: number;
+    max: number;
+    unitOfMeasure: string | null;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // The asset ids picked in the current selection mode. A kit enters as the
@@ -807,7 +834,7 @@ function BookingDetailScreen({ id }: { id: string }) {
     );
   };
 
-  // ── Lifecycle actions (cancel / archive / delete / duplicate) ──────────
+  // ── Lifecycle actions (extend / cancel / archive / delete / duplicate) ──
   // Each is permission/status-gated server-side AND only offered when the
   // detail endpoint's `bookingActions` flag says this role/status may use it.
 
@@ -900,6 +927,34 @@ function BookingDetailScreen({ id }: { id: string }) {
     router.back();
   };
 
+  /**
+   * Sends the end picked in the extend sheet. The wall clock travels with the
+   * preference zone the sheet's picker edits in, as on the booking forms.
+   *
+   * @param newEnd - The end the user confirmed
+   * @returns The server's refusal, or `null` once the booking is extended
+   */
+  const performExtend = async (newEnd: Date): Promise<string | null> => {
+    if (!booking || !currentOrg) return "Please try again.";
+    const { data, error: err } = await api.extendBooking(
+      currentOrg.id,
+      buildExtendPayload(booking.id, newEnd, prefs.timeZone)
+    );
+    if (err || !data) return err || "Please try again.";
+    setShowExtendSheet(false);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    // Mutation changed this booking: force the list to refetch.
+    markBookingsListDirty();
+    Alert.alert(
+      "Booking extended",
+      `"${booking.name}" now ends ${formatDateTime(
+        new Date(data.booking.to)
+      )}.`,
+      [{ text: "OK", onPress: () => fetchBooking() }]
+    );
+    return null;
+  };
+
   const handleDuplicate = () => {
     if (!booking || !currentOrg) return;
     Alert.alert(
@@ -936,7 +991,7 @@ function BookingDetailScreen({ id }: { id: string }) {
   };
 
   // Build the available lifecycle actions for the overflow menu. Order: the
-  // non-destructive Duplicate first, destructive ones last.
+  // non-destructive Extend and Duplicate first, destructive ones last.
   const lifecycleActions: {
     key: string;
     label: string;
@@ -944,6 +999,14 @@ function BookingDetailScreen({ id }: { id: string }) {
     destructive: boolean;
     onPress: () => void;
   }[] = [];
+  if (canOfferExtend(bookingActions))
+    lifecycleActions.push({
+      key: "extend",
+      label: "Extend booking",
+      icon: "time-outline",
+      destructive: false,
+      onPress: () => setShowExtendSheet(true),
+    });
   if (bookingActions.canDuplicate)
     lifecycleActions.push({
       key: "duplicate",
@@ -1010,6 +1073,61 @@ function BookingDetailScreen({ id }: { id: string }) {
       return next;
     });
   }, []);
+
+  /**
+   * Open the booked-quantity sheet for a quantity-tracked row. Asks the
+   * server for the cap first so the sheet never offers more than the booking
+   * may take; the current amount is the fallback when that read fails.
+   */
+  const openQtyEdit = useCallback(
+    async (item: BookingAsset) => {
+      if (!booking || !currentOrg) return;
+      const current = item.quantity ?? 1;
+      const { data } = await api.bookingAssetAvailability(
+        currentOrg.id,
+        booking.id,
+        [item.id]
+      );
+      const facts = data?.availability?.[0];
+      setQtyEdit({
+        assetId: item.id,
+        title: item.title,
+        current,
+        max: Math.max(
+          1,
+          bookingQuantityCap({
+            available: facts?.bookable,
+            booked: current,
+            pool: current,
+          })
+        ),
+        unitOfMeasure: item.unitOfMeasure ?? null,
+      });
+    },
+    [booking, currentOrg]
+  );
+
+  const handleQtyEditSubmit = async (quantity: number) => {
+    if (!qtyEdit || !booking || !currentOrg) return;
+    const target = qtyEdit;
+    setQtyEdit(null);
+    if (quantity === target.current) return;
+    setIsActioning(true);
+    const { error: err } = await api.adjustBookingAssetQuantity(
+      currentOrg.id,
+      booking.id,
+      target.assetId,
+      quantity
+    );
+    setIsActioning(false);
+    if (err) {
+      Alert.alert("Couldn't change quantity", err);
+      return;
+    }
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    markBookingsListDirty();
+    fetchBooking();
+  };
 
   /**
    * The whole booking as rows: one header per kit, its members beneath when
@@ -1125,6 +1243,19 @@ function BookingDetailScreen({ id }: { id: string }) {
     [rows, selectedAssetIds, selectMode, checkedInAssetIds]
   );
 
+  /**
+   * Whether the server lets the caller write this booking: any booking with
+   * `bookings.writeAll`, otherwise only one they created or hold. Mirrors the
+   * server's `canWriteBooking` (creator OR custodian), which is wider than the
+   * custodian-only rule the add-items endpoints apply.
+   */
+  const mayWriteThisBooking =
+    !!booking &&
+    (access.bookings.writeAll ||
+      (!!user?.id &&
+        (booking.creator.id === user.id ||
+          booking.custodianUser?.id === user.id)));
+
   const renderAsset = useCallback(
     (item: BookingAsset, inKit: boolean) => {
       const fallbackBadge = {
@@ -1167,6 +1298,17 @@ function BookingDetailScreen({ id }: { id: string }) {
       const selectable =
         !inKit && isBookingAssetSelectable(item, selectMode, checkedInAssetIds);
 
+      // Web parity: the booked amount of a standalone quantity-tracked slice
+      // that has not gone out can be changed under the same rule that lets
+      // items be added. See `canEditBookedQuantity` for the row rules.
+      const canEditQuantity =
+        canEditBookedQuantity(item) &&
+        !selectMode &&
+        !inKit &&
+        !!booking &&
+        mayWriteThisBooking &&
+        canAddItemsToBooking(access, booking.status, currentOrg?.roles);
+
       return (
         <TouchableOpacity
           style={[
@@ -1190,11 +1332,28 @@ function BookingDetailScreen({ id }: { id: string }) {
           accessibilityLabel={`${item.title}${
             item.location ? `, at ${item.location.name}` : ""
           }${describeSliceSourcesForA11y(item)}, ${stateLabel}${
-            isCheckedIn ? ", checked in" : ""
-          }${isSelected ? ", selected" : ""}${
-            selectable ? ". Tap to select" : ""
-          }`}
+            item.type === "QUANTITY_TRACKED" && item.quantity != null
+              ? `, ${item.quantity} ${item.unitOfMeasure || "units"} booked`
+              : ""
+          }${isCheckedIn ? ", checked in" : ""}${
+            isSelected ? ", selected" : ""
+          }${selectable ? ". Tap to select" : ""}`}
           accessibilityRole="button"
+          // The card is one accessibility element, so the nested "change
+          // quantity" button below is unreachable by a screen reader; expose
+          // it as a custom action on the card instead.
+          {...(canEditQuantity
+            ? {
+                accessibilityActions: [
+                  { name: "changeQuantity", label: "Change booked quantity" },
+                ],
+                onAccessibilityAction: (event: AccessibilityActionEvent) => {
+                  if (event.nativeEvent.actionName === "changeQuantity") {
+                    void openQtyEdit(item);
+                  }
+                },
+              }
+            : {})}
         >
           {selectable && (
             <View
@@ -1258,11 +1417,30 @@ function BookingDetailScreen({ id }: { id: string }) {
             ) : (
               <>
                 {item.type === "QUANTITY_TRACKED" && (
-                  <QuantityBadge
-                    value={item.quantity}
-                    unitOfMeasure={item.unitOfMeasure}
-                    label="booked"
-                  />
+                  <View style={styles.qtyRow}>
+                    <QuantityBadge
+                      value={item.quantity}
+                      unitOfMeasure={item.unitOfMeasure}
+                      label="booked"
+                    />
+                    {canEditQuantity ? (
+                      <TouchableOpacity
+                        testID={`adjust-booked-quantity-${item.id}`}
+                        onPress={() => void openQtyEdit(item)}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Change booked quantity of ${
+                          item.title
+                        }, currently ${item.quantity ?? 0}`}
+                      >
+                        <Ionicons
+                          name="create-outline"
+                          size={16}
+                          color={colors.primary}
+                        />
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
                 )}
                 {/* Where a checked-out pool's units left from, as the web
                     booking row shows it. Only a pool kept at two or more
@@ -1325,6 +1503,10 @@ function BookingDetailScreen({ id }: { id: string }) {
       statusBadge,
       bookingStatusBadge,
       booking?.status,
+      access,
+      currentOrg?.roles,
+      mayWriteThisBooking,
+      openQtyEdit,
       styles,
     ]
   );
@@ -1526,9 +1708,6 @@ function BookingDetailScreen({ id }: { id: string }) {
     hasUnitsLeftToCheckOut &&
     ["RESERVED", "ONGOING", "OVERDUE"].includes(booking.status);
 
-  /** Whether the server scopes this member's booking writes to their own bookings. */
-  const isRestrictedToOwnBookings = !access.bookings.writeAll;
-
   /**
    * Whether to offer the progressive check-out affordances (scan and select).
    *
@@ -1545,10 +1724,7 @@ function BookingDetailScreen({ id }: { id: string }) {
       entity: "booking",
       action: "checkout",
     }) &&
-    (!isRestrictedToOwnBookings ||
-      (!!user?.id &&
-        (booking.creator.id === user.id ||
-          booking.custodianUser?.id === user.id)));
+    mayWriteThisBooking;
 
   /**
    * Whether the server accepts this member changing this booking's items. A
@@ -1915,7 +2091,7 @@ function BookingDetailScreen({ id }: { id: string }) {
               </View>
             )}
 
-            {/* More lifecycle actions (duplicate / archive / cancel / delete).
+            {/* More lifecycle actions (extend / duplicate / archive / cancel / delete).
                 Shows for ANY status — including closed ones (Archive on
                 COMPLETE, Duplicate always) — gated by server-computed flags. */}
             {lifecycleActions.length > 0 && (
@@ -2528,6 +2704,24 @@ function BookingDetailScreen({ id }: { id: string }) {
         </TouchableOpacity>
       </Modal>
 
+      {/* Booked-quantity editor for one quantity-tracked row */}
+      {qtyEdit && (
+        <QuantityInputSheet
+          key={qtyEdit.assetId}
+          visible
+          title="Change booked quantity"
+          subtitle={`${qtyEdit.title} · ${qtyEdit.max} ${
+            qtyEdit.unitOfMeasure || "units"
+          } available`}
+          max={qtyEdit.max}
+          defaultValue={qtyEdit.current}
+          unitOfMeasure={qtyEdit.unitOfMeasure}
+          confirmLabel="Save"
+          onSubmit={(quantity) => void handleQtyEditSubmit(quantity)}
+          onClose={() => setQtyEdit(null)}
+        />
+      )}
+
       {/* Check-out quantity picker: walks the selected QT assets one at a
           time, defaulting to "all remaining" so one tap takes the whole line.
           Hidden (not cleared) while the source sheet is open, since two page
@@ -2626,6 +2820,17 @@ function BookingDetailScreen({ id }: { id: string }) {
           isDeleting={isActioning}
           onConfirm={(confirmation) => void performDelete(confirmation)}
           onClose={() => setShowDeleteSheet(false)}
+        />
+      )}
+      {booking && bookingEnd && (
+        <ExtendBookingSheet
+          visible={showExtendSheet}
+          bookingName={booking.name}
+          currentEnd={bookingEnd}
+          timeZone={prefs.timeZone}
+          formatDateTime={formatDateTime}
+          onClose={() => setShowExtendSheet(false)}
+          onExtend={performExtend}
         />
       )}
       <CheckoutSourceSheet
@@ -3122,6 +3327,11 @@ const useStyles = createStyles((colors, shadows) => ({
     fontSize: fontSize.base,
     fontWeight: "600",
     color: colors.foreground,
+  },
+  qtyRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
   },
   assetKit: {
     fontSize: fontSize.xs,

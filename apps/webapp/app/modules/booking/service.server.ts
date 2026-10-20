@@ -227,6 +227,11 @@ import {
   sendCheckinReminder,
 } from "./email-helpers";
 import {
+  getAssetsStillOutForExtend,
+  getKitMembershipIdsStillOut,
+  isExtendableStatus,
+} from "./extend-eligibility";
+import {
   buildAddToActiveBookingBlockerWhere,
   hasAssetBookingConflicts,
   isBookingArchivable,
@@ -611,12 +616,26 @@ export function getSystemActionText(
   }
 }
 
+/**
+ * Schedules a booking's next lifecycle job and stores its id as the booking's
+ * `activeSchedulerReference`.
+ *
+ * @param params.data - The job payload; `data.id` is the booking
+ * @param params.when - When the job fires
+ * @param params.expected - The booking state this job was planned for. When
+ *   given, the reference is stored only while the booking still has this end
+ *   and this reference; otherwise a concurrent write has planned its own job,
+ *   so the new one is cancelled and the booking left as it is.
+ * @throws {ShelfError} When the job cannot be sent or stored
+ */
 export async function scheduleNextBookingJob({
   data,
   when,
+  expected,
 }: {
   data: SchedulerData;
   when: Date;
+  expected?: { to: Date; activeSchedulerReference: string | null };
 }) {
   try {
     const id = await scheduler.sendAfter(
@@ -625,6 +644,21 @@ export async function scheduleNextBookingJob({
       {},
       when
     );
+    if (expected) {
+      const { count } = await db.booking.updateMany({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: internal scheduler bookkeeping; data.id always comes from a booking already org-validated by the caller and SchedulerData carries no organizationId; this only writes activeSchedulerReference, not a data read
+        where: {
+          id: data.id,
+          to: expected.to,
+          activeSchedulerReference: expected.activeSchedulerReference,
+        },
+        data: { activeSchedulerReference: id },
+      });
+      if (count === 0) {
+        await cancelScheduler({ id: data.id, activeSchedulerReference: id });
+      }
+      return;
+    }
     await db.booking.update({
       // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: internal scheduler bookkeeping; data.id always comes from a booking already org-validated by every caller (e.g. checkoutBooking L1265, reserveBooking L1020) and SchedulerData carries no organizationId; this only writes activeSchedulerReference, not a data read
       where: { id: data.id },
@@ -12608,6 +12642,9 @@ export async function revertBookingToDraft({
  * @returns The updated booking
  * @throws {ShelfError} 403 when the caller lacks `booking:extend` or does not
  *   own the booking
+ * @throws {ShelfError} 400 when `newEndDate` is not after the booking's end,
+ *   or when the booking changed between the read and the write (another
+ *   extension landed, or the booking was closed)
  */
 export async function extendBooking({
   id,
@@ -12685,13 +12722,7 @@ export async function extendBooking({
 
     validateBookingOwnership({ booking, userId, access, action: "extend" });
 
-    /** Extending booking is allowed only for these status */
-    const allowedStatus: BookingStatus[] = [
-      BookingStatus.ONGOING,
-      BookingStatus.OVERDUE,
-    ];
-
-    if (!allowedStatus.includes(booking.status)) {
+    if (!isExtendableStatus(booking.status)) {
       throw new ShelfError({
         cause: null,
         label,
@@ -12699,31 +12730,27 @@ export async function extendBooking({
       });
     }
 
-    /** Get assets that have been returned via partial check-in */
-    const checkedInAssetIds = booking.partialCheckins.flatMap(
-      (checkin) => checkin.assetIds
+    // An extension only ever moves the end later; an earlier end is a
+    // different operation.
+    if (newEndDate <= booking.to) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message: "The new end date must be after the current end date.",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
+    /** Assets still out, not returned through partial check-in */
+    const activeAssets = getAssetsStillOutForExtend(
+      booking.bookingAssets.map((ba) => ba.asset),
+      booking.partialCheckins.flatMap((checkin) => checkin.assetIds)
     );
 
-    /** Filter to only assets that are actively checked out (not returned) */
-    const activeAssets = booking.bookingAssets
-      .map((ba) => ba.asset)
-      .filter(
-        (asset) =>
-          (asset.status === AssetStatus.CHECKED_OUT ||
-            asset.status === AssetStatus.IN_CUSTODY) &&
-          !checkedInAssetIds.includes(asset.id)
-      );
-
-    /**
-     * Kit memberships this booking still has out, read from the slice markers.
-     *
-     * A kit is one physical case, so one still out stays exclusive to this
-     * booking through the extension. The markers answer for quantity-tracked
-     * members too, whose asset status only flips to CHECKED_OUT once every unit
-     * booked on the asset has left.
-     */
-    const kitMembershipIdsStillOut = booking.bookingAssets.flatMap((ba) =>
-      ba.assetKitId && ba.checkedOutAt && !ba.checkedInAt ? [ba.assetKitId] : []
+    /** Kit memberships still out, read from the slice markers */
+    const kitMembershipIdsStillOut = getKitMembershipIdsStillOut(
+      booking.bookingAssets
     );
 
     /** Validate that there are still active assets to extend the booking for */
@@ -12826,29 +12853,48 @@ export async function extendBooking({
         tx,
       });
 
-      return tx.booking.update({
-        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) at L2853; this is the write on that same proven id
-        where: { id: booking.id },
-        data: {
-          /**
-           * If booking is currently OVERDUE we have to make it ONGOING
-           */
-          status:
-            booking.status === BookingStatus.OVERDUE
-              ? BookingStatus.ONGOING
-              : undefined,
-          /**
-           * Only the LIVE end date moves. `originalTo` holds the end date the
-           * booking was planned for, and extension is allowed only once the
-           * booking has started (ONGOING/OVERDUE), so the plan is already
-           * fixed: moving it here would erase the deadline the custodian
-           * actually agreed to, and with it every late return from Booking
-           * Compliance.
-           */
-          to: newEndDate,
-        },
-        include: BOOKING_INCLUDE_FOR_EMAIL,
-      });
+      // The row must still be exactly as read when the lock is taken: an
+      // extension that landed since the read above, a booking closed, or the
+      // overdue job flipping it meanwhile leaves no row to update. So the
+      // note and the events below, built from that read, describe the change
+      // this write made. Either live status reads ONGOING once extended.
+      return tx.booking
+        .update({
+          where: {
+            id: booking.id,
+            organizationId,
+            status: booking.status,
+            to: booking.to,
+          },
+          data: {
+            status: BookingStatus.ONGOING,
+            /**
+             * Only the LIVE end date moves. `originalTo` holds the end date
+             * the booking was planned for, and extension is allowed only
+             * once the booking has started (ONGOING/OVERDUE), so the plan is
+             * already fixed: moving it here would erase the deadline the
+             * custodian actually agreed to, and with it every late return
+             * from Booking Compliance.
+             */
+            to: newEndDate,
+          },
+          include: BOOKING_INCLUDE_FOR_EMAIL,
+        })
+        .catch((cause) => {
+          if (isNotFoundError(cause)) {
+            // `cause: null`: a Prisma not-found cause would turn this into a
+            // 404, and the booking does exist; its row just moved on.
+            throw new ShelfError({
+              cause: null,
+              label,
+              message:
+                "The booking changed while you were extending it. Reload it and try again.",
+              status: 400,
+              shouldBeCaptured: false,
+            });
+          }
+          throw cause;
+        });
     });
 
     // Add activity log for booking extension
@@ -12963,7 +13009,26 @@ export async function extendBooking({
      * In case of ONGOING, a checkin reminder should have be scheduled. So we have to reschedule it.
      * And in case of OVERDUE all the jobs are completed, so we have to reschedule the checkin reminder.
      */
-    await cancelScheduler(booking);
+    // A later extension can commit after this one. The reminder belongs to
+    // the extension whose end is stored now: it cancels the job stored now,
+    // and stores its own only if neither has moved on again meanwhile.
+    const live = await db.booking.findUnique({
+      where: { id: booking.id, organizationId },
+      select: { to: true, activeSchedulerReference: true },
+    });
+    if (live && live.to.getTime() !== newEndDate.getTime()) {
+      return updatedBooking;
+    }
+    const storedReference =
+      live?.activeSchedulerReference ?? booking.activeSchedulerReference;
+    await cancelScheduler({
+      id: booking.id,
+      activeSchedulerReference: storedReference,
+    });
+    const expected = {
+      to: newEndDate,
+      activeSchedulerReference: storedReference,
+    };
 
     const { hours } = calcTimeDifference(newEndDate, new Date());
 
@@ -12986,10 +13051,12 @@ export async function extendBooking({
           eventType: BOOKING_SCHEDULER_EVENTS_ENUM.overdueHandler,
         },
         when: newEndDate,
+        expected,
       });
     } else {
-      const when = newEndDate;
-      when.setHours(newEndDate.getHours() - 1);
+      // A copy: `expected.to` must stay the stored end.
+      const when = new Date(newEndDate);
+      when.setHours(when.getHours() - 1);
 
       await scheduleNextBookingJob({
         data: {
@@ -12998,6 +13065,7 @@ export async function extendBooking({
           eventType: BOOKING_SCHEDULER_EVENTS_ENUM.checkinReminder,
         },
         when,
+        expected,
       });
     }
 
@@ -17934,12 +18002,21 @@ export async function addScannedAssetsToBooking({
   quantities = {},
   kitSlices = [],
   access,
+  inSameTransaction,
 }: {
   assetIds: Asset["id"][];
   kitIds?: string[];
   bookingId: Booking["id"];
   organizationId: Booking["organizationId"];
   userId: string;
+  /**
+   * Further writes that must commit or roll back with the add. Runs inside
+   * the add's transaction, after its writes and before its notes, so a
+   * refusal here leaves the booking exactly as it was.
+   */
+  inSameTransaction?: (
+    tx: Parameters<Parameters<typeof db.$transaction>[0]>[0]
+  ) => Promise<void>;
   /**
    * The caller's access. Its add-items rule is enforced inside the write
    * transaction against the locked booking status. `null` only for a flow
@@ -17974,16 +18051,16 @@ export async function addScannedAssetsToBooking({
      * status-sync behaviour used in manage-assets. The pure-tx body lives in
      * {@link addScannedAssetsToBookingWithinTx} so the fulfil-and-checkout
      * flow can reuse the same writes under a shared transaction. The
-     * overlap-conflict guard main added inline here was moved INTO the helper
-     * so both call sites get it atomically with the writes.
+     * overlap-conflict guard lives in the helper, so both call sites get it
+     * atomically with the writes.
      */
     const {
       booking: updatedBooking,
       addedAssetIds,
       claimedAssetIds,
       archivedKitMembersLeftOut,
-    } = await db.$transaction(async (tx) =>
-      addScannedAssetsToBookingWithinTx(tx, {
+    } = await db.$transaction(async (tx) => {
+      const result = await addScannedAssetsToBookingWithinTx(tx, {
         assetIds,
         kitIds,
         bookingId,
@@ -17992,8 +18069,10 @@ export async function addScannedAssetsToBooking({
         quantities,
         kitSlices,
         callerAccess: access ?? undefined,
-      })
-    );
+      });
+      await inSameTransaction?.(tx);
+      return result;
+    });
 
     /**
      * Step 2: Create activity notes, for the assets that actually arrived.

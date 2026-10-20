@@ -35,6 +35,9 @@ vi.mock("~/modules/asset/utils.server", () => ({
 }));
 
 const { expireHostOnlyUserPrefsCookie } = await import("./cookies.server");
+const { isLastAuditDateParam } = await import(
+  "~/modules/asset/last-audit-date-access"
+);
 
 describe("expireHostOnlyUserPrefsCookie", () => {
   beforeEach(() => {
@@ -222,6 +225,47 @@ describe("filter cookies never keep a typed search", () => {
     );
 
     expect(redirectNeeded).toBe(true);
+    expect(filters).toBe("status=is%3AAVAILABLE");
+  });
+
+  it("drops params the caller may not use from the URL and the saved cookie", async () => {
+    const { filters, redirectNeeded, serializedCookie } =
+      await getAdvancedFiltersFromRequest(
+        listRequest(
+          "http://localhost/assets?lastAuditDate=isEmpty:&status=is:AVAILABLE&sortBy=lastAuditDate:asc&sortBy=name:desc"
+        ),
+        "org-1",
+        settings,
+        isLastAuditDateParam
+      );
+
+    // The redirect lands on the cleaned URL, which is also what gets saved.
+    expect(redirectNeeded).toBe(true);
+    expect(new URLSearchParams(filters)).toEqual(
+      new URLSearchParams("status=is:AVAILABLE&sortBy=name:desc")
+    );
+    const saved = await createAdvancedAssetFilterCookie("org-1").parse(
+      storedValue(serializedCookie as string)
+    );
+    expect(new URLSearchParams(saved)).toEqual(
+      new URLSearchParams("status=is:AVAILABLE&sortBy=name:desc")
+    );
+  });
+
+  it("drops params the caller may not use from a restored cookie", async () => {
+    const remembered = storedValue(
+      await createAdvancedAssetFilterCookie("org-1").serialize(
+        "lastAuditDate=before:2026-01-01&status=is:AVAILABLE"
+      )
+    );
+
+    const { filters } = await getAdvancedFiltersFromRequest(
+      listRequest("http://localhost/assets", [remembered]),
+      "org-1",
+      settings,
+      isLastAuditDateParam
+    );
+
     expect(filters).toBe("status=is%3AAVAILABLE");
   });
 

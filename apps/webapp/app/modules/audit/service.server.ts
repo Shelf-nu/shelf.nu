@@ -27,6 +27,7 @@ import {
   createAssetNotesForAuditAddition,
   createAssetNotesForAuditRemoval,
 } from "~/modules/note/service.server";
+import { recordAuditScanNonFatal } from "~/modules/scan/service.server";
 import { USER_NAME_SELECT } from "~/modules/user/fields";
 import type { ClientHint } from "~/utils/client-hints";
 import type { RawFormatPrefs } from "~/utils/date-format";
@@ -307,6 +308,8 @@ export type RecordAuditScanInput = {
   userId: string;
   /** The organization ID for security validation */
   organizationId: string;
+  /** The scanning device's User-Agent, stored on the asset's scan record */
+  userAgent?: string | null;
 };
 
 /**
@@ -1386,7 +1389,8 @@ function isAuditAssetFkViolation(cause: unknown): boolean {
 export async function recordAuditScan(
   input: RecordAuditScanInput
 ): Promise<RecordAuditScanResult> {
-  const { auditSessionId, qrId, assetId, userId, organizationId } = input;
+  const { auditSessionId, qrId, assetId, userId, organizationId, userAgent } =
+    input;
 
   try {
     // Verify the audit session exists and belongs to the organization
@@ -1426,7 +1430,12 @@ export async function recordAuditScan(
       db.asset.findUnique({
         // eslint-disable-next-line local-rules/require-org-scope-on-id-queries, local-rules/require-archived-at-check-on-asset-queries -- idor-safe: deliberate fetch-then-verify — organizationId is selected and explicitly checked immediately below (`if (!scannedAsset || scannedAsset.organizationId !== organizationId) throw 404`), giving a clean cross-org message instead of a raw P2003.; why: a scanned label must resolve to its asset even when archived; audits badge archived assets
         where: { id: assetId },
-        select: { id: true, title: true, organizationId: true },
+        select: {
+          id: true,
+          title: true,
+          organizationId: true,
+          sequentialId: true,
+        },
       }),
     ]);
 
@@ -1818,6 +1827,18 @@ export async function recordAuditScan(
       },
       { timeout: 15000 }
     );
+
+    // The audit scan is also a scan of the asset, so it counts towards the
+    // asset's scan record and "Last scan". Recorded once per audit scan (the
+    // duplicate short-circuit above returns before this), after the audit
+    // commits, and non-fatally: it must never fail or roll back the audit.
+    await recordAuditScanNonFatal({
+      code: qrId,
+      asset: scannedAsset,
+      organizationId,
+      userId,
+      userAgent,
+    });
 
     return result;
   } catch (cause) {
@@ -2579,6 +2600,17 @@ export async function getAuditsForOrganization(params: {
    * webapp uses its own column-sort UI.
    */
   prioritizeDeadlines?: boolean;
+  /**
+   * Restricts the result to audits whose expected or scanned assets include
+   * this asset. The caller must already have verified the asset belongs to
+   * `organizationId`.
+   */
+  assetId?: string | null;
+  /**
+   * Keeps ARCHIVED audits in the result when no explicit `status` is given.
+   * Off by default so every other list keeps hiding archived audits.
+   */
+  includeArchived?: boolean;
 }) {
   const {
     organizationId,
@@ -2592,6 +2624,8 @@ export async function getAuditsForOrganization(params: {
     orderDirection = "desc",
     assignedToUserId,
     prioritizeDeadlines = false,
+    assetId,
+    includeArchived = false,
   } = params;
 
   // why: a caller limited to assigned audits MUST pass `userId`: without it
@@ -2634,10 +2668,16 @@ export async function getAuditsForOrganization(params: {
       ];
     }
 
-    // Add status filter — exclude ARCHIVED by default when no filter is set
+    // Only audits that list this asset (expected or scanned)
+    if (assetId) {
+      where.assets = { some: { assetId } };
+    }
+
+    // An explicit status always wins. With none, ARCHIVED audits are hidden
+    // unless the caller opts in through `includeArchived`.
     if (status) {
       where.status = status;
-    } else {
+    } else if (!includeArchived) {
       where.status = { notIn: [AuditStatus.ARCHIVED] };
     }
 
