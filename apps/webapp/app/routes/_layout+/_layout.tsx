@@ -6,6 +6,7 @@ import type {
   LinksFunction,
   LoaderFunctionArgs,
   MetaFunction,
+  ShouldRevalidateFunction,
 } from "react-router";
 import {
   data,
@@ -93,7 +94,24 @@ export type LayoutLoaderResponse = typeof loader;
  * booking overview) never trigger a shell refetch. Mutations and real
  * navigations still revalidate.
  */
-export const shouldRevalidate = skipRevalidationOnClientViewChange;
+export const shouldRevalidate: ShouldRevalidateFunction = (args) => {
+  const { formMethod, currentUrl, nextUrl } = args;
+  const isGetNavigation = !formMethod || formMethod === "GET";
+  // Single fetch reruns every active loader on each navigation unless the route
+  // opts out here (returning `defaultShouldRevalidate` is not an opt-out: the
+  // single-fetch pass asks again with `true`). A plain GET to another path
+  // changes nothing this loader reads (user, org, subscription, settings), so
+  // skip it. Submissions and same-path or search-param changes keep the
+  // default, so the shell still refreshes after every mutation.
+  if (
+    isGetNavigation &&
+    currentUrl.pathname !== nextUrl.pathname &&
+    currentUrl.search === nextUrl.search
+  ) {
+    return false;
+  }
+  return skipRevalidationOnClientViewChange(args);
+};
 
 /**
  * Gate for every authenticated route beneath this layout, and the source of the
@@ -294,7 +312,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         hasUnpaidInvoice: user.hasUnpaidInvoice,
         warnForNoPaymentMethod: user.warnForNoPaymentMethod,
         needsSequentialIdMigration,
-        /** THis is used to disable team organizations when the currentOrg is Team and no subscription is present  */
+        /** Disables team workspaces when the current one is a Team with no subscription. */
         disabledTeamOrg: isAdmin
           ? false
           : currentOrganization.workspaceDisabled ||
