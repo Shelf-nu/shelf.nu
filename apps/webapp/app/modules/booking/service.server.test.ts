@@ -10205,6 +10205,44 @@ describe("extendBooking", () => {
     );
   });
 
+  it("reschedules the reminder before the note, so a failed note still leaves the new reminder", async () => {
+    expect.assertions(3);
+    const newEndDate = new Date("2025-01-01T15:00:00Z");
+    const booking = bookingWithOneAssetOut(BookingStatus.ONGOING);
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(booking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ ...booking, to: newEndDate });
+    //@ts-expect-error missing vitest type
+    db.booking.findUnique.mockResolvedValueOnce({
+      to: newEndDate,
+      activeSchedulerReference: "reminder-job",
+    });
+    //@ts-expect-error missing vitest type
+    scheduler.sendAfter.mockResolvedValueOnce("earlier-reminder-job");
+    //@ts-expect-error missing vitest type
+    db.booking.updateMany.mockResolvedValueOnce({ count: 1 });
+    (
+      bookingNoteService.createSystemBookingNote as ReturnType<typeof vitest.fn>
+    ).mockRejectedValueOnce(new Error("notes table unavailable"));
+
+    await expect(changeEndTo(newEndDate)).rejects.toMatchObject({
+      message: "Something went wrong while changing the booking end date.",
+    });
+
+    expect(cancelledJobIds()).toEqual(["reminder-job"]);
+    expect(scheduler.sendAfter).toHaveBeenCalledWith(
+      "booking-queue",
+      {
+        id: "booking-1",
+        hints: mockClientHints,
+        eventType: "booking-checkin-reminder",
+      },
+      {},
+      new Date("2025-01-01T14:00:00Z")
+    );
+  });
+
   it("moves an overdue booking's end earlier and reopens it as ongoing", async () => {
     expect.assertions(1);
     // The overdue job flips the status without reading the end, so a job

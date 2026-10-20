@@ -1461,7 +1461,7 @@ const INTENT_VERB = {
   cancel: "cancel",
   removeKit: "remove kits from",
   "revert-to-draft": "revert",
-  "extend-booking": "extend",
+  "extend-booking": "change the end date of",
   "bulk-remove-asset-or-kit": "remove items from",
   "partial-checkin": "check in",
   "partial-checkout": "check out",

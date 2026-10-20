@@ -118,7 +118,7 @@ export async function action({ request }: ActionFunctionArgs) {
       booking,
       userId: user.id,
       access,
-      action: "extend",
+      action: "change the end date of",
     });
 
     // Checked before the dates: a closed booking answers with its status, not
@@ -126,7 +126,8 @@ export async function action({ request }: ActionFunctionArgs) {
     if (!isExtendableStatus(booking.status)) {
       throw new ShelfError({
         cause: null,
-        message: "Extending booking is not allowed for current status.",
+        message:
+          "Changing the end date is not allowed for the current booking status.",
         label: "Booking",
         status: 400,
         shouldBeCaptured: false,

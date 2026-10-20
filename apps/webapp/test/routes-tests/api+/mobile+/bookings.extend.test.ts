@@ -190,7 +190,7 @@ describe("POST /api/mobile/bookings/extend", () => {
 
     expect(status).toBe(403);
     expect(body.error.message).toBe(
-      "You are not authorized to extend this booking."
+      "You are not authorized to change the end date of this booking."
     );
     expect(extendBooking).not.toHaveBeenCalled();
   });
@@ -205,7 +205,7 @@ describe("POST /api/mobile/bookings/extend", () => {
 
     expect(status).toBe(400);
     expect(body.error.message).toBe(
-      "Extending booking is not allowed for current status."
+      "Changing the end date is not allowed for the current booking status."
     );
     expect(extendBooking).not.toHaveBeenCalled();
   });
