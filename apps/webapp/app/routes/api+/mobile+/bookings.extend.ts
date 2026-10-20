@@ -28,11 +28,12 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
 /**
  * POST /api/mobile/bookings/extend
  *
- * Moves the end of an ONGOING or OVERDUE booking later, from the Companion app.
+ * Moves the end of an ONGOING or OVERDUE booking, from the Companion app.
  * The mobile twin of the web "extend-booking" intent: it wraps the same
  * `extendBooking` service, which re-checks clashes with reserved bookings and
- * model reservations, flips OVERDUE back to ONGOING, writes the activity note,
- * sends the emails and reschedules the check-in reminder.
+ * model reservations when the end moves later, flips OVERDUE back to ONGOING,
+ * writes the activity note, sends the emails and reschedules the check-in
+ * reminder.
  *
  * PARITY with web:
  * - Gated on `PermissionAction.extend` (BASE holds `booking:update` but not
@@ -44,8 +45,10 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  *   (future date with buffer, working hours, maximum length), with the
  *   booking's stored start as the schema's start date.
  *
- * - The service refuses an end at or before the current end and a write that
- *   races another extension or a close, for web and phone alike.
+ * - The service accepts an earlier or a later end, as long as it is after the
+ *   start and in the future, and refuses a write that races another end-date
+ *   change or a close, for web and phone alike. The Companion app's sheet
+ *   still offers only later ends.
  *
  * `endDate` is a wall clock with no offset, decoded in the `timeZone` the
  * client declares (see `bookings.update.ts`). The response's `to` is read from

@@ -2216,8 +2216,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
 
         sendNotification({
-          title: "Booking extended",
-          message: "Your booking has been extended to new end date.",
+          title: "End date changed",
+          message: "The booking now ends on the new end date.",
           icon: { name: "success", variant: "success" },
           senderId: userId,
         });
