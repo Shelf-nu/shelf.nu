@@ -338,15 +338,29 @@ export function useUnsavedChanges({
 
   const shouldGuard = isDirty && !isSubmitting;
 
+  /**
+   * `shouldGuard` as of the last commit, for the blocker to read.
+   *
+   * React Router hands a changed blocker function to the router in a passive
+   * effect, which runs after the commit that shows "dirty". A navigation
+   * started in between would reach the stale function and leave unguarded.
+   * The blocker below keeps one identity and reads this ref instead, which a
+   * layout effect updates during the commit itself.
+   */
+  const shouldGuardRef = useRef(shouldGuard);
+  useLayoutEffect(() => {
+    shouldGuardRef.current = shouldGuard;
+  }, [shouldGuard]);
+
   const blocker = useBlocker(
     useCallback(
       ({ currentLocation, nextLocation }) =>
-        shouldGuard &&
+        shouldGuardRef.current &&
         !staysOnPage(
           formPagePathname(formRef.current, currentLocation.pathname),
           nextLocation.pathname
         ),
-      [shouldGuard, formRef]
+      [formRef]
     )
   );
 
