@@ -372,8 +372,14 @@ async function retryLoop<T>(
  * without verifying the server certificate. `pg` would instead send plaintext
  * when `sslmode` is absent and demand full verification for `prefer` and
  * `require`, so those three are mapped to encrypted-without-verification here
- * and removed from the string. `disable`, `verify-ca` and `verify-full` keep
- * `pg`'s own handling. A server without TLS needs `sslmode=disable`.
+ * and removed from the string. Verification is opt-in, as it was with the
+ * engine: `sslaccept=strict`, or `sslmode=verify-full` with `sslrootcert`
+ * pointing at the server's CA (Supabase publishes one), turns it on; `disable`,
+ * `verify-ca` and `verify-full` keep `pg`'s own handling. A server without TLS
+ * needs `sslmode=disable`.
+ *
+ * `socket_timeout` (seconds, a per-query limit for the engine) maps to `pg`'s
+ * `query_timeout`.
  *
  * The acquisition wait stays bounded: without `pool_timeout` it is 10 s, the
  * engine's default, because `pg` would otherwise queue forever on a saturated
@@ -384,7 +390,8 @@ export function poolOptionsFromUrl(connectionString: string | undefined): {
   max?: number;
   connectionTimeoutMillis?: number;
   schema?: string;
-  ssl?: { rejectUnauthorized: false };
+  ssl?: { rejectUnauthorized: false } | true;
+  query_timeout?: number;
 } {
   let url: URL | null;
   try {
@@ -401,11 +408,15 @@ export function poolOptionsFromUrl(connectionString: string | undefined): {
       : DEFAULT_POOL_TIMEOUT_SECONDS;
   const schema = params.get("schema");
   const sslmode = params.get("sslmode");
+  const strict = params.get("sslaccept") === "strict";
   const encryptWithoutVerify =
-    url !== null && (sslmode === null || ENCRYPT_ONLY_SSL_MODES.has(sslmode));
-  if (encryptWithoutVerify && sslmode !== null) {
-    url!.searchParams.delete("sslmode");
+    url !== null &&
+    !strict &&
+    (sslmode === null || ENCRYPT_ONLY_SSL_MODES.has(sslmode));
+  if (url && sslmode !== null && ENCRYPT_ONLY_SSL_MODES.has(sslmode)) {
+    url.searchParams.delete("sslmode");
   }
+  const socketTimeout = Number(params.get("socket_timeout") ?? NaN);
   return {
     ...(url ? { connectionString: url.toString() } : {}),
     ...(Number.isInteger(limit) && limit > 0 ? { max: limit } : {}),
@@ -414,6 +425,10 @@ export function poolOptionsFromUrl(connectionString: string | undefined): {
       : {}),
     ...(schema ? { schema } : {}),
     ...(encryptWithoutVerify ? { ssl: { rejectUnauthorized: false } } : {}),
+    ...(url && strict ? { ssl: true } : {}),
+    ...(Number.isFinite(socketTimeout) && socketTimeout > 0
+      ? { query_timeout: socketTimeout * 1000 }
+      : {}),
   };
 }
 

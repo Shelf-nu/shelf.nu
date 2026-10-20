@@ -893,3 +893,18 @@ test("poolOptionsFromUrl leaves disable and verify modes to pg", () => {
     assert.equal(out.connectionString, `${PLAIN_URL}?sslmode=${mode}`);
   }
 });
+
+test("poolOptionsFromUrl turns verification on for sslaccept=strict", () => {
+  for (const q of ["sslaccept=strict", "sslmode=require&sslaccept=strict"]) {
+    const out = poolOptionsFromUrl(`${PLAIN_URL}?${q}`);
+    assert.equal(out.ssl, true);
+  }
+});
+
+test("poolOptionsFromUrl maps socket_timeout seconds onto pg's query_timeout", () => {
+  assert.equal(
+    poolOptionsFromUrl(`${PLAIN_URL}?socket_timeout=3`).query_timeout,
+    3_000
+  );
+  assert.equal(poolOptionsFromUrl(PLAIN_URL).query_timeout, undefined);
+});
