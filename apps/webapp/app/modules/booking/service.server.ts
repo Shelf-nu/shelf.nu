@@ -6233,7 +6233,10 @@ export async function checkinBooking({
          * Each pool's stock before this loop's first write to it, and the
          * ledger events of every slice that used up its units. Recorded once
          * after the loop, so a check-in of many slices reads each pool twice
-         * in all, not twice per slice.
+         * in all, not twice per slice. Safe here because each slice is
+         * visited once and caps itself on its own rows plus the in-memory
+         * `assetRemainingSoFar`; `partialCheckinBooking` re-reads the
+         * booking's rows per disposition and so writes per disposition.
          */
         const stockChangesByAssetId = new Map<string, StockChangeInput>();
 
@@ -7957,13 +7960,6 @@ export async function partialCheckinBooking({
             .map((slice) => slice.id)
         );
 
-      /**
-       * Each pool's stock before this loop's first write to it, and the
-       * ledger events of every disposition that used up its units. Recorded
-       * once after the loop, as in `checkinBooking`.
-       */
-      const stockChangesByAssetId = new Map<string, StockChangeInput>();
-
       for (const disp of dispositions) {
         if (assetTypeById.get(disp.assetId) !== AssetType.QUANTITY_TRACKED) {
           continue;
@@ -8100,16 +8096,14 @@ export async function partialCheckinBooking({
         const poolDecrement =
           (disp.consumed ?? 0) + (disp.lost ?? 0) + (disp.damaged ?? 0);
 
-        if (poolDecrement > 0 && !stockChangesByAssetId.has(disp.assetId)) {
-          stockChangesByAssetId.set(disp.assetId, {
-            assetId: disp.assetId,
-            before: await readStockState(tx, {
-              assetId: disp.assetId,
-              organizationId,
-            }),
-            events: [],
-          });
-        }
+        /** The pool's stock before this disposition's write, for the ledger. */
+        const stockBefore =
+          poolDecrement > 0
+            ? await readStockState(tx, {
+                assetId: disp.assetId,
+                organizationId,
+              })
+            : null;
 
         /**
          * Pool-drain guard: `Asset.quantity` must stay ≥ current custody
@@ -8250,15 +8244,27 @@ export async function partialCheckinBooking({
             additionalData: { assetId: disp.assetId, bookingId: id },
           });
 
-          /** Same ledger events as the full check-in path above. */
-          stockChangesByAssetId.get(disp.assetId)?.events?.push(
-            ...checkinStockEvents({
-              slice: sourceSlice,
-              disposition: disp,
-              bookingId: id,
-              bookingAssetId: dispBookingAssetId,
-            })
-          );
+          /**
+           * Written per disposition, not once after the loop: the next
+           * disposition of this asset caps itself on this booking's
+           * CONSUME / LOSS / DAMAGE rows, so it must see these.
+           */
+          await recordStockChanges(tx, {
+            organizationId,
+            userId,
+            changes: [
+              {
+                assetId: disp.assetId,
+                before: stockBefore,
+                events: checkinStockEvents({
+                  slice: sourceSlice,
+                  disposition: disp,
+                  bookingId: id,
+                  bookingAssetId: dispBookingAssetId,
+                }),
+              },
+            ],
+          });
         }
 
         const pendingAfter = remaining - claimed;
@@ -8276,14 +8282,6 @@ export async function partialCheckinBooking({
           lost: disp.lost ?? 0,
           damaged: disp.damaged ?? 0,
           pendingAfter,
-        });
-      }
-
-      if (stockChangesByAssetId.size > 0) {
-        await recordStockChanges(tx, {
-          organizationId,
-          userId,
-          changes: [...stockChangesByAssetId.values()],
         });
       }
 

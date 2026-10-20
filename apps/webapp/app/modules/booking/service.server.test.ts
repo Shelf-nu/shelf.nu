@@ -14194,7 +14194,7 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     );
   });
 
-  it("reads the pool's stock before the decrement and records the ledger once after it", async () => {
+  it("reads the pool's stock before the decrement", async () => {
     setupQtyMocks();
 
     await partialCheckinBooking({
@@ -14207,7 +14207,46 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     expect(
       vitest.mocked(readStockState).mock.invocationCallOrder[0]
     ).toBeLessThan(vitest.mocked(db.asset.update).mock.invocationCallOrder[0]);
-    expect(recordStockChanges).toHaveBeenCalledTimes(1);
+  });
+
+  it("writes a disposition's used-up rows before the next disposition of the asset is capped", async () => {
+    // The asset-level cap sums this booking's CONSUME/LOSS/DAMAGE rows. Two
+    // slices of one asset checked in together must each see what the other
+    // already used up, or both pass the same remaining and the pool loses
+    // more units than are out on the booking.
+    setupQtyMocks();
+    const booking = makeQtyBooking();
+    const slice = booking.bookingAssets[0];
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...booking,
+      bookingAssets: [
+        { ...slice, id: "ba-a" },
+        { ...slice, id: "ba-b" },
+      ],
+    });
+    // why: each slice's own cap reads its booked quantity by id.
+    (
+      db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ quantity: 10 });
+    onTestFinished(() => {
+      (db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>).mockReset();
+    });
+
+    await partialCheckinBooking({
+      ...baseParams,
+      checkins: [
+        { assetId: mockQtyAssetId, bookingAssetId: "ba-a", consumed: 2 },
+        { assetId: mockQtyAssetId, bookingAssetId: "ba-b", consumed: 2 },
+      ],
+    });
+
+    const ledgerWrites = vitest.mocked(recordStockChanges).mock;
+    const capReads = vitest.mocked(db.consumptionLog.aggregate).mock;
+    expect(ledgerWrites.calls).toHaveLength(2);
+    expect(ledgerWrites.invocationCallOrder[0]).toBeLessThan(
+      capReads.invocationCallOrder[capReads.invocationCallOrder.length - 1]
+    );
   });
 
   it("emits an ASSET_QUANTITY_CHANGED event for the pool decrement (from pool → pool − decrement)", async () => {

@@ -142,7 +142,11 @@ describe.skipIf(!DATABASE_URL)("stock ledger replay (real database)", () => {
     return { total, byPlace };
   }
 
-  /** The pool's ledger rows, oldest first. */
+  /**
+   * The pool's ledger rows, oldest first. Rows of one ledger write share one
+   * `createdAt`, so their order within that write is unspecified: compare
+   * them with {@link sortTuples}.
+   */
   function ledgerRows(assetId: string) {
     return db.consumptionLog.findMany({
       where: { assetId, stockChange: { not: null } },
@@ -178,14 +182,26 @@ describe.skipIf(!DATABASE_URL)("stock ledger replay (real database)", () => {
     return rows;
   }
 
-  /** Rows added by the step that just ran, as `[category, locationId, stockChange]`. */
+  /**
+   * Rows added by the steps that just ran, as `[category, locationId,
+   * stockChange]`, in {@link sortTuples} order.
+   */
   function lastRows(
     rows: Awaited<ReturnType<typeof ledgerRows>>,
     count: number
   ) {
-    return rows
-      .slice(-count)
-      .map((row) => [row.category, row.locationId, row.stockChange]);
+    return sortTuples(
+      rows
+        .slice(-count)
+        .map((row) => [row.category, row.locationId, row.stockChange])
+    );
+  }
+
+  /** Row tuples in a fixed order, so tied rows of one write compare as a set. */
+  function sortTuples(tuples: Array<Array<string | number | null>>) {
+    return [...tuples].sort((a, b) =>
+      JSON.stringify(a).localeCompare(JSON.stringify(b))
+    );
   }
 
   async function createPool({
@@ -277,11 +293,13 @@ describe.skipIf(!DATABASE_URL)("stock ledger replay (real database)", () => {
     await adjust({ quantity: 5, category: "ADJUSTMENT" });
     await adjust({ quantity: 3, category: "LOSS", direction: "subtract" });
     rows = await expectLedgerMatchesLive(id);
-    expect(lastRows(rows, 3)).toEqual([
-      ["RESTOCK", loc.studio, 20],
-      ["ADJUSTMENT", null, 5],
-      ["LOSS", null, -3],
-    ]);
+    expect(lastRows(rows, 3)).toEqual(
+      sortTuples([
+        ["RESTOCK", loc.studio, 20],
+        ["ADJUSTMENT", null, 5],
+        ["LOSS", null, -3],
+      ])
+    );
 
     // Move between locations, then place the unplaced units.
     await asset.moveAssetLocationUnits({
@@ -300,12 +318,14 @@ describe.skipIf(!DATABASE_URL)("stock ledger replay (real database)", () => {
       quantity: 2,
     });
     rows = await expectLedgerMatchesLive(id);
-    expect(lastRows(rows, 4)).toEqual([
-      ["MOVE", loc.camera, -30],
-      ["MOVE", loc.studio, 30],
-      ["MOVE", null, -2],
-      ["MOVE", loc.camera, 2],
-    ]);
+    expect(lastRows(rows, 4)).toEqual(
+      sortTuples([
+        ["MOVE", loc.camera, -30],
+        ["MOVE", loc.studio, 30],
+        ["MOVE", null, -2],
+        ["MOVE", loc.camera, 2],
+      ])
+    );
 
     // Manage placements: lower both locations, the rest becomes unplaced.
     await asset.replaceAssetPlacements({
@@ -403,10 +423,12 @@ describe.skipIf(!DATABASE_URL)("stock ledger replay (real database)", () => {
     await edit({ quantity: (await current()) + 10 });
     await edit({ quantity: (await current()) - 5 });
     rows = await expectLedgerMatchesLive(id);
-    expect(lastRows(rows, 2)).toEqual([
-      ["ADJUSTMENT", null, 10],
-      ["ADJUSTMENT", null, -5],
-    ]);
+    expect(lastRows(rows, 2)).toEqual(
+      sortTuples([
+        ["ADJUSTMENT", null, 10],
+        ["ADJUSTMENT", null, -5],
+      ])
+    );
     await edit({
       currentLocationId: loc.camera,
       newLocationId: loc.camera,
@@ -447,11 +469,13 @@ describe.skipIf(!DATABASE_URL)("stock ledger replay (real database)", () => {
       ],
     });
     rows = await expectLedgerMatchesLive(id);
-    expect(lastRows(rows, 3)).toEqual([
-      ["CONSUME", loc.studio, -3],
-      ["LOSS", loc.studio, -1],
-      ["DAMAGE", loc.studio, -1],
-    ]);
+    expect(lastRows(rows, 3)).toEqual(
+      sortTuples([
+        ["CONSUME", loc.studio, -3],
+        ["LOSS", loc.studio, -1],
+        ["DAMAGE", loc.studio, -1],
+      ])
+    );
     await booking.checkinBooking({
       id: bookingId,
       organizationId,
@@ -508,13 +532,17 @@ describe.skipIf(!DATABASE_URL)("stock ledger replay (real database)", () => {
 
     const rows = await expectLedgerMatchesLive(legacy.id);
     expect(
-      rows.map((row) => [row.category, row.locationId, row.stockChange])
-    ).toEqual([
-      ["OPENING_BALANCE", null, 5],
-      ["OPENING_BALANCE", loc.camera, 25],
-      ["OPENING_BALANCE", loc.studio, 10],
-      ["LOSS", loc.camera, -2],
-    ]);
+      sortTuples(
+        rows.map((row) => [row.category, row.locationId, row.stockChange])
+      )
+    ).toEqual(
+      sortTuples([
+        ["OPENING_BALANCE", null, 5],
+        ["OPENING_BALANCE", loc.camera, 25],
+        ["OPENING_BALANCE", loc.studio, 10],
+        ["LOSS", loc.camera, -2],
+      ])
+    );
     const started = await db.asset.findUniqueOrThrow({
       where: { id: legacy.id, organizationId, archivedAt: null },
       select: { stockLedgerStartedAt: true },
@@ -573,13 +601,17 @@ describe.skipIf(!DATABASE_URL)("stock ledger replay (real database)", () => {
 
     const rows = await expectLedgerMatchesLive(drifted.id);
     expect(
-      rows.map((row) => [row.category, row.locationId, row.stockChange])
-    ).toEqual([
-      ["OPENING_BALANCE", null, -3],
-      ["OPENING_BALANCE", loc.camera, 8],
-      ["OPENING_BALANCE", loc.studio, 5],
-      ["RESTOCK", null, 5],
-    ]);
+      sortTuples(
+        rows.map((row) => [row.category, row.locationId, row.stockChange])
+      )
+    ).toEqual(
+      sortTuples([
+        ["OPENING_BALANCE", null, -3],
+        ["OPENING_BALANCE", loc.camera, 8],
+        ["OPENING_BALANCE", loc.studio, 5],
+        ["RESTOCK", null, 5],
+      ])
+    );
     expect(rows[0].quantity).toBe(3);
   }, 60_000);
 
@@ -608,10 +640,12 @@ describe.skipIf(!DATABASE_URL)("stock ledger replay (real database)", () => {
       checkins: [{ assetId: pool.id, bookingAssetId: sliceId, consumed: 5 }],
     });
     const rows = await expectLedgerMatchesLive(pool.id);
-    expect(lastRows(rows, 2)).toEqual([
-      ["CONSUME", null, -3],
-      ["CONSUME", loc.camera, -2],
-    ]);
+    expect(lastRows(rows, 2)).toEqual(
+      sortTuples([
+        ["CONSUME", null, -3],
+        ["CONSUME", loc.camera, -2],
+      ])
+    );
 
     const bookingRow = await db.booking.findUniqueOrThrow({
       where: { id: bookingId, organizationId },
