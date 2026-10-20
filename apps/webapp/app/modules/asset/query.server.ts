@@ -369,22 +369,32 @@ function addCustomFieldNumberFilter(
   }
 }
 
+/**
+ * The unit of measure as the advanced index shows it. Only QUANTITY_TRACKED
+ * assets have a unit there; an individual asset can still carry a stored unit
+ * (a CSV import writes whatever the row says), which the cell hides. Sorting
+ * and filtering read this expression, never the raw column, so a unit nobody
+ * can see neither matches a filter nor moves a row in a sort.
+ */
+const VISIBLE_UNIT_OF_MEASURE = Prisma.raw(
+  `CASE WHEN a."type" = 'QUANTITY_TRACKED' THEN a."unitOfMeasure" ELSE NULL END`
+);
+
 function addStringFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
+  const column =
+    filter.name === "unitOfMeasure"
+      ? VISIBLE_UNIT_OF_MEASURE
+      : Prisma.sql`a."${Prisma.raw(filter.name)}"`;
+
   switch (filter.operator) {
     case "is":
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(filter.name)}" = ${
-        filter.value
-      }`;
+      return Prisma.sql`${whereClause} AND ${column} = ${filter.value}`;
     case "isNot":
       // IS DISTINCT FROM, not `!=`: an empty column (no description, no unit
       // of measure) is "not" any value, and `!=` never matches NULL.
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(
-        filter.name
-      )}" IS DISTINCT FROM ${filter.value}`;
+      return Prisma.sql`${whereClause} AND ${column} IS DISTINCT FROM ${filter.value}`;
     case "contains":
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(
-        filter.name
-      )}" ILIKE ${`%${filter.value}%`}`;
+      return Prisma.sql`${whereClause} AND ${column} ILIKE ${`%${filter.value}%`}`;
     case "matchesAny": {
       // Split comma-separated values and remove whitespace
       const values = (filter.value as string).split(",").map((v) => v.trim());
@@ -393,16 +403,13 @@ function addStringFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         values.map((v) => Prisma.sql`${v}`),
         ", "
       );
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(
-        filter.name
-      )}" = ANY(ARRAY[${valuesArray}]::text[])`;
+      return Prisma.sql`${whereClause} AND ${column} = ANY(ARRAY[${valuesArray}]::text[])`;
     }
     case "containsAny": {
       const values = (filter.value as string).split(",").map((v) => v.trim());
       // Build OR condition for ILIKE
       const likeConditions = values.map(
-        (value) =>
-          Prisma.sql`a."${Prisma.raw(filter.name)}" ILIKE ${`%${value}%`}`
+        (value) => Prisma.sql`${column} ILIKE ${`%${value}%`}`
       );
       return Prisma.sql`${whereClause} AND (${Prisma.join(
         likeConditions,
@@ -2987,7 +2994,7 @@ export function buildAdvancedAssetsQuery({
           a."updatedAt" AS "assetUpdatedAt",
           a.value AS "assetValue",
           a.quantity AS "assetQuantity",
-          a."unitOfMeasure" AS "assetUnitOfMeasure",
+          ${VISIBLE_UNIT_OF_MEASURE} AS "assetUnitOfMeasure",
           a."minQuantity" AS "assetMinQuantity",
           a.title AS "assetTitle",
           a."sequentialId" AS "assetSequentialId",

@@ -364,6 +364,9 @@ describe("generateWhereClause - search fail-closed", () => {
   });
 });
 
+/** The unit of measure as the advanced index shows it. */
+const VISIBLE_UNIT = `CASE WHEN a."type" = 'QUANTITY_TRACKED' THEN a."unitOfMeasure" ELSE NULL END`;
+
 describe("generateWhereClause - quantity and unit of measure filters", () => {
   const columns = [
     { name: "quantity" as const, visible: true, position: 0 },
@@ -384,7 +387,9 @@ describe("generateWhereClause - quantity and unit of measure filters", () => {
     expect(filters[0]).toMatchObject({ name: "unitOfMeasure", type: "string" });
 
     const result = generateWhereClause("org-1", null, filters);
-    expect(getSqlString(result)).toContain('a."unitOfMeasure" ILIKE ?');
+    // Only quantity-tracked assets have a unit on the index, so an individual
+    // asset with a stored unit never matches a unit filter.
+    expect(getSqlString(result)).toContain(`${VISIBLE_UNIT} ILIKE ?`);
     expect(result.values).toContain("%pc%");
   });
 
@@ -394,7 +399,7 @@ describe("generateWhereClause - quantity and unit of measure filters", () => {
     const result = generateWhereClause("org-1", null, filters);
     // `!=` never matches NULL, which would hide every asset without a unit.
     expect(getSqlString(result)).toContain(
-      'a."unitOfMeasure" IS DISTINCT FROM ?'
+      `${VISIBLE_UNIT} IS DISTINCT FROM ?`
     );
     expect(result.values).toContain("kg");
   });
@@ -1509,7 +1514,8 @@ describe("buildAdvancedAssetsQuery", () => {
     const sql = getQuerySqlString(build({ sortBy: ["unitOfMeasure:asc"] }));
     const cheap = sql.slice(0, sql.indexOf("sorted_asset_query"));
 
-    expect(cheap).toContain('a."unitOfMeasure" AS "assetUnitOfMeasure"');
+    // The sort key is the unit the cell shows: none for individual assets.
+    expect(cheap).toContain(`${VISIBLE_UNIT} AS "assetUnitOfMeasure"`);
     expect(sql).toContain('LOWER(regexp_replace("assetUnitOfMeasure"');
   });
 
