@@ -875,12 +875,12 @@ function AuditScannerContent() {
       });
 
       if (err) {
-        // Completion failed — KEEP recovery state so nothing is lost.
+        // Completion failed: KEEP recovery state so nothing is lost.
         Alert.alert("Error", err);
         return;
       }
 
-      // Server accepted completion — only now is it safe to drop the local
+      // Server accepted completion. Only now is it safe to drop the local
       // recovery snapshot. Clear the in-memory queues too (in place): otherwise
       // the unmount cleanup would see a non-empty failedQueue on navigate-back and
       // re-flush a recovery snapshot for an audit that is already completed.
@@ -897,10 +897,16 @@ function AuditScannerContent() {
       // point, so a confirmation the user never gets to tap would strand them
       // on a scanner with no recoverable state.
       router.back();
-      // Completing an audit is a clear "value delivered" moment — a good
-      // (throttled, OS-gated) time to ask a happy user for a review.
-      void maybeAskForReview();
-      Alert.alert("Audit Complete", `"${auditName}" has been completed.`);
+      Alert.alert("Audit Complete", `"${auditName}" has been completed.`, [
+        {
+          text: "OK",
+          // Completing an audit is a clear "value delivered" moment, a good
+          // (throttled, OS-gated) time to ask a happy user for a review. It
+          // waits for OK so it never competes with this alert, and losing it
+          // with a dropped alert costs nothing.
+          onPress: () => void maybeAskForReview(),
+        },
+      ]);
     },
     [
       auditId,
@@ -915,16 +921,18 @@ function AuditScannerContent() {
   );
 
   // Standard confirm. The sheet names the audit, states how many unscanned
-  // assets become missing, and takes the closing note — the same confirmation
+  // assets become missing, and takes the closing note: the same confirmation
   // the detail screen shows, so a worker finishing at the scanner gets the note
   // field too.
   const confirmAndComplete = useCallback(() => {
     setShowCompleteSheet(true);
   }, []);
 
-  // Completion driven by the sheet: the note travels with the request, and the
-  // sheet stays up (disabled) until the request settles so a second confirm
-  // cannot fire.
+  // Completion driven by the sheet: the note travels with the request. The
+  // sheet is dismissed before the request is sent, and `isCompleting` keeps it
+  // disabled if the worker reopens it while the request is still in flight.
+  // The sheet keeps its note, so a blocked or failed completion can be retried
+  // without retyping it.
   const handleSheetConfirm = useCallback(
     async (completionNote?: string) => {
       // Re-entry guard: the sheet is dismissed immediately below, so it cannot
@@ -936,8 +944,8 @@ function AuditScannerContent() {
 
       // Dismissed BEFORE the request. `runCompletion` reports its outcome with
       // `Alert.alert`, and an alert presented from a modal that is then torn
-      // down can be dismissed along with it — taking the message, and any
-      // action attached to it, with it.
+      // down can be dismissed along with it, taking the message and any
+      // action attached to it.
       setShowCompleteSheet(false);
 
       try {
@@ -1488,8 +1496,8 @@ function AuditScannerContent() {
         )}
       </View>
 
-      {/* Evidence modal for adding notes + photos to scanned items */}
       <CompleteAuditSheet
+        key={auditId}
         visible={showCompleteSheet}
         auditName={auditName}
         pendingCount={Math.max(0, expectedTotal - foundCount)}
@@ -1498,6 +1506,7 @@ function AuditScannerContent() {
         onConfirm={(note) => void handleSheetConfirm(note)}
       />
 
+      {/* Evidence modal for adding notes + photos to scanned items */}
       <EvidenceModal
         visible={evidenceModalVisible}
         onClose={handleCloseEvidenceModal}

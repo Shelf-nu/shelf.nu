@@ -523,9 +523,11 @@ function AuditDetailContent({ id }: { id: string }) {
 
     setShowCompleteSheet(false);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    Alert.alert("Audit Complete", `"${audit.name}" has been completed.`, [
-      { text: "OK", onPress: () => fetchAudit() },
-    ]);
+    // Refresh here, never from the alert: an alert raised while the sheet is
+    // animating out can be dismissed with it, and the screen would keep
+    // offering Complete on an audit that is already finished.
+    void fetchAudit();
+    Alert.alert("Audit Complete", `"${audit.name}" has been completed.`);
   };
 
   // ── Build display assets list ─────────────────────────
@@ -950,6 +952,7 @@ function AuditDetailContent({ id }: { id: string }) {
     <View style={styles.container}>
       {audit ? (
         <CompleteAuditSheet
+          key={audit.id}
           visible={showCompleteSheet}
           auditName={audit.name}
           pendingCount={audit.expectedAssetCount - audit.foundAssetCount}

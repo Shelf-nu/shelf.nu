@@ -46,6 +46,14 @@ describe("valuationFromInput", () => {
   it("never yields NaN for text that is not a number", () => {
     assert.equal(valuationFromInput("abc"), null);
   });
+
+  it("reads a lone decimal point as no answer", () => {
+    assert.equal(valuationFromInput("."), null);
+  });
+
+  it("reads a trailing decimal point as the whole number", () => {
+    assert.equal(valuationFromInput("5."), 5);
+  });
 });
 
 describe("the two directions agree", () => {

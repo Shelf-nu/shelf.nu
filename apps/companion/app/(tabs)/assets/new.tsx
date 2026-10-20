@@ -41,6 +41,7 @@ import {
   type MobileCustomFieldDefinition,
 } from "@/lib/api";
 import { ValuationField } from "@/components/asset-edit/valuation-field";
+import { valuationFromInput } from "@/lib/asset-valuation";
 import { useOrg } from "@/lib/org-context";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
@@ -492,16 +493,6 @@ export default function CreateAssetScreen() {
     const customFieldsPayload = buildCustomFieldsPayload();
 
     setIsSubmitting(true);
-    const trimmedValuation = valuation.trim();
-    if (trimmedValuation !== "" && !Number.isFinite(Number(trimmedValuation))) {
-      Alert.alert(
-        "Check the value",
-        "Enter the value as a number, or leave it empty."
-      );
-      setIsSubmitting(false);
-      return;
-    }
-
     const { data, error } = await api.createAsset(currentOrg.id, {
       title: trimmedTitle,
       description: description.trim() || undefined,
@@ -511,8 +502,9 @@ export default function CreateAssetScreen() {
       customFields:
         customFieldsPayload.length > 0 ? customFieldsPayload : undefined,
       qrId: qrId || undefined,
-      // A blank box is omitted; a typed 0 is a real value and is sent.
-      valuation: trimmedValuation === "" ? undefined : Number(trimmedValuation),
+      // Same rule as the edit screen: a blank box is no value and is left
+      // out, while a typed 0 is a real value and is sent.
+      valuation: valuationFromInput(valuation) ?? undefined,
     });
 
     setIsSubmitting(false);

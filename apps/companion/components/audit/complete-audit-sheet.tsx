@@ -1,17 +1,20 @@
 /**
- * CompleteAuditSheet — the confirmation for finishing an audit, and the one
+ * CompleteAuditSheet: the confirmation for finishing an audit, and the one
  * place its closing note can be written.
  *
  * Completing is the irreversible step: every expected asset nobody scanned is
  * marked missing, and the counts are finalised into the record the report is
  * built from. So the sheet states that consequence in numbers before the
- * button, and offers a note for the thing numbers cannot carry — why the
+ * button, and offers a note for the thing numbers cannot carry: why the
  * missing ones are missing.
  *
- * The note is optional and free text, capped to match the server's own limit.
+ * The note is optional free text. It survives closing and reopening the sheet,
+ * so a completion that is blocked or fails can be retried without retyping it.
+ * Callers key the sheet by audit id, so a note never carries over to another
+ * audit.
  * Follows the house selection-flow contract (QuantityInputSheet,
  * TeamMemberPicker): page-sheet modal, header with close, explicit confirm.
- * React Native has no usable text prompt — `Alert.prompt` is iOS-only — which
+ * React Native has no usable text prompt (`Alert.prompt` is iOS-only), which
  * is why an Alert cannot do this job.
  *
  * The confirm button IS the confirmation: callers must not stack an Alert on
@@ -21,7 +24,7 @@
  * @see {@link file://../../app/(tabs)/audits/scan.tsx} the scanner consumer
  * @see {@link file://../quantity-input-sheet.tsx} the modal contract this mirrors
  */
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   View,
   Text,
@@ -37,14 +40,15 @@ import { Ionicons } from "@expo/vector-icons";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
-
-/** Matches the server's `completionNote` bound in api+/mobile+/audits.complete.ts. */
-const MAX_NOTE_LENGTH = 5000;
+import {
+  MAX_COMPLETION_NOTE_LENGTH,
+  completionNoteFromInput,
+} from "@/lib/audit-completion-note";
 
 type Props = {
   /** Whether the sheet is shown. */
   visible: boolean;
-  /** The audit being completed — named in the body so the act is unambiguous. */
+  /** The audit being completed, named in the body so the act is unambiguous. */
   auditName: string;
   /** Expected assets nobody scanned. These become missing on completion. */
   pendingCount: number;
@@ -77,14 +81,6 @@ export function CompleteAuditSheet({
   const { colors } = useTheme();
   const styles = useStyles();
   const [note, setNote] = useState("");
-
-  // A note belongs to the audit it was written for, so each opening starts
-  // empty rather than carrying the previous one forward.
-  useEffect(() => {
-    if (visible) setNote("");
-  }, [visible]);
-
-  const trimmedNote = note.trim();
 
   return (
     <Modal
@@ -129,12 +125,12 @@ export function CompleteAuditSheet({
               style={styles.input}
               value={note}
               onChangeText={setNote}
-              placeholder="Anything worth recording — why an asset is missing, who was asked, what happens next."
+              placeholder="Anything worth recording: why an asset is missing, who was asked, what happens next."
               placeholderTextColor={colors.placeholderText}
               multiline
               numberOfLines={4}
               textAlignVertical="top"
-              maxLength={MAX_NOTE_LENGTH}
+              maxLength={MAX_COMPLETION_NOTE_LENGTH}
               editable={!isSubmitting}
               accessibilityLabel="Closing note for this audit"
             />
@@ -146,7 +142,7 @@ export function CompleteAuditSheet({
           <View style={styles.footer}>
             <TouchableOpacity
               style={styles.confirm}
-              onPress={() => onConfirm(trimmedNote || undefined)}
+              onPress={() => onConfirm(completionNoteFromInput(note))}
               disabled={isSubmitting}
               accessibilityRole="button"
               accessibilityLabel={`Complete the audit ${auditName}`}
