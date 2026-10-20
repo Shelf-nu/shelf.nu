@@ -553,7 +553,7 @@ export async function validateKitCustodyConflicts({
     throw new ShelfError({
       cause: null,
       message:
-        "Some rows conflict with the custody of existing kits. See the issue on each row.",
+        "Some rows have conflicting kit custody assignments. See the issue on each row.",
       additionalData: {
         kitCustodyConflicts: conflicts,
       },
