@@ -55,6 +55,14 @@ export const ASSET_IMPORT_UNRELEASED_LEASE_DELAY_SECONDS =
 export const ASSET_IMPORT_STALL_MINUTES = 60;
 
 /**
+ * How long a stalled-looking import is left alone while pg-boss still holds a
+ * waiting or running job for it. Past this, a job that never ran is treated as
+ * lost (no worker is taking it) and the import is failed so the workspace's
+ * single active import slot frees up.
+ */
+export const ASSET_IMPORT_MAX_QUEUE_WAIT_HOURS = 6;
+
+/**
  * Time one ROWS chunk may spend downloading images before it writes its rows.
  * Rows not reached in time are imported without an image and get a warning.
  * Must stay well under the step's lease (one minute less than the 15-minute

@@ -192,6 +192,11 @@ export async function confirmAssetImport({
  * recreates anything deleted since, checks the creator's permission again and
  * continues at the chunk holding the first unwritten row.
  *
+ * Any member with import permission may resume any failed import of the
+ * workspace, not only its creator, so a team can recover an import whose
+ * starter is away. Confirming a draft stays creator-only: a draft is that
+ * user's unreviewed upload. The job still runs as the creator.
+ *
  * @param args.importId - The failed import
  * @param args.organizationId - Active workspace; the import must belong to it
  * @param args.canUseBarcodes - Whether the workspace has the barcodes add-on

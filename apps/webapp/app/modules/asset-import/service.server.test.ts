@@ -28,7 +28,10 @@ import { enqueueAssetImportStep } from "./worker.server";
 
 // why: the import row lives in the database.
 vi.mock("~/database/db.server", () => ({
-  db: { assetImport: { findFirst: vi.fn(), updateMany: vi.fn() } },
+  db: {
+    assetImport: { findFirst: vi.fn(), updateMany: vi.fn() },
+    $queryRaw: vi.fn(),
+  },
 }));
 
 // why: the queue has its own tests; here only the step sent matters.
@@ -258,6 +261,46 @@ describe("markStalledImportIfNeeded", () => {
     });
     expect(sendAssetImportFinishedEmail).toHaveBeenCalledOnce();
     expect(first.status).toBe("FAILED");
+  });
+
+  it("leaves a stale-looking import alone while its next job waits in the queue", async () => {
+    vi.mocked(db.$queryRaw).mockResolvedValue([{ live: true }] as never);
+    const waiting = imp({ status: "RUNNING", updatedAt: minutesAgo(61) });
+
+    await expect(markStalledImportIfNeeded(waiting)).resolves.toBe(waiting);
+    expect(db.assetImport.updateMany).not.toHaveBeenCalled();
+    const sql = vi.mocked(db.$queryRaw).mock.calls[0][0] as unknown as {
+      join: (separator: string) => string;
+    };
+    expect(sql.join("?")).toContain("pgboss.job");
+    expect(vi.mocked(db.$queryRaw).mock.calls[0]).toContain("imp:%");
+  });
+
+  it("fails an import whose queued job has waited past the limit", async () => {
+    vi.mocked(db.$queryRaw).mockResolvedValue([{ live: true }] as never);
+    vi.mocked(db.assetImport.updateMany).mockResolvedValue({ count: 1 });
+    vi.mocked(db.assetImport.findFirst).mockResolvedValue(
+      imp({ status: "FAILED" }) as never
+    );
+    const lost = imp({ status: "QUEUED", updatedAt: minutesAgo(7 * 60) });
+
+    const result = await markStalledImportIfNeeded(lost);
+
+    expect(db.$queryRaw).not.toHaveBeenCalled();
+    expect(result.status).toBe("FAILED");
+  });
+
+  it("falls back to the time rule when the queue lookup fails", async () => {
+    vi.mocked(db.$queryRaw).mockRejectedValue(new Error("no pgboss schema"));
+    vi.mocked(db.assetImport.updateMany).mockResolvedValue({ count: 1 });
+    vi.mocked(db.assetImport.findFirst).mockResolvedValue(
+      imp({ status: "FAILED" }) as never
+    );
+    const stale = imp({ status: "RUNNING", updatedAt: minutesAgo(61) });
+
+    await expect(markStalledImportIfNeeded(stale)).resolves.toMatchObject({
+      status: "FAILED",
+    });
   });
 
   it("leaves a recently updated RUNNING import alone", async () => {

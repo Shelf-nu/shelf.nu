@@ -17,7 +17,11 @@
 import type { AssetImport } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { sendAssetImportFinishedEmail } from "~/emails/asset-import-finished";
-import { ASSET_IMPORT_STALL_MINUTES } from "./constants";
+import { QueueNames } from "~/utils/scheduler.server";
+import {
+  ASSET_IMPORT_MAX_QUEUE_WAIT_HOURS,
+  ASSET_IMPORT_STALL_MINUTES,
+} from "./constants";
 
 /** Shown when a QUEUED or RUNNING import stopped moving. */
 export const IMPORT_STALLED_MESSAGE =
@@ -63,12 +67,42 @@ export async function markImportFailed({
 }
 
 /**
+ * Whether pg-boss still holds a job for this import that is waiting
+ * (`created`, `retry`) or running (`active`). Every step's singleton key
+ * starts with `${importId}:` (see `singletonKeyFor` in `worker.server.ts`).
+ * Reads pg-boss's own table: its API has no lookup by singleton key.
+ *
+ * @param importId - The import to look for
+ * @returns True when such a job exists; false when none does or the lookup
+ * fails, so a broken lookup falls back to the time-based rule
+ */
+export async function hasLiveImportJob(importId: string): Promise<boolean> {
+  try {
+    const [row] = await db.$queryRaw<{ live: boolean }[]>`
+      SELECT EXISTS (
+        SELECT 1 FROM pgboss.job
+        WHERE name = ${QueueNames.assetImportQueue}
+          AND singletonkey LIKE ${`${importId}:%`}
+          AND state IN ('created', 'retry', 'active')
+      ) AS live`;
+    return Boolean(row?.live);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Fails a QUEUED or RUNNING import that has not moved for
  * `ASSET_IMPORT_STALL_MINUTES`. Confirm, resume, every lease claim and every
- * chunk bump `updatedAt`, so an active import that old has no live step
- * behind it. That covers a QUEUED import whose first job never ran or never
+ * chunk bump `updatedAt`, so an active import that old usually has no live
+ * step behind it. That covers a QUEUED import whose first job never ran or never
  * claimed it, which would otherwise hold the workspace's single active import
  * slot forever. Status reads call this before they render the import.
+ *
+ * A step only touches the import once it starts, so an import whose next job
+ * is waiting behind other imports looks stalled too. While pg-boss still holds
+ * a waiting or running job for it, the import is left alone, for at most
+ * `ASSET_IMPORT_MAX_QUEUE_WAIT_HOURS`.
  *
  * @param assetImport - The import as just loaded
  * @returns The import unchanged when it is not stalled, otherwise the import
@@ -81,6 +115,15 @@ export async function markStalledImportIfNeeded(
   if (
     (assetImport.status !== "QUEUED" && assetImport.status !== "RUNNING") ||
     assetImport.updatedAt.getTime() >= stallBefore
+  ) {
+    return assetImport;
+  }
+
+  const giveUpBefore =
+    Date.now() - ASSET_IMPORT_MAX_QUEUE_WAIT_HOURS * 60 * 60 * 1000;
+  if (
+    assetImport.updatedAt.getTime() >= giveUpBefore &&
+    (await hasLiveImportJob(assetImport.id))
   ) {
     return assetImport;
   }

@@ -138,7 +138,10 @@ read-only  rows stored             claim QR,   100 rows     kit custody,
    100 rows (`ASSET_IMPORT_CHUNK_SIZE`). A chunk downloads its images, then
    writes assets, QR codes, tags, placement, kit pivots, direct custody, custom
    field values, barcodes and `ASSET_CREATED` events with one `createMany` per
-   table in a single transaction. Each job queues the next one.
+   table in a single transaction. A `QUANTITY_TRACKED` row with a custodian and
+   no kit gets direct custody of one unit (the `Custody.quantity` default), not
+   the full CSV `quantity`, the same as creating the asset by hand. Each job
+   queues the next one.
 5. **FINALIZE** (`finalize.server.ts`). Assigns kit custody for rows that name a
    kit and a custodian (through `bulkAssignKitCustody`), marks the import
    `COMPLETED`, clears the stored rows and emails the creator
@@ -172,10 +175,14 @@ Constants live in `modules/asset-import/constants.ts`.
   reached are imported without an image and get a warning. The budget keeps a
   live step well inside its 14 minute lease, which is never renewed.
 - **Stall detection.** A `QUEUED` or `RUNNING` import whose `updatedAt` has not
-  moved for 60 minutes (`ASSET_IMPORT_STALL_MINUTES`) is marked `FAILED` the
-  next time it is read (`markStalledImportIfNeeded`), so a dead job never shows
-  as active forever, and an import whose first job never ran cannot hold the
-  workspace's single active-import slot. Loading the import and claiming the
+  moved for 60 minutes (`ASSET_IMPORT_STALL_MINUTES`) is marked `FAILED` by the
+  next read that runs `markStalledImportIfNeeded` (the status page and the app
+  shell's active-import lookup, which runs on most page loads). Until such a read
+  happens, the row still counts as active and blocks a new import or a resume.
+  An import whose next job is still waiting or running in pg-boss is left alone
+  for up to 6 hours (`ASSET_IMPORT_MAX_QUEUE_WAIT_HOURS`), so an import queued
+  behind other imports is not failed early; past that, a job that never ran is
+  treated as lost. Loading the import and claiming the
   lease sit inside the job's error handling, so a failure there on the last
   attempt marks the import `FAILED` straight away.
 - **Resume.** A `FAILED` import can be resumed from the status page
@@ -238,7 +245,7 @@ deleted entity in PREPARE and continues.
 
 `apps/webapp/app/modules/asset-import/`:
 
-- `constants.ts`: chunk size, poll interval, lease, stall, image budget, TTL, job options.
+- `constants.ts`: chunk size, poll interval, lease, stall, queue wait, image budget, TTL, job options.
 - `types.ts`: stored row, resolved maps, warning, status and notice payloads.
 - `validate.server.ts`: read-only validation of a file or stored rows.
 - `preview.server.ts`: builds the DRAFT, the 100-row preview grid and the
