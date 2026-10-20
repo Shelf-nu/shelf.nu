@@ -152,6 +152,22 @@ describe("collectImportCodeProblems", () => {
     ]);
   });
 
+  it("reports another workspace's linked QR code as from another workspace", async () => {
+    qrFindMany.mockResolvedValue([
+      qr("foreign", { organizationId: "other", assetId: "their-asset" }),
+    ] as never);
+
+    const errors = await collect([row({ qrId: "foreign" })]);
+
+    expect(errors).toEqual([
+      {
+        row: 2,
+        title: "QR code from another workspace",
+        message: expect.stringContaining('"foreign"'),
+      },
+    ]);
+  });
+
   it("reports a barcode its type does not accept", async () => {
     const errors = await collect([row({ barcode_Code128: "AB" })]);
 

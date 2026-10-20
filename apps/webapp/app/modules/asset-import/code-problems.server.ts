@@ -152,10 +152,17 @@ async function collectQrCodeProblems({
 
     const code = codeById.get(qrId);
     let problem: Pick<ImportRowError, "title" | "message"> | null = null;
+    // Another workspace's code is reported as such even when it is linked
+    // there: that asset is not one the importer can see or act on.
     if (!code) {
       problem = {
         title: "QR code not found",
         message: `QR code "${qrId}" does not exist. Check the qrId column, or leave it empty to generate a new code.`,
+      };
+    } else if (code.organizationId && code.organizationId !== organizationId) {
+      problem = {
+        title: "QR code from another workspace",
+        message: `QR code "${qrId}" belongs to another workspace. Use a code from this workspace or an unclaimed code, or leave the qrId column empty to generate a new code.`,
       };
     } else if (code.assetId || code.kitId) {
       problem = {
@@ -163,11 +170,6 @@ async function collectQrCodeProblems({
         message: `QR code "${qrId}" is already linked to ${
           code.assetId ? "an asset" : "a kit"
         }. Use an unlinked code, or leave the qrId column empty to generate a new code.`,
-      };
-    } else if (code.organizationId && code.organizationId !== organizationId) {
-      problem = {
-        title: "QR code from another workspace",
-        message: `QR code "${qrId}" belongs to another workspace. Use a code from this workspace or an unclaimed code, or leave the qrId column empty to generate a new code.`,
       };
     }
 

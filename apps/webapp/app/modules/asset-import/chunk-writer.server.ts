@@ -475,6 +475,34 @@ function distinct(ids: (string | null | undefined)[]): string[] {
 }
 
 /**
+ * Runs one workspace guard over ids PREPARE resolved. The guard fails only
+ * when a record was deleted after PREPARE, so its generic form message is
+ * replaced with one that tells the importer how to recover: Resume runs
+ * PREPARE again, which recreates the record.
+ *
+ * @param kind - What the ids are, in the plural ("categories")
+ * @param assertion - The guard call
+ * @throws {ShelfError} 400 naming the kind and pointing at Resume
+ */
+async function assertStillInWorkspace(
+  kind: string,
+  assertion: () => Promise<void>
+): Promise<void> {
+  try {
+    await assertion();
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      label,
+      title: "Deleted during the import",
+      message: `Some ${kind} this import uses were deleted while it ran. Resume the import to create them again and continue.`,
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
+}
+
+/**
  * Appends warnings to an import, keeping at most MAX_STORED_IMPORT_WARNINGS in
  * the JSON array while `warningCount` always counts every warning. One
  * statement, so concurrent appends cannot lose each other's warnings. The
@@ -551,44 +579,56 @@ export async function writeImportChunk({
 
         // The ids come from PREPARE, but every id written still has to be
         // proven to belong to this workspace.
-        await assertCategoriesBelongToOrg(
-          {
-            categoryIds: distinct(prepared.map((p) => p.categoryId)),
-            organizationId,
-          },
-          tx
+        await assertStillInWorkspace("categories", () =>
+          assertCategoriesBelongToOrg(
+            {
+              categoryIds: distinct(prepared.map((p) => p.categoryId)),
+              organizationId,
+            },
+            tx
+          )
         );
-        await assertLocationsBelongToOrg(
-          {
-            locationIds: distinct(withLocation.map((p) => p.locationId)),
-            organizationId,
-          },
-          tx
+        await assertStillInWorkspace("locations", () =>
+          assertLocationsBelongToOrg(
+            {
+              locationIds: distinct(withLocation.map((p) => p.locationId)),
+              organizationId,
+            },
+            tx
+          )
         );
-        await assertTagsBelongToOrg(
-          {
-            tagIds: distinct(prepared.flatMap((p) => p.tagIds)),
-            organizationId,
-          },
-          tx
+        await assertStillInWorkspace("tags", () =>
+          assertTagsBelongToOrg(
+            {
+              tagIds: distinct(prepared.flatMap((p) => p.tagIds)),
+              organizationId,
+            },
+            tx
+          )
         );
-        await assertKitsBelongToOrg(
-          { kitIds: distinct(withKit.map((p) => p.kitId)), organizationId },
-          tx
+        await assertStillInWorkspace("kits", () =>
+          assertKitsBelongToOrg(
+            { kitIds: distinct(withKit.map((p) => p.kitId)), organizationId },
+            tx
+          )
         );
-        await assertTeamMembersBelongToOrg(
-          {
-            teamMemberIds: distinct(withCustody.map((p) => p.custodianId)),
-            organizationId,
-          },
-          tx
+        await assertStillInWorkspace("team members", () =>
+          assertTeamMembersBelongToOrg(
+            {
+              teamMemberIds: distinct(withCustody.map((p) => p.custodianId)),
+              organizationId,
+            },
+            tx
+          )
         );
-        await assertAssetModelsBelongToOrg(
-          {
-            assetModelIds: distinct(prepared.map((p) => p.assetModelId)),
-            organizationId,
-          },
-          tx
+        await assertStillInWorkspace("asset models", () =>
+          assertAssetModelsBelongToOrg(
+            {
+              assetModelIds: distinct(prepared.map((p) => p.assetModelId)),
+              organizationId,
+            },
+            tx
+          )
         );
 
         // The org-scoped read is the custom field guard: a field missing here

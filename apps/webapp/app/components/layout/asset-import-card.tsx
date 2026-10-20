@@ -12,8 +12,10 @@
  * card renders the same without storage.
  *
  * Looks like a toast (`Toaster`): white card, round status icon. Placement:
- * bottom-right with the toast viewport's 25px inset, lifted above that
- * viewport so a toast and the card never overlap. Hidden on `/assets/import`
+ * bottom-right with the toast viewport's 25px inset. While shown, it publishes
+ * its height as the `--asset-import-card-offset` CSS variable, which the toast
+ * viewport adds to its bottom padding, so toasts stack above the card instead
+ * of covering it. Hidden on `/assets/import`
  * and `/assets/import/*`, where the upload and status pages show the import
  * themselves.
  *
@@ -33,6 +35,47 @@ import { Button } from "../shared/button";
 import { iconsMap } from "../shared/icons-map";
 import { Progress } from "../shared/progress";
 import { Spinner } from "../shared/spinner";
+
+/**
+ * CSS variable on `<html>` holding the card's height plus the toast gap, read
+ * by the toast viewport in `components/shared/toast.tsx`.
+ */
+const IMPORT_CARD_OFFSET_VAR = "--asset-import-card-offset";
+
+/** Gap between the card and a toast stacked above it, matching toast spacing. */
+const TOAST_GAP_PX = 10;
+
+/**
+ * Publishes the element's height as {@link IMPORT_CARD_OFFSET_VAR} while it is
+ * mounted, and clears it on unmount so toasts drop back to the corner.
+ *
+ * @returns Ref to attach to the card
+ */
+function useToastOffset<T extends HTMLElement>() {
+  const ref = useRef<T>(null);
+  useEffect(() => {
+    const element = ref.current;
+    const root = document.documentElement;
+    if (!element) return;
+    const publish = () =>
+      root.style.setProperty(
+        IMPORT_CARD_OFFSET_VAR,
+        `${element.offsetHeight + TOAST_GAP_PX}px`
+      );
+    publish();
+    // Collapsing and status changes resize the card.
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(publish);
+    observer?.observe(element);
+    return () => {
+      observer?.disconnect();
+      root.style.removeProperty(IMPORT_CARD_OFFSET_VAR);
+    };
+  }, []);
+  return ref;
+}
 
 /** `localStorage` key holding `"1"` while the card is collapsed. */
 const COLLAPSED_KEY = "assetImportCard:collapsed";
@@ -147,6 +190,7 @@ const ICON_BUTTON_CLASS = tw(
  */
 function ImportCardBody({ initial, onDismiss }: ImportCardBodyProps) {
   const status = useAssetImportStatus(initial.id, initial);
+  const cardRef = useToastOffset<HTMLElement>();
   const [collapsed, setCollapsed] = useState(false);
   const [hovered, setHovered] = useState(false);
   const [focusWithin, setFocusWithin] = useState(false);
@@ -213,6 +257,7 @@ function ImportCardBody({ initial, onDismiss }: ImportCardBodyProps) {
 
   return (
     <section
+      ref={cardRef}
       aria-label="Asset import progress"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
@@ -223,7 +268,7 @@ function ImportCardBody({ initial, onDismiss }: ImportCardBodyProps) {
           setFocusWithin(false);
         }
       }}
-      className="fixed inset-x-[25px] bottom-28 z-40 flex gap-4 rounded border border-gray-100 bg-white p-3 text-left shadow-xl md:inset-x-auto md:right-[25px] md:w-[340px]"
+      className="fixed inset-x-[25px] bottom-[calc(25px+env(safe-area-inset-bottom))] z-40 flex gap-4 rounded border border-gray-100 bg-white p-3 text-left shadow-xl md:inset-x-auto md:right-[25px] md:w-[340px]"
     >
       <div
         aria-hidden="true"

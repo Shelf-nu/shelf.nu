@@ -95,6 +95,21 @@ describe("AssetImportCard", () => {
     );
   });
 
+  it("makes room for toasts above it while shown", async () => {
+    const root = document.documentElement;
+    renderCard(status());
+
+    await screen.findByText("300 of 965");
+    expect(root.style.getPropertyValue("--asset-import-card-offset")).toMatch(
+      /^\d+px$/
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Close import progress" })
+    );
+    expect(root.style.getPropertyValue("--asset-import-card-offset")).toBe("");
+  });
+
   it("can be closed while the import is running", async () => {
     renderCard(status());
 

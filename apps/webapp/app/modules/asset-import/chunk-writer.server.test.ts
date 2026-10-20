@@ -9,6 +9,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { db } from "~/database/db.server";
 import { recordEvents } from "~/modules/activity-event/service.server";
+import { ShelfError } from "~/utils/error";
+import { assertCategoriesBelongToOrg } from "~/utils/org-validation.server";
 import type { WriteImportChunkArgs } from "./chunk-writer.server";
 import { appendImportWarnings, writeImportChunk } from "./chunk-writer.server";
 import type { ResolvedImportEntities, StoredImportRow } from "./types";
@@ -172,6 +174,27 @@ describe("writeImportChunk", () => {
       ],
       tx
     );
+  });
+
+  it("tells the user to resume when a record was deleted since PREPARE", async () => {
+    tx.assetImport.updateMany.mockResolvedValue({ count: 1 });
+    vi.mocked(assertCategoriesBelongToOrg).mockRejectedValueOnce(
+      new ShelfError({
+        cause: null,
+        label: "Organization",
+        message: "Some of the selected categories do not exist.",
+        status: 400,
+      })
+    );
+
+    await expect(
+      writeImportChunk(args({ rows: [row("a1", { category: "Tools" })] }))
+    ).rejects.toMatchObject({
+      status: 400,
+      message:
+        "Some categories this import uses were deleted while it ran. Resume the import to create them again and continue.",
+    });
+    expect(tx.asset.createMany).not.toHaveBeenCalled();
   });
 
   it("skips a chunk whose rows are already committed", async () => {
