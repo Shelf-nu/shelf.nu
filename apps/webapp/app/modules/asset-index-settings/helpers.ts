@@ -102,6 +102,7 @@ export const fixedFields = [
   "type",
   "upcomingBookings",
   "assetModel",
+  "lastAuditDate",
 ] as const;
 
 // Define barcode field names
@@ -166,6 +167,7 @@ export const columnsLabelsMap: { [key in ColumnLabelKey]: string } = {
   type: "Tracking method",
   upcomingBookings: "Upcoming Bookings",
   assetModel: "Asset model",
+  lastAuditDate: "Last audit date",
 };
 
 export const defaultFields: Column[] = [
@@ -190,6 +192,7 @@ export const defaultFields: Column[] = [
   { name: "type", visible: false, position: 18 },
   { name: "assetModel", visible: false, position: 19 },
   { name: "minQuantity", visible: false, position: 20 },
+  { name: "lastAuditDate", visible: true, position: 21 },
 ];
 
 // Generate barcode columns when barcodes are enabled
@@ -240,4 +243,39 @@ export function parseColumnName(name: string) {
 
   /** For fixed fields, return the label */
   return columnsLabelsMap[name as keyof typeof columnsLabelsMap];
+}
+
+/**
+ * Adds the default columns a saved column list is missing, after every column
+ * it already has.
+ *
+ * A saved list keeps the positions its user arranged, so a newly introduced
+ * default column cannot take its static default position: another column may
+ * already sit there, and two columns sharing a position order by array index.
+ * Missing columns keep their default order and visibility.
+ *
+ * @param columns - The saved column list
+ * @param missingNames - Names of the default columns the list lacks
+ * @returns The saved columns followed by the missing defaults
+ */
+export function appendMissingDefaultColumns(
+  columns: Column[],
+  missingNames: ColumnLabelKey[]
+): Column[] {
+  const missing = defaultFields.filter((field) =>
+    missingNames.includes(field.name as ColumnLabelKey)
+  );
+  if (missing.length === 0) return columns;
+
+  const maxPosition = columns.reduce(
+    (max, column) => Math.max(max, column.position),
+    -1
+  );
+  return [
+    ...columns,
+    ...missing.map((field, index) => ({
+      ...field,
+      position: maxPosition + 1 + index,
+    })),
+  ];
 }

@@ -208,6 +208,7 @@ describe("api/assets/bulk-assign-custody", () => {
       organizationId: "org-1",
       role: OrganizationRoles.ADMIN,
       access: accessFor(["ADMIN"]),
+      currentOrganization: { auditsEnabled: true },
       canUseBarcodes: false,
     } as Awaited<ReturnType<typeof requirePermission>>);
 
@@ -251,6 +252,7 @@ describe("api/assets/bulk-assign-custody", () => {
       organizationId: "org-1",
       role: OrganizationRoles.ADMIN,
       access: accessFor(["ADMIN"]),
+      currentOrganization: { auditsEnabled: true },
       canUseBarcodes: false,
     } as Awaited<ReturnType<typeof requirePermission>>);
 
@@ -304,6 +306,7 @@ describe("api/assets/bulk-assign-custody", () => {
       organizationId: "org-1",
       role: OrganizationRoles.SELF_SERVICE,
       access: accessFor(["SELF_SERVICE"]),
+      currentOrganization: { auditsEnabled: true },
       canUseBarcodes: false,
     } as Awaited<ReturnType<typeof requirePermission>>);
 
@@ -346,6 +349,7 @@ describe("api/assets/bulk-assign-custody", () => {
       organizationId: "org-1",
       role: OrganizationRoles.ADMIN,
       access: accessFor(["ADMIN"]),
+      currentOrganization: { auditsEnabled: true },
       canUseBarcodes: false,
     } as Awaited<ReturnType<typeof requirePermission>>);
 
@@ -408,6 +412,7 @@ describe("api/assets/bulk-assign-custody", () => {
         organizationId: "org-1",
         role: OrganizationRoles.SELF_SERVICE,
         access: accessFor(["SELF_SERVICE"]),
+        currentOrganization: { auditsEnabled: true },
         canUseBarcodes: false,
       } as Awaited<ReturnType<typeof requirePermission>>);
       // The caller's own team member: the shape QUANTITY_CUSTODIAN_SELECT reads.

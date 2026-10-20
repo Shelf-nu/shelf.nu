@@ -129,6 +129,7 @@ describe("bulk release custody as SELF_SERVICE", () => {
       role: "SELF_SERVICE",
       canUseBarcodes: false,
       access: accessFor(["SELF_SERVICE"]),
+      currentOrganization: { auditsEnabled: true },
     } as never);
     vi.mocked(bulkCheckInAssets).mockResolvedValue({
       skippedQuantityTracked: 1,

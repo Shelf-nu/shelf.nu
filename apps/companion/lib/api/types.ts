@@ -1203,6 +1203,13 @@ export type BookingDetailResponse = {
     canArchive: boolean;
     canDuplicate: boolean;
     canDelete: boolean;
+    /**
+     * Whether the caller may extend this booking (ONGOING or OVERDUE, the
+     * extend permission, and one they write). Optional: servers that predate
+     * the flag omit it and have no extend endpoint, so an absent flag hides
+     * the action.
+     */
+    canExtend?: boolean;
   };
   /**
    * Pools on this booking that check-out must ask "Where do the units come
@@ -1299,6 +1306,27 @@ export type UpdateBookingPayload = {
   custodianTeamMemberId: string;
   description?: string;
   tags?: string[];
+};
+
+/**
+ * Payload for `POST /api/mobile/bookings/extend`. `endDate` is a wall clock in
+ * `yyyy-MM-dd'T'HH:mm` (no offset), read in `timeZone`, the preference zone the
+ * picker edits in.
+ */
+export type ExtendBookingPayload = {
+  bookingId: string;
+  endDate: string;
+  timeZone: string;
+};
+
+/** Response of the extend endpoint. `to` is the stored end, an ISO instant. */
+export type ExtendBookingResponse = {
+  booking: {
+    id: string;
+    name: string;
+    status: BookingStatus;
+    to: string;
+  };
 };
 
 /**

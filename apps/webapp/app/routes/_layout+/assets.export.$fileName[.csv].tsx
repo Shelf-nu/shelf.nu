@@ -29,7 +29,7 @@ export const loader = async ({
   const { userId } = authSession;
 
   try {
-    const { organizationId, organizations, currentOrganization, role } =
+    const { organizationId, organizations, currentOrganization, role, access } =
       await requirePermission({
         userId: authSession.userId,
         request,
@@ -81,11 +81,13 @@ export const loader = async ({
       exportType === "import"
         ? await exportAssetsForImportToCsv({
             request,
+            userId,
             assetIds,
             settings,
             currentOrganization,
             assetIndexCurrentSearchParams,
             columnScope,
+            access,
           })
         : await exportAssetsFromIndexToCsv({
             request,
@@ -95,6 +97,7 @@ export const loader = async ({
             currentOrganization,
             assetIndexCurrentSearchParams,
             columnScope,
+            access,
           });
 
     return csvResponse(csvString, {
