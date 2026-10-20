@@ -6,6 +6,7 @@
  * about it: its submit listener cancels the event before React's `onSubmit`
  * runs, and after the first submit it re-validates on every `change` event.
  */
+import { useState } from "react";
 import { fireEvent, render } from "@testing-library/react";
 import { useZorm } from "react-zorm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -17,12 +18,23 @@ const schema = z.object({
   notes: z.string().optional(),
 });
 
-function TestForm() {
+/**
+ * Mirrors the asset form's submit handler: its own checks may cancel a submit
+ * Zorm accepted, and one check at the end scrolls for every cancellation.
+ *
+ * @param props.localError - Message the form's own check raises on submit
+ */
+function TestForm({ localError }: { localError?: string }) {
   const zo = useZorm("TestForm", schema);
+  const [shownLocalError, setShownLocalError] = useState<string>();
   return (
     <form
       ref={zo.ref}
       onSubmit={(e) => {
+        if (localError) {
+          setShownLocalError(localError);
+          e.preventDefault();
+        }
         if (e.defaultPrevented) {
           scrollToFirstErrorOnNextFrame(e.currentTarget);
         }
@@ -33,6 +45,9 @@ function TestForm() {
         <div className="text-sm text-error-500">{e.message}</div>
       ))}
       <input data-testid="notes" name={zo.fields.notes()} />
+      {shownLocalError ? (
+        <p className="text-sm text-error-500">{shownLocalError}</p>
+      ) : null}
     </form>
   );
 }
@@ -76,6 +91,21 @@ describe("scrollToFirstErrorOnNextFrame", () => {
     await nextFrame();
 
     expect(scrollIntoView).toHaveBeenCalledTimes(1);
+  });
+
+  it("scrolls when the form's own check rejects a submit Zorm accepted", async () => {
+    const { container, getByTestId } = render(
+      <TestForm localError="Please select a consumption type" />
+    );
+
+    fireEvent.change(getByTestId("title"), { target: { value: "Drill" } });
+    fireEvent.submit(container.querySelector("form")!);
+    await nextFrame();
+
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(scrollIntoView.mock.contexts[0]).toHaveTextContent(
+      "Please select a consumption type"
+    );
   });
 
   it("does not scroll when the submit passes validation", async () => {

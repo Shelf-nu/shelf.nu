@@ -707,14 +707,6 @@ const AssetFormInner = ({
         className="flex w-full flex-col gap-2"
         encType="multipart/form-data"
         onSubmit={(e) => {
-          // Zorm has already cancelled a submit that fails client validation.
-          // Bring the first message into view, or a Save pressed far above
-          // the failing field (often a required custom field at the bottom)
-          // looks like it did nothing.
-          if (e.defaultPrevented) {
-            scrollToFirstErrorOnNextFrame(e.currentTarget);
-          }
-
           // Force validation of all barcode fields to show errors
           barcodesInputRef.current?.validateAll();
 
@@ -728,18 +720,25 @@ const AssetFormInner = ({
               setConsumptionTypeError("Please select a consumption type");
               e.preventDefault();
               e.stopPropagation();
-              return false;
             } else {
               setConsumptionTypeError(undefined);
             }
           }
 
           // If there are barcode errors, prevent submission
-          // Zorm will handle its own validation and prevent submission if needed
           if (hasBarcodeErrors) {
             e.preventDefault();
             e.stopPropagation();
-            return false;
+          }
+
+          // A Save can be rejected by Zorm (its submit listener runs before
+          // this handler and cancels the event), by the consumption type
+          // check, or by the barcode check. Every one of them leaves the
+          // event cancelled, so this single check brings the first message
+          // into view. Without it, a Save pressed far above the failing field
+          // looks like it did nothing.
+          if (e.defaultPrevented) {
+            scrollToFirstErrorOnNextFrame(e.currentTarget);
           }
         }}
       >
