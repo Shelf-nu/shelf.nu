@@ -158,7 +158,11 @@ describe("HYDRATION_WATCHDOG_SCRIPT: a chunk fails to load", () => {
 
     expect(fakeWindow.location.reload).not.toHaveBeenCalled();
     expect(isShowingScreen()).toBe(true);
-    expect(storedReport()).toMatchObject({ failures: 2 });
+    // Same chain: the earlier automatic reload is still reported.
+    expect(storedReport()).toMatchObject({
+      failures: 2,
+      reloadedAt: expect.any(Number),
+    });
   });
 
   it("reloads again once the last automatic reload is old enough", () => {
@@ -185,7 +189,7 @@ describe("HYDRATION_WATCHDOG_SCRIPT: a chunk fails to load", () => {
     runWatchdog();
     const event = Object.assign(new Event("unhandledrejection"), {
       reason: new TypeError(
-        "Failed to fetch dynamically imported module: /file-assets/entry.client-X1.js"
+        `Failed to fetch dynamically imported module: ${ORIGIN}/file-assets/entry.client-X1.js`
       ),
     });
     window.dispatchEvent(event);
@@ -251,6 +255,35 @@ describe("HYDRATION_WATCHDOG_SCRIPT: files from another origin", () => {
     expect(fakeWindow.location.reload).not.toHaveBeenCalled();
   });
 
+  it.each([
+    "Failed to fetch dynamically imported module: data:text/javascript,export%20default%201",
+    "Failed to fetch dynamically imported module: chrome-extension://abcdef/content.js",
+    "error loading dynamically imported module: blob:https://app.shelf.nu/1234",
+  ])(
+    "ignores a rejected import that names a non-http module: %s",
+    (message) => {
+      runWatchdog();
+      window.dispatchEvent(
+        Object.assign(new Event("unhandledrejection"), {
+          reason: new TypeError(message),
+        })
+      );
+
+      expect(fakeWindow.location.reload).not.toHaveBeenCalled();
+    }
+  );
+
+  it("counts an import failure that names no module", () => {
+    runWatchdog();
+    window.dispatchEvent(
+      Object.assign(new Event("unhandledrejection"), {
+        reason: new TypeError("error loading dynamically imported module"),
+      })
+    );
+
+    expect(fakeWindow.location.reload).toHaveBeenCalledTimes(1);
+  });
+
   it("counts Safari's import failure, which names no URL", () => {
     runWatchdog();
     window.dispatchEvent(
@@ -281,6 +314,8 @@ describe("HYDRATION_WATCHDOG_SCRIPT: the reload loop guard", () => {
 
     expect(fakeWindow.location.reload).not.toHaveBeenCalled();
     expect(isShowingScreen()).toBe(true);
+    // A new chain of failures: it did not reload, so it must not say it did.
+    expect(storedReport()).toMatchObject({ failures: 1, reloadedAt: null });
   });
 });
 

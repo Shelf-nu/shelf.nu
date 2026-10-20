@@ -85,7 +85,11 @@ export type HydrationFailureReport = {
   path: string;
   /** Epoch ms of the failure. */
   at: number;
-  /** Epoch ms of the automatic reload this failure triggered, if any. */
+  /**
+   * Epoch ms of the automatic reload in this unbroken chain of failed loads,
+   * whether this failure triggered it or an earlier one did. A successful
+   * hydration ends the chain.
+   */
   reloadedAt: number | null;
   /** Consecutive failed loads in this tab since the last successful one. */
   failures: number;
@@ -175,7 +179,9 @@ export const HYDRATION_WATCHDOG_SCRIPT = `(function () {
       source: source || null,
       path: window.location.pathname,
       at: now,
-      reloadedAt: lastReload,
+      // The guard key outlives a successful hydration; the report does not.
+      // Report only a reload from this chain of failures.
+      reloadedAt: (previous && previous.reloadedAt) || null,
       failures: ((previous && previous.failures) || 0) + 1
     };
     var reloadedRecently = lastReload !== null && now - lastReload < ${HYDRATION_RELOAD_WINDOW_MS};
@@ -211,10 +217,15 @@ export const HYDRATION_WATCHDOG_SCRIPT = `(function () {
   function onRejection(event) {
     var reason = event.reason;
     var message = reason && reason.message ? String(reason.message) : String(reason);
-    var isModuleFailure = /dynamically imported module|importing a module script failed/i.test(message);
-    // Safari's message names no URL; the others must name a file of ours.
-    var urlMatch = message.match(/https?:\\/\\/[^\\s]+/);
-    if (isModuleFailure && (!urlMatch || isOwnUrl(urlMatch[0]))) {
+    // Safari's message names no URL.
+    if (/importing a module script failed/i.test(message)) {
+      fail("load-error", message);
+      return;
+    }
+    // Chrome and Firefox name the module, in any scheme (data:, blob:,
+    // chrome-extension:). Only a file of ours counts; with no name, accept it.
+    var named = message.match(/dynamically imported module:?\\s*(\\S*)/i);
+    if (named && (!named[1] || isOwnUrl(named[1]))) {
       fail("load-error", message);
     }
   }
