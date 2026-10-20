@@ -98,4 +98,37 @@ describe("insertMissingDefaultColumns", () => {
 
     expect(insertMissingDefaultColumns(saved, [])).toBe(saved);
   });
+
+  it("adds Unit of measure after the saved columns, hidden, when the set has no Quantity", () => {
+    const saved = [
+      { name: "name", visible: true, position: 0 },
+      { name: "cf_Serial", visible: true, position: 7 },
+    ] as Column[];
+
+    const result = insertMissingDefaultColumns(saved, ["unitOfMeasure"]);
+
+    expect(result.slice(0, 2)).toEqual(saved);
+    expect(result[2]).toEqual({
+      name: "unitOfMeasure",
+      visible: false,
+      position: 8,
+    });
+  });
+
+  it("puts Unit of measure right after Quantity when both are missing", () => {
+    const saved = [
+      { name: "name", visible: true, position: 0 },
+      { name: "cf_Serial", visible: true, position: 4 },
+    ] as Column[];
+
+    const result = insertMissingDefaultColumns(saved, [
+      "unitOfMeasure",
+      "quantity",
+    ]);
+    const byName = (name: string) => result.find((col) => col.name === name);
+
+    expect(byName("quantity")?.position).toBe(5);
+    expect(byName("unitOfMeasure")?.position).toBe(6);
+    expect(byName("cf_Serial")?.position).toBe(4);
+  });
 });

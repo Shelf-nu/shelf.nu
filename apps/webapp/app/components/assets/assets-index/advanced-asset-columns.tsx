@@ -365,30 +365,10 @@ export function AdvancedIndexColumn({
       );
 
     case "quantity":
-      // Bare number, so the column reads and sorts as a number. The unit has
-      // its own "unitOfMeasure" column below.
-      return (
-        <Td className="w-full max-w-none whitespace-nowrap">
-          {isQuantityTracked(item) && item.quantity != null ? (
-            item.quantity
-          ) : (
-            <EmptyTableValue />
-          )}
-        </Td>
-      );
+      return <QuantityColumn item={item} />;
 
     case "unitOfMeasure":
-      // Free-text unit ("pcs", "kg") of a QUANTITY_TRACKED asset. Individual
-      // assets have no unit and show the empty-value dash.
-      return (
-        <Td className="w-full max-w-none whitespace-nowrap">
-          {isQuantityTracked(item) && item.unitOfMeasure ? (
-            item.unitOfMeasure
-          ) : (
-            <EmptyTableValue />
-          )}
-        </Td>
-      );
+      return <UnitOfMeasureColumn item={item} />;
 
     case "minQuantity":
       // Low-stock reorder threshold, only meaningful for QUANTITY_TRACKED
@@ -473,6 +453,51 @@ function StatusColumn({
         asset={asset}
         isArchived={isArchived}
       />
+    </Td>
+  );
+}
+
+/** The asset fields the Quantity and Unit of measure cells read. */
+type QuantityCellAsset = Pick<
+  AdvancedIndexAsset,
+  "type" | "quantity" | "unitOfMeasure"
+>;
+
+/**
+ * Quantity cell of the advanced index: the bare stock number of a
+ * QUANTITY_TRACKED asset, so the column reads and sorts as a number. The unit
+ * has its own {@link UnitOfMeasureColumn}. Individual assets show the
+ * empty-value dash.
+ *
+ * @param props.item - The asset row
+ */
+export function QuantityColumn({ item }: { item: QuantityCellAsset }) {
+  return (
+    <Td className="w-full max-w-none whitespace-nowrap">
+      {isQuantityTracked(item) && item.quantity != null ? (
+        item.quantity
+      ) : (
+        <EmptyTableValue />
+      )}
+    </Td>
+  );
+}
+
+/**
+ * Unit of measure cell of the advanced index: the free-text unit ("pcs",
+ * "kg") of a QUANTITY_TRACKED asset. Individual assets, and quantity-tracked
+ * assets without a unit, show the empty-value dash.
+ *
+ * @param props.item - The asset row
+ */
+export function UnitOfMeasureColumn({ item }: { item: QuantityCellAsset }) {
+  return (
+    <Td className="w-full max-w-none whitespace-nowrap">
+      {isQuantityTracked(item) && item.unitOfMeasure ? (
+        item.unitOfMeasure
+      ) : (
+        <EmptyTableValue />
+      )}
     </Td>
   );
 }

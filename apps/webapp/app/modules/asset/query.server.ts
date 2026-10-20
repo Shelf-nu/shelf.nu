@@ -376,9 +376,11 @@ function addStringFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         filter.value
       }`;
     case "isNot":
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(filter.name)}" != ${
-        filter.value
-      }`;
+      // IS DISTINCT FROM, not `!=`: an empty column (no description, no unit
+      // of measure) is "not" any value, and `!=` never matches NULL.
+      return Prisma.sql`${whereClause} AND a."${Prisma.raw(
+        filter.name
+      )}" IS DISTINCT FROM ${filter.value}`;
     case "contains":
       return Prisma.sql`${whereClause} AND a."${Prisma.raw(
         filter.name
@@ -1539,17 +1541,21 @@ const directAssetFields: Record<DirectAssetField, string> = {
  *
  * @param columnRef - The column or expression to sort. Caller-validated.
  * @param direction - Sort direction ('asc' or 'desc'). Caller-validated.
+ * @param options.nullsLast - Keep empty values last in both directions, for a
+ *   column most rows leave empty
  * @returns SQL string with normalized sorting expression
  */
 function getNormalizedSortExpression(
   columnRef: string,
-  direction: string
+  direction: string,
+  { nullsLast = false }: { nullsLast?: boolean } = {}
 ): string {
+  const order = nullsLast ? `${direction} NULLS LAST` : direction;
   return `
     LOWER(regexp_replace(${columnRef}, '([0-9]+)',
       lpad(regexp_replace(regexp_replace('\\1', '^0+', ''), '^$', '0'), 12, '0')
-    )) ${direction},
-    ${columnRef} ${direction}
+    )) ${order},
+    ${columnRef} ${order}
   `.trim();
 }
 
@@ -1672,9 +1678,13 @@ export function parseSortingOptions(sortBy: string[]): {
           getSequentialIdSortExpression(`"${columnName}"`, field.direction)
         );
       } else if (isTextColumn(field.name)) {
-        // Apply natural sort for other text columns
+        // Apply natural sort for other text columns. Individual assets have
+        // no unit of measure, so empty units stay last in both directions
+        // instead of filling the first pages of a descending sort.
         orderByParts.push(
-          getNormalizedSortExpression(`"${columnName}"`, field.direction)
+          getNormalizedSortExpression(`"${columnName}"`, field.direction, {
+            nullsLast: field.name === "unitOfMeasure",
+          })
         );
       } else if (field.name === "valuation") {
         // Quantity-aware: sort by TOTAL value (per-unit × quantity), matching

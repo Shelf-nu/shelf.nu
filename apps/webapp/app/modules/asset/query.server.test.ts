@@ -251,6 +251,21 @@ describe("parseSortingOptions", () => {
       expect(orderByInner).toContain('"assetId" ASC');
     });
 
+    it.each(["asc", "desc"])(
+      "keeps assets without a unit last when sorting unit of measure %s",
+      (direction) => {
+        const { orderByInner } = parseSortingOptions([
+          `unitOfMeasure:${direction}`,
+        ]);
+        // Individual assets have no unit; without NULLS LAST a descending
+        // sort opens on pages of empty rows.
+        expect(orderByInner).toContain(`)) ${direction} NULLS LAST`);
+        expect(orderByInner).toContain(
+          `"assetUnitOfMeasure" ${direction} NULLS LAST`
+        );
+      }
+    );
+
     it("uses custody jsonb path for custody", () => {
       const { orderByClause } = parseSortingOptions(["custody:desc"]);
       // Regression (custody-sort no-op): the `custody` column is a jsonb
@@ -371,6 +386,17 @@ describe("generateWhereClause - quantity and unit of measure filters", () => {
     const result = generateWhereClause("org-1", null, filters);
     expect(getSqlString(result)).toContain('a."unitOfMeasure" ILIKE ?');
     expect(result.values).toContain("%pc%");
+  });
+
+  it("keeps assets without a unit when filtering unit of measure 'is not'", () => {
+    const filters = parseFilters("unitOfMeasure=isNot:kg", columns);
+
+    const result = generateWhereClause("org-1", null, filters);
+    // `!=` never matches NULL, which would hide every asset without a unit.
+    expect(getSqlString(result)).toContain(
+      'a."unitOfMeasure" IS DISTINCT FROM ?'
+    );
+    expect(result.values).toContain("kg");
   });
 });
 
