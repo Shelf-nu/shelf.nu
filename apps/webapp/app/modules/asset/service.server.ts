@@ -197,6 +197,11 @@ import { setCustodyDrivenAssetStatus } from "./custody-status.server";
 import { assetIndexFields } from "./fields";
 import { removeImageFilesOfDeletedAssets } from "./image-files.server";
 import { validateContentImportRows } from "./import-preflight.server";
+import {
+  LAST_AUDIT_DATE_COLUMN,
+  canQueryLastAuditDate,
+} from "./last-audit-date-access";
+import type { LastAuditDateAccess } from "./last-audit-date-access";
 import type {
   MoveAssetLocationUnitsArgs,
   MoveUnitsResult,
@@ -1091,6 +1096,8 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   timeZone = "UTC",
   honorArchivedView = false,
   archivedFilter,
+  lastAuditDateAccess = "hidden",
+  includeHiddenColumns = false,
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
@@ -1124,6 +1131,18 @@ export async function getAdvancedPaginatedAndFilterableAssets({
    * archived rows included, whatever view the request came from.
    */
   archivedFilter?: ArchivedFilter;
+  /**
+   * How the last audit date column is exposed to the caller. Anything other
+   * than `available` never reaches the database: its filter and sort are
+   * dropped. Defaults to `hidden`.
+   */
+  lastAuditDateAccess?: LastAuditDateAccess;
+  /**
+   * Compute the last audit date even when the column is hidden in the
+   * caller's settings (exports include every column). Still requires
+   * `available` access.
+   */
+  includeHiddenColumns?: boolean;
 }) {
   const currentFilterParams = new URLSearchParams(filters || "");
   const searchParams = filters
@@ -1154,13 +1173,18 @@ export async function getAdvancedPaginatedAndFilterableAssets({
     // advertises pages that come back empty.
     const take = Math.min(Math.max(perPage, 1), 100);
     const skip = page > 1 ? (page - 1) * take : 0;
-    const parsedFilters =
+    const canQueryAuditDate = canQueryLastAuditDate(lastAuditDateAccess);
+    const allParsedFilters =
       preParsedFilters ??
       (await parseFiltersWithHierarchy(
         filters,
         settingColumns,
         organizationId
       ));
+    // Without queryable access the audit date filter must not reach SQL.
+    const parsedFilters = canQueryAuditDate
+      ? allParsedFilters
+      : allParsedFilters.filter((f) => f.name !== LAST_AUDIT_DATE_COLUMN);
 
     const whereClause = generateWhereClause(
       organizationId,
@@ -1177,9 +1201,18 @@ export async function getAdvancedPaginatedAndFilterableAssets({
           ? getArchivedFilterFromParams(searchParams)
           : "active")
     );
-    const sortByValues = searchParams.getAll("sortBy");
+    // Without queryable access the audit date sort must not reach SQL either.
+    const sortByValues = searchParams
+      .getAll("sortBy")
+      .filter(
+        (spec) =>
+          canQueryAuditDate || spec.split(":")[0] !== LAST_AUDIT_DATE_COLUMN
+      );
     const { orderByInner, customFieldSortings } =
       parseSortingOptions(sortByValues);
+    const isLastAuditDateColumnVisible = settingColumns?.some(
+      (col) => col.name === LAST_AUDIT_DATE_COLUMN && col.visible
+    );
     // Modify query to conditionally include LIMIT/OFFSET
     const paginationClause = takeAll
       ? Prisma.empty
@@ -1196,6 +1229,9 @@ export async function getAdvancedPaginatedAndFilterableAssets({
       parsedFilters,
       withBookings: getBookings || isUpcomingBookingsColumnVisible,
       withBarcodes: canUseBarcodes,
+      withLastAuditDate:
+        canQueryAuditDate &&
+        (Boolean(isLastAuditDateColumnVisible) || includeHiddenColumns),
       paginationClause,
     });
 
@@ -4222,6 +4258,7 @@ export async function bulkArchiveAssets({
   assetIds,
   currentSearchParams,
   settings,
+  lastAuditDateAccess,
   actorUserId,
   timeZone = "UTC",
   confirmModelShortfall = false,
@@ -4230,6 +4267,12 @@ export async function bulkArchiveAssets({
   assetIds: Asset["id"][];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * How the caller may use the last audit date, from `lastAuditDateAccessFor`.
+   * A select-all `lastAuditDate` filter without `available` access refuses the
+   * whole selection.
+   */
+  lastAuditDateAccess: LastAuditDateAccess;
   /** Optional — caller-supplied userId for the activity event actor. */
   actorUserId?: string;
   /**
@@ -4262,6 +4305,7 @@ export async function bulkArchiveAssets({
       // Acts ON archived assets in the view the user selected from; reached
       // only with asset:archive / asset:delete (ADMIN, OWNER). Issue #382.
       honorArchivedView: true,
+      lastAuditDateAccess,
     });
 
     // Fetch the eligible subset first so we can emit one event per asset
@@ -4417,6 +4461,7 @@ export async function bulkUnarchiveAssets({
   assetIds,
   currentSearchParams,
   settings,
+  lastAuditDateAccess,
   actorUserId,
   timeZone = "UTC",
 }: {
@@ -4424,6 +4469,12 @@ export async function bulkUnarchiveAssets({
   assetIds: Asset["id"][];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * How the caller may use the last audit date, from `lastAuditDateAccessFor`.
+   * A select-all `lastAuditDate` filter without `available` access refuses the
+   * whole selection.
+   */
+  lastAuditDateAccess: LastAuditDateAccess;
   /** Optional — caller-supplied userId for the activity event actor. */
   actorUserId?: string;
   /**
@@ -4446,6 +4497,7 @@ export async function bulkUnarchiveAssets({
       // Acts ON archived assets in the view the user selected from; reached
       // only with asset:archive / asset:delete (ADMIN, OWNER). Issue #382.
       honorArchivedView: true,
+      lastAuditDateAccess,
     });
 
     const eligible = await db.asset.findMany({
@@ -7093,6 +7145,7 @@ export async function bulkDeleteAssets({
   userId,
   currentSearchParams,
   settings,
+  lastAuditDateAccess,
   confirmation,
   timeZone = "UTC",
 }: {
@@ -7101,6 +7154,12 @@ export async function bulkDeleteAssets({
   userId: User["id"];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * How the caller may use the last audit date, from `lastAuditDateAccessFor`.
+   * A select-all `lastAuditDate` filter without `available` access refuses the
+   * whole selection.
+   */
+  lastAuditDateAccess: LastAuditDateAccess;
   /**
    * The number the user typed in the delete dialog. Must equal the number of
    * assets this call removes, see {@link assertBulkDeleteConfirmed}.
@@ -7127,6 +7186,7 @@ export async function bulkDeleteAssets({
       // Acts ON archived assets in the view the user selected from; reached
       // only with asset:archive / asset:delete (ADMIN, OWNER). Issue #382.
       honorArchivedView: true,
+      lastAuditDateAccess,
     });
 
     /**
@@ -7249,6 +7309,7 @@ export async function bulkCheckOutAssets({
   organizationId,
   currentSearchParams,
   settings,
+  lastAuditDateAccess,
   timeZone = "UTC",
   allowedTeamMemberIds,
 }: {
@@ -7265,6 +7326,12 @@ export async function bulkCheckOutAssets({
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * How the caller may use the last audit date, from `lastAuditDateAccessFor`.
+   * A select-all `lastAuditDate` filter without `available` access refuses the
+   * whole selection.
+   */
+  lastAuditDateAccess: LastAuditDateAccess;
   /**
    * Acting user's IANA timezone. Forwarded to the select-all id resolution so
    * built-in date-column filters truncate the day in the user's tz (avoids an
@@ -7288,6 +7355,7 @@ export async function bulkCheckOutAssets({
       settings,
       allowedTeamMemberIds,
       timeZone,
+      lastAuditDateAccess,
     });
 
     /**
@@ -7564,6 +7632,7 @@ export async function bulkCheckInAssets({
   organizationId,
   currentSearchParams,
   settings,
+  lastAuditDateAccess,
   timeZone = "UTC",
   allowedTeamMemberIds,
 }: {
@@ -7578,6 +7647,12 @@ export async function bulkCheckInAssets({
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * How the caller may use the last audit date, from `lastAuditDateAccessFor`.
+   * A select-all `lastAuditDate` filter without `available` access refuses the
+   * whole selection.
+   */
+  lastAuditDateAccess: LastAuditDateAccess;
   /**
    * Acting user's IANA timezone. Forwarded to the select-all id resolution so
    * built-in date-column filters truncate the day in the user's tz (avoids an
@@ -7600,6 +7675,7 @@ export async function bulkCheckInAssets({
       settings,
       allowedTeamMemberIds,
       timeZone,
+      lastAuditDateAccess,
     });
 
     /**
@@ -7812,6 +7888,7 @@ export async function bulkUpdateAssetLocation({
   newLocationId,
   currentSearchParams,
   settings,
+  lastAuditDateAccess,
   timeZone = "UTC",
 }: {
   userId: User["id"];
@@ -7820,6 +7897,12 @@ export async function bulkUpdateAssetLocation({
   newLocationId?: Location["id"] | null;
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * How the caller may use the last audit date, from `lastAuditDateAccessFor`.
+   * A select-all `lastAuditDate` filter without `available` access refuses the
+   * whole selection.
+   */
+  lastAuditDateAccess: LastAuditDateAccess;
   /**
    * Acting user's IANA timezone. Forwarded to the select-all id resolution so
    * built-in date-column filters truncate the day in the user's tz (avoids an
@@ -7838,6 +7921,7 @@ export async function bulkUpdateAssetLocation({
       // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
       allowedTeamMemberIds: "all",
       timeZone,
+      lastAuditDateAccess,
     });
 
     // Archived assets are frozen (issue #382): can't be edited in bulk either.
@@ -8145,6 +8229,7 @@ export async function bulkUpdateAssetCategory({
   categoryId,
   currentSearchParams,
   settings,
+  lastAuditDateAccess,
   timeZone = "UTC",
 }: {
   userId: string;
@@ -8153,6 +8238,12 @@ export async function bulkUpdateAssetCategory({
   categoryId: Asset["categoryId"];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * How the caller may use the last audit date, from `lastAuditDateAccessFor`.
+   * A select-all `lastAuditDate` filter without `available` access refuses the
+   * whole selection.
+   */
+  lastAuditDateAccess: LastAuditDateAccess;
   /**
    * Acting user's IANA timezone. Forwarded to the select-all id resolution so
    * built-in date-column filters truncate the day in the user's tz (avoids an
@@ -8171,6 +8262,7 @@ export async function bulkUpdateAssetCategory({
       // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
       allowedTeamMemberIds: "all",
       timeZone,
+      lastAuditDateAccess,
     });
 
     if (resolvedIds.length === 0) {
@@ -8362,6 +8454,7 @@ export async function bulkUpdateAssetModel({
   assetModelId,
   currentSearchParams,
   settings,
+  lastAuditDateAccess,
 }: {
   userId: string;
   assetIds: Asset["id"][];
@@ -8369,6 +8462,12 @@ export async function bulkUpdateAssetModel({
   assetModelId: Asset["assetModelId"];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * How the caller may use the last audit date, from `lastAuditDateAccessFor`.
+   * A select-all `lastAuditDate` filter without `available` access refuses the
+   * whole selection.
+   */
+  lastAuditDateAccess: LastAuditDateAccess;
 }): Promise<BulkUpdateAssetModelResult> {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -8380,6 +8479,7 @@ export async function bulkUpdateAssetModel({
       // Reachable only with an asset write permission, which BASE and
       // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
       allowedTeamMemberIds: "all",
+      lastAuditDateAccess,
     });
 
     // Archived assets are frozen (issue #382): can't be edited in bulk either.
@@ -8656,6 +8756,7 @@ export async function bulkAssignAssetTags({
   currentSearchParams,
   remove,
   settings,
+  lastAuditDateAccess,
   timeZone = "UTC",
 }: {
   userId: string;
@@ -8665,6 +8766,12 @@ export async function bulkAssignAssetTags({
   currentSearchParams?: string | null;
   remove: boolean;
   settings: AssetIndexSettings;
+  /**
+   * How the caller may use the last audit date, from `lastAuditDateAccessFor`.
+   * A select-all `lastAuditDate` filter without `available` access refuses the
+   * whole selection.
+   */
+  lastAuditDateAccess: LastAuditDateAccess;
   /**
    * Acting user's IANA timezone. Forwarded to the select-all id resolution so
    * built-in date-column filters truncate the day in the user's tz (avoids an
@@ -8683,6 +8790,7 @@ export async function bulkAssignAssetTags({
       // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
       allowedTeamMemberIds: "all",
       timeZone,
+      lastAuditDateAccess,
     });
 
     if (resolvedIds.length === 0) {
@@ -8849,6 +8957,7 @@ export async function bulkMarkAvailability({
   type,
   currentSearchParams,
   settings,
+  lastAuditDateAccess,
   timeZone = "UTC",
 }: {
   organizationId: Asset["organizationId"];
@@ -8856,6 +8965,12 @@ export async function bulkMarkAvailability({
   type: "available" | "unavailable";
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * How the caller may use the last audit date, from `lastAuditDateAccessFor`.
+   * A select-all `lastAuditDate` filter without `available` access refuses the
+   * whole selection.
+   */
+  lastAuditDateAccess: LastAuditDateAccess;
   /**
    * Acting user's IANA timezone. Forwarded to the select-all id resolution so
    * built-in date-column filters truncate the day in the user's tz (avoids an
@@ -8874,6 +8989,7 @@ export async function bulkMarkAvailability({
       // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
       allowedTeamMemberIds: "all",
       timeZone,
+      lastAuditDateAccess,
     });
 
     // Archived assets are frozen (issue #382): can't change availability.

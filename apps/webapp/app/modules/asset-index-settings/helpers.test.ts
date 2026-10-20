@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { columnsLabelsMap, defaultFields, fixedFields } from "./helpers";
+import type { Column } from "./helpers";
+import {
+  appendMissingDefaultColumns,
+  columnsLabelsMap,
+  defaultFields,
+  fixedFields,
+} from "./helpers";
 
 describe("asset index column metadata", () => {
   it("registers last updated as a fixed field with a label", () => {
@@ -36,5 +42,43 @@ describe("asset index column metadata", () => {
     expect(minQuantityColumn).toEqual(
       expect.objectContaining({ visible: false })
     );
+  });
+});
+
+describe("appendMissingDefaultColumns", () => {
+  it("adds a missing default column after the saved columns, never on a taken position", () => {
+    const lastAuditDefault = defaultFields.find(
+      (column) => column.name === "lastAuditDate"
+    );
+    // A saved list where another column already sits at the new column's
+    // default position.
+    const saved: Column[] = [
+      { name: "name", visible: true, position: 0 },
+      {
+        name: "barcode_Code128",
+        visible: true,
+        position: lastAuditDefault?.position ?? 21,
+      },
+      { name: "cf_Serial", visible: true, position: 30 },
+    ] as Column[];
+
+    const result = appendMissingDefaultColumns(saved, ["lastAuditDate"]);
+
+    expect(result.slice(0, 3)).toEqual(saved);
+    expect(result[3]).toEqual(
+      expect.objectContaining({
+        name: "lastAuditDate",
+        visible: true,
+        position: 31,
+      })
+    );
+    const positions = result.map((column) => column.position);
+    expect(new Set(positions).size).toBe(positions.length);
+  });
+
+  it("returns the saved columns untouched when nothing is missing", () => {
+    const saved = [{ name: "name", visible: true, position: 0 }] as Column[];
+
+    expect(appendMissingDefaultColumns(saved, [])).toBe(saved);
   });
 });

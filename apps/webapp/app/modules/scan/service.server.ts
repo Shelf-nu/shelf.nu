@@ -22,6 +22,8 @@ import {
 } from "~/utils/permissions/permission.data";
 import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import { parseSequentialId } from "~/utils/sequential-id";
+import type { ScanTarget } from "./target";
+import { scanTargetFilter } from "./target";
 import { parseScanData } from "./utils.server";
 import { createNote } from "../note/service.server";
 import { getOrganizationById } from "../organization/service.server";
@@ -439,8 +441,7 @@ export async function recordAuditScanNonFatal({
   }
 }
 
-/** The entity whose last scan is read: an asset or a kit, never both. */
-export type ScanTarget = { assetId: string } | { kitId: string };
+export type { ScanTarget } from "./target";
 
 /**
  * The most recent scan of an asset or kit, whichever code was scanned, and
@@ -452,23 +453,31 @@ export type ScanTarget = { assetId: string } | { kitId: string };
  * no location, and is null when it has one (the newest scan is the located
  * one) or when no scan ever had one.
  *
+ * Reads within the workspace: only scans recorded in `organizationId` count.
+ *
  * Served by the `[assetId, createdAt]` / `[kitId, createdAt]` indexes.
  *
  * @param target - The asset or kit to read
+ * @param organizationId - The workspace the scans must belong to
  * @returns The latest scan with the relations `parseScanData` needs (null when
  *   never scanned) and the latest located scan, when that is an older one
  * @throws {ShelfError} If the read fails
  */
-export async function getLastScanForTarget(target: ScanTarget) {
+export async function getLastScanForTarget(
+  target: ScanTarget,
+  organizationId: string
+) {
   try {
-    const where: Prisma.ScanWhereInput =
-      "assetId" in target
-        ? { assetId: target.assetId }
-        : { kitId: target.kitId };
+    const where: Prisma.ScanWhereInput = {
+      ...scanTargetFilter(target),
+      organizationId,
+    };
 
     const scan = await db.scan.findFirst({
       where,
-      orderBy: { createdAt: "desc" },
+      // Same order as the scan history, so the card's scan is the history's
+      // first row even when two scans share a timestamp.
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       include: {
         user: {
           include: {
@@ -486,7 +495,7 @@ export async function getLastScanForTarget(target: ScanTarget) {
               latitude: { not: null },
               longitude: { not: null },
             },
-            orderBy: { createdAt: "desc" },
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
             select: { latitude: true, longitude: true, createdAt: true },
           })
         : null;
@@ -550,7 +559,10 @@ export async function getLastScanForViewer({
     return null;
   }
 
-  const { scan, locatedScan } = await getLastScanForTarget(target);
+  const { scan, locatedScan } = await getLastScanForTarget(
+    target,
+    organizationId
+  );
   return parseScanData({ scan, locatedScan, userId });
 }
 
