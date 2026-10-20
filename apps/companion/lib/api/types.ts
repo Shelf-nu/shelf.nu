@@ -25,6 +25,11 @@ export type Organization = {
    */
   auditsEnabled: boolean;
   /**
+   * ISO currency code for the workspace. Absent on servers older than the
+   * field, so callers fall back rather than rendering an empty prefix.
+   */
+  currency?: string;
+  /**
    * The workspace's visibility toggles for restricted roles, from
    * `/api/mobile/me`. Each widens what one role may SEE (bookings or custody),
    * never what it may change. Absent on servers older than this field; the app
