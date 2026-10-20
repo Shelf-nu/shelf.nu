@@ -131,7 +131,7 @@ type CustomFieldColumnKey = `cf_${string}`;
 // the type system honest when the export caller injects it.
 //
 // `qrUrl` is export-only for the same reason: the CSV export places it right
-// after `qrId` whenever the QR ID column is exported (unless an exported
+// after `qrId` whenever the QR ID column is exported (unless a workspace
 // custom field already uses the "QR URL" header), so label printers get the
 // exact URL each code encodes.
 export type ColumnLabelKey =

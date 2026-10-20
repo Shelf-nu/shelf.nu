@@ -298,14 +298,26 @@ export async function exportAssetsFromIndexToCsv({
     getClientHint(request)
   );
 
-  const { assets } = await resolveExportAssets({
-    request,
-    assetIds,
-    settings,
-    currentOrganization,
-    assetIndexCurrentSearchParams,
-    timeZone: prefs.timeZone,
-  });
+  const [{ assets }, workspaceCustomFields] = await Promise.all([
+    resolveExportAssets({
+      request,
+      assetIds,
+      settings,
+      currentOrganization,
+      assetIndexCurrentSearchParams,
+      timeZone: prefs.timeZone,
+    }),
+    // The custom fields the update importer matches headers against (same
+    // filter as `buildUpdatePreview`).
+    db.customField.findMany({
+      where: {
+        organizationId: currentOrganization.id,
+        active: true,
+        deletedAt: null,
+      },
+      select: { name: true },
+    }),
+  ]);
 
   const baseColumns = settings.columns as Column[];
   // "All columns" for the human export = every configured column, visible or
@@ -330,6 +342,7 @@ export async function exportAssetsFromIndexToCsv({
     ],
     currentOrganization,
     prefs,
+    workspaceCustomFieldNames: workspaceCustomFields.map((cf) => cf.name),
   });
 
   // Join rows with CRLF as per CSV spec
@@ -403,6 +416,8 @@ export async function exportAssetsForImportToCsv({
  * @param assets - Array of assets to export
  * @param columns - Column settings that define the order and visibility of fields
  * @param prefs - Acting user's resolved date/time preferences for humanized columns
+ * @param workspaceCustomFieldNames - Names of the workspace's active custom
+ *   fields, exported or not; the `QR URL` column gives way to one of that name
  * @returns Array of string arrays representing CSV rows, including headers
  */
 export const buildCsvExportDataFromAssets = ({
@@ -410,6 +425,7 @@ export const buildCsvExportDataFromAssets = ({
   columns,
   currentOrganization,
   prefs,
+  workspaceCustomFieldNames,
 }: {
   assets: AdvancedIndexAsset[];
   columns: Column[];
@@ -418,6 +434,7 @@ export const buildCsvExportDataFromAssets = ({
     "id" | "barcodesEnabled" | "currency"
   >;
   prefs: ResolvedFormatPrefs;
+  workspaceCustomFieldNames: string[];
 }): string[][] => {
   if (!assets.length) return [];
 
@@ -426,14 +443,13 @@ export const buildCsvExportDataFromAssets = ({
     .sort((a, b) => a.position - b.position);
 
   // The export-only `qrUrl` column rides directly behind `qrId`, so it is
-  // shown exactly when the QR ID is. It gives way to an exported custom field
-  // with the same header: two identical headers would make the update
-  // importer write the code's URL into that field.
+  // shown exactly when the QR ID is. It gives way to any workspace custom
+  // field with the same header, exported or not: the update importer resolves
+  // that header to the custom field, so a `qrUrl` column under it would write
+  // the code's URL into the field.
   const qrUrlLabel = columnsLabelsMap.qrUrl.toLowerCase();
-  const customFieldTakesQrUrlHeader = exportedColumns.some(
-    (col) =>
-      col.name.startsWith("cf_") &&
-      parseColumnName(col.name).toLowerCase() === qrUrlLabel
+  const customFieldTakesQrUrlHeader = workspaceCustomFieldNames.some(
+    (name) => name.trim().toLowerCase() === qrUrlLabel
   );
   const visibleColumns = exportedColumns.flatMap((col): Column[] =>
     col.name === "qrId" && !customFieldTakesQrUrlHeader

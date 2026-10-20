@@ -376,6 +376,7 @@ describe("buildCsvExportDataFromAssets", () => {
         currency: "USD",
       },
       prefs: HARDCODED_DEFAULT_PREFS,
+      workspaceCustomFieldNames: [],
     });
 
     expect(headers).toEqual([
@@ -453,6 +454,7 @@ describe("buildCsvExportDataFromAssets", () => {
         currency: "USD",
       },
       prefs: HARDCODED_DEFAULT_PREFS,
+      workspaceCustomFieldNames: [],
     });
 
     // MM_DD_YYYY default prefs: July 6 from `raw`, never July 5 from `valueDate`.
@@ -494,6 +496,7 @@ describe("buildCsvExportDataFromAssets", () => {
         currency: "USD",
       },
       prefs: HARDCODED_DEFAULT_PREFS,
+      workspaceCustomFieldNames: [],
     });
 
     expect(headers).toEqual(['"Name"', '"Value"', '"Total value"']);
@@ -505,25 +508,32 @@ describe("buildCsvExportDataFromAssets", () => {
       { id: "asset-1", title: "Camera", qrId: "cm4abc123" },
       { id: "asset-2", title: "Tripod", qrId: null },
     ];
+    type BuildArgs = Parameters<typeof buildCsvExportDataFromAssets>[0];
 
-    /** Builds the export with the QR ID column shown or hidden. */
-    const exportWithQrId = (qrIdVisible: boolean) =>
+    /** Builds the export over `columns` for a workspace with these fields. */
+    const exportWith = (
+      columns: BuildArgs["columns"],
+      workspaceCustomFieldNames: string[] = []
+    ) =>
       buildCsvExportDataFromAssets({
-        assets: assets as unknown as Parameters<
-          typeof buildCsvExportDataFromAssets
-        >[0]["assets"],
-        columns: [
-          { name: "name", visible: true, position: 0 },
-          { name: "qrId", visible: qrIdVisible, position: 1 },
-          { name: "status", visible: true, position: 2 },
-        ],
+        assets: assets as unknown as BuildArgs["assets"],
+        columns,
         currentOrganization: {
           id: "org-1",
           barcodesEnabled: false,
           currency: "USD",
         },
         prefs: HARDCODED_DEFAULT_PREFS,
+        workspaceCustomFieldNames,
       });
+
+    /** Builds the export with the QR ID column shown or hidden. */
+    const exportWithQrId = (qrIdVisible: boolean) =>
+      exportWith([
+        { name: "name", visible: true, position: 0 },
+        { name: "qrId", visible: qrIdVisible, position: 1 },
+        { name: "status", visible: true, position: 2 },
+      ]);
 
     beforeEach(() => {
       env.URL_SHORTENER = "";
@@ -555,26 +565,46 @@ describe("buildCsvExportDataFromAssets", () => {
       expect(headers).toEqual(['"Name"', '"Status"']);
     });
 
-    it("gives way to an exported custom field already named QR URL", () => {
-      const [headers] = buildCsvExportDataFromAssets({
-        assets: assets as unknown as Parameters<
-          typeof buildCsvExportDataFromAssets
-        >[0]["assets"],
-        columns: [
-          { name: "name", visible: true, position: 0 },
-          { name: "qrId", visible: true, position: 1 },
-          { name: "cf_qr url", visible: true, position: 2 },
-        ] as Parameters<typeof buildCsvExportDataFromAssets>[0]["columns"],
-        currentOrganization: {
-          id: "org-1",
-          barcodesEnabled: false,
-          currency: "USD",
-        },
-        prefs: HARDCODED_DEFAULT_PREFS,
+    // The update importer resolves a "QR URL" header to a workspace custom
+    // field of that name, so the export must never emit the URL under it.
+    describe("in a workspace with a custom field named QR URL", () => {
+      it("leaves the header to the exported custom field", () => {
+        const [headers] = exportWith(
+          [
+            { name: "name", visible: true, position: 0 },
+            { name: "qrId", visible: true, position: 1 },
+            { name: "cf_QR URL", visible: true, position: 2 },
+          ] as BuildArgs["columns"],
+          ["QR URL"]
+        );
+
+        expect(headers).toEqual(['"Name"', '"QR ID"', '"QR URL"']);
       });
 
-      // One "QR URL" header, the custom field's, so a re-import updates it.
-      expect(headers).toEqual(['"Name"', '"QR ID"', '"qr url"']);
+      it("is left out when that field is hidden", () => {
+        const [headers] = exportWith(
+          [
+            { name: "name", visible: true, position: 0 },
+            { name: "qrId", visible: true, position: 1 },
+            { name: "cf_QR URL", visible: false, position: 2 },
+          ] as BuildArgs["columns"],
+          ["QR URL"]
+        );
+
+        expect(headers).toEqual(['"Name"', '"QR ID"']);
+      });
+
+      it("is left out when the column settings do not list that field", () => {
+        const [headers] = exportWith(
+          [
+            { name: "name", visible: true, position: 0 },
+            { name: "qrId", visible: true, position: 1 },
+          ],
+          [" qr url "]
+        );
+
+        expect(headers).toEqual(['"Name"', '"QR ID"']);
+      });
     });
   });
 });
