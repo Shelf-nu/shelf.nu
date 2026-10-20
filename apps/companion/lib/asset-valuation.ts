@@ -47,3 +47,20 @@ export function valuationFromInput(input: string): number | null {
   const parsed = parseFloat(trimmed);
   return Number.isNaN(parsed) ? null : parsed;
 }
+
+/**
+ * The text to keep for a keystroke in the valuation input, or `null` to refuse
+ * it and leave the field as it was.
+ *
+ * A comma is read as the decimal point, because that is the key the decimal
+ * keypad shows in comma-decimal locales: dropping it would turn "12,50" into
+ * 1250. A second separator of either kind is refused rather than guessed at,
+ * since "1,250.00" and "1.250,00" use one of them for grouping.
+ *
+ * @param text - The input's text after the keystroke
+ * @returns The cleaned text, or `null` when the keystroke must be refused
+ */
+export function sanitizeValuationInput(text: string): string | null {
+  const cleaned = text.replace(/,/g, ".").replace(/[^0-9.]/g, "");
+  return cleaned.split(".").length > 2 ? null : cleaned;
+}
