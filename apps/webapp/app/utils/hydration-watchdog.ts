@@ -47,6 +47,13 @@ export const HYDRATION_RELOAD_ATTRIBUTE = "data-hydration-reload";
 /** `sessionStorage` key holding the pending failure report. */
 export const HYDRATION_FAILURE_STORAGE_KEY = "shelf:hydration-failure";
 
+/**
+ * `sessionStorage` key holding the time of the last automatic reload. Kept
+ * apart from the report on purpose: sending the report clears it, and the loop
+ * guard must survive that, or every reload that hydrates would re-arm the next.
+ */
+export const HYDRATION_RELOADED_AT_STORAGE_KEY = "shelf:hydration-reloaded-at";
+
 /** How long a page may take to hydrate before the recovery screen is shown. */
 export const HYDRATION_TIMEOUT_MS = 20_000;
 
@@ -100,9 +107,11 @@ export const HYDRATION_GATE_STYLES = [
  * The watchdog itself. Plain ES5, like the browser-support check, so it parses
  * everywhere and never depends on the bundle it is watching.
  *
- * Only failures of the bundle count: `<script type="module">`,
- * `<link rel="modulepreload">` and rejected dynamic imports. A blocked
- * analytics script or a broken image does not stop hydration and is ignored.
+ * Only failures of the bundle count: an inline `<script type="module">` (React
+ * Router's bootstrap), a module script or `<link rel="modulepreload">` from
+ * this origin, and rejected dynamic imports of a file on this origin. Anything
+ * from another origin, such as an analytics beacon that a content blocker
+ * stops, cannot block hydration and never counts, whatever its element type.
  * Once the page hydrates the listeners are removed, so later lazy-route
  * chunk failures stay with React Router.
  */
@@ -112,6 +121,8 @@ export const HYDRATION_WATCHDOG_SCRIPT = `(function () {
   var failed = false;
   var timer;
   var KEY = "${HYDRATION_FAILURE_STORAGE_KEY}";
+  var RELOADED_AT_KEY = "${HYDRATION_RELOADED_AT_STORAGE_KEY}";
+  var ORIGIN = window.location.origin;
 
   function readReport() {
     try {
@@ -130,6 +141,27 @@ export const HYDRATION_WATCHDOG_SCRIPT = `(function () {
     }
   }
 
+  function readReloadedAt() {
+    try {
+      return Number(window.sessionStorage.getItem(RELOADED_AT_KEY)) || null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function writeReloadedAt(time) {
+    try {
+      window.sessionStorage.setItem(RELOADED_AT_KEY, String(time));
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function isOwnUrl(url) {
+    return typeof url === "string" && url.indexOf(ORIGIN + "/") === 0;
+  }
+
   function fail(reason, source) {
     if (settled || failed || root.hasAttribute("${UNSUPPORTED_BROWSER_ATTRIBUTE}")) {
       return;
@@ -137,7 +169,7 @@ export const HYDRATION_WATCHDOG_SCRIPT = `(function () {
     failed = true;
     var previous = readReport();
     var now = Date.now();
-    var lastReload = previous && previous.reloadedAt ? previous.reloadedAt : null;
+    var lastReload = readReloadedAt();
     var report = {
       reason: reason,
       source: source || null,
@@ -150,7 +182,7 @@ export const HYDRATION_WATCHDOG_SCRIPT = `(function () {
     if (reason === "load-error" && !reloadedRecently) {
       report.reloadedAt = now;
       // Without storage there is no loop guard, so only reload when it saved.
-      if (writeReport(report)) {
+      if (writeReloadedAt(now) && writeReport(report)) {
         stop();
         window.location.reload();
         return;
@@ -165,17 +197,24 @@ export const HYDRATION_WATCHDOG_SCRIPT = `(function () {
     if (!target || !target.tagName) {
       return;
     }
-    var isModuleScript = target.tagName === "SCRIPT" && target.type === "module";
-    var isModulePreload = target.tagName === "LINK" && target.rel === "modulepreload";
-    if (isModuleScript || isModulePreload) {
-      fail("load-error", target.src || target.href || "inline module script");
+    if (target.tagName === "SCRIPT" && target.type === "module") {
+      if (!target.src) {
+        fail("load-error", "inline module script");
+      } else if (isOwnUrl(target.src)) {
+        fail("load-error", target.src);
+      }
+    } else if (target.tagName === "LINK" && target.rel === "modulepreload" && isOwnUrl(target.href)) {
+      fail("load-error", target.href);
     }
   }
 
   function onRejection(event) {
     var reason = event.reason;
     var message = reason && reason.message ? String(reason.message) : String(reason);
-    if (/dynamically imported module|importing a module script failed/i.test(message)) {
+    var isModuleFailure = /dynamically imported module|importing a module script failed/i.test(message);
+    // Safari's message names no URL; the others must name a file of ours.
+    var urlMatch = message.match(/https?:\\/\\/[^\\s]+/);
+    if (isModuleFailure && (!urlMatch || isOwnUrl(urlMatch[0]))) {
       fail("load-error", message);
     }
   }
