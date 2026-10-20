@@ -341,6 +341,17 @@ function OptionSelect({
 
   const displayValue = value || `Choose ${field.name}`;
 
+  /**
+   * Picking an option only updates the hidden input, which fires no form
+   * `change` event, so Zorm keeps reporting the error from the last submit.
+   * The option schema has exactly two errors, an empty required value and a
+   * value missing from `field.options`, and a value in that list satisfies
+   * both. Hide the error only then: a stored value that was removed from the
+   * options must keep its message.
+   */
+  const shownError =
+    value !== "" && field.options.includes(value) ? undefined : error;
+
   // Handle option selection
   function handleOptionClick(option: string) {
     if (value === option) {
@@ -390,11 +401,11 @@ function OptionSelect({
             variant="secondary"
             className={tw(
               "w-full justify-start truncate whitespace-nowrap font-normal [&_span]:w-full [&_span]:max-w-full [&_span]:truncate [&_span]:text-left",
-              error && "border-error-300 focus:border-error-300"
+              shownError && "border-error-300 focus:border-error-300"
             )}
             ref={triggerRef}
-            aria-invalid={error ? true : undefined}
-            aria-describedby={error ? `cf-${field.id}-error` : undefined}
+            aria-invalid={shownError ? true : undefined}
+            aria-describedby={shownError ? `cf-${field.id}-error` : undefined}
           >
             <div className="flex w-full items-center justify-between">
               <span className={value === "" ? "text-gray-500" : ""}>
@@ -469,9 +480,9 @@ function OptionSelect({
           </PopoverContent>
         </PopoverPortal>
       </Popover>
-      {error ? (
+      {shownError ? (
         <div id={`cf-${field.id}-error`} className="text-sm text-error-500">
-          {error}
+          {shownError}
         </div>
       ) : null}
     </>

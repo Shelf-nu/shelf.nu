@@ -3,9 +3,11 @@
  *
  * Focus: a required OPTION field that fails validation must show its message
  * next to the picker, because its value lives in a hidden input and the
- * browser cannot surface the problem on its own.
+ * browser cannot surface the problem on its own. Picking an option never
+ * fires the form `change` event Zorm re-validates on, so the picker itself
+ * decides when a selection has resolved the error.
  */
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import AssetCustomFields from "./custom-fields-inputs";
@@ -46,10 +48,22 @@ const owningCompany = {
   active: true,
 };
 
-function renderFields(fieldErrors: Record<string, string | undefined>) {
+function renderFields(
+  fieldErrors: Record<string, string | undefined>,
+  storedValue?: string
+) {
   useLoaderDataMock.mockReturnValue({
     customFields: [owningCompany],
-    asset: { customFields: [] },
+    asset: {
+      customFields: storedValue
+        ? [
+            {
+              customFieldId: owningCompany.id,
+              value: { raw: storedValue, valueOption: storedValue },
+            },
+          ]
+        : [],
+    },
   });
   // The "Manage custom fields" link needs a router context to render.
   return render(
@@ -85,5 +99,38 @@ describe("AssetCustomFields option fields", () => {
       name: /Choose Owning Company/,
     });
     expect(trigger).not.toHaveAttribute("aria-invalid");
+  });
+
+  it("clears the message once an option is picked, and restores it on deselect", () => {
+    renderFields({ cf1: "Owning Company is required" });
+    const trigger = () =>
+      screen.getByRole("button", { name: /Owning Company|ACME/ });
+
+    fireEvent.click(trigger());
+    fireEvent.click(screen.getByRole("option", { name: "ACME" }));
+
+    expect(
+      screen.queryByText("Owning Company is required")
+    ).not.toBeInTheDocument();
+    expect(trigger()).not.toHaveAttribute("aria-invalid");
+
+    // Clicking the selected option again clears the selection.
+    fireEvent.click(trigger());
+    fireEvent.click(screen.getByRole("option", { name: "ACME" }));
+
+    expect(screen.getByText("Owning Company is required")).toBeInTheDocument();
+    expect(trigger()).toHaveAttribute("aria-invalid", "true");
+  });
+
+  it("keeps the message for a stored value that is no longer an option", () => {
+    renderFields({ cf1: "Initech is not a valid option" }, "Initech");
+
+    expect(
+      screen.getByText("Initech is not a valid option")
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Initech/ })).toHaveAttribute(
+      "aria-invalid",
+      "true"
+    );
   });
 });
