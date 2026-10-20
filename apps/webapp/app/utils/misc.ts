@@ -1,4 +1,5 @@
-import _ from "lodash";
+import startCase from "lodash/startCase";
+import toLower from "lodash/toLower";
 
 /**
  * .email() has an issue with validating email
@@ -104,5 +105,5 @@ export function sanitizeFilename(filename: string): string {
  * @example SOME_ENUM_CASE -> Some Enum Case
  */
 export function formatEnum(value: string) {
-  return _.startCase(_.toLower(value));
+  return startCase(toLower(value));
 }

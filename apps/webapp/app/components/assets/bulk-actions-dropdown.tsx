@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { KIT_MEMBERS_CUSTODY_BLOCKED_REASON } from "@shelf/labels";
 import { useAtomValue } from "jotai";
 import { useNavigation } from "react-router";
@@ -48,8 +48,10 @@ import {
 import { MobileDropdownStyles } from "../shared/mobile-dropdown-styles";
 import When from "../when/when";
 import BookSelectedAssetsDropdown from "./assets-index/book-selected-assets-dropdown";
-import BulkDownloadQrDialog from "./bulk-download-qr-dialog";
 import Icon from "../icons/icon";
+
+// Lazy: pulls in jszip and react-dom/server (~280 kB) that only a QR download needs.
+const BulkDownloadQrDialog = lazy(() => import("./bulk-download-qr-dialog"));
 
 export default function BulkActionsDropdown() {
   const isHydrated = useHydrated();
@@ -238,12 +240,16 @@ function ConditionalDropdown() {
         <BulkAddToAuditDialog />
       </When>
 
-      <BulkDownloadQrDialog
-        isDialogOpen={isBulkDownloadQrOpen}
-        onClose={() => {
-          setIsBulkDownloadQrOpen(false);
-        }}
-      />
+      {isBulkDownloadQrOpen ? (
+        <Suspense fallback={null}>
+          <BulkDownloadQrDialog
+            isDialogOpen
+            onClose={() => {
+              setIsBulkDownloadQrOpen(false);
+            }}
+          />
+        </Suspense>
+      ) : null}
 
       <When
         truthy={userHasPermission({

@@ -110,6 +110,9 @@ export default defineConfig({
     include: ["./app/routes/**/*.tsx", "./app/routes/**/*.ts"],
   },
   build: {
+    // Opt-in client sourcemaps for bundle attribution (which package owns the
+    // bytes a page loads). Off by default: they double the build output.
+    sourcemap: process.env.PERF_SOURCEMAP === "true",
     // Browser floor for the client bundle. Pinned explicitly (not a Vite alias
     // such as "baseline-widely-available", which moves between releases) and
     // equal to the runtime floor probed by `app/utils/browser-support.ts`:

@@ -1,5 +1,13 @@
 import type { KeyboardEvent, ReactNode } from "react";
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 import type { BarcodeType } from "@prisma/client";
 import { TriangleLeftIcon } from "@radix-ui/react-icons";
 import { useAtom } from "jotai";
@@ -18,7 +26,6 @@ import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { parseSequentialId } from "~/utils/sequential-id";
 import { tw } from "~/utils/tw";
 import { CameraSelector } from "./camera-selector";
-import SuccessAnimation from "./success-animation";
 import {
   getBestBackCamera,
   handleDetection,
@@ -32,6 +39,9 @@ import { Button } from "../shared/button";
 import { Spinner } from "../shared/spinner";
 import { scannerActionAtom } from "./drawer/action-atom";
 import type { ActionType } from "./drawer/action-switcher";
+
+// Lazy: lottie-react plus the animation JSON (~200 kB) only serve a successful scan.
+const SuccessAnimation = lazy(() => import("./success-animation"));
 
 export type OnCodeDetectionSuccessProps = {
   value: string; // The actual scanned value (QR ID or barcode value) - normalized for database operations
@@ -383,7 +393,11 @@ export const CodeScanner = ({
                   {typeof scanMessage === "string" ? (
                     <>
                       <ClientOnly fallback={null}>
-                        {() => <SuccessAnimation />}
+                        {() => (
+                          <Suspense fallback={null}>
+                            <SuccessAnimation />
+                          </Suspense>
+                        )}
                       </ClientOnly>
                       <p>{scanMessage || "Scanner paused"}</p>
                     </>

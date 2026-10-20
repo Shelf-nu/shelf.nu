@@ -1,11 +1,15 @@
+import { lazy, Suspense } from "react";
 import { ClientOnly } from "remix-utils/client-only";
-import SuccessAnimation from "~/components/scanner/success-animation";
 import { Button } from "~/components/shared/button";
 import { WarningBox } from "~/components/shared/warning-box";
 import When from "~/components/when/when";
 import { tw } from "~/utils/tw";
 import type { FetcherData } from "./import-users-dialog";
 import ImportUsersTable from "./import-users-table";
+
+const SuccessAnimation = lazy(
+  () => import("~/components/scanner/success-animation")
+);
 
 type ImportUsersSuccessContentProps = {
   className?: string;
@@ -27,7 +31,13 @@ export default function ImportUsersSuccessContent({
         className
       )}
     >
-      <ClientOnly fallback={null}>{() => <SuccessAnimation />}</ClientOnly>
+      <ClientOnly fallback={null}>
+        {() => (
+          <Suspense fallback={null}>
+            <SuccessAnimation />
+          </Suspense>
+        )}
+      </ClientOnly>
 
       <h4>Import completed</h4>
       <p className="mb-4">
