@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { locationDescendantsMock } from "@mocks/location-descendants";
 import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
 import { ShelfError } from "~/utils/error";
+import { parseFilters } from "./filter-parsing";
 import {
   assetQueryFragment,
   LAST_AUDIT_DATE_SQL,
@@ -235,6 +236,36 @@ describe("parseSortingOptions", () => {
       expect(orderByClause).toContain("LPAD(SPLIT_PART");
     });
 
+    it("sorts quantity as a plain number", () => {
+      const { orderByInner } = parseSortingOptions(["quantity:desc"]);
+      // A numeric column compare, so 10 sorts above 9.
+      expect(orderByInner).toBe('"assetQuantity" desc, "assetId" ASC');
+    });
+
+    it("sorts unit of measure with the natural text sort", () => {
+      const { orderByInner } = parseSortingOptions(["unitOfMeasure:asc"]);
+      expect(orderByInner).toContain(
+        'LOWER(regexp_replace("assetUnitOfMeasure"'
+      );
+      expect(orderByInner).toContain('"assetUnitOfMeasure" asc');
+      expect(orderByInner).toContain('"assetId" ASC');
+    });
+
+    it.each(["asc", "desc"])(
+      "keeps assets without a unit last when sorting unit of measure %s",
+      (direction) => {
+        const { orderByInner } = parseSortingOptions([
+          `unitOfMeasure:${direction}`,
+        ]);
+        // Individual assets have no unit; without NULLS LAST a descending
+        // sort opens on pages of empty rows.
+        expect(orderByInner).toContain(`)) ${direction} NULLS LAST`);
+        expect(orderByInner).toContain(
+          `"assetUnitOfMeasure" ${direction} NULLS LAST`
+        );
+      }
+    );
+
     it("uses custody jsonb path for custody", () => {
       const { orderByClause } = parseSortingOptions(["custody:desc"]);
       // Regression (custody-sort no-op): the `custody` column is a jsonb
@@ -330,6 +361,47 @@ describe("generateWhereClause - search fail-closed", () => {
     const sql = getSqlString(result);
     expect(sql).toContain("ILIKE");
     expect(sql).not.toContain("AND FALSE");
+  });
+});
+
+/** The unit of measure as the advanced index shows it. */
+const VISIBLE_UNIT = `CASE WHEN a."type" = 'QUANTITY_TRACKED' THEN a."unitOfMeasure" ELSE NULL END`;
+
+describe("generateWhereClause - quantity and unit of measure filters", () => {
+  const columns = [
+    { name: "quantity" as const, visible: true, position: 0 },
+    { name: "unitOfMeasure" as const, visible: true, position: 1 },
+  ];
+
+  it("filters quantity as a number", () => {
+    const filters = parseFilters("quantity=gt:9", columns);
+    expect(filters[0]).toMatchObject({ name: "quantity", type: "number" });
+
+    const result = generateWhereClause("org-1", null, filters);
+    expect(getSqlString(result)).toContain('a."quantity"::float > ?');
+    expect(result.values).toContain(9);
+  });
+
+  it("filters unit of measure as text", () => {
+    const filters = parseFilters("unitOfMeasure=contains:pc", columns);
+    expect(filters[0]).toMatchObject({ name: "unitOfMeasure", type: "string" });
+
+    const result = generateWhereClause("org-1", null, filters);
+    // Only quantity-tracked assets have a unit on the index, so an individual
+    // asset with a stored unit never matches a unit filter.
+    expect(getSqlString(result)).toContain(`${VISIBLE_UNIT} ILIKE ?`);
+    expect(result.values).toContain("%pc%");
+  });
+
+  it("keeps assets without a unit when filtering unit of measure 'is not'", () => {
+    const filters = parseFilters("unitOfMeasure=isNot:kg", columns);
+
+    const result = generateWhereClause("org-1", null, filters);
+    // `!=` never matches NULL, which would hide every asset without a unit.
+    expect(getSqlString(result)).toContain(
+      `${VISIBLE_UNIT} IS DISTINCT FROM ?`
+    );
+    expect(result.values).toContain("kg");
   });
 });
 
@@ -1433,6 +1505,18 @@ describe("buildAdvancedAssetsQuery", () => {
     // Base sort keys are always selected directly off the scan.
     expect(sql).toContain('a.value AS "assetValue"');
     expect(sql).toContain('a.quantity AS "assetQuantity"');
+  });
+
+  it("selects the unit of measure in the cheap phase so a unit sort can rank rows", () => {
+    // The ROW_NUMBER window reads the sort alias from the cheap phase
+    // (everything before `sorted_asset_query`); a missing alias is a
+    // `column does not exist` error.
+    const sql = getQuerySqlString(build({ sortBy: ["unitOfMeasure:asc"] }));
+    const cheap = sql.slice(0, sql.indexOf("sorted_asset_query"));
+
+    // The sort key is the unit the cell shows: none for individual assets.
+    expect(cheap).toContain(`${VISIBLE_UNIT} AS "assetUnitOfMeasure"`);
+    expect(sql).toContain('LOWER(regexp_replace("assetUnitOfMeasure"');
   });
 
   it("gates a name-sort column in the cheap phase on the active sort", () => {

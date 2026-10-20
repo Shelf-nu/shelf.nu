@@ -1,6 +1,6 @@
-# PR Review Loop
+# Watchdog
 
-`/pr-review-loop` drives a PR through the review-response cycle automatically:
+`/watchdog` drives a PR through the review-response cycle automatically:
 it watches GitHub for feedback from CodeRabbit, Codex, Copilot, React Doctor,
 and human reviewers, re-verifies each bot finding against the current code,
 implements what's still valid, commits, and replies to and resolves the
@@ -45,8 +45,8 @@ One round looks like this:
 ## Usage
 
 ```
-/pr-review-loop
-/pr-review-loop 2773
+/watchdog
+/watchdog 2773
 ```
 
 With a number, that PR is used directly. Without one, the loop resolves the
@@ -169,7 +169,7 @@ Grep, Glob, Skill` only. Even a fully successful prompt injection has
 ## Stopping
 
 **The loop never stops on its own.** It ends only when you say so: "stop the
-loop", `/pr-review-loop stop`, or the session ending. On a stop request it
+loop", `/watchdog stop`, or the session ending. On a stop request it
 stops the background watcher and prints a final summary.
 
 Both state files (see [Troubleshooting](#troubleshooting)) survive a stop, so
@@ -194,7 +194,9 @@ findings it already decided.
 
 Both live under `.git/pr-review-loop/` (resolved via
 `git rev-parse --git-common-dir`, so they're shared across worktrees of the
-same repo, not per-worktree). It's a single-writer-per-file split: the
+same repo, not per-worktree). The folder keeps that name on purpose: it holds
+the reply ledger, and a loop pointed at a different folder would answer
+already-answered threads again. It's a single-writer-per-file split: the
 watcher holds state across four network round trips per poll, so a write
 from anywhere else in that window would be silently discarded.
 

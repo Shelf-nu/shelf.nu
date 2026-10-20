@@ -99,6 +99,11 @@ import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.serv
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
 import { createConsumptionLog } from "~/modules/consumption-log/service.server";
 import {
+  readStockState,
+  recordStockChanges,
+  type StockChangeInput,
+} from "~/modules/consumption-log/stock-ledger.server";
+import {
   emitAssetKitDetachmentNotes,
   removeDestroyedUnitsFromKits,
   type DestroyedKitUnitsResult,
@@ -197,6 +202,7 @@ import {
 import type { SourceLocationSubmission } from "./checkout-source-location";
 import {
   checkinPlacementSources,
+  checkinStockEvents,
   parseSourceLocationsFromFormData,
   sliceForDisposition,
   untaggedCheckinPlacementSources,
@@ -226,6 +232,11 @@ import {
   sendBookingUpdatedEmail,
   sendCheckinReminder,
 } from "./email-helpers";
+import {
+  getAssetsStillOutForExtend,
+  getKitMembershipIdsStillOut,
+  isExtendableStatus,
+} from "./extend-eligibility";
 import {
   buildAddToActiveBookingBlockerWhere,
   hasAssetBookingConflicts,
@@ -611,12 +622,26 @@ export function getSystemActionText(
   }
 }
 
+/**
+ * Schedules a booking's next lifecycle job and stores its id as the booking's
+ * `activeSchedulerReference`.
+ *
+ * @param params.data - The job payload; `data.id` is the booking
+ * @param params.when - When the job fires
+ * @param params.expected - The booking state this job was planned for. When
+ *   given, the reference is stored only while the booking still has this end
+ *   and this reference; otherwise a concurrent write has planned its own job,
+ *   so the new one is cancelled and the booking left as it is.
+ * @throws {ShelfError} When the job cannot be sent or stored
+ */
 export async function scheduleNextBookingJob({
   data,
   when,
+  expected,
 }: {
   data: SchedulerData;
   when: Date;
+  expected?: { to: Date; activeSchedulerReference: string | null };
 }) {
   try {
     const id = await scheduler.sendAfter(
@@ -625,6 +650,21 @@ export async function scheduleNextBookingJob({
       {},
       when
     );
+    if (expected) {
+      const { count } = await db.booking.updateMany({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: internal scheduler bookkeeping; data.id always comes from a booking already org-validated by the caller and SchedulerData carries no organizationId; this only writes activeSchedulerReference, not a data read
+        where: {
+          id: data.id,
+          to: expected.to,
+          activeSchedulerReference: expected.activeSchedulerReference,
+        },
+        data: { activeSchedulerReference: id },
+      });
+      if (count === 0) {
+        await cancelScheduler({ id: data.id, activeSchedulerReference: id });
+      }
+      return;
+    }
     await db.booking.update({
       // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: internal scheduler bookkeeping; data.id always comes from a booking already org-validated by every caller (e.g. checkoutBooking L1265, reserveBooking L1020) and SchedulerData carries no organizationId; this only writes activeSchedulerReference, not a data read
       where: { id: data.id },
@@ -6190,6 +6230,17 @@ export async function checkinBooking({
         const destroyedUnitsByAssetKitId = new Map<string, number>();
 
         /**
+         * Each pool's stock before this loop's first write to it, and the
+         * ledger events of every slice that used up its units. Recorded once
+         * after the loop, so a check-in of many slices reads each pool twice
+         * in all, not twice per slice. Safe here because each slice is
+         * visited once and caps itself on its own rows plus the in-memory
+         * `assetRemainingSoFar`; `partialCheckinBooking` re-reads the
+         * booking's rows per disposition and so writes per disposition.
+         */
+        const stockChangesByAssetId = new Map<string, StockChangeInput>();
+
+        /**
          * What each ONE_WAY slice can still check out, to size the units it
          * sent out. Only read for slices that left: one that never did sent
          * nothing, and no read is needed to say so.
@@ -6361,6 +6412,17 @@ export async function checkinBooking({
             (disposition.lost ?? 0) +
             (disposition.damaged ?? 0);
 
+          if (poolDecrement > 0 && !stockChangesByAssetId.has(slice.assetId)) {
+            stockChangesByAssetId.set(slice.assetId, {
+              assetId: slice.assetId,
+              before: await readStockState(tx, {
+                assetId: slice.assetId,
+                organizationId,
+              }),
+              events: [],
+            });
+          }
+
           if (poolDecrement > 0) {
             const custodyAgg = await tx.custody.aggregate({
               where: { assetId: slice.assetId },
@@ -6389,48 +6451,6 @@ export async function checkinBooking({
               assetId: slice.assetId,
               category: "RETURN",
               quantity: disposition.returned!,
-              userId: userId!,
-              bookingId: id,
-              bookingAssetId: dispBookingAssetId,
-              // The location the slice's units left from: returned units go
-              // back there, used-up ones come off it.
-              locationId: slice.sourceLocationId,
-              tx,
-            });
-          }
-          if ((disposition.consumed ?? 0) > 0) {
-            await createConsumptionLog({
-              assetId: slice.assetId,
-              category: "CONSUME",
-              quantity: disposition.consumed!,
-              userId: userId!,
-              bookingId: id,
-              bookingAssetId: dispBookingAssetId,
-              // The location the slice's units left from: returned units go
-              // back there, used-up ones come off it.
-              locationId: slice.sourceLocationId,
-              tx,
-            });
-          }
-          if ((disposition.lost ?? 0) > 0) {
-            await createConsumptionLog({
-              assetId: slice.assetId,
-              category: "LOSS",
-              quantity: disposition.lost!,
-              userId: userId!,
-              bookingId: id,
-              bookingAssetId: dispBookingAssetId,
-              // The location the slice's units left from: returned units go
-              // back there, used-up ones come off it.
-              locationId: slice.sourceLocationId,
-              tx,
-            });
-          }
-          if ((disposition.damaged ?? 0) > 0) {
-            await createConsumptionLog({
-              assetId: slice.assetId,
-              category: "DAMAGE",
-              quantity: disposition.damaged!,
               userId: userId!,
               bookingId: id,
               bookingAssetId: dispBookingAssetId,
@@ -6492,6 +6512,19 @@ export async function checkinBooking({
               additionalData: { assetId: slice.assetId, bookingId: id },
             });
 
+            /**
+             * Ledger events for the destroyed units, tried first at the
+             * slice's source. The rows land where the reconcile actually
+             * took them from.
+             */
+            stockChangesByAssetId.get(slice.assetId)?.events?.push(
+              ...checkinStockEvents({
+                slice,
+                disposition,
+                bookingId: id,
+                bookingAssetId: dispBookingAssetId,
+              })
+            );
             if (slice.assetKitId) {
               destroyedUnitsByAssetKitId.set(
                 slice.assetKitId,
@@ -6521,6 +6554,14 @@ export async function checkinBooking({
           existing.lost += disposition.lost ?? 0;
           existing.damaged += disposition.damaged ?? 0;
           summaryByAssetId.set(slice.assetId, existing);
+        }
+
+        if (stockChangesByAssetId.size > 0) {
+          await recordStockChanges(tx, {
+            organizationId,
+            userId: userId!,
+            changes: [...stockChangesByAssetId.values()],
+          });
         }
 
         // Flush the accumulated pool-decrement audit events atomically with
@@ -8055,6 +8096,15 @@ export async function partialCheckinBooking({
         const poolDecrement =
           (disp.consumed ?? 0) + (disp.lost ?? 0) + (disp.damaged ?? 0);
 
+        /** The pool's stock before this disposition's write, for the ledger. */
+        const stockBefore =
+          poolDecrement > 0
+            ? await readStockState(tx, {
+                assetId: disp.assetId,
+                organizationId,
+              })
+            : null;
+
         /**
          * Pool-drain guard: `Asset.quantity` must stay ≥ current custody
          * sum. Mirrors the invariant from `adjustQuantity` — we never let
@@ -8136,42 +8186,6 @@ export async function partialCheckinBooking({
             tx,
           });
         }
-        if ((disp.consumed ?? 0) > 0) {
-          await createConsumptionLog({
-            assetId: disp.assetId,
-            category: "CONSUME",
-            quantity: disp.consumed!,
-            userId,
-            bookingId: id,
-            bookingAssetId: dispBookingAssetId,
-            locationId: sourceSlice?.sourceLocationId ?? null,
-            tx,
-          });
-        }
-        if ((disp.lost ?? 0) > 0) {
-          await createConsumptionLog({
-            assetId: disp.assetId,
-            category: "LOSS",
-            quantity: disp.lost!,
-            userId,
-            bookingId: id,
-            bookingAssetId: dispBookingAssetId,
-            locationId: sourceSlice?.sourceLocationId ?? null,
-            tx,
-          });
-        }
-        if ((disp.damaged ?? 0) > 0) {
-          await createConsumptionLog({
-            assetId: disp.assetId,
-            category: "DAMAGE",
-            quantity: disp.damaged!,
-            userId,
-            bookingId: id,
-            bookingAssetId: dispBookingAssetId,
-            locationId: sourceSlice?.sourceLocationId ?? null,
-            tx,
-          });
-        }
 
         if (qtyAssetIdsWithKitSlice.has(disp.assetId)) {
           const sessionLogs = sessionLogsByAssetId.get(disp.assetId) ?? [];
@@ -8228,6 +8242,28 @@ export async function partialCheckinBooking({
             result: reconcile,
             context: "Partial check-in",
             additionalData: { assetId: disp.assetId, bookingId: id },
+          });
+
+          /**
+           * Written per disposition, not once after the loop: the next
+           * disposition of this asset caps itself on this booking's
+           * CONSUME / LOSS / DAMAGE rows, so it must see these.
+           */
+          await recordStockChanges(tx, {
+            organizationId,
+            userId,
+            changes: [
+              {
+                assetId: disp.assetId,
+                before: stockBefore,
+                events: checkinStockEvents({
+                  slice: sourceSlice,
+                  disposition: disp,
+                  bookingId: id,
+                  bookingAssetId: dispBookingAssetId,
+                }),
+              },
+            ],
           });
         }
 
@@ -12608,6 +12644,9 @@ export async function revertBookingToDraft({
  * @returns The updated booking
  * @throws {ShelfError} 403 when the caller lacks `booking:extend` or does not
  *   own the booking
+ * @throws {ShelfError} 400 when `newEndDate` is not after the booking's end,
+ *   or when the booking changed between the read and the write (another
+ *   extension landed, or the booking was closed)
  */
 export async function extendBooking({
   id,
@@ -12685,13 +12724,7 @@ export async function extendBooking({
 
     validateBookingOwnership({ booking, userId, access, action: "extend" });
 
-    /** Extending booking is allowed only for these status */
-    const allowedStatus: BookingStatus[] = [
-      BookingStatus.ONGOING,
-      BookingStatus.OVERDUE,
-    ];
-
-    if (!allowedStatus.includes(booking.status)) {
+    if (!isExtendableStatus(booking.status)) {
       throw new ShelfError({
         cause: null,
         label,
@@ -12699,31 +12732,27 @@ export async function extendBooking({
       });
     }
 
-    /** Get assets that have been returned via partial check-in */
-    const checkedInAssetIds = booking.partialCheckins.flatMap(
-      (checkin) => checkin.assetIds
+    // An extension only ever moves the end later; an earlier end is a
+    // different operation.
+    if (newEndDate <= booking.to) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message: "The new end date must be after the current end date.",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
+    /** Assets still out, not returned through partial check-in */
+    const activeAssets = getAssetsStillOutForExtend(
+      booking.bookingAssets.map((ba) => ba.asset),
+      booking.partialCheckins.flatMap((checkin) => checkin.assetIds)
     );
 
-    /** Filter to only assets that are actively checked out (not returned) */
-    const activeAssets = booking.bookingAssets
-      .map((ba) => ba.asset)
-      .filter(
-        (asset) =>
-          (asset.status === AssetStatus.CHECKED_OUT ||
-            asset.status === AssetStatus.IN_CUSTODY) &&
-          !checkedInAssetIds.includes(asset.id)
-      );
-
-    /**
-     * Kit memberships this booking still has out, read from the slice markers.
-     *
-     * A kit is one physical case, so one still out stays exclusive to this
-     * booking through the extension. The markers answer for quantity-tracked
-     * members too, whose asset status only flips to CHECKED_OUT once every unit
-     * booked on the asset has left.
-     */
-    const kitMembershipIdsStillOut = booking.bookingAssets.flatMap((ba) =>
-      ba.assetKitId && ba.checkedOutAt && !ba.checkedInAt ? [ba.assetKitId] : []
+    /** Kit memberships still out, read from the slice markers */
+    const kitMembershipIdsStillOut = getKitMembershipIdsStillOut(
+      booking.bookingAssets
     );
 
     /** Validate that there are still active assets to extend the booking for */
@@ -12826,29 +12855,48 @@ export async function extendBooking({
         tx,
       });
 
-      return tx.booking.update({
-        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) at L2853; this is the write on that same proven id
-        where: { id: booking.id },
-        data: {
-          /**
-           * If booking is currently OVERDUE we have to make it ONGOING
-           */
-          status:
-            booking.status === BookingStatus.OVERDUE
-              ? BookingStatus.ONGOING
-              : undefined,
-          /**
-           * Only the LIVE end date moves. `originalTo` holds the end date the
-           * booking was planned for, and extension is allowed only once the
-           * booking has started (ONGOING/OVERDUE), so the plan is already
-           * fixed: moving it here would erase the deadline the custodian
-           * actually agreed to, and with it every late return from Booking
-           * Compliance.
-           */
-          to: newEndDate,
-        },
-        include: BOOKING_INCLUDE_FOR_EMAIL,
-      });
+      // The row must still be exactly as read when the lock is taken: an
+      // extension that landed since the read above, a booking closed, or the
+      // overdue job flipping it meanwhile leaves no row to update. So the
+      // note and the events below, built from that read, describe the change
+      // this write made. Either live status reads ONGOING once extended.
+      return tx.booking
+        .update({
+          where: {
+            id: booking.id,
+            organizationId,
+            status: booking.status,
+            to: booking.to,
+          },
+          data: {
+            status: BookingStatus.ONGOING,
+            /**
+             * Only the LIVE end date moves. `originalTo` holds the end date
+             * the booking was planned for, and extension is allowed only
+             * once the booking has started (ONGOING/OVERDUE), so the plan is
+             * already fixed: moving it here would erase the deadline the
+             * custodian actually agreed to, and with it every late return
+             * from Booking Compliance.
+             */
+            to: newEndDate,
+          },
+          include: BOOKING_INCLUDE_FOR_EMAIL,
+        })
+        .catch((cause) => {
+          if (isNotFoundError(cause)) {
+            // `cause: null`: a Prisma not-found cause would turn this into a
+            // 404, and the booking does exist; its row just moved on.
+            throw new ShelfError({
+              cause: null,
+              label,
+              message:
+                "The booking changed while you were extending it. Reload it and try again.",
+              status: 400,
+              shouldBeCaptured: false,
+            });
+          }
+          throw cause;
+        });
     });
 
     // Add activity log for booking extension
@@ -12963,7 +13011,26 @@ export async function extendBooking({
      * In case of ONGOING, a checkin reminder should have be scheduled. So we have to reschedule it.
      * And in case of OVERDUE all the jobs are completed, so we have to reschedule the checkin reminder.
      */
-    await cancelScheduler(booking);
+    // A later extension can commit after this one. The reminder belongs to
+    // the extension whose end is stored now: it cancels the job stored now,
+    // and stores its own only if neither has moved on again meanwhile.
+    const live = await db.booking.findUnique({
+      where: { id: booking.id, organizationId },
+      select: { to: true, activeSchedulerReference: true },
+    });
+    if (live && live.to.getTime() !== newEndDate.getTime()) {
+      return updatedBooking;
+    }
+    const storedReference =
+      live?.activeSchedulerReference ?? booking.activeSchedulerReference;
+    await cancelScheduler({
+      id: booking.id,
+      activeSchedulerReference: storedReference,
+    });
+    const expected = {
+      to: newEndDate,
+      activeSchedulerReference: storedReference,
+    };
 
     const { hours } = calcTimeDifference(newEndDate, new Date());
 
@@ -12986,10 +13053,12 @@ export async function extendBooking({
           eventType: BOOKING_SCHEDULER_EVENTS_ENUM.overdueHandler,
         },
         when: newEndDate,
+        expected,
       });
     } else {
-      const when = newEndDate;
-      when.setHours(newEndDate.getHours() - 1);
+      // A copy: `expected.to` must stay the stored end.
+      const when = new Date(newEndDate);
+      when.setHours(when.getHours() - 1);
 
       await scheduleNextBookingJob({
         data: {
@@ -12998,6 +13067,7 @@ export async function extendBooking({
           eventType: BOOKING_SCHEDULER_EVENTS_ENUM.checkinReminder,
         },
         when,
+        expected,
       });
     }
 

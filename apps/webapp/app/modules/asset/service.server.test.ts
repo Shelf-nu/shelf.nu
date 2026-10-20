@@ -23,6 +23,10 @@ import { getCategory } from "~/modules/category/service.server";
 import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
 import { createConsumptionLog } from "~/modules/consumption-log/service.server";
+import {
+  readStockState,
+  recordStockChanges,
+} from "~/modules/consumption-log/stock-ledger.server";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { bulkAssignKitCustody } from "~/modules/kit/service.server";
 import {
@@ -318,6 +322,28 @@ vitest.mock(
 vitest.mock("~/modules/consumption-log/service.server", () => ({
   createConsumptionLog: vitest.fn().mockResolvedValue({}),
 }));
+
+// why: the ledger rows are derived from real placement reads, covered by
+// `stock-ledger.test.ts` and the in-memory `service.custody-source.test.ts`.
+// These suites assert the events each service hands the ledger.
+vitest.mock("~/modules/consumption-log/stock-ledger.server", () => ({
+  readStockState: vitest.fn().mockResolvedValue({
+    total: 0,
+    placed: new Map(),
+    ledgerStartedAt: null,
+  }),
+  readStockStates: vitest.fn().mockResolvedValue(new Map()),
+  recordStockChanges: vitest.fn().mockResolvedValue(undefined),
+}));
+
+/** Every ledger event the mocked `recordStockChanges` was handed, in order. */
+function recordedStockEvents() {
+  return vitest
+    .mocked(recordStockChanges)
+    .mock.calls.flatMap(([, { changes }]) =>
+      changes.flatMap((change) => change.events ?? [])
+    );
+}
 
 // why: wiring-only — assert that updateAsset invokes the low-stock notifier on
 // a quantity DROP without running the real debounce/email logic (that logic is
@@ -1358,6 +1384,33 @@ describe("createAsset quantity validation", () => {
         type: "INDIVIDUAL",
       })
     ).resolves.toEqual({ id: "asset-new" });
+    expect(recordStockChanges).not.toHaveBeenCalled();
+  });
+
+  it("records the starting stock of a quantity-tracked asset as INITIAL", async () => {
+    await createAsset({
+      title: "Test Cables",
+      description: "USB cables",
+      userId: "user-1",
+      categoryId: null,
+      valuation: null,
+      organizationId: "org-1",
+      type: "QUANTITY_TRACKED",
+      consumptionType: "ONE_WAY",
+      quantity: 100,
+    });
+
+    expect(recordStockChanges).toHaveBeenCalledWith(expect.anything(), {
+      organizationId: "org-1",
+      userId: "user-1",
+      changes: [
+        {
+          assetId: "asset-new",
+          before: { total: 0, placed: new Map(), ledgerStartedAt: null },
+          events: [{ category: "INITIAL", change: 100, locationId: undefined }],
+        },
+      ],
+    });
   });
 });
 
@@ -1841,17 +1894,17 @@ describe("releaseQuantity — consumptionType disposition", () => {
       custodyAssign: "anyone",
     });
 
-    // Exactly one log, classified as consumption. Writing RETURN here is the
-    // shipped bug: consumption reporting counts the units as back on the shelf.
-    expect(mockCreateConsumptionLog).toHaveBeenCalledTimes(1);
-    expect(mockCreateConsumptionLog).toHaveBeenCalledWith(
+    // Exactly one ledger event, classified as consumption, and no RETURN.
+    // Writing RETURN here is the shipped bug: consumption reporting counts
+    // the units as back on the shelf.
+    expect(mockCreateConsumptionLog).not.toHaveBeenCalled();
+    expect(recordedStockEvents()).toEqual([
       expect.objectContaining({
-        assetId: "asset-1",
         category: "CONSUME",
-        quantity: 10,
+        change: -10,
         custodianId: "tm-1",
-      })
-    );
+      }),
+    ]);
     expect(mockAssetUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: "asset-1" },
@@ -1880,10 +1933,10 @@ describe("releaseQuantity — consumptionType disposition", () => {
 
     // 10 gloves used up, 30 handed back in good condition. Destroying all 40
     // is the over-correction this split exists to prevent.
-    expect(mockCreateConsumptionLog).toHaveBeenCalledTimes(2);
-    expect(mockCreateConsumptionLog).toHaveBeenCalledWith(
-      expect.objectContaining({ category: "CONSUME", quantity: 10 })
-    );
+    expect(recordedStockEvents()).toEqual([
+      expect.objectContaining({ category: "CONSUME", change: -10 }),
+    ]);
+    expect(mockCreateConsumptionLog).toHaveBeenCalledTimes(1);
     expect(mockCreateConsumptionLog).toHaveBeenCalledWith(
       expect.objectContaining({ category: "RETURN", quantity: 30 })
     );
@@ -3257,6 +3310,13 @@ describe("updateAsset stock-lowering guard", () => {
       name: "Storage B",
     });
 
+    const stockBefore = {
+      total: 10,
+      placed: new Map([["loc-1", 10]]),
+      ledgerStartedAt: new Date("2026-10-01T00:00:00.000Z"),
+    };
+    vi.mocked(readStockState).mockResolvedValueOnce(stockBefore);
+
     await updateAsset({
       id: "asset-1",
       userId: "user-1",
@@ -3267,6 +3327,24 @@ describe("updateAsset stock-lowering guard", () => {
     } as any);
 
     expect(db.asset.update).toHaveBeenCalled();
+    // The ledger diffs the stock read under the lock, before the first write,
+    // against the stock after the placement rewrite.
+    expect(vi.mocked(readStockState).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(db.asset.update).mock.invocationCallOrder[0]
+    );
+    expect(recordStockChanges).toHaveBeenCalledWith(expect.anything(), {
+      organizationId: "org-1",
+      userId: "user-1",
+      changes: [
+        {
+          assetId: "asset-1",
+          before: stockBefore,
+          events: [
+            expect.objectContaining({ category: "ADJUSTMENT", change: -5 }),
+          ],
+        },
+      ],
+    });
   });
 
   it("refuses when the replacement placement itself exceeds the new total", async () => {
@@ -3684,17 +3762,16 @@ describe("updateAsset quantity audit trail", () => {
       request: new Request("http://localhost"),
     } as any);
 
-    // ConsumptionLog stores the positive delta (|4 − 10| = 6) as an ADJUSTMENT,
-    // written inside the quantity tx (tx threaded through).
-    expect(mockCreateConsumptionLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        assetId: "asset-1",
-        category: "ADJUSTMENT",
-        quantity: 6,
-        userId: "user-1",
-      })
+    // The ledger gets the signed change (4 − 10 = −6) as an ADJUSTMENT,
+    // inside the quantity tx (tx threaded through).
+    expect(recordStockChanges).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ organizationId: "org-1", userId: "user-1" })
     );
-    // The direction the log can't carry is captured by the event's from/to.
+    expect(recordedStockEvents()).toEqual([
+      expect.objectContaining({ category: "ADJUSTMENT", change: -6 }),
+    ]);
+    // The activity event records the same change as from/to.
     expect(mockRecordEvents).toHaveBeenCalledWith(
       expect.arrayContaining([
         expect.objectContaining({
@@ -3801,8 +3878,8 @@ describe("updateAsset quantity audit trail", () => {
       request: new Request("http://localhost"),
     } as any);
 
-    // delta 0 → no stock-movement audit (createConsumptionLog rejects qty 0).
-    expect(mockCreateConsumptionLog).not.toHaveBeenCalled();
+    // delta 0 → no stock-movement event for the ledger.
+    expect(recordedStockEvents()).toEqual([]);
     // No field actually changed, so no quantity event is recorded.
     const emittedQuantityEvent = mockRecordEvents.mock.calls.some(([events]) =>
       (events as Array<{ action: string }>).some(
