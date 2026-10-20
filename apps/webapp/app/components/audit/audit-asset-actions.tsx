@@ -2,10 +2,11 @@ import type React from "react";
 import { useRef, useEffect } from "react";
 import type { AuditAsset } from "@prisma/client";
 import { useSetAtom } from "jotai";
-import { ImagePlus, Loader, MessageSquarePlus } from "lucide-react";
+import { ImagePlus, MessageSquarePlus } from "lucide-react";
 import { useFetcher } from "react-router";
 import { incrementAuditAssetMetaAtom } from "~/atoms/qr-scanner";
 import { Button } from "~/components/shared/button";
+import { Spinner } from "~/components/shared/spinner";
 import { useDisabled } from "~/hooks/use-disabled";
 import { tw } from "~/utils/tw";
 
@@ -152,10 +153,7 @@ export function AuditAssetActions({
       >
         <span className="flex items-center gap-1">
           {isUploading ? (
-            <Loader
-              className="size-4"
-              style={{ animation: "spinner 500ms linear infinite" }}
-            />
+            <Spinner className="size-4" />
           ) : (
             <ImagePlus className="size-4" />
           )}
