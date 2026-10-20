@@ -464,7 +464,13 @@ export const AssetsList = ({
               </AssetIndexSettingsProvider>
             </>
           ) : isAvailabilityView && shouldShowAvailabilityView ? (
-            <Suspense fallback={null}>
+            <Suspense
+              fallback={
+                <div className="flex h-64 items-center justify-center">
+                  <Spinner />
+                </div>
+              }
+            >
               <AvailabilityCalendar
                 resources={resources}
                 events={events}

@@ -31,6 +31,7 @@ import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { GrayBadge } from "~/components/shared/gray-badge";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
+import { Spinner } from "~/components/shared/spinner";
 import { Td, Th } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import { db } from "~/database/db.server";
@@ -410,7 +411,13 @@ export default function KitsIndexPage() {
           )}
         </Filters>
         {isAvailabilityView && shouldShowAvailabilityView ? (
-          <Suspense fallback={null}>
+          <Suspense
+            fallback={
+              <div className="flex h-64 items-center justify-center">
+                <Spinner />
+              </div>
+            }
+          >
             <AvailabilityCalendar
               resources={resources}
               events={events}
