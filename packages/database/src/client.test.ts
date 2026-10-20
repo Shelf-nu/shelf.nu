@@ -824,18 +824,26 @@ test("isReadOperation", async (t) => {
   });
 });
 
+const PLAIN_URL = "postgres://u:p@host:5432/db";
+const TLS = { ssl: { rejectUnauthorized: false as const } };
+
 test("poolOptionsFromUrl maps Prisma's URL pool params onto pg options", () => {
-  assert.deepEqual(
-    poolOptionsFromUrl(
-      "postgres://u:p@host:6543/db?pgbouncer=true&connection_limit=20&pool_timeout=10&schema=tenant"
-    ),
-    { max: 20, connectionTimeoutMillis: 10_000, schema: "tenant" }
-  );
+  const url =
+    "postgres://u:p@host:6543/db?pgbouncer=true&connection_limit=20&pool_timeout=10&schema=tenant";
+  assert.deepEqual(poolOptionsFromUrl(url), {
+    connectionString: url,
+    max: 20,
+    connectionTimeoutMillis: 10_000,
+    schema: "tenant",
+    ...TLS,
+  });
 });
 
 test("poolOptionsFromUrl keeps a 10 s acquisition timeout when the URL sets none", () => {
-  assert.deepEqual(poolOptionsFromUrl("postgres://u:p@host:5432/db"), {
+  assert.deepEqual(poolOptionsFromUrl(PLAIN_URL), {
+    connectionString: PLAIN_URL,
     connectionTimeoutMillis: 10_000,
+    ...TLS,
   });
   assert.deepEqual(poolOptionsFromUrl(undefined), {
     connectionTimeoutMillis: 10_000,
@@ -845,15 +853,43 @@ test("poolOptionsFromUrl keeps a 10 s acquisition timeout when the URL sets none
   });
 });
 
-test("poolOptionsFromUrl honours pool_timeout=0 as no limit and ignores junk", () => {
+test("poolOptionsFromUrl lifts the bound only for an explicit pool_timeout=0", () => {
   assert.deepEqual(
-    poolOptionsFromUrl("postgres://u:p@h/db?connection_limit=0&pool_timeout=0"),
-    {}
+    poolOptionsFromUrl(`${PLAIN_URL}?connection_limit=0&pool_timeout=0`),
+    {
+      connectionString: `${PLAIN_URL}?connection_limit=0&pool_timeout=0`,
+      ...TLS,
+    }
   );
-  assert.deepEqual(
-    poolOptionsFromUrl(
-      "postgres://u:p@h/db?connection_limit=abc&pool_timeout=abc"
-    ),
-    {}
-  );
+});
+
+test("poolOptionsFromUrl keeps the 10 s bound for unparsable or negative pool_timeout", () => {
+  for (const q of [
+    "connection_limit=abc&pool_timeout=abc",
+    "pool_timeout=-5",
+  ]) {
+    assert.deepEqual(poolOptionsFromUrl(`${PLAIN_URL}?${q}`), {
+      connectionString: `${PLAIN_URL}?${q}`,
+      connectionTimeoutMillis: 10_000,
+      ...TLS,
+    });
+  }
+});
+
+test("poolOptionsFromUrl encrypts without verification for absent, prefer and require sslmode", () => {
+  for (const mode of ["prefer", "require"]) {
+    const out = poolOptionsFromUrl(
+      `${PLAIN_URL}?sslmode=${mode}&connection_limit=5`
+    );
+    assert.deepEqual(out.ssl, TLS.ssl);
+    assert.equal(out.connectionString, `${PLAIN_URL}?connection_limit=5`);
+  }
+});
+
+test("poolOptionsFromUrl leaves disable and verify modes to pg", () => {
+  for (const mode of ["disable", "verify-ca", "verify-full"]) {
+    const out = poolOptionsFromUrl(`${PLAIN_URL}?sslmode=${mode}`);
+    assert.equal(out.ssl, undefined);
+    assert.equal(out.connectionString, `${PLAIN_URL}?sslmode=${mode}`);
+  }
 });

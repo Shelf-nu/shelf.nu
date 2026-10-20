@@ -363,42 +363,65 @@ async function retryLoop<T>(
 }
 
 /**
- * Pool options Prisma's own engine read from the URL (`connection_limit`,
- * `pool_timeout`, `schema`), mapped onto `pg` so an existing `DATABASE_URL`
- * keeps its sizing. `pg` ignores the Prisma-only keys it does not know
+ * Connection settings for `pg`, derived from a Prisma-style `DATABASE_URL` so
+ * an existing URL keeps its meaning (`connection_limit`, `pool_timeout`,
+ * `schema`, `sslmode`). `pg` ignores the Prisma-only keys it does not know
  * (`pgbouncer`).
+ *
+ * TLS: Prisma's default (`sslmode` absent, `prefer` or `require`) encrypts
+ * without verifying the server certificate. `pg` would instead send plaintext
+ * when `sslmode` is absent and demand full verification for `prefer` and
+ * `require`, so those three are mapped to encrypted-without-verification here
+ * and removed from the string. `disable`, `verify-ca` and `verify-full` keep
+ * `pg`'s own handling. A server without TLS needs `sslmode=disable`.
  *
  * The acquisition wait stays bounded: without `pool_timeout` it is 10 s, the
  * engine's default, because `pg` would otherwise queue forever on a saturated
- * pool. `pool_timeout=0` keeps the engine's meaning of "wait without limit".
+ * pool. Only an explicit `pool_timeout=0` lifts the bound.
  */
 export function poolOptionsFromUrl(connectionString: string | undefined): {
+  connectionString?: string;
   max?: number;
   connectionTimeoutMillis?: number;
   schema?: string;
+  ssl?: { rejectUnauthorized: false };
 } {
-  let params: URLSearchParams;
+  let url: URL | null;
   try {
-    params = new URL(connectionString ?? "").searchParams;
+    url = new URL(connectionString ?? "");
   } catch {
-    params = new URLSearchParams();
+    url = null;
   }
+  const params = url?.searchParams ?? new URLSearchParams();
   const limit = Number(params.get("connection_limit"));
-  const rawTimeout = params.get("pool_timeout");
+  const rawTimeout = Number(params.get("pool_timeout") ?? NaN);
   const timeoutSeconds =
-    rawTimeout === null ? DEFAULT_POOL_TIMEOUT_SECONDS : Number(rawTimeout);
+    Number.isFinite(rawTimeout) && rawTimeout >= 0
+      ? rawTimeout
+      : DEFAULT_POOL_TIMEOUT_SECONDS;
   const schema = params.get("schema");
+  const sslmode = params.get("sslmode");
+  const encryptWithoutVerify =
+    url !== null && (sslmode === null || ENCRYPT_ONLY_SSL_MODES.has(sslmode));
+  if (encryptWithoutVerify && sslmode !== null) {
+    url!.searchParams.delete("sslmode");
+  }
   return {
+    ...(url ? { connectionString: url.toString() } : {}),
     ...(Number.isInteger(limit) && limit > 0 ? { max: limit } : {}),
-    ...(Number.isFinite(timeoutSeconds) && timeoutSeconds > 0
+    ...(timeoutSeconds > 0
       ? { connectionTimeoutMillis: timeoutSeconds * 1000 }
       : {}),
     ...(schema ? { schema } : {}),
+    ...(encryptWithoutVerify ? { ssl: { rejectUnauthorized: false } } : {}),
   };
 }
 
 /** Prisma's default `pool_timeout`, kept when the URL does not set one. */
 const DEFAULT_POOL_TIMEOUT_SECONDS = 10;
+
+/** `sslmode` values that Prisma treats as "encrypt, do not verify". */
+const ENCRYPT_ONLY_SSL_MODES = new Set(["prefer", "require"]);
 
 /**
  * Talks to Postgres through `pg` instead of Prisma's Rust engine connector.
