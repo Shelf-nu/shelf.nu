@@ -9798,14 +9798,18 @@ describe("revertBookingToDraft", () => {
 });
 
 /**
- * `mockBookingData` ends in the future; an extension must land after the
- * stored end, so these cases start from a booking that ends before the ends
- * they extend to.
+ * A booking that runs 09:00 to 17:00 on 2025-01-01, read at
+ * {@link EXTEND_NOW}, while it is under way: a new end must land after the
+ * start and in the future, so the cases below move the end around that clock.
  */
 const extendableBookingData = {
   ...mockBookingData,
+  from: new Date("2025-01-01T09:00:00Z"),
   to: new Date("2025-01-01T17:00:00Z"),
 };
+
+/** The clock every `extendBooking` case reads: noon on the booking's day. */
+const EXTEND_NOW = new Date("2025-01-01T12:00:00Z");
 
 /** The job ids `scheduler.cancel` was called with, in order. */
 function cancelledJobIds(): unknown[] {
@@ -9816,6 +9820,13 @@ function cancelledJobIds(): unknown[] {
 describe("extendBooking", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
+    // why: the service refuses an end in the past, so each case pins "now"
+    vitest.useFakeTimers({ toFake: ["Date"] });
+    vitest.setSystemTime(EXTEND_NOW);
+  });
+
+  afterEach(() => {
+    vitest.useRealTimers();
   });
 
   it("should extend booking successfully", async () => {
@@ -10089,44 +10100,185 @@ describe("extendBooking", () => {
       })
     ).rejects.toMatchObject({
       message:
-        "The booking changed while you were extending it. Reload it and try again.",
+        "The booking changed while you were changing its end date. Reload it and try again.",
       status: 400,
     });
   });
 
-  it("refuses an end at or before the current end", async () => {
-    expect.assertions(2);
-    const newEndDate = new Date("2025-01-01T17:00:00Z");
-    const mockBooking = {
+  /** The fixture booking in `status`, with one asset still out. */
+  function bookingWithOneAssetOut(status: BookingStatus) {
+    return {
       ...extendableBookingData,
-      status: BookingStatus.ONGOING,
+      status,
+      activeSchedulerReference: "reminder-job",
       bookingAssets: [
         {
           asset: { id: "asset-1", status: AssetStatus.CHECKED_OUT },
           assetId: "asset-1",
           quantity: 1,
-          id: "ba-t153",
-          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          id: "ba-t160",
+          checkedOutAt: new Date("2025-01-01T09:00:00.000Z"),
           checkedInAt: null,
         },
       ],
       partialCheckins: [],
     };
+  }
+
+  /** Moves the fixture booking's end to `newEndDate`, as a workspace admin. */
+  function changeEndTo(newEndDate: Date) {
+    return extendBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      newEndDate,
+      hints: mockClientHints,
+      userId: "user-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
+      roles: [OrganizationRoles.ADMIN],
+    });
+  }
+
+  it("moves the end earlier and leaves the items still out checked out", async () => {
+    expect.assertions(9);
+    const newEndDate = new Date("2025-01-01T15:00:00Z");
+    const booking = bookingWithOneAssetOut(BookingStatus.ONGOING);
     //@ts-expect-error missing vitest type
-    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    db.booking.findUniqueOrThrow.mockResolvedValue(booking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ ...booking, to: newEndDate });
+    //@ts-expect-error missing vitest type
+    db.booking.findUnique.mockResolvedValueOnce({
+      to: newEndDate,
+      activeSchedulerReference: "reminder-job",
+    });
+    //@ts-expect-error missing vitest type
+    scheduler.sendAfter.mockResolvedValueOnce("earlier-reminder-job");
+    //@ts-expect-error missing vitest type
+    db.booking.updateMany.mockResolvedValueOnce({ count: 1 });
+
+    await changeEndTo(newEndDate);
+
+    expect(db.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: "booking-1",
+          organizationId: "org-1",
+          status: BookingStatus.ONGOING,
+          to: new Date("2025-01-01T17:00:00Z"),
+        },
+        data: { status: BookingStatus.ONGOING, to: newEndDate },
+      })
+    );
+    expect(db.asset.update).not.toHaveBeenCalled();
+    expect(db.asset.updateMany).not.toHaveBeenCalled();
+    // A shorter window overlaps nothing it did not already overlap.
+    expect(db.booking.findMany).not.toHaveBeenCalled();
+    expect(assertModelUnitsNotReservedElsewhere).not.toHaveBeenCalled();
+    expect(bookingNoteService.createSystemBookingNote).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingId: "booking-1",
+        content: expect.stringContaining(
+          ' shortened the booking from **{% date value="2025-01-01T17:00:00.000Z" /%}** to **{% date value="2025-01-01T15:00:00.000Z" /%}**.'
+        ),
+      })
+    );
+    expect(cancelledJobIds()).toEqual(["reminder-job"]);
+    expect(scheduler.sendAfter).toHaveBeenCalledWith(
+      "booking-queue",
+      {
+        id: "booking-1",
+        hints: mockClientHints,
+        eventType: "booking-checkin-reminder",
+      },
+      {},
+      new Date("2025-01-01T14:00:00Z")
+    );
+    expect(db.booking.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: "booking-1",
+          to: newEndDate,
+          activeSchedulerReference: "reminder-job",
+        },
+        data: { activeSchedulerReference: "earlier-reminder-job" },
+      })
+    );
+  });
+
+  it("moves an overdue booking's end earlier and reopens it as ongoing", async () => {
+    expect.assertions(1);
+    // The overdue job flips the status without reading the end, so a job
+    // that outlived an end change leaves the booking OVERDUE while its stored
+    // end is still ahead.
+    const newEndDate = new Date("2025-01-01T15:00:00Z");
+    const booking = bookingWithOneAssetOut(BookingStatus.OVERDUE);
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(booking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...booking,
+      status: BookingStatus.ONGOING,
+      to: newEndDate,
+    });
+
+    await changeEndTo(newEndDate);
+
+    expect(db.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: "booking-1",
+          organizationId: "org-1",
+          status: BookingStatus.OVERDUE,
+          to: new Date("2025-01-01T17:00:00Z"),
+        },
+        data: { status: BookingStatus.ONGOING, to: newEndDate },
+      })
+    );
+  });
+
+  it("refuses an end equal to the current end", async () => {
+    expect.assertions(2);
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(
+      bookingWithOneAssetOut(BookingStatus.ONGOING)
+    );
 
     await expect(
-      extendBooking({
-        id: "booking-1",
-        organizationId: "org-1",
-        newEndDate,
-        hints: mockClientHints,
-        userId: "user-1",
-        access: accessFor([OrganizationRoles.ADMIN]),
-        roles: [OrganizationRoles.ADMIN],
-      })
+      changeEndTo(new Date("2025-01-01T17:00:00Z"))
     ).rejects.toMatchObject({
-      message: "The new end date must be after the current end date.",
+      message: "The booking already ends at that date.",
+      status: 400,
+    });
+    expect(db.booking.update).not.toHaveBeenCalled();
+  });
+
+  it("refuses an end at or before the booking start", async () => {
+    expect.assertions(2);
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(
+      bookingWithOneAssetOut(BookingStatus.ONGOING)
+    );
+
+    await expect(
+      changeEndTo(new Date("2025-01-01T09:00:00Z"))
+    ).rejects.toMatchObject({
+      message: "The new end date must be after the booking start.",
+      status: 400,
+    });
+    expect(db.booking.update).not.toHaveBeenCalled();
+  });
+
+  it("refuses an end after the start that has already passed", async () => {
+    expect.assertions(2);
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(
+      bookingWithOneAssetOut(BookingStatus.ONGOING)
+    );
+
+    await expect(
+      changeEndTo(new Date("2025-01-01T10:00:00Z"))
+    ).rejects.toMatchObject({
+      message: "The new end date must be in the future.",
       status: 400,
     });
     expect(db.booking.update).not.toHaveBeenCalled();
@@ -10965,7 +11117,7 @@ describe("extendBooking", () => {
         roles: [OrganizationRoles.ADMIN],
       })
     ).rejects.toThrow(
-      "Cannot extend booking. All assets have been returned. Please complete the booking instead."
+      "Cannot change the end date. All assets have been returned. Please complete the booking instead."
     );
   });
 
@@ -21621,6 +21773,46 @@ describe("booking emails name who acted", () => {
     });
 
     expectActorLine("Extended by");
+  });
+
+  it("extendBooking: Shortened by, for an earlier end", async () => {
+    const ongoing = {
+      ...mockBookingData,
+      ...EMAIL_FIELDS,
+      status: BookingStatus.ONGOING,
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-actor-5b",
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
+        },
+      ],
+      partialCheckins: [],
+    };
+    const newEndDate = new Date(futureToDate.getTime() - 4 * 60 * 60 * 1000);
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(ongoing);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ ...ongoing, to: newEndDate });
+    mockBerlinRecipient();
+
+    await extendBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      newEndDate,
+      hints: mockClientHints,
+      userId: "user-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
+      roles: [OrganizationRoles.ADMIN],
+    });
+
+    expectActorLine("Shortened by");
+    const [payload] = vitest.mocked(sendEmail).mock.calls[0];
+    expect(payload.subject).toBe("Booking shortened (Test Booking) - shelf.nu");
+    expect(payload.text).toContain("Your booking has been shortened from ");
   });
 
   it("deleteBooking: Deleted by", async () => {

@@ -12630,9 +12630,21 @@ export async function revertBookingToDraft({
 }
 
 /**
- * Extends an ongoing or overdue booking to a new end date.
+ * How the activity note, the email and its actor line word each direction of
+ * an end-date change.
+ */
+const END_DATE_CHANGE_COPY = {
+  later: { verb: "extended", actorLabel: "Extended by" },
+  earlier: { verb: "shortened", actorLabel: "Shortened by" },
+} as const;
+
+/**
+ * Moves the end of an ongoing or overdue booking, later or earlier.
  *
- * @param params.id - The booking to extend
+ * Only the dates move: items stay checked out until they are checked in, and
+ * an item still out at the new end makes the booking overdue then.
+ *
+ * @param params.id - The booking whose end changes
  * @param params.organizationId - The caller's workspace; the lookup is scoped to it
  * @param params.newEndDate - The new live end (`to`); the planned end is left alone
  * @param params.hints - Client hints, for the note's dates, the check-in
@@ -12644,9 +12656,10 @@ export async function revertBookingToDraft({
  * @returns The updated booking
  * @throws {ShelfError} 403 when the caller lacks `booking:extend` or does not
  *   own the booking
- * @throws {ShelfError} 400 when `newEndDate` is not after the booking's end,
- *   or when the booking changed between the read and the write (another
- *   extension landed, or the booking was closed)
+ * @throws {ShelfError} 400 when `newEndDate` is not after the booking's start,
+ *   is not in the future, or equals the current end, when a later end overlaps
+ *   a reserved booking, or when the booking changed between the read and the
+ *   write (another end-date change landed, or the booking was closed)
  */
 export async function extendBooking({
   id,
@@ -12716,7 +12729,8 @@ export async function extendBooking({
       throw new ShelfError({
         cause: null,
         label: "Booking",
-        message: "You are not authorized to extend this booking.",
+        message:
+          "You are not authorized to change the end date of this booking.",
         status: 403,
         shouldBeCaptured: false,
       });
@@ -12728,17 +12742,39 @@ export async function extendBooking({
       throw new ShelfError({
         cause: null,
         label,
-        message: "Extending booking is not allowed for current status.",
+        message:
+          "Changing the end date is not allowed for the current booking status.",
       });
     }
 
-    // An extension only ever moves the end later; an earlier end is a
-    // different operation.
-    if (newEndDate <= booking.to) {
+    const movesLater = newEndDate > booking.to;
+    const copy = END_DATE_CHANGE_COPY[movesLater ? "later" : "earlier"];
+
+    if (newEndDate <= booking.from) {
       throw new ShelfError({
         cause: null,
         label,
-        message: "The new end date must be after the current end date.",
+        message: "The new end date must be after the booking start.",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
+    if (newEndDate <= new Date()) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message: "The new end date must be in the future.",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
+    if (newEndDate.getTime() === booking.to.getTime()) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message: "The booking already ends at that date.",
         status: 400,
         shouldBeCaptured: false,
       });
@@ -12755,111 +12791,115 @@ export async function extendBooking({
       booking.bookingAssets
     );
 
-    /** Validate that there are still active assets to extend the booking for */
     if (activeAssets.length === 0 && kitMembershipIdsStillOut.length === 0) {
       throw new ShelfError({
         cause: null,
         label,
         message:
-          "Cannot extend booking. All assets have been returned. Please complete the booking instead.",
+          "Cannot change the end date. All assets have been returned. Please complete the booking instead.",
         shouldBeCaptured: false,
       });
     }
 
     /** Wrap conflict detection and update in a transaction to prevent race conditions */
     const updatedBooking = await db.$transaction(async (tx) => {
-      /**
-       * Every membership of the kits still out. A reservation holds a kit
-       * through any of its memberships, not only the ones this booking's slices
-       * point at.
-       */
-      let heldKitMembershipIds: string[] = [];
-      if (kitMembershipIdsStillOut.length > 0) {
-        const heldMemberships = await tx.assetKit.findMany({
-          where: { id: { in: kitMembershipIdsStillOut }, organizationId },
-          select: { kitId: true },
-        });
-        const heldKitIds = [...new Set(heldMemberships.map((m) => m.kitId))];
-        if (heldKitIds.length > 0) {
-          const memberships = await tx.assetKit.findMany({
-            where: { kitId: { in: heldKitIds }, organizationId },
-            select: { id: true },
+      // Only a later end adds time to the booking's window; an earlier end
+      // shrinks it and cannot overlap anything it did not already overlap.
+      if (movesLater) {
+        /**
+         * Every membership of the kits still out. A reservation holds a kit
+         * through any of its memberships, not only the ones this booking's
+         * slices point at.
+         */
+        let heldKitMembershipIds: string[] = [];
+        if (kitMembershipIdsStillOut.length > 0) {
+          const heldMemberships = await tx.assetKit.findMany({
+            where: { id: { in: kitMembershipIdsStillOut }, organizationId },
+            select: { kitId: true },
           });
-          heldKitMembershipIds = memberships.map((m) => m.id);
+          const heldKitIds = [...new Set(heldMemberships.map((m) => m.kitId))];
+          if (heldKitIds.length > 0) {
+            const memberships = await tx.assetKit.findMany({
+              where: { kitId: { in: heldKitIds }, organizationId },
+              select: { id: true },
+            });
+            heldKitMembershipIds = memberships.map((m) => m.id);
+          }
         }
-      }
 
-      const activeAssetsClause: Prisma.BookingAssetWhereInput = {
-        assetId: { in: activeAssets.map((a) => a.id) },
-      };
+        const activeAssetsClause: Prisma.BookingAssetWhereInput = {
+          assetId: { in: activeAssets.map((a) => a.id) },
+        };
 
-      /** Checking if the booking period is clashing with any other booking containing the same active asset(s) or kit(s).*/
-      const clashingBookings: ClashingBooking[] = await tx.booking.findMany({
-        where: {
-          id: { not: booking.id },
+        /** Checking if the booking period is clashing with any other booking containing the same active asset(s) or kit(s).*/
+        const clashingBookings: ClashingBooking[] = await tx.booking.findMany({
+          where: {
+            id: { not: booking.id },
+            organizationId,
+            status: {
+              in: [BookingStatus.RESERVED],
+            },
+            bookingAssets: {
+              some:
+                heldKitMembershipIds.length > 0
+                  ? {
+                      OR: [
+                        activeAssetsClause,
+                        { assetKitId: { in: heldKitMembershipIds } },
+                      ],
+                    }
+                  : activeAssetsClause,
+            },
+            // Check for bookings that start within the added time
+            from: {
+              gt: booking.to,
+              lte: newEndDate,
+            },
+          },
+          select: { id: true, name: true },
+        });
+
+        if (clashingBookings?.length > 0) {
+          throw new ShelfError({
+            cause: null,
+            label,
+            message:
+              "Cannot extend booking because the extended period is overlapping with the following bookings:",
+            additionalData: {
+              clashingBookings: [...clashingBookings],
+            },
+            shouldBeCaptured: false,
+          });
+        }
+
+        /**
+         * The days being added may overlap model reservations that other
+         * bookings hold, which the clash check above cannot see: a
+         * `BookingModelRequest` names no asset. Every INDIVIDUAL unit the
+         * booking holds by name is measured again against the pool for the
+         * new dates, kit-driven rows included: the later end takes the unit
+         * off that pool for the added days however it got onto the booking.
+         */
+        await assertModelUnitsNotReservedElsewhere({
+          assets: booking.bookingAssets
+            .filter((ba) => ba.asset.type === AssetType.INDIVIDUAL)
+            .map((ba) => ba.asset),
+          bookingId: booking.id,
+          bookingStatus: booking.status,
+          windowChanged: true,
           organizationId,
-          status: {
-            in: [BookingStatus.RESERVED],
-          },
-          bookingAssets: {
-            some:
-              heldKitMembershipIds.length > 0
-                ? {
-                    OR: [
-                      activeAssetsClause,
-                      { assetKitId: { in: heldKitMembershipIds } },
-                    ],
-                  }
-                : activeAssetsClause,
-          },
-          // Check for bookings that start within the extension period
-          from: {
-            gt: booking.to,
-            lte: newEndDate,
-          },
-        },
-        select: { id: true, name: true },
-      });
-
-      if (clashingBookings?.length > 0) {
-        throw new ShelfError({
-          cause: null,
-          label,
-          message:
-            "Cannot extend booking because the extended period is overlapping with the following bookings:",
-          additionalData: {
-            clashingBookings: [...clashingBookings],
-          },
-          shouldBeCaptured: false,
+          from: booking.from,
+          to: newEndDate,
+          tx,
         });
       }
-
-      /**
-       * The days being added may overlap model reservations that other
-       * bookings hold, which the clash check above cannot see: a
-       * `BookingModelRequest` names no asset. Every INDIVIDUAL unit the
-       * booking holds by name is measured again against the pool for the new
-       * dates, kit-driven rows included — the extension takes the unit off
-       * that pool for the added days however it got onto the booking.
-       */
-      await assertModelUnitsNotReservedElsewhere({
-        assets: booking.bookingAssets
-          .filter((ba) => ba.asset.type === AssetType.INDIVIDUAL)
-          .map((ba) => ba.asset),
-        bookingId: booking.id,
-        bookingStatus: booking.status,
-        windowChanged: true,
-        organizationId,
-        from: booking.from,
-        to: newEndDate,
-        tx,
-      });
 
       // The row must still be exactly as read when the lock is taken: an
-      // extension that landed since the read above, a booking closed, or the
-      // overdue job flipping it meanwhile leaves no row to update. So the
-      // note and the events below, built from that read, describe the change
-      // this write made. Either live status reads ONGOING once extended.
+      // end-date change that landed since the read above, a booking closed,
+      // or the overdue job flipping it meanwhile leaves no row to update. So
+      // the note and the events below, built from that read, describe the
+      // change this write made. The new end is in the future, so the live
+      // status reads ONGOING either way.
       return tx.booking
         .update({
           where: {
@@ -12872,8 +12912,8 @@ export async function extendBooking({
             status: BookingStatus.ONGOING,
             /**
              * Only the LIVE end date moves. `originalTo` holds the end date
-             * the booking was planned for, and extension is allowed only
-             * once the booking has started (ONGOING/OVERDUE), so the plan is
+             * the booking was planned for, and the end can change only once
+             * the booking has started (ONGOING/OVERDUE), so the plan is
              * already fixed: moving it here would erase the deadline the
              * custodian actually agreed to, and with it every late return
              * from Booking Compliance.
@@ -12890,7 +12930,7 @@ export async function extendBooking({
               cause: null,
               label,
               message:
-                "The booking changed while you were extending it. Reload it and try again.",
+                "The booking changed while you were changing its end date. Reload it and try again.",
               status: 400,
               shouldBeCaptured: false,
             });
@@ -12899,7 +12939,6 @@ export async function extendBooking({
         });
     });
 
-    // Add activity log for booking extension
     const user = await getUserByID(userId, {
       select: {
         id: true,
@@ -12911,9 +12950,9 @@ export async function extendBooking({
     await createSystemBookingNote({
       bookingId: updatedBooking.id,
       organizationId,
-      content: `${wrapUserLinkForNote(
-        user
-      )} extended the booking from **${wrapDateForNote(
+      content: `${wrapUserLinkForNote(user)} ${
+        copy.verb
+      } the booking from **${wrapDateForNote(
         booking.to
       )}** to **${wrapDateForNote(newEndDate)}**.`,
     });
@@ -12979,16 +13018,17 @@ export async function extendBooking({
 
       const actor = await resolveBookingEmailActor({
         userId,
-        label: "Extended by",
+        label: copy.actorLabel,
       });
 
       await sendBookingEmailToAllRecipients({
         recipients,
         booking: updatedBooking,
-        subject: `Booking extended (${updatedBooking.name}) - shelf.nu`,
+        subject: `Booking ${copy.verb} (${updatedBooking.name}) - shelf.nu`,
         buildText: (textArgs) =>
           extendBookingEmailContent({
             ...textArgs,
+            verb: copy.verb,
             bookingName: updatedBooking.name,
             assetsCount: updatedBooking._count.bookingAssets,
             custodian,
@@ -12999,7 +13039,7 @@ export async function extendBooking({
             customEmailFooter: updatedBooking.organization.customEmailFooter,
           }),
         buildHeading: (prefs) =>
-          `Booking extended from ${formatDate(booking.to, prefs, {
+          `Booking ${copy.verb} from ${formatDate(booking.to, prefs, {
             includeTime: true,
           })} to ${formatDate(newEndDate, prefs, { includeTime: true })}`,
         hints,
@@ -13011,8 +13051,8 @@ export async function extendBooking({
      * In case of ONGOING, a checkin reminder should have be scheduled. So we have to reschedule it.
      * And in case of OVERDUE all the jobs are completed, so we have to reschedule the checkin reminder.
      */
-    // A later extension can commit after this one. The reminder belongs to
-    // the extension whose end is stored now: it cancels the job stored now,
+    // Another end-date change can commit after this one. The reminder belongs
+    // to the change whose end is stored now: it cancels the job stored now,
     // and stores its own only if neither has moved on again meanwhile.
     const live = await db.booking.findUnique({
       where: { id: booking.id, organizationId },
@@ -13080,7 +13120,7 @@ export async function extendBooking({
       title: "Error",
       message: isShelfError
         ? cause.message
-        : "Something went wrong while extending the booking.",
+        : "Something went wrong while changing the booking end date.",
       additionalData: isShelfError ? cause.additionalData : undefined,
       shouldBeCaptured: isShelfError ? cause.shouldBeCaptured : true,
     });
