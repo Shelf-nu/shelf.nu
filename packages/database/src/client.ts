@@ -15,6 +15,7 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 
+import { PrismaPg } from "@prisma/adapter-pg";
 import { Prisma, PrismaClient } from "@prisma/client";
 
 export type ExtendedPrismaClient = ReturnType<typeof createDatabaseClient>;
@@ -362,6 +363,52 @@ async function retryLoop<T>(
 }
 
 /**
+ * Pool options Prisma's own engine read from the URL (`connection_limit`,
+ * `pool_timeout`), mapped onto `pg` so an existing `DATABASE_URL` keeps its
+ * sizing. `pg` ignores the Prisma-only keys it does not know (`pgbouncer`).
+ */
+export function poolOptionsFromUrl(connectionString: string | undefined): {
+  max?: number;
+  connectionTimeoutMillis?: number;
+} {
+  if (!connectionString) return {};
+  let params: URLSearchParams;
+  try {
+    params = new URL(connectionString).searchParams;
+  } catch {
+    return {};
+  }
+  const limit = Number(params.get("connection_limit"));
+  const timeoutSeconds = Number(params.get("pool_timeout"));
+  return {
+    ...(Number.isInteger(limit) && limit > 0 ? { max: limit } : {}),
+    ...(Number.isFinite(timeoutSeconds) && timeoutSeconds > 0
+      ? { connectionTimeoutMillis: timeoutSeconds * 1000 }
+      : {}),
+  };
+}
+
+/**
+ * Talks to Postgres through `pg` instead of Prisma's Rust engine connector.
+ *
+ * Behind a transaction-mode pooler (Supabase port 6543) the engine connector
+ * needs `pgbouncer=true`, and that flag wraps EVERY query in
+ * `BEGIN` / `DEALLOCATE ALL` / `COMMIT`: four round trips per query, three of
+ * them doing nothing. `pg` sends each query as one unnamed extended-protocol
+ * statement, which the pooler accepts as is, so one query is one round trip.
+ */
+function createPgAdapter(connectionString: string | undefined) {
+  return new PrismaPg({
+    connectionString,
+    // Reconnecting to the pooler costs a TLS handshake, so keep idle
+    // connections for five minutes (Prisma's own default) rather than pg's 10 s;
+    // otherwise the first request after a lull pays it.
+    idleTimeoutMillis: 300_000,
+    ...poolOptionsFromUrl(connectionString),
+  });
+}
+
+/**
  * Creates a new PrismaClient instance with custom extensions.
  * Each app should create its own singleton using this factory.
  *
@@ -375,7 +422,28 @@ async function retryLoop<T>(
  *    {@link isReadOperation} and {@link withPrismaRetry}).
  */
 export function createDatabaseClient(url?: string) {
-  const client = new PrismaClient(url ? { datasourceUrl: url } : undefined)
+  const base = new PrismaClient({
+    adapter: createPgAdapter(url ?? process.env.DATABASE_URL),
+    ...(process.env.PRISMA_QUERY_LOG
+      ? { log: [{ emit: "event" as const, level: "query" as const }] }
+      : {}),
+  });
+  if (process.env.PRISMA_QUERY_LOG) {
+    // The log option above is only known at runtime, so the event type is
+    // narrowed by hand.
+    (
+      base as unknown as PrismaClient<{
+        log: [{ emit: "event"; level: "query" }];
+      }>
+    ).$on("query", (e) => {
+      process.stdout.write(
+        `PQ ${Date.now()} ${e.duration}ms ${e.query
+          .replace(/\s+/g, " ")
+          .slice(0, 160)}\n`
+      );
+    });
+  }
+  const client = base
     .$extends({
       model: {
         $allModels: {

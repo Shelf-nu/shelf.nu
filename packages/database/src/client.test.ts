@@ -21,6 +21,7 @@ import {
   isReadOperation,
   isLockTableExhaustionError,
   isRetryablePrismaError,
+  poolOptionsFromUrl,
   PRISMA_RETRYABLE_ERROR_CODES,
   withPrismaRetry,
 } from "./client";
@@ -821,4 +822,28 @@ test("isReadOperation", async (t) => {
       false
     );
   });
+});
+
+test("poolOptionsFromUrl maps Prisma's URL pool params onto pg options", () => {
+  assert.deepEqual(
+    poolOptionsFromUrl(
+      "postgres://u:p@host:6543/db?pgbouncer=true&connection_limit=20&pool_timeout=10"
+    ),
+    { max: 20, connectionTimeoutMillis: 10_000 }
+  );
+});
+
+test("poolOptionsFromUrl leaves pg defaults when the URL carries none", () => {
+  assert.deepEqual(poolOptionsFromUrl("postgres://u:p@host:5432/db"), {});
+  assert.deepEqual(poolOptionsFromUrl(undefined), {});
+  assert.deepEqual(poolOptionsFromUrl("not a url"), {});
+});
+
+test("poolOptionsFromUrl ignores non-positive or non-numeric values", () => {
+  assert.deepEqual(
+    poolOptionsFromUrl(
+      "postgres://u:p@h/db?connection_limit=0&pool_timeout=abc"
+    ),
+    {}
+  );
 });
