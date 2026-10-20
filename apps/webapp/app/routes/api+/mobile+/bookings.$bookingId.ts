@@ -69,6 +69,7 @@ import {
   canWriteBooking,
 } from "~/utils/booking-authorization.server";
 import { canAssignModelUnits } from "~/utils/booking-model-requests";
+import { isBookingPendingApproval } from "~/utils/bookings";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
 import {
@@ -137,6 +138,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         name: true,
         description: true,
         status: true,
+        // Feeds the derived pending-approval flag exposed in the response.
+        approvedAt: true,
         from: true,
         to: true,
         createdAt: true,
@@ -780,6 +783,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // this caller may. Both have to hold, or the app draws a button the server
     // then refuses — the endpoints gate on these same permissions regardless,
     // so without this the user meets the rule as a 403 instead of an absence.
+    // Approval gate (v1 companion support): while a reservation request is
+    // pending, no one can check out — the server-side service guard refuses
+    // regardless of app version; this flag keeps the app from drawing the
+    // button. Derived with the same shared helper the web + service use.
+    const isPendingApproval = isBookingPendingApproval({
+      status: booking.status,
+      approvedAt: booking.approvedAt,
+      requireBookingApproval: bookingSettings.requireBookingApproval ?? false,
+    });
     // Seeing a booking (the workspace see-toggles) never grants writing it:
     // every lifecycle endpoint runs `validateBookingOwnership`, so a booking
     // this caller may only read offers no actions.
@@ -791,7 +803,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       userId: user.id,
       access,
     });
-    const canCheckout = writesBooking && canCheckoutByState && canCheckoutPerm;
+    const canCheckout =
+      writesBooking &&
+      canCheckoutByState &&
+      canCheckoutPerm &&
+      !isPendingApproval;
     const canCheckin = writesBooking && canCheckinByState && canCheckinPerm;
     /**
      * Whether the quick "check in all" is offered.
@@ -1053,6 +1069,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         modelReservationShortfalls,
         lifecycleProgress,
         hasAlreadyBookedAssets,
+        // True while this reservation request awaits an admin's approval —
+        // the app renders a "Pending approval" badge and hides checkout.
+        isPendingApproval,
       },
       checkedInAssetIds,
       // Which assets this booking actually sent out, from the slice markers.

@@ -8,6 +8,29 @@ import type { UserNameFields } from "./user";
 import { resolveTeamMemberName } from "./user";
 
 /**
+ * Whether a booking is a reservation request still waiting for an admin's
+ * approval. Derived — there is no PENDING status: a RESERVED booking with no
+ * `approvedAt` in an org that requires approval is pending. Client-safe; the
+ * server-side checkout guard (`assertBookingIsApproved`) derives from this
+ * same function so UI and service can never disagree.
+ */
+export function isBookingPendingApproval({
+  status,
+  approvedAt,
+  requireBookingApproval,
+}: {
+  status: BookingStatus;
+  approvedAt: Date | string | null;
+  requireBookingApproval: boolean;
+}): boolean {
+  return (
+    requireBookingApproval &&
+    status === BookingStatus.RESERVED &&
+    approvedAt === null
+  );
+}
+
+/**
  * The statuses a booking is still open to item removal in: every status that
  * is not a closed record (COMPLETE, ARCHIVED, CANCELLED).
  */

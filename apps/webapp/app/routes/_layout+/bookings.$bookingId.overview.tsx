@@ -68,6 +68,7 @@ import {
   getDetailedPartialCheckoutData,
   removeAssets,
   reserveBooking,
+  approveBooking,
   revertBookingToDraft,
   updateBasicBooking,
   updateBookingNotificationRecipients,
@@ -1461,6 +1462,7 @@ const INTENT_VERB = {
   cancel: "cancel",
   removeKit: "remove kits from",
   "revert-to-draft": "revert",
+  "approve-booking": "approve",
   "extend-booking": "extend",
   "bulk-remove-asset-or-kit": "remove items from",
   "partial-checkin": "check in",
@@ -1497,6 +1499,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           "cancel",
           "removeKit",
           "revert-to-draft",
+          "approve-booking",
           "extend-booking",
           "bulk-remove-asset-or-kit",
           "partial-checkin",
@@ -1530,6 +1533,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       cancel: PermissionAction.cancel,
       removeKit: PermissionAction.update,
       "revert-to-draft": PermissionAction.update,
+      // `approve` is in no role's matrix entry, so only ADMIN/OWNER pass via
+      // the resolver short-circuit — Base/Self service cannot approve their
+      // own requests.
+      "approve-booking": PermissionAction.approve,
       "extend-booking": PermissionAction.extend,
       "bulk-remove-asset-or-kit": PermissionAction.update,
       "partial-checkin": PermissionAction.checkin,
@@ -2162,6 +2169,23 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         return data(payload({ booking: b }), {
           headers,
         });
+      }
+      case "approve-booking": {
+        await approveBooking({
+          id,
+          organizationId,
+          userId,
+          hints: getClientHint(request),
+        });
+
+        sendNotification({
+          title: "Booking approved",
+          message: "The booking request has been approved successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
+        return payload({ success: true });
       }
       case "revert-to-draft": {
         await revertBookingToDraft({

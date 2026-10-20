@@ -41,6 +41,7 @@ export function createBookingSettings(
     countKitsAsSingleUnit: false,
     notifyBookingCreator: true,
     notifyAdminsOnNewBooking: true,
+    requireBookingApproval: false,
     alwaysNotifyTeamMembers: [],
     ...overrides,
   };
