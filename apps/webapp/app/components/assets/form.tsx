@@ -46,6 +46,7 @@ import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
+import { scrollToFirstErrorOnNextFrame } from "~/utils/scroll-to-error";
 import { tw } from "~/utils/tw";
 import {
   optionalNumberFromString,
@@ -719,18 +720,25 @@ const AssetFormInner = ({
               setConsumptionTypeError("Please select a consumption type");
               e.preventDefault();
               e.stopPropagation();
-              return false;
             } else {
               setConsumptionTypeError(undefined);
             }
           }
 
           // If there are barcode errors, prevent submission
-          // Zorm will handle its own validation and prevent submission if needed
           if (hasBarcodeErrors) {
             e.preventDefault();
             e.stopPropagation();
-            return false;
+          }
+
+          // A Save can be rejected by Zorm (its submit listener runs before
+          // this handler and cancels the event), by the consumption type
+          // check, or by the barcode check. Every one of them leaves the
+          // event cancelled, so this single check brings the first message
+          // into view. Without it, a Save pressed far above the failing field
+          // looks like it did nothing.
+          if (e.defaultPrevented) {
+            scrollToFirstErrorOnNextFrame(e.currentTarget);
           }
         }}
       >

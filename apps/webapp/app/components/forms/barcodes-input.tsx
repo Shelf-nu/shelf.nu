@@ -358,7 +358,7 @@ const BarcodesInput = forwardRef<BarcodesInputRef, BarcodesInputProps>(
                     }}
                   />
                   <When truthy={!!valueErrorMessage}>
-                    <p className="mt-1 text-sm text-red-500">
+                    <p className="mt-1 text-sm text-error-500">
                       {valueErrorMessage}
                     </p>
                   </When>
