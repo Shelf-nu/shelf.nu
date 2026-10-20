@@ -23,6 +23,7 @@ import {
   refreshSession,
   urlShortener,
 } from "./middleware";
+import { BUILD_ASSETS_PATH, missingBuildAsset } from "./missing-build-asset";
 import {
   appLoaderRateLimit,
   calendarFeedRateLimit,
@@ -98,6 +99,11 @@ export default createHonoServer<ServerEnv>({
     app.use("*", securityHeaders());
   },
   configure: (server) => {
+    // Existing build files were already served before `configure`; whatever
+    // reaches here under the assets prefix is missing and must 404, not
+    // redirect to login.
+    server.use(BUILD_ASSETS_PATH, missingBuildAsset());
+
     // Measure total request duration (dev/staging only, skipped in production).
     // Registered first so it captures time spent in all downstream middleware.
     server.use("*", serverTiming());
