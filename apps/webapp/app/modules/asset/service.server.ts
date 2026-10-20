@@ -250,6 +250,11 @@ import { ASSET_EDIT_ADJUSTMENT_NOTE } from "../consumption-log/constants";
 import { checkAndNotifyLowStock } from "../consumption-log/low-stock.server";
 import { lockAssetForQuantityUpdate } from "../consumption-log/quantity-lock.server";
 import { createConsumptionLog } from "../consumption-log/service.server";
+import { emptyStockState } from "../consumption-log/stock-ledger";
+import {
+  readStockState,
+  recordStockChanges,
+} from "../consumption-log/stock-ledger.server";
 import { createKitsIfNotExists } from "../kit/service.server";
 import { createSystemLocationNote } from "../location-note/service.server";
 import {
@@ -1720,6 +1725,21 @@ export async function createAsset({
           });
         }
 
+        // The stock the pool starts with, where it landed.
+        if (type === AssetType.QUANTITY_TRACKED && quantity) {
+          await recordStockChanges(tx, {
+            organizationId,
+            userId,
+            changes: [
+              {
+                assetId: created.id,
+                before: emptyStockState(),
+                events: [{ category: "INITIAL", change: quantity, locationId }],
+              },
+            ],
+          });
+        }
+
         // Activity event must be inside transaction for atomicity
         await recordEvent(
           {
@@ -2661,6 +2681,8 @@ export async function updateAsset({
       /** Custody sources before a placement rewrite, for the re-home. */
       let custodyBefore: Awaited<ReturnType<typeof loadCustodySources>> | null =
         null;
+      /** The pool's stock under the lock, before this patch writes. */
+      let stockBefore: Awaited<ReturnType<typeof readStockState>> = null;
 
       // Block lowering a QUANTITY_TRACKED asset's total below the units
       // already committed to custody, kits, or overlapping bookings. Lock the
@@ -2677,6 +2699,12 @@ export async function updateAsset({
       // against the multi-asset lockers in the booking paths.
       if (quantity != null || shouldUpdatePlacement) {
         const locked = await lockAssetForQuantityUpdate(tx, id, organizationId);
+        if (locked.type === AssetType.QUANTITY_TRACKED) {
+          stockBefore = await readStockState(tx, {
+            assetId: id,
+            organizationId,
+          });
+        }
         if (quantity != null) {
           quantityBeforeUpdate = locked.quantity ?? 0;
           lockedAssetType = locked.type;
@@ -2801,32 +2829,6 @@ export async function updateAsset({
         },
       });
 
-      // Immutable stock-movement audit for a QUANTITY_TRACKED total change made
-      // through the asset-edit form. The form has no consumption-category
-      // input, so a manual total correction is an `ADJUSTMENT` (schema
-      // Decision #9: `ConsumptionLog.quantity` is always positive — direction
-      // lives in the `ASSET_QUANTITY_CHANGED` event's from/to below). Written
-      // IN this tx (not via `adjustQuantity`, which opens its own tx and
-      // re-locks the row we already hold). Skipped for a no-op edit
-      // (`delta === 0`) because `createConsumptionLog` rejects a zero quantity.
-      if (
-        quantity != null &&
-        lockedAssetType === AssetType.QUANTITY_TRACKED &&
-        quantityBeforeUpdate != null
-      ) {
-        const delta = Math.abs(quantity - quantityBeforeUpdate);
-        if (delta > 0) {
-          await createConsumptionLog({
-            assetId: id,
-            category: ConsumptionCategory.ADJUSTMENT,
-            quantity: delta,
-            userId,
-            note: ASSET_EDIT_ADJUSTMENT_NOTE,
-            tx,
-          });
-        }
-      }
-
       if (shouldUpdatePlacement) {
         if (newLocationId) {
           locationChangeQuantity = resolveNewLocationQuantity(
@@ -2883,6 +2885,40 @@ export async function updateAsset({
           });
         }
       }
+
+      /**
+       * Ledger rows for the patch: a total typed into the edit form is an
+       * `ADJUSTMENT` (the form has no category input), and units the
+       * placement rewrite moved are `MOVE`s. Written IN this tx (not via
+       * `adjustQuantity`, which opens its own tx and re-locks the row held
+       * here).
+       */
+      const totalChange =
+        quantity != null &&
+        lockedAssetType === AssetType.QUANTITY_TRACKED &&
+        quantityBeforeUpdate != null
+          ? quantity - quantityBeforeUpdate
+          : 0;
+      await recordStockChanges(tx, {
+        organizationId,
+        userId,
+        changes: [
+          {
+            assetId: id,
+            before: stockBefore,
+            events:
+              totalChange !== 0
+                ? [
+                    {
+                      category: ConsumptionCategory.ADJUSTMENT,
+                      change: totalChange,
+                      note: ASSET_EDIT_ADJUSTMENT_NOTE,
+                    },
+                  ]
+                : [],
+          },
+        ],
+      });
 
       // Re-read so the returned `assetLocations` reflects the pivot ops.
       return shouldUpdatePlacement
@@ -4886,6 +4922,12 @@ export async function replaceAssetPlacements({
         },
       });
 
+      /** The pool's stock before the diff, for the ledger's MOVE rows. */
+      const stockBefore =
+        locked.type === AssetType.QUANTITY_TRACKED
+          ? await readStockState(tx, { assetId, organizationId })
+          : null;
+
       /** Custody sources before the diff, for the re-home below. */
       const custodyBefore =
         locked.type === AssetType.QUANTITY_TRACKED
@@ -4948,9 +4990,20 @@ export async function replaceAssetPlacements({
         });
       }
 
+      /**
+       * The editor never changes the total, so every unit it shifts is a
+       * move: between locations, or to and from the unplaced units.
+       */
+      await recordStockChanges(tx, {
+        organizationId,
+        userId,
+        changes: [{ assetId, before: stockBefore }],
+      });
+
       // Activity events — one ASSET_LOCATION_CHANGED per net add /
       // remove. Qty-only edits don't emit an event today (deliberate
-      // gap). Mirrors the `updateLocationAssets` event pattern.
+      // gap; the stock ledger above records them). Mirrors the
+      // `updateLocationAssets` event pattern.
       // `meta.quantity` carries the per-row placement qty (this is the
       // QUANTITY_TRACKED multi-placement editor, so the count is
       // always meaningful here); `assetQtyMeta` no-ops for INDIVIDUAL.
@@ -10434,6 +10487,12 @@ export async function releaseQuantity({
       const consumedTotal = lines.reduce((sum, line) => sum + line.consumed, 0);
       const returnedTotal = quantity - consumedTotal;
 
+      /** The pool's stock before any write, for the CONSUME ledger rows. */
+      const stockBefore =
+        consumedTotal > 0
+          ? await readStockState(tx, { assetId, organizationId })
+          : null;
+
       /**
        * Step 6: Delete each drawn row when fully released, else decrement.
        * Targets by `Custody.id`: the rows were read above under the lock.
@@ -10569,29 +10628,38 @@ export async function releaseQuantity({
 
       /**
        * Step 7: Immutable audit log, one entry per non-zero leg per source.
-       * `CONSUME` records units that were used up; `RETURN` records units
-       * that went back into the available pool. Both carry the source
-       * location. Same category discriminator booking check-in uses, so
-       * consumption reporting sees every path identically.
+       * `CONSUME` records units that were used up, at the place the
+       * reconcile above actually took them from (the ledger diffs the stock
+       * before and after); `RETURN` records units that went back into the
+       * available pool, with the custody's source. Same category
+       * discriminator booking check-in uses, so consumption reporting sees
+       * every path identically.
        *
        * `createConsumptionLog` rejects a non-positive quantity, hence the
-       * guards. A split attaches the operator's note to both rows: it
+       * guard. A split attaches the operator's note to both rows: it
        * explains the single action the operator took.
        */
+      await recordStockChanges(tx, {
+        organizationId,
+        userId,
+        changes: [
+          {
+            assetId,
+            before: stockBefore,
+            events: lines
+              .filter((line) => line.consumed > 0)
+              .map((line) => ({
+                category: "CONSUME" as const,
+                change: -line.consumed,
+                locationId: line.locationId,
+                custodianId: teamMemberId,
+                note,
+              })),
+          },
+        ],
+      });
       for (const line of lines) {
         const lineReturned = line.quantity - line.consumed;
-        if (line.consumed > 0) {
-          await createConsumptionLog({
-            assetId,
-            category: "CONSUME",
-            quantity: line.consumed,
-            userId,
-            custodianId: teamMemberId,
-            locationId: line.locationId,
-            note,
-            tx,
-          });
-        }
         if (lineReturned > 0) {
           await createConsumptionLog({
             assetId,
@@ -10903,6 +10971,8 @@ export async function moveAssetLocationUnits(
         assetId,
         total: asset.quantity ?? 0,
       });
+      /** The pool's stock before the move, for the ledger's MOVE rows. */
+      const stockBefore = await readStockState(tx, { assetId, organizationId });
 
       /**
        * Step 8: Decrement (or delete) the source manual row. Deleting
@@ -10955,6 +11025,13 @@ export async function moveAssetLocationUnits(
           },
         });
       }
+
+      /** Step 9b: Ledger rows, one MOVE out of the source, one into the destination. */
+      await recordStockChanges(tx, {
+        organizationId,
+        userId,
+        changes: [{ assetId, before: stockBefore }],
+      });
 
       /**
        * Step 10: Emit two paired `ASSET_LOCATION_CHANGED` events
@@ -11294,6 +11371,8 @@ export async function placeUnplacedUnits(
         assetId,
         total: totalQuantity,
       });
+      /** The pool's stock before placing, for the ledger's MOVE rows. */
+      const stockBefore = await readStockState(tx, { assetId, organizationId });
 
       /**
        * Upsert the manual destination row, scoped by the
@@ -11325,6 +11404,13 @@ export async function placeUnplacedUnits(
           },
         });
       }
+
+      /** Ledger rows: a MOVE out of the unplaced units and into the location. */
+      await recordStockChanges(tx, {
+        organizationId,
+        userId,
+        changes: [{ assetId, before: stockBefore }],
+      });
 
       /**
        * One `ASSET_LOCATION_CHANGED` event for the to-side. We still
