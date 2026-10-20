@@ -10,12 +10,13 @@ import { db } from "~/database/db.server";
 import { ShelfError, type ErrorLabel } from "~/utils/error";
 import { ROLE_POLICIES, resolveRole } from "~/utils/permissions/role-access";
 import type { Column, ColumnLabelKey } from "./helpers";
-import { appendMissingDefaultColumns, syncCustomFieldColumn } from "./helpers";
+import { syncCustomFieldColumn } from "./helpers";
 import {
   barcodeFields,
   defaultFields,
   fixedFields,
   generateBarcodeColumns,
+  insertMissingDefaultColumns,
 } from "./helpers";
 import { getOrganizationById } from "../organization/service.server";
 
@@ -437,9 +438,10 @@ async function validateColumns({
       (name) => !existingDefaultFields.includes(name)
     );
 
-    // If default fields are missing, add them after the saved columns
+    // If default fields are missing, add them without moving any saved
+    // column out of the user's order
     if (missingDefaultFields.length > 0) {
-      updatedColumns = appendMissingDefaultColumns(
+      updatedColumns = insertMissingDefaultColumns(
         updatedColumns,
         missingDefaultFields
       );

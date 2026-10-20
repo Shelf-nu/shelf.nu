@@ -44,6 +44,8 @@ export function getQueryFieldType(fieldName: string): QueryFieldType {
       return "enum";
     case "description":
       return "text";
+    case "unitOfMeasure":
+      return "string";
     case "valuation":
     case "quantity":
     case "minQuantity":

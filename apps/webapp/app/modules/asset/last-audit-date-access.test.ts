@@ -54,11 +54,11 @@ describe("canQueryLastAuditDate", () => {
 });
 
 describe("column registration", () => {
-  it("registers the column as a visible date field at position 21", () => {
+  it("registers the column as a visible date field at position 22", () => {
     expect(defaultFields.find((f) => f.name === "lastAuditDate")).toEqual({
       name: "lastAuditDate",
       visible: true,
-      position: 21,
+      position: 22,
     });
     expect(getQueryFieldType("lastAuditDate")).toBe("date");
   });
