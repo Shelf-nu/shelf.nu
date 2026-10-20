@@ -96,7 +96,7 @@ type SheetState = {
 
 type SheetAction =
   | { type: "open"; floor: Date; pickerOpen: boolean }
-  | { type: "picked"; end: Date }
+  | { type: "picked"; end: Date; pickerOpen: boolean }
   | { type: "shifted"; end: Date }
   | { type: "togglePicker" }
   | { type: "closePicker" }
@@ -115,12 +115,14 @@ function reducer(state: SheetState, action: SheetAction): SheetState {
         serverError: null,
       };
     case "picked":
-      // The picker's confirm is terminal: it unmounts once it reports.
+      // Android's final time dialog is terminal, so the picker unmounts. The
+      // iOS inline picker reports every change, so it stays open until the
+      // row is toggled.
       return {
         ...state,
         newEnd: action.end,
         touched: true,
-        pickerOpen: false,
+        pickerOpen: action.pickerOpen,
         serverError: null,
       };
     case "shifted":
@@ -273,7 +275,13 @@ export function ExtendBookingSheet({
               value={state.newEnd}
               timeZoneName={timeZone}
               minimumDate={state.floor}
-              onConfirm={(end) => dispatch({ type: "picked", end })}
+              onConfirm={(end) =>
+                dispatch({
+                  type: "picked",
+                  end,
+                  pickerOpen: Platform.OS === "ios",
+                })
+              }
               onCancel={() => dispatch({ type: "closePicker" })}
               inlineStyle={styles.dateInlineWrap}
               accentColor={colors.primary}
