@@ -11,7 +11,7 @@
  * dismissed import id are per-viewer conveniences kept in `localStorage`; the
  * card renders the same without storage.
  *
- * Looks like a toast (`Toaster`): white card, round status icon. Placement:
+ * Looks like a toast (`Toaster`): white card with a status icon (spinner, check or alert). Placement:
  * bottom-right with the toast viewport's 25px inset. While shown, it publishes
  * its height as the `--asset-import-card-offset` CSS variable, which the toast
  * viewport adds to its bottom padding, so toasts stack above the card instead
@@ -25,16 +25,21 @@
  */
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
-import { ChevronDownIcon, ChevronUpIcon, XIcon } from "lucide-react";
+import {
+  ChevronDownIcon,
+  ChevronUpIcon,
+  CircleAlertIcon,
+  CircleCheckIcon,
+  Loader2Icon,
+  XIcon,
+} from "lucide-react";
 import { useLocation } from "react-router";
 import { formatAssetCount, formatCount } from "~/modules/asset-import/format";
 import type { AssetImportStatusPayload } from "~/modules/asset-import/types";
 import { tw } from "~/utils/tw";
 import { useAssetImportStatus } from "../assets/import-content/import-progress";
 import { Button } from "../shared/button";
-import { iconsMap } from "../shared/icons-map";
 import { Progress } from "../shared/progress";
-import { Spinner } from "../shared/spinner";
 
 /**
  * CSS variable on `<html>` holding the card's height plus the toast gap, read
@@ -169,13 +174,6 @@ type ImportCardBodyProps = AssetImportCardProps & {
   onDismiss: () => void;
 };
 
-/** Toast icon circle colours, matching the `Toaster` variants. */
-const ICON_VARIANTS = {
-  primary: tw("border-primary-50 bg-primary-100 text-primary"),
-  success: tw("border-success-50 bg-success-100 text-success-600"),
-  error: tw("border-error-50 bg-error-100 text-error-600"),
-};
-
 /** Shared look of the header's icon buttons. */
 const ICON_BUTTON_CLASS = tw(
   "flex size-8 items-center justify-center rounded text-gray-500 hover:bg-gray-100 hover:text-gray-700",
@@ -242,17 +240,30 @@ function ImportCardBody({ initial, onDismiss }: ImportCardBodyProps) {
       ? status.errorMessage ?? "The import stopped."
       : null;
 
+  // Plain lucide icons on the card's white background, sized to the title.
+  const iconClass = "mt-1 size-5 shrink-0";
   let icon: ReactNode;
-  let iconVariant: keyof typeof ICON_VARIANTS;
   if (status.status === "COMPLETED") {
-    icon = iconsMap.check;
-    iconVariant = "success";
+    icon = (
+      <CircleCheckIcon
+        aria-hidden="true"
+        className={tw(iconClass, "text-success-600")}
+      />
+    );
   } else if (status.status === "FAILED") {
-    icon = iconsMap.x;
-    iconVariant = "error";
+    icon = (
+      <CircleAlertIcon
+        aria-hidden="true"
+        className={tw(iconClass, "text-error-600")}
+      />
+    );
   } else {
-    icon = <Spinner className="size-4" />;
-    iconVariant = "primary";
+    icon = (
+      <Loader2Icon
+        aria-hidden="true"
+        className={tw(iconClass, "animate-spin text-primary-600")}
+      />
+    );
   }
 
   return (
@@ -268,17 +279,9 @@ function ImportCardBody({ initial, onDismiss }: ImportCardBodyProps) {
           setFocusWithin(false);
         }
       }}
-      className="fixed inset-x-[25px] bottom-[calc(25px+env(safe-area-inset-bottom))] z-40 flex gap-4 rounded border border-gray-100 bg-white p-3 text-left shadow-xl md:inset-x-auto md:right-[25px] md:w-[340px]"
+      className="fixed inset-x-[25px] bottom-[calc(25px+env(safe-area-inset-bottom))] z-40 flex gap-3 rounded border border-gray-100 bg-white p-3 text-left shadow-xl md:inset-x-auto md:right-[25px] md:w-[340px]"
     >
-      <div
-        aria-hidden="true"
-        className={tw(
-          ICON_VARIANTS[iconVariant],
-          "flex size-10 shrink-0 items-center justify-center rounded-full border-[6px]"
-        )}
-      >
-        {icon}
-      </div>
+      {icon}
 
       <div className="min-w-0 flex-1">
         <div className="flex items-start justify-between gap-2">
