@@ -1,6 +1,7 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import { resolveAssetIdsForBulkOperation } from "~/modules/asset/bulk-operations-helper.server";
+import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { generateQrObj } from "~/modules/qr/utils.server";
 import { scopeCustodianFilterIds } from "~/modules/team-member/service.server";
@@ -122,6 +123,10 @@ export async function loader({ context, request }: ActionFunctionArgs) {
         // assets (`assets.seeArchived`, issue #382); anyone else downloads
         // the codes of active assets, whatever the URL says.
         honorArchivedView: access.policy.assets.seeArchived,
+        lastAuditDateAccess: lastAuditDateAccessFor(
+          access,
+          currentOrganization
+        ),
       });
     }
 

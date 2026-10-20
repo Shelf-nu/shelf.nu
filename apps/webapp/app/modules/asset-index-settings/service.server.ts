@@ -10,7 +10,7 @@ import { db } from "~/database/db.server";
 import { ShelfError, type ErrorLabel } from "~/utils/error";
 import { ROLE_POLICIES, resolveRole } from "~/utils/permissions/role-access";
 import type { Column, ColumnLabelKey } from "./helpers";
-import { syncCustomFieldColumn } from "./helpers";
+import { appendMissingDefaultColumns, syncCustomFieldColumn } from "./helpers";
 import {
   barcodeFields,
   defaultFields,
@@ -437,12 +437,12 @@ async function validateColumns({
       (name) => !existingDefaultFields.includes(name)
     );
 
-    // If default fields are missing, add them from our static defaults
+    // If default fields are missing, add them after the saved columns
     if (missingDefaultFields.length > 0) {
-      const fieldsToAdd = defaultFields.filter((field) =>
-        missingDefaultFields.includes(field.name)
+      updatedColumns = appendMissingDefaultColumns(
+        updatedColumns,
+        missingDefaultFields
       );
-      updatedColumns = [...updatedColumns, ...fieldsToAdd];
       needsUpdate = true;
     }
 

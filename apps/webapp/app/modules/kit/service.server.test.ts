@@ -1190,6 +1190,7 @@ describe("bulkRemoveAssetsFromKits", () => {
     db.asset.findMany.mockResolvedValue(assets);
 
     await bulkRemoveAssetsFromKits({
+      lastAuditDateAccess: "hidden",
       assetIds: ["asset-1", "asset-2"],
       organizationId: "org-1",
       userId: "user-1",
@@ -1261,6 +1262,7 @@ describe("bulkRemoveAssetsFromKits", () => {
     db.asset.findMany.mockResolvedValue(assets);
 
     await bulkRemoveAssetsFromKits({
+      lastAuditDateAccess: "hidden",
       assetIds: ["asset-1"],
       organizationId: "org-1",
       userId: "user-1",
@@ -6728,6 +6730,7 @@ describe("kit detach flows — helper wiring", () => {
     ]);
 
     await bulkRemoveAssetsFromKits({
+      lastAuditDateAccess: "hidden",
       assetIds: ["switch-a"],
       organizationId: "org-1",
       userId: "user-1",
@@ -6770,6 +6773,7 @@ describe("kit detach flows — helper wiring", () => {
     ]);
 
     await bulkRemoveAssetsFromKits({
+      lastAuditDateAccess: "hidden",
       assetIds: ["battery"],
       organizationId: "org-1",
       userId: "user-1",
