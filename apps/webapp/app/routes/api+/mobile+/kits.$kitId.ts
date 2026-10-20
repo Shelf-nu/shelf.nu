@@ -62,10 +62,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
-    const { canSeeAllCustody } = await getMobileUserContext(
-      user.id,
-      organizationId
-    );
+    const { access } = await getMobileUserContext(user.id, organizationId);
 
     await requireMobilePermission({
       userId: user.id,
@@ -150,6 +147,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                 id: true,
                 title: true,
                 status: true,
+                // An archived member is out of service: it stays listed with
+                // an "Archived" badge, and it counts toward nothing (not the
+                // total value below, not the app's asset count).
+                archivedAt: true,
                 valuation: true,
                 // Workspace stock — kept for parity with other mobile asset
                 // payloads, but NOT used for this kit's totalValue math
@@ -244,9 +245,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // Kit total value = Σ per-unit valuation × units-in-this-kit. Uses the kit
     // slice quantity (AssetKit.quantity), NOT the asset's workspace stock —
     // see .claude/rules/quantity-semantics-per-surface.md. INDIVIDUAL members
-    // have AssetKit.quantity = 1 so the math is unchanged for them.
+    // have AssetKit.quantity = 1 so the math is unchanged for them. Archived
+    // members are out of service, so they add nothing to the kit's value.
     const totalValue = assets.reduce(
-      (sum, asset) => sum + (asset.valuation ?? 0) * asset.kitQuantity,
+      (sum, asset) =>
+        asset.archivedAt
+          ? sum
+          : sum + (asset.valuation ?? 0) * asset.kitQuantity,
       0
     );
 
@@ -262,7 +267,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       viewerCanSeeLegacyCustody({
         custodianUserId: kitData.custody.custodian.userId,
         viewerUserId: user.id,
-        canSeeAllCustody,
+        canSeeAllCustody: access.custody.seeAll,
       })
         ? kitData.custody
         : null;

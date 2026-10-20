@@ -177,6 +177,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     // Get asset details with organization scoping to prevent cross-tenant access
     // Use findUnique instead of findUniqueOrThrow to handle deleted assets gracefully
     const asset = await db.asset.findUnique({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: image refresh for the asset's own pages, which stay visible for archived assets
       where: { id: assetId, organizationId },
       select: {
         id: true,

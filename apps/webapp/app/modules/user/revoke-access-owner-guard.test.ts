@@ -8,10 +8,10 @@
  * names them, but with no membership they get a 403 and every transfer path
  * fails.
  *
- * The rule is enforced by a conditional DELETE rather than a preceding read,
- * because a check-then-delete loses to an ownership transfer committing in
- * between. The preceding read survives only to produce a friendly message in
- * the common case.
+ * The rule is enforced inside the revoking transaction: the membership row is
+ * locked and re-read before anything is written, and the DELETE itself is
+ * conditional on the member not holding OWNER. The read before the transaction
+ * survives only to produce a friendly message in the common case.
  *
  * Regression coverage for detail.dev finding D058.
  *
@@ -27,11 +27,20 @@ import { revokeAccessToOrganization } from "./service.server";
 // @vitest-environment node
 
 const dbMock = vi.hoisted(() => {
+  // The friendly pre-read (findFirst) and the locked re-read (findUnique)
+  // answer from one mock, so each case describes the membership once and a
+  // queued answer is consumed by whichever read comes next.
+  const findMembership = vi.fn();
   const client = {
-    userOrganization: { findFirst: vi.fn(), deleteMany: vi.fn() },
+    userOrganization: {
+      findFirst: findMembership,
+      findUnique: findMembership,
+      deleteMany: vi.fn(),
+    },
     teamMember: { findMany: vi.fn() },
     user: { update: vi.fn() },
     $executeRaw: vi.fn(),
+    $queryRaw: vi.fn(),
     $transaction: vi.fn(),
   };
 
@@ -92,14 +101,14 @@ describe("revokeAccessToOrganization — owner protection", () => {
       where: {
         userId: "admin-user",
         organizationId: "org-1",
-        NOT: { roles: { has: OrganizationRoles.OWNER } },
+        NOT: { roles: { hasSome: [OrganizationRoles.OWNER] } },
       },
     });
   });
 
   it("refuses when the target became the owner after the initial read", async () => {
-    // The race: the read sees ADMIN, an ownership transfer commits, and the
-    // conditional delete then matches nothing because they are now OWNER.
+    // The race: the pre-read sees ADMIN, an ownership transfer commits, and
+    // the re-read under the membership lock sees OWNER.
     dbMock.userOrganization.findFirst
       .mockResolvedValueOnce({ roles: [OrganizationRoles.ADMIN] })
       .mockResolvedValueOnce({ roles: [OrganizationRoles.OWNER] });
@@ -112,9 +121,58 @@ describe("revokeAccessToOrganization — owner protection", () => {
       })
     ).rejects.toThrow(/transfer ownership/i);
 
-    // A zero-row delete must not pass silently — that is the one regression
-    // this conditional-delete refactor could introduce.
+    // Nothing may be written once the locked re-read sees the owner.
+    expect(dbMock.userOrganization.deleteMany).not.toHaveBeenCalled();
     expect(dbMock.user.update).not.toHaveBeenCalled();
+  });
+
+  it("locks the membership before deleting it", async () => {
+    dbMock.userOrganization.findFirst.mockResolvedValue({
+      roles: [OrganizationRoles.ADMIN],
+    });
+
+    await revokeAccessToOrganization({
+      userId: "admin-user",
+      organizationId: "org-1",
+    });
+
+    expect(dbMock.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      dbMock.userOrganization.deleteMany.mock.invocationCallOrder[0]
+    );
+  });
+
+  it("refuses a non-owner when the target was promoted to ADMIN after the initial read", async () => {
+    // The pre-read sees BASE; an owner promotes the target, and the re-read
+    // under the membership lock sees ADMIN. The owner-only rule is decided on
+    // the locked row.
+    dbMock.userOrganization.findFirst
+      .mockResolvedValueOnce({ roles: [OrganizationRoles.BASE] })
+      .mockResolvedValueOnce({ roles: [OrganizationRoles.ADMIN] });
+
+    await expect(
+      revokeAccessToOrganization({
+        userId: "promoted-user",
+        organizationId: "org-1",
+        actorOwnsWorkspace: false,
+      })
+    ).rejects.toMatchObject({ status: 403 });
+
+    expect(dbMock.userOrganization.deleteMany).not.toHaveBeenCalled();
+    expect(dbMock.user.update).not.toHaveBeenCalled();
+  });
+
+  it("lets the owner revoke an ADMIN", async () => {
+    dbMock.userOrganization.findFirst.mockResolvedValue({
+      roles: [OrganizationRoles.ADMIN],
+    });
+
+    await revokeAccessToOrganization({
+      userId: "admin-user",
+      organizationId: "org-1",
+      actorOwnsWorkspace: true,
+    });
+
+    expect(dbMock.userOrganization.deleteMany).toHaveBeenCalledTimes(1);
   });
 
   it("still revokes a non-owner", async () => {

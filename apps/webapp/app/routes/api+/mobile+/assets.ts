@@ -27,6 +27,10 @@ import {
 } from "~/modules/api/mobile-custody-visibility.server";
 import { serializeImageExpiration } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
+import {
+  bookableListScopeWhere,
+  resolveBookableListScope,
+} from "~/modules/asset/list-scope.server";
 import { buildAssetStatusWhere } from "~/modules/asset/search.server";
 import {
   ASSET_IMAGE_RESIGN_LIMITS,
@@ -63,10 +67,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
-    const { canSeeAllCustody } = await getMobileUserContext(
-      user.id,
-      organizationId
-    );
+    const { access } = await getMobileUserContext(user.id, organizationId);
+    const bookableScope = resolveBookableListScope({
+      access,
+      userId: user.id,
+    });
 
     const url = new URL(request.url);
 
@@ -111,15 +116,27 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ? buildAssetStatusWhere(statusFilter as AssetStatus)
       : null;
 
+    // OR groups ride in `AND` so they compose with each other and with the
+    // search fragment:
+    // - status delegates to the QT-aware fragment shared with getAssets and
+    //   getAssetsWhereInput (see buildAssetStatusWhere); its AVAILABLE form is
+    //   an OR group.
+    // - the list scope is the web asset index's: a role limited to bookable
+    //   assets browses those plus every asset in their own custody.
+    const andWhere: Prisma.AssetWhereInput[] = [];
+    if (statusWhere?.OR) andWhere.push(statusWhere);
+    if (bookableScope) andWhere.push(bookableListScopeWhere(bookableScope));
+
     const baseWhere: Prisma.AssetWhereInput = {
       organizationId,
+      // Hide archived assets from the mobile list (parity with the web index
+      // default; issue #382). The mobile app has no archived view yet.
+      archivedAt: null,
       ...(myCustody
         ? {
-            // Phase 2/4 widened `Asset.custody` from 1:1 to 1:many for
-            // QUANTITY_TRACKED multi-custodian support, so we must filter
-            // via `some`. Without `some:`, Prisma rejects the where clause
-            // at runtime and the Custody tab returns 500. Mirrors the
-            // dashboard endpoint's myCustody count filter.
+            // `Asset.custody` is one-to-many (a quantity-tracked asset can
+            // have several holders), so it is filtered via `some`. Mirrors
+            // the dashboard endpoint's myCustody count filter.
             custody: {
               some: {
                 custodian: {
@@ -129,15 +146,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
             },
           }
         : {}),
-      // Status delegates to the QT-aware fragment shared with getAssets
-      // and getAssetsWhereInput (see buildAssetStatusWhere). The AVAILABLE
-      // form is an OR group, so it rides in `AND` to compose with the
-      // search fragment's `OR`; the equality form spreads at the top level.
-      ...(statusWhere
-        ? statusWhere.OR
-          ? { AND: [statusWhere] }
-          : statusWhere
-        : {}),
+      // The equality status form spreads at the top level; OR groups go in
+      // `AND` below.
+      ...(statusWhere && !statusWhere.OR ? statusWhere : {}),
+      ...(andWhere.length > 0 && { AND: andWhere }),
     };
 
     const searchWhere = await resolveMobileAssetSearchWhere({
@@ -187,6 +199,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
             thumbnailImage: true,
             // why: powers the scan-to-booking "not available to book" blocker.
             availableToBook: true,
+            // Always null here (the list hides archived assets), selected so
+            // every row carries the same shape as `MOBILE_ASSET_SELECT`.
+            archivedAt: true,
             // Quantity fields (additive) — mirror `MOBILE_ASSET_SELECT` so the
             // helper's now-required quantity scalars are satisfied and the
             // companion list can DISPLAY quantity. Null for INDIVIDUAL assets.
@@ -250,7 +265,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         db.asset.count({ where }),
       ]);
 
-    // Single query: the UNION already searches all 10 sources in one shot,
+    // Single query: the UNION already searches all 11 sources in one shot,
     // so there is no narrow/fallback two-query dance to run any more.
     const [storedAssets, totalCount] = await fetchPage({
       ...baseWhere,
@@ -316,7 +331,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           custodyList: shaped.custodyList,
           custodyRows: asset.custody,
           viewerUserId: user.id,
-          canSeeAllCustody,
+          canSeeAllCustody: access.custody.seeAll,
         });
 
       const primaryCustody = asset.custody[0] ?? null;
@@ -325,7 +340,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         viewerCanSeeLegacyCustody({
           custodianUserId: primaryCustody.custodian.userId,
           viewerUserId: user.id,
-          canSeeAllCustody,
+          canSeeAllCustody: access.custody.seeAll,
         })
           ? shaped.custody
           : null;

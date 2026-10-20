@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { TagUseFor } from "@prisma/client";
+import { archivedAssetBlockedReason } from "@shelf/labels";
 import { useAtomValue } from "jotai";
 import type {
   ActionFunctionArgs,
@@ -39,10 +40,11 @@ import {
   error,
   getCurrentSearchParams,
   getParams,
-  getRefererPath,
+  getRefererPathExcludingSelf,
   parseData,
   safeRedirect,
 } from "~/utils/http.server";
+import { userCanReinstateAssets } from "~/utils/org-validation.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -101,6 +103,23 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
     });
 
+    // An archived asset is read-only (issue #382), and Save would be refused.
+    // Say so before the form is filled in, and send the user back to the asset.
+    if (asset.archivedAt) {
+      sendNotification({
+        title: "Asset is archived",
+        message: archivedAssetBlockedReason({
+          canReinstate: await userCanReinstateAssets({
+            userId,
+            organizationId,
+          }),
+        }),
+        icon: { name: "trash", variant: "error" },
+        senderId: userId,
+      });
+      return redirect(`/assets/${id}/overview`);
+    }
+
     const [
       { categories, totalCategories, tags, locations, totalLocations },
       { assetModels, totalAssetModels },
@@ -142,7 +161,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       totalAssetModels,
       currency: currentOrganization?.currency,
       customFields,
-      referer: getRefererPath(request),
+      referer: getRefererPathExcludingSelf(request),
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });

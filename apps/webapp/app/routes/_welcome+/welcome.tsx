@@ -39,7 +39,7 @@ export const meta: MetaFunction = () => [
 
 export async function loader({ context }: LoaderFunctionArgs) {
   if (!ENABLE_PREMIUM_FEATURES) {
-    return redirect("/assets");
+    return redirect("/");
   }
 
   const authSession = context.getSession();
@@ -252,7 +252,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       });
     }
 
-    return redirect("/assets");
+    return redirect("/");
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });

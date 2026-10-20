@@ -17,6 +17,50 @@ describe("NewAssetFormSchema", () => {
     }
   });
 
+  describe("description length", () => {
+    function descriptionErrors(description: string) {
+      const result = NewAssetFormSchema.safeParse({
+        ...baseValidData,
+        description,
+      });
+      return result.success
+        ? []
+        : result.error.issues
+            .filter((issue) => issue.path[0] === "description")
+            .map((issue) => issue.message);
+    }
+
+    it("accepts 4,999 and 5,000 characters", () => {
+      expect(descriptionErrors("a".repeat(4999))).toEqual([]);
+      expect(descriptionErrors("a".repeat(5000))).toEqual([]);
+    });
+
+    it("rejects 5,001 characters with the limit message", () => {
+      expect(descriptionErrors("a".repeat(5001))).toEqual([
+        "Description must be 5,000 characters or fewer",
+      ]);
+    });
+
+    it("counts a submitted line break as one character", () => {
+      // 2,500 lines of "a" joined the way a browser submits a textarea:
+      // 2,500 + 2,499 = 4,999 visible characters, 7,498 raw code units.
+      const browserSubmitted = Array(2500).fill("a").join("\r\n");
+
+      expect(descriptionErrors(browserSubmitted)).toEqual([]);
+    });
+
+    it("trims the description after the length check", () => {
+      const result = NewAssetFormSchema.safeParse({
+        ...baseValidData,
+        description: "  Spare charger in the drawer  ",
+      });
+
+      expect(result.success && result.data.description).toBe(
+        "Spare charger in the drawer"
+      );
+    });
+  });
+
   it("parses a valid QUANTITY_TRACKED asset with all quantity fields", () => {
     const result = NewAssetFormSchema.safeParse({
       ...baseValidData,

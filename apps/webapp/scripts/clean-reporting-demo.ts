@@ -175,8 +175,10 @@ async function collectMarkedRatios(
     totalEvents,
     markedEvents,
   ] = await Promise.all([
+    // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: a cleanup tally counts every row it may delete, archived included
     db.asset.count({ where: { organizationId: orgId } }),
     db.asset.count({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: a cleanup tally counts every row it may delete, archived included
       where: {
         organizationId: orgId,
         tags: { some: { name: SEED_TAG_NAME } },

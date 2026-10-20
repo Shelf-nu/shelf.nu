@@ -5,19 +5,21 @@ import {
 } from "@remix-run/form-data-parser";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { stripHiddenAuditColumns } from "~/modules/asset/last-audit-date-access";
+import type { Column } from "~/modules/asset-index-settings/helpers";
+import { defaultFields } from "~/modules/asset-index-settings/helpers";
 import {
-  buildCsvBackupDataFromAssets,
   buildCsvExportDataFromAssets,
   buildCsvExportDataFromBookings,
   buildCsvExportDataFromTeamMembers,
+  buildIndexExportColumns,
   csvDataFromRequest,
   formatValueForCsv,
   parseCsv,
 } from "~/utils/csv.server";
 import { ShelfError } from "~/utils/error";
-import { extractCSVDataFromBackupImport } from "~/utils/import.server";
 
-import { HARDCODED_DEFAULT_PREFS } from "./date-format";
+import { HARDCODED_DEFAULT_PREFS, formatDate } from "./date-format";
 
 // why: mock parseFormData to control file upload parsing in tests
 // while keeping MaxFileSizeExceededError available
@@ -267,202 +269,6 @@ describe("formatValueForCsv", () => {
   });
 });
 
-describe("buildCsvBackupDataFromAssets", () => {
-  it("serializes asset data with special handling for relations and text", () => {
-    const assets = [
-      {
-        id: "asset-1",
-        description: "Line 1\nLine 2",
-        category: null,
-        assetLocations: [],
-        custody: null,
-        notes: [{ content: null }],
-        tags: [{ name: "tag-1" }],
-        customFields: { foo: null },
-        serialNumber: null,
-        skipMe: "ignore",
-      },
-    ];
-
-    const result = buildCsvBackupDataFromAssets({
-      assets,
-      keysToSkip: ["skipMe"],
-    });
-
-    expect(result).toEqual([
-      [
-        '"asset-1"',
-        '"Line 1Line 2"',
-        '"{}"',
-        '"[]"',
-        '"{}"',
-        '"[{""content"":""""}]"',
-        '"[{""name"":""tag-1""}]"',
-        '"{""foo"":""""}"',
-        '""',
-      ],
-    ]);
-  });
-
-  it("quotes a value carrying the delimiter or a quote", () => {
-    const assets = [
-      {
-        id: "asset-1",
-        title: "MacBook Pro; 16-inch",
-        description: 'He said "hello" to me',
-      },
-    ];
-
-    expect(buildCsvBackupDataFromAssets({ assets, keysToSkip: [] })).toEqual([
-      ['"asset-1"', '"MacBook Pro; 16-inch"', '"He said ""hello"" to me"'],
-    ]);
-  });
-
-  describe("assetLocations", () => {
-    /** A placement row as `fetchAssetsForExport` loads it. */
-    const placement = (
-      locationName: string,
-      quantity: number,
-      assetKitId: string | null = null
-    ) => ({
-      id: `al-${locationName}`,
-      assetId: "asset-1",
-      locationId: `loc-${locationName}`,
-      organizationId: "org-1",
-      quantity,
-      assetKitId,
-      location: { id: `loc-${locationName}`, name: locationName },
-    });
-
-    /** The exported `assetLocations` cell, the row's third column. */
-    const cellFor = (type: string, assetLocations: unknown[]) =>
-      buildCsvBackupDataFromAssets({
-        assets: [{ id: "asset-1", type, assetLocations }],
-        keysToSkip: [],
-      })[0]?.[2];
-
-    it("writes a pool's placements as JSON names and quantities", () => {
-      expect(
-        cellFor("QUANTITY_TRACKED", [
-          placement("Simulation Suite A", 99),
-          placement("Simulation Suite B", 44),
-        ])
-      ).toBe(
-        '"[{""location"":""Simulation Suite A"",""quantity"":99},{""location"":""Simulation Suite B"",""quantity"":44}]"'
-      );
-    });
-
-    it("writes an individual asset's placement as one entry", () => {
-      expect(cellFor("INDIVIDUAL", [placement("Studio", 1)])).toBe(
-        '"[{""location"":""Studio"",""quantity"":1}]"'
-      );
-    });
-
-    it("leaves a pool's kit-driven placements out", () => {
-      expect(
-        cellFor("QUANTITY_TRACKED", [
-          placement("Warehouse", 5),
-          placement("Van 2", 3, "ak-1"),
-        ])
-      ).toBe('"[{""location"":""Warehouse"",""quantity"":5}]"');
-    });
-  });
-});
-
-describe("backup export -> backup import round trip", () => {
-  // why: the real parser and the real extractor, so the assertion covers the
-  // whole restore path rather than the writer's own idea of its output.
-  const roundTrip = async (asset: Record<string, unknown>) => {
-    const rows = buildCsvBackupDataFromAssets({
-      assets: [asset],
-      keysToSkip: [],
-    });
-    const headers = Object.keys(asset).map((h) => `"${h}"`);
-    const csv = [headers, ...rows].map((row) => row.join(";")).join("\n");
-
-    const parsed = await parseCsv(new TextEncoder().encode(csv).buffer);
-    return extractCSVDataFromBackupImport(parsed as string[][])[0];
-  };
-
-  it("restores an asset whose relations are serialized as JSON", async () => {
-    expect(
-      await roundTrip({
-        id: "asset-1",
-        title: "AMD Ryzen",
-        category: { name: "CPU" },
-        tags: [{ name: "tag-1" }],
-      })
-    ).toEqual({
-      id: "asset-1",
-      title: "AMD Ryzen",
-      category: { name: "CPU" },
-      tags: [{ name: "tag-1" }],
-    });
-  });
-
-  it("restores a pool's placements by location name", async () => {
-    expect(
-      await roundTrip({
-        id: "asset-1",
-        title: "Pens",
-        type: "QUANTITY_TRACKED",
-        quantity: 143,
-        assetLocations: [
-          {
-            id: "al-1",
-            quantity: 99,
-            assetKitId: null,
-            location: { id: "loc-1", name: "Suite A; north" },
-          },
-          {
-            id: "al-2",
-            quantity: 44,
-            assetKitId: null,
-            location: { id: "loc-2", name: 'Suite "B"' },
-          },
-          {
-            id: "al-3",
-            quantity: 10,
-            assetKitId: "ak-1",
-            location: { id: "loc-3", name: "Kit van" },
-          },
-        ],
-      })
-    ).toEqual({
-      id: "asset-1",
-      title: "Pens",
-      type: "QUANTITY_TRACKED",
-      quantity: "143",
-      assetLocations: [
-        { location: "Suite A; north", quantity: 99 },
-        { location: 'Suite "B"', quantity: 44 },
-      ],
-    });
-  });
-
-  it("restores an unplaced asset without placements", async () => {
-    expect(
-      await roundTrip({ id: "asset-1", title: "Loose", assetLocations: [] })
-    ).toEqual({ id: "asset-1", title: "Loose" });
-  });
-
-  it("restores text carrying the delimiter, a quote, or both", async () => {
-    expect(
-      await roundTrip({
-        id: "asset-1",
-        title: 'Monitor "27-inch"; refurbished',
-        description: "Battery at 30% capacity; sold as-is",
-        category: { name: "Displays, external" },
-      })
-    ).toEqual({
-      id: "asset-1",
-      title: 'Monitor "27-inch"; refurbished',
-      description: "Battery at 30% capacity; sold as-is",
-      category: { name: "Displays, external" },
-    });
-  });
-});
-
 describe("buildCsvExportDataFromAssets", () => {
   it("builds ordered CSV rows with fixed and custom field values", () => {
     const assets = [
@@ -685,6 +491,231 @@ describe("buildCsvExportDataFromAssets", () => {
 
     expect(headers).toEqual(['"Name"', '"Value"', '"Total value"']);
     expect(row).toEqual(['"Pens"', '"$1.00"', '"$100.00"']);
+  });
+});
+
+describe("quantity and unit of measure in the index export", () => {
+  const ORG = {
+    id: "org-1",
+    barcodesEnabled: false,
+    currency: "USD" as const,
+  };
+
+  /** A consumable counted in pieces and an individual asset. */
+  const ASSETS = [
+    {
+      id: "asset-gloves",
+      title: "Gloves",
+      type: "QUANTITY_TRACKED",
+      quantity: 5,
+      unitOfMeasure: "pcs",
+      tags: [],
+      custody: [],
+      customFields: [],
+    },
+    {
+      id: "asset-drill",
+      title: "Drill",
+      type: "INDIVIDUAL",
+      quantity: 1,
+      unitOfMeasure: null,
+      tags: [],
+      custody: [],
+      customFields: [],
+    },
+  ];
+
+  /** Default columns with only the named ones visible. */
+  function columnsWithVisible(...visible: string[]): Column[] {
+    return defaultFields.map((col) => ({
+      ...col,
+      visible: visible.includes(col.name),
+    }));
+  }
+
+  function exportCsv(
+    settingsColumns: Column[],
+    columnScope: "visible" | "all"
+  ) {
+    return buildCsvExportDataFromAssets({
+      assets: ASSETS as any,
+      columns: buildIndexExportColumns({ settingsColumns, columnScope }),
+      currentOrganization: ORG,
+      prefs: HARDCODED_DEFAULT_PREFS,
+    });
+  }
+
+  it("exports quantity as a bare number and the unit in its own column", () => {
+    const [headers, gloves, drill] = exportCsv(
+      columnsWithVisible("quantity", "unitOfMeasure"),
+      "visible"
+    );
+
+    expect(headers).toEqual([
+      '"Name"',
+      '"Quantity"',
+      '"Unit of measure"',
+      '"Total value"',
+    ]);
+    expect(gloves).toEqual(['"Gloves"', '"5"', '"pcs"', '""']);
+    // Individual assets have no stock count and no unit.
+    expect(drill).toEqual(['"Drill"', '""', '""', '""']);
+  });
+
+  it("writes a unit that looks like a formula as plain text", () => {
+    const [, row] = buildCsvExportDataFromAssets({
+      assets: [{ ...ASSETS[0], unitOfMeasure: '=HYPERLINK("x")' }] as any,
+      columns: buildIndexExportColumns({
+        settingsColumns: columnsWithVisible("quantity", "unitOfMeasure"),
+        columnScope: "visible",
+      }),
+      currentOrganization: ORG,
+      prefs: HARDCODED_DEFAULT_PREFS,
+    });
+
+    expect(row[2]).toBe('"\'=HYPERLINK(""x"")"');
+  });
+
+  it("adds the unit right after quantity when only quantity is visible", () => {
+    const [headers, gloves] = exportCsv(
+      columnsWithVisible("sequentialId", "quantity", "minQuantity"),
+      "visible"
+    );
+
+    expect(headers).toEqual([
+      '"Name"',
+      '"Asset ID"',
+      '"Quantity"',
+      '"Unit of measure"',
+      '"Min quantity"',
+      '"Total value"',
+    ]);
+    expect(gloves.slice(2, 4)).toEqual(['"5"', '"pcs"']);
+  });
+
+  it("keeps the unit where the user put it when it is already visible", () => {
+    // Unit of measure moved to the front of the index, Quantity left in place.
+    const settingsColumns = columnsWithVisible(
+      "sequentialId",
+      "quantity",
+      "unitOfMeasure"
+    ).map((col) =>
+      col.name === "unitOfMeasure" ? { ...col, position: 0 } : col
+    );
+
+    const [headers] = exportCsv(settingsColumns, "visible");
+
+    expect(headers).toEqual([
+      '"Name"',
+      '"Unit of measure"',
+      '"Asset ID"',
+      '"Quantity"',
+      '"Total value"',
+    ]);
+  });
+
+  it("does not add the unit when quantity is not exported", () => {
+    const [headers] = exportCsv(columnsWithVisible("sequentialId"), "visible");
+
+    expect(headers).toEqual(['"Name"', '"Asset ID"', '"Total value"']);
+  });
+
+  it("exports every column in 'all' scope, with the unit right after quantity", () => {
+    const [headers] = exportCsv(columnsWithVisible(), "all");
+
+    expect(headers).toEqual([
+      '"Name"',
+      '"ID"',
+      '"Asset ID"',
+      '"QR ID"',
+      '"Status"',
+      '"Description"',
+      '"Value"',
+      '"Available to book"',
+      '"Created at"',
+      '"Updated at"',
+      '"Category"',
+      '"Tags"',
+      '"Location"',
+      '"Kit"',
+      '"Custody"',
+      '"Upcoming Reminder"',
+      '"Upcoming Bookings"',
+      '"Quantity"',
+      '"Unit of measure"',
+      '"Tracking method"',
+      '"Asset model"',
+      '"Min quantity"',
+      '"Last audit date"',
+      '"Total value"',
+    ]);
+  });
+});
+
+describe("buildCsvExportDataFromAssets last audit date", () => {
+  const organization = {
+    id: "org-1",
+    barcodesEnabled: false,
+    currency: "USD" as const,
+  };
+  const columns = [
+    { name: "name", visible: true, position: 0 },
+    { name: "lastAuditDate", visible: true, position: 1 },
+  ];
+  const build = (
+    assets: Array<{ id: string; title: string; lastAuditDate: string | null }>,
+    cols = columns
+  ) =>
+    buildCsvExportDataFromAssets({
+      assets: assets as unknown as Parameters<
+        typeof buildCsvExportDataFromAssets
+      >[0]["assets"],
+      columns: cols as Parameters<
+        typeof buildCsvExportDataFromAssets
+      >[0]["columns"],
+      currentOrganization: organization,
+      prefs: HARDCODED_DEFAULT_PREFS,
+    });
+
+  it("exports the last audit date formatted with the user's prefs", () => {
+    const iso = "2026-09-30T10:00:00.000Z";
+    const [headers, row] = build([
+      { id: "a1", title: "Pens", lastAuditDate: iso },
+    ]);
+
+    expect(headers).toEqual(['"Name"', '"Last audit date"']);
+    expect(row[1]).toBe(
+      formatValueForCsv(
+        formatDate(new Date(iso), HARDCODED_DEFAULT_PREFS, {
+          includeTime: true,
+        })
+      )
+    );
+  });
+
+  it("exports an empty value for a never-audited asset", () => {
+    const [, row] = build([{ id: "a1", title: "Pens", lastAuditDate: null }]);
+
+    expect(row[1]).toBe(formatValueForCsv(""));
+  });
+
+  it("has no Last audit date header once the column is stripped as hidden", () => {
+    const [headers] = build(
+      [{ id: "a1", title: "Pens", lastAuditDate: null }],
+      stripHiddenAuditColumns(columns, "hidden")
+    );
+
+    expect(headers).toEqual(['"Name"']);
+  });
+
+  it("keeps the column with empty values when access is locked", () => {
+    const [headers, row] = build(
+      [{ id: "a1", title: "Pens", lastAuditDate: null }],
+      stripHiddenAuditColumns(columns, "locked")
+    );
+
+    expect(headers).toEqual(['"Name"', '"Last audit date"']);
+    expect(row[1]).toBe(formatValueForCsv(""));
   });
 });
 

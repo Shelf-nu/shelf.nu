@@ -12,11 +12,16 @@
  * forwards the page's current search string, so the sheet always shows exactly
  * the assets the row's count described.
  *
- * The frozen name column is switched off here: freezing anchors the cell to
- * the bulk-select column, which this table does not render.
+ * The header row and the name column are pinned, so neither the column names
+ * nor the asset a row is about leaves the screen while reading a wide table.
+ * The index's own freeze setting stays off here: it anchors the name cell 48px
+ * in, beside the bulk-select column this table does not render, so the sheet
+ * applies the left-edge classes from the same helper instead.
  *
  * @see {@link file://./../../../modules/asset-model/bucket.ts} Endpoint and filter per bucket
  * @see {@link file://./../../../modules/asset-model/bucket-assets.server.ts} The shared loader
+ * @see {@link file://./freeze-column-classes.ts} The sticky-cell classes
+ * @see {@link file://./asset-model-sheet-empty-state.ts} The empty-sheet wording
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useFetcher, useLocation } from "react-router";
@@ -32,8 +37,11 @@ import {
   MODEL_VIEW_INAPPLICABLE_PARAMS,
   MODEL_VIEW_SCOPED_PARAMS,
 } from "~/modules/asset-model/view-params";
+import { tw } from "~/utils/tw";
 import { AdvancedAssetRow } from "./advanced-asset-row";
 import { AdvancedTableHeader } from "./advanced-table-header";
+import { describeEmptyAssetModelSheet } from "./asset-model-sheet-empty-state";
+import { freezeColumnClassNames } from "./freeze-column-classes";
 import { Button } from "../../shared/button";
 import {
   Sheet,
@@ -47,12 +55,26 @@ import { Th } from "../../table";
 
 /**
  * The endpoint's response body. `payload()` SPREADS its argument onto
- * `{ error: null }` — it does not nest under a `payload` key — so these
- * fields sit at the top level of `fetcher.data`.
+ * `{ error: null }`, it does not nest under a `payload` key, so these fields
+ * sit at the top level of `fetcher.data`.
+ *
+ * `unfilteredAssets` is the bucket's asset count with the filters ignored. The
+ * endpoint reports it for an empty result set only, and sends `null` otherwise,
+ * because that is the only case the sheet has a use for it.
  */
 type SheetResponse =
-  | { error: null; assets: AdvancedIndexAsset[]; totalAssets: number }
-  | { error: { message: string }; assets?: undefined; totalAssets?: undefined };
+  | {
+      error: null;
+      assets: AdvancedIndexAsset[];
+      totalAssets: number;
+      unfilteredAssets: number | null;
+    }
+  | {
+      error: { message: string };
+      assets?: undefined;
+      totalAssets?: undefined;
+      unfilteredAssets?: undefined;
+    };
 
 /**
  * The `N assets` trigger plus the sheet it opens.
@@ -142,6 +164,32 @@ export function AssetModelAssetsSheet({
   const totalAssets = fetcher.data?.totalAssets ?? 0;
   const isLoading = fetcher.state !== "idle";
 
+  /** A load that came back with nothing in it. Gated on a response being held
+   * and on the fetcher being idle, so neither the render before the first load
+   * starts nor a reload triggered by changed filters is mistaken for an empty
+   * bucket. */
+  const isEmptyResult =
+    !isLoading && !loadError && Boolean(fetcher.data) && assets.length === 0;
+
+  /**
+   * The line under the title. An empty sheet says everything it has to say in
+   * the body, so it has no subtitle: two elements stating the same fact read as
+   * a rendering fault.
+   */
+  const subtitle = loadError
+    ? "Couldn't load these assets"
+    : isEmptyResult
+    ? null
+    : // The sheet is a peek: it loads one page and does not paginate, so it
+    // states when it is showing fewer rows than matched rather than letting
+    // the count and the list silently disagree. The footer link is the way to
+    // see the rest.
+    totalAssets > assets.length
+    ? `Showing first ${assets.length} of ${totalAssets} assets matching your filters`
+    : `${matchingAssets} ${
+        matchingAssets === 1 ? "asset" : "assets"
+      } match your filters`;
+
   /** Clears the cached load key so the effect re-issues the same request. */
   function retry() {
     loadedKeyRef.current = null;
@@ -165,19 +213,9 @@ export function AssetModelAssetsSheet({
       >
         <SheetHeader>
           <SheetTitle>{title}</SheetTitle>
-          <p className="text-sm text-gray-500">
-            {/* The sheet is a peek: it loads one page and does not paginate,
-                so it states when it is showing fewer rows than matched rather
-                than letting the count and the list silently disagree. The
-                footer link is the way to see the rest. */}
-            {loadError
-              ? "Couldn't load these assets"
-              : totalAssets > assets.length
-              ? `Showing first ${assets.length} of ${totalAssets} assets matching your filters`
-              : `${matchingAssets} ${
-                  matchingAssets === 1 ? "asset" : "assets"
-                } match your filters`}
-          </p>
+          {subtitle ? (
+            <p className="text-sm text-gray-500">{subtitle}</p>
+          ) : null}
         </SheetHeader>
 
         {/* The ONE scroll container, both axes.
@@ -188,7 +226,11 @@ export function AssetModelAssetsSheet({
             table where the cap reserves height the sheet does not have, and
             an outer scroll that slides the whole table sideways out of view. */}
         <div className="min-h-0 flex-1 overflow-auto">
-          {isLoading ? (
+          {/* `!fetcher.data` covers the render between opening the sheet and the
+              effect issuing the request, where the fetcher is still idle and
+              holds nothing. Without it that frame draws the empty-bucket
+              message at every open. */}
+          {isLoading || !fetcher.data ? (
             <div className="flex h-32 items-center justify-center">
               <Spinner />
             </div>
@@ -207,12 +249,34 @@ export function AssetModelAssetsSheet({
                them all is drawn off-screen, since the cell is as wide as the
                table rather than as wide as the viewport. */
             <div className="px-6 py-8 text-sm text-gray-500">
-              No assets match your filters
+              {describeEmptyAssetModelSheet({
+                bucketKind: bucket.kind,
+                unfilteredAssets: fetcher.data?.unfilteredAssets ?? null,
+              })}
             </div>
           ) : (
             <AssetIndexSettingsProvider freezeColumn={false}>
-              <table className="w-full table-auto border-collapse">
-                <thead>
+              {/* The name column is pinned from the table rather than from the
+                  cell: a row's name cell is drawn by the shared
+                  `AdvancedIndexColumn`, which takes its own class from the
+                  index's freeze setting and its 48px checkbox offset. */}
+              <table
+                className={tw(
+                  "w-full table-auto border-collapse",
+                  freezeColumnClassNames.sheetNameCells
+                )}
+              >
+                {/* Sticky above the pinned name cells, which carry a z-index of
+                    their own: at equal z-index the later element in the
+                    document wins, and the rows would scroll over the header. */}
+                <thead
+                  className={tw(
+                    "sticky top-0 z-20 border-b bg-white",
+                    // A sticky element cannot draw its own bottom border, so the
+                    // border is a pseudo element.
+                    "before:absolute before:inset-x-0 before:bottom-0 before:border-b before:border-gray-200 before:content-['']"
+                  )}
+                >
                   <tr>
                     {/* `AdvancedTableHeader` emits the CONFIGURED columns only,
                         which never include the name: on the index, `ListHeader`
@@ -220,7 +284,12 @@ export function AssetModelAssetsSheet({
                         columns alone therefore puts every header one cell left
                         of its data, so this supplies the name header the way
                         `ListHeader` does. */}
-                    <Th className="whitespace-nowrap bg-gray-25 md:border-0">
+                    <Th
+                      className={tw(
+                        "whitespace-nowrap bg-gray-25 md:border-0",
+                        freezeColumnClassNames.sheetNameHeader
+                      )}
+                    >
                       Name
                     </Th>
                     <AdvancedTableHeader columns={columns} />

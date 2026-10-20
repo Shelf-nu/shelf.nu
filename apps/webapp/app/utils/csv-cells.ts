@@ -29,7 +29,6 @@
  * `"ABCD"` is far more likely to be a quoted `ABCD` than a value whose first
  * character is a quote.
  *
- * @see {@link file://./csv.server.ts} — writes the backup export
  * @see {@link file://./import-ready-export.server.ts} — writes the import-ready export
  * @see {@link file://./import.server.ts} — reads the `tags` cell
  * @see {@link file://./../modules/barcode/service.server.ts} — reads the barcode cells
@@ -48,6 +47,27 @@
  */
 export function quoteCsvCell(value: string): string {
   return `"${(value ?? "").replace(/"/g, '""')}"`;
+}
+
+/**
+ * Keeps a spreadsheet from reading a free-text cell as a formula.
+ *
+ * Excel, Sheets and Calc treat a cell that begins with `=`, `+`, `-` or `@` as
+ * a formula even when the CSV field is quoted, so a stored value such as
+ * `=HYPERLINK(...)` would run when the file is opened. Such a value gets a
+ * leading single quote, which spreadsheets show as plain text. The value is
+ * trimmed first, because the export trims every cell before writing it.
+ *
+ * Only for free text that starts a cell: a number or a date must not go
+ * through it, or a negative number would gain a quote.
+ *
+ * @param value - The cell text.
+ * @returns The trimmed text, prefixed with `'` when it begins with a formula
+ * trigger.
+ */
+export function neutralizeSpreadsheetFormula(value: string): string {
+  const trimmed = value.trim();
+  return /^[=+\-@]/.test(trimmed) ? `'${trimmed}` : trimmed;
 }
 
 /** An item needs quoting when a bare split would not give it back unchanged. */

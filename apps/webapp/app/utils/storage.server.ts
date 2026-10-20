@@ -1,9 +1,6 @@
 import { Readable } from "node:stream";
 
-import {
-  MaxFileSizeExceededError,
-  parseFormData,
-} from "@remix-run/form-data-parser";
+import { parseFormData } from "@remix-run/form-data-parser";
 import type { LRUCache } from "lru-cache";
 import type { ResizeOptions } from "sharp";
 
@@ -19,6 +16,7 @@ import { SUPABASE_URL } from "./env";
 import type { AdditionalData, ErrorLabel } from "./error";
 import { isLikeShelfError, ShelfError } from "./error";
 import { extractImageNameFromSupabaseUrl } from "./extract-image-name-from-supabase-url";
+import { getMaxFileSizeExceededError } from "./form-data-parse-errors.server";
 import { id } from "./id/id.server";
 import { detectImageFormat } from "./image-format.server";
 import {
@@ -498,29 +496,6 @@ export function findShelfErrorInCause(error: unknown): ShelfError | null {
   }
 
   return findShelfErrorInCause(cause);
-}
-
-/**
- * Recursively walks the `.cause` chain to find a `MaxFileSizeExceededError`.
- *
- * `parseFormData` wraps errors, so this helper normalises the shape and lets
- * callers respond with the correct user-facing message when the underlying
- * file exceeds the configured size.
- */
-function getMaxFileSizeExceededError(
-  error: unknown
-): MaxFileSizeExceededError | null {
-  if (error instanceof MaxFileSizeExceededError) {
-    return error;
-  }
-
-  const cause = (error as { cause?: unknown })?.cause;
-
-  if (!cause) {
-    return null;
-  }
-
-  return getMaxFileSizeExceededError(cause);
 }
 
 /**

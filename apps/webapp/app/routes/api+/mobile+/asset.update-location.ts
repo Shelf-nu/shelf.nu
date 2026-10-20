@@ -8,12 +8,22 @@ import {
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
 import { parseMobileBody } from "~/modules/api/mobile-body.server";
+import {
+  createCustodyRehomeNote,
+  loadCustodySources,
+  rehomeCustodyForPlacementChange,
+} from "~/modules/asset/custody-source.server";
 import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
+import {
+  readStockState,
+  recordStockChanges,
+} from "~/modules/consumption-log/stock-ledger.server";
 import { createNote } from "~/modules/note/service.server";
 import { assetQtyMeta, formatUnitCount } from "~/utils/asset-quantity";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { wrapUserLinkForNote, wrapLinkForNote } from "~/utils/markdoc-wrappers";
+import { assertAssetsAreNotArchived } from "~/utils/org-validation.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -60,6 +70,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // Verify asset exists and belongs to org
     const asset = await db.asset.findUnique({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: lookup ahead of the location write; the archive guard must see the row to refuse with the archived message
       where: { id: assetId, organizationId },
       select: {
         id: true,
@@ -82,6 +93,12 @@ export async function action({ request }: ActionFunctionArgs) {
     if (!asset) {
       return data({ error: { message: "Asset not found" } }, { status: 404 });
     }
+
+    // Archived assets are frozen (issue #382). Checked here, before the no-op
+    // short-circuit below, so an archived asset is refused the same way
+    // whether or not the request would change anything. The check inside the
+    // write transaction stays as the race-safe guard for real writes.
+    await assertAssetsAreNotArchived({ assetIds: [assetId], organizationId });
 
     // Prevent location update if asset belongs to a kit
     const parentKit = asset.assetKits[0]?.kit;
@@ -160,6 +177,7 @@ export async function action({ request }: ActionFunctionArgs) {
       placedQuantity,
       previousLocation,
       previousQuantity,
+      rehome,
     } = await db.$transaction(async (tx) => {
       /**
        * Row-lock the asset before writing the pivot, the same lock every
@@ -178,6 +196,15 @@ export async function action({ request }: ActionFunctionArgs) {
         tx,
         assetId,
         organizationId
+      );
+
+      // Archived assets are frozen (issue #382). This route writes the
+      // placement itself rather than through `updateAsset`, so it needs the
+      // freeze of its own. Read under the row lock just taken, so an archive
+      // cannot land between this check and the write.
+      await assertAssetsAreNotArchived(
+        { assetIds: [assetId], organizationId },
+        tx
       );
 
       // Per-placement bound: the requested units must fit the asset's
@@ -225,7 +252,19 @@ export async function action({ request }: ActionFunctionArgs) {
         placementsBefore.find((al) => al.location?.id === primaryBefore?.id)
           ?.quantity ?? null;
 
-      // Clear MANUAL placements only — kit-driven rows
+      /** Custody sources before the collapse, for the re-home below. */
+      const custodyBefore = isQty
+        ? await loadCustodySources(tx, {
+            assetId,
+            total: locked.quantity ?? 0,
+          })
+        : null;
+      /** The pool's stock before the collapse, for the ledger's MOVE rows. */
+      const stockBefore = isQty
+        ? await readStockState(tx, { assetId, organizationId })
+        : null;
+
+      // Clear MANUAL placements only: kit-driven rows
       // (`assetKitId IS NOT NULL`) are owned by the kit's flow. The kit
       // guard above rejects kit members outright, so this filter mirrors
       // the web service's pivot write rather than changing behavior.
@@ -239,6 +278,28 @@ export async function action({ request }: ActionFunctionArgs) {
           organizationId,
           quantity: pivotQuantity,
         },
+      });
+
+      /**
+       * Custody follows the units: what was in custody from a collapsed
+       * placement now belongs at the requested location, as far as it holds
+       * them, and becomes unplaced beyond that. Same rule as the web edit
+       * form's collapse in `updateAsset`. Never refused.
+       */
+      const rehomeResult = custodyBefore
+        ? await rehomeCustodyForPlacementChange(tx, {
+            assetId,
+            total: locked.quantity ?? 0,
+            before: custodyBefore,
+            destinationLocationId: locationId,
+          })
+        : null;
+
+      /** The total does not change: the collapse is a MOVE of every unit it shifted. */
+      await recordStockChanges(tx, {
+        organizationId,
+        userId: user.id,
+        changes: [{ assetId, before: stockBefore }],
       });
 
       /**
@@ -293,7 +354,7 @@ export async function action({ request }: ActionFunctionArgs) {
       );
 
       const refreshed = await tx.asset.findUniqueOrThrow({
-        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` already org-verified by the `db.asset.findUnique({ where: { id, organizationId } })` guard at the top of this action; this is the in-tx re-read
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries, local-rules/require-archived-at-check-on-asset-queries -- idor-safe: `assetId` already org-verified by the `db.asset.findUnique({ where: { id, organizationId } })` guard at the top of this action; this is the in-tx re-read; why: response re-read of the asset this action just wrote
         where: { id: assetId },
         select: {
           id: true,
@@ -309,8 +370,22 @@ export async function action({ request }: ActionFunctionArgs) {
         placedQuantity: pivotQuantity,
         previousLocation: primaryBefore,
         previousQuantity: primaryQuantityBefore,
+        rehome: rehomeResult,
       };
     });
+
+    if (rehome) {
+      await createCustodyRehomeNote({
+        result: rehome,
+        asset: {
+          id: asset.id,
+          type: asset.type,
+          unitOfMeasure: asset.unitOfMeasure,
+        },
+        userId: user.id,
+        organizationId,
+      });
+    }
 
     const { assetLocations: _, ...updatedAssetRest } = refreshedAsset;
     const updatedAssetWithLocation = {

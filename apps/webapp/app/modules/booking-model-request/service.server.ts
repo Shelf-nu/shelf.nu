@@ -43,6 +43,7 @@ import { AssetType, BookingStatus } from "@prisma/client";
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
+import type { ModelReservationShortfall } from "~/modules/asset/archive-shortfall";
 import { canEditModelReservations } from "~/utils/booking-model-requests";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
@@ -375,11 +376,15 @@ export async function getAssetModelAvailability({
         // Total INDIVIDUAL assets of this model in the org. QUANTITY_TRACKED
         // assets aren't part of the model-request flow (they have their own
         // quantity booking path from Phase 3b).
+        // Archived assets are out of service and can't be booked (issue #382),
+        // so they are not part of the pool. The custody and booking sums below
+        // read the same asset set, so the subtraction stays coherent.
         client.asset.count({
           where: {
             organizationId,
             assetModelId,
             type: AssetType.INDIVIDUAL,
+            archivedAt: null,
           },
         }),
         // Units currently held by team members / users.
@@ -389,6 +394,7 @@ export async function getAssetModelAvailability({
               organizationId,
               assetModelId,
               type: AssetType.INDIVIDUAL,
+              archivedAt: null,
             },
           },
           _sum: { quantity: true },
@@ -401,6 +407,7 @@ export async function getAssetModelAvailability({
               organizationId,
               assetModelId,
               type: AssetType.INDIVIDUAL,
+              archivedAt: null,
             },
             bookingId: { not: bookingId },
             booking: {
@@ -514,10 +521,17 @@ export type ModelReservationGuardClient = RawQueryClient &
 
 type AssertModelUnitsNotReservedElsewhereArgs = {
   /**
-   * The INDIVIDUAL assets about to hold a standalone `BookingAsset` row on
-   * `bookingId`. Assets without a model are ignored. Kit-driven slices must
-   * not be passed: a kit is reserved as one unit on its own axis, and its
-   * members are not claims on the loose pool.
+   * The INDIVIDUAL assets about to hold a `BookingAsset` row on `bookingId`,
+   * whether that row is standalone or kit-driven. Assets without a model are
+   * ignored.
+   *
+   * Kit-driven units belong here: a model pool has ONE axis, and
+   * {@link getAssetModelAvailability} counts every INDIVIDUAL `BookingAsset`
+   * row of the model without looking at `assetKitId`. A unit arriving inside a
+   * kit therefore leaves the loose pool exactly as a loose one does, and it can
+   * discharge a model reservation on the same terms.
+   *
+   * QUANTITY_TRACKED assets are not model units and must not be passed.
    */
   assets: ModelUnitCandidate[];
   bookingId: string;
@@ -605,6 +619,7 @@ export async function readOwnNamedUnits({
   tx: Pick<ModelReservationGuardClient, "asset">;
 }): Promise<Map<string, OwnNamedUnits>> {
   const rows = await tx.asset.findMany({
+    // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: units the booking already holds count toward its footprint whether or not archived since
     where: {
       organizationId,
       assetModelId: { in: assetModelIds },
@@ -950,6 +965,513 @@ export async function assertModelUnitsNotReservedElsewhere({
     message: `Some assets cannot be booked by name for these dates:\n${lines.join(
       "\n"
     )}\nRemove them, or change the dates.`,
+    additionalData: { bookingId, shortfalls },
+  });
+}
+
+/* -------------------------------------------------------------------------- */
+/*                            measureModelPoolFit                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The reads {@link measureModelPoolFit} issues. Structural, like
+ * {@link AssetModelAvailabilityClient}, so an interactive transaction client
+ * satisfies it without a cast.
+ */
+export type ModelPoolFitClient = Pick<
+  ModelReservationGuardClient,
+  "asset" | "custody" | "bookingAsset" | "bookingModelRequest"
+>;
+
+/** What one model's free pool holds, and what one booking takes from it. */
+export type ModelPoolFit = {
+  /** The pool, measured with this booking excluded. */
+  availability: AssetModelAvailability;
+  /**
+   * Units of the model the booking holds by name, less the ones a custodian
+   * holds. `availability.available` has already deducted every unit in
+   * custody, so charging one again refuses a booking over units the pool never
+   * offered.
+   */
+  namedNotInCustody: number;
+  /** Units of the booking's own reservation that stay unassigned. */
+  outstanding: number;
+  /** Whether both halves of that footprint fit inside the free pool. */
+  fits: boolean;
+};
+
+/**
+ * Measures one booking's whole footprint on one model's pool.
+ *
+ * {@link getAssetModelAvailability} excludes the booking, so BOTH halves of
+ * what it takes belong on the booking's side of the comparison: the units it
+ * holds by name, and the units of its own reservation that stay unassigned. A
+ * reservation and a named unit draw on the same physical pool, so measuring
+ * either half alone lets a pair of writes that each pass still over-commit it.
+ *
+ * Callers take {@link lockAssetModelForReservation} on the model FIRST. This is
+ * a read-then-decide, and under READ COMMITTED a plain `SELECT` takes no lock,
+ * so two callers otherwise measure the same free pool and both commit.
+ *
+ * Reports the numbers rather than refusing, because the two callers refuse in
+ * different registers: adding a reservation names the model and the quantity
+ * asked for, a booking starting to claim the pool names every model that no
+ * longer fits.
+ *
+ * @param args.outstanding - Units of the booking's reservation left unassigned
+ *   once the caller's write lands. Already-fulfilled units are named units, so
+ *   they belong to the other half and have to be netted out of this one.
+ * @param args.from - Start of the window being claimed. With either end
+ *   missing there is nothing to overlap, so every active booking competes, per
+ *   {@link getAssetModelAvailability}.
+ * @param args.to - End of that window.
+ * @param args.tx - The caller's interactive transaction. Required: the counts
+ *   see the transaction's own rows, and take part in its locks, only through it.
+ */
+export async function measureModelPoolFit({
+  bookingId,
+  assetModelId,
+  organizationId,
+  from,
+  to,
+  outstanding,
+  tx,
+}: {
+  bookingId: string;
+  assetModelId: string;
+  organizationId: string;
+  from: Date | null | undefined;
+  to: Date | null | undefined;
+  outstanding: number;
+  tx: ModelPoolFitClient;
+}): Promise<ModelPoolFit> {
+  const availability = await getAssetModelAvailability({
+    assetModelId,
+    organizationId,
+    bookingId,
+    from,
+    to,
+    db: tx,
+  });
+
+  const heldByModel = await readOwnNamedUnits({
+    bookingId,
+    assetModelIds: [assetModelId],
+    organizationId,
+    tx,
+  });
+  const held = heldByModel.get(assetModelId);
+  const namedNotInCustody = (held?.unitIds.size ?? 0) - (held?.inCustody ?? 0);
+
+  return {
+    availability,
+    namedNotInCustody,
+    outstanding,
+    fits: namedNotInCustody + outstanding <= availability.available,
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/*                    lockModelsForOutstandingRequests                        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Model reservations an archive would leave short (issue #382).
+ *
+ * Archiving an asset takes one unit out of its model's pool, and a booking
+ * that reserved units of that model by model request can then be promised
+ * more than the pool holds. Called INSIDE the archive transaction, after the
+ * archive write: the pool is measured through `tx`, so it already excludes
+ * the assets being archived ({@link getAssetModelAvailability} counts only
+ * active units).
+ *
+ * Drafts are included although they do not claim the pool yet: a draft that
+ * no longer fits is refused when it is reserved, so its owner should hear
+ * about it now, not then.
+ *
+ * Advisory: the archive goes ahead once the user confirms, so this takes no
+ * model lock. A reservation written concurrently is measured by its own
+ * guards.
+ *
+ * @param args.assetModelIds - Models of the assets being archived
+ * @param args.organizationId - The caller's workspace
+ * @param args.tx - The archive transaction, already holding the archive write
+ * @returns One entry per booking left short, empty when every reservation fits
+ */
+export async function findModelReservationsShortAfterArchive({
+  assetModelIds,
+  organizationId,
+  tx,
+}: {
+  assetModelIds: string[];
+  organizationId: string;
+  tx: ModelPoolFitClient;
+}): Promise<ModelReservationShortfall[]> {
+  const modelIds = [...new Set(assetModelIds)];
+  if (modelIds.length === 0) return [];
+
+  // The reservations themselves are untouched by the archive, so the plain
+  // client reads them; only the pool below needs the transaction's view.
+  const requests = await db.bookingModelRequest.findMany({
+    where: {
+      assetModelId: { in: modelIds },
+      fulfilledAt: null,
+      booking: {
+        organizationId,
+        status: {
+          in: [
+            BookingStatus.DRAFT,
+            BookingStatus.RESERVED,
+            BookingStatus.ONGOING,
+            BookingStatus.OVERDUE,
+          ],
+        },
+      },
+    },
+    select: {
+      bookingId: true,
+      assetModelId: true,
+      quantity: true,
+      fulfilledQuantity: true,
+      booking: { select: { name: true, from: true, to: true } },
+      assetModel: { select: { name: true } },
+    },
+  });
+
+  const shortfalls: ModelReservationShortfall[] = [];
+  for (const request of requests) {
+    const outstanding = request.quantity - request.fulfilledQuantity;
+    if (outstanding <= 0) continue;
+
+    const fit = await measureModelPoolFit({
+      bookingId: request.bookingId,
+      assetModelId: request.assetModelId,
+      organizationId,
+      from: request.booking.from,
+      to: request.booking.to,
+      outstanding,
+      tx,
+    });
+    if (fit.fits) continue;
+
+    shortfalls.push({
+      bookingId: request.bookingId,
+      bookingName: request.booking.name,
+      modelName: request.assetModel.name,
+      short:
+        fit.namedNotInCustody + fit.outstanding - fit.availability.available,
+    });
+  }
+  return shortfalls;
+}
+
+/** One model reservation on a booking that the free pool can no longer fill. */
+export type BookingModelShortfall = {
+  assetModelId: string;
+  modelName: string;
+  /** Units of the reservation still unassigned. */
+  outstanding: number;
+  /** Units the booking can still get for its dates, after its named units. */
+  available: number;
+  /** Units the reservation is promised beyond what the pool holds. */
+  short: number;
+};
+
+/**
+ * The booking's own model reservations that its dates can no longer fill.
+ *
+ * A reservation is measured when the booking leaves DRAFT, but the pool can
+ * shrink afterwards (an admin archiving a unit with "Archive anyway", for
+ * example). This re-measures every outstanding reservation against the pool as
+ * it is now, the same way {@link findModelReservationsShortAfterArchive} does,
+ * so the booking page can warn its owner before check-out refuses it.
+ *
+ * Read-only and lock-free, for a page loader: the numbers are a warning, and
+ * the reserve and check-out guards still measure under their own locks. The
+ * reservations are measured concurrently, which is safe because the reads go
+ * through the global client, not an interactive transaction.
+ *
+ * @param args.booking - The booking, with its dates and outstanding reservations
+ * @param args.organizationId - The caller's workspace
+ * @returns One entry per reservation left short, empty when all fit
+ */
+export async function findModelRequestShortfallsForBooking({
+  booking,
+  organizationId,
+}: {
+  booking: {
+    id: string;
+    from: Date | null;
+    to: Date | null;
+    modelRequests: Array<{
+      assetModelId: string;
+      quantity: number;
+      fulfilledQuantity: number;
+      fulfilledAt: Date | string | null;
+      assetModel: { name: string };
+    }>;
+  };
+  organizationId: string;
+}): Promise<BookingModelShortfall[]> {
+  const outstandingRequests = booking.modelRequests.flatMap((request) => {
+    if (request.fulfilledAt) return [];
+    const outstanding = request.quantity - request.fulfilledQuantity;
+    return outstanding > 0 ? [{ request, outstanding }] : [];
+  });
+
+  const measured = await Promise.all(
+    outstandingRequests.map(async ({ request, outstanding }) => ({
+      request,
+      outstanding,
+      fit: await measureModelPoolFit({
+        bookingId: booking.id,
+        assetModelId: request.assetModelId,
+        organizationId,
+        from: booking.from,
+        to: booking.to,
+        outstanding,
+        tx: db,
+      }),
+    }))
+  );
+
+  return measured.flatMap(({ request, outstanding, fit }) => {
+    if (fit.fits) return [];
+    const available = Math.max(
+      0,
+      fit.availability.available - fit.namedNotInCustody
+    );
+    return [
+      {
+        assetModelId: request.assetModelId,
+        modelName: request.assetModel.name,
+        outstanding,
+        available,
+        short: outstanding - available,
+      },
+    ];
+  });
+}
+
+/**
+ * Locks every `AssetModel` a booking still owes units for.
+ *
+ * Locks on these rows are taken in one order everywhere: the booking row, then
+ * `AssetModel`, then `BookingModelRequest`. The reservation writers take the
+ * model before the request row, so a transaction that wants a booking's request
+ * rows held for its whole duration has to take the models FIRST. Taking the
+ * request rows first inverts that pair, and the two transactions deadlock
+ * against each other with no booking lock between them to serialise the pair.
+ *
+ * Plain code-unit order, the comparator every writer of these rows uses, and
+ * the same set {@link assertOutstandingModelRequestsFit} goes on to lock
+ * downstream. Re-locking a row the transaction already holds costs nothing.
+ *
+ * @param tx - Transaction client, already holding the booking row.
+ * @param args.bookingId - Booking whose outstanding reservations to lock.
+ * @param args.organizationId - Workspace the booking must belong to.
+ */
+export async function lockModelsForOutstandingRequests(
+  tx: ModelReservationGuardClient,
+  {
+    bookingId,
+    organizationId,
+  }: {
+    bookingId: string;
+    organizationId: string;
+  }
+): Promise<void> {
+  // Workspace-scoped as well as booking-scoped: `bookingId` reaches this from
+  // request input, same rule as the guard's own read.
+  // The select matches `ModelReservationGuardClient`, which pins this read's
+  // shape for every caller's transaction client. Only `assetModelId` is used
+  // here; the quantities come along with the shape.
+  const requests = await tx.bookingModelRequest.findMany({
+    where: { bookingId, booking: { organizationId }, fulfilledAt: null },
+    select: { assetModelId: true, quantity: true, fulfilledQuantity: true },
+  });
+
+  const orderedModelIds = [
+    ...new Set(requests.map((request) => request.assetModelId)),
+  ].sort();
+
+  for (const assetModelId of orderedModelIds) {
+    await lockAssetModelForReservation(tx, assetModelId, organizationId);
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                     assertOutstandingModelRequestsFit                      */
+/* -------------------------------------------------------------------------- */
+
+/** One model whose outstanding units do not fit, with the numbers to say so. */
+type OutstandingModelShortfall = ModelPoolFit & { assetModelId: string };
+
+/**
+ * Refuses a booking's exit from DRAFT when the units it still owes by model no
+ * longer fit their pools.
+ *
+ * A DRAFT's reservations claim nothing: `ACTIVE_BOOKING_STATUSES` covers
+ * RESERVED, ONGOING and OVERDUE, so no other booking's availability is reduced
+ * by a draft's promises, and two drafts may each promise the whole pool. The
+ * transition out of DRAFT is where those promises start to compete, and it is
+ * the only point at which they can be measured against each other, so every
+ * outstanding request on the booking is checked here.
+ *
+ * Call on a DRAFT exit only. An active booking's reservations are already on
+ * the pool and were measured when it got there; measuring again at check-out
+ * would refuse an operator holding the physical units, over a pool that shrank
+ * for reasons the booking did not cause.
+ *
+ * **No model may be skipped.** The by-name guard in
+ * {@link assertModelUnitsNotReservedElsewhere} measures only models another
+ * booking is owed unnamed units of, because one physical unit cannot sit on two
+ * overlapping bookings and named units therefore cannot collide. Unnamed units
+ * have no such protection: they compete with custody and with units other
+ * bookings hold BY NAME, neither of which involves a foreign reservation. A
+ * model whose whole pool is booked by name elsewhere is exactly the case that
+ * skip would wave through.
+ *
+ * @param args.action - Completes "Cannot …" in the refusal, e.g.
+ *   "reserve booking".
+ * @param args.alsoLockAssetModelIds - Models this transaction measures AFTER
+ *   this guard, so one sorted pass covers every `AssetModel` row it locks. Two
+ *   passes in one transaction can each hold what the other waits for: a
+ *   transaction holding the higher id from the first pass and wanting the lower
+ *   in the second deadlocks against one that split the same pair the other way.
+ *   Locking a row already held by the transaction is a no-op, so the later
+ *   pass adds nothing.
+ * @param args.from - The window the booking is taking into RESERVED or ONGOING.
+ *   Absent dates mean nothing to overlap, so there is nothing to measure.
+ * @param args.to - The other end of that window.
+ * @param args.tx - The transaction that flips the status. Required, for the
+ *   reason {@link measureModelPoolFit} gives.
+ * @throws {ShelfError} 400 (`shouldBeCaptured: false`) naming every model whose
+ *   outstanding units do not fit, and by how much, in one message.
+ * @throws {ShelfError} 404 when a model is not in the caller's workspace.
+ */
+export async function assertOutstandingModelRequestsFit({
+  bookingId,
+  organizationId,
+  from,
+  to,
+  action,
+  alsoLockAssetModelIds = [],
+  tx,
+}: {
+  bookingId: string;
+  organizationId: string;
+  from: Date | null | undefined;
+  to: Date | null | undefined;
+  action: string;
+  alsoLockAssetModelIds?: string[];
+  tx: ModelReservationGuardClient;
+}): Promise<void> {
+  if (!from || !to) return;
+
+  // Scoped to the workspace as well as the booking: `bookingId` reaches this
+  // from request input, and a booking in another workspace has no reservations
+  // to offer this one. Same rule as the batch writer's own read.
+  const requests = await tx.bookingModelRequest.findMany({
+    where: { bookingId, booking: { organizationId }, fulfilledAt: null },
+    select: { assetModelId: true, quantity: true, fulfilledQuantity: true },
+  });
+
+  const outstandingByModel = new Map<string, number>();
+  for (const request of requests) {
+    const outstanding = Math.max(
+      0,
+      request.quantity - request.fulfilledQuantity
+    );
+    if (outstanding === 0) continue;
+    outstandingByModel.set(
+      request.assetModelId,
+      (outstandingByModel.get(request.assetModelId) ?? 0) + outstanding
+    );
+  }
+  // Nothing outstanding means no pass at all, which leaves the by-name guard's
+  // own pass the only one in the transaction. Either way there is one order.
+  if (outstandingByModel.size === 0) return;
+
+  const orderedModelIds = [...outstandingByModel.keys()].sort();
+
+  // Plain code-unit order, which is what every other writer of these rows
+  // uses. `localeCompare` would be a second ordering over one lock set, and
+  // two orderings are the cycle this sort exists to prevent.
+  const modelIdsToLock = [
+    ...new Set([...orderedModelIds, ...alsoLockAssetModelIds]),
+  ].sort();
+  for (const assetModelId of modelIdsToLock) {
+    await lockAssetModelForReservation(tx, assetModelId, organizationId);
+  }
+
+  const shortfalls: OutstandingModelShortfall[] = [];
+  for (const assetModelId of orderedModelIds) {
+    const fit = await measureModelPoolFit({
+      bookingId,
+      assetModelId,
+      organizationId,
+      from,
+      to,
+      outstanding: outstandingByModel.get(assetModelId)!,
+      tx,
+    });
+    if (!fit.fits) shortfalls.push({ assetModelId, ...fit });
+  }
+  if (shortfalls.length === 0) return;
+
+  const models = await tx.assetModel.findMany({
+    where: {
+      id: { in: shortfalls.map((shortfall) => shortfall.assetModelId) },
+      organizationId,
+    },
+    select: { id: true, name: true },
+  });
+  const nameById = new Map(models.map((model) => [model.id, model.name]));
+
+  const units = (n: number) => `${n} ${n === 1 ? "unit" : "units"}`;
+  const lines = shortfalls.map((shortfall) => {
+    const { available, inCustody, reservedConcrete, reservedViaRequest } =
+      shortfall.availability;
+    const heldNote =
+      shortfall.namedNotInCustody > 0
+        ? ` This booking also holds ${units(
+            shortfall.namedNotInCustody
+          )} of it by name.`
+        : "";
+    // Everything the pool already owes someone else, named so the numbers in
+    // the sentence add up for whoever has to act on it.
+    const deductions = [
+      inCustody > 0 ? `${units(inCustody)} in custody` : null,
+      reservedConcrete > 0
+        ? `${units(reservedConcrete)} booked by name on other bookings`
+        : null,
+      reservedViaRequest > 0
+        ? `${units(reservedViaRequest)} reserved by model on other bookings`
+        : null,
+    ].filter((part): part is string => part !== null);
+    const deductionNote =
+      deductions.length > 0
+        ? ` ${deductions.join(" and ")} ${
+            deductions.length === 1 ? "counts" : "count"
+          } against the pool for these dates.`
+        : "";
+    return `"${
+      nameById.get(shortfall.assetModelId) ?? shortfall.assetModelId
+    }": ${units(
+      shortfall.outstanding
+    )} still to assign, but only ${available} can be booked.${heldNote}${deductionNote}`;
+  });
+
+  throw new ShelfError({
+    cause: null,
+    label,
+    status: 400,
+    shouldBeCaptured: false,
+    title: "Booking conflict",
+    message: `Cannot ${action}. Some model reservations no longer fit:\n${lines.join(
+      "\n"
+    )}\nReduce them, or change the dates.`,
     additionalData: { bookingId, shortfalls },
   });
 }
@@ -1370,45 +1892,32 @@ export async function writeBookingModelRequestInTx(
   const isReduction = previousQuantity != null && quantity <= previousQuantity;
 
   if (!isReduction) {
-    const availability = await getAssetModelAvailability({
-      assetModelId,
-      organizationId,
-      bookingId,
-      from: booking.from,
-      to: booking.to,
-      db: tx,
-    });
-
     /**
-     * What this booking would take from the pool once the upsert lands.
+     * What this booking would take from the pool once the upsert lands, as
+     * {@link measureModelPoolFit} defines it: the units it holds by name plus
+     * the units of this request that stay unassigned, both charged against a
+     * pool measured with this booking excluded.
      *
-     * `availability` excludes this booking, so BOTH halves of its footprint
-     * belong on this side of the comparison:
-     *
-     * - the units it already holds by name. Without them a booking holding
-     *   two of three units could still reserve three more by model — the
-     *   same over-commit this module's by-name guard refuses in the other
-     *   direction, and the two have to agree or a pair of writes that each
-     *   pass can still break the pool.
-     * - the units of this request that stay unassigned. Already-fulfilled
-     *   units are named units, so `newOutstanding` nets them out rather than
-     *   counting them twice.
-     *
-     * Units a custodian holds are discounted exactly as the by-name guard
-     * discounts them: the pool never offered them.
+     * Both halves matter here. Without the named ones a booking holding two of
+     * three units could still reserve three more by model, which is the
+     * over-commit this module's by-name guard refuses from the other
+     * direction. The two guards share this measurement so they cannot disagree.
      */
-    const heldByModel = await readOwnNamedUnits({
-      bookingId,
-      assetModelIds: [assetModelId],
-      organizationId,
-      tx,
-    });
-    const held = heldByModel.get(assetModelId);
-    const namedNotInCustody =
-      (held?.unitIds.size ?? 0) - (held?.inCustody ?? 0);
-    const newOutstanding = quantity - existingFulfilled;
+    const { availability, namedNotInCustody, fits } = await measureModelPoolFit(
+      {
+        bookingId,
+        assetModelId,
+        organizationId,
+        from: booking.from,
+        to: booking.to,
+        // Already-fulfilled units are named units, counted in the other half,
+        // so the outstanding half nets them out.
+        outstanding: quantity - existingFulfilled,
+        tx,
+      }
+    );
 
-    if (namedNotInCustody + newOutstanding > availability.available) {
+    if (!fits) {
       const headroom = Math.max(
         0,
         availability.available - namedNotInCustody + existingFulfilled
@@ -1423,6 +1932,10 @@ export async function writeBookingModelRequestInTx(
         cause: null,
         label,
         status: 400,
+        // Titled, because the generic fallback ("Oops! Something went wrong")
+        // reads as a fault in Shelf next to a message that is really a fact
+        // about the pool the user is asking from.
+        title: "Not enough units",
         message: `Cannot reserve ${quantity} × ${assetModel.name}. Only ${headroom} can be reserved in this window.${heldNote}`,
         shouldBeCaptured: false,
       });

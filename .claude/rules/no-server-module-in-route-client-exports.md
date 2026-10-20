@@ -1,6 +1,8 @@
 ---
 description: A route's non-loader/action exports must never reference a *.server module — it leaks server code into the client bundle and 500s the dev server (typecheck/tests won't catch it)
-globs: ["apps/webapp/app/routes/**/*.tsx", "apps/webapp/app/routes/**/*.ts"]
+paths:
+  - "apps/webapp/app/routes/**/*.tsx"
+  - "apps/webapp/app/routes/**/*.ts"
 ---
 
 # No Server Modules in Route Client Exports

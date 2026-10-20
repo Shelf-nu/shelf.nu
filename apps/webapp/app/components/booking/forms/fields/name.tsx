@@ -9,17 +9,20 @@ export function NameField({
   disabled,
   error,
   onChange,
+  autoFocus = true,
 }: {
   name: string | undefined;
   fieldName?: string;
   disabled?: boolean;
   error?: string;
   onChange: ChangeEventHandler<HTMLInputElement | HTMLTextAreaElement>;
+  /** Focus the field on mount. Default true; false after a Discard. */
+  autoFocus?: boolean;
 }) {
   // NameField is the first field in every booking form (new + edit + the
   // create-booking-from-selection dialog), so focus on mount mirrors the
   // removed autoFocus behaviour.
-  const inputRef = useAutoFocus<HTMLInputElement>();
+  const inputRef = useAutoFocus<HTMLInputElement>({ when: autoFocus });
   return (
     <FormRow
       rowLabel={"Name"}

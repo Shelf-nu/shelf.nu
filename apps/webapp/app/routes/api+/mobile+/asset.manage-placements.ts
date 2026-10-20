@@ -89,6 +89,7 @@ export async function action({ request }: ActionFunctionArgs) {
     // Re-read the committed rows so the response reflects the pivot ops,
     // kit-driven rows included.
     const refreshed = await db.asset.findUniqueOrThrow({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: re-read of the asset replaceAssetPlacements just wrote (it refuses archived ones itself)
       where: { id: assetId, organizationId },
       select: {
         id: true,

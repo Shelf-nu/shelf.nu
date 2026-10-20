@@ -66,6 +66,22 @@ describe("getAssetModelRollup", () => {
     expect(sql).not.toContain("a.valuation");
   });
 
+  it("counts only active assets by default (issue #382)", async () => {
+    // The model view sits on the asset index, whose default view hides
+    // archived assets; the counts must describe the same set.
+    await getAssetModelRollup(baseArgs);
+
+    expect(lastQueryText()).toContain(`a."archivedAt" IS NULL`);
+  });
+
+  it("follows the Archived and All views", async () => {
+    await getAssetModelRollup({ ...baseArgs, archivedFilter: "archived" });
+    expect(lastQueryText()).toContain(`a."archivedAt" IS NOT NULL`);
+
+    await getAssetModelRollup({ ...baseArgs, archivedFilter: "all" });
+    expect(lastQueryText()).not.toContain(`"archivedAt"`);
+  });
+
   it("restricts the rollup to INDIVIDUAL assets", async () => {
     await getAssetModelRollup(baseArgs);
 
@@ -201,6 +217,28 @@ describe("getAssetModelRollup", () => {
     // outer WHERE they are NULL for the row an unmatched model contributes and
     // would discard it, which is the whole bug.
     expect(sql.indexOf(`WHERE a."organizationId" =`)).toBeLessThan(
+      sql.indexOf("FULL OUTER JOIN")
+    );
+  });
+
+  it("matches a search term against the asset model's name", async () => {
+    await getAssetModelRollup({ ...baseArgs, search: "dell" });
+
+    const sql = lastQueryText();
+
+    // A term like "dell" names a MODEL, not an asset title, so the search has
+    // to reach `AssetModel.name`. Without that branch every row of this view
+    // reports 0 matching assets for a term the operator can see on the page.
+    expect(sql).toMatch(
+      /FROM public\."AssetModel" am\s+JOIN public\."Asset" a ON a\."assetModelId" = am\."id"/
+    );
+    expect(sql).toContain('am."name" ILIKE');
+
+    // The match narrows the ASSET side, ahead of the join, so a matching
+    // model's count rises from 0 while every other model keeps its row.
+    // Row-level counts come from Postgres, which this harness does not run, so
+    // the position of the predicate is what is assertable here.
+    expect(sql.indexOf('am."name" ILIKE')).toBeLessThan(
       sql.indexOf("FULL OUTER JOIN")
     );
   });

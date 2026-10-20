@@ -31,6 +31,7 @@ import {
   useCsvExport,
   useReportRowHandlers,
 } from "~/components/reports";
+import { auditCompletionReport } from "~/modules/reports/audit-completion.server";
 import {
   resolveTimeframe,
   bookingComplianceReport,
@@ -136,7 +137,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     // Check permissions. `currentOrganization` supplies the workspace currency
     // for the reports whose KPI strings carry money values.
-    const { organizationId, organizations, currentOrganization } =
+    const { organizationId, organizations, currentOrganization, access } =
       await requirePermission({
         userId,
         request,
@@ -309,6 +310,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           timeframe,
           assetId: url.searchParams.get("asset") || undefined,
           categoryId: url.searchParams.get("category") || undefined,
+          page: getIntParam(url.searchParams, "page", 1),
+          pageSize: getIntParam(url.searchParams, "pageSize", 50),
+        });
+        break;
+
+      case "audit-completion":
+        reportData = await auditCompletionReport({
+          organizationId,
+          userId,
+          assignedOnly: !access.audits.seeAll,
+          timeframe,
           page: getIntParam(url.searchParams, "page", 1),
           pageSize: getIntParam(url.searchParams, "pageSize", 50),
         });

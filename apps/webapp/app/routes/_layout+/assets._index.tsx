@@ -7,19 +7,24 @@ import type {
 } from "react-router";
 import { data, useLoaderData } from "react-router";
 import { z } from "zod";
+import { ArchivedViewMenu } from "~/components/assets/archived-view-menu";
 import { AssetsList } from "~/components/assets/assets-index/assets-list";
+import { BulkDeleteAssetsSchema } from "~/components/assets/bulk-delete-dialog";
 import { ImportButton } from "~/components/assets/import-button";
 import { NewAssetDropdown } from "~/components/assets/new-asset-dropdown";
 import Header from "~/components/layout/header";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 
+import { useSearchParams } from "~/hooks/search-params";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useCanViewArchivedAssets } from "~/hooks/use-can-view-archived-assets";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import {
   advancedModeLoader,
   simpleModeLoader,
 } from "~/modules/asset/data.server";
+import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
 import { bulkDeleteAssets } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import {
@@ -74,7 +79,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         currentOrganization,
         role,
         canUseBarcodes,
-        canSeeAllCustody,
+        access,
       },
       user,
     ] = await Promise.all([
@@ -113,8 +118,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     });
     const mode = settings.mode;
 
-    /** For base and self service users, we dont allow to view the advanced index */
-    if (mode === "ADVANCED" && ["BASE", "SELF_SERVICE"].includes(role)) {
+    /** The advanced index is a per-role capability; switch back if the role lacks it. */
+    if (mode === "ADVANCED" && !access.policy.ui.advancedAssetIndex) {
       await changeMode({
         userId,
         organizationId,
@@ -141,7 +146,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           currentOrganization,
           user,
           settings,
-          canSeeAllCustody,
+          canSeeAllCustody: access.custody.seeAll,
+          access,
         })
       : await advancedModeLoader({
           request,
@@ -152,7 +158,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           currentOrganization,
           user,
           settings,
-          canSeeAllCustody,
+          canSeeAllCustody: access.custody.seeAll,
+          access,
         });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
@@ -188,7 +195,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
       "toggle-star-preset": PermissionAction.read,
     };
 
-    const { organizationId, canUseBarcodes, role } = await requirePermission({
+    const {
+      organizationId,
+      canUseBarcodes,
+      role,
+      access,
+      currentOrganization,
+    } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
@@ -205,11 +218,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     switch (intent) {
       case "bulk-delete": {
-        const { assetIds, currentSearchParams } = parseData(
+        const { assetIds, confirmation, currentSearchParams } = parseData(
           formData,
-          z
-            .object({ assetIds: z.array(z.string()).min(1) })
-            .and(CurrentSearchParamsSchema)
+          BulkDeleteAssetsSchema.and(CurrentSearchParamsSchema)
         );
 
         // Acting user's timezone: when "select all" is active the deletion set
@@ -226,6 +237,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
           userId,
           currentSearchParams,
           settings,
+          lastAuditDateAccess: lastAuditDateAccessFor(
+            access,
+            currentOrganization
+          ),
+          confirmation,
           timeZone,
         });
 
@@ -346,10 +362,39 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: appendToMetaTitle(data?.header.title) },
 ];
 
+/**
+ * Empty-state copy per Active/Archived/All view (issue #382).
+ *
+ * The Archived view needs its own: falling through to the default would either
+ * blame filters the user never applied, or urge someone with a full inventory
+ * to "create your first asset". Neither is true, and the archived one is the
+ * moment a worried user most needs to be told their asset is safe.
+ */
+function useAssetsEmptyState() {
+  const [searchParams] = useSearchParams();
+  const archivedView = searchParams.get("archived");
+
+  if (archivedView === "archived") {
+    return {
+      title: "Nothing archived",
+      text: "Archiving hides an asset from your lists and reports without deleting it. Its history, ID and QR code stay intact, and you can reinstate it at any time.",
+    };
+  }
+
+  return {
+    title: "No assets yet",
+    text: "Assets are the core of your inventory. Create your first asset to start tracking equipment, devices, or anything your team manages.",
+    newButtonRoute: "/assets/new",
+    newButtonContent: "Create your first asset",
+  };
+}
+
 export default function AssetIndexPage() {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const { canImportAssets } = useLoaderData<typeof loader>();
   const { modeIsAdvanced } = useAssetIndexViewState();
+  const emptyStateContent = useAssetsEmptyState();
+  const canViewArchivedAssets = useCanViewArchivedAssets();
 
   return (
     <div className="relative">
@@ -368,12 +413,12 @@ export default function AssetIndexPage() {
         </When>
       </Header>
       <AssetsList
-        customEmptyStateContent={{
-          title: "No assets yet",
-          text: "Assets are the core of your inventory. Create your first asset to start tracking equipment, devices, or anything your team manages.",
-          newButtonRoute: "/assets/new",
-          newButtonContent: "Create your first asset",
-        }}
+        customEmptyStateContent={emptyStateContent}
+        titleContent={
+          canViewArchivedAssets ? (
+            <ArchivedViewMenu plural="assets" />
+          ) : undefined
+        }
       />
     </div>
   );

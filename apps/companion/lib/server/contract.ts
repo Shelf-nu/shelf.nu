@@ -211,20 +211,34 @@ export function isAppVersionSupported(
   minVersion: string | null | undefined
 ): boolean {
   if (!minVersion) return true;
+  const order = compareAppVersions(appVersion, minVersion);
+  return order === null || order >= 0;
+}
 
-  const required = parseVersionSegments(minVersion);
-  const actual = parseVersionSegments(appVersion);
-  if (!required || !actual) return true;
+/**
+ * Orders two app versions.
+ *
+ * Segment-by-segment as NUMBERS (see `isAppVersionSupported` for why strings
+ * are wrong), and a missing segment is zero: "1.3" and "1.3.0" are the same
+ * version. Pre-release and build suffixes are ignored.
+ *
+ * @param a - A version string.
+ * @param b - A version string.
+ * @returns A negative number when `a` is older, 0 when equal, a positive number
+ *   when newer, or `null` when either side is not a version. Callers decide
+ *   what "cannot tell" means for them.
+ */
+export function compareAppVersions(a: string, b: string): number | null {
+  const left = parseVersionSegments(a);
+  const right = parseVersionSegments(b);
+  if (!left || !right) return null;
 
-  const length = Math.max(required.length, actual.length);
+  const length = Math.max(left.length, right.length);
   for (let i = 0; i < length; i++) {
-    // A missing segment is zero: "1.3" and "1.3.0" are the same version.
-    const a = actual[i] ?? 0;
-    const r = required[i] ?? 0;
-    if (a > r) return true;
-    if (a < r) return false;
+    const diff = (left[i] ?? 0) - (right[i] ?? 0);
+    if (diff !== 0) return diff;
   }
-  return true;
+  return 0;
 }
 
 /**

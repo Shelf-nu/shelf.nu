@@ -1,3 +1,12 @@
+---
+description: Every scanner blocker is derived in a pure builder with a stable id and pinned by a manifest test
+paths:
+  - "apps/webapp/app/components/scanner/**"
+  - "apps/companion/lib/batch-blockers*"
+  - "apps/companion/app/**/scan*"
+  - "apps/webapp/app/components/audit/**"
+---
+
 # Every Scanner Blocker Needs a Test
 
 A scanner blocker is the row's answer to "why can this not go". A **missing**
@@ -16,7 +25,7 @@ blocker a stable `id`, and pin the set:
 ```ts
 // ✅ uses/custody-blockers.tsx: a pure function of the scanned rows
 export function buildAssignCustodyBlockers({ items, removeAssetsFromList, removeItemsFromList })
-  : { blockerConfigs: BlockerConfig[]; onResolveAll: () => void }
+  : { blockerConfigs: BlockerConfig[] }
 
 // uses/custody-blockers.test.tsx
 const EXPECTED_ASSIGN_IDS = ["qty-nothing-free", "assets-checked-out", ...];
@@ -26,6 +35,10 @@ expect(built.blockerConfigs.map((b) => b.id)).toEqual(EXPECTED_ASSIGN_IDS);
 That manifest assertion is the point: adding a blocker without a case fails the
 suite instead of shipping untested. Each id then needs a row in that state
 raising it, and a healthy row not raising it.
+
+"Resolve all" is derived by `createBlockers` from the blockers it shows, so it
+can never remove a row the operator was not warned about. Never hand-write a
+resolve-all list.
 
 ❌ Deriving `blockerConfigs` inline in the drawer, or adding a blocker with no
 `id` and no case. Neither can be asserted on.
@@ -39,3 +52,7 @@ that drawer can actually move.
 `custody-blockers.tsx` is the reference. The other scanner drawers still derive
 their lists inline. When you add or change a blocker in one, extract that
 drawer's derivation the same way rather than adding to the inline array.
+
+The companion's Scan tab follows the same contract in
+`apps/companion/lib/batch-blockers.ts`: `blockerKeysFor(action)` lists the ids,
+and `batch-blockers.test.ts` pins them for the custody actions.
