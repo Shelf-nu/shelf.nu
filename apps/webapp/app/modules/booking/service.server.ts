@@ -12978,13 +12978,6 @@ export async function extendBooking({
        * reminder and we schedule the overdue handler.
        */
       if (hours < 1) {
-        await sendCheckinReminder(
-          updatedBooking,
-          updatedBooking._count.bookingAssets,
-          hints,
-          updatedBooking.organizationId
-        );
-
         await scheduleNextBookingJob({
           data: {
             id: updatedBooking.id,
@@ -12994,6 +12987,13 @@ export async function extendBooking({
           when: newEndDate,
           expected,
         });
+
+        await sendCheckinReminder(
+          updatedBooking,
+          updatedBooking._count.bookingAssets,
+          hints,
+          updatedBooking.organizationId
+        );
       } else {
         // A copy: `expected.to` must stay the stored end.
         const when = new Date(newEndDate);
