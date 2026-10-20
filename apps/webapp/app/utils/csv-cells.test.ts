@@ -27,6 +27,14 @@ describe("neutraliseCsvFormula", () => {
     ).toEqual(["'=1+1", "'+cmd", "'-20C Freezer", "'@SUM(A1)"]);
   });
 
+  it("neutralises a leading tab or carriage return, even for signed text", () => {
+    expect(neutraliseCsvFormula("\t=1+1")).toBe("'\t=1+1");
+    expect(neutraliseCsvFormula("\r=1")).toBe("'\r=1");
+    expect(neutraliseCsvFormula("\t-20C", { keepSignedText: true })).toBe(
+      "'\t-20C"
+    );
+  });
+
   it("leaves other values alone", () => {
     expect(neutraliseCsvFormula("Freezer -80")).toBe("Freezer -80");
   });

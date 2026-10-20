@@ -7,6 +7,7 @@
  * @see {@link file://./form.tsx} Consumer of these helpers
  * @see {@link file://./../../../utils/csv.server.ts} Server-side CSV parsing
  */
+import { neutraliseCsvFormula } from "~/utils/csv-cells";
 import { getDefinitionFromCsvHeader } from "~/utils/custom-fields";
 
 /**
@@ -234,15 +235,15 @@ function stripQuotes(value: string): string {
 }
 
 /**
- * Escape a value for CSV output — wraps in quotes if needed.
- * Also prefixes spreadsheet formula triggers (`=`, `+`, `-`, `@`)
- * with a single quote to prevent formula injection in Excel/Sheets.
+ * Escape a value for CSV output, wrapping it in quotes if needed. A value a
+ * spreadsheet would run as a formula is neutralised with a leading `'`
+ * (see `neutraliseCsvFormula`).
  */
 export function escapeCsvValue(value: string): string {
-  // Prevent spreadsheet formula injection — always quote so the
-  // leading apostrophe stays inside the quoted field
-  if (/^[=+\-@]/.test(value)) {
-    const safe = `'${value}`;
+  // Always quote a neutralised value so the leading apostrophe stays inside
+  // the quoted field.
+  const safe = neutraliseCsvFormula(value);
+  if (safe !== value) {
     return `"${safe.replace(/"/g, '""')}"`;
   }
   if (/[",\n\r]/.test(value)) {

@@ -49,8 +49,12 @@ export function quoteCsvCell(value: string): string {
   return `"${(value ?? "").replace(/"/g, '""')}"`;
 }
 
-/** A cell starting with one of these is run as a formula by spreadsheets. */
-const FORMULA_TRIGGER = /^[=+\-@]/;
+/**
+ * A cell starting with one of these is run as a formula by spreadsheets. Tab
+ * and carriage return count too: importers that trim leading whitespace turn
+ * `\t=...` back into a live formula.
+ */
+const FORMULA_TRIGGER = /^[=+\-@\t\r]/;
 
 /**
  * A leading sign followed only by digits, letters, spaces and unit marks
@@ -65,8 +69,8 @@ const SIGNED_PLAIN_TEXT = /^[+-]\d[\p{L}\p{N}\s.,°%/-]*$/u;
  *
  * Label printer software (Brady, P-touch, Dymo) prints that `'` literally, so
  * a file meant for printing passes `keepSignedText` to leave a plain signed
- * measurement such as `-20C Freezer` as typed. `=` and `@` are always
- * neutralised.
+ * measurement such as `-20C Freezer` as typed. `=`, `@`, a leading tab and a
+ * leading carriage return are always neutralised.
  *
  * @param value - The raw cell value, before quoting.
  * @param options.keepSignedText - Leave a `+`/`-` value alone when it holds no
