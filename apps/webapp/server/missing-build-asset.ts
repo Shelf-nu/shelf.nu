@@ -13,7 +13,7 @@
  * same to the user (the app never hydrates), but the 302 hides what actually
  * went wrong from devtools, from logs and from the hydration watchdog.
  *
- * @see {@link file://./index.ts} - registered first in `configure`
+ * @see {@link file://./index.ts} - registered after logger(), before session and auth
  * @see {@link file://./../app/utils/hydration-watchdog.ts} - what the browser does with the 404
  */
 import { createMiddleware } from "hono/factory";
@@ -30,7 +30,7 @@ export const BUILD_ASSETS_PATH = "/file-assets/*";
  * @returns Hono middleware that never calls `next()`
  */
 export function missingBuildAsset() {
-  return createMiddleware(async (c) =>
-    c.text("Not found", 404, { "cache-control": "no-store" })
+  return createMiddleware((c) =>
+    Promise.resolve(c.text("Not found", 404, { "cache-control": "no-store" }))
   );
 }

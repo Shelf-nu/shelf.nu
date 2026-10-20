@@ -11,7 +11,7 @@ import { BUILD_ASSETS_PATH, missingBuildAsset } from "./missing-build-asset";
 function createApp() {
   const app = new Hono();
   app.use(BUILD_ASSETS_PATH, missingBuildAsset());
-  app.use("*", async (c) => c.redirect("/login"));
+  app.use("*", (c) => Promise.resolve(c.redirect("/login")));
   return app;
 }
 
