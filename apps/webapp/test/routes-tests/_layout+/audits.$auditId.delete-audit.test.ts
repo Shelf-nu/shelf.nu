@@ -4,9 +4,8 @@
  * These tests cover the wiring that the service-layer tests can't reach:
  *   - The route requests `PermissionAction.delete` for this intent (not
  *     `update`, which is used for edit/cancel/complete).
- *   - The 403 self-service/base guard fires even when a caller happens to
- *     hold `delete` permission (defense-in-depth against a future config
- *     change).
+ *   - A caller without `audit:delete` is refused by that gate (403) before
+ *     the service runs.
  *   - `confirmation` is a required form field — missing/empty submissions
  *     are rejected before `deleteAuditSession` is called.
  *   - Happy path returns a redirect to `/audits` (not a JSON `data(...)`
@@ -21,7 +20,9 @@
  * @see {@link file://../../../app/routes/_layout+/audits.$auditId.tsx}
  * @see {@link file://../../../app/modules/audit/service.server.ts}
  */
+import { OrganizationRoles } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { accessFor } from "@helpers/role-access";
 import { createActionArgs } from "@mocks/remix";
 
 import { action } from "~/routes/_layout+/audits.$auditId";
@@ -52,8 +53,8 @@ vi.mock("~/modules/audit/complete-audit-with-images.server", () => ({
   completeAuditWithImages: vi.fn(),
 }));
 
-// why: permission resolution is mocked so we can drive `organizationId` +
-// `isSelfServiceOrBase` from each test.
+// why: permission resolution is mocked so we can drive `organizationId`,
+// `access` and the gate's refusal from each test.
 vi.mock("~/utils/roles.server", () => ({
   requirePermission: vi.fn(),
 }));
@@ -98,7 +99,7 @@ describe("audits.$auditId action — delete-audit intent", () => {
     vi.clearAllMocks();
     vi.mocked(requirePermission).mockResolvedValue({
       organizationId: "org-1",
-      isSelfServiceOrBase: false,
+      access: accessFor([OrganizationRoles.ADMIN]),
     } as any);
     vi.mocked(deleteAuditSession).mockResolvedValue(undefined);
   });
@@ -158,11 +159,25 @@ describe("audits.$auditId action — delete-audit intent", () => {
     expect(response.headers.get("location")).toBe("/audits");
   });
 
-  it("returns 403 and does NOT call the service when the caller is self-service/base", async () => {
-    vi.mocked(requirePermission).mockResolvedValue({
-      organizationId: "org-1",
-      isSelfServiceOrBase: true,
-    } as any);
+  it("returns 403 and does NOT call the service when the gate refuses audit:delete", async () => {
+    // why: a real ShelfError, the shape `validatePermission` throws, so
+    // `makeShelfError` keeps its 403. The refusal comes from the gate alone.
+    vi.mocked(requirePermission).mockImplementation(async ({ action }) => {
+      if (action === PermissionAction.delete) {
+        throw new ShelfError({
+          cause: null,
+          title: "Unauthorized",
+          message: "You have no permission to perform this action",
+          status: 403,
+          label: "Permission",
+          shouldBeCaptured: false,
+        });
+      }
+      return {
+        organizationId: "org-1",
+        access: accessFor([OrganizationRoles.BASE]),
+      } as any;
+    });
 
     const response = (await action(
       createActionArgs({

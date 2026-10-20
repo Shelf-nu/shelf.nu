@@ -13,10 +13,12 @@ import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import type { DuplicateBarcode } from "~/modules/barcode/service.server";
 import type { QRCodePerImportedAsset } from "~/modules/qr/service.server";
 import type { action } from "~/routes/_layout+/assets.import";
+import { readImportRowErrors } from "~/utils/import-row-errors";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import Input from "../forms/input";
 import Icon from "../icons/icon";
 import { Button } from "../shared/button";
+import { ImportRowErrorsTable } from "../shared/import-row-errors-table";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -79,9 +81,9 @@ export const ImportContent = () => {
 
       <WarningBox className="my-4">
         <>
-          <strong>IMPORTANT</strong>: Do not use data exported from asset backup
-          to import assets. You must use the template provided above or you will
-          get corrupted data.
+          <strong>IMPORTANT</strong>: Use the template provided above, or a file
+          exported as Import-ready from the asset index. Any other file will
+          produce corrupted data.
         </>
       </WarningBox>
 
@@ -313,7 +315,9 @@ export const ImportContent = () => {
                 The first row is used as column headers — it won't be imported
               </li>
               <li>
-                If any data in the file is invalid, the whole import will fail
+                Your file is checked before anything is imported. If any row is
+                invalid, nothing is created and you'll get a list of every
+                problem to fix
               </li>
             </ul>
           </div>
@@ -343,9 +347,8 @@ export const ImportContent = () => {
  * import errors or success state.
  *
  * @param intent - The form intent value sent to the action
- * @param url - Optional custom action URL for the form
  */
-export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
+export const FileForm = ({ intent }: { intent: string }) => {
   // Widened to `string` so toUpperCase() doesn't need a cast.
   // The "I AGREE" check happens at submit time.
   const [agreed, setAgreed] = useState("");
@@ -357,6 +360,11 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
   const isSubmitting = useDisabled(fetcher);
   const disabled = isSubmitting || agreed !== "I AGREE";
   const isSuccessful = data && !data.error;
+
+  /** Row-level import problems, narrowed out of the error payload. */
+  const { rowErrors, totalRowErrors } = readImportRowErrors(
+    data?.error?.additionalData
+  );
   //
 
   // Focus the "I AGREE" confirmation input when the dialog opens (replaces
@@ -383,7 +391,6 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
       method="post"
       ref={formRef}
       encType="multipart/form-data"
-      action={url ? url : undefined}
     >
       <Input
         type="file"
@@ -570,6 +577,13 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
                     )}
                   </tbody>
                 </table>
+              ) : null}
+
+              {rowErrors ? (
+                <ImportRowErrorsTable
+                  rowErrors={rowErrors}
+                  totalRowErrors={totalRowErrors}
+                />
               ) : null}
 
               <p className="mt-2">

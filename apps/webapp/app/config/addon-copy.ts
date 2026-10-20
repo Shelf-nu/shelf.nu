@@ -4,27 +4,33 @@
  * import from here so the wording stays consistent.
  */
 
+/**
+ * Shelf QR codes (creating, printing and scanning them) are free on every
+ * plan. Only non-Shelf codes are gated, so every string here says what is
+ * included before what the add-on adds.
+ */
+const BARCODE_ADDON_DESCRIPTION =
+  "Use barcodes other than Shelf QR codes: Code128, Code39, EAN-13, DataMatrix, or QR codes from another system already on your gear. Shelf QR codes are included in every plan.";
+
 export const BARCODE_ADDON = {
   label: "Alternative Barcodes",
 
   /** One-liner used in cards, banners, and onboarding toggles */
-  description:
-    "Generate new barcodes or use your existing ones. Supports Code128, Code39, EAN-13, DataMatrix & QR codes — ideal for migrations.",
+  description: BARCODE_ADDON_DESCRIPTION,
 
   /** Shorter subtitle for modal headers */
   subtitle:
-    "Add support for industry-standard barcode formats to your workspace.",
+    "Shelf QR codes, printing their labels and scanning them are included in every plan. This add-on is for other barcode formats, or barcodes already on your gear.",
 
-  /** Non-owner banner — tells the user to contact the owner */
-  nonOwnerDescription:
-    "Generate new barcodes or use your existing ones. Supports Code128, Code39, EAN-13, DataMatrix & QR codes — ideal for migrations. Contact your workspace owner to enable this feature.",
+  /** Non-owner banner - tells the user to contact the owner */
+  nonOwnerDescription: `${BARCODE_ADDON_DESCRIPTION} Contact your workspace owner to enable this add-on.`,
 
   /** Bullet-point features for modals and emails */
   features: [
-    "Supports Code128, Code39, EAN-13, DataMatrix & QR codes",
-    "Generate new barcode labels or use your existing ones",
-    "Print barcode labels for your assets",
-    "Built-in barcode scanner for quick asset lookups",
+    "Add Code128, Code39, EAN-13 and DataMatrix barcodes to assets and kits",
+    "Keep the barcodes already on your gear, including QR codes from another system",
+    "Print labels for these barcodes",
+    "Scan these barcodes to look up assets",
   ],
 } as const;
 

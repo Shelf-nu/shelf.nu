@@ -1,0 +1,35 @@
+appId: com.shelf.companion.carlos
+---
+# Steps, part 1 of 2: scan both reserved units of the fulfil fixture
+# (`seed-e2e.sh up`, booking id `e2e_fulfil_booking`) into the fulfil scanner.
+# Between the parts, archive unit A in the database, so the app holds a row it
+# believes is active. No login (see ../01-owner.yaml).
+
+- openLink: "shelf://bookings/e2e_fulfil_booking"
+- extendedWaitUntil:
+    visible: ".*Scan to assign 2 reserved units and check out.*"
+    timeout: 30000
+- tapOn: ".*Scan to assign 2 reserved units and check out.*"
+- extendedWaitUntil:
+    visible: ".*0/2 assigned.*"
+    timeout: 15000
+- tapOn: "Enter a code manually"
+- waitForAnimationToEnd
+- tapOn:
+    id: "dev-scan-input"
+- inputText: ${SHELF_TEST_MODEL_UNIT_QR_A}
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: ".*1/2 assigned.*"
+    timeout: 15000
+- tapOn:
+    id: "dev-scan-input"
+- inputText: ${SHELF_TEST_MODEL_UNIT_QR_B}
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: ".*2/2 assigned.*"
+    timeout: 15000
+- tapOn:
+    text: "Close manual entry"
+    optional: true
+- assertNotVisible: ".*archived and can't be booked.*"

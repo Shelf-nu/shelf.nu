@@ -1,4 +1,6 @@
+import { Platform } from "react-native";
 import { Stack } from "expo-router";
+import { contentColumnLayout } from "@/components/content-column";
 import { useTheme } from "@/lib/theme-context";
 import { fontSize } from "@/lib/constants";
 
@@ -8,11 +10,22 @@ import { fontSize } from "@/lib/constants";
  */
 export const unstable_settings = { initialRouteName: "index" };
 
+/**
+ * Booking screens sit in the content column on wide windows. On iOS the
+ * Add-to-Booking modal is left alone: an iPad presents it as a sheet the system
+ * sizes for the screen, so it needs no column of its own. Android presents it
+ * full screen, so it takes the column like the rest.
+ */
+const BOOKINGS_SCREEN_LAYOUT = contentColumnLayout({
+  except: Platform.OS === "ios" ? ["add-assets"] : [],
+});
+
 export default function BookingsLayout() {
   const { colors } = useTheme();
 
   return (
     <Stack
+      screenLayout={BOOKINGS_SCREEN_LAYOUT}
       screenOptions={{
         headerStyle: { backgroundColor: colors.white },
         headerTitleStyle: {

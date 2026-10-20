@@ -98,10 +98,12 @@ export const fixedFields = [
   "upcomingReminder",
   "actions",
   "quantity",
+  "unitOfMeasure",
   "minQuantity",
   "type",
   "upcomingBookings",
   "assetModel",
+  "lastAuditDate",
 ] as const;
 
 // Define barcode field names
@@ -162,10 +164,12 @@ export const columnsLabelsMap: { [key in ColumnLabelKey]: string } = {
   barcode_ExternalQR: "External QR",
   barcode_EAN13: "EAN-13",
   quantity: "Quantity",
+  unitOfMeasure: "Unit of measure",
   minQuantity: "Min quantity",
   type: "Tracking method",
   upcomingBookings: "Upcoming Bookings",
   assetModel: "Asset model",
+  lastAuditDate: "Last audit date",
 };
 
 export const defaultFields: Column[] = [
@@ -187,10 +191,83 @@ export const defaultFields: Column[] = [
   { name: "actions", visible: true, position: 15 },
   { name: "upcomingBookings", visible: true, position: 16 },
   { name: "quantity", visible: false, position: 17 },
-  { name: "type", visible: false, position: 18 },
-  { name: "assetModel", visible: false, position: 19 },
-  { name: "minQuantity", visible: false, position: 20 },
+  { name: "unitOfMeasure", visible: false, position: 18 },
+  { name: "type", visible: false, position: 19 },
+  { name: "assetModel", visible: false, position: 20 },
+  { name: "minQuantity", visible: false, position: 21 },
+  { name: "lastAuditDate", visible: true, position: 22 },
 ];
+
+/**
+ * Default columns that belong right after another column, keyed by the column
+ * they follow. The Quantity cell holds only the number and the unit lives in
+ * `unitOfMeasure`, so the unit column sits next to Quantity and is shown
+ * whenever Quantity is.
+ */
+const followsColumn: Partial<Record<ColumnLabelKey, ColumnLabelKey>> = {
+  unitOfMeasure: "quantity",
+};
+
+/**
+ * Adds default columns that a saved column set lacks.
+ *
+ * Settings rows are per user and outlive the default list, so a fixed column
+ * added to `defaultFields` is missing from every row saved before it existed.
+ * A saved set keeps the positions its user arranged, so a missing column never
+ * takes its static default position: another column may already sit there, and
+ * two columns sharing a position order by array index.
+ *
+ * - A column listed in {@link followsColumn} goes right after the column it
+ *   follows, wherever the saved set has that column, and is shown when that
+ *   column is shown. Every saved column after it moves down by one, so adding
+ *   it never separates it from its partner or hides what the user already saw.
+ * - Any other column goes after every column the set already has, in default
+ *   order and with its default visibility.
+ *
+ * @param columns - The row's saved columns; not modified
+ * @param missing - Names of the default columns to add
+ * @returns A new column list with the missing default columns added, or
+ *   `columns` itself when nothing is missing
+ */
+export function insertMissingDefaultColumns(
+  columns: Column[],
+  missing: ColumnLabelKey[]
+): Column[] {
+  // Ascending default order, so a column that follows another is inserted
+  // after it when both are missing.
+  const toInsert = defaultFields
+    .filter((field) => missing.includes(field.name))
+    .sort((a, b) => a.position - b.position);
+  if (toInsert.length === 0) return columns;
+
+  return toInsert.reduce<Column[]>(
+    (acc, field) => {
+      const partnerName = followsColumn[field.name];
+      const partner = partnerName
+        ? acc.find((col) => col.name === partnerName)
+        : undefined;
+
+      if (!partner) {
+        const maxPosition = acc.reduce(
+          (max, col) => Math.max(max, col.position),
+          -1
+        );
+        return [...acc, { ...field, position: maxPosition + 1 }];
+      }
+
+      const position = partner.position + 1;
+      return [
+        ...acc.map((col) =>
+          col.position >= position
+            ? { ...col, position: col.position + 1 }
+            : col
+        ),
+        { ...field, position, visible: field.visible || partner.visible },
+      ];
+    },
+    [...columns]
+  );
+}
 
 // Generate barcode columns when barcodes are enabled
 export const generateBarcodeColumns = (): Column[] =>

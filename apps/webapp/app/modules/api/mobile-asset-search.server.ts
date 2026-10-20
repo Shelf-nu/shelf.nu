@@ -10,9 +10,9 @@ import { splitAssetSearchTerms } from "~/modules/asset/search.server";
  * org-scoped UNION (`buildAssetSearchUnion`) — the same index-driven,
  * org-scoped path the web `getAssets` fetcher and the advanced index use,
  * replacing the old Prisma multi-table OR + narrow/fallback two-query dance.
- * Mobile search therefore matches exactly the same 10 sources web search
- * does (title, sequentialId, description, category, location, tags,
- * custodian names, QR/barcode, custom fields) in a single query. ID-shaped
+ * Mobile search therefore matches exactly the same 11 sources web search
+ * does (title, sequentialId, description, asset model, category, location,
+ * tags, custodian names, QR/barcode, custom fields) in a single query. ID-shaped
  * searches (which previously took a narrow indexed fast path with a
  * full-clause fallback) now resolve directly to the full, more-correct
  * result set — a superset of the old narrow match, matching the web indexes'

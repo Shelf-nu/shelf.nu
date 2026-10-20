@@ -180,6 +180,47 @@ describe("shapeBookingAssets", () => {
     expect(items.map((i) => i.id)).toEqual(["zebra", "kit-1"]);
   });
 
+  it("passes each asset's bookingAssets rows through unchanged, including the kit-conflict fields", () => {
+    // The booking overview's kit header reads assetKitId / sourceKitId /
+    // checkedOutAt / checkedInAt off each kit member's OWN bookingAssets rows
+    // (the OTHER, overlapping bookings the loader's rawAssets query already
+    // filtered to) to decide "Already booked" for the kit. shapeBookingAssets
+    // never re-projects a row — filter/sort/group all move the object as a
+    // whole — so these fields must survive from input to items[].assets
+    // untouched. This pins only the shaping step; the loader hops feeding it
+    // (rawAssets query -> enrichedAssetsForView -> enrichedAssetsForSort) have
+    // no route-test harness for bookings.$bookingId.overview.tsx today.
+    const conflictingBookingAssets = [
+      {
+        assetKitId: "ak-1",
+        sourceKitId: "kit-1",
+        checkedOutAt: new Date("2026-01-01T00:00:00.000Z"),
+        checkedInAt: null,
+        booking: { id: "other-booking", status: "ONGOING" },
+      },
+    ];
+    const rawAssets = [
+      asset({
+        id: "member-1",
+        kitId: "kit-1",
+        kit: { name: "Kit One" },
+        bookingAssets: conflictingBookingAssets,
+      }),
+    ];
+    const rawKits = [{ id: "kit-1", name: "Kit One" }];
+
+    const { items } = shapeBookingAssets({
+      ...baseParams,
+      rawAssets,
+      rawKits,
+    });
+
+    const kitItem = items.find((i) => i.type === "kit");
+    expect(
+      (kitItem?.assets[0] as { bookingAssets?: unknown }).bookingAssets
+    ).toEqual(conflictingBookingAssets);
+  });
+
   it("sorts by title when orderBy=title", () => {
     const rawAssets = [
       asset({ id: "b", title: "Banana" }),

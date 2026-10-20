@@ -1,10 +1,15 @@
 import type { Prisma } from "@prisma/client";
+import { ScanCodeType, ScanSource } from "@prisma/client";
 import { data } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
+import type { AssetWithResolvableImage } from "~/modules/asset/image-resolution";
 import { serializeAssetImage } from "~/modules/asset/image-resolution";
+import { getBarcodeByValue } from "~/modules/barcode/service.server";
 import { getQr } from "~/modules/qr/service.server";
+import type { RecordScanArgs } from "~/modules/scan/service.server";
+import { recordScanNonFatal } from "~/modules/scan/service.server";
 import {
   getScannerPickerMeta,
   ScannerPickerContextSchema,
@@ -42,13 +47,112 @@ import { parseSequentialId } from "~/utils/sequential-id";
 export type AssetFromQr = AssetFromScanner;
 export type KitFromQr = KitFromScanner;
 
+/**
+ * A barcode row carrying just what this loader needs to answer with.
+ *
+ * `getBarcodeByValue` is generic over its `include` and returns `any`, so
+ * annotating the call site is what keeps the fallback's payload typed. Only
+ * the relations are declared: the fallback decides what a barcode resolves to
+ * from the loaded asset or kit, the same way the QR branch does.
+ */
+type ScannedBarcodeMatch = {
+  id: string;
+  asset: (AssetWithResolvableImage & { id: string }) | null;
+  kit: KitFromScanner | null;
+};
+
+/**
+ * Serialize an asset the way every lookup in this loader answers with it.
+ *
+ * Collapses the model-image cascade into the flat image fields the scanner
+ * drawers read — the nested relation is dropped so the row carries one source
+ * of truth for the image — then attaches the audit counters and, when the
+ * scanner named a destination, the same strict-available pool the
+ * manage-assets picker shows.
+ *
+ * Shared by all three lookups (SAM id, QR code, SAM-shaped barcode) so a
+ * scanned asset carries identical fields whichever one matched.
+ *
+ * @param args.asset - The asset row, fetched with `ASSET_INCLUDE`.
+ * @param args.organizationId - The caller's workspace, for the picker bound.
+ * @param args.auditSessionId - Audit session to count notes and images against.
+ * @param args.pickerContext - Destination the scanner is filling, if any.
+ * @returns The asset as the endpoint responds with it.
+ */
+async function serializeScannedAsset<
+  T extends AssetWithResolvableImage & { id: string },
+>({
+  asset,
+  organizationId,
+  auditSessionId,
+  pickerContext,
+}: {
+  asset: T;
+  organizationId: string;
+  auditSessionId?: string;
+  pickerContext?: ReturnType<typeof ScannerPickerContextSchema.parse>;
+}) {
+  let auditAssetId: string | undefined;
+  let auditNotesCount = 0;
+  let auditImagesCount = 0;
+
+  if (auditSessionId) {
+    const auditAsset = await db.auditAsset.findFirst({
+      where: { auditSessionId, assetId: asset.id },
+      select: { id: true },
+    });
+    auditAssetId = auditAsset?.id;
+
+    if (auditAssetId) {
+      const [notesCount, imagesCount] = await Promise.all([
+        db.auditNote.count({ where: { auditSessionId, auditAssetId } }),
+        db.auditImage.count({ where: { auditSessionId, auditAssetId } }),
+      ]);
+      auditNotesCount = notesCount;
+      auditImagesCount = imagesCount;
+    }
+  }
+
+  const pickerMeta: ScannerPickerMeta | null = pickerContext
+    ? await getScannerPickerMeta({
+        assetId: asset.id,
+        organizationId,
+        context: pickerContext,
+      })
+    : null;
+
+  return {
+    ...serializeAssetImage(asset),
+    auditAssetId,
+    auditNotesCount,
+    auditImagesCount,
+    pickerMeta,
+  };
+}
+
+/**
+ * GET /api/get-scanned-item/:qrId
+ *
+ * Resolves a scanned QR id or SAM ID (with a SAM-shaped barcode fallback) to
+ * its asset or kit in the caller's workspace. Every web scanner drawer calls
+ * it once per scanned code, and the web scanner's SAM "View asset" calls it
+ * with `?source=scanner`.
+ *
+ * Each resolve records the scan: `WEB_SCANNER` with a note on the asset when
+ * `source=scanner` (the scanner opens the asset), `WEB_DRAWER` without one
+ * otherwise (any other `source` value counts as a drawer). A resolve carrying
+ * `auditSessionId` records nothing, because the audit's own writer
+ * (`recordAuditScan`) records that scan.
+ *
+ * @see {@link file://./get-scanned-barcode.$value.ts} the camera-barcode twin
+ */
 export async function loader({ request, params, context }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
   const searchParams = getCurrentSearchParams(request);
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, canUseBarcodes } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.qr,
@@ -66,6 +170,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       kitExtraInclude,
       auditSessionId,
       pickerContext,
+      source,
     } = parseData(
       searchParams,
       z.object({
@@ -92,6 +197,8 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
             }
           }),
         auditSessionId: z.string().optional(),
+        /** `scanner` from the web scanner's SAM "View asset"; see above. */
+        source: z.string().optional(),
         /**
          * JSON-encoded `{ type: "location" | "kit" | "booking", id }`.
          * When present, the loader attaches a normalised picker MAX
@@ -122,6 +229,40 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       kitExtraInclude: Prisma.KitInclude | undefined;
       auditSessionId?: string;
       pickerContext?: ReturnType<typeof ScannerPickerContextSchema.parse>;
+      source?: string;
+    };
+
+    // Allowlisted: only the exact value opens the asset and notes it; any
+    // other value counts as a drawer.
+    const isScannerView = source === "scanner";
+
+    /**
+     * Records this resolve as a scan, unless an audit is scanning (its writer
+     * records instead). Non-fatal: a failed record never fails the resolve.
+     *
+     * A drawer row does not wait for the record: a scanner list resolves one
+     * code per scan, and the row needs only the resolved item. The scanner's
+     * "View asset" waits, so its note is on the asset page it opens.
+     */
+    const recordResolvedScan = async (
+      resolved: Pick<
+        RecordScanArgs,
+        "codeType" | "qrId" | "barcodeId" | "assetId" | "kitId"
+      >
+    ) => {
+      if (auditSessionId) return;
+      const recording = recordScanNonFatal({
+        ...resolved,
+        code: qrId,
+        source: isScannerView ? ScanSource.WEB_SCANNER : ScanSource.WEB_DRAWER,
+        userAgent: request.headers.get("user-agent"),
+        userId,
+        organizationId,
+        writeNote: isScannerView,
+      });
+      if (isScannerView) {
+        await recording;
+      }
     };
 
     // SECURITY (CWE-94 / overfetch): assetExtraInclude/kitExtraInclude are
@@ -141,6 +282,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
 
     if (sequentialId) {
       const asset = await db.asset.findFirst({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: a scanned physical label must still resolve an archived asset
         where: {
           organizationId,
           sequentialId,
@@ -148,81 +290,93 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
         include: assetInclude,
       });
 
-      if (!asset) {
-        throw new ShelfError({
-          cause: null,
-          message:
-            "This SAM ID doesn't exist or it doesn't belong to your current organization.",
-          title: "SAM ID not found",
-          additionalData: { sequentialId, shouldSendNotification: false },
-          label: "Scan",
-          shouldBeCaptured: false,
+      if (asset) {
+        await recordResolvedScan({
+          codeType: ScanCodeType.SAM_ID,
+          assetId: asset.id,
         });
-      }
-
-      // If audit session ID provided, fetch the auditAssetId and counts
-      let auditAssetId: string | undefined;
-      let auditNotesCount = 0;
-      let auditImagesCount = 0;
-      if (auditSessionId && asset.id) {
-        const auditAsset = await db.auditAsset.findFirst({
-          where: {
-            auditSessionId,
-            assetId: asset.id,
-          },
-          select: { id: true },
-        });
-        auditAssetId = auditAsset?.id;
-        if (auditAssetId) {
-          const [notesCount, imagesCount] = await Promise.all([
-            db.auditNote.count({
-              where: {
+        return data(
+          payload({
+            qr: {
+              type: "asset" as const,
+              asset: await serializeScannedAsset({
+                asset,
+                organizationId,
                 auditSessionId,
-                auditAssetId,
-              },
-            }),
-            db.auditImage.count({
-              where: {
-                auditSessionId,
-                auditAssetId,
-              },
-            }),
-          ]);
-          auditNotesCount = notesCount;
-          auditImagesCount = imagesCount;
-        }
-      }
-
-      // When the scanner provides a destination (location / kit /
-      // booking), attach the same strict-available pool the
-      // manage-assets picker shows so the row label + qty input bound
-      // are consistent across both UX surfaces.
-      const pickerMeta: ScannerPickerMeta | null =
-        pickerContext && asset.id
-          ? await getScannerPickerMeta({
-              assetId: asset.id,
-              organizationId,
-              context: pickerContext,
-            })
-          : null;
-
-      return data(
-        payload({
-          qr: {
-            type: "asset" as const,
-            asset: {
-              // Collapse the model-image cascade into the flat image fields
-              // the scanner drawers read; the nested relation is dropped so
-              // the row carries one source of truth for the image.
-              ...serializeAssetImage(asset),
-              auditAssetId,
-              auditNotesCount,
-              auditImagesCount,
-              pickerMeta,
+                pickerContext,
+              }),
             },
-          },
-        })
-      );
+          })
+        );
+      }
+
+      // A printed label can carry a SAM-shaped value that the workspace
+      // registered as a BARCODE rather than as an asset's SAM id. Scanner mode
+      // (keyboard wedge or typed input) tests the SAM pattern before anything
+      // else and sends every match here, so without this fallback those labels
+      // dead-end on the error below even though the workspace holds the code.
+      // Camera scans escape it already: they carry their symbology and go to
+      // `get-scanned-barcode` instead.
+      //
+      // Gated on `canUseBarcodes` — the flag `requirePermission` resolves from
+      // the workspace — so this endpoint refuses barcode data on exactly the
+      // same terms as its camera-scan sibling.
+      const barcode: ScannedBarcodeMatch | null = canUseBarcodes
+        ? await getBarcodeByValue({
+            // The raw scanned string, not the normalized SAM id: barcode
+            // values are matched original-case first, then uppercased.
+            value: qrId,
+            organizationId,
+            include: {
+              asset: { include: assetInclude },
+              kit: { include: kitInclude },
+            },
+          })
+        : null;
+
+      if (barcode?.asset || barcode?.kit) {
+        await recordResolvedScan({
+          codeType: ScanCodeType.BARCODE,
+          barcodeId: barcode.id,
+          assetId: barcode.asset?.id ?? null,
+          kitId: barcode.asset ? null : barcode.kit?.id ?? null,
+        });
+      }
+
+      if (barcode?.asset) {
+        return data(
+          payload({
+            qr: {
+              type: "asset" as const,
+              asset: await serializeScannedAsset({
+                asset: barcode.asset,
+                organizationId,
+                auditSessionId,
+                pickerContext,
+              }),
+            },
+          })
+        );
+      }
+
+      if (barcode?.kit) {
+        return data(
+          payload({ qr: { type: "kit" as const, kit: barcode.kit } })
+        );
+      }
+
+      // Nothing carries this value. A barcode that exists but is linked to
+      // neither an asset nor a kit lands here too: it resolves to no item, and
+      // the response must not reveal that a row exists for it.
+      throw new ShelfError({
+        cause: null,
+        message:
+          "This SAM ID doesn't exist or it doesn't belong to your current organization.",
+        title: "SAM ID not found",
+        additionalData: { sequentialId, shouldSendNotification: false },
+        label: "Scan",
+        shouldBeCaptured: false,
+      });
     }
 
     const include = {
@@ -257,50 +411,12 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       });
     }
 
-    // If audit session ID provided, fetch the auditAssetId and counts
-    let auditAssetId: string | undefined;
-    let auditNotesCount = 0;
-    let auditImagesCount = 0;
-    if (auditSessionId && qr.asset?.id) {
-      const auditAsset = await db.auditAsset.findFirst({
-        where: {
-          auditSessionId,
-          assetId: qr.asset.id,
-        },
-        select: { id: true },
-      });
-      auditAssetId = auditAsset?.id;
-      if (auditAssetId) {
-        const [notesCount, imagesCount] = await Promise.all([
-          db.auditNote.count({
-            where: {
-              auditSessionId,
-              auditAssetId,
-            },
-          }),
-          db.auditImage.count({
-            where: {
-              auditSessionId,
-              auditAssetId,
-            },
-          }),
-        ]);
-        auditNotesCount = notesCount;
-        auditImagesCount = imagesCount;
-      }
-    }
-
-    // See the sequential-id branch above for context. Same attachment
-    // shape so consumers can read `qr.asset.pickerMeta` regardless of
-    // which lookup matched.
-    const pickerMeta: ScannerPickerMeta | null =
-      pickerContext && qr.asset?.id
-        ? await getScannerPickerMeta({
-            assetId: qr.asset.id,
-            organizationId,
-            context: pickerContext,
-          })
-        : null;
+    await recordResolvedScan({
+      codeType: ScanCodeType.QR,
+      qrId: qr.id,
+      assetId: qr.assetId,
+      kitId: qr.kitId,
+    });
 
     return data(
       payload({
@@ -308,16 +424,12 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
           ...qr,
           type: qr.asset ? "asset" : qr.kit ? "kit" : undefined,
           asset: qr.asset
-            ? {
-                // Collapse the model-image cascade into the flat image
-                // fields the scanner drawers read; the nested relation is
-                // dropped so the row carries one source of truth.
-                ...serializeAssetImage(qr.asset),
-                auditAssetId,
-                auditNotesCount,
-                auditImagesCount,
-                pickerMeta,
-              }
+            ? await serializeScannedAsset({
+                asset: qr.asset,
+                organizationId,
+                auditSessionId,
+                pickerContext,
+              })
             : undefined,
         },
       })

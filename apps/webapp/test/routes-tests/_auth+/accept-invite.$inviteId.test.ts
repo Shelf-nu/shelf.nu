@@ -20,11 +20,38 @@
  *
  * detail.dev finding D070.
  *
+ * Accepting also creates an email/password account for an invitee who has
+ * none. An address the SSO decision refuses for its domain could never use
+ * that account, so it is told to use SSO before anything is created; an SSO
+ * account (refused only for being SSO) still accepts.
+ *
  * @see {@link file://./../../../app/routes/_auth+/accept-invite.$inviteId.tsx}
  */
 
-// why: preventing Prisma from trying to connect to a real database during tests
-vi.mock("~/database/db.server", () => ({ db: {} }));
+const { mockInviteFindFirst } = vi.hoisted(() => ({
+  mockInviteFindFirst: vi.fn(),
+}));
+// why: preventing Prisma from trying to connect to a real database during
+// tests; the invite lookup supplies the address the SSO decision is asked about
+vi.mock("~/database/db.server", () => ({
+  db: { invite: { findFirst: mockInviteFindFirst } },
+}));
+
+const { mockGetLegacyLoginDecision } = vi.hoisted(() => ({
+  mockGetLegacyLoginDecision: vi.fn(),
+}));
+// why: the decision has its own tests (sso-enforcement.server.test.ts); here
+// only what acceptance does with its answer matters.
+vi.mock("~/modules/auth/sso-enforcement.server", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("~/modules/auth/sso-enforcement.server")
+    >();
+  return {
+    createSsoRequiredError: actual.createSsoRequiredError,
+    getLegacyLoginDecision: mockGetLegacyLoginDecision,
+  };
+});
 
 // why: mocking Remix's data() so the action's error path returns a readable
 // Response rather than an internal payload object
@@ -61,6 +88,7 @@ vi.mock("~/modules/organization/context.server", () => ({
   setSelectedOrganizationIdCookie: vi.fn().mockResolvedValue("org-cookie"),
 }));
 
+import { signInWithEmail } from "~/modules/auth/service.server";
 import { updateInviteStatus } from "~/modules/invite/service.server";
 import { action } from "~/routes/_auth+/accept-invite.$inviteId";
 // The real secret, stubbed by test/setup-test-env.ts — signing with the same
@@ -94,6 +122,10 @@ function accept({ inviteId, token }: { inviteId: string; token: string }) {
 describe("accept-invite action", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockInviteFindFirst.mockResolvedValue({
+      inviteeEmail: "invitee@example.com",
+    });
+    mockGetLegacyLoginDecision.mockResolvedValue({ allowed: true });
     (updateInviteStatus as any).mockResolvedValue({
       status: "ACCEPTED",
       organizationId: "org-1",
@@ -142,5 +174,83 @@ describe("accept-invite action", () => {
     });
 
     expect(updateInviteStatus).not.toHaveBeenCalled();
+  });
+
+  /**
+   * `updateInviteStatus` keys the account on the normalised address, so the
+   * sign-in has to use the same form. A stored invite can still hold the
+   * capitals of the CSV row it came from.
+   */
+  it("signs in with the normalised address when the stored invite holds capitals", async () => {
+    (updateInviteStatus as any).mockResolvedValue({
+      status: "ACCEPTED",
+      organizationId: "org-1",
+      inviteeEmail: "Invitee@Example.com",
+    });
+
+    await accept({ inviteId: "real-invite", token: tokenFor("real-invite") });
+
+    expect(signInWithEmail).toHaveBeenCalledWith(
+      "invitee@example.com",
+      expect.any(String)
+    );
+  });
+
+  it("forgets the list settings the browser kept when it signs the invitee in", async () => {
+    vi.mocked(signInWithEmail).mockResolvedValueOnce({
+      userId: "user-1",
+    } as never);
+
+    const response = (await action({
+      request: new Request("https://app.shelf.nu/accept-invite/real-invite", {
+        method: "POST",
+        headers: {
+          Cookie: "org-9_bookingFilter_v2=cz1aWg%3D%3D; user-prefs=e30%3D",
+        },
+        body: new URLSearchParams({ token: tokenFor("real-invite") }),
+      }),
+      params: { inviteId: "real-invite" },
+      context: { isAuthenticated: false, setSession: vi.fn() },
+    } as unknown as Parameters<typeof action>[0])) as unknown as Response;
+
+    expect(response.headers.getSetCookie()).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^org-9_bookingFilter_v2=;.*Max-Age=0/),
+        expect.stringMatching(/^user-prefs=.*Max-Age=0/),
+      ])
+    );
+  });
+
+  it("tells an invitee on an SSO domain to use SSO before creating anything", async () => {
+    mockGetLegacyLoginDecision.mockResolvedValue({
+      allowed: false,
+      reason: "sso_domain",
+    });
+
+    const result = (await accept({
+      inviteId: "real-invite",
+      token: tokenFor("real-invite"),
+    })) as unknown as Response;
+
+    expect(result.status).toBe(403);
+    expect(await result.text()).toContain("Please use Login with SSO.");
+    expect(mockGetLegacyLoginDecision).toHaveBeenCalledWith(
+      "invitee@example.com"
+    );
+    // The assertion that matters: no account is created, no sign-in tried.
+    expect(updateInviteStatus).not.toHaveBeenCalled();
+    expect(signInWithEmail).not.toHaveBeenCalled();
+  });
+
+  it("still accepts for an existing SSO account", async () => {
+    // An SSO user is only attached to the workspace, then signs in with SSO.
+    mockGetLegacyLoginDecision.mockResolvedValue({
+      allowed: false,
+      reason: "sso_account",
+    });
+
+    await accept({ inviteId: "real-invite", token: tokenFor("real-invite") });
+
+    expect(updateInviteStatus).toHaveBeenCalledTimes(1);
   });
 });

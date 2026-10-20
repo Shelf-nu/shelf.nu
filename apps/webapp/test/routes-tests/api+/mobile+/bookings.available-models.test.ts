@@ -25,6 +25,7 @@ import { getBookingModelTabData } from "~/modules/booking-model-request/service.
 import { loader } from "~/routes/api+/mobile+/bookings.available-models";
 
 import { assertIsDataWithResponseInit } from "@helpers/assertions";
+import { mobileUserContext } from "@helpers/mobile-user-context";
 
 // @vitest-environment node
 
@@ -72,14 +73,10 @@ const ORG_ID = "org-1";
 const BOOKING_ID = "booking-1";
 
 function withRole(role: OrganizationRoles) {
-  getMobileUserContextMock.mockResolvedValue({
-    role,
+  getMobileUserContextMock.mockResolvedValue(
     // The guard reads the full array, not roles[0].
-    roles: [role],
-    canUseBarcodes: true,
-    canUseAudits: true,
-    canSeeAllCustody: true,
-  });
+    mobileUserContext({ roles: [role] })
+  );
 }
 
 function makeArgs() {

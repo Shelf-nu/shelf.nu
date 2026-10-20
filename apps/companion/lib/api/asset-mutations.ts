@@ -22,8 +22,10 @@ import type {
   UpdateAssetPayload,
   UpdateAssetResponse,
   DeleteAssetResponse,
+  ReinstateAssetResponse,
   UpdateImageResponse,
   AdjustQuantityResponse,
+  ManagePlacementsResponse,
 } from "./types";
 
 export const assetMutationsApi = {
@@ -50,6 +52,9 @@ export const assetMutationsApi = {
       {
         method: "POST",
         body: JSON.stringify({ name }),
+        // why: not retried. Each call creates a tag, so a request that timed
+        // out after the server had already written it would leave two.
+        retry: false,
       }
     );
     if (!result.error) invalidateResponseCache("/api/mobile/tags");
@@ -105,6 +110,9 @@ export const assetMutationsApi = {
     apiFetch<CreateAssetResponse>(`/api/mobile/asset/create?orgId=${orgId}`, {
       method: "POST",
       body: JSON.stringify(payload),
+      // why: not retried. Each call records a new row, so a request that
+      // timed out after the server had already written it would leave two.
+      retry: false,
     }),
 
   /** Update an existing asset (partial update -- only provided fields change) */
@@ -114,12 +122,56 @@ export const assetMutationsApi = {
       body: JSON.stringify(payload),
     }),
 
-  /** Delete an asset */
-  deleteAsset: (orgId: string, assetId: string) =>
+  /**
+   * Replace a QUANTITY_TRACKED asset's manual placement set (spread units
+   * across locations at per-location quantities). Mobile twin of the web
+   * "Manage placements" dialog — both call the same server service, which
+   * owns the invariants (sum within the row-locked total, one row per
+   * location, org scoping) and leaves kit-driven rows untouched. An empty
+   * array unplaces the asset. Idempotent (a retry re-submits the same full
+   * set), so the default timeout retry stays on.
+   */
+  managePlacements: async (
+    orgId: string,
+    assetId: string,
+    placements: { locationId: string; quantity: number }[]
+  ) => {
+    const result = await apiFetch<ManagePlacementsResponse>(
+      `/api/mobile/asset/manage-placements?orgId=${orgId}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ assetId, placements }),
+      }
+    );
+    if (!result.error) invalidateResponseCache("/api/mobile/locations");
+    return result;
+  },
+
+  /**
+   * Delete an asset. `confirmation` is the title the user typed in the delete
+   * sheet; the server checks it once every supported build sends it (#3175).
+   */
+  deleteAsset: (orgId: string, assetId: string, confirmation: string) =>
     apiFetch<DeleteAssetResponse>(`/api/mobile/asset/delete?orgId=${orgId}`, {
       method: "POST",
-      body: JSON.stringify({ assetId }),
+      body: JSON.stringify({ assetId, confirmation }),
     }),
+
+  /**
+   * Reinstate an archived asset: it becomes active, bookable and changeable
+   * again. Admins and owners only (`asset: archive`). The server refuses an
+   * asset whose kit is in custody or checked out. Not retried: a retry after
+   * a slow success would read "not archived" and report a failure.
+   */
+  reinstateAsset: (orgId: string, assetId: string) =>
+    apiFetch<ReinstateAssetResponse>(
+      `/api/mobile/asset/reinstate?orgId=${orgId}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ assetId }),
+        retry: false,
+      }
+    ),
 
   /**
    * Adjust total stock of a QUANTITY_TRACKED asset (restock / remove /

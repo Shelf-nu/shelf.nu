@@ -1,10 +1,6 @@
 import { useState } from "react";
 import type { RenderableTreeNode } from "@markdoc/markdoc";
-import {
-  AssetStatus,
-  CustomFieldType,
-  OrganizationRoles,
-} from "@prisma/client";
+import { AssetStatus, CustomFieldType } from "@prisma/client";
 import type {
   MetaFunction,
   ActionFunctionArgs,
@@ -14,6 +10,10 @@ import { data, useFetcher, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { CustodyCard } from "~/components/assets/asset-custody-card";
+import {
+  AssetLastAuditCard,
+  LAST_AUDIT_CARD_RECENT_LIMIT,
+} from "~/components/assets/asset-last-audit-card";
 import { AssetReminderCards } from "~/components/assets/asset-reminder-cards";
 import { MoveUnitsDialog } from "~/components/assets/move-units-dialog";
 import { QuantityCustodyList } from "~/components/assets/quantity-custody-list";
@@ -48,11 +48,14 @@ import {
 } from "~/components/shared/tooltip";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
+import { useAssetCustodySources } from "~/hooks/use-asset-custody-sources";
 import { useDateFormatter } from "~/hooks/use-date-formatter";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { usePosition } from "~/hooks/use-position";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { getAssetAvailability } from "~/modules/asset/availability.server";
 import { getAssetOverviewFields } from "~/modules/asset/fields";
+import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
 import {
   MOVE_UNITS_INTENT_FIELD,
   type MoveAxis,
@@ -79,16 +82,19 @@ import {
   isQuantityTracked,
 } from "~/modules/asset/utils";
 import { getRemindersForOverviewPage } from "~/modules/asset-reminder/service.server";
-import { getPrimaryCustody } from "~/modules/custody/utils";
+import { getAssetAuditHistory } from "~/modules/audit/asset-audit-history.server";
+import { getCustodyCardHolderUserId } from "~/modules/custody/utils";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { moveAssetKitUnits } from "~/modules/kit/service.server";
 import { generateQrObj } from "~/modules/qr/utils.server";
 import { getLastScanForViewer } from "~/modules/scan/service.server";
 import { getTeamMembersForQuantityCustody } from "~/modules/team-member/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { assetDescriptionSchema } from "~/utils/asset-description";
 import { formatAssetValueWithBreakdown } from "~/utils/asset-value";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint } from "~/utils/client-hints";
+import { ASSET_DESCRIPTION_MAX_LENGTH } from "~/utils/constants";
 import { formatCurrency } from "~/utils/currency";
 import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import { buildCustomFieldLinkHref } from "~/utils/custom-field-link";
@@ -150,8 +156,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userOrganizations,
       currentOrganization,
       canUseBarcodes,
-      role,
-      canSeeAllCustody,
+      access,
     } = await requirePermission({
       userId,
       request,
@@ -176,12 +181,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       organizationId,
       userOrganizations,
       request,
-      include: getAssetOverviewFields(id, canUseBarcodes),
+      include: getAssetOverviewFields(canUseBarcodes),
     });
 
     /**
-     * We get the first QR code(for now we can only have 1)
-     * And using the ID of tha qr code, we find the latest scan.
+     * The latest scan of this asset, whichever code was scanned (QR, barcode
+     * or SAM ID).
      *
      * `getLastScanForViewer` applies the `scan:read` gate SERVER-SIDE and
      * returns null without it. The parsed scan carries the scanner's name and
@@ -189,13 +194,30 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * `<ScanDetails>` behind the same check, but a client-side check only
      * hides the data — BASE and SELF_SERVICE hold `scan: []` and were still
      * receiving all of it in the page payload.
+     *
+     * Read alongside it: the "Last audit" card's history. Gated server-side by
+     * the same rule as the "Last audit date" column: only callers who see
+     * every audit, in a workspace with the audits add-on, receive it. Everyone
+     * else gets null and no card, so no audit dates reach roles whose audits
+     * are assignment-scoped.
      */
-    const lastScan = await getLastScanForViewer({
-      qrId: asset.qrCodes[0]?.id,
-      userId,
-      organizationId,
-      roles,
-    });
+    const canSeeAuditHistory =
+      lastAuditDateAccessFor(access, currentOrganization) === "available";
+    const [lastScan, auditHistory] = await Promise.all([
+      getLastScanForViewer({
+        target: { assetId: asset.id },
+        userId,
+        organizationId,
+        roles,
+      }),
+      canSeeAuditHistory
+        ? getAssetAuditHistory({
+            assetId: asset.id,
+            organizationId,
+            limit: LAST_AUDIT_CARD_RECENT_LIMIT,
+          })
+        : null,
+    ]);
 
     const qrObj = await generateQrObj({
       assetId: asset.id,
@@ -273,25 +295,20 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     /**
      * For QUANTITY_TRACKED assets, fetch team members for the custody
-     * dialog. Self-service users are scoped to only their own record.
+     * dialog, scoped by the caller's custody assignment scope.
      */
     const { teamMembers, totalTeamMembers } = isQuantityTracked(asset)
       ? await getTeamMembersForQuantityCustody({
           organizationId,
           request,
           userId,
-          // The rule, not a role check: `isSelfService` was false for BASE, so
-          // the seed shipped the whole roster — with every user's email and
-          // Stripe id — to a role that cannot assign custody at all.
-          role,
-          canSeeAllCustody,
+          access,
         })
       : { teamMembers: [], totalTeamMembers: 0 };
 
-    // `bookingAssets` is already the asset's current booking: the query
-    // filters to ONGOING/OVERDUE and excludes bookings this asset has been
-    // partially checked in from, so the first row is the one the page shows.
-    // Nothing further is derived from it here.
+    // `bookingAssets` is already the asset's current booking: the query keeps
+    // only the slice that is out (`CURRENT_BOOKING_SLICE_FILTER`), so the first
+    // row is the one the page shows. Nothing further is derived from it here.
     /** We only need customField with same category of asset or without any category */
     const customFields = asset.categoryId
       ? asset.customFields.filter(
@@ -388,16 +405,34 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         )
       : 0;
 
+    /**
+     * How many OTHER people hold custody, counted by person before the
+     * custodians are redacted below. One person can hold several rows (one
+     * per source location, plus kit-inherited ones), and once redacted those
+     * rows no longer say whose they are. Only read when the viewer cannot see
+     * everyone's custody.
+     */
+    const otherCustodyHolders = access.custody.seeAll
+      ? 0
+      : new Set(
+          (asset.custody ?? [])
+            .filter(
+              (c) => c.custodian?.userId !== userId && c.custodian?.id != null
+            )
+            .map((c) => c.custodian.id)
+        ).size;
+
     return payload({
       // Same reasoning as the parent detail route: this payload carries
       // `custody[].custodian` and is reachable with `asset: read`.
       asset: redactCustodianForViewer([{ ...asset, customFields }], {
-        canSeeAllCustody,
+        canSeeAllCustody: access.custody.seeAll,
         userId,
       })[0],
       currentOrganization,
       userId,
       lastScan,
+      auditHistory,
       header,
       locale,
       timeZone,
@@ -413,6 +448,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       allCustomFieldDefs,
       moveDestinations,
       unplacedQuantity,
+      otherCustodyHolders,
     });
   } catch (cause) {
     const reason = makeShelfError(cause);
@@ -504,8 +540,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
       switch (fieldName) {
         case "description": {
+          const { fieldValue: rawDescription } = parseData(
+            formData,
+            z.object({ fieldValue: assetDescriptionSchema.optional() })
+          );
           /** Trim whitespace; treat empty as empty string (Prisma allows it) */
-          const description = (fieldValue ?? "").trim();
+          const description = (rawDescription ?? "").trim();
           await updateAsset({
             id,
             description,
@@ -763,14 +803,21 @@ export default function AssetOverview() {
     locale,
     qrObj,
     lastScan,
+    auditHistory,
     currentOrganization,
     userId,
     quantityData,
     allCustomFieldDefs,
     moveDestinations,
     unplacedQuantity,
+    otherCustodyHolders,
   } = useLoaderData<typeof loader>();
   const { prefs } = useDateFormatter();
+  /**
+   * The pool's sources from the asset detail loader, shared with the header
+   * actions menu so every Assign / Adjust dialog shows the same numbers.
+   */
+  const custodySources = useAssetCustodySources();
 
   /** Route URL used by all three `MoveUnitsDialog` form submissions. */
   const moveUnitsActionUrl = `/assets/${asset.id}/overview`;
@@ -813,14 +860,15 @@ export default function AssetOverview() {
     "NewQuestionWizardScreen",
     AvailabilityForBookingFormSchema
   );
-  const { roles, isSelfService } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
+  const assignsSelfOnly = useRoleAccess().custody.assign === "self";
   const { canUseBarcodes } = useBarcodePermissions();
   const canUpdateAvailability = userHasPermission({
     roles,
     entity: PermissionEntity.asset,
     action: PermissionAction.update,
   });
-  const canCustody = userHasPermission({
+  const hasCustodyPermission = userHasPermission({
     roles,
     entity: PermissionEntity.asset,
     action: PermissionAction.custody,
@@ -829,7 +877,21 @@ export default function AssetOverview() {
     roles,
     organization: currentOrganization,
   });
-  const canEditAsset = canUpdateAvailability;
+  /**
+   * Archived assets are frozen: reinstate or permanently delete, nothing else
+   * (issue #382). Folding `archivedAt` in here rather than at each control
+   * means every inline editor, placement action, move-unit action and custody
+   * control on this route inherits the freeze from one place, and the page
+   * cannot drift as controls are added. Reinstate lives in the Actions
+   * dropdown, so it is unaffected.
+   *
+   * Comments are the one deliberate exception: the Activity tab keeps its
+   * composer on an archived asset, so people can record why it was archived
+   * or what became of it. A comment changes nothing about the asset itself.
+   */
+  const assetIsFrozen = !!asset?.archivedAt;
+  const canEditAsset = canUpdateAvailability && !assetIsFrozen;
+  const canCustody = hasCustodyPermission && !assetIsFrozen;
 
   return (
     <div>
@@ -1056,11 +1118,8 @@ export default function AssetOverview() {
                       name="fieldValue"
                       defaultValue={asset.description ?? ""}
                       className="w-full"
-                      maxLength={1000}
+                      characterLimit={ASSET_DESCRIPTION_MAX_LENGTH}
                     />
-                    <p className="mt-1 text-xs text-gray-400">
-                      Maximum 1000 characters
-                    </p>
                   </div>
                 )}
               />
@@ -1462,18 +1521,35 @@ export default function AssetOverview() {
                       Available for bookings
                     </p>
                     <p className="text-[12px] text-gray-600">
-                      Asset is available for being used in bookings
+                      {/* An archived asset can't be booked whatever this says.
+                          The switch shows Off for it, and this line keeps the
+                          stored setting, which a reinstate brings back. */}
+                      {asset?.archivedAt
+                        ? `Archived assets can't be booked. When reinstated, it will be ${
+                            asset.availableToBook ? "available" : "unavailable"
+                          } for bookings again.`
+                        : "Asset is available for being used in bookings"}
                     </p>
                   </div>
                   <Switch
+                    // Remount when the archive state flips, so defaultChecked
+                    // is read again rather than kept from the previous state.
+                    key={asset?.archivedAt ? "archived" : "active"}
                     name={zo.fields.availableToBook()}
                     disabled={
-                      !canUpdateAvailability || isFormProcessing(fetcher.state)
-                    } // Disable for self service users
-                    defaultChecked={asset?.availableToBook}
+                      !canUpdateAvailability ||
+                      isFormProcessing(fetcher.state) ||
+                      // Archived assets are frozen: no actions except reinstate.
+                      !!asset?.archivedAt
+                    } // Disable for self service users + archived assets
+                    defaultChecked={
+                      !asset?.archivedAt && asset?.availableToBook
+                    }
                     required
                     title={
-                      !canUpdateAvailability
+                      asset?.archivedAt
+                        ? "This asset is archived. Reinstate it to change availability."
+                        : !canUpdateAvailability
                         ? "You do not have the permissions to change availability"
                         : "Toggle availability"
                     }
@@ -1485,6 +1561,8 @@ export default function AssetOverview() {
           </When>
 
           <AssetReminderCards className="my-2" />
+
+          <AssetLastAuditCard assetId={asset.id} history={auditHistory} />
 
           {(() => {
             /**
@@ -1707,9 +1785,21 @@ export default function AssetOverview() {
                           </div>
                           <div className="flex shrink-0 items-center gap-2">
                             {isQty ? (
-                              <span className="text-xs tabular-nums text-gray-500">
-                                {p.quantity} {unit}
-                              </span>
+                              <PlacementCount
+                                quantity={p.quantity}
+                                unit={unit}
+                                inCustody={
+                                  // For a pool placed at two or more locations, how
+                                  // many of this location's units are out with
+                                  // people. Manual rows only: kit-held units
+                                  // follow the kit. Never names anyone.
+                                  custodySources?.multiSource && !p.viaKit
+                                    ? custodySources.options.find(
+                                        (o) => o.locationId === p.locationId
+                                      )?.inCustody ?? 0
+                                    : 0
+                                }
+                              />
                             ) : null}
                             {/*
                              * Move-units affordance — manual rows only. Kit-driven
@@ -1760,8 +1850,13 @@ export default function AssetOverview() {
               custody={asset?.custody || null}
               hasPermission={userCanViewSpecificCustody({
                 roles,
-                custodianUserId: getPrimaryCustody(asset?.custody)?.custodian
-                  ?.user?.id,
+                // The holder the card shows, so a viewer always sees custody
+                // that is their own — including a booking they hold.
+                custodianUserId: getCustodyCardHolderUserId({
+                  custody: asset?.custody,
+                  booking,
+                  viewerUserId: userId,
+                }),
                 organization: currentOrganization,
                 currentUserId: userId,
               })}
@@ -1785,6 +1880,7 @@ export default function AssetOverview() {
               reservingBookingCount={quantityData?.reservingBookingCount}
               checkedOutQuantity={quantityData?.checkedOut}
               canUpdate={canUpdateAvailability}
+              custodySources={custodySources}
             />
           ) : null}
 
@@ -1832,11 +1928,13 @@ export default function AssetOverview() {
               unitOfMeasure={asset.unitOfMeasure}
               consumptionType={asset.consumptionType}
               availableQuantity={quantityData?.custodyAvailable}
-              isSelfService={isSelfService}
+              ownRowsOnly={assignsSelfOnly}
               currentUserId={userId}
               canViewAllCustody={canViewAllCustody}
               canCustody={canCustody}
               inKit={getPrimaryKit<{ id: string; name: string }>(asset)}
+              sources={custodySources}
+              otherHoldersCount={otherCustodyHolders}
             />
           ) : null}
 
@@ -1863,7 +1961,11 @@ export default function AssetOverview() {
               action: PermissionAction.read,
             })}
           >
-            <ScanDetails lastScan={lastScan} />
+            <ScanDetails
+              lastScan={lastScan}
+              target={{ assetId: asset.id }}
+              itemName={asset.title}
+            />
           </When>
         </div>
       </div>
@@ -1878,6 +1980,38 @@ export default function AssetOverview() {
  * `buildCustomFieldValue` treats as undefined (no value stored).
  * This prevents "Not set" booleans from being forced to "no" on save.
  */
+/**
+ * The unit count on a "Placed at locations" row, with "N in custody" on a
+ * second, smaller line when some of the location's units are out with
+ * people. Stacked rather than inline so a long location name keeps its room
+ * in the narrow sidebar.
+ */
+function PlacementCount({
+  quantity,
+  unit,
+  inCustody,
+}: {
+  quantity: number;
+  unit: string;
+  inCustody: number;
+}) {
+  if (inCustody <= 0) {
+    return (
+      <span className="text-xs tabular-nums text-gray-500">
+        {quantity} {unit}
+      </span>
+    );
+  }
+  return (
+    <span className="flex flex-col items-end text-xs tabular-nums text-gray-500">
+      <span>
+        {quantity} {unit}
+      </span>
+      <span className="text-gray-400">{inCustody} in custody</span>
+    </span>
+  );
+}
+
 function BooleanCustomFieldEditor({
   name,
   label,

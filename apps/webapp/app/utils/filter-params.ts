@@ -9,8 +9,21 @@ export const NON_FILTER_PARAMS = new Set([
   "sortBy",
   "orderBy",
   "orderDirection",
+  // The asset index's model view orders its rollup through its own two params,
+  // because the keys it offers name model columns rather than asset ones. They
+  // choose an ordering, so they belong here beside `sortBy`. Counted as filters
+  // instead, clicking a column header would put the index into its
+  // filters-are-active state, where an empty result is blamed on filters the
+  // reader never applied and the offered remedy is to clear them.
+  "modelSortBy",
+  "modelSortDirection",
   "index",
   "view",
+  // `archived` is the Active/Archived/All VIEW dimension on the asset index
+  // (issue #382), not a filter the user applied. It must never count as one:
+  // an empty Archived view is "nothing archived", not "your filters exclude
+  // everything", and Clear Filters must not appear for a tab.
+  "archived",
 ]);
 
 /**

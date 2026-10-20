@@ -12,7 +12,7 @@ import Icon from "~/components/icons/icon";
 import { ChevronRight } from "~/components/icons/library";
 import When from "~/components/when/when";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import {
   PermissionAction,
   PermissionEntity,
@@ -22,6 +22,40 @@ import { tw } from "~/utils/tw";
 import { DeleteLocation } from "./delete-location";
 import { Button } from "../shared/button";
 import { MobileDropdownStyles } from "../shared/mobile-dropdown-styles";
+
+/** Which entries of the location actions menu the current member may use. */
+type LocationActionPermissions = {
+  canCreateAudit: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
+};
+
+/**
+ * Resolves the location menu entries from the member's roles, so each entry
+ * renders only when its route would accept the member.
+ *
+ * @returns One flag per menu entry
+ */
+function useLocationActionPermissions(): LocationActionPermissions {
+  const roles = useOrganizationRoles();
+  return {
+    canCreateAudit: userHasPermission({
+      roles,
+      entity: PermissionEntity.audit,
+      action: PermissionAction.create,
+    }),
+    canEdit: userHasPermission({
+      roles,
+      entity: PermissionEntity.location,
+      action: PermissionAction.update,
+    }),
+    canDelete: userHasPermission({
+      roles,
+      entity: PermissionEntity.location,
+      action: PermissionAction.delete,
+    }),
+  };
+}
 
 interface Props {
   location: {
@@ -38,8 +72,8 @@ const ConditionalActionsDropdown = ({
   location,
   assetCount,
   fullWidth,
-}: Props) => {
-  const { roles } = useUserRoleHelper();
+  permissions,
+}: Props & { permissions: LocationActionPermissions }) => {
   const hasChildLocations = (location.childCount ?? 0) > 0;
   const { ref: popoverContentRef, open, setOpen } = useControlledDropdownMenu();
   const [isStartAuditOpen, setIsStartAuditOpen] = useState(false);
@@ -66,7 +100,7 @@ const ConditionalActionsDropdown = ({
             width={fullWidth ? "full" : "auto"}
             data-test-id="assetActionsButton"
             className={tw(
-              "asset-actions hidden sm:flex",
+              "asset-actions hidden md:flex",
               fullWidth ? "w-full" : ""
             )}
           >
@@ -82,7 +116,7 @@ const ConditionalActionsDropdown = ({
           variant="secondary"
           width={fullWidth ? "full" : "auto"}
           data-test-id="assetActionsButton"
-          className={tw("asset-actions sm:hidden", fullWidth ? "w-full" : "")}
+          className={tw("asset-actions md:hidden", fullWidth ? "w-full" : "")}
           onClick={() => setOpen(true)}
         >
           <span className="flex items-center gap-2">
@@ -94,6 +128,7 @@ const ConditionalActionsDropdown = ({
 
         <PopoverPortal>
           <PopoverContent
+            data-mobile-sheet
             ref={popoverContentRef}
             tabIndex={-1}
             align="end"
@@ -105,15 +140,9 @@ const ConditionalActionsDropdown = ({
             }}
             className="order actions-dropdown static z-[99] !mt-0 w-screen rounded-b-none rounded-t-[4px] border border-gray-300 bg-white p-0 text-right md:static md:mt-auto md:w-[180px] md:rounded-t-[4px]"
           >
-            <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-full md:rounded-t-[4px]">
+            <div className="order fixed bottom-0 left-0 max-h-[85dvh] w-screen overflow-y-auto rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:max-h-none md:w-full md:overflow-visible md:rounded-t-[4px]">
               {/* Start Audit - only visible to users with audit create permission */}
-              <When
-                truthy={userHasPermission({
-                  roles,
-                  entity: PermissionEntity.audit,
-                  action: PermissionAction.create,
-                })}
-              >
+              <When truthy={permissions.canCreateAudit}>
                 <div className="border-b px-0 py-1 md:p-0">
                   <Button
                     type="button"
@@ -133,38 +162,42 @@ const ConditionalActionsDropdown = ({
               </When>
 
               {/* Edit location */}
-              <div className="border-b px-0 py-1 md:p-0">
-                <Button
-                  to="edit"
-                  icon="pen"
-                  role="link"
-                  variant="link"
-                  className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
-                  width="full"
-                  onClick={handleMenuClose}
-                >
-                  Edit
-                </Button>
-              </div>
+              <When truthy={permissions.canEdit}>
+                <div className="border-b px-0 py-1 md:p-0">
+                  <Button
+                    to="edit"
+                    icon="pen"
+                    role="link"
+                    variant="link"
+                    className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
+                    width="full"
+                    onClick={handleMenuClose}
+                  >
+                    Edit
+                  </Button>
+                </div>
+              </When>
 
               {/* Delete location */}
-              <div className="border-b px-0 py-1 md:p-0">
-                <DeleteLocation
-                  location={location}
-                  trigger={
-                    <Button
-                      type="button"
-                      variant="link"
-                      data-test-id="deleteAssetButton"
-                      icon="trash"
-                      className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
-                      width="full"
-                    >
-                      Delete
-                    </Button>
-                  }
-                />
-              </div>
+              <When truthy={permissions.canDelete}>
+                <div className="border-b px-0 py-1 md:p-0">
+                  <DeleteLocation
+                    location={location}
+                    trigger={
+                      <Button
+                        type="button"
+                        variant="link"
+                        data-test-id="deleteAssetButton"
+                        icon="trash"
+                        className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
+                        width="full"
+                      >
+                        Delete
+                      </Button>
+                    }
+                  />
+                </div>
+              </When>
 
               <div className="border-t p-4 md:hidden md:p-0">
                 <Button
@@ -199,6 +232,16 @@ const ConditionalActionsDropdown = ({
 
 export const ActionsDropdown = ({ location, assetCount, fullWidth }: Props) => {
   const isHydrated = useHydrated();
+  const permissions = useLocationActionPermissions();
+
+  // A member with no entry to use gets no menu rather than an empty one.
+  if (
+    !permissions.canCreateAudit &&
+    !permissions.canEdit &&
+    !permissions.canDelete
+  ) {
+    return null;
+  }
 
   if (!isHydrated) {
     return (
@@ -221,6 +264,7 @@ export const ActionsDropdown = ({ location, assetCount, fullWidth }: Props) => {
         location={location}
         assetCount={assetCount}
         fullWidth={fullWidth}
+        permissions={permissions}
       />
     </div>
   );

@@ -1,32 +1,18 @@
 /**
- * Pending Items List (shared between check-in and check-out drawers)
+ * Pending rows for the booking scan drawers (check-in and check-out).
  *
- * Extracted from `partial-checkin-drawer.tsx` so the same pending-list
- * rendering primitives (foldable kit groups, indented kit-child rows,
- * loose individual rows, loose qty-tracked rows with the "Check N
- * without scanning" affordance) can be reused by the check-out drawer.
+ * Renders what is still outstanding on the booking as table rows: foldable kit
+ * groups with their members indented, loose individual rows, and loose
+ * quantity-tracked rows with the "Check N without scanning" action. The caller
+ * boxes them in a `ScanItemGroup`, which owns the "Pending" header and folding.
  *
- * The visible difference between the two consumers is small enough to
- * collapse onto a single `mode: "checkin" | "checkout"` discriminator:
+ * One `mode: "checkin" | "checkout"` switches the small differences: the quick
+ * action's label, tooltip copy, and React key prefixes (so both modes can mount
+ * in one tree without colliding).
  *
- *  - Button label   — "Check in without scanning" vs
- *                     "Check out without scanning".
- *  - Tooltip text   — "still to reconcile" vs "still to check out".
- *  - Section header — "Pending check-in" / "Pending check-out" (the
- *                     caller already passes the full label to
- *                     `<SectionHeader />`; this just keeps the prop
- *                     surface symmetric).
- *  - React keys     — `pending-checkin-*` vs `pending-checkout-*` so a
- *                     hypothetical test that mounts both modes in the
- *                     same tree wouldn't collide.
- *
- * For `mode="checkin"` the rendered output is byte-identical to the
- * pre-extract inline definitions in `partial-checkin-drawer.tsx`.
- *
- * @see {@link file://./partial-checkin-drawer.tsx} — original home of
- *   these renderers; now delegates here.
- * @see {@link file://./partial-checkout-drawer.tsx} — second consumer
- *   wired in a follow-up commit.
+ * @see {@link file://./partial-checkin-drawer.tsx}
+ * @see {@link file://./partial-checkout-drawer.tsx}
+ * @see {@link file://../scan-item-group.tsx}
  */
 
 import { useState } from "react";
@@ -118,47 +104,6 @@ const COPY_BY_MODE: Record<PendingItemsListMode, ModeCopy> = {
     keyPrefix: "pending-checkout",
   },
 };
-
-/**
- * Section header row between drawer buckets. Purely visual — gives
- * operators a clear split between "checked in this session" (active
- * rows) and "pending" (untouched) so the presence/absence of a
- * disposition form isn't the sole signal. Two tones:
- *
- * - `"active"` — slightly tinted background, primary text. Marks the
- *   "in progress" section above scanned / quick-checked rows.
- * - `"muted"` — neutral gray background, dimmed text. Marks the
- *   "pending" section below.
- *
- * Renders as a full-width `<tr>` so it lives inside the existing
- * `<tbody>` without breaking DOM semantics.
- */
-export function SectionHeader({
-  label,
-  tone,
-}: {
-  label: string;
-  tone: "active" | "muted";
-}) {
-  const toneClass =
-    tone === "active"
-      ? "bg-blue-50 text-blue-800 border-t border-blue-100"
-      : "bg-gray-50 text-gray-600 border-t border-gray-100";
-
-  return (
-    <Tr key={`section-${tone}-${label}`} skipEntrance>
-      <td
-        colSpan={2}
-        className={tw(
-          "px-4 py-3 text-xs font-semibold uppercase tracking-wide md:px-6",
-          toneClass
-        )}
-      >
-        {label}
-      </td>
-    </Tr>
-  );
-}
 
 /**
  * Groups pending assets that belong to the same kit under a foldable kit
@@ -532,9 +477,8 @@ function renderPendingQtyAsset(
  *  3. Loose qty rows (`kitId == null` — e.g. the standalone slice of an
  *     asset that's also in a kit).
  *
- * `pendingCount` is supplied by the caller (rather than derived) because
- * the caller already computes it for its own header label and we want to
- * avoid recomputing/diverging.
+ * The rows only: the caller boxes them in a `ScanItemGroup`, which owns the
+ * "Pending" header, the count and folding.
  */
 export type PendingItemsListProps = {
   /** Direction this list renders for — drives small copy + key differences. */
@@ -558,18 +502,11 @@ export type PendingItemsListProps = {
    * + any per-mode focus management.
    */
   onQuickAction: (asset: QtyExpectedAsset) => void;
-  /**
-   * Total pending count (`pendingIndividuals.length +
-   * pendingQtyTracked.length`). Used to gate the muted section header.
-   */
-  pendingCount: number;
 };
 
 /**
  * Interleaves the three pending buckets (kit groups, loose individuals,
- * loose qty rows) under a single muted "Pending (N)" section header.
- * Returns `null` when there's nothing pending so the caller doesn't have
- * to gate on `pendingCount` itself.
+ * loose qty rows) as table rows.
  */
 export function PendingItemsList({
   mode,
@@ -577,7 +514,6 @@ export function PendingItemsList({
   pendingQtyTracked,
   kitMetaById,
   onQuickAction,
-  pendingCount,
 }: PendingItemsListProps): ReactNode {
   const copy = COPY_BY_MODE[mode];
 
@@ -618,13 +554,6 @@ export function PendingItemsList({
 
   return (
     <>
-      {/* Header for pending section. Same visual weight as the scanned
-          header but muted — reinforces the bucket split without
-          shouting. */}
-      {pendingCount > 0 ? (
-        <SectionHeader label={`Pending (${pendingCount})`} tone="muted" />
-      ) : null}
-
       {[...kitGroups.values()].map(({ kit, assets }) => (
         <PendingKitGroup
           key={`${copy.keyPrefix}-kit-${kit.id}`}
