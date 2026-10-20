@@ -15,7 +15,7 @@
 # beside the loop state, so re-running after a crash cannot double-post a
 # reply. Replies are outward-facing and cannot be taken back.
 #
-# @see .claude/skills/pr-review-loop/SKILL.md
+# @see .claude/skills/watchdog/SKILL.md
 
 set -uo pipefail
 

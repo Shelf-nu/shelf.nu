@@ -9,7 +9,7 @@ report is written in plain language.
 It is read-only. It never edits code and never posts to GitHub unless you ask
 after reading the report. The one exception is a "prove N" you request, which
 writes and then deletes a throwaway test. For handling CodeRabbit, Codex and Copilot comments
-after the review, use [`/pr-review-loop`](./pr-review-loop.md).
+after the review, use [`/watchdog`](./watchdog.md).
 
 ## Running it
 

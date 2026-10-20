@@ -34,6 +34,14 @@ import type { RoleAccess } from "~/utils/permissions/role-access";
 import { resolveCanImportAssets } from "~/utils/subscription.server";
 import type { UserNameFields } from "~/utils/user";
 import { resolveUserDisplayName } from "~/utils/user";
+import {
+  type LastAuditDateAccess,
+  LAST_AUDIT_DATE_COLUMN,
+  canQueryLastAuditDate,
+  isLastAuditDateParam,
+  stripHiddenAuditColumns,
+} from "./last-audit-date-access";
+import { lastAuditDateAccessFor } from "./last-audit-date-access.server";
 import { resolveBookableListScope } from "./list-scope.server";
 import type { BookableListScope } from "./list-scope.server";
 import { getStillOutBookingRowsByAsset } from "./quantity-breakdown.server";
@@ -468,6 +476,9 @@ export async function simpleModeLoader({
   return data(
     payload({
       header,
+      // Simple mode never shows the last audit date column; the field keeps
+      // the loader union uniform for the shared column renderer.
+      lastAuditDateAccess: "hidden" as LastAuditDateAccess,
       /**
        * `TeamMemberBadge` only decides whether to DRAW the custodian; the name
        * and `user.email` shipped in this payload regardless, so a restricted
@@ -682,11 +693,26 @@ export async function advancedModeLoader({
   role,
   currentOrganization,
   user,
-  settings,
+  settings: loadedSettings,
   canSeeAllCustody,
   access,
 }: Props) {
   const { locale, timeZone } = getClientHint(request);
+
+  // The last audit date follows audit visibility and availability. Strip the
+  // column before anything parses filters or renders columns from the settings.
+  const lastAuditDateAccess = lastAuditDateAccessFor(
+    access,
+    currentOrganization
+  );
+  const settings: AssetIndexSettings = {
+    ...loadedSettings,
+    columns: stripHiddenAuditColumns(
+      loadedSettings.columns as Column[],
+      lastAuditDateAccess
+    ),
+  };
+
   const assignsSelfOnly = access.custody.assign === "self";
   const honorArchivedView = canViewArchivedAssets(access);
 
@@ -695,7 +721,16 @@ export async function advancedModeLoader({
     filters,
     serializedCookie: filtersCookie,
     redirectNeeded,
-  } = await getAdvancedFiltersFromRequest(request, organizationId, settings);
+  } = await getAdvancedFiltersFromRequest(
+    request,
+    organizationId,
+    settings,
+    // A caller who may not query the last audit date has no chip or sort to
+    // clear a stale one with, so it is stripped from the URL and the cookie.
+    canQueryLastAuditDate(lastAuditDateAccess)
+      ? undefined
+      : isLastAuditDateParam
+  );
 
   const currentFilterParams = new URLSearchParams(filters || "");
   const searchParams = filters
@@ -731,11 +766,16 @@ export async function advancedModeLoader({
   // Parse and expand location hierarchy filters ONCE — this avoids redundant
   // DB calls that were previously happening in both getAllSelectedValuesFromFilters
   // and getAdvancedPaginatedAndFilterableAssets independently.
-  const parsedFilters = await parseFiltersWithHierarchy(
+  const allParsedFilters = await parseFiltersWithHierarchy(
     filters ?? "",
     settings.columns as Column[],
     organizationId
   );
+  // A locked column keeps its header but must never be queried, so its filter
+  // is dropped here for every consumer (asset query and model rollup).
+  const parsedFilters = canQueryLastAuditDate(lastAuditDateAccess)
+    ? allParsedFilters
+    : allParsedFilters.filter((f) => f.name !== LAST_AUDIT_DATE_COLUMN);
 
   const {
     selectedTags,
@@ -822,6 +862,7 @@ export async function advancedModeLoader({
           bookableScope: resolveBookableListScope({ access, userId }),
           preParsedFilters: parsedFilters,
           honorArchivedView,
+          lastAuditDateAccess,
           // Both arms carry the same keys so the caller reads them directly.
           // Discriminating a union by `in` here degrades to `unknown` at this
           // file's type complexity, and the failure lands on unrelated
@@ -1003,6 +1044,7 @@ export async function advancedModeLoader({
       timeZone,
       currentOrganization,
       settings,
+      lastAuditDateAccess,
       modelRollup,
       totalRollupAssets,
       modelSortBy,

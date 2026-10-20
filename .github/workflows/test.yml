@@ -225,7 +225,7 @@ jobs:
       - name: 📥 Install deps
         run: pnpm install --frozen-lockfile
 
-      - name: 🛠️ Run pr-review-loop bash suite
+      - name: 🛠️ Run watchdog bash suite
         run: pnpm test:tooling
 
   # NOTE: this job consumes secrets — see the SECURITY INVARIANT at the top of

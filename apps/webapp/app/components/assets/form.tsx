@@ -27,6 +27,8 @@ import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, assetImageValidateFileAtom } from "~/atoms/file";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
+import { useDiscardRemount } from "~/hooks/use-discard-remount";
+import { useTrackedFormRef } from "~/hooks/use-unsaved-changes";
 import { getPrimaryKit, isQuantityTracked } from "~/modules/asset/utils";
 import type {
   AssetEditLoaderData,
@@ -44,6 +46,7 @@ import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
+import { scrollToFirstErrorOnNextFrame } from "~/utils/scroll-to-error";
 import { tw } from "~/utils/tw";
 import {
   optionalNumberFromString,
@@ -68,6 +71,7 @@ import {
 } from "../forms/image-file-field";
 import Input from "../forms/input";
 import { RefererRedirectInput } from "../forms/referer-redirect-input";
+import { UnsavedChangesGuard } from "../forms/unsaved-changes-bar";
 import ImageWithPreview from "../image-with-preview/image-with-preview";
 import InlineEntityCreationDialog from "../inline-entity-creation-dialog/inline-entity-creation-dialog";
 import { Button } from "../shared/button";
@@ -265,8 +269,28 @@ type Props = Partial<
   bulkMode?: boolean;
 };
 
+/**
+ * Create and edit form for assets, with the unsaved-changes bar.
+ *
+ * Discard remounts the inner form (see `useDiscardRemount`), which resets
+ * every widget that keeps its value in React state.
+ *
+ * @param props - Current values when editing; omit them to create an asset
+ */
+export function AssetForm(props: Props) {
+  const { key, discard, discarded } = useDiscardRemount();
+  return (
+    <AssetFormInner
+      key={key}
+      {...props}
+      onDiscard={discard}
+      autoFocusName={!discarded}
+    />
+  );
+}
+
 // react-doctor:no-giant-component — deferred for follow-up refactor
-export const AssetForm = ({
+const AssetFormInner = ({
   id,
   sequentialId,
   title,
@@ -289,7 +313,14 @@ export const AssetForm = ({
   preferredBarcodeId,
   referer,
   bulkMode = false,
-}: Props) => {
+  onDiscard,
+  autoFocusName,
+}: Props & {
+  /** Resets the form to the loaded values (remounts it). */
+  onDiscard: () => void;
+  /** Focus the Name field on mount; false after a Discard. */
+  autoFocusName: boolean;
+}) => {
   const navigation = useNavigation();
   const { canUseBarcodes } = useBarcodePermissions();
   // Workspace's current code-display preference — used by PreferredBarcodeSelector
@@ -340,9 +371,14 @@ export const AssetForm = ({
   const zo = useZorm("NewAssetFormScreen", FormSchema);
   const disabled = isFormProcessing(navigation.state);
 
+  /** The form element, shared by Zorm and the unsaved-changes tracking. */
+  const { formRef, setFormRef } = useTrackedFormRef(zo.ref);
+
   // Focus the asset Title field on mount so create/edit pages start
   // ready for typing instead of relying on the removed autoFocus prop.
-  const titleInputRef = useAutoFocus<HTMLInputElement>();
+  const titleInputRef = useAutoFocus<HTMLInputElement>({
+    when: autoFocusName,
+  });
 
   // Extract custom field errors into a plain object to pass to AssetCustomFields
   // This avoids passing the complex zo object which causes React 19 issues
@@ -488,29 +524,26 @@ export const AssetForm = ({
   /**
    * Snapshot of the referer as it was when this form first mounted.
    *
-   * Deliberately ignores later updates to the `referer` prop — this is not a
+   * Deliberately ignores later updates to the `referer` prop: this is not a
    * stale-state bug. The Referer header is only meaningful at the moment the
-   * user arrives. Any in-route navigation re-runs the loader and overwrites it
-   * with this page's own URL: picking a Category navigates to
-   * `/assets/new?category=<id>` (see the effect below), so the prop becomes
-   * `/assets/new` and "where I came from" is lost. ~93% of assets carry a
-   * category, so that is the normal path, not an edge case.
+   * user arrives. Any in-route navigation re-runs the loader with this page's
+   * own URL as the Referer: picking an asset model navigates to
+   * `?category=<id>` (see `handleAssetModelChange`), so the loader's referer
+   * becomes `null` (it drops self-references) and "where I came from" is lost.
    *
-   * Capturing once keeps Cancel pointing at the user's real origin (including
-   * its filters) for the whole life of the form.
+   * Capturing once keeps Cancel and the post-save redirect pointing at the
+   * user's real origin (including its filters) for the whole life of the form.
    */
   const [initialReferer] = useState(referer);
 
   /**
    * Where Cancel goes. The referer is best-effort and unusable in three
    * separate cases (absent prop, no Referer header, and self-reference).
-   * `resolveCancelTo` owns all three — see its JSDoc.
+   * `resolveCancelTo` owns all three, see its JSDoc.
    *
-   * The self-reference guard is still load-bearing even with the snapshot
-   * above: if this form ever mounts *after* an in-route navigation, the very
-   * first value it captures is already self-referential. Worst case it falls
-   * back to the index, which is exactly the pre-snapshot behaviour, so the
-   * snapshot can only ever improve the destination, never worsen it.
+   * The asset loaders already drop a self-referer, so the guard here is a
+   * fallback for any caller that passes one: the destination becomes the
+   * asset (or the index), never the form itself.
    */
   const cancelTo = resolveCancelTo({
     referer: initialReferer,
@@ -659,8 +692,16 @@ export const AssetForm = ({
         success={actionData?.bulkSuccess}
         sampleTitles={bulkPreviewTitles}
       />
+      {/* Bulk create has its own success modal flow, so it is not tracked. */}
+      {bulkMode ? null : (
+        <UnsavedChangesGuard
+          formRef={formRef}
+          actionData={actionData}
+          onDiscard={onDiscard}
+        />
+      )}
       <Form
-        ref={zo.ref}
+        ref={setFormRef}
         method="post"
         action="."
         className="flex w-full flex-col gap-2"
@@ -679,18 +720,25 @@ export const AssetForm = ({
               setConsumptionTypeError("Please select a consumption type");
               e.preventDefault();
               e.stopPropagation();
-              return false;
             } else {
               setConsumptionTypeError(undefined);
             }
           }
 
           // If there are barcode errors, prevent submission
-          // Zorm will handle its own validation and prevent submission if needed
           if (hasBarcodeErrors) {
             e.preventDefault();
             e.stopPropagation();
-            return false;
+          }
+
+          // A Save can be rejected by Zorm (its submit listener runs before
+          // this handler and cancels the event), by the consumption type
+          // check, or by the barcode check. Every one of them leaves the
+          // event cancelled, so this single check brings the first message
+          // into view. Without it, a Save pressed far above the failing field
+          // looks like it did nothing.
+          if (e.defaultPrevented) {
+            scrollToFirstErrorOnNextFrame(e.currentTarget);
           }
         }}
       >
@@ -699,7 +747,7 @@ export const AssetForm = ({
         {qrId && !bulkMode ? (
           <input type="hidden" name="qrId" value={qrId} />
         ) : null}
-        <RefererRedirectInput fieldName="redirectTo" referer={referer} />
+        <RefererRedirectInput fieldName="redirectTo" referer={initialReferer} />
 
         {/* Bulk-mode discriminator + synthetic title (satisfies the
             shared schema's title.min(2) check; the action ignores it

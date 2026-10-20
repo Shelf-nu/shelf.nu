@@ -45,6 +45,10 @@ import * as lowStockService from "~/modules/consumption-log/low-stock.server";
 import * as quantityLock from "~/modules/consumption-log/quantity-lock.server";
 import * as consumptionLogService from "~/modules/consumption-log/service.server";
 import {
+  readStockState,
+  recordStockChanges,
+} from "~/modules/consumption-log/stock-ledger.server";
+import {
   emitAssetKitDetachmentNotes,
   removeDestroyedUnitsFromKits,
 } from "~/modules/kit/service.server";
@@ -499,6 +503,34 @@ vitest.mock(
     };
   }
 );
+
+// why: the ledger rows are derived from real placement reads, covered by
+// `consumption-log/stock-ledger.test.ts` and the in-memory
+// `asset/service.custody-source.test.ts`. Here only the events check-in hands
+// the ledger are asserted.
+vitest.mock("~/modules/consumption-log/stock-ledger.server", () => ({
+  readStockState: vitest.fn().mockResolvedValue({
+    total: 0,
+    placed: new Map(),
+    ledgerStartedAt: null,
+  }),
+  readStockStates: vitest.fn().mockResolvedValue(new Map()),
+  recordStockChanges: vitest.fn().mockResolvedValue(undefined),
+}));
+
+/** Every ledger event the mocked `recordStockChanges` was handed, with its asset. */
+function recordedStockEvents() {
+  return vitest
+    .mocked(recordStockChanges)
+    .mock.calls.flatMap(([, { changes }]) =>
+      changes.flatMap((change) =>
+        (change.events ?? []).map((event) => ({
+          ...event,
+          assetId: change.assetId,
+        }))
+      )
+    );
+}
 
 // why: booking service writes activity events from main's transactional
 // integration — stub so we can assert on calls without persisting them.
@@ -9765,6 +9797,22 @@ describe("revertBookingToDraft", () => {
   });
 });
 
+/**
+ * `mockBookingData` ends in the future; an extension must land after the
+ * stored end, so these cases start from a booking that ends before the ends
+ * they extend to.
+ */
+const extendableBookingData = {
+  ...mockBookingData,
+  to: new Date("2025-01-01T17:00:00Z"),
+};
+
+/** The job ids `scheduler.cancel` was called with, in order. */
+function cancelledJobIds(): unknown[] {
+  //@ts-expect-error missing vitest type
+  return scheduler.cancel.mock.calls.map((call: unknown[]) => call[0]);
+}
+
 describe("extendBooking", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
@@ -9774,7 +9822,7 @@ describe("extendBooking", () => {
     expect.assertions(3);
 
     const mockBooking = {
-      ...mockBookingData,
+      ...extendableBookingData,
       status: BookingStatus.ONGOING,
       bookingAssets: [
         {
@@ -9820,7 +9868,7 @@ describe("extendBooking", () => {
 
     expect(db.booking.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: "booking-1" },
+        where: expect.objectContaining({ id: "booking-1" }),
         data: expect.objectContaining({
           to: expect.any(Date),
         }),
@@ -9839,11 +9887,256 @@ describe("extendBooking", () => {
     );
   });
 
+  it("writes only where the stored row is still exactly as read", async () => {
+    expect.assertions(4);
+    const newEndDate = new Date("2025-01-02T17:00:00Z");
+    const mockBooking = {
+      ...extendableBookingData,
+      status: BookingStatus.ONGOING,
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-t150",
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
+        },
+      ],
+      partialCheckins: [],
+    };
+    const stored = { ...mockBooking, to: newEndDate };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue(stored);
+    // The end stored after the commit is this request's, under a job another
+    // write stored meanwhile.
+    //@ts-expect-error missing vitest type
+    db.booking.findUnique.mockResolvedValueOnce({
+      to: newEndDate,
+      activeSchedulerReference: "live-job",
+    });
+    //@ts-expect-error missing vitest type
+    scheduler.sendAfter.mockResolvedValueOnce("new-job");
+    //@ts-expect-error missing vitest type
+    db.booking.updateMany.mockResolvedValueOnce({ count: 1 });
+
+    const result = await extendBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      newEndDate,
+      hints: mockClientHints,
+      userId: "user-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
+      roles: [OrganizationRoles.ADMIN],
+    });
+
+    expect(db.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: "booking-1",
+          organizationId: "org-1",
+          status: BookingStatus.ONGOING,
+          to: extendableBookingData.to,
+        },
+        data: { status: BookingStatus.ONGOING, to: newEndDate },
+      })
+    );
+    expect(result).toEqual(stored);
+    // The new job is stored only over the job and end it was planned for.
+    expect(db.booking.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: "booking-1",
+          to: newEndDate,
+          activeSchedulerReference: "live-job",
+        },
+        data: { activeSchedulerReference: "new-job" },
+      })
+    );
+    expect(cancelledJobIds()).toEqual(["live-job"]);
+  });
+
+  it("cancels its own new job when a later extension stored one first", async () => {
+    expect.assertions(2);
+    const newEndDate = new Date("2025-01-02T17:00:00Z");
+    const mockBooking = {
+      ...extendableBookingData,
+      status: BookingStatus.ONGOING,
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-t153",
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
+        },
+      ],
+      partialCheckins: [],
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ ...mockBooking, to: newEndDate });
+    // This extension's end is stored when it re-reads ...
+    //@ts-expect-error missing vitest type
+    db.booking.findUnique.mockResolvedValueOnce({
+      to: newEndDate,
+      activeSchedulerReference: "live-job",
+    });
+    //@ts-expect-error missing vitest type
+    scheduler.sendAfter.mockResolvedValueOnce("new-job");
+    // ... but by the time its job is stored, a later extension has moved on.
+    //@ts-expect-error missing vitest type
+    db.booking.updateMany.mockResolvedValueOnce({ count: 0 });
+
+    await extendBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      newEndDate,
+      hints: mockClientHints,
+      userId: "user-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
+      roles: [OrganizationRoles.ADMIN],
+    });
+
+    expect(cancelledJobIds()).toEqual(["live-job", "new-job"]);
+    expect(db.booking.update).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves the reminder to the extension whose end is stored", async () => {
+    expect.assertions(3);
+    const newEndDate = new Date("2025-01-02T17:00:00Z");
+    const mockBooking = {
+      ...extendableBookingData,
+      status: BookingStatus.ONGOING,
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-t151",
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
+        },
+      ],
+      partialCheckins: [],
+    };
+    const stored = { ...mockBooking, to: newEndDate };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue(stored);
+    // A later extension committed after this one: its end is the one stored.
+    //@ts-expect-error missing vitest type
+    db.booking.findUnique.mockResolvedValueOnce({
+      to: new Date("2025-01-03T09:00:00Z"),
+      activeSchedulerReference: "job-of-the-later-extension",
+    });
+
+    const result = await extendBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      newEndDate,
+      hints: mockClientHints,
+      userId: "user-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
+      roles: [OrganizationRoles.ADMIN],
+    });
+
+    expect(result).toEqual(stored);
+    expect(scheduler.cancel).not.toHaveBeenCalled();
+    expect(scheduler.sendAfter).not.toHaveBeenCalled();
+  });
+
+  it("refuses when the booking changed between the read and the write", async () => {
+    expect.assertions(1);
+    const newEndDate = new Date("2025-01-02T17:00:00Z");
+    const mockBooking = {
+      ...extendableBookingData,
+      status: BookingStatus.ONGOING,
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-t152",
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
+        },
+      ],
+      partialCheckins: [],
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    // No row matches the guarded write: another extension or a close landed.
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockRejectedValue(
+      Object.assign(new Error("No record was found"), { code: "P2025" })
+    );
+
+    await expect(
+      extendBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        newEndDate,
+        hints: mockClientHints,
+        userId: "user-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
+        roles: [OrganizationRoles.ADMIN],
+      })
+    ).rejects.toMatchObject({
+      message:
+        "The booking changed while you were extending it. Reload it and try again.",
+      status: 400,
+    });
+  });
+
+  it("refuses an end at or before the current end", async () => {
+    expect.assertions(2);
+    const newEndDate = new Date("2025-01-01T17:00:00Z");
+    const mockBooking = {
+      ...extendableBookingData,
+      status: BookingStatus.ONGOING,
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-t153",
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
+        },
+      ],
+      partialCheckins: [],
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+
+    await expect(
+      extendBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        newEndDate,
+        hints: mockClientHints,
+        userId: "user-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
+        roles: [OrganizationRoles.ADMIN],
+      })
+    ).rejects.toMatchObject({
+      message: "The new end date must be after the current end date.",
+      status: 400,
+    });
+    expect(db.booking.update).not.toHaveBeenCalled();
+  });
+
   it("measures the booking's named model units against the extended window", async () => {
     expect.assertions(1);
     const newEndDate = new Date("2025-01-02T17:00:00Z");
     const mockBooking = {
-      ...mockBookingData,
+      ...extendableBookingData,
       status: BookingStatus.ONGOING,
       bookingAssets: [
         {
@@ -9913,7 +10206,7 @@ describe("extendBooking", () => {
   it("keeps the end date when the model guard refuses the extended window", async () => {
     expect.assertions(2);
     const mockBooking = {
-      ...mockBookingData,
+      ...extendableBookingData,
       status: BookingStatus.ONGOING,
       bookingAssets: [
         {
@@ -9970,7 +10263,7 @@ describe("extendBooking", () => {
     const newEndDate = new Date("2025-01-02T17:00:00Z");
 
     const mockBooking = {
-      ...mockBookingData,
+      ...extendableBookingData,
       status: BookingStatus.ONGOING,
       bookingAssets: [
         {
@@ -10017,7 +10310,10 @@ describe("extendBooking", () => {
   it("should throw error when booking cannot be extended", async () => {
     expect.assertions(1);
 
-    const mockBooking = { ...mockBookingData, status: BookingStatus.COMPLETE };
+    const mockBooking = {
+      ...extendableBookingData,
+      status: BookingStatus.COMPLETE,
+    };
     //@ts-expect-error missing vitest type
     db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
 
@@ -10038,7 +10334,7 @@ describe("extendBooking", () => {
     expect.assertions(1);
 
     const mockBooking = {
-      ...mockBookingData,
+      ...extendableBookingData,
       status: BookingStatus.ONGOING,
       creatorId: "user-1",
       custodianUserId: "user-1",
@@ -10081,7 +10377,7 @@ describe("extendBooking", () => {
     expect.assertions(1);
 
     const mockBooking = {
-      ...mockBookingData,
+      ...extendableBookingData,
       status: BookingStatus.ONGOING,
       creatorId: "user-2",
       custodianUserId: "user-2",
@@ -10107,7 +10403,7 @@ describe("extendBooking", () => {
     expect.assertions(1);
 
     const mockBooking = {
-      ...mockBookingData,
+      ...extendableBookingData,
       status: BookingStatus.ONGOING,
     };
 
@@ -10131,7 +10427,7 @@ describe("extendBooking", () => {
     expect.assertions(1);
 
     const mockBooking = {
-      ...mockBookingData,
+      ...extendableBookingData,
       status: BookingStatus.ONGOING,
       creatorId: "user-2", // Different user created it
       custodianUserId: "user-2", // Different user is custodian
@@ -10176,7 +10472,7 @@ describe("extendBooking", () => {
     expect.assertions(1);
 
     const mockBooking = {
-      ...mockBookingData,
+      ...extendableBookingData,
       status: BookingStatus.ONGOING,
       creatorId: "user-2", // Different creator
       custodianUserId: "user-1", // But user is custodian
@@ -10221,7 +10517,7 @@ describe("extendBooking", () => {
     expect.assertions(1);
 
     const mockBooking = {
-      ...mockBookingData,
+      ...extendableBookingData,
       status: BookingStatus.ONGOING,
       creatorId: "user-1", // User is creator
       custodianUserId: "user-2", // But different custodian
@@ -10266,7 +10562,7 @@ describe("extendBooking", () => {
     expect.assertions(1);
 
     const mockBooking = {
-      ...mockBookingData,
+      ...extendableBookingData,
       status: BookingStatus.ONGOING,
       to: new Date("2025-01-01T17:00:00Z"),
       bookingAssets: [
@@ -10321,7 +10617,7 @@ describe("extendBooking", () => {
     expect.assertions(1);
 
     const mockBooking = {
-      ...mockBookingData,
+      ...extendableBookingData,
       status: BookingStatus.ONGOING,
       bookingAssets: [
         {
@@ -10364,7 +10660,7 @@ describe("extendBooking", () => {
     expect.assertions(3);
 
     const mockBooking = {
-      ...mockBookingData,
+      ...extendableBookingData,
       status: BookingStatus.OVERDUE,
       to: new Date("2025-01-01T17:00:00Z"),
       bookingAssets: [
@@ -10432,7 +10728,7 @@ describe("extendBooking", () => {
     expect.assertions(3);
 
     const mockBooking = {
-      ...mockBookingData,
+      ...extendableBookingData,
       status: BookingStatus.ONGOING,
       to: new Date("2025-01-01T17:00:00Z"),
       bookingAssets: [
@@ -10506,7 +10802,7 @@ describe("extendBooking", () => {
     expect.assertions(2);
 
     const mockBooking = {
-      ...mockBookingData,
+      ...extendableBookingData,
       status: BookingStatus.ONGOING,
       to: new Date("2025-01-01T17:00:00Z"),
       bookingAssets: [
@@ -10564,7 +10860,7 @@ describe("extendBooking", () => {
     expect.assertions(1);
 
     const mockBooking = {
-      ...mockBookingData,
+      ...extendableBookingData,
       status: BookingStatus.ONGOING,
       to: new Date("2025-01-01T17:00:00Z"),
       bookingAssets: [
@@ -10620,7 +10916,7 @@ describe("extendBooking", () => {
     expect.assertions(1);
 
     const mockBooking = {
-      ...mockBookingData,
+      ...extendableBookingData,
       status: BookingStatus.ONGOING,
       to: new Date("2025-01-01T17:00:00Z"),
       bookingAssets: [
@@ -10774,7 +11070,7 @@ describe("extendBooking", () => {
       mockReservationOfCase();
       //@ts-expect-error missing vitest type
       db.booking.findUniqueOrThrow.mockResolvedValue({
-        ...mockBookingData,
+        ...extendableBookingData,
         status: BookingStatus.ONGOING,
         to: new Date("2025-01-01T17:00:00Z"),
         bookingAssets: [
@@ -10798,7 +11094,7 @@ describe("extendBooking", () => {
       //@ts-expect-error missing vitest type
       db.booking.findMany.mockResolvedValue([]); // No clashing bookings
       const mockBooking = {
-        ...mockBookingData,
+        ...extendableBookingData,
         status: BookingStatus.ONGOING,
         to: new Date("2025-01-01T17:00:00Z"),
         bookingAssets: [
@@ -10829,7 +11125,7 @@ describe("extendBooking", () => {
       mockCaseMemberships();
       mockReservationOfCase();
       const mockBooking = {
-        ...mockBookingData,
+        ...extendableBookingData,
         status: BookingStatus.ONGOING,
         to: new Date("2025-01-01T17:00:00Z"),
         bookingAssets: [
@@ -13517,11 +13813,11 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
       assetIds: [mockQtyAssetId],
     });
 
-    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+    expect(recordedStockEvents()).toContainEqual(
       expect.objectContaining({
         assetId: mockQtyAssetId,
         category: "CONSUME",
-        quantity: 10,
+        change: -10,
         bookingId: mockQtyBookingId,
       })
     );
@@ -13880,11 +14176,11 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
       expect.objectContaining({ category: "RETURN", quantity: 5 })
     );
-    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
-      expect.objectContaining({ category: "LOSS", quantity: 3 })
+    expect(recordedStockEvents()).toContainEqual(
+      expect.objectContaining({ category: "LOSS", change: -3 })
     );
-    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
-      expect.objectContaining({ category: "DAMAGE", quantity: 2 })
+    expect(recordedStockEvents()).toContainEqual(
+      expect.objectContaining({ category: "DAMAGE", change: -2 })
     );
     // Pool decrement = lost (3) + damaged (2) = 5. RETURN is excluded.
     expect(db.asset.update).toHaveBeenCalledWith({
@@ -13895,6 +14191,61 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
       expect.objectContaining({
         data: expect.objectContaining({ status: BookingStatus.COMPLETE }),
       })
+    );
+  });
+
+  it("reads the pool's stock before the decrement", async () => {
+    setupQtyMocks();
+
+    await partialCheckinBooking({
+      ...baseParams,
+      checkins: [{ assetId: mockQtyAssetId, returned: 5, lost: 3, damaged: 2 }],
+    });
+
+    // Read after the write, the before-state would equal the after-state and
+    // the ledger would see no change at all.
+    expect(
+      vitest.mocked(readStockState).mock.invocationCallOrder[0]
+    ).toBeLessThan(vitest.mocked(db.asset.update).mock.invocationCallOrder[0]);
+  });
+
+  it("writes a disposition's used-up rows before the next disposition of the asset is capped", async () => {
+    // The asset-level cap sums this booking's CONSUME/LOSS/DAMAGE rows. Two
+    // slices of one asset checked in together must each see what the other
+    // already used up, or both pass the same remaining and the pool loses
+    // more units than are out on the booking.
+    setupQtyMocks();
+    const booking = makeQtyBooking();
+    const slice = booking.bookingAssets[0];
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...booking,
+      bookingAssets: [
+        { ...slice, id: "ba-a" },
+        { ...slice, id: "ba-b" },
+      ],
+    });
+    // why: each slice's own cap reads its booked quantity by id.
+    (
+      db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ quantity: 10 });
+    onTestFinished(() => {
+      (db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>).mockReset();
+    });
+
+    await partialCheckinBooking({
+      ...baseParams,
+      checkins: [
+        { assetId: mockQtyAssetId, bookingAssetId: "ba-a", consumed: 2 },
+        { assetId: mockQtyAssetId, bookingAssetId: "ba-b", consumed: 2 },
+      ],
+    });
+
+    const ledgerWrites = vitest.mocked(recordStockChanges).mock;
+    const capReads = vitest.mocked(db.consumptionLog.aggregate).mock;
+    expect(ledgerWrites.calls).toHaveLength(2);
+    expect(ledgerWrites.invocationCallOrder[0]).toBeLessThan(
+      capReads.invocationCallOrder[capReads.invocationCallOrder.length - 1]
     );
   });
 
@@ -13992,8 +14343,8 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
       checkins: [{ assetId: mockQtyAssetId, consumed: 10 }],
     });
 
-    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
-      expect.objectContaining({ category: "CONSUME", quantity: 10 })
+    expect(recordedStockEvents()).toContainEqual(
+      expect.objectContaining({ category: "CONSUME", change: -10 })
     );
     expect(db.asset.update).toHaveBeenCalledWith({
       where: { id: mockQtyAssetId },
@@ -14062,7 +14413,7 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
       { id: "al-store", locationId: "loc-store", quantity: 60 },
       { id: "al-studio", locationId: "loc-studio", quantity: 34 },
     ]);
-    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+    expect(recordedStockEvents()).toContainEqual(
       expect.objectContaining({ category: "CONSUME", locationId: "loc-studio" })
     );
     expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
@@ -14580,11 +14931,11 @@ describe("checkinBooking — qty-tracked auto-default", () => {
 
     await checkinBooking(baseParams);
 
-    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+    expect(recordedStockEvents()).toContainEqual(
       expect.objectContaining({
         assetId: mockQtyAssetId,
         category: "CONSUME",
-        quantity: 10,
+        change: -10,
         bookingId: mockBookingId,
         // Bug 2 fix: auto-default tags the log with the slice's bookingAssetId
         // (not NULL) so future reads attribute it to the right slice.
@@ -14649,7 +15000,7 @@ describe("checkinBooking — qty-tracked auto-default", () => {
       { id: "al-store", locationId: "loc-store", quantity: 60 },
       { id: "al-studio", locationId: "loc-studio", quantity: 30 },
     ]);
-    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+    expect(recordedStockEvents()).toContainEqual(
       expect.objectContaining({ category: "CONSUME", locationId: "loc-studio" })
     );
   });
@@ -14711,8 +15062,8 @@ describe("checkinBooking — qty-tracked auto-default", () => {
     });
 
     // Only a LOSS log — no RETURN or CONSUME auto-fill.
-    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
-      expect.objectContaining({ category: "LOSS", quantity: 10 })
+    expect(recordedStockEvents()).toContainEqual(
+      expect.objectContaining({ category: "LOSS", change: -10 })
     );
     const calls = (
       consumptionLogService.createConsumptionLog as ReturnType<typeof vitest.fn>
@@ -16353,6 +16704,69 @@ describe("addScannedAssetsToBooking", () => {
       ]),
       expect.anything()
     );
+  });
+
+  describe("inSameTransaction", () => {
+    beforeEach(() => {
+      //@ts-expect-error missing vitest type
+      db.asset.findMany.mockResolvedValue([
+        {
+          id: "asset-scan-1",
+          title: "Scanned Asset 1",
+          type: AssetType.INDIVIDUAL,
+          assetModelId: null,
+        },
+      ]);
+      //@ts-expect-error missing vitest type
+      db.booking.update.mockResolvedValue({
+        id: "booking-scan",
+        name: "Scan Booking",
+        status: BookingStatus.DRAFT,
+      });
+    });
+
+    const scan = {
+      assetIds: ["asset-scan-1"],
+      kitIds: [],
+      bookingId: "booking-scan",
+      organizationId: "org-1",
+      userId: "user-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
+    };
+
+    it("runs after the add's writes, inside the same transaction", async () => {
+      const hook = vitest.fn().mockResolvedValue(undefined);
+
+      await addScannedAssetsToBooking({ ...scan, inSameTransaction: hook });
+
+      expect(db.$transaction).toHaveBeenCalledTimes(1);
+      expect(hook).toHaveBeenCalledTimes(1);
+      expect(
+        vitest.mocked(db.booking.update).mock.invocationCallOrder[0]
+      ).toBeLessThan(hook.mock.invocationCallOrder[0]);
+    });
+
+    it("fails the whole add when the hook refuses, keeping its status", async () => {
+      const hook = vitest.fn().mockRejectedValue(
+        new ShelfError({
+          cause: null,
+          status: 400,
+          label: "Booking",
+          message: "Only 3 units are available.",
+          shouldBeCaptured: false,
+        })
+      );
+
+      await expect(
+        addScannedAssetsToBooking({ ...scan, inSameTransaction: hook })
+      ).rejects.toMatchObject({
+        status: 400,
+        message: "Only 3 units are available.",
+      });
+      // The refusal is thrown inside the transaction callback, which is what
+      // rolls the add's writes back; no activity note narrates them.
+      expect(bookingNoteService.createSystemBookingNote).not.toHaveBeenCalled();
+    });
   });
 
   it("resolves a kit slice's sourceKitId from the AssetKit row, ignoring the client-supplied kitId", async () => {
@@ -19515,7 +19929,7 @@ describe("checkinBooking: units destroyed out of a kit slice leave the kit", () 
   });
 
   it("consumes only the units a one-way kit slice sent out", async () => {
-    expect.assertions(3);
+    expect.assertions(4);
 
     arrangeBooking(ConsumptionType.ONE_WAY);
     // why: the sizing reads the slice and the booking's sessions. 4 of the
@@ -19539,13 +19953,17 @@ describe("checkinBooking: units destroyed out of a kit slice leave the kit", () 
 
     await checkinBooking(params);
 
-    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+    expect(recordedStockEvents()).toContainEqual(
       expect.objectContaining({
         category: "CONSUME",
-        quantity: 4,
+        change: -4,
         bookingAssetId: "ba-pens",
       })
     );
+    // The pool's stock is read before its decrement, for the ledger diff.
+    expect(
+      vitest.mocked(readStockState).mock.invocationCallOrder[0]
+    ).toBeLessThan(vitest.mocked(db.asset.update).mock.invocationCallOrder[0]);
     expect(db.asset.update).toHaveBeenCalledWith({
       where: { id: ASSET_ID },
       data: { quantity: { decrement: 4 } },
@@ -19659,10 +20077,10 @@ describe("checkinBooking: units destroyed out of a kit slice leave the kit", () 
 
     await checkinBooking(params);
 
-    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+    expect(recordedStockEvents()).toContainEqual(
       expect.objectContaining({
         category: "CONSUME",
-        quantity: 3,
+        change: -3,
         bookingAssetId: "ba-kit",
       })
     );
@@ -19827,10 +20245,10 @@ describe("checkinBooking: units destroyed out of a kit slice leave the kit", () 
       checkins: [{ assetId: ASSET_ID, consumed: 2 }],
     });
 
-    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+    expect(recordedStockEvents()).toContainEqual(
       expect.objectContaining({
         category: "CONSUME",
-        quantity: 2,
+        change: -2,
         bookingAssetId: "ba-pens-loose",
       })
     );

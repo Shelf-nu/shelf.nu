@@ -337,10 +337,12 @@ export const createAdvancedAssetFilterCookie = (orgId: string) =>
  */
 function normalizeAdvancedFilterParams(
   filters: string,
-  columnNames: string[]
+  columnNames: string[],
+  dropParam?: (key: string, value: string) => boolean
 ): URLSearchParams {
   const normalized = new URLSearchParams();
   new URLSearchParams(filters).forEach((value, key) => {
+    if (dropParam?.(key, value)) return;
     if (!columnNames.includes(key)) {
       normalized.append(key, value);
       return;
@@ -365,12 +367,15 @@ function normalizeAdvancedFilterParams(
  * @param request - The incoming request
  * @param organizationId - The organization ID for the request
  * @param settings - The asset index settings containing column configuration
+ * @param dropParam - Params the caller may not use. They are removed from both
+ *   the URL (with a redirect, and from the saved cookie) and a restored cookie.
  * @returns Object containing filters, serialized cookie, and redirect status
  */
 export async function getAdvancedFiltersFromRequest(
   request: Request,
   organizationId: string,
-  settings: AssetIndexSettings
+  settings: AssetIndexSettings,
+  dropParam?: (key: string, value: string) => boolean
 ): Promise<{
   filters: string | undefined;
   serializedCookie: string | undefined;
@@ -386,7 +391,11 @@ export async function getAdvancedFiltersFromRequest(
   // CASE 1: URL has filters
   // Validate them, save to cookie, and return (with redirect if validation changed params)
   if (filters) {
-    const validatedParams = normalizeAdvancedFilterParams(filters, columnNames);
+    const validatedParams = normalizeAdvancedFilterParams(
+      filters,
+      columnNames,
+      dropParam
+    );
     const validatedParamsString = validatedParams.toString();
     const serializedCookie = await serializeFilterCookieForUrl(
       advancedAssetFilterCookie,
@@ -411,7 +420,8 @@ export async function getAdvancedFiltersFromRequest(
     if (filters) {
       const validatedParams = normalizeAdvancedFilterParams(
         filters,
-        columnNames
+        columnNames,
+        dropParam
       );
       const validatedParamsString = validatedParams.toString();
       const cleanedFilters = cleanParamsForFilterCookie(validatedParamsString);

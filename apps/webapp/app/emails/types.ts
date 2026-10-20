@@ -29,7 +29,11 @@ export type BookingEmailActor = {
 };
 
 export type EmailPayloadType = {
-  /** Email address of recipient */
+  /**
+   * Email address of the recipient. A comma separated list is allowed for
+   * internal emails that go to several inboxes (see FEEDBACK_EMAIL); every
+   * address in it is checked against the soft-deleted domain individually.
+   */
   to: string;
 
   /** Subject of email */

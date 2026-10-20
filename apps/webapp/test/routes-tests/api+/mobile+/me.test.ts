@@ -78,7 +78,9 @@ const findMany = vi.mocked(db.userOrganization.findMany);
 const { loader } = await import("~/routes/api+/mobile+/me");
 
 /** A findMany row in the shape `getUserOrganizations` selects. */
-function row(organizationOverrides: Partial<Record<string, boolean>> = {}) {
+function row(
+  organizationOverrides: Partial<Record<string, boolean | string>> = {}
+) {
   return {
     roles: ["BASE"],
     user: { sso: false, lastSelectedOrganizationId: null },
@@ -89,6 +91,7 @@ function row(organizationOverrides: Partial<Record<string, boolean>> = {}) {
       imageId: null,
       barcodesEnabled: false,
       auditsEnabled: false,
+      currency: "EUR",
       selfServiceCanSeeBookings: false,
       baseUserCanSeeBookings: false,
       selfServiceCanSeeCustody: false,
@@ -161,6 +164,32 @@ describe("GET /api/mobile/me", () => {
       baseUserCanSeeBookings: false,
       selfServiceCanSeeCustody: false,
     });
+  });
+
+  it("sends each workspace's currency, which the companion prefixes money with", async () => {
+    findMany.mockResolvedValue([
+      row(),
+      row({ id: "org-2", currency: "JPY" }),
+    ] as never);
+
+    const response = await invoke();
+    const body = (await response.json()) as {
+      organizations: Array<Record<string, unknown>>;
+    };
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          organization: expect.objectContaining({
+            select: expect.objectContaining({ currency: true }),
+          }),
+        }),
+      })
+    );
+    expect(body.organizations.map((org) => org.currency)).toEqual([
+      "EUR",
+      "JPY",
+    ]);
   });
 
   it("sends each organization in the shape the companion resolves access from", async () => {

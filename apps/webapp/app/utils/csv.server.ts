@@ -16,6 +16,9 @@ import iconv from "iconv-lite";
 import type { BookingsList } from "~/components/booking/bookings-list-fields";
 import type { SortingDirection } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
+import { stripHiddenAuditColumns } from "~/modules/asset/last-audit-date-access";
+import type { LastAuditDateAccess } from "~/modules/asset/last-audit-date-access";
+import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
 import { getAdvancedPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import type {
   AdvancedIndexAsset,
@@ -43,11 +46,13 @@ import { calculatePartialCheckinProgress } from "~/modules/booking/utils.server"
 import { getPrimaryCustody } from "~/modules/custody/utils";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { getNrmSelectionWhere } from "~/modules/team-member/nrm-scope";
+import type { RoleAccess } from "~/utils/permissions/role-access";
 import { getAssetTotalValue } from "./asset-value";
 import { getBookingAssetCheckinLabel } from "./booking-assets";
 import { checkExhaustiveSwitch } from "./check-exhaustive-switch";
 import { getClientHint } from "./client-hints";
 import { getAdvancedFiltersFromRequest } from "./cookies.server";
+import { neutralizeSpreadsheetFormula } from "./csv-cells";
 import { formatCurrency } from "./currency";
 import { formatDate, type ResolvedFormatPrefs } from "./date-format";
 import { resolveUserFormatPrefsById } from "./date-format.server";
@@ -186,8 +191,14 @@ export const csvDataFromRequest = async ({ request }: { request: Request }) => {
  * @param args.assetIndexCurrentSearchParams - The index's current URL search
  *   params, used instead of cookie filters when select-all is active.
  * @param args.timeZone - Acting user's IANA timezone; forwarded to the fetch so
- *   built-in date-column filters truncate the day in the user's tz (avoids an
- *   off-by-one). Defaults to "UTC" (import-ready export has no acting user).
+ *   date-column filters truncate the day in the user's tz, matching the rows
+ *   the index showed. Both exports pass it; "UTC" is only a fallback.
+ * @param args.lastAuditDateAccess - How the last audit date may be used. The
+ *   service defaults to `hidden`, which also drops an active last audit date
+ *   filter. Both exports pass the resolved level so a select-all export
+ *   matches the rows the index showed.
+ * @param args.includeHiddenColumns - Compute the last audit date even when the
+ *   column is hidden in the user's settings (the "All columns" scope).
  * @returns The full filtered asset set (no pagination when selecting all).
  */
 async function resolveExportAssets({
@@ -197,6 +208,8 @@ async function resolveExportAssets({
   currentOrganization,
   assetIndexCurrentSearchParams,
   timeZone = "UTC",
+  lastAuditDateAccess,
+  includeHiddenColumns,
 }: {
   request: Request;
   assetIds: string;
@@ -207,6 +220,8 @@ async function resolveExportAssets({
   >;
   assetIndexCurrentSearchParams: string | null;
   timeZone?: string;
+  lastAuditDateAccess?: LastAuditDateAccess;
+  includeHiddenColumns?: boolean;
 }): Promise<{ assets: AdvancedIndexAsset[] }> {
   /** Make an array of the ids and check if we have to take all */
   const ids = assetIds.split(",");
@@ -239,6 +254,8 @@ async function resolveExportAssets({
     assetIds: takeAll ? undefined : ids,
     canUseBarcodes: currentOrganization.barcodesEnabled ?? false,
     timeZone,
+    lastAuditDateAccess,
+    includeHiddenColumns,
     // The export reproduces the index view it was started from, Archived and
     // All included (issue #382). Reaching it takes `asset: export`, which only
     // ADMIN and OWNER hold, the same members who hold `asset: archive`.
@@ -266,6 +283,9 @@ async function resolveExportAssets({
  * @param args.columnScope - `"visible"` (default) exports only the columns
  *   the user currently has shown; `"all"` exports every configured column
  *   regardless of visibility.
+ * @param args.access - The caller's role access. With the workspace's audit
+ *   add-on it decides the last audit date access: `hidden` drops the column,
+ *   `locked` keeps it with empty values (it is never queried).
  * @returns The CSV file contents (CRLF-joined rows).
  */
 export async function exportAssetsFromIndexToCsv({
@@ -276,6 +296,7 @@ export async function exportAssetsFromIndexToCsv({
   currentOrganization,
   assetIndexCurrentSearchParams,
   columnScope = "visible",
+  access,
 }: {
   request: Request;
   userId: string;
@@ -283,11 +304,16 @@ export async function exportAssetsFromIndexToCsv({
   settings: AssetIndexSettings;
   currentOrganization: Pick<
     Organization,
-    "id" | "barcodesEnabled" | "currency"
+    "id" | "barcodesEnabled" | "currency" | "auditsEnabled"
   >;
   assetIndexCurrentSearchParams: string | null;
   columnScope?: ColumnScope;
+  access: RoleAccess;
 }) {
+  const lastAuditDateAccess = lastAuditDateAccessFor(
+    access,
+    currentOrganization
+  );
   // Acting user's prefs: this export was triggered by userId, so their
   // date/time preferences drive every humanized column AND the timezone the
   // built-in date-column filters resolve the day in. Resolved before the fetch
@@ -304,29 +330,21 @@ export async function exportAssetsFromIndexToCsv({
     currentOrganization,
     assetIndexCurrentSearchParams,
     timeZone: prefs.timeZone,
+    lastAuditDateAccess,
+    // "All columns" exports hidden columns too, so the date is computed even
+    // when the user has hidden it in their settings.
+    includeHiddenColumns: columnScope === "all",
   });
-
-  const baseColumns = settings.columns as Column[];
-  // "All columns" for the human export = every configured column, visible or
-  // not (actions is still dropped downstream in buildCsvExportDataFromAssets).
-  const scopedColumns =
-    columnScope === "all"
-      ? baseColumns.map((c) => ({ ...c, visible: true }))
-      : baseColumns;
 
   const csvData = buildCsvExportDataFromAssets({
     assets,
-    columns: [
-      { name: "name", visible: true, position: 0 },
-      ...scopedColumns,
-      // Synthetic export-only column: emits `valuation × quantity` so QT
-      // inventories report total worth without overwriting the per-unit
-      // `valuation` column (kept lossless for CSV → re-import round-trip).
-      // Always appended at the end so existing user column ordering is
-      // unaffected. Not in `defaultFields` / column-picker schema, so
-      // users can't toggle or reorder it via settings.
-      { name: "total_value", visible: true, position: Number.MAX_SAFE_INTEGER },
-    ],
+    columns: buildIndexExportColumns({
+      settingsColumns: stripHiddenAuditColumns(
+        settings.columns as Column[],
+        lastAuditDateAccess
+      ),
+      columnScope,
+    }),
     currentOrganization,
     prefs,
   });
@@ -336,12 +354,86 @@ export async function exportAssetsFromIndexToCsv({
 }
 
 /**
+ * Assembles the column list for the standard (human/analytics) index export
+ * from a user's saved asset index columns.
+ *
+ * On top of the saved columns it adds:
+ * - `name` first, always exported.
+ * - `unitOfMeasure` right after `quantity` when Quantity is exported and Unit
+ *   of measure is not (see {@link withUnitOfMeasureBesideQuantity}).
+ * - the synthetic `total_value` column last.
+ *
+ * @param args.settingsColumns - The user's saved asset index columns
+ * @param args.columnScope - `"visible"` keeps the saved visibility; `"all"`
+ *   exports every configured column regardless of visibility
+ * @returns Columns for {@link buildCsvExportDataFromAssets}
+ */
+export function buildIndexExportColumns({
+  settingsColumns,
+  columnScope,
+}: {
+  settingsColumns: Column[];
+  columnScope: ColumnScope;
+}): Column[] {
+  // "All columns" for the human export = every configured column, visible or
+  // not (actions is still dropped downstream in buildCsvExportDataFromAssets).
+  const scopedColumns =
+    columnScope === "all"
+      ? settingsColumns.map((c) => ({ ...c, visible: true }))
+      : settingsColumns;
+
+  return [
+    { name: "name", visible: true, position: 0 },
+    ...withUnitOfMeasureBesideQuantity(scopedColumns),
+    // Synthetic export-only column: emits `valuation × quantity` so QT
+    // inventories report total worth without overwriting the per-unit
+    // `valuation` column (kept lossless for CSV → re-import round-trip).
+    // Always appended at the end so existing user column ordering is
+    // unaffected. Not in `defaultFields` / column-picker schema, so
+    // users can't toggle or reorder it via settings.
+    { name: "total_value", visible: true, position: Number.MAX_SAFE_INTEGER },
+  ];
+}
+
+/**
+ * Exports the unit of measure wherever the quantity is exported.
+ *
+ * The Quantity column holds the bare number and the unit has its own column,
+ * which a user can leave hidden in the index. When Quantity is exported and
+ * Unit of measure is not, this adds Unit of measure directly after Quantity,
+ * moving the columns after it down by one. When both are exported, or
+ * Quantity is not, the columns are returned as they are.
+ *
+ * @param columns - Export columns with their visibility; not modified
+ * @returns The columns, with Unit of measure visible next to Quantity when needed
+ */
+function withUnitOfMeasureBesideQuantity(columns: Column[]): Column[] {
+  const quantity = columns.find((col) => col.name === "quantity");
+  const unitOfMeasure = columns.find((col) => col.name === "unitOfMeasure");
+  if (!quantity?.visible || unitOfMeasure?.visible) return columns;
+
+  const unitPosition = quantity.position + 1;
+  return [
+    ...columns
+      .filter((col) => col.name !== "unitOfMeasure")
+      .map((col) =>
+        col.position >= unitPosition
+          ? { ...col, position: col.position + 1 }
+          : col
+      ),
+    { name: "unitOfMeasure", visible: true, position: unitPosition },
+  ];
+}
+
+/**
  * Builds an import-ready CSV (headers = content-importer keys, values
  * importer-native) so the file re-imports into another workspace. Works in
  * both index modes; SIMPLE mode has no per-user column config, so scope is
  * forced to "all".
  *
  * @param args.request - The incoming request (filters, locale, timezone).
+ * @param args.userId - The acting user; their time zone resolves the day of
+ *   every select-all date filter, so the rows match the index.
  * @param args.assetIds - Comma-separated asset ids, or the select-all sentinel.
  * @param args.settings - The asset index settings (mode + column config).
  * @param args.currentOrganization - The active workspace; scopes the fetch.
@@ -351,26 +443,47 @@ export async function exportAssetsFromIndexToCsv({
  *   currently has shown; `"all"` exports every importable column. Ignored
  *   (forced to `"all"`) when `settings.mode` is `SIMPLE`, which has no
  *   per-user column visibility to key off of.
+ * @param args.access - The caller's role access. It decides whether an active
+ *   last audit date filter applies; the column itself is never written to the
+ *   import-ready file.
  * @returns The CSV file contents.
  */
 export async function exportAssetsForImportToCsv({
   request,
+  userId,
   assetIds,
   settings,
   currentOrganization,
   assetIndexCurrentSearchParams,
   columnScope,
+  access,
 }: {
   request: Request;
+  /** The acting user; their time zone resolves the day of every date filter. */
+  userId: string;
   assetIds: string;
   settings: AssetIndexSettings;
   currentOrganization: Pick<
     Organization,
-    "id" | "barcodesEnabled" | "currency"
+    "id" | "barcodesEnabled" | "currency" | "auditsEnabled"
   >;
   assetIndexCurrentSearchParams: string | null;
   columnScope: ColumnScope;
+  access: RoleAccess;
 }): Promise<string> {
+  // The file never carries the last audit date column, but a select-all export
+  // must still honour an active last audit date filter so it matches the rows
+  // the index showed.
+  const lastAuditDateAccess = lastAuditDateAccessFor(
+    access,
+    currentOrganization
+  );
+  // The file holds raw values, so the prefs only supply the time zone that a
+  // select-all's date filters resolve the day in, the same as the index.
+  const { timeZone } = await resolveUserFormatPrefsById(
+    userId,
+    getClientHint(request)
+  );
   const [{ assets }, activeCustomFields] = await Promise.all([
     resolveExportAssets({
       request,
@@ -378,6 +491,8 @@ export async function exportAssetsForImportToCsv({
       settings,
       currentOrganization,
       assetIndexCurrentSearchParams,
+      timeZone,
+      lastAuditDateAccess,
     }),
     getActiveCustomFields({
       organizationId: currentOrganization.id,
@@ -548,6 +663,17 @@ export const buildCsvExportDataFromAssets = ({
             }
             break;
           }
+          case "lastAuditDate": {
+            // Absent for never-audited assets; guard against unparseable values.
+            const lastAudit = asset.lastAuditDate
+              ? new Date(asset.lastAuditDate)
+              : null;
+            value =
+              lastAudit && !isNaN(lastAudit.getTime())
+                ? formatDateForCsv(lastAudit)
+                : "";
+            break;
+          }
           case "upcomingBookings": {
             value = asset.bookings
               ? asset.bookings.map((b) => b.name).join(", ")
@@ -567,15 +693,23 @@ export const buildCsvExportDataFromAssets = ({
           }
 
           case "quantity":
+            // Bare number, so the column sums in a spreadsheet. The unit is
+            // exported in its own "unitOfMeasure" column.
             value =
               isQuantityTracked(asset) && asset.quantity != null
-                ? `${asset.quantity}${
-                    asset.unitOfMeasure ? ` ${asset.unitOfMeasure}` : ""
-                  }`
+                ? `${asset.quantity}`
+                : "";
+            break;
+          case "unitOfMeasure":
+            // Free text that starts its own cell, so a stored "=..." must not
+            // reach a spreadsheet as a formula.
+            value =
+              isQuantityTracked(asset) && asset.unitOfMeasure
+                ? neutralizeSpreadsheetFormula(asset.unitOfMeasure)
                 : "";
             break;
           case "minQuantity":
-            // Low-stock reorder threshold — plain number, mirrors "quantity" above.
+            // Low-stock reorder threshold: plain number, mirrors "quantity" above.
             value =
               isQuantityTracked(asset) && asset.minQuantity != null
                 ? `${asset.minQuantity}`

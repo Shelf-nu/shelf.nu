@@ -673,35 +673,34 @@ describe("createInvite — SCIM-managed domains", () => {
   });
 });
 
-describe("createInvite / bulkInviteUsers: who may grant Administrator", () => {
+describe("createInvite / bulkInviteUsers: an Administrator inviting an Administrator", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ssoMock.checkDomainSSOStatus.mockResolvedValue({
       isConfiguredForSSO: false,
       linkedOrganizations: [],
     });
+    dbMock.teamMember.findMany.mockResolvedValue([]);
+    dbMock.user.findMany.mockResolvedValue([]);
+    dbMock.invite.findMany.mockResolvedValue([]);
+    dbMock.$transaction.mockImplementation((callback) => callback(dbMock));
+    dbMock.teamMember.createMany.mockResolvedValue({ count: 0 });
+    // No invites returned means no emails are scheduled after the test ends.
+    dbMock.invite.createManyAndReturn.mockResolvedValue([]);
   });
 
-  it("createInvite refuses an ADMIN granting ADMIN before touching the database", async () => {
-    await expect(
-      createInvite({
-        organizationId: "org-1",
-        inviteeEmail: "new@school.org",
-        inviterId: "admin-1",
-        roles: [OrganizationRoles.ADMIN],
-        teamMemberName: "new",
-        userId: "admin-1",
-        actorOwnsWorkspace: false,
-      })
-    ).rejects.toMatchObject({ status: 403 });
+  /** The roles the bulk insert wrote, keyed by invitee email */
+  const writtenRoles = () =>
+    Object.fromEntries(
+      (dbMock.invite.createManyAndReturn.mock.calls[0]?.[0]?.data ?? []).map(
+        (invite: { inviteeEmail: string; roles: string[] }) => [
+          invite.inviteeEmail,
+          invite.roles,
+        ]
+      )
+    );
 
-    expect(ssoMock.checkDomainSSOStatus).not.toHaveBeenCalled();
-    expect(dbMock.user.findFirst).not.toHaveBeenCalled();
-    expect(createTeamMember).not.toHaveBeenCalled();
-    expect(dbMock.invite.create).not.toHaveBeenCalled();
-  });
-
-  it("createInvite lets an ADMIN grant a role that does not need the owner", async () => {
+  it("createInvite lets an ADMIN grant ADMIN", async () => {
     dbMock.user.findFirst.mockResolvedValue(null);
     dbMock.invite.findFirst.mockResolvedValue(null);
     vi.mocked(createTeamMember).mockResolvedValue({
@@ -718,47 +717,35 @@ describe("createInvite / bulkInviteUsers: who may grant Administrator", () => {
       organizationId: "org-1",
       inviteeEmail: "new@school.org",
       inviterId: "admin-1",
-      roles: [OrganizationRoles.SELF_SERVICE],
+      roles: [OrganizationRoles.ADMIN],
       teamMemberName: "new",
       userId: "admin-1",
       actorOwnsWorkspace: false,
     });
 
-    expect(dbMock.invite.create).toHaveBeenCalledTimes(1);
+    expect(dbMock.invite.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ roles: [OrganizationRoles.ADMIN] }),
+      })
+    );
   });
 
-  it("bulkInviteUsers refuses a CSV with an ADMIN row from an ADMIN and writes nothing", async () => {
-    await expect(
-      bulkInviteUsers({
-        users: [
-          { email: "a@school.org", role: "BASE" },
-          { email: "b@school.org", role: "ADMIN" },
-        ] as Parameters<typeof bulkInviteUsers>[0]["users"],
-        userId: "admin-1",
-        organizationId: "org-1",
-        actorOwnsWorkspace: false,
-      })
-    ).rejects.toMatchObject({ status: 403 });
+  it("bulkInviteUsers lets an ADMIN import ADMIN rows, including the role's label", async () => {
+    await bulkInviteUsers({
+      users: [
+        { email: "a@school.org", role: "BASE" },
+        { email: "b@school.org", role: "ADMIN" },
+        { email: "c@school.org", role: " administrator " },
+      ] as Parameters<typeof bulkInviteUsers>[0]["users"],
+      userId: "admin-1",
+      organizationId: "org-1",
+      actorOwnsWorkspace: false,
+    });
 
-    expect(ssoMock.checkDomainSSOStatus).not.toHaveBeenCalled();
-    expect(dbMock.$transaction).not.toHaveBeenCalled();
-    expect(dbMock.invite.createManyAndReturn).not.toHaveBeenCalled();
-  });
-
-  it("bulkInviteUsers refuses an Administrator row written as the role's label", async () => {
-    await expect(
-      bulkInviteUsers({
-        users: [
-          { email: "a@school.org", role: "Base" },
-          { email: "b@school.org", role: " administrator " },
-        ] as Parameters<typeof bulkInviteUsers>[0]["users"],
-        userId: "admin-1",
-        organizationId: "org-1",
-        actorOwnsWorkspace: false,
-      })
-    ).rejects.toMatchObject({ status: 403 });
-
-    expect(dbMock.$transaction).not.toHaveBeenCalled();
-    expect(dbMock.invite.createManyAndReturn).not.toHaveBeenCalled();
+    expect(writtenRoles()).toEqual({
+      "a@school.org": [OrganizationRoles.BASE],
+      "b@school.org": [OrganizationRoles.ADMIN],
+      "c@school.org": [OrganizationRoles.ADMIN],
+    });
   });
 });

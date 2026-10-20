@@ -100,6 +100,7 @@ import {
   releaseAssetsToAvailableUnlessCheckedOut,
   setCustodyDrivenAssetStatus,
 } from "../asset/custody-status.server";
+import type { LastAuditDateAccess } from "../asset/last-audit-date-access";
 import type {
   MoveAssetKitUnitsArgs,
   MoveUnitsResult,
@@ -7719,12 +7720,19 @@ export async function bulkRemoveAssetsFromKits({
   userId,
   request,
   settings,
+  lastAuditDateAccess,
 }: {
   assetIds: Asset["id"][];
   organizationId: Organization["id"];
   userId: User["id"];
   request: Request;
   settings: AssetIndexSettings;
+  /**
+   * How the caller may use the last audit date, from `lastAuditDateAccessFor`.
+   * A select-all `lastAuditDate` filter without `available` access refuses the
+   * whole selection.
+   */
+  lastAuditDateAccess: LastAuditDateAccess;
 }) {
   try {
     const user = await getUserByID(userId, {
@@ -7755,6 +7763,7 @@ export async function bulkRemoveAssetsFromKits({
       // Kit write permissions are ADMIN/OWNER-only, so the custodian filter
       // here can never come from a restricted viewer.
       allowedTeamMemberIds: "all",
+      lastAuditDateAccess,
     });
 
     // We pull the parent kit (today: ≤1 pivot row per asset) through
