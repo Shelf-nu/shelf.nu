@@ -19,6 +19,7 @@
 
 import { useCallback } from "react";
 
+import { Spinner } from "~/components/shared/spinner";
 import { useSearchParams } from "~/hooks/search-params";
 import type {
   ResolvedTimeframe,
@@ -102,7 +103,7 @@ export function ReportFilterBar({ reportId, timeframe, isLoading }: Props) {
 function FilterLoadingIndicator() {
   return (
     <div className="flex items-center gap-2 text-xs text-gray-500">
-      <div className="animate-spin size-3 rounded-full border-2 border-gray-300 border-t-gray-600" />
+      <Spinner className="size-3" />
       <span>Updating...</span>
     </div>
   );
