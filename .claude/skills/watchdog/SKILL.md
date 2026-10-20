@@ -1,14 +1,14 @@
 ---
-name: pr-review-loop
-description: Automate the PR review-response cycle — watch a PR for CodeRabbit/Codex/Copilot/human feedback, verify each finding, implement the valid ones, commit, then reply and resolve on GitHub. Iterates until the user stops it. Use when the user says "start the PR loop", "handle the review comments", or invokes /pr-review-loop.
+name: watchdog
+description: Automate the PR review-response cycle — watch a PR for CodeRabbit/Codex/Copilot/human feedback, verify each finding, implement the valid ones, commit, then reply and resolve on GitHub. Iterates until the user stops it. Use when the user says "start the PR loop", "handle the review comments", or invokes /watchdog.
 ---
 
-# PR Review Loop
+# Watchdog
 
 Drive a PR to done: watch for review feedback, verify it, fix what is real,
 commit, and answer every thread. The user's only job is `git push`.
 
-**Announce at start:** "Using pr-review-loop to handle review feedback on PR #N."
+**Announce at start:** "Using watchdog to handle review feedback on PR #N."
 
 ## Authorization
 
@@ -432,7 +432,7 @@ waiting after 20 minutes and name it in the report.
 ## Stopping
 
 **The loop never stops on its own.** Only the user ends it: "stop the loop",
-`/pr-review-loop stop`, or the session ending. On a stop request, `TaskStop`
+`/watchdog stop`, or the session ending. On a stop request, `TaskStop`
 the monitor and print a final summary.
 
 The state file survives, so re-invoking on the same PR resumes rather than

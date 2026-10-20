@@ -45,6 +45,10 @@ import * as lowStockService from "~/modules/consumption-log/low-stock.server";
 import * as quantityLock from "~/modules/consumption-log/quantity-lock.server";
 import * as consumptionLogService from "~/modules/consumption-log/service.server";
 import {
+  readStockState,
+  recordStockChanges,
+} from "~/modules/consumption-log/stock-ledger.server";
+import {
   emitAssetKitDetachmentNotes,
   removeDestroyedUnitsFromKits,
 } from "~/modules/kit/service.server";
@@ -499,6 +503,34 @@ vitest.mock(
     };
   }
 );
+
+// why: the ledger rows are derived from real placement reads, covered by
+// `consumption-log/stock-ledger.test.ts` and the in-memory
+// `asset/service.custody-source.test.ts`. Here only the events check-in hands
+// the ledger are asserted.
+vitest.mock("~/modules/consumption-log/stock-ledger.server", () => ({
+  readStockState: vitest.fn().mockResolvedValue({
+    total: 0,
+    placed: new Map(),
+    ledgerStartedAt: null,
+  }),
+  readStockStates: vitest.fn().mockResolvedValue(new Map()),
+  recordStockChanges: vitest.fn().mockResolvedValue(undefined),
+}));
+
+/** Every ledger event the mocked `recordStockChanges` was handed, with its asset. */
+function recordedStockEvents() {
+  return vitest
+    .mocked(recordStockChanges)
+    .mock.calls.flatMap(([, { changes }]) =>
+      changes.flatMap((change) =>
+        (change.events ?? []).map((event) => ({
+          ...event,
+          assetId: change.assetId,
+        }))
+      )
+    );
+}
 
 // why: booking service writes activity events from main's transactional
 // integration — stub so we can assert on calls without persisting them.
@@ -13781,11 +13813,11 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
       assetIds: [mockQtyAssetId],
     });
 
-    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+    expect(recordedStockEvents()).toContainEqual(
       expect.objectContaining({
         assetId: mockQtyAssetId,
         category: "CONSUME",
-        quantity: 10,
+        change: -10,
         bookingId: mockQtyBookingId,
       })
     );
@@ -14144,11 +14176,11 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
       expect.objectContaining({ category: "RETURN", quantity: 5 })
     );
-    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
-      expect.objectContaining({ category: "LOSS", quantity: 3 })
+    expect(recordedStockEvents()).toContainEqual(
+      expect.objectContaining({ category: "LOSS", change: -3 })
     );
-    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
-      expect.objectContaining({ category: "DAMAGE", quantity: 2 })
+    expect(recordedStockEvents()).toContainEqual(
+      expect.objectContaining({ category: "DAMAGE", change: -2 })
     );
     // Pool decrement = lost (3) + damaged (2) = 5. RETURN is excluded.
     expect(db.asset.update).toHaveBeenCalledWith({
@@ -14159,6 +14191,61 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
       expect.objectContaining({
         data: expect.objectContaining({ status: BookingStatus.COMPLETE }),
       })
+    );
+  });
+
+  it("reads the pool's stock before the decrement", async () => {
+    setupQtyMocks();
+
+    await partialCheckinBooking({
+      ...baseParams,
+      checkins: [{ assetId: mockQtyAssetId, returned: 5, lost: 3, damaged: 2 }],
+    });
+
+    // Read after the write, the before-state would equal the after-state and
+    // the ledger would see no change at all.
+    expect(
+      vitest.mocked(readStockState).mock.invocationCallOrder[0]
+    ).toBeLessThan(vitest.mocked(db.asset.update).mock.invocationCallOrder[0]);
+  });
+
+  it("writes a disposition's used-up rows before the next disposition of the asset is capped", async () => {
+    // The asset-level cap sums this booking's CONSUME/LOSS/DAMAGE rows. Two
+    // slices of one asset checked in together must each see what the other
+    // already used up, or both pass the same remaining and the pool loses
+    // more units than are out on the booking.
+    setupQtyMocks();
+    const booking = makeQtyBooking();
+    const slice = booking.bookingAssets[0];
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...booking,
+      bookingAssets: [
+        { ...slice, id: "ba-a" },
+        { ...slice, id: "ba-b" },
+      ],
+    });
+    // why: each slice's own cap reads its booked quantity by id.
+    (
+      db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ quantity: 10 });
+    onTestFinished(() => {
+      (db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>).mockReset();
+    });
+
+    await partialCheckinBooking({
+      ...baseParams,
+      checkins: [
+        { assetId: mockQtyAssetId, bookingAssetId: "ba-a", consumed: 2 },
+        { assetId: mockQtyAssetId, bookingAssetId: "ba-b", consumed: 2 },
+      ],
+    });
+
+    const ledgerWrites = vitest.mocked(recordStockChanges).mock;
+    const capReads = vitest.mocked(db.consumptionLog.aggregate).mock;
+    expect(ledgerWrites.calls).toHaveLength(2);
+    expect(ledgerWrites.invocationCallOrder[0]).toBeLessThan(
+      capReads.invocationCallOrder[capReads.invocationCallOrder.length - 1]
     );
   });
 
@@ -14256,8 +14343,8 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
       checkins: [{ assetId: mockQtyAssetId, consumed: 10 }],
     });
 
-    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
-      expect.objectContaining({ category: "CONSUME", quantity: 10 })
+    expect(recordedStockEvents()).toContainEqual(
+      expect.objectContaining({ category: "CONSUME", change: -10 })
     );
     expect(db.asset.update).toHaveBeenCalledWith({
       where: { id: mockQtyAssetId },
@@ -14326,7 +14413,7 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
       { id: "al-store", locationId: "loc-store", quantity: 60 },
       { id: "al-studio", locationId: "loc-studio", quantity: 34 },
     ]);
-    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+    expect(recordedStockEvents()).toContainEqual(
       expect.objectContaining({ category: "CONSUME", locationId: "loc-studio" })
     );
     expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
@@ -14844,11 +14931,11 @@ describe("checkinBooking — qty-tracked auto-default", () => {
 
     await checkinBooking(baseParams);
 
-    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+    expect(recordedStockEvents()).toContainEqual(
       expect.objectContaining({
         assetId: mockQtyAssetId,
         category: "CONSUME",
-        quantity: 10,
+        change: -10,
         bookingId: mockBookingId,
         // Bug 2 fix: auto-default tags the log with the slice's bookingAssetId
         // (not NULL) so future reads attribute it to the right slice.
@@ -14913,7 +15000,7 @@ describe("checkinBooking — qty-tracked auto-default", () => {
       { id: "al-store", locationId: "loc-store", quantity: 60 },
       { id: "al-studio", locationId: "loc-studio", quantity: 30 },
     ]);
-    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+    expect(recordedStockEvents()).toContainEqual(
       expect.objectContaining({ category: "CONSUME", locationId: "loc-studio" })
     );
   });
@@ -14975,8 +15062,8 @@ describe("checkinBooking — qty-tracked auto-default", () => {
     });
 
     // Only a LOSS log — no RETURN or CONSUME auto-fill.
-    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
-      expect.objectContaining({ category: "LOSS", quantity: 10 })
+    expect(recordedStockEvents()).toContainEqual(
+      expect.objectContaining({ category: "LOSS", change: -10 })
     );
     const calls = (
       consumptionLogService.createConsumptionLog as ReturnType<typeof vitest.fn>
@@ -19842,7 +19929,7 @@ describe("checkinBooking: units destroyed out of a kit slice leave the kit", () 
   });
 
   it("consumes only the units a one-way kit slice sent out", async () => {
-    expect.assertions(3);
+    expect.assertions(4);
 
     arrangeBooking(ConsumptionType.ONE_WAY);
     // why: the sizing reads the slice and the booking's sessions. 4 of the
@@ -19866,13 +19953,17 @@ describe("checkinBooking: units destroyed out of a kit slice leave the kit", () 
 
     await checkinBooking(params);
 
-    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+    expect(recordedStockEvents()).toContainEqual(
       expect.objectContaining({
         category: "CONSUME",
-        quantity: 4,
+        change: -4,
         bookingAssetId: "ba-pens",
       })
     );
+    // The pool's stock is read before its decrement, for the ledger diff.
+    expect(
+      vitest.mocked(readStockState).mock.invocationCallOrder[0]
+    ).toBeLessThan(vitest.mocked(db.asset.update).mock.invocationCallOrder[0]);
     expect(db.asset.update).toHaveBeenCalledWith({
       where: { id: ASSET_ID },
       data: { quantity: { decrement: 4 } },
@@ -19986,10 +20077,10 @@ describe("checkinBooking: units destroyed out of a kit slice leave the kit", () 
 
     await checkinBooking(params);
 
-    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+    expect(recordedStockEvents()).toContainEqual(
       expect.objectContaining({
         category: "CONSUME",
-        quantity: 3,
+        change: -3,
         bookingAssetId: "ba-kit",
       })
     );
@@ -20154,10 +20245,10 @@ describe("checkinBooking: units destroyed out of a kit slice leave the kit", () 
       checkins: [{ assetId: ASSET_ID, consumed: 2 }],
     });
 
-    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+    expect(recordedStockEvents()).toContainEqual(
       expect.objectContaining({
         category: "CONSUME",
-        quantity: 2,
+        change: -2,
         bookingAssetId: "ba-pens-loose",
       })
     );
