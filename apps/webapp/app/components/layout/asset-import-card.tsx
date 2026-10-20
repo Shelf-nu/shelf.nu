@@ -241,6 +241,8 @@ function ImportCardBody({ initial, onDismiss }: ImportCardBodyProps) {
       : null;
 
   // Plain lucide icons on the card's white background, sized to the title.
+  // The theme replaces Tailwind's animation list, so `animate-spin` does not
+  // exist; the arbitrary value uses the default `spin` keyframes, which remain.
   const iconClass = "mt-1 size-5 shrink-0";
   let icon: ReactNode;
   if (status.status === "COMPLETED") {
@@ -261,7 +263,10 @@ function ImportCardBody({ initial, onDismiss }: ImportCardBodyProps) {
     icon = (
       <Loader2Icon
         aria-hidden="true"
-        className={tw(iconClass, "animate-spin text-primary-600")}
+        className={tw(
+          iconClass,
+          "animate-[spin_1s_linear_infinite] text-primary-600"
+        )}
       />
     );
   }
