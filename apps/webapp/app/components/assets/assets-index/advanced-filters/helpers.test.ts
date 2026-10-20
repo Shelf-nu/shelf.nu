@@ -2,7 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Column } from "~/modules/asset-index-settings/helpers";
 
-import { getDefaultValueForFieldType, getUIFieldType } from "./helpers";
+import {
+  getDefaultValueForFieldType,
+  getUIFieldType,
+  valueForOperatorChange,
+} from "./helpers";
+import { getOperatorsForFilter } from "./operator-selector";
+import type { Filter } from "./schema";
 
 describe("getUIFieldType", () => {
   it("treats updatedAt as a date field", () => {
@@ -100,5 +106,81 @@ describe("getDefaultValueForFieldType — date defaults use the user's timezone"
     expect(getDefaultValueForFieldType(nameColumn, null, "Asia/Tokyo")).toBe(
       ""
     );
+  });
+});
+
+describe("getOperatorsForFilter", () => {
+  const dateFilter = (name: string) =>
+    ({ name, type: "date", operator: "is", value: "" }) as Filter;
+
+  it("offers isEmpty for lastAuditDate", () => {
+    expect(getOperatorsForFilter(dateFilter("lastAuditDate"))).toContain(
+      "isEmpty"
+    );
+  });
+
+  it("does not offer isEmpty for other date columns", () => {
+    expect(getOperatorsForFilter(dateFilter("createdAt"))).not.toContain(
+      "isEmpty"
+    );
+  });
+});
+
+describe("valueForOperatorChange", () => {
+  // why: the date default is "today"; a fixed instant keeps it deterministic.
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-15T12:00:00.000Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const lastAuditDate = {
+    name: "lastAuditDate",
+    visible: true,
+    position: 21,
+  } as unknown as Column;
+
+  /** An applied last audit date filter with the given operator and value. */
+  function applied(operator: Filter["operator"], value: Filter["value"]) {
+    return { name: "lastAuditDate", type: "date", operator, value } as Filter;
+  }
+
+  it("re-seeds today's date when leaving Never audited", () => {
+    expect(
+      valueForOperatorChange({
+        filter: applied("isEmpty", ""),
+        operator: "before",
+        columns: [lastAuditDate],
+        customFields: null,
+        timeZone: "UTC",
+      })
+    ).toBe("2026-06-15");
+  });
+
+  it("clears the value when switching to Never audited", () => {
+    expect(
+      valueForOperatorChange({
+        filter: applied("before", "2026-01-01"),
+        operator: "isEmpty",
+        columns: [lastAuditDate],
+        customFields: null,
+        timeZone: "UTC",
+      })
+    ).toBe("");
+  });
+
+  it("keeps the value between operators that both take a date", () => {
+    expect(
+      valueForOperatorChange({
+        filter: applied("before", "2026-01-01"),
+        operator: "after",
+        columns: [lastAuditDate],
+        customFields: null,
+        timeZone: "UTC",
+      })
+    ).toBe("2026-01-01");
   });
 });

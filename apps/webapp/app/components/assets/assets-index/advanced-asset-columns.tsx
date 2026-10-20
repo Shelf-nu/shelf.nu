@@ -68,6 +68,7 @@ import { SamIdCell } from "./advanced-columns/sam-id-cell";
 import { Td } from "./advanced-columns/td";
 import AssetQuickActions from "./asset-quick-actions";
 import { freezeColumnClassNames } from "./freeze-column-classes";
+import { LastAuditDateCell } from "./last-audit-date-cell";
 import { ListItemTagsColumn } from "./list-item-tags-column";
 import { AssetImage } from "../asset-image/component";
 import { AssetStatusBadge } from "../asset-status-badge";
@@ -80,7 +81,8 @@ export function AdvancedIndexColumn({
   column: ColumnLabelKey;
   item: AdvancedIndexAsset;
 }) {
-  const { locale, currentOrganization } = useLoaderData<AssetIndexLoaderData>();
+  const { locale, currentOrganization, lastAuditDateAccess } =
+    useLoaderData<AssetIndexLoaderData>();
   const { prefs } = useDateFormatter();
   const showAssetImage = useAssetIndexShowImage();
   const freezeColumn = useAssetIndexFreezeColumn();
@@ -310,6 +312,15 @@ export function AdvancedIndexColumn({
         <UpcomingReminderColumn
           assetId={item.id}
           upcomingReminder={item.upcomingReminder}
+        />
+      );
+
+    case "lastAuditDate":
+      return (
+        <LastAuditDateCell
+          assetId={item.id}
+          lastAuditDate={item.lastAuditDate}
+          access={lastAuditDateAccess ?? "hidden"}
         />
       );
 

@@ -105,6 +105,9 @@ export function useFilterFormValidation(
    * @returns True if valid, false if invalid
    */
   const validateFilterValue = (filter: Filter): boolean => {
+    // `isEmpty` carries no value; the empty string is its valid state.
+    if (filter.operator === "isEmpty") return true;
+
     try {
       const schema =
         filterValueSchema[filter.type as keyof typeof filterValueSchema];
