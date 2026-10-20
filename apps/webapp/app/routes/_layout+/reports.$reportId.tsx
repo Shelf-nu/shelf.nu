@@ -96,8 +96,9 @@ export const handle = {
  *
  * @returns The report's data for the current filters, its id, and the page
  *   header; or a redirect to `/reports` when the plan does not include reports
- * @throws {ShelfError} 404 for an unknown report; 403 for one not yet enabled, or
- *   when the caller lacks `reports: read`
+ * @throws A route error response carrying the failure's status: 404 for an
+ *   unknown report; 403 for one not yet enabled, or when the caller lacks
+ *   `reports: read`
  */
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -188,7 +189,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         reportData = await bookingComplianceReport({
           organizationId,
           timeframe,
-          // Anchor trend-chart axis labels in the acting user's timezone (D2).
+          // Anchor trend-chart axis labels in the acting user's timezone.
           timeZone: formatPrefs.timeZone,
           page: getIntParam(url.searchParams, "page", 1),
           pageSize: getIntParam(url.searchParams, "pageSize", 50),

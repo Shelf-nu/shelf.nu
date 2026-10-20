@@ -430,20 +430,33 @@ describe("reports plan gate: a workspace on a plan with reports", () => {
   );
 });
 
-describe("reports plan gate: the role check comes first", () => {
-  it.each(DOORS)(
-    "$file gives a base user the role error, whatever the plan",
-    async (door) => {
-      givenOwnerPlan("free");
-      const context = givenViewer("base-1", OrganizationRoles.BASE);
+/**
+ * Every role the permission matrix gives no `reports` access. Manager has no
+ * allow-all shortcut, so its answer comes from its matrix row alone.
+ */
+const ROLES_WITHOUT_REPORTS = [
+  OrganizationRoles.BASE,
+  OrganizationRoles.SELF_SERVICE,
+  OrganizationRoles.MANAGER,
+];
 
-      expect(await outcomeOf(() => door.run(context))).toMatchObject({
-        kind: "refused",
-        status: 403,
-        title: "Unauthorized",
-      });
-      // The plan is never looked up for a role that may not see reports.
-      expect(db.user.findUniqueOrThrow).not.toHaveBeenCalled();
-    }
-  );
-});
+describe.each(ROLES_WITHOUT_REPORTS)(
+  "reports plan gate: the role check comes first for %s",
+  (role) => {
+    it.each(DOORS)(
+      "$file gives the role error, whatever the plan",
+      async (door) => {
+        givenOwnerPlan("free");
+        const context = givenViewer("viewer-1", role);
+
+        expect(await outcomeOf(() => door.run(context))).toMatchObject({
+          kind: "refused",
+          status: 403,
+          title: "Unauthorized",
+        });
+        // The plan is never looked up for a role that may not see reports.
+        expect(db.user.findUniqueOrThrow).not.toHaveBeenCalled();
+      }
+    );
+  }
+);

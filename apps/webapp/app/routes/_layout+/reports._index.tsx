@@ -50,7 +50,8 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
  * the workspace) when it does not. Both shapes carry `header`, which `meta` and
  * the layout header read.
  *
- * @throws {ShelfError} when the caller lacks `reports: read`
+ * @throws A route error response carrying the failure's status: 403 when the
+ *   caller lacks `reports: read`
  */
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
