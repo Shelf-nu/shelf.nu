@@ -421,16 +421,25 @@ export const buildCsvExportDataFromAssets = ({
 }): string[][] => {
   if (!assets.length) return [];
 
-  // Get visible columns in the correct order. The export-only `qrUrl` column
-  // rides directly behind `qrId`, so it is shown exactly when the QR ID is.
-  const visibleColumns = columns
+  const exportedColumns = columns
     .filter((col) => col.visible && col.name !== "actions")
-    .sort((a, b) => a.position - b.position)
-    .flatMap((col): Column[] =>
-      col.name === "qrId"
-        ? [col, { name: "qrUrl", visible: true, position: col.position }]
-        : [col]
-    );
+    .sort((a, b) => a.position - b.position);
+
+  // The export-only `qrUrl` column rides directly behind `qrId`, so it is
+  // shown exactly when the QR ID is. It gives way to an exported custom field
+  // with the same header: two identical headers would make the update
+  // importer write the code's URL into that field.
+  const qrUrlLabel = columnsLabelsMap.qrUrl.toLowerCase();
+  const customFieldTakesQrUrlHeader = exportedColumns.some(
+    (col) =>
+      col.name.startsWith("cf_") &&
+      parseColumnName(col.name).toLowerCase() === qrUrlLabel
+  );
+  const visibleColumns = exportedColumns.flatMap((col): Column[] =>
+    col.name === "qrId" && !customFieldTakesQrUrlHeader
+      ? [col, { name: "qrUrl", visible: true, position: col.position }]
+      : [col]
+  );
 
   // Create headers row using column names
   const headers = visibleColumns.map((col) =>

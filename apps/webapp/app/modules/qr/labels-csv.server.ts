@@ -16,6 +16,7 @@
  * @see {@link file://../../components/assets/bulk-download-qr-dialog.tsx}
  * @see {@link file://./qr-url.server.ts}
  */
+import { neutraliseCsvFormula, quoteCsvCell } from "~/utils/csv-cells";
 import { withUtf8Bom } from "~/utils/csv-utf8";
 import { getQrUrl } from "./qr-url.server";
 
@@ -43,17 +44,16 @@ export const LABELS_CSV_HEADERS = [
 /**
  * Quotes one CSV field, doubling any quote inside it.
  *
- * Asset, category and location names are typed by workspace members, and
- * spreadsheets run a cell that starts with `=`, `+`, `-` or `@` as a formula
- * (CWE-1236). Such a value gets a leading `'` so it opens as plain text, the
- * same guard the report exports apply.
+ * Asset, category and location names are typed by workspace members, so a
+ * value a spreadsheet would run as a formula is neutralised. The file is read
+ * by label software that prints a leading `'` literally, so a plain signed
+ * measurement (`-20C Freezer`) is left as typed.
  *
  * @param value - The raw field value
  * @returns The quoted field
  */
 function quoteField(value: string) {
-  const safe = /^[=+\-@]/.test(value) ? `'${value}` : value;
-  return `"${safe.replace(/"/g, '""')}"`;
+  return quoteCsvCell(neutraliseCsvFormula(value, { keepSignedText: true }));
 }
 
 /**

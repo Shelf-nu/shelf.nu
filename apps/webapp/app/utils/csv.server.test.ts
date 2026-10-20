@@ -554,6 +554,28 @@ describe("buildCsvExportDataFromAssets", () => {
 
       expect(headers).toEqual(['"Name"', '"Status"']);
     });
+
+    it("gives way to an exported custom field already named QR URL", () => {
+      const [headers] = buildCsvExportDataFromAssets({
+        assets: assets as unknown as Parameters<
+          typeof buildCsvExportDataFromAssets
+        >[0]["assets"],
+        columns: [
+          { name: "name", visible: true, position: 0 },
+          { name: "qrId", visible: true, position: 1 },
+          { name: "cf_qr url", visible: true, position: 2 },
+        ] as Parameters<typeof buildCsvExportDataFromAssets>[0]["columns"],
+        currentOrganization: {
+          id: "org-1",
+          barcodesEnabled: false,
+          currency: "USD",
+        },
+        prefs: HARDCODED_DEFAULT_PREFS,
+      });
+
+      // One "QR URL" header, the custom field's, so a re-import updates it.
+      expect(headers).toEqual(['"Name"', '"QR ID"', '"qr url"']);
+    });
   });
 });
 

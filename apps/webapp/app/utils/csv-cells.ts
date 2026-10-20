@@ -49,6 +49,39 @@ export function quoteCsvCell(value: string): string {
   return `"${(value ?? "").replace(/"/g, '""')}"`;
 }
 
+/** A cell starting with one of these is run as a formula by spreadsheets. */
+const FORMULA_TRIGGER = /^[=+\-@]/;
+
+/**
+ * A leading sign followed only by digits, letters, spaces and unit marks
+ * (`-20C Freezer`, `+5V PSU`). A formula that does anything needs a call
+ * `(`, a DDE `|` or an operator beyond `-`, none of which this allows.
+ */
+const SIGNED_PLAIN_TEXT = /^[+-]\d[\p{L}\p{N}\s.,°%/-]*$/u;
+
+/**
+ * Neutralises a value a spreadsheet would run as a formula (CWE-1236) by
+ * prefixing a `'`, which spreadsheets read as "this cell is text".
+ *
+ * Label printer software (Brady, P-touch, Dymo) prints that `'` literally, so
+ * a file meant for printing passes `keepSignedText` to leave a plain signed
+ * measurement such as `-20C Freezer` as typed. `=` and `@` are always
+ * neutralised.
+ *
+ * @param value - The raw cell value, before quoting.
+ * @param options.keepSignedText - Leave a `+`/`-` value alone when it holds no
+ * formula syntax.
+ * @returns The value, prefixed with `'` when a spreadsheet would run it.
+ */
+export function neutraliseCsvFormula(
+  value: string,
+  { keepSignedText = false }: { keepSignedText?: boolean } = {}
+): string {
+  if (!FORMULA_TRIGGER.test(value)) return value;
+  if (keepSignedText && SIGNED_PLAIN_TEXT.test(value)) return value;
+  return `'${value}`;
+}
+
 /** An item needs quoting when a bare split would not give it back unchanged. */
 const NEEDS_QUOTING = /[",]/;
 

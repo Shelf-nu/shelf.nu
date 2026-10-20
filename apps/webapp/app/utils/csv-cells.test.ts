@@ -12,7 +12,37 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { decodeCsvListCell, encodeCsvListCell } from "./csv-cells";
+import {
+  decodeCsvListCell,
+  encodeCsvListCell,
+  neutraliseCsvFormula,
+} from "./csv-cells";
+
+describe("neutraliseCsvFormula", () => {
+  it("prefixes every value a spreadsheet would run", () => {
+    expect(
+      ["=1+1", "+cmd", "-20C Freezer", "@SUM(A1)"].map((v) =>
+        neutraliseCsvFormula(v)
+      )
+    ).toEqual(["'=1+1", "'+cmd", "'-20C Freezer", "'@SUM(A1)"]);
+  });
+
+  it("leaves other values alone", () => {
+    expect(neutraliseCsvFormula("Freezer -80")).toBe("Freezer -80");
+  });
+
+  it("keeps a plain signed measurement when asked, never = or @", () => {
+    const keep = { keepSignedText: true };
+    expect(neutraliseCsvFormula("-20C Freezer", keep)).toBe("-20C Freezer");
+    expect(neutraliseCsvFormula("+5V PSU", keep)).toBe("+5V PSU");
+    expect(neutraliseCsvFormula("-1+cmd|' /C calc'!A0", keep)).toBe(
+      "'-1+cmd|' /C calc'!A0"
+    );
+    expect(neutraliseCsvFormula("-2*3", keep)).toBe("'-2*3");
+    expect(neutraliseCsvFormula("=1", keep)).toBe("'=1");
+    expect(neutraliseCsvFormula("@HQ", keep)).toBe("'@HQ");
+  });
+});
 
 describe("encodeCsvListCell", () => {
   it("leaves a plain list alone", () => {

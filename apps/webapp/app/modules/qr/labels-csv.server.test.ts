@@ -88,6 +88,39 @@ describe("buildLabelsCsv", () => {
     expect(row.startsWith('"Freezer -80",')).toBe(true);
   });
 
+  it("prints a signed measurement as typed, with no apostrophe on the label", () => {
+    const [, row] = linesOf(
+      buildLabelsCsv([
+        {
+          ...camera,
+          title: "-20C Freezer",
+          category: { name: "+5V PSU" },
+          location: { name: "-2.5 m, Cellar" },
+        },
+      ])
+    );
+
+    expect(row).toBe(
+      '"-20C Freezer","SAM-0001","cm4abc123","http://localhost:3000/qr/cm4abc123","+5V PSU","-2.5 m, Cellar"'
+    );
+  });
+
+  it("still neutralises a signed value that carries formula syntax", () => {
+    const [, row] = linesOf(
+      buildLabelsCsv([
+        {
+          ...camera,
+          title: "-1+cmd|' /C calc'!A0",
+          category: { name: "+1+SUM(A1:A9)" },
+          location: { name: "-2*3" },
+        },
+      ])
+    );
+
+    expect(row.startsWith(`"'-1+cmd|' /C calc'!A0",`)).toBe(true);
+    expect(row.endsWith(`"'+1+SUM(A1:A9)","'-2*3"`)).toBe(true);
+  });
+
   it("writes only the header for an empty selection", () => {
     expect(linesOf(buildLabelsCsv([]))).toEqual([
       '"Asset name","SAM ID","QR ID","QR URL","Category","Location"',
