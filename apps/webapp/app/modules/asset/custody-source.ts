@@ -5,8 +5,9 @@
  * for custody), once, and only when a pool is placed at two or more locations.
  * A source is a manual placement (`AssetLocation` with `assetKitId` NULL) or,
  * when the pool has units no placement accounts for, "Unplaced". The chosen
- * source is stored on `Custody.locationId` (NULL = unplaced, or never
- * recorded).
+ * source is stored on `Custody.locationId`. NULL is the unplaced units, or,
+ * with `Custody.sourceUnknown`, a source that was never recorded: the
+ * assignment named none and the pool had more than one place to take from.
  *
  * Custody never changes a location's count. The source only decides which
  * location loses units that are used up, and caps how many can be taken from
@@ -20,24 +21,28 @@
  * @see {@link file://./placement-reconcile.server.ts}
  */
 
-/**
- * Form value the web pickers post for "the unplaced units". Form parsing
- * drops empty strings, so the web cannot post `""`; JSON clients may send
- * `null` or `""` instead. See {@link isUnplacedSource}. Location ids are
- * cuids, so this word can never be mistaken for one.
- */
-export const UNPLACED_SOURCE = "unplaced";
+import type {
+  CustodySourceEntry,
+  CustodySourceOption,
+} from "@shelf/quantity-control";
+import { isUnplacedSource, UNPLACED_SOURCE } from "@shelf/quantity-control";
 
-/**
- * Whether a submitted source names the unplaced units: `null`, `""` or
- * {@link UNPLACED_SOURCE}. `undefined` is NOT one of them: it means the
- * caller did not say.
- */
-export function isUnplacedSource(
-  value: string | null | undefined
-): value is null | "" | typeof UNPLACED_SOURCE {
-  return value === null || value === "" || value === UNPLACED_SOURCE;
-}
+// The picker values, the option shape, the dialog defaults and the source
+// entry shape are shared with the companion app so both pre-select the same
+// location. They live in @shelf/quantity-control and are re-exported here so
+// webapp call sites keep importing from this module.
+export {
+  UNPLACED_SOURCE,
+  UNRECORDED_SOURCE,
+  custodySourceKey,
+  defaultAssignSourceOption,
+  defaultSourceOption,
+  isUnplacedSource,
+} from "@shelf/quantity-control";
+export type {
+  CustodySourceEntry,
+  CustodySourceOption,
+} from "@shelf/quantity-control";
 
 /** One manual placement of a pool. */
 export type SourcePlacement = {
@@ -48,6 +53,8 @@ export type SourcePlacement = {
 /** One operator custody row (kit-inherited rows never take part). */
 export type SourceCustodyRow = {
   locationId: string | null;
+  /** `Custody.sourceUnknown`: the source was never recorded. */
+  sourceUnknown: boolean;
   quantity: number;
 };
 
@@ -96,13 +103,17 @@ export function placedAtSource(
     .reduce((sum, p) => sum + p.quantity, 0);
 }
 
-/** Units in operator custody that were taken from `locationId` (NULL included). */
+/**
+ * Units in operator custody that were taken from `locationId`, or from the
+ * unplaced units for NULL. Custody whose source was never recorded counts
+ * against neither.
+ */
 export function custodyFromSource(
   state: CustodySourceState,
   locationId: string | null
 ): number {
   return state.operatorCustody
-    .filter((row) => row.locationId === locationId)
+    .filter((row) => row.locationId === locationId && !row.sourceUnknown)
     .reduce((sum, row) => sum + row.quantity, 0);
 }
 
@@ -125,7 +136,9 @@ export function bookedOutFromSource(
 /**
  * How many units a source has left to hand out: placed there, minus already
  * in custody from there, minus out on a booking from there. For NULL: the
- * unplaced units minus custody recorded against them. Never negative.
+ * unplaced units minus custody recorded against them. Custody whose source
+ * was never recorded is charged to no source; the pool-wide availability
+ * check still bounds it. Never negative.
  *
  * This is the one definition used by the Assign cap, the dropdown numbers and
  * pre-selection, the loss cap and the booking check-out default. The
@@ -225,24 +238,6 @@ export type SourceLocationLabel = {
   parentName?: string | null;
 };
 
-/** One choice in a "From location" / "At location" dropdown. */
-export type CustodySourceOption = {
-  /** The form value: a location id, or {@link UNPLACED_SOURCE}. */
-  value: string;
-  /** NULL for the unplaced units. */
-  locationId: string | null;
-  /** "Camera Room", "Shelf A (Warehouse)" or "Unplaced". */
-  label: string;
-  /** Plain count placed there (or unplaced). */
-  placed: number;
-  /** Units in operator custody taken from there. */
-  inCustody: number;
-  /** Units out on a booking that left from there. */
-  onBooking: number;
-  /** {@link unitsLeftAtSource} for this option. */
-  left: number;
-};
-
 /**
  * Builds the dropdown choices for a pool: one per manual placement, in
  * placement order, then "Unplaced" when the pool has unplaced units.
@@ -315,23 +310,6 @@ export type CustodySourceSummary = {
   poolAvailable: number;
 };
 
-/**
- * The option a dialog opens with: the LOCATION with the most units left.
- * "Unplaced" is never the default, even when it has more left; the operator
- * picks it on purpose. Ties go to the earlier location, so the choice is
- * stable between renders. NULL only when there is no location option.
- */
-export function defaultSourceOption(
-  options: CustodySourceOption[]
-): CustodySourceOption | null {
-  let best: CustodySourceOption | null = null;
-  for (const option of options) {
-    if (option.locationId === null) continue;
-    if (!best || option.left > best.left) best = option;
-  }
-  return best;
-}
-
 /* -------------------------------------------------------------------------- */
 /*                                 Resolution                                 */
 /* -------------------------------------------------------------------------- */
@@ -340,6 +318,11 @@ export function defaultSourceOption(
 export type ResolvedCustodySource = {
   /** The location to record, NULL for unplaced / unknown. */
   locationId: string | null;
+  /**
+   * True when nothing was named and the pool had more than one place the
+   * units could come from: recorded as `Custody.sourceUnknown`.
+   */
+  sourceUnknown: boolean;
   /**
    * True when the caller named the source (a location, or "unplaced"). Only
    * an explicit source is validated and capped per location: an older phone
@@ -355,8 +338,10 @@ export type ResolvedCustodySource = {
  *    (see {@link isUnplacedSource}).
  * 2. Nothing submitted, and the pool has exactly one manual placement and no
  *    unplaced units: that location (there is nowhere else the units can be).
- * 3. Nothing submitted otherwise (no placements, or an ambiguous pool from an
- *    older client): NULL.
+ * 3. Nothing submitted and no manual placement: the unplaced units, the only
+ *    place the units can be.
+ * 4. Nothing submitted otherwise (one placement plus unplaced units, or two
+ *    or more placements, from an older client): NULL with `sourceUnknown`.
  *
  * @param submitted - `undefined` when the field was absent from the request
  */
@@ -370,16 +355,20 @@ export function resolveCustodySource({
   if (submitted !== undefined) {
     return {
       locationId: isUnplacedSource(submitted) ? null : submitted,
+      sourceUnknown: false,
       explicit: true,
     };
   }
 
   const locations = distinctPlacementLocationIds(state);
+  if (locations.length === 0) {
+    return { locationId: null, sourceUnknown: false, explicit: false };
+  }
   if (locations.length === 1 && unplacedUnits(state) === 0) {
-    return { locationId: locations[0], explicit: false };
+    return { locationId: locations[0], sourceUnknown: false, explicit: false };
   }
 
-  return { locationId: null, explicit: false };
+  return { locationId: null, sourceUnknown: true, explicit: false };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -391,6 +380,8 @@ export type CustodyRowForPlan = {
   id: string;
   teamMemberId: string;
   locationId: string | null;
+  /** `Custody.sourceUnknown`: the source was never recorded. */
+  sourceUnknown: boolean;
   quantity: number;
   createdAt: Date | string;
 };
@@ -543,8 +534,12 @@ export function planCustodyRehome({
     }
   ) => {
     let remaining = amount;
+    // Custody whose source was never recorded is not at any placement, so
+    // a placement change never moves it.
     const sourceRows = orderRowsForDrain(
-      rows.filter((row) => row.locationId === fromLocationId)
+      rows.filter(
+        (row) => row.locationId === fromLocationId && !row.sourceUnknown
+      )
     );
     for (const row of sourceRows) {
       let rowLeft = row.quantity;
@@ -612,16 +607,6 @@ export function planCustodyRehome({
 /*                                 API shape                                  */
 /* -------------------------------------------------------------------------- */
 
-/** One source of a holder's units, as the mobile API reports it. */
-export type CustodySourceEntry = {
-  /** NULL: the unplaced units, or a source that was never recorded. */
-  locationId: string | null;
-  /** The location's name; null with `locationId`. */
-  name: string | null;
-  /** Units the holder took from this source. */
-  quantity: number;
-};
-
 /**
  * A holder's operator rows as per-source entries, one per source location,
  * in the order the rows were given. Rows sharing a source (never the case
@@ -632,18 +617,24 @@ export type CustodySourceEntry = {
 export function buildCustodySourceEntries(
   rows: Array<{
     quantity: number;
+    sourceUnknown: boolean;
     location: { id: string; name: string } | null;
   }>
 ): CustodySourceEntry[] {
   const entries: CustodySourceEntry[] = [];
   for (const row of rows) {
     const locationId = row.location?.id ?? null;
-    const existing = entries.find((entry) => entry.locationId === locationId);
+    const unrecorded = locationId === null && row.sourceUnknown === true;
+    const existing = entries.find(
+      (entry) =>
+        entry.locationId === locationId && entry.unrecorded === unrecorded
+    );
     if (existing) {
       existing.quantity += row.quantity;
     } else {
       entries.push({
         locationId,
+        unrecorded,
         name: row.location?.name ?? null,
         quantity: row.quantity,
       });

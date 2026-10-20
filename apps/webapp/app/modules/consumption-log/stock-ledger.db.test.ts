@@ -123,7 +123,7 @@ describe.skipIf(!DATABASE_URL)("stock ledger replay (real database)", () => {
   async function liveStock(assetId: string) {
     const [row, placements] = await Promise.all([
       db.asset.findUniqueOrThrow({
-        where: { id: assetId, organizationId },
+        where: { id: assetId, organizationId, archivedAt: null },
         select: { quantity: true },
       }),
       db.assetLocation.findMany({
@@ -349,7 +349,7 @@ describe.skipIf(!DATABASE_URL)("stock ledger replay (real database)", () => {
         quantity,
         userId,
         organizationId,
-        role: "ADMIN",
+        custodyAssign: "anyone",
         locationId: locationId ?? "",
       });
     await assign(10, loc.studio);
@@ -360,7 +360,7 @@ describe.skipIf(!DATABASE_URL)("stock ledger replay (real database)", () => {
       consumed: 6,
       userId,
       organizationId,
-      role: "ADMIN",
+      custodyAssign: "anyone",
     });
     rows = await expectLedgerMatchesLive(id);
     expect(
@@ -377,7 +377,7 @@ describe.skipIf(!DATABASE_URL)("stock ledger replay (real database)", () => {
       quantity: 4,
       userId,
       organizationId,
-      role: "ADMIN",
+      custodyAssign: "anyone",
     });
     rows = await expectLedgerMatchesLive(id);
     expect(lastRows(rows, 1)).toEqual([["CONSUME", null, -4]]);
@@ -388,7 +388,7 @@ describe.skipIf(!DATABASE_URL)("stock ledger replay (real database)", () => {
     const current = async () =>
       (
         await db.asset.findUniqueOrThrow({
-          where: { id, organizationId },
+          where: { id, organizationId, archivedAt: null },
           select: { quantity: true },
         })
       ).quantity ?? 0;
@@ -516,7 +516,7 @@ describe.skipIf(!DATABASE_URL)("stock ledger replay (real database)", () => {
       ["LOSS", loc.camera, -2],
     ]);
     const started = await db.asset.findUniqueOrThrow({
-      where: { id: legacy.id, organizationId },
+      where: { id: legacy.id, organizationId, archivedAt: null },
       select: { stockLedgerStartedAt: true },
     });
     expect(started.stockLedgerStartedAt).toBeInstanceOf(Date);
@@ -581,42 +581,6 @@ describe.skipIf(!DATABASE_URL)("stock ledger replay (real database)", () => {
       ["RESTOCK", null, 5],
     ]);
     expect(rows[0].quantity).toBe(3);
-  }, 60_000);
-
-  it("records the stock a backup restores", async () => {
-    await asset.createAssetsFromBackupImport({
-      userId,
-      organizationId,
-      data: [
-        {
-          id: "backup-row",
-          title: `Restored cable ${stamp}`,
-          description: "",
-          category: {},
-          tags: [],
-          location: {},
-          custody: {},
-          customFields: [],
-          notes: [],
-          status: "AVAILABLE",
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          valuation: null,
-          mainImage: null,
-          type: "QUANTITY_TRACKED",
-          quantity: "12",
-          consumptionType: "TWO_WAY",
-        },
-      ] as unknown as Parameters<
-        typeof asset.createAssetsFromBackupImport
-      >[0]["data"],
-    });
-    const restored = await db.asset.findFirstOrThrow({
-      where: { organizationId, title: `Restored cable ${stamp}` },
-      select: { id: true },
-    });
-    const rows = await expectLedgerMatchesLive(restored.id);
-    expect(lastRows(rows, 1)).toEqual([["INITIAL", null, 12]]);
   }, 60_000);
 
   it("gives the ledger readers the same numbers whether a disposition is one row or split", async () => {

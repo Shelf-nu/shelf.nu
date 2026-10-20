@@ -157,7 +157,11 @@ export async function loadBookedOutBySource(
   const sourced = await client.bookingAsset.findMany({
     where: {
       assetId: { in: ids },
+      // Standalone slices that never came with a kit: kit slices and detached
+      // kit residue record the kit's location, not a manual placement (see
+      // `isManualSourceSlice`).
       assetKitId: null,
+      sourceKitId: null,
       sourceLocationId: locationId ?? { not: null },
       checkedOutQuantity: { gt: 0 },
       booking: {

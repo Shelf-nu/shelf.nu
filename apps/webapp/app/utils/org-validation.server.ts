@@ -31,8 +31,15 @@ import type {
   User,
 } from "@prisma/client";
 import { TagUseFor } from "@prisma/client";
+import type { ArchivedAssetsFix } from "@shelf/labels";
+import { archivedAssetsRefusal } from "@shelf/labels";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { hasPermission } from "~/utils/permissions/permission.validator.server";
 
 const label = "Request validation";
 
@@ -45,9 +52,20 @@ const label = "Request validation";
 export type OrgValidationTxClient = {
   asset: {
     findMany: (args: {
-      where: { id: { in: string[] }; organizationId: string };
-      select: { id: true };
-    }) => Promise<{ id: string }[]>;
+      where: {
+        id: { in: string[] };
+        organizationId: string;
+        archivedAt?: { not: null };
+      };
+      select: { id: true; title?: true };
+    }) => Promise<{ id: string; title?: string }[]>;
+    count: (args: {
+      where: {
+        id: { in: string[] };
+        organizationId: string;
+        archivedAt: { not: null };
+      };
+    }) => Promise<number>;
   };
   tag: {
     findMany: (args: {
@@ -117,6 +135,10 @@ export type OrgValidationTxClient = {
       where: { id: string; organizationId: string };
       select: { id: true; name: true };
     }) => Promise<{ id: string; name: string } | null>;
+    findMany: (args: {
+      where: { id: { in: string[] }; organizationId: string };
+      select: { id: true };
+    }) => Promise<{ id: string }[]>;
   };
 };
 
@@ -144,6 +166,7 @@ export async function assertAssetsBelongToOrg(
   const uniqueIds = [...new Set(assetIds)];
 
   const found = await client.asset.findMany({
+    // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: org-ownership guard; archived assets still belong to the org and are refused by the archived guard instead
     where: { id: { in: uniqueIds }, organizationId },
     select: { id: true },
   });
@@ -159,6 +182,130 @@ export async function assertAssetsBelongToOrg(
       shouldBeCaptured: false,
       additionalData: { organizationId },
     });
+  }
+}
+
+/**
+ * Asserts that none of the given assets are archived.
+ *
+ * Archived assets are frozen: the only allowed mutations are reinstate and
+ * permanent delete (issue #382). Call this to server-enforce the UI's disabled
+ * state on every OTHER asset mutation (edit, location, tags, category, kit-add,
+ * availability, custody, bookings), so a crafted request can't change an
+ * archived asset. Dedupes the input; a no-op for an empty list.
+ *
+ * The refusal names the archived assets (`archivedAssetsRefusal` in
+ * `@shelf/labels`) and carries them in `additionalData` as
+ * `archivedAssetIds` / `archivedAssetTitles` (same order, the input's order).
+ * The way out it offers depends on `fix` and on whether the reader may
+ * reinstate: pass `canReinstate` when the caller knows, or `actorUserId` to
+ * look it up. With neither, the wording tells the reader to ask an admin, which
+ * is true for every role.
+ *
+ * @param params.assetIds - Asset IDs sourced from request/form input
+ * @param params.organizationId - The caller's (validated) organization ID
+ * @param params.fix - How the reader moves on: "reinstate" for a change to the
+ *   asset itself, "remove-from-list" for a batch they built,
+ *   "remove-from-booking" for a booking that holds the assets. Defaults to
+ *   "remove-from-list" for several assets and "reinstate" for one.
+ * @param params.canReinstate - Whether the reader holds `asset: archive`
+ * @param params.actorUserId - The acting user, read only on refusal to decide
+ *   `canReinstate` when the caller did not pass it
+ * @param tx - Optional Prisma transaction client; defaults to the global `db`
+ * @throws {ShelfError} 400 if any of the assets is archived
+ */
+export async function assertAssetsAreNotArchived(
+  {
+    assetIds,
+    organizationId,
+    fix,
+    canReinstate,
+    actorUserId,
+  }: {
+    assetIds: Asset["id"][];
+    organizationId: string;
+    fix?: ArchivedAssetsFix;
+    canReinstate?: boolean;
+    actorUserId?: string;
+  },
+  tx?: OrgValidationTxClient
+): Promise<void> {
+  if (assetIds.length === 0) return;
+
+  const client = tx ?? db;
+  const uniqueIds = [...new Set(assetIds)];
+
+  // The count is the common path (nothing archived); titles are read only
+  // when there is something to refuse.
+  const archivedCount = await client.asset.count({
+    where: {
+      id: { in: uniqueIds },
+      organizationId,
+      archivedAt: { not: null },
+    },
+  });
+
+  if (archivedCount === 0) return;
+
+  const archivedRows = await client.asset.findMany({
+    where: { id: { in: uniqueIds }, organizationId, archivedAt: { not: null } },
+    select: { id: true, title: true },
+  });
+  const titleById = new Map(
+    archivedRows.map((row) => [row.id, row.title ?? ""])
+  );
+  // Input order, so the first assets named are the ones the reader listed first.
+  const archivedAssetIds = uniqueIds.filter((id) => titleById.has(id));
+  const archivedAssetTitles = archivedAssetIds.map(
+    (id) => titleById.get(id) ?? ""
+  );
+
+  const readerCanReinstate =
+    canReinstate ??
+    (actorUserId
+      ? await userCanReinstateAssets({ userId: actorUserId, organizationId })
+      : false);
+
+  throw new ShelfError({
+    cause: null,
+    title: "Asset is archived",
+    message: archivedAssetsRefusal({
+      titles: archivedAssetTitles,
+      fix: fix ?? (uniqueIds.length > 1 ? "remove-from-list" : "reinstate"),
+      canReinstate: readerCanReinstate,
+    }),
+    label,
+    status: 400,
+    shouldBeCaptured: false,
+    additionalData: { organizationId, archivedAssetIds, archivedAssetTitles },
+  });
+}
+
+/**
+ * Whether a member may reinstate archived assets (`asset: archive`). Used only
+ * to word a refusal, so a failed lookup answers `false`: the reader is then
+ * told to ask an admin, which is never a dead end.
+ *
+ * @param params.userId - The member to check
+ * @param params.organizationId - The workspace
+ * @returns `true` when the member holds `asset: archive`
+ */
+export async function userCanReinstateAssets({
+  userId,
+  organizationId,
+}: {
+  userId: string;
+  organizationId: string;
+}): Promise<boolean> {
+  try {
+    return await hasPermission({
+      userId,
+      organizationId,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.archive,
+    });
+  } catch {
+    return false;
   }
 }
 
@@ -593,12 +740,60 @@ export async function assertAssetModelBelongsToOrg(
 }
 
 /**
+ * Asserts that every asset-model ID belongs to `organizationId`.
+ *
+ * Model ids reach the server from a bulk selection — the asset index's model
+ * view lets a user reserve units of several models on one booking — so they are
+ * request input and carry no org of their own. Dedupes first so a repeated id
+ * does not inflate the expected count; a no-op for an empty list.
+ *
+ * Returns nothing: callers reserve units by id and have the names already from
+ * the selection they submitted. Use {@link assertAssetModelBelongsToOrg} when a
+ * single model's label is needed for a note or toast.
+ *
+ * @param params.assetModelIds - AssetModel IDs sourced from request/form input
+ * @param params.organizationId - The caller's (validated) organization ID
+ * @param tx - Optional Prisma transaction client; defaults to the global `db`
+ * @throws {ShelfError} 400 if any ID is missing or belongs to another org
+ */
+export async function assertAssetModelsBelongToOrg(
+  {
+    assetModelIds,
+    organizationId,
+  }: { assetModelIds: AssetModel["id"][]; organizationId: string },
+  tx?: OrgValidationTxClient
+): Promise<void> {
+  if (assetModelIds.length === 0) return;
+
+  const client = tx ?? db;
+  const uniqueIds = [...new Set(assetModelIds)];
+
+  const found = await client.assetModel.findMany({
+    where: { id: { in: uniqueIds }, organizationId },
+    select: { id: true },
+  });
+
+  if (found.length !== uniqueIds.length) {
+    throw new ShelfError({
+      cause: null,
+      title: "Invalid asset models",
+      message:
+        "Some of the selected models do not exist in your workspace. Please reload and try again.",
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+      additionalData: { organizationId },
+    });
+  }
+}
+
+/**
  * Asserts that a user is a member of `organizationId` (via UserOrganization).
  *
- * Used to validate request-supplied custodian *user* IDs before connecting
- * them to a booking — `custodianTeamMemberId` being org-valid does not prove
- * the paired `custodianUserId` is, so an attacker could otherwise bind an
- * arbitrary (foreign) user as the custodian user and leak their name/email.
+ * Validates any request-supplied *user* ID before it is written: a booking's
+ * custodian user (an org-valid `custodianTeamMemberId` does not prove the
+ * paired `custodianUserId` is) and an audit's assignee. Without it a caller
+ * could bind a foreign user and leak their name and email.
  *
  * @param params.userId - User ID sourced from request/form input
  * @param params.organizationId - The caller's (validated) organization ID
@@ -619,9 +814,9 @@ export async function assertUserBelongsToOrg(
   if (!found) {
     throw new ShelfError({
       cause: null,
-      title: "Invalid custodian",
+      title: "Invalid user",
       message:
-        "The selected custodian user is not a member of this workspace. Please reload and try again.",
+        "The selected user is not a member of this workspace. Please reload and try again.",
       label,
       status: 400,
       shouldBeCaptured: false,

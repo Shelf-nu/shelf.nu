@@ -36,8 +36,9 @@ import {
   AlertDialogTrigger,
 } from "~/components/shared/modal";
 import { useDisabled } from "~/hooks/use-disabled";
+import { useFetcherOutcomeSinceOpen } from "~/hooks/use-fetcher-error-since-open";
 import type { CustodySourceSummary } from "~/modules/asset/custody-source";
-import { defaultSourceOption } from "~/modules/asset/custody-source";
+import { defaultAssignSourceOption } from "~/modules/asset/custody-source";
 import { isFormProcessing } from "~/utils/form";
 import { resolveTeamMemberName } from "~/utils/user";
 import { CustodySourceSelect } from "./custody-source-select";
@@ -111,7 +112,7 @@ export function QuantityCustodyDialog({
   const [selectedTeamMemberId, setSelectedTeamMemberId] = useState<
     string | null
   >(null);
-  const fetcher = useFetcher({ key: "assign-quantity-custody" });
+  const fetcher = useFetcher({ key: `assign-quantity-custody-${assetId}` });
   const disabled = useDisabled(fetcher);
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -121,7 +122,8 @@ export function QuantityCustodyDialog({
   /**
    * The "From location" choice. Held as the operator's pick; until they
    * pick (or when their pick no longer exists after a revalidation) the
-   * field shows the source with the most units left.
+   * field shows the source with the most units left, or Unplaced when no
+   * location has any left.
    */
   const sourceOptions = sources?.multiSource ? sources.options : [];
   const showSource = sourceOptions.length > 0;
@@ -130,25 +132,43 @@ export function QuantityCustodyDialog({
     pickedSource !== null &&
     sourceOptions.some((option) => option.value === pickedSource)
       ? pickedSource
-      : defaultSourceOption(sourceOptions)?.value ?? "";
+      : defaultAssignSourceOption(sourceOptions)?.value ?? "";
+
+  /**
+   * The quantity's Max: the pool-wide availability, lowered to what the
+   * chosen source has left, which is the cap the server enforces for a named
+   * source. Without a source field it is the pool-wide availability alone.
+   */
+  const sourceLeft = sourceOptions.find(
+    (option) => option.value === sourceValue
+  )?.left;
+  const maxQuantity =
+    sourceLeft === undefined
+      ? availableQuantity
+      : Math.min(availableQuantity ?? sourceLeft, sourceLeft);
+
+  /**
+   * What the server has said during THIS opening. The fetcher is keyed, so it
+   * keeps handing back its last response after the dialog closes: read
+   * directly, an old refusal reappears and an old success closes the dialog
+   * the moment it opens.
+   */
+  const outcome = useFetcherOutcomeSinceOpen(fetcher, open);
 
   /**
    * Server-side refusal, shown above the form: the source may have fewer
    * units left than asked for, or custody moved while the dialog was open.
    */
-  const serverErrorMessage =
-    fetcher.data?.error != null
-      ? (fetcher.data.error as { message?: string })?.message
-      : null;
+  const serverErrorMessage = outcome.message;
 
-  /** Close the dialog and reset state after a successful submission */
+  /** Close once this opening's assignment has been accepted. */
   useEffect(() => {
-    if (fetcher.state === "idle" && fetcher.data && !fetcher.data.error) {
+    if (outcome.status === "accepted") {
       setOpen(false);
       setSelectedTeamMemberId(null);
       formRef.current?.reset();
     }
-  }, [fetcher.state, fetcher.data, setOpen]);
+  }, [outcome.status, setOpen]);
 
   return (
     <AlertDialog
@@ -266,12 +286,10 @@ export function QuantityCustodyDialog({
               type="number"
               label={`Quantity (${unitLabel})`}
               placeholder={
-                availableQuantity != null
-                  ? `Max: ${availableQuantity}`
-                  : "Enter quantity"
+                maxQuantity != null ? `Max: ${maxQuantity}` : "Enter quantity"
               }
               min={1}
-              max={availableQuantity ?? undefined}
+              max={maxQuantity ?? undefined}
               step={1}
               required
             />

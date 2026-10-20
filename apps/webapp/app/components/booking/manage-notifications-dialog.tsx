@@ -21,6 +21,7 @@ import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import type { ModelFilterItem } from "~/hooks/use-model-filters";
 import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId.overview";
 import type { DataOrErrorResponse } from "~/utils/http.server";
+import { PICKABLE_RECIPIENT_AUDIENCE } from "~/utils/permissions/role-audience";
 import { resolveTeamMemberName } from "~/utils/user";
 import type { NotificationRecipientTeamMember } from "./forms/fields/notification-recipients";
 import { NotificationPreview } from "./notification-preview";
@@ -228,14 +229,15 @@ export default function ManageNotificationsDialog() {
                     name: "teamMember",
                     queryKey: "name",
                     deletedAt: null,
-                    userWithAdminAndOwnerOnly: true,
+                    selectableRecipientsOnly: true,
                     usersOnly: true,
-                    // why: no `custodyPurpose` on purpose. This picks admins to
-                    // notify — neither custody nor a booking custodian — and
-                    // `userWithAdminAndOwnerOnly` already does the narrowing.
-                    // The endpoint's assignment fallback resolves to "all" for
-                    // the ADMIN/OWNER users this is rendered for, and fails
-                    // closed for anyone else, which is what we want here.
+                    // why: no `custodyPurpose` on purpose. This picks members
+                    // to notify (neither custody nor a booking custodian), and
+                    // `selectableRecipientsOnly` already narrows to members who
+                    // may be picked as recipients. The endpoint's assignment
+                    // fallback resolves to "all" for the members this is
+                    // rendered for (those who manage booking recipients), and
+                    // fails closed for anyone else, which is what we want here.
                   }}
                   initialDataKey="teamMembersForNotify"
                   countKey="totalTeamMembersForNotify"
@@ -247,7 +249,7 @@ export default function ManageNotificationsDialog() {
                   placeholder="Search team members..."
                 />
                 <p className="mt-1.5 text-[13px] text-gray-500">
-                  Only administrators can be added.
+                  Only {PICKABLE_RECIPIENT_AUDIENCE} can be added.
                 </p>
               </div>
 

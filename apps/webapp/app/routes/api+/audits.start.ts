@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { db } from "~/database/db.server";
 import { resolveAssetIdsForBulkOperation } from "~/modules/asset/bulk-operations-helper.server";
+import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { AUDIT_SCHEDULER_EVENTS_ENUM } from "~/modules/audit/constants";
@@ -101,7 +102,13 @@ export async function action({ request, context }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId, canUseBarcodes, role } = await requirePermission({
+    const {
+      organizationId,
+      canUseBarcodes,
+      role,
+      access,
+      currentOrganization,
+    } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.audit,
@@ -188,6 +195,10 @@ export async function action({ request, context }: ActionFunctionArgs) {
         // Gated on `audit: create`, which neither BASE nor SELF_SERVICE holds —
         // unlike `audits.add-assets`, which is `audit: update` and does narrow.
         allowedTeamMemberIds: "all",
+        lastAuditDateAccess: lastAuditDateAccessFor(
+          access,
+          currentOrganization
+        ),
       });
     } else {
       // Resolve asset IDs from either direct input or context

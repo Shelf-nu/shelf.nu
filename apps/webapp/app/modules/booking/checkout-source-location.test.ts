@@ -7,6 +7,7 @@ import type {
 import {
   checkinPlacementSources,
   checkinStockEvents,
+  isManualSourceSlice,
   checkoutSourceOptions,
   defaultSourceLocationId,
   parseSourceLocationsFromFormData,
@@ -14,6 +15,7 @@ import {
   resolveSliceSource,
   sliceForDisposition,
   sourceLocationFieldName,
+  untaggedCheckinPlacementSources,
   sourceSubmissionFromRecord,
   submittedSourceForSlice,
 } from "./checkout-source-location";
@@ -35,11 +37,13 @@ const studio = {
   left: 40,
 };
 
+/** A pool's snapshot; the unplaced units have `unplacedLeft` left (all, by default). */
 function snapshot(
   placements: PoolSourceSnapshot["placements"],
-  unplaced = 0
+  unplaced = 0,
+  unplacedLeft = unplaced
 ): PoolSourceSnapshot {
-  return { placements, unplaced };
+  return { placements, unplaced, unplacedLeft };
 }
 
 function input(overrides: Partial<SliceSourceInput> = {}): SliceSourceInput {
@@ -97,6 +101,36 @@ describe("defaultSourceLocationId", () => {
         ])
       )
     ).toBe("loc-studio");
+  });
+
+  it("falls back to the unplaced units when no placement has any left", () => {
+    expect(
+      defaultSourceLocationId(
+        snapshot(
+          [
+            { ...cameraRoom, left: 0 },
+            { ...studio, left: 0 },
+          ],
+          10
+        )
+      )
+    ).toBeNull();
+  });
+
+  it("keeps a location when nothing anywhere has units left", () => {
+    // 10 unplaced, all of them already in custody.
+    expect(
+      defaultSourceLocationId(
+        snapshot(
+          [
+            { ...cameraRoom, left: 0 },
+            { ...studio, left: 0 },
+          ],
+          10,
+          0
+        )
+      )
+    ).toBe("loc-camera");
   });
 
   it("keeps the earliest placement on a tie", () => {
@@ -275,7 +309,11 @@ describe("checkinStockEvents", () => {
   it("writes one event per used-up category, tried first at the slice's source", () => {
     expect(
       checkinStockEvents({
-        slice: { assetKitId: null, sourceLocationId: "loc-studio" },
+        slice: {
+          assetKitId: null,
+          sourceKitId: null,
+          sourceLocationId: "loc-studio",
+        },
         disposition: { consumed: 6, lost: 1, damaged: 2 },
         bookingId: "b-1",
         bookingAssetId: "ba-1",
@@ -305,10 +343,19 @@ describe("checkinStockEvents", () => {
     ]);
   });
 
-  it("names no place for a kit slice or a slice with no source", () => {
+  it("names no place for a kit slice, detached kit residue or a slice with no source", () => {
     for (const slice of [
-      { assetKitId: "ak-1", sourceLocationId: "loc-kit-shelf" },
-      { assetKitId: null, sourceLocationId: null },
+      {
+        assetKitId: "ak-1",
+        sourceKitId: "kit-1",
+        sourceLocationId: "loc-kit-shelf",
+      },
+      {
+        assetKitId: null,
+        sourceKitId: "kit-1",
+        sourceLocationId: "loc-kit-shelf",
+      },
+      { assetKitId: null, sourceKitId: null, sourceLocationId: null },
       null,
     ]) {
       expect(
@@ -337,7 +384,11 @@ describe("checkinStockEvents", () => {
 });
 
 describe("checkinPlacementSources", () => {
-  const standalone = { assetKitId: null, sourceLocationId: "loc-studio" };
+  const standalone = {
+    assetKitId: null,
+    sourceKitId: null,
+    sourceLocationId: "loc-studio",
+  };
 
   it("takes consumed, lost and damaged off the recorded location", () => {
     expect(
@@ -357,30 +408,78 @@ describe("checkinPlacementSources", () => {
   it("names no placement for a slice with no source, a kit slice, or an unknown slice", () => {
     expect(
       checkinPlacementSources({
-        slice: { assetKitId: null, sourceLocationId: null },
+        slice: { assetKitId: null, sourceKitId: null, sourceLocationId: null },
         consumed: 3,
       })
     ).toEqual([]);
     expect(
       checkinPlacementSources({
-        slice: { assetKitId: "ak-1", sourceLocationId: "loc-kit-shelf" },
+        slice: {
+          assetKitId: "ak-1",
+          sourceKitId: "kit-1",
+          sourceLocationId: "loc-kit-shelf",
+        },
         consumed: 3,
       })
     ).toEqual([]);
     expect(checkinPlacementSources({ slice: null, consumed: 3 })).toEqual([]);
   });
+
+  it("names no placement for detached kit residue, which keeps the kit's location", () => {
+    // The member left the kit while the kit was out: `assetKitId` was cleared,
+    // `sourceKitId` and the kit's location stay. Those units were the kit's,
+    // never the manual placement that happens to sit at the kit's location.
+    expect(
+      checkinPlacementSources({
+        slice: {
+          assetKitId: null,
+          sourceKitId: "kit-1",
+          sourceLocationId: "loc-kit-shelf",
+        },
+        consumed: 3,
+      })
+    ).toEqual([]);
+  });
+});
+
+describe("isManualSourceSlice", () => {
+  it("is true only for a slice that never came with a kit and has a source", () => {
+    const base = { assetKitId: null, sourceKitId: null, sourceLocationId: "a" };
+    expect(isManualSourceSlice(base)).toBe(true);
+    expect(isManualSourceSlice({ ...base, sourceLocationId: null })).toBe(
+      false
+    );
+    expect(
+      isManualSourceSlice({ ...base, assetKitId: "ak-1", sourceKitId: "k" })
+    ).toBe(false);
+    // Detached kit residue.
+    expect(isManualSourceSlice({ ...base, sourceKitId: "kit-1" })).toBe(false);
+  });
 });
 
 describe("sliceForDisposition", () => {
   const slices = [
-    { id: "ba-1", assetId: "pool-1", assetKitId: null, sourceLocationId: "a" },
+    {
+      id: "ba-1",
+      assetId: "pool-1",
+      assetKitId: null,
+      sourceKitId: null,
+      sourceLocationId: "a",
+    },
     {
       id: "ba-2",
       assetId: "pool-1",
       assetKitId: "ak-1",
+      sourceKitId: "kit-1",
       sourceLocationId: "k",
     },
-    { id: "ba-3", assetId: "pool-2", assetKitId: null, sourceLocationId: "b" },
+    {
+      id: "ba-3",
+      assetId: "pool-2",
+      assetKitId: null,
+      sourceKitId: null,
+      sourceLocationId: "b",
+    },
   ];
 
   it("returns the slice a disposition names", () => {
@@ -421,5 +520,66 @@ describe("checkoutSourceOptions", () => {
       "Studio · 40 pcs",
       "Unplaced · 5 pcs",
     ]);
+  });
+});
+
+describe("untaggedCheckinPlacementSources", () => {
+  const loose = {
+    id: "ba-loose",
+    quantity: 4,
+    checkedOutQuantity: 4,
+    assetKitId: null,
+    sourceKitId: null,
+    sourceLocationId: "loc-studio",
+  };
+  const kit = {
+    id: "ba-kit",
+    quantity: 6,
+    checkedOutQuantity: 6,
+    assetKitId: "ak-1",
+    sourceKitId: "kit-1",
+    sourceLocationId: "loc-kit-shelf",
+  };
+
+  it("fills the standalone slice first, as the readers do", () => {
+    expect(
+      untaggedCheckinPlacementSources({
+        slices: [kit, loose],
+        priorLogs: [],
+        consumed: 6,
+      })
+    ).toEqual([{ locationId: "loc-studio", quantity: 4 }]);
+  });
+
+  it("puts returned units first, so used-up ones land where the readers put them", () => {
+    // 3 returned fill the loose slice to 1 left; 2 consumed: 1 there, 1 on the kit.
+    expect(
+      untaggedCheckinPlacementSources({
+        slices: [loose, kit],
+        priorLogs: [],
+        returned: 3,
+        consumed: 2,
+      })
+    ).toEqual([{ locationId: "loc-studio", quantity: 1 }]);
+  });
+
+  it("counts earlier logs, tagged or not, before filling", () => {
+    expect(
+      untaggedCheckinPlacementSources({
+        slices: [loose, kit],
+        priorLogs: [{ bookingAssetId: null, quantity: 4 }],
+        consumed: 2,
+      })
+    ).toEqual([]);
+  });
+
+  it("lets a slice that went out twice absorb both trips", () => {
+    expect(
+      untaggedCheckinPlacementSources({
+        slices: [{ ...loose, checkedOutQuantity: 8 }, kit],
+        priorLogs: [],
+        consumed: 6,
+      })
+    ).toEqual([{ locationId: "loc-studio", quantity: 6 }]);
   });
 });

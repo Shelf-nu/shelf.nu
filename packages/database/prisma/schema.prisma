@@ -197,6 +197,16 @@ model UserBusinessIntel {
   currentSolution      String? // How they currently track assets
   timeline             String? // When they need Shelf working
 
+  // Signup attribution: what the signup link asked for and where it came from.
+  // Read from `/join?plan=…&trial=…&utm_*=…`, written once when the user
+  // completes onboarding. Steers nothing after that; kept for reporting.
+  signupPlan  String? // Plan the link asked for: "team" | "plus"
+  signupTrial Boolean? // Whether the link asked to start with a trial
+  utmSource   String?
+  utmMedium   String?
+  utmCampaign String?
+  utmContent  String?
+
   // Relationships
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   userId String @unique
@@ -210,6 +220,8 @@ model UserBusinessIntel {
   @@index([companyName]) // For company-based analytics
   @@index([jobTitle]) // For role-based analytics
   @@index([teamSize]) // For team size analytics
+  @@index([utmSource]) // For campaign attribution
+  @@index([utmCampaign]) // For campaign attribution
 }
 
 model Asset {
@@ -223,6 +235,12 @@ model Asset {
   valuation           Float?      @map("value") // Field to store the monetary value of an asset
   availableToBook     Boolean     @default(true)
   sequentialId        String? // Sequential identifier for the asset (e.g., "SAM-0001")
+  // Soft "out of view" state, orthogonal to `status` (which stays the live
+  // AVAILABLE/IN_CUSTODY/CHECKED_OUT custody/booking state). Null = active;
+  // non-null = archived (hidden from default lists, not bookable/custody-able,
+  // reinstatable). Kept as a timestamp (not a bool) for when-archived
+  // provenance, mirroring `Booking.autoArchivedAt`.
+  archivedAt          DateTime?   @db.Timestamptz(3)
 
   // Tracking method & model
   type            AssetType        @default(INDIVIDUAL)
@@ -273,6 +291,7 @@ model Asset {
   reminders       AssetReminder[]
   auditEntries    AuditAsset[]
   auditScans      AuditScan[]
+  scans           Scan[]
   assetKits      AssetKit[]
   assetLocations AssetLocation[]
 
@@ -298,6 +317,8 @@ model Asset {
   // Indexes for optimization of queries
   @@index([organizationId, title, status, availableToBook], name: "Asset_organizationId_compound_idx")
   @@index([status, organizationId], name: "Asset_status_organizationId_idx")
+  // Keeps the default "active assets" filter (archivedAt IS NULL) on an index scan
+  @@index([organizationId, archivedAt], name: "Asset_organizationId_archivedAt_idx")
   @@index([createdAt, organizationId], name: "Asset_createdAt_organizationId_idx")
   // Serves the advanced index's default view: WHERE organizationId = ?
   // ORDER BY createdAt DESC, id ASC LIMIT n. Column order (org first, then
@@ -342,7 +363,7 @@ enum ConsumptionCategory {
   CONSUME // Items used as intended (ONE_WAY consumables — e.g. AA batteries, latex gloves)
   DAMAGE // Items returned but unusable — distinct from LOSS for reporting
   MOVE // Units moved between locations, or between a location and the unplaced units. One row per side; the total does not change
-  INITIAL // Stock the asset was created with (create form, import, backup restore)
+  INITIAL // Stock the asset was created with (create form, import)
   OPENING_BALANCE // Stock held at each location when the ledger started for a pool that existed before it
 }
 
@@ -470,6 +491,8 @@ model AssetModel {
 
   @@index([organizationId, name])
   @@index([userId])
+  // Trigram index for substring search from the asset-list search bar
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, name: "AssetModel_name_trgm_idx")
 }
 
 /// Book-by-Model: intent row attached to a booking for a quantity of
@@ -693,6 +716,8 @@ model Barcode {
   // are not chosen as the asset's display-preferred one.
   preferredByAsset Asset? @relation("AssetPreferredBarcode")
 
+  scans Scan[]
+
   kit   Kit?    @relation(fields: [kitId], references: [id], onDelete: SetNull)
   kitId String?
 
@@ -776,15 +801,42 @@ model Scan {
 
   userAgent String?
 
-  // When a logged in user scanned the QR code, we store it here
+  // When a logged in user scanned the code, we store it here
   user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
   userId String?
 
+  // Set only for a QR scan. A barcode or SAM ID scan has no QR.
   qr   Qr?     @relation(fields: [qrId], references: [id], onDelete: SetNull)
   qrId String?
 
-  // We also store the qrId as a raw string for reference is fhte qr is deleted
-  rawQrId String
+  // The scanned QR id as a raw string, kept when the QR is deleted. NULL for a
+  // barcode or SAM ID scan; `code` carries the scanned value for every type.
+  rawQrId String?
+
+  // What kind of code was scanned, and its value exactly as scanned (a QR id,
+  // a barcode value or a SAM ID).
+  codeType ScanCodeType @default(QR)
+  code     String?
+
+  // Set only for a barcode scan.
+  barcode   Barcode? @relation(fields: [barcodeId], references: [id], onDelete: SetNull)
+  barcodeId String?
+
+  // What the code resolved to at scan time. Stamped on the row so the last
+  // scan of an asset or kit is read by the entity, whichever code was scanned,
+  // and survives the code being relinked or deleted.
+  asset          Asset?        @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  assetId        String?
+  kit            Kit?          @relation(fields: [kitId], references: [id], onDelete: SetNull)
+  kitId          String?
+  // The workspace the code resolved in. Every scan has one: a code no
+  // workspace has claimed is not recorded.
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organizationId String
+
+  // Which surface recorded the scan. NULL on rows written before it was
+  // tracked: their source cannot be told honestly.
+  source ScanSource?
 
   // This will be true if the user manually created the scan by using "Update GPS coordinates"
   manuallyGenerated Boolean @default(false)
@@ -796,13 +848,39 @@ model Scan {
   // Indexes for foreign keys
   @@index([qrId])
   @@index([userId])
-  // Serves getScanByQrId (last-scan card on asset overview + kit detail):
-  // WHERE rawQrId = ? ORDER BY createdAt DESC LIMIT 1. Scan is a global,
-  // append-only table (public QR hits + companion scans, never pruned), so
-  // without this index every page view pays a full sequential scan of all
-  // tenants' scan history. rawQrId seeks the QR; createdAt lets the top-1
-  // sort early-terminate (Postgres walks the btree backwards for DESC).
+  // Serves the scan lookups by QR id. Scan is a global, append-only table
+  // (never pruned), so every read must seek an index rather than scan all
+  // tenants' history; createdAt lets a top-1 DESC sort stop early.
   @@index([rawQrId, createdAt])
+  // Serve the last-scan card on the asset overview and the kit page:
+  // WHERE assetId|kitId = ? ORDER BY createdAt DESC LIMIT 1.
+  @@index([assetId, createdAt])
+  @@index([kitId, createdAt])
+  @@index([barcodeId])
+  @@index([organizationId])
+}
+
+/// The kind of code a `Scan` recorded.
+enum ScanCodeType {
+  QR
+  BARCODE
+  SAM_ID
+}
+
+/// The surface that recorded a `Scan`.
+enum ScanSource {
+  /// The public QR page, `/qr/:qrId` (phone camera or web scanner "view")
+  QR_LINK
+  /// The web scanner's "View asset" action for a barcode or SAM ID
+  WEB_SCANNER
+  /// A web scanner drawer list (bookings, kits, locations, custody)
+  WEB_DRAWER
+  /// An audit scan, web or companion
+  AUDIT
+  /// The companion app's scanner
+  COMPANION
+  /// "Update GPS coordinates" on the asset page
+  GPS_UPDATE
 }
 
 model Location {
@@ -927,14 +1005,20 @@ model Custody {
   quantity Int @default(1) // How many units in custody (1 for individual assets)
 
   // The manual placement the units were taken from, for a quantity-tracked
-  // asset's operator custody. NULL means the unplaced units, or a source
-  // that was never recorded (custody older than this column on an asset
-  // placed at several locations). Always NULL for kit-inherited rows and for
-  // individual assets. Custody never changes a location's count: this only
-  // says which location loses the units when they are used up.
-  // `onDelete: SetNull` so deleting the location keeps the custody.
+  // asset's operator custody. NULL means the unplaced units, or a source that
+  // was never recorded: `sourceUnknown` tells the two apart. Always NULL for
+  // kit-inherited rows and for individual assets. Custody never changes a
+  // location's count: this only says which location loses the units when
+  // they are used up. `onDelete: SetNull` so deleting the location keeps the
+  // custody.
   location   Location? @relation(fields: [locationId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   locationId String?
+
+  // True when the assignment did not say where the units came from and the
+  // pool had more than one place they could have come from. Only ever true
+  // with `locationId` NULL. Such units count against no location and never
+  // against the unplaced units; the pool-wide cap still bounds them.
+  sourceUnknown Boolean @default(false)
 
   // DateTime
   createdAt DateTime @default(now())
@@ -942,12 +1026,14 @@ model Custody {
 
   // Two partial uniques live in raw SQL (Prisma can't express partial
   // uniques in the schema); see migrations
-  // 20260603100000_custody_partial_uniques_split_operator_kit and
-  // 20260925100000_custody_source_location:
-  //   - Custody_operator_unique -> UNIQUE (assetId, teamMemberId, locationId)
-  //                                NULLS NOT DISTINCT
+  // 20260603100000_custody_partial_uniques_split_operator_kit,
+  // 20260925100000_custody_source_location and
+  // 20261006100000_custody_source_unknown:
+  //   - Custody_operator_unique -> UNIQUE (assetId, teamMemberId, locationId,
+  //                                sourceUnknown) NULLS NOT DISTINCT
   //                                WHERE "kitCustodyId" IS NULL
-  //     One operator row per holder per source location, NULL included.
+  //     One operator row per holder per source: a location, the unplaced
+  //     units, or a source never recorded.
   //   - Custody_kit_unique      -> UNIQUE (assetId, kitCustodyId)
   //                                WHERE "kitCustodyId" IS NOT NULL
   // The total cap (sum <= Asset.quantity) is enforced at the application
@@ -972,6 +1058,7 @@ model Organization {
   assets  Asset[]
   assetKits AssetKit[]
   assetLocations AssetLocation[]
+  scans   Scan[]
 
   image   Image?  @relation("orgImage", fields: [imageId], references: [id])
   imageId String? @unique
@@ -1124,6 +1211,7 @@ enum OrganizationRoles {
   BASE
   OWNER
   SELF_SERVICE
+  MANAGER
 }
 
 model SsoDetails {
@@ -1137,6 +1225,13 @@ model SsoDetails {
   baseUserGroupId    String? // The group id for BASE users
   selfServiceGroupId String? // The group id for SELF_SERVICE users
   adminGroupId       String? // The group id for ADMIN users
+  managerGroupId     String? // The group id for MANAGER users
+
+  // Whether legacy sign-in (password, email code, password reset) is refused
+  // for unconverted accounts on this setup's domain. Owners of a linked
+  // workspace keep legacy sign-in either way. Shelf staff turn it off only
+  // while setting up and testing SSO with a few users.
+  requireSsoLogin Boolean @default(true)
 
   // Datetime
   createdAt DateTime @default(now())
@@ -2003,6 +2098,12 @@ model MobileAuthCode {
   // because rows predating that rule may still exist; treat NULL as poison.
   codeChallenge String?
 
+  // The web SSO session the code hands to the app, AES-256-GCM encrypted under
+  // a key derived from the plaintext code, which is never stored: the row alone
+  // cannot be decrypted. Cleared when the code is redeemed. NULL on rows minted
+  // before sessions were stored, which redemption refuses.
+  sessionCiphertext String?
+
   // Single-use guard: set when redeemed. A non-null value rejects reuse.
   consumedAt DateTime?
 
@@ -2033,6 +2134,7 @@ model Kit {
   qrCodes  Qr[]
   barcodes Barcode[]
   reports  ReportFound[]
+  scans    Scan[]
 
   // NOTE: there is intentionally no `bookingAssets BookingAsset[]`
   // back-relation here. `BookingAsset.sourceKitId` is a plain FK column
@@ -2485,6 +2587,7 @@ model AuditAsset {
   @@unique([auditSessionId, assetId])
   @@index([status])
   @@index([scannedById])
+  @@index([assetId])
 }
 
 model AuditScan {
@@ -2564,10 +2667,20 @@ model AuditImage {
   @@index([uploadedById])
 }
 
+/// How a membership's role came to change.
+enum RoleChangeSource {
+  /// An owner or administrator changed it in the team settings.
+  MANUAL
+  /// The member's identity-provider groups changed it at sign-in.
+  SSO
+}
+
 model RoleChangeLog {
   id           String            @id @default(cuid())
   previousRole OrganizationRoles
   newRole      OrganizationRoles
+  /// How the change was made. SSO rows name the member themself as `changedBy`.
+  source       RoleChangeSource  @default(MANUAL)
   createdAt    DateTime          @default(now())
 
   // Who was changed
@@ -2669,6 +2782,7 @@ enum ActivityAction {
   ASSET_CUSTOM_FIELD_CHANGED
   ASSET_PREFERRED_BARCODE_CHANGED
   ASSET_ARCHIVED
+  ASSET_UNARCHIVED
   ASSET_DELETED
 
   // Custody

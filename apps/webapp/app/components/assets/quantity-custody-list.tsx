@@ -57,8 +57,8 @@ import {
 } from "~/components/shared/tooltip";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
+import { useFetcherErrorSinceOpen } from "~/hooks/use-fetcher-error-since-open";
 import type { CustodySourceSummary } from "~/modules/asset/custody-source";
-import { UNPLACED_SOURCE } from "~/modules/asset/custody-source";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import type { UserNameFields } from "~/utils/user";
@@ -68,6 +68,7 @@ import type { CustodyGroup } from "./quantity-custody-groups";
 import {
   describeCustodySources,
   groupCustodyRecords,
+  releaseSourceValue,
 } from "./quantity-custody-groups";
 import { ReleaseBySourceButton } from "./release-by-source-button";
 
@@ -79,6 +80,8 @@ interface CustodyRecord {
   quantity?: number;
   /** Where the units were taken from. Null: unplaced, or not recorded. */
   location?: { id: string; name: string } | null;
+  /** With no location: the source was never recorded (not the unplaced units). */
+  sourceUnknown?: boolean;
   /** When set, this row was inherited from a kit's custody. The UI must
    * not allow direct release — the only legitimate way to clear it is
    * to release the parent kit's custody (which cascades). */
@@ -111,9 +114,12 @@ export interface QuantityCustodyListProps {
   consumptionType?: ConsumptionType | null;
   /** Quantity currently available for checkout */
   availableQuantity?: number;
-  /** Whether the current user is self-service */
-  isSelfService?: boolean;
-  /** The current user's ID (used for self-service filtering) */
+  /**
+   * Only the caller's own rows may be acted on: the caller's custody scope is
+   * `self`.
+   */
+  ownRowsOnly?: boolean;
+  /** The current user's ID (used by `ownRowsOnly`) */
   currentUserId?: string;
   /** Whether the user has permission to view other people's custody */
   canViewAllCustody?: boolean;
@@ -154,7 +160,7 @@ export function QuantityCustodyList({
   unitOfMeasure,
   consumptionType,
   availableQuantity,
-  isSelfService = false,
+  ownRowsOnly = false,
   currentUserId,
   canViewAllCustody = true,
   canCustody = true,
@@ -165,10 +171,6 @@ export function QuantityCustodyList({
   const unitLabel = unitOfMeasure || "units";
   const allRecords = custody ?? [];
   const multiSource = Boolean(sources?.multiSource);
-  /** Whether a NULL source reads "unplaced" rather than "not recorded". */
-  const poolHasUnplaced = Boolean(
-    sources?.options.some((option) => option.locationId === null)
-  );
 
   /**
    * The shared predicate decides this, so the label can never disagree with
@@ -201,12 +203,12 @@ export function QuantityCustodyList({
   const noneAvailable = availableQuantity != null && availableQuantity <= 0;
 
   /**
-   * Self-service users can only release their own custody.
-   * Admins/owners can release anyone's.
+   * A caller limited to their own rows may release only their own custody;
+   * anyone else with custody rights may release any row.
    */
   const canRelease = (record: CustodyRecord) => {
     if (!canCustody) return false;
-    if (isSelfService) return record.custodian.userId === currentUserId;
+    if (ownRowsOnly) return record.custodian.userId === currentUserId;
     return true;
   };
 
@@ -260,7 +262,6 @@ export function QuantityCustodyList({
                   group.kind === "kit" ? group.record : group.first
                 )}
                 multiSource={multiSource}
-                poolHasUnplaced={poolHasUnplaced}
               />
             ))}
           </ul>
@@ -301,8 +302,6 @@ interface CustodyRowProps {
   canRelease?: boolean;
   /** Whether the pool is placed at two or more locations (see `hasMultipleSources`). */
   multiSource?: boolean;
-  /** Whether the pool has unplaced units, for the NULL-source wording. */
-  poolHasUnplaced?: boolean;
 }
 
 /**
@@ -322,7 +321,6 @@ function CustodyRow({
   isConsumable = false,
   canRelease = true,
   multiSource = false,
-  poolHasUnplaced = false,
 }: CustodyRowProps) {
   const record = group.kind === "kit" ? group.record : group.first;
   const custodianName = resolveTeamMemberName(record.custodian);
@@ -330,7 +328,7 @@ function CustodyRow({
 
   const sourceParts =
     multiSource && group.kind === "operator"
-      ? describeCustodySources(group.rows, poolHasUnplaced)
+      ? describeCustodySources(group.rows)
       : [];
 
   return (
@@ -378,7 +376,6 @@ function CustodyRow({
           rows={group.rows}
           unitLabel={unitLabel}
           isConsumable={isConsumable}
-          poolHasUnplaced={poolHasUnplaced}
         />
       ) : (
         <ReleaseButton
@@ -391,9 +388,9 @@ function CustodyRow({
           source={
             multiSource && group.rows.length === 1
               ? {
-                  value: record.location?.id ?? UNPLACED_SOURCE,
+                  value: releaseSourceValue(record),
                   name: record.location?.name ?? null,
-                  poolHasUnplaced,
+                  unrecorded: !record.location && Boolean(record.sourceUnknown),
                 }
               : null
           }
@@ -518,10 +515,11 @@ interface ReleaseButtonProps {
    * used-up ones). Null for every other pool: the form is unchanged.
    */
   source?: {
-    /** Location id, or `UNPLACED_SOURCE` for the unplaced units. */
+    /** Location id, `"unplaced"` or `"unrecorded"`. */
     value: string;
     name: string | null;
-    poolHasUnplaced: boolean;
+    /** The source was never recorded: nothing honest to say about it. */
+    unrecorded: boolean;
   } | null;
 }
 
@@ -551,7 +549,7 @@ function releaseSourceInfo({
       </>
     );
   }
-  if (!source.poolHasUnplaced) return null;
+  if (source.unrecorded) return null;
   return isConsumable
     ? `Used-up ${unitLabel} come off the unplaced units.`
     : "Goes back to the unplaced units, where the units came from.";
@@ -612,10 +610,7 @@ function ReleaseButton({
    * read — without this the dialog just sits there with its submit button
    * re-enabled and no explanation.
    */
-  const serverErrorMessage =
-    fetcher.data?.error != null
-      ? (fetcher.data.error as { message?: string })?.message
-      : null;
+  const serverErrorMessage = useFetcherErrorSinceOpen(fetcher, open);
 
   /** Close the dialog after a successful release */
   useEffect(() => {

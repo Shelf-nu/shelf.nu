@@ -1,4 +1,14 @@
-import { OrganizationRoles } from "@prisma/client";
+/**
+ * Transfer recipients for a role change.
+ *
+ * Lists the members the change-role dialog offers as the recipient of a
+ * member's entities: every member holding a role whose policy may receive
+ * transfers, excluding the member being changed. The role change validates
+ * the chosen recipient again inside its transaction.
+ *
+ * @see {@link file://./../../components/workspace/change-role-dialog.tsx}
+ * @see {@link file://./../../modules/user/service.server.ts} assertTransferRecipient
+ */
 import type { LoaderFunctionArgs } from "react-router";
 import { data } from "react-router";
 import { z } from "zod";
@@ -9,9 +19,14 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { isWorkspaceOwner, rolesWhere } from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
 import { resolveUserDisplayName } from "~/utils/user";
 
+/**
+ * `GET /api/user/transfer-recipients?excludeUserId=`: candidate recipients,
+ * each flagged when they own the workspace.
+ */
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -31,13 +46,13 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       { additionalData: { userId, organizationId } }
     );
 
-    /** Fetch OWNER and ADMIN users in this org, excluding the target user */
+    /** Members whose role may receive transferred entities, excluding the target */
     const userOrgs = await db.userOrganization.findMany({
       where: {
         organizationId,
         userId: { not: excludeUserId },
         roles: {
-          hasSome: [OrganizationRoles.OWNER, OrganizationRoles.ADMIN],
+          hasSome: rolesWhere((p) => p.membership.canReceiveTransfers),
         },
       },
       select: {
@@ -59,7 +74,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
         id: uo.user.id,
         name: resolveUserDisplayName(uo.user),
         email: uo.user.email,
-        isOwner: uo.roles.includes(OrganizationRoles.OWNER),
+        isOwner: isWorkspaceOwner(uo.roles),
       }))
     );
   } catch (cause) {

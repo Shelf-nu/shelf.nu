@@ -83,13 +83,17 @@ describe("CheckoutDialog From location question", () => {
       screen.getByRole("heading", { name: "Where do the units come from?" })
     ).toBeInTheDocument();
     const select = screen.getByRole("combobox") as HTMLSelectElement;
-    expect(select.name).toBe("sourceLocation.ba-1");
+    expect(select.name).toBe("");
     expect(select.value).toBe("loc-store");
     expect(select.getAttribute("form")).toBe("edit-booking-form");
     expect([...select.options].map((option) => option.text)).toEqual([
       "Store Room · 60 pcs",
       "Studio · 40 pcs",
     ]);
+    // Unchanged, it posts nothing and the server records its own default;
+    // once the operator picks, the answer is posted under the slice's key.
+    fireEvent.change(select, { target: { value: "loc-studio" } });
+    expect(select.name).toBe("sourceLocation.ba-1");
 
     const submit = screen.getByRole("button", { name: "Check out" });
     expect(submit).toHaveAttribute("type", "submit");

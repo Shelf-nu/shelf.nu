@@ -31,7 +31,7 @@
 
 import type { ReactNode } from "react";
 import { AssetStatus, AssetType, BookingStatus } from "@prisma/client";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { useActionData, useLoaderData } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -464,7 +464,7 @@ describe("BulkPartialCheckoutDialog — QT partial top-off", () => {
     const select = screen.getByLabelText(
       "From location for Batteries"
     ) as HTMLSelectElement;
-    expect(select.name).toBe("sourceLocation.ba-standalone");
+    expect(select.name).toBe("");
     expect(select.value).toBe("loc-store");
     expect([...select.options].map((option) => option.text)).toEqual([
       "Store Room · 60 pcs",
@@ -472,6 +472,10 @@ describe("BulkPartialCheckoutDialog — QT partial top-off", () => {
     ]);
     // Inside the dialog's form, so it posts with the check-out.
     expect(select.form?.id).toBe("bulk-partial-checkout-form");
+    // Unchanged, it posts nothing and the server records its own default;
+    // once the operator picks, the answer is posted under the slice's key.
+    fireEvent.change(select, { target: { value: "loc-studio" } });
+    expect(select.name).toBe("sourceLocation.ba-standalone");
   });
 
   it("asks nothing for a pool the loader has no question for", () => {

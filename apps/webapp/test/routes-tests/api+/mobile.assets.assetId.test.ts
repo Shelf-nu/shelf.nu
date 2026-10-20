@@ -96,6 +96,17 @@ vitest.mock("~/modules/asset/quantity-breakdown.server", () => ({
   }),
 }));
 
+// why: the custody-source summary reads placements, custody and bookings
+// from the database. Stub it with the one-location shape (nothing to ask) so
+// the existing cases keep their numbers; the dedicated case below feeds a
+// two-location pool and checks the field is forwarded as-is.
+vitest.mock("~/modules/asset/custody-source.server", () => ({
+  getCustodySourceOptions: vitest.fn().mockResolvedValue({
+    multiSource: false,
+    options: [],
+  }),
+}));
+
 // why: `subscription.server` loads the Stripe client and the billing config at
 // module load. Stubbing the one capability helper also puts the add-on gate
 // under explicit control, so these tests do not depend on the ambient
@@ -125,7 +136,9 @@ import {
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
 import { db } from "~/database/db.server";
+import { getCustodySourceOptions } from "~/modules/asset/custody-source.server";
 import { canUseBarcodes } from "~/utils/subscription.server";
+import { accessFor } from "@helpers/role-access";
 
 /**
  * Typed handles for the mocks every suite below drives. Auth fixtures are cast
@@ -187,6 +200,7 @@ function buildAsset() {
         quantity: 5,
         kitCustodyId: null,
         location: null as { id: string; name: string } | null,
+        sourceUnknown: false,
         custodian: {
           id: "tm-alice",
           name: "Alice Holder",
@@ -194,6 +208,7 @@ function buildAsset() {
           user: {
             firstName: "Alice",
             lastName: "Holder",
+            displayName: null as string | null,
             email: "alice@example.com",
             profilePicture: null,
           },
@@ -204,6 +219,7 @@ function buildAsset() {
         quantity: 3,
         kitCustodyId: null,
         location: null as { id: string; name: string } | null,
+        sourceUnknown: false,
         custodian: {
           id: "tm-me",
           name: "Test User",
@@ -211,6 +227,7 @@ function buildAsset() {
           user: {
             firstName: "Test",
             lastName: "User",
+            displayName: null as string | null,
             email: "test@example.com",
             profilePicture: null,
           },
@@ -221,6 +238,7 @@ function buildAsset() {
         quantity: 1,
         kitCustodyId: null,
         location: null as { id: string; name: string } | null,
+        sourceUnknown: false,
         custodian: {
           id: "tm-nrm",
           name: "Bob NonRegistered",
@@ -393,23 +411,66 @@ describe("GET /api/mobile/assets/:assetId — custody visibility", () => {
     requireOrganizationAccessMock.mockResolvedValue("org-1");
 
     getMobileUserContextMock.mockResolvedValue({
-      role: "ADMIN",
       canUseBarcodes: false,
       canUseAudits: false,
-      canSeeAllCustody: true,
-      canSeeAllBookings: true,
+      access: accessFor(["ADMIN"]),
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
 
     assetFindUniqueMock.mockResolvedValue(buildAsset());
   });
 
+  it("forwards the custody source summary for a pool placed at two or more locations", async () => {
+    const summary = {
+      multiSource: true,
+      options: [
+        {
+          value: "loc-a",
+          locationId: "loc-a",
+          label: "Camera Room",
+          placed: 6,
+          inCustody: 5,
+          onBooking: 0,
+          left: 1,
+        },
+        {
+          value: "loc-b",
+          locationId: "loc-b",
+          label: "Studio",
+          placed: 4,
+          inCustody: 4,
+          onBooking: 0,
+          left: 0,
+        },
+      ],
+    };
+    vitest.mocked(getCustodySourceOptions).mockResolvedValueOnce(summary);
+
+    const result = await loader(
+      createLoaderArgs({
+        request: createDetailRequest(),
+        params: { assetId: "asset-1" },
+      })
+    );
+
+    expect((result as unknown as Response).status).toBe(200);
+    const body = await (result as unknown as Response).json();
+
+    // The pool's total feeds the summary, scoped to the caller's workspace.
+    expect(getCustodySourceOptions).toHaveBeenCalledWith({
+      assetId: "asset-1",
+      organizationId: "org-1",
+      total: 10,
+    });
+    // The app reads `multiSource` to decide whether to ask, and `options` to
+    // build the picker. Pool-wide availability travels as custodyAvailable.
+    expect(body.asset.custodySources).toEqual(summary);
+  });
+
   it("shows a self-service caller only their own custody rows + the hidden count", async () => {
     getMobileUserContextMock.mockResolvedValue({
-      role: "SELF_SERVICE",
       canUseBarcodes: false,
       canUseAudits: false,
-      canSeeAllCustody: false,
-      canSeeAllBookings: false,
+      access: accessFor(["SELF_SERVICE"]),
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
 
     const result = await loader(
@@ -427,7 +488,9 @@ describe("GET /api/mobile/assets/:assetId — custody visibility", () => {
       {
         custodian: { id: "tm-me", name: "Test User" },
         quantity: 3,
-        sources: [{ locationId: null, name: null, quantity: 3 }],
+        sources: [
+          { locationId: null, unrecorded: false, name: null, quantity: 3 },
+        ],
       },
     ]);
     // Two other holders were hidden
@@ -446,11 +509,9 @@ describe("GET /api/mobile/assets/:assetId — custody visibility", () => {
 
   it("keeps the legacy custody visible when the restricted caller IS the primary custodian", async () => {
     getMobileUserContextMock.mockResolvedValue({
-      role: "SELF_SERVICE",
       canUseBarcodes: false,
       canUseAudits: false,
-      canSeeAllCustody: false,
-      canSeeAllBookings: false,
+      access: accessFor(["SELF_SERVICE"]),
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
     // Reorder so the caller's row is the primary (oldest) one
     const asset = buildAsset();
@@ -475,7 +536,9 @@ describe("GET /api/mobile/assets/:assetId — custody visibility", () => {
       {
         custodian: { id: "tm-me", name: "Test User" },
         quantity: 3,
-        sources: [{ locationId: null, name: null, quantity: 3 }],
+        sources: [
+          { locationId: null, unrecorded: false, name: null, quantity: 3 },
+        ],
       },
     ]);
     expect(body.asset.custodyListOthersCount).toBe(2);
@@ -501,8 +564,71 @@ describe("GET /api/mobile/assets/:assetId — custody visibility", () => {
       (entry: { custodian: { id: string } }) => entry.custodian.id === "tm-me"
     );
     expect(mine.sources).toEqual([
-      { locationId: "loc-studio", name: "Studio", quantity: 3 },
+      {
+        locationId: "loc-studio",
+        unrecorded: false,
+        name: "Studio",
+        quantity: 3,
+      },
     ]);
+  });
+
+  it("flags units whose source was never recorded apart from unplaced ones", async () => {
+    const asset = buildAsset();
+    asset.custody[1] = { ...asset.custody[1], sourceUnknown: true };
+    assetFindUniqueMock.mockResolvedValue(asset);
+
+    const result = await loader(
+      createLoaderArgs({
+        request: createDetailRequest(),
+        params: { assetId: "asset-1" },
+      })
+    );
+    const body = await (result as unknown as Response).json();
+
+    const mine = body.asset.custodyList.find(
+      (entry: { custodian: { id: string } }) => entry.custodian.id === "tm-me"
+    );
+    expect(mine.sources).toEqual([
+      { locationId: null, unrecorded: true, name: null, quantity: 3 },
+    ]);
+  });
+
+  it("names a registered holder by their user when the stored member name is empty", async () => {
+    const asset = buildAsset();
+    const alice = asset.custody[0];
+    if (!alice.custodian.user) throw new Error("fixture: Alice is registered");
+    // A registered member whose TeamMember.name was never filled in.
+    asset.custody[0] = {
+      ...alice,
+      custodian: {
+        ...alice.custodian,
+        name: "",
+        user: { ...alice.custodian.user, displayName: "Ally" },
+      },
+    };
+    assetFindUniqueMock.mockResolvedValue(asset);
+
+    const result = await loader(
+      createLoaderArgs({
+        request: createDetailRequest(),
+        params: { assetId: "asset-1" },
+      })
+    );
+    const body = await (result as unknown as Response).json();
+    const nameOf = (id: string) =>
+      body.asset.custodyList.find(
+        (entry: { custodian: { id: string } }) => entry.custodian.id === id
+      ).custodian.name;
+
+    // The custody card and every list row print `custodian.name` as sent,
+    // so the display name has to arrive in that field.
+    expect(body.asset.custody.custodian.name).toBe("Ally");
+    expect(nameOf("tm-alice")).toBe("Ally");
+    // Without a display name, the user's first and last name.
+    expect(nameOf("tm-me")).toBe("Test User");
+    // A non-registered member has no user, so the stored name stands.
+    expect(nameOf("tm-nrm")).toBe("Bob NonRegistered");
   });
 
   it("returns the full custody list to callers who can see all custody", async () => {
@@ -539,11 +665,9 @@ describe("GET /api/mobile/assets/:assetId — payload projection", () => {
     } as Awaited<ReturnType<typeof requireMobileAuth>>);
     requireOrganizationAccessMock.mockResolvedValue("org-1");
     getMobileUserContextMock.mockResolvedValue({
-      role: "ADMIN",
       canUseBarcodes: false,
       canUseAudits: false,
-      canSeeAllCustody: true,
-      canSeeAllBookings: true,
+      access: accessFor(["ADMIN"]),
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
     assetFindUniqueMock.mockResolvedValue(buildAsset());
   });
@@ -618,11 +742,9 @@ describe("GET /api/mobile/assets/:assetId — custody through a booking", () => 
     } as Awaited<ReturnType<typeof requireMobileAuth>>);
     requireOrganizationAccessMock.mockResolvedValue("org-1");
     getMobileUserContextMock.mockResolvedValue({
-      role: "ADMIN",
       canUseBarcodes: false,
       canUseAudits: false,
-      canSeeAllCustody: true,
-      canSeeAllBookings: true,
+      access: accessFor(["ADMIN"]),
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
     assetFindUniqueMock.mockResolvedValue(buildCheckedOutAsset());
   });
@@ -683,10 +805,12 @@ describe("GET /api/mobile/assets/:assetId — custody through a booking", () => 
     canSeeAllBookings: boolean;
   }) {
     getMobileUserContextMock.mockResolvedValue({
-      role: "SELF_SERVICE",
       canUseBarcodes: false,
       canUseAudits: false,
-      ...overrides,
+      access: accessFor(["SELF_SERVICE"], {
+        selfServiceCanSeeBookings: overrides.canSeeAllBookings,
+        selfServiceCanSeeCustody: overrides.canSeeAllCustody,
+      }),
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
   }
 
@@ -881,10 +1005,9 @@ describe("GET /api/mobile/assets/:assetId — display code", () => {
     } as Awaited<ReturnType<typeof requireMobileAuth>>);
     requireOrganizationAccessMock.mockResolvedValue("org-1");
     getMobileUserContextMock.mockResolvedValue({
-      role: "ADMIN",
       canUseBarcodes: true,
       canUseAudits: false,
-      canSeeAllCustody: true,
+      access: accessFor(["ADMIN"]),
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
     canUseBarcodesMock.mockReturnValue(true);
   });

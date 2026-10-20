@@ -1,6 +1,6 @@
 import type { Booking, TeamMember, User } from "@prisma/client";
 import { Link } from "react-router";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { getPrimaryCustody } from "~/modules/custody/utils";
 import {
   PermissionAction,
@@ -52,7 +52,7 @@ export function CustodyCard({
     | null;
   className?: string;
 }) {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const canViewTeamMemberUsers = userHasPermission({
     roles,
     entity: PermissionEntity.teamMemberProfile,

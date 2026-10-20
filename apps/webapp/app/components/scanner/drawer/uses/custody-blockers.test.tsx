@@ -28,12 +28,15 @@ import {
 /** Every blocker the assign drawer declares, in order. */
 const EXPECTED_ASSIGN_IDS = [
   "qty-nothing-free",
+  "qty-source-empty",
   "assets-already-in-custody",
   "assets-checked-out",
   "assets-part-of-kit",
   "kits-in-custody",
   "kits-with-assets-in-custody",
   "kits-checked-out",
+  "assets-archived",
+  "kits-only-archived",
   "invalid-codes",
 ];
 
@@ -96,20 +99,64 @@ function qtyItem(
   } as Partial<AssetFromQr> & { id: string });
 }
 
+/**
+ * A pool placed at two locations, A (nothing left) and B (`bLeft` left), plus
+ * Unplaced (`unplacedLeft` left, omitted when undefined). Shows a picker.
+ */
+function multiSourceQtyItem(
+  id: string,
+  { bLeft, unplacedLeft }: { bLeft: number; unplacedLeft?: number }
+) {
+  const option = (value: string, locationId: string | null, left: number) => ({
+    value,
+    locationId,
+    label: value,
+    placed: 3,
+    inCustody: 3 - left,
+    left,
+  });
+  const options = [
+    option("loc-a", "loc-a", 0),
+    option("loc-b", "loc-b", bLeft),
+    ...(unplacedLeft === undefined
+      ? []
+      : [option("unplaced", null, unplacedLeft)]),
+  ];
+  return assetItem({
+    id,
+    type: "QUANTITY_TRACKED",
+    quantity: 10,
+    pickerMeta: {
+      maxAllowed: 4,
+      assetQuantity: 10,
+      unitOfMeasure: null,
+      sources: { multiSource: true, options, poolAvailable: 4 },
+    },
+  } as unknown as Partial<AssetFromQr> & { id: string });
+}
+
 /** A scanned kit row. */
 function kitItem(
   id: string,
   {
     status = "AVAILABLE",
     memberStatuses = [],
-  }: { status?: string; memberStatuses?: string[] } = {}
+    memberArchivedAt = [],
+  }: {
+    status?: string;
+    memberStatuses?: string[];
+    /** Per member, in `memberStatuses` order; missing means active. */
+    memberArchivedAt?: (string | null)[];
+  } = {}
 ) {
   return {
     type: "kit" as const,
     data: {
       id,
       status,
-      assetKits: memberStatuses.map((s) => ({ asset: { status: s } })),
+      assetKits: memberStatuses.map((s, i) => ({
+        asset: { status: s, archivedAt: memberArchivedAt[i] ?? null },
+      })),
     } as never,
   };
 }
@@ -117,19 +164,19 @@ function kitItem(
 /** Builds with spies so resolve wiring can be asserted too. */
 function build(
   which: "assign" | "release",
-  items: ScanListItems
+  items: ScanListItems,
+  pickedSources: Record<string, string> = {}
 ): CustodyBlockers & {
   removeAssetsFromList: ReturnType<typeof vi.fn>;
   removeItemsFromList: ReturnType<typeof vi.fn>;
 } {
   const removeAssetsFromList = vi.fn();
   const removeItemsFromList = vi.fn();
-  const builder =
-    which === "assign"
-      ? buildAssignCustodyBlockers
-      : buildReleaseCustodyBlockers;
+  const args = { items, removeAssetsFromList, removeItemsFromList };
   return {
-    ...builder({ items, removeAssetsFromList, removeItemsFromList }),
+    ...(which === "assign"
+      ? buildAssignCustodyBlockers({ ...args, pickedSources })
+      : buildReleaseCustodyBlockers(args)),
     removeAssetsFromList,
     removeItemsFromList,
   };
@@ -138,6 +185,11 @@ function build(
 /** Ids of the blockers currently firing. */
 function activeIds(built: CustodyBlockers): string[] {
   return built.blockerConfigs.filter((b) => b.condition).map((b) => b.id ?? "");
+}
+
+/** Every id a remove spy was asked to drop, across all its calls. */
+function removedBy(spy: { mock: { calls: unknown[][] } }): string[] {
+  return spy.mock.calls.flatMap(([ids]) => ids as string[]);
 }
 
 describe("buildAssignCustodyBlockers", () => {
@@ -157,6 +209,40 @@ describe("buildAssignCustodyBlockers", () => {
     expect(activeIds(built)).toEqual([]);
   });
 
+  it("assets-archived: an archived asset, which still reads AVAILABLE", () => {
+    const built = build("assign", {
+      qr1: assetItem({ id: "a1", archivedAt: new Date() }),
+      qr2: assetItem({ id: "a2" }),
+    });
+    expect(activeIds(built)).toEqual(["assets-archived"]);
+    built.blockerConfigs.find((b) => b.id === "assets-archived")?.onResolve();
+    expect(removedBy(built.removeAssetsFromList)).toEqual(["a1"]);
+  });
+
+  it("kits-only-archived: a kit whose every member is archived", () => {
+    const built = build("assign", {
+      qr1: kitItem("k1", {
+        memberStatuses: ["AVAILABLE", "AVAILABLE"],
+        memberArchivedAt: ["2026-10-01T00:00:00Z", "2026-10-02T00:00:00Z"],
+      }),
+    });
+    expect(activeIds(built)).toEqual(["kits-only-archived"]);
+    built.blockerConfigs
+      .find((b) => b.id === "kits-only-archived")
+      ?.onResolve();
+    expect(removedBy(built.removeItemsFromList)).toEqual(["qr1"]);
+  });
+
+  it("kits-only-archived: does not fire while one member is active", () => {
+    const built = build("assign", {
+      qr1: kitItem("k1", {
+        memberStatuses: ["AVAILABLE", "AVAILABLE"],
+        memberArchivedAt: ["2026-10-01T00:00:00Z", null],
+      }),
+    });
+    expect(activeIds(built)).toEqual([]);
+  });
+
   it("qty-nothing-free: a quantity row with no units left", () => {
     const built = build("assign", { qr1: qtyItem("a1", { available: 0 }) });
     expect(activeIds(built)).toEqual(["qty-nothing-free"]);
@@ -166,6 +252,34 @@ describe("buildAssignCustodyBlockers", () => {
   it("qty-nothing-free: does not fire while units remain", () => {
     const built = build("assign", { qr1: qtyItem("a1", { available: 1 }) });
     expect(activeIds(built)).toEqual([]);
+  });
+
+  it("qty-source-empty: the picked location has nothing left", () => {
+    const built = build(
+      "assign",
+      { qr1: multiSourceQtyItem("a1", { bLeft: 2 }) },
+      { a1: "loc-a" }
+    );
+    expect(activeIds(built)).toEqual(["qty-source-empty"]);
+    built.blockerConfigs.find((b) => b.id === "qty-source-empty")?.onResolve();
+    expect(built.removeAssetsFromList).toHaveBeenCalledWith(["a1"]);
+  });
+
+  it("qty-source-empty: does not fire when the source in effect has units left", () => {
+    // No pick: the default is B, which has units left.
+    expect(
+      activeIds(
+        build("assign", { qr1: multiSourceQtyItem("a1", { bLeft: 2 }) })
+      )
+    ).toEqual([]);
+    // Every location is empty: the default falls back to Unplaced.
+    expect(
+      activeIds(
+        build("assign", {
+          qr1: multiSourceQtyItem("a1", { bLeft: 0, unplacedLeft: 4 }),
+        })
+      )
+    ).toEqual([]);
   });
 
   it("assets-already-in-custody: an individual asset held by someone", () => {
@@ -242,13 +356,16 @@ describe("buildAssignCustodyBlockers", () => {
       qrBad: { error: "No such code" },
     });
 
-    built.onResolveAll();
+    // What "Resolve all" runs: every shown blocker's own fix.
+    built.blockerConfigs
+      .filter((b) => b.condition)
+      .forEach((b) => b.onResolve());
 
-    expect(built.removeAssetsFromList).toHaveBeenCalledWith(
+    expect(removedBy(built.removeAssetsFromList)).toEqual(
       expect.arrayContaining(["a1", "a2"])
     );
     // Kits and unresolved codes are keyed by the CODE, not the kit id.
-    expect(built.removeItemsFromList).toHaveBeenCalledWith(
+    expect(removedBy(built.removeItemsFromList)).toEqual(
       expect.arrayContaining(["qrKit", "qrBad"])
     );
   });
@@ -357,12 +474,15 @@ describe("buildReleaseCustodyBlockers", () => {
       qrBad: { error: "No such code" },
     });
 
-    built.onResolveAll();
+    // What "Resolve all" runs: every shown blocker's own fix.
+    built.blockerConfigs
+      .filter((b) => b.condition)
+      .forEach((b) => b.onResolve());
 
-    expect(built.removeAssetsFromList).toHaveBeenCalledWith(
+    expect(removedBy(built.removeAssetsFromList)).toEqual(
       expect.arrayContaining(["a1", "a2"])
     );
-    expect(built.removeItemsFromList).toHaveBeenCalledWith(
+    expect(removedBy(built.removeItemsFromList)).toEqual(
       expect.arrayContaining(["qrKit", "qrBad"])
     );
   });

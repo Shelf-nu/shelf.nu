@@ -29,12 +29,17 @@ import {
   DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
   PUBLIC_BUCKET,
 } from "~/utils/constants";
+import {
+  assertBulkDeleteConfirmed,
+  assertDeleteConfirmedFor,
+} from "~/utils/delete-confirmation.server";
 import type { ErrorLabel } from "~/utils/error";
 import {
   ShelfError,
   isLikeShelfError,
   isNotFoundError,
   maybeUniqueConstraintViolation,
+  rethrowIfClientError,
   throwIfAssetQuantityOverAllocation,
   throwIfIndividualAssetAlreadyPlaced,
 } from "~/utils/error";
@@ -44,16 +49,20 @@ import { getCurrentSearchParams } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
 import { assertUploadedImageContentType } from "~/utils/image-upload.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
+import { Logger } from "~/utils/logger";
 import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import {
   wrapDescriptionForNote,
   wrapLinkForNote,
   wrapUserLinkForNote,
 } from "~/utils/markdoc-wrappers";
+import { assertAssetsAreNotArchived } from "~/utils/org-validation.server";
 import {
   getFileUploadPath,
+  MAX_PUBLIC_FILES_PER_REMOVE,
   parseFileFormData,
   removePublicFile,
+  removePublicFiles,
 } from "~/utils/storage.server";
 import {
   formatLocationLink,
@@ -69,10 +78,12 @@ import { recordEvent, recordEvents } from "../activity-event/service.server";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 import { getPrimaryLocation } from "../asset/utils";
 import {
+  applyArchivedFilter,
   getAssetsWhereInput,
   getLocationUpdateNoteContent,
   getKitLocationUpdateNoteContent,
 } from "../asset/utils.server";
+import type { ArchivedFilter } from "../asset/utils.server";
 import { getKitsWhereInput } from "../kit/utils.server";
 import { createSystemLocationNote as createSystemLocationActivityNote } from "../location-note/service.server";
 import { createNote } from "../note/service.server";
@@ -104,6 +115,7 @@ async function assertAssetsInOrganization({
   if (ids.length === 0) return;
 
   const authorizedCount = await db.asset.count({
+    // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: org-ownership guard; must count archived assets too
     where: { id: { in: ids }, organizationId },
   });
 
@@ -175,6 +187,12 @@ export async function getLocation(
     request?: Request;
     include?: Prisma.LocationInclude;
     teamMemberIds?: string[] | null;
+    /**
+     * Which of the location's assets to list by archive state. Pages that
+     * offer the view menu resolve it with `resolveArchivedViewForMember`;
+     * everything else lists them all.
+     */
+    archivedFilter?: ArchivedFilter;
   }
 ) {
   const {
@@ -189,6 +207,7 @@ export async function getLocation(
     orderDirection,
     include,
     teamMemberIds,
+    archivedFilter = "all",
   } = params;
 
   try {
@@ -199,8 +218,15 @@ export async function getLocation(
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
 
-    /** Build where object for querying related assets */
-    const assetsWhere: Prisma.AssetWhereInput = {};
+    /**
+     * Where clause for the location's assets. The list and the count below
+     * share it, so the count always describes the rows the view shows.
+     * Archived assets that the view includes render with an "Archived" badge.
+     */
+    const assetsWhere: Prisma.AssetWhereInput = applyArchivedFilter(
+      {},
+      archivedFilter
+    );
 
     if (search) {
       assetsWhere.title = {
@@ -302,6 +328,11 @@ export async function getLocation(
       ...assetsWhere,
     };
 
+    const assetsCountWhere: Prisma.AssetWhereInput = applyArchivedFilter(
+      { assetLocations: { some: { locationId: id } } },
+      archivedFilter
+    );
+
     const [location, totalAssetsWithinLocation, assets] = await Promise.all([
       /** Get the items */
       db.location.findFirstOrThrow({
@@ -318,9 +349,8 @@ export async function getLocation(
 
       /** Count them */
       db.asset.count({
-        where: {
-          assetLocations: { some: { locationId: id } },
-        },
+        // Follows the archived view so the count matches the list it heads.
+        where: assetsCountWhere,
       }),
 
       /**
@@ -622,8 +652,15 @@ export async function getLocationSubtreeDepth(params: {
 
 export const LOCATION_LIST_INCLUDE = {
   // Asset count comes from the `AssetLocation` pivot rather than a
-  // direct `Location.assets` relation (which doesn't exist).
-  _count: { select: { kits: true, assetLocations: true, children: true } },
+  // direct `Location.assets` relation (which doesn't exist). Archived assets
+  // are out of service and left out, the same as every other inventory count.
+  _count: {
+    select: {
+      kits: true,
+      assetLocations: { where: { asset: { archivedAt: null } } },
+      children: true,
+    },
+  },
   parent: {
     select: {
       id: true,
@@ -734,7 +771,9 @@ export async function getLocationTotalValuation({
   // Prisma's `aggregate({_sum})` cannot express the multiplication, so we drop
   // to `$queryRaw` and keep the same scope (assets joined to the pivot).
   // Column is `value` (Asset.valuation is `@map("value")`). COALESCE
-  // mirrors `getAssetTotalValue`. No `::bigint` cast — truncated floats.
+  // mirrors `getAssetTotalValue`. No `::bigint` cast, it truncates floats.
+  // Archived assets are out of service, so they add nothing to the value
+  // stored here, matching the dashboard and the inventory reports.
   const rows = await db.$queryRaw<{ total: number | null }[]>(
     Prisma.sql`
       SELECT COALESCE(SUM(COALESCE(a.value, 0) * COALESCE(a.quantity, 1)), 0) AS total
@@ -743,6 +782,7 @@ export async function getLocationTotalValuation({
         SELECT al."assetId" FROM "AssetLocation" al
         WHERE al."locationId" = ${locationId}
       )
+      AND a."archivedAt" IS NULL
     `
   );
 
@@ -922,20 +962,143 @@ export async function createLocation({
   }
 }
 
+/** A location's id and the public URLs of its stored image files. */
+type LocationImageFiles = Pick<Location, "id" | "imageUrl" | "thumbnailUrl">;
+
+/**
+ * Removes the image and thumbnail files of deleted locations from the public
+ * storage bucket.
+ *
+ * Call this only after the location rows are deleted. Files are removed in one
+ * storage request per chunk of locations, one request after another, so even a select-all delete makes only a handful of
+ * requests. Best effort: a failed request is logged and the next one still
+ * runs, because a stale storage object can be cleaned up later, while failing
+ * would report a delete that already happened as an error. Never rejects.
+ *
+ * @param locations - The deleted locations and their stored image URLs
+ */
+async function safeRemoveImageFilesOfLocations(
+  locations: LocationImageFiles[]
+): Promise<void> {
+  /**
+   * Each location has at most two files, so a chunk of this size stays within
+   * the storage API's per-request limit. Read at call time rather than module
+   * load, so tests that mock the storage module without it can still import
+   * this service.
+   */
+  const LOCATIONS_PER_STORAGE_REMOVE = MAX_PUBLIC_FILES_PER_REMOVE / 2;
+  const locationsWithFiles = locations.filter(
+    (location) => !!location.imageUrl || !!location.thumbnailUrl
+  );
+
+  for (
+    let i = 0;
+    i < locationsWithFiles.length;
+    i += LOCATIONS_PER_STORAGE_REMOVE
+  ) {
+    const chunk = locationsWithFiles.slice(i, i + LOCATIONS_PER_STORAGE_REMOVE);
+    const publicUrls = chunk.flatMap((location) =>
+      [location.imageUrl, location.thumbnailUrl].filter(
+        (url): url is string => !!url
+      )
+    );
+    // The raw URLs stay out of the logs: they contain the storage object
+    // keys. The location ids are enough to trace the files.
+    const locationIds = chunk.map((location) => location.id);
+
+    try {
+      const { invalidUrlCount } = await removePublicFiles({ publicUrls });
+
+      if (invalidUrlCount > 0) {
+        Logger.error(
+          new ShelfError({
+            cause: null,
+            message:
+              "Skipped location image files outside the public bucket during delete",
+            additionalData: { locationIds, invalidUrlCount },
+            label,
+          })
+        );
+      }
+    } catch (cause) {
+      Logger.error(
+        new ShelfError({
+          cause,
+          message:
+            "Failed to remove location images from storage during delete",
+          additionalData: { locationIds },
+          label,
+        })
+      );
+    }
+  }
+}
+
+/**
+ * Refuses a single location delete unless the user typed its name, as the delete
+ * dialog asks. A location that is already gone passes, so the delete itself
+ * reports it.
+ *
+ * @param params.id - The location to delete
+ * @param params.organizationId - The caller's organization
+ * @param params.confirmation - What the user typed in the dialog
+ * @throws {ShelfError} 400 when the confirmation does not match
+ */
+export async function assertLocationDeleteConfirmed({
+  id,
+  organizationId,
+  confirmation,
+}: {
+  id: string;
+  organizationId: string;
+  confirmation: string | null | undefined;
+}) {
+  await assertDeleteConfirmedFor({
+    confirmation,
+    findName: () =>
+      db.location
+        .findFirst({ where: { id, organizationId }, select: { name: true } })
+        .then((location) => location?.name ?? null),
+    label,
+  });
+}
+
+/**
+ * Deletes a location, its legacy `Image` row, and its stored image files.
+ *
+ * The location and its `Image` row are deleted in one transaction. The image
+ * and thumbnail files are removed after it commits, see
+ * {@link safeRemoveImageFilesOfLocations}.
+ *
+ * @param id - ID of the location to delete
+ * @param organizationId - Organization the location must belong to
+ * @returns The deleted location
+ * @throws {ShelfError} When the database delete fails
+ */
 export async function deleteLocation({
   id,
   organizationId,
 }: Pick<Location, "id" | "organizationId">) {
   try {
-    const location = await db.location.delete({
-      where: { id, organizationId },
+    /**
+     * Both deletes commit together, so the cleanup below always runs once the
+     * location is gone. Its URLs cannot be read back after the row is deleted.
+     */
+    const location = await db.$transaction(async (tx) => {
+      const deleted = await tx.location.delete({
+        where: { id, organizationId },
+      });
+
+      if (deleted.imageId) {
+        await tx.image.delete({
+          where: { id: deleted.imageId },
+        });
+      }
+
+      return deleted;
     });
 
-    if (location.imageId) {
-      await db.image.delete({
-        where: { id: location.imageId },
-      });
-    }
+    await safeRemoveImageFilesOfLocations([location]);
 
     return location;
   } catch (cause) {
@@ -1232,26 +1395,63 @@ export async function createLocationsIfNotExists({
   }
 }
 
+/**
+ * Deletes the selected locations of an organization, their legacy `Image`
+ * rows, and their stored image files.
+ *
+ * The locations and `Image` rows are deleted in one transaction. The image and
+ * thumbnail files are removed in the background after it commits, so this
+ * resolves without waiting on storage, see
+ * {@link safeRemoveImageFilesOfLocations}.
+ *
+ * @param locationIds - IDs to delete, or `ALL_SELECTED_KEY` for every location
+ *   in the organization
+ * @param organizationId - Organization the locations must belong to
+ * @throws {ShelfError} When the database delete fails
+ */
 export async function bulkDeleteLocations({
   locationIds,
   organizationId,
+  currentSearchParams,
+  confirmation,
 }: {
   locationIds: Location["id"][];
   organizationId: Organization["id"];
+  /** The index's search params; a "select all" deletes only what they match. */
+  currentSearchParams?: string | null;
+  /**
+   * The number the user typed in the delete dialog. Must equal the number of
+   * locations this call removes, see {@link assertBulkDeleteConfirmed}.
+   */
+  confirmation: string | null | undefined;
 }) {
   try {
-    /** We have to delete the images of locations if any */
+    /**
+     * Read before the delete: the `Image` row ids and the storage URLs are
+     * gone once the location rows are deleted. A "select all" resolves through
+     * the index's own builder, so it removes exactly the locations the list
+     * shows for the active search.
+     */
     const locations = await db.location.findMany({
       where: locationIds.includes(ALL_SELECTED_KEY)
-        ? { organizationId }
+        ? getLocationsWhereInput({ organizationId, currentSearchParams })
         : { id: { in: locationIds }, organizationId },
-      select: { id: true, imageId: true },
+      select: { id: true, imageId: true, imageUrl: true, thumbnailUrl: true },
     });
 
-    return await db.$transaction(async (tx) => {
+    // Before any write: the typed count must be the number about to go.
+    assertBulkDeleteConfirmed({
+      selectedIds: locationIds,
+      confirmation,
+      matchedCount: locations.length,
+      noun: { one: "location", many: "locations" },
+      label,
+    });
+
+    await db.$transaction(async (tx) => {
       /** Deleting all locations */
       await tx.location.deleteMany({
-        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: ids come from `locations` fetched above with `organizationId` in the where clause (lines 1062-1067), so they are already org-proven before this delete
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: ids come from `locations` fetched above with `organizationId` in the where clause, so they are already org-proven before this delete
         where: { id: { in: locations.map((location) => location.id) } },
       });
 
@@ -1270,7 +1470,18 @@ export async function bulkDeleteLocations({
         },
       });
     });
+
+    /**
+     * Not awaited: the transaction has committed, so the response does not wait
+     * on storage. A select-all delete can mean thousands of files. Cleanup is
+     * best effort either way: a run cut short leaves an orphaned file, the same
+     * outcome as a storage failure.
+     */
+    void safeRemoveImageFilesOfLocations(locations);
   } catch (cause) {
+    // A refused confirmation carries the count to type in its additionalData.
+    rethrowIfClientError(cause);
+
     throw new ShelfError({
       cause,
       message: "Something went wrong while bulk deleting locations.",
@@ -2011,6 +2222,15 @@ export async function updateLocationAssets({
       (id) => !existingAssetIds.has(id)
     );
 
+    // Archived assets are frozen (issue #382): none can be moved INTO this
+    // location. Ones already placed here stay listed (the location page shows
+    // them with a badge), and removing them stays allowed.
+    await assertAssetsAreNotArchived({
+      assetIds: actuallyNewAssetIds,
+      organizationId,
+      actorUserId: userId,
+    });
+
     /**
      * Qty-edit set: assets already at this location whose submitted
      * quantity differs from the existing pivot row. The picker pre-fills
@@ -2040,6 +2260,7 @@ export async function updateLocationAssets({
      */
     const modifiedAssets = await db.asset
       .findMany({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: before-state read for assets moved in or out; archived assets can still be removed from a location
         where: {
           id: {
             in: [
@@ -2635,7 +2856,11 @@ export async function updateLocationKits({
           name: true,
           locationId: true,
           location: { select: { id: true, name: true } },
+          // Archived members are frozen (issue #382): their placement stays
+          // where it was and they get no "moved" note, the same as the
+          // kit-side cascade (`cascadeKitLocationToAssets`).
           assetKits: {
+            where: { asset: { archivedAt: null } },
             select: {
               asset: {
                 select: {
@@ -2692,11 +2917,20 @@ export async function updateLocationKits({
             // kit might be moving in from another location), then
             // create fresh kit-driven rows here.
             const newKitIds = kitsToAdd.map((k) => k.id);
+            // Active members only: an archived member's placement is frozen.
             await tx.assetLocation.deleteMany({
-              where: { assetKit: { kitId: { in: newKitIds } } },
+              where: {
+                assetKit: {
+                  kitId: { in: newKitIds },
+                  asset: { archivedAt: null },
+                },
+              },
             });
             const assetKitsForKits = await tx.assetKit.findMany({
-              where: { kitId: { in: newKitIds } },
+              where: {
+                kitId: { in: newKitIds },
+                asset: { archivedAt: null },
+              },
               select: { id: true, assetId: true, quantity: true },
             });
             if (assetKitsForKits.length > 0) {
@@ -2858,7 +3092,9 @@ export async function updateLocationKits({
         select: {
           id: true,
           name: true,
+          // Archived members keep their placement and get no note.
           assetKits: {
+            where: { asset: { archivedAt: null } },
             select: { asset: { select: { id: true, title: true } } },
           },
         },
@@ -2891,7 +3127,10 @@ export async function updateLocationKits({
             // created at this location for the same assets survive.
             await tx.assetLocation.deleteMany({
               where: {
-                assetKit: { kitId: { in: removedKitIds } },
+                assetKit: {
+                  kitId: { in: removedKitIds },
+                  asset: { archivedAt: null },
+                },
                 locationId,
                 organizationId,
               },

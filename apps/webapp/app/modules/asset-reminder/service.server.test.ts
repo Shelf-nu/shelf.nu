@@ -11,7 +11,10 @@
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import { scheduleAssetReminder } from "./scheduler.server";
-import { createAssetReminder } from "./service.server";
+import {
+  createAssetReminder,
+  getUpcomingRemindersForHomePage,
+} from "./service.server";
 
 // @vitest-environment node
 
@@ -21,7 +24,7 @@ vi.mock("~/database/db.server", () => ({
     $transaction: vi.fn(),
     asset: { findMany: vi.fn() },
     teamMember: { count: vi.fn() },
-    assetReminder: { create: vi.fn() },
+    assetReminder: { create: vi.fn(), findMany: vi.fn() },
     note: { create: vi.fn() },
   },
 }));
@@ -119,5 +122,27 @@ describe("createAssetReminder", () => {
       ShelfError
     );
     expect(scheduleAssetReminder).not.toHaveBeenCalled();
+  });
+});
+
+describe("getUpcomingRemindersForHomePage", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (db.assetReminder.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(
+      []
+    );
+  });
+
+  it("leaves out reminders whose asset is archived, since they will not fire", async () => {
+    await getUpcomingRemindersForHomePage({ organizationId: "org-1" });
+
+    expect(db.assetReminder.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          organizationId: "org-1",
+          asset: { archivedAt: null },
+        }),
+      })
+    );
   });
 });

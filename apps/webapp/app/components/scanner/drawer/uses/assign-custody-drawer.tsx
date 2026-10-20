@@ -41,7 +41,7 @@ import {
 } from "~/components/shared/modal";
 import { Spinner } from "~/components/shared/spinner";
 import { useDisabled } from "~/hooks/use-disabled";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { createCustodianSchema } from "~/modules/custody/schema";
 import type { ScannerLoader } from "~/routes/_layout+/scanner";
@@ -104,19 +104,20 @@ export default function AssignCustodyDrawer({
   const removeItem = useSetAtom(removeScannedItemAtom);
   const removeAssetsFromList = useSetAtom(removeScannedItemsByAssetIdAtom);
   const removeItemsFromList = useSetAtom(removeMultipleScannedItemsAtom);
+  const pickedSources = useAtomValue(scannedAssetSourcesAtom);
 
   // Blockers live in `custody-blockers` so the list is a pure function of the
   // scanned rows and can be tested without mounting this drawer.
-  const { blockerConfigs, onResolveAll } = buildAssignCustodyBlockers({
+  const { blockerConfigs } = buildAssignCustodyBlockers({
     items,
     removeAssetsFromList,
     removeItemsFromList,
+    pickedSources,
   });
 
   // Create blockers component
   const [hasBlockers, Blockers] = createBlockers({
     blockerConfigs,
-    onResolveAll,
   });
 
   // Render item row
@@ -178,7 +179,7 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
     custodianName: "",
   });
   const disabled = useDisabled();
-  const { isSelfService } = useUserRoleHelper();
+  const assignsSelfOnly = useRoleAccess().custody.assign === "self";
   const { teamMembers } = useLoaderData<ScannerLoader>();
   // Per-row units for quantity-tracked scans, written by
   // `ScannedAssetQuantityInput` and keyed by asset id.
@@ -351,18 +352,18 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
         ))}
 
         <div className="px-4 md:pl-0">
-          <div className="relative z-50 my-8 ">
+          <div className="relative z-50 mb-3 mt-2">
             <h5 className="mb-1">Assign custody to:</h5>
             <DynamicSelect
               defaultValue={
-                isSelfService && teamMembers?.length > 0
+                assignsSelfOnly && teamMembers?.length > 0
                   ? JSON.stringify({
                       id: teamMembers[0].id,
                       name: resolveTeamMemberName(teamMembers[0]),
                     })
                   : undefined
               }
-              disabled={disabled || isSelfService}
+              disabled={disabled || assignsSelfOnly}
               model={{
                 name: "teamMember",
                 queryKey: "name",
@@ -399,7 +400,7 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
             ) : null}
           </div>
 
-          <div className={tw("mb-4 flex gap-3", isSelfService && "-mt-4")}>
+          <div className="mb-2 flex gap-3">
             <Button
               type="submit"
               variant="primary"
@@ -430,6 +431,7 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
   const showStateBadges = shouldShowStateBadges(asset, maxAllowed);
   // Use predefined presets to create label configurations
   const availabilityConfigs = [
+    assetLabelPresets.archived(!!asset.archivedAt),
     assetLabelPresets.inCustody(
       showStateBadges && asset.status === AssetStatus.IN_CUSTODY
     ),

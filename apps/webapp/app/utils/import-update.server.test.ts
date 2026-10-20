@@ -797,6 +797,85 @@ describe("applyBulkUpdatesFromImport — description (Task 2 fix round 1)", () =
   });
 });
 
+describe("description length limit on the update import", () => {
+  const overLimitReason =
+    "Description too long: 5,123 characters, but the maximum is 5,000. Shorten it and import again.";
+
+  function mockStoredAsset() {
+    vi.mocked(db.asset.findMany).mockResolvedValueOnce([
+      makeDbAsset({ title: "Old Name", description: "Old description" }),
+    ] as unknown as Awaited<ReturnType<typeof db.asset.findMany>>);
+  }
+
+  it("lists an over-limit row as failed in the preview", async () => {
+    mockStoredAsset();
+
+    const preview = await buildUpdatePreview({
+      csvData: [
+        ["Asset ID", "Description", "Name"],
+        ["SAM-0001", "a".repeat(5123), "New Name"],
+      ],
+      organizationId,
+    });
+
+    expect(preview.failedRows).toEqual([
+      { rowNumber: 2, id: "SAM-0001", reason: overLimitReason },
+    ]);
+    expect(preview.assetsToUpdate).toEqual([]);
+    expect(preview.totalFieldChanges).toBe(0);
+  });
+
+  it("writes nothing for an over-limit row when applied without a preview", async () => {
+    mockStoredAsset();
+
+    const result = await applyBulkUpdatesFromImport({
+      csvData: [
+        ["Asset ID", "Description", "Name"],
+        ["SAM-0001", "a".repeat(5123), "New Name"],
+      ],
+      organizationId,
+      userId,
+      request,
+    });
+
+    expect(updateAsset).not.toHaveBeenCalled();
+    expect(result.failed).toEqual([
+      { id: "SAM-0001", title: "", rowNumber: 2, error: overLimitReason },
+    ]);
+    expect(result.summary).toEqual({
+      total: 1,
+      updated: 0,
+      skipped: 0,
+      failed: 1,
+    });
+  });
+
+  it.each([
+    ["exactly 5,000 characters", "a".repeat(5000)],
+    [
+      "5,000 characters with a \\r\\n line break",
+      `${"a".repeat(2500)}\r\n${"a".repeat(2499)}`,
+    ],
+  ])("applies a description of %s", async (_label, description) => {
+    mockStoredAsset();
+
+    const result = await applyBulkUpdatesFromImport({
+      csvData: [
+        ["Asset ID", "Description"],
+        ["SAM-0001", description],
+      ],
+      organizationId,
+      userId,
+      request,
+    });
+
+    expect(result.failed).toEqual([]);
+    expect(vi.mocked(updateAsset).mock.calls[0][0].description).toBe(
+      description
+    );
+  });
+});
+
 describe("applyBulkUpdatesFromImport — tags", () => {
   it("connects a quoted tag name carrying the separator", async () => {
     // why: tags are resolved into an id map keyed by the stored (trimmed)

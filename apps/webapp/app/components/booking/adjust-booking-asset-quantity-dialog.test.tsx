@@ -28,18 +28,20 @@ import type { ReactNode } from "react";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { accessFor } from "@helpers/role-access";
+import type { RoleAccess } from "~/utils/permissions/role-access";
 import { AdjustBookingAssetQuantityDialog } from "./adjust-booking-asset-quantity-dialog";
 
 /** Mutable per-test fetcher state, reassigned in `beforeEach`. */
 type FetcherState = {
   state: "idle" | "submitting" | "loading";
-  data: { success?: boolean; error?: { message?: string } } | undefined;
+  data: { success?: boolean; error?: { message?: string } | null } | undefined;
 };
 
 let mockFetcherState: FetcherState = { state: "idle", data: undefined };
 let mockSubmit = vi.fn();
-/** Controls the viewer's role (owner vs self-service/base) per test. */
-const mockUseUserRoleHelper = vi.fn(() => ({ isBaseOrSelfService: false }));
+/** Controls the viewer's access per test. Default: an admin. */
+let mockAccess: RoleAccess = accessFor(["ADMIN"]);
 
 // why: useFetcher returns a Form component + state we need to control per
 // test, and a `submit` we assert against for the happy-path case.
@@ -88,11 +90,9 @@ vi.mock("~/hooks/use-disabled", () => ({
   useDisabled: () => false,
 }));
 
-// why: the dialog calls useUserRoleHelper (which reads route loader data) to
-// decide whether to show the owner-only "View bookings" link; mock it so tests
-// pick the role without a full data-router context.
-vi.mock("~/hooks/user-user-role-helper", () => ({
-  useUserRoleHelper: () => mockUseUserRoleHelper(),
+// why: the dialog reads the viewer's booking visibility from the layout data
+vi.mock("~/hooks/use-role-access", () => ({
+  useRoleAccess: () => mockAccess,
 }));
 
 // why: AlertDialog from `~/components/shared/modal` uses Radix's portal +
@@ -145,8 +145,8 @@ describe("AdjustBookingAssetQuantityDialog", () => {
   beforeEach(() => {
     mockFetcherState = { state: "idle", data: undefined };
     mockSubmit = vi.fn();
-    // Default: owner (can view other bookings). Individual tests override.
-    mockUseUserRoleHelper.mockReturnValue({ isBaseOrSelfService: false });
+    // Default: an admin (can view other bookings). Individual tests override.
+    mockAccess = accessFor(["ADMIN"]);
   });
 
   describe("booking context (totalQuantity provided)", () => {
@@ -193,7 +193,7 @@ describe("AdjustBookingAssetQuantityDialog", () => {
     });
 
     it("shows the generic note WITHOUT a link for self-service/base users", () => {
-      mockUseUserRoleHelper.mockReturnValue({ isBaseOrSelfService: true });
+      mockAccess = accessFor(["SELF_SERVICE"]);
       render(
         <AdjustBookingAssetQuantityDialog
           bookingId="booking-1"
@@ -213,6 +213,26 @@ describe("AdjustBookingAssetQuantityDialog", () => {
       expect(
         screen.queryByRole("link", { name: /View bookings/i })
       ).not.toBeInTheDocument();
+    });
+
+    it("shows the View bookings link to SELF_SERVICE when the workspace lets them see bookings", () => {
+      // The link follows access.bookings.seeAll, which folds in the workspace toggle.
+      mockAccess = accessFor(["SELF_SERVICE"], {
+        selfServiceCanSeeBookings: true,
+      });
+      render(
+        <AdjustBookingAssetQuantityDialog
+          bookingId="booking-1"
+          assetId="asset-1"
+          currentQuantity={3}
+          maxQuantity={3}
+          totalQuantity={10}
+          reservedByOthers={7}
+          open
+          onOpenChange={() => {}}
+        />
+      );
+      expect(screen.getByRole("link", { name: /view bookings/i })).toBeTruthy();
     });
 
     it('does NOT show the "reserved by other bookings" note when reservedByOthers is 0', () => {
@@ -283,6 +303,117 @@ describe("AdjustBookingAssetQuantityDialog", () => {
       expect(
         screen.queryByText(/reserved by other bookings/i)
       ).not.toBeInTheDocument();
+    });
+  });
+
+  describe("stale submission errors", () => {
+    const REFUSAL = "Only 2 units are available for these dates.";
+    const CLIENT_ERROR = /whole number greater than 0/i;
+
+    function dialog(open: boolean, onOpenChange: (v: boolean) => void) {
+      return (
+        <AdjustBookingAssetQuantityDialog
+          bookingId="booking-1"
+          assetId="asset-1"
+          assetTitle="Chairs"
+          currentQuantity={2}
+          maxQuantity={10}
+          open={open}
+          onOpenChange={onOpenChange}
+        />
+      );
+    }
+
+    it("shows a refusal the server has just sent back", () => {
+      const onOpenChange = vi.fn();
+      const { rerender } = render(dialog(true, onOpenChange));
+
+      mockFetcherState = { state: "submitting", data: undefined };
+      rerender(dialog(true, onOpenChange));
+      mockFetcherState = {
+        state: "idle",
+        data: { error: { message: REFUSAL } },
+      };
+      rerender(dialog(true, onOpenChange));
+
+      expect(screen.getByText(REFUSAL)).toBeInTheDocument();
+    });
+
+    it("drops that refusal when the dialog is opened again", () => {
+      const onOpenChange = vi.fn();
+      const { rerender } = render(dialog(true, onOpenChange));
+
+      mockFetcherState = { state: "submitting", data: undefined };
+      rerender(dialog(true, onOpenChange));
+      mockFetcherState = {
+        state: "idle",
+        data: { error: { message: REFUSAL } },
+      };
+      rerender(dialog(true, onOpenChange));
+      expect(screen.getByText(REFUSAL)).toBeInTheDocument();
+
+      // The operator closes the dialog and comes back to it later. The fetcher
+      // is keyed, so it is still handing back that same refusal.
+      rerender(dialog(false, onOpenChange));
+      rerender(dialog(true, onOpenChange));
+
+      expect(screen.queryByText(REFUSAL)).not.toBeInTheDocument();
+    });
+
+    it("drops a client-side validation error when the dialog is opened again", () => {
+      const onOpenChange = vi.fn();
+      const { rerender } = render(dialog(true, onOpenChange));
+
+      fireEvent.change(screen.getByLabelText(/Quantity/i), {
+        target: { value: "0" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: /^Save$/ }));
+      expect(screen.getByText(CLIENT_ERROR)).toBeInTheDocument();
+      expect(mockSubmit).not.toHaveBeenCalled();
+
+      rerender(dialog(false, onOpenChange));
+      rerender(dialog(true, onOpenChange));
+
+      expect(screen.queryByText(CLIENT_ERROR)).not.toBeInTheDocument();
+    });
+
+    it("stays open when mounted fresh while the fetcher holds an earlier success", () => {
+      // A parent that renders this dialog only while open mounts it fresh on
+      // every opening, with the keyed fetcher still holding the result of the
+      // last change that went through.
+      mockFetcherState = {
+        state: "idle",
+        data: { success: true, error: null },
+      };
+      const onOpenChange = vi.fn();
+
+      render(dialog(true, onOpenChange));
+
+      expect(onOpenChange).not.toHaveBeenCalled();
+    });
+
+    it("does not close itself again on reopen while the fetcher holds a success", () => {
+      const onOpenChange = vi.fn();
+      const { rerender } = render(dialog(true, onOpenChange));
+
+      mockFetcherState = { state: "submitting", data: undefined };
+      rerender(dialog(true, onOpenChange));
+      // `payload()` stamps `error: null` onto every success, so a success is
+      // told apart by the VALUE being null, never by the key being absent.
+      mockFetcherState = {
+        state: "idle",
+        data: { success: true, error: null },
+      };
+      rerender(dialog(true, onOpenChange));
+
+      // The accepted submission closes it once.
+      expect(onOpenChange).toHaveBeenCalledWith(false);
+      onOpenChange.mockClear();
+
+      rerender(dialog(false, onOpenChange));
+      rerender(dialog(true, onOpenChange));
+
+      expect(onOpenChange).not.toHaveBeenCalled();
     });
   });
 });

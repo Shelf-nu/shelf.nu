@@ -14,6 +14,7 @@
 import { OrganizationRoles } from "@prisma/client";
 import type { ActionFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { permissionContext } from "@helpers/role-access";
 
 import { checkOutQuantity } from "~/modules/asset/service.server";
 import { createNote } from "~/modules/note/service.server";
@@ -81,10 +82,12 @@ vi.mock("~/utils/emitter/send-notification.server", () => ({
 const mockCheckOut = vi.mocked(checkOutQuantity);
 
 function asRole(role: OrganizationRoles) {
-  vi.mocked(requirePermission).mockResolvedValue({
-    organizationId: "org-1",
-    role,
-  } as Awaited<ReturnType<typeof requirePermission>>);
+  vi.mocked(requirePermission).mockResolvedValue(
+    permissionContext({
+      roles: [role],
+      organizationId: "org-1",
+    }) as unknown as Awaited<ReturnType<typeof requirePermission>>
+  );
 }
 
 function post(fields: Record<string, string>) {

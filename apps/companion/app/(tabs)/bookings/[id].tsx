@@ -1,4 +1,9 @@
-import { BOOKING_RESERVE_BLOCKED_LABELS } from "@shelf/labels";
+import {
+  archivedAssetsRefusal,
+  BOOKING_RESERVE_BLOCKED_LABELS,
+  DELETE_CONSEQUENCE_LABELS,
+  EXPLICIT_REQUIREMENT_LABELS,
+} from "@shelf/labels";
 import { useState, useCallback, useMemo, useRef } from "react";
 import {
   View,
@@ -12,6 +17,7 @@ import {
   Platform,
   ActionSheetIOS,
   Modal,
+  type AccessibilityActionEvent,
   type LayoutChangeEvent,
 } from "react-native";
 import * as Haptics from "expo-haptics";
@@ -29,14 +35,34 @@ import { Ionicons } from "@expo/vector-icons";
 import {
   api,
   type BookingDetail,
+  type BookingDetailResponse,
   type BookingAsset,
   type CheckoutDisposition,
+  type CheckoutSourceQuestion,
   type CheckinDisposition,
 } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import { useAuth } from "@/lib/auth-context";
 import { userHasPermission } from "@/lib/permissions";
+import {
+  archivedLeftOutNote,
+  assetBadgeStatus,
+  isArchivedAsset,
+} from "@/lib/archived-assets";
+import {
+  MODEL_SHORTFALL_NOTICE,
+  modelShortfallLabel,
+  shortfallsByModelId,
+} from "@/lib/model-reservation-shortfall";
+import {
+  canAddItemsToBooking,
+  canRemoveItemsFromBooking,
+  mayRemoveBookingItemsAsCustodian,
+  mayWriteBookingItems,
+} from "@/lib/role-access";
+import { useRoleAccess } from "@/hooks/use-role-access";
 import { fontSize, spacing, borderRadius, formatStatus } from "@/lib/constants";
+import { FORM_MAX_WIDTH } from "@/lib/content-column";
 import { useDateFormatter } from "@/lib/use-date-formatter";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
@@ -51,12 +77,19 @@ import { announce } from "@/lib/a11y";
 import { submitFromSheet } from "@/lib/sheet-submit";
 import { maybeAskForReview } from "@/lib/review-prompt";
 import { canOfferQuickCheckout } from "@/lib/booking-quick-actions";
+import { buildExtendPayload, canOfferExtend } from "@/lib/booking-extend";
+import { BOOKING_METHOD } from "@/lib/booking-method";
+import { CheckoutSourceSheet } from "@/components/checkout-source-sheet";
+import ConfirmDeleteSheet from "@/components/confirm-delete-sheet";
+import { ExtendBookingSheet } from "@/components/bookings/extend-booking-sheet";
+import { questionsForCheckouts } from "@/lib/custody-source-options";
 import {
   hasAssetsLeftToCheckOut,
   unassignedCheckoutConfirm,
 } from "@/lib/booking-reservation-checkout";
 import { BookingAssetsSearch } from "@/components/bookings/booking-assets-search";
 import { BookingKitHeader } from "@/components/bookings/booking-kit-header";
+import { ExpandableText } from "@/components/shared/expandable-text";
 import {
   bookingRowKey,
   buildBookingRows,
@@ -76,6 +109,10 @@ import {
   type SelectionCounts,
 } from "@/lib/booking-kit-rows";
 import { filterBookingAssets } from "@/lib/booking-search";
+import {
+  bookingQuantityCap,
+  canEditBookedQuantity,
+} from "@/lib/booking-quantity";
 
 /**
  * Segment colours for the booking lifecycle progress bar. Fixed hues matched to
@@ -91,13 +128,28 @@ const LIFECYCLE_COLORS = {
 } as const;
 
 /**
+ * The booking detail route.
+ *
+ * A link or navigate to another booking while this one is on top of the stack
+ * reuses this route with a new `id`, and the screen below holds data,
+ * selections and open sheets for one booking. Keying it by `id` gives every
+ * booking its own instance, so nothing from the previous one carries over and
+ * a reply still in flight for it lands nowhere.
+ */
+export default function BookingDetailRoute() {
+  const { id } = useLocalSearchParams<{ id: string }>();
+  return <BookingDetailScreen key={id} id={id} />;
+}
+
+/**
  * The booking detail screen: the booking's details, the actions its status and
  * the caller's role allow, its reserved models, and its assets and kits, which
  * can be searched, grouped under their kits, and selected for check-in,
  * check-out or removal.
+ *
+ * @param props.id - the booking to show
  */
-export default function BookingDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+function BookingDetailScreen({ id }: { id: string }) {
   const router = useRouter();
   const { currentOrg } = useOrg();
   // Current auth user — the booking's creator/custodian ids are compared
@@ -105,7 +157,7 @@ export default function BookingDetailScreen() {
   const { user } = useAuth();
   const { colors, statusBadge, bookingStatusBadge } = useTheme();
   const styles = useStyles();
-  const { formatDateTime } = useDateFormatter();
+  const { formatDateTime, prefs } = useDateFormatter();
 
   const [booking, setBooking] = useState<BookingDetail | null>(null);
   const [checkedInAssetIds, setCheckedInAssetIds] = useState<string[]>([]);
@@ -121,12 +173,32 @@ export default function BookingDetailScreen() {
   // completes the booking whatever went out. The workspace's explicit-check-in
   // policy is already folded in by the server.
   const [canCheckinAll, setCanCheckinAll] = useState(false);
+  // Whether the workspace allows this role the quick check-in at all. Kept
+  // apart from `canCheckinAll` (which also folds in the booking's state and
+  // the permission) so the screen can say WHY "Check In All" is missing when
+  // it is the workspace's explicit-check-in rule that hides it. An older
+  // server omits the flag; read that as allowed, like `canCheckinAll` does.
+  const [canQuickCheckin, setCanQuickCheckin] = useState(true);
   // The check-out twin: false hides "Check Out All Assets". Read through
   // canOfferQuickCheckout, which keeps the button for servers without the flag.
   const [canQuickCheckout, setCanQuickCheckout] = useState(true);
-  // Per-booking lifecycle-action availability (cancel/archive/duplicate/delete),
+  // Pools this booking must ask "Where do the units come from?" about before
+  // they go out (kept at two or more locations). Empty when nothing needs
+  // asking, which is also what an older server means by not sending it.
+  const [sourceQuestions, setSourceQuestions] = useState<
+    CheckoutSourceQuestion[]
+  >([]);
+  // The question sheet, when open: which pools it asks about and what to do
+  // with the answers. The sheet stays open until the server accepts.
+  const [sourcePrompt, setSourcePrompt] = useState<{
+    questions: CheckoutSourceQuestion[];
+    onConfirm: (sourceLocations: Record<string, string | null>) => void;
+  } | null>(null);
+  // Per-booking lifecycle-action availability (extend/cancel/archive/duplicate/delete),
   // computed server-side mirroring the web ActionsDropdown gating.
-  const [bookingActions, setBookingActions] = useState({
+  const [bookingActions, setBookingActions] = useState<
+    BookingDetailResponse["bookingActions"]
+  >({
     canCancel: false,
     canArchive: false,
     canDuplicate: false,
@@ -134,22 +206,38 @@ export default function BookingDetailScreen() {
   });
   // Android overflow-menu visibility (iOS uses the native ActionSheetIOS).
   const [showActionsMenu, setShowActionsMenu] = useState(false);
+  // The typed-name delete confirmation (see ConfirmDeleteSheet).
+  const [showDeleteSheet, setShowDeleteSheet] = useState(false);
+  // The new-end picker (see ExtendBookingSheet).
+  const [showExtendSheet, setShowExtendSheet] = useState(false);
+  // One Date per stored end: the sheet hands it to the native picker as its
+  // floor, and a fresh object on every render would re-key that picker.
+  const bookingEnd = useMemo(
+    () => (booking?.to ? new Date(booking.to) : null),
+    [booking?.to]
+  );
 
   /**
-   * Mirrors the web's `canUserManageBookingAssets`: closed statuses reject, and
-   * a RESTRICTED role may only build its own DRAFT booking.
-   *
-   * BASE as well as SELF_SERVICE: the web passes both roles into that helper
-   * (its parameter is named `isSelfService`, but every caller hands it
-   * `isBaseOrSelfService`). The add, browse, remove and fulfil affordances
-   * below therefore turn off past DRAFT for both roles.
+   * The member's access; booking item rules below read
+   * `canAddItemsToBooking` / `canRemoveItemsFromBooking`, the same rules the
+   * server applies.
    */
-  const isRestrictedRole = Boolean(
-    currentOrg?.roles?.some((r) => r === "SELF_SERVICE" || r === "BASE")
-  );
+  const access = useRoleAccess();
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isActioning, setIsActioning] = useState(false);
+  /**
+   * The quantity-tracked row whose booked quantity is being changed (null =
+   * sheet closed). `max` is what the booking's window still has free with this
+   * booking excluded — the same cap the web "Adjust quantity" dialog uses.
+   */
+  const [qtyEdit, setQtyEdit] = useState<{
+    assetId: string;
+    title: string;
+    current: number;
+    max: number;
+    unitOfMeasure: string | null;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // The asset ids picked in the current selection mode. A kit enters as the
@@ -183,13 +271,16 @@ export default function BookingDetailScreen() {
   // user selects the rows, then we walk each QT asset asking "how many units?"
   // (defaulting to all remaining), collect the dispositions, then submit.
   // `batch` is the selection counted when the walk starts, for the success
-  // message the submit ends in.
+  // message the submit ends in. `pendingQuantity` is the last asset's answer
+  // while the source sheet is open for it: closing that sheet reopens the last
+  // asset on the number already typed, with the earlier answers in `collected`.
   const [checkoutQueue, setCheckoutQueue] = useState<{
     queue: BookingAsset[];
     index: number;
     collected: CheckoutDisposition[];
     individualIds: string[];
     batch: SelectionCounts;
+    pendingQuantity?: number;
   } | null>(null);
 
   // Sequential disposition picker for checking IN quantity-tracked assets:
@@ -231,8 +322,10 @@ export default function BookingDetailScreen() {
     setCanCheckinAll(
       data.canCheckinAll ?? (data.canCheckin && data.canQuickCheckin)
     );
+    setCanQuickCheckin(data.canQuickCheckin ?? true);
     setCanQuickCheckout(canOfferQuickCheckout(data));
     setBookingActions(data.bookingActions);
+    setSourceQuestions(data.checkoutSourceQuestions ?? []);
     // Clear stale selections — checked-in assets are no longer selectable
     setSelectedAssetIds(new Set());
     lastFetchedAt.current = Date.now();
@@ -301,24 +394,51 @@ export default function BookingDetailScreen() {
   const handleCheckout = async () => {
     if (!booking || !currentOrg) return;
 
-    const submit = async () => {
+    const submit = async (sourceLocations?: Record<string, string | null>) => {
+      // The same synchronous lock the partial paths hold: a second tap on the
+      // source sheet's Confirm before the first request settles must not send
+      // the check-out twice (the service accepts a rerun and duplicates events).
+      if (bookingSubmitLock.current) return;
+      bookingSubmitLock.current = true;
       setIsActioning(true);
-      const { error: err } = await api.checkoutBooking(
-        currentOrg.id,
-        booking.id,
-        getTimeZone()
-      );
-      setIsActioning(false);
+      let err: string | null = null;
+      try {
+        ({ error: err } = await api.checkoutBooking(
+          currentOrg.id,
+          booking.id,
+          getTimeZone(),
+          sourceLocations
+        ));
+      } catch {
+        err = "Something went wrong";
+      } finally {
+        bookingSubmitLock.current = false;
+        setIsActioning(false);
+      }
       if (err) {
+        // A refusal keeps the source sheet (if any) open with its answers.
         Alert.alert("Error", err);
         return;
       }
+      setSourcePrompt(null);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       // Mutation changed this booking — force the list to refetch.
       markBookingsListDirty();
       Alert.alert("Checked Out", `"${booking.name}" is now ongoing.`, [
         { text: "OK", onPress: () => fetchBooking() },
       ]);
+    };
+    // A booking holding a pool kept at two or more locations is asked where
+    // the units leave from first; the answers ride on the same request.
+    const run = () => {
+      if (sourceQuestions.length > 0) {
+        setSourcePrompt({
+          questions: sourceQuestions,
+          onConfirm: (sourceLocations) => void submit(sourceLocations),
+        });
+        return;
+      }
+      void submit();
     };
 
     // Reserved units nobody has assigned yet don't stop the check-out; they
@@ -337,7 +457,7 @@ export default function BookingDetailScreen() {
     if (unassignedConfirm) {
       Alert.alert(unassignedConfirm.title, unassignedConfirm.message, [
         { text: "Cancel", style: "cancel" },
-        { text: unassignedConfirm.confirmLabel, onPress: () => void submit() },
+        { text: unassignedConfirm.confirmLabel, onPress: run },
       ]);
       return;
     }
@@ -347,7 +467,7 @@ export default function BookingDetailScreen() {
       `Check out "${booking.name}"?\n\nAll ${booking.assetCount} assets will be marked as checked out.`,
       [
         { text: "Cancel", style: "cancel" },
-        { text: "Check Out", onPress: () => void submit() },
+        { text: "Check Out", onPress: run },
       ]
     );
   };
@@ -417,7 +537,9 @@ export default function BookingDetailScreen() {
           bookingId,
           assetIds,
           getTimeZone(),
-          checkins.length > 0 ? checkins : undefined
+          checkins.length > 0 ? checkins : undefined,
+          // Rows ticked in this screen's list, never scanned.
+          BOOKING_METHOD.selected
         ),
       onAccepted: ({ data }) => {
         closeSheet?.();
@@ -497,7 +619,8 @@ export default function BookingDetailScreen() {
     assetIds: string[],
     checkouts: CheckoutDisposition[],
     batch: SelectionCounts,
-    closeSheet?: () => void
+    closeSheet?: () => void,
+    sourceLocations?: Record<string, string | null>
   ) => {
     if (!booking || !currentOrg) return;
     const orgId = currentOrg.id;
@@ -511,7 +634,10 @@ export default function BookingDetailScreen() {
           bookingId,
           assetIds,
           getTimeZone(),
-          checkouts.length > 0 ? checkouts : undefined
+          checkouts.length > 0 ? checkouts : undefined,
+          sourceLocations,
+          // Rows ticked in this screen's list, never scanned.
+          BOOKING_METHOD.selected
         ),
       onAccepted: ({ data }) => {
         closeSheet?.();
@@ -708,7 +834,7 @@ export default function BookingDetailScreen() {
     );
   };
 
-  // ── Lifecycle actions (cancel / archive / delete / duplicate) ──────────
+  // ── Lifecycle actions (extend / cancel / archive / delete / duplicate) ──
   // Each is permission/status-gated server-side AND only offered when the
   // detail endpoint's `bookingActions` flag says this role/status may use it.
 
@@ -773,36 +899,60 @@ export default function BookingDetailScreen() {
     );
   };
 
+  // A permanent delete asks for the booking's name to be typed first, the
+  // same rule as the webapp's delete dialog.
   const handleDelete = () => {
     if (!booking || !currentOrg) return;
-    Alert.alert(
-      "Delete Booking",
-      `Permanently delete "${booking.name}"? This can't be undone.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            setIsActioning(true);
-            const { error: err } = await api.deleteBooking(
-              currentOrg.id,
-              booking.id
-            );
-            setIsActioning(false);
-            if (err) {
-              Alert.alert("Couldn't delete", err);
-              return;
-            }
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            // Mutation changed this booking — force the list to refetch.
-            markBookingsListDirty();
-            // The booking no longer exists — leave the detail screen.
-            router.back();
-          },
-        },
-      ]
+    setShowDeleteSheet(true);
+  };
+
+  const performDelete = async (confirmation: string) => {
+    if (!booking || !currentOrg) return;
+    setIsActioning(true);
+    const { error: err } = await api.deleteBooking(
+      currentOrg.id,
+      booking.id,
+      confirmation
     );
+    setIsActioning(false);
+    setShowDeleteSheet(false);
+    if (err) {
+      Alert.alert("Couldn't delete", err);
+      return;
+    }
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    // Mutation changed this booking: force the list to refetch.
+    markBookingsListDirty();
+    // The booking no longer exists: leave the detail screen.
+    router.back();
+  };
+
+  /**
+   * Sends the end picked in the extend sheet. The wall clock travels with the
+   * preference zone the sheet's picker edits in, as on the booking forms.
+   *
+   * @param newEnd - The end the user confirmed
+   * @returns The server's refusal, or `null` once the booking is extended
+   */
+  const performExtend = async (newEnd: Date): Promise<string | null> => {
+    if (!booking || !currentOrg) return "Please try again.";
+    const { data, error: err } = await api.extendBooking(
+      currentOrg.id,
+      buildExtendPayload(booking.id, newEnd, prefs.timeZone)
+    );
+    if (err || !data) return err || "Please try again.";
+    setShowExtendSheet(false);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    // Mutation changed this booking: force the list to refetch.
+    markBookingsListDirty();
+    Alert.alert(
+      "Booking extended",
+      `"${booking.name}" now ends ${formatDateTime(
+        new Date(data.booking.to)
+      )}.`,
+      [{ text: "OK", onPress: () => fetchBooking() }]
+    );
+    return null;
   };
 
   const handleDuplicate = () => {
@@ -830,6 +980,10 @@ export default function BookingDetailScreen() {
             markBookingsListDirty();
             // Open the new draft's edit screen so the user can adjust dates etc.
             router.push(`/(tabs)/bookings/edit?id=${dup.booking.id}`);
+            // Archived assets cannot be booked, so the copy left them out.
+            // Say so, as the web does, instead of letting it look complete.
+            const droppedNote = archivedLeftOutNote(dup.droppedArchivedCount);
+            if (droppedNote) Alert.alert("Booking duplicated", droppedNote);
           },
         },
       ]
@@ -837,7 +991,7 @@ export default function BookingDetailScreen() {
   };
 
   // Build the available lifecycle actions for the overflow menu. Order: the
-  // non-destructive Duplicate first, destructive ones last.
+  // non-destructive Extend and Duplicate first, destructive ones last.
   const lifecycleActions: {
     key: string;
     label: string;
@@ -845,6 +999,14 @@ export default function BookingDetailScreen() {
     destructive: boolean;
     onPress: () => void;
   }[] = [];
+  if (canOfferExtend(bookingActions))
+    lifecycleActions.push({
+      key: "extend",
+      label: "Extend booking",
+      icon: "time-outline",
+      destructive: false,
+      onPress: () => setShowExtendSheet(true),
+    });
   if (bookingActions.canDuplicate)
     lifecycleActions.push({
       key: "duplicate",
@@ -911,6 +1073,61 @@ export default function BookingDetailScreen() {
       return next;
     });
   }, []);
+
+  /**
+   * Open the booked-quantity sheet for a quantity-tracked row. Asks the
+   * server for the cap first so the sheet never offers more than the booking
+   * may take; the current amount is the fallback when that read fails.
+   */
+  const openQtyEdit = useCallback(
+    async (item: BookingAsset) => {
+      if (!booking || !currentOrg) return;
+      const current = item.quantity ?? 1;
+      const { data } = await api.bookingAssetAvailability(
+        currentOrg.id,
+        booking.id,
+        [item.id]
+      );
+      const facts = data?.availability?.[0];
+      setQtyEdit({
+        assetId: item.id,
+        title: item.title,
+        current,
+        max: Math.max(
+          1,
+          bookingQuantityCap({
+            available: facts?.bookable,
+            booked: current,
+            pool: current,
+          })
+        ),
+        unitOfMeasure: item.unitOfMeasure ?? null,
+      });
+    },
+    [booking, currentOrg]
+  );
+
+  const handleQtyEditSubmit = async (quantity: number) => {
+    if (!qtyEdit || !booking || !currentOrg) return;
+    const target = qtyEdit;
+    setQtyEdit(null);
+    if (quantity === target.current) return;
+    setIsActioning(true);
+    const { error: err } = await api.adjustBookingAssetQuantity(
+      currentOrg.id,
+      booking.id,
+      target.assetId,
+      quantity
+    );
+    setIsActioning(false);
+    if (err) {
+      Alert.alert("Couldn't change quantity", err);
+      return;
+    }
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    markBookingsListDirty();
+    fetchBooking();
+  };
 
   /**
    * The whole booking as rows: one header per kit, its members beneath when
@@ -1026,6 +1243,19 @@ export default function BookingDetailScreen() {
     [rows, selectedAssetIds, selectMode, checkedInAssetIds]
   );
 
+  /**
+   * Whether the server lets the caller write this booking: any booking with
+   * `bookings.writeAll`, otherwise only one they created or hold. Mirrors the
+   * server's `canWriteBooking` (creator OR custodian), which is wider than the
+   * custodian-only rule the add-items endpoints apply.
+   */
+  const mayWriteThisBooking =
+    !!booking &&
+    (access.bookings.writeAll ||
+      (!!user?.id &&
+        (booking.creator.id === user.id ||
+          booking.custodianUser?.id === user.id)));
+
   const renderAsset = useCallback(
     (item: BookingAsset, inKit: boolean) => {
       const fallbackBadge = {
@@ -1046,10 +1276,17 @@ export default function BookingDetailScreen() {
               bookingStatus: booking?.status ?? "",
             })
           : null;
-      const badge = qtState
-        ? bookingStatusBadge[qtState.key] ?? fallbackBadge
-        : statusBadge[item.status] ?? fallbackBadge;
-      const stateLabel = qtState ? qtState.label : formatStatus(item.status);
+      // An archived row reads "Archived" whatever its type: it is out of
+      // service, which matters more here than any booking-scoped state.
+      const isArchived = isArchivedAsset(item);
+      const badge =
+        qtState && !isArchived
+          ? bookingStatusBadge[qtState.key] ?? fallbackBadge
+          : statusBadge[assetBadgeStatus(item)] ?? fallbackBadge;
+      const stateLabel =
+        qtState && !isArchived
+          ? qtState.label
+          : formatStatus(assetBadgeStatus(item));
       const isCheckedIn = checkedInAssetIds.includes(item.id);
       // A member of a picked kit reads as selected too, which shows what the
       // kit's one tick covers — in check-in mode, only the members still out.
@@ -1060,6 +1297,17 @@ export default function BookingDetailScreen() {
       // not wherever it sits.
       const selectable =
         !inKit && isBookingAssetSelectable(item, selectMode, checkedInAssetIds);
+
+      // Web parity: the booked amount of a standalone quantity-tracked slice
+      // that has not gone out can be changed under the same rule that lets
+      // items be added. See `canEditBookedQuantity` for the row rules.
+      const canEditQuantity =
+        canEditBookedQuantity(item) &&
+        !selectMode &&
+        !inKit &&
+        !!booking &&
+        mayWriteThisBooking &&
+        canAddItemsToBooking(access, booking.status, currentOrg?.roles);
 
       return (
         <TouchableOpacity
@@ -1083,10 +1331,29 @@ export default function BookingDetailScreen() {
           }}
           accessibilityLabel={`${item.title}${
             item.location ? `, at ${item.location.name}` : ""
-          }, ${stateLabel}${isCheckedIn ? ", checked in" : ""}${
+          }${describeSliceSourcesForA11y(item)}, ${stateLabel}${
+            item.type === "QUANTITY_TRACKED" && item.quantity != null
+              ? `, ${item.quantity} ${item.unitOfMeasure || "units"} booked`
+              : ""
+          }${isCheckedIn ? ", checked in" : ""}${
             isSelected ? ", selected" : ""
           }${selectable ? ". Tap to select" : ""}`}
           accessibilityRole="button"
+          // The card is one accessibility element, so the nested "change
+          // quantity" button below is unreachable by a screen reader; expose
+          // it as a custom action on the card instead.
+          {...(canEditQuantity
+            ? {
+                accessibilityActions: [
+                  { name: "changeQuantity", label: "Change booked quantity" },
+                ],
+                onAccessibilityAction: (event: AccessibilityActionEvent) => {
+                  if (event.nativeEvent.actionName === "changeQuantity") {
+                    void openQtyEdit(item);
+                  }
+                },
+              }
+            : {})}
         >
           {selectable && (
             <View
@@ -1138,7 +1405,11 @@ export default function BookingDetailScreen() {
                       label="booked"
                     />
                     <Text style={styles.assetKit} numberOfLines={1}>
-                      {slice.kit ? `Kit: ${slice.kit.name}` : "Standalone"}
+                      {slice.kit
+                        ? `Kit: ${slice.kit.name}`
+                        : slice.sourceLocation
+                        ? `Standalone · from ${slice.sourceLocation.name}`
+                        : "Standalone"}
                     </Text>
                   </View>
                 ))}
@@ -1146,12 +1417,41 @@ export default function BookingDetailScreen() {
             ) : (
               <>
                 {item.type === "QUANTITY_TRACKED" && (
-                  <QuantityBadge
-                    value={item.quantity}
-                    unitOfMeasure={item.unitOfMeasure}
-                    label="booked"
-                  />
+                  <View style={styles.qtyRow}>
+                    <QuantityBadge
+                      value={item.quantity}
+                      unitOfMeasure={item.unitOfMeasure}
+                      label="booked"
+                    />
+                    {canEditQuantity ? (
+                      <TouchableOpacity
+                        testID={`adjust-booked-quantity-${item.id}`}
+                        onPress={() => void openQtyEdit(item)}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Change booked quantity of ${
+                          item.title
+                        }, currently ${item.quantity ?? 0}`}
+                      >
+                        <Ionicons
+                          name="create-outline"
+                          size={16}
+                          color={colors.primary}
+                        />
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
                 )}
+                {/* Where a checked-out pool's units left from, as the web
+                    booking row shows it. Only a pool kept at two or more
+                    locations has it. */}
+                {item.type === "QUANTITY_TRACKED" &&
+                item.slices?.length === 1 &&
+                item.slices[0].sourceLocation ? (
+                  <Text style={styles.assetKit} numberOfLines={1}>
+                    From {item.slices[0].sourceLocation.name}
+                  </Text>
+                ) : null}
                 {/* Under a kit header the name is already on screen; naming
                     it again on every member is noise. */}
                 {item.kit && !inKit && (
@@ -1203,6 +1503,10 @@ export default function BookingDetailScreen() {
       statusBadge,
       bookingStatusBadge,
       booking?.status,
+      access,
+      currentOrg?.roles,
+      mayWriteThisBooking,
+      openQtyEdit,
       styles,
     ]
   );
@@ -1301,26 +1605,41 @@ export default function BookingDetailScreen() {
   } ${describeSelection(selectionCounts)}`;
 
   /**
-   * Why Reserve is unavailable, or null when it is fine. Mirrors all THREE of
-   * the web form's disable rules so the app never offers a tap the server
-   * refuses: a booking with neither assets nor model reservations reserves
-   * nothing, an asset flagged unavailable is unavailable on either surface,
-   * and an asset already booked for this window conflicts on either surface.
+   * Why Reserve is unavailable, or null when it is fine, so the app never
+   * offers a tap the server refuses: a booking with neither assets nor model
+   * reservations reserves nothing; an archived asset (archived after it was
+   * added to this draft) cannot be booked; an asset flagged unavailable is
+   * unavailable on either surface; and an asset already booked for this
+   * window conflicts on either surface.
    *
-   * The first two are decided from rows this screen already holds. The third
-   * cannot be — it needs the overlapping-booking query — so the server sends
-   * it as a flag. `?? false` reads a server that does not send the flag
-   * (rolling deploy) as reporting no conflict, rather than blocking Reserve.
+   * The first three are decided from rows this screen already holds. The last
+   * cannot be: it needs the overlapping-booking query, so the server sends it
+   * as a flag. `?? false` reads a server that does not send the flag (rolling
+   * deploy) as reporting no conflict, rather than blocking Reserve.
    *
-   * All three are enforced server-side too: the first two in
-   * `bookings.reserve.ts`, the third by `reserveBooking`'s race-safe conflict
-   * check, which names the offending assets.
+   * All four are enforced server-side too: the empty and unavailable rules in
+   * `bookings.reserve.ts`, the archived rule by `reserveBooking`'s archived
+   * guard, and the conflict by its race-safe conflict check.
    *
-   * `booking` is non-null here — the early return above already handled it.
+   * `booking` is non-null here: the early return above already handled it.
    */
+  const archivedAssetTitles = booking.assets
+    .filter(isArchivedAsset)
+    .map((asset) => asset.title);
   const reserveBlockedReason: string | null =
     booking.assetCount === 0 && (booking.modelRequestCount ?? 0) === 0
       ? BOOKING_RESERVE_BLOCKED_LABELS.NOTHING_TO_RESERVE
+      : archivedAssetTitles.length > 0
+      ? archivedAssetsRefusal({
+          titles: archivedAssetTitles,
+          fix: "remove-from-booking",
+          // Reinstating uses the web's archive grant (admins and owners).
+          canReinstate: userHasPermission({
+            roles: currentOrg?.roles,
+            entity: "asset",
+            action: "archive",
+          }),
+        })
       : booking.assets.some((a) => a.availableToBook === false)
       ? BOOKING_RESERVE_BLOCKED_LABELS.UNAVAILABLE_ASSETS
       : booking.hasAlreadyBookedAssets ?? false
@@ -1367,6 +1686,11 @@ export default function BookingDetailScreen() {
   // to offer the scan-to-assign CTA below, and a check-out that takes the
   // booking out of RESERVED confirms them before going ahead.
   const hasOutstandingModelRequests = outstandingModelRequests.length > 0;
+  // Reservations the dates can no longer fill (sent only while units can
+  // still be assigned): one notice for the section, a chip on each short row.
+  const shortfallByModelId = shortfallsByModelId(
+    booking.modelReservationShortfalls
+  );
 
   // Progressive check-out stays available while the booking is active AND still
   // holds never-checked-out assets. The server (`partialCheckoutBooking`) accepts
@@ -1385,20 +1709,6 @@ export default function BookingDetailScreen() {
     ["RESERVED", "ONGOING", "OVERDUE"].includes(booking.status);
 
   /**
-   * Whether the server would scope this user's booking writes to their own
-   * bookings.
-   *
-   * Roles are a set, and the server judges a request by the most privileged
-   * one it contains, so someone holding both SELF_SERVICE and ADMIN writes to
-   * any booking. `isRestrictedRole` asks the opposite question — whether ANY
-   * restricted role is present — which is the right test for the DRAFT-only
-   * editing rules above but would hide controls from a multi-role admin here.
-   */
-  const isRestrictedToOwnBookings =
-    isRestrictedRole &&
-    !currentOrg?.roles?.some((r) => r === "OWNER" || r === "ADMIN");
-
-  /**
    * Whether to offer the progressive check-out affordances (scan and select).
    *
    * Both submit to the same endpoint, so they share one gate. It mirrors what
@@ -1414,16 +1724,35 @@ export default function BookingDetailScreen() {
       entity: "booking",
       action: "checkout",
     }) &&
-    (!isRestrictedToOwnBookings ||
-      (!!user?.id &&
-        (booking.creator.id === user.id ||
-          booking.custodianUser?.id === user.id)));
+    mayWriteThisBooking;
 
-  // Same gate the manage buttons use: an editable booking, and self-service
-  // users only on their own DRAFTs (server re-checks ownership + status).
-  const canManageModels =
-    !["COMPLETE", "ARCHIVED", "CANCELLED"].includes(booking.status) &&
-    (!isRestrictedRole || booking.status === "DRAFT");
+  /**
+   * Whether the server accepts this member changing this booking's items. A
+   * role whose writes are scoped must be the custodian: the add and
+   * model-request endpoints check the direct custodian user only, while the
+   * remove endpoint also accepts the custodian team member's user. Every item
+   * affordance below requires its own check, so none of them leads to a 403.
+   */
+  const mayAddItems = mayWriteBookingItems({
+    access,
+    userId: user?.id,
+    custodianUserId: booking.custodianUser?.id,
+  });
+  const mayRemoveItems = mayRemoveBookingItemsAsCustodian({
+    access,
+    userId: user?.id,
+    custodianUserId: booking.custodianUser?.id,
+    custodianTeamMemberUserId: booking.custodianTeamMember?.userId,
+  });
+  const canAddItems =
+    mayAddItems &&
+    canAddItemsToBooking(access, booking.status, currentOrg?.roles);
+  const canRemoveItems =
+    mayRemoveItems &&
+    canRemoveItemsFromBooking(access, booking.status, currentOrg?.roles);
+
+  // Model reservations are item changes, so they share the add gate.
+  const canManageModels = canAddItems;
 
   /**
    * Open the model-reservation manager (the picker's Models tab) for this
@@ -1510,9 +1839,14 @@ export default function BookingDetailScreen() {
               </View>
 
               {booking.description ? (
-                <Text style={styles.description} numberOfLines={3}>
-                  {booking.description}
-                </Text>
+                <ExpandableText
+                  key={booking.id}
+                  text={booking.description}
+                  label="description"
+                  numberOfLines={3}
+                  style={styles.description}
+                  testID="booking-description"
+                />
               ) : null}
 
               <View style={styles.infoRows}>
@@ -1576,9 +1910,8 @@ export default function BookingDetailScreen() {
                 ) : null}
               </View>
 
-              {/* Tag names were already in the payload and shown by web; the
-                  colour they are keyed by was not, and was added with the
-                  chip so the phone can tell two tags apart the way web can. */}
+              {/* Each chip carries its tag's colour as well as its name, so
+                  the phone tells two tags apart the way web does. */}
               {booking.tags?.length ? (
                 <View style={styles.tagRow}>
                   {booking.tags.map((tag) => (
@@ -1706,21 +2039,26 @@ export default function BookingDetailScreen() {
               booking.status
             ) && (
               <View style={styles.manageRow}>
-                <TouchableOpacity
-                  style={[styles.actionButtonOutline, styles.manageRowItem]}
-                  onPress={() =>
-                    router.push(`/(tabs)/bookings/edit?id=${booking.id}`)
-                  }
-                  accessibilityLabel="Edit booking"
-                  accessibilityRole="button"
-                >
-                  <Ionicons
-                    name="create-outline"
-                    size={18}
-                    color={colors.buttonSecondaryText}
-                  />
-                  <Text style={styles.actionButtonOutlineText}>Edit</Text>
-                </TouchableOpacity>
+                {/* Only on a booking this caller writes; a booking the
+                    workspace only lets them see offers no edit the save would
+                    refuse. Servers without the flag keep offering it. */}
+                {bookingActions.canEdit !== false && (
+                  <TouchableOpacity
+                    style={[styles.actionButtonOutline, styles.manageRowItem]}
+                    onPress={() =>
+                      router.push(`/(tabs)/bookings/edit?id=${booking.id}`)
+                    }
+                    accessibilityLabel="Edit booking"
+                    accessibilityRole="button"
+                  >
+                    <Ionicons
+                      name="create-outline"
+                      size={18}
+                      color={colors.buttonSecondaryText}
+                    />
+                    <Text style={styles.actionButtonOutlineText}>Edit</Text>
+                  </TouchableOpacity>
+                )}
 
                 {booking.status === "DRAFT" && (
                   <TouchableOpacity
@@ -1753,7 +2091,7 @@ export default function BookingDetailScreen() {
               </View>
             )}
 
-            {/* More lifecycle actions (duplicate / archive / cancel / delete).
+            {/* More lifecycle actions (extend / duplicate / archive / cancel / delete).
                 Shows for ANY status — including closed ones (Archive on
                 COMPLETE, Duplicate always) — gated by server-computed flags. */}
             {lifecycleActions.length > 0 && (
@@ -1772,102 +2110,97 @@ export default function BookingDetailScreen() {
               </TouchableOpacity>
             )}
 
-            {booking &&
-              !["COMPLETE", "ARCHIVED", "CANCELLED"].includes(booking.status) &&
-              (!isRestrictedRole || booking.status === "DRAFT") && (
-                <TouchableOpacity
-                  style={styles.actionButtonOutline}
-                  onPress={() =>
-                    router.push(
-                      `/(tabs)/scanner?bookingId=${
-                        booking.id
-                      }&bookingName=${encodeURIComponent(
-                        booking.name
-                      )}&bookingAction=add`
-                    )
-                  }
-                  accessibilityLabel="Scan assets or kits to add to this booking"
-                  accessibilityRole="button"
-                >
-                  <Ionicons
-                    name="scan"
-                    size={18}
-                    color={colors.buttonSecondaryText}
-                  />
-                  <Text style={styles.actionButtonOutlineText}>
-                    Scan to Add Assets
-                  </Text>
-                </TouchableOpacity>
-              )}
+            {canAddItems && (
+              <TouchableOpacity
+                style={styles.actionButtonOutline}
+                onPress={() =>
+                  router.push(
+                    `/(tabs)/scanner?bookingId=${
+                      booking.id
+                    }&bookingName=${encodeURIComponent(
+                      booking.name
+                    )}&bookingAction=add`
+                  )
+                }
+                accessibilityLabel="Scan assets or kits to add to this booking"
+                accessibilityRole="button"
+              >
+                <Ionicons
+                  name="scan"
+                  size={18}
+                  color={colors.buttonSecondaryText}
+                />
+                <Text style={styles.actionButtonOutlineText}>
+                  Scan to Add Assets
+                </Text>
+              </TouchableOpacity>
+            )}
 
             {/* Browse available assets/kits to add (date-aware picker) */}
-            {!["COMPLETE", "ARCHIVED", "CANCELLED"].includes(booking.status) &&
-              (!isRestrictedRole || booking.status === "DRAFT") && (
-                <TouchableOpacity
-                  style={styles.actionButtonOutline}
-                  onPress={() =>
-                    router.push(
-                      `/(tabs)/bookings/add-assets?bookingId=${
-                        booking.id
-                      }&bookingName=${encodeURIComponent(
-                        booking.name
-                      )}&from=${encodeURIComponent(
-                        booking.from
-                      )}&to=${encodeURIComponent(booking.to)}`
-                    )
-                  }
-                  accessibilityLabel="Browse available assets and kits to add"
-                  accessibilityRole="button"
-                >
-                  <Ionicons
-                    name="search"
-                    size={18}
-                    color={colors.buttonSecondaryText}
-                  />
-                  <Text style={styles.actionButtonOutlineText}>
-                    Browse to Add
-                  </Text>
-                </TouchableOpacity>
-              )}
+            {canAddItems && (
+              <TouchableOpacity
+                style={styles.actionButtonOutline}
+                onPress={() =>
+                  router.push(
+                    `/(tabs)/bookings/add-assets?bookingId=${
+                      booking.id
+                    }&bookingName=${encodeURIComponent(
+                      booking.name
+                    )}&from=${encodeURIComponent(
+                      booking.from
+                    )}&to=${encodeURIComponent(booking.to)}`
+                  )
+                }
+                accessibilityLabel="Browse available assets and kits to add"
+                accessibilityRole="button"
+              >
+                <Ionicons
+                  name="search"
+                  size={18}
+                  color={colors.buttonSecondaryText}
+                />
+                <Text style={styles.actionButtonOutlineText}>
+                  Browse to Add
+                </Text>
+              </TouchableOpacity>
+            )}
 
             {/* Select assets to remove (editable bookings with assets) */}
-            {!["COMPLETE", "ARCHIVED", "CANCELLED"].includes(booking.status) &&
-              (!isRestrictedRole || booking.status === "DRAFT") &&
-              booking.assetCount > 0 && (
-                <TouchableOpacity
-                  style={[
-                    styles.actionButtonOutline,
-                    selectMode === "remove" && styles.actionButtonOutlineActive,
-                  ]}
-                  onPress={() => {
-                    toggleSelectMode("remove");
-                  }}
-                  accessibilityLabel={
+            {canRemoveItems && booking.assetCount > 0 && (
+              <TouchableOpacity
+                style={[
+                  styles.actionButtonOutline,
+                  selectMode === "remove" && styles.actionButtonOutlineActive,
+                ]}
+                onPress={() => {
+                  toggleSelectMode("remove");
+                }}
+                accessibilityLabel={
+                  selectMode === "remove"
+                    ? "Cancel selection"
+                    : "Select assets to remove"
+                }
+                accessibilityRole="button"
+              >
+                <Ionicons
+                  name={selectMode === "remove" ? "close" : "trash-outline"}
+                  size={18}
+                  color={
                     selectMode === "remove"
-                      ? "Cancel selection"
-                      : "Select assets to remove"
+                      ? colors.error
+                      : colors.buttonSecondaryText
                   }
-                  accessibilityRole="button"
+                />
+                <Text
+                  style={[
+                    styles.actionButtonOutlineText,
+                    selectMode === "remove" && { color: colors.error },
+                  ]}
                 >
-                  <Ionicons
-                    name={selectMode === "remove" ? "close" : "trash-outline"}
-                    size={18}
-                    color={
-                      selectMode === "remove"
-                        ? colors.error
-                        : colors.buttonSecondaryText
-                    }
-                  />
-                  <Text
-                    style={[
-                      styles.actionButtonOutlineText,
-                      selectMode === "remove" && { color: colors.error },
-                    ]}
-                  >
-                    {selectMode === "remove" ? "Cancel" : "Select to Remove"}
-                  </Text>
-                </TouchableOpacity>
-              )}
+                  {selectMode === "remove" ? "Cancel" : "Select to Remove"}
+                </Text>
+              </TouchableOpacity>
+            )}
 
             {/* Full check-out is RESERVED-only (web parity); the loader's
                 canCheckout reflects that. It is hidden when the workspace
@@ -1891,6 +2224,16 @@ export default function BookingDetailScreen() {
                   Check Out All Assets
                 </Text>
               </TouchableOpacity>
+            )}
+
+            {/* The one line that says why the one-tap check-out is missing:
+                the workspace's rule for this role. The scan and select paths
+                below are how they check out. Same words as the web's settings
+                card, from @shelf/labels. */}
+            {canCheckout && !canQuickCheckout && (
+              <Text style={styles.explicitRequirementHint}>
+                {EXPLICIT_REQUIREMENT_LABELS.CHECKOUT.PHONE_HINT}
+              </Text>
             )}
 
             {/* Progressive check-out persists while reserved assets remain, even
@@ -1973,13 +2316,13 @@ export default function BookingDetailScreen() {
                 booking, and the scanner confirms that before submitting.
                 Scan-first IS the point of book-by-model: reserve the count
                 now, scan the items when you grab them, no browse picker.
-                (Browse to Add above stays for hand-picking.) Gated
-                `!isRestrictedRole` to match the add/browse affordances above:
-                a restricted custodian can only edit a DRAFT booking, so on a
-                RESERVED booking the assign+checkout flow can't succeed for
-                them — showing the CTA would just lead to a rejected submit. */}
-            {!isRestrictedRole &&
-              booking.status === "RESERVED" &&
+                (Browse to Add above stays for hand-picking.) Gated on adding
+                items past DRAFT, like the add/browse affordances above: a
+                member who may not add items to a RESERVED booking cannot
+                complete the assign and check-out flow, so showing the CTA
+                would only lead to a rejected submit. */}
+            {booking.status === "RESERVED" &&
+              canAddItems &&
               hasOutstandingModelRequests && (
                 <TouchableOpacity
                   style={styles.actionButton}
@@ -2034,6 +2377,13 @@ export default function BookingDetailScreen() {
                     />
                     <Text style={styles.actionButtonText}>Check In All</Text>
                   </TouchableOpacity>
+                )}
+
+                {/* The check-in twin of the line above "Scan to Check Out". */}
+                {canCheckin && !canQuickCheckin && (
+                  <Text style={styles.explicitRequirementHint}>
+                    {EXPLICIT_REQUIREMENT_LABELS.CHECKIN.PHONE_HINT}
+                  </Text>
                 )}
 
                 {canCheckin && (
@@ -2132,8 +2482,17 @@ export default function BookingDetailScreen() {
                     to assign. Scan or browse to add matching assets.
                   </Text>
                 )}
+                {shortfallByModelId.size > 0 && (
+                  <Text style={styles.modelsShortfallNotice}>
+                    {MODEL_SHORTFALL_NOTICE}
+                  </Text>
+                )}
                 {outstandingModelRequests.map((mr) => {
                   const remaining = mr.outstandingQuantity;
+                  const shortfall = shortfallByModelId.get(mr.assetModelId);
+                  const shortfallLabel = shortfall
+                    ? modelShortfallLabel(shortfall)
+                    : null;
                   const row = (
                     <>
                       <View
@@ -2172,6 +2531,23 @@ export default function BookingDetailScreen() {
                             {mr.fulfilledQuantity} of {mr.quantity} assigned
                           </Text>
                         )}
+                        {shortfallLabel ? (
+                          <View
+                            style={[
+                              styles.modelBadge,
+                              { backgroundColor: colors.errorBg },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.modelBadgeText,
+                                { color: colors.errorText },
+                              ]}
+                            >
+                              {shortfallLabel}
+                            </Text>
+                          </View>
+                        ) : null}
                       </View>
                       <Text style={styles.modelQty}>× {remaining}</Text>
                       {canManageModels && (
@@ -2189,7 +2565,11 @@ export default function BookingDetailScreen() {
                       style={styles.modelCard}
                       onPress={openModelManager}
                       accessibilityRole="button"
-                      accessibilityLabel={`${mr.assetModelName}, ${remaining} reserved and awaiting assignment. Tap to manage.`}
+                      accessibilityLabel={`${
+                        mr.assetModelName
+                      }, ${remaining} reserved and awaiting assignment${
+                        shortfallLabel ? `, ${shortfallLabel}` : ""
+                      }. Tap to manage.`}
                     >
                       {row}
                     </TouchableOpacity>
@@ -2197,7 +2577,11 @@ export default function BookingDetailScreen() {
                     <View
                       key={mr.id}
                       style={styles.modelCard}
-                      accessibilityLabel={`${mr.assetModelName}, ${remaining} reserved and awaiting assignment`}
+                      accessibilityLabel={`${
+                        mr.assetModelName
+                      }, ${remaining} reserved and awaiting assignment${
+                        shortfallLabel ? `, ${shortfallLabel}` : ""
+                      }`}
                     >
                       {row}
                     </View>
@@ -2320,9 +2704,29 @@ export default function BookingDetailScreen() {
         </TouchableOpacity>
       </Modal>
 
-      {/* Check-out quantity picker — walks the selected QT assets one at a
-          time, defaulting to "all remaining" so one tap takes the whole line. */}
-      {checkoutQueue && (
+      {/* Booked-quantity editor for one quantity-tracked row */}
+      {qtyEdit && (
+        <QuantityInputSheet
+          key={qtyEdit.assetId}
+          visible
+          title="Change booked quantity"
+          subtitle={`${qtyEdit.title} · ${qtyEdit.max} ${
+            qtyEdit.unitOfMeasure || "units"
+          } available`}
+          max={qtyEdit.max}
+          defaultValue={qtyEdit.current}
+          unitOfMeasure={qtyEdit.unitOfMeasure}
+          confirmLabel="Save"
+          onSubmit={(quantity) => void handleQtyEditSubmit(quantity)}
+          onClose={() => setQtyEdit(null)}
+        />
+      )}
+
+      {/* Check-out quantity picker: walks the selected QT assets one at a
+          time, defaulting to "all remaining" so one tap takes the whole line.
+          Hidden (not cleared) while the source sheet is open, since two page
+          sheets cannot stack; closing that sheet brings this one back. */}
+      {checkoutQueue && !sourcePrompt && (
         <QuantityInputSheet
           // Remount per asset so the sheet's reset effect (keyed on
           // max/defaultValue) can't reuse the previous asset's typed value when
@@ -2337,7 +2741,9 @@ export default function BookingDetailScreen() {
             checkoutQueue.queue[checkoutQueue.index].remainingToCheckOut ?? 1
           }
           defaultValue={
-            checkoutQueue.queue[checkoutQueue.index].remainingToCheckOut ?? 1
+            checkoutQueue.pendingQuantity ??
+            checkoutQueue.queue[checkoutQueue.index].remainingToCheckOut ??
+            1
           }
           unitOfMeasure={checkoutQueue.queue[checkoutQueue.index].unitOfMeasure}
           confirmLabel={
@@ -2359,6 +2765,34 @@ export default function BookingDetailScreen() {
                 collected,
               });
             } else {
+              // A picked pool kept at two or more locations is asked where
+              // the units leaving from its slice come from. The queue stays
+              // alive behind the source sheet holding the last answer, so
+              // closing that sheet returns to this asset with every quantity
+              // intact. Both clear only once the server accepts.
+              const asked = questionsForCheckouts(sourceQuestions, collected);
+              if (asked.length > 0) {
+                const { individualIds, batch } = checkoutQueue;
+                setCheckoutQueue({
+                  ...checkoutQueue,
+                  pendingQuantity: quantity,
+                });
+                setSourcePrompt({
+                  questions: asked,
+                  onConfirm: (sourceLocations) =>
+                    void submitCheckout(
+                      individualIds,
+                      collected,
+                      batch,
+                      () => {
+                        setSourcePrompt(null);
+                        setCheckoutQueue(null);
+                      },
+                      sourceLocations
+                    ),
+                });
+                return;
+              }
               // The last asset submits with the sheet still open. The queue
               // clears only once the server accepts, so a refusal keeps every
               // collected quantity for a retry.
@@ -2373,6 +2807,41 @@ export default function BookingDetailScreen() {
           onClose={() => setCheckoutQueue(null)}
         />
       )}
+
+      {/* "Where do the units come from?": asked once, at check-out, for pools
+          kept at two or more locations. Stays open until the server accepts.
+          Closing it during a partial check-out reopens the quantity picker. */}
+      {booking && (
+        <ConfirmDeleteSheet
+          visible={showDeleteSheet}
+          title="Delete booking"
+          message={DELETE_CONSEQUENCE_LABELS.BOOKING}
+          expected={booking.name}
+          isDeleting={isActioning}
+          onConfirm={(confirmation) => void performDelete(confirmation)}
+          onClose={() => setShowDeleteSheet(false)}
+        />
+      )}
+      {booking && bookingEnd && (
+        <ExtendBookingSheet
+          visible={showExtendSheet}
+          bookingName={booking.name}
+          currentEnd={bookingEnd}
+          timeZone={prefs.timeZone}
+          formatDateTime={formatDateTime}
+          onClose={() => setShowExtendSheet(false)}
+          onExtend={performExtend}
+        />
+      )}
+      <CheckoutSourceSheet
+        visible={sourcePrompt != null}
+        questions={sourcePrompt?.questions ?? []}
+        isSubmitting={isActioning}
+        onConfirm={(sourceLocations) =>
+          sourcePrompt?.onConfirm(sourceLocations)
+        }
+        onClose={() => setSourcePrompt(null)}
+      />
 
       {/* Check-in disposition picker — walks the selected QT assets one at a
           time, asking returned / consumed / lost / damaged per asset. */}
@@ -2622,6 +3091,13 @@ const useStyles = createStyles((colors, shadows) => ({
   checkinActions: {
     gap: spacing.sm,
   },
+  // Why a one-tap button is missing, under the place it would have been.
+  explicitRequirementHint: {
+    fontSize: fontSize.sm,
+    color: colors.muted,
+    textAlign: "center",
+    paddingHorizontal: spacing.md,
+  },
   // Lifecycle actions overflow menu (Android)
   overflowBackdrop: {
     flex: 1,
@@ -2633,6 +3109,9 @@ const useStyles = createStyles((colors, shadows) => ({
     backgroundColor: colors.white,
     borderRadius: borderRadius.xl,
     width: "75%",
+    // The modal sits outside the content column, so 75% is of the whole
+    // window; the cap keeps a tablet's menu narrower than the column behind it.
+    maxWidth: FORM_MAX_WIDTH,
     overflow: "hidden",
     ...shadows.lg,
   },
@@ -2740,6 +3219,12 @@ const useStyles = createStyles((colors, shadows) => ({
     color: colors.muted,
     lineHeight: 16,
   },
+  modelsShortfallNotice: {
+    fontSize: fontSize.xs,
+    fontWeight: "600",
+    color: colors.errorText,
+    lineHeight: 16,
+  },
   modelCard: {
     flexDirection: "row",
     alignItems: "center",
@@ -2843,6 +3328,11 @@ const useStyles = createStyles((colors, shadows) => ({
     fontWeight: "600",
     color: colors.foreground,
   },
+  qtyRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+  },
   assetKit: {
     fontSize: fontSize.xs,
     color: colors.checkedOut,
@@ -2936,3 +3426,19 @@ const useStyles = createStyles((colors, shadows) => ({
     fontSize: fontSize.base,
   },
 }));
+
+/**
+ * Where a pool's booked units left from, for the asset card's screen-reader
+ * label: ", booked units from Camera Room, Studio". The card's explicit label
+ * replaces the text of its children, so the visible "From ..." lines are not
+ * announced on their own. Empty when no standalone slice recorded a source.
+ *
+ * @param item - One booking asset row
+ */
+function describeSliceSourcesForA11y(item: BookingAsset): string {
+  if (item.type !== "QUANTITY_TRACKED") return "";
+  const names = (item.slices ?? []).flatMap((slice) =>
+    !slice.kit && slice.sourceLocation ? [slice.sourceLocation.name] : []
+  );
+  return names.length > 0 ? `, booked units from ${names.join(", ")}` : "";
+}

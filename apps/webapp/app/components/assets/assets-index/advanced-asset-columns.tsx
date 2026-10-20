@@ -36,7 +36,7 @@ import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useDateFormatter } from "~/hooks/use-date-formatter";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import type {
   AdvancedIndexAsset,
   ShelfAssetCustomFieldValueType,
@@ -48,6 +48,7 @@ import { type AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { formatAssetValueWithBreakdown } from "~/utils/asset-value";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { formatCurrency } from "~/utils/currency";
+import { buildCustomFieldLinkHref } from "~/utils/custom-field-link";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { cleanMarkdownFormatting } from "~/utils/markdown-cleaner";
 import { isLink } from "~/utils/misc";
@@ -58,6 +59,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
+import { truncateText } from "~/utils/truncate-text";
 import { tw } from "~/utils/tw";
 import { resolveUserDisplayName } from "~/utils/user";
 import { BarcodeCell } from "./advanced-columns/barcode-cell";
@@ -66,6 +68,7 @@ import { SamIdCell } from "./advanced-columns/sam-id-cell";
 import { Td } from "./advanced-columns/td";
 import AssetQuickActions from "./asset-quick-actions";
 import { freezeColumnClassNames } from "./freeze-column-classes";
+import { LastAuditDateCell } from "./last-audit-date-cell";
 import { ListItemTagsColumn } from "./list-item-tags-column";
 import { AssetImage } from "../asset-image/component";
 import { AssetStatusBadge } from "../asset-status-badge";
@@ -78,7 +81,8 @@ export function AdvancedIndexColumn({
   column: ColumnLabelKey;
   item: AdvancedIndexAsset;
 }) {
-  const { locale, currentOrganization } = useLoaderData<AssetIndexLoaderData>();
+  const { locale, currentOrganization, lastAuditDateAccess } =
+    useLoaderData<AssetIndexLoaderData>();
   const { prefs } = useDateFormatter();
   const showAssetImage = useAssetIndexShowImage();
   const freezeColumn = useAssetIndexFreezeColumn();
@@ -137,7 +141,7 @@ export function AdvancedIndexColumn({
             variant="link"
             className="text-gray text-end font-normal underline hover:text-gray-600"
             target="_blank"
-            to={`${customFieldDisplayValue}?ref=shelf-webapp`}
+            to={buildCustomFieldLinkHref(customFieldDisplayValue as string)}
           >
             {customFieldDisplayValue as string}
           </Button>
@@ -227,6 +231,7 @@ export function AdvancedIndexColumn({
           status={item.status}
           availableToBook={item.availableToBook}
           asset={item}
+          isArchived={!!item.archivedAt}
         />
       );
 
@@ -289,13 +294,33 @@ export function AdvancedIndexColumn({
       return <CustodyColumn custody={item.custody} />;
 
     case "availableToBook":
-      return <TextColumn value={item.availableToBook ? "Yes" : "No"} />;
+      // An archived asset can't be booked, whatever its stored setting.
+      return (
+        <TextColumn
+          value={
+            item.archivedAt
+              ? "No (archived)"
+              : item.availableToBook
+              ? "Yes"
+              : "No"
+          }
+        />
+      );
 
     case "upcomingReminder":
       return (
         <UpcomingReminderColumn
           assetId={item.id}
           upcomingReminder={item.upcomingReminder}
+        />
+      );
+
+    case "lastAuditDate":
+      return (
+        <LastAuditDateCell
+          assetId={item.id}
+          lastAuditDate={item.lastAuditDate}
+          access={lastAuditDateAccess ?? "hidden"}
         />
       );
 
@@ -418,11 +443,13 @@ function StatusColumn({
   status,
   availableToBook,
   asset,
+  isArchived = false,
 }: {
   id: string;
   status: AssetStatus;
   availableToBook?: boolean;
   asset?: AdvancedIndexAsset;
+  isArchived?: boolean;
 }) {
   return (
     <Td className="w-full max-w-none whitespace-nowrap">
@@ -431,20 +458,27 @@ function StatusColumn({
         status={status}
         availableToBook={availableToBook ?? true}
         asset={asset}
+        isArchived={isArchived}
       />
     </Td>
   );
 }
 
+/** The most description characters the index tooltip shows. */
+const DESCRIPTION_TOOLTIP_MAX_LENGTH = 600;
+
 /**
  * Displays a truncated plain-text preview of the asset description and shows
- * the full markdown-rendered content inside a tooltip on hover.
+ * the markdown-rendered content inside a tooltip on hover. The tooltip shows
+ * at most {@link DESCRIPTION_TOOLTIP_MAX_LENGTH} characters and points to the
+ * asset page for the rest.
  * Description column component - exported for reuse in other index pages
  */
 export function DescriptionColumn({ value }: { value: string }) {
   const plainPreview = cleanMarkdownFormatting(value ?? "");
   const hasContent = Boolean(value && value.trim().length > 0);
   const previewText = plainPreview.length > 0 ? plainPreview : value.trim();
+  const isTooltipTruncated = value.length > DESCRIPTION_TOOLTIP_MAX_LENGTH;
 
   return (
     <Td className="max-w-62 min-w-60 whitespace-pre-wrap">
@@ -463,7 +497,15 @@ export function DescriptionColumn({ value }: { value: string }) {
                   textarea and rendered as plain text on the asset page, so
                   they are not a markdown surface. Links here would also be
                   unreachable — Radix tooltip content is not interactive. */}
-              <MarkdownViewer content={value} className="mt-2 text-sm" />
+              <MarkdownViewer
+                content={truncateText(value, DESCRIPTION_TOOLTIP_MAX_LENGTH)}
+                className="mt-2 text-sm"
+              />
+              {isTooltipTruncated ? (
+                <p className="mt-2 text-xs text-gray-500">
+                  Open the asset to read the full description
+                </p>
+              ) : null}
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
@@ -528,7 +570,7 @@ export function CustodyColumn({
 }: {
   custody: AdvancedIndexAsset["custody"];
 }) {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const { primary, others, total } = formatCustodyList(custody ?? []);
 
   return (
@@ -824,7 +866,7 @@ function UpcomingBookingsColumn({
 }: {
   bookings: AdvancedIndexAsset["bookings"];
 }) {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const organization = useCurrentOrganization();
   const canSeeAllCustody = userHasCustodyViewPermission({
     roles,

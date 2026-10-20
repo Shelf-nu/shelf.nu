@@ -46,11 +46,12 @@ export const AdminFooter = ({ booking }: { booking: BookingForEmail }) => (
  *
  * The `reason` parameter maps directly to the `NotificationRecipient.reason`
  * field resolved by `getBookingNotificationRecipients()`:
- *   - `"custodian"` — "you are the custodian of this booking"
- *   - `"creator"` — "you created this booking"
- *   - `"admin"` — "you are an admin of the workspace"
- *   - `"always_notify"` — "you are set to always receive booking notifications"
- *   - `"booking_recipient"` — "you were added as a notification recipient"
+ *   - `"custodian"`: "you are the custodian of this booking"
+ *   - `"creator"`: "you created this booking"
+ *   - `"admin"`: "you manage bookings in the workspace" (every role in the
+ *     workspace's booking-broadcast audience, Managers included)
+ *   - `"always_notify"`: "you are set to always receive booking notifications"
+ *   - `"booking_recipient"`: "you were added as a notification recipient"
  *
  * Falls back to a generic message for any unrecognized reason value,
  * providing forward compatibility if new reason types are added.
@@ -72,7 +73,7 @@ export const NotificationReasonFooter = ({
   const reasonTexts: Record<string, string> = {
     custodian: "you are the custodian of this booking",
     creator: "you created this booking",
-    admin: `you are an admin of the workspace "${booking.organization.name}"`,
+    admin: `you manage bookings in the workspace "${booking.organization.name}"`,
     always_notify: `you are set to always receive booking notifications in "${booking.organization.name}"`,
     booking_recipient:
       "you were added as a notification recipient for this booking",

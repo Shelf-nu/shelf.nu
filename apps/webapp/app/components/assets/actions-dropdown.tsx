@@ -5,14 +5,35 @@ import {
   PopoverPortal,
   PopoverTrigger,
 } from "@radix-ui/react-popover";
-import { AlarmClockIcon, ArrowUpDownIcon } from "lucide-react";
-import { useLoaderData } from "react-router";
+import {
+  archivedAssetBlockedReason,
+  KIT_IN_USE_REINSTATE_REASON,
+  kitMemberCustodyBlockedReason,
+} from "@shelf/labels";
+import {
+  AlarmClockIcon,
+  ArchiveIcon,
+  ArchiveRestoreIcon,
+  ArrowUpDownIcon,
+} from "lucide-react";
+import { useFetcher, useLoaderData } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { ChevronRight } from "~/components/icons/library";
+import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
+import { useDisabled } from "~/hooks/use-disabled";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { useUserData } from "~/hooks/use-user-data";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import { getPrimaryKit, isQuantityTracked } from "~/modules/asset/utils";
+import {
+  CONFIRM_MODEL_SHORTFALL_FIELD,
+  isModelShortfallMessage,
+} from "~/modules/asset/archive-shortfall";
+import {
+  getPrimaryKit,
+  isIndividualKitMember,
+  isQuantityTracked,
+} from "~/modules/asset/utils";
 import { getPrimaryCustody, hasCustody } from "~/modules/custody/utils";
 import type { loader } from "~/routes/_layout+/assets.$assetId";
 import {
@@ -30,6 +51,15 @@ import SetOrEditReminderDialog from "../asset-reminder/set-or-edit-reminder-dial
 import Icon from "../icons/icon";
 import { Button } from "../shared/button";
 import { MobileDropdownStyles } from "../shared/mobile-dropdown-styles";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "../shared/modal";
 import When from "../when/when";
 
 // react-doctor:no-giant-component — deferred for follow-up refactor
@@ -56,7 +86,21 @@ const ConditionalActionsDropdown = () => {
     : 0;
   const noneAvailable = isQtyTracked && quantityAvailable <= 0;
 
-  const { roles, isSelfService, isAdministratorOrOwner } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
+  const canUpdateAsset = userHasPermission({
+    roles,
+    entity: PermissionEntity.asset,
+    action: PermissionAction.update,
+  });
+  /** Reminders are their own entity, so "Set reminder" is gated on its grant. */
+  const canSetReminder = userHasPermission({
+    roles,
+    entity: PermissionEntity.assetReminders,
+    action: PermissionAction.create,
+  });
+  /** Archive and Reinstate share one grant, `asset: archive` (issue #382). */
+  const canArchiveAsset = useCanArchiveAssets();
+  const assignsSelfOnly = useRoleAccess().custody.assign === "self";
   const user = useUserData();
 
   const { ref: popoverContentRef, open, setOpen } = useControlledDropdownMenu();
@@ -70,13 +114,80 @@ const ConditionalActionsDropdown = () => {
     assetKitMembership && assetKitMembership.status !== "AVAILABLE"
   );
   const custodyActionDisabled = assetIsCheckedOut && !assetCanBeReleased;
+  /**
+   * An individually tracked kit member takes custody through its kit, so
+   * "Assign custody" is disabled with the reason. The server refuses the same
+   * request (`assertNotKitMembers`); this only says so before the click.
+   */
+  const assignCustodyKitReason =
+    assetKitMembership && isIndividualKitMember(asset)
+      ? kitMemberCustodyBlockedReason(assetKitMembership.name)
+      : null;
+
+  // Archive / reinstate. Fetcher-driven (posts to the asset detail action).
+  const archiveFetcher = useFetcher<{ error?: { message?: string } | null }>();
+  const isArchiveSubmitting = useDisabled(archiveFetcher);
+  const isArchived = Boolean(asset.archivedAt);
+
+  /**
+   * Archiving would leave a model reservation short (issue #382). The server
+   * refuses the first attempt with a warning instead of an error toast; this
+   * turns it into an "Archive anyway" prompt. A warning the user cancelled
+   * stays dismissed until the next attempt returns a fresh one.
+   */
+  const shortfallWarning =
+    archiveFetcher.state === "idle" &&
+    isModelShortfallMessage(archiveFetcher.data?.error?.message)
+      ? archiveFetcher.data?.error?.message ?? null
+      : null;
+  const [dismissedWarning, setDismissedWarning] = useState<string | null>(null);
+  const isShortfallPromptOpen =
+    shortfallWarning !== null && shortfallWarning !== dismissedWarning;
+  /**
+   * Why archiving is blocked for this asset, if at all. Mirrors the server
+   * guard in `archiveAsset` so the UI explains the disabled state up-front.
+   */
+  const archiveDisabledReason: { reason: string } | false = isQtyTracked
+    ? { reason: "Quantity-tracked assets can't be archived yet." }
+    : assetIsCheckedOut || assetCanBeReleased
+    ? {
+        reason:
+          "Check the asset in and release any custody before archiving it.",
+      }
+    : assetIsPartOfUnavailableKit
+    ? { reason: "This asset is part of a kit that's currently in use." }
+    : false;
+
+  /**
+   * Reinstating is refused while the asset's kit is in custody or out on a
+   * booking (`unarchiveAsset`): the kit took its hold without this member, so
+   * it would come back as an active member its own kit does not account for.
+   * Said up-front, with the server's refusal text, rather than after the click.
+   */
+  const reinstateDisabledReason: { reason: string } | false =
+    isArchived && assetIsPartOfUnavailableKit
+      ? { reason: KIT_IN_USE_REINSTATE_REASON }
+      : false;
+
+  /**
+   * An archived asset is frozen: every action is disabled except Reinstate.
+   * Thread this into each action's `disabled` so the whole menu reads as
+   * read-only with one consistent reason, while Reinstate stays enabled.
+   */
+  const archivedActionDisabled: { reason: string } | false = isArchived
+    ? {
+        // Members who see this menu without the archive grant (Manager, self
+        // service) cannot reinstate, so they are told who can instead.
+        reason: archivedAssetBlockedReason({ canReinstate: canArchiveAsset }),
+      }
+    : false;
 
   function handleMenuClose() {
     setOpen(false);
   }
 
   const disableReleaseForSelfService =
-    isSelfService &&
+    assignsSelfOnly &&
     getPrimaryCustody(asset.custody)?.custodian?.userId !== user?.id;
 
   return (
@@ -94,7 +205,7 @@ const ConditionalActionsDropdown = () => {
             type="button"
             variant="secondary"
             data-test-id="assetActionsButton"
-            className="asset-actions hidden sm:flex"
+            className="asset-actions hidden md:flex"
           >
             <span className="flex items-center gap-2">
               Actions <ChevronRight className="chev" />
@@ -107,7 +218,7 @@ const ConditionalActionsDropdown = () => {
           type="button"
           variant="secondary"
           data-test-id="assetActionsButton"
-          className="asset-actions sm:hidden"
+          className="asset-actions md:hidden"
           onClick={() => setOpen(true)}
         >
           <span className="flex items-center gap-2">
@@ -118,6 +229,7 @@ const ConditionalActionsDropdown = () => {
         <MobileDropdownStyles open={open} />
         <PopoverPortal>
           <PopoverContent
+            data-mobile-sheet
             ref={popoverContentRef}
             tabIndex={-1}
             align="end"
@@ -128,17 +240,8 @@ const ConditionalActionsDropdown = () => {
             }}
             className="order actions-dropdown static z-[99] !mt-0 w-screen rounded-b-none rounded-t-[4px] border border-gray-300 bg-white p-0 text-right md:static md:mt-auto md:w-[230px] md:rounded-t-[4px]"
           >
-            <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-full md:rounded-t-[4px]">
-              <When
-                truthy={
-                  isQtyTracked &&
-                  userHasPermission({
-                    roles,
-                    entity: PermissionEntity.asset,
-                    action: PermissionAction.update,
-                  })
-                }
-              >
+            <div className="order fixed bottom-0 left-0 max-h-[85dvh] w-screen overflow-y-auto rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:max-h-none md:w-full md:overflow-visible md:rounded-t-[4px]">
+              <When truthy={isQtyTracked && canUpdateAsset}>
                 <div className="border-b px-0 py-1 md:p-0">
                   <Button
                     type="button"
@@ -191,7 +294,7 @@ const ConditionalActionsDropdown = () => {
                     >
                       <span className="flex items-center gap-2">
                         <Icon icon="assign-custody" />{" "}
-                        {isSelfService ? "Take" : "Assign"} custody
+                        {assignsSelfOnly ? "Take" : "Assign"} custody
                       </span>
                     </Button>
                   ) : assetCanBeReleased ? (
@@ -203,6 +306,7 @@ const ConditionalActionsDropdown = () => {
                       width="full"
                       onClick={handleMenuClose}
                       disabled={
+                        archivedActionDisabled ||
                         custodyActionDisabled ||
                         assetIsPartOfUnavailableKit ||
                         disableReleaseForSelfService
@@ -220,24 +324,24 @@ const ConditionalActionsDropdown = () => {
                       className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
                       width="full"
                       onClick={handleMenuClose}
-                      disabled={custodyActionDisabled}
+                      disabled={
+                        archivedActionDisabled ||
+                        custodyActionDisabled ||
+                        (assignCustodyKitReason
+                          ? { reason: assignCustodyKitReason }
+                          : false)
+                      }
                     >
                       <span className="flex items-center gap-2">
                         <Icon icon="assign-custody" />{" "}
-                        {isSelfService ? "Take" : "Assign"} custody
+                        {assignsSelfOnly ? "Take" : "Assign"} custody
                       </span>
                     </Button>
                   )}
                 </div>
               </When>
 
-              <When
-                truthy={userHasPermission({
-                  roles,
-                  entity: PermissionEntity.asset,
-                  action: PermissionAction.update,
-                })}
-              >
+              <When truthy={canUpdateAsset}>
                 <div
                   className="px-0 py-1 md:p-0"
                   aria-disabled={assetIsCheckedOut}
@@ -263,7 +367,9 @@ const ConditionalActionsDropdown = () => {
                     width="full"
                     onClick={handleMenuClose}
                     disabled={
-                      assetIsCheckedOut
+                      archivedActionDisabled
+                        ? archivedActionDisabled
+                        : assetIsCheckedOut
                         ? true
                         : assetIsPartOfKit
                         ? {
@@ -290,6 +396,7 @@ const ConditionalActionsDropdown = () => {
                   <UpdateGpsCoordinatesForm
                     // Closes the dropdown when the button is clicked
                     callback={handleMenuClose}
+                    disabled={archivedActionDisabled}
                   />
                 </div>
                 <div className="border-b px-0 py-1 md:p-0">
@@ -299,6 +406,7 @@ const ConditionalActionsDropdown = () => {
                     variant="link"
                     className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
                     width="full"
+                    disabled={archivedActionDisabled}
                     onClick={() => {
                       handleMenuClose();
                       setIsRelinkQrDialogOpen(true);
@@ -310,26 +418,32 @@ const ConditionalActionsDropdown = () => {
                     </span>
                   </Button>
                 </div>
-                <When truthy={isAdministratorOrOwner}>
-                  <div className="border-b px-0 py-1 md:p-0">
-                    <Button
-                      type="button"
-                      role="button"
-                      variant="link"
-                      className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
-                      width="full"
-                      onClick={() => {
-                        handleMenuClose();
-                        setIsSetReminderDialogOpen(true);
-                      }}
-                    >
-                      <span className="flex items-center gap-2">
-                        <AlarmClockIcon className="size-5" />
-                        Set reminder
-                      </span>
-                    </Button>
-                  </div>
-                </When>
+              </When>
+
+              {/* Reminders are gated on their own grant, not on `asset:update`. */}
+              <When truthy={canSetReminder}>
+                <div className="border-b px-0 py-1 md:p-0">
+                  <Button
+                    type="button"
+                    role="button"
+                    variant="link"
+                    className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
+                    width="full"
+                    disabled={archivedActionDisabled}
+                    onClick={() => {
+                      handleMenuClose();
+                      setIsSetReminderDialogOpen(true);
+                    }}
+                  >
+                    <span className="flex items-center gap-2">
+                      <AlarmClockIcon className="size-5" />
+                      Set reminder
+                    </span>
+                  </Button>
+                </div>
+              </When>
+
+              <When truthy={canUpdateAsset}>
                 <div className="px-0 py-1 md:p-0">
                   <Button
                     to="edit"
@@ -337,6 +451,7 @@ const ConditionalActionsDropdown = () => {
                     variant="link"
                     className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
                     width="full"
+                    disabled={archivedActionDisabled}
                   >
                     <span className="flex items-center gap-2">
                       <Icon icon="pen" /> Edit
@@ -351,12 +466,54 @@ const ConditionalActionsDropdown = () => {
                     className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
                     width="full"
                     onClick={handleMenuClose}
+                    disabled={archivedActionDisabled}
                   >
                     <span className="flex items-center gap-2">
                       <Icon icon="duplicate" /> Duplicate
                     </span>
                   </Button>
                 </div>
+                <When truthy={canArchiveAsset}>
+                  <div className="border-b px-0 py-1 md:p-0">
+                    <Button
+                      type="button"
+                      variant="link"
+                      data-test-id={
+                        isArchived
+                          ? "reinstateAssetButton"
+                          : "archiveAssetButton"
+                      }
+                      className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
+                      width="full"
+                      disabled={
+                        isArchived
+                          ? reinstateDisabledReason || isArchiveSubmitting
+                          : archiveDisabledReason || isArchiveSubmitting
+                      }
+                      onClick={() => {
+                        // Submit imperatively so closing the popover (which
+                        // unmounts this subtree) can't cancel an in-flight form
+                        // submit. The fetcher request is dispatched first, then
+                        // the menu closes. `void` — fire-and-forget; the fetcher
+                        // tracks its own state.
+                        void archiveFetcher.submit(
+                          { intent: isArchived ? "reinstate" : "archive" },
+                          { method: "post", action: `/assets/${asset.id}` }
+                        );
+                        handleMenuClose();
+                      }}
+                    >
+                      <span className="flex items-center gap-2">
+                        {isArchived ? (
+                          <ArchiveRestoreIcon className="size-5" />
+                        ) : (
+                          <ArchiveIcon className="size-5" />
+                        )}
+                        {isArchived ? "Reinstate" : "Archive"}
+                      </span>
+                    </Button>
+                  </div>
+                </When>
                 <div
                   className="px-0 py-1 md:p-0"
                   aria-disabled={
@@ -374,6 +531,8 @@ const ConditionalActionsDropdown = () => {
                         className="justify-start rounded-sm px-4 py-3 text-sm font-semibold text-gray-700 data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-slate-100 hover:text-gray-700"
                         width="full"
                         disabled={
+                          // Archived assets can still be permanently deleted
+                          // (along with Reinstate, the only allowed actions).
                           assetIsCheckedOut || assetIsPartOfUnavailableKit
                         }
                       >
@@ -382,36 +541,79 @@ const ConditionalActionsDropdown = () => {
                     }
                   />
                 </div>
-                <div className="border-t p-4 md:hidden md:p-0">
-                  <Button
-                    type="button"
-                    role="button"
-                    variant="secondary"
-                    className="flex items-center justify-center text-gray-700 hover:text-gray-700 "
-                    width="full"
-                    onClick={handleMenuClose}
-                  >
-                    Close
-                  </Button>
-                </div>
-                {assetIsCheckedOut ? (
-                  <div className=" border-t p-2 text-left text-xs">
-                    Some actions are disabled due to the asset being checked
-                    out.
-                  </div>
-                ) : null}
-                {assetIsPartOfUnavailableKit ? (
-                  <div className=" border-t p-2 text-left text-xs">
-                    Some actions are disabled due to the asset being part of a
-                    kit.
-                  </div>
-                ) : null}
               </When>
+              {/* Outside the update group: everyone who can open this menu
+                  (custody-only members included) can close it on mobile and
+                  sees why an action is disabled. */}
+              <div className="border-t p-4 md:hidden md:p-0">
+                <Button
+                  type="button"
+                  role="button"
+                  variant="secondary"
+                  className="flex items-center justify-center text-gray-700 hover:text-gray-700 "
+                  width="full"
+                  onClick={handleMenuClose}
+                >
+                  Close
+                </Button>
+              </div>
+              {assetIsCheckedOut ? (
+                <div className=" border-t p-2 text-left text-xs">
+                  Some actions are disabled due to the asset being checked out.
+                </div>
+              ) : null}
+              {assetIsPartOfUnavailableKit ? (
+                <div className=" border-t p-2 text-left text-xs">
+                  Some actions are disabled due to the asset being part of a
+                  kit.
+                </div>
+              ) : null}
             </div>
           </PopoverContent>
         </PopoverPortal>
       </Popover>
 
+      <AlertDialog
+        open={isShortfallPromptOpen}
+        onOpenChange={(open) => {
+          if (!open) setDismissedWarning(shortfallWarning);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Model reservations affected</AlertDialogTitle>
+            <AlertDialogDescription>{shortfallWarning}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <div className="flex justify-center gap-2">
+              <AlertDialogCancel asChild>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={isArchiveSubmitting}
+                >
+                  Cancel
+                </Button>
+              </AlertDialogCancel>
+              <Button
+                type="button"
+                disabled={isArchiveSubmitting}
+                onClick={() => {
+                  void archiveFetcher.submit(
+                    {
+                      intent: "archive",
+                      [CONFIRM_MODEL_SHORTFALL_FIELD]: "true",
+                    },
+                    { method: "post", action: `/assets/${asset.id}` }
+                  );
+                }}
+              >
+                Archive anyway
+              </Button>
+            </div>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <When truthy={isRelinkQrDialogOpen}>
         <RelinkQrCodeDialog
           key={asset.qrCodes[0]?.id || asset.id}
@@ -421,7 +623,7 @@ const ConditionalActionsDropdown = () => {
           }}
         />
       </When>
-      <When truthy={isSetReminderDialogOpen && isAdministratorOrOwner}>
+      <When truthy={isSetReminderDialogOpen && canSetReminder}>
         <SetOrEditReminderDialog
           action={`/assets/${asset.id}`}
           open={isSetReminderDialogOpen}

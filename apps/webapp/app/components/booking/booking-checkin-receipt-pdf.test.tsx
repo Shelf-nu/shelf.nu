@@ -112,6 +112,7 @@ function row(
     },
     checkedInByName: "Ada Lovelace",
     checkedInOn: "03/09/2026 5:30 PM",
+    checkedInHow: null,
     ...overrides,
   };
 }
@@ -152,6 +153,7 @@ function viewWith(
     returnedAt: "03/09/2026 5:30 PM",
     latenessNote: { text: "16 hours after the planned end", isLate: true },
     checkedInByNames: ["Ada Lovelace"],
+    checkedInHow: null,
     ...overrides,
     rows,
   };
@@ -339,8 +341,25 @@ describe("booking check-in receipt — the sheet", () => {
     // on the paper defeats scanning the label on the item.
     const { container } = renderReceipt();
 
-    expect(screen.queryByAltText("QR Code")).not.toBeInTheDocument();
+    // why: the sheet has no picture column; any image in the table would be
+    // a code picture that should not be here.
+    expect(container.querySelector("table img")).toBeNull();
     expect(container.textContent).not.toMatch(/Total assets value/);
+  });
+
+  it("fixes the table to the page width, one share per column", () => {
+    // why: a table sized by its content runs off the page when a name or a
+    // moment is long; a fixed table wraps inside its columns instead.
+    const { container } = renderReceipt();
+
+    const table = container.querySelector("table.checkin-receipt-table")!;
+    const widths = [...table.querySelectorAll("col")].map((col) =>
+      parseFloat((col as HTMLElement).style.width)
+    );
+
+    expect(table).toHaveClass("table-fixed");
+    expect(widths).toHaveLength(table.querySelectorAll("thead th").length);
+    expect(widths.reduce((sum, width) => sum + width, 0)).toBe(100);
   });
 
   it("prints the workspace's asset code on the row", () => {
@@ -467,5 +486,61 @@ describe("booking check-in receipt — when the entry is offered", () => {
     expect(
       screen.getAllByText("Nothing has been checked in yet.").length
     ).toBeGreaterThan(0);
+  });
+});
+
+describe("booking check-in receipt: how the items came back", () => {
+  it("prints one method line in the header when every row agrees", () => {
+    const { container } = renderReceipt({
+      checkedInHow: "Scanned on the phone",
+      rows: [
+        row({ checkedInHow: "Scanned on the phone" }),
+        row({
+          bookingAssetId: "ba-2",
+          assetId: "asset-2",
+          title: "Monitor",
+          checkedInHow: "Scanned on the phone",
+        }),
+      ],
+    });
+
+    const fact = within(factsBlock(container))
+      .getByText("Check-in method")
+      .closest("div");
+    expect(fact).toHaveTextContent("Scanned on the phone");
+    // The rows do not repeat what the header already says.
+    expect(cellsFor("Tripod")[7]).not.toHaveTextContent("Scanned on the phone");
+  });
+
+  it("prints the method per row when the rows disagree", () => {
+    const { container } = renderReceipt({
+      checkedInHow: null,
+      rows: [
+        row({ checkedInHow: "Scanned on the phone" }),
+        row({
+          bookingAssetId: "ba-2",
+          assetId: "asset-2",
+          title: "Monitor",
+          checkedInHow: "Selected on the web",
+        }),
+      ],
+    });
+
+    expect(
+      within(factsBlock(container)).queryByText("Check-in method")
+    ).not.toBeInTheDocument();
+    expect(cellsFor("Tripod")[7]).toHaveTextContent("Scanned on the phone");
+    expect(cellsFor("Monitor")[7]).toHaveTextContent("Selected on the web");
+  });
+
+  it("prints no method where none was recorded", () => {
+    // why: a return made before methods were recorded must not be described;
+    // a guessed method on a signed document is a false statement.
+    const { container } = renderReceipt();
+
+    expect(
+      within(factsBlock(container)).queryByText("Check-in method")
+    ).not.toBeInTheDocument();
+    expect(cellsFor("Tripod")[7]).toHaveTextContent(/^Ada Lovelace$/);
   });
 });

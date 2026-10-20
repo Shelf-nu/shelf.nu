@@ -5,7 +5,8 @@
  * Pins the check-in rule shared by the loader and the action:
  *  - SELF_SERVICE holds `booking:checkin`, but may check in only a booking they
  *    are the CUSTODIAN of, and only while it is ONGOING or OVERDUE. Having
- *    created the booking is not enough;
+ *    created the booking is not enough, and the workspace toggle that lets
+ *    them SEE other bookings does not let them check those in;
  *  - a refusal is a 403, not a 500;
  *  - ADMIN is not narrowed by ownership.
  *
@@ -13,6 +14,8 @@
  */
 
 import { OrganizationRoles } from "@prisma/client";
+import { permissionContext } from "@helpers/role-access";
+import type { WorkspaceAccessSettings } from "~/utils/permissions/role-access";
 
 // why: React Router v7 single fetch — `data()` must return a real Response so
 // the action's error path has an assertable status.
@@ -63,23 +66,23 @@ import { action } from "~/routes/_layout+/bookings.$bookingId.overview.checkin-a
 
 const CALLER = "user-1";
 
-/** POSTs a check-in as a caller with `role` against a booking shaped by the rest. */
+/** POSTs a check-in as a caller with `role` (and `workspace` toggles) against a booking shaped by the rest. */
 async function postCheckin({
   role,
+  workspace = {},
   status = "ONGOING",
   creatorId = "someone-else",
   custodianUserId = "someone-else",
 }: {
   role: OrganizationRoles;
+  workspace?: Partial<WorkspaceAccessSettings>;
   status?: string;
   creatorId?: string;
   custodianUserId?: string | null;
 }) {
-  requirePermissionMock.mockResolvedValue({
-    organizationId: "org-1",
-    role,
-    userOrganizations: [],
-  });
+  requirePermissionMock.mockResolvedValue(
+    permissionContext({ roles: [role], workspace })
+  );
   getBookingMock.mockResolvedValue({
     id: "booking-1",
     status,
@@ -103,6 +106,19 @@ async function postCheckin({
 describe("checkin-assets action", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("records the page's batch as scanned on the web, leaving ticked rows to the form", async () => {
+    // The page is the scanner: everything on it was scanned unless the drawer
+    // named the slice in `selectedBookingAssetIds[]`, which the sink reads off
+    // the form.
+    await postCheckin({ role: OrganizationRoles.ADMIN });
+
+    expect(checkinAssetsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provenance: { surface: "web", method: "scanned" },
+      })
+    );
   });
 
   it("refuses SELF_SERVICE on a booking they neither created nor hold, with a 403 and no check-in", async () => {
@@ -143,6 +159,17 @@ describe("checkin-assets action", () => {
     });
 
     expect(checkinAssetsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses SELF_SERVICE on someone else's live booking even with the see-toggle on", async () => {
+    const response = await postCheckin({
+      role: OrganizationRoles.SELF_SERVICE,
+      workspace: { selfServiceCanSeeBookings: true },
+      status: "ONGOING",
+    });
+
+    expect(response.status).toBe(403);
+    expect(checkinAssetsMock).not.toHaveBeenCalled();
   });
 
   it("lets ADMIN check in someone else's live booking", async () => {

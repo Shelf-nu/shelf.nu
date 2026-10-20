@@ -16,6 +16,7 @@ import {
   fulfilModelRequestsAndCheckout,
   partialCheckoutBooking,
 } from "~/modules/booking/service.server";
+import { claimUnstampedBookingRows } from "~/modules/booking-model-request/service.server";
 
 import { fulfilAndCheckOut } from "./fulfil-and-checkout.server";
 
@@ -33,7 +34,19 @@ vi.mock("~/database/db.server", () => ({
     // to none so only the cases about that rule have to stage memberships.
     asset: { findMany: vi.fn() },
     bookingModelRequest: { findMany: vi.fn() },
+    // why: the claim step runs in its own transaction, since the assign above
+    // manages one of its own. Hand the callback the same stub.
+    $transaction: vi.fn((cb: (tx: unknown) => unknown) => cb({})),
   },
+}));
+
+// why: the claim's transaction opens on the booking row, so lock order is the
+// same on every path that reaches it and the two cannot deadlock. The lock is
+// a raw `SELECT … FOR UPDATE`, which the model-shaped stubs above cannot
+// answer; this module only has to take it, and the ordering it guarantees is
+// asserted below.
+vi.mock("~/modules/booking/utils.server", () => ({
+  lockBookingForStatusCheck: vi.fn().mockResolvedValue("RESERVED"),
 }));
 
 // why: the full fulfil flow, scan-to-add and progressive check-out each have
@@ -51,6 +64,12 @@ vi.mock("~/modules/booking/service.server", () => ({
   // checkout sessions and is covered where that math lives; this module only
   // has to ask for it per kit-driven row and pass the answer through.
   computeBookingAssetSliceRemainingToCheckOut: vi.fn(),
+}));
+
+// why: the claim step has its own suite next to the helper it wraps; here only
+// which assets this module offers it matters.
+vi.mock("~/modules/booking-model-request/service.server", () => ({
+  claimUnstampedBookingRows: vi.fn(),
 }));
 
 const hints = { timeZone: "Europe/Sofia", locale: "en-US" } as never;
@@ -75,6 +94,7 @@ beforeEach(() => {
   // quantity-tracked members have to state a figure.
   vi.mocked(computeBookingAssetSliceRemainingToCheckOut).mockResolvedValue(0);
   vi.mocked(db.asset.findMany).mockResolvedValue([]);
+  vi.mocked(claimUnstampedBookingRows).mockResolvedValue(new Map());
 });
 
 /** One `AssetKit` membership, in the shape `buildKitSlicesForBooking` returns. */
@@ -229,6 +249,8 @@ describe("fulfilAndCheckOut", () => {
       bookingId: "booking-1",
       organizationId: "org-1",
       userId: "user-1",
+      // Fulfil is authorized by the check-out rule, so it skips the add rule.
+      access: null,
     });
     expect(partialCheckoutBooking).toHaveBeenCalledWith({
       id: "booking-1",
@@ -335,6 +357,51 @@ describe("fulfilAndCheckOut", () => {
     expect(addScannedAssetsToBooking).not.toHaveBeenCalled();
     expect(partialCheckoutBooking).toHaveBeenCalledWith(
       expect.objectContaining({ assetIds: ["dell-1"] })
+    );
+  });
+
+  it("offers a scanned unit already on the booking to the claim step", async () => {
+    // The row exists but carries no stamp, which is the state a unit lands in
+    // when it was added before the reservation existed, or before its model
+    // matched one. Nothing new is added, but the unit must still be able to
+    // answer a reservation, or scanning it reports nothing and the operator is
+    // told it is merely a duplicate.
+    primeRulePath();
+    vi.mocked(db.bookingAsset.findMany).mockResolvedValue([
+      { assetId: "dell-1", assetKitId: null, asset: { type: "INDIVIDUAL" } },
+    ] as never);
+
+    await fulfilAndCheckOut({ ...baseArgs, requireExplicitCheckout: true });
+
+    expect(claimUnstampedBookingRows).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingId: "booking-1",
+        assetIds: ["dell-1"],
+      }),
+      expect.anything()
+    );
+  });
+
+  it("offers the claim step only the units it did not add", async () => {
+    // A unit the scan adds is stamped as it is inserted, so offering it again
+    // would ask the same reservation to answer twice.
+    primeRulePath();
+    vi.mocked(db.bookingAsset.findMany).mockResolvedValue([
+      { assetId: "dell-1", assetKitId: null, asset: { type: "INDIVIDUAL" } },
+    ] as never);
+
+    await fulfilAndCheckOut({
+      ...baseArgs,
+      assetIds: ["dell-1", "dell-2"],
+      requireExplicitCheckout: true,
+    });
+
+    expect(addScannedAssetsToBooking).toHaveBeenCalledWith(
+      expect.objectContaining({ assetIds: ["dell-2"] })
+    );
+    expect(claimUnstampedBookingRows).toHaveBeenCalledWith(
+      expect.objectContaining({ assetIds: ["dell-1"] }),
+      expect.anything()
     );
   });
 
@@ -764,5 +831,83 @@ describe("fulfilAndCheckOut", () => {
         },
       })
     );
+  });
+});
+
+/**
+ * The flow each booking status takes through `fulfilAndCheckOut`, with and
+ * without the explicit check-out requirement.
+ *
+ * Neither fulfil guard (web action, mobile endpoint) reads the booking's
+ * status, so this table is what refuses a DRAFT or a closed booking on those
+ * paths. It also decides which flow a status takes: this is the service half
+ * of the check-out/check-in contract, the counterpart to the route guards in
+ * `checkinout-service-status.test.ts`.
+ */
+describe("fulfilAndCheckOut, the flow each booking status takes", () => {
+  type Flow = "full" | "scanned-only" | "refused";
+
+  const FLOWS: Record<"rule off" | "rule on", Record<BookingStatus, Flow>> = {
+    "rule off": {
+      DRAFT: "refused",
+      RESERVED: "full",
+      ONGOING: "scanned-only",
+      OVERDUE: "scanned-only",
+      COMPLETE: "refused",
+      ARCHIVED: "refused",
+      CANCELLED: "refused",
+    },
+    "rule on": {
+      DRAFT: "refused",
+      RESERVED: "scanned-only",
+      ONGOING: "scanned-only",
+      OVERDUE: "scanned-only",
+      COMPLETE: "refused",
+      ARCHIVED: "refused",
+      CANCELLED: "refused",
+    },
+  };
+
+  const cases = (Object.keys(FLOWS) as (keyof typeof FLOWS)[]).flatMap((rule) =>
+    Object.values(BookingStatus).map(
+      (status) => [rule, status, FLOWS[rule][status]] as const
+    )
+  );
+
+  it.each(cases)("%s, %s booking -> %s", async (rule, status, expected) => {
+    primeRulePath();
+    vi.mocked(db.booking.findFirst).mockResolvedValue({ status } as never);
+    vi.mocked(fulfilModelRequestsAndCheckout).mockResolvedValue({
+      id: "booking-1",
+      name: "Load-in",
+      status: BookingStatus.ONGOING,
+    } as never);
+
+    const flow = await fulfilAndCheckOut({
+      ...baseArgs,
+      requireExplicitCheckout: rule === "rule on",
+    }).then(
+      (): Flow =>
+        vi.mocked(fulfilModelRequestsAndCheckout).mock.calls.length > 0
+          ? "full"
+          : "scanned-only",
+      (cause: unknown): Flow => {
+        expect(cause).toMatchObject({
+          status: 400,
+          message: expect.stringMatching(
+            /can't be checked out in its current status/
+          ),
+        });
+        return "refused";
+      }
+    );
+
+    expect(flow).toBe(expected);
+    if (flow === "refused") {
+      expect(addScannedAssetsToBooking).not.toHaveBeenCalled();
+    }
+    if (flow === "scanned-only") {
+      expect(partialCheckoutBooking).toHaveBeenCalledTimes(1);
+    }
   });
 });

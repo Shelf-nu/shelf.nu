@@ -3,7 +3,6 @@ import type { StockState } from "./stock-ledger";
 import {
   diffStockStates,
   emptyStockState,
-  initialStockRows,
   planStockLedgerRows,
   replayStockLedger,
   stockByPlace,
@@ -241,22 +240,6 @@ describe("planStockLedgerRows", () => {
         [STUDIO, 2],
       ])
     );
-  });
-});
-
-describe("initialStockRows", () => {
-  it("writes the created stock where it lands, as INITIAL", () => {
-    expect(
-      shape(
-        initialStockRows({
-          total: 12,
-          placed: new Map([[STUDIO, 8]]),
-        })
-      )
-    ).toEqual([
-      ["INITIAL", null, 4],
-      ["INITIAL", STUDIO, 8],
-    ]);
   });
 });
 

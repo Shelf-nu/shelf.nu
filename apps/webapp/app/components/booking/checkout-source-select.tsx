@@ -10,9 +10,16 @@
  * A native `<select>`, like the placements editor, so it posts with the form
  * even when the dialog renders in a portal (pass `formId`).
  *
+ * It posts only an answer the operator gave. Until they change it the select
+ * has no `name`, so nothing is sent and the server records its own default,
+ * worked out from the data at submit time: the same rule that chose the
+ * pre-selected option. A pre-selection that went stale (its placement was
+ * deleted while the dialog was open) therefore never comes back as a refused
+ * "pick".
+ *
  * @see {@link file://../../modules/booking/checkout-source-location.ts} the rule and the option labels
  */
-import { useId } from "react";
+import { useId, useState } from "react";
 
 import type { CheckoutSourceQuestion } from "~/modules/booking/checkout-source-location";
 import {
@@ -55,7 +62,7 @@ type CheckoutSourceSelectProps = {
 
 /**
  * One "From location" select, pre-selected with the location the server would
- * pick if nothing were sent.
+ * pick if nothing were sent, and posted only once the operator changes it.
  *
  * @param props - {@link CheckoutSourceSelectProps}
  */
@@ -68,6 +75,8 @@ export function CheckoutSourceSelect({
   className,
 }: CheckoutSourceSelectProps) {
   const id = useId();
+  /** Whether the operator changed the answer: only then is it posted. */
+  const [picked, setPicked] = useState(false);
   const options = checkoutSourceOptions(question);
   const defaultValue = question.defaultLocationId ?? UNPLACED_SOURCE_FORM_VALUE;
   const isInline = variant === "inline";
@@ -100,8 +109,9 @@ export function CheckoutSourceSelect({
       </label>
       <select
         id={id}
-        name={sourceLocationFieldName(fieldKey)}
+        name={picked ? sourceLocationFieldName(fieldKey) : undefined}
         defaultValue={defaultValue}
+        onChange={() => setPicked(true)}
         form={formId}
         disabled={disabled}
         aria-label={

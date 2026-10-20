@@ -89,6 +89,7 @@ export async function loadPoolSourceSnapshots(
 
   const [assets, placements, operatorCustody, bookedOut] = await Promise.all([
     tx.asset.findMany({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: by-id snapshot of pools on the booking being checked out; archive refusal is the guard's job
       where: { id: { in: uniqueAssetIds }, organizationId },
       select: { id: true, title: true, quantity: true, unitOfMeasure: true },
     }),
@@ -117,7 +118,12 @@ export async function loadPoolSourceSnapshots(
         kitCustodyId: null,
         asset: { organizationId },
       },
-      select: { assetId: true, locationId: true, quantity: true },
+      select: {
+        assetId: true,
+        locationId: true,
+        sourceUnknown: true,
+        quantity: true,
+      },
     }),
     // Units out on other bookings from each location are not there either.
     loadBookedOutBySource(tx, { assetIds: uniqueAssetIds, organizationId }),
@@ -163,6 +169,7 @@ export async function loadPoolSourceSnapshots(
       unitOfMeasure: asset.unitOfMeasure,
       placements: assetPlacements,
       unplaced: Math.max(0, (asset.quantity ?? 0) - placedSum),
+      unplacedLeft: unitsLeftAtSource(state, null),
     });
   }
 
@@ -273,6 +280,7 @@ export async function recordCheckoutSourceLocations(
     const snapshot = snapshots.get(slice.assetId) ?? {
       placements: [],
       unplaced: 0,
+      unplacedLeft: 0,
     };
     const decision = resolveSliceSource({
       checkedOutQuantity: 0,
