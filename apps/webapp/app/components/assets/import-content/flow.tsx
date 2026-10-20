@@ -70,14 +70,23 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
   }
 }
 
+/** Props for {@link ContentImportFlow}. */
+type ContentImportFlowProps = {
+  /** True while another import runs in the workspace: the upload is held. */
+  uploadBlocked?: boolean;
+};
+
 /**
  * Upload form and preview for a content import. Owns both fetchers: the
  * preview fetcher posts the file (`intent=preview`), the confirm fetcher posts
  * the draft's id (`intent=confirm`) from the preview stage.
  *
+ * @param props - See {@link ContentImportFlowProps}
  * @returns The upload form, or the preview stage once a file was parsed
  */
-export function ContentImportFlow() {
+export function ContentImportFlow({
+  uploadBlocked = false,
+}: ContentImportFlowProps) {
   const formRef = useRef<HTMLFormElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   /** Set by "Choose a different file", so the upload stage takes focus back. */
@@ -144,7 +153,7 @@ export function ContentImportFlow() {
           required
           onChange={handleFileSelect}
           accept=".csv"
-          disabled={isPreviewLoading}
+          disabled={isPreviewLoading || uploadBlocked}
         />
         <input type="hidden" name="intent" value="preview" />
 
@@ -157,7 +166,7 @@ export function ContentImportFlow() {
         <Button
           type="submit"
           className="my-4"
-          disabled={!selectedFile || isPreviewLoading}
+          disabled={!selectedFile || isPreviewLoading || uploadBlocked}
         >
           {isPreviewLoading ? "Checking file..." : "Preview import"}
         </Button>

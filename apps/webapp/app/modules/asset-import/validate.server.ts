@@ -1,11 +1,14 @@
 /**
  * Read-only validation of an asset import file.
  *
- * Runs every check the importer applies before it writes anything (row rules,
- * barcode add-on gate, QR codes, barcodes, kit custody) without creating or
- * claiming anything. The upload step calls it so a bad file is refused before
- * a draft exists.
+ * Runs every check the importer applies before it writes anything, without
+ * creating or claiming anything. Row rules and QR code and barcode problems are
+ * gathered into one list of row errors, so a single upload shows the user
+ * everything they have to fix. The barcode add-on gate and the kit custody
+ * check follow. The upload step calls it so a bad file is refused before a
+ * draft exists.
  *
+ * @see {@link file://./code-problems.server.ts}
  * @see {@link file://./missing-entities.server.ts}
  * @see {@link file://../asset/import-preflight.server.ts}
  */
@@ -14,12 +17,10 @@ import { db } from "~/database/db.server";
 import { validateContentImportRows } from "~/modules/asset/import-preflight.server";
 import { validateKitCustodyConflicts } from "~/modules/asset/service.server";
 import type { CreateAssetFromContentImportPayload } from "~/modules/asset/types";
-import {
-  importDataHasBarcodes,
-  parseBarcodesFromImportData,
-} from "~/modules/barcode/service.server";
-import { validateImportQrCodes } from "~/modules/qr/service.server";
+import { importDataHasBarcodes } from "~/modules/barcode/service.server";
 import { ShelfError } from "~/utils/error";
+import { MAX_REPORTED_ROW_ERRORS } from "~/utils/import-row-errors";
+import { collectImportCodeProblems } from "./code-problems.server";
 import { MAX_BACKGROUND_IMPORT_ROWS } from "./constants";
 
 /**
@@ -29,9 +30,9 @@ import { MAX_BACKGROUND_IMPORT_ROWS } from "./constants";
  * @param args.organizationId - Workspace the import targets
  * @param args.userId - User running the import (recorded in error data)
  * @param args.canUseBarcodes - Whether the workspace has the barcodes add-on
- * @throws {ShelfError} 400 with `rowErrors` when rows are invalid, 403 when the
- * file has barcodes and the workspace lacks the add-on, and the QR, barcode and
- * kit custody errors of their own checks
+ * @throws {ShelfError} 400 with `rowErrors` and `totalErrors` when any row or
+ * QR code / barcode is invalid, 403 when the file has barcodes and the
+ * workspace lacks the add-on, and the kit custody error of its own check
  */
 export async function validateContentImportFile({
   data,
@@ -52,11 +53,30 @@ export async function validateContentImportFile({
     select: { name: true, type: true },
   });
 
-  const { errors: rowErrors, totalErrors } = validateContentImportRows({
+  const preflight = validateContentImportRows({
     data,
     existingCustomFields,
     maxRows: MAX_BACKGROUND_IMPORT_ROWS,
   });
+
+  // A file over the row cap is refused on that alone (the preflight reports
+  // only the cap), so its codes are not looked up.
+  const codeProblems =
+    data.length > MAX_BACKGROUND_IMPORT_ROWS
+      ? []
+      : await collectImportCodeProblems({
+          data,
+          organizationId,
+          canUseBarcodes: Boolean(canUseBarcodes),
+        });
+
+  // The preflight list is already capped, so the total adds its own count to
+  // the code problems. `sort` is stable: whole-file problems (row 0) lead and
+  // each row keeps its check order.
+  const totalErrors = preflight.totalErrors + codeProblems.length;
+  const rowErrors = [...preflight.errors, ...codeProblems]
+    .sort((a, b) => a.row - b.row)
+    .slice(0, MAX_REPORTED_ROW_ERRORS);
 
   if (rowErrors.length > 0) {
     throw new ShelfError({
@@ -77,8 +97,6 @@ export async function validateContentImportFile({
     });
   }
 
-  await validateImportQrCodes({ data, organizationId });
-
   // Uses the shared column list so a file carrying only ExternalQR/EAN13 is
   // refused too, rather than having those barcodes silently dropped.
   if (importDataHasBarcodes(data) && !canUseBarcodes) {
@@ -91,10 +109,6 @@ export async function validateContentImportFile({
       status: 403,
       shouldBeCaptured: false,
     });
-  }
-
-  if (canUseBarcodes) {
-    await parseBarcodesFromImportData({ data, organizationId, userId });
   }
 
   await validateKitCustodyConflicts({ data, organizationId });

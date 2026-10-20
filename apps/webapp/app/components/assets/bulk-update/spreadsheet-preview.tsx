@@ -98,7 +98,7 @@ export function SpreadsheetPreview({
       columns={columns}
       rows={rows}
       // why: the caption already states the truncation, so the grid's own
-      // "Showing the first N" footer is suppressed by passing the rendered
+      // "Showing N of M rows" footer is suppressed by passing the rendered
       // count as the total.
       totalRows={rows.length}
       caption={caption}

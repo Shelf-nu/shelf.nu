@@ -4,16 +4,19 @@
  * Renders the flow in a router stub whose action answers like the real
  * `assets.import` route: a preview payload, or an error payload. Asserts what
  * the user sees across the upload and preview stages, where focus goes when the
- * stage changes, and that a refused confirm belongs to the dialog opening that
- * sent it.
+ * stage changes, that a refused confirm belongs to the dialog opening that
+ * sent it, and that the grid pages through the draft with "Load more".
  *
  * @see {@link file://./flow.tsx}
  */
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createRoutesStub } from "react-router";
-import { describe, expect, it } from "vitest";
-import type { ContentImportPreview } from "~/modules/asset-import/types";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type {
+  ContentImportPreview,
+  ImportGridRow,
+} from "~/modules/asset-import/types";
 import { ContentImportFlow } from "./flow";
 
 const PREVIEW: ContentImportPreview = {
@@ -301,5 +304,148 @@ describe("ContentImportFlow", () => {
         within(reopened).queryByText("Another import is already running")
       ).not.toBeInTheDocument();
     });
+  });
+});
+
+describe("preview grid paging", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** `count` plain grid rows starting at stored row `from`. */
+  function gridRows(from: number, count: number): ImportGridRow[] {
+    return Array.from({ length: count }, (_, index) => ({
+      key: `k${from + index}`,
+      label: String(from + index + 2),
+      cells: { Title: { value: `Asset ${from + index}`, tone: "plain" } },
+    }));
+  }
+
+  /** A preview of a 250-row file carrying its first 100 rows. */
+  const LARGE_PREVIEW: ContentImportPreview = {
+    ...PREVIEW,
+    totalRows: 250,
+    columns: ["Title", "Category"],
+    rows: gridRows(0, 100),
+    newEntities: { ...PREVIEW.newEntities, categories: [] },
+  };
+
+  /** Body rows of the preview grid (the header row excluded). */
+  function bodyRows() {
+    return within(screen.getByRole("table", { name: "Import preview" }))
+      .getAllByRole("row")
+      .slice(1);
+  }
+
+  it("renders the first 100 rows and how many the file has", async () => {
+    const user = userEvent.setup();
+    renderFlow({ error: null, intent: "preview", preview: LARGE_PREVIEW });
+
+    await uploadFile(user);
+
+    await screen.findByRole("button", { name: "Import 250 assets" });
+    expect(bodyRows()).toHaveLength(100);
+    expect(screen.getByText("Showing 100 of 250 rows")).toBeInTheDocument();
+  });
+
+  it("loads the next page from the draft and appends it", async () => {
+    // why: "Load more" reads an api+ endpoint with fetch; there is no server
+    // in a component test, so the endpoint's documented payload stands in.
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: null,
+          rows: [
+            ...gridRows(100, 99),
+            {
+              key: "k199",
+              label: "201",
+              cells: {
+                Title: { value: "Asset 199", tone: "plain" },
+                Category: {
+                  value: "Fresh",
+                  tone: "new",
+                  note: "Will be created",
+                },
+              },
+            },
+          ],
+          nextOffset: 200,
+        })
+      )
+    );
+    const user = userEvent.setup();
+    renderFlow({ error: null, intent: "preview", preview: LARGE_PREVIEW });
+
+    await uploadFile(user);
+    await user.click(
+      await screen.findByRole("button", { name: "Load 100 more" })
+    );
+
+    await waitFor(() => expect(bodyRows()).toHaveLength(200));
+    expect(String(fetchSpy.mock.calls[0][0])).toBe(
+      "/api/asset-imports/import-1/preview-rows?offset=100"
+    );
+    expect(screen.getByText("Asset 199")).toBeInTheDocument();
+    expect(screen.getByText("Showing 200 of 250 rows")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Load 50 more" })
+    ).toBeInTheDocument();
+    // A loaded page with a new value brings the legend entry with it.
+    expect(
+      screen.getByText("New: will be created on import")
+    ).toBeInTheDocument();
+  });
+
+  it("shows the endpoint's refusal and keeps the rows it has", async () => {
+    // why: no server in a component test; the endpoint's error payload
+    // stands in for an expired draft.
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: {
+            message: "Import not found. Upload the file again.",
+            label: "Asset Import",
+          },
+        }),
+        { status: 404 }
+      )
+    );
+    const user = userEvent.setup();
+    renderFlow({ error: null, intent: "preview", preview: LARGE_PREVIEW });
+
+    await uploadFile(user);
+    await user.click(
+      await screen.findByRole("button", { name: "Load 100 more" })
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Import not found. Upload the file again."
+    );
+    expect(bodyRows()).toHaveLength(100);
+    expect(screen.getByRole("button", { name: "Load 100 more" })).toBeEnabled();
+  });
+
+  it("leaves the 'new' legend entry out when no loaded cell is new", async () => {
+    const user = userEvent.setup();
+    renderFlow({ error: null, intent: "preview", preview: LARGE_PREVIEW });
+
+    await uploadFile(user);
+
+    await screen.findByRole("button", { name: "Import 250 assets" });
+    expect(
+      screen.queryByText("New: will be created on import")
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows the 'new' legend entry when a cell will be created", async () => {
+    const user = userEvent.setup();
+    renderFlow({ error: null, intent: "preview", preview: PREVIEW });
+
+    await uploadFile(user);
+
+    expect(
+      await screen.findByText("New: will be created on import")
+    ).toBeInTheDocument();
   });
 });

@@ -108,7 +108,7 @@ request.
 upload ──> preview ──> confirm ──> [ queue: asset-import-queue ]
 (file)     DRAFT       QUEUED      PREPARE ──> ROWS x N ──> FINALIZE
 read-only  rows stored             claim QR,   100 rows     kit custody,
-           50-row grid             create      per job,     COMPLETED,
+           100-row grid            create      per job,     COMPLETED,
                                    entities    one tx       email
 ```
 
@@ -116,10 +116,12 @@ read-only  rows stored             claim QR,   100 rows     kit custody,
    parsed and validated in full without writing anything to the workspace
    (`validate.server.ts`). The parsed rows, each with a pre-allocated `assetId`,
    are stored on a new `AssetImport` row with status `DRAFT`
-   (`preview.server.ts`). The response carries the first 50 rows
+   (`preview.server.ts`). The response carries the first 100 rows
    (`PREVIEW_DISPLAY_LIMIT`) as a grid plus the entities that will be created
    (`missing-entities.server.ts`): categories, locations, tags, kits,
    custodians, custom fields and asset models the workspace does not have yet.
+   "Load more" under the grid reads the next 100 stored rows of the draft from
+   `GET /api/asset-imports/:importId/preview-rows?offset=N`.
 2. **Confirm** (`confirmAssetImport` in `service.server.ts`). The stored rows are
    validated again, because the workspace may have changed since the preview. A
    DRAFT older than 24 hours (`ASSET_IMPORT_DRAFT_TTL_HOURS`) cannot be
@@ -170,7 +172,7 @@ Constants live in `modules/asset-import/constants.ts`.
   reached are imported without an image and get a warning. The budget keeps a
   live step well inside its 14 minute lease, which is never renewed.
 - **Stall detection.** A `QUEUED` or `RUNNING` import whose `updatedAt` has not
-  moved for 30 minutes (`ASSET_IMPORT_STALL_MINUTES`) is marked `FAILED` the
+  moved for 60 minutes (`ASSET_IMPORT_STALL_MINUTES`) is marked `FAILED` the
   next time it is read (`markStalledImportIfNeeded`), so a dead job never shows
   as active forever, and an import whose first job never ran cannot hold the
   workspace's single active-import slot. Loading the import and claiming the
@@ -239,7 +241,8 @@ deleted entity in PREPARE and continues.
 - `constants.ts`: chunk size, poll interval, lease, stall, image budget, TTL, job options.
 - `types.ts`: stored row, resolved maps, warning, status and notice payloads.
 - `validate.server.ts`: read-only validation of a file or stored rows.
-- `preview.server.ts`: builds the DRAFT and the 50-row preview grid.
+- `preview.server.ts`: builds the DRAFT, the 100-row preview grid and the
+  further pages that `GET /api/asset-imports/:importId/preview-rows` loads.
 - `missing-entities.server.ts`: names of entities the import will create.
 - `service.server.ts`: confirm, resume, status reads, active-import lookup.
 - `worker.server.ts`: pg-boss queue, step runner, image downloads, retry handling.

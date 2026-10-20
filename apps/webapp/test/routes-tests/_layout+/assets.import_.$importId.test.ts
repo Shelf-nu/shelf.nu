@@ -79,9 +79,10 @@ async function load(importId = "imp-1") {
 describe("assets.import_.$importId", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    vi.mocked(requirePermission).mockResolvedValue(
-      permissionContext({}) as never
-    );
+    vi.mocked(requirePermission).mockResolvedValue({
+      ...permissionContext({}),
+      canUseBarcodes: true,
+    } as never);
   });
 
   describe("loader", () => {
@@ -137,6 +138,15 @@ describe("assets.import_.$importId", () => {
       const result = await resume();
 
       expect(result).toMatchObject({ success: true });
+      // The resumed job follows the workspace's barcode add-on as it is now.
+      expect(db.assetImport.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: "QUEUED",
+            canUseBarcodes: true,
+          }),
+        })
+      );
       expect(enqueueAssetImportStep).toHaveBeenCalledWith({
         importId: "imp-1",
         step: "PREPARE",

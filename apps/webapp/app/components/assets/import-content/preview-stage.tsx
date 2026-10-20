@@ -10,16 +10,25 @@
  * its heading when it mounts. A refused confirm is read per opening of the
  * dialog, so a refusal never shows on a later opening that did not cause it.
  *
+ * The preview payload carries the first page of grid rows; "Load more" reads
+ * the next page of the draft from the preview rows endpoint and appends it.
+ *
  * @see {@link file://./flow.tsx} Owner of the stage and the confirm fetcher
  * @see {@link file://./../import-preview/import-grid.tsx} Row grid
+ * @see {@link file://./../../../routes/api+/asset-imports.$importId.preview-rows.ts} Next-page endpoint
  */
-import { useState } from "react";
+import { useMemo, useReducer, useState } from "react";
+import useApiQuery from "~/hooks/use-api-query";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useFetcherOutcomeSinceOpen } from "~/hooks/use-fetcher-error-since-open";
 import type useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import { formatAssetCount } from "~/modules/asset-import/format";
-import type { ContentImportPreview } from "~/modules/asset-import/types";
+import type {
+  ContentImportPreview,
+  ContentImportPreviewRowsPage,
+  ImportGridRow,
+} from "~/modules/asset-import/types";
 import type { action } from "~/routes/_layout+/assets.import";
 import { AlertIcon } from "../../icons/library";
 import { Button } from "../../shared/button";
@@ -35,6 +44,69 @@ type ConfirmFetcher = Pick<
   ReturnType<typeof useFetcherWithReset<typeof action>>,
   "state" | "data" | "submit" | "reset"
 >;
+
+/** What the preview rows endpoint answers: a page, or an error payload. */
+type PreviewRowsResponse =
+  | (ContentImportPreviewRowsPage & { error: null })
+  | { error: { message: string } };
+
+/**
+ * Rows loaded with "Load more", beyond the first page in the preview payload.
+ * Tagged with the draft they belong to, so a different preview never shows
+ * another file's rows.
+ */
+type MoreRowsState = {
+  importId: string | null;
+  rows: ImportGridRow[];
+  /** Offset of the page being loaded, or `null` when nothing is loading. */
+  requestedOffset: number | null;
+  error: string | null;
+};
+
+/** Transitions of {@link MoreRowsState}. */
+type MoreRowsAction =
+  | { type: "request"; importId: string; offset: number }
+  | { type: "loaded"; importId: string; rows: ImportGridRow[] }
+  | { type: "failed"; importId: string; message: string };
+
+const NO_MORE_ROWS: MoreRowsState = {
+  importId: null,
+  rows: [],
+  requestedOffset: null,
+  error: null,
+};
+
+/**
+ * Reducer for the rows loaded with "Load more".
+ *
+ * @param state - Current state
+ * @param action - The transition to apply
+ * @returns The next state
+ */
+function moreRowsReducer(
+  state: MoreRowsState,
+  action: MoreRowsAction
+): MoreRowsState {
+  // Rows of another draft are dropped: a page belongs to one import only.
+  const current =
+    state.importId === action.importId
+      ? state
+      : { ...NO_MORE_ROWS, importId: action.importId };
+  switch (action.type) {
+    case "request":
+      return { ...current, requestedOffset: action.offset, error: null };
+    case "loaded":
+      return {
+        ...current,
+        rows: [...current.rows, ...action.rows],
+        requestedOffset: null,
+      };
+    case "failed":
+      return { ...current, requestedOffset: null, error: action.message };
+    default:
+      return state;
+  }
+}
 
 /** Props for {@link PreviewStage}. */
 type PreviewStageProps = {
@@ -71,6 +143,49 @@ export function PreviewStage({
   // mount effect without waiting a frame.
   const headingRef = useAutoFocus<HTMLHeadingElement>({
     deferToNextFrame: false,
+  });
+
+  const { importId } = preview;
+  const [moreRowsState, dispatchMoreRows] = useReducer(
+    moreRowsReducer,
+    NO_MORE_ROWS
+  );
+  const moreRows =
+    moreRowsState.importId === importId ? moreRowsState : NO_MORE_ROWS;
+  const rows = useMemo(
+    () => [...preview.rows, ...moreRows.rows],
+    [preview.rows, moreRows.rows]
+  );
+  const { requestedOffset } = moreRows;
+  const hasNewCells = rows.some((row) =>
+    Object.values(row.cells).some((cell) => cell.tone === "new")
+  );
+
+  useApiQuery<PreviewRowsResponse>({
+    api: `/api/asset-imports/${importId}/preview-rows`,
+    searchParams:
+      requestedOffset === null
+        ? undefined
+        : new URLSearchParams({ offset: String(requestedOffset) }),
+    enabled: requestedOffset !== null,
+    onSuccess: (response) => {
+      if (response.error) {
+        dispatchMoreRows({
+          type: "failed",
+          importId,
+          message: response.error.message,
+        });
+        return;
+      }
+      dispatchMoreRows({ type: "loaded", importId, rows: response.rows });
+    },
+    // A network or parse failure carries no message worth showing.
+    onError: () =>
+      dispatchMoreRows({
+        type: "failed",
+        importId,
+        message: "Something went wrong. Please try again.",
+      }),
   });
 
   return (
@@ -126,17 +241,33 @@ export function PreviewStage({
 
       <ImportGrid
         columns={preview.columns}
-        rows={preview.rows}
+        rows={rows}
         totalRows={totalRows}
+        onLoadMore={() =>
+          dispatchMoreRows({ type: "request", importId, offset: rows.length })
+        }
+        isLoadingMore={requestedOffset !== null}
         caption={`${formatAssetCount(totalRows)} will be created`}
         legend={[
-          { tone: "new", label: "Will be created" },
+          ...(hasNewCells
+            ? [
+                {
+                  tone: "new" as const,
+                  label: "New: will be created on import",
+                },
+              ]
+            : []),
           ...(totalValueWarnings > 0
             ? [{ tone: "warning" as const, label: "Check this value" }]
             : []),
         ]}
         ariaLabel="Import preview"
       />
+      {moreRows.error ? (
+        <p role="alert" className="-mt-2 mb-4 text-sm text-error-600">
+          Could not load more rows: {moreRows.error}
+        </p>
+      ) : null}
 
       <div className="my-4 flex flex-wrap items-center gap-3">
         <ConfirmImportDialog

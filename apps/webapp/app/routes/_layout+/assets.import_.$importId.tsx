@@ -84,7 +84,7 @@ export const action = async ({
   const { userId } = context.getSession();
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, canUseBarcodes } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
@@ -97,7 +97,7 @@ export const action = async ({
       z.object({ intent: z.enum(["resume"]) })
     );
 
-    await resumeAssetImport({ importId, organizationId });
+    await resumeAssetImport({ importId, organizationId, canUseBarcodes });
 
     return payload({ success: true });
   } catch (cause) {

@@ -60,6 +60,17 @@ function anotherImportRunning(): ShelfError {
   });
 }
 
+/** The 409 raised when a draft has already left DRAFT. */
+function alreadyConfirmed(): ShelfError {
+  return new ShelfError({
+    cause: null,
+    message: "This import has already been confirmed.",
+    label: "Asset Import",
+    status: 409,
+    shouldBeCaptured: false,
+  });
+}
+
 /**
  * Confirms a DRAFT import: re-validates its stored rows against the
  * workspace as it is now, marks it QUEUED and sends the PREPARE step.
@@ -67,6 +78,9 @@ function anotherImportRunning(): ShelfError {
  * @param args.importId - The draft to start
  * @param args.organizationId - Active workspace; the draft must belong to it
  * @param args.userId - The user confirming; must be the one who uploaded
+ * @param args.canUseBarcodes - Whether the workspace has the barcodes add-on
+ *   now. Used for the re-validation and stored on the import, so the job
+ *   follows today's entitlement rather than the one at upload.
  * @returns The id of the queued import
  * @throws {ShelfError} 404 when no such draft exists for this user and
  * workspace, 400 when the draft expired or its rows no longer validate, 409
@@ -78,18 +92,18 @@ export async function confirmAssetImport({
   importId,
   organizationId,
   userId,
+  canUseBarcodes,
 }: {
   importId: string;
   organizationId: Organization["id"];
   userId: User["id"];
+  canUseBarcodes: boolean;
 }): Promise<{ importId: string }> {
+  // Looked up without a status filter so a second press of Import (a double
+  // click, a retried request) is told the import already started instead of
+  // being told it does not exist.
   const draft = await db.assetImport.findFirst({
-    where: {
-      id: importId,
-      organizationId,
-      createdById: userId,
-      status: "DRAFT",
-    },
+    where: { id: importId, organizationId, createdById: userId },
   });
 
   if (!draft) {
@@ -100,6 +114,10 @@ export async function confirmAssetImport({
       status: 404,
       shouldBeCaptured: false,
     });
+  }
+
+  if (draft.status !== "DRAFT") {
+    throw alreadyConfirmed();
   }
 
   const ageMs = Date.now() - draft.createdAt.getTime();
@@ -128,7 +146,7 @@ export async function confirmAssetImport({
     data: draft.rows as unknown as StoredImportRow[],
     organizationId,
     userId,
-    canUseBarcodes: draft.canUseBarcodes,
+    canUseBarcodes,
   });
 
   // The partial unique index on active imports turns a lost race with another
@@ -137,7 +155,12 @@ export async function confirmAssetImport({
   try {
     claimed = await db.assetImport.updateMany({
       where: { id: importId, organizationId, status: "DRAFT" },
-      data: { status: "QUEUED", phase: "PREPARE", confirmedAt: new Date() },
+      data: {
+        status: "QUEUED",
+        phase: "PREPARE",
+        confirmedAt: new Date(),
+        canUseBarcodes,
+      },
     });
   } catch (cause) {
     if (isActiveImportConflict(cause)) {
@@ -147,13 +170,7 @@ export async function confirmAssetImport({
   }
 
   if (claimed.count === 0) {
-    throw new ShelfError({
-      cause: null,
-      message: "This import has already been confirmed.",
-      label: "Asset Import",
-      status: 409,
-      shouldBeCaptured: false,
-    });
+    throw alreadyConfirmed();
   }
 
   try {
@@ -177,6 +194,8 @@ export async function confirmAssetImport({
  *
  * @param args.importId - The failed import
  * @param args.organizationId - Active workspace; the import must belong to it
+ * @param args.canUseBarcodes - Whether the workspace has the barcodes add-on
+ *   now, stored on the import so the resumed job follows today's entitlement
  * @returns The id of the queued import
  * @throws {ShelfError} 404 when no failed import with this id exists in the
  * workspace, 409 when another import is queued or running in the workspace or
@@ -186,9 +205,11 @@ export async function confirmAssetImport({
 export async function resumeAssetImport({
   importId,
   organizationId,
+  canUseBarcodes,
 }: {
   importId: string;
   organizationId: Organization["id"];
+  canUseBarcodes: boolean;
 }): Promise<{ importId: string }> {
   const failed = await db.assetImport.findFirst({
     where: { id: importId, organizationId, status: "FAILED" },
@@ -223,6 +244,7 @@ export async function resumeAssetImport({
         phase: "PREPARE",
         lockedUntil: null,
         errorMessage: null,
+        canUseBarcodes,
       },
     });
   } catch (cause) {
@@ -329,7 +351,9 @@ async function findVisibleImportRow({
 }
 
 /**
- * Reads the newest import the app shell should surface for a viewer.
+ * Reads the import the app shell should surface for a viewer. A queued or
+ * running import of the workspace always wins over the viewer's own recently
+ * finished one, so a finished import never hides another member's live one.
  *
  * @param args.userId - The viewer
  * @param args.organizationId - Active workspace
@@ -345,17 +369,19 @@ async function findActiveImportRow({
   organizationId: Organization["id"];
   recentSince: Date;
 }): Promise<StatusRow | null> {
+  const active = await db.assetImport.findFirst({
+    where: { organizationId, status: { in: ["QUEUED", "RUNNING"] } },
+    orderBy: { updatedAt: "desc" },
+    select: STATUS_SELECT,
+  });
+  if (active) return active as StatusRow;
+
   return db.assetImport.findFirst({
     where: {
       organizationId,
-      OR: [
-        { status: { in: ["QUEUED", "RUNNING"] } },
-        {
-          status: { in: ["COMPLETED", "FAILED"] },
-          createdById: userId,
-          updatedAt: { gt: recentSince },
-        },
-      ],
+      status: { in: ["COMPLETED", "FAILED"] },
+      createdById: userId,
+      updatedAt: { gt: recentSince },
     },
     orderBy: { updatedAt: "desc" },
     select: STATUS_SELECT,

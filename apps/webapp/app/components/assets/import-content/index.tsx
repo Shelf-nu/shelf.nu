@@ -6,26 +6,105 @@
  * confirm flow. Confirming queues a background import and leaves this page for
  * its progress view.
  *
+ * One import runs per workspace at a time. While one is queued or running the
+ * page shows its live progress at the top and holds the upload form; both
+ * clear as soon as the polled status reaches COMPLETED or FAILED.
+ *
  * @see {@link file://./flow.tsx} Upload, preview and confirm stages
  * @see {@link file://./../../../routes/_layout+/assets.import.tsx} Route handler
  */
+import { formatCount } from "~/modules/asset-import/format";
+import type { AssetImportStatusPayload } from "~/modules/asset-import/types";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { ContentImportFlow } from "./flow";
+import { isActiveStatus, useAssetImportStatus } from "./import-progress";
 import Icon from "../../icons/icon";
 import { Button } from "../../shared/button";
 import { WarningBox } from "../../shared/warning-box";
 import When from "../../when/when";
 
+/** Props for {@link ImportContent}. */
+type ImportContentProps = {
+  /** The workspace's QUEUED or RUNNING import from the loader, if any. */
+  runningImport: AssetImportStatusPayload | null;
+};
+
 /**
- * Main content component for the CSV asset import page.
- * Displays instructions, rules, and embeds the FileForm for upload.
+ * Main content component for the CSV asset import page. Displays
+ * instructions, rules and the upload flow, held while another import runs.
+ *
+ * @param props - See {@link ImportContentProps}
  */
-export const ImportContent = () => {
+export const ImportContent = ({ runningImport }: ImportContentProps) =>
+  runningImport ? (
+    <ImportContentWithRunningImport runningImport={runningImport} />
+  ) : (
+    <ImportContentBody runningStatus={null} />
+  );
+
+/**
+ * Follows the running import and passes its live status down while it is
+ * still active. Split out so polling only runs when there is an import.
+ *
+ * @param props.runningImport - The import from the loader
+ */
+function ImportContentWithRunningImport({
+  runningImport,
+}: {
+  runningImport: AssetImportStatusPayload;
+}) {
+  const status = useAssetImportStatus(runningImport.id, runningImport);
+  return (
+    <ImportContentBody
+      runningStatus={isActiveStatus(status.status) ? status : null}
+    />
+  );
+}
+
+/**
+ * Notice that another import is running, with a link to its progress page.
+ * Not a live region: the count changes on every poll.
+ *
+ * @param props.status - Live status of the running import
+ */
+function RunningImportBox({ status }: { status: AssetImportStatusPayload }) {
+  return (
+    <div className="my-4 flex flex-col gap-3 rounded border border-primary-200 bg-primary-25 p-3 text-sm text-primary-700 sm:flex-row sm:items-center sm:justify-between">
+      <p>
+        An import is running ({formatCount(status.processedRows)} of{" "}
+        {formatCount(status.totalRows)}). You can upload another file when it
+        finishes.
+      </p>
+      <Button
+        to={`/assets/import/${status.id}`}
+        variant="secondary"
+        size="xs"
+        className="shrink-0"
+      >
+        View progress
+      </Button>
+    </div>
+  );
+}
+
+/**
+ * The page body.
+ *
+ * @param props.runningStatus - Live status of an active import that holds the
+ * upload form, or null when the form is open
+ */
+function ImportContentBody({
+  runningStatus,
+}: {
+  runningStatus: AssetImportStatusPayload | null;
+}) {
   const { canUseBarcodes } = useBarcodePermissions();
 
   return (
     <div className="w-full text-left">
       <h3>Import assets</h3>
+
+      {runningStatus ? <RunningImportBox status={runningStatus} /> : null}
 
       {/* Intent fork */}
       <div className="my-4 flex gap-3 rounded-md border border-gray-200 bg-gray-50 p-4">
@@ -320,7 +399,7 @@ export const ImportContent = () => {
         .
       </p>
 
-      <ContentImportFlow />
+      <ContentImportFlow uploadBlocked={!!runningStatus} />
     </div>
   );
-};
+}

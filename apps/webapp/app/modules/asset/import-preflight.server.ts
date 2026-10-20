@@ -153,17 +153,28 @@ export function validateContentImportRows({
 
   for (const [index, asset] of data.entries()) {
     const row = spreadsheetRowNumber(index);
-    const rowLabel = `asset "${asset.title}"`;
+    const title = typeof asset.title === "string" ? asset.title.trim() : "";
+    // A row with no title is named by its line so every message still points
+    // the user at the right place.
+    const rowLabel = title ? `asset "${title}"` : `the asset on row ${row}`;
+    const assetLabel = title ? `Asset "${title}"` : `The asset on row ${row}`;
 
-    // The importer stores the cell as it is, untrimmed, so the cell is what
-    // gets measured.
+    if (!title) {
+      errors.push({
+        row,
+        title: "Title required",
+        message: `The asset on row ${row} has no title. Fill in the title column and import again.`,
+      });
+    }
+
+    // Measured as the importer stores it: the parser has already trimmed it.
     const description = cell(asset, "description") ?? "";
     if (isAssetDescriptionTooLong(description)) {
       const length = countCharacters(description).toLocaleString("en-US");
       errors.push({
         row,
         title: "Description too long",
-        message: `Asset "${asset.title}": the description is ${length} characters, but the maximum is ${ASSET_DESCRIPTION_MAX_LENGTH_LABEL}. Shorten it and import again.`,
+        message: `${assetLabel}: the description is ${length} characters, but the maximum is ${ASSET_DESCRIPTION_MAX_LENGTH_LABEL}. Shorten it and import again.`,
       });
     }
 
@@ -199,7 +210,7 @@ export function validateContentImportRows({
       errors.push({
         row,
         title: "Asset model not allowed",
-        message: `Asset "${asset.title}": asset models can only be linked to ${ASSET_TYPE_ADJECTIVES.INDIVIDUAL} assets. Remove the assetModel cell, or set the type column to INDIVIDUAL.`,
+        message: `${assetLabel}: asset models can only be linked to ${ASSET_TYPE_ADJECTIVES.INDIVIDUAL} assets. Remove the assetModel cell, or set the type column to INDIVIDUAL.`,
       });
     }
 
@@ -269,6 +280,25 @@ export function validateContentImportRows({
           type: definition.type,
           header: key,
         });
+      }
+
+      // `buildCustomFieldValue` skips any other word, so a typo such as
+      // "maybe" would import silently as an empty value. Blank stays allowed.
+      const rawValue: unknown = asset[key];
+      if (
+        definition.type === CustomFieldType.BOOLEAN &&
+        typeof rawValue === "string" &&
+        rawValue.trim() !== "" &&
+        !["yes", "no"].includes(rawValue.trim().toLowerCase())
+      ) {
+        errors.push({
+          row,
+          title: "Invalid custom field value",
+          message: `Custom field "${
+            definition.name
+          }" accepts only yes or no. The value we found is: "${rawValue.trim()}".`,
+        });
+        continue;
       }
 
       try {

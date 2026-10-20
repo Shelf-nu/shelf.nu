@@ -171,8 +171,14 @@ export const csvDataFromRequest = async ({
       throw new ShelfError({
         cause,
         title: "File too large",
-        message:
-          "The CSV file is too large. Please reduce the file size by removing empty rows or splitting it into smaller files and try again.",
+        message: maxFileSize
+          ? `The CSV file is larger than ${(
+              maxFileSize /
+              (1024 * 1024)
+            ).toLocaleString("en-US", {
+              maximumFractionDigits: 1,
+            })} MB. Split it into smaller files or remove empty rows and try again.`
+          : "The CSV file is too large. Please reduce the file size by removing empty rows or splitting it into smaller files and try again.",
         label: "CSV",
         status: 400,
         shouldBeCaptured: false,

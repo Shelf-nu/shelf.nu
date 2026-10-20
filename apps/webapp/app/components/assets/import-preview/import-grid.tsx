@@ -12,11 +12,14 @@
 import type React from "react";
 import { useCallback, useId, useState } from "react";
 import { createPortal } from "react-dom";
+import { PREVIEW_DISPLAY_LIMIT } from "~/modules/asset-import/constants";
+import { formatCount } from "~/modules/asset-import/format";
 import type {
   ImportGridCell,
   ImportGridRow,
 } from "~/modules/asset-import/types";
 import { AlertIcon } from "../../icons/library";
+import { Button } from "../../shared/button";
 
 /** Tailwind classes per tone: cell background, cell text, and legend swatch. */
 const TONE_CLASSES: Record<
@@ -41,11 +44,13 @@ const TONE_CLASSES: Record<
     tooltipText: "text-blue-700",
     swatch: "bg-amber-50 ring-1 ring-amber-200",
   },
+  // warning-700 on warning-50 (and on the white tooltip) clears WCAG AA for
+  // small text; warning-600 does not, so warning text never goes lighter.
   warning: {
-    bg: "bg-red-50",
-    text: "text-red-700",
-    tooltipText: "text-red-700",
-    swatch: "bg-red-50 ring-1 ring-red-200",
+    bg: "bg-warning-50",
+    text: "text-warning-700",
+    tooltipText: "text-warning-700",
+    swatch: "bg-warning-50 ring-1 ring-warning-200",
   },
   new: {
     bg: "bg-green-50",
@@ -63,6 +68,13 @@ type ImportGridProps = {
   rows: ImportGridRow[];
   /** Rows in the whole file. A footer notes the truncation when above `rows.length`. */
   totalRows: number;
+  /**
+   * Loads the next page of rows. When set, the truncation footer offers a
+   * "Load more" button; without it the footer is a note only.
+   */
+  onLoadMore?: () => void;
+  /** True while the page requested by `onLoadMore` is loading. */
+  isLoadingMore?: boolean;
   /** Summary line shown above the table. */
   caption: React.ReactNode;
   /** Legend entries. A `plain` entry renders the "no value" dash glyph. */
@@ -78,7 +90,8 @@ type HoveredCell = { rowKey: string; col: string };
 
 /**
  * Renders the import preview grid with tone-colored cells, a viewport-aware
- * tooltip, a truncation footer, and a legend.
+ * tooltip, a truncation footer (with an optional "Load more" button), and a
+ * legend.
  *
  * @param props - See {@link ImportGridProps}
  * @returns The grid, its caption and legend
@@ -87,6 +100,8 @@ export function ImportGrid({
   columns,
   rows,
   totalRows,
+  onLoadMore,
+  isLoadingMore = false,
   caption,
   legend,
   labelHeading = "Row",
@@ -214,7 +229,7 @@ export function ImportGrid({
                         </div>
                       ) : null}
                       {showsWarning ? (
-                        <div className="truncate text-[10px] text-red-500">
+                        <div className="truncate text-[10px] text-warning-700">
                           <AlertIcon className="inline-block size-4" />{" "}
                           {cell.note}
                         </div>
@@ -246,7 +261,7 @@ export function ImportGrid({
                                   <span
                                     className={`font-medium ${
                                       cell.tone === "warning"
-                                        ? "text-red-600"
+                                        ? "text-warning-700"
                                         : "text-blue-600"
                                     }`}
                                   >
@@ -260,7 +275,7 @@ export function ImportGrid({
                               <p
                                 className={`mt-1 ${
                                   cell.tone === "warning"
-                                    ? "text-red-600"
+                                    ? "text-warning-700"
                                     : tone.tooltipText
                                 }`}
                               >
@@ -285,9 +300,26 @@ export function ImportGrid({
       </div>
 
       {rows.length < totalRows ? (
-        <p className="mt-2 text-xs text-gray-500">
-          Showing the first {rows.length} of {totalRows} rows
-        </p>
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          <p className="text-xs text-gray-500">
+            Showing {formatCount(rows.length)} of {formatCount(totalRows)} rows
+          </p>
+          {onLoadMore ? (
+            <Button
+              type="button"
+              variant="secondary"
+              size="xs"
+              onClick={onLoadMore}
+              disabled={isLoadingMore}
+            >
+              {isLoadingMore
+                ? "Loading..."
+                : `Load ${formatCount(
+                    Math.min(PREVIEW_DISPLAY_LIMIT, totalRows - rows.length)
+                  )} more`}
+            </Button>
+          ) : null}
+        </div>
       ) : null}
 
       {/* Legend */}

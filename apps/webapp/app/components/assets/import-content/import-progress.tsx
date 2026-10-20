@@ -2,7 +2,8 @@
  * @file Progress view of a background asset import.
  *
  * `useAssetImportStatus` polls the status endpoint while an import is queued
- * or running and the tab is visible. `ImportProgress` renders the status:
+ * or running and the tab is visible, through `usePollWhileVisible`, which the
+ * other import surfaces share. `ImportProgress` renders the status:
  * waiting, a progress bar with the current phase, the finished summary with
  * its warnings, or the failure with a resume button.
  *
@@ -29,8 +30,14 @@ import { Button } from "../../shared/button";
 import { ImportRowErrorsTable } from "../../shared/import-row-errors-table";
 import { Progress } from "../../shared/progress";
 
-/** Statuses during which the import still moves and the page keeps polling. */
-function isActiveStatus(status: AssetImportStatusPayload["status"]) {
+/**
+ * True for the statuses during which the import still moves and its views
+ * keep polling.
+ *
+ * @param status - An import status
+ * @returns Whether the import is QUEUED or RUNNING
+ */
+export function isActiveStatus(status: AssetImportStatusPayload["status"]) {
   return status === "QUEUED" || status === "RUNNING";
 }
 
@@ -62,7 +69,6 @@ export function useAssetImportStatus(
   } | null>(null);
   const status = polled && polled.base === initial ? polled.value : initial;
   const active = isActiveStatus(status.status);
-  const [visible, setVisible] = useState(true);
 
   const { refetch } = useApiQuery<StatusResponse>({
     api: `/api/asset-imports/${importId}`,
@@ -73,6 +79,22 @@ export function useAssetImportStatus(
       }
     },
   });
+
+  usePollWhileVisible(refetch, active);
+
+  return status;
+}
+
+/**
+ * Calls `refetch` every `ASSET_IMPORT_POLL_INTERVAL_SECONDS` while `active`
+ * and the tab is visible, and once as soon as a hidden tab becomes visible
+ * again. Shared by every import surface that follows a running import.
+ *
+ * @param refetch - Starts a new request (e.g. `useApiQuery`'s `refetch`)
+ * @param active - Whether there is still something to follow
+ */
+export function usePollWhileVisible(refetch: () => void, active: boolean) {
+  const [visible, setVisible] = useState(true);
 
   useEffect(() => {
     const sync = () => setVisible(document.visibilityState === "visible");
@@ -96,8 +118,6 @@ export function useAssetImportStatus(
     refetch,
     active && visible ? ASSET_IMPORT_POLL_INTERVAL_SECONDS : undefined
   );
-
-  return status;
 }
 
 /**

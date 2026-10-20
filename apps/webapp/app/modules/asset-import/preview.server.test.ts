@@ -1,7 +1,7 @@
 // @vitest-environment node
 /**
  * Tests for the import preview builder: what the draft stores, what the
- * preview returns and how cells are marked.
+ * preview returns, how cells are marked and how further pages are read.
  *
  * @see {@link file://./preview.server.ts}
  */
@@ -10,14 +10,22 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import { findMissingImportEntities } from "./missing-entities.server";
-import { buildContentImportPreview, toImportGridRows } from "./preview.server";
+import {
+  buildContentImportPreview,
+  getContentImportPreviewRows,
+  toImportGridRows,
+} from "./preview.server";
 import type { ImportNewEntities } from "./types";
 import { validateContentImportFile } from "./validate.server";
 
 // why: the draft is written to the database; `$transaction` runs its callback
 // against the same mock so the calls inside it can be asserted.
 vi.mock("~/database/db.server", () => {
-  const assetImport = { create: vi.fn(), deleteMany: vi.fn() };
+  const assetImport = {
+    create: vi.fn(),
+    deleteMany: vi.fn(),
+    findFirst: vi.fn(),
+  };
   const dbMock = {
     assetImport,
     $transaction: vi.fn(),
@@ -230,5 +238,116 @@ describe("toImportGridRows", () => {
       tone: "new",
       note: "Will be created",
     });
+  });
+});
+
+describe("getContentImportPreviewRows", () => {
+  /** `count` stored rows, numbered from spreadsheet row 2. */
+  const storedRows = (count: number) =>
+    Array.from({ length: count }, (_, index) => ({
+      key: `k${index}`,
+      assetId: `a${index}`,
+      rowNumber: index + 2,
+      title: `Asset ${index}`,
+      category: "Tools",
+    }));
+
+  const pageArgs = { importId: "imp", organizationId: "org", userId: "u" };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(findMissingImportEntities).mockResolvedValue(emptyEntities);
+  });
+
+  it("reads only the rows of the viewer's draft in this workspace", async () => {
+    vi.mocked(db.assetImport.findFirst).mockResolvedValue({
+      rows: storedRows(3),
+    } as never);
+
+    await getContentImportPreviewRows({ ...pageArgs, offset: 0 });
+
+    expect(db.assetImport.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "imp",
+        organizationId: "org",
+        createdById: "u",
+        status: "DRAFT",
+      },
+      select: { rows: true },
+    });
+  });
+
+  it("returns one page from the offset and the offset of the next page", async () => {
+    vi.mocked(db.assetImport.findFirst).mockResolvedValue({
+      rows: storedRows(250),
+    } as never);
+
+    const page = await getContentImportPreviewRows({
+      ...pageArgs,
+      offset: 100,
+    });
+
+    expect(page.rows).toHaveLength(100);
+    expect(page.rows[0]).toEqual({
+      key: "k100",
+      label: "102",
+      cells: {
+        title: { value: "Asset 100", tone: "plain" },
+        category: { value: "Tools", tone: "plain" },
+      },
+    });
+    expect(page.rows[99].key).toBe("k199");
+    expect(page.nextOffset).toBe(200);
+  });
+
+  it("returns a null next offset when the page reaches the end of the file", async () => {
+    vi.mocked(db.assetImport.findFirst).mockResolvedValue({
+      rows: storedRows(250),
+    } as never);
+
+    const page = await getContentImportPreviewRows({
+      ...pageArgs,
+      offset: 200,
+    });
+
+    expect(page.rows).toHaveLength(50);
+    expect(page.nextOffset).toBeNull();
+  });
+
+  it("marks names the import will create, looked up for this page only", async () => {
+    const rows = storedRows(150);
+    rows[120].category = "Fresh";
+    vi.mocked(db.assetImport.findFirst).mockResolvedValue({ rows } as never);
+    vi.mocked(findMissingImportEntities).mockResolvedValue({
+      ...emptyEntities,
+      categories: ["Fresh"],
+    });
+
+    const page = await getContentImportPreviewRows({
+      ...pageArgs,
+      offset: 100,
+    });
+
+    expect(vi.mocked(findMissingImportEntities).mock.calls[0][0]).toEqual({
+      data: rows.slice(100, 150),
+      organizationId: "org",
+    });
+    expect(page.rows[20].cells.category).toEqual({
+      value: "Fresh",
+      tone: "new",
+      note: "Will be created",
+    });
+  });
+
+  it("throws a 404 when there is no such draft", async () => {
+    vi.mocked(db.assetImport.findFirst).mockResolvedValue(null);
+
+    await expect(
+      getContentImportPreviewRows({ ...pageArgs, offset: 0 })
+    ).rejects.toMatchObject({
+      status: 404,
+      message: "Import not found. Upload the file again.",
+    });
+    expect(findMissingImportEntities).not.toHaveBeenCalled();
   });
 });

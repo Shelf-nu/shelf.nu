@@ -8,6 +8,7 @@
  * @see {@link file://./service.server.ts}
  * @see {@link file://./validate.server.ts}
  * @see {@link file://./missing-entities.server.ts}
+ * @see {@link file://./../../routes/api+/asset-imports.$importId.preview-rows.ts}
  */
 import type { Organization, Prisma, User } from "@prisma/client";
 import { db } from "~/database/db.server";
@@ -15,6 +16,7 @@ import { ASSET_CSV_HEADERS } from "~/modules/asset/utils.server";
 import { getExternalQrValueWarning } from "~/modules/barcode/validation";
 import { LEGACY_CUID_LENGTH } from "~/utils/constants";
 import { decodeCsvListCell } from "~/utils/csv-cells";
+import { ShelfError } from "~/utils/error";
 import { id } from "~/utils/id/id.server";
 import {
   MAX_REPORTED_ROW_ERRORS,
@@ -25,6 +27,7 @@ import { PREVIEW_DISPLAY_LIMIT } from "./constants";
 import { findMissingImportEntities } from "./missing-entities.server";
 import type {
   ContentImportPreview,
+  ContentImportPreviewRowsPage,
   ImportGridCell,
   ImportGridRow,
   ImportNewEntities,
@@ -238,5 +241,85 @@ export async function buildContentImportPreview({
         (row) => row.type?.trim().toUpperCase() === "QUANTITY_TRACKED"
       ).length,
     },
+  };
+}
+
+/** Keys a stored row carries that are not CSV columns. */
+const NON_COLUMN_ROW_KEYS = new Set(["key", "assetId", "rowNumber", ""]);
+
+/**
+ * The CSV columns present on a stored row, in file order. A row stores one
+ * key per header, so this is the preview's column list for that row.
+ *
+ * @param row - Stored import row
+ * @returns Column names, without the keys the import adds
+ */
+function storedRowColumns(row: StoredImportRow): string[] {
+  return Object.keys(row).filter((key) => !NON_COLUMN_ROW_KEYS.has(key));
+}
+
+/**
+ * Reads one further page of preview grid rows from the viewer's DRAFT import.
+ * The preview payload carries the first {@link PREVIEW_DISPLAY_LIMIT} rows;
+ * "Load more" calls this with the number of rows already shown.
+ *
+ * Cells are marked against the workspace as it is now, so a name created
+ * since the upload no longer shows as new.
+ *
+ * @param args.importId - The draft import
+ * @param args.organizationId - Active workspace
+ * @param args.userId - Viewer; only the user who uploaded a draft can read it
+ * @param args.offset - Index of the first stored row to return
+ * @returns Up to {@link PREVIEW_DISPLAY_LIMIT} grid rows and the offset of the
+ *   next page, or `null` when this page reaches the end of the file
+ * @throws {ShelfError} 404 when the draft is not the viewer's, not in this
+ *   workspace, or no longer a draft
+ */
+export async function getContentImportPreviewRows({
+  importId,
+  organizationId,
+  userId,
+  offset,
+}: {
+  importId: string;
+  organizationId: Organization["id"];
+  userId: User["id"];
+  offset: number;
+}): Promise<ContentImportPreviewRowsPage> {
+  const draft = await db.assetImport.findFirst({
+    where: {
+      id: importId,
+      organizationId,
+      createdById: userId,
+      status: "DRAFT",
+    },
+    select: { rows: true },
+  });
+
+  if (!draft) {
+    throw new ShelfError({
+      cause: null,
+      message: "Import not found. Upload the file again.",
+      label: "Asset Import",
+      status: 404,
+      shouldBeCaptured: false,
+    });
+  }
+
+  const rows = (draft.rows ?? []) as unknown as StoredImportRow[];
+  const slice = rows.slice(offset, offset + PREVIEW_DISPLAY_LIMIT);
+  const newEntities = await findMissingImportEntities({
+    data: slice,
+    organizationId,
+  });
+  const nextOffset = offset + slice.length;
+
+  return {
+    // Each row is mapped with its own columns; the grid looks cells up by
+    // column name, so the client's column list decides what is shown.
+    rows: slice.flatMap((row) =>
+      toImportGridRows([row], storedRowColumns(row), newEntities, 1)
+    ),
+    nextOffset: nextOffset < rows.length ? nextOffset : null,
   };
 }

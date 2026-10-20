@@ -137,3 +137,10 @@ export type ContentImportPreview = {
   /** How many value warnings the whole file has, listed or not. */
   totalValueWarnings: number;
 };
+
+/** One further page of preview grid rows, read after the preview payload. */
+export type ContentImportPreviewRowsPage = {
+  rows: ImportGridRow[];
+  /** Offset to request next, or `null` when the file has no more rows. */
+  nextOffset: number | null;
+};

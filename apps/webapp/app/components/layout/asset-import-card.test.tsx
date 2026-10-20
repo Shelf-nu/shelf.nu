@@ -1,16 +1,17 @@
 /**
  * AssetImportCard - unit tests
  *
- * Covers who sees the card, the progress line and link, the hidden status
- * pages, dismissal, and resilience to a throwing `localStorage`.
+ * Covers who sees the card, the progress line and link, the hidden import
+ * pages, closing in every state, the auto-dismiss of a finished import, and
+ * resilience to a throwing `localStorage`.
  *
  * @see {@link file://./asset-import-card.tsx}
  */
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AssetImportStatusPayload } from "~/modules/asset-import/types";
-import { AssetImportCard } from "./asset-import-card";
+import { AUTO_DISMISS_MS, AssetImportCard } from "./asset-import-card";
 
 // why: the real hook polls the network; the card only needs the status passed in.
 vi.mock("../assets/import-content/import-progress", () => ({
@@ -46,6 +47,7 @@ function renderCard(initial: AssetImportStatusPayload, path = "/assets") {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   window.localStorage.clear();
 });
@@ -66,18 +68,87 @@ describe("AssetImportCard", () => {
     );
   });
 
-  it("renders nothing on the import status pages", () => {
-    const { container } = renderCard(status(), "/assets/import/abc");
-    expect(container).toBeEmptyDOMElement();
+  it.each(["/assets/import", "/assets/import/", "/assets/import/abc"])(
+    "renders nothing on %s",
+    (path) => {
+      const { container } = renderCard(status(), path);
+      expect(container).toBeEmptyDOMElement();
+    }
+  );
+
+  it("still shows on the bulk update import page", async () => {
+    renderCard(status(), "/assets/import-update");
+    expect(await screen.findByText("300 of 965")).toBeInTheDocument();
   });
 
-  it("hides a finished card when it is dismissed", async () => {
+  it("hides a finished card when it is closed", async () => {
     renderCard(status({ status: "COMPLETED", processedRows: 965 }));
 
     expect(await screen.findByText("Import complete")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Close import progress" })
+    );
 
     expect(screen.queryByText("Import complete")).not.toBeInTheDocument();
+    expect(window.localStorage.getItem("assetImportCard:dismissed")).toBe(
+      "abc"
+    );
+  });
+
+  it("can be closed while the import is running", async () => {
+    renderCard(status());
+
+    await screen.findByText("300 of 965");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Close import progress" })
+    );
+
+    expect(screen.queryByText("Importing assets")).not.toBeInTheDocument();
+  });
+
+  it("closes a finished card by itself after the delay", async () => {
+    vi.useFakeTimers();
+    renderCard(status({ status: "COMPLETED", processedRows: 965 }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByText("Import complete")).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(AUTO_DISMISS_MS);
+    });
+
+    expect(screen.queryByText("Import complete")).not.toBeInTheDocument();
+    expect(window.localStorage.getItem("assetImportCard:dismissed")).toBe(
+      "abc"
+    );
+  });
+
+  it("does not close itself while hovered", async () => {
+    vi.useFakeTimers();
+    renderCard(status({ status: "FAILED", errorMessage: "boom" }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    fireEvent.mouseEnter(
+      screen.getByRole("region", { name: "Asset import progress" })
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(AUTO_DISMISS_MS * 2);
+    });
+
+    expect(screen.getByText("Import stopped")).toBeInTheDocument();
+  });
+
+  it("does not close a running import by itself", async () => {
+    vi.useFakeTimers();
+    renderCard(status());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(AUTO_DISMISS_MS * 2);
+    });
+
+    expect(screen.getByText("Importing assets")).toBeInTheDocument();
   });
 
   it("still renders and dismisses when localStorage throws", async () => {
@@ -91,7 +162,9 @@ describe("AssetImportCard", () => {
     renderCard(status({ status: "FAILED", errorMessage: "boom" }));
 
     expect(await screen.findByText("Import stopped")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Close import progress" })
+    );
     expect(screen.queryByText("Import stopped")).not.toBeInTheDocument();
   });
 

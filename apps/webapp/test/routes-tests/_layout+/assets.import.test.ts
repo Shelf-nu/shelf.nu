@@ -3,8 +3,10 @@
  * Asset import upload and confirm action.
  *
  * Pins the `preview` and `confirm` intents: the permission gate, the preview
- * payload, the redirect to the progress page, and that a draft from another
- * workspace is never confirmed. The real import service runs against a mocked
+ * payload, the empty-file errors (shown on the page, never as a toast), the
+ * redirect to the progress page, and that a draft from another workspace is
+ * never confirmed. The loader is pinned for the running import it hands the
+ * page, which holds the upload form. The real import service runs against a mocked
  * database so the workspace scoping is exercised, not assumed.
  *
  * @see {@link file://./../../../app/routes/_layout+/assets.import.tsx}
@@ -12,12 +14,13 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { permissionContext } from "@helpers/role-access";
-import { createActionArgs } from "@mocks/remix";
+import { createActionArgs, createLoaderArgs } from "@mocks/remix";
 
 import { db } from "~/database/db.server";
 import { buildContentImportPreview } from "~/modules/asset-import/preview.server";
-import { action } from "~/routes/_layout+/assets.import";
+import { action, loader } from "~/routes/_layout+/assets.import";
 import { csvDataFromRequest } from "~/utils/csv.server";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError } from "~/utils/error";
 import { requirePermission } from "~/utils/roles.server";
 
@@ -57,6 +60,11 @@ vi.mock("~/modules/asset-import/validate.server", () => ({
 // why: the failure helper sends email over the network.
 vi.mock("~/emails/asset-import-finished", () => ({
   sendAssetImportFinishedEmail: vi.fn(),
+}));
+
+// why: toasts travel over server-sent events; only whether one is sent matters.
+vi.mock("~/utils/emitter/send-notification.server", () => ({
+  sendNotification: vi.fn(),
 }));
 
 type ActionResult = { init?: { status?: number }; data?: unknown };
@@ -106,7 +114,22 @@ describe("assets.import action", () => {
     );
   });
 
-  it("refuses an empty file", async () => {
+  it("refuses an empty file without a toast", async () => {
+    vi.mocked(csvDataFromRequest).mockResolvedValue([]);
+
+    const result = (await run(
+      new URLSearchParams({ intent: "preview" })
+    )) as ActionResult;
+
+    expect(result.init?.status).toBe(400);
+    expect(result.data).toMatchObject({
+      error: { message: "This file is empty." },
+    });
+    expect(buildContentImportPreview).not.toHaveBeenCalled();
+    expect(sendNotification).not.toHaveBeenCalled();
+  });
+
+  it("refuses a file with headers but no assets", async () => {
     vi.mocked(csvDataFromRequest).mockResolvedValue([["title"]]);
 
     const result = (await run(
@@ -114,13 +137,22 @@ describe("assets.import action", () => {
     )) as ActionResult;
 
     expect(result.init?.status).toBe(400);
+    expect(result.data).toMatchObject({
+      error: {
+        title: "No assets in file",
+        message:
+          "This file has headers but no assets. Add at least one row below the headers.",
+      },
+    });
     expect(buildContentImportPreview).not.toHaveBeenCalled();
+    expect(sendNotification).not.toHaveBeenCalled();
   });
 
   it("queues a confirmed draft and redirects to its progress page", async () => {
     vi.mocked(db.assetImport.findFirst)
       .mockResolvedValueOnce({
         id: "imp-1",
+        status: "DRAFT",
         rows: [],
         canUseBarcodes: false,
         createdAt: new Date(),
@@ -134,6 +166,16 @@ describe("assets.import action", () => {
 
     expect(result.status).toBe(302);
     expect(result.headers.get("Location")).toBe("/assets/import/imp-1");
+    // The job follows the workspace's barcode add-on at confirm time, not the
+    // one stored with the draft.
+    expect(db.assetImport.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "QUEUED",
+          canUseBarcodes: true,
+        }),
+      })
+    );
   });
 
   it("404s on a draft that belongs to another workspace", async () => {
@@ -151,7 +193,6 @@ describe("assets.import action", () => {
         id: "foreign",
         organizationId: "org-1",
         createdById: "user-1",
-        status: "DRAFT",
       },
     });
     expect(db.assetImport.updateMany).not.toHaveBeenCalled();
@@ -179,4 +220,89 @@ describe("assets.import action", () => {
       expect(db.assetImport.updateMany).not.toHaveBeenCalled();
     }
   );
+});
+
+/** An `AssetImport` status row as the active import lookup selects it. */
+function importRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "imp-9",
+    organizationId: "org-1",
+    createdById: "user-2",
+    status: "RUNNING",
+    phase: "ROWS",
+    fileName: "assets.csv",
+    totalRows: 3000,
+    processedRows: 900,
+    errorMessage: null,
+    warningCount: 0,
+    completedAt: null,
+    // Fresh, so the stall check leaves it alone.
+    updatedAt: new Date(),
+    ...overrides,
+  };
+}
+
+/** Runs the loader as user-1. */
+async function load() {
+  return (await loader(
+    createLoaderArgs({
+      request: new Request("http://localhost/assets/import"),
+      params: {},
+      context: { getSession: () => ({ userId: "user-1" }) } as never,
+    })
+  )) as { runningImport: unknown };
+}
+
+describe("assets.import loader", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.mocked(requirePermission).mockResolvedValue({
+      ...permissionContext({}),
+      organizations: [],
+      canUseBarcodes: true,
+    } as never);
+  });
+
+  it("returns the workspace's running import", async () => {
+    vi.mocked(db.assetImport.findFirst).mockResolvedValue(importRow() as never);
+
+    const result = await load();
+
+    expect(result.runningImport).toMatchObject({
+      id: "imp-9",
+      status: "RUNNING",
+      processedRows: 900,
+      totalRows: 3000,
+      isMine: false,
+    });
+    expect(db.assetImport.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ organizationId: "org-1" }),
+      })
+    );
+  });
+
+  it("does not hold the form for the viewer's finished import", async () => {
+    vi.mocked(db.assetImport.findFirst).mockResolvedValue(
+      importRow({
+        createdById: "user-1",
+        status: "COMPLETED",
+        phase: "FINALIZE",
+        processedRows: 3000,
+        completedAt: new Date(),
+      }) as never
+    );
+
+    const result = await load();
+
+    expect(result.runningImport).toBeNull();
+  });
+
+  it("returns null when nothing is running", async () => {
+    vi.mocked(db.assetImport.findFirst).mockResolvedValue(null);
+
+    const result = await load();
+
+    expect(result.runningImport).toBeNull();
+  });
 });

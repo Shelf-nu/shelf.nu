@@ -74,7 +74,12 @@ function draft(overrides: Record<string, unknown> = {}) {
   };
 }
 
-const args = { importId: "imp", organizationId: "org", userId: "u" };
+const args = {
+  importId: "imp",
+  organizationId: "org",
+  userId: "u",
+  canUseBarcodes: true,
+};
 
 describe("confirmAssetImport", () => {
   beforeEach(() => {
@@ -91,8 +96,10 @@ describe("confirmAssetImport", () => {
 
     await confirmAssetImport(args);
 
+    // The draft stored canUseBarcodes: false; the workspace's flag now wins
+    // for both the re-validation and the job.
     expect(validateContentImportFile).toHaveBeenCalledWith(
-      expect.objectContaining({ data: draft().rows })
+      expect.objectContaining({ data: draft().rows, canUseBarcodes: true })
     );
     expect(db.assetImport.updateMany).toHaveBeenCalledWith({
       where: { id: "imp", organizationId: "org", status: "DRAFT" },
@@ -100,6 +107,7 @@ describe("confirmAssetImport", () => {
         status: "QUEUED",
         phase: "PREPARE",
         confirmedAt: expect.any(Date),
+        canUseBarcodes: true,
       },
     });
     expect(enqueueAssetImportStep).toHaveBeenCalledWith({
@@ -133,6 +141,23 @@ describe("confirmAssetImport", () => {
     await expect(confirmAssetImport(args)).rejects.toMatchObject({
       status: 404,
     });
+  });
+
+  it("409s for an import that has already left DRAFT", async () => {
+    // A second press of Import finds the same row, now QUEUED.
+    vi.mocked(db.assetImport.findFirst).mockResolvedValueOnce(
+      draft({ status: "QUEUED" }) as never
+    );
+
+    await expect(confirmAssetImport(args)).rejects.toMatchObject({
+      status: 409,
+      message: "This import has already been confirmed.",
+    });
+    expect(db.assetImport.findFirst).toHaveBeenCalledWith({
+      where: { id: "imp", organizationId: "org", createdById: "u" },
+    });
+    expect(validateContentImportFile).not.toHaveBeenCalled();
+    expect(db.assetImport.updateMany).not.toHaveBeenCalled();
   });
 
   it("409s while the workspace has an import queued or running", async () => {
@@ -215,7 +240,7 @@ describe("markStalledImportIfNeeded", () => {
     vi.mocked(db.assetImport.findFirst).mockResolvedValue(
       imp({ status: "FAILED" }) as never
     );
-    const stale = imp({ status: "RUNNING", updatedAt: minutesAgo(31) });
+    const stale = imp({ status: "RUNNING", updatedAt: minutesAgo(61) });
 
     const first = await markStalledImportIfNeeded(stale);
     await markStalledImportIfNeeded(stale);
@@ -250,7 +275,7 @@ describe("markStalledImportIfNeeded", () => {
       imp({ status: "FAILED" }) as never
     );
     // Its first job never ran, so nothing has touched it since confirm.
-    const stuck = imp({ status: "QUEUED", updatedAt: minutesAgo(31) });
+    const stuck = imp({ status: "QUEUED", updatedAt: minutesAgo(61) });
 
     const first = await markStalledImportIfNeeded(stuck);
     await markStalledImportIfNeeded(stuck);
@@ -287,7 +312,11 @@ describe("markStalledImportIfNeeded", () => {
 });
 
 describe("resumeAssetImport", () => {
-  const resumeArgs = { importId: "imp", organizationId: "org" };
+  const resumeArgs = {
+    importId: "imp",
+    organizationId: "org",
+    canUseBarcodes: true,
+  };
 
   beforeEach(() => {
     vi.resetAllMocks();
@@ -317,6 +346,7 @@ describe("resumeAssetImport", () => {
         phase: "PREPARE",
         lockedUntil: null,
         errorMessage: null,
+        canUseBarcodes: true,
       },
     });
     expect(enqueueAssetImportStep).toHaveBeenCalledWith({
@@ -578,23 +608,38 @@ describe("getActiveAssetImport", () => {
     ).resolves.toBeNull();
   });
 
+  it("prefers a live import over the viewer's recently finished one", async () => {
+    vi.mocked(db.assetImport.findFirst).mockResolvedValueOnce(row() as never);
+
+    const result = await getActiveAssetImport({
+      userId: "u",
+      organizationId: "org",
+    });
+
+    expect(result?.status).toBe("RUNNING");
+    expect(db.assetImport.findFirst).toHaveBeenCalledTimes(1);
+    const query = vi.mocked(db.assetImport.findFirst).mock.calls[0][0];
+    expect(query?.where).toEqual({
+      organizationId: "org",
+      status: { in: ["QUEUED", "RUNNING"] },
+    });
+  });
+
   it("limits finished imports to the viewer's own from the last 10 minutes", async () => {
-    vi.mocked(db.assetImport.findFirst).mockResolvedValueOnce(null);
+    vi.mocked(db.assetImport.findFirst)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null);
 
     await getActiveAssetImport({ userId: "u", organizationId: "org" });
 
-    const query = vi.mocked(db.assetImport.findFirst).mock.calls[0][0];
-    const where = query?.where as {
-      organizationId: string;
-      OR: Array<Record<string, unknown>>;
-    };
-    expect(where.organizationId).toBe("org");
-    expect(where.OR[0]).toEqual({ status: { in: ["QUEUED", "RUNNING"] } });
-    expect(where.OR[1]).toMatchObject({
+    const query = vi.mocked(db.assetImport.findFirst).mock.calls[1][0];
+    const where = query?.where as Record<string, unknown>;
+    expect(where).toMatchObject({
+      organizationId: "org",
       status: { in: ["COMPLETED", "FAILED"] },
       createdById: "u",
     });
-    const { gt } = where.OR[1].updatedAt as { gt: Date };
+    const { gt } = where.updatedAt as { gt: Date };
     const ageMinutes = (Date.now() - gt.getTime()) / 60000;
     expect(ageMinutes).toBeGreaterThan(9.9);
     expect(ageMinutes).toBeLessThan(10.1);

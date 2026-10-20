@@ -52,7 +52,7 @@ export const ASSET_IMPORT_UNRELEASED_LEASE_DELAY_SECONDS =
  * Confirm, resume, every lease claim and every chunk bump `updatedAt`, so the
  * longest legitimate silence is one job expiry plus backoff, about 16 minutes.
  */
-export const ASSET_IMPORT_STALL_MINUTES = 30;
+export const ASSET_IMPORT_STALL_MINUTES = 60;
 
 /**
  * Time one ROWS chunk may spend downloading images before it writes its rows.
@@ -82,4 +82,4 @@ export const ASSET_IMPORT_JOB_OPTIONS = {
 } as const;
 
 /** Maximum number of rows shown in an import preview grid. */
-export const PREVIEW_DISPLAY_LIMIT = 50;
+export const PREVIEW_DISPLAY_LIMIT = 100;

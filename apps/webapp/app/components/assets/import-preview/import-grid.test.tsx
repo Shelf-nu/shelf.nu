@@ -3,12 +3,13 @@
  *
  * Covers the rendering contract of the generic import preview grid: one row
  * per entry with its label first, the struck-through previous value, the
- * truncation footer and the hover tooltip.
+ * truncation footer and its "Load more" button, the warning tone and the
+ * hover tooltip.
  *
  * @see {@link file://./import-grid.tsx}
  */
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ImportGridRow } from "~/modules/asset-import/types";
 import { ImportGrid } from "./import-grid";
 
@@ -37,12 +38,23 @@ const ROWS: ImportGridRow[] = [
   },
 ];
 
-function renderGrid(overrides: { totalRows?: number } = {}) {
+/** Renders the grid over {@link ROWS}, or `overrides.rows`. */
+function renderGrid(
+  overrides: {
+    rows?: ImportGridRow[];
+    totalRows?: number;
+    onLoadMore?: () => void;
+    isLoadingMore?: boolean;
+  } = {}
+) {
+  const rows = overrides.rows ?? ROWS;
   return render(
     <ImportGrid
       columns={["Title", "Category"]}
-      rows={ROWS}
-      totalRows={overrides.totalRows ?? ROWS.length}
+      rows={rows}
+      totalRows={overrides.totalRows ?? rows.length}
+      onLoadMore={overrides.onLoadMore}
+      isLoadingMore={overrides.isLoadingMore}
       caption="2 rows"
       legend={LEGEND}
     />
@@ -72,14 +84,59 @@ describe("ImportGrid", () => {
   });
 
   it("shows the truncation footer only when rows are cut off", () => {
-    const { unmount } = renderGrid({ totalRows: 965 });
-    expect(
-      screen.getByText("Showing the first 2 of 965 rows")
-    ).toBeInTheDocument();
+    const { unmount } = renderGrid({ totalRows: 1965 });
+    expect(screen.getByText("Showing 2 of 1,965 rows")).toBeInTheDocument();
+    // Without a loader the footer is a note only.
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
     unmount();
 
     renderGrid();
-    expect(screen.queryByText(/Showing the first/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Showing/)).not.toBeInTheDocument();
+  });
+
+  it("offers to load the next page, capped at the rows left", () => {
+    const onLoadMore = vi.fn();
+    const { unmount } = renderGrid({ totalRows: 965, onLoadMore });
+
+    fireEvent.click(screen.getByRole("button", { name: "Load 100 more" }));
+    expect(onLoadMore).toHaveBeenCalledTimes(1);
+    unmount();
+
+    renderGrid({ totalRows: 30, onLoadMore });
+    expect(
+      screen.getByRole("button", { name: "Load 28 more" })
+    ).toBeInTheDocument();
+  });
+
+  it("disables the load button while the next page loads", () => {
+    renderGrid({ totalRows: 965, onLoadMore: vi.fn(), isLoadingMore: true });
+
+    expect(screen.getByRole("button", { name: "Loading..." })).toBeDisabled();
+  });
+
+  it("tints a warning cell and its note with the warning palette", () => {
+    renderGrid({
+      rows: [
+        {
+          key: "r2",
+          label: "Row 2",
+          cells: {
+            Title: {
+              value: "example.com/abc",
+              tone: "warning",
+              note: "Looks like a web address",
+            },
+          },
+        },
+      ],
+    });
+
+    const cell = screen.getByText("example.com/abc").closest("td")!;
+    expect(cell).toHaveClass("bg-warning-50");
+    expect(screen.getByText("example.com/abc")).toHaveClass("text-warning-700");
+    expect(screen.getByText("Looks like a web address")).toHaveClass(
+      "text-warning-700"
+    );
   });
 
   it("reveals the note of a new cell as a tooltip on hover", () => {

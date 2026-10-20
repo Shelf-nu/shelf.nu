@@ -542,7 +542,8 @@ export async function validateKitCustodyConflicts({
   if (conflicts.length > 0) {
     throw new ShelfError({
       cause: null,
-      message: `We found custody conflicts with existing kits. Assets with custody cannot be imported into existing kits that are not in custody.`,
+      message:
+        "Some rows conflict with the custody of existing kits. See the issue on each row.",
       additionalData: {
         kitCustodyConflicts: conflicts,
       },
