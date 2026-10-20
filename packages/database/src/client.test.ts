@@ -827,22 +827,32 @@ test("isReadOperation", async (t) => {
 test("poolOptionsFromUrl maps Prisma's URL pool params onto pg options", () => {
   assert.deepEqual(
     poolOptionsFromUrl(
-      "postgres://u:p@host:6543/db?pgbouncer=true&connection_limit=20&pool_timeout=10"
+      "postgres://u:p@host:6543/db?pgbouncer=true&connection_limit=20&pool_timeout=10&schema=tenant"
     ),
-    { max: 20, connectionTimeoutMillis: 10_000 }
+    { max: 20, connectionTimeoutMillis: 10_000, schema: "tenant" }
   );
 });
 
-test("poolOptionsFromUrl leaves pg defaults when the URL carries none", () => {
-  assert.deepEqual(poolOptionsFromUrl("postgres://u:p@host:5432/db"), {});
-  assert.deepEqual(poolOptionsFromUrl(undefined), {});
-  assert.deepEqual(poolOptionsFromUrl("not a url"), {});
+test("poolOptionsFromUrl keeps a 10 s acquisition timeout when the URL sets none", () => {
+  assert.deepEqual(poolOptionsFromUrl("postgres://u:p@host:5432/db"), {
+    connectionTimeoutMillis: 10_000,
+  });
+  assert.deepEqual(poolOptionsFromUrl(undefined), {
+    connectionTimeoutMillis: 10_000,
+  });
+  assert.deepEqual(poolOptionsFromUrl("not a url"), {
+    connectionTimeoutMillis: 10_000,
+  });
 });
 
-test("poolOptionsFromUrl ignores non-positive or non-numeric values", () => {
+test("poolOptionsFromUrl honours pool_timeout=0 as no limit and ignores junk", () => {
+  assert.deepEqual(
+    poolOptionsFromUrl("postgres://u:p@h/db?connection_limit=0&pool_timeout=0"),
+    {}
+  );
   assert.deepEqual(
     poolOptionsFromUrl(
-      "postgres://u:p@h/db?connection_limit=0&pool_timeout=abc"
+      "postgres://u:p@h/db?connection_limit=abc&pool_timeout=abc"
     ),
     {}
   );

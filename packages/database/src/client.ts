@@ -364,29 +364,41 @@ async function retryLoop<T>(
 
 /**
  * Pool options Prisma's own engine read from the URL (`connection_limit`,
- * `pool_timeout`), mapped onto `pg` so an existing `DATABASE_URL` keeps its
- * sizing. `pg` ignores the Prisma-only keys it does not know (`pgbouncer`).
+ * `pool_timeout`, `schema`), mapped onto `pg` so an existing `DATABASE_URL`
+ * keeps its sizing. `pg` ignores the Prisma-only keys it does not know
+ * (`pgbouncer`).
+ *
+ * The acquisition wait stays bounded: without `pool_timeout` it is 10 s, the
+ * engine's default, because `pg` would otherwise queue forever on a saturated
+ * pool. `pool_timeout=0` keeps the engine's meaning of "wait without limit".
  */
 export function poolOptionsFromUrl(connectionString: string | undefined): {
   max?: number;
   connectionTimeoutMillis?: number;
+  schema?: string;
 } {
-  if (!connectionString) return {};
   let params: URLSearchParams;
   try {
-    params = new URL(connectionString).searchParams;
+    params = new URL(connectionString ?? "").searchParams;
   } catch {
-    return {};
+    params = new URLSearchParams();
   }
   const limit = Number(params.get("connection_limit"));
-  const timeoutSeconds = Number(params.get("pool_timeout"));
+  const rawTimeout = params.get("pool_timeout");
+  const timeoutSeconds =
+    rawTimeout === null ? DEFAULT_POOL_TIMEOUT_SECONDS : Number(rawTimeout);
+  const schema = params.get("schema");
   return {
     ...(Number.isInteger(limit) && limit > 0 ? { max: limit } : {}),
     ...(Number.isFinite(timeoutSeconds) && timeoutSeconds > 0
       ? { connectionTimeoutMillis: timeoutSeconds * 1000 }
       : {}),
+    ...(schema ? { schema } : {}),
   };
 }
+
+/** Prisma's default `pool_timeout`, kept when the URL does not set one. */
+const DEFAULT_POOL_TIMEOUT_SECONDS = 10;
 
 /**
  * Talks to Postgres through `pg` instead of Prisma's Rust engine connector.
@@ -398,14 +410,18 @@ export function poolOptionsFromUrl(connectionString: string | undefined): {
  * statement, which the pooler accepts as is, so one query is one round trip.
  */
 function createPgAdapter(connectionString: string | undefined) {
-  return new PrismaPg({
-    connectionString,
-    // Reconnecting to the pooler costs a TLS handshake, so keep idle
-    // connections for five minutes (Prisma's own default) rather than pg's 10 s;
-    // otherwise the first request after a lull pays it.
-    idleTimeoutMillis: 300_000,
-    ...poolOptionsFromUrl(connectionString),
-  });
+  const { schema, ...pool } = poolOptionsFromUrl(connectionString);
+  return new PrismaPg(
+    {
+      connectionString,
+      // Reconnecting to the pooler costs a TLS handshake, so keep idle
+      // connections for five minutes (Prisma's own default) rather than pg's 10 s;
+      // otherwise the first request after a lull pays it.
+      idleTimeoutMillis: 300_000,
+      ...pool,
+    },
+    schema ? { schema } : undefined
+  );
 }
 
 /**
