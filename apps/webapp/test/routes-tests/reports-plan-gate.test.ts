@@ -40,6 +40,7 @@ import {
 import { getEnabledReports } from "~/modules/reports/registry";
 import type { ReportPayload } from "~/modules/reports/types";
 import { loader as pdfLoader } from "~/routes/api+/reports.$reportId.generate-pdf";
+import { loader as customFieldValuesLoader } from "~/routes/api+/reports.custom-field-values";
 import { loader as reportLoader } from "~/routes/_layout+/reports.$reportId";
 import { loader as indexLoader } from "~/routes/_layout+/reports._index";
 import { loader as csvLoader } from "~/routes/_layout+/reports.export.$fileName[.csv]";
@@ -79,6 +80,33 @@ vi.mock("~/modules/reports/helpers.server", () => ({
   monthlyBookingTrendsReport: vi.fn(),
   assetUtilizationReport: vi.fn(),
   assetActivityReport: vi.fn(),
+}));
+
+// why: the report page loads its filter pick-lists (categories, locations,
+// team members, models, custom fields) and the values route reads a field's
+// values from the database; the gate only decides whether they are reached.
+// Filter resolution runs for real.
+vi.mock("~/modules/reports/filters.server", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("~/modules/reports/filters.server")
+  >()),
+  loadReportFilterOptions: vi.fn(() =>
+    Promise.resolve({
+      categories: [],
+      totalCategories: 0,
+      locations: [],
+      totalLocations: 0,
+      teamMembers: [],
+      totalTeamMembers: 0,
+      assetModels: [],
+      totalAssetModels: 0,
+      customFields: [],
+      statuses: [],
+    })
+  ),
+  loadCustomFieldValues: vi.fn(() =>
+    Promise.resolve({ values: [], hasMore: false })
+  ),
 }));
 
 // why: format prefs are resolved from the database for the acting user
@@ -317,6 +345,24 @@ const DOORS: Door[] = [
             "http://localhost:3000/api/reports/asset-inventory/generate-pdf"
           ),
           params: { reportId: "asset-inventory" },
+          context,
+        })
+      ),
+    lockedOutcome: {
+      kind: "refused",
+      status: 403,
+      title: PLAN_TITLE,
+      message: PLAN_MESSAGE,
+    },
+  },
+  {
+    file: "api+/reports.custom-field-values.ts",
+    run: (context) =>
+      customFieldValuesLoader(
+        createLoaderArgs({
+          request: new Request(
+            "http://localhost:3000/api/reports/custom-field-values?customFieldId=f-1"
+          ),
           context,
         })
       ),

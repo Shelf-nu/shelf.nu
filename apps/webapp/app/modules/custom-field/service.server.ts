@@ -1,7 +1,7 @@
+import { Prisma } from "@prisma/client";
 import type {
   CustomField,
   Organization,
-  Prisma,
   User,
   UserOrganization,
 } from "@prisma/client";
@@ -13,9 +13,12 @@ import {
   isLikeShelfError,
   isNotFoundError,
   maybeUniqueConstraintViolation,
+  rethrowIfClientError,
 } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
+import type { OptionRename } from "./option-list";
 import type { CustomFieldDraftPayload } from "./types";
+import { recordEvents } from "../activity-event/service.server";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 import type { Column } from "../asset-index-settings/helpers";
 import { syncCustomFieldColumn } from "../asset-index-settings/helpers";
@@ -278,6 +281,24 @@ export async function getCustomField<
   }
 }
 
+/**
+ * Updates a custom field's definition and, for an OPTION field, moves assets
+ * along with renamed or merged options.
+ *
+ * `optionRenames` maps a saved spelling to the option that now holds its
+ * assets. The field update, the value rewrite and one
+ * `ASSET_CUSTOM_FIELD_CHANGED` event per rewritten asset commit together, so an
+ * option is never renamed while its assets still store the old spelling. The
+ * field row is locked for the transaction, so two saves of the same field
+ * validate their renames one after the other.
+ *
+ * @param payload - The field id and organization, the acting user, the fields
+ *   to change, and the option rewrites to apply
+ * @returns The updated CustomField
+ * @throws {ShelfError} 400 when the renames do not describe the saved and new
+ *   options (see `assertRenamesMatchOptions`); 404 when the field does not
+ *   exist in the organization
+ */
 export async function updateCustomField(payload: {
   id: CustomField["id"];
   name?: CustomField["name"];
@@ -286,8 +307,11 @@ export async function updateCustomField(payload: {
   required?: CustomField["required"];
   active?: CustomField["active"];
   options?: CustomField["options"];
+  optionRenames?: OptionRename[];
   categories?: string[];
   organizationId: CustomField["organizationId"];
+  /** The user making the change, recorded as the actor of rename events. */
+  userId: User["id"];
 }) {
   const {
     id,
@@ -296,8 +320,10 @@ export async function updateCustomField(payload: {
     required,
     active,
     options,
+    optionRenames = [],
     categories,
     organizationId,
+    userId,
   } = payload;
 
   try {
@@ -321,28 +347,214 @@ export async function updateCustomField(payload: {
       },
     });
 
-    /** Get the custom field. We need it in order to be able to update the asset index settings */
-    const customField = (await db.customField.findFirst({
-      where: { id, organizationId, deletedAt: null },
-    })) as CustomField;
+    const renames = optionRenames.filter(({ from, to }) => from !== to);
 
-    const updatedField = await db.customField.update({
-      where: { id, organizationId },
-      data: data,
-    });
+    const { oldField, updatedField } = await db.$transaction(
+      async (tx) => {
+        // Holds the field row until commit, so a concurrent save of the same
+        // field reads the options this one writes before checking its renames.
+        await tx.$queryRaw(Prisma.sql`
+          SELECT id FROM "CustomField"
+          WHERE id = ${id} AND "organizationId" = ${organizationId}
+          FOR UPDATE
+        `);
 
-    /** Updates the Asset */
+        const oldField = await tx.customField.findFirst({
+          where: { id, organizationId, deletedAt: null },
+        });
+
+        if (!oldField) {
+          throw new ShelfError({
+            cause: null,
+            title: "Custom field not found",
+            message:
+              "The custom field you are trying to update does not exist or you do not have access to it.",
+            additionalData: { id, organizationId },
+            label,
+            status: 404,
+            shouldBeCaptured: false,
+          });
+        }
+
+        assertRenamesMatchOptions({
+          renames,
+          savedOptions: oldField.options,
+          nextOptions: options ?? oldField.options,
+          additionalData: { id, organizationId },
+        });
+
+        const updatedField = await tx.customField.update({
+          where: { id, organizationId },
+          data,
+        });
+
+        if (renames.length > 0) {
+          const rewritten = await tx.$queryRaw<RewrittenOptionValue[]>(
+            buildOptionRenameStatement(id, renames)
+          );
+
+          // One event per asset whose stored value changed, shaped like the
+          // event a single-asset edit of the same field records.
+          await recordEvents(
+            rewritten.map(({ assetId, from, to }) => ({
+              organizationId,
+              actorUserId: userId,
+              action: "ASSET_CUSTOM_FIELD_CHANGED",
+              entityType: "ASSET",
+              entityId: assetId,
+              assetId,
+              field: updatedField.name,
+              fromValue: from,
+              toValue: to,
+              meta: { isFirstTimeSet: false, viaOptionRename: true },
+            })),
+            tx
+          );
+        }
+
+        return { oldField, updatedField };
+      },
+      { timeout: 30000 }
+    );
+
     await updateAssetIndexSettingsAfterCfUpdate({
-      oldField: customField,
+      oldField,
       newField: updatedField,
     });
 
     return updatedField;
   } catch (cause) {
+    rethrowIfClientError(cause);
     throw maybeUniqueConstraintViolation(cause, "Custom field", {
       additionalData: {
         id,
       },
+    });
+  }
+}
+
+/**
+ * Refuses renames that do not describe this field: each `from` must be an
+ * option saved right now and each `to` one of the options being saved. A
+ * `from` that is no longer saved means someone else edited the field since the
+ * page loaded. Each `from` may appear once, because a stored value can only
+ * move to one place.
+ *
+ * A `from` that is still one of the new options keeps its assets, unless
+ * another rename moves assets onto it: that is a swap or rotation of
+ * spellings, where every set of assets follows its row. Without that, moving
+ * assets off an option that stays selectable would split one choice in two.
+ */
+function assertRenamesMatchOptions({
+  renames,
+  savedOptions,
+  nextOptions,
+  additionalData,
+}: {
+  renames: OptionRename[];
+  savedOptions: string[];
+  nextOptions: string[];
+  additionalData: Record<string, unknown>;
+}) {
+  const froms = renames.map(({ from }) => from);
+  const tos = new Set(renames.map(({ to }) => to));
+  const fits = renames.every(
+    ({ from, to }) =>
+      savedOptions.includes(from) &&
+      nextOptions.includes(to) &&
+      (!nextOptions.includes(from) || tos.has(from))
+  );
+
+  if (!fits || new Set(froms).size !== froms.length) {
+    const message =
+      "The options of this field changed since you opened it. Reload the page and try again.";
+    throw new ShelfError({
+      cause: null,
+      title: "Options changed",
+      message,
+      // Shown under the option list by the form's server-error fallback.
+      additionalData: {
+        ...additionalData,
+        renames,
+        validationErrors: { options: { message } },
+      },
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
+}
+
+/** A value row the rename statement changed, with the spellings it moved between. */
+type RewrittenOptionValue = { assetId: string; from: string; to: string };
+
+/**
+ * One statement that rewrites every renamed option value of a field and
+ * returns each changed row as a {@link RewrittenOptionValue}. Each row is
+ * matched against the value it held before the statement ran, so swapping two
+ * spellings in the same save moves each set of assets exactly once. `raw` and
+ * `valueOption` hold the same string for OPTION values and change together.
+ */
+function buildOptionRenameStatement(
+  customFieldId: CustomField["id"],
+  renames: OptionRename[]
+) {
+  const pairs = Prisma.join(
+    renames.map(({ from, to }) => Prisma.sql`(${from}::text, ${to}::text)`)
+  );
+
+  return Prisma.sql`
+    UPDATE "AssetCustomFieldValue" AS v
+    SET "value" = jsonb_set(
+          jsonb_set(v."value"::jsonb, '{raw}', to_jsonb(m."to")),
+          '{valueOption}',
+          to_jsonb(m."to")
+        ),
+        "updatedAt" = now()
+    FROM (VALUES ${pairs}) AS m("from", "to")
+    WHERE v."customFieldId" = ${customFieldId}
+      AND v."value"->>'valueOption' = m."from"
+    RETURNING v."assetId" AS "assetId", m."from" AS "from", m."to" AS "to"
+  `;
+}
+
+/**
+ * How many assets store each option of an OPTION field, keyed by the stored
+ * spelling. Spellings no longer in the field's options are included, because
+ * assets keep their value when an option is removed.
+ *
+ * @param args - The field and the organization it must belong to
+ * @returns Asset count per stored option value
+ * @throws {ShelfError} If the query fails
+ */
+export async function getOptionUsageCounts({
+  customFieldId,
+  organizationId,
+}: {
+  customFieldId: CustomField["id"];
+  organizationId: Organization["id"];
+}): Promise<Record<string, number>> {
+  try {
+    const rows = await db.$queryRaw<{ option: string; count: number }[]>(
+      Prisma.sql`
+        SELECT v."value"->>'valueOption' AS "option", COUNT(DISTINCT v."assetId")::int AS "count"
+        FROM "AssetCustomFieldValue" AS v
+        JOIN "CustomField" AS cf ON cf.id = v."customFieldId"
+        WHERE cf.id = ${customFieldId}
+          AND cf."organizationId" = ${organizationId}
+          AND v."value"->>'valueOption' IS NOT NULL
+        GROUP BY 1
+      `
+    );
+
+    return Object.fromEntries(rows.map(({ option, count }) => [option, count]));
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while counting the assets that use each option. Please try again or contact support.",
+      additionalData: { customFieldId, organizationId },
+      label,
     });
   }
 }
@@ -487,6 +699,7 @@ export async function upsertCustomField(
               id: existingCustomField.id,
               options,
               organizationId: def.organizationId,
+              userId: def.userId,
             });
             existingCustomField = updatedCustomField;
             newOrUpdatedFields.push(updatedCustomField);

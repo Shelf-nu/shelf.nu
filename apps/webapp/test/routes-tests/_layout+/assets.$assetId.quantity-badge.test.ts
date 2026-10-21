@@ -21,12 +21,14 @@ const {
   requirePermission,
   getTeamMembersForQuantityCustody,
   getCustodySourceSummary,
+  getAssetAvailability,
   db,
 } = vi.hoisted(() => ({
   getAsset: vi.fn(),
   requirePermission: vi.fn(),
   getTeamMembersForQuantityCustody: vi.fn(),
   getCustodySourceSummary: vi.fn(),
+  getAssetAvailability: vi.fn(),
   db: {
     bookingAsset: { findMany: vi.fn() },
     partialBookingCheckout: { findMany: vi.fn() },
@@ -51,6 +53,13 @@ vi.mock("~/modules/team-member/service.server", async (importOriginal) => ({
 }));
 vi.mock("~/modules/asset/custody-source.server", () => ({
   getCustodySourceSummary,
+}));
+
+// why: the engine's free-now figure for the badge tooltip is a separate,
+// heavier read; these tests are about the booking rows.
+vi.mock("~/modules/asset/availability.server", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  getAssetAvailability,
 }));
 
 // why: the still-out accounting reads through `db`. An in-memory client keeps
@@ -124,6 +133,7 @@ describe("asset page loader: header badge booking rows", () => {
       options: [],
       poolAvailable: 20,
     });
+    getAssetAvailability.mockResolvedValue({ physicalAvailable: 14 });
   });
 
   it("gives an ongoing booking the units still out, not the units booked", async () => {
@@ -135,6 +145,7 @@ describe("asset page loader: header badge booking rows", () => {
     expect(result.asset.bookingAssets).toEqual([
       { quantity: 6, assetKitId: null, booking: ongoingBooking },
     ]);
+    expect(result.asset).toEqual(expect.objectContaining({ freeNow: 14 }));
   });
 
   it("does not read still-out units for an INDIVIDUAL asset", async () => {
@@ -178,6 +189,7 @@ describe("asset page loader: header badge booking rows", () => {
 
     expect(db.bookingAsset.findMany).toHaveBeenCalled();
     expect(getCustodySourceSummary).toHaveBeenCalled();
+    expect(getAssetAvailability).toHaveBeenCalled();
 
     releaseTeamMembers();
     await pending;

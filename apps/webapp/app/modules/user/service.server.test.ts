@@ -31,7 +31,7 @@ import {
   findUserByEmail,
   findUserById,
 } from "./service.server";
-import { defaultFields } from "../asset-index-settings/helpers";
+import { defaultColumnsForWorkspace } from "../asset-index-settings/helpers";
 import { ensureAssetIndexModeForRole } from "../asset-index-settings/service.server";
 
 // @vitest-environment node
@@ -289,7 +289,10 @@ describe(createUserAccountForTesting.name, () => {
               assetIndexSettings: {
                 create: {
                   mode: AssetIndexMode.ADVANCED,
-                  columns: defaultFields,
+                  // A brand-new personal workspace has no quantity-tracked assets.
+                  columns: defaultColumnsForWorkspace({
+                    hasQuantityAssets: false,
+                  }),
                   user: {
                     connect: {
                       id: USER_ID,

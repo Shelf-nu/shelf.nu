@@ -9,6 +9,9 @@
  *    calendar day in the user's tz (a UTC-only resolution near a day boundary
  *    mutates adjacent-day assets). These tests assert the resolved id SET
  *    actually depends on the forwarded timezone.
+ *  - pool join gate: the per-asset `pool` LATERAL joins a select-all only
+ *    when its WHERE reads pool.* (a pool column filter or the low stock
+ *    toggle), the same gate the index's cheap phase uses.
  *  - `buildAdvancedFilteredAssetIdsQuery` — the raw-SQL shape guard
  *    (SHELF-WEBAPP-21X): raw SQL isn't typechecked, so a string assertion
  *    ensures location joins through the `AssetLocation` pivot and never
@@ -220,9 +223,9 @@ describe("buildAdvancedFilteredAssetIdsQuery", () => {
   // assertion per `.claude/rules/raw-sql-respects-prisma-map.md`. Regression for
   // SHELF-WEBAPP-21X: the query referenced the dropped `Asset.locationId`
   // column and 500'd (`42703: column a.locationId does not exist`).
-  const sql = buildAdvancedFilteredAssetIdsQuery(Prisma.empty).strings.join(
-    "?"
-  );
+  const sql = buildAdvancedFilteredAssetIdsQuery(Prisma.empty, {
+    withPool: false,
+  }).strings.join("?");
 
   it("joins location through the AssetLocation pivot (LATERAL primary-pick)", () => {
     expect(sql).toContain('public."AssetLocation"');
@@ -235,10 +238,92 @@ describe("buildAdvancedFilteredAssetIdsQuery", () => {
 
   it("still selects distinct asset ids and interpolates the where clause", () => {
     const withWhere = buildAdvancedFilteredAssetIdsQuery(
-      Prisma.sql`WHERE a."organizationId" = ${"org-1"}`
+      Prisma.sql`WHERE a."organizationId" = ${"org-1"}`,
+      { withPool: false }
     );
     expect(withWhere.strings.join("?")).toContain("SELECT DISTINCT a.id");
     // The org id is carried as a bound parameter, never interpolated inline.
     expect(withWhere.values).toContain("org-1");
+  });
+});
+
+/** The `pool` LATERAL's alias line, present only when the join is emitted. */
+const POOL_JOIN_MARKER = ") pool ON TRUE";
+
+describe("buildAdvancedFilteredAssetIdsQuery - pool join", () => {
+  it("omits the pool LATERAL when withPool is false", () => {
+    const sql = buildAdvancedFilteredAssetIdsQuery(Prisma.empty, {
+      withPool: false,
+    }).strings.join("?");
+
+    expect(sql).not.toContain(POOL_JOIN_MARKER);
+  });
+
+  it("adds the pool LATERAL when withPool is true", () => {
+    const sql = buildAdvancedFilteredAssetIdsQuery(Prisma.empty, {
+      withPool: true,
+    }).strings.join("?");
+
+    expect(sql).toContain(POOL_JOIN_MARKER);
+  });
+});
+
+describe("resolveAssetIdsForBulkOperation - pool join gate", () => {
+  const capturedQueries: Prisma.Sql[] = [];
+
+  const stockStatusFilter: Filter = {
+    name: "stockStatus",
+    type: "enum",
+    operator: "is",
+    value: "LOW",
+  };
+
+  const resolve = (currentSearchParams: string) =>
+    resolveAssetIdsForBulkOperation({
+      // Not the subject of these tests; the narrowing has its own suite.
+      allowedTeamMemberIds: "all" as const,
+      lastAuditDateAccess: "available" as const,
+      assetIds: [ALL_SELECTED_KEY],
+      organizationId: "org-1",
+      currentSearchParams,
+      settings: advancedSettings,
+    });
+
+  /** The SQL text of the one query the resolution sent. */
+  const sentSql = () => capturedQueries[0]?.strings.join("?") ?? "";
+
+  beforeEach(() => {
+    capturedQueries.length = 0;
+    vi.mocked(db.$queryRaw).mockImplementation(((query: Prisma.Sql) => {
+      capturedQueries.push(query);
+      return Promise.resolve([{ id: "asset-1" }]);
+    }) as unknown as typeof db.$queryRaw);
+  });
+
+  it("does not join the pool aggregates when no filter reads them", async () => {
+    vi.mocked(parseFiltersWithHierarchy).mockResolvedValue([createdAtFilter]);
+
+    await resolve("createdAt=is:2026-07-20");
+
+    expect(capturedQueries).toHaveLength(1);
+    expect(sentSql()).not.toContain(POOL_JOIN_MARKER);
+  });
+
+  it("joins the pool aggregates for a Stock status filter", async () => {
+    vi.mocked(parseFiltersWithHierarchy).mockResolvedValue([stockStatusFilter]);
+
+    await resolve("stockStatus=is:LOW");
+
+    expect(sentSql()).toContain(POOL_JOIN_MARKER);
+    expect(sentSql()).toContain("pool.in_custody");
+  });
+
+  it("joins the pool aggregates for the low stock toggle", async () => {
+    vi.mocked(parseFiltersWithHierarchy).mockResolvedValue([]);
+
+    await resolve("lowStockOnly=true");
+
+    expect(sentSql()).toContain(POOL_JOIN_MARKER);
+    expect(sentSql()).toContain('a."minQuantity" IS NOT NULL');
   });
 });
