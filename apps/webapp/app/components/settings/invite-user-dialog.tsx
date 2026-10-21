@@ -24,7 +24,11 @@ import type { DataOrErrorResponse } from "~/utils/http.server";
 import { validEmail } from "~/utils/misc";
 import { canInviteRole } from "~/utils/permissions/membership-access";
 import type { OrganizationRole } from "~/utils/permissions/role-access";
-import { ROLE_LABELS } from "~/utils/permissions/role-access";
+import {
+  ROLE_DESCRIPTIONS,
+  ROLE_LABELS,
+} from "~/utils/permissions/role-access";
+import { RolesHelpLink } from "./roles-help-link";
 import Input from "../forms/input";
 import {
   Select,
@@ -207,12 +211,17 @@ export default function InviteUserDialog({
                   </SelectTrigger>
                   <SelectContent
                     position="popper"
-                    className="w-full min-w-[300px]"
+                    className="w-[var(--radix-select-trigger-width)] max-w-[var(--radix-select-content-available-width)]"
                     align="start"
                   >
                     <div className=" max-h-[320px] overflow-auto">
                       {grantableRoles.map((role) => (
-                        <SelectItem value={role} key={role} className="p-2">
+                        <SelectItem
+                          value={role}
+                          key={role}
+                          className="p-2"
+                          description={ROLE_DESCRIPTIONS[role]}
+                        >
                           <div className="flex items-center gap-2">
                             <div className=" ml-px block text-sm lowercase text-gray-900 first-letter:uppercase">
                               {ROLE_LABELS[role]}
@@ -236,6 +245,8 @@ export default function InviteUserDialog({
                     zo.errors?.role()?.message}
                 </p>
               </When>
+              {/* After the role error, so the error stays directly under the picker. */}
+              <RolesHelpLink />
 
               <div className="pt-1.5">
                 <Input
