@@ -1,14 +1,15 @@
 ---
 name: pr-review
-description: First review of the PR linked to the current branch (or a PR number). Checks what the PR claims against what it does, bugs, tests, project conventions and reuse, security, consumers, performance and deploy safety, verifies every finding, and prints a plain-language verdict with numbered findings. Read-only (except a user-requested "prove N" throwaway test), never posts. Use when the user says "review this PR", "review PR 3191", or invokes /pr-review.
+description: First review of the PR linked to the current branch (or a PR number). Checks what the PR claims against what it does, bugs, tests, project conventions and reuse, security, consumers, performance and deploy safety, verifies every finding, and prints a plain-language verdict with numbered findings. Read-only until the user picks findings to fix or a "prove N" throwaway test after the report; never posts unasked. Use when the user says "review this PR", "review PR 3191", or invokes /pr-review.
 ---
 
 # PR Review
 
 Give the first review of a PR: fast, verified, in plain language. The user
-reads the report and decides what to fix. **Read-only**: never edit, commit,
-push, or post to GitHub during this skill. The one exception is a
-user-requested "prove N" (see "After the report").
+reads the report and decides what to fix. **Read-only during the review**:
+never edit, commit, push, or post to GitHub while reviewing. After the report,
+edits happen only for what the user picks: the findings they choose to fix,
+and a "prove N" throwaway test (see "After the report").
 
 **Announce:** "Using pr-review on PR #N (tier X)." once Stage 1 is done.
 
@@ -224,21 +225,32 @@ Do not fix anything until the user picks it. Right after printing the report,
 ask with the `AskUserQuestion` tool, built from the same options the Next line
 offers. With "Next: nothing to fix.", skip the question and stop.
 
-- **Question 1, header "Fix"** (single select), only when there are findings:
-  1. "Must + should fix (<range>) (Recommended)": only when any exist.
-  2. "Everything (<full range>)": only when nits or "Spotted along the way" exist.
-  3. "Nothing for now".
-     Fill in real numbers. The tool adds "Other", where the user can type a custom
-     range such as "1-4, 7". For a merged PR, label the fix options "in a follow-up
-     PR". Never more than 4 options.
-- **Question 2, header "Also"** (multi select): the other applicable options,
-  "Prove <n>" (one option per candidate, at most the 2 most severe),
+- **Question 1, header "Fix"** (multi select, so the user can tick several),
+  only when there are findings:
+  - With 4 or fewer findings in total: one option per finding, labelled
+    "<n>. <short title>", with its section as the description.
+  - Otherwise: one option per non-empty section, "Must fix (<range>)",
+    "Should fix (<range>)", "Nits (<range>)", "Spotted along the way (<range>)",
+    in that order. Add " (Recommended)" to the must-fix option, or to the
+    should-fix option when there is no must-fix.
+  - When that leaves only one option, add "Nothing for now".
+    Fill in real numbers. The tool adds "Other", where the user can type a
+    custom range such as "1-4, 7". For a merged PR, add "in a follow-up PR" to
+    each option's description. Never more than 4 options. Ticked options add up:
+    "Must fix" plus "Nits" means fix both sections, nothing else.
+- **Question 2, header "Also"** (multi select), only when at least one of these
+  applies: "Prove <n>" (one option per candidate, at most the 2 most severe),
   "Restore D<range>" and "Post a request-changes review", each with a one-line
-  description of what it does. Add "Nothing else" when fewer than 2 apply.
-  Keep it to 4 options; leave out lower-value prove options first.
+  description of what it does. Add "Nothing else" when exactly one applies, so
+  the question has the 2 options the tool requires. Keep it to 4 options;
+  leave out lower-value prove options first.
 
 Then run what was picked in this order: restore, prove, post (show the body
-and confirm as below), fix. Selecting a fix option is the user asking. If
+and confirm as below), fix. A ticked section means that section after any
+restore, so a restored finding is fixed with its section; a per-finding tick
+or a typed range stays exactly as picked. Selecting a fix option is the user
+asking; a
+"Nothing for now" tick, or no fix tick at all, means fix nothing. If
 `AskUserQuestion` is unavailable, or the user dismisses it, stop and wait for
 a typed reply to the Next line.
 
@@ -247,7 +259,7 @@ the next free number, at its original severity, with its saved impact, trigger
 and fix, and print it in the report shape. Then recompute the verdict and the
 header counts and print them.
 
-**"prove N":** the ONE user-requested exception to read-only. Write a
+**"prove N":** writes a throwaway test, never kept. Write a
 throwaway test that fails if finding N is real, at
 `apps/webapp/test/pr-review-proof-<N>.test.ts` (never under `app/routes/`).
 If `localHeadMatchesPr` is false, refuse and tell the user to check out the PR
