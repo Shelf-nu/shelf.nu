@@ -51,7 +51,7 @@ Now you need to add the Service provider details. Insert the details from the ta
 | ----------- | -------------------------------------------------------------------- |
 | ACS URL     | `https://nmmqcuiasekdacmhwsxk.supabase.co/auth/v1/sso/saml/acs`      |
 | Entity ID   | `https://nmmqcuiasekdacmhwsxk.supabase.co/auth/v1/sso/saml/metadata` |
-| Relay State | `https://app.shelf.nu/oauthcallback`                                 |
+| Relay State | `https://app.shelf.nu/oauth/callback`                                |
 
 ## Step 7: Configure attribute mapping [#](#step-7-configure-attribute-mapping)
 
@@ -120,9 +120,10 @@ In the meantime, you can continue with the next steps that will show you how to 
 
 ## Step 10: Create groups and assign users [#](#step-10-create-groups-and-assign-users)
 
-In order to manage which users get access to which workspace and with what role, Shelf uses groups for the mapping. Shelf has three roles you can map a group to:
+In order to manage which users get access to which workspace and with what role, Shelf uses groups for the mapping. Shelf has four roles you can map a group to:
 
 - Admin group
+- Manager group
 - Self service group
 - Base user group
 
@@ -156,15 +157,19 @@ Once confirmed you should end up with a setup similar to this:
 > [!NOTE]
 > You can only complete this step, once you have received confirmation from your contact person at Shelf that the setup has been completed.
 >
-> Keep in mind that the OWNER of the workspace in shelf, cannot be an SSO user. The workspace needs to be created by a normal user. If you are having trouble with this, please feel free to contact your account manager to help it get resolved.
+> Keep in mind that the workspace in Shelf needs to be created by a normal (non-SSO) user, who becomes its OWNER and maps the groups. We recommend that this owner keeps standard login as an administrative fallback; converting the owner to SSO later is optional and done on request. If you are having trouble with this, please feel free to contact your account manager to help it get resolved.
 
 Once you have the groups ready, you need to add their **IDs** in the workspace settings inside Shelf. If you have multiple workspaces, you will need to map each one.
 
-Go to the workspace settings and place the **Object ID** of each group next to its matching role (Administrator, Self service, Base). You can find the ID by clicking on each group in Entra and copying the _Object ID_. You only need to fill in the roles you use — leave the others blank, but at least one group must be mapped.
+Go to the workspace settings and place the **Object ID** of each group next to its matching role (Administrator, Manager, Self service, Base). You can find the ID by clicking on each group in Entra and copying the _Object ID_. You only need to fill in the roles you use: leave the others blank, but at least one group must be mapped.
 
-Each field also accepts **more than one Object ID, separated by commas** — anyone in _any_ of the listed groups gets that role. This is useful when several existing groups should map to the same Shelf role. A user still only ever holds one role per workspace; if their groups match more than one role, the highest applies (Administrator > Self service > Base).
+Each field also accepts **more than one Object ID, separated by commas**: anyone in _any_ of the listed groups gets that role. This is useful when several existing groups should map to the same Shelf role. A user still only ever holds one role per workspace; if their groups match more than one role, the highest applies (Administrator > Manager > Self service > Base).
 
 > [!IMPORTANT]
 > Enter each Object ID exactly as it appears in Microsoft Entra. Matching ignores letter case and surrounding spaces, but copying the exact value is the safest way to avoid a mismatch.
 
 ![Shelf workspace SSO group mapping](../../img/google-workspace-step-9.png)
+
+## Moving existing Shelf users to SSO [#](#moving-existing-shelf-users-to-sso)
+
+If people on your domain already have standard (email/password) Shelf accounts, they do not need to be deleted or recreated. Shelf converts them to SSO, keeping their data and workspace memberships. The first SSO sign-in after conversion lands the user in their existing account, with all their data and workspaces, and no NameID change is needed. The one exception is a user who tried to sign in with SSO before their account was converted: their first SSO sign-in after conversion shows "Your account is now on single sign-on" and asks them to sign in with SSO once more. After that they sign in once, as usual. Convert accounts before announcing SSO to your team to avoid this extra step. Map your groups (Step 11) before the accounts are converted, because a converted user whose groups map to no role loses access to the workspace at their first SSO login (the workspace owner keeps their Owner role and access). See [Existing standard accounts on your domain](../index.md#existing-standard-accounts-on-your-domain) for the full rules.

@@ -1,4 +1,3 @@
-import { parseBackupPlacements } from "~/modules/asset/backup-placements";
 import type { CreateAssetFromContentImportPayload } from "~/modules/asset/types";
 import { decodeCsvListCell } from "./csv-cells";
 import { ShelfError } from "./error";
@@ -64,6 +63,11 @@ export function extractCSVDataFromContentImport(
           case "imageUrl":
             // Return empty string if URL is empty/undefined, otherwise trim
             return [headers[index], value?.trim() || ""];
+          case "title":
+          case "description":
+            // Stray spaces around a title or description are never meant to
+            // be stored, and a whitespace-only title reads as missing.
+            return [headers[index], value?.trim() ?? value];
           case "bookable":
             return [headers[index], !value ? null : value];
           default:
@@ -115,50 +119,3 @@ export function extractCSVDataFromContentImport(
 
   return csvData;
 }
-
-/** Takes the CSV data from a `backup` import and parses it into an object that we can then use to create the entries */
-export function extractCSVDataFromBackupImport(data: string[][]): any[] {
-  const keys = data[0] as string[];
-  const values = data.slice(1) as string[][];
-
-  return values.map((entry, rowIndex) =>
-    Object.fromEntries(
-      entry
-        .map((value, index) => {
-          if (cellIsEmpty(value)) return undefined; // Return undefined for empty cells
-
-          // Backup-export emits `assetModel` as a JSON-serialised object
-          // (`{ name }`) so cross-org backup-restore can resolve / create
-          // the model by name. Symmetric with `category`.
-          switch (keys[index]) {
-            case "assetLocations":
-              // Row 1 is the header, so the first data row is row 2.
-              return [keys[index], parseBackupPlacements(value, rowIndex + 2)];
-            // Only a backup written before placements existed has this
-            // column; `placementsForRestore` turns it into one placement.
-            case "location":
-            case "category":
-            case "tags":
-            case "notes":
-            case "custody":
-            case "customFields":
-            case "assetModel":
-              return [keys[index], JSON.parse(value)];
-            default:
-              return [keys[index], value];
-          }
-        })
-        .filter((entry): entry is [string, any] => entry !== undefined) // Remove undefined entries
-    )
-  );
-}
-
-/** Helper function that checks if cell is empty in the context of parsing the csv.
- * Empty cells can be:
- *  - empty string
- *  - undefined
- *  - "{}"
- *  - "[]"
- */
-const cellIsEmpty = (cell: string) =>
-  cell === "" || cell === undefined || cell === "{}" || cell === "[]";

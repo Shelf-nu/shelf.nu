@@ -12,6 +12,7 @@
  */
 
 import { OrganizationRoles } from "@prisma/client";
+import { accessFor } from "@helpers/role-access";
 
 // why: React Router v7 single fetch — `data()` must return a real Response so
 // the response body is assertable.
@@ -83,8 +84,8 @@ describe("GET /api/audit-images", () => {
     mockFindMany.mockResolvedValue([]);
     mockRequirePermission.mockResolvedValue({
       organizationId: ORG_ID,
-      isSelfServiceOrBase: true,
       role: OrganizationRoles.BASE,
+      access: accessFor([OrganizationRoles.BASE]),
     });
   });
 
@@ -101,8 +102,8 @@ describe("GET /api/audit-images", () => {
   it("limits a SELF_SERVICE caller the same way", async () => {
     mockRequirePermission.mockResolvedValue({
       organizationId: ORG_ID,
-      isSelfServiceOrBase: true,
       role: OrganizationRoles.SELF_SERVICE,
+      access: accessFor([OrganizationRoles.SELF_SERVICE]),
     });
 
     await loader(args("img-1"));
@@ -115,8 +116,8 @@ describe("GET /api/audit-images", () => {
   it("lets an ADMIN read any image in the workspace", async () => {
     mockRequirePermission.mockResolvedValue({
       organizationId: ORG_ID,
-      isSelfServiceOrBase: false,
       role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
     });
 
     await loader(args("img-1"));

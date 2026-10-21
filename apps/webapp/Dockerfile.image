@@ -35,6 +35,15 @@ COPY --from=deps /src/ /src/
 COPY --from=pruner /src/out/full/ .
 
 RUN turbo build --filter=@shelf/webapp
+
+# The Prisma CLI is a devDependency and is removed by `pnpm prune --prod`
+# below, so install a standalone copy (same version as the workspace) that
+# the entrypoint uses to run `prisma migrate deploy` at container start.
+RUN PRISMA_VERSION="$(cd /src/apps/webapp && node -p "require('prisma/package.json').version")" && \
+    mkdir -p /opt/prisma-cli && cd /opt/prisma-cli && \
+    echo '{"name":"prisma-cli","private":true}' > package.json && \
+    npm install --no-audit --no-fund --omit=dev "prisma@${PRISMA_VERSION}"
+
 RUN pnpm prune --prod
 
 # Finally, build the production image with minimal footprint
@@ -56,6 +65,7 @@ COPY --from=build /src/apps/webapp/package.json /src/apps/webapp/package.json
 COPY --from=build /src/package.json /src/package.json
 COPY --from=build /src/apps/webapp/prisma.config.ts /src/apps/webapp/prisma.config.ts
 COPY --from=build /src/apps/webapp/docker-entrypoint.sh /src/apps/webapp/docker-entrypoint.sh
+COPY --from=build /opt/prisma-cli /opt/prisma-cli
 
 WORKDIR /src/apps/webapp
 

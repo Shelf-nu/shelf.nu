@@ -14,9 +14,12 @@
  * suite covers that loading contract itself.
  */
 import type { ReactNode } from "react";
+import { OrganizationRoles } from "@prisma/client";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { accessFor } from "@helpers/role-access";
 
 import { BookingAssetsSidebar } from "./booking-assets-sidebar";
 
@@ -26,6 +29,15 @@ import { BookingAssetsSidebar } from "./booking-assets-sidebar";
 // so the asset-code chip is simply skipped — irrelevant to these tests.
 vi.mock("~/hooks/use-current-organization", () => ({
   useCurrentOrganization: () => null,
+}));
+
+/** The viewing member's roles, per case. */
+const viewer = { roles: [OrganizationRoles.ADMIN] as OrganizationRoles[] };
+
+// why: the member's access comes from the `_layout` loader, which a
+// component-only render does not run.
+vi.mock("~/hooks/use-role-access", () => ({
+  useRoleAccess: () => accessFor(viewer.roles),
 }));
 
 // why: the real `Button` renders a react-router `Link` for `to=`, which
@@ -188,6 +200,7 @@ async function openSidebar() {
 
 beforeEach(() => {
   fetcher = { load: vi.fn(), state: "idle", data: undefined };
+  viewer.roles = [OrganizationRoles.ADMIN];
 });
 
 describe("BookingAssetsSidebar QT stock badges", () => {
@@ -456,4 +469,55 @@ describe("BookingAssetsSidebar lazy loading", () => {
     expect(fetcher.load).not.toHaveBeenCalled();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
+});
+
+describe("BookingAssetsSidebar scan-to-assign link", () => {
+  /** A RESERVED booking with one model reservation still to assign. */
+  function bookingWithOpenModelRequest() {
+    return {
+      ...makeBooking({ status: "RESERVED", assetCount: 0 }),
+      modelRequests: [
+        {
+          id: "req-1",
+          assetModelId: "model-1",
+          quantity: 2,
+          fulfilledQuantity: 0,
+          fulfilledAt: null,
+          assetModel: { id: "model-1", name: "Tripod" },
+        },
+      ],
+    } as Parameters<typeof BookingAssetsSidebar>[0]["booking"];
+  }
+
+  it("offers an Administrator the scanner on a reserved booking", async () => {
+    render(
+      <MemoryRouter>
+        <BookingAssetsSidebar booking={bookingWithOpenModelRequest()} />
+      </MemoryRouter>
+    );
+    await openSidebar();
+
+    expect(
+      screen.getByRole("link", { name: "Scan to assign" })
+    ).toHaveAttribute("href", "/bookings/booking-1/overview/scan-assets");
+  });
+
+  it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
+    "offers %s no scanner on a reserved booking, which the page refuses",
+    async (role) => {
+      viewer.roles = [role];
+
+      render(
+        <MemoryRouter>
+          <BookingAssetsSidebar booking={bookingWithOpenModelRequest()} />
+        </MemoryRouter>
+      );
+      await openSidebar();
+
+      expect(screen.getByText("Tripod")).toBeInTheDocument();
+      expect(
+        screen.queryByRole("link", { name: "Scan to assign" })
+      ).not.toBeInTheDocument();
+    }
+  );
 });

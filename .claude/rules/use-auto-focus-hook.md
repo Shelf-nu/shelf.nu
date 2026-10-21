@@ -1,6 +1,7 @@
 ---
 description: Use the useAutoFocus hook instead of the autoFocus JSX prop
-globs: ["apps/webapp/**/*.tsx"]
+paths:
+  - "apps/webapp/**/*.tsx"
 ---
 
 `jsx-a11y/no-autofocus` disallows the `autoFocus` prop. When you need

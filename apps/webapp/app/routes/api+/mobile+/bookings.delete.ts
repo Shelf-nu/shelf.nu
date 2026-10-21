@@ -1,4 +1,3 @@
-import { BookingStatus, OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
@@ -11,9 +10,9 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { deleteBooking } from "~/modules/booking/service.server";
-import { validateBookingOwnership } from "~/utils/booking-authorization.server";
+import { assertCanDeleteBooking } from "~/utils/booking-authorization.server";
 import { getClientHint } from "~/utils/client-hints";
-import { makeShelfError, ShelfError } from "~/utils/error";
+import { makeShelfError } from "~/utils/error";
 import {
   PermissionAction,
   PermissionEntity,
@@ -23,17 +22,14 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
 /**
  * POST /api/mobile/bookings/delete
  *
- * Permanently deletes a booking from the Companion app — the mobile twin of the
+ * Permanently deletes a booking from the Companion app, the mobile twin of the
  * web "delete" intent. Wraps the shared `deleteBooking` service (which frees
  * assets, cancels the scheduler and removes the PDF).
  *
  * PARITY: `delete` maps to `PermissionAction.delete` (web intent2ActionMap).
- * The two guards that on web live ONLY in the route action (not the service)
- * are re-implemented here EXACTLY (overview.tsx:783-809), or this would be a
- * privilege escalation vs web:
- *   1. self-service/base may only delete their own (creator OR custodian) —
- *      via the shared `validateBookingOwnership`.
- *   2. BASE users may only delete DRAFT bookings.
+ * The guard is `assertCanDeleteBooking`, the same one the web delete intent
+ * runs: ownership for callers who do not write every booking, and drafts only
+ * for roles whose policy says so.
  *
  * Body: { bookingId: string }
  * Query: ?orgId=...
@@ -64,7 +60,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const { bookingId } = await parseMobileBody(BodySchema, request, "Booking");
 
-    const { role } = await getMobileUserContext(user.id, organizationId);
+    const { access } = await getMobileUserContext(user.id, organizationId);
 
     const booking = await db.booking.findFirst({
       where: { id: bookingId, organizationId },
@@ -83,39 +79,14 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
-    // Mirror the web delete guards (overview.tsx:783-809) exactly.
-    const isSelfServiceOrBase =
-      role === OrganizationRoles.SELF_SERVICE ||
-      role === OrganizationRoles.BASE;
-
-    if (isSelfServiceOrBase) {
-      validateBookingOwnership({
-        booking,
-        userId: user.id,
-        role,
-        action: "delete",
-      });
-
-      // BASE users can only delete DRAFT bookings.
-      if (
-        role === OrganizationRoles.BASE &&
-        booking.status !== BookingStatus.DRAFT
-      ) {
-        throw new ShelfError({
-          cause: null,
-          message:
-            "You are not authorized to delete this booking. BASE users can only delete draft bookings.",
-          status: 403,
-          label: "Booking",
-          shouldBeCaptured: false,
-        });
-      }
-    }
+    assertCanDeleteBooking({ access, booking, userId: user.id });
 
     await deleteBooking(
       { id: bookingId, organizationId },
       getClientHint(request),
-      user.id
+      user.id,
+      // Re-checked at write time: the booking may have left DRAFT since.
+      { onlyIfDraft: access.policy.bookings.deleteOnlyDrafts }
     );
 
     return data({ success: true });

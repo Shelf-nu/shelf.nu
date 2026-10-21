@@ -33,6 +33,7 @@ import { useOrg } from "@/lib/org-context";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
+import { CONTENT_MAX_WIDTH } from "@/lib/content-column";
 import type { ScannedItem } from "@/hooks/use-audit-init";
 
 // Lazy-load native image modules below all imports (keeps import/first happy)
@@ -147,12 +148,10 @@ export function EvidenceModal({
   /**
    * The evidence already recorded against this asset.
    *
-   * why the modal fetches it: this sheet printed "1 note, 1 photo" and then
-   * offered only Add Photo and Save Note. On the SCANNER — where a field
-   * worker actually stands — the counts were a promise the screen did not
-   * keep, which is the same gap the read-only viewer closed on the audit
-   * detail screen. Someone checking whether a scratch was already recorded
-   * had to leave the scan, find the audit, and come back.
+   * why the modal fetches it: the sheet says how many notes and photos the
+   * asset already has, so it lists them too. A field worker on the scanner can
+   * check whether a scratch is already recorded without leaving the scan,
+   * the same record the read-only viewer shows on the audit detail screen.
    */
   const [existing, setExisting] = useState<{
     notes: AuditEvidenceNote[];
@@ -799,6 +798,12 @@ const useStyles = createStyles((colors) => ({
     paddingTop: spacing.md,
     paddingBottom: spacing.xl + 20, // Extra for safe area
     maxHeight: "80%",
+    // The modal covers the whole window, outside any navigator's content
+    // column, so the sheet holds itself to the column: on a tablet it stays
+    // reading width instead of spanning the window.
+    width: "100%",
+    maxWidth: CONTENT_MAX_WIDTH,
+    alignSelf: "center",
     ...Platform.select({
       ios: {
         shadowColor: "#000",

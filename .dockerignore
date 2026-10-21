@@ -1,23 +1,56 @@
-node_modules
+# Docker build context for apps/webapp/Dockerfile.
+# The Dockerfile runs `COPY . .` before `turbo prune`, so everything not listed
+# here is uploaded to the builder on every deploy. Patterns without a leading
+# `**/` only match at the repo root.
+
+# Dependencies (installed inside the image)
 **/node_modules
-*.log
-.DS_Store
-.env
-.env.*
-!.env.example
-.cache
+
+# Secrets: never send env files or tool credentials to the builder
+**/.env
+**/.env.*
+!**/.env.example
+.sentryclirc
+.cert
+*.cert.bak
+
+# Build output and caches (regenerated inside the image)
 **/build
 **/dist
+**/.cache
+**/.turbo
+**/.react-router
+**/*.tsbuildinfo
+**/.expo
+node-compile-cache
+.bin
+
+# Test and coverage output
+**/coverage
+**/test-results
+**/playwright-report
+**/playwright/.cache
+
+# Local checkouts and agent tooling (worktrees hold full copies of the repo)
 .git
+.worktrees
+.claude
+.claude-notes
+.pr-review
+CLAUDE.local.md
+superpowers
+
+# Editor, OS and logs
+**/.DS_Store
+**/*.log
+.vscode
+.idea
+.editorconfig
+
+# Not needed to build the webapp
 .github
 .gitignore
 .husky
-.vscode
-.editorconfig
-.idea
-.turbo
-.worktrees
-.cert
 docs
 desktop-app
 README.md

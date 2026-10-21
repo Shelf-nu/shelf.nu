@@ -117,7 +117,7 @@ const REDACTED_CUSTODIAN = {
  * identity readable one field over.
  *
  * @param rows - List rows straight from Prisma.
- * @param args.canSeeAllCustody - Resolved by `resolveCanSeeAllCustody`.
+ * @param args.canSeeAllCustody - The caller's `access.custody.seeAll`.
  * @param args.userId - The viewer.
  * @returns A shallow copy with disallowed custodian identities emptied. The
  *   input array and its rows are left untouched, because callers reuse them.

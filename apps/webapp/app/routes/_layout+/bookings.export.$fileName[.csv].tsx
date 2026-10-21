@@ -1,6 +1,7 @@
 /** CSV export route for selected bookings. */
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
+import { BookingsListSchema } from "~/components/booking/bookings-list-fields";
 import { csvResponse } from "~/utils/csv-utf8";
 import { exportBookingsFromIndexToCsv } from "~/utils/csv.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -8,6 +9,7 @@ import {
   buildContentDisposition,
   error,
   getCurrentSearchParams,
+  parseData,
 } from "~/utils/http.server";
 import {
   PermissionAction,
@@ -30,7 +32,7 @@ export const loader = async ({
   const { userId } = authSession;
 
   try {
-    const { organizationId, currentOrganization, canSeeAllBookings } =
+    const { organizationId, currentOrganization, access } =
       await requirePermission({
         userId: authSession.userId,
         request,
@@ -56,8 +58,11 @@ export const loader = async ({
       request,
       bookingsIds: bookingsIds.split(","),
       userId,
-      canSeeAllBookings,
+      canSeeAllBookings: access.bookings.seeAll,
       organizationId,
+      // The list a "Select all" stands for. It only narrows: the export ANDs
+      // it with the workspace and the caller's custody scope.
+      list: parseData(searchParams, BookingsListSchema),
     });
 
     return csvResponse(csvString, {

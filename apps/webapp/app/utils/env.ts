@@ -67,6 +67,7 @@ declare global {
       /** Auto-injected on Fly machines; used as a fallback for SENTRY_RELEASE. */
       FLY_RELEASE_VERSION: string;
       ADMIN_EMAIL: string;
+      FEEDBACK_EMAIL: string;
       CHROME_EXECUTABLE_PATH: string;
       FINGERPRINT: string;
       FREE_TRIAL_DAYS: string;
@@ -80,6 +81,7 @@ declare global {
       COMPANION_SERVERS: string;
       INSTANCE_NAME: string;
       MIN_COMPANION_VERSION: string;
+      LATEST_COMPANION_VERSION: string;
     }
   }
 }
@@ -219,6 +221,19 @@ export const ADMIN_EMAIL = getEnv("ADMIN_EMAIL", {
 });
 
 /**
+ * Internal inbox(es) that receive in-app feedback: issues, ideas and error
+ * reports. Accepts a comma separated list so more than one person gets
+ * notified (e.g. the support inbox plus whoever triages product feedback).
+ * Optional: when it is unset the feedback email goes to SUPPORT_EMAIL alone.
+ *
+ * Server side only, and deliberately absent from `getBrowserEnv()`: unlike
+ * SUPPORT_EMAIL it is never shown to users, it only routes internal mail.
+ */
+export const FEEDBACK_EMAIL = getEnv("FEEDBACK_EMAIL", {
+  isRequired: false,
+});
+
+/**
  * A comma separated list of customerIds that have custom install of shelf.
  * We need this in order to make our webhook work properly.
  */
@@ -284,6 +299,22 @@ export const INSTANCE_NAME = getEnv("INSTANCE_NAME", {
  * @see {@link file://./../routes/api+/mobile+/config.ts}
  */
 export const MIN_COMPANION_VERSION = getEnv("MIN_COMPANION_VERSION", {
+  isSecret: false,
+  isRequired: false,
+});
+
+/**
+ * Newest companion-app version in the app stores, e.g. "1.6.0".
+ *
+ * Served on `/api/mobile/config`. An app older than this shows a dismissible
+ * "new version available" banner with a store link. Unlike
+ * `MIN_COMPANION_VERSION` it blocks nothing. Leave unset (the default) to show
+ * no banner. Set it only once that version is live in BOTH stores: an earlier
+ * value sends people to a store page with nothing new to install.
+ *
+ * @see {@link file://./../routes/api+/mobile+/config.ts}
+ */
+export const LATEST_COMPANION_VERSION = getEnv("LATEST_COMPANION_VERSION", {
   isSecret: false,
   isRequired: false,
 });

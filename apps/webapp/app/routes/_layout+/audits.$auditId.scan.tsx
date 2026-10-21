@@ -28,13 +28,13 @@ import type { OnCodeDetectionSuccessProps } from "~/components/scanner/code-scan
 import { db } from "~/database/db.server";
 import { useAuditScanPersistence } from "~/hooks/use-audit-scan-persistence";
 import { useAuditSessionInitialization } from "~/hooks/use-audit-session-initialization";
-import { useViewportHeight } from "~/hooks/use-viewport-height";
+import { useFillViewportHeight } from "~/hooks/use-fill-viewport-height";
 import { completeAuditWithImages } from "~/modules/audit/complete-audit-with-images.server";
 import {
   getAuditSessionDetails,
   getAuditScans,
   requireAuditAssignee,
-  requireAuditAssigneeForBaseSelfService,
+  requireAuditAssigneeForScopedViewer,
   removeAuditScan,
 } from "~/modules/audit/service.server";
 import scannerCss from "~/styles/scanner.css?url";
@@ -46,7 +46,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { tw } from "~/utils/tw";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: scannerCss },
@@ -85,7 +84,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
-    const { organizationId, isSelfServiceOrBase } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.audit,
@@ -117,13 +116,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
     }
 
-    // Assignee-gated: ADMIN/OWNER may act on any audit,
-    // BASE/SELF_SERVICE only when assigned.
+    // Assignee-gated: callers who see every audit may act on any audit,
+    // everyone else only when assigned.
     await requireAuditAssignee({
       auditSessionId: auditId,
       organizationId,
       userId,
-      isSelfServiceOrBase,
+      assignedOnly: !access.audits.seeAll,
     });
 
     const formData = await request.clone().formData();
@@ -190,8 +189,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const { organizationId, userOrganizations, isSelfServiceOrBase } =
-      permissionResult;
+    const { organizationId, userOrganizations, access } = permissionResult;
 
     const { session, expectedAssets } = await getAuditSessionDetails({
       // The scan drawer renders the expected-asset photos.
@@ -206,12 +204,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       return redirect(`/audits/${auditId}/overview`);
     }
 
-    // Scan access: ADMIN/OWNER can scan any audit,
-    // BASE/SELF_SERVICE only when assigned.
-    requireAuditAssigneeForBaseSelfService({
+    // Scan access: callers who see every audit can scan any audit, everyone
+    // else only when assigned.
+    requireAuditAssigneeForScopedViewer({
       audit: session,
       userId,
-      isSelfServiceOrBase,
+      assignedOnly: !access.audits.seeAll,
       auditId,
     });
 
@@ -256,8 +254,10 @@ export default function AuditSessionRoute() {
   const isRestoringRef = useRef(true); // Start true, set false after initialization
   const pendingPersistsRef = useRef<Map<string, string>>(new Map()); // Maps assetId -> qrId
 
-  const { vh, isMd } = useViewportHeight();
-  const height = isMd ? vh - 67 : vh - 100;
+  // Fills the screen below wherever the layout's chrome ends, measured rather
+  // than subtracted, so the page itself never scrolls behind the drawer.
+  const { ref: scannerContainerRef, height } =
+    useFillViewportHeight<HTMLDivElement>();
 
   const expectedItems: AuditScannedItem[] = useMemo(
     () =>
@@ -390,16 +390,17 @@ export default function AuditSessionRoute() {
         }}
       />
 
-      <div className="-mx-4 flex flex-col" style={{ height: `${height}px` }}>
+      <div
+        ref={scannerContainerRef}
+        className="-mx-4 flex flex-col overflow-hidden"
+        style={height === undefined ? undefined : { height: `${height}px` }}
+      >
         <CodeScanner
           onCodeDetectionSuccess={handleCodeDetectionSuccess}
           backButtonText="Audit"
           allowNonShelfCodes
           paused={!auditSession}
           setPaused={() => {}}
-          scannerModeClassName={(mode) =>
-            tw(mode === "scanner" && "justify-start pt-[100px]")
-          }
         />
       </div>
     </>

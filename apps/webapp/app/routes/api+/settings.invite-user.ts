@@ -37,7 +37,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.teamMember,
@@ -100,6 +100,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
       teamMemberId,
       userId,
       extraMessage: inviteMessage,
+      // Only the workspace owner may grant an owner-only role; createInvite enforces it.
+      actorOwnsWorkspace: access.ownsWorkspace,
     });
 
     if (!invite) {

@@ -28,7 +28,9 @@ import { withPrismaRetry } from "@shelf/database";
 import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
+import type { BookableListScope } from "../asset/list-scope.server";
 import { CUSTODY_AGG_JOIN, generateWhereClause } from "../asset/query.server";
+import type { ArchivedFilter } from "../asset/types";
 
 /** Sort keys the model view offers. Deliberately separate from the asset
  * index's `sortBy`, whose keys name asset columns a model row does not have. */
@@ -262,10 +264,14 @@ export type GetAssetModelRollupArgs = {
    * returns at most 100 rows rather than erroring, so a caller comparing the
    * row count against the requested `perPage` should expect the clamp. */
   perPage: number;
-  /** Restricts the rollup to assets the viewer may reserve. Mirrors the asset
-   * list's own scoping, so a role that sees a narrowed list does not also see
-   * counts computed over the wider set. */
-  availableToBookOnly?: boolean;
+  /** The viewer's list scope. Mirrors the asset list's own scoping, so a role
+   * that sees a narrowed list does not also see counts computed over the wider
+   * set. `null` or omitted counts every asset. */
+  bookableScope?: BookableListScope | null;
+  /** The index's Active / Archived / All view (issue #382), so a model's
+   * counts describe the same assets the list beside it shows. Defaults to
+   * `"active"`, matching every other asset list. */
+  archivedFilter?: ArchivedFilter;
   sortBy?: AssetModelRollupSortKey;
   sortDirection?: "asc" | "desc";
 };
@@ -284,7 +290,8 @@ export async function getAssetModelRollup({
   timeZone = "UTC",
   page,
   perPage,
-  availableToBookOnly = false,
+  bookableScope = null,
+  archivedFilter = "active",
   sortBy = "name",
   sortDirection = "asc",
 }: GetAssetModelRollupArgs): Promise<{
@@ -303,8 +310,10 @@ export async function getAssetModelRollup({
     search,
     filters,
     undefined,
-    availableToBookOnly,
-    timeZone
+    bookableScope,
+    timeZone,
+    false,
+    archivedFilter
   );
 
   // Checked against the tuple, not a nullish-coalesce on the lookup: an

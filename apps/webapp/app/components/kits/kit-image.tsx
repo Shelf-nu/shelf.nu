@@ -3,8 +3,9 @@
  * full-size preview dialog.
  *
  * Kit images are served on signed URLs that expire. When the stored URL has
- * expired, the component asks `/api/kit/refresh-image` for a new one (which
- * also saves it on the kit) and shows that URL once it arrives.
+ * expired, the component asks `/api/kit/refresh-image` to re-sign the kit's
+ * stored image (the server reads it from the kit, so only the id is sent),
+ * which also saves the new URL on the kit, and shows it once it arrives.
  *
  * @see {@link file://../../routes/api+/kit.refresh-image.ts}
  */
@@ -70,7 +71,7 @@ export default function KitImage({
         const jitter = Math.random() * 3000;
         timerId = setTimeout(() => {
           void fetcher.submit(
-            { kitId, image },
+            { kitId },
             {
               method: "post",
               action: "/api/kit/refresh-image",
@@ -106,7 +107,7 @@ export default function KitImage({
               "transition-opacity" // Fallback animation
             )}
           >
-            <Spinner className="[&_.spinner]:before:border-t-gray-400" />
+            <Spinner />
           </div>
         )}
 

@@ -1,5 +1,6 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
+import { findMobileArchivedRefusal } from "~/modules/api/mobile-archived.server";
 import {
   requireMobileAuth,
   requireMobilePermission,
@@ -10,10 +11,12 @@ import {
   mobileBulkIdsSchema,
   mobileQuantitiesSchema,
 } from "~/modules/api/mobile-bulk-ids.server";
+import { resolveLastAuditDateAccess } from "~/modules/asset/last-audit-date-access";
 import { bulkCheckOutAssets } from "~/modules/asset/service.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import {
   assertAssignableQuantities,
+  assertMayAssignCustodyTo,
   assignQuantities,
   QUANTITY_CUSTODIAN_SELECT,
   splitQuantityAssetIds,
@@ -95,15 +98,17 @@ export async function action({ request }: ActionFunctionArgs) {
       quantities
     );
 
-    // Get user context (role + barcode access) for asset index settings
-    const { role, canUseBarcodes, canSeeAllCustody } =
-      await getMobileUserContext(user.id, organizationId);
+    // Caller's access (effective role, custody scope), barcode and audit add-ons
+    const { canUseBarcodes, canUseAudits, access } = await getMobileUserContext(
+      user.id,
+      organizationId
+    );
 
     const settings = await getAssetIndexSettings({
       userId: user.id,
       organizationId,
       canUseBarcodes,
-      role,
+      role: access.role,
     });
 
     // Validate custodian belongs to the organization
@@ -123,21 +128,35 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     });
 
-    /**
-     * Pass `role` so the service-level SELF_SERVICE guard fires.
-     * Without it, a SELF_SERVICE user could assign custody to any
-     * team member (hex-security r3202162994).
-     */
-    // Every per-unit assignment is checked before anything is written,
-    // including the SELF_SERVICE rule.
+    // The "assign only to yourself" rule (`access.custody.assign`) comes
+    // first: it applies to the whole request, whatever is in the list.
+    assertMayAssignCustodyTo({
+      custodian: teamMember,
+      custodyAssign: access.custody.assign,
+      userId: user.id,
+    });
+
+    // Every per-unit assignment is checked before anything is written.
     await assertAssignableQuantities({
       quantityAssetIds,
       quantities,
       organizationId,
       custodian: teamMember,
-      role,
+      custodyAssign: access.custody.assign,
       userId: user.id,
     });
+
+    // Answer an archived scan by naming the archived rows, so the app marks
+    // only those (see mobile-archived.server.ts). It runs after every other
+    // check: an archived row is the last reason to refuse, so removing it
+    // leaves a request that goes through.
+    const archivedRefusal = await findMobileArchivedRefusal({
+      assetIds,
+      organizationId,
+    });
+    if (archivedRefusal) {
+      return data({ error: archivedRefusal }, { status: 400 });
+    }
 
     /**
      * The whole-asset call runs before the per-unit writes: it validates and
@@ -146,13 +165,17 @@ export async function action({ request }: ActionFunctionArgs) {
     const { skippedQuantityTracked } = bulkAssetIds.length
       ? await bulkCheckOutAssets({
           userId: user.id,
-          role,
+          custodyAssign: access.custody.assign,
           assetIds: bulkAssetIds,
           custodianId,
           custodianName: teamMember.name,
           organizationId,
           currentSearchParams: "",
           settings,
+          lastAuditDateAccess: resolveLastAuditDateAccess({
+            seeAllAudits: access.audits.seeAll,
+            auditsUsable: canUseAudits,
+          }),
           /**
            * Mobile sends no list filters (`currentSearchParams` is empty above), so
            * this never narrows anything today — the where-builder returns before it
@@ -161,7 +184,7 @@ export async function action({ request }: ActionFunctionArgs) {
            * custodian filter. Swap in `scopeCustodianFilterIds` at that point, so
            * they can still filter by their OWN custody.
            */
-          allowedTeamMemberIds: canSeeAllCustody ? "all" : [],
+          allowedTeamMemberIds: access.custody.seeAll ? "all" : [],
         })
       : { skippedQuantityTracked: 0 };
 
@@ -177,7 +200,7 @@ export async function action({ request }: ActionFunctionArgs) {
       custodian: teamMember,
       userId: user.id,
       organizationId,
-      role,
+      custodyAssign: access.custody.assign,
     });
 
     // The service skips QUANTITY_TRACKED ids that came without a quantity in a

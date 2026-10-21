@@ -24,9 +24,9 @@ import { useLocalSearchParams, Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { api } from "@/lib/api";
-import type { KitDetail } from "@/lib/api/types";
+import type { KitDetail, KitDetailAsset } from "@/lib/api/types";
 import { useOrg } from "@/lib/org-context";
-import { pushIntoTab } from "@/lib/navigation";
+import { useAssetScreenNavigation } from "@/lib/asset-host-stack";
 import {
   fontSize,
   spacing,
@@ -46,6 +46,11 @@ import { TeamMemberPicker } from "@/components/team-member-picker";
 import { LocationPicker } from "@/components/location-picker";
 import { useKitActions } from "@/hooks/use-kit-actions";
 import { userHasPermission } from "@/lib/permissions";
+import {
+  assetBadgeStatus,
+  isArchivedAsset,
+  kitAssignCustodyBlockedReason,
+} from "@/lib/archived-assets";
 
 /**
  * Kit detail screen, resolved from the `id` route param scoped to the current
@@ -56,6 +61,9 @@ import { userHasPermission } from "@/lib/permissions";
 export default function KitDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { currentOrg } = useOrg();
+  // Asset rows open in whichever stack mounts this screen (the Assets tab, or
+  // the Audits stack when reached from an audit). See lib/asset-routes.ts.
+  const assetNavigation = useAssetScreenNavigation();
   const { colors, statusBadge } = useTheme();
   const styles = useStyles();
   const { formatDate } = useDateFormatter();
@@ -132,6 +140,11 @@ export default function KitDetailScreen() {
         text: colors.muted,
       }
     : null;
+
+  // Archived members are out of service: listed apart, counted nowhere.
+  const members = kit?.assets ?? [];
+  const activeMembers = members.filter((asset) => !isArchivedAsset(asset));
+  const archivedMembers = members.filter(isArchivedAsset);
 
   return (
     <View style={styles.container}>
@@ -223,6 +236,7 @@ export default function KitDetailScreen() {
             isActionLoading={isActionLoading}
             canCustody={canCustody}
             canUpdate={canUpdate}
+            assignBlockedReason={kitAssignCustodyBlockedReason(members)}
           />
 
           {/* ── Details ────────────────────────────────── */}
@@ -275,7 +289,12 @@ export default function KitDetailScreen() {
             <InfoRow
               icon="cube-outline"
               label="Assets"
-              value={String(kit.assets.length)}
+              value={String(activeMembers.length)}
+              hint={
+                archivedMembers.length > 0
+                  ? `${archivedMembers.length} archived, not counted`
+                  : undefined
+              }
             />
             <InfoRow
               icon="calendar-outline"
@@ -300,96 +319,51 @@ export default function KitDetailScreen() {
           />
 
           {/* ── Assets ─────────────────────────────────── */}
+          {/* Members still in service, then the archived ones in their own
+              group: an archived member stays in the kit but counts toward
+              nothing, and the kit is booked and handed over without it. */}
           <View style={styles.sectionContainer}>
             <Text style={styles.sectionTitle}>
-              Assets ({kit.assets.length})
+              Assets ({activeMembers.length})
             </Text>
-            {kit.assets.length === 0 ? (
-              <Text style={styles.stateText}>This kit has no assets yet.</Text>
+            {activeMembers.length === 0 ? (
+              <Text style={styles.stateText}>
+                {archivedMembers.length > 0
+                  ? "Every asset in this kit is archived."
+                  : "This kit has no assets yet."}
+              </Text>
             ) : (
               <View style={styles.assetList}>
-                {kit.assets.map((asset) => {
-                  const assetBadge = statusBadge[asset.status] ?? {
-                    bg: colors.backgroundTertiary,
-                    text: colors.muted,
-                  };
-                  // Only show the "×N" kit-quantity line when we have a
-                  // formatted value — never a bare "×". Mirrors the assets
-                  // list/detail screens, which render nothing when
-                  // formatQuantity returns null (missing/non-finite qty).
-                  const kitQuantityLabel = isQuantityTracked(asset)
-                    ? formatQuantity(asset.kitQuantity, asset.unitOfMeasure)
-                    : null;
-                  return (
-                    <TouchableOpacity
-                      key={asset.id}
-                      style={styles.assetRow}
-                      onPress={() =>
-                        pushIntoTab(
-                          "/(tabs)/assets",
-                          `/(tabs)/assets/${asset.id}`
-                        )
-                      }
-                      activeOpacity={0.7}
-                      accessibilityLabel={`View asset ${asset.title}`}
-                      accessibilityRole="button"
-                    >
-                      {asset.thumbnailImage || asset.mainImage ? (
-                        <Image
-                          source={{
-                            uri: asset.thumbnailImage || asset.mainImage!,
-                          }}
-                          style={styles.assetImage}
-                          contentFit="cover"
-                        />
-                      ) : (
-                        <View
-                          style={[
-                            styles.assetImage,
-                            styles.assetImagePlaceholder,
-                          ]}
-                        >
-                          <Ionicons
-                            name="cube-outline"
-                            size={16}
-                            color={colors.muted}
-                          />
-                        </View>
-                      )}
-                      <View style={styles.assetInfo}>
-                        <Text style={styles.assetTitle} numberOfLines={1}>
-                          {asset.title}
-                        </Text>
-                        {kitQuantityLabel ? (
-                          <Text style={styles.assetMeta} numberOfLines={1}>
-                            {`×${kitQuantityLabel}`}
-                          </Text>
-                        ) : null}
-                        <Text style={styles.assetMeta} numberOfLines={1}>
-                          {asset.category?.name || "Uncategorized"}
-                        </Text>
-                      </View>
-                      <View
-                        style={[
-                          styles.statusBadge,
-                          { backgroundColor: assetBadge.bg },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.statusText,
-                            { color: assetBadge.text },
-                          ]}
-                        >
-                          {formatStatus(asset.status)}
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })}
+                {activeMembers.map((asset) => (
+                  <KitMemberRow
+                    key={asset.id}
+                    asset={asset}
+                    onOpen={assetNavigation.openAsset}
+                  />
+                ))}
               </View>
             )}
           </View>
+          {archivedMembers.length > 0 ? (
+            <View style={styles.sectionContainer}>
+              <Text style={styles.sectionTitle}>
+                Archived ({archivedMembers.length})
+              </Text>
+              <Text style={styles.archivedNote}>
+                Archived assets stay in the kit but are not counted, booked or
+                put in custody with it.
+              </Text>
+              <View style={styles.assetList}>
+                {archivedMembers.map((asset) => (
+                  <KitMemberRow
+                    key={asset.id}
+                    asset={asset}
+                    onOpen={assetNavigation.openAsset}
+                  />
+                ))}
+              </View>
+            </View>
+          ) : null}
         </ScrollView>
       )}
 
@@ -425,6 +399,79 @@ export default function KitDetailScreen() {
         </>
       ) : null}
     </View>
+  );
+}
+
+/**
+ * One kit member row: photo, title, kit units and category, and its status
+ * badge ("Archived" for an archived member). Tapping opens the asset.
+ *
+ * @param props.asset - The kit member
+ * @param props.onOpen - Opens the asset's screen in the current stack
+ * @returns The row element
+ */
+function KitMemberRow({
+  asset,
+  onOpen,
+}: {
+  asset: KitDetailAsset;
+  onOpen: (assetId: string) => void;
+}) {
+  const { colors, statusBadge } = useTheme();
+  const styles = useStyles();
+  const memberStatus = assetBadgeStatus(asset);
+  const assetBadge = statusBadge[memberStatus] ?? {
+    bg: colors.backgroundTertiary,
+    text: colors.muted,
+  };
+  // Only show the "×N" kit-quantity line when we have a formatted value,
+  // never a bare "×". Mirrors the assets list/detail screens, which render
+  // nothing when formatQuantity returns null (missing/non-finite qty).
+  const kitQuantityLabel = isQuantityTracked(asset)
+    ? formatQuantity(asset.kitQuantity, asset.unitOfMeasure)
+    : null;
+  return (
+    <TouchableOpacity
+      style={styles.assetRow}
+      onPress={() => onOpen(asset.id)}
+      activeOpacity={0.7}
+      accessibilityLabel={`View asset ${asset.title}${
+        isArchivedAsset(asset) ? ", archived" : ""
+      }`}
+      accessibilityRole="button"
+    >
+      {asset.thumbnailImage || asset.mainImage ? (
+        <Image
+          source={{
+            uri: asset.thumbnailImage || asset.mainImage!,
+          }}
+          style={styles.assetImage}
+          contentFit="cover"
+        />
+      ) : (
+        <View style={[styles.assetImage, styles.assetImagePlaceholder]}>
+          <Ionicons name="cube-outline" size={16} color={colors.muted} />
+        </View>
+      )}
+      <View style={styles.assetInfo}>
+        <Text style={styles.assetTitle} numberOfLines={1}>
+          {asset.title}
+        </Text>
+        {kitQuantityLabel ? (
+          <Text style={styles.assetMeta} numberOfLines={1}>
+            {`×${kitQuantityLabel}`}
+          </Text>
+        ) : null}
+        <Text style={styles.assetMeta} numberOfLines={1}>
+          {asset.category?.name || "Uncategorized"}
+        </Text>
+      </View>
+      <View style={[styles.statusBadge, { backgroundColor: assetBadge.bg }]}>
+        <Text style={[styles.statusText, { color: assetBadge.text }]}>
+          {formatStatus(memberStatus)}
+        </Text>
+      </View>
+    </TouchableOpacity>
   );
 }
 
@@ -530,6 +577,11 @@ const useStyles = createStyles((colors, shadows) => ({
     fontSize: fontSize.base,
     color: colors.muted,
     textAlign: "center",
+  },
+  archivedNote: {
+    fontSize: fontSize.sm,
+    color: colors.muted,
+    marginBottom: spacing.sm,
   },
   retryButton: {
     backgroundColor: colors.primary,

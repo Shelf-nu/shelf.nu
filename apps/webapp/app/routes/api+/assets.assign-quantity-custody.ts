@@ -11,7 +11,6 @@
  * @see {@link file://./assets.bulk-assign-custody.ts} the bulk route, which uses the same function
  */
 
-import { OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import {
@@ -40,6 +39,12 @@ export const AssignQuantityCustodySchema = z.object({
     .string()
     .optional()
     .transform((val) => (val === "" ? undefined : val)),
+  /**
+   * Where the units come from: a location id, or `"unplaced"` for the
+   * unplaced units. Only sent by the dialog for a pool placed at two or more
+   * locations; absent means the service decides (see `resolveCustodySource`).
+   */
+  locationId: z.string().optional(),
 });
 
 export async function action({ context, request }: ActionFunctionArgs) {
@@ -49,7 +54,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId, role } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       request,
       userId,
       entity: PermissionEntity.asset,
@@ -58,7 +63,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const formData = await request.formData();
 
-    const { assetId, teamMemberId, quantity, note } = parseData(
+    const { assetId, teamMemberId, quantity, note, locationId } = parseData(
       formData,
       AssignQuantityCustodySchema
     );
@@ -79,11 +84,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
       });
     });
 
-    /** Self-service users can only assign custody to themselves */
-    if (
-      role === OrganizationRoles.SELF_SERVICE &&
-      teamMember.userId !== userId
-    ) {
+    /** A caller whose custody scope is `self` may assign only to themselves */
+    const assignsSelfOnly = access.custody.assign === "self";
+    if (assignsSelfOnly && teamMember.userId !== userId) {
       throw new ShelfError({
         cause: null,
         title: "Action not allowed",
@@ -101,8 +104,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
       quantity,
       userId,
       organizationId,
-      role,
+      custodyAssign: access.custody.assign,
       note,
+      locationId,
     });
 
     sendNotification({

@@ -1,4 +1,4 @@
-import { OrganizationRoles } from "@prisma/client";
+import { archivedAssetsLeftOut } from "@shelf/labels";
 import { useSetAtom } from "jotai";
 import type {
   MetaFunction,
@@ -18,8 +18,8 @@ import AddAssetsToBookingDrawer, {
 } from "~/components/scanner/drawer/uses/add-assets-to-booking-drawer";
 import { db } from "~/database/db.server";
 import { useBookingAssignSessionInitialization } from "~/hooks/use-booking-assign-session-initialization";
+import { useFillViewportHeight } from "~/hooks/use-fill-viewport-height";
 import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
-import { useViewportHeight } from "~/hooks/use-viewport-height";
 import type { ScannedKitSliceSpec } from "~/modules/booking/service.server";
 import {
   addScannedAssetsToBooking,
@@ -29,10 +29,9 @@ import { deriveBookingScanSession } from "~/modules/booking-model-request/scan-s
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
-  isSelfServiceOrBaseRole,
+  assertCanAddBookingItems,
   validateBookingOwnership,
 } from "~/utils/booking-authorization.server";
-import { canUserManageBookingAssets } from "~/utils/bookings";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
@@ -47,8 +46,8 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { canManageBookingItems } from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
-import { tw } from "~/utils/tw";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: scannerCss },
@@ -64,12 +63,11 @@ export const links: LinksFunction = () => [
  * no models, so the screen renders exactly as it did before this reservation
  * context existed.
  *
- * `booking:update` is a permission SELF_SERVICE and BASE both hold, so
- * neither role is stopped by `requirePermission` alone: past that gate, this
- * also proves the caller CREATED or holds CUSTODY of the booking, otherwise a
- * restricted user could open any booking in the workspace through this
- * screen. `canUserManageBookingAssets` cannot substitute for that check: it
- * reads only the booking's status, never `userId`.
+ * `booking:update` is a permission every role holds, so past that gate this
+ * also proves the caller may write the booking (they created it or hold it,
+ * unless their access writes every booking), then applies the add-items rule
+ * for the caller's role and the booking's status. The action repeats both
+ * checks, since a direct POST skips this loader.
  */
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -80,16 +78,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, role, userOrganizations } = await requirePermission(
-      {
+    const { organizationId, access, userOrganizations } =
+      await requirePermission({
         userId,
         request,
         entity: PermissionEntity.booking,
         action: PermissionAction.update,
-      }
-    );
-
-    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+      });
 
     const booking = await getBooking({
       id: bookingId,
@@ -98,31 +93,21 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
     });
 
-    /**
-     * `booking:update` is a permission BASE holds as well as SELF_SERVICE,
-     * unlike the fulfil-and-checkout screen's `booking:checkout`, which BASE
-     * does not hold and so can leave BASE out of its own ownership check.
-     * Without this, a SELF_SERVICE or BASE user could load another member's
-     * booking, its outstanding reservations and its asset list through this
-     * screen, even though the action below refuses the write. Matches the
-     * role set the mobile twin (`api+/mobile+/bookings.add-scanned-assets.ts`)
-     * restricts for this same operation, which also folds BASE in with
-     * SELF_SERVICE.
-     *
-     * Ownership is judged before status, as on the sibling booking screens: a
-     * caller with no claim on the booking should not learn what state it is
-     * in.
-     */
-    if (isSelfServiceOrBaseRole(role)) {
-      validateBookingOwnership({
-        booking,
-        userId,
-        role,
-        action: "add assets to",
-      });
-    }
+    // Seeing a booking does not grant writing it: the action refuses the same
+    // callers, so the page does not offer them a scanner that cannot submit.
+    validateBookingOwnership({
+      booking,
+      userId,
+      access,
+      action: "add items to",
+    });
 
-    const canManageAssets = canUserManageBookingAssets(booking, isSelfService);
+    // The same add rule as every other add path (manage-assets, manage-kits,
+    // add-to-existing-booking, mobile add-scanned-assets).
+    const canManageAssets = canManageBookingItems({
+      access,
+      bookingStatus: booking.status,
+    });
 
     if (!canManageAssets) {
       throw new ShelfError({
@@ -130,6 +115,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         message:
           "You are not allowed to add assets for this booking at the moment.",
         label: "Booking",
+        status: 403,
         shouldBeCaptured: false,
       });
     }
@@ -178,13 +164,38 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId, role, isSelfServiceOrBase } =
-      await requirePermission({
-        userId,
-        request,
-        entity: PermissionEntity.booking,
-        action: PermissionAction.update,
+    const { organizationId, access } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.update,
+    });
+
+    // `booking:update` is held by every role, so it settles nothing about THIS
+    // booking: a caller who does not write every booking must own it, and the
+    // status must accept new items for the caller's role. The service still
+    // re-checks, under a row lock, that the booking is not closed.
+    const target = await db.booking.findFirst({
+      where: { id: bookingId, organizationId },
+      select: { status: true, creatorId: true, custodianUserId: true },
+    });
+    if (!target) {
+      throw new ShelfError({
+        cause: null,
+        title: "Not found",
+        message: "Booking not found.",
+        label: "Booking",
+        status: 404,
+        shouldBeCaptured: false,
       });
+    }
+    validateBookingOwnership({
+      booking: target,
+      userId,
+      access,
+      action: "add items to",
+    });
+    assertCanAddBookingItems({ access, bookingStatus: target.status });
 
     const formData = await request.formData();
 
@@ -302,42 +313,18 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       (id) => !kitSliceAssetIds.has(id)
     );
 
-    /**
-     * `requirePermission` above only proves the caller holds `booking:update`
-     * in this organization. BASE holds it too, unlike the fulfil-and-checkout
-     * action's `booking:checkout`, which is why that route can leave BASE out
-     * of its own ownership check. Without this, a direct POST from a
-     * SELF_SERVICE or BASE user could write to a booking they neither created
-     * nor hold custody of; the loader's `canUserManageBookingAssets` only
-     * shapes what renders, it is not consulted on a POST that skips the page.
-     * Runs before `addScannedAssetsToBooking`, which is the write it guards.
-     * Matches the role set the mobile twin
-     * (`api+/mobile+/bookings.add-scanned-assets.ts`) restricts for this same
-     * operation, which also folds BASE in with SELF_SERVICE.
-     */
-    if (isSelfServiceOrBase) {
-      const basicBookingInfo = await db.booking.findUniqueOrThrow({
-        where: { id: bookingId, organizationId },
-        select: { creatorId: true, custodianUserId: true },
-      });
-
-      validateBookingOwnership({
-        booking: basicBookingInfo,
+    const { addedAssetIds, claimedAssetIds, archivedKitMembersLeftOut } =
+      await addScannedAssetsToBooking({
+        bookingId,
+        assetIds: standaloneAssetIds,
+        kitIds,
+        organizationId,
         userId,
-        role,
-        action: "add assets to",
+        quantities,
+        kitSlices,
+        // Re-checks the add rule against the locked status inside the write.
+        access,
       });
-    }
-
-    const { addedAssetIds, claimedAssetIds } = await addScannedAssetsToBooking({
-      bookingId,
-      assetIds: standaloneAssetIds,
-      kitIds,
-      organizationId,
-      userId,
-      quantities,
-      kitSlices,
-    });
 
     /**
      * A scan can legitimately change nothing: every item may already sit on
@@ -348,14 +335,21 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      */
     const addedCount = addedAssetIds.length;
     const claimedCount = claimedAssetIds.length;
+    // Archived members of a scanned kit stay off the booking; say so, rather
+    // than letting the count quietly differ from the kit's size.
+    const leftOutNote =
+      archivedKitMembersLeftOut > 0
+        ? ` ${archivedAssetsLeftOut(archivedKitMembersLeftOut)}`
+        : "";
 
     if (addedCount > 0) {
       sendNotification({
         title: "Assets added",
-        message:
+        message: `${
           addedCount === 1
             ? "The scanned asset was added to the booking."
-            : `${addedCount} scanned assets were added to the booking.`,
+            : `${addedCount} scanned assets were added to the booking.`
+        }${leftOutNote}`,
         icon: { name: "success", variant: "success" },
         senderId: authSession.userId,
       });
@@ -405,8 +399,10 @@ export default function ScanAssetsForBookings() {
   const navigation = useNavigation();
   const isLoading = isFormProcessing(navigation.state);
 
-  const { vh, isMd } = useViewportHeight();
-  const height = isMd ? vh - 67 : vh - 100;
+  // Fills the screen below wherever the layout's chrome ends, measured rather
+  // than subtracted, so the page itself never scrolls behind the drawer.
+  const { ref: scannerContainerRef, height } =
+    useFillViewportHeight<HTMLDivElement>();
 
   const savedCameraId = useScannerCameraId();
 
@@ -425,7 +421,11 @@ export default function ScanAssetsForBookings() {
 
       <AddAssetsToBookingDrawer isLoading={isLoading} />
 
-      <div className="-mx-4 flex flex-col" style={{ height: `${height}px` }}>
+      <div
+        ref={scannerContainerRef}
+        className="-mx-4 flex flex-col overflow-hidden"
+        style={height === undefined ? undefined : { height: `${height}px` }}
+      >
         <CodeScanner
           isLoading={isLoading}
           onCodeDetectionSuccess={handleCodeDetectionSuccess}
@@ -433,9 +433,6 @@ export default function ScanAssetsForBookings() {
           allowNonShelfCodes
           paused={false}
           setPaused={() => {}}
-          scannerModeClassName={(mode) =>
-            tw(mode === "scanner" && "justify-start pt-[100px]")
-          }
           savedCameraId={savedCameraId}
         />
       </div>

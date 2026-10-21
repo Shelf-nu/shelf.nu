@@ -12,6 +12,7 @@
  * `models[i].quantity`, alongside the booking's own fields).
  */
 
+import { permissionContext } from "@helpers/role-access";
 import { OrganizationRoles } from "@prisma/client";
 import type { ActionFunctionArgs } from "react-router";
 import { redirect } from "react-router";
@@ -40,7 +41,7 @@ vi.mock("~/database/db.server", () => ({
   },
 }));
 
-// why: each case supplies the (organizationId, role, isSelfServiceOrBase) it
+// why: each case supplies the (organizationId, access) it
 // needs rather than running the real permission machinery.
 vi.mock("~/utils/roles.server", () => ({
   requirePermission: vi.fn(),
@@ -205,10 +206,8 @@ beforeEach(() => {
   vi.clearAllMocks();
 
   requirePermissionMock.mockResolvedValue({
-    organizationId: "org-1",
+    ...permissionContext({ roles: [OrganizationRoles.ADMIN] }),
     currentOrganization: { id: "org-1", type: "TEAM" },
-    role: OrganizationRoles.ADMIN,
-    isSelfServiceOrBase: false,
   } as never);
 
   serviceMocks.getTeamMember.mockResolvedValue({

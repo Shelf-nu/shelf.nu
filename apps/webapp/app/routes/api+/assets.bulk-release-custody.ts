@@ -1,7 +1,8 @@
-import { AssetType, OrganizationRoles } from "@prisma/client";
+import { AssetType } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { BulkReleaseCustodySchema } from "~/components/assets/bulk-release-custody-dialog";
 import { db } from "~/database/db.server";
+import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
 import { bulkCheckInAssets } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
@@ -30,13 +31,18 @@ export async function action({ request, context }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId, role, canUseBarcodes, canSeeAllCustody } =
-      await requirePermission({
-        userId,
-        request,
-        entity: PermissionEntity.asset,
-        action: PermissionAction.custody,
-      });
+    const {
+      organizationId,
+      role,
+      canUseBarcodes,
+      access,
+      currentOrganization,
+    } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.custody,
+    });
 
     // Fetch asset index settings to determine mode
     const settings = await getAssetIndexSettings({
@@ -65,14 +71,12 @@ export async function action({ request, context }: ActionFunctionArgs) {
     );
 
     /**
-     * Phase 2 widened Custody from 1:1 to 1:many to support multi-custodian
-     * QUANTITY_TRACKED assets. SELF_SERVICE users may only release custody
-     * on rows assigned to their own user — guard before delegating to the
-     * bulk service so we fail fast and don't leak counts via partial work.
-     * Symmetric with the SELF_SERVICE assign-side guard centralised inside
-     * `bulkCheckOutAssets` (see asset/service.server.ts).
+     * A caller whose scope is `self` may release only custody assigned to
+     * them; checked here before delegating so a refused request does no
+     * partial work. Custody is 1:many (several custodians on a
+     * QUANTITY_TRACKED asset), so every row is checked.
      */
-    if (role === OrganizationRoles.SELF_SERVICE) {
+    if (access.custody.assign === "self") {
       const custodies = await db.custody.findMany({
         where: {
           assetId: { in: assetIds },
@@ -82,9 +86,9 @@ export async function action({ request, context }: ActionFunctionArgs) {
             // `bulkCheckInAssets` skips QUANTITY_TRACKED rows — they are
             // released individually, with a quantity — and it reports the count
             // it skipped. Judging them here refuses the whole request over
-            // custody nobody was going to release: a self-service user
+            // custody nobody was going to release: a `self`-scoped caller
             // selecting their own individual asset alongside a qty-tracked one
-            // that a colleague holds units of got a 403 for the lot.
+            // that a colleague holds units of would get a 403 for the lot.
             type: { not: AssetType.QUANTITY_TRACKED },
           },
         },
@@ -119,18 +123,22 @@ export async function action({ request, context }: ActionFunctionArgs) {
       quantityAssetIds,
       quantities,
       organizationId,
-      role,
+      custodyAssign: access.custody.assign,
       userId,
     });
 
     const { skippedQuantityTracked } = bulkAssetIds.length
       ? await bulkCheckInAssets({
           userId,
-          role,
+          custodyAssign: access.custody.assign,
           assetIds: bulkAssetIds,
           organizationId,
           currentSearchParams,
           settings,
+          lastAuditDateAccess: lastAuditDateAccessFor(
+            access,
+            currentOrganization
+          ),
           timeZone,
           // `asset: custody` is a SELF_SERVICE permission, so narrow the
           // select-all custodian filter to the caller's own custody, otherwise a
@@ -139,7 +147,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
             teamMemberIds: new URLSearchParams(
               currentSearchParams ?? ""
             ).getAll("teamMember"),
-            canSeeAllCustody,
+            canSeeAllCustody: access.custody.seeAll,
             userId,
             organizationId,
           }),
@@ -157,7 +165,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
       quantities,
       userId,
       organizationId,
-      role,
+      custodyAssign: access.custody.assign,
     });
     if (refusals.length) throw quantityRefusalsError("released", refusals);
 

@@ -14,6 +14,7 @@ import { api, type TeamMember } from "@/lib/api";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
+import { useSheetColumnStyle } from "@/lib/use-content-gutter";
 
 type Props = {
   visible: boolean;
@@ -164,6 +165,7 @@ export function TeamMemberPicker({ visible, orgId, onSelect, onClose }: Props) {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const { colors } = useTheme();
   const styles = useStyles();
+  const sheetColumn = useSheetColumnStyle();
 
   // Debounce search
   useEffect(() => {
@@ -312,7 +314,10 @@ export function TeamMemberPicker({ visible, orgId, onSelect, onClose }: Props) {
       presentationStyle="pageSheet"
       onRequestClose={onClose}
     >
-      <SafeAreaView style={styles.container} accessibilityViewIsModal={true}>
+      <SafeAreaView
+        style={[styles.container, sheetColumn]}
+        accessibilityViewIsModal={true}
+      >
         {/* Header */}
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Select Team Member</Text>

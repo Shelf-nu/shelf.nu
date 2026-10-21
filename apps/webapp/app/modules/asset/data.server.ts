@@ -1,13 +1,17 @@
 /** In this file you can find the different ways of fetching data for the asset index. They are either for the simple or advanced mode */
 
-import type { AssetIndexSettings, Kit } from "@prisma/client";
-import { OrganizationRoles } from "@prisma/client";
+import type {
+  AssetIndexSettings,
+  Kit,
+  OrganizationRoles,
+} from "@prisma/client";
 import { data, redirect } from "react-router";
 import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
 import type { HeaderData } from "~/components/layout/header/types";
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import type { AllowedModelNames } from "~/routes/api+/model-filters";
+import { bookingCustodianIsSelf } from "~/utils/bookings";
 import { getClientHint } from "~/utils/client-hints";
 import {
   getAdvancedFiltersFromRequest,
@@ -31,9 +35,21 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { hasPermission } from "~/utils/permissions/permission.validator.server";
+import type { RoleAccess } from "~/utils/permissions/role-access";
 import { canImportAssets } from "~/utils/subscription.server";
 import type { UserNameFields } from "~/utils/user";
 import { resolveUserDisplayName } from "~/utils/user";
+import {
+  type LastAuditDateAccess,
+  LAST_AUDIT_DATE_COLUMN,
+  canQueryLastAuditDate,
+  isLastAuditDateParam,
+  stripHiddenAuditColumns,
+} from "./last-audit-date-access";
+import { lastAuditDateAccessFor } from "./last-audit-date-access.server";
+import { resolveBookableListScope } from "./list-scope.server";
+import type { BookableListScope } from "./list-scope.server";
+import { getStillOutBookingRowsByAsset } from "./quantity-breakdown.server";
 import { parseFiltersWithHierarchy } from "./query.server";
 import {
   getAdvancedPaginatedAndFilterableAssets,
@@ -42,7 +58,11 @@ import {
   refreshExpiredAssetImages,
   updateAssetsWithBookingCustodians,
 } from "./service.server";
-import { getAllSelectedValuesFromFilters } from "./utils.server";
+import type { ArchivedFilter } from "./utils.server";
+import {
+  getAllSelectedValuesFromFilters,
+  getArchivedFilterFromParams,
+} from "./utils.server";
 import { MAX_SAVED_FILTER_PRESETS } from "../asset-filter-presets/constants";
 import { listPresetsForUser } from "../asset-filter-presets/service.server";
 import type { Column } from "../asset-index-settings/helpers";
@@ -77,10 +97,15 @@ interface Props {
   settings: AssetIndexSettings;
   /**
    * Resolved custody read-visibility, from `requirePermission`. Required, not
-   * optional: the custodian filter seed previously passed no scoping at all,
-   * and an optional field would let a caller silently restore that.
+   * optional: the custodian filter seed must always be scoped, and an optional
+   * field would let a caller skip that silently.
    */
   canSeeAllCustody: boolean;
+  /**
+   * The caller's resolved access: the booking form's custodian seed and the
+   * custody scope that decides the self-assign team member.
+   */
+  access: RoleAccess;
 }
 
 const searchFieldTooltipText = `
@@ -104,6 +129,49 @@ type MutableBookingAssetSlice = {
   kitId?: string | null;
   kitName?: string | null;
 };
+
+/**
+ * Gives each quantity-tracked asset on an index page the booking rows its
+ * status badge counts, as `stillOutBookingAssets`: one row per active booking
+ * with the units still off the shelf there (see
+ * `getStillOutBookingRowsByAsset`). `getQuantityData` reads them in place of
+ * `bookingAssets`, which stays raw because the calendar and the booking
+ * custodian read it per slice.
+ *
+ * Badge data is supplementary, so a failed read is logged and the page still
+ * renders.
+ *
+ * @param args.assets - The page's asset rows, mutated in place.
+ * @param args.organizationId - Caller's organization. Scopes every read.
+ */
+async function attachStillOutBookingAssets({
+  assets,
+  organizationId,
+}: {
+  assets: Parameters<typeof getStillOutBookingRowsByAsset>[1]["assets"];
+  organizationId: string;
+}) {
+  try {
+    const stillOutByAsset = await getStillOutBookingRowsByAsset(db, {
+      assets,
+      organizationId,
+    });
+    for (const asset of assets) {
+      const rows = stillOutByAsset.get(asset.id);
+      if (rows) Object.assign(asset, { stillOutBookingAssets: rows });
+    }
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Failed to compute checked-out units for the asset index",
+        label: "Assets",
+        additionalData: { organizationId, assetCount: assets.length },
+        shouldBeCaptured: true,
+      })
+    );
+  }
+}
 
 /**
  * Attaches the kit name (and kit id) onto every kit-driven BookingAsset slice.
@@ -167,14 +235,14 @@ export async function simpleModeLoader({
   user,
   settings,
   canSeeAllCustody,
+  access,
 }: Props) {
-  // Threaded into the asset query so the custodian FILTER seed is scoped —
-  // it used a role-only check that let BASE through unscoped. See
+  // `canSeeAllCustody` is threaded into the asset query so the custodian
+  // FILTER seed is scoped for every restricted role, BASE included. See
   // `getPaginatedAndFilterableAssets`.
   const { locale, timeZone } = getClientHint(request);
-  const isSelfService = role === OrganizationRoles.SELF_SERVICE;
-  const isSelfServiceOrBase =
-    role === OrganizationRoles.SELF_SERVICE || role === OrganizationRoles.BASE;
+  const assignsSelfOnly = access.custody.assign === "self";
+  const honorArchivedView = canViewArchivedAssets(access);
 
   // Check if URL contains advanced filter syntax (from browser back button or old bookmark)
   // URLSearchParams.toString() encodes colons as %3A, so we must check the decoded values
@@ -248,9 +316,12 @@ export async function simpleModeLoader({
     getPaginatedAndFilterableAssets({
       request,
       organizationId,
-      // The fix: this route DOES render the custodian filter, and the seed was
-      // scoped on a role check that let BASE through unscoped.
+      // This route renders the custodian filter, so its seed is scoped by the
+      // custody rule for every restricted role.
       canSeeAllCustody,
+      honorArchivedView,
+      // The simple index renders the "Low stock only" toggle.
+      honorLowStockFilter: true,
       filters,
       extraInclude:
         view === "availability"
@@ -303,18 +374,19 @@ export async function simpleModeLoader({
               },
             }
           : undefined,
-      isSelfService,
+      bookableScope: resolveBookableListScope({ access, userId }),
       userId,
     }),
     getTagsForBookingTagsFilter({
       organizationId,
     }),
-    // Team members for booking form - BASE/SELF_SERVICE always get their team member
-    isSelfServiceOrBase
+    // Team members for the booking form: a member whose booking custodian is
+    // fixed to themself always gets their own team member.
+    bookingCustodianIsSelf(access)
       ? getTeamMemberForForm({
           organizationId,
           userId,
-          isSelfServiceOrBase,
+          access,
           getAll:
             searchParams.has("getAll") &&
             hasGetAllValue(searchParams, "teamMember"),
@@ -336,7 +408,7 @@ export async function simpleModeLoader({
     }),
   ]);
 
-  const currentUserTeamMember = isSelfService
+  const currentUserTeamMember = assignsSelfOnly
     ? teamMembers.find((tm) => tm.userId === userId) ?? null
     : null;
 
@@ -360,6 +432,11 @@ export async function simpleModeLoader({
         shouldBeCaptured: true,
       })
     );
+  }
+
+  // List view only: the calendar's badge never takes the quantity path.
+  if (view !== "availability") {
+    await attachStillOutBookingAssets({ assets, organizationId });
   }
 
   // Availability view only: resolve kit names for kit-driven booking slices so
@@ -417,6 +494,9 @@ export async function simpleModeLoader({
   return data(
     payload({
       header,
+      // Simple mode never shows the last audit date column; the field keeps
+      // the loader union uniform for the shared column renderer.
+      lastAuditDateAccess: "hidden" as LastAuditDateAccess,
       /**
        * `TeamMemberBadge` only decides whether to DRAW the custodian; the name
        * and `user.email` shipped in this payload regardless, so a restricted
@@ -503,6 +583,45 @@ export async function simpleModeLoader({
 }
 
 /**
+ * Whether a member may open the Archived and All views (issue #382).
+ *
+ * Read from the role policy (`assets.seeArchived`), not from `asset: archive`:
+ * a Manager sees archived assets so it can tell why one is out of service, but
+ * cannot archive or reinstate. Everyone else gets active assets, whatever
+ * `?archived=` says.
+ *
+ * @param access - The member's resolved access, from `requirePermission`
+ * @returns `true` when the member's role may see archived assets
+ */
+export function canViewArchivedAssets(access: RoleAccess): boolean {
+  return access.policy.assets.seeArchived;
+}
+
+/**
+ * The Active / Archived / All view an asset list shows this member.
+ *
+ * What `?archived=` asks for when the member may open the archived views (see
+ * {@link canViewArchivedAssets}), and Active otherwise. Every list that offers
+ * the view menu resolves it here, so the menu and the rows it governs follow
+ * the same grant on every page.
+ *
+ * @param args.access - The member's resolved access, from `requirePermission`
+ * @param args.searchParams - The request's search params
+ * @returns The view to filter the list by
+ */
+export function resolveArchivedViewForMember({
+  access,
+  searchParams,
+}: {
+  access: RoleAccess;
+  searchParams: URLSearchParams;
+}): ArchivedFilter {
+  return canViewArchivedAssets(access)
+    ? getArchivedFilterFromParams(searchParams)
+    : "active";
+}
+
+/**
  * Adapts {@link getAssetModelRollup} to the shape `advancedModeLoader`
  * destructures from the asset query, so the two branches stay interchangeable.
  *
@@ -516,7 +635,8 @@ async function getAssetModelRollupPage({
   timeZone,
   filters,
   parsedFilters,
-  availableToBookOnly,
+  bookableScope,
+  honorArchivedView,
   sortBy,
   sortDirection,
 }: {
@@ -525,7 +645,10 @@ async function getAssetModelRollupPage({
   timeZone: string;
   filters: string | undefined;
   parsedFilters: Filter[];
-  availableToBookOnly: boolean;
+  /** The caller's list scope; `null` lists every asset. */
+  bookableScope: BookableListScope | null;
+  /** Honour `?archived=` (issue #382); see `canViewArchivedAssets`. */
+  honorArchivedView: boolean;
   sortBy: AssetModelRollupSortKey;
   sortDirection: "asc" | "desc";
 }) {
@@ -533,16 +656,18 @@ async function getAssetModelRollupPage({
     ? new URLSearchParams(filters)
     : getCurrentSearchParams(request);
   const { page, perPageParam, search } = getParamsValues(searchParams);
+  // The Active / Archived / All toggle applies to the model view too, so the
+  // rollup counts the same assets the list would show (issue #382).
+  const archivedFilter = honorArchivedView
+    ? getArchivedFilterFromParams(searchParams)
+    : "active";
   const cookie = await updateCookieWithPerPage(request, perPageParam);
-  // Clamp once, here, and report the clamped value. `per_page` reaches the
-  // cookie straight from the URL with no upper bound, while the rollup caps its
-  // own LIMIT at 100 — so reporting the raw value would advertise a page size
-  // larger than any page can hold and strand every row past the first hundred.
-  // Mirrors `getAdvancedPaginatedAndFilterableAssets`'s `take` / `perPage: take`.
+  // The rollup caps its own LIMIT at 100, so the reported size must never
+  // exceed it or rows past the first hundred would be stranded. The cookie only
+  // holds sizes the per-page menu offers (all within 100); this clamp keeps the
+  // rollup safe if that list ever grows. Written back so the loader serializes
+  // the same value it reports.
   const perPage = Math.min(Math.max(cookie.perPage, 1), 100);
-  // Written back, not just used locally: this same object is serialized into
-  // the user's cookie by the loader, so leaving the raw value on it would
-  // persist a page size no page can hold into the next request.
   cookie.perPage = perPage;
 
   const { rows, totalModels, totalGroups, totalRollupAssets } =
@@ -553,7 +678,8 @@ async function getAssetModelRollupPage({
       timeZone,
       page,
       perPage,
-      availableToBookOnly,
+      bookableScope,
+      archivedFilter,
       sortBy,
       sortDirection,
     });
@@ -585,19 +711,44 @@ export async function advancedModeLoader({
   role,
   currentOrganization,
   user,
-  settings,
+  settings: loadedSettings,
   canSeeAllCustody,
+  access,
 }: Props) {
   const { locale, timeZone } = getClientHint(request);
-  const isSelfService = role === OrganizationRoles.SELF_SERVICE;
-  const isSelfServiceOrBase = isSelfService || role === OrganizationRoles.BASE;
+
+  // The last audit date follows audit visibility and availability. Strip the
+  // column before anything parses filters or renders columns from the settings.
+  const lastAuditDateAccess = lastAuditDateAccessFor(
+    access,
+    currentOrganization
+  );
+  const settings: AssetIndexSettings = {
+    ...loadedSettings,
+    columns: stripHiddenAuditColumns(
+      loadedSettings.columns as Column[],
+      lastAuditDateAccess
+    ),
+  };
+
+  const assignsSelfOnly = access.custody.assign === "self";
+  const honorArchivedView = canViewArchivedAssets(access);
 
   /** Parse filters */
   const {
     filters,
     serializedCookie: filtersCookie,
     redirectNeeded,
-  } = await getAdvancedFiltersFromRequest(request, organizationId, settings);
+  } = await getAdvancedFiltersFromRequest(
+    request,
+    organizationId,
+    settings,
+    // A caller who may not query the last audit date has no chip or sort to
+    // clear a stale one with, so it is stripped from the URL and the cookie.
+    canQueryLastAuditDate(lastAuditDateAccess)
+      ? undefined
+      : isLastAuditDateParam
+  );
 
   const currentFilterParams = new URLSearchParams(filters || "");
   const searchParams = filters
@@ -633,11 +784,16 @@ export async function advancedModeLoader({
   // Parse and expand location hierarchy filters ONCE — this avoids redundant
   // DB calls that were previously happening in both getAllSelectedValuesFromFilters
   // and getAdvancedPaginatedAndFilterableAssets independently.
-  const parsedFilters = await parseFiltersWithHierarchy(
+  const allParsedFilters = await parseFiltersWithHierarchy(
     filters ?? "",
     settings.columns as Column[],
     organizationId
   );
+  // A locked column keeps its header but must never be queried, so its filter
+  // is dropped here for every consumer (asset query and model rollup).
+  const parsedFilters = canQueryLastAuditDate(lastAuditDateAccess)
+    ? allParsedFilters
+    : allParsedFilters.filter((f) => f.name !== LAST_AUDIT_DATE_COLUMN);
 
   const {
     selectedTags,
@@ -712,7 +868,8 @@ export async function advancedModeLoader({
           // Same scoping the asset query three lines below applies, so a
           // restricted role's model counts describe the assets it can actually
           // see rather than the whole workspace.
-          availableToBookOnly: role === OrganizationRoles.SELF_SERVICE,
+          bookableScope: resolveBookableListScope({ access, userId }),
+          honorArchivedView,
           sortBy: modelSortBy,
           sortDirection: modelSortDirection,
         })
@@ -724,8 +881,10 @@ export async function advancedModeLoader({
           settings,
           getBookings: view === "availability",
           canUseBarcodes: currentOrganization.barcodesEnabled ?? false,
-          availableToBookOnly: role === OrganizationRoles.SELF_SERVICE,
+          bookableScope: resolveBookableListScope({ access, userId }),
           preParsedFilters: parsedFilters,
+          honorArchivedView,
+          lastAuditDateAccess,
           // Both arms carry the same keys so the caller reads them directly.
           // Discriminating a union by `in` here degrades to `unknown` at this
           // file's type complexity, and the failure lands on unrelated
@@ -751,8 +910,7 @@ export async function advancedModeLoader({
         searchParams.has("getAll") &&
         hasGetAllValue(searchParams, "teamMember"),
       userId,
-      // A FILTER. This passed no scoping argument at all, so the seed
-      // disagreed with the search endpoint for any restricted role.
+      // A FILTER: scoped by the custody rule, like the search endpoint.
       filterByUserId: !canSeeAllCustody,
     }),
 
@@ -769,12 +927,13 @@ export async function advancedModeLoader({
     getTagsForBookingTagsFilter({
       organizationId,
     }),
-    // Team members for booking form - BASE/SELF_SERVICE always get their team member
-    isSelfServiceOrBase
+    // Team members for the booking form: a member whose booking custodian is
+    // fixed to themself always gets their own team member.
+    bookingCustodianIsSelf(access)
       ? getTeamMemberForForm({
           organizationId,
           userId,
-          isSelfServiceOrBase,
+          access,
           getAll:
             searchParams.has("getAll") &&
             hasGetAllValue(searchParams, "teamMember"),
@@ -823,7 +982,7 @@ export async function advancedModeLoader({
   const modelRollup: AssetModelRollupRow[] | null = assetsOrRollup.modelRows;
   const totalRollupAssets = assetsOrRollup.totalRollupAssets;
 
-  const currentUserTeamMember = isSelfService
+  const currentUserTeamMember = assignsSelfOnly
     ? teamMembersData.teamMembers.find((tm) => tm.userId === userId) ?? null
     : null;
 
@@ -842,6 +1001,16 @@ export async function advancedModeLoader({
         shouldBeCaptured: true,
       })
     );
+  }
+
+  // The advanced index ships no booking slices, so without these rows the
+  // status badge of a quantity-tracked asset would count no checked-out units
+  // at all. The calendar's badge never takes the quantity path.
+  if (view !== "availability") {
+    await attachStillOutBookingAssets({
+      assets: refreshedAssets,
+      organizationId,
+    });
   }
 
   const userName = resolveUserDisplayName(user);
@@ -905,6 +1074,7 @@ export async function advancedModeLoader({
       timeZone,
       currentOrganization,
       settings,
+      lastAuditDateAccess,
       modelRollup,
       totalRollupAssets,
       modelSortBy,

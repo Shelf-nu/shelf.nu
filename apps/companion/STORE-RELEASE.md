@@ -10,6 +10,10 @@ instead — this document is the binary.
 - `apps/companion/google-service-account.json` exists. It is git-ignored and
   holds the Play submission key; without it the Android submit fails.
 - Everything intended for this release is merged to `main`.
+- App Store Connect has screenshots for 13-inch iPad displays. The iOS build
+  targets iPad as well as iPhone (`supportsTablet` in `app.json`), so App Store
+  Connect will not send a version to review without them. Uploaded screenshots
+  carry over to later versions.
 
 ## 1. The version bump
 
