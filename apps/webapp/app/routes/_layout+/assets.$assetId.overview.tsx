@@ -260,6 +260,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * (`reservedTotal`), just no longer baked into the headline.
      */
     let quantityData: QuantityData | null = null;
+    let overCommitmentReads: Awaited<
+      ReturnType<typeof loadOverCommitmentReads>
+    > | null = null;
 
     if (isQuantityTracked(asset)) {
       // Sum each location's slice — the asset's pool that has a physical
@@ -284,10 +287,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         0
       );
 
-      const availability = await getAssetAvailability({
-        assetId: asset.id,
-        organizationId,
-      });
+      // Run together: both availability reads and the booking lookup are
+      // independent, and each walks the asset's active bookings.
+      const [availability, overCommitment] = await Promise.all([
+        getAssetAvailability({
+          assetId: asset.id,
+          organizationId,
+        }),
+        loadOverCommitmentReads(asset.id, organizationId),
+      ]);
+      overCommitmentReads = overCommitment;
 
       quantityData = buildQuantityData({
         availability,
@@ -329,31 +338,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * is the booked quantity of the largest upcoming RESERVED booking, which
      * the page names as the biggest upcoming booking, not as part of the peak.
      */
-    const [availabilityAhead, topReservedBooking] = isQuantityTracked(asset)
-      ? await Promise.all([
-          getAssetAvailability({
-            assetId: asset.id,
-            organizationId,
-            window: { from: new Date(), to: AVAILABILITY_HORIZON },
-          }),
-          db.bookingAsset
-            .groupBy({
-              by: ["bookingId"],
-              where: {
-                assetId: asset.id,
-                assetKitId: null,
-                booking: {
-                  status: BookingStatus.RESERVED,
-                  to: { gt: new Date() },
-                },
-              },
-              _sum: { quantity: true },
-              orderBy: { _sum: { quantity: "desc" } },
-              take: 1,
-            })
-            .then((rows) => rows[0] ?? null),
-        ])
-      : [null, null];
+    const [availabilityAhead, topReservedBooking] = overCommitmentReads ?? [
+      null,
+      null,
+    ];
 
     /**
      * The booking is named and linked only for a viewer who may open it, by
@@ -543,6 +531,37 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const reason = makeShelfError(cause);
     throw data(error(reason), { status: reason.status });
   }
+}
+
+/**
+ * The reads behind the over-commitment notice: the pool's availability from
+ * now on, and the largest upcoming RESERVED booking's standalone units. See
+ * the note where the loader uses them.
+ */
+function loadOverCommitmentReads(assetId: string, organizationId: string) {
+  return Promise.all([
+    getAssetAvailability({
+      assetId,
+      organizationId,
+      window: { from: new Date(), to: AVAILABILITY_HORIZON },
+    }),
+    db.bookingAsset
+      .groupBy({
+        by: ["bookingId"],
+        where: {
+          assetId,
+          assetKitId: null,
+          booking: {
+            status: BookingStatus.RESERVED,
+            to: { gt: new Date() },
+          },
+        },
+        _sum: { quantity: true },
+        orderBy: { _sum: { quantity: "desc" } },
+        take: 1,
+      })
+      .then((rows) => rows[0] ?? null),
+  ]);
 }
 
 /**

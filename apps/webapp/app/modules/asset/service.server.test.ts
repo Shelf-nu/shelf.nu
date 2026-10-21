@@ -7713,6 +7713,31 @@ describe("bulkUpdateAssetMinQuantity", () => {
     expect(mockAssetUpdateMany).toHaveBeenCalled();
   });
 
+  it("passes a deliberate refusal through with its own message", async () => {
+    // why: the route shows `error.message`. Wrapping a 400 (archived assets in
+    // the selection, say) in the generic 500 hid how to fix the selection.
+    const refusal = new ShelfError({
+      cause: null,
+      message: "Some selected assets are archived.",
+      status: 400,
+      label: "Assets",
+    });
+    (db.asset.count as ReturnType<typeof vitest.fn>).mockRejectedValueOnce(
+      refusal
+    );
+
+    await expect(
+      bulkUpdateAssetMinQuantity({
+        ...args,
+        assetIds: ["asset-1"],
+        minQuantity: 5,
+      })
+    ).rejects.toMatchObject({
+      message: "Some selected assets are archived.",
+      status: 400,
+    });
+  });
+
   it("returns 0 when the selection held nothing to change", () => {
     // why: the route builds its confirmation from this number. Returning a
     // truthy value regardless is what let it claim "reorder point set" for a

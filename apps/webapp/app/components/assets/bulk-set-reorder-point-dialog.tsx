@@ -21,15 +21,15 @@ import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialo
 import Input from "../forms/input";
 import { Button } from "../shared/button";
 
+/** Min quantity is stored in a 32-bit integer column; larger values cannot be saved. */
+const MAX_MIN_QUANTITY = 2_147_483_647;
+
 /**
  * An empty string clears the threshold; anything else must be a whole number of
  * zero or more. Zero is deliberately valid, it is a real "warn me when nothing
  * is left" threshold, and the shared `isLowStock` predicate treats only `null`
  * as "no threshold set".
  */
-/** Min quantity is stored in a 32-bit integer column; larger values cannot be saved. */
-const MAX_MIN_QUANTITY = 2_147_483_647;
-
 export const BulkSetReorderPointSchema = z.object({
   assetIds: z.array(z.string()).min(1),
   minQuantity: optionalNumberFromString({

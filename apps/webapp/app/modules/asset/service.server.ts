@@ -8436,6 +8436,9 @@ export async function bulkUpdateAssetMinQuantity({
 
     return assetsThatChange.length;
   } catch (cause) {
+    // Keep a deliberate refusal's status and message (archived assets in the
+    // selection, a last audit date filter the caller may not use).
+    if (isLikeShelfError(cause)) throw cause;
     throw new ShelfError({
       cause,
       message: "Something went wrong while bulk updating the min quantity.",
