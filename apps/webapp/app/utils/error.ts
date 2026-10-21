@@ -48,6 +48,7 @@ export type FailureReason = {
     | "Admin dashboard"
     | "App layout"
     | "Assets"
+    | "Asset Import"
     | "Asset Index Settings"
     | "Auth"
     | "Barcode"

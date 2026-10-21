@@ -528,4 +528,60 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
       expect(rows[2]).toBe("audit-2,Q4 Office,Active,10,8,,1,,Jane Doe,,,");
     });
   });
+
+  describe("asset-inventory", () => {
+    it("writes the URL each QR code encodes next to its id", async () => {
+      vi.mocked(assetInventoryReport).mockResolvedValue({
+        rows: [
+          {
+            assetId: "SAM-0001",
+            assetName: "Camera",
+            category: "Cameras",
+            location: "Studio",
+            status: "AVAILABLE",
+            custodian: null,
+            quantity: null,
+            valuation: null,
+            // Dates are covered elsewhere; this test is about the QR columns.
+            createdAt: null,
+            qrId: "cm4abc123",
+          },
+          {
+            assetId: "SAM-0002",
+            assetName: "Tripod",
+            category: null,
+            location: null,
+            status: "AVAILABLE",
+            custodian: null,
+            quantity: null,
+            valuation: null,
+            createdAt: null,
+            qrId: null,
+          },
+        ],
+      } as unknown as Awaited<ReturnType<typeof assetInventoryReport>>);
+
+      const response = (await loader(
+        createLoaderArgs({
+          request: new Request(
+            "http://localhost:3000/reports/export/asset-inventory.csv?reportId=asset-inventory"
+          ),
+          params: { fileName: "asset-inventory" },
+          context,
+        })
+      )) as unknown as Response;
+      const rows = (await response.text())
+        .replace(/^\uFEFF/, "")
+        .trim()
+        .split("\n");
+
+      expect(rows[0].endsWith(",QR Code ID,QR Code URL")).toBe(true);
+      // No shortener in the test environment: codes encode this server's /qr.
+      expect(
+        rows[1].endsWith(",cm4abc123,http://localhost:3000/qr/cm4abc123")
+      ).toBe(true);
+      // An asset without a code leaves both cells empty.
+      expect(rows[2].endsWith(",,")).toBe(true);
+    });
+  });
 });

@@ -63,6 +63,11 @@ export function extractCSVDataFromContentImport(
           case "imageUrl":
             // Return empty string if URL is empty/undefined, otherwise trim
             return [headers[index], value?.trim() || ""];
+          case "title":
+          case "description":
+            // Stray spaces around a title or description are never meant to
+            // be stored, and a whitespace-only title reads as missing.
+            return [headers[index], value?.trim() ?? value];
           case "bookable":
             return [headers[index], !value ? null : value];
           default:

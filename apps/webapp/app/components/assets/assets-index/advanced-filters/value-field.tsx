@@ -8,6 +8,7 @@ import {
   PopoverTrigger,
 } from "@radix-ui/react-popover";
 import { parseISO } from "date-fns";
+import { Search } from "lucide-react";
 import { useLoaderData } from "react-router";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
@@ -692,6 +693,12 @@ interface EnumOption {
   label: string;
 }
 
+/**
+ * Option lists longer than this get a search box. The companion's custom field
+ * option picker uses the same threshold.
+ */
+const ENUM_SEARCH_THRESHOLD = 8;
+
 interface EnumFieldProps {
   value: string;
   options: EnumOption[];
@@ -714,9 +721,21 @@ function EnumField({
 }: EnumFieldProps) {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
+  const [searchQuery, setSearchQuery] = useState("");
 
   // Convert the value into an array for multi-select mode
   const selectedValues = multiSelect ? value.split(", ") : [value];
+
+  const hasSearch = options.length > ENUM_SEARCH_THRESHOLD;
+  const query = searchQuery.trim().toLowerCase();
+  const visibleOptions = query
+    ? options.filter((option) => option.label.toLowerCase().includes(query))
+    : options;
+
+  function closePopover() {
+    setIsPopoverOpen(false);
+    setSearchQuery("");
+  }
 
   /**
    * Popover open/close handler. Seeds the keyboard highlight on open as
@@ -726,14 +745,16 @@ function EnumField({
    */
   function handleOpenChange(open: boolean) {
     if (disabled) return;
-    setIsPopoverOpen(open);
-    if (open) {
-      if (!multiSelect) {
-        const currentIndex = options.findIndex((opt) => opt.id === value);
-        setSelectedIndex(currentIndex >= 0 ? currentIndex : 0);
-      } else {
-        setSelectedIndex(0);
-      }
+    if (!open) {
+      closePopover();
+      return;
+    }
+    setIsPopoverOpen(true);
+    if (!multiSelect) {
+      const currentIndex = options.findIndex((opt) => opt.id === value);
+      setSelectedIndex(currentIndex >= 0 ? currentIndex : 0);
+    } else {
+      setSelectedIndex(0);
     }
   }
 
@@ -760,7 +781,7 @@ function EnumField({
     }
     handleChange(newValue);
     if (!multiSelect) {
-      setIsPopoverOpen(false);
+      closePopover();
     }
   }
 
@@ -779,7 +800,7 @@ function EnumField({
       case "ArrowDown": {
         event.preventDefault();
         const next =
-          selectedIndex < options.length - 1
+          selectedIndex < visibleOptions.length - 1
             ? selectedIndex + 1
             : selectedIndex;
         setSelectedIndex(next);
@@ -793,16 +814,26 @@ function EnumField({
         scrollOptionIntoView(next);
         break;
       }
+      case " ": // Space key, unless it is typing into the search box
+        if (event.target instanceof HTMLInputElement) break;
+      // falls through
       case "Enter":
-      case " ": // Space key
+        // A focused option row selects itself; acting here too would pick a
+        // second option.
+        if (
+          event.target !== event.currentTarget &&
+          !(event.target instanceof HTMLInputElement)
+        ) {
+          break;
+        }
         event.preventDefault();
-        if (options[selectedIndex]) {
-          handleOptionClick(options[selectedIndex].id);
+        if (visibleOptions[selectedIndex]) {
+          handleOptionClick(visibleOptions[selectedIndex].id);
         }
         break;
       case "Escape":
         event.preventDefault();
-        setIsPopoverOpen(false);
+        closePopover();
         break;
     }
   };
@@ -837,18 +868,36 @@ function EnumField({
             )}
             onKeyDown={handleKeyDown}
           >
+            {hasSearch ? (
+              <div className="flex items-center border-b">
+                <Search className="ml-4 size-4 text-gray-500" />
+                <input
+                  placeholder="Search options..."
+                  aria-label="Search options"
+                  className="border-0 px-4 py-2 pl-2 text-[14px] focus:border-0 focus:ring-0"
+                  value={searchQuery}
+                  onChange={(event) => {
+                    setSearchQuery(event.target.value);
+                    setSelectedIndex(0);
+                  }}
+                />
+              </div>
+            ) : null}
             {options.length === 0 ? (
               <div className="max-w-[400px] p-4">
                 No options available. Please contact support if you believe this
                 is an error.
               </div>
+            ) : visibleOptions.length === 0 ? (
+              <div className="max-w-[400px] p-4">No options found</div>
             ) : (
-              options.map((option, index) => {
+              visibleOptions.map((option, index) => {
                 const isSelected = selectedValues.includes(option.id);
                 return (
                   <div
                     id={`enum-option-${index}`}
-                    key={option.id}
+                    // Custom field options can repeat, so the label is not unique.
+                    key={`${index}-${option.id}`}
                     className={tw(
                       "flex items-center justify-between px-4 py-3 text-[14px] text-gray-600 hover:cursor-pointer hover:bg-gray-50",
                       selectedIndex === index && "bg-gray-50"
