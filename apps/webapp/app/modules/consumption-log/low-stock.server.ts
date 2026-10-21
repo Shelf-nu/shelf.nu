@@ -46,7 +46,7 @@
  * @see {@link file://../../emails/low-stock-copy.ts} - email wording
  */
 
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { db } from "~/database/db.server";
 import type { StockLevelEmailProps } from "~/emails/components/stock-level-email";
 import { lowStockAlertHtml, lowStockAlertText } from "~/emails/low-stock-alert";
@@ -67,6 +67,7 @@ import { sendEmail } from "~/emails/mail.server";
 import {
   generateWhereClause,
   POOL_AGGREGATE_JOIN,
+  POOL_AVAILABLE_EXPR,
 } from "~/modules/asset/query.server";
 import { computeCheckedOutBreakdownForAsset } from "~/modules/booking/checked-out.server";
 import {
@@ -388,8 +389,7 @@ async function sendLowStockEmails({
         ids
       ),
       optionalRead(
-        () =>
-          countOtherLowStockAssets({ organizationId, assetId }),
+        () => countOtherLowStockAssets({ organizationId, assetId }),
         "count of other low-stock items",
         ids
       ),
@@ -832,6 +832,95 @@ export async function checkAndNotifyLowStock(
           assetId: params.assetId,
           organizationId: params.organizationId,
         },
+      })
+    );
+  }
+}
+
+/** One row of the {@link syncLowStockMarkers} read. */
+type LowStockMarkerRow = {
+  id: string;
+  /** A threshold is set and Free now is at or below it. */
+  is_low: boolean;
+  /** `lowStockNotifiedAt` is set. */
+  marked: boolean;
+};
+
+/**
+ * Brings `lowStockNotifiedAt` up to date for many assets at once, with the
+ * marker transitions of {@link checkAndNotifyLowStock} in silent mode and none
+ * of its notices: no email, no in-app toast.
+ *
+ * For bulk callers that move assets into or out of the low band on purpose (a
+ * bulk Min quantity change), where the user can already see the result and a
+ * notice per asset would mail several people hundreds of times. The marker
+ * still has to follow the band, or the next stock movement alerts for an
+ * episode that is already known.
+ *
+ * Per quantity-tracked, active asset among `assetIds` in the workspace:
+ * - low (threshold set, Free now at or below it) and unmarked: stamp now
+ * - not low (including no threshold) and marked: clear
+ * - otherwise: leave it
+ *
+ * Free now is read with the SQL the asset index uses (`POOL_AGGREGATE_JOIN`
+ * and `POOL_AVAILABLE_EXPR`), so a stamped asset is one the "Low stock" toggle
+ * finds. Costs one read and at most two writes, whatever the number of assets.
+ *
+ * Best-effort: runs after the caller's write has committed, so a failure is
+ * logged and never thrown. A stale marker only means the next stock movement
+ * re-evaluates.
+ *
+ * @param params.assetIds - Assets to reconcile; ids outside the workspace are ignored
+ * @param params.organizationId - Workspace that scopes every read and write
+ */
+export async function syncLowStockMarkers({
+  assetIds,
+  organizationId,
+}: {
+  assetIds: string[];
+  organizationId: string;
+}): Promise<void> {
+  if (assetIds.length === 0) return;
+
+  try {
+    const rows = await db.$queryRaw<LowStockMarkerRow[]>(Prisma.sql`
+      SELECT
+        a.id,
+        COALESCE(
+          a."minQuantity" IS NOT NULL AND ${POOL_AVAILABLE_EXPR} <= a."minQuantity",
+          false
+        ) AS is_low,
+        (a."lowStockNotifiedAt" IS NOT NULL) AS marked
+      FROM public."Asset" a
+      ${POOL_AGGREGATE_JOIN}
+      WHERE a."organizationId" = ${organizationId}
+        AND a."archivedAt" IS NULL
+        AND a.type = 'QUANTITY_TRACKED'
+        AND a.id = ANY(${assetIds}::text[])
+    `);
+
+    const toStamp = rows.filter((r) => r.is_low && !r.marked).map((r) => r.id);
+    const toClear = rows.filter((r) => !r.is_low && r.marked).map((r) => r.id);
+
+    if (toStamp.length > 0) {
+      await db.asset.updateMany({
+        where: { id: { in: toStamp }, organizationId },
+        data: { lowStockNotifiedAt: new Date() },
+      });
+    }
+    if (toClear.length > 0) {
+      await db.asset.updateMany({
+        where: { id: { in: toClear }, organizationId },
+        data: { lowStockNotifiedAt: null },
+      });
+    }
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Failed to sync low-stock markers",
+        additionalData: { organizationId, assetCount: assetIds.length },
+        label: "Notification",
       })
     );
   }

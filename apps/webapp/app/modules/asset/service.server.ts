@@ -247,7 +247,10 @@ import {
 import { cancelAssetReminderScheduler } from "../asset-reminder/scheduler.server";
 import { createSystemBookingNotes } from "../booking-note/service.server";
 import { ASSET_EDIT_ADJUSTMENT_NOTE } from "../consumption-log/constants";
-import { checkAndNotifyLowStock } from "../consumption-log/low-stock.server";
+import {
+  checkAndNotifyLowStock,
+  syncLowStockMarkers,
+} from "../consumption-log/low-stock.server";
 import { lockAssetForQuantityUpdate } from "../consumption-log/quantity-lock.server";
 import { createConsumptionLog } from "../consumption-log/service.server";
 import { emptyStockState } from "../consumption-log/stock-ledger";
@@ -8400,39 +8403,13 @@ export async function bulkUpdateAssetMinQuantity({
     // Changing a threshold moves assets into or out of the low-stock band, so
     // the `lowStockNotifiedAt` marker has to be brought up to date or the very
     // next stock movement fires an alert for an episode that is already known.
-    //
-    // Run SILENT. This notifier emails the organisation owner AND every admin,
-    // once per asset. Setting a threshold across a few hundred assets would
-    // otherwise send hundreds of emails to several people each, in one click,
-    // about a change the user just made deliberately and can already see as
-    // amber badges on the screen in front of them. Alerting is for stock moving
-    // while nobody is watching.
-    //
-    // Sequential rather than Promise.all: each call is a read plus a write, and
-    // a select-all over a large catalogue would otherwise open one connection
-    // per asset simultaneously. Slower and boring beats exhausting the pool.
-    for (const asset of assetsThatChange) {
-      try {
-        await checkAndNotifyLowStock({
-          assetId: asset.id,
-          userId,
-          organizationId,
-          silent: true,
-        });
-      } catch (lowStockError) {
-        // Best-effort: a marker that failed to update just means the next stock
-        // movement re-evaluates. Never fail the committed threshold write.
-        Logger.error(
-          new ShelfError({
-            cause: lowStockError,
-            message:
-              "Failed to refresh the low-stock marker after a bulk threshold change",
-            additionalData: { assetId: asset.id, organizationId, userId },
-            label,
-          })
-        );
-      }
-    }
+    // Silent and in one pass: the user just made this change deliberately and
+    // can see the result, so no asset is worth an email. Best-effort, never
+    // fails the committed threshold write.
+    await syncLowStockMarkers({
+      assetIds: assetsThatChange.map((asset) => asset.id),
+      organizationId,
+    });
 
     return assetsThatChange.length;
   } catch (cause) {

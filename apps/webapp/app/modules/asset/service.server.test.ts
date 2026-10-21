@@ -20,7 +20,10 @@ import type * as AvailabilityPrimitivesModule from "~/modules/asset/availability
 import { findModelReservationsShortAfterArchive } from "~/modules/booking-model-request/service.server";
 import { createSystemBookingNotes } from "~/modules/booking-note/service.server";
 import { getCategory } from "~/modules/category/service.server";
-import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
+import {
+  checkAndNotifyLowStock,
+  syncLowStockMarkers,
+} from "~/modules/consumption-log/low-stock.server";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
 import { createConsumptionLog } from "~/modules/consumption-log/service.server";
 import {
@@ -347,10 +350,12 @@ function recordedStockEvents() {
 }
 
 // why: wiring-only — assert that updateAsset invokes the low-stock notifier on
-// a quantity DROP without running the real debounce/email logic (that logic is
+// a quantity DROP, and that the bulk threshold change reconciles markers in
+// one call, without running the real debounce/email logic (that logic is
 // exhaustively tested in low-stock.server.test.ts).
 vitest.mock("~/modules/consumption-log/low-stock.server", () => ({
   checkAndNotifyLowStock: vitest.fn().mockResolvedValue(undefined),
+  syncLowStockMarkers: vitest.fn().mockResolvedValue(undefined),
 }));
 
 // why: avoid emitting real activity events during asset service tests; assert
@@ -7579,6 +7584,7 @@ describe("bulkUpdateAssetMinQuantity", () => {
   >;
   const mockRecordEvents = recordEvents as ReturnType<typeof vitest.fn>;
   const mockLowStock = checkAndNotifyLowStock as ReturnType<typeof vitest.fn>;
+  const mockSyncMarkers = syncLowStockMarkers as ReturnType<typeof vitest.fn>;
 
   beforeEach(() => {
     vitest.clearAllMocks();
@@ -7673,44 +7679,42 @@ describe("bulkUpdateAssetMinQuantity", () => {
     );
   });
 
-  it("refreshes the low-stock marker SILENTLY, once per changed asset", async () => {
-    // why: this is the guard against a mailbox flood. The notifier emails the
-    // owner AND every admin, so a threshold set across a large catalogue would
-    // otherwise send hundreds of emails for a change the user just made and can
-    // already see on screen. The marker still has to be updated, or the next
-    // stock movement fires the alert we meant to suppress.
+  it("reconciles every changed asset's low-stock marker in one silent call", async () => {
+    // why: this is the guard against a mailbox flood and a timeout. The
+    // per-asset notifier emails the owner AND every admin and costs several
+    // queries per asset, so a threshold set across a large catalogue must
+    // neither mail anyone nor run once per asset. The marker still has to be
+    // updated, or the next stock movement fires the alert we meant to suppress.
     mockAssetFindMany.mockResolvedValue([
       { id: "asset-1", minQuantity: null },
-      { id: "asset-2", minQuantity: null },
+      { id: "asset-2", minQuantity: 3 },
+      { id: "asset-3", minQuantity: 8 },
     ]);
 
     await bulkUpdateAssetMinQuantity({
       ...args,
-      assetIds: ["asset-1", "asset-2"],
+      assetIds: ["asset-1", "asset-2", "asset-3"],
       minQuantity: 5,
     });
 
-    expect(mockLowStock).toHaveBeenCalledTimes(2);
-    for (const call of mockLowStock.mock.calls) {
-      expect(call[0]).toEqual(expect.objectContaining({ silent: true }));
-    }
+    expect(mockLowStock).not.toHaveBeenCalled();
+    expect(mockSyncMarkers).toHaveBeenCalledTimes(1);
+    expect(mockSyncMarkers).toHaveBeenCalledWith({
+      assetIds: ["asset-1", "asset-2", "asset-3"],
+      organizationId: "org-1",
+    });
   });
 
-  it("still commits the threshold when the low-stock refresh throws", async () => {
-    // why: notifications are best-effort. A failed marker update must never
-    // roll back a write the user already saw succeed.
-    mockAssetFindMany.mockResolvedValue([{ id: "asset-1", minQuantity: null }]);
-    mockLowStock.mockRejectedValueOnce(new Error("notifier down"));
+  it("does not reconcile markers when nothing changed", async () => {
+    mockAssetFindMany.mockResolvedValue([{ id: "asset-1", minQuantity: 5 }]);
 
-    await expect(
-      bulkUpdateAssetMinQuantity({
-        ...args,
-        assetIds: ["asset-1"],
-        minQuantity: 5,
-      })
-    ).resolves.toBe(1);
+    await bulkUpdateAssetMinQuantity({
+      ...args,
+      assetIds: ["asset-1"],
+      minQuantity: 5,
+    });
 
-    expect(mockAssetUpdateMany).toHaveBeenCalled();
+    expect(mockSyncMarkers).not.toHaveBeenCalled();
   });
 
   it("passes a deliberate refusal through with its own message", async () => {
