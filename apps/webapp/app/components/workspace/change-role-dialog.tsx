@@ -1,4 +1,4 @@
-import { useEffect, useReducer } from "react";
+import { useEffect, useId, useReducer } from "react";
 import type { User } from "@prisma/client";
 import type { OrganizationRoles } from "@prisma/client";
 import {
@@ -21,9 +21,9 @@ import {
   INVITABLE_ROLES,
   ROLE_DESCRIPTIONS,
   ROLE_LABELS,
-  ROLES_HELP_URL,
 } from "~/utils/permissions/role-access";
 import { tw } from "~/utils/tw";
+import { RolesHelpLink } from "../settings/roles-help-link";
 import { Button } from "../shared/button";
 import {
   AlertDialog,
@@ -85,8 +85,7 @@ type DialogAction =
 function dialogReducer(state: DialogState, action: DialogAction): DialogState {
   switch (action.type) {
     case "selectRole":
-      // Atomic: choose role + close its popover. Previously required two
-      // separate setState calls, which triggered `no-cascading-set-state`.
+      // Selecting a role and closing its popover are one state transition.
       return {
         ...state,
         selectedRole: action.role,
@@ -153,6 +152,9 @@ export function ChangeRoleDialog({
   const grantableRoles = INVITABLE_ROLES.filter((role) =>
     canAssignRole({ actorOwnsWorkspace: ownsWorkspace, role })
   );
+
+  /** Per-instance prefix for the role options' label and description ids. */
+  const roleOptionIdPrefix = useId();
 
   const [state, dispatch] = useReducer(dialogReducer, {
     selectedRole: currentRoleEnum as string,
@@ -311,7 +313,8 @@ export function ChangeRoleDialog({
                           key={k}
                           role="option"
                           aria-selected={selectedRole === k}
-                          aria-describedby={`role-option-${k}-description`}
+                          aria-labelledby={`${roleOptionIdPrefix}-${k}-label`}
+                          aria-describedby={`${roleOptionIdPrefix}-${k}-description`}
                           tabIndex={0}
                           className={tw(
                             "px-4 py-2 text-[14px] text-gray-600 hover:cursor-pointer hover:bg-gray-50",
@@ -324,11 +327,14 @@ export function ChangeRoleDialog({
                             dispatch({ type: "selectRole", role: k })
                           )}
                         >
-                          <span className="block text-gray-900">
+                          <span
+                            id={`${roleOptionIdPrefix}-${k}-label`}
+                            className="block text-gray-900"
+                          >
                             {ROLE_LABELS[k]}
                           </span>
                           <span
-                            id={`role-option-${k}-description`}
+                            id={`${roleOptionIdPrefix}-${k}-description`}
                             className="block text-xs font-normal text-gray-500"
                           >
                             {ROLE_DESCRIPTIONS[k]}
@@ -338,14 +344,7 @@ export function ChangeRoleDialog({
                     </PopoverContent>
                   </PopoverPortal>
                 </Popover>
-                <a
-                  href={ROLES_HELP_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="mt-1 inline-block text-sm font-semibold text-primary-700 hover:text-primary-800"
-                >
-                  Learn more about roles
-                </a>
+                <RolesHelpLink />
 
                 {showDemotion ? (
                   <div className="mt-4 rounded-md border border-warning-200 bg-warning-25 p-3">

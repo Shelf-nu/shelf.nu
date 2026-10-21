@@ -82,7 +82,7 @@ const SelectContent = React.forwardRef<
    * iOS Safari fires for that tap. Radix selects on pointerup, but several
    * focus / aria-activedescendant transitions in Radix Select still rely on
    * the click event firing. Suppressing it intermittently breaks selection
-   * on iPhone/iPad — the original report behind these fixes.
+   * on iPhone/iPad.
    */
   const [contentEl, setContentEl] = React.useState<HTMLDivElement | null>(null);
 

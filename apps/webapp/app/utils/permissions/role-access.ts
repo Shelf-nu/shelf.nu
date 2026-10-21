@@ -39,7 +39,3 @@ export type {
   RolePolicy,
   WorkspaceAccessSettings,
 } from "@shelf/permissions";
-
-/** The knowledge-base article that explains every role; linked from the role pickers. */
-export const ROLES_HELP_URL =
-  "https://www.shelf.nu/knowledge-base/user-roles-and-their-permissions";

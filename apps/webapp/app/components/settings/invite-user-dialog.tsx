@@ -27,8 +27,8 @@ import type { OrganizationRole } from "~/utils/permissions/role-access";
 import {
   ROLE_DESCRIPTIONS,
   ROLE_LABELS,
-  ROLES_HELP_URL,
 } from "~/utils/permissions/role-access";
+import { RolesHelpLink } from "./roles-help-link";
 import Input from "../forms/input";
 import {
   Select,
@@ -232,14 +232,6 @@ export default function InviteUserDialog({
                     </div>
                   </SelectContent>
                 </Select>
-                <a
-                  href={ROLES_HELP_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="mt-1 inline-block text-sm font-semibold text-primary-700 hover:text-primary-800"
-                >
-                  Learn more about roles
-                </a>
               </SelectGroup>
               <When
                 truthy={
@@ -253,6 +245,8 @@ export default function InviteUserDialog({
                     zo.errors?.role()?.message}
                 </p>
               </When>
+              {/* After the role error, so the error stays directly under the picker. */}
+              <RolesHelpLink />
 
               <div className="pt-1.5">
                 <Input

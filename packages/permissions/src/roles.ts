@@ -45,7 +45,7 @@ export const ROLE_DESCRIPTIONS: Record<OrganizationRole, string> = {
   ADMIN:
     "Manages everything in the workspace: assets, bookings, custody, audits, settings and the team.",
   MANAGER:
-    "Runs bookings, custody and audits for everyone, but cannot create, edit or delete assets, or change workspace settings or the team.",
+    "Runs bookings, custody and audits for everyone, but cannot create, edit or delete assets, or change workspace settings or registered team members.",
   SELF_SERVICE:
     "Books assets and checks them out and in for themselves, and by default sees only their own bookings and custody.",
   BASE: "Requests assets through bookings that an Administrator or Manager checks out, and by default sees only their own bookings.",

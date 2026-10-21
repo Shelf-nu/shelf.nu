@@ -9,15 +9,13 @@
  */
 import type { ReactNode } from "react";
 import { OrganizationRoles } from "@prisma/client";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  ROLE_DESCRIPTIONS,
-  ROLES_HELP_URL,
-} from "~/utils/permissions/role-access";
+import { ROLE_DESCRIPTIONS } from "~/utils/permissions/role-access";
 
 import { ChangeRoleDialog } from "./change-role-dialog";
+import { ROLES_HELP_URL } from "../settings/roles-help-link";
 
 /** Whether the viewer owns the workspace, per case. */
 const viewer = { ownsWorkspace: false };
@@ -61,7 +59,9 @@ function openRolePicker() {
 /** Opens the role picker and returns the role names it offers. */
 function offeredRoles() {
   return openRolePicker().map(
-    (option) => option.querySelector("span")?.textContent
+    (option) =>
+      document.getElementById(option.getAttribute("aria-labelledby")!)
+        ?.textContent
   );
 }
 
@@ -77,13 +77,16 @@ describe("ChangeRoleDialog role options", () => {
   it("explains each role under its name and links to the roles article", () => {
     const options = openRolePicker();
 
-    expect(options.map((option) => option.textContent)).toEqual([
-      `Manager${ROLE_DESCRIPTIONS.MANAGER}`,
-      `Self service${ROLE_DESCRIPTIONS.SELF_SERVICE}`,
-      `Base${ROLE_DESCRIPTIONS.BASE}`,
-    ]);
+    for (const [option, role] of [
+      [options[0], "MANAGER"],
+      [options[1], "SELF_SERVICE"],
+      [options[2], "BASE"],
+    ] as const) {
+      const description = within(option).getByText(ROLE_DESCRIPTIONS[role]);
+      expect(option).toHaveAttribute("aria-describedby", description.id);
+    }
     expect(
-      screen.getByRole("link", { name: "Learn more about roles" })
+      screen.getByRole("link", { name: /learn more about roles/i })
     ).toHaveAttribute("href", ROLES_HELP_URL);
   });
 
