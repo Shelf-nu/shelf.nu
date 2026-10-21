@@ -47,6 +47,10 @@ import {
   loadSliceSourceLocations,
 } from "~/modules/booking/checkout-source-location.server";
 import type { SliceSourceLocation } from "~/modules/booking/checkout-source-location.server";
+import {
+  hasItemsStillOutToExtend,
+  isExtendableStatus,
+} from "~/modules/booking/extend-eligibility";
 import { isBookingArchivable } from "~/modules/booking/helpers";
 import {
   bookingDraftVisibilityClause,
@@ -720,6 +724,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       canDeletePerm,
       canCheckoutPerm,
       canCheckinPerm,
+      canExtendPerm,
     ] = await Promise.all([
       hasPermission({
         userId: user.id,
@@ -762,6 +767,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         roles,
         entity: PermissionEntity.booking,
         action: PermissionAction.checkin,
+      }),
+      hasPermission({
+        userId: user.id,
+        organizationId,
+        roles,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.extend,
       }),
     ]);
     // State says the booking COULD be checked out or in; the role says whether
@@ -826,6 +838,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           booking.status === "DRAFT") &&
         writesBooking &&
         canDeletePerm,
+      // Extend: the service's state rules (started, something still out) +
+      // extend permission, so the app never offers an extension it refuses.
+      canExtend:
+        isExtendableStatus(booking.status) &&
+        hasItemsStillOutToExtend({
+          assets: booking.bookingAssets.map((ba) => ba.asset),
+          checkedInAssetIds,
+          slices: sliceRows,
+        }) &&
+        writesBooking &&
+        canExtendPerm,
     };
 
     // Flatten book-by-model reservations into a mobile-friendly shape. Each

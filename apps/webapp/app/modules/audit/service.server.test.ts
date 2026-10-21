@@ -2216,6 +2216,46 @@ describe("audit service", () => {
       ]);
     });
 
+    it("filters to audits containing the asset when assetId is set", async () => {
+      await getAuditsForOrganization({
+        organizationId: "org-1",
+        assetId: "asset-1",
+      });
+
+      const findManyArgs = mockDb.auditSession.findMany.mock.calls[0]?.[0];
+      expect(findManyArgs?.where).toMatchObject({
+        assets: { some: { assetId: "asset-1" } },
+      });
+    });
+
+    it("leaves status unset when includeArchived is true and no status is given", async () => {
+      await getAuditsForOrganization({
+        organizationId: "org-1",
+        includeArchived: true,
+      });
+
+      const findManyArgs = mockDb.auditSession.findMany.mock.calls[0]?.[0];
+      expect(findManyArgs?.where?.status).toBeUndefined();
+    });
+
+    it("hides ARCHIVED audits by default", async () => {
+      await getAuditsForOrganization({ organizationId: "org-1" });
+
+      const findManyArgs = mockDb.auditSession.findMany.mock.calls[0]?.[0];
+      expect(findManyArgs?.where?.status).toEqual({ notIn: ["ARCHIVED"] });
+    });
+
+    it("keeps an explicit status even when includeArchived is true", async () => {
+      await getAuditsForOrganization({
+        organizationId: "org-1",
+        status: "ACTIVE",
+        includeArchived: true,
+      });
+
+      const findManyArgs = mockDb.auditSession.findMany.mock.calls[0]?.[0];
+      expect(findManyArgs?.where?.status).toBe("ACTIVE");
+    });
+
     it("falls back to the legacy single-field orderBy when prioritizeDeadlines is false", async () => {
       await getAuditsForOrganization({
         organizationId: "org-1",

@@ -16,7 +16,7 @@
  * @see {@link file://../../components/assets/bulk-download-qr-dialog.tsx}
  * @see {@link file://./qr-url.server.ts}
  */
-import { neutraliseCsvFormula, quoteCsvCell } from "~/utils/csv-cells";
+import { neutralizeCsvFormula, quoteCsvCell } from "~/utils/csv-cells";
 import { withUtf8Bom } from "~/utils/csv-utf8";
 import { getQrUrl } from "./qr-url.server";
 
@@ -53,7 +53,7 @@ export const LABELS_CSV_HEADERS = [
  * @returns The quoted field
  */
 function quoteField(value: string) {
-  return quoteCsvCell(neutraliseCsvFormula(value, { keepSignedText: true }));
+  return quoteCsvCell(neutralizeCsvFormula(value, { keepSignedText: true }));
 }
 
 /**

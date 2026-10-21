@@ -17,6 +17,7 @@ import {
   CONFIRM_MODEL_SHORTFALL_FIELD,
   isModelShortfallMessage,
 } from "~/modules/asset/archive-shortfall";
+import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
 import {
   bulkArchiveAssets,
   bulkUnarchiveAssets,
@@ -41,7 +42,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId, canUseBarcodes, role } = await requirePermission({
+    const {
+      organizationId,
+      canUseBarcodes,
+      role,
+      access,
+      currentOrganization,
+    } = await requirePermission({
       request,
       userId,
       entity: PermissionEntity.asset,
@@ -78,6 +85,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
           assetIds,
           currentSearchParams,
           settings,
+          lastAuditDateAccess: lastAuditDateAccessFor(
+            access,
+            currentOrganization
+          ),
           actorUserId: userId,
           timeZone,
           // Set by the dialog's "Archive anyway" after the shortfall warning.
@@ -105,6 +116,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
         assetIds,
         currentSearchParams,
         settings,
+        lastAuditDateAccess: lastAuditDateAccessFor(
+          access,
+          currentOrganization
+        ),
         actorUserId: userId,
         timeZone,
       });

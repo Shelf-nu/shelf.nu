@@ -27,6 +27,8 @@ import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, assetImageValidateFileAtom } from "~/atoms/file";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
+import { useDiscardRemount } from "~/hooks/use-discard-remount";
+import { useTrackedFormRef } from "~/hooks/use-unsaved-changes";
 import { getPrimaryKit, isQuantityTracked } from "~/modules/asset/utils";
 import type {
   AssetEditLoaderData,
@@ -44,6 +46,7 @@ import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
+import { scrollToFirstErrorOnNextFrame } from "~/utils/scroll-to-error";
 import { tw } from "~/utils/tw";
 import {
   optionalNumberFromString,
@@ -68,6 +71,7 @@ import {
 } from "../forms/image-file-field";
 import Input from "../forms/input";
 import { RefererRedirectInput } from "../forms/referer-redirect-input";
+import { UnsavedChangesGuard } from "../forms/unsaved-changes-bar";
 import ImageWithPreview from "../image-with-preview/image-with-preview";
 import InlineEntityCreationDialog from "../inline-entity-creation-dialog/inline-entity-creation-dialog";
 import { Button } from "../shared/button";
@@ -265,8 +269,28 @@ type Props = Partial<
   bulkMode?: boolean;
 };
 
+/**
+ * Create and edit form for assets, with the unsaved-changes bar.
+ *
+ * Discard remounts the inner form (see `useDiscardRemount`), which resets
+ * every widget that keeps its value in React state.
+ *
+ * @param props - Current values when editing; omit them to create an asset
+ */
+export function AssetForm(props: Props) {
+  const { key, discard, discarded } = useDiscardRemount();
+  return (
+    <AssetFormInner
+      key={key}
+      {...props}
+      onDiscard={discard}
+      autoFocusName={!discarded}
+    />
+  );
+}
+
 // react-doctor:no-giant-component — deferred for follow-up refactor
-export const AssetForm = ({
+const AssetFormInner = ({
   id,
   sequentialId,
   title,
@@ -289,7 +313,14 @@ export const AssetForm = ({
   preferredBarcodeId,
   referer,
   bulkMode = false,
-}: Props) => {
+  onDiscard,
+  autoFocusName,
+}: Props & {
+  /** Resets the form to the loaded values (remounts it). */
+  onDiscard: () => void;
+  /** Focus the Name field on mount; false after a Discard. */
+  autoFocusName: boolean;
+}) => {
   const navigation = useNavigation();
   const { canUseBarcodes } = useBarcodePermissions();
   // Workspace's current code-display preference — used by PreferredBarcodeSelector
@@ -340,9 +371,14 @@ export const AssetForm = ({
   const zo = useZorm("NewAssetFormScreen", FormSchema);
   const disabled = isFormProcessing(navigation.state);
 
+  /** The form element, shared by Zorm and the unsaved-changes tracking. */
+  const { formRef, setFormRef } = useTrackedFormRef(zo.ref);
+
   // Focus the asset Title field on mount so create/edit pages start
   // ready for typing instead of relying on the removed autoFocus prop.
-  const titleInputRef = useAutoFocus<HTMLInputElement>();
+  const titleInputRef = useAutoFocus<HTMLInputElement>({
+    when: autoFocusName,
+  });
 
   // Extract custom field errors into a plain object to pass to AssetCustomFields
   // This avoids passing the complex zo object which causes React 19 issues
@@ -656,8 +692,16 @@ export const AssetForm = ({
         success={actionData?.bulkSuccess}
         sampleTitles={bulkPreviewTitles}
       />
+      {/* Bulk create has its own success modal flow, so it is not tracked. */}
+      {bulkMode ? null : (
+        <UnsavedChangesGuard
+          formRef={formRef}
+          actionData={actionData}
+          onDiscard={onDiscard}
+        />
+      )}
       <Form
-        ref={zo.ref}
+        ref={setFormRef}
         method="post"
         action="."
         className="flex w-full flex-col gap-2"
@@ -676,18 +720,25 @@ export const AssetForm = ({
               setConsumptionTypeError("Please select a consumption type");
               e.preventDefault();
               e.stopPropagation();
-              return false;
             } else {
               setConsumptionTypeError(undefined);
             }
           }
 
           // If there are barcode errors, prevent submission
-          // Zorm will handle its own validation and prevent submission if needed
           if (hasBarcodeErrors) {
             e.preventDefault();
             e.stopPropagation();
-            return false;
+          }
+
+          // A Save can be rejected by Zorm (its submit listener runs before
+          // this handler and cancels the event), by the consumption type
+          // check, or by the barcode check. Every one of them leaves the
+          // event cancelled, so this single check brings the first message
+          // into view. Without it, a Save pressed far above the failing field
+          // looks like it did nothing.
+          if (e.defaultPrevented) {
+            scrollToFirstErrorOnNextFrame(e.currentTarget);
           }
         }}
       >

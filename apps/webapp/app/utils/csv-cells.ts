@@ -64,26 +64,46 @@ const FORMULA_TRIGGER = /^[=+\-@\t\r]/;
 const SIGNED_PLAIN_TEXT = /^[+-]\d[\p{L}\p{N}\s.,°%/-]*$/u;
 
 /**
- * Neutralises a value a spreadsheet would run as a formula (CWE-1236) by
+ * Neutralizes a value a spreadsheet would run as a formula (CWE-1236) by
  * prefixing a `'`, which spreadsheets read as "this cell is text".
  *
  * Label printer software (Brady, P-touch, Dymo) prints that `'` literally, so
  * a file meant for printing passes `keepSignedText` to leave a plain signed
  * measurement such as `-20C Freezer` as typed. `=`, `@`, a leading tab and a
- * leading carriage return are always neutralised.
+ * leading carriage return are always neutralized.
  *
  * @param value - The raw cell value, before quoting.
  * @param options.keepSignedText - Leave a `+`/`-` value alone when it holds no
  * formula syntax.
  * @returns The value, prefixed with `'` when a spreadsheet would run it.
  */
-export function neutraliseCsvFormula(
+export function neutralizeCsvFormula(
   value: string,
   { keepSignedText = false }: { keepSignedText?: boolean } = {}
 ): string {
   if (!FORMULA_TRIGGER.test(value)) return value;
   if (keepSignedText && SIGNED_PLAIN_TEXT.test(value)) return value;
   return `'${value}`;
+}
+
+/**
+ * Keeps a spreadsheet from reading a free-text cell as a formula.
+ *
+ * Excel, Sheets and Calc treat a cell that begins with `=`, `+`, `-` or `@` as
+ * a formula even when the CSV field is quoted, so a stored value such as
+ * `=HYPERLINK(...)` would run when the file is opened. Such a value gets a
+ * leading single quote, which spreadsheets show as plain text. The value is
+ * trimmed first, because the export trims every cell before writing it.
+ *
+ * Only for free text that starts a cell: a number or a date must not go
+ * through it, or a negative number would gain a quote.
+ *
+ * @param value - The cell text.
+ * @returns The trimmed text, prefixed with `'` when it begins with a formula
+ * trigger.
+ */
+export function neutralizeSpreadsheetFormula(value: string): string {
+  return neutralizeCsvFormula(value.trim());
 }
 
 /** An item needs quoting when a bare split would not give it back unchanged. */

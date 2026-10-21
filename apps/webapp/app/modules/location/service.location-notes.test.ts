@@ -79,6 +79,16 @@ const geolocateMock = vi.hoisted(() => vi.fn());
 const createNoteMock = vi.hoisted(() => vi.fn());
 const getUserByIDMock = vi.hoisted(() => vi.fn());
 
+// why: the stock ledger's rows come from real placement reads and have their
+// own tests (`consumption-log/stock-ledger.test.ts`, the in-memory
+// `asset/service.custody-source.test.ts`); this suite is about placements,
+// events and notes.
+vi.mock("~/modules/consumption-log/stock-ledger.server", () => ({
+  readStockState: vi.fn().mockResolvedValue(null),
+  readStockStates: vi.fn().mockResolvedValue(new Map()),
+  recordStockChanges: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("~/database/db.server", () => ({
   db: dbMocks,
 }));
@@ -176,6 +186,9 @@ const {
   updateLocationKits,
   createLocationChangeNote,
 } = await import("./service.server");
+const { readStockStates, recordStockChanges } = await import(
+  "~/modules/consumption-log/stock-ledger.server"
+);
 
 describe("location service activity logging", () => {
   beforeEach(() => {
@@ -465,6 +478,14 @@ describe("location service activity logging", () => {
           quantity: 80,
         }),
       ]);
+      const stockBefore = {
+        total: 80,
+        placed: new Map<string, number>(),
+        ledgerStartedAt: new Date("2026-10-01T00:00:00.000Z"),
+      };
+      vi.mocked(readStockStates).mockResolvedValueOnce(
+        new Map([["pens", stockBefore]])
+      );
 
       await updateLocationAssets({
         assetIds: ["pens"],
@@ -481,6 +502,19 @@ describe("location service activity logging", () => {
           data: [expect.objectContaining({ assetId: "pens", quantity: 30 })],
         })
       );
+      // The 30 units placed here are a MOVE out of the unplaced units: the
+      // ledger diffs the stock read before the placement write against the
+      // stock after it, with no event.
+      expect(
+        vi.mocked(readStockStates).mock.invocationCallOrder[0]
+      ).toBeLessThan(
+        dbMocks.assetLocation.createMany.mock.invocationCallOrder[0]
+      );
+      expect(recordStockChanges).toHaveBeenCalledWith(expect.anything(), {
+        organizationId: "org-1",
+        userId: "user-1",
+        changes: [{ assetId: "pens", before: stockBefore }],
+      });
     });
 
     it("forces INDIVIDUAL qty to 1 even when assetQuantities tries to set it higher", async () => {

@@ -84,7 +84,9 @@ export const Toaster = () => {
           {iconsMap["x"]}
         </Toast.Close>
       </Toast.Root>
-      <Toast.Viewport className="fixed bottom-0 right-0 z-[2147483647] m-0 flex w-full max-w-[100vw] list-none flex-col gap-[10px] p-[var(--viewport-padding)] pb-[calc(var(--viewport-padding)_+_env(safe-area-inset-bottom))] outline-none [--viewport-padding:_25px] md:w-[390px]" />
+      {/* The bottom padding grows by the asset import card's height while it
+          is shown (`--asset-import-card-offset`), so toasts stack above it. */}
+      <Toast.Viewport className="fixed bottom-0 right-0 z-[2147483647] m-0 flex w-full max-w-[100vw] list-none flex-col gap-[10px] p-[var(--viewport-padding)] pb-[calc(var(--viewport-padding)_+_env(safe-area-inset-bottom)_+_var(--asset-import-card-offset,0px))] outline-none [--viewport-padding:_25px] md:w-[390px]" />
     </Toast.Provider>
   );
 };

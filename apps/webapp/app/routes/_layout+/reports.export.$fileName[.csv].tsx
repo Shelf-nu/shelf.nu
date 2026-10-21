@@ -45,7 +45,7 @@ import type {
   MonthlyBookingTrendRow,
 } from "~/modules/reports/types";
 import { getClientHint } from "~/utils/client-hints";
-import { neutraliseCsvFormula } from "~/utils/csv-cells";
+import { neutralizeCsvFormula } from "~/utils/csv-cells";
 import { csvResponse } from "~/utils/csv-utf8";
 import { type ResolvedFormatPrefs } from "~/utils/date-format";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
@@ -61,13 +61,15 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { getIntParam } from "~/utils/search-params-number";
+import { assertUserCanUseReports } from "~/utils/subscription.server";
 
 /**
  * Builds the report named by `?reportId` as a CSV download, applying the same
  * filters as the report page but reading up to 10,000 rows instead of one page.
  *
- * @returns The CSV as an attachment, or the failure with its status — 400 without
- *   a report id, 404 for an unknown report, 403 for one that does not export
+ * @returns The CSV as an attachment, or the failure with its status: 400 without
+ *   a report id, 404 for an unknown report, 403 for one that does not export or
+ *   when the workspace's plan does not include reports
  */
 export const loader = async ({
   context,
@@ -80,13 +82,18 @@ export const loader = async ({
   try {
     // `currentOrganization` supplies the workspace currency for the reports
     // whose KPI strings carry money values.
-    const { organizationId, currentOrganization, access } =
+    const { organizationId, organizations, currentOrganization, access } =
       await requirePermission({
         userId,
         request,
         entity: PermissionEntity.reports,
         action: PermissionAction.export,
       });
+
+    // Reports are part of the Plus and Team plans. This is a download URL, so
+    // a workspace without them gets the 403 as JSON rather than a page.
+    await assertUserCanUseReports({ organizationId, organizations });
+
     const currency = currentOrganization.currency;
 
     const searchParams = getCurrentSearchParams(request);
@@ -541,7 +548,7 @@ function buildCsv(headers: string[], rows: string[][]): string {
 function escapeCsvField(field: string): string {
   // Neutralize spreadsheet formula injection (CWE-1236). Applied here in the
   // shared helper so every report export is protected.
-  const safeField = neutraliseCsvFormula(field);
+  const safeField = neutralizeCsvFormula(field);
   // `\r` is quoted alongside `\n`: a bare carriage return terminates a record in
   // consumers that accept CR as a line ending, so an unquoted one lets a
   // user-controlled value split the row and forge structure — which also puts

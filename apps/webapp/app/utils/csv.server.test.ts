@@ -5,17 +5,21 @@ import {
 } from "@remix-run/form-data-parser";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { stripHiddenAuditColumns } from "~/modules/asset/last-audit-date-access";
+import type { Column } from "~/modules/asset-index-settings/helpers";
+import { defaultFields } from "~/modules/asset-index-settings/helpers";
 import {
   buildCsvExportDataFromAssets,
   buildCsvExportDataFromBookings,
   buildCsvExportDataFromTeamMembers,
+  buildIndexExportColumns,
   csvDataFromRequest,
   formatValueForCsv,
   parseCsv,
 } from "~/utils/csv.server";
 import { ShelfError } from "~/utils/error";
 
-import { HARDCODED_DEFAULT_PREFS } from "./date-format";
+import { HARDCODED_DEFAULT_PREFS, formatDate } from "./date-format";
 
 // why: mock parseFormData to control file upload parsing in tests
 // while keeping MaxFileSizeExceededError available
@@ -606,6 +610,235 @@ describe("buildCsvExportDataFromAssets", () => {
         expect(headers).toEqual(['"Name"', '"QR ID"']);
       });
     });
+  });
+});
+
+describe("quantity and unit of measure in the index export", () => {
+  const ORG = {
+    id: "org-1",
+    barcodesEnabled: false,
+    currency: "USD" as const,
+  };
+
+  /** A consumable counted in pieces and an individual asset. */
+  const ASSETS = [
+    {
+      id: "asset-gloves",
+      title: "Gloves",
+      type: "QUANTITY_TRACKED",
+      quantity: 5,
+      unitOfMeasure: "pcs",
+      tags: [],
+      custody: [],
+      customFields: [],
+    },
+    {
+      id: "asset-drill",
+      title: "Drill",
+      type: "INDIVIDUAL",
+      quantity: 1,
+      unitOfMeasure: null,
+      tags: [],
+      custody: [],
+      customFields: [],
+    },
+  ];
+
+  /** Default columns with only the named ones visible. */
+  function columnsWithVisible(...visible: string[]): Column[] {
+    return defaultFields.map((col) => ({
+      ...col,
+      visible: visible.includes(col.name),
+    }));
+  }
+
+  function exportCsv(
+    settingsColumns: Column[],
+    columnScope: "visible" | "all"
+  ) {
+    return buildCsvExportDataFromAssets({
+      assets: ASSETS as any,
+      columns: buildIndexExportColumns({ settingsColumns, columnScope }),
+      currentOrganization: ORG,
+      prefs: HARDCODED_DEFAULT_PREFS,
+      workspaceCustomFieldNames: [],
+    });
+  }
+
+  it("exports quantity as a bare number and the unit in its own column", () => {
+    const [headers, gloves, drill] = exportCsv(
+      columnsWithVisible("quantity", "unitOfMeasure"),
+      "visible"
+    );
+
+    expect(headers).toEqual([
+      '"Name"',
+      '"Quantity"',
+      '"Unit of measure"',
+      '"Total value"',
+    ]);
+    expect(gloves).toEqual(['"Gloves"', '"5"', '"pcs"', '""']);
+    // Individual assets have no stock count and no unit.
+    expect(drill).toEqual(['"Drill"', '""', '""', '""']);
+  });
+
+  it("writes a unit that looks like a formula as plain text", () => {
+    const [, row] = buildCsvExportDataFromAssets({
+      assets: [{ ...ASSETS[0], unitOfMeasure: '=HYPERLINK("x")' }] as any,
+      columns: buildIndexExportColumns({
+        settingsColumns: columnsWithVisible("quantity", "unitOfMeasure"),
+        columnScope: "visible",
+      }),
+      currentOrganization: ORG,
+      prefs: HARDCODED_DEFAULT_PREFS,
+      workspaceCustomFieldNames: [],
+    });
+
+    expect(row[2]).toBe('"\'=HYPERLINK(""x"")"');
+  });
+
+  it("adds the unit right after quantity when only quantity is visible", () => {
+    const [headers, gloves] = exportCsv(
+      columnsWithVisible("sequentialId", "quantity", "minQuantity"),
+      "visible"
+    );
+
+    expect(headers).toEqual([
+      '"Name"',
+      '"Asset ID"',
+      '"Quantity"',
+      '"Unit of measure"',
+      '"Min quantity"',
+      '"Total value"',
+    ]);
+    expect(gloves.slice(2, 4)).toEqual(['"5"', '"pcs"']);
+  });
+
+  it("keeps the unit where the user put it when it is already visible", () => {
+    // Unit of measure moved to the front of the index, Quantity left in place.
+    const settingsColumns = columnsWithVisible(
+      "sequentialId",
+      "quantity",
+      "unitOfMeasure"
+    ).map((col) =>
+      col.name === "unitOfMeasure" ? { ...col, position: 0 } : col
+    );
+
+    const [headers] = exportCsv(settingsColumns, "visible");
+
+    expect(headers).toEqual([
+      '"Name"',
+      '"Unit of measure"',
+      '"Asset ID"',
+      '"Quantity"',
+      '"Total value"',
+    ]);
+  });
+
+  it("does not add the unit when quantity is not exported", () => {
+    const [headers] = exportCsv(columnsWithVisible("sequentialId"), "visible");
+
+    expect(headers).toEqual(['"Name"', '"Asset ID"', '"Total value"']);
+  });
+
+  it("exports every column in 'all' scope, with the unit right after quantity", () => {
+    const [headers] = exportCsv(columnsWithVisible(), "all");
+
+    expect(headers).toEqual([
+      '"Name"',
+      '"ID"',
+      '"Asset ID"',
+      '"QR ID"',
+      '"QR URL"',
+      '"Status"',
+      '"Description"',
+      '"Value"',
+      '"Available to book"',
+      '"Created at"',
+      '"Updated at"',
+      '"Category"',
+      '"Tags"',
+      '"Location"',
+      '"Kit"',
+      '"Custody"',
+      '"Upcoming Reminder"',
+      '"Upcoming Bookings"',
+      '"Quantity"',
+      '"Unit of measure"',
+      '"Tracking method"',
+      '"Asset model"',
+      '"Min quantity"',
+      '"Last audit date"',
+      '"Total value"',
+    ]);
+  });
+});
+
+describe("buildCsvExportDataFromAssets last audit date", () => {
+  const organization = {
+    id: "org-1",
+    barcodesEnabled: false,
+    currency: "USD" as const,
+  };
+  const columns = [
+    { name: "name", visible: true, position: 0 },
+    { name: "lastAuditDate", visible: true, position: 1 },
+  ];
+  const build = (
+    assets: Array<{ id: string; title: string; lastAuditDate: string | null }>,
+    cols = columns
+  ) =>
+    buildCsvExportDataFromAssets({
+      assets: assets as unknown as Parameters<
+        typeof buildCsvExportDataFromAssets
+      >[0]["assets"],
+      columns: cols as Parameters<
+        typeof buildCsvExportDataFromAssets
+      >[0]["columns"],
+      currentOrganization: organization,
+      prefs: HARDCODED_DEFAULT_PREFS,
+      workspaceCustomFieldNames: [],
+    });
+
+  it("exports the last audit date formatted with the user's prefs", () => {
+    const iso = "2026-09-30T10:00:00.000Z";
+    const [headers, row] = build([
+      { id: "a1", title: "Pens", lastAuditDate: iso },
+    ]);
+
+    expect(headers).toEqual(['"Name"', '"Last audit date"']);
+    expect(row[1]).toBe(
+      formatValueForCsv(
+        formatDate(new Date(iso), HARDCODED_DEFAULT_PREFS, {
+          includeTime: true,
+        })
+      )
+    );
+  });
+
+  it("exports an empty value for a never-audited asset", () => {
+    const [, row] = build([{ id: "a1", title: "Pens", lastAuditDate: null }]);
+
+    expect(row[1]).toBe(formatValueForCsv(""));
+  });
+
+  it("has no Last audit date header once the column is stripped as hidden", () => {
+    const [headers] = build(
+      [{ id: "a1", title: "Pens", lastAuditDate: null }],
+      stripHiddenAuditColumns(columns, "hidden")
+    );
+
+    expect(headers).toEqual(['"Name"']);
+  });
+
+  it("keeps the column with empty values when access is locked", () => {
+    const [headers, row] = build(
+      [{ id: "a1", title: "Pens", lastAuditDate: null }],
+      stripHiddenAuditColumns(columns, "locked")
+    );
+
+    expect(headers).toEqual(['"Name"', '"Last audit date"']);
+    expect(row[1]).toBe(formatValueForCsv(""));
   });
 });
 

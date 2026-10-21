@@ -251,6 +251,8 @@ export type AdvancedIndexAsset = Pick<
   >;
   bookings?: Array<AdvancedAssetBooking>;
   barcodes?: Array<Pick<Barcode, "id" | "type" | "value">>;
+  /** ISO UTC completion time of the latest finished audit covering the asset. */
+  lastAuditDate?: string | null;
 };
 // Type for the entire query result
 export type AdvancedIndexQueryResult = Array<{

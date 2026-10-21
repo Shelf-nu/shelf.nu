@@ -68,6 +68,14 @@ vi.mock("~/utils/date-format.server", () => ({
   }),
 }));
 
+// why: the plan gate reads the workspace owner's tier from the database; it has
+// its own suite (reports-plan-gate.test.ts), so here the workspace has reports.
+vi.mock("~/utils/subscription.server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("~/utils/subscription.server")>()),
+  workspaceCanUseReports: vi.fn().mockResolvedValue(true),
+  assertUserCanUseReports: vi.fn().mockResolvedValue(undefined),
+}));
+
 // why: PostHog is an external service; record what would be sent.
 vi.mock("~/integrations/posthog/client.server", () => ({
   captureServerEvent: vi.fn(),
