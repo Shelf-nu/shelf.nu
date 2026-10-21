@@ -71,8 +71,9 @@ read your working tree. A detached HEAD at the PR's head commit is fine.
 After the report the skill asks what to do next in a picker. You tick which
 findings to fix: each finding when there are 4 or fewer, otherwise whole
 sections (must fix, should fix, nits, spotted along the way), or type a custom
-range under "Other". A second question, shown only when one applies, offers
-prove, restore and post. You can also type "fix 1-4",
+range under "Other". A second question appears when at least one of prove,
+restore or post applies. If you close the picker, it waits for a typed reply to
+the Next line. You can also type "fix 1-4",
 "restore D2", or "prove 3". `prove N`
 writes a throwaway test under
 `apps/webapp/test/` that fails if finding N is real, runs only that file
@@ -80,7 +81,8 @@ writes a throwaway test under
 such as `node --test` for scripts), shows the output, and says proven, not
 proven, or inconclusive (the test failed for an unrelated reason such as a setup
 error). It then deletes the test in every case. It refuses when your checkout is
-not the PR head or the proof file already exists, is never committed, and never runs the full suite.
+not the PR head, when the PR's files have uncommitted edits, or when the proof
+file already exists. The test is never committed, and the full suite never runs.
 
 ## The agents
 
