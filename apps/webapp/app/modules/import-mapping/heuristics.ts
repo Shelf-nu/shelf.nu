@@ -21,6 +21,7 @@ import {
   MAX_PROPOSAL_NOTES,
   MAX_SAMPLE_LENGTH,
   MAX_SAMPLES_PER_COLUMN,
+  customFieldNameKey,
   customFieldNameSchema,
   targetKey,
 } from "./types";
@@ -129,11 +130,11 @@ function buildExistingFieldLookup(
   const byExact = new Map<string, ExistingCustomField>();
   const byFolded = new Map<string, ExistingCustomField[]>();
   for (const field of fields) {
-    byExact.set(field.name.trim().toLowerCase(), field);
+    byExact.set(customFieldNameKey(field.name), field);
     const folded = normalizeHeader(field.name);
     byFolded.set(folded, [...(byFolded.get(folded) ?? []), field]);
   }
-  const exact = (name: string) => byExact.get(name.trim().toLowerCase());
+  const exact = (name: string) => byExact.get(customFieldNameKey(name));
   return {
     exact,
     find: (name) => {
@@ -152,10 +153,23 @@ function buildExistingFieldLookup(
 type Candidate = Pick<ColumnMapping, "target" | "confidence">;
 
 /**
+ * The Shelf header a column carries: its exact name, or the same name written
+ * with other case and separators ("Valuation", "MIN_QUANTITY").
+ */
+function matchShelfHeader(header: string): AssetCsvHeader | undefined {
+  if (isAssetCsvHeader(header)) return header;
+  const compact = compactHeader(header);
+  return IMPORT_FIELDS.find(
+    (candidate) => compactHeader(candidate.name) === compact
+  )?.name;
+}
+
+/**
  * Proposes a destination for one column.
  *
- * Order: exact Shelf header, `cf:` header, case- and separator-insensitive
- * header, existing custom field by name, synonym, skip.
+ * Order: Shelf's `id` column (skipped), `cf:` header, Shelf header (exact or
+ * case- and separator-insensitive), existing custom field by name, synonym,
+ * skip.
  */
 function proposeColumn(
   header: string,
@@ -166,10 +180,10 @@ function proposeColumn(
   const skip: Candidate = { target: { kind: "skip" }, confidence: "low" };
   if (header === "") return skip;
 
-  if (isAssetCsvHeader(header)) {
-    if (!fieldAllowed(header, options)) return skip;
-    return { target: { kind: "field", name: header }, confidence: "high" };
-  }
+  // The import-ready export's `id` column holds Shelf's own asset ids, which
+  // the create importer ignores. It never goes to a custom field, even one
+  // the workspace named "ID".
+  if (header === "id") return skip;
 
   if (header.toLowerCase().startsWith("cf:")) {
     const target = parseCustomFieldHeader(header);
@@ -187,20 +201,19 @@ function proposeColumn(
     return { target, confidence: "high" };
   }
 
-  const compact = compactHeader(header);
-  const looseField = IMPORT_FIELDS.find(
-    (candidate) => compactHeader(candidate.name) === compact
-  );
-  if (looseField) {
-    if (!fieldAllowed(looseField.name, options)) return skip;
-    if (samplesFitField(looseField.name, sample)) {
+  const shelfHeader = matchShelfHeader(header);
+  if (shelfHeader) {
+    if (!fieldAllowed(shelfHeader, options)) return skip;
+    // The heading alone is not enough for enum-like fields: the values must
+    // be ones the importer accepts, however exactly the heading is written.
+    if (samplesFitField(shelfHeader, sample)) {
       return {
-        target: { kind: "field", name: looseField.name },
+        target: { kind: "field", name: shelfHeader },
         confidence: "high",
       };
     }
     // A "Type" column holding "Laptop" is a category, not an asset type.
-    if (looseField.name === "type") {
+    if (shelfHeader === "type") {
       return { target: { kind: "field", name: "category" }, confidence: "low" };
     }
     return skip;
@@ -295,9 +308,10 @@ export function buildFormatNotes(columns: ColumnMapping[]): string[] {
 /**
  * Proposes a mapping for a whole file using rules only.
  *
- * When two columns resolve to the same destination, the first keeps it and
- * the later one is skipped, so a fresh proposal never needs fixing before
- * Import.
+ * When two columns resolve to the same destination, one keeps it and the
+ * others are skipped, so a fresh proposal never needs fixing before Import.
+ * A sure match beats a guess (an exact "Category" column beats a "Type"
+ * column read as categories); between equals, the first column wins.
  *
  * @param headers - Trimmed headers, in file order
  * @param samples - Sample cells per column, aligned with `headers`
@@ -312,16 +326,32 @@ export function proposeByRules(
   options: RulesOptions = {}
 ): MappingProposal {
   const existing = buildExistingFieldLookup(existingCustomFields);
-  const taken = new Set<string>();
+  const candidates = headers.map((source, index) =>
+    proposeColumn(source, samples[index] ?? [], existing, options)
+  );
+
+  /** Destination key to the index of the column that keeps it. */
+  const winners = new Map<string, number>();
+  candidates.forEach((candidate, index) => {
+    const key = targetKey(candidate.target);
+    if (!key) return;
+    const current = winners.get(key);
+    if (
+      current === undefined ||
+      (candidate.confidence === "high" &&
+        candidates[current].confidence !== "high")
+    ) {
+      winners.set(key, index);
+    }
+  });
 
   const columns = headers.map((source, index): ColumnMapping => {
     const sample = samples[index] ?? [];
-    const candidate = proposeColumn(source, sample, existing, options);
+    const candidate = candidates[index];
     const key = targetKey(candidate.target);
-    if (key && taken.has(key)) {
+    if (key && winners.get(key) !== index) {
       return { source, target: { kind: "skip" }, confidence: "low", sample };
     }
-    if (key) taken.add(key);
     return { source, sample, ...candidate };
   });
 
@@ -347,7 +377,7 @@ export function isAlreadyShelfFormat(columns: ColumnMapping[]): boolean {
           : null;
         return (
           parsed !== null &&
-          parsed.name.toLowerCase() === target.name.trim().toLowerCase() &&
+          customFieldNameKey(parsed.name) === customFieldNameKey(target.name) &&
           parsed.type === target.type
         );
       }

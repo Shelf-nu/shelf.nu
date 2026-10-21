@@ -9,6 +9,7 @@
  *
  * @see {@link file://./flow.tsx}
  */
+import { createContext, useContext } from "react";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createRoutesStub } from "react-router";
@@ -482,7 +483,6 @@ describe("ContentImportFlow column mapping", () => {
       ],
     },
     rowCount: 2,
-    alreadyMatches: false,
     columnStats: [
       { newCategories: 2, newLocations: 2 },
       { newCategories: 2, newLocations: 2 },
@@ -497,12 +497,20 @@ describe("ContentImportFlow column mapping", () => {
    * fields (happy-dom drops File values from a FormData request body, so the
    * file itself is checked on the input, which stays mounted).
    */
+  /** Whether another import holds the upload; flipped while a test runs. */
+  const UploadBlocked = createContext(false);
+
+  /** The flow, reading `uploadBlocked` the way `ImportContent` passes it. */
+  function FlowWithBlock() {
+    return <ContentImportFlow uploadBlocked={useContext(UploadBlocked)} />;
+  }
+
   function renderMappingFlow() {
     const posts: Record<string, string>[] = [];
     const Stub = createRoutesStub([
       {
         path: "/",
-        Component: ContentImportFlow,
+        Component: FlowWithBlock,
         // why: no server in a component test; the action stands in for the
         // `assets.import` route and records what it is sent
         action: async ({ request }) => {
@@ -518,8 +526,19 @@ describe("ContentImportFlow column mapping", () => {
         },
       },
     ]);
-    const view = render(<Stub initialEntries={["/"]} />);
-    return { posts, container: view.container };
+    const view = render(
+      <UploadBlocked.Provider value={false}>
+        <Stub initialEntries={["/"]} />
+      </UploadBlocked.Provider>
+    );
+    /** Re-renders the flow as if another import started (or ended). */
+    const setUploadBlocked = (blocked: boolean) =>
+      view.rerender(
+        <UploadBlocked.Provider value={blocked}>
+          <Stub initialEntries={["/"]} />
+        </UploadBlocked.Provider>
+      );
+    return { posts, container: view.container, setUploadBlocked };
   }
 
   /** The file input, which stays mounted through every stage. */
@@ -623,6 +642,21 @@ describe("ContentImportFlow column mapping", () => {
     expect(
       await screen.findByRole("button", { name: "Import 2 assets" })
     ).toBeInTheDocument();
+  });
+
+  it("holds Preview import while another import runs", async () => {
+    const user = userEvent.setup();
+    const { setUploadBlocked } = renderMappingFlow();
+    await reachReview(user);
+    expect(
+      screen.getByRole("button", { name: "Preview import" })
+    ).toBeEnabled();
+
+    setUploadBlocked(true);
+
+    expect(
+      screen.getByRole("button", { name: "Preview import" })
+    ).toBeDisabled();
   });
 
   it("blocks Preview import while two columns share a field", async () => {

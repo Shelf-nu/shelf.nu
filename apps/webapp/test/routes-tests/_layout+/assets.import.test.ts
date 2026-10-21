@@ -20,7 +20,11 @@ import { createActionArgs, createLoaderArgs } from "@mocks/remix";
 
 import { db } from "~/database/db.server";
 import { captureServerEvent } from "~/integrations/posthog/client.server";
-import type { ColumnMapping } from "~/modules/import-mapping/types";
+import { isAlreadyShelfFormat } from "~/modules/import-mapping/heuristics";
+import type {
+  ColumnMapping,
+  MappingProposal,
+} from "~/modules/import-mapping/types";
 import { buildContentImportPreview } from "~/modules/asset-import/preview.server";
 import { action, loader } from "~/routes/_layout+/assets.import";
 import { csvDataFromRequest } from "~/utils/csv.server";
@@ -392,7 +396,6 @@ describe("assets.import column mapping", () => {
       expect(result).toMatchObject({
         intent: "analyze",
         rowCount: 2,
-        alreadyMatches: false,
         existingCustomFields: [{ name: "Serial number", type: "TEXT" }],
         proposal: {
           source: "rules",
@@ -417,16 +420,16 @@ describe("assets.import column mapping", () => {
       });
     });
 
-    it("says when the file already matches Shelf's format", async () => {
+    it("proposes a template file as already in Shelf's format", async () => {
       vi.mocked(csvDataFromRequest).mockResolvedValue([
         ["title", "category"],
         ["Camera", "Video"],
       ]);
-      const result = (await post({ intent: "analyze" })) as Record<
-        string,
-        unknown
-      >;
-      expect(result.alreadyMatches).toBe(true);
+      const result = (await post({ intent: "analyze" })) as {
+        proposal: MappingProposal;
+      };
+      // The review reads "already matches" off the proposal it is sent.
+      expect(isAlreadyShelfFormat(result.proposal.columns)).toBe(true);
     });
 
     it("refuses a file over the background import's row limit before any review", async () => {
@@ -497,6 +500,23 @@ describe("assets.import column mapping", () => {
           newCustomFields: 0,
         },
       });
+    });
+
+    it("reports the mapping as confirmed only once the preview is built", async () => {
+      vi.mocked(buildContentImportPreview).mockRejectedValue(
+        new ShelfError({
+          cause: null,
+          message: "Row 2: title is required",
+          label: "Assets",
+          status: 400,
+          shouldBeCaptured: false,
+        })
+      );
+      await post({ intent: "preview", mapping: JSON.stringify(MAPPING) });
+
+      expect(captureServerEvent).not.toHaveBeenCalledWith(
+        expect.objectContaining({ event: "import_mapping_confirmed" })
+      );
     });
 
     it("previews the file unchanged when no mapping is posted", async () => {

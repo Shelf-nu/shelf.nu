@@ -64,7 +64,6 @@ import { ImportErrorDetails } from "../import-preview/import-error-details";
 export type MappingAnalysis = {
   proposal: MappingProposal;
   rowCount: number;
-  alreadyMatches: boolean;
   columnStats: ColumnStats[];
   existingCustomFields: ExistingCustomField[];
 };
@@ -397,7 +396,8 @@ export function ContentImportFlow({
                 duplicateRows.size > 0 ||
                 hasInvalidName ||
                 allSkipped ||
-                isPreviewLoading
+                isPreviewLoading ||
+                uploadBlocked
               }
             >
               {isPreviewLoading ? "Checking file..." : "Preview import"}

@@ -20,10 +20,7 @@ import {
 } from "~/modules/asset-import/service.server";
 import { applyMapping } from "~/modules/import-mapping/apply";
 import { classifyImportFailure } from "~/modules/import-mapping/failure";
-import {
-  buildColumnSamples,
-  isAlreadyShelfFormat,
-} from "~/modules/import-mapping/heuristics";
+import { buildColumnSamples } from "~/modules/import-mapping/heuristics";
 import { proposeMapping } from "~/modules/import-mapping/propose";
 import { buildColumnStats } from "~/modules/import-mapping/summary";
 import type { ColumnMapping } from "~/modules/import-mapping/types";
@@ -153,10 +150,20 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
       })
     );
 
-    let mappedCsvData: string[][] = csvData;
-    if (mapping) {
-      const columns = parseMapping(mapping);
-      mappedCsvData = applyMapping(csvData, columns);
+    const columns = mapping ? parseMapping(mapping) : null;
+    const mappedCsvData = columns ? applyMapping(csvData, columns) : csvData;
+
+    const file = formData.get("file");
+    const preview = await buildContentImportPreview({
+      csvData: mappedCsvData,
+      fileName: file instanceof File ? file.name : null,
+      organizationId,
+      userId,
+      canUseBarcodes,
+    });
+
+    // Sent once the draft exists, so a retry after row errors counts once.
+    if (columns) {
       captureServerEvent({
         distinctId: userId,
         event: "import_mapping_confirmed",
@@ -168,15 +175,6 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
         },
       });
     }
-
-    const file = formData.get("file");
-    const preview = await buildContentImportPreview({
-      csvData: mappedCsvData,
-      fileName: file instanceof File ? file.name : null,
-      organizationId,
-      userId,
-      canUseBarcodes,
-    });
 
     return payload({ intent: "preview" as const, preview });
   } catch (cause) {
@@ -294,7 +292,6 @@ async function analyzeColumns({
   return {
     proposal,
     rowCount,
-    alreadyMatches: isAlreadyShelfFormat(proposal.columns),
     columnStats: buildColumnStats(csvData, {
       categories: categories.map(({ name }) => name),
       locations: locations.map(({ name }) => name),

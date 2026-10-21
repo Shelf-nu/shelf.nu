@@ -13,11 +13,12 @@
  * @see {@link file://./../../components/assets/import-mapping/mapping-review.tsx}
  */
 import type { ColumnMapping } from "./types";
+import { customFieldNameKey } from "./types";
 
 /** Per column: distinct values that are not yet a category or a location. */
 export type ColumnStats = { newCategories: number; newLocations: number };
 
-/** Lowercased, trimmed: the importer matches these names case-insensitively. */
+/** Lowercased, trimmed: the importer matches category and location names case-insensitively. */
 function nameKey(name: string): string {
   return name.trim().toLowerCase();
 }
@@ -84,7 +85,7 @@ export function summarizeMapping({
   rowCount: number;
   existingCustomFieldNames: string[];
 }): MappingSummary {
-  const existing = new Set(existingCustomFieldNames.map(nameKey));
+  const existing = new Set(existingCustomFieldNames.map(customFieldNameKey));
   const summary: MappingSummary = {
     rows: rowCount,
     newCustomFields: [],
@@ -93,7 +94,10 @@ export function summarizeMapping({
   };
 
   columns.forEach(({ target }, index) => {
-    if (target.kind === "customField" && !existing.has(nameKey(target.name))) {
+    if (
+      target.kind === "customField" &&
+      !existing.has(customFieldNameKey(target.name))
+    ) {
       summary.newCustomFields.push(target.name.trim());
     }
     if (target.kind === "field" && target.name === "category") {

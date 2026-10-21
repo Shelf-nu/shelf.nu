@@ -1,8 +1,9 @@
 /**
  * Import mapping: turns a reviewed mapping into importer-ready CSV data.
  *
- * Renames each kept column to its Shelf header and drops skipped columns.
- * Cell values are copied untouched, so `extractCSVDataFromContentImport` and
+ * Renames each kept column to its Shelf header and drops skipped columns,
+ * plus any row that only had values in them. Cell values are copied
+ * untouched, so `extractCSVDataFromContentImport` and
  * `createAssetsFromContentImport` run exactly as for a hand-made template and
  * enforce every rule they always enforce.
  *
@@ -24,7 +25,8 @@ import { findDuplicateTargets, headerForTarget } from "./types";
  *
  * @param csvData - Parsed CSV, header row first
  * @param columns - One mapping per column, in file order
- * @returns A new table with renamed headers and without skipped columns
+ * @returns A new table with renamed headers, without skipped columns and
+ *   without rows left blank once those columns are gone
  * @throws {ShelfError} 400 when the mapping does not fit the file, two
  *   columns share a destination, or every column is skipped
  */
@@ -93,8 +95,12 @@ export function applyMapping(
     });
   }
 
-  return [
-    kept.map(({ header }) => header),
-    ...csvData.slice(1).map((row) => kept.map(({ index }) => row[index] ?? "")),
-  ];
+  // The upload already drops blank rows, but a row whose only values sit in
+  // skipped columns turns blank here and would fail as a row with no title.
+  const rows = csvData
+    .slice(1)
+    .map((row) => kept.map(({ index }) => row[index] ?? ""))
+    .filter((row) => row.some((cell) => cell.trim() !== ""));
+
+  return [kept.map(({ header }) => header), ...rows];
 }

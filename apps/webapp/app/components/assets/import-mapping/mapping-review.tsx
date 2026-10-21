@@ -9,7 +9,7 @@
  *
  * Controlled: the parent owns the columns and receives every edit.
  *
- * @see {@link file://./mapping-import-form.tsx} the two-step form around it
+ * @see {@link file://./../import-content/flow.tsx} the flow around it
  * @see {@link file://./../../../modules/import-mapping/types.ts}
  */
 import type { CustomFieldType } from "@prisma/client";
@@ -19,6 +19,7 @@ import type {
   ColumnMapping,
   ColumnTarget,
 } from "~/modules/import-mapping/types";
+import { customFieldNameKey } from "~/modules/import-mapping/types";
 import { tw } from "~/utils/tw";
 import { CustomFieldTarget } from "./custom-field-target";
 import { TargetSelect } from "./target-select";
@@ -34,9 +35,8 @@ export function existingTypeFor(
   existing: ExistingCustomField[],
   name: string
 ): CustomFieldType | undefined {
-  const key = name.trim().toLowerCase();
-  return existing.find((field) => field.name.trim().toLowerCase() === key)
-    ?.type;
+  const key = customFieldNameKey(name);
+  return existing.find((field) => customFieldNameKey(field.name) === key)?.type;
 }
 
 /** Green when sure, amber when a guess. Text is for screen readers. */

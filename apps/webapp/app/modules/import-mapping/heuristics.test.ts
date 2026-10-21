@@ -99,6 +99,58 @@ describe("proposeByRules", () => {
     });
   });
 
+  it("checks the values of an exact `type` heading like any other", () => {
+    const proposal = propose([["type"], ["Laptop"]]);
+    expect(proposal.columns[0]).toMatchObject({
+      target: { kind: "field", name: "category" },
+      confidence: "low",
+    });
+  });
+
+  it("keeps an exact `type` heading whose values are asset types", () => {
+    const proposal = propose([["type"], ["QUANTITY_TRACKED"]]);
+    expect(proposal.columns[0]).toMatchObject({
+      target: { kind: "field", name: "type" },
+      confidence: "high",
+    });
+  });
+
+  it("lets a sure match keep a destination a guess reached first", () => {
+    const proposal = propose([
+      ["Type", "Category"],
+      ["Laptop", "Electronics"],
+    ]);
+    expect(proposal.columns.map((column) => column.target)).toEqual([
+      { kind: "skip" },
+      { kind: "field", name: "category" },
+    ]);
+    expect(proposal.columns[1].confidence).toBe("high");
+  });
+
+  it("skips Shelf's `id` column even when a custom field is named ID", () => {
+    const proposal = propose(
+      [
+        ["id", "title"],
+        ["clx123", "Laptop"],
+      ],
+      [{ name: "ID", type: CustomFieldType.TEXT }]
+    );
+    expect(proposal.columns[0].target).toEqual({ kind: "skip" });
+    expect(isAlreadyShelfFormat(proposal.columns)).toBe(true);
+  });
+
+  it("still maps an `ID` heading to the workspace's ID custom field", () => {
+    const proposal = propose(
+      [["ID"], ["A-1"]],
+      [{ name: "ID", type: CustomFieldType.TEXT }]
+    );
+    expect(proposal.columns[0].target).toEqual({
+      kind: "customField",
+      name: "ID",
+      type: "TEXT",
+    });
+  });
+
   it("prefers the workspace's existing custom field and its type", () => {
     const proposal = propose(
       [

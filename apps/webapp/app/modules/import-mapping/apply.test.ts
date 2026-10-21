@@ -42,6 +42,21 @@ describe("applyMapping", () => {
     ]);
   });
 
+  it("drops rows whose only values were in skipped columns", () => {
+    const file = [
+      ["Item Name", "Legacy ID"],
+      ["Dell", "X1"],
+      ["", "X2"],
+      ["  ", "X3"],
+    ];
+    expect(
+      applyMapping(file, [
+        col("Item Name", { kind: "field", name: "title" }),
+        col("Legacy ID", { kind: "skip" }),
+      ])
+    ).toEqual([["title"], ["Dell"]]);
+  });
+
   it("produces headers the existing importer accepts", () => {
     const rows = extractCSVDataFromContentImport(
       applyMapping(FILE, MAPPING),

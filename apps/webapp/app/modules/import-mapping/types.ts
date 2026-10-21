@@ -120,8 +120,21 @@ export const columnMappingListSchema = z
   .max(MAX_MAPPED_COLUMNS);
 
 /**
+ * The key custom field names are compared by everywhere in the mapping:
+ * trimmed and lowercased, so "Serial Number " and "serial number" are one
+ * field. The proposal, the review and its summary must all agree on this, or
+ * they disagree about whether a field already exists.
+ *
+ * @param name - A custom field name
+ * @returns The comparison key
+ */
+export function customFieldNameKey(name: string): string {
+  return name.trim().toLowerCase();
+}
+
+/**
  * A stable key per destination, so two columns aimed at the same place can be
- * found. Custom fields match by name case-insensitively, like the importer.
+ * found. Custom fields match by {@link customFieldNameKey}.
  *
  * @param target - A column target
  * @returns The key, or `null` for skipped columns (any number may be skipped)
@@ -131,7 +144,7 @@ export function targetKey(target: ColumnTarget): string | null {
     case "field":
       return `field:${target.name}`;
     case "customField":
-      return `cf:${target.name.trim().toLowerCase()}`;
+      return `cf:${customFieldNameKey(target.name)}`;
     case "skip":
       return null;
   }

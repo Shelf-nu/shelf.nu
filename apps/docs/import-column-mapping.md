@@ -23,9 +23,11 @@ matches Shelf's format".
 trying in order:
 
 1. **Exact Shelf header**, for example `title` or `cf:Serial number, type:text`.
+   The import-ready export's `id` column is always skipped: it holds Shelf's
+   own asset ids, which the importer ignores.
 2. **Same name ignoring case and punctuation**, for example `Title` or
-   `Unit of measure`. A `Type` column whose values are not `INDIVIDUAL` or
-   `QUANTITY_TRACKED` is read as a category instead.
+   `Unit of measure`. A `type` or `Type` column whose values are not
+   `INDIVIDUAL` or `QUANTITY_TRACKED` is read as a category instead.
 3. **An existing custom field** of the workspace with the same name. Its stored
    type is kept, because the importer refuses a header that contradicts it.
 4. **A synonym** from `modules/import-mapping/synonyms.ts`, which lists over
@@ -39,8 +41,10 @@ trying in order:
    unless an earlier rule matched them, such as an existing custom field with
    the same name.
 
-When two columns resolve to the same destination, the first keeps it and the
-later one is skipped. The proposal also carries short notes about values the
+When two columns resolve to the same destination, one keeps it and the others
+are skipped. A sure match beats a guess, so an exact "Category" column keeps
+the category over a "Type" column read as categories; between equals, the
+first column wins. The proposal also carries short notes about values the
 importer will refuse, for example a date column in DD/MM/YYYY.
 
 `modules/import-mapping/propose.ts` is the single entry point. It accepts an
@@ -55,11 +59,13 @@ proposer can be added later without changing the route or the review table.
   import.
 - A line under the table says how many rows will be imported and which custom
   fields, categories and locations will be created.
+- Preview import is held while another import runs in the workspace.
 
 ## What the importer still checks
 
 Applying a mapping only renames and drops columns
-(`modules/import-mapping/apply.ts`). Cell values are never changed, so every
+(`modules/import-mapping/apply.ts`), plus any row left blank once its skipped
+columns are gone. Cell values are never changed, so every
 existing import rule still applies: dates as YYYY-MM-DD, yes/no fields,
 quantity-tracked columns, barcodes, QR codes and the 10,000-row limit of the
 background import. Row

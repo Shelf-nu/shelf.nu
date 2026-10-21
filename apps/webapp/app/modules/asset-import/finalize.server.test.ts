@@ -13,6 +13,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { db } from "~/database/db.server";
 import { sendAssetImportFinishedEmail } from "~/emails/asset-import-finished";
+import { captureServerEvent } from "~/integrations/posthog/client.server";
 import { bulkAssignKitCustody } from "~/modules/kit/service.server";
 import { ShelfError } from "~/utils/error";
 import { appendImportWarnings } from "./chunk-writer.server";
@@ -42,6 +43,12 @@ vi.mock("./chunk-writer.server", () => ({ appendImportWarnings: vi.fn() }));
 // why: the email is sent over the network; here only whether it is sent.
 vi.mock("~/emails/asset-import-finished", () => ({
   sendAssetImportFinishedEmail: vi.fn(),
+}));
+
+// why: analytics events go to PostHog over the network; here only whether
+// the completion event is sent.
+vi.mock("~/integrations/posthog/client.server", () => ({
+  captureServerEvent: vi.fn(),
 }));
 
 const resolved: ResolvedImportEntities = {
@@ -257,7 +264,17 @@ describe("runFinalizeStep", () => {
     });
   });
 
-  it("sends no email when the import was no longer RUNNING", async () => {
+  it("reports the completed import to analytics as counts only", async () => {
+    await runFinalizeStep(imp([row(2), row(3)]));
+
+    expect(captureServerEvent).toHaveBeenCalledWith({
+      distinctId: "u",
+      event: "import_completed",
+      properties: { organizationId: "org", rows: 2 },
+    });
+  });
+
+  it("sends no email or completion event when the import was no longer RUNNING", async () => {
     vi.mocked(db.assetImport.updateMany)
       .mockResolvedValueOnce({ count: 0 })
       .mockResolvedValueOnce({ count: 0 });
@@ -265,5 +282,6 @@ describe("runFinalizeStep", () => {
     await runFinalizeStep(imp([row(2)]));
 
     expect(sendAssetImportFinishedEmail).not.toHaveBeenCalled();
+    expect(captureServerEvent).not.toHaveBeenCalled();
   });
 });
