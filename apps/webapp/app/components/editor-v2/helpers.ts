@@ -161,6 +161,21 @@ export function sanitizeHref(value: string) {
   }
 }
 
+/**
+ * The extent of the link the cursor sits in.
+ *
+ * The caller both reads the href from this range and re-marks the whole of it,
+ * so the range has to end where the link does. Two links can sit immediately
+ * adjacent with no text between them, and the only thing separating them is the
+ * href: walking outward by mark TYPE cannot see that boundary, because both
+ * neighbours carry a link mark. The walk therefore compares against the cursor's
+ * own mark, whose `eq` includes the attributes, so it stops at a change of
+ * destination. Two runs sharing one href are one link and stay whole.
+ *
+ * @param state - The editor state, whose selection locates the link
+ * @param linkType - The schema's link mark type
+ * @returns The range to edit, or null when the cursor is not in a link
+ */
 export function findLinkRange(state: EditorState, linkType: MarkType) {
   const { from, to, empty, $from } = state.selection;
   if (!empty) {
@@ -173,14 +188,14 @@ export function findLinkRange(state: EditorState, linkType: MarkType) {
   }
 
   let start = from;
-  while (start > 0 && state.doc.rangeHasMark(start - 1, start, linkType)) {
+  while (start > 0 && state.doc.rangeHasMark(start - 1, start, mark)) {
     start -= 1;
   }
 
   let end = from;
   while (
     end < state.doc.content.size &&
-    state.doc.rangeHasMark(end, end + 1, linkType)
+    state.doc.rangeHasMark(end, end + 1, mark)
   ) {
     end += 1;
   }

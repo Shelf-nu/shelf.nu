@@ -30,6 +30,7 @@ function renderStock(assets = many(3), showBranding = true) {
       assets={assets}
       qrBaseUrl="https://eam.sh"
       showBranding={showBranding}
+      labelsCsv=""
     />
   );
 }

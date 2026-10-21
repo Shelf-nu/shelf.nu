@@ -1,10 +1,14 @@
 /**
  * PostHog Server Analytics
  *
- * Thin, best-effort wrapper around `posthog-node` for emitting product funnel
- * events (signup → paid → cancel) from the server. These feed the free→paid
- * funnel in PostHog so we can measure self-serve conversion — the metric the
- * marketing site can't see because conversion happens inside the app.
+ * Thin, best-effort wrapper around `posthog-node` for emitting product events
+ * from the server. Two kinds go through it:
+ *
+ * - funnel events (signup, paid, cancel), which feed the free-to-paid funnel so
+ *   we can measure self-serve conversion, a number the marketing site cannot
+ *   see because conversion happens inside the app;
+ * - usage events for things only the server sees, such as a printable sheet's
+ *   preview being generated (printing itself never reaches the server).
  *
  * Design rules (do not relax without discussion):
  * - **Never throws / never blocks.** Analytics must not be able to break a
@@ -15,10 +19,12 @@
  *
  * @see {@link file://./../../modules/stripe-webhook/handlers.server.ts}
  * @see {@link file://./../../modules/user/service.server.ts}
+ * @see {@link file://./../../routes/api+/bookings.$bookingId.generate-pdf.tsx}
  */
 
 import { PostHog } from "posthog-node";
 
+import type { SignupIntentEventProperties } from "~/modules/signup-intent/analytics";
 import { POSTHOG_API_KEY, POSTHOG_HOST } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
@@ -54,14 +60,25 @@ function getPostHogClient(): PostHog | null {
   return client;
 }
 
+/** A printable sheet whose preview the server generates. */
+export type PdfPreviewSheet =
+  | "booking_checklist"
+  | "checkin_receipt"
+  | "audit_receipt"
+  | "report";
+
 /**
- * The closed set of server-side funnel events and their property shapes.
- * Keeping this a discriminated union type-checks every call site.
+ * The closed set of server-side analytics events and their property shapes.
+ * Keeping this a discriminated union type-checks every call site. Properties
+ * carry ids and counts only, never personal data.
  */
-export type ServerFunnelEvent =
+export type ServerAnalyticsEvent =
   | {
       event: "signup_completed";
-      properties: { created_with_invite: boolean; is_sso: boolean };
+      properties: {
+        created_with_invite: boolean;
+        is_sso: boolean;
+      } & SignupIntentEventProperties;
     }
   | {
       event: "upgrade_completed";
@@ -75,21 +92,52 @@ export type ServerFunnelEvent =
   | {
       event: "subscription_cancelled";
       properties: { tierId: string };
+    }
+  | {
+      /**
+       * A printable sheet's preview was generated. Sent by the sheet's data
+       * loader, which runs when the preview opens; the print itself happens in
+       * the browser and is not seen by the server.
+       */
+      event: "pdf_preview_opened";
+      properties: {
+        sheet: PdfPreviewSheet;
+        organizationId: string;
+        /** Rows printed in the sheet's main table. */
+        rowCount: number;
+        /**
+         * Distinct assets across those rows, for `booking_checklist`,
+         * `audit_receipt` and `checkin_receipt`. Booking sheets print one row
+         * per booking slice, so one asset can fill several rows.
+         */
+        assetCount?: number;
+        /**
+         * Rows that matched the report's filters, for `sheet: "report"` only.
+         * Can exceed `rowCount` when the printed table is capped.
+         */
+        totalCount?: number;
+        /** Which report, for `sheet: "report"` only. */
+        reportId?: string;
+      };
     };
 
 /**
- * Emit a server-side funnel event to PostHog. Best-effort: it does not await,
- * never throws, and is a silent no-op when PostHog is not configured — so it
- * is always safe to call from inside signup or a webhook handler.
+ * Emit a server-side analytics event to PostHog. Best-effort: it does not
+ * await, never throws, and is a silent no-op when PostHog is not configured,
+ * so it is always safe to call from inside signup, a webhook handler or a
+ * loader.
  *
  * @param args - The event name + its typed properties, plus `distinctId`
- *   (use the Shelf user id so events stitch to one person) and optional
- *   `groups` for org-level group analytics.
+ *   (use the Shelf user id so events stitch to one person), optional
+ *   `groups` for org-level group analytics, and optional `setOnce`: person
+ *   properties written only if the person does not have them yet (PostHog's
+ *   `$set_once`), for facts about how someone first arrived.
  */
 export function captureServerEvent(
-  args: ServerFunnelEvent & {
+  args: ServerAnalyticsEvent & {
     distinctId: string;
     groups?: Record<string, string>;
+    setOnce?: Record<string, string | number | boolean>;
   }
 ): void {
   try {
@@ -100,7 +148,9 @@ export function captureServerEvent(
     posthog.capture({
       distinctId: args.distinctId,
       event: args.event,
-      properties: args.properties,
+      properties: args.setOnce
+        ? { ...args.properties, $set_once: args.setOnce }
+        : args.properties,
       groups: args.groups,
     });
   } catch (cause) {

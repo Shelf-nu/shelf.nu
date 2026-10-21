@@ -7,6 +7,7 @@
  * the where-clause. Resolver text and the branding tier-gate run the real pure
  * functions; only db/auth/tier/env are mocked.
  */
+import { accessFor } from "@helpers/role-access";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const ALL_SELECTED = "all-selected";
@@ -19,7 +20,8 @@ const CONFIG: {
     showShelfBranding: boolean;
   };
   canHide: boolean;
-  canSeeAllCustody: boolean;
+  /** BASE may not see colleagues' custody; ADMIN sees all of it. */
+  role: "ADMIN" | "BASE";
 } = {
   org: {
     qrIdDisplayPreference: "QR_ID",
@@ -27,7 +29,7 @@ const CONFIG: {
     showShelfBranding: true,
   },
   canHide: true,
-  canSeeAllCustody: false,
+  role: "BASE",
 };
 
 /** In-memory asset store the db mock filters. */
@@ -65,17 +67,32 @@ vi.mock("~/utils/roles.server", () => ({ requirePermission: vi.fn() }));
 vi.mock("~/modules/tier/service.server", () => ({
   getOrganizationTierLimit: vi.fn(),
 }));
-vi.mock("~/modules/qr/utils.server", () => ({
+// why: the base URL comes from env; pin it so assertions are stable.
+vi.mock("~/modules/qr/qr-url.server", () => ({
   getQrBaseUrl: () => "https://eam.sh",
+  getQrUrl: (qrId: string) => `https://eam.sh/${qrId}`,
 }));
-vi.mock("~/modules/asset/utils.server", () => ({
-  // select-all path: just scope to the org (the real filter logic isn't under test here).
-  getAssetsWhereInput: vi.fn(({ organizationId }: any) => ({ organizationId })),
+// why: select-all filter SQL has its own coverage; here it just resolves every
+// org-scoped id in the store (the real filter logic isn't under test).
+vi.mock("~/modules/asset/bulk-operations-helper.server", () => ({
+  resolveAssetIdsForBulkOperation: vi.fn(async ({ organizationId }: any) =>
+    STORE.filter((a) => a.organizationId === organizationId).map((a) => a.id)
+  ),
+}));
+// why: reads the member's saved index settings from the database.
+vi.mock("~/modules/asset-index-settings/service.server", () => ({
+  getAssetIndexSettings: vi.fn(async () => ({ mode: "SIMPLE", columns: [] })),
+}));
+// why: reads the member's format preferences from the database.
+vi.mock("~/utils/date-format.server", () => ({
+  resolveUserFormatPrefsById: vi.fn(async () => ({ timeZone: "UTC" })),
 }));
 vi.mock("~/modules/team-member/service.server", () => ({
   scopeCustodianFilterIds: vi.fn(),
 }));
-vi.mock("~/utils/subscription.server", () => ({
+vi.mock("~/utils/subscription.server", async (importOriginal) => ({
+  // The select-all path reads the real `canUseAudits` (last-audit-date gate).
+  ...(await importOriginal<typeof import("~/utils/subscription.server")>()),
   canHideShelfBranding: vi.fn(),
   assertUserCanExportAssets: vi.fn(),
 }));
@@ -89,7 +106,9 @@ const { loader, MAX_BULK_QR_EXPORT } = await import(
   "~/routes/api+/assets.get-assets-for-bulk-qr-download"
 );
 const { db } = await import("~/database/db.server");
-const { getAssetsWhereInput } = await import("~/modules/asset/utils.server");
+const { resolveAssetIdsForBulkOperation } = await import(
+  "~/modules/asset/bulk-operations-helper.server"
+);
 const { scopeCustodianFilterIds } = await import(
   "~/modules/team-member/service.server"
 );
@@ -141,7 +160,7 @@ beforeEach(() => {
     showShelfBranding: true,
   };
   CONFIG.canHide = true;
-  CONFIG.canSeeAllCustody = false;
+  CONFIG.role = "BASE";
   vi.mocked(requirePermission).mockImplementation(
     async () =>
       ({
@@ -156,7 +175,9 @@ beforeEach(() => {
           },
         ],
         currentOrganization: CONFIG.org,
-        canSeeAllCustody: CONFIG.canSeeAllCustody,
+        role: CONFIG.role,
+        access: accessFor([CONFIG.role]),
+        canUseBarcodes: CONFIG.org.barcodesEnabled,
       }) as any
   );
   vi.mocked(scopeCustodianFilterIds).mockResolvedValue(["scoped-tm-1"]);
@@ -284,13 +305,13 @@ describe("loader wiring (A15–A19, A24)", () => {
     expect(ids).not.toContain("foreign");
   });
 
-  it("forwards the active filters to getAssetsWhereInput on select-all", async () => {
+  it("forwards the active filters to the bulk helper on select-all", async () => {
     await callLoader([ALL_SELECTED], "s=laptop&category=cat-A");
-    expect(getAssetsWhereInput).toHaveBeenCalledWith(
+    expect(resolveAssetIdsForBulkOperation).toHaveBeenCalledWith(
       expect.objectContaining({
         organizationId: "org-1",
         // The real index filters — not just the ALL_SELECTED key — must reach
-        // the where-builder, otherwise select-all would ignore the user's filter.
+        // the resolver, otherwise select-all would ignore the user's filter.
         currentSearchParams: expect.stringContaining("s=laptop"),
       })
     );
@@ -299,8 +320,8 @@ describe("loader wiring (A15–A19, A24)", () => {
   it("scopes the custodian filter on select-all (BASE/SELF_SERVICE hold `qr: read`)", async () => {
     await callLoader([ALL_SELECTED], "teamMember=tm-colleague");
 
-    // The raw `?teamMember=` ids and the viewer's resolved custody visibility
-    // both reach the scoper, which decides which ids may be filtered on.
+    // The raw `?teamMember=` ids reach the scoper for a role that can't see
+    // all custody, which decides which ids may be filtered on.
     expect(scopeCustodianFilterIds).toHaveBeenCalledWith({
       teamMemberIds: ["tm-colleague"],
       canSeeAllCustody: false,
@@ -308,19 +329,21 @@ describe("loader wiring (A15–A19, A24)", () => {
       organizationId: "org-1",
     });
 
-    // And its answer reaches the where-builder. Passing `"all"` here (or
-    // dropping the argument) turns select-all into an enumeration oracle for
-    // any colleague's custody.
-    expect(getAssetsWhereInput).toHaveBeenCalledWith(
+    // And its answer reaches the resolver. Passing `"all"` here (or dropping
+    // the argument) turns select-all into an enumeration oracle for any
+    // colleague's custody.
+    expect(resolveAssetIdsForBulkOperation).toHaveBeenCalledWith(
       expect.objectContaining({ allowedTeamMemberIds: ["scoped-tm-1"] })
     );
   });
 
-  it("bounds the query with take so a huge select-all isn't fully loaded", async () => {
-    await callLoader([ALL_SELECTED]);
-    expect(db.asset.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ take: MAX_BULK_QR_EXPORT + 1 })
+  it("rejects a select-all over the cap before loading any asset rows", async () => {
+    STORE = Array.from({ length: MAX_BULK_QR_EXPORT + 1 }, (_, i) =>
+      makeAsset({ id: `a${i}`, qrCodes: [{ id: `qr-${i}` }] })
     );
+    const { status } = await callLoader([ALL_SELECTED]);
+    expect(status).toBe(400);
+    expect(db.asset.findMany).not.toHaveBeenCalled();
   });
 
   it("A18 — returns the env-derived qrBaseUrl", async () => {

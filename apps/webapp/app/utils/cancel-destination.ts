@@ -33,17 +33,30 @@ export function resolveCancelTo({
   currentPathname: string;
   fallback: string;
 }): string {
-  if (!referer) {
-    return fallback;
-  }
-
-  // `referer` is `pathname + search`; compare only the pathname, so returning
-  // to a *filtered* list (`/assets?search=x` from `/assets/new`) still works
-  // while a true self-reference is rejected.
-  const [refererPathname] = referer.split("?");
-  if (refererPathname === currentPathname) {
+  if (!referer || isSelfReferer(referer, currentPathname)) {
     return fallback;
   }
 
   return referer;
+}
+
+/**
+ * Whether a referer points at the page it would send the user back to.
+ *
+ * `referer` is `pathname + search`; only the pathname is compared, so a
+ * *filtered* list (`/assets?search=x` from `/assets/new`) is still a valid
+ * destination while a true self-reference is rejected. Shared by
+ * `resolveCancelTo` (client) and `getRefererPathExcludingSelf` (server) so
+ * Cancel and the post-save redirect always agree on what "self" means.
+ *
+ * @param referer - Referer as `pathname + search`
+ * @param currentPathname - Pathname of the page the user is on
+ * @returns `true` when the referer's pathname equals `currentPathname`
+ */
+export function isSelfReferer(
+  referer: string,
+  currentPathname: string
+): boolean {
+  const [refererPathname] = referer.split("?");
+  return refererPathname === currentPathname;
 }

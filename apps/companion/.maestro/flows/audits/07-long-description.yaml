@@ -1,0 +1,45 @@
+appId: com.shelf.companion.carlos
+name: "Audits - long description can be read in full"
+tags:
+  - audits
+  - fixture
+
+---
+# Test: an audit description taller than the collapsed three lines shows
+# "Show more", expands to the full text, and collapses again.
+#
+# Needs the long-description fixture:
+#   ./scripts/seed-e2e.sh long-description-up
+#   ./scripts/run-suite.sh audits   # loads env/test.env and env/e2e*.env
+# or one flow on its own:
+#   maestro test -e <each line of both files> flows/audits/07-long-description.yaml
+
+- runFlow: ../../shared/login.yaml
+
+- tapOn:
+    text: "Quick Actions"
+
+- openLink: "shelf://audits/${SHELF_TEST_LONG_DESCRIPTION_AUDIT_ID}"
+
+- extendedWaitUntil:
+    visible: "E2E Long Description Audit"
+    timeout: 20000
+  label: "Fixture audit opens (if not, its rows are gone: re-run seed-e2e.sh long-description-up)"
+
+- scrollUntilVisible:
+    element:
+      id: "audit-description-toggle"
+    direction: DOWN
+- assertVisible: "Show more description"
+- takeScreenshot: audit-long-description-collapsed
+
+- tapOn:
+    id: "audit-description-toggle"
+- extendedWaitUntil:
+    visible: "Show less description"
+    timeout: 5000
+- takeScreenshot: audit-long-description-expanded
+
+- tapOn:
+    id: "audit-description-toggle"
+- assertVisible: "Show more description"

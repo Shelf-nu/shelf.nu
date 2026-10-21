@@ -13,9 +13,11 @@ import {
 } from "~/components/shared/dropdown";
 import { MobileDropdownStyles } from "~/components/shared/mobile-dropdown-styles";
 import When from "~/components/when/when";
+import { useSearchParams } from "~/hooks/search-params";
+import { useCanViewArchivedAssets } from "~/hooks/use-can-view-archived-assets";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { isDirectBookingBlockedByKit } from "~/modules/asset/utils";
 import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
 import { isPersonalOrg } from "~/utils/organization";
@@ -47,14 +49,24 @@ export default function BookSelectedAssetsDropdown() {
 function ConditionalActionsDropdown() {
   const {
     ref: dropdownRef,
-    defaultApplied,
+    onOpenChange,
     open,
     defaultOpen,
     setOpen,
   } = useControlledDropdownMenu();
   const organization = useCurrentOrganization();
   const selectedAssets = useAtomValue(selectedBulkItemsAtom);
-  const { roles } = useUserRoleHelper();
+  const [searchParams] = useSearchParams();
+  /**
+   * Active / Archived / All view dimension (issue #382). Honoured only for
+   * members who may see archived assets, as the list itself is; anyone else is looking at
+   * the Active view whatever the URL says.
+   */
+  const canViewArchivedAssets = useCanViewArchivedAssets();
+  const archivedFilter = canViewArchivedAssets
+    ? searchParams.get("archived") ?? "active"
+    : "active";
+  const roles = useOrganizationRoles();
 
   const allSelected = isSelectingAllItems(selectedAssets);
   const buttonTitle = `Book selection ${
@@ -86,6 +98,23 @@ function ConditionalActionsDropdown() {
       };
     }
 
+    /**
+     * If any selected asset is archived (frozen — can't be booked).
+     *
+     * "Select all" puts only the ALL_SELECTED_KEY marker in the selection, so
+     * `realAssets` is empty and per-asset inspection sees nothing. Fall back to
+     * the view filter in that case: any view other than Active can contain
+     * archived assets, and the server would refuse the booking anyway.
+     */
+    const someAssetsArchived = allSelected
+      ? archivedFilter !== "active"
+      : realAssets.some((asset) => !!asset.archivedAt);
+    if (someAssetsArchived) {
+      return {
+        reason: "Some of the assets are archived. Reinstate them to book.",
+      };
+    }
+
     /** If any asset is marked as unavailable. */
     const someAssetsMarkedUnavailable = realAssets.some(
       (asset) => !asset.availableToBook
@@ -100,7 +129,7 @@ function ConditionalActionsDropdown() {
     }
 
     return false;
-  }, [selectedAssets]);
+  }, [selectedAssets, allSelected, archivedFilter]);
 
   function closeMenu() {
     setOpen(false);
@@ -143,14 +172,10 @@ function ConditionalActionsDropdown() {
         modal={false}
         open={open}
         defaultOpen={defaultOpen}
-        onOpenChange={(openValue) => {
-          if (defaultApplied && window.innerWidth <= 640) {
-            setOpen(openValue);
-          }
-        }}
+        onOpenChange={onOpenChange}
       >
         <DropdownMenuTrigger
-          className="hidden sm:flex"
+          className="hidden md:flex"
           onClick={() => {
             setOpen(!open);
           }}
@@ -166,7 +191,7 @@ function ConditionalActionsDropdown() {
         {/* using custom dropdown menu triggerer on mobile which only opens dropdown not toggles menu to avoid conflicts with overlay*/}
         <Button
           type="button"
-          className="flex-1 sm:hidden"
+          className="flex-1 md:hidden"
           onClick={() => setOpen(true)}
           disabled={disabledReason}
         >
@@ -178,6 +203,7 @@ function ConditionalActionsDropdown() {
         <MobileDropdownStyles open={open} />
 
         <DropdownMenuContent
+          data-mobile-sheet
           ref={dropdownRef}
           asChild
           className="order actions-dropdown w-screen rounded-b-none rounded-t bg-white p-0 text-right md:static md:w-56"

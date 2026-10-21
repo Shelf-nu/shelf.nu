@@ -8,10 +8,16 @@ import { QrLabelCard } from "~/components/assets/qr-label-card";
 import { BarcodeDisplay } from "~/components/barcode/barcode-display";
 import { Button } from "~/components/shared/button";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import { buildLabelSvg } from "~/modules/qr/label";
 import { resolveShowShelfBranding } from "~/utils/branding";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { slugify } from "~/utils/slugify";
 import { svgToPngBlob } from "~/utils/svg-to-png";
@@ -135,7 +141,14 @@ export const CodePreview = ({
   const captureDivRef = useRef<HTMLDivElement>(null);
   const downloadBtnRef = useRef<HTMLAnchorElement>(null);
   const { canUseBarcodes } = useBarcodePermissions();
-  const { isBaseOrSelfService, isOwner } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
+  const { ownsWorkspace: isOwner } = useRoleAccess();
+  /** Adding a code writes to the asset, so it follows `asset:update`. */
+  const canAddCode = userHasPermission({
+    roles,
+    entity: PermissionEntity.asset,
+    action: PermissionAction.update,
+  });
   const organization = useCurrentOrganization();
   const resolvedShowShelfBranding = resolveShowShelfBranding(
     showShelfBranding,
@@ -380,7 +393,7 @@ export const CodePreview = ({
             }}
             className={tw(
               "min-w-0  flex-1 truncate rounded-md border border-gray-300 bg-white px-3 py-2 pr-7 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500",
-              isBaseOrSelfService ? "max-w-[320px]" : "max-w-[280px]"
+              canAddCode ? "max-w-[280px]" : "max-w-[320px]"
             )}
           >
             {availableCodes.map((code) => (
@@ -389,7 +402,7 @@ export const CodePreview = ({
               </option>
             ))}
           </select>
-          <When truthy={!isBaseOrSelfService}>
+          <When truthy={canAddCode}>
             <Button
               type="button"
               icon="plus"
@@ -402,8 +415,9 @@ export const CodePreview = ({
                   ? {
                       reason: isOwner ? (
                         <>
-                          Your workspace doesn't have the barcodes addon
-                          enabled.{" "}
+                          Shelf QR codes are included in every plan. Adding
+                          other barcodes, like Code128 or a QR code from another
+                          system, needs the Alternative Barcodes add-on.{" "}
                           <UnlockBarcodesModal
                             triggerVariant="link"
                             triggerLabel="Learn more"
@@ -411,9 +425,10 @@ export const CodePreview = ({
                         </>
                       ) : (
                         <>
-                          Your workspace doesn't currently support barcodes.
-                          Contact your workspace owner to enable this feature,
-                          or get in touch with{" "}
+                          Shelf QR codes are included in every plan. Adding
+                          other barcodes needs the Alternative Barcodes add-on:
+                          contact your workspace owner to enable it, or get in
+                          touch with{" "}
                           <CrispButton variant="link">sales</CrispButton>.
                         </>
                       ),

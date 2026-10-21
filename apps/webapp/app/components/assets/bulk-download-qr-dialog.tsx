@@ -184,6 +184,7 @@ export default function BulkDownloadQrDialog({
                     assets={data.assets}
                     qrBaseUrl={data.qrBaseUrl}
                     showBranding={data.showBranding}
+                    labelsCsv={data.labelsCsv}
                   />
                 )}
               </div>

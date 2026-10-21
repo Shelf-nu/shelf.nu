@@ -39,7 +39,7 @@ const QUIET_ZONE = 4;
 
 /** The per-asset data a label needs (already org-scoped + resolved upstream). */
 export type LabelAsset = {
-  /** The asset id (manifest only). */
+  /** The asset id (not printed on the label). */
   id: string;
   /** Human-readable asset name shown on the label and used for the filename. */
   title: string;
@@ -935,41 +935,6 @@ export function layoutSheetPages(
  * Zip journey — files for the user's own label software.
  * ------------------------------------------------------------------------- */
 
-/**
- * RFC-4180 escape + spreadsheet-formula-injection neutralization. A cell that
- * starts with `=`, `+`, `-`, `@`, or a control char can execute as a formula
- * when the CSV is opened in Excel/Sheets — and asset names are attacker-
- * controllable — so we prefix those with an apostrophe before quoting.
- */
-const csvCell = (value: string): string => {
-  // Leading control chars (tab/CR/LF) can also smuggle a formula payload, so
-  // neutralize them alongside the `= + - @` formula triggers.
-  const safe = /^[=+\-@\t\r\n]/.test(value) ? `'${value}` : value;
-  return `"${safe.replace(/"/g, '""')}"`;
-};
-
-/** Manifest column headers — stable contract for the merge workflow. */
-export const MANIFEST_HEADERS = ["Asset ID", "Name", "QR ID", "Scan URL"];
-
-/**
- * Builds the `manifest.csv` content pairing each asset with its code + scan URL.
- * The URL is the SAME string the label QR encodes (see {@link qrScanUrl}) so the
- * printed code and the merge data can never diverge.
- *
- * @param assets - the resolved label assets
- * @param qrBaseUrl - env-derived QR base url
- * @returns CSV text (CRLF line endings, RFC-4180 quoted)
- */
-export function buildManifestCsv(
-  assets: LabelAsset[],
-  qrBaseUrl: string
-): string {
-  const rows = assets.map((a) =>
-    [a.id, a.title, a.qrId, qrScanUrl(qrBaseUrl, a.qrId)].map(csvCell).join(",")
-  );
-  return [MANIFEST_HEADERS.map(csvCell).join(","), ...rows].join("\r\n");
-}
-
 /** Deterministic, filesystem-safe filename for an asset's label (default `.svg`). */
 export const labelFileName = (
   asset: LabelAsset,
@@ -988,7 +953,7 @@ export const ZIP_README = `HOW TO USE THESE FILES
 ======================
 
 This zip has one QR image (.svg) for each of your assets, inside the
-"qr-codes" folder, plus a spreadsheet called "manifest.csv".
+"qr-codes" folder, plus a spreadsheet called "labels.csv".
 
 Each QR code is already linked to the right asset in Shelf.
 
@@ -1000,18 +965,20 @@ JUST WANT TO PRINT ONE?
 WANT TO PRINT MANY ON A LABEL PRINTER (Brother, Dymo, Avery...)?
   1. Open your label software (e.g. Brother P-touch Editor, Dymo
      Connect, or Avery Design & Print).
-  2. Import "manifest.csv" as a data source / mail merge.
-  3. Put the "Name" column on the label as text, and the "Scan URL"
+  2. Import "labels.csv" as a data source / mail merge.
+  3. Put the "Asset name" column on the label as text, and the "QR URL"
      column as a QR code.
   4. Print ONE label first and scan it with your phone to check it
      works, then print the rest.
 ----------------------------------------------------------------------
 
-The "manifest.csv" columns:
-  - Asset ID : the asset's id in Shelf
-  - Name     : the asset name (put this on the label)
-  - QR ID    : the code's id
-  - Scan URL : what the QR points to (use this to make the QR code)
+The "labels.csv" columns:
+  - Asset name : the asset name (put this on the label)
+  - SAM ID     : the asset's ID in Shelf (e.g. SAM-0001)
+  - QR ID      : the code's id
+  - QR URL     : what the QR points to (use this to make the QR code)
+  - Category   : the asset's category, if any
+  - Location   : the asset's location, if any
 
 ----------------------------------------------------------------------
 ABOUT PRINT QUALITY
@@ -1027,7 +994,7 @@ ABOUT PRINT QUALITY
 
 /**
  * Assembles the complete set of zip entries for the SVG export journey: one
- * vector `.svg` per asset under `qr-codes/`, plus a root `manifest.csv`. Pure so
+ * vector `.svg` per asset under `qr-codes/`, plus the server-built `labels.csv`. Pure so
  * the file map is unit-testable without JSZip/Blob; the dialog just feeds these
  * to JSZip.
  *
@@ -1037,11 +1004,14 @@ export function buildLabelZipEntries({
   assets,
   qrBaseUrl,
   showBranding,
+  labelsCsv,
   ec = DEFAULT_EC,
 }: {
   assets: LabelAsset[];
   qrBaseUrl: string;
   showBranding: boolean;
+  /** The loader's `labels.csv` (see `buildLabelsCsv`), shipped at the zip root. */
+  labelsCsv: string;
   ec?: ErrorCorrectionLevel;
 }): ZipEntry[] {
   const entries: ZipEntry[] = assets.map((a) => ({
@@ -1054,10 +1024,7 @@ export function buildLabelZipEntries({
       ec,
     }),
   }));
-  entries.push({
-    path: "manifest.csv",
-    content: buildManifestCsv(assets, qrBaseUrl),
-  });
+  entries.push({ path: "labels.csv", content: labelsCsv });
   entries.push({ path: "README.txt", content: ZIP_README });
   return entries;
 }
@@ -1074,6 +1041,7 @@ export function buildFittedLabelZipEntries({
   qrBaseUrl,
   showBranding,
   stock,
+  labelsCsv,
   showName = true,
   ec = DEFAULT_EC,
 }: {
@@ -1081,6 +1049,8 @@ export function buildFittedLabelZipEntries({
   qrBaseUrl: string;
   showBranding: boolean;
   stock: LabelStock;
+  /** The loader's `labels.csv` (see `buildLabelsCsv`), shipped at the zip root. */
+  labelsCsv: string;
   showName?: boolean;
   ec?: ErrorCorrectionLevel;
 }): ZipEntry[] {
@@ -1096,10 +1066,7 @@ export function buildFittedLabelZipEntries({
       ec,
     }),
   }));
-  entries.push({
-    path: "manifest.csv",
-    content: buildManifestCsv(assets, qrBaseUrl),
-  });
+  entries.push({ path: "labels.csv", content: labelsCsv });
   entries.push({ path: "README.txt", content: ZIP_README });
   return entries;
 }

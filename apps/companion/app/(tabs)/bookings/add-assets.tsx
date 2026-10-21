@@ -8,6 +8,14 @@
  * out for the window never appear. Selected items are added via the existing
  * `add-scanned-assets` endpoint (kits expand to their assets server-side).
  *
+ * Quantity-tracked assets book a NUMBER of units, not a scan per unit — the
+ * web picker's rule. Selecting one opens the quantity sheet, capped at the
+ * units the booking's window has free (`availableQuantity`, this booking
+ * excluded), opening on what the booking already holds or else 1. The chosen
+ * amounts travel with the add call as `quantities`, each one the booking's new
+ * total; the server re-checks them. A quantity-tracked row with nothing free
+ * is shown but cannot be selected.
+ *
  * The non-availability path (scan a physical label) lives on the scanner; this
  * is the "browse and pick" complement. Reached via
  * `/(tabs)/bookings/add-assets?bookingId=...&bookingName=...&from=...&to=...`.
@@ -38,10 +46,20 @@ import {
 } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import { markBookingDirty } from "@/lib/booking-refresh";
+import { archivedLeftOutNote } from "@/lib/archived-assets";
 import { fontSize, spacing, borderRadius, hitSlop } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { QuantityInputSheet } from "@/components/quantity-input-sheet";
+import {
+  bookingQuantityCap,
+  bookingQuantityDefault,
+} from "@/lib/booking-quantity";
+import {
+  canCancelModelReservation,
+  modelReservationBounds,
+} from "@/lib/booking-model-reservation";
+import { submitFromSheet } from "@/lib/sheet-submit";
 
 type Mode = "assets" | "kits" | "models";
 
@@ -55,6 +73,36 @@ const PICKER_PAGE_SIZE = 50;
 const kitKeyExtractor = (item: AvailableKit) => item.id;
 const modelKeyExtractor = (item: AvailableModel) => item.id;
 
+/** True for a row that books a NUMBER of units rather than one unit. */
+const isQuantityTracked = (item: AvailableAsset) =>
+  item.type === "QUANTITY_TRACKED";
+
+/**
+ * The most units the booking may hold of a row; 0 when it can take none.
+ * See {@link bookingQuantityCap}.
+ */
+const qtyCap = (item: AvailableAsset) =>
+  bookingQuantityCap({
+    available: item.availableQuantity,
+    booked: item.bookedQuantity,
+    pool: item.quantity,
+  });
+
+/**
+ * The picker screen itself: three tabs over one paginated loader.
+ *
+ * Assets and Kits multi-select and add in one call; Models reserves a count
+ * against an `AssetModel` instead, so its rows write straight through rather
+ * than joining the selection. All three page through their whole result set —
+ * a capped list would hide inventory the operator has to be able to reach.
+ *
+ * Route params carry the booking and its window: everything shown is filtered
+ * to what is available for those dates, so `from` and `to` are what make the
+ * lists mean anything. Opened without them, the screen shows its error state —
+ * no retry can supply a window the route never carried.
+ *
+ * @returns The picker for the booking named in the route params.
+ */
 export default function AddBookingAssetsScreen() {
   const router = useRouter();
   const {
@@ -71,6 +119,14 @@ export default function AddBookingAssetsScreen() {
     mode?: string;
   }>();
   const { currentOrg } = useOrg();
+  /**
+   * Whether the route arrived without the booking's window.
+   *
+   * Derived, not state: route params are fixed for the life of a mounted
+   * screen, so there is nothing to keep in sync. It marks the one error on
+   * this screen that no retry can clear.
+   */
+  const isMissingBookingWindow = !from || !to;
   const { colors } = useTheme();
   const styles = useStyles();
 
@@ -101,6 +157,16 @@ export default function AddBookingAssetsScreen() {
     new Set()
   );
   const [selectedKitIds, setSelectedKitIds] = useState<Set<string>>(new Set());
+  /**
+   * Units to book per selected quantity-tracked asset. Only ids that are
+   * selected AND quantity-tracked ever appear here; the add call sends this
+   * map and the server books 1 for anything missing from it.
+   */
+  const [quantities, setQuantities] = useState<Record<string, number>>({});
+  /** The quantity-tracked asset whose quantity sheet is open (null = closed). */
+  const [activeQtyAsset, setActiveQtyAsset] = useState<AvailableAsset | null>(
+    null
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Debounce search (mirrors the list screens)
@@ -114,6 +180,19 @@ export default function AddBookingAssetsScreen() {
   const requestIdRef = useRef(0);
   /** Highest page currently held, so `loadMore` knows what to ask for next. */
   const pageRef = useRef(1);
+  /**
+   * Whether a page is in flight, as a ref rather than the `isLoading` state.
+   *
+   * `loadMore` runs from `onEndReached`, which the list fires while it is still
+   * laying out — in the same tick as the reset effect that starts page 1. The
+   * state it would read there is the state from the render it closed over, so
+   * `isLoading` is still false and a second page goes out beside the first.
+   * That is fatal rather than merely wasteful: each request bumps
+   * `requestIdRef`, so the newer page-2 response makes the guard below discard
+   * page 1 — the tab then shows nothing at all until something forces a reload.
+   * A ref settles before the next line runs, which is what the guard needs.
+   */
+  const isFetchingRef = useRef(false);
 
   /**
    * Fetch one page for the active tab.
@@ -129,8 +208,19 @@ export default function AddBookingAssetsScreen() {
    */
   const fetchPage = useCallback(
     async (targetPage: number, append: boolean) => {
-      if (!currentOrg || !from || !to) return;
+      // A missing booking window is terminal, not transient: every list here
+      // is filtered to those dates, so there is nothing to fall back to. Report
+      // it, or the initial `isLoading` spinner stays up with nothing behind it.
+      if (isMissingBookingWindow) {
+        setError(
+          "This picker needs the booking's dates. Open it from the booking."
+        );
+        setIsLoading(false);
+        return;
+      }
+      if (!currentOrg) return;
       const reqId = ++requestIdRef.current;
+      isFetchingRef.current = true;
       if (append) {
         setIsLoadingMore(true);
       } else {
@@ -205,11 +295,20 @@ export default function AddBookingAssetsScreen() {
         }
       }
       if (reqId === requestIdRef.current) {
+        isFetchingRef.current = false;
         setIsLoading(false);
         setIsLoadingMore(false);
       }
     },
-    [currentOrg, from, to, mode, debouncedSearch, bookingId]
+    [
+      currentOrg,
+      from,
+      to,
+      isMissingBookingWindow,
+      mode,
+      debouncedSearch,
+      bookingId,
+    ]
   );
 
   // Reset to page 1 whenever the tab, search or booking window changes.
@@ -220,11 +319,17 @@ export default function AddBookingAssetsScreen() {
     void fetchPage(1, false);
   }, [fetchPage]);
 
-  /** Pull the next page in when the list nears its end. */
+  /**
+   * Pull the next page in when the list nears its end.
+   *
+   * The lists pass this to `onEndReached` only while they hold rows: a list
+   * with no rows has no next page, and RN fires that callback from its
+   * content-size change even when it is empty.
+   */
   const loadMore = useCallback(() => {
-    if (isLoading || isLoadingMore || !hasMore) return;
+    if (isFetchingRef.current || !hasMore) return;
     void fetchPage(pageRef.current + 1, true);
-  }, [isLoading, isLoadingMore, hasMore, fetchPage]);
+  }, [hasMore, fetchPage]);
 
   /**
    * Reload the active tab from page 1. Used after a mutation (reserving or
@@ -249,14 +354,43 @@ export default function AddBookingAssetsScreen() {
     </View>
   ) : null;
 
-  const toggleAsset = useCallback((assetId: string) => {
-    setSelectedAssetIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(assetId)) next.delete(assetId);
-      else next.add(assetId);
-      return next;
-    });
-  }, []);
+  const toggleAsset = useCallback(
+    (item: AvailableAsset) => {
+      if (selectedAssetIds.has(item.id)) {
+        setSelectedAssetIds((prev) => {
+          const next = new Set(prev);
+          next.delete(item.id);
+          return next;
+        });
+        setQuantities((prev) => {
+          if (!(item.id in prev)) return prev;
+          const { [item.id]: _dropped, ...rest } = prev;
+          return rest;
+        });
+        return;
+      }
+      // A quantity-tracked asset is selected THROUGH the sheet: the amount is
+      // part of the choice, so the row only joins the selection on confirm.
+      if (isQuantityTracked(item)) {
+        if (qtyCap(item) > 0) setActiveQtyAsset(item);
+        return;
+      }
+      setSelectedAssetIds((prev) => new Set(prev).add(item.id));
+    },
+    [selectedAssetIds]
+  );
+
+  /** Confirm from the quantity sheet: select the row with that amount. */
+  const handleQuantityConfirm = useCallback(
+    (quantity: number) => {
+      if (!activeQtyAsset) return;
+      const id = activeQtyAsset.id;
+      setActiveQtyAsset(null);
+      setSelectedAssetIds((prev) => new Set(prev).add(id));
+      setQuantities((prev) => ({ ...prev, [id]: quantity }));
+    },
+    [activeQtyAsset]
+  );
 
   const toggleKit = useCallback((kitId: string) => {
     setSelectedKitIds((prev) => {
@@ -272,11 +406,15 @@ export default function AddBookingAssetsScreen() {
   const handleAdd = async () => {
     if (!currentOrg || !bookingId || totalSelected === 0) return;
     setIsSubmitting(true);
-    const { error: err } = await api.addScannedToBooking(
+    const selectedQuantities = Object.fromEntries(
+      Object.entries(quantities).filter(([id]) => selectedAssetIds.has(id))
+    );
+    const { data, error: err } = await api.addScannedToBooking(
       currentOrg.id,
       bookingId,
       Array.from(selectedAssetIds),
-      Array.from(selectedKitIds)
+      Array.from(selectedKitIds),
+      selectedQuantities
     );
     setIsSubmitting(false);
     if (err) {
@@ -286,40 +424,55 @@ export default function AddBookingAssetsScreen() {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     markBookingDirty(bookingId);
     router.back();
+    // A kit is booked with its active members; say how many archived ones
+    // stayed out, as the web does, so the booking does not look short.
+    const leftOutNote = archivedLeftOutNote(data?.archivedKitMembersLeftOut);
+    if (leftOutNote) Alert.alert("Added to booking", leftOutNote);
   };
 
   // ── Book-by-model reserve / edit / remove ────────────────────────────────
 
   /**
-   * Upper bound for reserving a model: what's free in the window PLUS the units
-   * this booking has already had assigned (they can't be re-reserved away but
-   * the total can't drop below them). Mirrors the server cap in
-   * `upsertBookingModelRequest` (available + existingFulfilled).
+   * How far this model's reservation may be moved — free pool plus the units
+   * the booking already holds, floored at what is already assigned. See
+   * {@link modelReservationBounds}; the server enforces the same range.
    */
-  const reserveMax = (model: AvailableModel) => {
-    const existing = modelRequestsById[model.id];
-    return model.available + (existing?.fulfilledQuantity ?? 0);
-  };
+  const reserveBounds = (model: AvailableModel) =>
+    modelReservationBounds({
+      available: model.available,
+      fulfilledQuantity: modelRequestsById[model.id]?.fulfilledQuantity,
+    });
 
+  /**
+   * Held while a reservation request runs, so a second tap on Reserve cannot
+   * send it twice. A ref rather than state: a state flag cannot block a tap
+   * delivered in the same tick.
+   */
+  const reserveSubmitLock = useRef(false);
+
+  /**
+   * Sends the reservation with the sheet still open; the sheet's confirm IS
+   * the confirmation step. The sheet closes only once the server accepts, so a
+   * refusal — the model's free pool no longer fits the quantity — keeps the
+   * entered number on screen to lower and retry.
+   */
   const handleReserveSubmit = async (quantity: number) => {
     if (!currentOrg || !bookingId || !activeModel) return;
-    const model = activeModel;
-    setActiveModel(null); // the sheet's confirm IS the confirmation step
-    setIsSubmitting(true);
-    const { error: err } = await api.upsertModelRequest(
-      currentOrg.id,
-      bookingId,
-      model.id,
-      quantity
-    );
-    setIsSubmitting(false);
-    if (err) {
-      Alert.alert("Couldn't reserve model", err);
-      return;
-    }
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    markBookingDirty(bookingId);
-    reload(); // refresh availability + the reserved amounts
+    const orgId = currentOrg.id;
+    const modelId = activeModel.id;
+    await submitFromSheet({
+      lock: reserveSubmitLock,
+      request: () =>
+        api.upsertModelRequest(orgId, bookingId, modelId, quantity),
+      onAccepted: () => {
+        setActiveModel(null);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        markBookingDirty(bookingId);
+        reload(); // refresh availability + the reserved amounts
+      },
+      setSubmitting: setIsSubmitting,
+      showError: (message) => Alert.alert("Couldn't reserve model", message),
+    });
   };
 
   // Memoized so `renderModel` (which references it) keeps a stable identity
@@ -364,17 +517,47 @@ export default function AddBookingAssetsScreen() {
   const renderAsset = useCallback(
     ({ item }: { item: AvailableAsset }) => {
       const selected = selectedAssetIds.has(item.id);
+      const qtyTracked = isQuantityTracked(item);
+      const bookedQty = qtyTracked ? quantities[item.id] : undefined;
+      const unit = item.unitOfMeasure || "units";
+      // Nothing free for these dates and none held: shown, never selectable.
+      const unavailable = qtyTracked && !selected && qtyCap(item) <= 0;
       return (
         <TouchableOpacity
-          style={[styles.row, selected && styles.rowSelected]}
-          onPress={() => toggleAsset(item.id)}
+          style={[
+            styles.row,
+            selected && styles.rowSelected,
+            unavailable && styles.rowUnavailable,
+          ]}
+          onPress={() => toggleAsset(item)}
+          disabled={unavailable}
           accessibilityRole="button"
-          accessibilityState={{ selected }}
+          accessibilityState={{ selected, disabled: unavailable }}
           accessibilityLabel={`${item.title}${
             item.displayCode
               ? `, ${item.displayCode.label} ${item.displayCode.value}`
               : ""
-          }${selected ? ", selected" : ""}`}
+          }${
+            qtyTracked
+              ? `, quantity tracked, ${item.availableQuantity ?? 0} of ${
+                  item.quantity ?? 0
+                } ${unit} available${
+                  item.bookedQuantity
+                    ? `, ${item.bookedQuantity} booked here`
+                    : ""
+                }`
+              : ""
+          }${
+            selected
+              ? bookedQty
+                ? `, selected, ${bookedQty} ${unit}, tap to deselect`
+                : ", selected"
+              : unavailable
+              ? ", none free for these dates"
+              : qtyTracked
+              ? ", tap to choose a quantity"
+              : ""
+          }`}
         >
           <View style={[styles.checkbox, selected && styles.checkboxChecked]}>
             {selected && (
@@ -414,11 +597,39 @@ export default function AddBookingAssetsScreen() {
                 </Text>
               </View>
             ) : null}
+            {/* Web parity: the picker row says "Qty tracked · N available" so
+                the operator knows a number is coming, not a unit scan. */}
+            {qtyTracked ? (
+              <Text style={styles.modelMeta} numberOfLines={1}>
+                {unavailable
+                  ? "Qty tracked · none free for these dates"
+                  : `Qty tracked · ${item.availableQuantity ?? 0} of ${
+                      item.quantity ?? 0
+                    } ${unit} available${
+                      item.bookedQuantity
+                        ? ` · ${item.bookedQuantity} booked here`
+                        : ""
+                    }`}
+              </Text>
+            ) : null}
           </View>
+          {qtyTracked && selected && bookedQty ? (
+            <TouchableOpacity
+              style={styles.qtyChip}
+              onPress={() => setActiveQtyAsset(item)}
+              hitSlop={hitSlop.sm}
+              accessibilityRole="button"
+              accessibilityLabel={`Change quantity, currently ${bookedQty} ${unit}`}
+            >
+              <Text style={styles.qtyChipText}>
+                × {bookedQty} {unit}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
         </TouchableOpacity>
       );
     },
-    [selectedAssetIds, toggleAsset, colors, styles]
+    [selectedAssetIds, quantities, toggleAsset, colors, styles]
   );
 
   const renderKit = useCallback(
@@ -457,7 +668,11 @@ export default function AddBookingAssetsScreen() {
     ({ item }: { item: AvailableModel }) => {
       const existing = modelRequestsById[item.id];
       const reserved = existing?.quantity ?? 0;
-      const max = item.available + (existing?.fulfilledQuantity ?? 0);
+      const assigned = existing?.fulfilledQuantity ?? 0;
+      const { max } = modelReservationBounds({
+        available: item.available,
+        fulfilledQuantity: assigned,
+      });
       // Nothing free to reserve AND nothing already reserved → can't act.
       const canReserve = max >= 1;
       return (
@@ -472,9 +687,12 @@ export default function AddBookingAssetsScreen() {
             <Text style={styles.modelMeta}>
               {item.available} of {item.total} available
               {reserved > 0 ? ` · ${reserved} reserved here` : ""}
+              {assigned > 0 ? ` · ${assigned} assigned` : ""}
             </Text>
           </View>
-          {reserved > 0 && (
+          {/* Edit, floored at the assigned count, is the route that works
+              once units are on the booking. */}
+          {reserved > 0 && canCancelModelReservation(assigned) && (
             <TouchableOpacity
               style={styles.modelRemoveButton}
               onPress={() => handleRemoveModel(item)}
@@ -585,14 +803,16 @@ export default function AddBookingAssetsScreen() {
             color={colors.error}
           />
           <Text style={styles.emptyText}>{error}</Text>
-          <TouchableOpacity
-            style={styles.retryButton}
-            onPress={reload}
-            accessibilityRole="button"
-            accessibilityLabel="Retry"
-          >
-            <Text style={styles.retryText}>Retry</Text>
-          </TouchableOpacity>
+          {isMissingBookingWindow ? null : (
+            <TouchableOpacity
+              style={styles.retryButton}
+              onPress={reload}
+              accessibilityRole="button"
+              accessibilityLabel="Retry"
+            >
+              <Text style={styles.retryText}>Retry</Text>
+            </TouchableOpacity>
+          )}
         </View>
       ) : mode === "assets" ? (
         <FlatList
@@ -601,7 +821,7 @@ export default function AddBookingAssetsScreen() {
           keyExtractor={assetKeyExtractor}
           contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
-          onEndReached={loadMore}
+          onEndReached={assets.length ? loadMore : undefined}
           onEndReachedThreshold={0.4}
           ListFooterComponent={listFooter}
           ListEmptyComponent={
@@ -624,7 +844,7 @@ export default function AddBookingAssetsScreen() {
           keyExtractor={kitKeyExtractor}
           contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
-          onEndReached={loadMore}
+          onEndReached={kits.length ? loadMore : undefined}
           onEndReachedThreshold={0.4}
           ListFooterComponent={listFooter}
           ListEmptyComponent={
@@ -647,7 +867,7 @@ export default function AddBookingAssetsScreen() {
           keyExtractor={modelKeyExtractor}
           contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
-          onEndReached={loadMore}
+          onEndReached={models.length ? loadMore : undefined}
           onEndReachedThreshold={0.4}
           ListFooterComponent={listFooter}
           ListEmptyComponent={
@@ -672,13 +892,47 @@ export default function AddBookingAssetsScreen() {
             : "Reserve model"
         }
         subtitle={activeModel?.name}
-        max={activeModel ? reserveMax(activeModel) : 1}
+        max={activeModel ? reserveBounds(activeModel).max : 1}
+        min={activeModel ? reserveBounds(activeModel).min : 1}
         defaultValue={
           activeModel ? modelRequestsById[activeModel.id]?.quantity ?? 1 : 1
         }
         confirmLabel="Reserve"
-        onSubmit={handleReserveSubmit}
+        isSubmitting={isSubmitting}
+        onSubmit={(quantity) => void handleReserveSubmit(quantity)}
         onClose={() => setActiveModel(null)}
+      />
+
+      {/* Quantity sheet for a quantity-tracked asset (select or edit) */}
+      <QuantityInputSheet
+        visible={activeQtyAsset !== null}
+        title={
+          activeQtyAsset && selectedAssetIds.has(activeQtyAsset.id)
+            ? "Change quantity"
+            : "How many to book?"
+        }
+        subtitle={
+          activeQtyAsset
+            ? `${activeQtyAsset.title} · ${
+                activeQtyAsset.availableQuantity ?? 0
+              } ${activeQtyAsset.unitOfMeasure || "units"} available`
+            : undefined
+        }
+        max={activeQtyAsset ? Math.max(1, qtyCap(activeQtyAsset)) : 1}
+        defaultValue={
+          activeQtyAsset
+            ? quantities[activeQtyAsset.id] ??
+              bookingQuantityDefault({ booked: activeQtyAsset.bookedQuantity })
+            : 1
+        }
+        unitOfMeasure={activeQtyAsset?.unitOfMeasure ?? null}
+        confirmLabel={
+          activeQtyAsset && selectedAssetIds.has(activeQtyAsset.id)
+            ? "Update"
+            : "Select"
+        }
+        onSubmit={handleQuantityConfirm}
+        onClose={() => setActiveQtyAsset(null)}
       />
 
       {/* Add bar */}
@@ -788,6 +1042,9 @@ const useStyles = createStyles((colors, shadows) => ({
     borderColor: colors.border,
     gap: spacing.sm,
   },
+  rowUnavailable: {
+    opacity: 0.5,
+  },
   rowSelected: {
     borderColor: colors.primary,
     backgroundColor: colors.primaryBg,
@@ -844,6 +1101,18 @@ const useStyles = createStyles((colors, shadows) => ({
   },
   modelReserveTextDisabled: {
     color: colors.muted,
+  },
+  qtyChip: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: borderRadius.pill,
+    backgroundColor: colors.primaryBg,
+    marginLeft: spacing.sm,
+  },
+  qtyChipText: {
+    fontSize: fontSize.sm,
+    fontWeight: "600",
+    color: colors.primary,
   },
   modelRemoveButton: {
     padding: spacing.xs,

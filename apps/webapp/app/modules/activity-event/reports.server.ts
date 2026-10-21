@@ -26,6 +26,7 @@ const ASSET_ACTIONS = [
   "ASSET_NAME_CHANGED",
   "ASSET_DESCRIPTION_CHANGED",
   "ASSET_CATEGORY_CHANGED",
+  "ASSET_MODEL_CHANGED",
   "ASSET_KIT_CHANGED",
   "ASSET_LOCATION_CHANGED",
   "ASSET_TAGS_CHANGED",
@@ -35,6 +36,7 @@ const ASSET_ACTIONS = [
   "ASSET_MIN_QUANTITY_CHANGED",
   "ASSET_CUSTOM_FIELD_CHANGED",
   "ASSET_ARCHIVED",
+  "ASSET_UNARCHIVED",
   "ASSET_DELETED",
 ] as const satisfies readonly ActivityAction[];
 
@@ -115,53 +117,6 @@ export async function bookingStatusTransitionCounts({
     return rows.map((r) => ({ toStatus: r.to_status, count: Number(r.count) }));
   } catch (cause) {
     throw wrap(cause, "bookingStatusTransitionCounts", { organizationId });
-  }
-}
-
-/** Audit completion event with its counters (expected/found/missing/unexpected) in `meta`. */
-export type AuditCompletionRow = {
-  auditSessionId: string;
-  actorUserId: string | null;
-  occurredAt: Date;
-  meta: Prisma.JsonValue;
-};
-
-/**
- * All `AUDIT_COMPLETED` events within a timeframe. `meta` holds the counters
- * written by the audit service — consumer formats them for display.
- */
-export async function auditCompletionStats({
-  organizationId,
-  from,
-  to,
-}: ReportScope): Promise<AuditCompletionRow[]> {
-  try {
-    const rows = await db.activityEvent.findMany({
-      where: {
-        organizationId,
-        action: "AUDIT_COMPLETED",
-        occurredAt: { gte: from, lte: to },
-      },
-      select: {
-        auditSessionId: true,
-        actorUserId: true,
-        occurredAt: true,
-        meta: true,
-      },
-      orderBy: { occurredAt: "desc" },
-    });
-    return rows
-      .filter((r): r is typeof r & { auditSessionId: string } =>
-        Boolean(r.auditSessionId)
-      )
-      .map((r) => ({
-        auditSessionId: r.auditSessionId,
-        actorUserId: r.actorUserId,
-        occurredAt: r.occurredAt,
-        meta: r.meta as Prisma.JsonValue,
-      }));
-  } catch (cause) {
-    throw wrap(cause, "auditCompletionStats", { organizationId });
   }
 }
 

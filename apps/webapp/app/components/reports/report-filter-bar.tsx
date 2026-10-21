@@ -19,12 +19,14 @@
 
 import { useCallback } from "react";
 
+import { Spinner } from "~/components/shared/spinner";
 import { useSearchParams } from "~/hooks/search-params";
 import type {
   ResolvedTimeframe,
   TimeframePreset,
 } from "~/modules/reports/types";
 
+import { getIntParam } from "~/utils/search-params-number";
 import { IdleThresholdSelector } from "./idle-threshold-selector";
 import { TimeframePicker } from "./timeframe-picker";
 import { TimeframeRangeIndicator } from "./timeframe-range-indicator";
@@ -83,7 +85,9 @@ export function ReportFilterBar({ reportId, timeframe, isLoading }: Props) {
     return (
       <div className="flex items-center justify-between rounded border border-gray-200 bg-white px-4 py-3">
         <IdleThresholdSelector
-          value={parseInt(searchParams.get("days") || "30", 10)}
+          // Same floor the loader applies, so the selector shows the threshold
+          // the report actually ran with.
+          value={getIntParam(searchParams, "days", 30, { min: 1 })}
           onChange={handleIdleThresholdChange}
           disabled={isLoading}
         />
@@ -99,7 +103,7 @@ export function ReportFilterBar({ reportId, timeframe, isLoading }: Props) {
 function FilterLoadingIndicator() {
   return (
     <div className="flex items-center gap-2 text-xs text-gray-500">
-      <div className="animate-spin size-3 rounded-full border-2 border-gray-300 border-t-gray-600" />
+      <Spinner className="size-3" />
       <span>Updating...</span>
     </div>
   );

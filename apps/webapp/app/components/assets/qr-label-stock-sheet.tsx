@@ -51,15 +51,18 @@ type Printing = "all" | "test" | null;
  * @param props.assets - resolved label assets
  * @param props.qrBaseUrl - env-derived QR base url for building scan URLs
  * @param props.showBranding - effective (tier-gated) branding flag
+ * @param props.labelsCsv - the loader's `labels.csv`, shipped in the zip
  */
 export function QrLabelStockSheet({
   assets,
   qrBaseUrl,
   showBranding,
+  labelsCsv,
 }: {
   assets: StockAsset[];
   qrBaseUrl: string;
   showBranding: boolean;
+  labelsCsv: string;
 }) {
   const printRef = useRef<HTMLDivElement>(null);
   const [stockId, setStockId] = useState<string>(DEFAULT_STOCK_ID);
@@ -124,6 +127,7 @@ export function QrLabelStockSheet({
         showBranding,
         showName,
         stock,
+        labelsCsv,
       }).forEach((entry) => archive.file(entry.path, entry.content));
       const blob = await archive.generateAsync({ type: "blob" });
       const link = document.createElement("a");

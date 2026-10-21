@@ -1,5 +1,6 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { BulkUpdateTagsSchema } from "~/components/assets/bulk-assign-tags-dialog";
+import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
 import { bulkAssignAssetTags } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
@@ -31,7 +32,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const formData = await request.formData();
 
-    const { organizationId, canUseBarcodes, role } = await requirePermission({
+    const {
+      organizationId,
+      canUseBarcodes,
+      role,
+      access,
+      currentOrganization,
+    } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
@@ -72,6 +79,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       currentSearchParams,
       remove,
       settings,
+      lastAuditDateAccess: lastAuditDateAccessFor(access, currentOrganization),
       timeZone,
     });
 

@@ -2,10 +2,10 @@
  * POST /api/mobile/custody/assign-quantity
  *
  * Assigns (checks out) N units of a QUANTITY_TRACKED asset to a team member.
- * Mobile twin of the web's `/api/assets/assign-quantity-custody` route —
- * same Zod schema, same org-scoped custodian check, same SELF_SERVICE guard,
- * same `checkOutQuantity` service call, same best-effort audit note and
- * low-stock check. Only the auth/permission/envelope skeleton differs
+ * Mobile twin of the web's `/api/assets/assign-quantity-custody` route: same
+ * Zod schema, same org-scoped custodian check, same custody-scope guard, and the
+ * same `assignQuantityToCustodian` call (the custody change, its audit note
+ * and the low-stock check). Only the auth/permission/envelope skeleton differs
  * (bearer auth + the mobile error envelope, per `custody.assign.ts`).
  *
  * Body: { assetId: string, teamMemberId: string, quantity: number, note?: string }
@@ -16,12 +16,10 @@
  * for the caller) so the app can update state without a second round trip.
  *
  * @see {@link file://./../assets.assign-quantity-custody.ts} — the mirrored web route
- * @see {@link file://./../../../modules/asset/service.server.ts} — checkOutQuantity
+ * @see {@link file://./../../../modules/custody/quantity-custody.server.ts} assignQuantityToCustodian
  * @see {@link file://./custody.release-quantity.ts} — counterpart release route
  */
 
-import type { Prisma } from "@prisma/client";
-import { OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import {
@@ -31,18 +29,13 @@ import {
   requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
-import { checkOutQuantity } from "~/modules/asset/service.server";
-import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
-import { createNote } from "~/modules/note/service.server";
+import {
+  assignQuantityToCustodian,
+  QUANTITY_CUSTODIAN_SELECT,
+} from "~/modules/custody/quantity-custody.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
-import { getUserByID } from "~/modules/user/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
-import {
-  appendUserTextToNote,
-  wrapCustodianForNote,
-  wrapUserLinkForNote,
-} from "~/utils/markdoc-wrappers";
 import {
   PermissionAction,
   PermissionEntity,
@@ -64,6 +57,13 @@ const AssignQuantityCustodySchema = z.object({
     .string()
     .optional()
     .transform((val) => (val === "" ? undefined : val)),
+  /**
+   * Where the units come from: a location id, or `null` / `""` for the
+   * unplaced units. Optional and additive: an app build that does not send
+   * it gets the server-side default (the only placement of a pool at one
+   * location, otherwise no recorded source), never a refusal.
+   */
+  locationId: z.string().nullable().optional(),
 });
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -87,18 +87,19 @@ export async function action({ request }: ActionFunctionArgs) {
       action: PermissionAction.custody,
     });
 
-    // Role for the SELF_SERVICE guard below; canSeeAllCustody for shaping
-    // the refreshed asset. No getAssetIndexSettings here: checkOutQuantity
+    // Access for the custody-scope guard below and for shaping the
+    // refreshed asset. No getAssetIndexSettings here: checkOutQuantity
     // takes no `settings` param (that call is bulk-route plumbing only).
-    const { role, canSeeAllCustody } = await getMobileUserContext(
-      user.id,
-      organizationId
-    );
+    const { access } = await getMobileUserContext(user.id, organizationId);
 
     // why: siblings use raw `.parse`, which surfaces a ZodError as a 500
     // through makeShelfError's unknown-error branch. The web route returns
     // 400 via parseData — safeParse + a 400 ShelfError honors that parity.
-    const parsed = AssignQuantityCustodySchema.safeParse(await request.json());
+    // An unreadable body parses as `null` and fails the schema too, so it
+    // takes the same 400 instead of throwing a SyntaxError into the 500 branch.
+    const parsed = AssignQuantityCustodySchema.safeParse(
+      await request.json().catch(() => null)
+    );
     if (!parsed.success) {
       throw new ShelfError({
         cause: parsed.error,
@@ -106,15 +107,16 @@ export async function action({ request }: ActionFunctionArgs) {
         additionalData: { validationErrors: parsed.error.flatten() },
         label: "Assets",
         status: 400,
+        shouldBeCaptured: false,
       });
     }
-    const { assetId, teamMemberId, quantity, note } = parsed.data;
+    const { assetId, teamMemberId, quantity, note, locationId } = parsed.data;
 
     /** Validate that the team member belongs to the same organization */
     const teamMember = await getTeamMember({
       id: teamMemberId,
       organizationId,
-      include: { user: true },
+      select: { ...QUANTITY_CUSTODIAN_SELECT, userId: true },
     }).catch((cause) => {
       throw new ShelfError({
         cause,
@@ -126,11 +128,8 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     });
 
-    /** Self-service users can only assign custody to themselves */
-    if (
-      role === OrganizationRoles.SELF_SERVICE &&
-      teamMember.userId !== user.id
-    ) {
+    /** A caller whose custody scope is `self` may assign only to themselves */
+    if (access.custody.assign === "self" && teamMember.userId !== user.id) {
       throw new ShelfError({
         cause: null,
         title: "Action not allowed",
@@ -142,92 +141,26 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
-    // All quantity validation (type gate, org mismatch, row-locked
-    // availability check) lives inside the service — no duplication here.
-    await checkOutQuantity({
+    // `assignQuantityToCustodian` writes the custody change (validated under
+    // a row lock by `checkOutQuantity`), then the audit note and the low-stock
+    // check, both best-effort because the change has already committed.
+    await assignQuantityToCustodian({
       assetId,
-      teamMemberId,
+      custodian: teamMember,
       quantity,
       userId: user.id,
       organizationId,
+      custodyAssign: access.custody.assign,
       note,
+      locationId,
     });
-
-    /** Best-effort audit note — don't fail the action if note creation fails */
-    try {
-      const actorUser = await getUserByID(user.id, {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          displayName: true,
-        } satisfies Prisma.UserSelect,
-      });
-
-      const actor = wrapUserLinkForNote(actorUser);
-      const custodianDisplay = wrapCustodianForNote({
-        teamMember: {
-          name: teamMember.name,
-          user: teamMember.user
-            ? {
-                id: teamMember.user.id,
-                firstName: teamMember.user.firstName,
-                lastName: teamMember.user.lastName,
-                displayName: teamMember.user.displayName,
-              }
-            : null,
-        },
-      });
-
-      const isSelfService = role === OrganizationRoles.SELF_SERVICE;
-      const baseLine = isSelfService
-        ? `${actor} took custody of **${quantity}** unit(s).`
-        : `${actor} assigned **${quantity}** unit(s) to ${custodianDisplay}.`;
-      const noteContent = appendUserTextToNote(baseLine, note);
-
-      await createNote({
-        content: noteContent,
-        type: "UPDATE",
-        userId: user.id,
-        assetId,
-        organizationId,
-      });
-    } catch (noteError) {
-      Logger.error(
-        new ShelfError({
-          cause: noteError,
-          message: "Failed to create audit note for quantity operation",
-          label: "Assets",
-          additionalData: { assetId, userId: user.id },
-        })
-      );
-    }
 
     // No route-level sendNotification success toast here: that's the web's
     // SSE emitter and mobile has no listener (matches custody.assign.ts).
 
-    // Everything past checkOutQuantity is best-effort: the mutation has
-    // already committed, so a failure here must NOT surface as an action
-    // error — the client would show a failure (and could retry a
-    // non-idempotent assign) for a checkout that actually succeeded.
-
-    /** Check low-stock threshold and notify if breached (web parity) */
-    try {
-      await checkAndNotifyLowStock({
-        assetId,
-        userId: user.id,
-        organizationId,
-      });
-    } catch (lowStockError) {
-      Logger.error(
-        new ShelfError({
-          cause: lowStockError,
-          message: "Failed low-stock check after quantity checkout",
-          label: "Assets",
-          additionalData: { assetId, userId: user.id },
-        })
-      );
-    }
+    // Everything past the custody change is best-effort: it has already
+    // committed, so a failure must NOT surface as an action error (the client
+    // would show a failure, and could retry a non-idempotent assign).
 
     // Refreshed asset, shaped for mobile with the caller's custody
     // visibility already applied, so the app can update state directly.
@@ -238,7 +171,7 @@ export async function action({ request }: ActionFunctionArgs) {
         assetId,
         organizationId,
         viewerUserId: user.id,
-        canSeeAllCustody,
+        canSeeAllCustody: access.custody.seeAll,
       });
     } catch (refreshError) {
       Logger.error(

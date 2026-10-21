@@ -79,6 +79,7 @@ function payloadFor(assetIds: string[]): BulkQrDownloadLoaderData {
     })),
     qrBaseUrl: "https://eam.sh",
     showBranding: true,
+    labelsCsv: `labels for ${assetIds.join(",")}`,
   };
 }
 

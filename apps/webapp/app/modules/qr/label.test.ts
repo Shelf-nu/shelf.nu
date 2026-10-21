@@ -15,15 +15,12 @@ import {
   buildFittedLabelZipEntries,
   buildLabelSvg,
   buildLabelZipEntries,
-  buildManifestCsv,
   fittedLabelGeometry,
   LABEL_STOCKS,
   labelSvgDataUrl,
   layoutSheetPages,
-  MANIFEST_HEADERS,
   plainSheetSpec,
   qrModuleCount,
-  qrScanUrl,
   SHEET_TEMPLATES,
   svgDataUrl,
   wrapLabelText,
@@ -147,46 +144,6 @@ describe("module minimization (A3)", () => {
     expect(qrModuleCount("https://eam.sh/kQ7m2aX", "L")).toBeLessThanOrEqual(
       33
     );
-  });
-});
-
-describe("buildManifestCsv (A12–A14)", () => {
-  const base = "https://eam.sh";
-
-  it("A12 — header + one row per asset", () => {
-    const csv = buildManifestCsv(
-      [asset({ id: "a1" }), asset({ id: "a2" })],
-      base
-    );
-    const lines = csv.split("\r\n");
-    expect(lines).toHaveLength(3);
-    expect(lines[0]).toBe(MANIFEST_HEADERS.map((h) => `"${h}"`).join(","));
-  });
-
-  it("A13 — the manifest URL is the SAME string the QR encodes", () => {
-    const a = asset({ qrId: "kQ7m2aX" });
-    const csv = buildManifestCsv([a], base);
-    expect(csv).toContain(`"${qrScanUrl(base, a.qrId)}"`);
-  });
-
-  it("A14 — a name with comma and quote is RFC-4180 escaped", () => {
-    const csv = buildManifestCsv([asset({ title: 'Cam, "A"' })], base);
-    expect(csv).toContain('"Cam, ""A"""');
-  });
-
-  it("A14b — a formula-prefixed name is neutralized against CSV injection", () => {
-    for (const lead of ["=", "+", "-", "@"]) {
-      const csv = buildManifestCsv([asset({ title: `${lead}cmd()` })], base);
-      // apostrophe-prefixed so spreadsheets treat it as text, then quoted.
-      expect(csv).toContain(`"'${lead}cmd()"`);
-    }
-  });
-
-  it("A14c — a control-char-prefixed name (tab/CR/LF) is neutralized too", () => {
-    for (const lead of ["\t", "\r", "\n"]) {
-      const csv = buildManifestCsv([asset({ title: `${lead}=cmd()` })], base);
-      expect(csv).toContain(`"'${lead}=cmd()"`);
-    }
   });
 });
 
@@ -381,14 +338,18 @@ describe("wrapLabelText", () => {
 });
 
 describe("buildLabelZipEntries (A22)", () => {
-  it("one .svg per asset under qr-codes/, plus a root manifest.csv — never .jpg", () => {
+  it("one .svg per asset under qr-codes/, plus the loader's labels.csv — never .jpg", () => {
     const entries = buildLabelZipEntries({
       assets: [asset({ id: "a1" }), asset({ id: "a2", title: "Lock Washer" })],
       qrBaseUrl: "https://eam.sh",
       showBranding: true,
+      labelsCsv: "labels for a1,a2",
     });
     const paths = entries.map((e) => e.path);
-    expect(paths).toContain("manifest.csv");
+    // The CSV is built server-side (labels-csv.server.ts) and shipped verbatim.
+    expect(entries.find((e) => e.path === "labels.csv")?.content).toBe(
+      "labels for a1,a2"
+    );
     expect(paths).toContain("README.txt");
     const svgs = paths.filter((p) => p.endsWith(".svg"));
     expect(svgs).toHaveLength(2);
@@ -403,10 +364,13 @@ describe("buildLabelZipEntries (A22)", () => {
       qrBaseUrl: "https://eam.sh",
       showBranding: true,
       stock,
+      labelsCsv: "labels for a1",
     });
     const svg = entries.find((e) => e.path.endsWith(".svg"));
     expect(svg?.content).toContain(`width="${stock.widthMm}mm"`);
-    expect(entries.some((e) => e.path === "manifest.csv")).toBe(true);
+    expect(entries.find((e) => e.path === "labels.csv")?.content).toBe(
+      "labels for a1"
+    );
   });
 });
 

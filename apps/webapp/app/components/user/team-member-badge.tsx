@@ -1,6 +1,7 @@
+import { WITHHELD_CUSTODIAN_NAME } from "@shelf/labels";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { useUserData } from "~/hooks/use-user-data";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { tw } from "~/utils/tw";
@@ -45,7 +46,7 @@ export function TeamMemberBadge({
   teamMember: TeamMemberForBadge | undefined | null;
   hidePrivate?: boolean;
 }) {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const organization = useCurrentOrganization();
   const user = useUserData();
 
@@ -73,7 +74,7 @@ export function TeamMemberBadge({
           <span className="mt-px">{resolveTeamMemberName(teamMember)}</span>
         </>
       ) : !hidePrivate ? (
-        "private"
+        WITHHELD_CUSTODIAN_NAME
       ) : null}
     </GrayBadge>
   ) : null;

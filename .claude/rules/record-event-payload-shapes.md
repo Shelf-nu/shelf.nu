@@ -1,6 +1,7 @@
 ---
 description: Emit one recordEvent per changed field and per added/removed array item — never aggregate
-globs: ["apps/webapp/app/modules/**/*.ts"]
+paths:
+  - "apps/webapp/app/modules/**/*.ts"
 ---
 
 For `*_CHANGED` actions, write one event per logical field that actually

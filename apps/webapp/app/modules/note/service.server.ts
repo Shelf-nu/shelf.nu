@@ -13,6 +13,7 @@ import type {
 import type { AssetType, ConsumptionType } from "@prisma/client";
 import { db } from "~/database/db.server";
 import {
+  buildAssetModelChangeNote,
   buildCategoryChangeNote,
   buildDescriptionChangeNote,
   buildNameChangeNote,
@@ -796,6 +797,48 @@ export async function createAssetDescriptionChangeNote({
     userLink,
     previous: previousDescription,
     next: newDescription,
+  });
+
+  if (!content) {
+    return;
+  }
+
+  await createNote({
+    content,
+    type: "UPDATE",
+    userId,
+    assetId,
+    organizationId,
+  });
+}
+
+/**
+ * Persist a note when the asset model is set, changed, or removed.
+ *
+ * Writes nothing when the model did not actually change, so bulk callers can
+ * pass every asset they touched without filtering first.
+ */
+export async function createAssetModelChangeNote({
+  assetId,
+  userId,
+  organizationId,
+  previousModel,
+  newModel,
+  loadUserForNotes,
+}: {
+  assetId: Asset["id"];
+  userId: User["id"];
+  /** Caller's validated org — propagated to the note's asset ownership check */
+  organizationId: string;
+  previousModel?: { id: string; name: string } | null;
+  newModel?: { id: string; name: string } | null;
+  loadUserForNotes: LoadUserForNotesFn;
+}) {
+  const userLink = await resolveUserLink({ userId, loadUserForNotes });
+  const content = buildAssetModelChangeNote({
+    userLink,
+    previous: previousModel,
+    next: newModel,
   });
 
   if (!content) {
