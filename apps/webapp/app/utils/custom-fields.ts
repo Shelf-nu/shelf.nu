@@ -355,6 +355,61 @@ function sanitizeNumericInput(
   return throwInvalid();
 }
 
+/** The only date format a custom field import accepts: YYYY-MM-DD. */
+export const CUSTOM_FIELD_DATE_FORMAT = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/**
+ * UTC midnight of a calendar day, so the date stays the same in every time
+ * zone.
+ *
+ * @param year - Full year
+ * @param month - Month, 1 to 12
+ * @param day - Day of the month
+ * @returns The date, or `null` when the parts are not a real day: `Date`
+ *   rolls 2026-02-31 over to 2026-03-03, which must never be stored
+ */
+export function utcCalendarDate(
+  year: number,
+  month: number,
+  day: number
+): Date | null {
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+    ? date
+    : null;
+}
+
+/**
+ * Whether a value is a date a custom field import accepts: YYYY-MM-DD and a
+ * real calendar day. The caller decides whether to trim first.
+ *
+ * @param value - A CSV cell
+ * @returns `true` when the importer would store it
+ */
+export function isImportableCustomFieldDate(value: string): boolean {
+  const match = CUSTOM_FIELD_DATE_FORMAT.exec(value);
+  return (
+    match !== null &&
+    utcCalendarDate(Number(match[1]), Number(match[2]), Number(match[3])) !==
+      null
+  );
+}
+
+/**
+ * Reads a yes/no cell the way imports do. Case-insensitive, trims whitespace.
+ *
+ * @param value - Raw string from a CSV cell
+ * @returns `true` for "yes", `false` for "no", `undefined` for anything else
+ */
+export function parseYesNo(value: string): boolean | undefined {
+  const lower = value.trim().toLowerCase();
+  if (lower === "yes") return true;
+  if (lower === "no") return false;
+  return undefined;
+}
+
 export const buildCustomFieldValue = (
   value: ShelfAssetCustomFieldValueType["value"],
   def: CustomFieldDefinitionForValue
@@ -375,15 +430,10 @@ export const buildCustomFieldValue = (
       case "BOOLEAN": {
         let finalValue: boolean;
         if (typeof raw === "string") {
-          const normalized = raw.trim().toLowerCase();
-          if (normalized === "yes") {
-            finalValue = true;
-          } else if (normalized === "no") {
-            finalValue = false;
-          } else {
-            // Unrecognized boolean string — skip instead of coercing
-            return undefined;
-          }
+          const parsed = parseYesNo(raw);
+          // An unrecognized string is skipped instead of coerced.
+          if (parsed === undefined) return undefined;
+          finalValue = parsed;
         } else {
           finalValue = Boolean(raw);
         }
@@ -402,7 +452,7 @@ export const buildCustomFieldValue = (
         // the queryable valueDate (sort/filter/reports/reminders) invisibly.
         // This mirrors the strict guard already used on the bulk-update import path
         // (see compareCustomField's DATE case in ~/utils/import-update-diff).
-        const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateOnly);
+        const match = CUSTOM_FIELD_DATE_FORMAT.exec(dateOnly);
         if (!match) {
           throw new ShelfError({
             cause: null,
@@ -413,21 +463,12 @@ export const buildCustomFieldValue = (
           });
         }
 
-        const year = Number(match[1]);
-        const month = Number(match[2]);
-        const day = Number(match[3]);
-
-        // Create date at UTC midnight to preserve the date across all timezones.
-        const utcDate = new Date(Date.UTC(year, month - 1, day));
-
-        // why: new Date normalizes overflow (e.g. 2026-02-31 → 2026-03-03), so we
-        // must confirm the components round-trip — otherwise impossible calendar
-        // dates would be silently stored as a different (shifted) date.
-        if (
-          utcDate.getUTCFullYear() !== year ||
-          utcDate.getUTCMonth() !== month - 1 ||
-          utcDate.getUTCDate() !== day
-        ) {
+        const utcDate = utcCalendarDate(
+          Number(match[1]),
+          Number(match[2]),
+          Number(match[3])
+        );
+        if (!utcDate) {
           throw new ShelfError({
             cause: null,
             title: "Invalid date",

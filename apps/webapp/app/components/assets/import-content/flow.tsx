@@ -38,7 +38,6 @@ import {
   buildFormatNotes,
   isAlreadyShelfFormat,
 } from "~/modules/import-mapping/heuristics";
-import type { ColumnStats } from "~/modules/import-mapping/summary";
 import { summarizeMapping } from "~/modules/import-mapping/summary";
 import type {
   ColumnMapping,
@@ -64,7 +63,6 @@ import { ImportErrorDetails } from "../import-preview/import-error-details";
 export type MappingAnalysis = {
   proposal: MappingProposal;
   rowCount: number;
-  columnStats: ColumnStats[];
   existingCustomFields: ExistingCustomField[];
 };
 
@@ -239,7 +237,6 @@ export function ContentImportFlow({
   const summary = analysis
     ? summarizeMapping({
         columns,
-        stats: analysis.columnStats,
         rowCount: analysis.rowCount,
         existingCustomFieldNames: analysis.existingCustomFields.map(
           ({ name }) => name

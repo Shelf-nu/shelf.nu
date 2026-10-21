@@ -37,9 +37,8 @@ const COLUMNS: ColumnMapping[] = [
 
 const SUMMARY = {
   rows: 2,
+  rowsMayDrop: false,
   newCustomFields: ["Serial number"],
-  newCategories: 0,
-  newLocations: 1,
 };
 
 function renderReview(
@@ -135,17 +134,20 @@ describe("MappingReview", () => {
 });
 
 describe("describeSummary", () => {
-  it("names rows and everything that will be created", () => {
+  it("names rows and the custom fields that will be created", () => {
     expect(describeSummary(SUMMARY)).toBe(
-      '2 assets will be imported. New: custom field "Serial number" and 1 location.'
+      '2 assets will be imported. New: custom field "Serial number".'
     );
     expect(
-      describeSummary({
-        rows: 1,
-        newCustomFields: [],
-        newCategories: 0,
-        newLocations: 0,
-      })
+      describeSummary({ rows: 1, rowsMayDrop: false, newCustomFields: [] })
     ).toBe("1 asset will be imported.");
+  });
+
+  it("gives the row count as a ceiling when skipped columns can empty a row", () => {
+    expect(
+      describeSummary({ rows: 12, rowsMayDrop: true, newCustomFields: [] })
+    ).toBe(
+      "Up to 12 assets will be imported. Rows with values only in skipped columns are left out."
+    );
   });
 });

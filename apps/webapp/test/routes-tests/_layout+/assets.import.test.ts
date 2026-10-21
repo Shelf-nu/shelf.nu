@@ -374,8 +374,6 @@ describe("assets.import column mapping", () => {
     vi.mocked(db.customField.findMany).mockResolvedValue([
       { name: "Serial number", type: "TEXT" },
     ] as never);
-    vi.mocked(db.category.findMany).mockResolvedValue([]);
-    vi.mocked(db.location.findMany).mockResolvedValue([]);
     vi.mocked(buildContentImportPreview).mockResolvedValue({
       importId: "imp-1",
     } as never);
@@ -389,6 +387,10 @@ describe("assets.import column mapping", () => {
       >;
 
       expect(buildContentImportPreview).not.toHaveBeenCalled();
+      // New categories and locations are named once, by the preview.
+      expect(db.category.findMany).not.toHaveBeenCalled();
+      expect(db.location.findMany).not.toHaveBeenCalled();
+      expect(result).not.toHaveProperty("columnStats");
       expect(db.customField.findMany).toHaveBeenCalledWith({
         where: { organizationId: "org-1", deletedAt: null },
         select: { name: true, type: true },

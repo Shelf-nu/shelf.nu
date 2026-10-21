@@ -58,7 +58,13 @@ proposer can be added later without changing the route or the review table.
 - Two columns aimed at one destination are flagged inline and block Preview
   import.
 - A line under the table says how many rows will be imported and which custom
-  fields, categories and locations will be created.
+  fields will be created. When a column is skipped, the count reads "Up to N",
+  because rows whose only values sit in skipped columns are left out. New
+  categories, locations, tags, kits and custodians are listed by the preview
+  that follows, which also gives the exact row count.
+- Format notes (dates that are not YYYY-MM-DD real days, yes/no values) use the
+  importer's own rules from `~/utils/custom-fields`, so they warn about exactly
+  what the import will refuse or leave empty.
 - Preview import is held while another import runs in the workspace.
 
 ## What the importer still checks

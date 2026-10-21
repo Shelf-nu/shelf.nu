@@ -4,8 +4,8 @@
  * One row per spreadsheet column: its heading, a few sample values, the Shelf
  * field it will become (editable) and a dot for how sure the proposal is.
  * Duplicate destinations are flagged on every clashing row. Under the table:
- * format notes from the proposal and a line saying what the import will
- * create.
+ * format notes from the proposal and a line saying how many assets will be
+ * imported and which custom fields will be created.
  *
  * Controlled: the parent owns the columns and receives every edit.
  *
@@ -64,40 +64,28 @@ function listNames(names: string[]): string {
 }
 
 /**
- * The line under the table: rows to import and what will be created.
+ * The line under the table: rows to import and the custom fields that will
+ * be created. When a skipped column can empty a row, the row count is a
+ * ceiling and the line says so; the preview gives the exact count.
  *
  * @param summary - From `summarizeMapping`
  * @returns A plain sentence
  */
 export function describeSummary(summary: MappingSummary): string {
-  const parts = [
-    `${summary.rows} ${
-      summary.rows === 1 ? "asset" : "assets"
-    } will be imported.`,
-  ];
-  const creates: string[] = [];
+  const assets = `${summary.rows} ${summary.rows === 1 ? "asset" : "assets"}`;
+  const parts = summary.rowsMayDrop
+    ? [
+        `Up to ${assets} will be imported.`,
+        "Rows with values only in skipped columns are left out.",
+      ]
+    : [`${assets} will be imported.`];
   if (summary.newCustomFields.length > 0) {
-    creates.push(
-      `${
+    parts.push(
+      `New: ${
         summary.newCustomFields.length === 1 ? "custom field" : "custom fields"
-      } ${listNames(summary.newCustomFields.map((name) => `"${name}"`))}`
+      } ${listNames(summary.newCustomFields.map((name) => `"${name}"`))}.`
     );
   }
-  if (summary.newCategories > 0) {
-    creates.push(
-      `${summary.newCategories} ${
-        summary.newCategories === 1 ? "category" : "categories"
-      }`
-    );
-  }
-  if (summary.newLocations > 0) {
-    creates.push(
-      `${summary.newLocations} ${
-        summary.newLocations === 1 ? "location" : "locations"
-      }`
-    );
-  }
-  if (creates.length > 0) parts.push(`New: ${listNames(creates)}.`);
   return parts.join(" ");
 }
 
@@ -110,7 +98,7 @@ export function describeSummary(summary: MappingSummary): string {
  * @param props.existingCustomFields - The workspace's custom fields
  * @param props.canUseBarcodes - Lists barcode fields in the pickers
  * @param props.notes - Format warnings from the proposal
- * @param props.summary - What the import will create
+ * @param props.summary - Rows to import and the custom fields to create
  * @param props.alreadyMatches - Shows "already matches" above the table
  */
 export function MappingReview({

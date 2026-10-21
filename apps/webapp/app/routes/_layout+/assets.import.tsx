@@ -22,7 +22,6 @@ import { applyMapping } from "~/modules/import-mapping/apply";
 import { classifyImportFailure } from "~/modules/import-mapping/failure";
 import { buildColumnSamples } from "~/modules/import-mapping/heuristics";
 import { proposeMapping } from "~/modules/import-mapping/propose";
-import { buildColumnStats } from "~/modules/import-mapping/summary";
 import type { ColumnMapping } from "~/modules/import-mapping/types";
 import {
   MAX_HEADER_LENGTH,
@@ -203,7 +202,7 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
  * @param args.organizationId - The caller's workspace
  * @param args.userId - The caller, for analytics
  * @param args.canUseBarcodes - Whether barcode fields may be proposed
- * @returns The proposal, row count, per-column stats and existing custom fields
+ * @returns The proposal, row count and existing custom fields
  * @throws {ShelfError} 400 for a file the importer cannot take
  */
 async function analyzeColumns({
@@ -260,14 +259,10 @@ async function analyzeColumns({
     });
   }
 
-  const [existingCustomFields, categories, locations] = await Promise.all([
-    db.customField.findMany({
-      where: { organizationId, deletedAt: null },
-      select: { name: true, type: true },
-    }),
-    db.category.findMany({ where: { organizationId }, select: { name: true } }),
-    db.location.findMany({ where: { organizationId }, select: { name: true } }),
-  ]);
+  const existingCustomFields = await db.customField.findMany({
+    where: { organizationId, deletedAt: null },
+    select: { name: true, type: true },
+  });
 
   const proposal = await proposeMapping({
     headers,
@@ -292,10 +287,6 @@ async function analyzeColumns({
   return {
     proposal,
     rowCount,
-    columnStats: buildColumnStats(csvData, {
-      categories: categories.map(({ name }) => name),
-      locations: locations.map(({ name }) => name),
-    }),
     existingCustomFields,
   };
 }

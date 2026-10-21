@@ -1,24 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildColumnStats, summarizeMapping } from "./summary";
+import { summarizeMapping } from "./summary";
 import type { ColumnMapping } from "./types";
-
-const FILE = [
-  ["Where", "Kind", "Serial"],
-  ["Sofia", "Laptop", "S1"],
-  ["sofia ", "Camera", "S2"],
-  ["Berlin", "", "S3"],
-];
-
-describe("buildColumnStats", () => {
-  it("counts distinct values the workspace does not have, ignoring case", () => {
-    const stats = buildColumnStats(FILE, {
-      categories: ["laptop"],
-      locations: ["Berlin"],
-    });
-    expect(stats[0]).toEqual({ newCategories: 2, newLocations: 1 });
-    expect(stats[1]).toEqual({ newCategories: 1, newLocations: 2 });
-  });
-});
 
 describe("summarizeMapping", () => {
   const col = (target: ColumnMapping["target"]): ColumnMapping => ({
@@ -28,24 +10,29 @@ describe("summarizeMapping", () => {
     sample: [],
   });
 
-  it("reads the counts of whichever columns map to category and location", () => {
-    const stats = buildColumnStats(FILE, { categories: [], locations: [] });
+  it("counts the rows and names the custom fields the mapping creates", () => {
     const summary = summarizeMapping({
       columns: [
-        col({ kind: "field", name: "location" }),
-        col({ kind: "field", name: "category" }),
+        col({ kind: "field", name: "title" }),
         col({ kind: "customField", name: "Serial number", type: "TEXT" }),
       ],
-      stats,
       rowCount: 3,
       existingCustomFieldNames: [],
     });
     expect(summary).toEqual({
       rows: 3,
+      rowsMayDrop: false,
       newCustomFields: ["Serial number"],
-      newCategories: 2,
-      newLocations: 2,
     });
+  });
+
+  it("says rows may drop only when a column is skipped", () => {
+    const summary = summarizeMapping({
+      columns: [col({ kind: "field", name: "title" }), col({ kind: "skip" })],
+      rowCount: 3,
+      existingCustomFieldNames: [],
+    });
+    expect(summary.rowsMayDrop).toBe(true);
   });
 
   it("does not list custom fields the workspace already has", () => {
@@ -53,7 +40,6 @@ describe("summarizeMapping", () => {
       columns: [
         col({ kind: "customField", name: "serial NUMBER", type: "TEXT" }),
       ],
-      stats: [{ newCategories: 0, newLocations: 0 }],
       rowCount: 1,
       existingCustomFieldNames: ["Serial number"],
     });

@@ -12,7 +12,11 @@
  * @see {@link file://./../../utils/import.server.ts} the importer it feeds
  */
 import { CustomFieldType } from "@prisma/client";
-import { getDefinitionFromCsvHeader } from "~/utils/custom-fields";
+import {
+  getDefinitionFromCsvHeader,
+  isImportableCustomFieldDate,
+  parseYesNo,
+} from "~/utils/custom-fields";
 import type { AssetCsvHeader } from "./fields";
 import { IMPORT_FIELDS, getImportField, isAssetCsvHeader } from "./fields";
 import { lookupSynonym, normalizeHeader } from "./synonyms";
@@ -250,15 +254,14 @@ function proposeColumn(
   return skip;
 }
 
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-
 /** Shown when a column maps to quantity and none maps to type. */
 export const QUANTITY_WITHOUT_TYPE_NOTE =
   "Rows with a quantity above 1 need a type column set to QUANTITY_TRACKED (and a consumptionType). Without it the importer rejects those rows.";
 
 /**
  * Short warnings about values the importer will refuse or drop under the
- * proposed mapping. Facts about formats only; nothing is rewritten.
+ * proposed mapping, read with the importer's own date and yes/no rules
+ * (`~/utils/custom-fields`). Facts about formats only; nothing is rewritten.
  *
  * @param columns - A complete mapping, in file order
  * @returns At most {@link MAX_PROPOSAL_NOTES} notes
@@ -271,7 +274,10 @@ export function buildFormatNotes(columns: ColumnMapping[]): string[] {
 
   for (const { source, target, sample } of columns) {
     if (target.kind === "customField" && target.type === CustomFieldType.DATE) {
-      const bad = sample.find((cell) => !ISO_DATE.test(cell));
+      // The importer trims a date before it reads it.
+      const bad = sample.find(
+        (cell) => !isImportableCustomFieldDate(cell.trim())
+      );
       if (bad) {
         notes.push(
           `"${source}" has dates like "${bad}", but the importer needs YYYY-MM-DD. Fix the dates or pick a text field.`
@@ -282,9 +288,7 @@ export function buildFormatNotes(columns: ColumnMapping[]): string[] {
       target.kind === "customField" &&
       target.type === CustomFieldType.BOOLEAN
     ) {
-      const bad = sample.find(
-        (cell) => !["yes", "no"].includes(cell.trim().toLowerCase())
-      );
+      const bad = sample.find((cell) => parseYesNo(cell) === undefined);
       if (bad) {
         notes.push(
           `"${source}" has values like "${bad}". Yes/no fields accept only yes or no; other values are left empty.`

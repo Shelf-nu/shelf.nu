@@ -212,6 +212,20 @@ describe("proposeByRules", () => {
     ]);
   });
 
+  it("warns about dates and yes/no values exactly as the importer reads them", () => {
+    const notes = propose(
+      [
+        ["cf:Bought, type:date", "cf:Insured, type:boolean"],
+        ["2026-02-31", " YES "],
+      ],
+      []
+    ).notes;
+    // A real YYYY-MM-DD shape that is not a real day is refused on import.
+    expect(notes.join(" ")).toContain('"cf:Bought, type:date" has dates like');
+    // The importer trims and ignores case, so " YES " is a valid yes.
+    expect(notes.join(" ")).not.toContain("cf:Insured");
+  });
+
   it("warns that quantities above 1 need a type column", () => {
     expect(propose([["Qty"], ["1"]]).notes).toContain(
       QUANTITY_WITHOUT_TYPE_NOTE

@@ -483,11 +483,6 @@ describe("ContentImportFlow column mapping", () => {
       ],
     },
     rowCount: 2,
-    columnStats: [
-      { newCategories: 2, newLocations: 2 },
-      { newCategories: 2, newLocations: 2 },
-      { newCategories: 2, newLocations: 2 },
-    ],
     existingCustomFields: [],
   };
 
