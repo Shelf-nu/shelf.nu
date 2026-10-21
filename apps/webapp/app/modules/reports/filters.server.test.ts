@@ -16,13 +16,14 @@ vi.mock("~/database/db.server", () => ({
     location: { findMany: vi.fn(), count: vi.fn() },
     assetModel: { findMany: vi.fn(), count: vi.fn() },
     teamMember: { findFirst: vi.fn(), findMany: vi.fn(), count: vi.fn() },
-    customField: { findMany: vi.fn() },
+    customField: { findMany: vi.fn(), findFirst: vi.fn() },
     $queryRaw: vi.fn(),
   },
 }));
 
 import { db } from "~/database/db.server";
 import {
+  loadCustomFieldValues,
   loadReportFilterOptions,
   resolveReportFilters,
 } from "./filters.server";
@@ -186,7 +187,10 @@ describe("resolveReportFilters", () => {
 
     expect(db.teamMember.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: "tm-1", organizationId: "org-1" },
+        where: {
+          organizationId: "org-1",
+          OR: [{ id: "tm-1" }, { userId: "tm-1" }],
+        },
       })
     );
     expect(resolved.teamMemberId).toBe("tm-1");
@@ -198,6 +202,97 @@ describe("resolveReportFilters", () => {
       "Custodian: Sam Stone",
       "Status: Complete",
     ]);
+  });
+
+  it("reads a legacy custodian link that carries a user id", async () => {
+    // Old Overdue Items links put the custodian's USER id in `custodian=`.
+    vi.mocked(db.teamMember.findFirst).mockResolvedValue({
+      id: "tm-1",
+      name: "Sam Stone",
+      user: null,
+    } as any);
+
+    const resolved = await resolveReportFilters({
+      organizationId: "org-1",
+      searchParams: new URLSearchParams("custodian=user-1"),
+      reportDef: getReportById("overdue-items")!,
+    });
+
+    expect(db.teamMember.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          organizationId: "org-1",
+          OR: [{ id: "user-1" }, { userId: "user-1" }],
+        },
+      })
+    );
+    expect(resolved.teamMemberId).toBe("tm-1");
+    // The chip removes the value the URL actually holds.
+    expect(resolved.active[0]).toMatchObject({
+      param: "teamMember",
+      value: "user-1",
+      label: "Custodian: Sam Stone",
+    });
+  });
+
+  it("reads the legacy comma-joined category spelling into the predicate", async () => {
+    vi.mocked(db.category.findMany).mockResolvedValue([
+      { id: "cat-1", name: "Cameras" },
+      { id: "cat-2", name: "Lenses" },
+    ] as any);
+
+    const resolved = await resolveReportFilters({
+      organizationId: "org-1",
+      searchParams: new URLSearchParams("categories=cat-1,cat-2"),
+      reportDef: inventory,
+    });
+
+    expect(resolved.params.categoryIds).toEqual(["cat-1", "cat-2"]);
+    expect(resolved.assetFilter.where).toEqual({
+      categoryId: { in: ["cat-1", "cat-2"] },
+    });
+  });
+
+  it("counts the filters it had to leave out, so the page can say so", async () => {
+    vi.mocked(db.category.findMany).mockResolvedValue([
+      { id: "cat-1", name: "Cameras" },
+    ] as any);
+    vi.mocked(db.customField.findMany).mockResolvedValue([
+      { id: "f-bool", name: "Insured", type: CustomFieldType.BOOLEAN },
+    ] as any);
+
+    const params = new URLSearchParams(
+      "category=cat-1&category=cat-deleted&location=loc-deleted&teamMember=tm-deleted"
+    );
+    params.append("cf", "f-gone:yes");
+    const resolved = await resolveReportFilters({
+      organizationId: "org-1",
+      searchParams: params,
+      reportDef: getReportById("custody-snapshot")!,
+    });
+
+    expect(resolved.ignoredCount).toBe(4);
+    expect(resolved.active.map((a) => a.value)).toEqual(["cat-1"]);
+  });
+
+  it("drops a boolean value it cannot read instead of showing a chip for it", async () => {
+    vi.mocked(db.customField.findMany).mockResolvedValue([
+      { id: "f-bool", name: "Insured", type: CustomFieldType.BOOLEAN },
+    ] as any);
+
+    const params = new URLSearchParams();
+    params.append("cf", "f-bool:0");
+    params.append("cf", "f-bool:TRUE");
+    const resolved = await resolveReportFilters({
+      organizationId: "org-1",
+      searchParams: params,
+      reportDef: inventory,
+    });
+
+    // The predicate ignores "0", so a "No" chip would claim a filter that
+    // is not applied.
+    expect(resolved.active.map((a) => a.label)).toEqual(["Insured: Yes"]);
+    expect(resolved.ignoredCount).toBe(1);
   });
 
   it("reads asset statuses for asset reports", async () => {
@@ -237,7 +332,7 @@ describe("loadReportFilterOptions", () => {
     expect(options.statuses).toEqual([]);
   });
 
-  it("offers TEXT, OPTION and BOOLEAN custom fields with their values", async () => {
+  it("offers TEXT, OPTION and BOOLEAN custom fields, TEXT values on demand", async () => {
     vi.mocked(db.customField.findMany).mockResolvedValue([
       { id: "f-text", name: "Fund", type: CustomFieldType.TEXT, options: [] },
       {
@@ -259,14 +354,6 @@ describe("loadReportFilterOptions", () => {
         options: [],
       },
     ] as any);
-    // The distinct-values query returns the ranked rows for TEXT fields; a
-    // row past the limit signals that more values exist.
-    vi.mocked(db.$queryRaw).mockResolvedValue([
-      { customFieldId: "f-text", value: "Perkins", rowNumber: 1 },
-      { customFieldId: "f-text", value: "General", rowNumber: 2 },
-      { customFieldId: "f-text", value: "overflow", rowNumber: 201 },
-    ] as any);
-
     const options = await loadReportFilterOptions({
       organizationId: "org-1",
       reportDef: reportWith(["custom_field"]),
@@ -277,8 +364,9 @@ describe("loadReportFilterOptions", () => {
         id: "f-text",
         name: "Fund",
         type: CustomFieldType.TEXT,
-        values: ["Perkins", "General"],
-        hasMoreValues: true,
+        values: [],
+        hasMoreValues: false,
+        valuesOnDemand: true,
       },
       {
         id: "f-opt",
@@ -286,6 +374,7 @@ describe("loadReportFilterOptions", () => {
         type: CustomFieldType.OPTION,
         values: ["Red", "Blue"],
         hasMoreValues: false,
+        valuesOnDemand: false,
       },
       {
         id: "f-bool",
@@ -293,14 +382,12 @@ describe("loadReportFilterOptions", () => {
         type: CustomFieldType.BOOLEAN,
         values: ["yes", "no"],
         hasMoreValues: false,
+        valuesOnDemand: false,
       },
     ]);
-    // Distinct values are read only for TEXT fields, scoped by workspace.
-    const rawSql = (
-      vi.mocked(db.$queryRaw).mock.calls[0]?.[0] as { sql: string }
-    ).sql;
-    expect(rawSql).toContain('a."organizationId" =');
-    expect(rawSql).toContain("value->>'raw'");
+    // A TEXT field's distinct values are an aggregate over every asset, so
+    // the page never pays for them: the picker asks when a field is opened.
+    expect(db.$queryRaw).not.toHaveBeenCalled();
   });
 
   it("lists asset statuses for asset reports and measurable statuses for booking reports", async () => {
@@ -320,5 +407,58 @@ describe("loadReportFilterOptions", () => {
     ]);
     expect(booking.statuses.map((s) => s.value)).not.toContain("DRAFT");
     expect(booking.statuses.map((s) => s.value)).toContain("COMPLETE");
+  });
+});
+
+describe("loadCustomFieldValues", () => {
+  beforeEach(() => {
+    vi.mocked(db.$queryRaw).mockResolvedValue([] as any);
+  });
+
+  it("reads one TEXT field's values, most frequent first, scoped by workspace", async () => {
+    vi.mocked(db.customField.findFirst).mockResolvedValue({
+      id: "f-text",
+    } as any);
+    // A row past the limit signals that more values exist.
+    vi.mocked(db.$queryRaw).mockResolvedValue([
+      { value: "Perkins", rowNumber: 1 },
+      { value: "General", rowNumber: 2 },
+      { value: "overflow", rowNumber: 201 },
+    ] as any);
+
+    const result = await loadCustomFieldValues({
+      organizationId: "org-1",
+      customFieldId: "f-text",
+    });
+
+    expect(result).toEqual({ values: ["Perkins", "General"], hasMore: true });
+    expect(db.customField.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: "f-text",
+          organizationId: "org-1",
+          type: CustomFieldType.TEXT,
+          active: true,
+          deletedAt: null,
+        },
+      })
+    );
+    const rawSql = (
+      vi.mocked(db.$queryRaw).mock.calls[0]?.[0] as { sql: string }
+    ).sql;
+    expect(rawSql).toContain('a."organizationId" =');
+    expect(rawSql).toContain("value->>'raw'");
+  });
+
+  it("answers nothing for a field outside the workspace without reading values", async () => {
+    vi.mocked(db.customField.findFirst).mockResolvedValue(null);
+
+    const result = await loadCustomFieldValues({
+      organizationId: "org-1",
+      customFieldId: "f-foreign",
+    });
+
+    expect(result).toEqual({ values: [], hasMore: false });
+    expect(db.$queryRaw).not.toHaveBeenCalled();
   });
 });

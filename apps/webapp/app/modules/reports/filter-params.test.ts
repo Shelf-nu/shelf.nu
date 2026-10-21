@@ -7,6 +7,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ALL_REPORT_FILTER_PARAM_KEYS,
+  canonicalReportFilterSearch,
   decodeCustomFieldParam,
   encodeCustomFieldParam,
   hasActiveReportFilters,
@@ -104,9 +105,70 @@ describe("custom field param encoding", () => {
     );
   });
 
+  it("keeps a value's own leading and trailing spaces, which the stored text may carry", () => {
+    for (const value of ["Room 4 ", " Room 4", "a  b"]) {
+      const filter = { customFieldId: "clx1", value };
+      expect(decodeCustomFieldParam(encodeCustomFieldParam(filter))).toEqual(
+        filter
+      );
+    }
+  });
+
+  it("drops a value that is only whitespace", () => {
+    expect(decodeCustomFieldParam("clx1:   ")).toBeNull();
+  });
+
   it("uses the key the parser reads", () => {
     expect(REPORT_FILTER_PARAM.customField).toBe("cf");
     expect(ALL_REPORT_FILTER_PARAM_KEYS).toContain("cf");
     expect(ALL_REPORT_FILTER_PARAM_KEYS).toContain("categories");
+  });
+});
+
+describe("canonicalReportFilterSearch", () => {
+  it("rewrites legacy keys and comma-joined values to one value per key", () => {
+    const canonical = canonicalReportFilterSearch(
+      new URLSearchParams(
+        "statuses=AVAILABLE,IN_CUSTODY&timeframe=last_7d&categories=a,b&locations=l1&custodian=u1"
+      )
+    );
+
+    expect(canonical?.toString()).toBe(
+      "status=AVAILABLE&status=IN_CUSTODY&timeframe=last_7d&category=a&category=b&location=l1&teamMember=u1"
+    );
+  });
+
+  it("splits comma-joined values on current keys and drops duplicates", () => {
+    const canonical = canonicalReportFilterSearch(
+      new URLSearchParams("category=a,b&category=a&assetModel=m1,m2")
+    );
+
+    expect(canonical?.toString()).toBe(
+      "category=a&category=b&assetModel=m1&assetModel=m2"
+    );
+  });
+
+  it("lets the current custodian key win over the legacy one", () => {
+    const canonical = canonicalReportFilterSearch(
+      new URLSearchParams("teamMember=tm1&custodian=u1")
+    );
+
+    expect(canonical?.toString()).toBe("teamMember=tm1");
+  });
+
+  it("leaves custom-field values alone, commas included", () => {
+    expect(
+      canonicalReportFilterSearch(
+        new URLSearchParams("cf=f1:a,b&category=c1&timeframe=last_7d")
+      )
+    ).toBeNull();
+  });
+
+  it("returns null when the query is already canonical", () => {
+    expect(
+      canonicalReportFilterSearch(
+        new URLSearchParams("category=a&category=b&status=AVAILABLE&page=2")
+      )
+    ).toBeNull();
   });
 });

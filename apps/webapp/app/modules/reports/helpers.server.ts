@@ -12,12 +12,7 @@
  * @see {@link file://../activity-event/reports.server.ts}
  */
 
-import type {
-  ActivityAction,
-  AssetStatus,
-  BookingStatus,
-  Currency,
-} from "@prisma/client";
+import type { ActivityAction, BookingStatus, Currency } from "@prisma/client";
 import { Prisma } from "@prisma/client";
 import { DateTime } from "luxon";
 
@@ -36,11 +31,7 @@ import { ShelfError } from "~/utils/error";
 import type { UserNameFields } from "~/utils/user";
 import { resolveUserDisplayName } from "~/utils/user";
 
-import {
-  buildReportAssetFilter,
-  mergeAssetWhere,
-  type ReportAssetFilter,
-} from "./asset-filter";
+import { mergeAssetWhere, type ReportAssetFilter } from "./asset-filter";
 import { resolveCheckInTimes } from "./check-in-time.server";
 
 import type {
@@ -161,15 +152,12 @@ interface BookingComplianceArgs {
   organizationId: string;
   timeframe: ResolvedTimeframe;
   statusFilter?: BookingStatus[];
-  /** Custodian by USER id (`Booking.custodianUserId`). */
-  custodianId?: string;
   /**
    * Custodian by `TeamMember` id, which is what the filter bar's custodian
    * picker yields. Matches bookings whose custodian is that team member, or
    * the user account behind it.
    */
   custodianTeamMemberId?: string;
-  locationId?: string;
   /** Shared asset predicate: keeps bookings holding at least one matching asset. */
   assetFilter?: ReportAssetFilter;
   page?: number;
@@ -249,22 +237,49 @@ function custodianTeamMemberWhere(
 }
 
 /**
- * Asset predicate for booking reports: the single-location argument and the
- * shared filter, merged. `null` when neither narrows, so callers add the
+ * Asset predicate for booking reports: the shared filter scoped to the
+ * workspace. `null` when the filter does not narrow, so callers add the
  * `bookingAssets: some` join only when there is something to join on.
  */
 function bookingAssetFilterWhere(
   organizationId: string,
-  locationId: string | undefined,
   assetFilter: ReportAssetFilter | undefined
 ): Prisma.AssetWhereInput | null {
-  const base: Prisma.AssetWhereInput = { organizationId };
-  if (locationId) {
-    base.assetLocations = { some: { locationId } };
+  if (!assetFilter || assetFilter.isEmpty) return null;
+  return mergeAssetWhere({ organizationId }, assetFilter);
+}
+
+/**
+ * Booking predicate for the filter bar's custodian and asset filters, without
+ * any status or date condition. Booking Compliance spreads it into every
+ * query it runs (rows, KPIs, rate, trend, custodian table) so each figure
+ * describes the same bookings.
+ *
+ * @returns The narrowing fragment; `{}` when neither filter is set
+ */
+function bookingFilterWhere({
+  organizationId,
+  custodianTeamMemberId,
+  assetFilter,
+}: {
+  organizationId: string;
+  custodianTeamMemberId: string | undefined;
+  assetFilter: ReportAssetFilter | undefined;
+}): Prisma.BookingWhereInput {
+  const where: Prisma.BookingWhereInput = {};
+  if (custodianTeamMemberId) {
+    where.AND = [
+      custodianTeamMemberWhere(custodianTeamMemberId, organizationId),
+    ];
   }
-  const filterNarrows = !!assetFilter && !assetFilter.isEmpty;
-  if (!locationId && !filterNarrows) return null;
-  return mergeAssetWhere(base, assetFilter);
+  const bookingAssetWhere = bookingAssetFilterWhere(
+    organizationId,
+    assetFilter
+  );
+  if (bookingAssetWhere) {
+    where.bookingAssets = { some: { asset: bookingAssetWhere } };
+  }
+  return where;
 }
 
 /**
@@ -290,9 +305,7 @@ export async function bookingComplianceReport(
     organizationId,
     timeframe,
     statusFilter,
-    custodianId,
     custodianTeamMemberId,
-    locationId,
     assetFilter,
     page = 1,
     pageSize = 50,
@@ -312,6 +325,26 @@ export async function bookingComplianceReport(
     // 2. Have a measurable outcome (COMPLETE, OVERDUE, or ARCHIVED). ARCHIVED
     //    bookings are returned bookings that have aged out of the active list,
     //    so they belong in the table just like COMPLETE rows.
+    // Custodian and asset filters. Asset filters match bookings whose pivot
+    // rows include at least one asset satisfying them.
+    const filterWhere = bookingFilterWhere({
+      organizationId,
+      custodianTeamMemberId,
+      assetFilter,
+    });
+
+    // The status filter narrows within the measurable statuses. Together
+    // with `filterWhere` it is the narrowing every compliance figure shares.
+    const narrowing: Prisma.BookingWhereInput = { ...filterWhere };
+    if (statusFilter && statusFilter.length > 0) {
+      const measurableStatuses = statusFilter.filter((s) =>
+        (MEASURABLE_BOOKING_STATUSES as readonly BookingStatus[]).includes(s)
+      );
+      if (measurableStatuses.length > 0) {
+        narrowing.status = { in: measurableStatuses };
+      }
+    }
+
     const where: Prisma.BookingWhereInput = {
       organizationId,
       // Planned end (originalTo ?? to) inside the timeframe.
@@ -322,40 +355,22 @@ export async function bookingComplianceReport(
       // Exclude bookings archived straight from RESERVED (never checked in):
       // they were never returned, so they must not count toward compliance.
       archivedWithoutCheckin: false,
+      ...narrowing,
     };
 
-    // Allow further status filtering within the measurable statuses
-    if (statusFilter && statusFilter.length > 0) {
-      const measurableStatuses = statusFilter.filter((s) =>
-        (MEASURABLE_BOOKING_STATUSES as readonly BookingStatus[]).includes(s)
-      );
-      if (measurableStatuses.length > 0) {
-        where.status = { in: measurableStatuses as BookingStatus[] };
-      }
-    }
-
-    if (custodianId) {
-      where.custodianUserId = custodianId;
-    }
-
-    if (custodianTeamMemberId) {
-      where.AND = [
-        ...(Array.isArray(where.AND) ? where.AND : []),
-        custodianTeamMemberWhere(custodianTeamMemberId, organizationId),
-      ];
-    }
-
-    // Asset filters match bookings whose pivot rows include at least one
-    // asset satisfying them; the `BookingAsset` pivot makes this join
-    // expressible directly in the where clause.
-    const bookingAssetWhere = bookingAssetFilterWhere(
-      organizationId,
-      locationId,
-      assetFilter
-    );
-    if (bookingAssetWhere) {
-      where.bookingAssets = { some: { asset: bookingAssetWhere } };
-    }
+    // The status-transition chart counts events, which carry a booking id but
+    // no relation to filter through. Under a custodian or asset filter it is
+    // scoped to the ids of the matching bookings; its own subject is status
+    // changes, so the status filter does not apply to it.
+    const chartBookingIds =
+      Object.keys(filterWhere).length > 0
+        ? (
+            await db.booking.findMany({
+              where: { organizationId, ...filterWhere },
+              select: { id: true },
+            })
+          ).map((b) => b.id)
+        : undefined;
 
     // Fetch all data in parallel
     const [
@@ -372,13 +387,14 @@ export async function bookingComplianceReport(
         organizationId,
         from: timeframe.from,
         to: timeframe.to,
+        bookingIds: chartBookingIds,
       }),
       // Compliance rate calculation with prior period comparison
-      computeComplianceRate(organizationId, timeframe),
+      computeComplianceRate(organizationId, timeframe, narrowing),
       // Weekly compliance trend
-      computeComplianceTrend(organizationId, timeframe, timeZone),
+      computeComplianceTrend(organizationId, timeframe, timeZone, narrowing),
       // Custodian performance breakdown
-      computeCustodianPerformance(organizationId, timeframe),
+      computeCustodianPerformance(organizationId, timeframe, narrowing),
     ]);
 
     // Transform chart data
@@ -692,11 +708,14 @@ function formatStatusLabel(status: BookingStatus): string {
  *
  * @param organizationId - Workspace whose bookings are measured.
  * @param timeframe - Resolved reporting window (planned end must fall inside).
+ * @param narrowing - The report's status, custodian and asset filters,
+ *   applied to both periods so the comparison is like for like.
  * @returns On-time/late counts, the rate, and the prior-period comparison.
  */
 async function computeComplianceRate(
   organizationId: string,
-  timeframe: ResolvedTimeframe
+  timeframe: ResolvedTimeframe,
+  narrowing: Prisma.BookingWhereInput = {}
 ): Promise<ComplianceData> {
   // Fetch all measurable bookings (COMPLETE, OVERDUE, ARCHIVED) scheduled to
   // end within the timeframe. We need OVERDUE so currently-late bookings count
@@ -710,6 +729,7 @@ async function computeComplianceRate(
       archivedWithoutCheckin: false,
       // Planned end (originalTo ?? to) inside the timeframe.
       ...plannedEndInWindow(timeframe.from, timeframe.to),
+      ...narrowing,
     },
     select: {
       id: true,
@@ -748,6 +768,7 @@ async function computeComplianceRate(
       archivedWithoutCheckin: false,
       // Planned end (originalTo ?? to), consistent with the main query.
       ...plannedEndInWindow(priorFrom, priorTo),
+      ...narrowing,
     },
     select: {
       id: true,
@@ -865,11 +886,13 @@ function getPriorPeriodLabel(preset: string): string {
  *   is derived from `timeframe.from` (pref-tz midnight), so the axis labels are
  *   resolved in this same zone to avoid an off-by-one day for east-of-UTC
  *   users. Defaults to `"UTC"`.
+ * @param narrowing - The report's status, custodian and asset filters
  */
 async function computeComplianceTrend(
   organizationId: string,
   timeframe: ResolvedTimeframe,
-  timeZone: string = "UTC"
+  timeZone: string = "UTC",
+  narrowing: Prisma.BookingWhereInput = {}
 ): Promise<ComplianceTrendPoint[]> {
   const periodMs = timeframe.to.getTime() - timeframe.from.getTime();
   const msPerDay = 24 * 60 * 60 * 1000;
@@ -913,6 +936,7 @@ async function computeComplianceTrend(
       archivedWithoutCheckin: false,
       // Planned end (originalTo ?? to) inside the timeframe.
       ...plannedEndInWindow(timeframe.from, timeframe.to),
+      ...narrowing,
     },
     select: {
       id: true,
@@ -1071,10 +1095,13 @@ function formatWeekLabel(start: Date, end: Date, timeZone: string): string {
  *
  * Returns custodians sorted by worst performance first (lowest compliance rate).
  * This helps identify team members who may need support or process improvements.
+ *
+ * @param narrowing - The report's status, custodian and asset filters
  */
 async function computeCustodianPerformance(
   organizationId: string,
-  timeframe: ResolvedTimeframe
+  timeframe: ResolvedTimeframe,
+  narrowing: Prisma.BookingWhereInput = {}
 ): Promise<CustodianPerformanceData[]> {
   // Fetch all measurable bookings (COMPLETE, OVERDUE, ARCHIVED) with custodian
   // info. Including OVERDUE/ARCHIVED ensures custodians with currently-late or
@@ -1087,6 +1114,7 @@ async function computeCustodianPerformance(
       archivedWithoutCheckin: false,
       // Planned end (originalTo ?? to), consistent with the main compliance query.
       ...plannedEndInWindow(timeframe.from, timeframe.to),
+      ...narrowing,
     },
     select: {
       id: true,
@@ -1197,8 +1225,6 @@ interface OverdueItemsArgs {
   organizationId: string;
   /** Workspace currency the money KPI value strings are formatted in. */
   currency: Currency;
-  /** Custodian by USER id (`Booking.custodianUserId`). */
-  custodianId?: string;
   /** Custodian by `TeamMember` id, as the filter bar's picker yields it. */
   custodianTeamMemberId?: string;
   /** Shared asset predicate: keeps bookings holding at least one matching asset. */
@@ -1222,7 +1248,6 @@ export async function overdueItemsReport(
   const {
     organizationId,
     currency,
-    custodianId,
     custodianTeamMemberId,
     assetFilter,
     page = 1,
@@ -1236,26 +1261,12 @@ export async function overdueItemsReport(
     const where: Prisma.BookingWhereInput = {
       organizationId,
       status: "OVERDUE",
+      ...bookingFilterWhere({
+        organizationId,
+        custodianTeamMemberId,
+        assetFilter,
+      }),
     };
-
-    if (custodianId) {
-      where.custodianUserId = custodianId;
-    }
-
-    if (custodianTeamMemberId) {
-      where.AND = [
-        custodianTeamMemberWhere(custodianTeamMemberId, organizationId),
-      ];
-    }
-
-    const bookingAssetWhere = bookingAssetFilterWhere(
-      organizationId,
-      undefined,
-      assetFilter
-    );
-    if (bookingAssetWhere) {
-      where.bookingAssets = { some: { asset: bookingAssetWhere } };
-    }
 
     // Fetch data in parallel
     const [rows, totalCount, kpis] = await Promise.all([
@@ -1583,8 +1594,6 @@ interface IdleAssetsArgs {
   currency: Currency;
   /** Number of days without activity to consider "idle" (default: 30) */
   idleThresholdDays?: number;
-  categoryId?: string;
-  locationId?: string;
   /** Shared asset predicate from the report filter bar. */
   assetFilter?: ReportAssetFilter;
   page?: number;
@@ -1621,8 +1630,6 @@ export async function idleAssetsReport(
     organizationId,
     currency,
     idleThresholdDays = 30,
-    categoryId,
-    locationId,
     assetFilter,
     page = 1,
     pageSize = 50,
@@ -1636,20 +1643,10 @@ export async function idleAssetsReport(
     cutoffDate.setDate(cutoffDate.getDate() - idleThresholdDays);
 
     // Build asset where clause (active inventory only, issue #382)
-    const baseAssetWhere: Prisma.AssetWhereInput = {
-      organizationId,
-      ...ACTIVE_INVENTORY_ASSET_FILTER,
-    };
-
-    if (categoryId) {
-      baseAssetWhere.categoryId = categoryId;
-    }
-
-    if (locationId) {
-      baseAssetWhere.assetLocations = { some: { locationId } };
-    }
-
-    const assetWhere = mergeAssetWhere(baseAssetWhere, assetFilter);
+    const assetWhere = mergeAssetWhere(
+      { organizationId, ...ACTIVE_INVENTORY_ASSET_FILTER },
+      assetFilter
+    );
 
     // Fetch data — `fetchIdleAssetRows` re-signs any expired thumbnail URLs
     // inline (see its body) so we don't need a separate refresh round-trip.
@@ -2041,7 +2038,6 @@ interface CustodySnapshotArgs {
   /** Workspace currency the money KPI value strings are formatted in. */
   currency: Currency;
   teamMemberId?: string;
-  locationId?: string;
   /** Shared asset predicate from the report filter bar. */
   assetFilter?: ReportAssetFilter;
   page?: number;
@@ -2064,7 +2060,6 @@ export async function custodySnapshotReport(
     organizationId,
     currency,
     teamMemberId,
-    locationId,
     assetFilter,
     page = 1,
     pageSize = 50,
@@ -2073,21 +2068,10 @@ export async function custodySnapshotReport(
   const startTime = performance.now();
 
   try {
-    // Build where clause for custody records. Location filtering operates on
-    // the underlying asset; the `"without-location"` sentinel mirrors the
-    // Simple-mode Assets index convention for "no location set".
-    const baseAssetWhere: Prisma.AssetWhereInput = { organizationId };
-    // Placement lives on the AssetLocation pivot — an asset can occupy
-    // multiple locations. "without-location" means no pivot rows at all;
-    // a concrete id means at least one pivot row points at it.
-    if (locationId === "without-location") {
-      baseAssetWhere.assetLocations = { none: {} };
-    } else if (locationId) {
-      baseAssetWhere.assetLocations = { some: { locationId } };
-    }
-
+    // Build where clause for custody records. Asset filters (including the
+    // "without location" choice) operate on the underlying asset.
     const where: Prisma.CustodyWhereInput = {
-      asset: mergeAssetWhere(baseAssetWhere, assetFilter),
+      asset: mergeAssetWhere({ organizationId }, assetFilter),
     };
 
     if (teamMemberId) {
@@ -2257,9 +2241,10 @@ async function computeCustodyKpis(
 
   // Fetch custody data for KPIs. `Custody` has no direct organizationId
   // column, so we scope through the related asset as a defense-in-depth
-  // guard alongside the caller-supplied `baseWhere`.
+  // guard. It is ANDed with `baseWhere`, never spread over it: `baseWhere`
+  // carries the filter bar's asset predicate on the same `asset` key.
   const custodyRecords = await db.custody.findMany({
-    where: { ...baseWhere, asset: { organizationId } },
+    where: { AND: [baseWhere, { asset: { organizationId } }] },
     select: {
       createdAt: true,
       teamMemberId: true,
@@ -2346,8 +2331,6 @@ async function computeCustodyKpis(
 interface TopBookedAssetsArgs {
   organizationId: string;
   timeframe: ResolvedTimeframe;
-  categoryId?: string;
-  locationId?: string;
   /** Shared asset predicate from the report filter bar. */
   assetFilter?: ReportAssetFilter;
   page?: number;
@@ -2369,8 +2352,6 @@ export async function topBookedAssetsReport(
   const {
     organizationId,
     timeframe,
-    categoryId,
-    locationId,
     assetFilter,
     page = 1,
     pageSize = 50,
@@ -2380,19 +2361,7 @@ export async function topBookedAssetsReport(
 
   try {
     // Build asset where clause
-    const baseAssetWhere: Prisma.AssetWhereInput = {
-      organizationId,
-    };
-
-    if (categoryId) {
-      baseAssetWhere.categoryId = categoryId;
-    }
-
-    if (locationId) {
-      baseAssetWhere.assetLocations = { some: { locationId } };
-    }
-
-    const assetWhere = mergeAssetWhere(baseAssetWhere, assetFilter);
+    const assetWhere = mergeAssetWhere({ organizationId }, assetFilter);
 
     // Fetch data — `fetchTopBookedAssetRows` re-signs expired thumbnail URLs
     // inline (see its body) for both the paginated rows and the topAsset.
@@ -3584,9 +3553,6 @@ interface AssetInventoryArgs {
   organizationId: string;
   /** Workspace currency the money KPI value strings are formatted in. */
   currency: Currency;
-  categoryIds?: string[];
-  locationIds?: string[];
-  statuses?: string[];
   /** Shared asset predicate from the report filter bar. */
   assetFilter?: ReportAssetFilter;
   page?: number;
@@ -3607,9 +3573,6 @@ export async function assetInventoryReport(
   const {
     organizationId,
     currency,
-    categoryIds,
-    locationIds,
-    statuses,
     assetFilter,
     page = 1,
     pageSize = 50,
@@ -3618,23 +3581,14 @@ export async function assetInventoryReport(
   const startTime = performance.now();
 
   try {
-    // The direct list arguments and the filter-bar predicate are both
-    // expressed through the shared builder, so the Prisma `where` the rows
-    // use and the SQL fragments the money KPI uses come from one source.
-    // Active inventory only (issue #382).
-    const argumentFilter = buildReportAssetFilter({
-      categoryIds,
-      locationIds,
-      statuses: statuses as AssetStatus[] | undefined,
-    });
+    // The filter-bar predicate comes in both forms from one builder, so the
+    // Prisma `where` the rows use and the SQL fragments the money KPI uses
+    // select the same assets. Active inventory only (issue #382).
     const where = mergeAssetWhere(
-      mergeAssetWhere(
-        { organizationId, ...ACTIVE_INVENTORY_ASSET_FILTER },
-        argumentFilter
-      ),
+      { organizationId, ...ACTIVE_INVENTORY_ASSET_FILTER },
       assetFilter
     );
-    const filterSql = [...argumentFilter.sql, ...(assetFilter?.sql ?? [])];
+    const filterSql = assetFilter?.sql ?? [];
 
     // Fetch data in parallel — `fetchInventoryRows` re-signs expired
     // thumbnail URLs inline (see its body); no separate refresh round-trip.
@@ -3869,8 +3823,6 @@ async function computeInventoryKpis(
 interface MonthlyBookingTrendsArgs {
   organizationId: string;
   timeframe: ResolvedTimeframe;
-  categoryId?: string;
-  locationId?: string;
   /** Shared asset predicate: keeps bookings holding at least one matching asset. */
   assetFilter?: ReportAssetFilter;
   page?: number;
@@ -3891,8 +3843,6 @@ export async function monthlyBookingTrendsReport(
   const {
     organizationId,
     timeframe,
-    categoryId,
-    locationId,
     assetFilter,
     page = 1,
     pageSize = 12,
@@ -3903,14 +3853,10 @@ export async function monthlyBookingTrendsReport(
   try {
     // Asset filters keep the bookings that hold at least one matching asset,
     // the same reading the top-booked reports give them.
-    const baseAssetWhere: Prisma.AssetWhereInput = { organizationId };
-    if (categoryId) baseAssetWhere.categoryId = categoryId;
-    if (locationId) baseAssetWhere.assetLocations = { some: { locationId } };
-    const assetNarrows =
-      !!categoryId || !!locationId || (!!assetFilter && !assetFilter.isEmpty);
-    const narrowedAssetWhere = assetNarrows
-      ? mergeAssetWhere(baseAssetWhere, assetFilter)
-      : null;
+    const narrowedAssetWhere =
+      assetFilter && !assetFilter.isEmpty
+        ? mergeAssetWhere({ organizationId }, assetFilter)
+        : null;
 
     // Fetch all bookings created in the timeframe. DRAFT and CANCELLED are
     // excluded so "Total Bookings" means the same thing it means in the
@@ -3935,8 +3881,15 @@ export async function monthlyBookingTrendsReport(
         // Distinguishes checked-in archives (completed bookings) from
         // never-checked-out ones — see `isReturnedBooking`.
         archivedWithoutCheckin: true,
-        // Pivot asset ids feed each month's unique-assets count.
-        bookingAssets: { select: { assetId: true } },
+        // Pivot asset ids feed each month's unique-assets count. Under an
+        // asset filter only the matching assets count: a booking with one
+        // matching projector and nine cables adds one asset, not ten.
+        bookingAssets: {
+          select: { assetId: true },
+          ...(narrowedAssetWhere && {
+            where: { asset: narrowedAssetWhere },
+          }),
+        },
       },
     });
 
@@ -4169,8 +4122,6 @@ export async function monthlyBookingTrendsReport(
 interface AssetUtilizationArgs {
   organizationId: string;
   timeframe: ResolvedTimeframe;
-  categoryId?: string;
-  locationId?: string;
   /** Shared asset predicate from the report filter bar. */
   assetFilter?: ReportAssetFilter;
   page?: number;
@@ -4223,8 +4174,6 @@ export async function assetUtilizationReport(
   const {
     organizationId,
     timeframe,
-    categoryId,
-    locationId,
     assetFilter,
     page = 1,
     pageSize = 50,
@@ -4234,10 +4183,7 @@ export async function assetUtilizationReport(
 
   try {
     // Build asset where clause
-    const baseAssetWhere: Prisma.AssetWhereInput = { organizationId };
-    if (categoryId) baseAssetWhere.categoryId = categoryId;
-    if (locationId) baseAssetWhere.assetLocations = { some: { locationId } };
-    const assetWhere = mergeAssetWhere(baseAssetWhere, assetFilter);
+    const assetWhere = mergeAssetWhere({ organizationId }, assetFilter);
 
     // Calculate total days in period
     const totalDays = Math.ceil(
@@ -4474,7 +4420,6 @@ interface AssetActivityArgs {
   organizationId: string;
   timeframe: ResolvedTimeframe;
   assetId?: string;
-  categoryId?: string;
   /** Shared asset predicate; narrows events to the matching assets. */
   assetFilter?: ReportAssetFilter;
   page?: number;
@@ -4496,7 +4441,6 @@ export async function assetActivityReport(
     organizationId,
     timeframe,
     assetId,
-    categoryId,
     assetFilter,
     page = 1,
     pageSize = 50,
@@ -4525,43 +4469,25 @@ export async function assetActivityReport(
       "BOOKING_CHECKED_IN",
     ];
 
-    // Build where clause for ActivityEvent
-    const where: Prisma.ActivityEventWhereInput = {
-      organizationId,
-      occurredAt: { gte: timeframe.from, lte: timeframe.to },
-      action: { in: assetActions },
-      assetId: assetId ? assetId : { not: null },
-    };
-
-    // Asset-level filters (category, location, model, custom field) reach
-    // the events through the ids of the matching assets. A chosen asset
-    // that the filters exclude yields no rows rather than escaping them.
-    const baseAssetWhere: Prisma.AssetWhereInput = { organizationId };
-    if (categoryId) baseAssetWhere.categoryId = categoryId;
-    if (categoryId || (assetFilter && !assetFilter.isEmpty)) {
-      const matchingAssets = await db.asset.findMany({
-        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: Activity is a history report; archived assets keep their events
-        where: mergeAssetWhere(baseAssetWhere, assetFilter),
-        select: { id: true },
-      });
-      const matchingAssetIds = matchingAssets.map((a) => a.id);
-      where.assetId = assetId
-        ? { in: matchingAssetIds.includes(assetId) ? [assetId] : [] }
-        : { in: matchingAssetIds };
-    }
-
-    // Fetch activity events
-    const [events, totalCount] = await Promise.all([
-      db.activityEvent.findMany({
-        where,
-        // `id` tiebreaker keeps skip/take paging deterministic for events
-        // sharing an `occurredAt` (bulk mutations emit same-instant events).
-        orderBy: [{ occurredAt: "desc" }, { id: "asc" }],
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-      }),
-      db.activityEvent.count({ where }),
-    ]);
+    const { events, totalCount, actionCounts, mostActive } =
+      assetFilter && !assetFilter.isEmpty
+        ? await fetchFilteredActivityEvents({
+            organizationId,
+            timeframe,
+            actions: assetActions,
+            assetId,
+            assetFilter,
+            page,
+            pageSize,
+          })
+        : await fetchActivityEvents({
+            organizationId,
+            timeframe,
+            actions: assetActions,
+            assetId,
+            page,
+            pageSize,
+          });
 
     // Get asset details for the events. `mainImage`, `mainImageExpiration`,
     // `organizationId` are selected so we can pipe assets through
@@ -4608,17 +4534,6 @@ export async function assetActivityReport(
       };
     });
 
-    // Calculate KPIs from ALL events (not just current page)
-    const allEventsForKpis = await db.activityEvent.groupBy({
-      by: ["action"],
-      where,
-      _count: { id: true },
-    });
-
-    const actionCounts = new Map(
-      allEventsForKpis.map((g) => [g.action, g._count.id])
-    );
-
     const custodyChanges =
       (actionCounts.get("CUSTODY_ASSIGNED") || 0) +
       (actionCounts.get("CUSTODY_RELEASED") || 0);
@@ -4626,20 +4541,11 @@ export async function assetActivityReport(
       (actionCounts.get("BOOKING_CHECKED_OUT") || 0) +
       (actionCounts.get("BOOKING_CHECKED_IN") || 0);
 
-    // Find most active asset
-    const assetActivityCounts = await db.activityEvent.groupBy({
-      by: ["assetId"],
-      where,
-      _count: { id: true },
-      orderBy: { _count: { id: "desc" } },
-      take: 1,
-    });
-
     let mostActiveName = "—";
-    if (assetActivityCounts.length > 0 && assetActivityCounts[0].assetId) {
+    if (mostActive) {
       const mostActiveAsset = await db.asset.findFirst({
         // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: Activity is a history report; the most active asset may be archived since
-        where: { id: assetActivityCounts[0].assetId, organizationId },
+        where: { id: mostActive.assetId, organizationId },
         select: { title: true },
       });
       mostActiveName = mostActiveAsset?.title || "—";
@@ -4677,7 +4583,7 @@ export async function assetActivityReport(
         id: "most_active_asset",
         label: "Most Active",
         value: mostActiveName,
-        rawValue: assetActivityCounts[0]?._count?.id || 0,
+        rawValue: mostActive?.count ?? 0,
         format: "number",
         delta: null,
         deltaType: "neutral",
@@ -4714,6 +4620,159 @@ export async function assetActivityReport(
       additionalData: { organizationId },
     });
   }
+}
+
+/** Arguments shared by the two Asset Activity event readers. */
+interface ActivityEventQueryArgs {
+  organizationId: string;
+  timeframe: ResolvedTimeframe;
+  actions: ActivityAction[];
+  /** One asset chosen in the URL; otherwise every asset's events. */
+  assetId: string | undefined;
+  page: number;
+  pageSize: number;
+}
+
+/** One page of Asset Activity events plus the counts its KPIs read. */
+interface ActivityEventPage {
+  events: Prisma.ActivityEventGetPayload<object>[];
+  totalCount: number;
+  /** Event count per action across every page. */
+  actionCounts: Map<ActivityAction, number>;
+  /** The asset with the most events, or `null` when there are none. */
+  mostActive: { assetId: string; count: number } | null;
+}
+
+/**
+ * Reads one page of asset events, unfiltered by asset attributes, through
+ * Prisma.
+ */
+async function fetchActivityEvents({
+  organizationId,
+  timeframe,
+  actions,
+  assetId,
+  page,
+  pageSize,
+}: ActivityEventQueryArgs): Promise<ActivityEventPage> {
+  const where: Prisma.ActivityEventWhereInput = {
+    organizationId,
+    occurredAt: { gte: timeframe.from, lte: timeframe.to },
+    action: { in: actions },
+    assetId: assetId ? assetId : { not: null },
+  };
+
+  const [events, totalCount, byAction, byAsset] = await Promise.all([
+    db.activityEvent.findMany({
+      where,
+      // `id` tiebreaker keeps skip/take paging deterministic for events
+      // sharing an `occurredAt` (bulk mutations emit same-instant events).
+      orderBy: [{ occurredAt: "desc" }, { id: "asc" }],
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+    db.activityEvent.count({ where }),
+    db.activityEvent.groupBy({
+      by: ["action"],
+      where,
+      _count: { id: true },
+    }),
+    db.activityEvent.groupBy({
+      by: ["assetId"],
+      where,
+      _count: { id: true },
+      orderBy: { _count: { id: "desc" } },
+      take: 1,
+    }),
+  ]);
+
+  const top = byAsset[0];
+  return {
+    events,
+    totalCount,
+    actionCounts: new Map(byAction.map((g) => [g.action, g._count.id])),
+    mostActive: top?.assetId
+      ? { assetId: top.assetId, count: top._count.id }
+      : null,
+  };
+}
+
+/**
+ * Reads one page of asset events for the assets matching the filter bar.
+ *
+ * Events carry an asset id but no relation to filter through, and the
+ * matching assets can number in the tens of thousands, so they are never
+ * loaded as an id list: the asset predicate's SQL form runs as a subquery.
+ * Only the page's own event ids (at most `pageSize`) go back through Prisma.
+ */
+async function fetchFilteredActivityEvents({
+  organizationId,
+  timeframe,
+  actions,
+  assetId,
+  assetFilter,
+  page,
+  pageSize,
+}: ActivityEventQueryArgs & {
+  assetFilter: ReportAssetFilter;
+}): Promise<ActivityEventPage> {
+  // Activity is a history report: archived assets keep their events, so the
+  // subquery does not exclude them.
+  const assetWhereSql = Prisma.join(
+    [Prisma.sql`"organizationId" = ${organizationId}`, ...assetFilter.sql],
+    " AND "
+  );
+  const eventWhereSql = Prisma.sql`
+    e."organizationId" = ${organizationId}
+    AND e."occurredAt" >= ${timeframe.from}
+    AND e."occurredAt" <= ${timeframe.to}
+    AND e.action::text = ANY(${actions})
+    AND e."assetId" IN (SELECT id FROM "Asset" WHERE ${assetWhereSql})
+    ${assetId ? Prisma.sql`AND e."assetId" = ${assetId}` : Prisma.empty}
+  `;
+
+  const [pageRows, byAction, byAsset] = await Promise.all([
+    db.$queryRaw<{ id: string }[]>(Prisma.sql`
+      SELECT e.id
+      FROM "ActivityEvent" e
+      WHERE ${eventWhereSql}
+      ORDER BY e."occurredAt" DESC, e.id ASC
+      LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}
+    `),
+    db.$queryRaw<{ action: ActivityAction; count: number }[]>(Prisma.sql`
+      SELECT e.action::text AS action, COUNT(*)::int AS count
+      FROM "ActivityEvent" e
+      WHERE ${eventWhereSql}
+      GROUP BY e.action
+    `),
+    db.$queryRaw<{ assetId: string; count: number }[]>(Prisma.sql`
+      SELECT e."assetId" AS "assetId", COUNT(*)::int AS count
+      FROM "ActivityEvent" e
+      WHERE ${eventWhereSql}
+      GROUP BY e."assetId"
+      ORDER BY count DESC
+      LIMIT 1
+    `),
+  ]);
+
+  const events =
+    pageRows.length > 0
+      ? await db.activityEvent.findMany({
+          where: { id: { in: pageRows.map((r) => r.id) }, organizationId },
+          orderBy: [{ occurredAt: "desc" }, { id: "asc" }],
+        })
+      : [];
+
+  // Every event matched one of `actions`, so the per-action counts sum to
+  // the total.
+  const totalCount = byAction.reduce((sum, row) => sum + row.count, 0);
+  const top = byAsset[0];
+  return {
+    events,
+    totalCount,
+    actionCounts: new Map(byAction.map((row) => [row.action, row.count])),
+    mostActive: top ? { assetId: top.assetId, count: top.count } : null,
+  };
 }
 
 /** Map ActivityAction enum to the report's activity type */

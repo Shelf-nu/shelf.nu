@@ -13,7 +13,10 @@
  * - {@link loadReportFilterOptions} loads the pick-lists the filter bar
  *   renders: the first page of categories, locations, custodians and asset
  *   models (the dropdowns search the rest through `/api/model-filters`), the
- *   status choices, and the custom fields with the values they hold.
+ *   status choices, and the custom fields. OPTION and BOOLEAN fields carry
+ *   their values; a TEXT field's values are an aggregate over every asset, so
+ *   {@link loadCustomFieldValues} reads them only when the picker opens that
+ *   field (`api+/reports.custom-field-values.ts`).
  *
  * @see {@link file://./filter-params.ts} the URL grammar
  * @see {@link file://./asset-filter.ts} the predicate builder
@@ -31,6 +34,7 @@ import {
   BOOLEAN_FILTER_VALUES,
   buildReportAssetFilter,
   isReportFilterableCustomFieldType,
+  parseBooleanFilterValue,
   type ReportAssetFilter,
   type ResolvedCustomFieldValue,
 } from "./asset-filter";
@@ -65,6 +69,12 @@ export interface ResolvedReportFilters {
   assetId: string | null;
   /** Labelled chips, in URL order. */
   active: ActiveReportFilter[];
+  /**
+   * How many requested filter values were left out: ids that no longer exist
+   * in the workspace (or never did) and values a field cannot read. The page
+   * says so, because a dropped filter otherwise looks like a filtered report.
+   */
+  ignoredCount: number;
 }
 
 /** How many entries a dropdown receives up front; it searches for the rest. */
@@ -123,13 +133,13 @@ function narrowStatuses(
   };
 }
 
-/** Display text for a custom-field chip value. */
+/**
+ * Display text for a custom-field chip value. Reads a boolean through the same
+ * parser the predicate uses, so the chip and the rows cannot disagree.
+ */
 function customFieldValueLabel(type: CustomFieldType, value: string): string {
   if (type !== "BOOLEAN") return value;
-  return value.trim().toLowerCase() === BOOLEAN_FILTER_VALUES.yes ||
-    value.trim().toLowerCase() === "true"
-    ? "Yes"
-    : "No";
+  return parseBooleanFilterValue(value) ? "Yes" : "No";
 }
 
 /**
@@ -179,6 +189,7 @@ export async function resolveReportFilters({
       teamMemberId: null,
       assetId: null,
       active: [],
+      ignoredCount: 0,
     };
   }
 
@@ -210,7 +221,16 @@ export async function resolveReportFilters({
           : [],
         params.teamMemberId
           ? db.teamMember.findFirst({
-              where: { id: params.teamMemberId, organizationId },
+              // Links written before the filter bar (Overdue Items'
+              // `custodian=`) carry the custodian's USER id; both resolve to
+              // the workspace's team member.
+              where: {
+                organizationId,
+                OR: [
+                  { id: params.teamMemberId },
+                  { userId: params.teamMemberId },
+                ],
+              },
               select: {
                 id: true,
                 name: true,
@@ -254,6 +274,13 @@ export async function resolveReportFilters({
     for (const filter of params.customFieldValues) {
       const field = customFieldById.get(filter.customFieldId);
       if (!field || !isReportFilterableCustomFieldType(field.type)) continue;
+      // The predicate ignores a boolean it cannot read; so does the chip.
+      if (
+        field.type === "BOOLEAN" &&
+        parseBooleanFilterValue(filter.value) === null
+      ) {
+        continue;
+      }
       customFieldValues.push({ ...filter, type: field.type });
     }
 
@@ -276,11 +303,13 @@ export async function resolveReportFilters({
         }`,
       });
     }
-    if (teamMember) {
+    if (teamMember && params.teamMemberId) {
       active.push({
         type: "team_member",
         param: REPORT_FILTER_PARAM.teamMember,
-        value: teamMember.id,
+        // The value the URL holds (a user id on a legacy link), so removing
+        // the chip removes it.
+        value: params.teamMemberId,
         label: `Custodian: ${resolveTeamMemberName(teamMember)}`,
       });
     }
@@ -336,6 +365,13 @@ export async function resolveReportFilters({
       teamMemberId: teamMember?.id ?? null,
       assetId: params.assetId,
       active,
+      ignoredCount:
+        params.categoryIds.length -
+        categoryIds.length +
+        (params.locationIds.length - locationIds.length) +
+        (params.assetModelIds.length - assetModelIds.length) +
+        (params.teamMemberId && !teamMember ? 1 : 0) +
+        (params.customFieldValues.length - customFieldValues.length),
     };
   } catch (cause) {
     throw new ShelfError({
@@ -347,60 +383,81 @@ export async function resolveReportFilters({
   }
 }
 
-/** A distinct stored value of a TEXT custom field, with how often it occurs. */
+/** A distinct stored value of a TEXT custom field, ranked by frequency. */
 type CustomFieldValueRow = {
-  customFieldId: string;
   value: string;
   rowNumber: number;
 };
 
 /**
- * Loads the distinct `raw` values of the given TEXT fields, most frequent
- * first, one row past the limit per field so the caller can tell that more
- * exist. Scoped through `Asset.organizationId`: a field id belongs to one
- * workspace already, and the join keeps it that way if that ever changes.
+ * Loads the distinct `raw` values one TEXT custom field holds in the
+ * workspace, most frequent first, for the filter bar's value picker.
+ *
+ * Reads one row past {@link CUSTOM_FIELD_VALUES_LIMIT} so the caller can tell
+ * that more exist and offer an exact-text input. Values are returned
+ * verbatim, spaces included, because the filter compares them exactly.
+ *
+ * @param args.organizationId - The current workspace
+ * @param args.customFieldId - The field the picker opened
+ * @returns The values; empty when the field is not an active TEXT field of
+ *   this workspace
+ * @throws {ShelfError} When a query fails
  */
-async function loadTextCustomFieldValues(
-  organizationId: string,
-  customFieldIds: string[]
-): Promise<Map<string, { values: string[]; hasMore: boolean }>> {
-  const result = new Map<string, { values: string[]; hasMore: boolean }>();
-  if (customFieldIds.length === 0) return result;
+export async function loadCustomFieldValues({
+  organizationId,
+  customFieldId,
+}: {
+  organizationId: string;
+  customFieldId: string;
+}): Promise<{ values: string[]; hasMore: boolean }> {
+  try {
+    const field = await db.customField.findFirst({
+      where: {
+        id: customFieldId,
+        organizationId,
+        type: "TEXT",
+        active: true,
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+    if (!field) return { values: [], hasMore: false };
 
-  const rows = await db.$queryRaw<CustomFieldValueRow[]>(Prisma.sql`
-    SELECT "customFieldId", value, "rowNumber"
-    FROM (
-      SELECT
-        v."customFieldId" AS "customFieldId",
-        v.value->>'raw' AS value,
-        ROW_NUMBER() OVER (
-          PARTITION BY v."customFieldId"
-          ORDER BY COUNT(*) DESC, v.value->>'raw' ASC
-        )::int AS "rowNumber"
-      FROM "AssetCustomFieldValue" v
-      JOIN "Asset" a ON a.id = v."assetId"
-      WHERE a."organizationId" = ${organizationId}
-        AND v."customFieldId" IN (${Prisma.join(customFieldIds)})
-        AND NULLIF(TRIM(v.value->>'raw'), '') IS NOT NULL
-      GROUP BY v."customFieldId", v.value->>'raw'
-    ) ranked
-    WHERE "rowNumber" <= ${CUSTOM_FIELD_VALUES_LIMIT + 1}
-    ORDER BY "customFieldId", "rowNumber"
-  `);
+    // Scoped through `Asset.organizationId` as well: a field id belongs to
+    // one workspace already, and the join keeps it that way.
+    const rows = await db.$queryRaw<CustomFieldValueRow[]>(Prisma.sql`
+      SELECT value, "rowNumber"
+      FROM (
+        SELECT
+          v.value->>'raw' AS value,
+          ROW_NUMBER() OVER (
+            ORDER BY COUNT(*) DESC, v.value->>'raw' ASC
+          )::int AS "rowNumber"
+        FROM "AssetCustomFieldValue" v
+        JOIN "Asset" a ON a.id = v."assetId"
+        WHERE a."organizationId" = ${organizationId}
+          AND v."customFieldId" = ${field.id}
+          AND NULLIF(TRIM(v.value->>'raw'), '') IS NOT NULL
+        GROUP BY v.value->>'raw'
+      ) ranked
+      WHERE "rowNumber" <= ${CUSTOM_FIELD_VALUES_LIMIT + 1}
+      ORDER BY "rowNumber"
+    `);
 
-  for (const row of rows) {
-    const entry = result.get(row.customFieldId) ?? {
-      values: [],
-      hasMore: false,
+    return {
+      values: rows
+        .filter((row) => row.rowNumber <= CUSTOM_FIELD_VALUES_LIMIT)
+        .map((row) => row.value),
+      hasMore: rows.some((row) => row.rowNumber > CUSTOM_FIELD_VALUES_LIMIT),
     };
-    if (row.rowNumber > CUSTOM_FIELD_VALUES_LIMIT) {
-      entry.hasMore = true;
-    } else {
-      entry.values.push(row.value);
-    }
-    result.set(row.customFieldId, entry);
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to load the custom field values",
+      additionalData: { organizationId, customFieldId },
+      label,
+    });
   }
-  return result;
 }
 
 /**
@@ -510,10 +567,6 @@ export async function loadReportFilterOptions({
     const filterableFields = customFieldDefs.filter((f) =>
       isReportFilterableCustomFieldType(f.type)
     );
-    const textValues = await loadTextCustomFieldValues(
-      organizationId,
-      filterableFields.filter((f) => f.type === "TEXT").map((f) => f.id)
-    );
 
     const customFields: ReportCustomFieldOption[] = filterableFields.map(
       (field) => {
@@ -524,6 +577,7 @@ export async function loadReportFilterOptions({
             type: field.type,
             values: field.options,
             hasMoreValues: false,
+            valuesOnDemand: false,
           };
         }
         if (field.type === "BOOLEAN") {
@@ -533,15 +587,16 @@ export async function loadReportFilterOptions({
             type: field.type,
             values: [BOOLEAN_FILTER_VALUES.yes, BOOLEAN_FILTER_VALUES.no],
             hasMoreValues: false,
+            valuesOnDemand: false,
           };
         }
-        const loaded = textValues.get(field.id);
         return {
           id: field.id,
           name: field.name,
           type: field.type,
-          values: loaded?.values ?? [],
-          hasMoreValues: loaded?.hasMore ?? false,
+          values: [],
+          hasMoreValues: false,
+          valuesOnDemand: true,
         };
       }
     );

@@ -47,7 +47,8 @@ export interface ReportAssetFilter {
   where: Prisma.AssetWhereInput;
   /**
    * Raw-SQL form: fragments to `AND` into a query over `"Asset"` with no
-   * table alias, matching the existing KPI queries in `helpers.server.ts`.
+   * table alias. Correlated subqueries reference the row as `"Asset".id`, so
+   * an aliased `FROM "Asset" a` would break them.
    */
   sql: Prisma.Sql[];
   /** True when no filter is set, so callers can skip merging entirely. */
@@ -80,7 +81,7 @@ export const BOOLEAN_FILTER_VALUES = {
  *
  * @returns `true`/`false`, or `null` for anything that is not yes/no
  */
-function parseBooleanFilterValue(value: string): boolean | null {
+export function parseBooleanFilterValue(value: string): boolean | null {
   const normalized = value.trim().toLowerCase();
   if (normalized === BOOLEAN_FILTER_VALUES.yes || normalized === "true") {
     return true;
@@ -185,23 +186,23 @@ export function buildReportAssetFilter(
       assetLocations: { none: {} },
     };
 
+    // Correlated on the asset row, so each check reads only that asset's
+    // placements through the `assetId` index.
+    const placedSql = (ids: string[]) =>
+      Prisma.sql`EXISTS (SELECT 1 FROM "AssetLocation" al WHERE al."assetId" = "Asset".id AND al."locationId" IN (${Prisma.join(
+        ids
+      )}))`;
+    const unplacedSql = Prisma.sql`NOT EXISTS (SELECT 1 FROM "AssetLocation" al WHERE al."assetId" = "Asset".id)`;
+
     if (wantsUnplaced && realLocationIds.length > 0) {
       and.push({ OR: [placedWhere, unplacedWhere] });
-      sql.push(
-        Prisma.sql`(id IN (SELECT "assetId" FROM "AssetLocation" WHERE "locationId" IN (${Prisma.join(
-          realLocationIds
-        )})) OR id NOT IN (SELECT "assetId" FROM "AssetLocation"))`
-      );
+      sql.push(Prisma.sql`(${placedSql(realLocationIds)} OR ${unplacedSql})`);
     } else if (wantsUnplaced) {
       and.push(unplacedWhere);
-      sql.push(Prisma.sql`id NOT IN (SELECT "assetId" FROM "AssetLocation")`);
+      sql.push(unplacedSql);
     } else {
       and.push(placedWhere);
-      sql.push(
-        Prisma.sql`id IN (SELECT "assetId" FROM "AssetLocation" WHERE "locationId" IN (${Prisma.join(
-          realLocationIds
-        )}))`
-      );
+      sql.push(placedSql(realLocationIds));
     }
   }
 

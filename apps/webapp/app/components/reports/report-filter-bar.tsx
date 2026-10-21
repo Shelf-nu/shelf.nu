@@ -58,6 +58,8 @@ type Props = {
   filterConfigs: ReportFilterConfig[];
   /** Filters currently applied, labelled by the loader. */
   activeFilters: ActiveReportFilter[];
+  /** Filters the link named that no longer exist, left out by the loader. */
+  ignoredFilterCount: number;
   /** Pick-lists for the declared filters. */
   filterOptions: ReportFilterOptions;
 };
@@ -97,6 +99,7 @@ export function ReportFilterBar({
   isLoading,
   filterConfigs,
   activeFilters,
+  ignoredFilterCount,
   filterOptions,
 }: Props) {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -243,7 +246,11 @@ export function ReportFilterBar({
         </div>
       ) : null}
 
-      <ActiveFilterChips filters={activeFilters} disabled={isLoading} />
+      <ActiveFilterChips
+        filters={activeFilters}
+        ignoredCount={ignoredFilterCount}
+        disabled={isLoading}
+      />
     </div>
   );
 }

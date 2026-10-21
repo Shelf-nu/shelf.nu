@@ -82,6 +82,10 @@ export function encodeCustomFieldParam(filter: CustomFieldValueParam): string {
 /**
  * Parses one `cf` query value.
  *
+ * The value is kept exactly as written, spaces included: it is compared with
+ * the stored text, which the picker offers verbatim, so trimming it would
+ * make a stored `"Room 4 "` impossible to match.
+ *
  * @param raw - The query value as written, e.g. `clx123:yes`
  * @returns The filter, or `null` when the id or the value is missing
  */
@@ -92,8 +96,8 @@ export function decodeCustomFieldParam(
   if (separatorIndex <= 0) return null;
 
   const customFieldId = raw.slice(0, separatorIndex).trim();
-  const value = raw.slice(separatorIndex + 1).trim();
-  if (!customFieldId || !value) return null;
+  const value = raw.slice(separatorIndex + 1);
+  if (!customFieldId || !value.trim()) return null;
 
   return { customFieldId, value };
 }
@@ -209,3 +213,77 @@ export const ALL_REPORT_FILTER_PARAM_KEYS: readonly string[] = [
   ...Object.values(REPORT_FILTER_PARAM),
   ...Object.values(LEGACY_REPORT_FILTER_PARAM),
 ];
+
+/** Current multi-value keys whose values may arrive comma-joined. */
+const MULTI_VALUE_KEYS: readonly string[] = [
+  REPORT_FILTER_PARAM.category,
+  REPORT_FILTER_PARAM.location,
+  REPORT_FILTER_PARAM.status,
+  REPORT_FILTER_PARAM.assetModel,
+];
+
+/** Each legacy key and the current key it is read as. */
+const LEGACY_TO_CURRENT: Readonly<Record<string, string>> = {
+  [LEGACY_REPORT_FILTER_PARAM.categories]: REPORT_FILTER_PARAM.category,
+  [LEGACY_REPORT_FILTER_PARAM.locations]: REPORT_FILTER_PARAM.location,
+  [LEGACY_REPORT_FILTER_PARAM.statuses]: REPORT_FILTER_PARAM.status,
+  [LEGACY_REPORT_FILTER_PARAM.custodian]: REPORT_FILTER_PARAM.teamMember,
+};
+
+/**
+ * Rewrites a query string into the form the filter bar writes: current keys
+ * only, one value per repeated key. Chips and pickers add and remove single
+ * `key=value` pairs, so a legacy or comma-joined link has to be brought into
+ * this form before they can act on it.
+ *
+ * Custom-field values are left alone: they may contain commas. A legacy
+ * single-value key is dropped when its current key is also present, the same
+ * precedence {@link parseReportFilterParams} applies.
+ *
+ * @param searchParams - The request's query string
+ * @returns The canonical query string, or `null` when it already is canonical
+ */
+export function canonicalReportFilterSearch(
+  searchParams: URLSearchParams
+): URLSearchParams | null {
+  const next = new URLSearchParams();
+  const seen = new Set<string>();
+  let changed = false;
+
+  for (const [rawKey, rawValue] of searchParams.entries()) {
+    const key = LEGACY_TO_CURRENT[rawKey] ?? rawKey;
+    if (key !== rawKey) changed = true;
+
+    if (key === REPORT_FILTER_PARAM.teamMember) {
+      // Single value: the current key wins over its legacy alias.
+      const current = searchParams.get(REPORT_FILTER_PARAM.teamMember);
+      if (rawKey !== REPORT_FILTER_PARAM.teamMember && current) continue;
+      if (seen.has(key)) {
+        changed = true;
+        continue;
+      }
+      seen.add(key);
+      next.append(key, rawValue.trim());
+      continue;
+    }
+
+    if (!MULTI_VALUE_KEYS.includes(key)) {
+      next.append(rawKey, rawValue);
+      continue;
+    }
+
+    const pieces = rawValue.split(",").map((piece) => piece.trim());
+    if (pieces.length !== 1 || pieces[0] !== rawValue) changed = true;
+    for (const value of pieces) {
+      const pair = `${key}=${value}`;
+      if (!value || seen.has(pair)) {
+        changed = true;
+        continue;
+      }
+      seen.add(pair);
+      next.append(key, value);
+    }
+  }
+
+  return changed ? next : null;
+}

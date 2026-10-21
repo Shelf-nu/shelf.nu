@@ -32,6 +32,7 @@ import {
   useReportRowHandlers,
 } from "~/components/reports";
 import { auditCompletionReport } from "~/modules/reports/audit-completion.server";
+import { canonicalReportFilterSearch } from "~/modules/reports/filter-params";
 import {
   loadReportFilterOptions,
   resolveReportFilters,
@@ -96,10 +97,13 @@ export const handle = {
  * defaults rather than reaching the report as `NaN`.
  *
  * Reports are part of the Plus and Team plans: when the workspace's plan does
- * not include them, the loader redirects to `/reports`, the unlock page.
+ * not include them, the loader redirects to `/reports`, the unlock page. A
+ * filter link in a legacy or comma-joined spelling redirects to the same
+ * report in the form the filter bar edits.
  *
  * @returns The report's data for the current filters, its id, and the page
- *   header; or a redirect to `/reports` when the plan does not include reports
+ *   header; or a redirect to `/reports` when the plan does not include
+ *   reports, or to the canonical filter link
  * @throws A route error response carrying the failure's status: 404 for an
  *   unknown report; 403 for one not yet enabled, or when the caller lacks
  *   `reports: read`
@@ -159,6 +163,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     // Parse search params for filters
     const url = new URL(request.url);
+
+    // Chips and pickers add and remove single `key=value` pairs, so a link in
+    // a legacy spelling (`statuses=a,b`, `custodian=`) is first rewritten to
+    // the form they edit.
+    const canonicalSearch = canonicalReportFilterSearch(url.searchParams);
+    if (canonicalSearch) {
+      const query = canonicalSearch.toString();
+      return redirect(query ? `${url.pathname}?${query}` : url.pathname);
+    }
+
     const timeframePreset =
       (url.searchParams.get("timeframe") as TimeframePreset) || "last_30d";
     const customFrom = url.searchParams.get("from");
@@ -358,6 +372,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       filterOptions,
       filterConfigs: reportDef.filters,
       activeFilters: reportFilters.active,
+      ignoredFilterCount: reportFilters.ignoredCount,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, reportId });
@@ -390,6 +405,7 @@ export default function ReportPage() {
     filterOptions,
     filterConfigs,
     activeFilters,
+    ignoredFilterCount,
   } = loaderData as typeof loaderData & {
     complianceData?: ComplianceData;
     topBookedAsset?: TopBookedAssetRow | null;
@@ -424,6 +440,7 @@ export default function ReportPage() {
           isLoading={isLoading}
           filterConfigs={filterConfigs}
           activeFilters={activeFilters}
+          ignoredFilterCount={ignoredFilterCount}
           filterOptions={filterOptions}
         />
 

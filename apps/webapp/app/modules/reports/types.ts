@@ -130,11 +130,31 @@ export interface ReportCustomFieldOption {
   id: string;
   name: string;
   type: CustomFieldType;
-  /** Values to pick from; OPTION lists its options, BOOLEAN yes/no. */
+  /**
+   * Values to pick from; OPTION lists its options, BOOLEAN yes/no. Empty
+   * when {@link valuesOnDemand} is set.
+   */
   values: string[];
   /** True when a TEXT field holds more distinct values than were loaded. */
   hasMoreValues: boolean;
+  /**
+   * True for TEXT fields: the picker loads their values from
+   * `/api/reports/custom-field-values` when the field is opened.
+   */
+  valuesOnDemand: boolean;
 }
+
+/**
+ * What `/api/reports/custom-field-values` answers: one TEXT field's distinct
+ * values, most frequent first.
+ */
+export type ReportCustomFieldValuesPayload = {
+  /** The field the values belong to, so a late answer cannot label another. */
+  customFieldId: string;
+  values: string[];
+  /** True when the field holds more values than were returned. */
+  hasMore: boolean;
+};
 
 /** One selectable status for the status dropdown. */
 export interface ReportStatusOption {
