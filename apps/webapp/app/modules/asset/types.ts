@@ -115,42 +115,6 @@ export interface CreateAssetFromContentImportPayload
   consumptionType?: "ONE_WAY" | "TWO_WAY";
 }
 
-export interface CreateAssetFromBackupImportPayload
-  extends Record<string, any> {
-  id: string;
-  title: string;
-  description?: string;
-  category:
-    | {
-        id: string;
-        name: string;
-        description: string;
-        color: string;
-        createdAt: string;
-        updatedAt: string;
-        userId: string;
-      }
-    | {};
-  tags: {
-    name: string;
-  }[];
-  location:
-    | {
-        name: string;
-        description?: string;
-        address?: string;
-        createdAt: string;
-        updatedAt: string;
-      }
-    | {};
-  customFields: AssetCustomFieldsValuesWithFields[];
-}
-
-export type AssetCustomFieldsValuesWithFields =
-  ShelfAssetCustomFieldValueType & {
-    customField: CustomField;
-  };
-
 /** Item returned by getAssetsFromView */
 export type AssetsFromViewItem = Prisma.AssetGetPayload<{
   include: Return<typeof assetIndexFields>;
@@ -216,6 +180,7 @@ export type AdvancedIndexAsset = Pick<
   | "minQuantity"
   | "consumptionType"
   | "availableToBook"
+  | "archivedAt"
 > & {
   qrId: string; // QR code will always be available
   /**
@@ -352,6 +317,8 @@ export type AdvancedIndexAsset = Pick<
   >;
   bookings?: Array<AdvancedAssetBooking>;
   barcodes?: Array<Pick<Barcode, "id" | "type" | "value">>;
+  /** ISO UTC completion time of the latest finished audit covering the asset. */
+  lastAuditDate?: string | null;
 };
 // Type for the entire query result
 export type AdvancedIndexQueryResult = Array<{
@@ -365,3 +332,12 @@ export interface CustomFieldSorting {
   alias: string;
   fieldType?: CustomFieldType;
 }
+
+/**
+ * The "active vs archived" view dimension for asset lists. This is orthogonal
+ * to the per-status (AVAILABLE/IN_CUSTODY/CHECKED_OUT) filter — see issue #382.
+ * - `active`   → only non-archived assets (the default everywhere).
+ * - `archived` → only archived assets (the "Archived" view).
+ * - `all`      → both.
+ */
+export type ArchivedFilter = "active" | "archived" | "all";

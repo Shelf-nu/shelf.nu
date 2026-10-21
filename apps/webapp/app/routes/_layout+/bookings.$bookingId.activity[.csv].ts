@@ -28,7 +28,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const { canSeeAllBookings } = await requirePermission({
+    const { access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.bookingNote,
@@ -51,7 +51,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * scope alone would let either role export any booking's activity feed by
      * id. Mirrors the gate on the activity route this CSV mirrors.
      */
-    if (!canSeeBooking({ canSeeAllBookings, booking, userId })) {
+    if (!canSeeBooking({ access, booking, userId })) {
       throw new ShelfError({
         cause: null,
         message: "You are not authorized to view this booking",

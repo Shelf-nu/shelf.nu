@@ -7,9 +7,13 @@
  * across their other workspaces, and the response carries the OWNING
  * `organizationId` so the app can offer to switch and open it there.
  *
+ * A linked asset carries only the custody the caller may see in the owning
+ * workspace, as on the asset detail.
+ *
  * @see {@link file://./qr.$qrId.ts} the QR twin of this route
  * @see {@link file://./../../../modules/api/mobile-auth.server.ts} MOBILE_ASSET_SELECT and the shape helpers
  */
+import { ScanCodeType, ScanSource } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
@@ -18,10 +22,12 @@ import {
   requireOrganizationAccess,
   MOBILE_ASSET_SELECT,
   MOBILE_KIT_SELECT,
-  resignAndShapeMobileAsset,
   shapeMobileKitResponse,
 } from "~/modules/api/mobile-auth.server";
+import { shapeScannedAssetForViewer } from "~/modules/api/mobile-code-resolve.server";
 import { getBarcodeByValue } from "~/modules/barcode/service.server";
+import { parseScanGeolocation } from "~/modules/scan/geolocation.server";
+import { recordScanNonFatal } from "~/modules/scan/service.server";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
 import { readRawLastPathSegment } from "~/utils/raw-path-param";
@@ -36,6 +42,12 @@ import { canUseBarcodes } from "~/utils/subscription.server";
  * Requires the workspace to hold the barcode capability (`canUseBarcodes`),
  * which every workspace holds on a self-hosted deployment — there is no
  * billing there to gate on.
+ *
+ * Records the scan as `COMPANION` with a note on a scanned asset. The
+ * companion's audit scanner resolves barcodes here too: it marks those calls
+ * with `X-Scan-Context: audit`, which records the scan as `AUDIT` with no note
+ * (the audit keeps its own trail). Optional `X-Scan-Latitude` /
+ * `X-Scan-Longitude` headers are stored as the scan's position.
  *
  * @returns 200 with the barcode, its owning `organizationId`, and the linked
  *   asset or kit; 403 when the workspace lacks the capability; 404 when the
@@ -195,6 +207,25 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       );
     }
 
+    const isAuditScan =
+      request.headers.get("x-scan-context")?.toLowerCase() === "audit";
+
+    // Non-fatal: a failed record never fails the resolve. The note and the
+    // row belong to the workspace that owns the barcode.
+    await recordScanNonFatal({
+      codeType: ScanCodeType.BARCODE,
+      code: value,
+      source: isAuditScan ? ScanSource.AUDIT : ScanSource.COMPANION,
+      userAgent: request.headers.get("user-agent") ?? "mobile-companion",
+      userId: user.id,
+      barcodeId: foundBarcode.id,
+      assetId: foundBarcode.assetId,
+      kitId: foundBarcode.kitId,
+      organizationId: foundOrganizationId,
+      ...(parseScanGeolocation(request.headers) ?? {}),
+      writeNote: !isAuditScan,
+    });
+
     return data({
       barcode: {
         id: foundBarcode.id,
@@ -210,12 +241,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         // the flat `asset.kit` / `.location` / `.custody` shape the companion
         // build in the App Store consumes. Mirrors qr.$qrId.ts; see
         // MOBILE_ASSET_SELECT for the full shape.
-        // Re-signed against the workspace that owns the barcode.
+        // Re-signed, and custody scoped, in the workspace that owns the
+        // barcode.
         asset: foundBarcode.asset
-          ? await resignAndShapeMobileAsset(
-              foundBarcode.asset,
-              foundOrganizationId
-            )
+          ? await shapeScannedAssetForViewer({
+              asset: foundBarcode.asset,
+              organizationId: foundOrganizationId,
+              viewerUserId: user.id,
+            })
           : null,
         // Kit-linked barcodes return the kit so the scanner can batch-operate
         // on it. shapeMobileKitResponse handles null pass-through.

@@ -383,6 +383,9 @@ export async function getUpcomingRemindersForHomePage({
         alertDateTime: {
           gte: new Date(),
         },
+        // A reminder on an archived asset will not fire, so it is not
+        // upcoming. It stays listed, marked, on /reminders.
+        asset: { archivedAt: null },
       },
       take,
       include: ASSET_REMINDER_INCLUDE_FIELDS,

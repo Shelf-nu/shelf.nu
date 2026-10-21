@@ -39,6 +39,19 @@ describe("resolveFillHeight", () => {
     ).toBe(869);
   });
 
+  it("leaves room for the container's own bottom padding", () => {
+    // The layout's `<main>` pads its bottom on some routes. A pane that ignores
+    // it ends flush with the box edge, and the padding then makes the page
+    // scroll by exactly that much.
+    expect(
+      resolveFillHeight({
+        containerHeight: 857,
+        elementOffsetTop: 77,
+        containerPaddingBottom: 40,
+      })
+    ).toBe(857 - 77 - 40);
+  });
+
   it("holds the floor when the offset would leave less than the minimum", () => {
     expect(
       resolveFillHeight({

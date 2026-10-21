@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 import type { Kit } from "@prisma/client";
 import { PencilIcon, QrCodeIcon, Trash2Icon } from "lucide-react";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import {
   PermissionAction,
   PermissionEntity,
@@ -24,7 +24,7 @@ export default function KitQuickActions({
   style,
   kit,
 }: KitQuickActionsProps) {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
 
   return (
     <div className={tw("flex items-center gap-2", className)} style={style}>

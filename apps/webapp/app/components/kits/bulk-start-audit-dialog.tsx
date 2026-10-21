@@ -139,9 +139,9 @@ function SelectedKitsSummary({
             </p>
             <ul className="py-1">
               {kits.map((kit) => {
-                // Row data carried from the Kits list (see its loader's `_count`
-                // select). Default to 0 if a row somehow lacks it.
-                const assetCount: number = kit._count?.assets ?? 0;
+                // Row data carried from the Kits list: `_count.assetKits` from
+                // KITS_INCLUDE_FIELDS, the same number the index row shows.
+                const assetCount: number = kit._count?.assetKits ?? 0;
                 return (
                   <li
                     key={kit.id}

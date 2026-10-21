@@ -7,7 +7,9 @@ import {
   isSupabaseRateLimitError,
   isSupabaseServerError,
   MAX_PUBLIC_FILES_PER_REMOVE,
+  parseFileFormData,
   removePublicFiles,
+  uploadFile,
 } from "./storage.server";
 
 // why: the Supabase admin client talks to storage over HTTP; stub `remove` so
@@ -326,5 +328,60 @@ describe("removePublicFiles", () => {
       ShelfError
     );
     expect(storageRemoveMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("unreadable image upload", () => {
+  /** A JPEG cut off halfway: the header passes, the decoder fails. */
+  async function truncatedJpeg(): Promise<Buffer> {
+    const sharp = (await import("sharp")).default;
+    const full = await sharp({
+      create: { width: 64, height: 64, channels: 3, background: "#ef6820" },
+    })
+      .jpeg()
+      .toBuffer();
+    return full.subarray(0, Math.floor(full.length / 2));
+  }
+
+  it("keeps the 400 when uploadFile wraps it", async () => {
+    const buffer = await truncatedJpeg();
+
+    await expect(
+      uploadFile(
+        (async function* () {
+          await Promise.resolve();
+          yield new Uint8Array(buffer);
+        })(),
+        {
+          filename: "asset.jpg",
+          contentType: "image/jpeg",
+          bucketName: "assets",
+        }
+      )
+    ).rejects.toMatchObject({ status: 400, shouldBeCaptured: false });
+  });
+
+  it("keeps the 400 through the form-data parser's wrapping", async () => {
+    const buffer = await truncatedJpeg();
+    const form = new FormData();
+    form.append(
+      "mainImage",
+      new File([new Uint8Array(buffer)], "asset.jpg", { type: "image/jpeg" })
+    );
+
+    await expect(
+      parseFileFormData({
+        request: new Request("http://localhost/assets/new", {
+          method: "POST",
+          body: form,
+        }),
+        newFileName: "asset-1/main",
+        bucketName: "assets",
+      })
+    ).rejects.toMatchObject({
+      status: 400,
+      shouldBeCaptured: false,
+      title: "Image could not be read",
+    });
   });
 });

@@ -161,6 +161,40 @@ describe("POST /api/mobile/asset/update", () => {
     );
   });
 
+  it("accepts a description of exactly 5,000 characters", async () => {
+    (updateAsset as any).mockResolvedValue({ id: "asset-1", title: "Laptop" });
+    const description = "a".repeat(5000);
+
+    const result = await action(
+      createActionArgs({
+        request: createRequest({ assetId: "asset-1", description }),
+      })
+    );
+
+    expect((result as unknown as Response).status).toBe(200);
+    expect(vi.mocked(updateAsset).mock.calls[0][0].description).toBe(
+      description
+    );
+  });
+
+  it("rejects a description over 5,000 characters and does not update", async () => {
+    const result = await action(
+      createActionArgs({
+        request: createRequest({
+          assetId: "asset-1",
+          description: "a".repeat(5001),
+        }),
+      })
+    );
+
+    expect((result as unknown as Response).status).toBe(400);
+    const body = await (result as unknown as Response).json();
+    expect(body.error.message).toBe(
+      "Description must be 5,000 characters or fewer"
+    );
+    expect(updateAsset).not.toHaveBeenCalled();
+  });
+
   it("org-validates submitted tags and connects them on update", async () => {
     (updateAsset as any).mockResolvedValue({
       id: "asset-1",

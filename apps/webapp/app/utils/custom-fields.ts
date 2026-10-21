@@ -11,6 +11,10 @@ import {
 } from "./client-hints";
 import { ShelfError, isLikeShelfError } from "./error";
 import { parseMarkdownToReact } from "./md";
+import {
+  optionalNumberFromString,
+  requiredNumberFromString,
+} from "./zod-numeric";
 /** Returns the schema depending on the field type.
  * Also handles the required field error message.
  * This was greatly inspired and done with the help of @rphlmr (https://github.com/rphlmr)
@@ -65,12 +69,16 @@ const getSchema = ({
       }
       return v;
     }),
+    // Blank must stay blank rather than coerce to 0: `z.coerce.number()` reads
+    // `""` as zero, which stored a real zero for every optional numeric field the
+    // operator left empty (the downstream blank guard cannot catch it, because by
+    // then the value is the number 0, not an empty string).
     amount: required
-      ? z.coerce.number().refine((value) => value !== 0, "Please enter a value")
-      : z.coerce.number(params).optional().nullable(),
+      ? requiredNumberFromString({ fieldName: field_name })
+      : optionalNumberFromString({ blank: null, fieldName: field_name }),
     number: required
-      ? z.coerce.number().refine((value) => value !== 0, "Please enter a value")
-      : z.coerce.number(params).optional().nullable(),
+      ? requiredNumberFromString({ fieldName: field_name })
+      : optionalNumberFromString({ blank: null, fieldName: field_name }),
   } as Record<CustomFieldZodSchema["type"], z.ZodTypeAny>;
 };
 

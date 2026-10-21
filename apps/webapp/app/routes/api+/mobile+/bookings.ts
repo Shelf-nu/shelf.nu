@@ -6,6 +6,7 @@ import {
   requireMobileAuth,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
+import { parseMobilePagination } from "~/modules/api/mobile-pagination";
 import {
   bookingDraftVisibilityClause,
   custodianScopeClause,
@@ -35,14 +36,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const url = new URL(request.url);
     const statusParam = url.searchParams.get("status");
     const search = (url.searchParams.get("search") || "").trim().slice(0, 100);
-    const page = Math.max(
-      1,
-      parseInt(url.searchParams.get("page") || "1", 10) || 1
-    );
-    const perPage = Math.min(
-      50,
-      Math.max(1, parseInt(url.searchParams.get("perPage") || "20", 10) || 20)
-    );
+    const { page, perPage, skip } = parseMobilePagination(url.searchParams);
 
     // Sort: allowlisted column + direction (mirrors the web list's sortable
     // columns). Defaults to the original `from asc` so existing callers are
@@ -82,19 +76,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
     /**
      * Two independent questions, two independent workspace overrides.
      *
-     * `canSeeAllBookings` decides WHICH ROWS exist for this caller: ADMIN and
-     * OWNER see every booking, SELF_SERVICE and BASE see only their own unless
-     * the workspace has switched their override on. Resolve it here, never
-     * from the role alone - the role does not know what the workspace decided.
+     * `access.bookings.seeAll` decides WHICH ROWS exist for this caller: ADMIN
+     * and OWNER see every booking, SELF_SERVICE and BASE see only their own
+     * unless the workspace has switched their override on.
      *
-     * `canSeeAllCustody` decides whether the custodian's NAME may be shown on
+     * `access.custody.seeAll` decides whether the custodian's NAME may be shown on
      * a row that already exists. A workspace may grant either without the
      * other, so never let one stand in for the other.
      */
-    const { canSeeAllBookings, canSeeAllCustody } = await getMobileUserContext(
-      user.id,
-      organizationId
-    );
+    const { access } = await getMobileUserContext(user.id, organizationId);
 
     /**
      * Custodian scope (web parity). Web matches a self-service or base user's
@@ -104,7 +94,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
      * a TEAM MEMBER rather than a user was visible on the website and missing
      * from the phone, for the very user it belonged to.
      */
-    const custodianScope = canSeeAllBookings
+    const custodianScope = access.bookings.seeAll
       ? null
       : await resolveCustodianScope({ userId: user.id, organizationId });
 
@@ -190,7 +180,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           },
         },
         orderBy: [{ [sortBy]: sortOrder }],
-        skip: (page - 1) * perPage,
+        skip,
         take: perPage,
       }),
       db.booking.count({ where }),
@@ -208,13 +198,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
         // these rows cannot disagree about who holds a booking. Answers a
         // name, null for "no custodian", or the withheld sentinel.
         custodianName: resolveBookingCustodianName({
-          canSeeAllCustody,
+          canSeeAllCustody: access.custody.seeAll,
           booking: b,
           userId: user.id,
         }),
         // The face is as identifying as the name, so it follows the same gate.
         custodianImage: canSeeBookingCustodian({
-          canSeeAllCustody,
+          canSeeAllCustody: access.custody.seeAll,
           booking: b,
           userId: user.id,
         })

@@ -19,8 +19,9 @@
 import { AssetType } from "@prisma/client";
 import { z } from "zod";
 import { db } from "~/database/db.server";
-import { computeCustodyAvailability } from "~/modules/asset/availability-primitives.server";
 import { getAssetAvailabilityBatch } from "~/modules/asset/availability.server";
+import type { CustodySourceSummary } from "~/modules/asset/custody-source";
+import { getCustodySourceSummary } from "~/modules/asset/custody-source.server";
 import { getKitPickerMeta } from "~/modules/kit/picker-meta.server";
 import { getLocationPickerMeta } from "~/modules/location/picker-meta.server";
 
@@ -52,6 +53,12 @@ export type ScannerPickerMeta = {
   /** Asset's total quantity — shown alongside MAX in the row label. */
   assetQuantity: number;
   unitOfMeasure: string | null;
+  /**
+   * Custody context only: where the units can come from, for a pool placed
+   * at two or more locations. The assign drawer shows a "From location"
+   * picker from it; absent otherwise.
+   */
+  sources?: CustodySourceSummary | null;
 };
 
 /**
@@ -71,7 +78,7 @@ export async function getScannerPickerMeta({
   // Fast-fail on INDIVIDUAL — the qty input never renders, no point
   // computing a strict-available pool.
   const asset = await db.asset.findFirst({
-    where: { id: assetId, organizationId },
+    where: { id: assetId, organizationId, archivedAt: null },
     select: { id: true, type: true, quantity: true, unitOfMeasure: true },
   });
   if (!asset || asset.type !== AssetType.QUANTITY_TRACKED) return null;
@@ -110,16 +117,19 @@ export async function getScannerPickerMeta({
 
   if (context.type === "custody") {
     // The pool `checkOutQuantity` enforces, read through the same helper it
-    // uses, so the input's ceiling and the write's rule cannot drift apart.
-    const { available } = await computeCustodyAvailability(db, {
+    // uses (`computeCustodyAvailability`, inside the summary), so the input's
+    // ceiling and the write's rule cannot drift apart. The summary also
+    // carries the source options the asset page's Assign dialog shows.
+    const summary = await getCustodySourceSummary({
       assetId,
       organizationId,
-      totalQuantity: totalQty,
+      total: totalQty,
     });
     return {
-      maxAllowed: Math.max(0, available),
+      maxAllowed: Math.max(0, summary.poolAvailable),
       assetQuantity: totalQty,
       unitOfMeasure: asset.unitOfMeasure,
+      sources: summary.multiSource ? summary : null,
     };
   }
 

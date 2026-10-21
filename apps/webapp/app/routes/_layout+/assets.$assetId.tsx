@@ -1,4 +1,4 @@
-import { BarcodeType, OrganizationRoles } from "@prisma/client";
+import { BarcodeType } from "@prisma/client";
 import { DateTime } from "luxon";
 import type {
   ActionFunctionArgs,
@@ -17,16 +17,26 @@ import BookingActionsDropdown from "~/components/assets/booking-actions-dropdown
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
+import { DateS } from "~/components/shared/date";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import { getAssetAvailability } from "~/modules/asset/availability.server";
-import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { draftBookingsNote } from "~/modules/asset/archive-messages";
 import {
+  CONFIRM_MODEL_SHORTFALL_FIELD,
+  isModelShortfallMessage,
+} from "~/modules/asset/archive-shortfall";
+import { getAssetAvailability } from "~/modules/asset/availability.server";
+import { getCustodySourceSummary } from "~/modules/asset/custody-source.server";
+import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
+import { toStillOutBookingRows } from "~/modules/asset/quantity-breakdown.server";
+import {
+  archiveAsset,
+  assertAssetDeleteConfirmed,
   deleteAsset,
-  deleteOtherImages,
   getAsset,
   relinkAssetQrCode,
+  unarchiveAsset,
 } from "~/modules/asset/service.server";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { createAssetReminder } from "~/modules/asset-reminder/service.server";
@@ -35,7 +45,7 @@ import {
   validateBarcodeValue,
   normalizeBarcodeValue,
 } from "~/modules/barcode/validation";
-import { computeBookingAssetRemainingToCheckOut } from "~/modules/booking/service.server";
+import { computeCheckedOutByBookingForAsset } from "~/modules/booking/checked-out.server";
 import { getTeamMembersForQuantityCustody } from "~/modules/team-member/service.server";
 import assetCss from "~/styles/asset.css?url";
 
@@ -45,6 +55,7 @@ import { getClientHint } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
+import { DeleteConfirmationSchema } from "~/utils/delete-confirmation";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -54,6 +65,7 @@ import {
   parseData,
   safeRedirect,
 } from "~/utils/http.server";
+import { assertAssetsAreNotArchived } from "~/utils/org-validation.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -79,17 +91,15 @@ export const AvailabilityForBookingFormSchema = z.object({
  * quantity-aware tooltip data straight from `asset.bookingAssets`, this
  * loader is responsible for honouring the
  * {@link import('~/components/assets/asset-status-badge/quantity-data').getQuantityData getQuantityData}
- * contract for ONGOING/OVERDUE rows — i.e. `BookingAsset.quantity` for
- * those rows MUST be the SERVER-COMPUTED effective claimed count
- * (`booked − remaining-to-check-out`), NOT the raw pivot snapshot.
+ * contract for ONGOING/OVERDUE rows: `BookingAsset.quantity` on those rows is
+ * the units still off the shelf on that booking, not the raw pivot snapshot.
  *
  * If a child route adds another badge / tooltip that reads `bookingAssets`
- * from the parent loader, it inherits this corrected shape — no extra work
- * needed. Mirrors the post-processing in
- * `~/routes/api+/assets.$assetId.quantity-breakdown.ts` so the inline-SSR
- * path and the lazy-fetch path agree byte-for-byte.
+ * from the parent loader, it inherits this shape. The rows are built by
+ * `toStillOutBookingRows`, the same function the lazy-fetch endpoint uses, so
+ * the two paths agree.
  *
- * @see {@link file://./../api+/assets.$assetId.quantity-breakdown.ts}
+ * @see {@link file://./../../modules/asset/quantity-breakdown.server.ts}
  * @see {@link file://./../../components/assets/asset-status-badge/quantity-data.ts}
  */
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
@@ -100,7 +110,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, userOrganizations, role, canSeeAllCustody } =
+    const { organizationId, userOrganizations, access } =
       await requirePermission({
         userId,
         request,
@@ -179,130 +189,67 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
 
     /**
-     * Effective-quantity post-processing for ONGOING / OVERDUE rows.
+     * Four reads only a QUANTITY_TRACKED asset needs, run together since none
+     * depends on another. An INDIVIDUAL asset's badge asks
+     * `/api/assets/:id/ongoing-booking` instead of reading `bookingAssets`,
+     * and it has no quantity custody dialogs, so it pays for none of them.
      *
-     * The raw `BookingAsset.quantity` shipped by Prisma is the BOOKED
-     * quantity (the snapshot the user reserved at booking time). On the
-     * OUT-flow, units can be scanned out progressively via
-     * `PartialBookingCheckout` — so the BOOKED total may overstate what's
-     * actually checked out at any given moment. The header
-     * `AssetStatusBadge` tooltip's "Checked out" line needs the EFFECTIVE
-     * count (`booked − remaining-to-check-out`), otherwise it over-reports
-     * while a booking is partially scanned out (bug #96).
-     *
-     * RESERVED rows pass through unchanged — reservations have no
-     * `PartialBookingCheckout` claim subtraction (nothing scanned yet).
-     *
-     * Aggregates per `bookingId` because the canonical reducer
-     * `computeBookingAssetRemainingToCheckOut` operates per
-     * (bookingId, assetId) and the tooltip already groups by booking. The
-     * per-slice `assetKitId` discriminator is intentionally collapsed to
-     * `null` on the aggregated active rows — the standalone-vs-kit-driven
-     * split isn't recoverable without re-deriving claim attribution per
-     * slice, which the tooltip's per-booking summation doesn't need.
-     *
-     * Mirrors the post-processing in
-     * `~/routes/api+/assets.$assetId.quantity-breakdown.ts` so the inline
-     * SSR path used by this page and the lazy-fetch path used by index /
-     * picker / scanner-drawer surfaces produce identical numbers.
+     *  - Units still out per active booking. The header `AssetStatusBadge`
+     *    tooltip reads `asset.bookingAssets`, so ONGOING / OVERDUE rows carry
+     *    these units through the same `toStillOutBookingRows` the lazy-fetch
+     *    endpoint uses, and agree with the overview's "Checked out" figure.
+     *  - Team members, so the QuantityCustodyDialog in the actions dropdown
+     *    has initial data.
+     *  - Where the asset's units can come from, for the Assign and Adjust
+     *    dialogs. Built here, in the loader both entry points share (the
+     *    header's actions menu and the overview's custody and quantity cards),
+     *    so they always show the same numbers. Counts only, no names, so it
+     *    needs no redaction.
+     *  - The engine's free-now figure for the header tooltip.
      */
-    type RawBookingAssetRow = (typeof asset.bookingAssets)[number];
-    const rawBookingAssets: RawBookingAssetRow[] = asset.bookingAssets ?? [];
-
-    const reservedRows: RawBookingAssetRow[] = [];
-    const activeRows: RawBookingAssetRow[] = [];
-    for (const ba of rawBookingAssets) {
-      const status = ba.booking?.status;
-      if (status === "ONGOING" || status === "OVERDUE") {
-        activeRows.push(ba);
-      } else {
-        reservedRows.push(ba);
-      }
-    }
-
-    // Aggregate active rows by bookingId — multiple slices of the same
-    // asset on the same booking (kit-driven + standalone) share a
-    // booking-level claim pool, so per-booking is the correct grain.
-    type ActiveBookingAggregate = {
-      booking: NonNullable<RawBookingAssetRow["booking"]>;
-      bookedQuantity: number;
-    };
-    const activeByBooking = new Map<string, ActiveBookingAggregate>();
-    for (const ba of activeRows) {
-      const bookingId = ba.booking?.id;
-      if (!bookingId || !ba.booking) continue;
-      const existing = activeByBooking.get(bookingId);
-      if (existing) {
-        existing.bookedQuantity += ba.quantity ?? 0;
-      } else {
-        activeByBooking.set(bookingId, {
-          booking: ba.booking,
-          bookedQuantity: ba.quantity ?? 0,
-        });
-      }
-    }
-
-    // Run each booking through `computeBookingAssetRemainingToCheckOut`
-    // in parallel: independent reads, no shared state. The engine's
-    // free-now figure is read alongside them.
-    const [effectiveActiveRows, freeNow] = await Promise.all([
-      Promise.all(
-        Array.from(activeByBooking.entries()).map(async ([bookingId, agg]) => {
-          const remaining = await computeBookingAssetRemainingToCheckOut(
-            db,
-            bookingId,
-            asset.id
-          );
-          // effective claimed = booked − remaining-to-check-out, floored at 0
-          const effectiveQuantity = Math.max(0, agg.bookedQuantity - remaining);
-          return {
-            quantity: effectiveQuantity,
-            // Per-slice attribution collapses at the aggregate grain; see
-            // the API endpoint for the same rationale.
-            assetKitId: null,
-            booking: agg.booking,
-          } as RawBookingAssetRow;
-        })
-      ),
-      isQuantityTracked(asset)
-        ? getAssetAvailability({ assetId: asset.id, organizationId }).then(
-            (availability) => Math.max(0, availability.physicalAvailable)
-          )
-        : null,
-    ]);
-
-    // Drop ONGOING/OVERDUE rows with zero effective quantity — they
-    // represent bookings where nothing has been scanned out yet (e.g. a
-    // brand-new ONGOING booking awaiting its first scan). The tooltip
-    // should only show bookings that contribute to the checked-out count.
-    const cleanedActiveRows = effectiveActiveRows.filter(
-      (row) => (row.quantity ?? 0) > 0
-    );
-
-    const assetWithEffectiveBookingAssets = {
-      ...asset,
-      bookingAssets: [...reservedRows, ...cleanedActiveRows],
-      // The engine's free-now figure, so the header tooltip's "free right
-      // now" matches the Quantity Overview and the assets index.
+    const qtyTracked = isQuantityTracked(asset);
+    const [
+      stillOutByBooking,
+      { teamMembers, totalTeamMembers },
+      custodySources,
       freeNow,
-    };
+    ] = qtyTracked
+      ? await Promise.all([
+          computeCheckedOutByBookingForAsset(db, asset.id, organizationId),
+          getTeamMembersForQuantityCustody({
+            organizationId,
+            request,
+            userId,
+            access,
+          }),
+          getCustodySourceSummary({
+            assetId: asset.id,
+            organizationId,
+            total: asset.quantity ?? 0,
+          }),
+          // The engine's free-now figure, so the header tooltip's "free right
+          // now" matches the Quantity Overview and the assets index.
+          getAssetAvailability({ assetId: asset.id, organizationId }).then(
+            (availability) => Math.max(0, availability.physicalAvailable)
+          ),
+        ])
+      : [
+          null,
+          { teamMembers: [], totalTeamMembers: 0 },
+          { multiSource: false, options: [], poolAvailable: 0 },
+          null,
+        ];
 
-    /**
-     * For QUANTITY_TRACKED assets, fetch team members so the
-     * QuantityCustodyDialog in the actions dropdown has initial data.
-     */
-    const { teamMembers, totalTeamMembers } = isQuantityTracked(asset)
-      ? await getTeamMembersForQuantityCustody({
-          organizationId,
-          request,
-          userId,
-          // The rule, not a role check: `isSelfService` was false for BASE, so
-          // the seed shipped the whole roster — with every user's email and
-          // Stripe id — to a role that cannot assign custody at all.
-          role,
-          canSeeAllCustody,
-        })
-      : { teamMembers: [], totalTeamMembers: 0 };
+    const assetWithEffectiveBookingAssets = stillOutByBooking
+      ? {
+          ...asset,
+          bookingAssets: toStillOutBookingRows(
+            asset.bookingAssets ?? [],
+            stillOutByBooking
+          ),
+          freeNow,
+        }
+      : asset;
 
     const header: HeaderData = {
       title: asset.title,
@@ -317,7 +264,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      */
     const [redactedAsset] = redactCustodianForViewer(
       [assetWithEffectiveBookingAssets],
-      { canSeeAllCustody, userId }
+      { canSeeAllCustody: access.custody.seeAll, userId }
     );
 
     return payload({
@@ -325,6 +272,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       header,
       teamMembers,
       totalTeamMembers,
+      custodySources,
     });
   } catch (cause) {
     const reason = makeShelfError(cause);
@@ -334,8 +282,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
 /**
  * Handles the asset page's own intents: delete, relink QR code, set reminder and
- * add barcode. Each intent is permission-checked against the action it maps to,
- * so deleting needs `asset: delete` while the other three need `asset: update`.
+ * add barcode. Each intent is permission-checked against the permission it maps
+ * to: deleting needs `asset: delete`, setting a reminder `assetReminders: create`,
+ * and relinking a QR code or adding a barcode `asset: update`.
  *
  * @returns A redirect after deletion, or the intent's result or failure with its status
  */
@@ -354,6 +303,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       z.object({
         intent: z.enum([
           "delete",
+          "archive",
+          "reinstate",
           "relink-qr-code",
           "set-reminder",
           "add-barcode",
@@ -361,40 +312,71 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       })
     );
 
-    const intent2ActionMap: { [K in typeof intent]: PermissionAction } = {
-      delete: PermissionAction.delete,
-      "relink-qr-code": PermissionAction.update,
-      "set-reminder": PermissionAction.update,
-      "add-barcode": PermissionAction.update,
+    // Setting a reminder has its own permission; the other intents act on
+    // the asset itself.
+    const intent2Permission: {
+      [K in typeof intent]: {
+        entity: PermissionEntity;
+        action: PermissionAction;
+      };
+    } = {
+      delete: {
+        entity: PermissionEntity.asset,
+        action: PermissionAction.delete,
+      },
+      // Reinstating is the inverse of archiving, so one grant covers both.
+      archive: {
+        entity: PermissionEntity.asset,
+        action: PermissionAction.archive,
+      },
+      reinstate: {
+        entity: PermissionEntity.asset,
+        action: PermissionAction.archive,
+      },
+      "relink-qr-code": {
+        entity: PermissionEntity.asset,
+        action: PermissionAction.update,
+      },
+      "set-reminder": {
+        entity: PermissionEntity.assetReminders,
+        action: PermissionAction.create,
+      },
+      "add-barcode": {
+        entity: PermissionEntity.asset,
+        action: PermissionAction.update,
+      },
     };
 
     const { organizationId } = await requirePermission({
       userId,
       request,
-      entity: PermissionEntity.asset,
-      action: intent2ActionMap[intent],
+      ...intent2Permission[intent],
     });
+
+    // Archived assets are frozen (issue #382): only delete + reinstate are
+    // allowed. Block the other mutating intents server-side.
+    if (
+      intent === "relink-qr-code" ||
+      intent === "set-reminder" ||
+      intent === "add-barcode"
+    ) {
+      await assertAssetsAreNotArchived({
+        assetIds: [id],
+        organizationId,
+        actorUserId: userId,
+      });
+    }
 
     switch (intent) {
       case "delete": {
-        const { mainImageUrl } = parseData(
-          formData,
-          z.object({ mainImageUrl: z.string().optional() })
-        );
+        const { confirmation } = parseData(formData, DeleteConfirmationSchema);
+
+        // The dialog asks for the asset's title; refuse a request that skipped it.
+        await assertAssetDeleteConfirmed({ id, organizationId, confirmation });
 
         // Name the actor, or the activity event records the deletion as
-        // "System" — the mobile delete route already passes it, so the same
-        // action read differently depending on where it was performed.
+        // "System". `deleteAsset` also removes the stored image files.
         await deleteAsset({ organizationId, id, actorUserId: userId });
-
-        if (mainImageUrl) {
-          // as it is deletion operation giving hardcoded path(to make sure all the images were deleted)
-          await deleteOtherImages({
-            userId,
-            assetId: id,
-            data: { path: `main-image-${id}.jpg` },
-          });
-        }
 
         sendNotification({
           title: "Asset deleted",
@@ -404,6 +386,49 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
 
         return redirect("/assets");
+      }
+
+      case "archive": {
+        const { draftBookings } = await archiveAsset({
+          id,
+          organizationId,
+          actorUserId: userId,
+          // Set by the "Archive anyway" prompt after the shortfall warning.
+          confirmModelShortfall:
+            formData.get(CONFIRM_MODEL_SHORTFALL_FIELD) === "true",
+        });
+
+        sendNotification({
+          title: "Asset archived",
+          message: `The asset is hidden from your lists and can't be booked. You can reinstate it any time.${draftBookingsNote(
+            draftBookings
+          )}`,
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return payload({ success: true });
+      }
+
+      case "reinstate": {
+        const { availableToBook } = await unarchiveAsset({
+          id,
+          organizationId,
+          actorUserId: userId,
+        });
+
+        sendNotification({
+          title: "Asset reinstated",
+          // Archiving never changed availability, so an asset marked
+          // unavailable before it was archived is still unavailable now.
+          message: availableToBook
+            ? "The asset is active again and available to book."
+            : "The asset is active again. It is still marked as unavailable for bookings.",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return payload({ success: true });
       }
 
       case "relink-qr-code": {
@@ -544,7 +569,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
-    return data(error(reason), { status: reason.status });
+    // The model-reservation warning is a question, not a failure: the Actions
+    // menu turns it into an "Archive anyway" prompt, so no error toast.
+    const isShortfallWarning = isModelShortfallMessage(reason.message);
+    return data(error(reason, !isShortfallWarning), { status: reason.status });
   }
 }
 
@@ -563,7 +591,7 @@ export const links: LinksFunction = () => [
 export default function AssetDetailsPage() {
   const { asset } = useLoaderData<typeof loader>();
 
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
 
   const items = [
     { to: "overview", content: "Overview" },
@@ -610,13 +638,20 @@ export default function AssetDetailsPage() {
           ),
         }}
         subHeading={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <AssetStatusBadge
               id={asset.id}
               status={asset.status}
               availableToBook={asset.availableToBook}
               asset={asset}
+              isArchived={!!asset.archivedAt}
             />
+            {/* When it left service; who did it is on the Activity tab. */}
+            {asset.archivedAt ? (
+              <span className="text-sm text-gray-600">
+                Archived on <DateS date={asset.archivedAt} />
+              </span>
+            ) : null}
           </div>
         }
       >

@@ -28,6 +28,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "~/components/shared/tooltip";
+import type { CustodySourceSummary } from "~/modules/asset/custody-source";
 import { tw } from "~/utils/tw";
 import { QuickAdjustDialog } from "./quick-adjust-dialog";
 
@@ -135,6 +136,11 @@ export interface QuantityOverviewCardProps {
   canUpdate?: boolean;
   /** Optional additional CSS class names */
   className?: string;
+  /**
+   * The pool's sources, handed to the Adjust dialog so it can ask "At
+   * location" for a pool placed at two or more locations.
+   */
+  custodySources?: CustodySourceSummary | null;
 }
 
 /**
@@ -238,6 +244,7 @@ export function QuantityOverviewCard({
   checkedOutQuantity,
   canUpdate = false,
   className,
+  custodySources,
 }: QuantityOverviewCardProps) {
   const qty = quantity ?? 0;
   const unit = unitOfMeasure || null;
@@ -311,6 +318,7 @@ export function QuantityOverviewCard({
             assetId={assetId}
             unitOfMeasure={unitOfMeasure}
             availableQuantity={custodyAvailableQuantity ?? available}
+            sources={custodySources}
             trigger={
               <Button type="button" variant="secondary" size="sm">
                 Adjust

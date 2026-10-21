@@ -119,6 +119,7 @@ export { AssetInventoryContent } from "./asset-inventory-content";
 export { MonthlyBookingTrendsContent } from "./monthly-booking-trends-content";
 export { AssetUtilizationContent } from "./asset-utilization-content";
 export { AssetActivityContent } from "./asset-activity-content";
+export { AuditCompletionContent } from "./audit-completion-content";
 
 // Route-level page composition pieces — these are the chunks the
 // reports.$reportId route stitches together.

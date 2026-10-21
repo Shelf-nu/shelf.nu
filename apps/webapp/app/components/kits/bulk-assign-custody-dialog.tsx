@@ -1,7 +1,7 @@
 import { useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { createCustodianSchema } from "~/modules/custody/schema";
 import type { KitIndexLoaderData } from "~/routes/_layout+/kits._index";
 import { tw } from "~/utils/tw";
@@ -18,16 +18,16 @@ export const BulkAssignKitCustodySchema = z.object({
 export default function BulkAssignCustodyDialog() {
   const zo = useZorm("BulkAssignKitCustody", BulkAssignKitCustodySchema);
 
-  const { isSelfService } = useUserRoleHelper();
+  const assignsSelfOnly = useRoleAccess().custody.assign === "self";
   const { currentUserTeamMember } = useLoaderData<KitIndexLoaderData>();
 
   return (
     <BulkUpdateDialogContent
       ref={zo.ref}
       type="assign-custody"
-      title={`${isSelfService ? "Take" : "Assign"} custody of kit`}
+      title={`${assignsSelfOnly ? "Take" : "Assign"} custody of kit`}
       description={`These kits are currently available. You're about to assign custody to ${
-        isSelfService ? "yourself" : "one of your team members"
+        assignsSelfOnly ? "yourself" : "one of your team members"
       }.`}
       arrayFieldId="kitIds"
       actionUrl="/api/kits/bulk-actions"
@@ -37,7 +37,7 @@ export default function BulkAssignCustodyDialog() {
           <div className="relative z-50 mb-8">
             <input type="hidden" value="bulk-assign-custody" name="intent" />
 
-            {isSelfService && currentUserTeamMember ? (
+            {assignsSelfOnly && currentUserTeamMember ? (
               <input
                 type="hidden"
                 name="custodian"
@@ -83,7 +83,7 @@ export default function BulkAssignCustodyDialog() {
             ) : null}
           </div>
 
-          <div className={tw("flex gap-3", isSelfService && "-mt-8")}>
+          <div className={tw("flex gap-3", assignsSelfOnly && "-mt-8")}>
             <Button
               type="button"
               variant="secondary"

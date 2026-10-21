@@ -1,7 +1,8 @@
-import { AssetType, OrganizationRoles } from "@prisma/client";
+import { AssetType } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
+import { findMobileArchivedRefusal } from "~/modules/api/mobile-archived.server";
 import {
   requireMobileAuth,
   requireMobilePermission,
@@ -11,16 +12,23 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import {
+  noteBookedQuantityChanges,
+  setStandaloneBookedQuantitiesWithinTx,
+  type AppliedBookedQuantityChange,
+  type BookedQuantityChange,
+} from "~/modules/booking/booked-quantity.server";
+import {
   addScannedAssetsToBooking,
   buildKitSlicesForBooking,
+  countArchivedKitMembers,
 } from "~/modules/booking/service.server";
-import { canUserManageBookingAssets } from "~/utils/bookings";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertAssetsBelongToOrg } from "~/utils/org-validation.server";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { canManageBookingItems } from "~/utils/permissions/role-access";
 import { enforceUserRateLimit } from "~/utils/rate-limit.server";
 
 /**
@@ -34,11 +42,34 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  * ready-made kit slices, while the phone sends kit ids and this route resolves
  * them, keeping the mobile client thin and the lookup org-scoped.
  *
- * Status/role gating mirrors the web (`canUserManageBookingAssets`):
- * COMPLETE / ARCHIVED / CANCELLED bookings reject; SELF_SERVICE users may
- * only modify their own DRAFT bookings.
+ * Status gating mirrors the web manage-items rule (`canManageBookingItems`):
+ * COMPLETE / ARCHIVED / CANCELLED bookings reject, and roles held to DRAFT
+ * may only add to a DRAFT booking. Callers who do not write every booking may
+ * only modify a booking they are the custodian of.
  *
- * Body: { bookingId: string, assetIds?: string[], kitIds?: string[] }
+ * Body: {
+ *   bookingId: string,
+ *   assetIds?: string[],
+ *   kitIds?: string[],
+ *   quantities?: Record<assetId, number>   // QUANTITY_TRACKED units to book
+ * }
+ *
+ * `quantities` is the mobile twin of the web drawer's per-row quantity input:
+ * how many units of each QUANTITY_TRACKED asset to book. An asset missing from
+ * the map books 1 unit (the service default), which is also what every older
+ * companion build sends. Kit-driven slices never take a quantity here — a kit
+ * books whatever the kit holds — so keys for kit-expanded assets are ignored
+ * by the service the same way the web drawer never sends them.
+ * Availability is enforced server-side inside `addScannedAssetsToBooking`
+ * (`assertAssetQuantitiesAvailable` over the booking's own window), so an
+ * over-ask fails with the same message web shows.
+ *
+ * An asset that is ALREADY on the booking (standalone slice) is not inserted
+ * again — the service would reject the duplicate row. When the body names a
+ * quantity for it, that is a change of the booked amount and goes through the
+ * same guarded update as the adjust route; without one it is a no-op. The
+ * web picker behaves the same way: re-selecting a booked asset edits its
+ * quantity rather than failing.
  *
  * Response (200):
  *
@@ -46,7 +77,17 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  *       success: true,
  *       added:   { assets: number, kitSlices: number, kits: number },
  *       skipped: { assets: number, kits: number },
+ *       updated: number,
+ *       archivedKitMembersLeftOut: number,
  *     }
+ *
+ * `updated` counts the QUANTITY_TRACKED assets already on the booking whose
+ * booked amount this scan changed. A resized asset is neither added nor
+ * skipped.
+ *
+ * `archivedKitMembersLeftOut` counts the archived members of the kits this
+ * scan added, which a kit add leaves out of the booking (memberships already
+ * on it excepted). A kit the scan skipped reports none.
  *
  * A scan can legitimately put nothing on the booking — every item scanned may
  * already be there — so `added` and `skipped` are what tell a client whether
@@ -62,6 +103,13 @@ const BodySchema = z
     bookingId: z.string().min(1),
     assetIds: z.array(z.string().min(1)).optional().default([]),
     kitIds: z.array(z.string().min(1)).optional().default([]),
+    // Same bounds as the web picker's `quantitiesSchema`: a positive integer
+    // per asset id. Non-integers and zero are rejected at the edge rather than
+    // reaching the availability guard as a nonsense ask.
+    quantities: z
+      .record(z.string().min(1), z.number().int().positive().max(1_000_000))
+      .optional()
+      .default({}),
   })
   .refine((body) => body.assetIds.length > 0 || body.kitIds.length > 0, {
     message: "Scan at least one asset or kit to add.",
@@ -89,7 +137,7 @@ export async function action({ request }: ActionFunctionArgs) {
     // bypassing the entitlement the web enforces.
     await assertMobileCanUseBookings(organizationId);
 
-    const { bookingId, assetIds, kitIds } = await parseMobileBody(
+    const { bookingId, assetIds, kitIds, quantities } = await parseMobileBody(
       BodySchema,
       request,
       "Booking"
@@ -100,6 +148,7 @@ export async function action({ request }: ActionFunctionArgs) {
       where: { id: bookingId, organizationId },
       select: {
         id: true,
+        name: true,
         status: true,
         from: true,
         to: true,
@@ -135,17 +184,13 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
-    const { role } = await getMobileUserContext(user.id, organizationId);
-    // BASE is as restricted as SELF_SERVICE for managing booking assets: own
-    // bookings only, and DRAFT only, via `canUserManageBookingAssets`. Both
-    // roles hold `booking:update`, so the permission gate above lets them
-    // through and this is what narrows them.
-    const isSelfServiceOrBase =
-      role === OrganizationRoles.SELF_SERVICE ||
-      role === OrganizationRoles.BASE;
+    // `booking:update` lets SELF_SERVICE and BASE through the gate above; the
+    // caller's access narrows them to their own bookings, and the manage-items
+    // rule below to the statuses their policy allows.
+    const { access } = await getMobileUserContext(user.id, organizationId);
 
-    // Self-service / BASE users may only modify their own bookings.
-    if (isSelfServiceOrBase && booking.custodianUserId !== user.id) {
+    // A caller who does not write every booking may only modify their own.
+    if (!access.bookings.writeAll && booking.custodianUserId !== user.id) {
       throw new ShelfError({
         cause: null,
         message: "You can only modify your own bookings.",
@@ -155,7 +200,7 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
-    if (!canUserManageBookingAssets(booking, isSelfServiceOrBase)) {
+    if (!canManageBookingItems({ access, bookingStatus: booking.status })) {
       throw new ShelfError({
         cause: null,
         title: "Action not allowed",
@@ -174,6 +219,16 @@ export async function action({ request }: ActionFunctionArgs) {
     // IDOR). Kit-derived asset ids are already org-scoped by the query below.
     await assertAssetsBelongToOrg({ assetIds, organizationId });
 
+    // Answer an archived scan by naming the archived rows, so the app marks
+    // only those (see mobile-archived.server.ts).
+    const archivedRefusal = await findMobileArchivedRefusal({
+      assetIds,
+      organizationId,
+    });
+    if (archivedRefusal) {
+      return data({ error: archivedRefusal }, { status: 400 });
+    }
+
     /**
      * Resolve each scanned kit into one slice per `AssetKit` membership.
      *
@@ -190,14 +245,15 @@ export async function action({ request }: ActionFunctionArgs) {
      * memberships. The mobile client sends kit ids only — the web drawer
      * resolves the same slices in the browser and posts them.
      */
+    const existingAssetKitIds = new Set(
+      booking.bookingAssets
+        .map((row) => row.assetKitId)
+        .filter((id): id is string => id !== null)
+    );
     const resolvedKitSlices = await buildKitSlicesForBooking({
       kitIds,
       organizationId,
-      existingAssetKitIds: new Set(
-        booking.bookingAssets
-          .map((row) => row.assetKitId)
-          .filter((id): id is string => id !== null)
-      ),
+      existingAssetKitIds,
     });
 
     /**
@@ -226,7 +282,14 @@ export async function action({ request }: ActionFunctionArgs) {
               assetKitId: null,
               assetId: { in: scannedAssetIds },
             },
-            select: { assetId: true, asset: { select: { type: true } } },
+            select: {
+              id: true,
+              assetId: true,
+              quantity: true,
+              asset: {
+                select: { title: true, type: true, unitOfMeasure: true },
+              },
+            },
           })
         : [];
 
@@ -261,12 +324,11 @@ export async function action({ request }: ActionFunctionArgs) {
      * booking has already reserved (that is what `unhideBookingId` is for) and
      * marks none of them as present, so ticking one is a normal thing to do.
      *
-     * Dropping the id is right for both asset types HERE. For an INDIVIDUAL
-     * asset a second row is meaningless. For a QUANTITY_TRACKED one a re-add
-     * could in principle mean "hold more units" — but this endpoint carries no
-     * per-asset quantity, so every row it writes is worth one unit and a
-     * re-scan can only be asking for what the booking already has. Changing a
-     * held quantity is the booking's own quantity control, not a scan.
+     * Dropping the id is right for both asset types. For an INDIVIDUAL asset
+     * a second row is meaningless. For a QUANTITY_TRACKED one, a quantity the
+     * body names is a change of the booked amount, applied below through the
+     * same guarded update as the adjust route; without one the re-scan asks
+     * for nothing the booking does not already hold.
      */
     const assetIdsAlreadyStandalone = new Set(
       existingStandaloneRows.map((row) => row.assetId)
@@ -295,6 +357,50 @@ export async function action({ request }: ActionFunctionArgs) {
     // would write a note saying it had been added when nothing was.
     const kitIdsAdded = [...new Set(kitSlices.map((slice) => slice.kitId))];
 
+    // The archived members of the kits this scan added stay out of the
+    // booking; the phone's success message says how many, as the web's does.
+    // A kit the scan skipped added nothing, so it reports nothing. Read before
+    // the write, so a failed count can never report an error for a booking
+    // that did change.
+    const archivedKitMembersLeftOut = await countArchivedKitMembers({
+      kitIds: kitIdsAdded,
+      organizationId,
+      existingAssetKitIds,
+    });
+
+    /**
+     * QUANTITY_TRACKED assets already on the booking loose whose quantity the
+     * body names and changes: the web picker's "re-select edits the amount".
+     * Only assets scanned directly qualify; a kit member's units are the
+     * kit's to decide.
+     */
+    const directlyScannedAssetIds = new Set(assetIds);
+    const slicesToResize = existingStandaloneRows.filter((row) => {
+      const requested = quantities[row.assetId];
+      return (
+        directlyScannedAssetIds.has(row.assetId) &&
+        !kitSliceAssetIds.has(row.assetId) &&
+        row.asset.type === AssetType.QUANTITY_TRACKED &&
+        requested !== undefined &&
+        requested !== row.quantity
+      );
+    });
+
+    const window =
+      booking.from && booking.to
+        ? { from: booking.from, to: booking.to }
+        : null;
+    const resizes: BookedQuantityChange[] = slicesToResize.map((slice) => ({
+      bookingAssetId: slice.id,
+      assetId: slice.assetId,
+      quantity: quantities[slice.assetId],
+      assetTitle: slice.asset.title,
+      unitOfMeasure: slice.asset.unitOfMeasure ?? null,
+    }));
+
+    // The resizes run inside the add's transaction: a refused resize rolls
+    // back the new assets too, so the booking is never left half-changed.
+    let appliedResizes: AppliedBookedQuantityChange[] = [];
     await addScannedAssetsToBooking({
       assetIds: standaloneAssetIds,
       kitSlices,
@@ -302,7 +408,27 @@ export async function action({ request }: ActionFunctionArgs) {
       bookingId,
       organizationId,
       userId: user.id,
+      quantities,
+      // Re-checks the add rule against the locked status inside the write.
+      access,
+      inSameTransaction: async (tx) => {
+        appliedResizes = await setStandaloneBookedQuantitiesWithinTx(tx, {
+          bookingId,
+          organizationId,
+          window,
+          changes: resizes,
+        });
+      },
     });
+    await noteBookedQuantityChanges({
+      userId: user.id,
+      organizationId,
+      bookingId,
+      bookingName: booking.name,
+      changes: appliedResizes,
+      source: "mobile",
+    });
+    const resizedAssetIds = new Set(appliedResizes.map((c) => c.assetId));
 
     /**
      * What the scan did NOT put on the booking, because the booking already
@@ -316,7 +442,10 @@ export async function action({ request }: ActionFunctionArgs) {
     const addedStandaloneAssetIds = new Set(standaloneAssetIds);
     const skippedAssetIds = new Set(
       assetIds.filter(
-        (id) => !addedStandaloneAssetIds.has(id) && !kitSliceAssetIds.has(id)
+        (id) =>
+          !addedStandaloneAssetIds.has(id) &&
+          !kitSliceAssetIds.has(id) &&
+          !resizedAssetIds.has(id)
       )
     );
     const addedKitIds = new Set(kitIdsAdded);
@@ -333,6 +462,8 @@ export async function action({ request }: ActionFunctionArgs) {
         assets: skippedAssetIds.size,
         kits: skippedKitIds.size,
       },
+      updated: resizedAssetIds.size,
+      archivedKitMembersLeftOut,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });

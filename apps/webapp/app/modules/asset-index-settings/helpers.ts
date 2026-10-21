@@ -99,6 +99,7 @@ export const fixedFields = [
   "upcomingReminder",
   "actions",
   "quantity",
+  "unitOfMeasure",
   "minQuantity",
   "type",
   "upcomingBookings",
@@ -110,6 +111,7 @@ export const fixedFields = [
   "available",
   "reserved",
   "stockStatus",
+  "lastAuditDate",
 ] as const;
 
 // Define barcode field names
@@ -137,17 +139,25 @@ type CustomFieldColumnKey = `cf_${string}`;
 // schema (`generateColumnsSchema`), so it never appears in user column
 // settings or the UI's "manage columns" picker. Including it here keeps
 // the type system honest when the export caller injects it.
+//
+// `qrUrl` is export-only for the same reason: the CSV export places it right
+// after `qrId` whenever the QR ID column is exported (unless a workspace
+// custom field already uses the "QR URL" header), so label printers get the
+// exact URL each code encodes.
 export type ColumnLabelKey =
   | FixedField
   | BarcodeField
   | "name"
   | "total_value"
+  | "qrUrl"
   | CustomFieldColumnKey;
 
 export const columnsLabelsMap: { [key in ColumnLabelKey]: string } = {
   id: "ID",
   sequentialId: "Asset ID",
   qrId: "QR ID",
+  // Export-only synthetic column (see `ColumnLabelKey` comment above).
+  qrUrl: "QR URL",
   name: "Name",
   status: "Status",
   description: "Description",
@@ -172,6 +182,7 @@ export const columnsLabelsMap: { [key in ColumnLabelKey]: string } = {
   // Renamed from "Quantity": with `available` beside it, the bare word was read
   // as "how many can I use" by three separate customers. Same field, clearer name.
   quantity: "Total quantity",
+  unitOfMeasure: "Unit of measure",
   minQuantity: "Min quantity",
   // "Free now", not "Available". Three things in this product were called
   // "Available" at once: this column, the `AssetStatus` badge, and the
@@ -188,6 +199,7 @@ export const columnsLabelsMap: { [key in ColumnLabelKey]: string } = {
   type: "Tracking method",
   upcomingBookings: "Upcoming Bookings",
   assetModel: "Asset model",
+  lastAuditDate: "Last audit date",
 };
 
 export const defaultFields: Column[] = [
@@ -202,24 +214,26 @@ export const defaultFields: Column[] = [
   { name: "status", visible: true, position: 3 },
   { name: "available", visible: true, position: 4 },
   { name: "quantity", visible: false, position: 5 },
-  { name: "reserved", visible: false, position: 6 },
-  { name: "stockStatus", visible: true, position: 7 },
-  { name: "minQuantity", visible: false, position: 8 },
-  { name: "description", visible: true, position: 9 },
-  { name: "valuation", visible: true, position: 10 },
-  { name: "availableToBook", visible: true, position: 11 },
-  { name: "createdAt", visible: true, position: 12 },
-  { name: "updatedAt", visible: true, position: 13 },
-  { name: "category", visible: true, position: 14 },
-  { name: "tags", visible: true, position: 15 },
-  { name: "location", visible: true, position: 16 },
-  { name: "kit", visible: true, position: 17 },
-  { name: "custody", visible: true, position: 18 },
-  { name: "upcomingReminder", visible: true, position: 19 },
-  { name: "actions", visible: true, position: 20 },
-  { name: "upcomingBookings", visible: true, position: 21 },
-  { name: "type", visible: false, position: 22 },
-  { name: "assetModel", visible: false, position: 23 },
+  { name: "unitOfMeasure", visible: false, position: 6 },
+  { name: "reserved", visible: false, position: 7 },
+  { name: "stockStatus", visible: true, position: 8 },
+  { name: "minQuantity", visible: false, position: 9 },
+  { name: "description", visible: true, position: 10 },
+  { name: "valuation", visible: true, position: 11 },
+  { name: "availableToBook", visible: true, position: 12 },
+  { name: "createdAt", visible: true, position: 13 },
+  { name: "updatedAt", visible: true, position: 14 },
+  { name: "category", visible: true, position: 15 },
+  { name: "tags", visible: true, position: 16 },
+  { name: "location", visible: true, position: 17 },
+  { name: "kit", visible: true, position: 18 },
+  { name: "custody", visible: true, position: 19 },
+  { name: "upcomingReminder", visible: true, position: 20 },
+  { name: "actions", visible: true, position: 21 },
+  { name: "upcomingBookings", visible: true, position: 22 },
+  { name: "type", visible: false, position: 23 },
+  { name: "assetModel", visible: false, position: 24 },
+  { name: "lastAuditDate", visible: true, position: 25 },
 ];
 
 /**
@@ -230,6 +244,8 @@ export const defaultFields: Column[] = [
 export const QUANTITY_COLUMN_BLOCK: readonly ColumnLabelKey[] = [
   "available",
   "quantity",
+  // The Total quantity cell holds only the number, so its unit sits beside it.
+  "unitOfMeasure",
   "reserved",
   "stockStatus",
   // The floor Stock status judges against, so it sits beside the verdict.
@@ -240,7 +256,8 @@ export const QUANTITY_COLUMN_BLOCK: readonly ColumnLabelKey[] = [
  * Whether a column belongs to {@link QUANTITY_COLUMN_BLOCK}.
  *
  * @param name - A column name
- * @returns `true` for Free now, Total quantity, Reserved, Stock status and Min quantity
+ * @returns `true` for Free now, Total quantity, Unit of measure, Reserved,
+ *   Stock status and Min quantity
  */
 export function isQuantityColumn(name: ColumnLabelKey): boolean {
   return QUANTITY_COLUMN_BLOCK.includes(name);
@@ -270,6 +287,16 @@ export function defaultColumnsForWorkspace({
 }
 
 /**
+ * Default columns that belong right after another column, keyed by the column
+ * they follow. The Total quantity cell holds only the number and the unit lives
+ * in `unitOfMeasure`, so the unit column sits next to Total quantity and is
+ * shown whenever Total quantity is.
+ */
+const followsColumn: Partial<Record<ColumnLabelKey, ColumnLabelKey>> = {
+  unitOfMeasure: "quantity",
+};
+
+/**
  * Where a missing quantity column goes in a saved column set: right after the
  * nearest block column before it, or else right before the nearest one after
  * it. `undefined` when the column is not a quantity column or the set has none.
@@ -294,6 +321,20 @@ function positionInQuantityBlock(
     .map(find)
     .find(Boolean);
   return after?.position;
+}
+
+/**
+ * Where a quantity column goes in a saved set that has no quantity column yet:
+ * right after Status, where a fresh set has the block. `undefined` for any
+ * other column, or when the set has no Status column.
+ */
+function afterStatus(
+  columns: Column[],
+  name: ColumnLabelKey
+): number | undefined {
+  if (!isQuantityColumn(name)) return undefined;
+  const status = columns.find((col) => col.name === "status");
+  return status ? status.position + 1 : undefined;
 }
 
 /**
@@ -337,23 +378,29 @@ function gatherHiddenQuantityColumnsAfterStatus(columns: Column[]): Column[] {
  *
  * Settings rows are per user and outlive the default list, so a fixed column
  * added to `defaultFields` is missing from every row saved before it existed.
- * Each missing column is inserted and every saved column at or after its
- * position moves down by one, so the user's own order is kept.
+ * A saved set keeps the positions its user arranged, so a missing column never
+ * takes its static default position: another column may already sit there, and
+ * two columns sharing a position order by array index. Every saved column at or
+ * after an inserted one moves down by one, so the user's own order is kept.
  *
  * - A quantity column goes next to the quantity columns the set already has
  *   (see {@link QUANTITY_COLUMN_BLOCK}): next to Total quantity when the user
  *   shows it, else right after Status, where the hidden quantity columns are
- *   gathered first (see {@link gatherHiddenQuantityColumnsAfterStatus}). In a
+ *   gathered first (see {@link gatherHiddenQuantityColumnsAfterStatus}), and
+ *   right after Status too when the set has no quantity column yet. In a
  *   workspace with quantity-tracked assets it takes its default visibility, so
  *   Free now and Stock status appear and the rest stay one switch away. In a
  *   workspace without any it starts hidden, instead of as a column of dashes.
- * - Any other column goes in at the position a fresh row would give it, with
- *   its default visibility.
+ * - A column listed in {@link followsColumn} is also shown when the column it
+ *   follows is shown, so adding it never hides what the user already saw.
+ * - Any other column goes after every column the set already has, in default
+ *   order and with its default visibility.
  *
  * @param columns - The row's saved columns; not modified
  * @param missing - Names of the default columns to add
  * @param options.hasQuantityAssets - Whether the workspace has any quantity-tracked asset
- * @returns A new column list with the missing default columns inserted
+ * @returns A new column list with the missing default columns added, or
+ *   `columns` itself when nothing is missing
  */
 export function insertMissingDefaultColumns(
   columns: Column[],
@@ -365,18 +412,38 @@ export function insertMissingDefaultColumns(
   const toInsert = defaultFields
     .filter((field) => missing.includes(field.name))
     .sort((a, b) => a.position - b.position);
+  if (toInsert.length === 0) return columns;
 
   const start = toInsert.some((field) => isQuantityColumn(field.name))
     ? gatherHiddenQuantityColumnsAfterStatus(columns)
     : [...columns];
 
   return toInsert.reduce<Column[]>((acc, field) => {
-    const position = positionInQuantityBlock(acc, field.name) ?? field.position;
+    const position =
+      positionInQuantityBlock(acc, field.name) ??
+      afterStatus(acc, field.name);
 
+    if (position === undefined) {
+      const maxPosition = acc.reduce(
+        (max, col) => Math.max(max, col.position),
+        -1
+      );
+      const visible =
+        isQuantityColumn(field.name) && !hasQuantityAssets
+          ? false
+          : field.visible;
+      return [...acc, { ...field, position: maxPosition + 1, visible }];
+    }
+
+    const partnerName = followsColumn[field.name];
+    const partnerShown = partnerName
+      ? acc.some((col) => col.name === partnerName && col.visible)
+      : false;
     const visible =
-      isQuantityColumn(field.name) && !hasQuantityAssets
+      partnerShown ||
+      (isQuantityColumn(field.name) && !hasQuantityAssets
         ? false
-        : field.visible;
+        : field.visible);
 
     return [
       ...acc.map((col) =>

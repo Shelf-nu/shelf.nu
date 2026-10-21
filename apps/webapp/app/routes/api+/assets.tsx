@@ -39,6 +39,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     }
 
     const assets = await db.asset.findMany({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: popover for assets named in notes and history, which must still resolve archived assets
       where: {
         id: { in: assetIds },
         organizationId, // Ensure user can only see assets from their organization

@@ -20,23 +20,34 @@ import { AssetType, CustomFieldType } from "@prisma/client";
 import { ASSET_TYPE_ADJECTIVES } from "@shelf/labels";
 
 import {
+  ASSET_DESCRIPTION_MAX_LENGTH_LABEL,
+  isAssetDescriptionTooLong,
+} from "~/utils/asset-description";
+import { countCharacters } from "~/utils/count-characters";
+import {
   buildCustomFieldValue,
   getDefinitionFromCsvHeader,
 } from "~/utils/custom-fields";
 import { isLikeShelfError } from "~/utils/error";
+import {
+  MAX_REPORTED_ROW_ERRORS,
+  type ImportPreflightResult,
+  type ImportRowError,
+  spreadsheetRowNumber,
+} from "~/utils/import-row-errors";
 import { validateQtyTrackedFields } from "./qty-validation.server";
 import type { CreateAssetFromContentImportPayload } from "./types";
 
-/** The largest content-import file accepted, in data rows. */
+/**
+ * The largest content-import file accepted by the synchronous importer, in
+ * data rows. The background importer passes its own, higher `maxRows`.
+ */
 export const MAX_CONTENT_IMPORT_ROWS = 1000;
 
-/**
- * The most row errors listed back to the browser. A file where every row is
- * wrong would otherwise produce a response measured in megabytes, so the list
- * is truncated and {@link ImportPreflightResult.totalErrors} carries how many
- * there really were.
- */
-export const MAX_REPORTED_ROW_ERRORS = 100;
+// The row-error shape is shared by every CSV import; re-exported so this
+// module stays the single import for the asset preflight and its tests.
+export { MAX_REPORTED_ROW_ERRORS };
+export type { ImportPreflightResult, ImportRowError };
 
 /**
  * Every custom field type the database will accept.
@@ -48,32 +59,6 @@ export const MAX_REPORTED_ROW_ERRORS = 100;
  */
 const CUSTOM_FIELD_TYPES = Object.values(CustomFieldType);
 const CUSTOM_FIELD_TYPE_SET = new Set<string>(CUSTOM_FIELD_TYPES);
-
-/**
- * One problem found in one row.
- *
- * `row` is the line number as the user's spreadsheet shows it — the header
- * occupies row 1, so the first data row is row 2. A `row` of 0 marks a
- * whole-file problem that belongs to no single line, such as the row cap.
- */
-export type ImportRowError = {
-  row: number;
-  title: string;
-  message: string;
-};
-
-/**
- * The outcome of a pre-flight pass.
- *
- * `errors` is truncated to {@link MAX_REPORTED_ROW_ERRORS} so the response
- * stays a sane size; `totalErrors` counts every problem found. The two differ
- * exactly when a file had more problems than are listed, which is what lets the
- * import page say "showing the first 100 of 412".
- */
-export type ImportPreflightResult = {
-  errors: ImportRowError[];
-  totalErrors: number;
-};
 
 /**
  * Reads one CSV cell as the string the column validators expect.
@@ -111,17 +96,24 @@ function cell(
 export function validateContentImportRows({
   data,
   existingCustomFields,
+  maxRows = MAX_CONTENT_IMPORT_ROWS,
 }: {
   data: CreateAssetFromContentImportPayload[];
   existingCustomFields: Pick<CustomField, "name" | "type">[];
+  /** Largest number of data rows accepted; defaults to the synchronous cap. */
+  maxRows?: number;
 }): ImportPreflightResult {
-  if (data.length > MAX_CONTENT_IMPORT_ROWS) {
+  if (data.length > maxRows) {
     return {
       errors: [
         {
           row: 0,
           title: "File too large",
-          message: `This file has ${data.length} rows, but the maximum is ${MAX_CONTENT_IMPORT_ROWS}. Please split it into smaller files and import them one at a time.`,
+          message: `This file has ${data.length.toLocaleString(
+            "en-US"
+          )} rows, but the maximum is ${maxRows.toLocaleString(
+            "en-US"
+          )}. Please split it into smaller files and import them one at a time.`,
         },
       ],
       totalErrors: 1,
@@ -160,8 +152,31 @@ export function validateContentImportRows({
   const inFileTypeByName = new Map<string, { type: string; header: string }>();
 
   for (const [index, asset] of data.entries()) {
-    const row = index + 2;
-    const rowLabel = `asset "${asset.title}"`;
+    const row = spreadsheetRowNumber(index);
+    const title = typeof asset.title === "string" ? asset.title.trim() : "";
+    // A row with no title is named by its line so every message still points
+    // the user at the right place.
+    const rowLabel = title ? `asset "${title}"` : `the asset on row ${row}`;
+    const assetLabel = title ? `Asset "${title}"` : `The asset on row ${row}`;
+
+    if (!title) {
+      errors.push({
+        row,
+        title: "Title required",
+        message: `The asset on row ${row} has no title. Fill in the title column and import again.`,
+      });
+    }
+
+    // Measured as the importer stores it: the parser has already trimmed it.
+    const description = cell(asset, "description") ?? "";
+    if (isAssetDescriptionTooLong(description)) {
+      const length = countCharacters(description).toLocaleString("en-US");
+      errors.push({
+        row,
+        title: "Description too long",
+        message: `${assetLabel}: the description is ${length} characters, but the maximum is ${ASSET_DESCRIPTION_MAX_LENGTH_LABEL}. Shorten it and import again.`,
+      });
+    }
 
     // ── quantity-tracked columns ──────────────────────────────────────
     let assetType: AssetType | undefined;
@@ -195,7 +210,7 @@ export function validateContentImportRows({
       errors.push({
         row,
         title: "Asset model not allowed",
-        message: `Asset "${asset.title}": asset models can only be linked to ${ASSET_TYPE_ADJECTIVES.INDIVIDUAL} assets. Remove the assetModel cell, or set the type column to INDIVIDUAL.`,
+        message: `${assetLabel}: asset models can only be linked to ${ASSET_TYPE_ADJECTIVES.INDIVIDUAL} assets. Remove the assetModel cell, or set the type column to INDIVIDUAL.`,
       });
     }
 
@@ -265,6 +280,25 @@ export function validateContentImportRows({
           type: definition.type,
           header: key,
         });
+      }
+
+      // `buildCustomFieldValue` skips any other word, so a typo such as
+      // "maybe" would import silently as an empty value. Blank stays allowed.
+      const rawValue: unknown = asset[key];
+      if (
+        definition.type === CustomFieldType.BOOLEAN &&
+        typeof rawValue === "string" &&
+        rawValue.trim() !== "" &&
+        !["yes", "no"].includes(rawValue.trim().toLowerCase())
+      ) {
+        errors.push({
+          row,
+          title: "Invalid custom field value",
+          message: `Custom field "${
+            definition.name
+          }" accepts only yes or no. The value we found is: "${rawValue.trim()}".`,
+        });
+        continue;
       }
 
       try {

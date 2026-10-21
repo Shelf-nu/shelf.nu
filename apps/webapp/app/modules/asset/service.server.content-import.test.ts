@@ -210,6 +210,19 @@ describe("createAssetsFromContentImport pre-flight write boundary", () => {
     });
   });
 
+  it("refuses a barcode file when the workspace may not use barcodes", async () => {
+    await expect(
+      runImport([row({ barcode_Code128: "CAM00001" })])
+    ).rejects.toMatchObject({
+      status: 403,
+      message:
+        "Your workspace doesn't have barcodes enabled. Please contact sales to learn more about barcodes.",
+    });
+
+    expect(assetCreate).not.toHaveBeenCalled();
+    expect(createKitsIfNotExists).not.toHaveBeenCalled();
+  });
+
   it("lets a clean file through to the writers", async () => {
     // Guards the opposite failure: a pre-flight that rejects a file the
     // importer would have accepted is worse than the abort it replaces.

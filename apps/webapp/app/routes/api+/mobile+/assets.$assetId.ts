@@ -24,6 +24,8 @@ import {
   filterMobileCustodyListForViewer,
   viewerCanSeeLegacyCustody,
 } from "~/modules/api/mobile-custody-visibility.server";
+import { buildCustodySourceEntries } from "~/modules/asset/custody-source";
+import { getCustodySourceOptions } from "~/modules/asset/custody-source.server";
 import { CURRENT_BOOKING_SLICE_FILTER } from "~/modules/asset/fields";
 import { serializeImageExpiration } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
@@ -51,6 +53,7 @@ import {
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
 import { canUseBarcodes } from "~/utils/subscription.server";
+import { resolveTeamMemberName } from "~/utils/user";
 
 /**
  * GET /api/mobile/assets/:assetId
@@ -72,15 +75,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // Custody visibility is permission-gated (web parity): viewers without
     // custody-view permission (SELF_SERVICE/BASE, unless the org overrides
     // allow) must not receive other holders' custody. Resolve the flags once
-    // here; the filtering happens below, after shaping. `canSeeAllBookings`
+    // here; the filtering happens below, after shaping. `access.bookings.seeAll`
     // is the booking screen's own read gate, which `activeBooking.canOpen`
     // answers in advance.
-    const { canSeeAllCustody, canSeeAllBookings } = await getMobileUserContext(
-      user.id,
-      organizationId
-    );
+    const { access } = await getMobileUserContext(user.id, organizationId);
 
     const storedAsset = await db.asset.findUnique({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: the asset's own detail screen must still load an archived asset
       where: {
         // why: inline-scope to org so cross-org probes 404 — matches the
         // pattern used by every other mobile route.
@@ -116,6 +117,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         mainImageExpiration: true,
         thumbnailImage: true,
         availableToBook: true,
+        // The detail screen badges an archived asset and turns its actions off.
+        archivedAt: true,
         valuation: true,
         // Quantity fields (additive) — surfaced so the companion detail
         // screen can DISPLAY quantity. Null for INDIVIDUAL assets.
@@ -157,6 +160,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             // why: discriminates operator rows (null) from kit-allocated rows
             // so the shaper can compute `releasableQuantity` per holder.
             kitCustodyId: true,
+            // why: the location each operator row's units were taken from,
+            // for the additive `custodyList[].sources` below.
+            location: { select: { id: true, name: true } },
+            // why: tells unplaced units apart from a source never recorded
+            // in those `sources` (both have a null location).
+            sourceUnknown: true,
             custodian: {
               select: {
                 id: true,
@@ -261,10 +270,26 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       return data({ error: { message: "Asset not found" } }, { status: 404 });
     }
 
-    const [asset] = await refreshExpiredAssetImages([storedAsset], {
+    const [refreshedAsset] = await refreshExpiredAssetImages([storedAsset], {
       organizationId,
       ...ASSET_IMAGE_RESIGN_LIMITS,
     });
+
+    // The companion prints `custodian.name` as it arrives, in the custody
+    // card and in every `custodyList` row. The stored `TeamMember.name` can
+    // be empty for a registered member, so each holder is named here the way
+    // the web names them: the user's display name first, the stored name for
+    // a non-registered member.
+    const asset = {
+      ...refreshedAsset,
+      custody: refreshedAsset.custody.map((row) => ({
+        ...row,
+        custodian: {
+          ...row.custodian,
+          name: resolveTeamMemberName(row.custodian),
+        },
+      })),
+    };
 
     // Flatten kit / location / custody via the shared mobile shaper so the
     // legacy companion contract (`asset.kit`, `asset.kitId`, `asset.location`,
@@ -293,6 +318,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       thumbnailImage: asset.thumbnailImage,
       assetModel: asset.assetModel,
       availableToBook: asset.availableToBook,
+      archivedAt: asset.archivedAt,
       // Helper's `category` type is `{ name } | null`; widen-then-narrow.
       category: asset.category ? { name: asset.category.name } : null,
       // Quantity scalars the helper requires (this route only consumes
@@ -332,11 +358,34 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       custodyAvailable: number;
       freeNow: number;
     } | null = null;
+    /**
+     * Where a pool's units can be taken from (additive). The same summary the
+     * web asset page ships to its Assign dialog: `multiSource` is true only
+     * for a pool placed at two or more locations, and `options` then lists
+     * each location (and "Unplaced" when units are unplaced) with what it has
+     * left. The app shows a "From location" picker from it; an older build
+     * ignores the field and the server records no source.
+     *
+     * Not gated on custody permissions: the holder rows' source line reads
+     * `multiSource` for every viewer. The options read skips the pool-wide
+     * availability, which this loader already derives from the quantity rows.
+     */
+    let custodySources: Awaited<
+      ReturnType<typeof getCustodySourceOptions>
+    > | null = null;
     if (isQuantityTracked(asset)) {
-      const rows = await getAssetQuantityRows(db, {
-        assetId,
-        organizationId,
-      });
+      const [rows, sources] = await Promise.all([
+        getAssetQuantityRows(db, {
+          assetId,
+          organizationId,
+        }),
+        getCustodySourceOptions({
+          assetId,
+          organizationId,
+          total: asset.quantity ?? 0,
+        }),
+      ]);
+      custodySources = sources;
       const breakdown = getQuantityData(rows);
       quantityBreakdown = breakdown
         ? {
@@ -428,13 +477,31 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // `custodyList` to their OWN entries and report how many holders were
     // hidden — mirroring the web's `QuantityCustodyList` filter and hidden
     // count (its `canViewAllCustody` prop).
-    const { custodyList, custodyListOthersCount } =
+    const { custodyList: visibleCustodyList, custodyListOthersCount } =
       filterMobileCustodyListForViewer({
         custodyList: flattened.custodyList,
         custodyRows: detailCustody,
         viewerUserId: user.id,
-        canSeeAllCustody,
+        canSeeAllCustody: access.custody.seeAll,
       });
+
+    /**
+     * Additive: where each holder's operator units were taken from, one entry
+     * per source (`locationId` null: the unplaced units, or with
+     * `unrecorded: true` a source never recorded). Kit-inherited units are not
+     * listed: they follow the kit. The app shows these only for a pool placed
+     * at two or more distinct locations (count distinct manual `placements`),
+     * and releases per source with the entry's `locationId`, or
+     * `"unrecorded"` for an unrecorded entry.
+     */
+    const custodyList = visibleCustodyList.map((entry) => ({
+      ...entry,
+      sources: buildCustodySourceEntries(
+        detailCustody.filter(
+          (row) => !row.kitCustodyId && row.custodian.id === entry.custodian.id
+        )
+      ),
+    }));
 
     // Legacy single `custody`: the web HIDES its single-custodian card from
     // viewers without custody-view permission unless they ARE the custodian —
@@ -448,7 +515,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       viewerCanSeeLegacyCustody({
         custodianUserId: primaryCustody.custodian.userId,
         viewerUserId: user.id,
-        canSeeAllCustody,
+        canSeeAllCustody: access.custody.seeAll,
       })
         ? primaryCustody
         : null;
@@ -473,7 +540,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const activeBooking =
       checkedOutOn &&
       canSeeBookingCustodian({
-        canSeeAllCustody,
+        canSeeAllCustody: access.custody.seeAll,
         booking: checkedOutOn,
         userId: user.id,
       })
@@ -483,7 +550,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             from: checkedOutOn.from,
             // The resolver every mobile booking surface names a holder with.
             custodianName: resolveBookingCustodianName({
-              canSeeAllCustody,
+              canSeeAllCustody: access.custody.seeAll,
               booking: checkedOutOn,
               userId: user.id,
             }),
@@ -492,7 +559,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             // the booking screen. This is that screen's own gate, answered here
             // so the app only offers a tap that will open.
             canOpen: canSeeBooking({
-              canSeeAllBookings,
+              access,
               booking: {
                 custodianUserId: checkedOutOn.custodianUser?.id ?? null,
                 custodianTeamMember: checkedOutOn.custodianTeamMember,
@@ -554,6 +621,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         // assets and for QUANTITY_TRACKED assets with no custody/booking
         // activity (see getQuantityData's null contract).
         quantityBreakdown,
+        // Where the pool's units can be taken from (additive, see above).
+        // Null for INDIVIDUAL assets.
+        custodySources,
         // Reshaped from the widened select above so the companion keeps
         // reading `asset.organization.currency` and nothing else.
         organization: { currency: detailOrganization.currency },

@@ -1,6 +1,7 @@
 ---
 description: Every PR opened for a bug fix must carry the GitHub "fix" label, applied at creation time
-globs: ["**/*"]
+paths:
+  - "**/*"
 ---
 
 # Label Fix PRs With `fix`

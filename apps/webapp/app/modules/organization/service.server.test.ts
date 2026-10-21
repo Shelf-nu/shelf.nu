@@ -3,20 +3,19 @@
  *
  * Pins the authorization contract of {@link transferOwnership}: only the
  * workspace's current OWNER, or a Shelf platform admin, may transfer
- * ownership. A workspace ADMIN must not.
+ * ownership. A workspace ADMIN must not. The check compares the requesting
+ * `userId` with the owner's id; ADMIN and OWNER share every permission, so no
+ * role comparison can tell them apart.
  *
- * Regression coverage for detail.dev finding D000: the owner check compared
- * the *organization owner's* role against itself (`currentOwnerUserOrg` was
- * selected by `roles.includes(OWNER)`, so `!roles.includes(OWNER)` could never
- * be true) and never compared the requesting `userId` to anyone, letting any
- * workspace ADMIN take over the workspace.
+ * Also pins how each refusal surfaces: rule refusals are uncaptured 4xx the
+ * admin can act on, while a workspace with no owner stays a captured 500.
  *
  * @see {@link file://./service.server.ts}
  * @see {@link file://./../../routes/_layout+/settings.general.tsx}
  */
 
 import { OrganizationRoles, OrganizationType, Roles } from "@prisma/client";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   createOrganization,
@@ -40,8 +39,10 @@ type MockDb = {
     findFirstOrThrow: ReturnType<typeof vi.fn>;
     update: ReturnType<typeof vi.fn>;
   };
+  $queryRaw: ReturnType<typeof vi.fn>;
   userOrganization: {
     findMany: ReturnType<typeof vi.fn>;
+    findUnique: ReturnType<typeof vi.fn>;
     update: ReturnType<typeof vi.fn>;
   };
   organization: {
@@ -67,7 +68,32 @@ const dbMock = vi.hoisted<MockDb>(() => ({
     // so whether it ran is the assertion target of the free-trial tests.
     update: vi.fn(),
   },
-  userOrganization: { findMany: vi.fn(), update: vi.fn() },
+  // why: transferOwnership locks both memberships with a raw
+  // `SELECT ... FOR UPDATE` before re-reading them inside the transaction.
+  $queryRaw: vi.fn().mockResolvedValue([]),
+  userOrganization: {
+    findMany: vi.fn(),
+    // why: the locked re-read answers with the same membership rows the
+    // test's earlier `findMany` returned, so the transfer sees no change in
+    // between unless a test says otherwise.
+    findUnique: vi.fn(
+      async ({
+        where,
+      }: {
+        where: { userId_organizationId: { userId: string } };
+      }) => {
+        const results = dbMock.userOrganization.findMany.mock.results;
+        const rows = (await results[results.length - 1]?.value) as
+          | { roles: OrganizationRoles[]; user: { id: string } }[]
+          | undefined;
+        const row = rows?.find(
+          (r) => r.user.id === where.userId_organizationId.userId
+        );
+        return row ? { roles: row.roles } : null;
+      }
+    ),
+    update: vi.fn(),
+  },
   organization: {
     update: vi.fn(),
     // why: this is the assertion target. Whether it was called is exactly what
@@ -85,11 +111,19 @@ vi.mock("~/database/db.server", () => ({ db: dbMock }));
 // why: ownership transfer sends notification emails as a side effect
 vi.mock("~/emails/mail.server", () => ({ sendEmail: vi.fn() }));
 
-// why: premium/Stripe paths are irrelevant to the authorization contract and
-// would otherwise require a full Stripe client
-vi.mock("~/utils/stripe.server", () => ({
+const stripeMock = vi.hoisted(() => ({
   premiumIsEnabled: false,
   getUserActiveSubscription: vi.fn(),
+}));
+
+// why: premium/Stripe paths would otherwise require a full Stripe client. The
+// getter lets one test switch billing on to reach the active-subscription
+// refusal; every other test runs with it off.
+vi.mock("~/utils/stripe.server", () => ({
+  get premiumIsEnabled() {
+    return stripeMock.premiumIsEnabled;
+  },
+  getUserActiveSubscription: stripeMock.getUserActiveSubscription,
   getUserActiveSubscriptions: vi.fn(),
   transferSubscriptionToCustomer: vi.fn(),
   createStripeCustomer: vi.fn(),
@@ -220,6 +254,126 @@ describe("transferOwnership authorization", () => {
       where: { id: `uo-${OWNER_ID}` },
       data: { roles: { set: [OrganizationRoles.ADMIN] } },
     });
+  });
+});
+
+describe("transferOwnership refusals", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    stripeMock.premiumIsEnabled = false;
+
+    (dbMock.$transaction as ReturnType<typeof vi.fn>).mockImplementation(
+      <T>(callback: (tx: MockDb) => Promise<T>): Promise<T> => callback(dbMock)
+    );
+    // Default: the owner asks, and the candidate is an ADMIN member
+    dbMock.user.findUniqueOrThrow.mockResolvedValue({
+      id: OWNER_ID,
+      roles: [],
+    });
+    dbMock.userOrganization.findMany.mockResolvedValue([
+      userOrg(OWNER_ID, [OrganizationRoles.OWNER]),
+      userOrg(NEW_OWNER_ID, [OrganizationRoles.ADMIN]),
+    ]);
+  });
+
+  afterEach(() => {
+    stripeMock.premiumIsEnabled = false;
+  });
+
+  /** A rule refusal: shown to the admin, not reported to Sentry */
+  const refusal = (message: RegExp, status: number) =>
+    expect.objectContaining({
+      message: expect.stringMatching(message),
+      status,
+      shouldBeCaptured: false,
+    });
+
+  it("refuses a personal workspace as a 400", async () => {
+    await expect(
+      transferOwnership({
+        currentOrganization: {
+          ...currentOrganization,
+          type: OrganizationType.PERSONAL,
+        },
+        newOwnerId: NEW_OWNER_ID,
+        userId: OWNER_ID,
+      })
+    ).rejects.toEqual(refusal(/personal workspaces/i, 400));
+  });
+
+  it("refuses a requester who is not the owner as a 403", async () => {
+    dbMock.user.findUniqueOrThrow.mockResolvedValue({
+      id: ADMIN_ID,
+      roles: [],
+    });
+
+    await expect(
+      transferOwnership({
+        currentOrganization,
+        newOwnerId: NEW_OWNER_ID,
+        userId: ADMIN_ID,
+      })
+    ).rejects.toEqual(refusal(/not the owner/i, 403));
+  });
+
+  it("refuses a new owner who is not a member as a 400", async () => {
+    dbMock.userOrganization.findMany.mockResolvedValue([
+      userOrg(OWNER_ID, [OrganizationRoles.OWNER]),
+    ]);
+
+    await expect(
+      transferOwnership({
+        currentOrganization,
+        newOwnerId: NEW_OWNER_ID,
+        userId: OWNER_ID,
+      })
+    ).rejects.toEqual(refusal(/not a member/i, 400));
+  });
+
+  it("refuses a new owner who is not an admin as a 400", async () => {
+    dbMock.userOrganization.findMany.mockResolvedValue([
+      userOrg(OWNER_ID, [OrganizationRoles.OWNER]),
+      userOrg(NEW_OWNER_ID, [OrganizationRoles.BASE]),
+    ]);
+
+    await expect(
+      transferOwnership({
+        currentOrganization,
+        newOwnerId: NEW_OWNER_ID,
+        userId: OWNER_ID,
+      })
+    ).rejects.toEqual(refusal(/not an admin/i, 400));
+  });
+
+  it("refuses a new owner with an active subscription as a 400", async () => {
+    stripeMock.premiumIsEnabled = true;
+    stripeMock.getUserActiveSubscription.mockResolvedValue({ id: "sub_1" });
+
+    await expect(
+      transferOwnership({
+        currentOrganization,
+        newOwnerId: NEW_OWNER_ID,
+        userId: OWNER_ID,
+      })
+    ).rejects.toEqual(refusal(/already has an active subscription/i, 400));
+    expect(dbMock.organization.update).not.toHaveBeenCalled();
+  });
+
+  it("keeps a workspace with no owner a captured 500", async () => {
+    // Broken data, not a user mistake: it must still reach Sentry.
+    dbMock.userOrganization.findMany.mockResolvedValue([
+      userOrg(NEW_OWNER_ID, [OrganizationRoles.ADMIN]),
+    ]);
+
+    await expect(
+      transferOwnership({
+        currentOrganization,
+        newOwnerId: NEW_OWNER_ID,
+        userId: OWNER_ID,
+      })
+    ).rejects.toEqual(
+      expect.objectContaining({ status: 500, shouldBeCaptured: true })
+    );
   });
 });
 
