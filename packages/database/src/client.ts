@@ -15,6 +15,7 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 
+import { PrismaPg } from "@prisma/adapter-pg";
 import { Prisma, PrismaClient } from "@prisma/client";
 
 export type ExtendedPrismaClient = ReturnType<typeof createDatabaseClient>;
@@ -362,6 +363,106 @@ async function retryLoop<T>(
 }
 
 /**
+ * Connection settings for `pg`, derived from a Prisma-style `DATABASE_URL` so
+ * an existing URL keeps its meaning (`connection_limit`, `pool_timeout`,
+ * `schema`, `sslmode`). `pg` ignores the Prisma-only keys it does not know
+ * (`pgbouncer`).
+ *
+ * TLS: Prisma's default (`sslmode` absent, `prefer` or `require`) encrypts
+ * without verifying the server certificate. `pg` would instead send plaintext
+ * when `sslmode` is absent and demand full verification for `prefer` and
+ * `require`, so those three are mapped to encrypted-without-verification here
+ * and removed from the string. Verification is opt-in, as it was with the
+ * engine: `sslaccept=strict`, or `sslmode=verify-full` with `sslrootcert`
+ * pointing at the server's CA (Supabase publishes one), turns it on; `disable`,
+ * `verify-ca` and `verify-full` keep `pg`'s own handling. A server without TLS
+ * needs `sslmode=disable`.
+ *
+ * `socket_timeout` (seconds, a per-query limit for the engine) maps to `pg`'s
+ * `query_timeout`.
+ *
+ * The acquisition wait stays bounded: without `pool_timeout` it is 10 s, the
+ * engine's default, because `pg` would otherwise queue forever on a saturated
+ * pool. Only an explicit `pool_timeout=0` lifts the bound.
+ */
+export function poolOptionsFromUrl(connectionString: string | undefined): {
+  connectionString?: string;
+  max?: number;
+  connectionTimeoutMillis?: number;
+  schema?: string;
+  ssl?: { rejectUnauthorized: false } | true;
+  query_timeout?: number;
+} {
+  let url: URL | null;
+  try {
+    url = new URL(connectionString ?? "");
+  } catch {
+    url = null;
+  }
+  const params = url?.searchParams ?? new URLSearchParams();
+  const limit = Number(params.get("connection_limit"));
+  const rawTimeout = Number(params.get("pool_timeout") ?? NaN);
+  const timeoutSeconds =
+    Number.isFinite(rawTimeout) && rawTimeout >= 0
+      ? rawTimeout
+      : DEFAULT_POOL_TIMEOUT_SECONDS;
+  const schema = params.get("schema");
+  const sslmode = params.get("sslmode");
+  const strict = params.get("sslaccept") === "strict";
+  const encryptWithoutVerify =
+    url !== null &&
+    !strict &&
+    (sslmode === null || ENCRYPT_ONLY_SSL_MODES.has(sslmode));
+  if (url && sslmode !== null && ENCRYPT_ONLY_SSL_MODES.has(sslmode)) {
+    url.searchParams.delete("sslmode");
+  }
+  const socketTimeout = Number(params.get("socket_timeout") ?? NaN);
+  return {
+    ...(url ? { connectionString: url.toString() } : {}),
+    ...(Number.isInteger(limit) && limit > 0 ? { max: limit } : {}),
+    ...(timeoutSeconds > 0
+      ? { connectionTimeoutMillis: timeoutSeconds * 1000 }
+      : {}),
+    ...(schema ? { schema } : {}),
+    ...(encryptWithoutVerify ? { ssl: { rejectUnauthorized: false } } : {}),
+    ...(url && strict ? { ssl: true } : {}),
+    ...(Number.isFinite(socketTimeout) && socketTimeout > 0
+      ? { query_timeout: socketTimeout * 1000 }
+      : {}),
+  };
+}
+
+/** Prisma's default `pool_timeout`, kept when the URL does not set one. */
+const DEFAULT_POOL_TIMEOUT_SECONDS = 10;
+
+/** `sslmode` values that Prisma treats as "encrypt, do not verify". */
+const ENCRYPT_ONLY_SSL_MODES = new Set(["prefer", "require"]);
+
+/**
+ * Talks to Postgres through `pg` instead of Prisma's Rust engine connector.
+ *
+ * Behind a transaction-mode pooler (Supabase port 6543) the engine connector
+ * needs `pgbouncer=true`, and that flag wraps EVERY query in
+ * `BEGIN` / `DEALLOCATE ALL` / `COMMIT`: four round trips per query, three of
+ * them doing nothing. `pg` sends each query as one unnamed extended-protocol
+ * statement, which the pooler accepts as is, so one query is one round trip.
+ */
+function createPgAdapter(connectionString: string | undefined) {
+  const { schema, ...pool } = poolOptionsFromUrl(connectionString);
+  return new PrismaPg(
+    {
+      connectionString,
+      // Reconnecting to the pooler costs a TLS handshake, so keep idle
+      // connections for five minutes (Prisma's own default) rather than pg's 10 s;
+      // otherwise the first request after a lull pays it.
+      idleTimeoutMillis: 300_000,
+      ...pool,
+    },
+    schema ? { schema } : undefined
+  );
+}
+
+/**
  * Creates a new PrismaClient instance with custom extensions.
  * Each app should create its own singleton using this factory.
  *
@@ -375,7 +476,28 @@ async function retryLoop<T>(
  *    {@link isReadOperation} and {@link withPrismaRetry}).
  */
 export function createDatabaseClient(url?: string) {
-  const client = new PrismaClient(url ? { datasourceUrl: url } : undefined)
+  const base = new PrismaClient({
+    adapter: createPgAdapter(url ?? process.env.DATABASE_URL),
+    ...(process.env.PRISMA_QUERY_LOG
+      ? { log: [{ emit: "event" as const, level: "query" as const }] }
+      : {}),
+  });
+  if (process.env.PRISMA_QUERY_LOG) {
+    // The log option above is only known at runtime, so the event type is
+    // narrowed by hand.
+    (
+      base as unknown as PrismaClient<{
+        log: [{ emit: "event"; level: "query" }];
+      }>
+    ).$on("query", (e) => {
+      process.stdout.write(
+        `PQ ${Date.now()} ${e.duration}ms ${e.query
+          .replace(/\s+/g, " ")
+          .slice(0, 160)}\n`
+      );
+    });
+  }
+  const client = base
     .$extends({
       model: {
         $allModels: {

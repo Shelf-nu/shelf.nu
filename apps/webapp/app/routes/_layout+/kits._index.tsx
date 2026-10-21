@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { lazy, Suspense } from "react";
 import type { Prisma } from "@prisma/client";
 import { KitStatus } from "@prisma/client";
 import type {
@@ -11,7 +12,6 @@ import { AssetCodeBadge } from "~/components/assets/asset-code-badge";
 import { useKitAvailabilityData } from "~/components/assets/assets-index/use-kit-availability-data";
 import { AvailabilityViewToggle } from "~/components/assets/assets-index/view-toggle";
 import { CategoryBadge } from "~/components/assets/category-badge";
-import AvailabilityCalendar from "~/components/availability-calendar/availability-calendar";
 import { ResourceTitleLink } from "~/components/availability-calendar/resource-title-link";
 import { StatusFilter } from "~/components/booking/status-filter";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
@@ -31,6 +31,7 @@ import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { GrayBadge } from "~/components/shared/gray-badge";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
+import { Spinner } from "~/components/shared/spinner";
 import { Td, Th } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import { db } from "~/database/db.server";
@@ -64,6 +65,11 @@ import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 import type { MergeInclude } from "~/utils/utils";
+
+// Lazy: FullCalendar (~230 kB) is only needed in the availability view.
+const AvailabilityCalendar = lazy(
+  () => import("~/components/availability-calendar/availability-calendar")
+);
 
 export type KitIndexLoaderData = typeof loader;
 
@@ -405,7 +411,13 @@ export default function KitsIndexPage() {
           )}
         </Filters>
         {isAvailabilityView && shouldShowAvailabilityView ? (
-          <>
+          <Suspense
+            fallback={
+              <div className="flex h-64 items-center justify-center">
+                <Spinner />
+              </div>
+            }
+          >
             <AvailabilityCalendar
               resources={resources}
               events={events}
@@ -447,7 +459,7 @@ export default function KitsIndexPage() {
             <Card className="-mt-2 border-t-0 py-0">
               <Pagination />
             </Card>
-          </>
+          </Suspense>
         ) : (
           <List
             className="overflow-x-visible md:overflow-x-auto"

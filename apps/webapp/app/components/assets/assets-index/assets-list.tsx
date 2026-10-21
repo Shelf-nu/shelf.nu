@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useEffect, useMemo } from "react";
+import { lazy, Suspense, useEffect, useMemo } from "react";
 import { m } from "framer-motion";
 import { useSetAtom } from "jotai";
 import { Package } from "lucide-react";
@@ -58,9 +58,13 @@ import { ListItemTagsColumn } from "./list-item-tags-column";
 import BookSelectedModelsDropdown from "./model-booking/book-selected-models-dropdown";
 import { getUnselectableModelRows } from "./model-booking/unselectable-model-rows";
 import { useAssetAvailabilityData } from "./use-asset-availability-data";
-import AvailabilityCalendar from "../../availability-calendar/availability-calendar";
 import { ResourceTitleLink } from "../../availability-calendar/resource-title-link";
 import { CategoryBadge } from "../category-badge";
+
+// Lazy: FullCalendar (~230 kB) is only needed in the availability view.
+const AvailabilityCalendar = lazy(
+  () => import("../../availability-calendar/availability-calendar")
+);
 
 /**
  * The model view's bulk-action toolbar, built once.
@@ -460,7 +464,13 @@ export const AssetsList = ({
               </AssetIndexSettingsProvider>
             </>
           ) : isAvailabilityView && shouldShowAvailabilityView ? (
-            <>
+            <Suspense
+              fallback={
+                <div className="flex h-64 items-center justify-center">
+                  <Spinner />
+                </div>
+              }
+            >
               <AvailabilityCalendar
                 resources={resources}
                 events={events}
@@ -522,7 +532,7 @@ export const AssetsList = ({
                 }}
               />
               <AssetIndexPagination />
-            </>
+            </Suspense>
           ) : (
             <List
               title="Assets"
