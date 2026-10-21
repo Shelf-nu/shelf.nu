@@ -28,6 +28,15 @@ const TEXT_FIELD: ReportCustomFieldOption = {
   valuesOnDemand: true,
 };
 
+const OTHER_TEXT_FIELD: ReportCustomFieldOption = {
+  id: "f-room",
+  name: "Room",
+  type: "TEXT",
+  values: [],
+  hasMoreValues: false,
+  valuesOnDemand: true,
+};
+
 const OPTION_FIELD: ReportCustomFieldOption = {
   id: "f-opt",
   name: "Colour",
@@ -43,7 +52,9 @@ function renderPicker() {
     {
       path: "/",
       Component: () => (
-        <CustomFieldFilter customFields={[TEXT_FIELD, OPTION_FIELD]} />
+        <CustomFieldFilter
+          customFields={[TEXT_FIELD, OTHER_TEXT_FIELD, OPTION_FIELD]}
+        />
       ),
     },
   ]);
@@ -118,5 +129,51 @@ describe("CustomFieldFilter", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Could not load the values for this field."
     );
+  });
+
+  it("keeps a failed read with its own field, so the next field still loads", async () => {
+    const roomAnswer: ReportCustomFieldValuesPayload = {
+      customFieldId: "f-room",
+      values: ["Room 4"],
+      hasMore: false,
+    };
+    fetchMock
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce(new Response(JSON.stringify(roomAnswer)));
+
+    renderPicker();
+    await openField("Fund");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Could not load the values for this field."
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to fields" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Room/ }));
+
+    expect(await screen.findByRole("button", { name: "Room 4" })).toBeVisible();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("reads the field again when it is reopened after a failure", async () => {
+    const answer: ReportCustomFieldValuesPayload = {
+      customFieldId: "f-text",
+      values: ["Perkins"],
+      hasMore: false,
+    };
+    fetchMock
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce(new Response(JSON.stringify(answer)));
+
+    renderPicker();
+    await openField("Fund");
+    expect(await screen.findByRole("alert")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to fields" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Fund/ }));
+
+    expect(
+      await screen.findByRole("button", { name: "Perkins" })
+    ).toBeVisible();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });

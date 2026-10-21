@@ -68,14 +68,20 @@ type FieldValues = {
 /**
  * The values to offer for `field`: its own for OPTION and BOOLEAN, the
  * on-demand read's for TEXT.
+ *
+ * A failure is read from `failedFieldId`, never from the query's `error`:
+ * `useApiQuery` keeps its last error through later requests, so trusting it
+ * would show one field's failure on every field opened after it.
+ *
+ * @param failedFieldId - The field whose last read failed, if any
  */
 function resolveFieldValues(
   field: ReportCustomFieldOption | null,
   query: {
     data: ReportCustomFieldValuesPayload | undefined;
     isLoading: boolean;
-    error: string | undefined;
-  }
+  },
+  failedFieldId: string | null
 ): FieldValues {
   if (!field) {
     return { values: [], hasMore: false, isLoading: false, failed: false };
@@ -88,18 +94,11 @@ function resolveFieldValues(
       failed: false,
     };
   }
-  if (query.error) {
-    return { values: [], hasMore: false, isLoading: false, failed: true };
-  }
-  if (query.isLoading || !query.data) {
-    return { values: [], hasMore: false, isLoading: true, failed: false };
-  }
-  // A refused request answers with an error body, not with values.
-  if (!Array.isArray(query.data.values)) {
+  if (failedFieldId === field.id) {
     return { values: [], hasMore: false, isLoading: false, failed: true };
   }
   // The previous field's answer stays in `data` until this field's lands.
-  if (query.data.customFieldId !== field.id) {
+  if (query.isLoading || !query.data || query.data.customFieldId !== field.id) {
     return { values: [], hasMore: false, isLoading: true, failed: false };
   }
   return {
@@ -133,6 +132,9 @@ export function CustomFieldFilter({ customFields, disabled }: Props) {
   const [field, setField] = useState<ReportCustomFieldOption | null>(null);
   const [query, setQuery] = useState("");
   const [exactValue, setExactValue] = useState("");
+  // The field whose last values read failed. Tied to a field so a failure
+  // never outlives it: opening the field again reads it again.
+  const [failedFieldId, setFailedFieldId] = useState<string | null>(null);
 
   const activeCount = searchParams.getAll(
     REPORT_FILTER_PARAM.customField
@@ -153,8 +155,14 @@ export function CustomFieldFilter({ customFields, disabled }: Props) {
       [field]
     ),
     enabled: !!field?.valuesOnDemand,
+    // A refused request answers with an error body, not with values.
+    onSuccess: (payload) =>
+      setFailedFieldId(
+        Array.isArray(payload?.values) ? null : field?.id ?? null
+      ),
+    onError: () => setFailedFieldId(field?.id ?? null),
   });
-  const fieldValues = resolveFieldValues(field, valuesQuery);
+  const fieldValues = resolveFieldValues(field, valuesQuery, failedFieldId);
 
   const visibleValues = useMemo(() => {
     if (!field) return [];
@@ -171,6 +179,7 @@ export function CustomFieldFilter({ customFields, disabled }: Props) {
     setField(null);
     setQuery("");
     setExactValue("");
+    setFailedFieldId(null);
   };
 
   const handleOpenChange = (next: boolean) => {
