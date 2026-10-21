@@ -673,7 +673,7 @@ describe("quantity and unit of measure in the index export", () => {
 
     expect(headers).toEqual([
       '"Name"',
-      '"Quantity"',
+      '"Total quantity"',
       '"Unit of measure"',
       '"Total value"',
     ]);
@@ -706,7 +706,7 @@ describe("quantity and unit of measure in the index export", () => {
     expect(headers).toEqual([
       '"Name"',
       '"Asset ID"',
-      '"Quantity"',
+      '"Total quantity"',
       '"Unit of measure"',
       '"Min quantity"',
       '"Total value"',
@@ -730,7 +730,7 @@ describe("quantity and unit of measure in the index export", () => {
       '"Name"',
       '"Unit of measure"',
       '"Asset ID"',
-      '"Quantity"',
+      '"Total quantity"',
       '"Total value"',
     ]);
   });
@@ -751,6 +751,12 @@ describe("quantity and unit of measure in the index export", () => {
       '"QR ID"',
       '"QR URL"',
       '"Status"',
+      '"Free now"',
+      '"Total quantity"',
+      '"Unit of measure"',
+      '"Reserved"',
+      '"Stock status"',
+      '"Min quantity"',
       '"Description"',
       '"Value"',
       '"Available to book"',
@@ -763,11 +769,8 @@ describe("quantity and unit of measure in the index export", () => {
       '"Custody"',
       '"Upcoming Reminder"',
       '"Upcoming Bookings"',
-      '"Quantity"',
-      '"Unit of measure"',
       '"Tracking method"',
       '"Asset model"',
-      '"Min quantity"',
       '"Last audit date"',
       '"Total value"',
     ]);

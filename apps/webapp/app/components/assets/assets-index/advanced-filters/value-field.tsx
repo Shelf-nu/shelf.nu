@@ -7,6 +7,8 @@ import {
   PopoverPortal,
   PopoverTrigger,
 } from "@radix-ui/react-popover";
+import { STOCK_STATUS_LABELS } from "@shelf/labels";
+import { STOCK_STATUSES } from "@shelf/quantity-control";
 import { parseISO } from "date-fns";
 import { Search } from "lucide-react";
 import { useLoaderData } from "react-router";
@@ -131,6 +133,9 @@ function resolveFilterDefault(
   if (filter.type === "enum") {
     if (filter.name === "type") return "INDIVIDUAL";
     if (filter.name === "status") return Object.values(AssetStatus)[0];
+    // The picker shows its first option when empty, so the filter starts on
+    // it too, or the row would read SHORT while filtering on nothing.
+    if (filter.name === "stockStatus") return STOCK_STATUSES[0];
     if (filter.name.startsWith("cf_")) {
       const options =
         customFields.find((f) => f?.name === filter.name.slice(3))?.options ??
@@ -939,6 +944,38 @@ function StatusEnumField({
   const options: EnumOption[] = Object.values(AssetStatus).map((status) => ({
     id: status,
     label: userFriendlyAssetStatus(status),
+  }));
+
+  return (
+    <EnumField
+      value={value}
+      options={options}
+      handleChange={handleChange}
+      multiSelect={multiSelect}
+      name={name}
+      disabled={disabled}
+    />
+  );
+}
+
+/**
+ * The Stock status verdicts, worst first, named as the column's badge names
+ * them. The column shows a dash when no min quantity is set; the picker needs
+ * a word for it.
+ */
+function StockStatusEnumField({
+  value,
+  handleChange,
+  multiSelect,
+  name,
+  disabled = false,
+}: Omit<EnumFieldProps, "options">) {
+  const options: EnumOption[] = STOCK_STATUSES.map((status) => ({
+    id: status,
+    label:
+      status === "NO_THRESHOLD"
+        ? "No min quantity set"
+        : STOCK_STATUS_LABELS[status],
   }));
 
   return (
@@ -2030,6 +2067,21 @@ function ValueEnumField({
     return (
       <>
         <AssetModelEnumField
+          value={value}
+          handleChange={handleChange}
+          multiSelect={multiSelect}
+          name={name}
+          disabled={disabled}
+        />
+        {error && <div className="mt-1 text-[12px] text-red-500">{error}</div>}
+      </>
+    );
+  }
+
+  if (fieldName === "stockStatus") {
+    return (
+      <>
+        <StockStatusEnumField
           value={value}
           handleChange={handleChange}
           multiSelect={multiSelect}

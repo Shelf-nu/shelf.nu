@@ -247,7 +247,10 @@ import {
 import { cancelAssetReminderScheduler } from "../asset-reminder/scheduler.server";
 import { createSystemBookingNotes } from "../booking-note/service.server";
 import { ASSET_EDIT_ADJUSTMENT_NOTE } from "../consumption-log/constants";
-import { checkAndNotifyLowStock } from "../consumption-log/low-stock.server";
+import {
+  checkAndNotifyLowStock,
+  syncLowStockMarkers,
+} from "../consumption-log/low-stock.server";
 import { lockAssetForQuantityUpdate } from "../consumption-log/quantity-lock.server";
 import { createConsumptionLog } from "../consumption-log/service.server";
 import { emptyStockState } from "../consumption-log/stock-ledger";
@@ -1232,6 +1235,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
       customFieldSortings,
       sortBy: sortByValues,
       parsedFilters,
+      lowStockOnly,
       withBookings: getBookings || isUpcomingBookingsColumnVisible,
       withBarcodes: canUseBarcodes,
       withLastAuditDate:
@@ -8270,6 +8274,152 @@ export async function bulkUpdateAssetLocation({
         ? cause.message
         : "Something went wrong while bulk updating location.",
       additionalData: { userId, assetIds, newLocationId },
+      label,
+    });
+  }
+}
+
+/**
+ * Sets (or clears) the low-stock reorder point on many assets at once.
+ *
+ * Exists because `minQuantity` is the input the whole Stock status column
+ * depends on, and almost nobody has set it: measured on a live workspace, 2 of
+ * 12 quantity assets had one, and 0 of 10 in dev. Nothing in the product ever
+ * asks for it, it is optional in the create form and in the CSV importer. A
+ * column that tells a customer "no reorder point" on most of their catalogue,
+ * with only a one-at-a-time cure, diagnoses a problem it cannot treat.
+ *
+ * INDIVIDUAL assets are skipped, not rejected. `minQuantity` is meaningless for
+ * a single tracked object, and a mixed selection is the normal case in a
+ * workspace that has both kinds, failing the whole batch because a camera came
+ * along for the ride would make the action unusable on exactly the lists people
+ * select from.
+ *
+ * @param args.assetIds - Selected ids, or the sentinel for "all matching".
+ * @param args.minQuantity - The new reorder point, or `null` to clear it.
+ * @param args.currentSearchParams - Live filters, used to resolve "select all".
+ * @returns How many assets actually changed. The caller needs this to report
+ *   honestly: a selection can be entirely individually-tracked assets, or
+ *   already hold the threshold being applied, in which case nothing happened and
+ *   saying "reorder point set" would be a lie.
+ * @throws {ShelfError} If the write fails.
+ */
+export async function bulkUpdateAssetMinQuantity({
+  userId,
+  assetIds,
+  organizationId,
+  minQuantity,
+  currentSearchParams,
+  settings,
+  lastAuditDateAccess,
+  timeZone = "UTC",
+}: {
+  userId: string;
+  assetIds: Asset["id"][];
+  organizationId: Asset["organizationId"];
+  minQuantity: number | null;
+  currentSearchParams?: string | null;
+  settings: AssetIndexSettings;
+  /**
+   * How the caller may use the last audit date, from `lastAuditDateAccessFor`.
+   * Select-all drops a last audit date filter the caller may not query.
+   */
+  lastAuditDateAccess: LastAuditDateAccess;
+  /** Acting user's IANA timezone, for select-all date-filter truncation. */
+  timeZone?: string;
+}) {
+  try {
+    const resolvedIds = await resolveAssetIdsForBulkOperation({
+      assetIds,
+      organizationId,
+      currentSearchParams,
+      settings,
+      // Reachable only with an asset write permission, which BASE and
+      // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
+      allowedTeamMemberIds: "all",
+      lastAuditDateAccess,
+      timeZone,
+    });
+
+    if (resolvedIds.length === 0) {
+      return 0;
+    }
+
+    // Archived assets are frozen (issue #382): can't change their min quantity.
+    await assertAssetsAreNotArchived({
+      assetIds: resolvedIds,
+      organizationId,
+      actorUserId: userId,
+    });
+
+    // Org-scoped read, so every id below is already proven to belong here.
+    // Quantity assets only, see the note on skipping INDIVIDUAL above.
+    const assetsBeforeUpdate = await db.asset.findMany({
+      where: {
+        id: { in: resolvedIds },
+        organizationId,
+        archivedAt: null,
+        type: AssetType.QUANTITY_TRACKED,
+      },
+      select: { id: true, minQuantity: true },
+    });
+
+    // Only rows that actually change, so the activity feed does not fill with
+    // no-op entries when someone re-applies the same threshold.
+    const assetsThatChange = assetsBeforeUpdate.filter(
+      (asset) => (asset.minQuantity ?? null) !== minQuantity
+    );
+
+    if (assetsThatChange.length === 0) {
+      return 0;
+    }
+
+    await db.$transaction(async (tx) => {
+      await tx.asset.updateMany({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: assetsThatChange derives from assetsBeforeUpdate, fetched above with where { id in resolvedIds, organizationId }
+        where: { id: { in: assetsThatChange.map((a) => a.id) } },
+        data: { minQuantity },
+      });
+
+      // One event per asset that changed. ASSET_MIN_QUANTITY_CHANGED already
+      // exists and is what the singular edit path emits, so the bulk action
+      // keeps reporting parity with it.
+      await recordEvents(
+        assetsThatChange.map((asset) => ({
+          organizationId,
+          actorUserId: userId,
+          action: "ASSET_MIN_QUANTITY_CHANGED" as const,
+          entityType: "ASSET" as const,
+          entityId: asset.id,
+          assetId: asset.id,
+          field: "minQuantity",
+          fromValue: asset.minQuantity ?? null,
+          toValue: minQuantity,
+        })),
+        tx
+      );
+    });
+
+    // Changing a threshold moves assets into or out of the low-stock band, so
+    // the `lowStockNotifiedAt` marker has to be brought up to date or the very
+    // next stock movement fires an alert for an episode that is already known.
+    // Silent and in one pass: the user just made this change deliberately and
+    // can see the result, so no asset is worth an email. Best-effort, never
+    // fails the committed threshold write.
+    await syncLowStockMarkers({
+      assetIds: assetsThatChange.map((asset) => asset.id),
+      organizationId,
+    });
+
+    return assetsThatChange.length;
+  } catch (cause) {
+    // Keep a deliberate refusal's status and message (archived assets in the
+    // selection, a last audit date filter the caller may not use).
+    if (isLikeShelfError(cause)) throw cause;
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while bulk updating the min quantity.",
+      additionalData: { userId, assetIds, organizationId },
       label,
     });
   }

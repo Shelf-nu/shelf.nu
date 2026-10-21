@@ -13,6 +13,9 @@ import {
   generateCustomFieldSelect,
   generateWhereClause,
   parseSortingOptions,
+  POOL_AGGREGATE_JOIN,
+  POOL_AVAILABLE_EXPR,
+  POOL_STOCK_STATUS_EXPR,
 } from "./query.server";
 
 // why: mocking location descendants to avoid database queries during tests
@@ -1437,7 +1440,127 @@ describe("generateWhereClause - lowStockOnly", () => {
     );
     expect(sql).toContain(`a."type" = 'QUANTITY_TRACKED'`);
     expect(sql).toContain(`a."minQuantity" IS NOT NULL`);
-    expect(sql).toContain(`a."quantity" <= a."minQuantity"`);
+    // Compares AVAILABLE against the threshold, via the shared pool expression.
+    expect(sql).toContain(`pool.in_custody`);
+    expect(sql).toContain(`<= a."minQuantity"`);
+  });
+
+  it("compares AVAILABLE, not total quantity, against the threshold", () => {
+    // why: this is the defect the unification closes, and a total-based
+    // predicate would pass every other assertion in this file. The toggle used
+    // to read `a."quantity" <= a."minQuantity"`, which disagreed with the
+    // low-stock EMAIL (available-based) the moment any unit was in custody:
+    // 6 total, 2 in custody, threshold 5 → the alert fired and this filter
+    // could not find the row. Two of the three thresholded assets in the dev
+    // workspace were invisible to the old predicate.
+    const sql = getSqlString(
+      generateWhereClause(orgId, null, [], undefined, null, "UTC", true)
+    );
+    expect(sql).not.toContain(`a."quantity" <= a."minQuantity"`);
+  });
+});
+
+describe("generateWhereClause - Free now filter", () => {
+  it("leaves individually-tracked assets out of a Free now number filter", () => {
+    // why: an individual asset has no pool. Before the type guard its Free now
+    // came out as 0, so "Free now is 0" listed every individual asset while
+    // their cells showed a dash.
+    const filter: Filter = {
+      name: "available",
+      type: "number",
+      operator: "is",
+      value: 0,
+    };
+    const sql = getSqlString(
+      generateWhereClause("test-org-id", null, [filter])
+    );
+
+    expect(sql).toContain(
+      `CASE WHEN a."type" = 'QUANTITY_TRACKED' THEN GREATEST(COALESCE(a.quantity, 0)`
+    );
+  });
+});
+
+describe("POOL_AGGREGATE_JOIN, the SQL twin of getAssetAvailability", () => {
+  const sql = POOL_AGGREGATE_JOIN.strings.join("?");
+
+  it("counts direct custody only, leaving kit-inherited rows to in_kits", () => {
+    // A kit in custody writes Custody rows tagged kitCustodyId for its members;
+    // those units are already in AssetKit.quantity. Summing both painted every
+    // member of a kit in custody as None free.
+    expect(sql).toContain(`cu_q."kitCustodyId" IS NULL`);
+  });
+
+  it("keeps kit-driven booking slices out of every booking figure", () => {
+    // A booked kit writes BookingAsset rows tagged assetKitId for its members.
+    // Reserved, checked-out, the peak and the top booking all read standalone
+    // slices only; a member of a reserved kit read Short before this.
+    expect(sql).toContain(`(ba."assetKitId" IS NULL) AS standalone`);
+    expect(sql).toContain(
+      `FROM slices WHERE standalone AND status = 'RESERVED'), 0) AS reserved,`
+    );
+    expect(sql).toMatch(
+      /FROM slices WHERE standalone AND ahead AND remaining > 0/
+    );
+  });
+
+  it("counts what is still out as what left minus what came back", () => {
+    // Mirror of computeUnitsStillOutBySlice. What left: the whole slice for an
+    // all-at-once checkout, otherwise the larger of the session claims and the
+    // stored counter.
+    // One trip's reading: session claims, else the whole slice when the slice
+    // itself is stamped as checked out. Never the asset's global status.
+    expect(sql).toContain(
+      `WHEN oc.claimed > 0 THEN LEAST(oc.quantity, oc.claimed)`
+    );
+    expect(sql).toContain(
+      `WHEN oc.checked_out_at IS NOT NULL THEN oc.quantity`
+    );
+    expect(sql).not.toContain(`a.status = 'CHECKED_OUT'`);
+    // The cumulative counter floors both readings, so a slice sent out a
+    // second time, by either checkout, still counts.
+    expect(sql).toMatch(/END,\s+oc\.counter\s+\) AS departed/);
+    // What came back comes off the slice, never below zero or above booked.
+    expect(sql).toContain(`LEAST(od.quantity, GREATEST(od.departed - (`);
+    // Untagged claims and returns fill standalone slices first, then by id in
+    // the byte order JavaScript compares these ids in.
+    expect(sql).toContain(
+      `ORDER BY NOT ob.standalone, ob.slice_id COLLATE "C"`
+    );
+    expect(sql).toContain(
+      `ORDER BY NOT od.standalone, od.slice_id COLLATE "C"`
+    );
+  });
+
+  it("looks up each slice's booking by key rather than joining every active booking", () => {
+    // Without the fence the planner joins every RESERVED / ONGOING / OVERDUE
+    // booking in the database once per asset. Same result, several times the
+    // cost on the Stock status sort, which runs this for every asset.
+    expect(sql).toMatch(
+      /CROSS JOIN LATERAL \(\s+SELECT b\.name, b\.status, b\."from", b\."to"\s+FROM public\."Booking" b\s+WHERE b\.id = ba\."bookingId"[\s\S]*?OFFSET 0\s+\) bk/
+    );
+  });
+
+  it("nets the ledger against what a booking still owes", () => {
+    expect(sql).toContain(
+      `cl.category IN ('RETURN', 'CONSUME', 'LOSS', 'DAMAGE')`
+    );
+    expect(sql).toContain(
+      `GREATEST(act.quantity - COALESCE(booked_logs.q, 0), 0) AS remaining`
+    );
+  });
+
+  it("sweeps bookings as intervals for the peak, releases before claims at a tie", () => {
+    // peakConcurrent in SQL: +qty at start, -qty at end, running sum ordered by
+    // (t, delta) so a booking ending exactly when another starts never overlaps.
+    expect(sql).toContain(
+      `SUM(delta) OVER (ORDER BY t, delta ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)`
+    );
+    expect(sql).toContain(`GREATEST(COALESCE(from_at, now()), now()) AS t`);
+    expect(sql).toContain(
+      `CASE WHEN bk.status = 'OVERDUE' THEN 'infinity'::timestamptz ELSE bk."to" END AS end_at`
+    );
+    expect(sql).not.toContain("largest_booking");
   });
 });
 
@@ -1742,7 +1865,9 @@ describe("custodian display name", () => {
     // the custody JSON projection and inside BOOKING_CUSTODIAN_NAME's COALESCE,
     // so a bare `toContain` over the whole query stays green even when the
     // grouping column is removed — which is the only thing this guards.
-    const groupBy = sql.match(/GROUP BY [^\n]*/)?.[0] ?? "";
+    // Anchor on `a.id`: the per-asset pool LATERAL carries its own GROUP BY
+    // earlier in the text, and the outer clause is the one under test.
+    const groupBy = sql.match(/GROUP BY a\.id[^\n]*/)?.[0] ?? "";
 
     expect(groupBy).toContain('bu."displayName"');
   });
@@ -1865,5 +1990,199 @@ describe("lastAuditDate filter and sort", () => {
 
     expect(slimCte(["lastAuditDate:asc"])).toContain('AS "lastAuditDate"');
     expect(slimCte(["name:asc"])).not.toContain('AS "lastAuditDate"');
+  });
+});
+
+describe("assetReturnFragment argument count", () => {
+  /**
+   * The top-level arguments of each `jsonb_build_object(` call in `sql`.
+   * Nested calls and parenthesised expressions count as one argument.
+   */
+  function topLevelArgumentCounts(sql: string): number[] {
+    const counts: number[] = [];
+    const opener = "jsonb_build_object(";
+    let index = sql.indexOf(opener);
+    while (index !== -1) {
+      let depth = 1;
+      let args = 1;
+      let inString = false;
+      for (let i = index + opener.length; i < sql.length && depth > 0; i++) {
+        const char = sql[i];
+        if (char === "'" || char === '"') inString = !inString;
+        if (inString) continue;
+        if (char === "(") depth++;
+        if (char === ")") depth--;
+        if (char === "," && depth === 1) args++;
+      }
+      counts.push(args);
+      index = sql.indexOf(opener, index + opener.length);
+    }
+    return counts;
+  }
+
+  it("keeps every jsonb_build_object call under Postgres's 100-argument cap", () => {
+    // why: one object holding every asset key passed the cap once the stock
+    // columns and the last audit date were both added, and the advanced index
+    // failed with "cannot pass more than 100 arguments to a function".
+    const sql = assetReturnFragment({
+      withBookings: true,
+      withBarcodes: true,
+      withLastAuditDate: true,
+    }).strings.join("?");
+
+    const counts = topLevelArgumentCounts(sql);
+    expect(counts.length).toBeGreaterThan(1);
+    for (const count of counts) {
+      expect(count).toBeLessThanOrEqual(100);
+    }
+  });
+});
+
+describe("parseSortingOptions - pool columns", () => {
+  it.each(["asc", "desc"])(
+    "sorts Stock status %s by severity, with individual assets last",
+    (direction) => {
+      const { orderByInner } = parseSortingOptions([
+        `stockStatus:${direction}`,
+      ]);
+      const sql = orderByInner.replace(/\s+/g, " ");
+
+      expect(sql).toContain('CASE "assetStockStatus"');
+      // Worst first: Short, then None free, Low, Enough, No threshold
+      expect(sql).toContain("WHEN 'SHORT' THEN 0");
+      expect(sql).toContain("WHEN 'NONE_FREE' THEN 1");
+      expect(sql).toContain("WHEN 'LOW' THEN 2");
+      expect(sql).toContain("WHEN 'ENOUGH' THEN 3");
+      expect(sql).toContain("WHEN 'NO_THRESHOLD' THEN 4");
+      expect(sql).toMatch(new RegExp(`END ${direction} NULLS LAST`));
+    }
+  );
+
+  it.each([
+    ["available", "assetAvailable"],
+    ["reserved", "assetReservedDisplay"],
+  ])(
+    "sorts %s by its pool alias, with individual assets last",
+    (column, alias) => {
+      expect(parseSortingOptions([`${column}:asc`]).orderByInner).toContain(
+        `"${alias}" asc NULLS LAST`
+      );
+      expect(parseSortingOptions([`${column}:desc`]).orderByInner).toContain(
+        `"${alias}" desc NULLS LAST`
+      );
+    }
+  );
+});
+
+describe("generateWhereClause - Stock status filter", () => {
+  /** A Stock status filter with the given operator and value. */
+  function stockStatusFilter(
+    operator: Filter["operator"],
+    value: string
+  ): Filter {
+    return { name: "stockStatus", type: "enum", operator, value };
+  }
+
+  it("matches one verdict with 'is'", () => {
+    const result = generateWhereClause("org-1", null, [
+      stockStatusFilter("is", "LOW"),
+    ]);
+    const sql = getSqlString(result);
+
+    expect(sql).toContain("THEN 'SHORT'");
+    expect(sql).toMatch(/END\) = \?/);
+    expect(result.values).toContain("LOW");
+  });
+
+  it("keeps individual assets out of 'is not', since they have no verdict", () => {
+    const result = generateWhereClause("org-1", null, [
+      stockStatusFilter("isNot", "ENOUGH"),
+    ]);
+    const sql = getSqlString(result);
+
+    expect(sql).toMatch(/END\) IS NOT NULL AND \(CASE/);
+    expect(sql).toMatch(/END\) != \?/);
+    expect(result.values).toContain("ENOUGH");
+  });
+
+  it("matches any of several verdicts with 'contains any'", () => {
+    const result = generateWhereClause("org-1", null, [
+      stockStatusFilter("containsAny", "SHORT, NONE_FREE"),
+    ]);
+    const sql = getSqlString(result);
+
+    expect(sql).toMatch(/END\) = ANY\(ARRAY\[/);
+    expect(result.values).toEqual(
+      expect.arrayContaining(["SHORT", "NONE_FREE"])
+    );
+  });
+
+  it("leaves the clause unchanged for an empty 'contains any'", () => {
+    const base = generateWhereClause("org-1", null, []);
+    const result = generateWhereClause("org-1", null, [
+      stockStatusFilter("containsAny", ""),
+    ]);
+
+    expect(getSqlString(result)).toBe(getSqlString(base));
+    expect(result.values).toEqual(base.values);
+  });
+});
+
+describe("generateWhereClause - Reserved filter", () => {
+  it("filters Reserved through the same expression the column shows", () => {
+    const filter: Filter = {
+      name: "reserved",
+      type: "number",
+      operator: "gt",
+      value: 2,
+    };
+    const result = generateWhereClause("org-1", null, [filter]);
+
+    expect(getSqlString(result)).toContain(
+      `(CASE WHEN a.type = 'INDIVIDUAL' THEN pool.reserved_all ELSE pool.reserved END)::float > ?`
+    );
+    expect(result.values).toContain(2);
+  });
+});
+
+describe("POOL_STOCK_STATUS_EXPR", () => {
+  /** The expression with whitespace collapsed, for order assertions. */
+  const sql = POOL_STOCK_STATUS_EXPR.sql.replace(/\s+/g, " ");
+
+  it("judges the verdicts most urgent first", () => {
+    // SHORT before NONE_FREE: an over-committed pool is usually also empty,
+    // and the over-commitment is what needs acting on. NO_THRESHOLD before
+    // ENOUGH: a pool with no floor must never read as fine.
+    const order = [
+      "'SHORT'",
+      "'NONE_FREE'",
+      "'LOW'",
+      "'NO_THRESHOLD'",
+      "'ENOUGH'",
+    ].map((verdict) => sql.indexOf(verdict));
+
+    expect(order.every((at) => at >= 0)).toBe(true);
+    expect([...order].sort((x, y) => x - y)).toEqual(order);
+  });
+
+  it("gives individually-tracked assets no verdict", () => {
+    expect(sql).toContain("WHEN a.type <> 'QUANTITY_TRACKED' THEN NULL");
+  });
+
+  it("judges SHORT on custody, kits and the booking peak against the total", () => {
+    expect(sql).toContain(
+      "WHEN (pool.in_custody + pool.in_kits + pool.peak_booked) > COALESCE(a.quantity, 0) THEN 'SHORT'"
+    );
+  });
+
+  it("uses the same Free now arithmetic as the Free now column", () => {
+    const freeNow =
+      "GREATEST(COALESCE(a.quantity, 0) - pool.in_custody - pool.in_kits - pool.checked_out, 0)";
+
+    expect(POOL_AVAILABLE_EXPR.sql).toContain(freeNow);
+    expect(sql).toContain(`WHEN ${freeNow} <= 0 THEN 'NONE_FREE'`);
+    expect(sql).toContain(
+      `WHEN a."minQuantity" IS NOT NULL AND ${freeNow} <= a."minQuantity" THEN 'LOW'`
+    );
   });
 });

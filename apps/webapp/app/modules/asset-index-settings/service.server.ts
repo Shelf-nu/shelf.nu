@@ -1,5 +1,6 @@
 import {
   AssetIndexMode,
+  AssetType,
   type CustomField,
   type OrganizationRoles,
   type Prisma,
@@ -13,10 +14,12 @@ import type { Column, ColumnLabelKey } from "./helpers";
 import { syncCustomFieldColumn } from "./helpers";
 import {
   barcodeFields,
+  defaultColumnsForWorkspace,
   defaultFields,
   fixedFields,
   generateBarcodeColumns,
   insertMissingDefaultColumns,
+  isQuantityColumn,
 } from "./helpers";
 import { getOrganizationById } from "../organization/service.server";
 
@@ -37,6 +40,26 @@ export function getDefaultModeForRole(
 
 const label: ErrorLabel = "Asset Index Settings";
 
+/**
+ * Whether the workspace has at least one quantity-tracked asset. Decides
+ * whether the quantity columns start visible in a column set.
+ *
+ * @param organizationId - The workspace to check
+ * @param client - The Prisma client or transaction to read through
+ * @returns `true` when any asset in the workspace is quantity-tracked
+ */
+async function workspaceHasQuantityAssets(
+  organizationId: string,
+  client: Pick<typeof db, "asset"> = db
+): Promise<boolean> {
+  const asset = await client.asset.findFirst({
+    // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: an archived quantity asset still makes this a counting workspace, and archived rows show in the list's Archived view
+    where: { organizationId, type: AssetType.QUANTITY_TRACKED },
+    select: { id: true },
+  });
+  return Boolean(asset);
+}
+
 export async function createUserAssetIndexSettings({
   userId,
   organizationId,
@@ -55,11 +78,14 @@ export async function createUserAssetIndexSettings({
   const _db = tx || db;
 
   try {
-    const org = await getOrganizationById(organizationId, {
-      customFields: {
-        where: { active: true, deletedAt: null },
-      },
-    });
+    const [org, hasQuantityAssets] = await Promise.all([
+      getOrganizationById(organizationId, {
+        customFields: {
+          where: { active: true, deletedAt: null },
+        },
+      }),
+      workspaceHasQuantityAssets(organizationId, _db),
+    ]);
 
     /** We start at the default fields length */
     let position = defaultFields.length - 1;
@@ -80,7 +106,7 @@ export async function createUserAssetIndexSettings({
     });
 
     const columns = [
-      ...defaultFields,
+      ...defaultColumnsForWorkspace({ hasQuantityAssets }),
       ...barcodeColumns,
       ...customFieldsColumns,
     ];
@@ -441,9 +467,15 @@ async function validateColumns({
     // If default fields are missing, add them without moving any saved
     // column out of the user's order
     if (missingDefaultFields.length > 0) {
+      // Asked only when a quantity column is missing, which happens once per
+      // saved column set, not on every page load.
+      const hasQuantityAssets = missingDefaultFields.some(isQuantityColumn)
+        ? await workspaceHasQuantityAssets(organizationId)
+        : false;
       updatedColumns = insertMissingDefaultColumns(
         updatedColumns,
-        missingDefaultFields
+        missingDefaultFields,
+        { hasQuantityAssets }
       );
       needsUpdate = true;
     }

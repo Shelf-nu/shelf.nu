@@ -9,7 +9,12 @@ import {
 } from "./last-audit-date-access";
 import type { LastAuditDateAccess } from "./last-audit-date-access";
 import type { BookableListScope } from "./list-scope.server";
-import { generateWhereClause, parseFiltersWithHierarchy } from "./query.server";
+import {
+  detectPoolKeys,
+  generateWhereClause,
+  parseFiltersWithHierarchy,
+  POOL_AGGREGATE_JOIN,
+} from "./query.server";
 import type { AllowedCustodianFilterIds } from "./utils.server";
 import {
   getArchivedFilterFromParams,
@@ -21,23 +26,26 @@ const label = "Assets";
 
 /**
  * Builds the raw SQL that resolves asset IDs for an advanced-filter bulk
- * operation. Extracted so the join/column shape is unit-testable without a DB —
- * raw SQL can't be typechecked, so a string assertion is the regression guard
- * (see `.claude/rules/raw-sql-respects-prisma-map.md` and the co-located test).
+ * operation. Kept separate so the join/column shape is unit-testable without a
+ * DB: raw SQL can't be typechecked, so a string assertion is the regression
+ * guard (see `.claude/rules/raw-sql-respects-prisma-map.md` and the co-located
+ * test).
  *
  * The joins mirror the main paginated query because {@link generateWhereClause}
- * may reference the joined aliases (c.name, l.name, t.id, tm.name, …). Asset
- * placement lives on the `AssetLocation` pivot — there is no `Asset.locationId`
- * FK — so location is joined via a LATERAL primary-pick (oldest pivot row),
- * exactly like the index query. The previous `LEFT JOIN "Location" l ON
- * a."locationId" = l.id` referenced a dropped column and 500'd on every
- * advanced-mode select-all (SHELF-WEBAPP-21X).
+ * may reference the joined aliases (c.name, l.name, t.id, tm.name, ...). Asset
+ * placement lives on the `AssetLocation` pivot (there is no `Asset.locationId`
+ * column), so location is joined via a LATERAL primary-pick (oldest pivot row),
+ * exactly like the index query.
  *
  * @param whereClause - The `Prisma.Sql` WHERE fragment from generateWhereClause.
+ * @param options.withPool - Whether `whereClause` may reference the `pool`
+ *   LATERAL (a Free now / Reserved / Stock status filter, or the low stock
+ *   toggle). Adds {@link POOL_AGGREGATE_JOIN} when `true`.
  * @returns The composed `Prisma.Sql` SELECT query.
  */
 export function buildAdvancedFilteredAssetIdsQuery(
-  whereClause: Prisma.Sql
+  whereClause: Prisma.Sql,
+  { withPool }: { withPool: boolean }
 ): Prisma.Sql {
   return Prisma.sql`
     SELECT DISTINCT a.id
@@ -59,6 +67,11 @@ export function buildAdvancedFilteredAssetIdsQuery(
     LEFT JOIN public."Custody" cu ON cu."assetId" = a.id
     LEFT JOIN public."TeamMember" tm ON cu."teamMemberId" = tm.id
     LEFT JOIN public."User" u ON tm."userId" = u.id
+    -- The pool aggregates the index query uses, required exactly when the
+    -- WHERE may reference pool.*: without them that WHERE fails with
+    -- "missing FROM-clause entry for table pool", and with them every asset
+    -- pays five correlated aggregates the WHERE never reads.
+    ${withPool ? POOL_AGGREGATE_JOIN : Prisma.empty}
     ${whereClause}
   `;
 }
@@ -158,7 +171,11 @@ async function getAdvancedFilteredAssetIds({
     // Minimal query: only SELECT id, but include the same joins the main
     // paginated query uses, because the WHERE clause may reference joined
     // aliases (c.name, l.name, t.id, tm.name, etc.).
-    const query = buildAdvancedFilteredAssetIdsQuery(whereClause);
+    // Same gate as the index's cheap phase: the WHERE reads pool.* only for
+    // the low stock toggle or a pool column filter. No sort applies here.
+    const query = buildAdvancedFilteredAssetIdsQuery(whereClause, {
+      withPool: lowStockOnly || detectPoolKeys(parsedFilters, []),
+    });
 
     const results = await db.$queryRaw<Array<{ id: string }>>(query);
     return results.map((r) => r.id);
