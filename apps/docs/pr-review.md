@@ -79,7 +79,7 @@ writes a throwaway test under
 (`pnpm webapp:test -- --run <file>`), shows the output, and says proven, not
 proven, or inconclusive (the test failed for an unrelated reason such as a setup
 error). It then deletes the test in every case. It refuses when your checkout is
-not the PR head, is never committed, and never runs the full suite.
+not the PR head or the proof file already exists, is never committed, and never runs the full suite.
 
 ## The agents
 

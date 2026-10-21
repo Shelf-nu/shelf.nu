@@ -257,16 +257,20 @@ a typed reply to the Next line.
 **"restore D<n>":** bring that dismissed entry back as a normal finding with
 the next free number, at its original severity, with its saved impact, trigger
 and fix, and print it in the report shape. Then recompute the verdict and the
-header counts and print them.
+header counts and print them. When a ticked section already covers the restored
+finding, carry on with the picked actions. Otherwise rebuild the Next line and
+ask the picker again with the updated options, so the restored finding can be
+fixed, proven or posted.
 
-**"prove N":** writes a throwaway test, never kept. Write a
-throwaway test that fails if finding N is real, at
+**"prove N":** write a throwaway test that fails if finding N is real, at
 `apps/webapp/test/pr-review-proof-<N>.test.ts` (never under `app/routes/`).
+If that file already exists, tracked or not, refuse and tell the user: never
+overwrite it, and never delete a file this run did not create.
 If `localHeadMatchesPr` is false, refuse and tell the user to check out the PR
 head first, with no uncommitted edits to its files. Run only that file with `pnpm webapp:test -- --run <file>`. Show the
 command and its output, then say "proven" (the test failed for the reason the
 finding names), "not proven", or "inconclusive" (it failed for another reason,
-such as an import or setup error). DELETE the test file in all cases (pass,
+such as an import or setup error). DELETE the test file this run created in all cases (pass,
 fail, error, timeout), then run `git status --short` to confirm nothing is
 left. Never commit it and never run the full suite. For non-webapp code use the
 closest equivalent (`node --test` for scripts) with the same rules.
