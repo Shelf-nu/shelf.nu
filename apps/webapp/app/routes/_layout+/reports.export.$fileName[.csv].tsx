@@ -10,6 +10,7 @@
 import { AUDIT_STATUS_LABELS } from "@shelf/labels";
 import { data, type LoaderFunctionArgs } from "react-router";
 
+import { getQrUrl } from "~/modules/qr/qr-url.server";
 import { auditCompletionReport } from "~/modules/reports/audit-completion.server";
 import { formatDateForCsv } from "~/modules/reports/csv-format";
 import {
@@ -44,6 +45,7 @@ import type {
   MonthlyBookingTrendRow,
 } from "~/modules/reports/types";
 import { getClientHint } from "~/utils/client-hints";
+import { neutralizeCsvFormula } from "~/utils/csv-cells";
 import { csvResponse } from "~/utils/csv-utf8";
 import { type ResolvedFormatPrefs } from "~/utils/date-format";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
@@ -544,11 +546,9 @@ function buildCsv(headers: string[], rows: string[][]): string {
  * Escape a field for CSV format.
  */
 function escapeCsvField(field: string): string {
-  // Neutralize spreadsheet formula injection (CWE-1236): a value starting with
-  // =, +, -, or @ can execute as a formula in Excel/Google Sheets. Prefix such
-  // values with a single quote so the cell is treated as literal text. Applied
-  // here in the shared helper so every report export is protected.
-  const safeField = /^[=+\-@]/.test(field) ? `'${field}` : field;
+  // Neutralize spreadsheet formula injection (CWE-1236). Applied here in the
+  // shared helper so every report export is protected.
+  const safeField = neutralizeCsvFormula(field);
   // `\r` is quoted alongside `\n`: a bare carriage return terminates a record in
   // consumers that accept CR as a line ending, so an unquoted one lets a
   // user-controlled value split the row and forge structure — which also puts
@@ -707,6 +707,7 @@ function generateAssetInventoryCsv(
     "Total Value",
     "Created Date",
     "QR Code ID",
+    "QR Code URL",
   ];
 
   const csvRows = rows.map((row) => [
@@ -725,6 +726,8 @@ function generateAssetInventoryCsv(
     // Date-only column: no time part.
     formatDateForCsv(row.createdAt, prefs),
     row.qrId || "",
+    // The URL the printed code encodes, for label-printer software.
+    getQrUrl(row.qrId),
   ]);
 
   return buildCsv(headers, csvRows);

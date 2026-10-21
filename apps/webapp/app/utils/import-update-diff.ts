@@ -257,8 +257,13 @@ export function analyzeUpdateHeaders(
     // Check if it's a known fixed-field header via the reverse map
     // (case-insensitive — see map construction above).
     const internalField = fieldByLowerHeader.get(lowerHeader);
+    // A workspace custom field outranks the export-only `qrUrl` column with
+    // the same header. The asset export leaves `qrUrl` out in that case, so
+    // the header can only be the custom field.
+    const isCustomFieldNamedQrUrl =
+      internalField === "qrUrl" && cfByName.has(lowerHeader);
 
-    if (internalField) {
+    if (internalField && !isCustomFieldNamedQrUrl) {
       if (UPDATABLE_FIELDS.has(internalField)) {
         updatableColumns.push({
           csvHeader: header,
