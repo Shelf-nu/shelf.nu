@@ -12,6 +12,7 @@ import { db } from "~/database/db.server";
 
 import {
   assertUserMayPurchase,
+  pricesOfferedTo,
   ssoUserMayPurchase,
 } from "./sso-purchase-gate.server";
 
@@ -69,6 +70,29 @@ describe("ssoUserMayPurchase", () => {
         target: "team",
       })
     ).toBe(false);
+  });
+});
+
+/** Builds a price as the pricing table reads it: only the tier matters here. */
+function price(id: string, shelfTier: string) {
+  return { id, product: { metadata: { shelf_tier: shelfTier } } };
+}
+
+describe("pricesOfferedTo", () => {
+  const prices = {
+    month: [price("plus-month", "tier_1"), price("team-month", "tier_2")],
+    year: [price("plus-year", "tier_1"), price("team-year", "tier_2")],
+  };
+
+  it("offers every plan to a non-SSO user", () => {
+    expect(pricesOfferedTo({ prices, sso: false })).toEqual(prices);
+  });
+
+  it("never offers Plus to an SSO user, in either interval", () => {
+    expect(pricesOfferedTo({ prices, sso: true })).toEqual({
+      month: [price("team-month", "tier_2")],
+      year: [price("team-year", "tier_2")],
+    });
   });
 });
 

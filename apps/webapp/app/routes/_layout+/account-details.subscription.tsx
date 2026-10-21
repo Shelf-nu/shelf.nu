@@ -32,6 +32,7 @@ import {
 import { PURCHASES_UNAVAILABLE_MESSAGE } from "~/modules/billing/purchase-copy";
 import {
   assertUserMayPurchase,
+  pricesOfferedTo,
   ssoUserMayPurchase,
 } from "~/modules/billing/sso-purchase-gate.server";
 import { getWorkspacePlansForUser } from "~/modules/billing/workspace-plans.server";
@@ -120,7 +121,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     /* Get the prices, products, subscriptions, and invoices from Stripe */
     const [
-      prices,
+      allPrices,
       openInvoices,
       paidInvoicesData,
       upcomingInvoicesData,
@@ -132,6 +133,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       getCustomerUpcomingInvoices(customer),
       getCustomerSubscriptionsWithProducts(customer.id),
     ]);
+
+    /** Plans this user could actually buy: SSO users are never offered Plus. */
+    const prices = pricesOfferedTo({ prices: allPrices, sso: user.sso });
 
     // Transform paid invoices to simplified type for UI
     const paidInvoices: PaidInvoice[] = paidInvoicesData.map((inv) => ({

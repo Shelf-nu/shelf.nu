@@ -50,6 +50,35 @@ export function ssoUserMayPurchase({
 }
 
 /**
+ * Removes the plans a user can never buy from the prices a pricing table shows.
+ *
+ * SSO users only ever work in the workspaces their SSO account resolves them
+ * to, so Plus (`shelf_tier: "tier_1"`, which bills the personal workspace) is
+ * never offered to them. Everyone else sees every plan.
+ *
+ * @param args.prices - Prices grouped by billing interval, as Stripe returns them
+ * @param args.sso - Whether the viewer signs in through SSO
+ * @returns The same grouping, without Plus prices for SSO users
+ */
+export function pricesOfferedTo<
+  P extends { product: { metadata: Record<string, string> } },
+>({
+  prices,
+  sso,
+}: {
+  prices: Record<string, P[]>;
+  sso: boolean;
+}): Record<string, P[]> {
+  if (!sso) return prices;
+  return Object.fromEntries(
+    Object.entries(prices).map(([interval, list]) => [
+      interval,
+      list.filter((p) => p.product.metadata.shelf_tier !== "tier_1"),
+    ])
+  );
+}
+
+/**
  * Throws unless the user may start a purchase.
  *
  * The workspace count is only queried for SSO users buying a Team plan, since
