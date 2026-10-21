@@ -29,6 +29,10 @@ import {
   assertPriceIsForAddon,
   assertPriceMatchesTier,
 } from "~/modules/billing/price-validation.server";
+import {
+  assertUserMayPurchase,
+  ssoUserMayPurchase,
+} from "~/modules/billing/sso-purchase-gate.server";
 import { getWorkspacePlansForUser } from "~/modules/billing/workspace-plans.server";
 import { getSelectedOrganization } from "~/modules/organization/context.server";
 import { getUserTierLimit } from "~/modules/tier/service.server";
@@ -82,6 +86,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           customerId: true,
           tierId: true,
           usedFreeTrial: true,
+          sso: true,
         } satisfies Prisma.UserSelect,
       }),
       getUserTierLimit(userId),
@@ -94,6 +99,18 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     /** A paid workspace the user works in that someone else pays for. */
     const workspaceAccessedThroughOthers =
       findPaidWorkspaceThroughOthers(workspacePlans);
+
+    /**
+     * Whether this user may start a Team purchase from this page. SSO users
+     * may only buy for a TEAM workspace they own.
+     */
+    const canPurchase = ssoUserMayPurchase({
+      sso: user.sso,
+      ownsTeamWorkspace: workspacePlans.some(
+        (row) => row.type === "TEAM" && row.paidBy.isYou
+      ),
+      target: "team",
+    });
 
     /** Get the Stripe customer */
     const customer = (await getStripeCustomer(
@@ -166,6 +183,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       hasPersonalWorkspace: workspacePlans.some(
         (row) => row.type === "PERSONAL"
       ),
+      canPurchase,
       prices,
       customer,
       subscriptionsWithProducts,
@@ -212,6 +230,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
           barcodePriceId: z.string().optional(),
         })
       );
+
+    // Refuse before any price lookup, checkout or trial: the tier decides
+    // which workspace the purchase bills.
+    await assertUserMayPurchase({
+      userId,
+      target: shelfTier === "tier_1" ? "personal" : "team",
+    });
 
     // `shelfTier` and every price id here come from the form. The tier is
     // written straight to `user.tierId` below and the add-on ids become raw
