@@ -168,6 +168,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       optionRenames,
       categories,
       organizationId,
+      userId,
     });
 
     sendNotification({

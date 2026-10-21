@@ -18,6 +18,7 @@ import {
 import { getRedirectUrlFromRequest } from "~/utils/http";
 import type { OptionRename } from "./option-list";
 import type { CustomFieldDraftPayload } from "./types";
+import { recordEvents } from "../activity-event/service.server";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 import type { Column } from "../asset-index-settings/helpers";
 import { syncCustomFieldColumn } from "../asset-index-settings/helpers";
@@ -285,15 +286,18 @@ export async function getCustomField<
  * along with renamed or merged options.
  *
  * `optionRenames` maps a saved spelling to the option that now holds its
- * assets. The field update and the value rewrite commit together, so an option
- * is never renamed while its assets still store the old spelling.
+ * assets. The field update, the value rewrite and one
+ * `ASSET_CUSTOM_FIELD_CHANGED` event per rewritten asset commit together, so an
+ * option is never renamed while its assets still store the old spelling. The
+ * field row is locked for the transaction, so two saves of the same field
+ * validate their renames one after the other.
  *
- * @param payload - The field id and organization, the fields to change, and the
- *   option rewrites to apply
+ * @param payload - The field id and organization, the acting user, the fields
+ *   to change, and the option rewrites to apply
  * @returns The updated CustomField
- * @throws {ShelfError} 400 when a rename's `from` is not a currently saved
- *   option, its `to` is not one of the new options, or two renames share a
- *   `from`; 404 when the field does not exist in the organization
+ * @throws {ShelfError} 400 when the renames do not describe the saved and new
+ *   options (see `assertRenamesMatchOptions`); 404 when the field does not
+ *   exist in the organization
  */
 export async function updateCustomField(payload: {
   id: CustomField["id"];
@@ -306,6 +310,8 @@ export async function updateCustomField(payload: {
   optionRenames?: OptionRename[];
   categories?: string[];
   organizationId: CustomField["organizationId"];
+  /** The user making the change, recorded as the actor of rename events. */
+  userId: User["id"];
 }) {
   const {
     id,
@@ -317,6 +323,7 @@ export async function updateCustomField(payload: {
     optionRenames = [],
     categories,
     organizationId,
+    userId,
   } = payload;
 
   try {
@@ -344,9 +351,30 @@ export async function updateCustomField(payload: {
 
     const { oldField, updatedField } = await db.$transaction(
       async (tx) => {
-        const oldField = await tx.customField.findFirstOrThrow({
+        // Holds the field row until commit, so a concurrent save of the same
+        // field reads the options this one writes before checking its renames.
+        await tx.$queryRaw(Prisma.sql`
+          SELECT id FROM "CustomField"
+          WHERE id = ${id} AND "organizationId" = ${organizationId}
+          FOR UPDATE
+        `);
+
+        const oldField = await tx.customField.findFirst({
           where: { id, organizationId, deletedAt: null },
         });
+
+        if (!oldField) {
+          throw new ShelfError({
+            cause: null,
+            title: "Custom field not found",
+            message:
+              "The custom field you are trying to update does not exist or you do not have access to it.",
+            additionalData: { id, organizationId },
+            label,
+            status: 404,
+            shouldBeCaptured: false,
+          });
+        }
 
         assertRenamesMatchOptions({
           renames,
@@ -361,7 +389,27 @@ export async function updateCustomField(payload: {
         });
 
         if (renames.length > 0) {
-          await tx.$executeRaw(buildOptionRenameStatement(id, renames));
+          const rewritten = await tx.$queryRaw<RewrittenOptionValue[]>(
+            buildOptionRenameStatement(id, renames)
+          );
+
+          // One event per asset whose stored value changed, shaped like the
+          // event a single-asset edit of the same field records.
+          await recordEvents(
+            rewritten.map(({ assetId, from, to }) => ({
+              organizationId,
+              actorUserId: userId,
+              action: "ASSET_CUSTOM_FIELD_CHANGED",
+              entityType: "ASSET",
+              entityId: assetId,
+              assetId,
+              field: updatedField.name,
+              fromValue: from,
+              toValue: to,
+              meta: { isFirstTimeSet: false, viaOptionRename: true },
+            })),
+            tx
+          );
         }
 
         return { oldField, updatedField };
@@ -391,6 +439,11 @@ export async function updateCustomField(payload: {
  * `from` that is no longer saved means someone else edited the field since the
  * page loaded. Each `from` may appear once, because a stored value can only
  * move to one place.
+ *
+ * A `from` that is still one of the new options keeps its assets, unless
+ * another rename moves assets onto it: that is a swap or rotation of
+ * spellings, where every set of assets follows its row. Without that, moving
+ * assets off an option that stays selectable would split one choice in two.
  */
 function assertRenamesMatchOptions({
   renames,
@@ -404,8 +457,12 @@ function assertRenamesMatchOptions({
   additionalData: Record<string, unknown>;
 }) {
   const froms = renames.map(({ from }) => from);
+  const tos = new Set(renames.map(({ to }) => to));
   const fits = renames.every(
-    ({ from, to }) => savedOptions.includes(from) && nextOptions.includes(to)
+    ({ from, to }) =>
+      savedOptions.includes(from) &&
+      nextOptions.includes(to) &&
+      (!nextOptions.includes(from) || tos.has(from))
   );
 
   if (!fits || new Set(froms).size !== froms.length) {
@@ -428,12 +485,15 @@ function assertRenamesMatchOptions({
   }
 }
 
+/** A value row the rename statement changed, with the spellings it moved between. */
+type RewrittenOptionValue = { assetId: string; from: string; to: string };
+
 /**
- * One statement that rewrites every renamed option value of a field. Each row
- * is matched against the value it held before the statement ran, so swapping
- * two spellings in the same save moves each set of assets exactly once.
- * `raw` and `valueOption` hold the same string for OPTION values and change
- * together.
+ * One statement that rewrites every renamed option value of a field and
+ * returns each changed row as a {@link RewrittenOptionValue}. Each row is
+ * matched against the value it held before the statement ran, so swapping two
+ * spellings in the same save moves each set of assets exactly once. `raw` and
+ * `valueOption` hold the same string for OPTION values and change together.
  */
 function buildOptionRenameStatement(
   customFieldId: CustomField["id"],
@@ -454,6 +514,7 @@ function buildOptionRenameStatement(
     FROM (VALUES ${pairs}) AS m("from", "to")
     WHERE v."customFieldId" = ${customFieldId}
       AND v."value"->>'valueOption' = m."from"
+    RETURNING v."assetId" AS "assetId", m."from" AS "from", m."to" AS "to"
   `;
 }
 
@@ -638,6 +699,7 @@ export async function upsertCustomField(
               id: existingCustomField.id,
               options,
               organizationId: def.organizationId,
+              userId: def.userId,
             });
             existingCustomField = updatedCustomField;
             newOrUpdatedFields.push(updatedCustomField);

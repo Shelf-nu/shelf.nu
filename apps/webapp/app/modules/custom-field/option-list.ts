@@ -124,15 +124,30 @@ export function mergeDuplicates(rows: OptionRow[]): {
  * Which row ends up holding each saved spelling's assets.
  *
  * A row holds the spelling it came from, and a merged-away row's spelling goes
- * to the row it merged into. Exact legacy duplicates share one spelling, and
- * the first of them in display order takes it. A spelling whose row was
- * removed without merging maps nowhere, so its assets keep their stored value.
+ * to the row it merged into. Exact legacy duplicates share one spelling: a
+ * copy that still reads as that spelling keeps it, otherwise the first copy in
+ * display order takes it. A spelling whose row was removed without merging
+ * maps nowhere, so its assets keep their stored value.
+ *
+ * A spelling that is still one of the options keeps its assets, unless the
+ * assets of another spelling move onto it (a swap or rotation). This is the
+ * rule `updateCustomField` enforces, so a save never sends a rename the server
+ * refuses.
  */
 function assignSavedOptions(
   rows: OptionRow[],
   merged: MergedOption[]
 ): Map<string, OptionRow> {
   const assignments = new Map<string, OptionRow>();
+  for (const row of rows) {
+    if (
+      row.original !== null &&
+      row.value === row.original &&
+      !assignments.has(row.original)
+    ) {
+      assignments.set(row.original, row);
+    }
+  }
   for (const row of rows) {
     if (row.original !== null && !assignments.has(row.original)) {
       assignments.set(row.original, row);
@@ -143,6 +158,25 @@ function assignSavedOptions(
     const target = rowsByKey.get(intoKey);
     if (target && !assignments.has(original)) {
       assignments.set(original, target);
+    }
+  }
+
+  // Dropping one move can leave another without the swap that justified it,
+  // so repeat until nothing changes. Each pass only removes, so it ends.
+  const values = new Set(rows.map((row) => row.value));
+  let dropped = true;
+  while (dropped) {
+    dropped = false;
+    const targets = new Set(
+      [...assignments]
+        .filter(([from, row]) => from !== row.value)
+        .map(([, row]) => row.value)
+    );
+    for (const [from, row] of [...assignments]) {
+      if (from !== row.value && values.has(from) && !targets.has(from)) {
+        assignments.delete(from);
+        dropped = true;
+      }
     }
   }
   return assignments;

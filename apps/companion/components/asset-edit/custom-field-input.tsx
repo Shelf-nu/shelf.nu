@@ -202,9 +202,13 @@ export function CustomFieldInput({
 }
 
 /**
- * Option lists longer than this get a search box. Same threshold as the web
- * advanced filter's value picker (`ENUM_SEARCH_THRESHOLD` in
- * `apps/webapp/app/components/assets/assets-index/advanced-filters/value-field.tsx`).
+ * Option lists longer than this get a search box.
+ *
+ * MIRROR of `ENUM_SEARCH_THRESHOLD` and its case-insensitive substring filter in
+ * `apps/webapp/app/components/assets/assets-index/advanced-filters/value-field.tsx`.
+ * Cosmetic only: it changes which options are listed, never which value is
+ * valid, and the server checks a submitted option against the field's options.
+ * Extraction target: a pure `packages/*` custom-field module (none yet).
  */
 const OPTION_SEARCH_THRESHOLD = 8;
 

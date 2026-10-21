@@ -204,6 +204,75 @@ describe("buildOptionRenames", () => {
       { from: "Sony", to: "SONY" },
     ]);
   });
+
+  it("leaves exact duplicates' assets on the copy that kept the spelling", () => {
+    const renameFirstCopy = (s: OptionListState) =>
+      ({ type: "rename", key: s.rows[0].key, value: "Canon EOS" }) as const;
+
+    expect(renamesOf(edit(["Canon", "Canon"], renameFirstCopy))).toEqual([]);
+    expect(
+      renamesOf(
+        edit(
+          ["Canon", "Canon"],
+          (s) => ({ type: "reorder", rows: [s.rows[1], s.rows[0]] }),
+          renameFirstCopy
+        )
+      )
+    ).toEqual([]);
+  });
+
+  it("keeps assets on a spelling that is typed again after its row was renamed", () => {
+    const state = edit(
+      ["Sony", "Canon"],
+      (s) => ({
+        type: "rename",
+        key: keyOf(s, "Sony"),
+        value: "Sony Pictures",
+      }),
+      () => ({ type: "add", key: "new-row", value: "Sony" })
+    );
+
+    expect(renamesOf(state)).toEqual([]);
+  });
+
+  it("sends nothing for an option renamed and then removed", () => {
+    const state = edit(
+      ["Sony", "Canon"],
+      (s) => ({
+        type: "rename",
+        key: keyOf(s, "Sony"),
+        value: "Sony Pictures",
+      }),
+      (s) => ({ type: "remove", key: keyOf(s, "Sony Pictures") })
+    );
+
+    expect(values(state)).toEqual(["Canon"]);
+    expect(renamesOf(state)).toEqual([]);
+  });
+
+  it("drops a merge whose keeper is renamed and then removed", () => {
+    const state = edit(
+      ["Sony", "sony", "Canon"],
+      () => ({ type: "mergeDuplicates" }),
+      (s) => ({ type: "rename", key: keyOf(s, "Sony"), value: "Sony Group" }),
+      (s) => ({ type: "remove", key: keyOf(s, "Sony Group") })
+    );
+
+    expect(values(state)).toEqual(["Canon"]);
+    expect(renamesOf(state)).toEqual([]);
+  });
+
+  it("keeps a rename through a sort and its undo", () => {
+    const state = edit(
+      ["Sony", "Canon"],
+      (s) => ({ type: "rename", key: keyOf(s, "Sony"), value: "Alpha" }),
+      () => ({ type: "sort" }),
+      () => ({ type: "undoSort" })
+    );
+
+    expect(values(state)).toEqual(["Alpha", "Canon"]);
+    expect(renamesOf(state)).toEqual([{ from: "Sony", to: "Alpha" }]);
+  });
 });
 
 describe("summarizeOptionUsage", () => {
