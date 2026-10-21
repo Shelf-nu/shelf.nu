@@ -74,15 +74,21 @@ vi.mock("react-router", async () => {
 });
 
 /** Builds a POST to the action with a URL-encoded body (happy-dom drops FormData fields). */
-function submit(intent: "subscribe" | "trial") {
+function submit(
+  intent: "subscribe" | "trial",
+  plan: { priceId: string; shelfTier: "tier_1" | "tier_2" } = {
+    priceId: "price_team",
+    shelfTier: "tier_2",
+  }
+) {
   return action({
     request: new Request("https://app.test/account-details/subscription", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
-        priceId: "price_team",
+        priceId: plan.priceId,
         intent,
-        shelfTier: "tier_2",
+        shelfTier: plan.shelfTier,
       }),
     }),
     context: {
@@ -124,6 +130,20 @@ describe("account-details.subscription action: SSO purchase gate", () => {
       expect(response.status).toBe(403);
       expect(assertPriceMatchesTier).not.toHaveBeenCalled();
       expect(getOrCreateCustomerId).not.toHaveBeenCalled();
+      expect(createStripeCheckoutSession).not.toHaveBeenCalled();
+    });
+
+    it("gates a tier_1 purchase against the personal workspace", async () => {
+      const response = await submit("subscribe", {
+        priceId: "price_plus",
+        shelfTier: "tier_1",
+      });
+
+      expect(assertUserMayPurchase).toHaveBeenCalledWith({
+        userId: "user-123",
+        target: "personal",
+      });
+      expect(response.status).toBe(403);
       expect(createStripeCheckoutSession).not.toHaveBeenCalled();
     });
 
