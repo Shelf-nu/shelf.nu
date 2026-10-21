@@ -13,6 +13,7 @@ import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
 import InviteUserDialog from "~/components/settings/invite-user-dialog";
+import { ROLES_HELP_URL } from "~/components/settings/roles-help-link";
 import { Button } from "~/components/shared/button";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
 import {
@@ -165,11 +166,7 @@ export default function UserInvitesSetting() {
       <p className="mb-6 text-xs text-gray-600">
         Users by default have a mail registered in shelf and can get reminders,
         log in or perform other actions. Read more about our{" "}
-        <Link
-          to="https://www.shelf.nu/knowledge-base/user-roles-and-their-permissions"
-          target="_blank"
-          className="underline"
-        >
+        <Link to={ROLES_HELP_URL} target="_blank" className="underline">
           permissions here
         </Link>
         .
