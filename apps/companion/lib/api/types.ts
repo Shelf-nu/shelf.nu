@@ -260,12 +260,6 @@ export type AssetQuantityBreakdown = {
    * Absent on older servers — fall back to `available`, then the plain total.
    */
   custodyAvailable?: number;
-  /**
-   * Units free to hand over right now, the figure the web labels "Free now":
-   * total minus custody, units in kits and units out. Reservations are NOT
-   * subtracted. Absent on older servers; see `resolveFreeNowFigure`.
-   */
-  freeNow?: number;
 };
 
 /**
@@ -423,6 +417,19 @@ export type AssetDetail = {
    * assets or QUANTITY_TRACKED assets with no activity. See type docs.
    */
   quantityBreakdown?: AssetQuantityBreakdown | null;
+  /**
+   * Units free to hand over right now, the figure the web labels "Free now":
+   * total minus custody, units in kits and units out. Reservations are NOT
+   * subtracted.
+   *
+   * Mirrors the `freeNow` field of
+   * apps/webapp/app/routes/api+/mobile+/assets.$assetId.ts, which reads the
+   * availability engine (`getAssetQuantityRows` in
+   * apps/webapp/app/modules/asset/quantity-breakdown.server.ts). Sent for every
+   * QUANTITY_TRACKED asset, even when `quantityBreakdown` is null; `null` for
+   * INDIVIDUAL assets; absent on older servers. See `resolveFreeNowFigure`.
+   */
+  freeNow?: number | null;
   /**
    * Number of custody holders hidden from the caller for privacy (e.g.
    * self-service users only see their own rows). When > 0 the detail screen

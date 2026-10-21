@@ -649,12 +649,12 @@ function StatusColumn({
        */
       freeNow: asset.available,
       /**
-       * Empty on purpose. An asset can carry hundreds of future bookings, and
-       * shipping a per-booking list for every row of the index just so a hover
-       * card can list them would blow up the payload for the busiest customers,
-       * the ones this feature is for. The card degrades to totals plus the
-       * `nextReservedFrom` scalar below, which is the part that actually
-       * reconciles "12 reserved" with "10 free right now".
+       * The index row carries no per-booking or per-kit lists: an asset can
+       * hold hundreds of future bookings, too many to ship for every row. The
+       * badge is told so through `quantityListsDeferred` and fetches the lists
+       * on first hover; until then the card shows totals plus the
+       * `nextReservedFrom` scalar below, which reconciles "12 reserved" with
+       * "10 free right now".
        */
       bookingAssets: [],
       assetKits: [],
@@ -670,6 +670,7 @@ function StatusColumn({
         availableToBook={availableToBook ?? true}
         asset={asset}
         quantityBreakdown={quantityBreakdown}
+        quantityListsDeferred
         isArchived={isArchived}
       />
     </Td>

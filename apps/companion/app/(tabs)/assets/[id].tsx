@@ -574,10 +574,15 @@ export default function AssetDetailScreen() {
   // plain total in that case.
   const breakdown = isQtyTracked ? asset.quantityBreakdown ?? null : null;
   // Free units for the low-stock check and the "Free now" stat, the same
-  // figure the web shows (see `resolveFreeNowFigure`). With no breakdown the
-  // whole pool is free, so an idle QT asset can still show its low-stock
-  // warning, which is exactly the inventory the alert is for.
-  const freeNowFigure = resolveFreeNowFigure(breakdown, asset.quantity);
+  // figure the web shows (see `resolveFreeNowFigure`). The server sends it
+  // even when the breakdown is null, so units held only in kits never count
+  // as free, and an idle QT asset still shows its low-stock warning, which is
+  // exactly the inventory the alert is for.
+  const freeNowFigure = resolveFreeNowFigure(
+    isQtyTracked ? asset.freeNow : null,
+    breakdown,
+    asset.quantity
+  );
   const availableUnits = freeNowFigure.value;
   // Low-stock mirrors the web detail card: availability-aware
   // `available <= minQuantity` (null threshold = not low).

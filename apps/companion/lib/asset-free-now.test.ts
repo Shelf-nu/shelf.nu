@@ -13,35 +13,43 @@ import { resolveFreeNowFigure } from "./asset-free-now";
 
 test("shows the server's Free now figure, not the reservation-aware available", () => {
   // 10 owned, 3 in custody, 4 reserved for later: 7 are on the shelf now.
-  assert.deepEqual(resolveFreeNowFigure({ available: 3, freeNow: 7 }, 10), {
+  assert.deepEqual(resolveFreeNowFigure(7, { available: 3 }, 10), {
     value: 7,
     isFreeNow: true,
   });
 });
 
+test("shows a Free now of zero when every unit sits in a kit and the breakdown is null", () => {
+  // 10 owned, all in a kit: nothing to slice, so no breakdown, yet none free.
+  assert.deepEqual(resolveFreeNowFigure(0, null, 10), {
+    value: 0,
+    isFreeNow: true,
+  });
+});
+
 test("keeps the older Available figure and label when the server sends no Free now", () => {
-  assert.deepEqual(resolveFreeNowFigure({ available: 3 }, 10), {
+  assert.deepEqual(resolveFreeNowFigure(undefined, { available: 3 }, 10), {
     value: 3,
     isFreeNow: false,
   });
 });
 
-test("shows the whole pool as free when nothing is in custody, reserved or out", () => {
-  assert.deepEqual(resolveFreeNowFigure(null, 10), {
+test("shows the whole pool as free when the server sends neither figure", () => {
+  assert.deepEqual(resolveFreeNowFigure(undefined, null, 10), {
     value: 10,
     isFreeNow: true,
   });
 });
 
 test("shows nothing when the asset has no quantity", () => {
-  assert.deepEqual(resolveFreeNowFigure(undefined, null), {
+  assert.deepEqual(resolveFreeNowFigure(null, undefined, null), {
     value: null,
     isFreeNow: true,
   });
 });
 
 test("shows a Free now of zero rather than falling back", () => {
-  assert.deepEqual(resolveFreeNowFigure({ available: 0, freeNow: 0 }, 5), {
+  assert.deepEqual(resolveFreeNowFigure(0, { available: 0 }, 5), {
     value: 0,
     isFreeNow: true,
   });

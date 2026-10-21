@@ -11,7 +11,10 @@
  * first cursor enter via `/api/assets/:id/quantity-breakdown` so an
  * index of 100 rows pays zero per-row cost up-front. When the asset
  * detail page passes `bookingAssets` + `assetKits` inline through
- * `asset`, the hover-card is instant.
+ * `asset`, the hover-card is instant. The assets index passes its server
+ * figures as `quantityBreakdown` with `quantityListsDeferred`: the label
+ * and totals come from those figures, and the first hover fetches only
+ * the booking and kit lists.
  *
  * @see {@link file://./quantity-data.ts}
  * @see {@link file://./quantity-tooltip-content.tsx}
@@ -50,6 +53,7 @@ export function AssetStatusBadge({
   availableToBook = true,
   asset,
   quantityBreakdown,
+  quantityListsDeferred = false,
   isArchived = false,
 }: {
   id: string;
@@ -93,22 +97,29 @@ export function AssetStatusBadge({
   asset?: QuantityAwareAsset | null;
   /**
    * A breakdown the CALLER has already computed server-side. When supplied it
-   * wins over deriving one from `asset`, and it suppresses the lazy
-   * `/quantity-breakdown` fetch entirely.
+   * wins over deriving one from `asset` and decides the label from first
+   * paint, and the badge does not fetch `/quantity-breakdown` unless
+   * `quantityListsDeferred` is set.
    *
-   * Why this exists: deriving from `asset` needs `custody` AND `bookingAssets`
-   * on the row. The assets index carries custody but not booking slices, so the
-   * derived breakdown came back reserved/checkedOut = 0, or null when custody
-   * was 0 too, and the badge fell back to the raw `Asset.status`. It then
-   * REWROTE itself on first mouse-enter once the lazy fetch landed, so a row
-   * reading "Available" flipped to "Reserved" under the cursor.
-   *
-   * Passing the server's numbers fixes three things at once: the badge is right
-   * on first paint, it agrees with the `Available` / `Stock status` columns
-   * beside it because it is the same arithmetic, and the index stops firing one
-   * HTTP request per hovered quantity row.
+   * Deriving from `asset` needs `custody` AND `bookingAssets` on the row. A
+   * list surface without booking slices (the assets index) would derive
+   * reserved/checkedOut = 0 and show the raw `Asset.status`, so it passes the
+   * server's numbers here instead. The badge then agrees with the `Available`
+   * and `Stock status` columns beside it, because it is the same arithmetic.
    */
   quantityBreakdown?: QuantityBreakdown | null;
+  /**
+   * Set when `quantityBreakdown` carries the figures but not the per-booking
+   * and per-kit lists (the assets index, which cannot ship every row's
+   * bookings). The label and totals still come from `quantityBreakdown`; the
+   * first hover lazily fetches `/api/assets/:id/quantity-breakdown` and only
+   * its `bookingAssets` and `assetKits` are merged in, so the hover card can
+   * list and link the bookings and kits holding units.
+   *
+   * Leave unset when `quantityBreakdown` already includes the lists (the
+   * asset page): the badge then never fetches.
+   */
+  quantityListsDeferred?: boolean;
 }) {
   const derivedQuantityData = useMemo(() => getQuantityData(asset), [asset]);
   const inlineQuantityData = quantityBreakdown ?? derivedQuantityData;
@@ -130,8 +141,9 @@ export function AssetStatusBadge({
   // `suppressQtyAware` also disables the lazy fetch: when the caller has
   // told us they don't want the qty-aware breakdown, paying the network
   // cost would be wasted bandwidth (the data isn't rendered).
+  const listsDeferred = !!quantityBreakdown && quantityListsDeferred;
   const needsLazyBreakdown =
-    isQtyTracked && !inlineQuantityData && !suppressQtyAware;
+    isQtyTracked && !suppressQtyAware && (!inlineQuantityData || listsDeferred);
   const { data: lazyAsset } = useApiQuery<QuantityAwareAsset>({
     api: `/api/assets/${id}/quantity-breakdown`,
     enabled: needsLazyBreakdown && hasInteracted,
@@ -140,7 +152,23 @@ export function AssetStatusBadge({
     () => getQuantityData(lazyAsset ?? null),
     [lazyAsset]
   );
-  const quantityData = inlineQuantityData ?? lazyQuantityData;
+  /**
+   * With deferred lists the caller's figures stay authoritative (label,
+   * totals, `freeNow`) and the fetched breakdown contributes only its lists.
+   * Until the fetch lands the card shows totals alone.
+   */
+  const quantityData = useMemo(() => {
+    if (listsDeferred && quantityBreakdown) {
+      return lazyQuantityData
+        ? {
+            ...quantityBreakdown,
+            bookingAssets: lazyQuantityData.bookingAssets,
+            assetKits: lazyQuantityData.assetKits,
+          }
+        : quantityBreakdown;
+    }
+    return inlineQuantityData ?? lazyQuantityData;
+  }, [listsDeferred, quantityBreakdown, inlineQuantityData, lazyQuantityData]);
 
   // Fetch the ongoing booking from API when asset is CHECKED_OUT.
   // Skip for quantity-tracked assets — they handle multi-booking
