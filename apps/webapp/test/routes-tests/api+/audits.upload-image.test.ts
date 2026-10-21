@@ -32,13 +32,13 @@ vi.mock("react-router", async () => {
 vi.mock("~/utils/roles.server", () => ({
   requirePermission: vi.fn().mockResolvedValue({
     organizationId: "org-1",
-    isSelfServiceOrBase: false,
+    access: { audits: { seeAll: true } },
   }),
 }));
 
 // why: the assignee guard does its own lookup; it is not under test
 vi.mock("~/modules/audit/service.server", () => ({
-  requireAuditAssigneeForBaseSelfService: vi.fn(),
+  requireAuditAssigneeForScopedViewer: vi.fn(),
 }));
 
 // why: external database; the audit lookup and the note transaction
