@@ -1,4 +1,4 @@
-import type { Prisma, Organization } from "@prisma/client";
+import type { OrganizationRoles, Prisma, Organization } from "@prisma/client";
 import { OrganizationType } from "@prisma/client";
 import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
@@ -15,6 +15,11 @@ import { getUserByID } from "~/modules/user/service.server";
 import type { ErrorLabel } from "./error";
 import { ShelfError } from "./error";
 import { isPersonalOrg } from "./organization";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "./permissions/permission.data";
+import { hasPermission } from "./permissions/permission.validator.server";
 
 const label: ErrorLabel = "Tier";
 export const premiumIsEnabled = config.enablePremiumFeatures;
@@ -212,6 +217,45 @@ export async function assertUserCanImportAssets({
       shouldBeCaptured: false,
     });
   }
+}
+
+/**
+ * Whether a member may import assets into a workspace: the workspace's plan
+ * allows importing AND the member's role holds `asset: import`. The single
+ * answer behind every "Import" entry point (asset index, home checklist).
+ *
+ * @param args.organizationId - The workspace
+ * @param args.organizations - The member's workspaces, as `requirePermission` returns them
+ * @param args.userId - The member
+ * @param args.role - The member's role in this workspace; when omitted, the
+ *   roles are loaded from the database
+ * @returns `true` when the import page would let this member in
+ */
+export async function resolveCanImportAssets({
+  organizationId,
+  organizations,
+  userId,
+  role,
+}: {
+  organizationId: Organization["id"];
+  organizations: Parameters<
+    typeof getOrganizationTierLimit
+  >[0]["organizations"];
+  userId: string;
+  role?: OrganizationRoles;
+}): Promise<boolean> {
+  const [tierLimit, allowed] = await Promise.all([
+    getOrganizationTierLimit({ organizationId, organizations }),
+    hasPermission({
+      organizationId,
+      userId,
+      // Without a known role, let hasPermission load the member's roles.
+      ...(role ? { roles: [role] } : {}),
+      entity: PermissionEntity.asset,
+      action: PermissionAction.import,
+    }),
+  ]);
+  return canImportAssets(tierLimit) && allowed;
 }
 
 export const canImportNRM = (
