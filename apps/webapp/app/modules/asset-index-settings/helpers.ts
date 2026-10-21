@@ -131,17 +131,25 @@ type CustomFieldColumnKey = `cf_${string}`;
 // schema (`generateColumnsSchema`), so it never appears in user column
 // settings or the UI's "manage columns" picker. Including it here keeps
 // the type system honest when the export caller injects it.
+//
+// `qrUrl` is export-only for the same reason: the CSV export places it right
+// after `qrId` whenever the QR ID column is exported (unless a workspace
+// custom field already uses the "QR URL" header), so label printers get the
+// exact URL each code encodes.
 export type ColumnLabelKey =
   | FixedField
   | BarcodeField
   | "name"
   | "total_value"
+  | "qrUrl"
   | CustomFieldColumnKey;
 
 export const columnsLabelsMap: { [key in ColumnLabelKey]: string } = {
   id: "ID",
   sequentialId: "Asset ID",
   qrId: "QR ID",
+  // Export-only synthetic column (see `ColumnLabelKey` comment above).
+  qrUrl: "QR URL",
   name: "Name",
   status: "Status",
   description: "Description",
