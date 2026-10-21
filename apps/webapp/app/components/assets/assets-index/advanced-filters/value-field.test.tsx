@@ -88,4 +88,19 @@ describe("ValueField for a custom field dropdown", () => {
     await user.keyboard("{ArrowDown}{Enter}");
     expect(setFilter).toHaveBeenLastCalledWith("Canon EOS");
   });
+
+  it("picks only the focused option when Enter is pressed on it", async () => {
+    const user = userEvent.setup();
+    const setFilter = renderPicker(BRANDS);
+
+    await user.click(await screen.findByRole("button", { name: "Sony" }));
+    const arri = screen
+      .getAllByRole("button")
+      .find((button) => button.textContent === "ARRI");
+    arri?.focus();
+    await user.keyboard("{Enter}");
+
+    expect(setFilter).toHaveBeenCalledTimes(1);
+    expect(setFilter).toHaveBeenCalledWith("ARRI");
+  });
 });

@@ -818,6 +818,14 @@ function EnumField({
         if (event.target instanceof HTMLInputElement) break;
       // falls through
       case "Enter":
+        // A focused option row selects itself; acting here too would pick a
+        // second option.
+        if (
+          event.target !== event.currentTarget &&
+          !(event.target instanceof HTMLInputElement)
+        ) {
+          break;
+        }
         event.preventDefault();
         if (visibleOptions[selectedIndex]) {
           handleOptionClick(visibleOptions[selectedIndex].id);
