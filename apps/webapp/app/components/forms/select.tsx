@@ -82,7 +82,7 @@ const SelectContent = React.forwardRef<
    * iOS Safari fires for that tap. Radix selects on pointerup, but several
    * focus / aria-activedescendant transitions in Radix Select still rely on
    * the click event firing. Suppressing it intermittently breaks selection
-   * on iPhone/iPad — the original report behind these fixes.
+   * on iPhone/iPad.
    */
   const [contentEl, setContentEl] = React.useState<HTMLDivElement | null>(null);
 
@@ -115,6 +115,25 @@ const SelectContent = React.forwardRef<
           className
         )}
         {...props}
+        // A modal Radix Dialog — every `Sheet`, and so every route rendered
+        // through `ContextualSidebar` — mounts `react-remove-scroll`, which
+        // cancels any `wheel` whose target sits outside the dialog content.
+        // This content is portalled to `document.body`, which counts as
+        // outside, so without this a long option list cannot be scrolled by
+        // wheel inside a sheet; only dragging the scrollbar works, since that
+        // is a pointer interaction rather than a wheel event.
+        //
+        // React attaches portal listeners to the portal container, and
+        // `document.body` is a descendant of the `document` remove-scroll
+        // listens on, so stopping here runs first and keeps the event alive.
+        onWheel={(event) => {
+          event.stopPropagation();
+          props.onWheel?.(event);
+        }}
+        onTouchMove={(event) => {
+          event.stopPropagation();
+          props.onTouchMove?.(event);
+        }}
       >
         <SelectPrimitive.Viewport>{children}</SelectPrimitive.Viewport>
       </SelectPrimitive.Content>
@@ -138,13 +157,24 @@ const SelectLabel = React.forwardRef<
   );
 });
 
+type SelectItemProps = ComponentPropsWithoutRef<typeof SelectPrimitive.Item> & {
+  /**
+   * A second line under the item's text. Rendered outside the item text, so
+   * the trigger shows only `children` once the item is chosen, and linked to
+   * the option with `aria-describedby` so screen readers still announce it.
+   */
+  description?: React.ReactNode;
+};
+
 const SelectItem = React.forwardRef<
   ElementRef<typeof SelectPrimitive.Item>,
-  ComponentPropsWithoutRef<typeof SelectPrimitive.Item>
->(function SelectItem({ className, children, ...props }, ref) {
+  SelectItemProps
+>(function SelectItem({ className, children, description, ...props }, ref) {
+  const descriptionId = React.useId();
   return (
     <SelectPrimitive.Item
       ref={ref}
+      aria-describedby={description ? descriptionId : undefined}
       className={tw(
         "relative flex min-h-[40px] cursor-default touch-manipulation select-none items-center rounded p-1 text-sm font-medium outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 focus:bg-gray-50 md:min-h-0 ",
         className
@@ -152,7 +182,17 @@ const SelectItem = React.forwardRef<
       {...props}
     >
       <div className="flex w-full items-center justify-between">
-        <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
+        <div className="flex min-w-0 flex-col">
+          <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
+          {description ? (
+            <span
+              id={descriptionId}
+              className="text-xs font-normal text-gray-500"
+            >
+              {description}
+            </span>
+          ) : null}
+        </div>
 
         <span className="mr-[10px] flex size-3.5 h-auto w-[18px] items-center justify-center text-primary">
           <SelectPrimitive.ItemIndicator>

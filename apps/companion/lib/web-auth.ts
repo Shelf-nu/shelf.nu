@@ -6,8 +6,9 @@
  * SSO flow (`/sso-login?platform=mobile`); after the user authenticates there,
  * the web hands back a single-use authorization code via the
  * `shelf://auth-callback` deeplink. We exchange that code at
- * `POST /api/mobile/exchange` for a fresh, independent Supabase session and
- * install it with `getSupabase().auth.setSession`.
+ * `POST /api/mobile/exchange` for the SSO session the web sign-in produced
+ * (refreshed, and held by the app alone) and install it with
+ * `getSupabase().auth.setSession`.
  *
  * No tokens ever appear in a URL — only the short-lived, single-use code.
  *

@@ -1,4 +1,13 @@
-import type { OrganizationRoles } from "@prisma/client";
+/**
+ * Team User Actions
+ *
+ * Server handlers for the actions on the team settings pages: delete a user,
+ * revoke access, change a role, and resend or cancel an invite.
+ *
+ * @see {@link file://./../../routes/_layout+/settings.team.users.tsx}
+ * @see {@link file://./../../routes/_layout+/settings.team.invites.tsx}
+ * @see {@link file://./../invite/service.server.ts}
+ */
 import {
   InviteStatuses,
   OrganizationRoles as OrgRolesEnum,
@@ -8,35 +17,54 @@ import { z } from "zod";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import { roleChangeTemplateString } from "~/emails/role-change-template";
-import { organizationRolesMap } from "~/routes/_layout+/settings.team";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError } from "~/utils/error";
 import { payload, parseData } from "~/utils/http.server";
+import { roleChangeRequiresOwner } from "~/utils/permissions/membership-access";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { validatePermission } from "~/utils/permissions/permission.validator.server";
-import { isDemotion } from "~/utils/roles";
+import type { RoleAccess } from "~/utils/permissions/role-access";
+import {
+  ROLE_LABELS,
+  labelToRole,
+  resolveRole,
+} from "~/utils/permissions/role-access";
+import { assertCanAssignRoles } from "~/utils/permissions/role-assignment.server";
 import { randomUsernameFromEmail } from "~/utils/user";
 import {
   changeUserRole,
+  lockMembership,
   revokeAccessToOrganization,
-  transferEntitiesToNewOwner,
+  transferOnRoleChange,
 } from "./service.server";
-import { revokeAccessEmailText, roleChangeEmailText } from "../invite/helpers";
+import {
+  caseInsensitiveEmailFilter,
+  revokeAccessEmailText,
+  roleChangeEmailText,
+} from "../invite/helpers";
 import { isInvitableRole } from "../invite/roles";
 import { createInvite } from "../invite/service.server";
 
 /**
- * This function handles the user actions such as deleting, revoking access, resending invite, and cancelling invite.
- * It is currently used in the settings/team/users index & user page.
+ * Handles the team actions posted from the team users list, the member page
+ * and the invites list: delete a team member, revoke access, resend or cancel
+ * an invite, and change a role.
+ *
+ * @param request - The action request; its form data carries the `intent`
+ * @param organizationId - The caller's current organization
+ * @param userId - The acting user's id
+ * @param callerAccess - The acting member's resolved access (from requirePermission)
+ * @throws {ShelfError} On invalid input, or 403 when the caller may not act on
+ *   the target or grant the requested role
  */
 export async function resolveUserAction(
   request: Request,
   organizationId: string,
   userId: string,
-  callerRole: OrgRolesEnum
+  callerAccess: RoleAccess
 ) {
   const formData = await request.formData();
 
@@ -110,28 +138,33 @@ export async function resolveUserAction(
       );
 
       /**
-       * Parity with `changeUserRole`: only the OWNER may act on an ADMIN.
-       * Without this an ADMIN who is refused a role change ("Only the workspace
-       * owner can change an Administrator's role") can just revoke that
-       * ADMIN's access instead, which is the stronger action.
+       * Same rule as `changeUserRole`: a member whose effective role needs the
+       * owner to change it (Administrator, Owner) can only have access revoked
+       * by the workspace owner. Revoking is the stronger action, so it can
+       * never be looser than a role change.
        *
-       * Revoking the OWNER is refused by `revokeAccessToOrganization` itself,
-       * so it holds for every caller rather than only this one.
+       * This read is a fast path for a friendly refusal. The decision that
+       * counts is repeated by `revokeAccessToOrganization` on the row re-read
+       * under the membership lock, which also refuses revoking the OWNER for
+       * every caller.
        */
       const targetUserOrg = await db.userOrganization.findFirst({
         where: { userId: targetUserId, organizationId },
         select: { roles: true },
       });
+      const targetRole = targetUserOrg
+        ? resolveRole(targetUserOrg.roles)
+        : null;
 
       if (
-        targetUserOrg?.roles.includes(OrgRolesEnum.ADMIN) &&
-        callerRole !== OrgRolesEnum.OWNER
+        targetRole &&
+        roleChangeRequiresOwner(targetRole) &&
+        !callerAccess.ownsWorkspace
       ) {
         throw new ShelfError({
           cause: null,
           title: "Insufficient permissions",
-          message:
-            "Only the workspace owner can revoke an Administrator's access.",
+          message: `Only the workspace owner can revoke access for a member with the ${ROLE_LABELS[targetRole]} role.`,
           additionalData: { organizationId, targetUserId },
           label: "Team",
           status: 403,
@@ -142,6 +175,7 @@ export async function resolveUserAction(
       const user = await revokeAccessToOrganization({
         userId: targetUserId,
         organizationId,
+        actorOwnsWorkspace: callerAccess.ownsWorkspace,
       });
 
       const org = await db.organization
@@ -198,7 +232,7 @@ export async function resolveUserAction(
       await db.invite
         .updateMany({
           where: {
-            inviteeEmail,
+            inviteeEmail: caseInsensitiveEmailFilter(inviteeEmail),
             organizationId,
             status: InviteStatuses.PENDING,
           },
@@ -246,17 +280,14 @@ export async function resolveUserAction(
         }
       );
 
-      /** Find the Role based on its user friendly name */
-      const role = Object.keys(organizationRolesMap).find(
-        (key) => organizationRolesMap[key] === userFriendlyRole
-      ) as OrganizationRoles | undefined;
+      /** The form submits the role's label; map it back through ROLE_LABELS. */
+      const role = labelToRole(userFriendlyRole);
 
       /**
-       * `userFriendlyRole` is free text from the form and `organizationRolesMap`
-       * contains an OWNER entry (it doubles as the display map for the team
-       * list), so "Owner" would resolve here and mint an OWNER invite —
-       * the same escalation the invite dialog and CSV import both refuse.
-       * Ownership moves only through `transferOwnership`.
+       * `userFriendlyRole` is free text from the form. `labelToRole` knows
+       * every role's label, including Owner, so the invitable check is what
+       * refuses an Owner invite. Ownership moves only through
+       * `transferOwnership`.
        */
       if (!role || !isInvitableRole(role)) {
         throw new ShelfError({
@@ -269,39 +300,51 @@ export async function resolveUserAction(
         });
       }
 
-      /** Invalidate all previous invites for current user for current organization */
+      // Authorize before invalidating: a refused resend must leave the
+      // existing invite pending.
+      assertCanAssignRoles({
+        actorOwnsWorkspace: callerAccess.ownsWorkspace,
+        roles: [role],
+        organizationId,
+      });
 
-      const [_invalidatedInvites, invite] = await Promise.all([
-        db.invite
-          .updateMany({
-            where: {
-              inviteeEmail,
-              organizationId,
-            },
-            data: {
-              status: InviteStatuses.INVALIDATED,
-            },
-          })
-          .catch((cause) => {
-            throw new ShelfError({
-              cause,
-              message: "Failed to invalidate previous invites",
-              additionalData: { userId, organizationId, inviteeEmail },
-              label: "Team",
-            });
-          }),
+      /**
+       * Invalidate every earlier invite for this person in this organization
+       * before creating the new one. The two steps run in order: the new
+       * invite matches the same email, so an invalidation that finishes later
+       * would close it too, and `createInvite` refuses while another pending
+       * invite for the person exists.
+       */
+      await db.invite
+        .updateMany({
+          where: {
+            inviteeEmail: caseInsensitiveEmailFilter(inviteeEmail),
+            organizationId,
+          },
+          data: {
+            status: InviteStatuses.INVALIDATED,
+          },
+        })
+        .catch((cause) => {
+          throw new ShelfError({
+            cause,
+            message: "Failed to invalidate previous invites",
+            additionalData: { userId, organizationId, inviteeEmail },
+            label: "Team",
+          });
+        });
 
-        /** Create a new invite, based on the prev invite's role */
-        createInvite({
-          organizationId,
-          inviteeEmail,
-          teamMemberName,
-          teamMemberId,
-          inviterId: userId,
-          roles: [role],
-          userId,
-        }),
-      ]);
+      /** Create a new invite, based on the prev invite's role */
+      const invite = await createInvite({
+        organizationId,
+        inviteeEmail,
+        teamMemberName,
+        teamMemberId,
+        inviterId: userId,
+        roles: [role],
+        userId,
+        actorOwnsWorkspace: callerAccess.ownsWorkspace,
+      });
 
       if (invite) {
         sendNotification({
@@ -317,7 +360,7 @@ export async function resolveUserAction(
     }
     case "changeRole": {
       await validatePermission({
-        roles: [callerRole],
+        roles: [callerAccess.role],
         action: PermissionAction.changeRole,
         entity: PermissionEntity.teamMember,
         organizationId,
@@ -351,99 +394,78 @@ export async function resolveUserAction(
         });
       }
 
-      /** Fetch the target's current role to detect demotion */
-      const targetUserOrg = await db.userOrganization.findFirst({
-        where: { userId: targetUserId, organizationId },
-      });
-
-      if (!targetUserOrg) {
-        throw new ShelfError({
-          cause: null,
-          message: "User is not a member of this organization",
-          label: "Team",
-          shouldBeCaptured: false,
-        });
-      }
-
-      const currentRole = targetUserOrg.roles[0];
-
-      /** Transfer entities on demotion */
-      if (isDemotion(currentRole, newRole)) {
-        const org = await db.organization.findUniqueOrThrow({
+      // `workspaceOwnerId`, not `org`: the role-change email further down in
+      // this same `case` block declares `const [targetUser, org]`.
+      const { userId: workspaceOwnerId } =
+        await db.organization.findUniqueOrThrow({
           where: { id: organizationId },
           select: { userId: true },
         });
 
-        const recipientId = transferToUserId || org.userId;
+      /**
+       * Lock order: the target's membership row FIRST, then the authorized
+       * role write, then entity writes, matching the other paths that take
+       * this same lock (SSO reconciliation, account deletion, revocation; see
+       * {@link lockMembership}), so two role changes on the same member queue
+       * on it instead of each holding a lock the other needs. Everything the
+       * change moves, and the role the audit entry records, is read from the
+       * persisted row under that lock.
+       */
+      const currentRole = await db.$transaction(async (tx) => {
+        const targetUserOrg = await lockMembership(tx, {
+          userId: targetUserId,
+          organizationId,
+        });
 
-        /** Validate that the transfer recipient is a member of this org */
-        if (transferToUserId) {
-          const recipientOrg = await db.userOrganization.findFirst({
-            where: { userId: transferToUserId, organizationId },
+        if (!targetUserOrg) {
+          throw new ShelfError({
+            cause: null,
+            message: "User is not a member of this organization",
+            additionalData: { targetUserId, organizationId },
+            label: "Team",
+            status: 404,
+            shouldBeCaptured: false,
           });
-
-          if (!recipientOrg) {
-            throw new ShelfError({
-              cause: null,
-              message:
-                "Transfer recipient is not a member of this organization",
-              label: "Team",
-              additionalData: { transferToUserId, organizationId },
-            });
-          }
         }
 
-        await db.$transaction(async (tx) => {
-          // The demoted user keeps their org membership (only their role
-          // rank drops), so only OWNERSHIP columns move — see
-          // EntityTransferReason's JSDoc in service.server.ts.
-          await transferEntitiesToNewOwner({
-            tx,
-            id: targetUserId,
-            newOwnerId: recipientId,
-            organizationId,
-            reason: "demotion",
-          });
+        const previousRole = resolveRole(targetUserOrg.roles);
 
-          await changeUserRole({
-            userId: targetUserId,
-            organizationId,
-            newRole,
-            callerRole,
-            tx,
-          });
-
-          await tx.roleChangeLog.create({
-            data: {
-              userId: targetUserId,
-              changedById: userId,
-              organizationId,
-              previousRole: currentRole,
-              newRole,
-            },
-          });
+        // Authorize and write the role, then validate the recipient and move
+        // entities; any refusal rolls the whole change back. Authorizing first
+        // means a refused request takes no entity row locks and never reveals
+        // anything about the recipient.
+        await changeUserRole({
+          userId: targetUserId,
+          organizationId,
+          newRole,
+          actorOwnsWorkspace: callerAccess.ownsWorkspace,
+          tx,
         });
-      } else {
-        await db.$transaction(async (tx) => {
-          await changeUserRole({
-            userId: targetUserId,
-            organizationId,
-            newRole,
-            callerRole,
-            tx,
-          });
 
-          await tx.roleChangeLog.create({
-            data: {
-              userId: targetUserId,
-              changedById: userId,
-              organizationId,
-              previousRole: currentRole,
-              newRole,
-            },
-          });
+        // Decides from the roles read under the lock, never from the row the
+        // role write above just changed.
+        await transferOnRoleChange({
+          tx,
+          targetUserId,
+          organizationId,
+          fromRoles: targetUserOrg.roles,
+          toRole: newRole,
+          recipientId: transferToUserId || workspaceOwnerId,
         });
-      }
+
+        await tx.roleChangeLog.create({
+          data: {
+            userId: targetUserId,
+            changedById: userId,
+            source: "MANUAL",
+            organizationId,
+            previousRole,
+            newRole,
+          },
+        });
+
+        return previousRole;
+      });
 
       /** Send email notification to the affected user */
       const [targetUser, org] = await Promise.all([
@@ -457,8 +479,8 @@ export async function resolveUserAction(
         }),
       ]);
 
-      const roleName = organizationRolesMap[newRole] || newRole;
-      const previousRoleName = organizationRolesMap[currentRole] || currentRole;
+      const roleName = ROLE_LABELS[newRole];
+      const previousRoleName = ROLE_LABELS[currentRole];
 
       sendEmail({
         to: targetUser.email,

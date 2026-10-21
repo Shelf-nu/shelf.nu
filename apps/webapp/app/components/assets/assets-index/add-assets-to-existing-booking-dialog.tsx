@@ -21,6 +21,7 @@ import { DateS } from "~/components/shared/date";
 import When from "~/components/when/when";
 import useApiQuery from "~/hooks/use-api-query";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
+import { sortPickerBookings } from "~/utils/booking-picker-order";
 import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
 
@@ -252,7 +253,21 @@ export default function AddAssetsToExistingBookingDialog() {
     enabled: isDialogOpen,
   });
 
-  const bookings = bookingsData?.bookings || [];
+  /**
+   * The fetched bookings in picker order: live and upcoming first, finished
+   * bookings after them newest-first.
+   *
+   * `/api/bookings/get-all` orders by start date ascending for callers that
+   * want a plain chronological list, so the reordering happens here through the
+   * shared comparator that the model dialog's picker also uses. `Date.now()` is
+   * read once per recompute: the order only has to be right for the list the
+   * user is looking at now, and re-ordering the popover under a moving clock
+   * would be worse than a timestamp a few minutes old.
+   */
+  const bookings = useMemo(
+    () => sortPickerBookings(bookingsData?.bookings ?? [], Date.now()),
+    [bookingsData]
+  );
 
   return (
     <BulkUpdateDialogContent

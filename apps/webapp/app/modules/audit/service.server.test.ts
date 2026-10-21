@@ -3,8 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { db } from "~/database/db.server";
 import { recordEvent } from "~/modules/activity-event/service.server";
+import { recordAuditScanNonFatal } from "~/modules/scan/service.server";
 import { ShelfError } from "~/utils/error";
 import { ALL_SELECTED_KEY } from "~/utils/list";
+import { createSignedUrl } from "~/utils/storage.server";
 import { sendAuditCancelledEmails } from "./email-helpers";
 import {
   createAuditResumedNote,
@@ -12,10 +14,12 @@ import {
 } from "./helpers.server";
 import {
   createAuditSession,
+  updateAuditSession,
   addAssetsToAudit,
   removeAssetFromAudit,
   removeAssetsFromAudit,
   getAuditsForOrganization,
+  getAuditSessionDetails,
   getPendingAuditsForOrganization,
   getAuditWhereInput,
   bulkArchiveAudits,
@@ -33,6 +37,9 @@ import {
 // why: storage.server calls Supabase over HTTP; mock so delete tests stay offline
 vi.mock("~/utils/storage.server", () => ({
   removePublicFile: vi.fn(),
+  // why: the expected-asset photo re-sign signs through Supabase Storage; the
+  // getAuditSessionDetails tests count these calls.
+  createSignedUrl: vi.fn(),
 }));
 
 // why: Mock the helper functions that create automatic notes to avoid database dependencies in unit tests
@@ -57,6 +64,12 @@ vi.mock("~/utils/markdoc-wrappers", () => ({
 vi.mock("~/modules/activity-event/service.server", () => ({
   recordEvent: vi.fn().mockResolvedValue(undefined),
   recordEvents: vi.fn().mockResolvedValue(undefined),
+}));
+
+// why: the asset's scan record writes to the database; what it records is
+// covered in modules/scan/record-scan.test.ts. Here we assert the audit asks.
+vi.mock("~/modules/scan/service.server", () => ({
+  recordAuditScanNonFatal: vi.fn().mockResolvedValue(null),
 }));
 
 // why: cancellation triggers email + scheduler side effects we don't exercise in service unit tests
@@ -131,6 +144,14 @@ vi.mock("~/database/db.server", () => {
     },
     auditAssignment: {
       createMany: vi.fn(),
+      // why: updateAuditSession swaps the assignee with a delete + create.
+      create: vi.fn(),
+      deleteMany: vi.fn(),
+    },
+    // why: an assignee from the form must be a workspace member before it is
+    // written; members are found by default, and a test makes one missing.
+    userOrganization: {
+      findFirst: vi.fn().mockResolvedValue({ id: "user-org-1" }),
     },
     auditImage: {
       findMany: vi.fn(),
@@ -144,6 +165,8 @@ vi.mock("~/database/db.server", () => {
     asset: {
       findMany: vi.fn(),
       findUnique: vi.fn(),
+      // why: a re-signed photo is written back with a guarded updateMany.
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
     $transaction: vi.fn(),
     // why: comment writes lock the audit row with a raw SELECT ... FOR UPDATE.
@@ -191,6 +214,11 @@ const mockDb = db as unknown as {
   };
   auditAssignment: {
     createMany: ReturnType<typeof vi.fn>;
+    create: ReturnType<typeof vi.fn>;
+    deleteMany: ReturnType<typeof vi.fn>;
+  };
+  userOrganization: {
+    findFirst: ReturnType<typeof vi.fn>;
   };
   auditImage: {
     findMany: ReturnType<typeof vi.fn>;
@@ -340,6 +368,20 @@ describe("audit service", () => {
       { id: "asset-2", name: "Camera B", auditAssetId: "audit-asset-2" },
     ]);
     expect(result.session.assignments).toHaveLength(1);
+  });
+
+  it("refuses an assignee who is not a member of the workspace", async () => {
+    mockDb.userOrganization.findFirst.mockResolvedValueOnce(null);
+
+    await expect(createAuditSession(defaultInput)).rejects.toMatchObject({
+      status: 400,
+    });
+    expect(mockDb.userOrganization.findFirst).toHaveBeenCalledWith({
+      where: { userId: "user-2", organizationId: "org-1" },
+      select: { id: true },
+    });
+    expect(mockDb.auditSession.create).not.toHaveBeenCalled();
+    expect(mockDb.auditAssignment.createMany).not.toHaveBeenCalled();
   });
 
   it("throws when no assets are provided", async () => {
@@ -879,21 +921,21 @@ describe("audit service", () => {
         ]);
       });
 
-      it("scopes to the user's assignments when isSelfServiceOrBase with userId", () => {
+      it("scopes to the user's assignments when assignedOnly with userId", () => {
         const where = getAuditWhereInput({
           organizationId: "org-1",
           userId: "user-1",
-          isSelfServiceOrBase: true,
+          assignedOnly: true,
         });
 
         expect(where.assignments).toEqual({ some: { userId: "user-1" } });
       });
 
-      it("does not apply the assignments filter when isSelfServiceOrBase is false", () => {
+      it("does not apply the assignments filter when assignedOnly is false", () => {
         const where = getAuditWhereInput({
           organizationId: "org-1",
           userId: "user-1",
-          isSelfServiceOrBase: false,
+          assignedOnly: false,
         });
 
         expect(where.assignments).toBeUndefined();
@@ -902,7 +944,7 @@ describe("audit service", () => {
       it("does not apply the assignments filter when userId is missing", () => {
         const where = getAuditWhereInput({
           organizationId: "org-1",
-          isSelfServiceOrBase: true,
+          assignedOnly: true,
         });
 
         expect(where.assignments).toBeUndefined();
@@ -1005,14 +1047,14 @@ describe("audit service", () => {
           currentSearchParams: "status=COMPLETED",
           organizationId: "org-1",
           userId: "user-1",
-          isSelfServiceOrBase: true,
+          assignedOnly: true,
         });
 
         const expectedWhere = getAuditWhereInput({
           organizationId: "org-1",
           currentSearchParams: "status=COMPLETED",
           userId: "user-1",
-          isSelfServiceOrBase: true,
+          assignedOnly: true,
         });
 
         expect(mockDb.auditSession.findMany.mock.calls[0][0].where).toEqual(
@@ -1299,6 +1341,7 @@ describe("audit service", () => {
       it("deletes archived audits narrowed by ARCHIVED status on the write", async () => {
         const result = await bulkDeleteAudits({
           auditIds: ["a1", "a2"],
+          confirmation: "2",
           organizationId: "org-1",
           userId: "user-1",
         });
@@ -1329,6 +1372,7 @@ describe("audit service", () => {
         await expect(
           bulkDeleteAudits({
             auditIds: ["a1"],
+            confirmation: "1",
             organizationId: "org-1",
             userId: "user-1",
           })
@@ -1348,6 +1392,7 @@ describe("audit service", () => {
         await expect(
           bulkDeleteAudits({
             auditIds: ["a1", "a2"],
+            confirmation: "2",
             organizationId: "org-1",
             userId: "user-1",
           })
@@ -1373,6 +1418,7 @@ describe("audit service", () => {
               currentSearchParams: params,
               organizationId: "org-1",
               userId: "user-1",
+              confirmation: "2",
             })
           ).rejects.toMatchObject({
             status: 400,
@@ -1392,6 +1438,8 @@ describe("audit service", () => {
           currentSearchParams: "status=archived",
           organizationId: "org-1",
           userId: "user-1",
+          // The two archived audits the pre-read resolves to.
+          confirmation: "2",
         });
 
         const whereArg = mockDb.auditSession.findMany.mock.calls[0][0].where;
@@ -1402,6 +1450,36 @@ describe("audit service", () => {
         // PermissionAction.delete is ADMIN/OWNER-only, so assignments-based
         // scoping has no place here — guard against re-introduction.
         expect(whereArg.assignments).toBeUndefined();
+      });
+
+      it("refuses a select-all whose typed count is not what it resolves to", async () => {
+        await expect(
+          bulkDeleteAudits({
+            auditIds: [ALL_SELECTED_KEY],
+            currentSearchParams: "status=ARCHIVED",
+            organizationId: "org-1",
+            userId: "user-1",
+            confirmation: "1",
+          })
+        ).rejects.toMatchObject({
+          status: 400,
+          additionalData: { expectedConfirmation: 2 },
+        });
+
+        expect(mockDb.auditSession.deleteMany).not.toHaveBeenCalled();
+      });
+
+      it("refuses an explicit selection posted without the typed count", async () => {
+        await expect(
+          bulkDeleteAudits({
+            auditIds: ["a1", "a2"],
+            organizationId: "org-1",
+            userId: "user-1",
+            confirmation: undefined,
+          })
+        ).rejects.toMatchObject({ status: 400 });
+
+        expect(mockDb.auditSession.deleteMany).not.toHaveBeenCalled();
       });
 
       it("calls removePublicFile for every image AFTER the DB transaction commits", async () => {
@@ -1422,6 +1500,7 @@ describe("audit service", () => {
 
         await bulkDeleteAudits({
           auditIds: ["a1", "a2"],
+          confirmation: "2",
           organizationId: "org-1",
           userId: "user-1",
         });
@@ -1458,6 +1537,7 @@ describe("audit service", () => {
         await expect(
           bulkDeleteAudits({
             auditIds: ["a1", "a2", "a3"],
+            confirmation: "3",
             organizationId: "org-1",
             userId: "user-1",
           })
@@ -1476,6 +1556,7 @@ describe("audit service", () => {
         await expect(
           bulkDeleteAudits({
             auditIds: ["a1"],
+            confirmation: "1",
             organizationId: "org-1",
             userId: "user-1",
           })
@@ -1813,7 +1894,7 @@ describe("audit service", () => {
           auditSessionId,
           organizationId,
           userId: creatorId,
-          isAdminOrOwner: false,
+          canManageOthers: false,
           hints,
         })
       ).resolves.toMatchObject({ status: AuditStatus.CANCELLED });
@@ -1842,7 +1923,7 @@ describe("audit service", () => {
           auditSessionId,
           organizationId,
           userId: adminId,
-          isAdminOrOwner: true,
+          canManageOthers: true,
           hints,
         })
       ).resolves.toMatchObject({ status: AuditStatus.CANCELLED });
@@ -1854,7 +1935,7 @@ describe("audit service", () => {
           auditSessionId,
           organizationId,
           userId: stranger,
-          isAdminOrOwner: false,
+          canManageOthers: false,
           hints,
         })
       ).rejects.toMatchObject({
@@ -1876,7 +1957,7 @@ describe("audit service", () => {
           auditSessionId,
           organizationId,
           userId: adminId,
-          isAdminOrOwner: true,
+          canManageOthers: true,
           hints,
         })
       ).rejects.toMatchObject({ status: 400 });
@@ -1887,7 +1968,7 @@ describe("audit service", () => {
         auditSessionId,
         organizationId,
         userId: adminId,
-        isAdminOrOwner: true,
+        canManageOthers: true,
         hints,
       });
 
@@ -1914,7 +1995,7 @@ describe("audit service", () => {
         auditSessionId,
         organizationId,
         userId: adminId,
-        isAdminOrOwner: true,
+        canManageOthers: true,
         hints,
       });
 
@@ -1946,7 +2027,7 @@ describe("audit service", () => {
         auditSessionId,
         organizationId,
         userId: adminId,
-        isAdminOrOwner: true,
+        canManageOthers: true,
         hints,
       });
 
@@ -1965,7 +2046,7 @@ describe("audit service", () => {
         auditSessionId,
         organizationId,
         userId: creatorId,
-        isAdminOrOwner: false,
+        canManageOthers: false,
         hints,
       });
 
@@ -1990,7 +2071,7 @@ describe("audit service", () => {
           auditSessionId,
           organizationId,
           userId: creatorId,
-          isAdminOrOwner: false,
+          canManageOthers: false,
           hints,
         })
       ).rejects.toMatchObject({
@@ -2014,7 +2095,7 @@ describe("audit service", () => {
         auditSessionId,
         organizationId,
         userId: adminId,
-        isAdminOrOwner: true,
+        canManageOthers: true,
         hints,
       });
 
@@ -2034,7 +2115,7 @@ describe("audit service", () => {
         auditSessionId,
         organizationId,
         userId: creatorId,
-        isAdminOrOwner: false,
+        canManageOthers: false,
         hints,
       });
 
@@ -2060,7 +2141,7 @@ describe("audit service", () => {
       await getAuditsForOrganization({
         organizationId: "org-1",
         userId: "admin-user",
-        isSelfServiceOrBase: false,
+        assignedOnly: false,
         assignedToUserId: "admin-user",
       });
 
@@ -2077,7 +2158,7 @@ describe("audit service", () => {
       await getAuditsForOrganization({
         organizationId: "org-1",
         userId: "admin-user",
-        isSelfServiceOrBase: false,
+        assignedOnly: false,
         assignedToUserId: null,
       });
 
@@ -2093,7 +2174,7 @@ describe("audit service", () => {
       await getAuditsForOrganization({
         organizationId: "org-1",
         userId: "base-user",
-        isSelfServiceOrBase: true,
+        assignedOnly: true,
       });
 
       const findManyArgs = mockDb.auditSession.findMany.mock.calls[0]?.[0];
@@ -2105,7 +2186,7 @@ describe("audit service", () => {
       });
     });
 
-    it("throws when isSelfServiceOrBase is true but userId is missing", async () => {
+    it("throws when assignedOnly is true but userId is missing", async () => {
       // why: silently falling back to assignedToUserId (or null) when a
       // caller signals role-scoping but forgets the userId would leak
       // the whole org list to a BASE/SELF_SERVICE user. The guard fails
@@ -2113,7 +2194,7 @@ describe("audit service", () => {
       await expect(
         getAuditsForOrganization({
           organizationId: "org-1",
-          isSelfServiceOrBase: true,
+          assignedOnly: true,
           // userId intentionally omitted
         })
       ).rejects.toThrow(/Missing user context/);
@@ -2133,6 +2214,46 @@ describe("audit service", () => {
         { dueDate: { sort: "asc", nulls: "last" } },
         { createdAt: "desc" },
       ]);
+    });
+
+    it("filters to audits containing the asset when assetId is set", async () => {
+      await getAuditsForOrganization({
+        organizationId: "org-1",
+        assetId: "asset-1",
+      });
+
+      const findManyArgs = mockDb.auditSession.findMany.mock.calls[0]?.[0];
+      expect(findManyArgs?.where).toMatchObject({
+        assets: { some: { assetId: "asset-1" } },
+      });
+    });
+
+    it("leaves status unset when includeArchived is true and no status is given", async () => {
+      await getAuditsForOrganization({
+        organizationId: "org-1",
+        includeArchived: true,
+      });
+
+      const findManyArgs = mockDb.auditSession.findMany.mock.calls[0]?.[0];
+      expect(findManyArgs?.where?.status).toBeUndefined();
+    });
+
+    it("hides ARCHIVED audits by default", async () => {
+      await getAuditsForOrganization({ organizationId: "org-1" });
+
+      const findManyArgs = mockDb.auditSession.findMany.mock.calls[0]?.[0];
+      expect(findManyArgs?.where?.status).toEqual({ notIn: ["ARCHIVED"] });
+    });
+
+    it("keeps an explicit status even when includeArchived is true", async () => {
+      await getAuditsForOrganization({
+        organizationId: "org-1",
+        status: "ACTIVE",
+        includeArchived: true,
+      });
+
+      const findManyArgs = mockDb.auditSession.findMany.mock.calls[0]?.[0];
+      expect(findManyArgs?.where?.status).toBe("ACTIVE");
     });
 
     it("falls back to the legacy single-field orderBy when prioritizeDeadlines is false", async () => {
@@ -2444,6 +2565,45 @@ describe("audit service", () => {
       await recordAuditScan(scanInput);
 
       expect(mockDb.auditSession.updateMany).not.toHaveBeenCalled();
+    });
+
+    it("records the audit scan on the asset's scan record once it commits", async () => {
+      mockPendingSession({ first: 1 });
+      mockDb.asset.findUnique.mockResolvedValue({
+        id: "asset-1",
+        title: "Camera",
+        organizationId: "org-1",
+        sequentialId: "SAM-0001",
+      });
+
+      await recordAuditScan({ ...scanInput, userAgent: "Mozilla/5.0" });
+
+      expect(recordAuditScanNonFatal).toHaveBeenCalledWith({
+        code: "qr-1",
+        asset: expect.objectContaining({
+          id: "asset-1",
+          sequentialId: "SAM-0001",
+        }),
+        organizationId: "org-1",
+        userId: "user-1",
+        userAgent: "Mozilla/5.0",
+      });
+    });
+
+    it("does not record a repeat of an asset this audit already scanned", async () => {
+      mockPendingSession({ first: 1 });
+      mockDb.auditScan.findFirst.mockResolvedValue({
+        id: "scan-0",
+        auditAssetId: "audit-asset-1",
+      });
+      // why: the repeat returns before the transaction, so the claims queued
+      // above are never consumed; drain them so they cannot answer a later
+      // test's updateMany.
+      mockDb.auditSession.updateMany.mockReset();
+
+      await recordAuditScan(scanInput);
+
+      expect(recordAuditScanNonFatal).not.toHaveBeenCalled();
     });
   });
 
@@ -2767,7 +2927,7 @@ describe("audit service", () => {
 
     it("allows ADMIN/OWNER even when the audit has other assignees", async () => {
       await expect(
-        requireAuditAssignee({ ...baseArgs, isSelfServiceOrBase: false })
+        requireAuditAssignee({ ...baseArgs, assignedOnly: false })
       ).resolves.toBeUndefined();
 
       // why: the admin path must not depend on the assignee list at all —
@@ -2780,7 +2940,7 @@ describe("audit service", () => {
       mockSessionWithAssignments([{ userId: "user-1" }]);
 
       await expect(
-        requireAuditAssignee({ ...baseArgs, isSelfServiceOrBase: true })
+        requireAuditAssignee({ ...baseArgs, assignedOnly: true })
       ).resolves.toBeUndefined();
     });
 
@@ -2788,7 +2948,7 @@ describe("audit service", () => {
       mockSessionWithAssignments([{ userId: "user-2" }]);
 
       await expect(
-        requireAuditAssignee({ ...baseArgs, isSelfServiceOrBase: true })
+        requireAuditAssignee({ ...baseArgs, assignedOnly: true })
       ).rejects.toMatchObject({ status: 403 });
     });
 
@@ -2796,7 +2956,7 @@ describe("audit service", () => {
       mockDb.auditSession.findFirst.mockResolvedValue(null);
 
       await expect(
-        requireAuditAssignee({ ...baseArgs, isSelfServiceOrBase: true })
+        requireAuditAssignee({ ...baseArgs, assignedOnly: true })
       ).rejects.toMatchObject({ status: 404 });
     });
   });
@@ -3068,5 +3228,108 @@ describe("createWhileAuditAcceptsComments", () => {
 
     await expect(run(write)).rejects.toMatchObject({ status: 404 });
     expect(write).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * `getAuditSessionDetails` serves five loaders, and only the web scan tab and
+ * the mobile audit screen render the expected-asset photos. Signing is opt-in so
+ * the other callers make no storage calls, and it covers expected rows only.
+ */
+describe("getAuditSessionDetails photo re-sign", () => {
+  const lapsedAsset = (id: string) => ({
+    id,
+    title: `Asset ${id}`,
+    mainImage: `https://storage.test/storage/v1/object/sign/assets/org-owner/${id}/photo.png?token=old`,
+    thumbnailImage: null,
+    mainImageExpiration: new Date("2020-01-01T00:00:00.000Z"),
+    assetModel: null,
+    category: null,
+    custody: [],
+    assetLocations: [],
+  });
+  const sessionRow = {
+    id: "audit-1",
+    organizationId: "org-owner",
+    assets: [
+      {
+        id: "audit-asset-1",
+        assetId: "asset-expected",
+        expected: true,
+        asset: lapsedAsset("asset-expected"),
+        _count: { notes: 0, images: 0 },
+      },
+      {
+        id: "audit-asset-2",
+        assetId: "asset-unexpected",
+        expected: false,
+        asset: lapsedAsset("asset-unexpected"),
+        _count: { notes: 0, images: 0 },
+      },
+    ],
+  };
+
+  beforeEach(() => {
+    mockDb.auditSession.findFirst.mockResolvedValue(sessionRow);
+    vi.mocked(createSignedUrl)
+      .mockReset()
+      .mockResolvedValue("https://storage.test/fresh.png?token=new");
+  });
+
+  it("signs nothing for a caller that reads the session only", async () => {
+    await getAuditSessionDetails({
+      id: "audit-1",
+      organizationId: "org-owner",
+      refreshExpectedAssetImages: false,
+    });
+
+    expect(createSignedUrl).not.toHaveBeenCalled();
+  });
+
+  it("re-signs the expected rows only, for a caller that renders them", async () => {
+    const { expectedAssets } = await getAuditSessionDetails({
+      id: "audit-1",
+      organizationId: "org-owner",
+      refreshExpectedAssetImages: true,
+    });
+
+    expect(expectedAssets).toHaveLength(1);
+    expect(expectedAssets[0].mainImage).toBe(
+      "https://storage.test/fresh.png?token=new"
+    );
+    // One call, for the expected row's photo; the unexpected row is not signed.
+    expect(createSignedUrl).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("updateAuditSession", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDb.auditSession.findUnique.mockResolvedValue({
+      name: "Warehouse audit",
+      description: null,
+      status: "PENDING",
+      dueDate: null,
+      assignments: [{ userId: "user-2" }],
+    });
+    mockDb.auditSession.update.mockResolvedValue({ id: "audit-1" });
+  });
+
+  it("refuses a new assignee who is not a member of the workspace", async () => {
+    mockDb.userOrganization.findFirst.mockResolvedValueOnce(null);
+
+    await expect(
+      updateAuditSession({
+        id: "audit-1",
+        organizationId: "org-1",
+        userId: "user-1",
+        data: { assigneeUserId: "foreign-user" },
+      })
+    ).rejects.toMatchObject({ status: 400 });
+    expect(mockDb.userOrganization.findFirst).toHaveBeenCalledWith({
+      where: { userId: "foreign-user", organizationId: "org-1" },
+      select: { id: true },
+    });
+    expect(mockDb.auditAssignment.create).not.toHaveBeenCalled();
   });
 });

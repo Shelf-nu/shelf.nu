@@ -1592,6 +1592,20 @@ interface IdleAssetsArgs {
 }
 
 /**
+ * Current-inventory snapshot reports (Idle, Distribution, Inventory) count only
+ * ACTIVE assets, so their numbers line up with the dashboard's active-inventory
+ * view (issue #382). Archived assets are out of circulation, so a "what do I
+ * have / how is it distributed / what's idle" snapshot must exclude them.
+ *
+ * Historical / timeframe reports (Activity, Utilization, Top Booked) deliberately
+ * do NOT apply this: an asset's past usage inside a window is real even after the
+ * asset is later archived, so those still include archived assets.
+ */
+const ACTIVE_INVENTORY_ASSET_FILTER: Prisma.AssetWhereInput = {
+  archivedAt: null,
+};
+
+/**
  * Generate the Idle Assets report (R4).
  *
  * Identifies assets that haven't been booked or checked out recently.
@@ -1621,9 +1635,10 @@ export async function idleAssetsReport(
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - idleThresholdDays);
 
-    // Build asset where clause
+    // Build asset where clause (active inventory only, issue #382)
     const baseAssetWhere: Prisma.AssetWhereInput = {
       organizationId,
+      ...ACTIVE_INVENTORY_ASSET_FILTER,
     };
 
     if (categoryId) {
@@ -1874,10 +1889,14 @@ async function computeIdleAssetsKpis(
 ): Promise<ReportKpi[]> {
   const now = new Date();
 
-  // Get total asset count for percentage
+  // Get total asset count for percentage.
+  // Archived assets are excluded here too (issue #382): the idle numerator
+  // rides on `assetWhere`, which excludes them, so an unfiltered denominator
+  // would quietly shrink the "% of Inventory" figure.
   const totalAssets = await db.asset.count({
     where: {
       organizationId,
+      ...ACTIVE_INVENTORY_ASSET_FILTER,
     },
   });
 
@@ -3126,7 +3145,10 @@ export async function assetDistributionReport(
     // pure reduction over the same rows, so a large inventory is scanned
     // once instead of four times. The filter narrows that read and the
     // headline KPIs together, so every figure describes the same assets.
-    const assetWhere = mergeAssetWhere({ organizationId }, assetFilter);
+    const assetWhere = mergeAssetWhere(
+      { organizationId, ...ACTIVE_INVENTORY_ASSET_FILTER },
+      assetFilter
+    );
     const assets = await fetchDistributionAssets(assetWhere);
     const [kpis, byCategory, byLocation, byStatus, byAssetModel] =
       await Promise.all([
@@ -3476,6 +3498,7 @@ async function computeDistributionKpis({
   const valueWhereSql = Prisma.join(
     [
       Prisma.sql`"organizationId" = ${organizationId}`,
+      Prisma.sql`"archivedAt" IS NULL`,
       ...(assetFilter?.sql ?? []),
     ],
     " AND "
@@ -3489,6 +3512,8 @@ async function computeDistributionKpis({
       // Column name is `value` (Asset.valuation is `@map("value")`). COALESCE
       // mirrors `getAssetTotalValue` (null quantity → 1, null value → 0).
       // No `::bigint` cast — it truncated fractional Float valuations.
+      // `archivedAt IS NULL` is the raw-SQL twin of ACTIVE_INVENTORY_ASSET_FILTER
+      // (issue #382) so this KPI reconciles with the breakdowns above it.
       db.$queryRaw<{ total: number | null }[]>(
         Prisma.sql`
           SELECT COALESCE(SUM(COALESCE(value, 0) * COALESCE(quantity, 1)), 0) AS total
@@ -3596,13 +3621,17 @@ export async function assetInventoryReport(
     // The direct list arguments and the filter-bar predicate are both
     // expressed through the shared builder, so the Prisma `where` the rows
     // use and the SQL fragments the money KPI uses come from one source.
+    // Active inventory only (issue #382).
     const argumentFilter = buildReportAssetFilter({
       categoryIds,
       locationIds,
       statuses: statuses as AssetStatus[] | undefined,
     });
     const where = mergeAssetWhere(
-      mergeAssetWhere({ organizationId }, argumentFilter),
+      mergeAssetWhere(
+        { organizationId, ...ACTIVE_INVENTORY_ASSET_FILTER },
+        argumentFilter
+      ),
       assetFilter
     );
     const filterSql = [...argumentFilter.sql, ...(assetFilter?.sql ?? [])];
@@ -3753,9 +3782,16 @@ async function computeInventoryKpis(
 
   // QT-aware: multiplies valuation × quantity so qty-tracked assets are not silently underreported.
   // Prisma's `aggregate({_sum})` cannot express the multiplication, so we drop
-  // to `$queryRaw` with the SQL twin of the rows' filters.
+  // to `$queryRaw` with the SQL twin of the rows' filters. `"archivedAt" IS
+  // NULL` is the raw-SQL twin of ACTIVE_INVENTORY_ASSET_FILTER, which
+  // `scopedWhere` carries, so Total Value and Total Assets describe the same
+  // assets.
   const whereSql = Prisma.join(
-    [Prisma.sql`"organizationId" = ${organizationId}`, ...filterSql],
+    [
+      Prisma.sql`"organizationId" = ${organizationId}`,
+      Prisma.sql`"archivedAt" IS NULL`,
+      ...filterSql,
+    ],
     " AND "
   );
 
@@ -4504,6 +4540,7 @@ export async function assetActivityReport(
     if (categoryId) baseAssetWhere.categoryId = categoryId;
     if (categoryId || (assetFilter && !assetFilter.isEmpty)) {
       const matchingAssets = await db.asset.findMany({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: Activity is a history report; archived assets keep their events
         where: mergeAssetWhere(baseAssetWhere, assetFilter),
         select: { id: true },
       });
@@ -4533,6 +4570,7 @@ export async function assetActivityReport(
       ...new Set(events.map((e) => e.assetId).filter(Boolean)),
     ] as string[];
     const assets = await db.asset.findMany({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: Activity is a history report; events on archived assets still render their asset
       where: { id: { in: assetIds }, organizationId },
       select: {
         id: true,
@@ -4600,6 +4638,7 @@ export async function assetActivityReport(
     let mostActiveName = "—";
     if (assetActivityCounts.length > 0 && assetActivityCounts[0].assetId) {
       const mostActiveAsset = await db.asset.findFirst({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: Activity is a history report; the most active asset may be archived since
         where: { id: assetActivityCounts[0].assetId, organizationId },
         select: { title: true },
       });

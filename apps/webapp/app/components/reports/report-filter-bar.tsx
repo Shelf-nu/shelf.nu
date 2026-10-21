@@ -24,6 +24,7 @@ import { useCallback } from "react";
 
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ChevronRight } from "~/components/icons/library";
+import { Spinner } from "~/components/shared/spinner";
 import { useSearchParams } from "~/hooks/search-params";
 import { WITHOUT_LOCATION_ID } from "~/modules/reports/filter-params";
 import type {
@@ -272,7 +273,7 @@ function DropdownTriggerLabel({ label }: { label: string }) {
 function FilterLoadingIndicator() {
   return (
     <div className="flex items-center gap-2 text-xs text-gray-500">
-      <div className="animate-spin size-3 rounded-full border-2 border-gray-300 border-t-gray-600" />
+      <Spinner className="size-3" />
       <span>Updating...</span>
     </div>
   );

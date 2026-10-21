@@ -7,8 +7,8 @@
  * The rules under test are the ones a screenshot cannot check: which kit a
  * quantity-tracked asset is grouped under when its slices disagree, what a
  * kit's badge says on a booking that is over, how a selection counts a kit as
- * one thing, and when a removal may name the kit instead of listing its
- * assets.
+ * one thing (on the button and in the check-out and check-in alerts), and when
+ * a removal may name the kit instead of listing its assets.
  *
  * @see ./booking-kit-rows.ts
  */
@@ -18,14 +18,19 @@ import { test } from "node:test";
 import {
   bookingRowKey,
   buildBookingRows,
+  countBookingBatch,
   countSelection,
+  describeBatchConfirm,
+  describeBatchResult,
+  describeBatch,
   describeBookingRows,
-  describeRemoval,
   describeSelection,
+  getBookingAssetState,
   isBookingAssetSelectable,
   resolveBookingKitBadge,
   resolveKitSelectionState,
   splitRemovalSelection,
+  unitsStillOut,
   type BookingRow,
 } from "./booking-kit-rows";
 import type { BookingAsset, BookingKit } from "./api/types";
@@ -708,6 +713,261 @@ test("check-in skips a quantity-tracked asset with nothing left to reconcile", (
   );
 });
 
+// ---------------------------------------------------------------------------
+// Check-in eligibility by units actually out
+// ---------------------------------------------------------------------------
+
+/** A kit member booked `booked` units, with `out` sent and `back` returned. */
+function qtyMember(
+  id: string,
+  booked: number,
+  out: number,
+  back: number
+): BookingAsset {
+  const member = { ...inKit(id, "kit-1", "Camera Kit") };
+  member.type = "QUANTITY_TRACKED";
+  member.quantity = booked;
+  member.dispatchedUnitsTotal = out;
+  member.dispositionedUnitsTotal = back;
+  // Booked minus dispositioned, which is what the server sends and what the
+  // old rule read. On a never-dispatched row it equals the booked quantity,
+  // which is exactly the number that made the bug.
+  member.remainingToCheckIn = Math.max(0, booked - back);
+  return member;
+}
+
+test("units still out is what went out less what came back", () => {
+  assert.equal(unitsStillOut(qtyMember("m1", 4, 3, 1)), 2);
+});
+
+test("units still out never goes negative", () => {
+  assert.equal(unitsStillOut(qtyMember("m1", 4, 2, 3)), 0);
+});
+
+test("check-in skips a quantity-tracked asset that never went out", () => {
+  // The reported bug: booked 4, nothing dispatched. `remainingToCheckIn` is 4
+  // and offering on it got the server's "never checked out" refusal.
+  const member = qtyMember("m1", 4, 0, 0);
+  assert.equal(member.remainingToCheckIn, 4);
+  assert.equal(isBookingAssetSelectable(member, "checkin", []), false);
+});
+
+test("check-in offers a quantity-tracked asset that is partly out", () => {
+  assert.equal(
+    isBookingAssetSelectable(qtyMember("m1", 4, 2, 0), "checkin", []),
+    true
+  );
+});
+
+test("check-in skips a quantity-tracked asset whose units are all back", () => {
+  assert.equal(
+    isBookingAssetSelectable(qtyMember("m1", 2, 2, 2), "checkin", []),
+    false
+  );
+});
+
+test("a kit whose member never went out is not offered for check-in", () => {
+  assert.equal(
+    resolveKitSelectionState({
+      members: [qtyMember("m1", 4, 0, 0)],
+      selectMode: "checkin",
+      selectedAssetIds: new Set(),
+      checkedInAssetIds: [],
+    }),
+    "unselectable"
+  );
+});
+
+test("a kit whose member never went out still reads as Available", () => {
+  // Never dispatched is not the same as back: the badge must not claim a
+  // return that never happened.
+  assert.deepEqual(
+    resolveBookingKitBadge({
+      kit: cameraKit,
+      members: [qtyMember("m1", 4, 0, 0)],
+      bookingStatus: "ONGOING",
+      checkedInAssetIds: [],
+    }),
+    { tone: "AVAILABLE", label: "Available" }
+  );
+});
+
+test("a kit whose units are all back reads as already checked in", () => {
+  assert.deepEqual(
+    resolveBookingKitBadge({
+      kit: cameraKit,
+      members: [qtyMember("m1", 2, 2, 2)],
+      bookingStatus: "ONGOING",
+      checkedInAssetIds: [],
+    }),
+    { tone: "PARTIALLY_CHECKED_IN", label: "Already checked in" }
+  );
+});
+
+test("units still out never exceeds what the endpoint will accept", () => {
+  // A second trip inside one booking: 8 units have been sent out, 4 came back,
+  // so 4 are physically out. `partialCheckinBooking` caps each claim at booked
+  // minus everything dispositioned, which is 0 here, so those 4 cannot be
+  // checked in yet and must not be offered.
+  const member = qtyMember("m1", 4, 8, 4);
+  assert.equal(member.remainingToCheckIn, 0);
+  assert.equal(unitsStillOut(member), 0);
+  assert.equal(isBookingAssetSelectable(member, "checkin", []), false);
+});
+
+test("a member on a second trip is not called back in", () => {
+  // 4 booked, 8 sent out across two trips, 4 back. Reading the returns against
+  // the booked quantity alone would call it done while the second trip is out.
+  const member = qtyMember("m1", 4, 8, 4);
+  assert.deepEqual(
+    resolveBookingKitBadge({
+      kit: cameraKit,
+      members: [member],
+      bookingStatus: "ONGOING",
+      checkedInAssetIds: [],
+    }),
+    { tone: "AVAILABLE", label: "Available" }
+  );
+});
+
+/**
+ * The member ROW badge and the kit HEADER badge answer the same question from
+ * the same counters, so no row may read "Returned" under a header that still
+ * says the kit is out — and vice versa. Only a badge keyed on units can hold
+ * that: the endpoint's remaining cap reaches zero on a second trip while the
+ * units are still in the field.
+ */
+function rowAndHeaderAgree(member: BookingAsset): {
+  rowSaysDone: boolean;
+  headerSaysDone: boolean;
+} {
+  const state = getBookingAssetState({
+    booked: member.quantity ?? 0,
+    remOut: member.remainingToCheckOut,
+    remIn: member.remainingToCheckIn,
+    dispatched: member.dispatchedUnitsTotal,
+    dispositioned: member.dispositionedUnitsTotal,
+    bookingStatus: "ONGOING",
+  });
+  const badge = resolveBookingKitBadge({
+    kit: cameraKit,
+    members: [member],
+    bookingStatus: "ONGOING",
+    checkedInAssetIds: [],
+  });
+  return {
+    rowSaysDone: state.key === "COMPLETE",
+    headerSaysDone: badge?.tone === "PARTIALLY_CHECKED_IN",
+  };
+}
+
+test("the row badge and the kit header agree on a never-dispatched member", () => {
+  const { rowSaysDone, headerSaysDone } = rowAndHeaderAgree(
+    qtyMember("m1", 4, 0, 0)
+  );
+  assert.equal(rowSaysDone, false);
+  assert.equal(headerSaysDone, false);
+});
+
+test("the row badge and the kit header agree on a fully returned member", () => {
+  const { rowSaysDone, headerSaysDone } = rowAndHeaderAgree(
+    qtyMember("m1", 2, 2, 2)
+  );
+  assert.equal(rowSaysDone, true);
+  assert.equal(headerSaysDone, true);
+});
+
+test("the row badge and the kit header agree on a member out a second time", () => {
+  // 4 booked, 8 sent out across two trips, 4 back. Judged by the endpoint's
+  // remaining cap the row reads "Returned" while the header still reads the
+  // kit as out — the same screen claiming both.
+  const member = qtyMember("m1", 4, 8, 4);
+  assert.equal(member.remainingToCheckIn, 0);
+  const { rowSaysDone, headerSaysDone } = rowAndHeaderAgree(member);
+  assert.equal(rowSaysDone, false);
+  assert.equal(headerSaysDone, false);
+});
+
+test("a member with units out reads as checked out on its row", () => {
+  const state = getBookingAssetState({
+    booked: 4,
+    dispatched: 4,
+    dispositioned: 0,
+    bookingStatus: "ONGOING",
+  });
+  assert.equal(state.key, "ONGOING");
+});
+
+test("a partly dispatched member names how many units are out", () => {
+  const state = getBookingAssetState({
+    booked: 4,
+    dispatched: 2,
+    dispositioned: 0,
+    bookingStatus: "ONGOING",
+  });
+  assert.equal(state.label, "2/4 out");
+});
+
+test("a never-dispatched member reads as reserved, not as out", () => {
+  const state = getBookingAssetState({
+    booked: 4,
+    dispatched: 0,
+    dispositioned: 0,
+    bookingStatus: "ONGOING",
+  });
+  assert.equal(state.key, "RESERVED");
+});
+
+test("an older server without unit totals keeps the remaining-based badge", () => {
+  const state = getBookingAssetState({
+    booked: 4,
+    remOut: 0,
+    remIn: 0,
+    bookingStatus: "ONGOING",
+  });
+  assert.equal(state.key, "COMPLETE");
+});
+
+test("check-out is unchanged by the units-out rule", () => {
+  // A never-dispatched row is exactly what check-out is for.
+  const member = qtyMember("m1", 4, 0, 0);
+  member.remainingToCheckOut = 4;
+  assert.equal(isBookingAssetSelectable(member, "checkout", []), true);
+});
+
+test("an older server without the two counters keeps the old rule", () => {
+  const member = { ...inKit("m1", "kit-1", "Camera Kit") };
+  member.type = "QUANTITY_TRACKED";
+  member.quantity = 4;
+  member.remainingToCheckIn = 4;
+
+  assert.equal(unitsStillOut(member), 4);
+  assert.equal(isBookingAssetSelectable(member, "checkin", []), true);
+});
+
+test("an older server judges a member back in by what is left to reconcile", () => {
+  const member = { ...inKit("m1", "kit-1", "Camera Kit") };
+  member.type = "QUANTITY_TRACKED";
+  member.quantity = 5;
+  member.remainingToCheckIn = 0;
+
+  assert.deepEqual(
+    resolveBookingKitBadge({
+      kit: cameraKit,
+      members: [member],
+      bookingStatus: "ONGOING",
+      checkedInAssetIds: [],
+    }),
+    { tone: "PARTIALLY_CHECKED_IN", label: "Already checked in" }
+  );
+});
+
+test("an individual row is judged by status, not by units", () => {
+  const out = asset({ id: "a1", status: "CHECKED_OUT" });
+  assert.equal(isBookingAssetSelectable(out, "checkin", []), true);
+  assert.equal(isBookingAssetSelectable(out, "checkin", ["a1"]), false);
+});
+
 test("a header with nothing picked reads as none", () => {
   assert.equal(
     resolveKitSelectionState({
@@ -720,21 +980,21 @@ test("a header with nothing picked reads as none", () => {
   );
 });
 
-test("a removal names the kits before the assets", () => {
+test("a batch names the kits before the assets", () => {
   assert.equal(
-    describeRemoval({ assetCount: 2, kitCount: 1 }),
+    describeBatch({ assetCount: 2, kitCount: 1 }),
     "1 kit and 2 assets"
   );
   assert.equal(
-    describeRemoval({ assetCount: 1, kitCount: 1 }),
+    describeBatch({ assetCount: 1, kitCount: 1 }),
     "1 kit and 1 asset"
   );
-  assert.equal(describeRemoval({ assetCount: 3, kitCount: 0 }), "3 assets");
-  assert.equal(describeRemoval({ assetCount: 0, kitCount: 2 }), "2 kits");
+  assert.equal(describeBatch({ assetCount: 3, kitCount: 0 }), "3 assets");
+  assert.equal(describeBatch({ assetCount: 0, kitCount: 2 }), "2 kits");
 });
 
-test("a removal with nothing to name still names assets", () => {
-  assert.equal(describeRemoval({ assetCount: 0, kitCount: 0 }), "0 assets");
+test("a batch with nothing to name still names assets", () => {
+  assert.equal(describeBatch({ assetCount: 0, kitCount: 0 }), "0 assets");
 });
 
 // ---------------------------------------------------------------------------
@@ -911,5 +1171,305 @@ test("nothing picked counts nothing", () => {
       checkedInAssetIds: [],
     }),
     { kitCount: 0, assetCount: 0 }
+  );
+});
+
+// ---------------------------------------------------------------------------
+// A flat batch of ids, as the scanner holds one
+// ---------------------------------------------------------------------------
+
+/** A booking of a three-member kit and a standalone asset. */
+const kitAndLooseAssetOnBooking: BookingAsset[] = [
+  inKit("m1", "kit-1", "Camera Kit"),
+  inKit("m2", "kit-1", "Camera Kit"),
+  inKit("m3", "kit-1", "Camera Kit"),
+  asset({ id: "loose-1" }),
+];
+
+test("a batch holding every member of a kit counts the kit once", () => {
+  assert.deepEqual(
+    countBookingBatch({
+      assets: kitAndLooseAssetOnBooking,
+      assetIds: ["m1", "m2", "m3", "loose-1"],
+      selectMode: "checkout",
+      checkedInAssetIds: [],
+    }),
+    { kitCount: 1, assetCount: 1 }
+  );
+});
+
+test("a batch holding part of a kit counts the members as assets", () => {
+  assert.deepEqual(
+    countBookingBatch({
+      assets: kitAndLooseAssetOnBooking,
+      assetIds: ["m1", "loose-1"],
+      selectMode: "checkout",
+      checkedInAssetIds: [],
+    }),
+    { kitCount: 0, assetCount: 2 }
+  );
+});
+
+test("a batch counts a kit whole when the rest of it cannot move", () => {
+  // m3 went out in an earlier batch, so check-out can only act on m1 and m2.
+  const assets = [
+    inKit("m1", "kit-1", "Camera Kit"),
+    inKit("m2", "kit-1", "Camera Kit"),
+    { ...inKit("m3", "kit-1", "Camera Kit"), status: "CHECKED_OUT" },
+  ];
+  assert.deepEqual(
+    countBookingBatch({
+      assets,
+      assetIds: ["m1", "m2"],
+      selectMode: "checkout",
+      checkedInAssetIds: [],
+    }),
+    { kitCount: 1, assetCount: 0 }
+  );
+});
+
+test("a batch keeps counting its kit once its members are marked moved", () => {
+  // The scanner marks a batch out as soon as the server accepts it, while the
+  // list and its success message still name that batch.
+  const markedOut = kitAndLooseAssetOnBooking.map((row) => ({
+    ...row,
+    status: "CHECKED_OUT",
+  }));
+  assert.deepEqual(
+    countBookingBatch({
+      assets: markedOut,
+      assetIds: ["m1", "m2", "m3", "loose-1"],
+      selectMode: "checkout",
+      checkedInAssetIds: [],
+    }),
+    { kitCount: 1, assetCount: 1 }
+  );
+});
+
+test("a batch still names a member as an asset once part of a kit is out", () => {
+  // m1 went out with this batch; m2 and m3 can still go, so the kit is not
+  // whole before the batch is marked moved, nor after.
+  const assets = [
+    { ...inKit("m1", "kit-1", "Camera Kit"), status: "CHECKED_OUT" },
+    inKit("m2", "kit-1", "Camera Kit"),
+    inKit("m3", "kit-1", "Camera Kit"),
+  ];
+  assert.deepEqual(
+    countBookingBatch({
+      assets,
+      assetIds: ["m1"],
+      selectMode: "checkout",
+      checkedInAssetIds: [],
+    }),
+    { kitCount: 0, assetCount: 1 }
+  );
+});
+
+test("a batch counts members the booking holds standalone as assets", () => {
+  // No kit id on the rows: the booking lists them as assets of their own, so
+  // the batch does too.
+  assert.deepEqual(
+    countBookingBatch({
+      assets: [asset({ id: "m1" }), asset({ id: "m2" })],
+      assetIds: ["m1", "m2"],
+      selectMode: "checkout",
+      checkedInAssetIds: [],
+    }),
+    { kitCount: 0, assetCount: 2 }
+  );
+});
+
+// ---------------------------------------------------------------------------
+// The check-out and check-in alerts
+// ---------------------------------------------------------------------------
+
+test("the confirm names the batch the way the button does", () => {
+  assert.equal(
+    describeBatchConfirm({
+      direction: "checkout",
+      counts: { kitCount: 1, assetCount: 1 },
+    }),
+    "Check out 1 kit and 1 asset?"
+  );
+  assert.equal(
+    describeBatchConfirm({
+      direction: "checkin",
+      counts: { kitCount: 0, assetCount: 3 },
+    }),
+    "Check in 3 assets?"
+  );
+  assert.equal(
+    describeBatchConfirm({
+      direction: "checkout",
+      counts: { kitCount: 2, assetCount: 0 },
+    }),
+    "Check out 2 kits?"
+  );
+  assert.equal(
+    describeBatchConfirm({
+      direction: "checkin",
+      counts: { kitCount: 1, assetCount: 0 },
+    }),
+    "Check in 1 kit?"
+  );
+});
+
+test("the confirm names the booking when it is given one", () => {
+  assert.equal(
+    describeBatchConfirm({
+      direction: "checkout",
+      counts: { kitCount: 1, assetCount: 1 },
+      bookingName: "Film shoot",
+    }),
+    'Check out 1 kit and 1 asset for "Film shoot"?'
+  );
+  // A blank name is no name: the question still ends where the batch does.
+  assert.equal(
+    describeBatchConfirm({
+      direction: "checkin",
+      counts: { kitCount: 0, assetCount: 1 },
+      bookingName: "  ",
+    }),
+    "Check in 1 asset?"
+  );
+});
+
+test("a partial check-out names the batch and does not count the rest", () => {
+  assert.equal(
+    describeBatchResult({
+      direction: "checkout",
+      counts: { kitCount: 1, assetCount: 1 },
+      isComplete: false,
+      bookingName: "Film shoot",
+    }),
+    "1 kit and 1 asset checked out. The rest is still reserved."
+  );
+});
+
+test("a partial check-in names the batch and does not count the rest", () => {
+  assert.equal(
+    describeBatchResult({
+      direction: "checkin",
+      counts: { kitCount: 2, assetCount: 0 },
+      isComplete: false,
+      bookingName: "Film shoot",
+    }),
+    "2 kits checked in. The rest is still checked out."
+  );
+});
+
+test("a batch that completes the check-out speaks for the whole booking", () => {
+  assert.equal(
+    describeBatchResult({
+      direction: "checkout",
+      counts: { kitCount: 1, assetCount: 1 },
+      isComplete: true,
+      bookingName: "Film shoot",
+    }),
+    'All assets are now checked out for "Film shoot".'
+  );
+});
+
+test("a batch that completes the check-in says the booking is complete", () => {
+  assert.equal(
+    describeBatchResult({
+      direction: "checkin",
+      counts: { kitCount: 1, assetCount: 1 },
+      isComplete: true,
+      bookingName: "Film shoot",
+    }),
+    'All assets checked in. "Film shoot" is now complete.'
+  );
+});
+
+test("a completed batch without a booking name still reads as a sentence", () => {
+  assert.equal(
+    describeBatchResult({
+      direction: "checkout",
+      counts: { kitCount: 0, assetCount: 1 },
+      isComplete: true,
+      bookingName: "",
+    }),
+    "All assets are now checked out for this booking."
+  );
+  assert.equal(
+    describeBatchResult({
+      direction: "checkin",
+      counts: { kitCount: 0, assetCount: 1 },
+      isComplete: true,
+    }),
+    "All assets checked in. The booking is now complete."
+  );
+});
+
+test("without the server's answer the result names the batch alone", () => {
+  assert.equal(
+    describeBatchResult({
+      direction: "checkout",
+      counts: { kitCount: 0, assetCount: 1 },
+      isComplete: undefined,
+    }),
+    "1 asset checked out."
+  );
+  assert.equal(
+    describeBatchResult({
+      direction: "checkin",
+      counts: { kitCount: 1, assetCount: 2 },
+      isComplete: undefined,
+    }),
+    "1 kit and 2 assets checked in."
+  );
+});
+
+test("names the server's count when it checked out fewer assets than were sent", () => {
+  // The server skips an asset another check-out already took, so the batch as
+  // counted did not all move: the message must not claim it did.
+  assert.equal(
+    describeBatchResult({
+      direction: "checkout",
+      counts: { kitCount: 1, assetCount: 1 },
+      isComplete: false,
+      bookingName: "Film shoot",
+      assets: { sent: 4, moved: 3 },
+    }),
+    "3 assets checked out. 1 was already checked out. The rest is still reserved."
+  );
+});
+
+test("keeps the batch's words when the server moved every asset it was sent", () => {
+  assert.equal(
+    describeBatchResult({
+      direction: "checkout",
+      counts: { kitCount: 1, assetCount: 1 },
+      isComplete: false,
+      assets: { sent: 4, moved: 4 },
+    }),
+    "1 kit and 1 asset checked out. The rest is still reserved."
+  );
+});
+
+test("a batch that completes the booking still says so when some were already out", () => {
+  // Nothing is left either way, so the whole-booking message stays true.
+  assert.equal(
+    describeBatchResult({
+      direction: "checkout",
+      counts: { kitCount: 0, assetCount: 3 },
+      isComplete: true,
+      bookingName: "Film shoot",
+      assets: { sent: 3, moved: 1 },
+    }),
+    'All assets are now checked out for "Film shoot".'
+  );
+});
+
+test("names what moved without the server's answer on whether anything is left", () => {
+  assert.equal(
+    describeBatchResult({
+      direction: "checkout",
+      counts: { kitCount: 0, assetCount: 3 },
+      isComplete: undefined,
+      assets: { sent: 3, moved: 1 },
+    }),
+    "1 asset checked out. 2 were already checked out."
   );
 });

@@ -3,6 +3,10 @@ import type {
   TimeFormatPreference,
   WeekStartPreference,
 } from "@shelf/datetime";
+import type {
+  CustodySourceEntry,
+  CustodySourceOption,
+} from "@shelf/quantity-control";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -20,6 +24,21 @@ export type Organization = {
    * every mobile audit endpoint returns 403.
    */
   auditsEnabled: boolean;
+  /**
+   * ISO currency code for the workspace. Absent on servers older than the
+   * field, so callers fall back rather than rendering an empty prefix.
+   */
+  currency?: string;
+  /**
+   * The workspace's visibility toggles for restricted roles, from
+   * `/api/mobile/me`. Each widens what one role may SEE (bookings or custody),
+   * never what it may change. Absent on servers older than this field; the app
+   * then reads them as `false`, which only ever under-offers.
+   */
+  selfServiceCanSeeBookings?: boolean;
+  baseUserCanSeeBookings?: boolean;
+  selfServiceCanSeeCustody?: boolean;
+  baseUserCanSeeCustody?: boolean;
 };
 
 export type MeResponse = {
@@ -93,6 +112,38 @@ export type AssetCustodyListEntry = {
    * fall back to `quantity` (the server still enforces the real cap).
    */
   releasableQuantity?: number;
+  /**
+   * Where this holder's operator units were taken from, one entry per
+   * source: a location, the unplaced units (`locationId` null), or units
+   * whose source was never recorded (`unrecorded` true). Kit-held units are
+   * not listed. Absent on older servers. The screen shows these only for a
+   * pool placed at two or more locations (`AssetDetail.custodySources`).
+   */
+  sources?: AssetCustodySourceEntry[];
+};
+
+/**
+ * One source line of a holder's quantity custody (see `sources` above). The
+ * shape is shared with the server through `@shelf/quantity-control`.
+ */
+export type AssetCustodySourceEntry = CustodySourceEntry;
+
+/**
+ * One choice of the "From location" picker: a location the pool is placed
+ * at, or "Unplaced" (`locationId` null). Shared with the server through
+ * `@shelf/quantity-control`.
+ */
+export type { CustodySourceOption };
+
+/**
+ * Where a pool's units can be taken from. `multiSource` is true only for a
+ * pool placed at two or more locations; the app then asks "From location"
+ * when custody is assigned and shows per-source lines on each holder.
+ * Absent on older servers and null for INDIVIDUAL assets.
+ */
+export type AssetCustodySources = {
+  multiSource: boolean;
+  options: CustodySourceOption[];
 };
 
 /**
@@ -131,6 +182,14 @@ export type AssetListItem = {
    * servers.
    */
   sequentialId?: string | null;
+  /**
+   * The identifier this workspace labels its assets with, resolved by the
+   * server. Rows show this so an operator can match a printed label by eye;
+   * see `AssetDetail["displayCode"]` for the full contract.
+   *
+   * Absent on older servers, where the row falls back to the SAM ID.
+   */
+  displayCode?: ResolvedDisplayCode | null;
   status: string;
   mainImage: string | null;
   thumbnailImage: string | null;
@@ -203,6 +262,47 @@ export type AssetQuantityBreakdown = {
   custodyAvailable?: number;
 };
 
+/**
+ * The barcode symbologies Shelf can store on an asset. Mirrors the server's
+ * `BarcodeType` enum; `ExternalQR` is a 2D code and renders as a QR, the rest
+ * are linear barcodes.
+ */
+export type BarcodeSymbology =
+  | "Code128"
+  | "Code39"
+  | "DataMatrix"
+  | "ExternalQR"
+  | "EAN13";
+
+/**
+ * What a resolved display code turned out to be. Adds the two non-barcode
+ * identifiers a workspace can prefer to {@link BarcodeSymbology}.
+ */
+export type CodeDisplayType = "QR_ID" | "SAM_ID" | BarcodeSymbology;
+
+/**
+ * A display code as the server resolved it. See `AssetDetail["displayCode"]`
+ * for the contract; kits carry the same shape.
+ */
+export type ResolvedDisplayCode = {
+  value: string;
+  /**
+   * Human label for the type of the code that is SHOWN, e.g. "Code 128". On a
+   * fallback this names the Shelf QR shown in the preference's place, never
+   * the preference itself — `fallbackNote` is what names that.
+   */
+  label: string;
+  type: CodeDisplayType;
+  isFallback: boolean;
+  /**
+   * One sentence explaining a fallback, worded by the server so it matches the
+   * web app ("Your workspace prefers Code 128 but this item has no Code 128.").
+   * `null` unless `isFallback`. Absent on older servers, which the app treats
+   * as "no note" rather than guessing at the words.
+   */
+  fallbackNote?: string | null;
+};
+
 export type AssetDetail = {
   id: string;
   title: string;
@@ -217,6 +317,12 @@ export type AssetDetail = {
   mainImage: string | null;
   thumbnailImage: string | null;
   availableToBook: boolean;
+  /**
+   * When the asset was archived (ISO), `null` while it is active. An archived
+   * asset is read-only and cannot be booked; the app badges it "Archived".
+   * Absent on servers that predate archiving.
+   */
+  archivedAt?: string | null;
   valuation: number | null;
   createdAt: string;
   updatedAt: string;
@@ -235,6 +341,8 @@ export type AssetDetail = {
     custodian: {
       id: string;
       name: string;
+      /** The custodian's user; null for a non-registered member. */
+      userId?: string | null;
       user: {
         firstName: string | null;
         lastName: string | null;
@@ -243,9 +351,53 @@ export type AssetDetail = {
       } | null;
     };
   } | null;
+  /**
+   * The booking an INDIVIDUAL asset is checked out on, and who holds the asset
+   * through it: the web asset page's "In custody of … via …" card. Everything
+   * is resolved server-side, so the screen prints it and derives nothing.
+   *
+   * - `from`: the booking's start, an ISO instant.
+   * - `custodianName`: named as the bookings list names the same booking's
+   *   holder; `null` when the booking has no custodian.
+   * - `canOpen`: whether this viewer may open the booking. The row is only
+   *   tappable when true; the booking screen refuses everyone else.
+   *
+   * `null` when the asset is not checked out, is quantity-tracked, or the
+   * viewer may not see who holds it: that takes custody-view permission,
+   * unless the booking is the viewer's own. Absent on older servers — render
+   * nothing.
+   */
+  activeBooking?: {
+    id: string;
+    name: string;
+    from: string;
+    custodianName: string | null;
+    canOpen: boolean;
+  } | null;
   kit: { id: string; name: string; status: string } | null;
   tags: { id: string; name: string }[];
   qrCodes: { id: string }[];
+  /**
+   * The identifier this workspace labels its assets with, already resolved by
+   * the server: a per-asset override first, then the workspace's code
+   * preference, then the Shelf QR. The app must not re-derive this — it never
+   * receives the workspace preference, and resolving server-side is what lets
+   * an installed build follow a preference change with no app release.
+   *
+   * `isFallback` marks a preference that could not be honoured (the workspace
+   * prints Code 128, this asset has none), and `fallbackNote` says so in
+   * words, so the screen can explain itself rather than quietly showing a
+   * different code.
+   *
+   * Absent on older servers — treat a missing value as "show the QR".
+   */
+  displayCode?: ResolvedDisplayCode | null;
+  /**
+   * Every alternative code on the asset, for the code switcher. Empty for a
+   * workspace without the alternative-barcodes add-on — the server withholds
+   * the rows rather than relying on the client to hide them.
+   */
+  barcodes?: { id: string; type: BarcodeSymbology; value: string }[];
   organization: { currency: string };
   notes: AssetNote[];
   customFields: {
@@ -278,6 +430,8 @@ export type AssetDetail = {
    * Absent on older servers; fall back to the flat `location` field.
    */
   placements?: AssetPlacement[];
+  /** Where the pool's units can be taken from; see {@link AssetCustodySources}. */
+  custodySources?: AssetCustodySources | null;
   /**
    * Number of AssetLocation placements the asset currently has. Absent on
    * older servers.
@@ -329,7 +483,14 @@ export type ScannedKit = {
   name: string;
   status: string;
   image: string | null;
+  /** Active members: archived ones are not counted. */
   _count: { assets: number };
+  /**
+   * Archived members, left out of `assets` and `_count`. Absent from servers
+   * that predate it, and then read as none.
+   */
+  archivedAssetCount?: number;
+  /** Active members only. */
   assets: { id: string; status: string; availableToBook: boolean }[];
 };
 
@@ -339,24 +500,36 @@ export type QrResponse = {
     assetId: string | null;
     kitId: string | null;
     organizationId: string | null;
-    asset: {
-      id: string;
-      title: string;
-      status: string;
-      mainImage: string | null;
-      /** Set when the asset belongs to a kit (drives scanner batch blockers) */
-      kitId: string | null;
-      /** Drives the scan-to-booking "not available to book" blocker */
-      availableToBook: boolean;
-      /**
-       * Model this asset belongs to, or null. The fulfil-and-check-out scanner
-       * matches it against the booking's outstanding reservations so it can
-       * count only units that actually fulfil one. Absent on older servers.
-       */
-      assetModelId?: string | null;
-      category: { name: string } | null;
-      location: { name: string } | null;
-    } | null;
+    /**
+     * The linked asset. Its quantity fields and holders come from the same
+     * server shaper as the asset list; the scan tab's custody modes read them.
+     */
+    asset:
+      | ({
+          id: string;
+          title: string;
+          status: string;
+          mainImage: string | null;
+          /** Set when the asset belongs to a kit (drives scanner batch blockers) */
+          kitId: string | null;
+          /** Drives the scan-to-booking "not available to book" blocker */
+          availableToBook: boolean;
+          /**
+           * When the asset was archived (ISO), `null` while active. Drives the
+           * scanner's "Archived" badge and its archived blocker. Absent on
+           * servers that predate archiving.
+           */
+          archivedAt?: string | null;
+          /**
+           * Model this asset belongs to, or null. The fulfil-and-check-out scanner
+           * matches it against the booking's outstanding reservations so it can
+           * count only units that actually fulfil one. Absent on older servers.
+           */
+          assetModelId?: string | null;
+          category: { name: string } | null;
+          location: { name: string } | null;
+        } & AssetQuantityFields)
+      | null;
     /** Set when the QR is linked to a kit instead of an asset */
     kit: ScannedKit | null;
   };
@@ -401,24 +574,33 @@ export type BarcodeResponse = {
     assetId: string | null;
     kitId: string | null;
     organizationId: string;
-    asset: {
-      id: string;
-      title: string;
-      status: string;
-      mainImage: string | null;
-      /** Set when the asset belongs to a kit (drives scanner batch blockers) */
-      kitId: string | null;
-      /** Drives the scan-to-booking "not available to book" blocker */
-      availableToBook: boolean;
-      /**
-       * Model this asset belongs to, or null. Lets the fulfil scanner tell a
-       * unit that fulfils a reservation from one that does not. Absent on
-       * older servers.
-       */
-      assetModelId?: string | null;
-      category: { name: string } | null;
-      location: { name: string } | null;
-    } | null;
+    /** The linked asset, shaped like the QR resolve's. See {@link QrResponse}. */
+    asset:
+      | ({
+          id: string;
+          title: string;
+          status: string;
+          mainImage: string | null;
+          /** Set when the asset belongs to a kit (drives scanner batch blockers) */
+          kitId: string | null;
+          /** Drives the scan-to-booking "not available to book" blocker */
+          availableToBook: boolean;
+          /**
+           * When the asset was archived (ISO), `null` while active. Drives the
+           * scanner's "Archived" badge and its archived blocker. Absent on
+           * servers that predate archiving.
+           */
+          archivedAt?: string | null;
+          /**
+           * Model this asset belongs to, or null. Lets the fulfil scanner tell a
+           * unit that fulfils a reservation from one that does not. Absent on
+           * older servers.
+           */
+          assetModelId?: string | null;
+          category: { name: string } | null;
+          location: { name: string } | null;
+        } & AssetQuantityFields)
+      | null;
     /** Set when the barcode is linked to a kit instead of an asset */
     kit: ScannedKit | null;
   };
@@ -452,6 +634,13 @@ export type KitDetailAsset = {
   id: string;
   title: string;
   status: string;
+  /**
+   * When the member was archived (ISO), `null` while it is active. Archived
+   * members stay listed with an "Archived" badge but count toward nothing:
+   * the server leaves them out of `totalValue`. Absent on servers that
+   * predate archiving.
+   */
+  archivedAt?: string | null;
   valuation: number | null;
   mainImage: string | null;
   thumbnailImage: string | null;
@@ -476,6 +665,16 @@ export type KitDetail = {
   category: { id: string; name: string; color: string } | null;
   location: { id: string; name: string } | null;
   qrCodes: { id: string }[];
+  /**
+   * The identifier this workspace labels its kits with, resolved server-side.
+   * Kits carry no SAM ID and no per-kit override, so a workspace preferring
+   * SAM IDs resolves to the Shelf QR with `isFallback` set.
+   *
+   * Absent on older servers — treat a missing value as "show the QR".
+   */
+  displayCode?: ResolvedDisplayCode | null;
+  /** The kit's alternative codes. Empty without the add-on. */
+  barcodes?: { id: string; type: BarcodeSymbology; value: string }[];
   organization: { currency: string };
   /** Sum of the contained assets' valuation (computed server-side). */
   totalValue: number;
@@ -615,6 +814,17 @@ export type BulkActionResponse = {
    * older servers). Always 0 for all-INDIVIDUAL batches.
    */
   skippedQuantityTracked?: number;
+  /**
+   * Bulk custody with `quantities` only: assets whose unit write the server
+   * refused after its checks passed (a concurrent change). Nothing was written
+   * for them; the rest of the request was. Absent when every write landed.
+   */
+  refusedQuantities?: { assetId: string; title: string; message: string }[];
+  /**
+   * Bulk custody: asset ids whose units the server moved. Present on every
+   * response from a server that takes `quantities`; absent from older ones.
+   */
+  movedQuantityAssetIds?: string[];
 };
 
 export type BookingStatus =
@@ -638,9 +848,9 @@ export type BookingListItem = {
   assetCount: number;
   /**
    * Outstanding book-by-model reservations still to assign (units reserved at
-   * the model level with no concrete asset behind them yet). > 0 means the
-   * booking can't be checked out until matching assets are assigned. Optional
-   * for back-compat with an older server response.
+   * the model level with no concrete asset behind them yet). They don't stop a
+   * check-out; they stay open on the booking until scanned or released.
+   * Optional for back-compat with an older server response.
    */
   outstandingModelCount?: number;
   /**
@@ -671,6 +881,46 @@ export type BookingAssetSlice = {
   quantity: number;
   assetKitId: string | null;
   kit: { id: string; name: string } | null;
+  /**
+   * The location this slice's units left from, recorded at check-out. Set
+   * only for a standalone slice of a pool placed at two or more locations
+   * once it is out; null otherwise. Absent on older servers.
+   */
+  sourceLocation?: { id: string; name: string } | null;
+};
+
+/** One manual placement of a pool, as a check-out source question lists it. */
+export type CheckoutSourcePlacement = {
+  locationId: string;
+  name: string;
+  /** Units placed there. */
+  placed: number;
+  /** Units in custody taken from there. */
+  inCustody: number;
+  /** Units out on other bookings that left from there. */
+  onBooking: number;
+  /** Units that location has left to give. */
+  left: number;
+};
+
+/**
+ * One pool on a booking that check-out asks "Where do the units come from?"
+ * about: a pool placed at two or more locations whose slice has not gone out
+ * yet. The answer is sent as `sourceLocations[sliceId]`.
+ */
+export type CheckoutSourceQuestion = {
+  /** The BookingAsset row the answer is recorded on. */
+  sliceId: string;
+  assetId: string;
+  title: string;
+  unitOfMeasure: string | null;
+  /** Units this slice sends out. */
+  quantity: number;
+  placements: CheckoutSourcePlacement[];
+  /** Units of the pool that sit at no location. */
+  unplaced: number;
+  /** The option to pre-select: the server's own answer when nothing is picked. */
+  defaultLocationId: string | null;
 };
 
 export type BookingAsset = {
@@ -679,6 +929,13 @@ export type BookingAsset = {
   status: string;
   /** False when the asset is flagged unavailable for bookings. */
   availableToBook?: boolean;
+  /**
+   * When the asset was archived (ISO), `null` while it is active. A DRAFT
+   * booking can hold an asset archived after it was added; the row shows
+   * "Archived" and the booking cannot be reserved until it is removed.
+   * Absent on servers that predate archiving.
+   */
+  archivedAt?: string | null;
   mainImage: string | null;
   kitId: string | null;
   category: { id: string; name: string; color: string } | null;
@@ -700,10 +957,36 @@ export type BookingAsset = {
   assetKitId?: string | null;
   /** Per-slice breakdown; present when the server sends it (see gap 1). */
   slices?: BookingAssetSlice[];
-  /** Units currently checked out on this booking that can still be checked in. */
+  /**
+   * Booked units not yet returned, consumed, lost or damaged, and the cap the
+   * check-in endpoint applies to every claim.
+   *
+   * NOT a check-in eligibility test on its own: it counts booked units that
+   * never left, so a row nothing was ever checked out for reads as fully
+   * outstanding. `unitsStillOut` in `lib/booking-kit-rows` is that test.
+   */
   remainingToCheckIn?: number;
   /** Units still reserved on this booking that can still be checked out. */
   remainingToCheckOut?: number;
+  /**
+   * Units this booking has SENT OUT, summed across every slice and every
+   * departure and NOT capped at the booked quantity — a row that went out,
+   * came back and went out again reports more than it booked.
+   *
+   * Named apart from the web's `checkedOutQuantity` on purpose: that one is
+   * per-slice and capped at booked, and so is the counter of the same name the
+   * lifecycle progress bar reads. Reading this one with either rule in mind
+   * gives a wrong answer that still renders. Absent from an older server.
+   */
+  dispatchedUnitsTotal?: number;
+  /**
+   * Units returned, consumed, lost or damaged on this booking, summed across
+   * every slice and likewise UNCAPPED. Only meaningful against
+   * {@link BookingAsset.dispatchedUnitsTotal} — the two measure the same
+   * lifetime, and mixing either with a capped counter misreports a repeat
+   * trip. Absent from an older server.
+   */
+  dispositionedUnitsTotal?: number;
 };
 
 /**
@@ -728,6 +1011,22 @@ export type CheckoutDisposition = {
   assetId: string;
   bookingAssetId?: string | null;
   quantity: number;
+};
+
+/**
+ * A model reservation the booking's dates can no longer fill, for example
+ * after a unit of the model was archived. Sent only while units can still be
+ * assigned.
+ */
+export type BookingModelShortfall = {
+  assetModelId: string;
+  modelName: string;
+  /** Units of the reservation still unassigned. */
+  outstanding: number;
+  /** Units the booking can still get for its dates, after its named units. */
+  available: number;
+  /** Units the reservation is promised beyond what the pool holds. */
+  short: number;
 };
 
 /**
@@ -792,6 +1091,8 @@ export type BookingDetail = {
   custodianTeamMember: {
     id: string;
     name: string;
+    /** The team member's user, once they have accepted an invite. */
+    userId?: string | null;
   } | null;
   tags: { id: string; name: string; color: string | null }[];
   assets: BookingAsset[];
@@ -810,6 +1111,11 @@ export type BookingDetail = {
   modelRequestCount: number;
   /** Total units still to assign across all model requests. */
   outstandingModelUnitCount: number;
+  /**
+   * Reservations the booking's dates can no longer fill. Absent from servers
+   * that predate it, and then read as none.
+   */
+  modelReservationShortfalls?: BookingModelShortfall[];
   /**
    * True when any asset on this booking is already booked for the same window
    * — the third rule web's Reserve button disables on, and the one the client
@@ -855,6 +1161,12 @@ export type BookingDetailResponse = {
    */
   checkedOutAssetIds?: string[];
   canCheckout: boolean;
+  /**
+   * Whether the EXPLICIT check-in paths — scan and select — are offered. They
+   * submit to `partialCheckinBooking`, which refuses a row no slice of which
+   * ever went out, so this is false on an active booking holding only
+   * never-dispatched rows. Use {@link canCheckinAll} for the quick path.
+   */
   canCheckin: boolean;
   /**
    * False when the workspace requires explicit (scan/select) check-in for the
@@ -862,6 +1174,16 @@ export type BookingDetailResponse = {
    * web, which never offers quick check-in under that policy.
    */
   canQuickCheckin: boolean;
+  /**
+   * Whether the quick "Check In All" is offered: an active booking, the
+   * permission, and a workspace that allows quick check-in. It completes the
+   * booking whatever went out, so unlike {@link canCheckin} it does not ask
+   * whether anything is still in the field — matching web's `CheckinDropdown`.
+   *
+   * Absent on an older server; read absence as `canCheckin && canQuickCheckin`,
+   * which is how that server gated the same button.
+   */
+  canCheckinAll?: boolean;
   /**
    * False when the workspace requires explicit (scan/select) check-out for the
    * caller's role. The app then hides the one-tap "Check Out All Assets", which
@@ -876,11 +1198,30 @@ export type BookingDetailResponse = {
    * same gates regardless.
    */
   bookingActions: {
+    /**
+     * Whether the caller may edit this booking (open, and one they write).
+     * Optional: servers that predate the flag omit it, and the app then keeps
+     * offering Edit as before.
+     */
+    canEdit?: boolean;
     canCancel: boolean;
     canArchive: boolean;
     canDuplicate: boolean;
     canDelete: boolean;
+    /**
+     * Whether the caller may extend this booking (ONGOING or OVERDUE, the
+     * extend permission, and one they write). Optional: servers that predate
+     * the flag omit it and have no extend endpoint, so an absent flag hides
+     * the action.
+     */
+    canExtend?: boolean;
   };
+  /**
+   * Pools on this booking that check-out must ask "Where do the units come
+   * from?" about (placed at two or more locations, not out yet). Empty when
+   * nothing needs asking; absent on older servers.
+   */
+  checkoutSourceQuestions?: CheckoutSourceQuestion[];
 };
 
 export type BookingActionResponse = {
@@ -935,6 +1276,12 @@ export type BookingMutationResponse = {
     name: string;
     status: BookingStatus;
   };
+  /**
+   * Duplicate only: how many archived assets the server left out of the copy
+   * (archived assets cannot be booked). Absent on other mutations and on
+   * servers that predate archiving.
+   */
+  droppedArchivedCount?: number;
 };
 
 /**
@@ -966,6 +1313,58 @@ export type UpdateBookingPayload = {
   tags?: string[];
 };
 
+/**
+ * Payload for `POST /api/mobile/bookings/extend`. `endDate` is a wall clock in
+ * `yyyy-MM-dd'T'HH:mm` (no offset), read in `timeZone`, the preference zone the
+ * picker edits in.
+ */
+export type ExtendBookingPayload = {
+  bookingId: string;
+  endDate: string;
+  timeZone: string;
+};
+
+/** Response of the extend endpoint. `to` is the stored end, an ISO instant. */
+export type ExtendBookingResponse = {
+  booking: {
+    id: string;
+    name: string;
+    status: BookingStatus;
+    to: string;
+  };
+};
+
+/**
+ * Free units per quantity-tracked asset for one booking's window, this booking
+ * excluded. `bookable` is the cap for a quantity prompt.
+ */
+export type BookingAssetAvailability = {
+  assetId: string;
+  total: number;
+  bookable: number;
+  reserved: number;
+  inCustody: number;
+  /**
+   * Units the booking's standalone slice already holds; null when none.
+   * Absent on older servers.
+   */
+  bookedQuantity?: number | null;
+};
+
+/** Response of `GET /api/mobile/bookings/asset-availability`. */
+export type BookingAssetAvailabilityResponse = {
+  availability: BookingAssetAvailability[];
+};
+
+/** Response of `POST /api/mobile/bookings/adjust-asset-quantity`. */
+export type AdjustBookingAssetQuantityResponse = {
+  success: boolean;
+  /** The booked quantity now held. */
+  quantity: number;
+  /** The booked quantity held before the change. */
+  previousQuantity: number;
+};
+
 export type RemoveBookingAssetsResponse = {
   booking: {
     id: string;
@@ -991,6 +1390,20 @@ export type AvailableAsset = {
    * the exact unit. Null when the asset has no resolvable code.
    */
   displayCode?: { value: string; label: string } | null;
+  /**
+   * Quantity-tracked metadata (additive; older servers omit it). `type` gates
+   * the quantity prompt, `quantity` is the pool, `availableQuantity` is what
+   * the booking's window still has free with this booking excluded: the cap
+   * the web picker applies to its quantity input. A row with nothing free
+   * still arrives, with `availableQuantity: 0`, and the picker shows it as
+   * unavailable.
+   */
+  type?: "INDIVIDUAL" | "QUANTITY_TRACKED";
+  quantity?: number | null;
+  unitOfMeasure?: string | null;
+  availableQuantity?: number | null;
+  /** Units this booking already holds of the row (standalone slice), if any. */
+  bookedQuantity?: number | null;
 };
 
 export type AvailableAssetsResponse = {
@@ -1145,6 +1558,11 @@ export type AuditExpectedAsset = {
    * location (someone has it on loan).
    */
   custodianName: string | null;
+  /**
+   * When the asset was archived (ISO), `null` while it is active. The row
+   * shows an "Archived" badge. Absent on servers that predate archiving.
+   */
+  archivedAt?: string | null;
 };
 
 export type AuditScanData = {
@@ -1171,6 +1589,11 @@ export type AuditScanData = {
    * `assetId` fallback rather than trusting this alone.
    */
   assetDeleted?: boolean;
+  /**
+   * When the scanned asset was archived (ISO), `null` while it is active.
+   * Absent on servers that predate archiving.
+   */
+  archivedAt?: string | null;
 };
 
 export type AuditDetailResponse = {
@@ -1501,6 +1924,11 @@ export type DeleteAssetResponse = {
   success: boolean;
 };
 
+/** Response of `POST /api/mobile/asset/reinstate`. */
+export type ReinstateAssetResponse = {
+  asset: { id: string; archivedAt: null };
+};
+
 export type DashboardKPIs = {
   totalAssets: number;
   categories: number;
@@ -1572,4 +2000,36 @@ export type CalendarBookingsResponse = {
     /** ISO date to jump to, or null when there is nothing outside. */
     jumpTo: string | null;
   };
+};
+
+/**
+ * One row of an asset's booking history: the phone's answer to "when is this
+ * asset out, and where has it been?".
+ *
+ * `custodianName` has three answers: a name, `null` when the booking has no
+ * custodian, or `WITHHELD_CUSTODIAN_NAME` (`@shelf/labels`) when the viewer may
+ * not see who holds it.
+ *
+ * @see {@link file://../../../webapp/app/routes/api+/mobile+/assets.$assetId.bookings.ts}
+ */
+export type AssetBookingRow = {
+  id: string;
+  name: string;
+  status: BookingStatus;
+  from: string;
+  to: string;
+  custodianName: string | null;
+};
+
+/**
+ * One page of an asset's bookings, newest start first, plus the bookings the
+ * asset is out on now (ONGOING and OVERDUE) wherever they fall in the paging.
+ */
+export type AssetBookingsResponse = {
+  bookings: AssetBookingRow[];
+  activeBookings: AssetBookingRow[];
+  page: number;
+  perPage: number;
+  totalCount: number;
+  totalPages: number;
 };

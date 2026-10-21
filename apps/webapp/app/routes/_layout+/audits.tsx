@@ -31,6 +31,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { isWorkspaceOwner } from "~/utils/permissions/role-access";
 import {
   assertIsOrganizationOwner,
   requirePermission,
@@ -55,7 +56,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const currentUserRoles = userOrganizations.find(
       (uo) => uo.organizationId === organizationId
     )?.roles;
-    const isOwner = currentUserRoles?.includes("OWNER") ?? false;
+    const isOwner = isWorkspaceOwner(currentUserRoles);
 
     const hasAccess = canUseAudits(currentOrganization);
 

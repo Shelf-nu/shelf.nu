@@ -116,6 +116,25 @@ describe("handleClientBeforeSend — noise filters", () => {
   });
 });
 
+describe("handleClientBeforeSend: JavaScript chunks that fail to load", () => {
+  it.each([
+    "Failed to fetch dynamically imported module: https://app.shelf.nu/file-assets/abc/assets._index-X1.js",
+    "error loading dynamically imported module: https://app.shelf.nu/file-assets/abc/assets._index-X1.js",
+    "Importing a module script failed.",
+  ])("keeps %s", (value) => {
+    const event = makeEvent({ type: "TypeError", value });
+    expect(handleClientBeforeSend(event)).toBe(event);
+  });
+
+  it("still drops an interrupted data request", () => {
+    expect(
+      handleClientBeforeSend(
+        makeEvent({ type: "TypeError", value: "Failed to fetch" })
+      )
+    ).toBeNull();
+  });
+});
+
 describe("handleClientBeforeSend — error-boundary allowlist", () => {
   it("drops an expected 403 boundary event", () => {
     const event = makeEvent({

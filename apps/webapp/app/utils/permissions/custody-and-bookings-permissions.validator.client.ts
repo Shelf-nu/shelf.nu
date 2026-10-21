@@ -1,7 +1,5 @@
-import type { Organization } from "@prisma/client";
-import { OrganizationRoles } from "@prisma/client";
-import { PermissionAction, PermissionEntity } from "./permission.data";
-import { userHasPermission } from "./permission.validator.client";
+import type { Organization, OrganizationRoles } from "@prisma/client";
+import { isOrganizationRole, resolveRoleAccess } from "./role-access";
 
 /**
  * Type for organization permission settings
@@ -29,12 +27,19 @@ type UserCustodyViewPermissionsArgs = {
 };
 
 /**
- * Checks if a user has permission to view custody information in general,
- * based on their roles and organization settings.
+ * Whether the member may see custody held by other people: the client twin
+ * of `access.custody.seeAll`, resolved by the same resolver so the UI and the
+ * server agree for every membership, including mixed ones (the highest role
+ * decides).
  *
- * Use this function for UI elements like showing/hiding custody filters.
+ * A membership with no known role sees nothing: during loading the layout
+ * data has no roles yet, and custody must stay hidden until it does.
  *
- * @returns boolean indicating if the user has permission to view custody in general
+ * Use it for UI such as custody filters and custody columns.
+ *
+ * @param args.roles - The member's roles in the current workspace
+ * @param args.organization - The workspace's custody visibility toggles
+ * @returns `true` when custody of other people may be shown
  */
 export function userHasCustodyViewPermission({
   roles,
@@ -46,37 +51,17 @@ export function userHasCustodyViewPermission({
     "selfServiceCanSeeCustody" | "baseUserCanSeeCustody"
   >;
 }): boolean {
-  // First check if the user has the standard permission
-  const hasStandardPermission = userHasPermission({
+  if (!roles?.some(isOrganizationRole)) return false;
+  return resolveRoleAccess({
     roles,
-    entity: PermissionEntity.custody,
-    action: PermissionAction.read,
-  });
-
-  if (hasStandardPermission) {
-    return true;
-  }
-
-  // If user doesn't have standard permission, check for organization overrides
-  if (!roles || !roles.length) return false;
-
-  // Check if the user is SELF_SERVICE and has the custody override
-  if (
-    roles.includes(OrganizationRoles.SELF_SERVICE) &&
-    organization.selfServiceCanSeeCustody
-  ) {
-    return true;
-  }
-
-  // Check if the user is BASE and has the custody override
-  if (
-    roles.includes(OrganizationRoles.BASE) &&
-    organization.baseUserCanSeeCustody
-  ) {
-    return true;
-  }
-
-  return false;
+    workspace: {
+      selfServiceCanSeeCustody: organization.selfServiceCanSeeCustody,
+      baseUserCanSeeCustody: organization.baseUserCanSeeCustody,
+      // Booking visibility does not affect custody visibility.
+      selfServiceCanSeeBookings: false,
+      baseUserCanSeeBookings: false,
+    },
+  }).custody.seeAll;
 }
 
 /**

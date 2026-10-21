@@ -3,9 +3,12 @@ import { describe, expect, it, vi } from "vitest";
 import { locationDescendantsMock } from "@mocks/location-descendants";
 import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
 import { ShelfError } from "~/utils/error";
+import { parseFilters } from "./filter-parsing";
 import {
   assetQueryFragment,
+  LAST_AUDIT_DATE_SQL,
   assetQueryJoins,
+  assetReturnFragment,
   buildAdvancedAssetsQuery,
   generateCustomFieldSelect,
   generateWhereClause,
@@ -233,6 +236,36 @@ describe("parseSortingOptions", () => {
       expect(orderByClause).toContain("LPAD(SPLIT_PART");
     });
 
+    it("sorts quantity as a plain number", () => {
+      const { orderByInner } = parseSortingOptions(["quantity:desc"]);
+      // A numeric column compare, so 10 sorts above 9.
+      expect(orderByInner).toBe('"assetQuantity" desc, "assetId" ASC');
+    });
+
+    it("sorts unit of measure with the natural text sort", () => {
+      const { orderByInner } = parseSortingOptions(["unitOfMeasure:asc"]);
+      expect(orderByInner).toContain(
+        'LOWER(regexp_replace("assetUnitOfMeasure"'
+      );
+      expect(orderByInner).toContain('"assetUnitOfMeasure" asc');
+      expect(orderByInner).toContain('"assetId" ASC');
+    });
+
+    it.each(["asc", "desc"])(
+      "keeps assets without a unit last when sorting unit of measure %s",
+      (direction) => {
+        const { orderByInner } = parseSortingOptions([
+          `unitOfMeasure:${direction}`,
+        ]);
+        // Individual assets have no unit; without NULLS LAST a descending
+        // sort opens on pages of empty rows.
+        expect(orderByInner).toContain(`)) ${direction} NULLS LAST`);
+        expect(orderByInner).toContain(
+          `"assetUnitOfMeasure" ${direction} NULLS LAST`
+        );
+      }
+    );
+
     it("uses custody jsonb path for custody", () => {
       const { orderByClause } = parseSortingOptions(["custody:desc"]);
       // Regression (custody-sort no-op): the `custody` column is a jsonb
@@ -328,6 +361,47 @@ describe("generateWhereClause - search fail-closed", () => {
     const sql = getSqlString(result);
     expect(sql).toContain("ILIKE");
     expect(sql).not.toContain("AND FALSE");
+  });
+});
+
+/** The unit of measure as the advanced index shows it. */
+const VISIBLE_UNIT = `CASE WHEN a."type" = 'QUANTITY_TRACKED' THEN a."unitOfMeasure" ELSE NULL END`;
+
+describe("generateWhereClause - quantity and unit of measure filters", () => {
+  const columns = [
+    { name: "quantity" as const, visible: true, position: 0 },
+    { name: "unitOfMeasure" as const, visible: true, position: 1 },
+  ];
+
+  it("filters quantity as a number", () => {
+    const filters = parseFilters("quantity=gt:9", columns);
+    expect(filters[0]).toMatchObject({ name: "quantity", type: "number" });
+
+    const result = generateWhereClause("org-1", null, filters);
+    expect(getSqlString(result)).toContain('a."quantity"::float > ?');
+    expect(result.values).toContain(9);
+  });
+
+  it("filters unit of measure as text", () => {
+    const filters = parseFilters("unitOfMeasure=contains:pc", columns);
+    expect(filters[0]).toMatchObject({ name: "unitOfMeasure", type: "string" });
+
+    const result = generateWhereClause("org-1", null, filters);
+    // Only quantity-tracked assets have a unit on the index, so an individual
+    // asset with a stored unit never matches a unit filter.
+    expect(getSqlString(result)).toContain(`${VISIBLE_UNIT} ILIKE ?`);
+    expect(result.values).toContain("%pc%");
+  });
+
+  it("keeps assets without a unit when filtering unit of measure 'is not'", () => {
+    const filters = parseFilters("unitOfMeasure=isNot:kg", columns);
+
+    const result = generateWhereClause("org-1", null, filters);
+    // `!=` never matches NULL, which would hide every asset without a unit.
+    expect(getSqlString(result)).toContain(
+      `${VISIBLE_UNIT} IS DISTINCT FROM ?`
+    );
+    expect(result.values).toContain("kg");
   });
 });
 
@@ -738,6 +812,80 @@ describe("generateWhereClause - special filter values", () => {
   });
 });
 
+/**
+ * Custom-field OPTION values are free text: an option can legitimately contain a
+ * double quote, a backslash or a comma. Binding them as parameters is the only
+ * way to get them to Postgres intact — a hand-assembled `{"a","b"}` literal
+ * cannot survive a value that contains the literal's own delimiters.
+ */
+describe("generateWhereClause - custom-field OPTION containsAny quoting", () => {
+  const orgId = "org-1";
+
+  /** Builds a containsAny OPTION filter over the given comma-joined values. */
+  function optionFilter(value: string) {
+    return {
+      name: "cf_Size",
+      type: "customField",
+      fieldType: "OPTION",
+      operator: "containsAny",
+      value,
+    } as Filter;
+  }
+
+  it("binds an option value containing a double quote as a parameter", () => {
+    const result = generateWhereClause(orgId, null, [
+      optionFilter('12" monitor,plain'),
+    ]);
+
+    expect(result.values).toContain('12" monitor');
+    expect(result.values).toContain("plain");
+  });
+
+  it("does not assemble a Postgres array literal from the values", () => {
+    const result = generateWhereClause(orgId, null, [
+      optionFilter('12" monitor,plain'),
+    ]);
+
+    // The literal the old build produced. Postgres rejects it: the quote inside
+    // the value closes the element early.
+    expect(result.values).not.toContain('{"12" monitor","plain"}');
+  });
+
+  it("keeps a backslash in an option value intact", () => {
+    const result = generateWhereClause(orgId, null, [
+      optionFilter("back\\slash"),
+    ]);
+
+    expect(result.values).toContain("back\\slash");
+  });
+
+  it("still matches a plain single option", () => {
+    const result = generateWhereClause(orgId, null, [optionFilter("Large")]);
+
+    expect(result.values).toContain("Large");
+    expect(getSqlString(result)).toContain("ANY(ARRAY[");
+  });
+
+  /**
+   * An empty list has to stay valid SQL that matches nothing. A bare `ARRAY[]`
+   * is a Postgres syntax error — the element type is not inferable — so the
+   * cast is load-bearing, not decoration.
+   */
+  it("emits a typed empty array when there are no values to match", () => {
+    const filter = {
+      name: "cf_Size",
+      type: "customField",
+      fieldType: "OPTION",
+      operator: "containsAny",
+      value: [],
+    } as unknown as Filter;
+
+    const sql = getSqlString(generateWhereClause(orgId, null, [filter]));
+
+    expect(sql).toContain("ANY(ARRAY[]::text[])");
+  });
+});
+
 describe("generateWhereClause - built-in date filter timezone", () => {
   const orgId = "test-org-id";
 
@@ -770,7 +918,7 @@ describe("generateWhereClause - built-in date filter timezone", () => {
       null,
       [filter],
       undefined,
-      false,
+      null,
       "Asia/Tokyo"
     );
 
@@ -814,7 +962,7 @@ describe("generateWhereClause - built-in date filter timezone", () => {
       null,
       [filter],
       undefined,
-      false,
+      null,
       "Asia/Tokyo"
     );
 
@@ -1248,6 +1396,23 @@ describe("generateWhereClause - tag EXISTS-ification (slim-phase enabler)", () =
   });
 });
 
+describe("generateWhereClause - list scope", () => {
+  const orgId = "test-org-id";
+
+  it("lists every asset when there is no scope", () => {
+    const sql = getSqlString(generateWhereClause(orgId, null, []));
+    expect(sql).not.toContain("availableToBook");
+  });
+
+  it("keeps bookable assets and the ones the viewer holds", () => {
+    const sql = getSqlString(
+      generateWhereClause(orgId, null, [], undefined, { holderUserId: "u-1" })
+    );
+    expect(sql).toContain(`AND (a."availableToBook" = true OR EXISTS`);
+    expect(sql).toContain(`FROM "Custody" scope_cu`);
+  });
+});
+
 describe("generateWhereClause - lowStockOnly", () => {
   const orgId = "test-org-id";
 
@@ -1258,9 +1423,9 @@ describe("generateWhereClause - lowStockOnly", () => {
   });
 
   it("does NOT emit the low-stock predicate when explicitly false", () => {
-    // Args: (org, search, filters, assetIds, availableToBookOnly, timeZone, lowStockOnly)
+    // Args: (org, search, filters, assetIds, bookableScope, timeZone, lowStockOnly)
     const sql = getSqlString(
-      generateWhereClause(orgId, null, [], undefined, false, "UTC", false)
+      generateWhereClause(orgId, null, [], undefined, null, "UTC", false)
     );
     expect(sql).not.toContain("QUANTITY_TRACKED");
     expect(sql).not.toContain("minQuantity");
@@ -1268,7 +1433,7 @@ describe("generateWhereClause - lowStockOnly", () => {
 
   it("emits the low-stock predicate when the flag is set", () => {
     const sql = getSqlString(
-      generateWhereClause(orgId, null, [], undefined, false, "UTC", true)
+      generateWhereClause(orgId, null, [], undefined, null, "UTC", true)
     );
     expect(sql).toContain(`a."type" = 'QUANTITY_TRACKED'`);
     expect(sql).toContain(`a."minQuantity" IS NOT NULL`);
@@ -1306,6 +1471,7 @@ describe("buildAdvancedAssetsQuery", () => {
       parsedFilters,
       withBookings: overrides?.withBookings ?? false,
       withBarcodes: overrides?.withBarcodes ?? false,
+      withLastAuditDate: false,
       paginationClause: Prisma.sql`LIMIT ${100} OFFSET ${0}`,
     });
   }
@@ -1339,6 +1505,18 @@ describe("buildAdvancedAssetsQuery", () => {
     // Base sort keys are always selected directly off the scan.
     expect(sql).toContain('a.value AS "assetValue"');
     expect(sql).toContain('a.quantity AS "assetQuantity"');
+  });
+
+  it("selects the unit of measure in the cheap phase so a unit sort can rank rows", () => {
+    // The ROW_NUMBER window reads the sort alias from the cheap phase
+    // (everything before `sorted_asset_query`); a missing alias is a
+    // `column does not exist` error.
+    const sql = getQuerySqlString(build({ sortBy: ["unitOfMeasure:asc"] }));
+    const cheap = sql.slice(0, sql.indexOf("sorted_asset_query"));
+
+    // The sort key is the unit the cell shows: none for individual assets.
+    expect(cheap).toContain(`${VISIBLE_UNIT} AS "assetUnitOfMeasure"`);
+    expect(sql).toContain('LOWER(regexp_replace("assetUnitOfMeasure"');
   });
 
   it("gates a name-sort column in the cheap phase on the active sort", () => {
@@ -1556,6 +1734,7 @@ describe("custodian display name", () => {
       parsedFilters: [],
       withBookings: false,
       withBarcodes: false,
+      withLastAuditDate: false,
       paginationClause: Prisma.sql`LIMIT ${100} OFFSET ${0}`,
     }).strings.join("?");
 
@@ -1566,5 +1745,125 @@ describe("custodian display name", () => {
     const groupBy = sql.match(/GROUP BY [^\n]*/)?.[0] ?? "";
 
     expect(groupBy).toContain('bu."displayName"');
+  });
+});
+
+describe("lastAuditDate", () => {
+  const text = (sql: Prisma.Sql) => sql.strings.join("?");
+
+  it("counts only finished audits inside the asset's workspace", () => {
+    const sql = text(LAST_AUDIT_DATE_SQL);
+    expect(sql).toContain("'COMPLETED'");
+    expect(sql).toContain("'ARCHIVED'");
+    expect(sql).toContain('MAX(s."completedAt")');
+    expect(sql).toContain('s."organizationId" = a."organizationId"');
+    expect(sql).not.toContain("'CANCELLED'");
+    expect(sql).not.toContain("'PENDING'");
+    expect(sql).not.toContain("'ACTIVE'");
+  });
+
+  it("excludes archived audits that were never completed", () => {
+    expect(text(LAST_AUDIT_DATE_SQL)).toContain('"completedAt" IS NOT NULL');
+  });
+
+  it("selects the column only when withLastAuditDate is set", () => {
+    expect(text(assetQueryFragment({ withLastAuditDate: true }))).toContain(
+      'AS "lastAuditDate"'
+    );
+    expect(
+      text(assetQueryFragment({ withLastAuditDate: false }))
+    ).not.toContain('AS "lastAuditDate"');
+    expect(text(assetQueryFragment())).not.toContain('AS "lastAuditDate"');
+  });
+
+  it("emits the JSON key only when withLastAuditDate is set", () => {
+    expect(text(assetReturnFragment({ withLastAuditDate: true }))).toContain(
+      "'lastAuditDate'"
+    );
+    expect(text(assetReturnFragment())).not.toContain("'lastAuditDate'");
+  });
+});
+
+describe("lastAuditDate filter and sort", () => {
+  const orgId = "org-1";
+  const lastAuditFilter = (
+    operator: Filter["operator"],
+    value: Filter["value"]
+  ): Filter => ({
+    name: "lastAuditDate",
+    type: "date",
+    operator,
+    value,
+  });
+
+  it("filters lastAuditDate in the user's timezone", () => {
+    const result = generateWhereClause(
+      orgId,
+      null,
+      [lastAuditFilter("is", "2026-07-21")],
+      undefined,
+      null,
+      "Asia/Tokyo"
+    );
+    const sql = getSqlString(result);
+
+    expect(sql).toContain('MAX(s."completedAt")');
+    expect(sql).toContain("AT TIME ZONE 'UTC' AT TIME ZONE");
+    expect(result.values).toContain("Asia/Tokyo");
+  });
+
+  it("matches never-audited assets with isEmpty", () => {
+    const sql = getSqlString(
+      generateWhereClause(orgId, null, [lastAuditFilter("isEmpty", "")])
+    );
+
+    expect(sql).toContain('MAX(s."completedAt")');
+    expect(sql).toContain(") IS NULL");
+  });
+
+  it("excludes never-audited assets with before", () => {
+    const sql = getSqlString(
+      generateWhereClause(orgId, null, [
+        lastAuditFilter("before", "2026-01-01"),
+      ])
+    );
+
+    expect(sql).toContain("< ");
+    // The base clause and the subquery carry their own IS NULL checks; what
+    // must be absent is the never-audited predicate on the subquery itself.
+    expect(sql).not.toContain(") IS NULL");
+  });
+
+  it("sorts lastAuditDate with NULLS LAST in both directions", () => {
+    const asc = parseSortingOptions(["lastAuditDate:asc"]).orderByInner;
+    const desc = parseSortingOptions(["lastAuditDate:desc"]).orderByInner;
+
+    expect(asc).toContain('"lastAuditDate" asc NULLS LAST');
+    expect(desc).toContain('"lastAuditDate" desc NULLS LAST');
+    // The stable id tiebreaker still applies.
+    expect(asc).toContain('"assetId" ASC');
+  });
+
+  it("selects the sort key in the slim CTE only when sorting by it", () => {
+    const base = {
+      whereClause: Prisma.sql`WHERE a."organizationId" = 'org-1'`,
+      customFieldSortings: [],
+      parsedFilters: [],
+      withBookings: false,
+      withBarcodes: false,
+      withLastAuditDate: false,
+      paginationClause: Prisma.sql`LIMIT 10 OFFSET 0`,
+    };
+    const slimCte = (sortBy: string[]) => {
+      const sql = buildAdvancedAssetsQuery({
+        ...base,
+        sortBy,
+        orderByInner: parseSortingOptions(sortBy).orderByInner,
+      }).strings.join("?");
+      return sql.slice(0, sql.indexOf("sorted_asset_query AS"));
+    };
+
+    expect(slimCte(["lastAuditDate:asc"])).toContain('AS "lastAuditDate"');
+    expect(slimCte(["name:asc"])).not.toContain('AS "lastAuditDate"');
   });
 });

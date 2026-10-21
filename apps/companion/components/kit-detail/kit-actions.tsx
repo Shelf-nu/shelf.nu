@@ -27,6 +27,11 @@ interface KitActionsProps {
   canCustody: boolean;
   /** Role can update the kit (location). Server-enforced; hides the button. */
   canUpdate: boolean;
+  /**
+   * Why "Assign Custody" is off, e.g. every member of the kit is archived.
+   * The button then renders disabled with this line under it.
+   */
+  assignBlockedReason?: string;
 }
 
 /**
@@ -45,6 +50,7 @@ export const KitActions = memo(function KitActions({
   isActionLoading,
   canCustody,
   canUpdate,
+  assignBlockedReason,
 }: KitActionsProps) {
   const { colors } = useTheme();
   const styles = useStyles();
@@ -92,23 +98,35 @@ export const KitActions = memo(function KitActions({
             <Text style={styles.primaryActionText}>Release Custody</Text>
           </TouchableOpacity>
         ) : isAvailable ? (
-          <TouchableOpacity
-            style={styles.primaryActionBlack}
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-              onAssignCustody();
-            }}
-            activeOpacity={0.7}
-            accessibilityLabel="Assign custody of kit"
-            accessibilityRole="button"
-          >
-            <Ionicons
-              name="person-add-outline"
-              size={20}
-              color={colors.primaryForeground}
-            />
-            <Text style={styles.primaryActionText}>Assign Custody</Text>
-          </TouchableOpacity>
+          <>
+            <TouchableOpacity
+              style={[
+                styles.primaryActionBlack,
+                assignBlockedReason ? styles.primaryActionDisabled : null,
+              ]}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                onAssignCustody();
+              }}
+              disabled={!!assignBlockedReason}
+              activeOpacity={0.7}
+              accessibilityLabel="Assign custody of kit"
+              accessibilityHint={assignBlockedReason}
+              accessibilityRole="button"
+            >
+              <Ionicons
+                name="person-add-outline"
+                size={20}
+                color={colors.primaryForeground}
+              />
+              <Text style={styles.primaryActionText}>Assign Custody</Text>
+            </TouchableOpacity>
+            {assignBlockedReason ? (
+              <Text style={styles.assignBlockedHint}>
+                {assignBlockedReason}
+              </Text>
+            ) : null}
+          </>
         ) : null)}
 
       {/* Secondary action — location */}
@@ -141,6 +159,14 @@ const useStyles = createStyles((colors, shadows) => ({
     marginHorizontal: spacing.lg,
     marginTop: spacing.xl,
     gap: spacing.sm,
+  },
+  primaryActionDisabled: {
+    opacity: 0.5,
+  },
+  assignBlockedHint: {
+    fontSize: fontSize.sm,
+    color: colors.muted,
+    textAlign: "center",
   },
   primaryActionBlack: {
     flexDirection: "row",

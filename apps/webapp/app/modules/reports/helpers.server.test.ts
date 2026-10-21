@@ -676,7 +676,10 @@ describe("assetDistributionReport — quantity-aware bucket values", () => {
     });
 
     const expectedWhere = {
-      AND: [{ organizationId: "org-1" }, { categoryId: { in: ["cat-1"] } }],
+      AND: [
+        { organizationId: "org-1", archivedAt: null },
+        { categoryId: { in: ["cat-1"] } },
+      ],
     };
     expect(vi.mocked(db.asset.findMany)).toHaveBeenCalledWith(
       expect.objectContaining({ where: expectedWhere })
@@ -689,6 +692,7 @@ describe("assetDistributionReport — quantity-aware bucket values", () => {
       sql: string;
     };
     expect(rawCall.sql).toContain('"categoryId" IN');
+    expect(rawCall.sql).toContain('"archivedAt" IS NULL');
     // Category/location counts come from the filtered rows, not org totals.
     expect(vi.mocked(db.category.count)).not.toHaveBeenCalled();
     expect(vi.mocked(db.location.count)).not.toHaveBeenCalled();

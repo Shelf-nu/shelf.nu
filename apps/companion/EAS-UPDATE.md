@@ -20,9 +20,9 @@ ride an OTA bundle.
 
 ## Runtime version = app version
 
-`app.json` sets `runtimeVersion` equal to the app version, by hand — it reads
-`1.5.0` today, and every store cut bumps it (see
-[STORE-RELEASE.md](./STORE-RELEASE.md) for the six places that must agree). An
+`app.json` sets `runtimeVersion` equal to the app version, by hand, and every
+store cut bumps both (see [STORE-RELEASE.md](./STORE-RELEASE.md) for the six
+places that must agree). An
 update only reaches builds whose **runtime version matches**, and only on the
 **channel** it was published to (see Channels below). So an update published to
 `production` for the current runtime reaches the **update-capable** production

@@ -58,6 +58,34 @@ export async function getNextSequentialId(
 }
 
 /**
+ * Allocates `count` sequential asset ids for a workspace in one round trip.
+ * Calls the same `get_next_sequential_id` function as {@link getNextSequentialId},
+ * once per generated series row, so ids are contiguous unless another writer
+ * interleaves. Values consumed by a rolled-back transaction are not returned to
+ * the sequence.
+ *
+ * Ordered by the series number, never by the id text: the padding grows past
+ * 9999, and `SAM-10000` sorts before `SAM-9999` as text.
+ *
+ * @param organizationId - Workspace whose sequence to draw from.
+ * @param count - Number of ids to allocate.
+ * @param tx - Transaction or client to run on.
+ * @returns The ids, in allocation order. Empty when `count` is 0 or less.
+ */
+export async function getNextSequentialIds(
+  organizationId: string,
+  count: number,
+  tx: Pick<typeof db, "$queryRaw">
+): Promise<string[]> {
+  if (count <= 0) return [];
+  const rows = await tx.$queryRaw<{ n: number; id: string }[]>`
+    SELECT n, get_next_sequential_id(${organizationId}, ${DEFAULT_PREFIX}) AS id
+    FROM generate_series(1, ${count}::int) AS n
+    ORDER BY n`;
+  return rows.map((r) => r.id);
+}
+
+/**
  * The highest number currently issued under `prefix` in this organization.
  *
  * Read from the assets themselves rather than from the sequence, because the
@@ -200,6 +228,7 @@ export async function organizationHasSequentialIds(
 ): Promise<boolean> {
   try {
     const count = await db.asset.count({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: archived assets keep their SAM id, so they count toward whether the org has sequential ids
       where: {
         organizationId,
         sequentialId: { not: null },
@@ -228,6 +257,7 @@ export async function getAssetsWithoutSequentialIdCount(
 ): Promise<number> {
   try {
     return await db.asset.count({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: ID backfill must cover archived assets too, or they stay without a SAM id
       where: {
         organizationId,
         sequentialId: null,

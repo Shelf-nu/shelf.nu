@@ -74,7 +74,9 @@ vi.mock("~/modules/booking/service.server", async () => {
     ...actual,
     computeBookingAssetRemaining: vi.fn().mockResolvedValue(0),
     computeBookingAssetRemainingToCheckOut: vi.fn().mockResolvedValue(0),
-    getPartiallyCheckedInAssetIds: vi.fn().mockResolvedValue([]),
+    getDetailedPartialCheckinData: vi
+      .fn()
+      .mockResolvedValue({ checkedInAssetIds: [], partialCheckinDetails: {} }),
   };
 });
 
@@ -160,7 +162,7 @@ function bookingRow(bookingAssets: ReturnType<typeof slice>[]) {
     id: "booking-1",
     name: "Load-in",
     description: null,
-    // DRAFT keeps `getPartiallyCheckedInAssetIds` out of the path.
+    // DRAFT keeps `getDetailedPartialCheckinData` out of the path.
     status: "DRAFT",
     from: null,
     to: null,

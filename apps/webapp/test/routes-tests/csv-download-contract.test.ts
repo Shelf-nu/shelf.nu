@@ -1,12 +1,6 @@
-import { readdirSync, readFileSync } from "node:fs";
-import path from "node:path";
-import { describe, expect, it } from "vitest";
-
-// @vitest-environment node
-
 /**
  * Contract test: every route that serves a `.csv` download must build its
- * response with `csvResponse`.
+ * response with `csvResponse` and name the file with `Content-Disposition`.
  *
  * Spreadsheet applications pick a CSV's encoding from its first bytes, so a
  * download without the UTF-8 byte order mark opens as mojibake for any
@@ -15,8 +9,18 @@ import { describe, expect, it } from "vitest";
  * `Response` ships the bug again for its own export only, which is invisible
  * to every other test.
  *
+ * Every such route must also set `Content-Disposition`. Without it, opening
+ * the export URL directly saves a file with no name or extension.
+ *
  * @see {@link file://../../app/utils/csv-utf8.ts}
+ * @see {@link file://../../app/utils/http.server.ts} buildContentDisposition
  */
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { describe, expect, it } from "vitest";
+
+// @vitest-environment node
+
 const ROUTES_DIR = path.resolve(__dirname, "../../app/routes");
 
 /**
@@ -78,5 +82,14 @@ describe("csv download encoding contract", () => {
       src,
       `${file} should not hand-roll a text/csv Response — csvResponse sets the content type`
     ).not.toMatch(/["']text\/csv["']/);
+  });
+
+  it.each(GUARDED_FILES)("%s sets a Content-Disposition header", (file) => {
+    const src = readFileSync(path.join(ROUTES_DIR, file), "utf8");
+
+    expect(
+      src,
+      `${file} should set Content-Disposition so direct downloads have a filename`
+    ).toMatch(/["']content-disposition["']\s*:/i);
   });
 });

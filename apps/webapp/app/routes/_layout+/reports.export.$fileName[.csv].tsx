@@ -7,8 +7,11 @@
  * @see {@link file://../../modules/reports/helpers.server.ts}
  */
 
+import { AUDIT_STATUS_LABELS } from "@shelf/labels";
 import { data, type LoaderFunctionArgs } from "react-router";
 
+import { getQrUrl } from "~/modules/qr/qr-url.server";
+import { auditCompletionReport } from "~/modules/reports/audit-completion.server";
 import { formatDateForCsv } from "~/modules/reports/csv-format";
 import { resolveReportFilters } from "~/modules/reports/filters.server";
 import {
@@ -27,6 +30,7 @@ import {
   type BookingComplianceSortColumn,
 } from "~/modules/reports/helpers.server";
 import { getReportById } from "~/modules/reports/registry";
+import type { AuditCompletionRow } from "~/modules/reports/types";
 import type {
   TimeframePreset,
   BookingComplianceRow,
@@ -42,24 +46,31 @@ import type {
   MonthlyBookingTrendRow,
 } from "~/modules/reports/types";
 import { getClientHint } from "~/utils/client-hints";
+import { neutralizeCsvFormula } from "~/utils/csv-cells";
 import { csvResponse } from "~/utils/csv-utf8";
 import { type ResolvedFormatPrefs } from "~/utils/date-format";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { error, getCurrentSearchParams } from "~/utils/http.server";
+import {
+  buildContentDisposition,
+  error,
+  getCurrentSearchParams,
+} from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { getIntParam } from "~/utils/search-params-number";
+import { assertUserCanUseReports } from "~/utils/subscription.server";
 
 /**
  * Builds the report named by `?reportId` as a CSV download, applying the same
  * filters as the report page but reading up to 10,000 rows instead of one page.
  *
- * @returns The CSV as an attachment, or the failure with its status — 400 without
- *   a report id, 404 for an unknown report, 403 for one that does not export
+ * @returns The CSV as an attachment, or the failure with its status: 400 without
+ *   a report id, 404 for an unknown report, 403 for one that does not export or
+ *   when the workspace's plan does not include reports
  */
 export const loader = async ({
   context,
@@ -72,12 +83,18 @@ export const loader = async ({
   try {
     // `currentOrganization` supplies the workspace currency for the reports
     // whose KPI strings carry money values.
-    const { organizationId, currentOrganization } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.reports,
-      action: PermissionAction.export,
-    });
+    const { organizationId, organizations, currentOrganization, access } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.reports,
+        action: PermissionAction.export,
+      });
+
+    // Reports are part of the Plus and Team plans. This is a download URL, so
+    // a workspace without them gets the 403 as JSON rather than a page.
+    await assertUserCanUseReports({ organizationId, organizations });
+
     const currency = currentOrganization.currency;
 
     const searchParams = getCurrentSearchParams(request);
@@ -326,6 +343,24 @@ export const loader = async ({
         break;
       }
 
+      case "audit-completion": {
+        const reportData = await auditCompletionReport({
+          organizationId,
+          // The CSV carries the same assignment scoping as the page: an
+          // export is just the page's data in a file.
+          userId,
+          assignedOnly: !access.audits.seeAll,
+          timeframe,
+          page: 1,
+          pageSize: 10000,
+        });
+        csvString = generateAuditCompletionCsv(
+          reportData.rows as AuditCompletionRow[],
+          formatPrefs
+        );
+        break;
+      }
+
       default:
         throw new ShelfError({
           cause: null,
@@ -340,7 +375,10 @@ export const loader = async ({
 
     return csvResponse(csvString, {
       headers: {
-        "content-disposition": `attachment; filename="${fileName}.csv"`,
+        "content-disposition": buildContentDisposition(null, {
+          fallback: `${reportId}-export`,
+          filename: `${fileName}.csv`,
+        }),
         "cache-control": "no-cache",
       },
     });
@@ -508,11 +546,9 @@ function buildCsv(headers: string[], rows: string[][]): string {
  * Escape a field for CSV format.
  */
 function escapeCsvField(field: string): string {
-  // Neutralize spreadsheet formula injection (CWE-1236): a value starting with
-  // =, +, -, or @ can execute as a formula in Excel/Google Sheets. Prefix such
-  // values with a single quote so the cell is treated as literal text. Applied
-  // here in the shared helper so every report export is protected.
-  const safeField = /^[=+\-@]/.test(field) ? `'${field}` : field;
+  // Neutralize spreadsheet formula injection (CWE-1236). Applied here in the
+  // shared helper so every report export is protected.
+  const safeField = neutralizeCsvFormula(field);
   // `\r` is quoted alongside `\n`: a bare carriage return terminates a record in
   // consumers that accept CR as a line ending, so an unquoted one lets a
   // user-controlled value split the row and forge structure — which also puts
@@ -671,6 +707,7 @@ function generateAssetInventoryCsv(
     "Total Value",
     "Created Date",
     "QR Code ID",
+    "QR Code URL",
   ];
 
   const csvRows = rows.map((row) => [
@@ -689,6 +726,8 @@ function generateAssetInventoryCsv(
     // Date-only column: no time part.
     formatDateForCsv(row.createdAt, prefs),
     row.qrId || "",
+    // The URL the printed code encodes, for label-printer software.
+    getQrUrl(row.qrId),
   ]);
 
   return buildCsv(headers, csvRows);
@@ -818,6 +857,59 @@ function generateDistributionCsv(breakdown: DistributionBreakdown): string {
   ];
 
   return buildCsv(headers, allRows);
+}
+
+/**
+ * Generate CSV for the Audit Completion report.
+ *
+ * Columns match the UI table: raw counters, accuracy, and the lifecycle
+ * dates. Status uses the shared `AUDIT_STATUS_LABELS` words so the export
+ * reads the same as every badge in the app.
+ */
+function generateAuditCompletionCsv(
+  rows: AuditCompletionRow[],
+  prefs: ResolvedFormatPrefs
+): string {
+  const headers = [
+    "Audit ID",
+    "Name",
+    "Status",
+    "Expected",
+    "Found",
+    "Missing",
+    "Unexpected",
+    "Accuracy",
+    "Created By",
+    "Started",
+    "Due Date",
+    "Completed",
+  ];
+
+  const csvRows = rows.map((row) => [
+    row.id,
+    row.name,
+    AUDIT_STATUS_LABELS[row.status] || row.status,
+    row.expectedAssetCount.toString(),
+    row.foundAssetCount.toString(),
+    // Null until completion (counter still counts "not scanned"): empty cell.
+    row.missingAssetCount !== null ? row.missingAssetCount.toString() : "",
+    row.unexpectedAssetCount.toString(),
+    // Null accuracy (0 expected assets) exports as an empty cell, not "0%".
+    row.accuracy !== null ? `${row.accuracy}%` : "",
+    row.createdByName,
+    // Datetime columns: include the time part; empty when unset.
+    row.startedAt
+      ? formatDateForCsv(row.startedAt, prefs, { includeTime: true })
+      : "",
+    row.dueDate
+      ? formatDateForCsv(row.dueDate, prefs, { includeTime: true })
+      : "",
+    row.completedAt
+      ? formatDateForCsv(row.completedAt, prefs, { includeTime: true })
+      : "",
+  ]);
+
+  return buildCsv(headers, csvRows);
 }
 
 /**

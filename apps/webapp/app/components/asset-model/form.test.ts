@@ -72,4 +72,28 @@ describe("AssetModelFormSchema", () => {
       expect(result.data.preventRedirect).toBe("true");
     }
   });
+
+  it("treats a whitespace-only defaultValuation as null, not zero", () => {
+    const result = AssetModelFormSchema.safeParse({
+      name: "Model name",
+      defaultValuation: "   ",
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.defaultValuation).toBeNull();
+    }
+  });
+
+  it("keeps a deliberate zero defaultValuation", () => {
+    const result = AssetModelFormSchema.safeParse({
+      name: "Model name",
+      defaultValuation: "0",
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.defaultValuation).toBe(0);
+    }
+  });
 });

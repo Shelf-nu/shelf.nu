@@ -1,5 +1,6 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
+import { findMobileArchivedRefusal } from "~/modules/api/mobile-archived.server";
 import {
   getMobileUserContext,
   requireMobileAuth,
@@ -7,6 +8,7 @@ import {
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
 import { mobileBulkIdsSchema } from "~/modules/api/mobile-bulk-ids.server";
+import { resolveLastAuditDateAccess } from "~/modules/asset/last-audit-date-access";
 import { bulkUpdateAssetLocation } from "~/modules/asset/service.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -61,7 +63,17 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const { assetIds, locationId } = parsed.data;
 
-    const { role, canUseBarcodes } = await getMobileUserContext(
+    // Answer an archived scan by naming the archived rows, so the app marks
+    // only those (see mobile-archived.server.ts).
+    const archivedRefusal = await findMobileArchivedRefusal({
+      assetIds,
+      organizationId,
+    });
+    if (archivedRefusal) {
+      return data({ error: archivedRefusal }, { status: 400 });
+    }
+
+    const { canUseBarcodes, canUseAudits, access } = await getMobileUserContext(
       user.id,
       organizationId
     );
@@ -70,7 +82,7 @@ export async function action({ request }: ActionFunctionArgs) {
       userId: user.id,
       organizationId,
       canUseBarcodes,
-      role,
+      role: access.role,
     });
 
     await bulkUpdateAssetLocation({
@@ -80,6 +92,10 @@ export async function action({ request }: ActionFunctionArgs) {
       newLocationId: locationId,
       currentSearchParams: null,
       settings,
+      lastAuditDateAccess: resolveLastAuditDateAccess({
+        seeAllAudits: access.audits.seeAll,
+        auditsUsable: canUseAudits,
+      }),
     });
 
     return data({ success: true });

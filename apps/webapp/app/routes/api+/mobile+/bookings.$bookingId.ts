@@ -1,9 +1,19 @@
-import {
-  AssetStatus,
-  AssetType,
-  BookingStatus,
-  OrganizationRoles,
-} from "@prisma/client";
+/**
+ * Mobile API route: booking detail.
+ *
+ * Serves the companion's booking screen: the booking, its assets collapsed to
+ * one row per asset with their kit slices, the kits those rows group under,
+ * model reservations, check-in state and the action flags the screen needs.
+ * The assets arrive in the web booking overview's default order (Status), which
+ * the app renders as sent. Org-scoped behind the mobile bearer auth, with drafts
+ * private to their creator and a custody gate on the loaded row. Lapsed asset
+ * photo and kit image URLs are re-signed before the response is sent.
+ *
+ * @see {@link file://./../../../modules/asset/service.server.ts} refreshExpiredAssetImages
+ * @see {@link file://./../../../modules/kit/service.server.ts} refreshExpiredKitImages
+ * @see {@link file://./../../../modules/booking/shape-booking-assets.ts} sortCollapsedBookingAssets
+ */
+import { AssetStatus, AssetType, BookingStatus } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
@@ -16,22 +26,49 @@ import {
 import { ASSET_LOCATIONS_INCLUDE } from "~/modules/asset/fields";
 import { serializeAssetImage } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
+import {
+  ASSET_IMAGE_RESIGN_LIMITS,
+  refreshExpiredAssetImages,
+} from "~/modules/asset/service.server";
 import { getPrimaryLocation } from "~/modules/asset/utils";
-import { computeDispatchedUnitsByAsset } from "~/modules/booking/checkout-attribution";
+import {
+  BOOKING_DISPOSITION_CATEGORIES,
+  computeBookingSliceUnitCounts,
+  type QtyBookingAssetRow,
+} from "~/modules/booking/booking-slice-unit-counts.server";
+import {
+  combineDispatchedWithStoredUnits,
+  computeDispatchedUnitsByAsset,
+} from "~/modules/booking/checkout-attribution";
+import { isManualSourceSlice } from "~/modules/booking/checkout-source-location";
+import {
+  getCheckoutSourceQuestions,
+  loadMultiPlacedPoolIds,
+  loadSliceSourceLocations,
+} from "~/modules/booking/checkout-source-location.server";
+import type { SliceSourceLocation } from "~/modules/booking/checkout-source-location.server";
+import {
+  hasItemsStillOutToExtend,
+  isExtendableStatus,
+} from "~/modules/booking/extend-eligibility";
 import { isBookingArchivable } from "~/modules/booking/helpers";
 import {
   bookingDraftVisibilityClause,
   computeBookingAssetRemaining,
   computeBookingAssetRemainingToCheckOut,
   getBookingFlags,
-  getPartiallyCheckedInAssetIds,
+  getDetailedPartialCheckinData,
 } from "~/modules/booking/service.server";
+import { sortCollapsedBookingAssets } from "~/modules/booking/shape-booking-assets";
 import { calculateBookingLifecycleProgress } from "~/modules/booking/utils.server";
-import { isExplicitCheckoutRequired } from "~/modules/booking-settings/explicit-checkout";
+import { findModelRequestShortfallsForBooking } from "~/modules/booking-model-request/service.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { refreshExpiredKitImages } from "~/modules/kit/service.server";
-import { canSeeBooking } from "~/utils/booking-authorization.server";
-import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
+import {
+  canSeeBooking,
+  canWriteBooking,
+} from "~/utils/booking-authorization.server";
+import { canAssignModelUnits } from "~/utils/booking-model-requests";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
 import {
@@ -39,13 +76,14 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { hasPermission } from "~/utils/permissions/permission.validator.server";
+import { isExplicitScanRequired } from "~/utils/permissions/role-access";
 
 /**
  * GET /api/mobile/bookings/:bookingId
  *
  * Returns full booking detail with assets, custodian, and check-in status.
- * A kit image whose signed URL has lapsed is re-signed, and the new URL
- * written back to the kit, before it is sent.
+ * An asset photo or kit image whose signed URL has lapsed is re-signed, and
+ * the new URL written back, before it is sent.
  */
 export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
@@ -57,13 +95,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // details, assets, tags and action flags via mobile.
     await assertMobileCanUseBookings(organizationId);
 
-    // `canSeeAllBookings` answers who may READ a booking they do not custody:
-    // ADMIN/OWNER always, SELF_SERVICE/BASE only where the workspace override
-    // allows it. `isSelfServiceOrBase` is the narrower, role-only question of
-    // which ACTIONS the caller may take, and must stay role-only: the override
-    // widens reading and never writing.
-    const { canSeeAllBookings, isSelfServiceOrBase, effectiveRole, roles } =
-      await getMobileUserContext(user.id, organizationId);
+    // `access.bookings.seeAll` answers who may READ a booking they do not
+    // custody: ADMIN/OWNER always, SELF_SERVICE/BASE only where the workspace
+    // override allows it. The action flags below read the role policy and the
+    // matrix, never the override: it widens reading and never writing.
+    const { access, roles } = await getMobileUserContext(
+      user.id,
+      organizationId
+    );
 
     const { bookingId } = getParams(
       params,
@@ -144,6 +183,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             id: true,
             quantity: true,
             assetKitId: true,
+            // why: kit provenance that survives a member leaving the kit
+            // mid-booking; such residue has no manual source to show.
+            sourceKitId: true,
+            // Where a pool slice's units left from, recorded at check-out.
+            // Resolved to `{ id, name }` per slice below.
+            sourceLocationId: true,
             asset: {
               select: {
                 id: true,
@@ -155,6 +200,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                 // spread that builds each row — there is no explicit mapping to
                 // grep for, so do not assume it is unused.
                 availableToBook: true,
+                // A DRAFT booking can hold an asset that was archived after it
+                // was added. The app badges that row "Archived" and greys out
+                // Reserve, which the server refuses for it. Reaches the client
+                // through the same `serializeAssetImage(rest)` spread.
+                archivedAt: true,
                 // Quantity-tracked metadata so the app can render the
                 // check-in / check-out quantity + disposition pickers: `type`
                 // gates the picker to QT assets, `consumptionType` decides
@@ -164,6 +214,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                 consumptionType: true,
                 mainImage: true,
                 thumbnailImage: true,
+                // Lets the re-sign below tell a lapsed photo URL.
+                mainImageExpiration: true,
                 // Model cover image; collapsed into the flat image fields by
                 // `serializeAssetImage` below, so an asset inheriting its
                 // model's photo is not blank on the companion booking screen.
@@ -193,6 +245,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
               },
             },
           },
+          // Base fetch order only: `sortCollapsedBookingAssets` below sets the
+          // order the app receives, and this breaks the ties it leaves exactly
+          // as the web booking overview's base order does.
           orderBy: [
             { asset: { status: "desc" } },
             { asset: { createdAt: "asc" } },
@@ -232,18 +287,19 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
      * and this same status, so a booking that opens on one platform opens on
      * the other.
      */
-    if (!canSeeBooking({ canSeeAllBookings, booking, userId: user.id })) {
+    if (!canSeeBooking({ access, booking, userId: user.id })) {
       return data(
         { error: { message: "You are not authorized to view this booking" } },
         { status: 403 }
       );
     }
 
-    // Get partial check-in data for ONGOING/OVERDUE bookings
-    let checkedInAssetIds: string[] = [];
-    if (booking.status === "ONGOING" || booking.status === "OVERDUE") {
-      checkedInAssetIds = await getPartiallyCheckedInAssetIds(booking.id);
-    }
+    // Partial check-in records for ONGOING/OVERDUE bookings: the ids the app
+    // reads, and the details the asset order resolves each row's status with.
+    const { checkedInAssetIds, partialCheckinDetails } =
+      booking.status === "ONGOING" || booking.status === "OVERDUE"
+        ? await getDetailedPartialCheckinData(booking.id)
+        : { checkedInAssetIds: [] as string[], partialCheckinDetails: {} };
 
     // Collapse multi-row BookingAsset entries to one mobile shape per
     // `assetId`. Sum the quantities; expose `assetKitId` only when
@@ -259,7 +315,47 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       quantity: number;
       assetKitId: string | null;
       kit: { id: string; name: string } | null;
+      /**
+       * The location this pool slice's units left from, recorded when it was
+       * first checked out. Set only where the web booking row shows "from
+       * <Location>": a standalone slice of a pool at two or more placements.
+       * `null` otherwise (individual assets, kit slices, pools at one
+       * location, slices not out yet, the unplaced units, a deleted location).
+       */
+      sourceLocation: SliceSourceLocation | null;
     };
+    const sourcedPoolSlices = booking.bookingAssets.filter(
+      (ba) =>
+        ba.asset.type === AssetType.QUANTITY_TRACKED && isManualSourceSlice(ba)
+    );
+    const [
+      sourceLocationsById,
+      multiPlacedPoolIds,
+      modelReservationShortfalls,
+    ] = await Promise.all([
+      loadSliceSourceLocations({
+        organizationId,
+        locationIds: sourcedPoolSlices.map((ba) => ba.sourceLocationId),
+      }),
+      loadMultiPlacedPoolIds({
+        organizationId,
+        assetIds: sourcedPoolSlices.map((ba) => ba.asset.id),
+      }),
+      // Reservations the booking's dates can no longer fill (e.g. a unit was
+      // archived with "Archive anyway"), so the app can warn like the web
+      // page. Measured only while units can still be assigned.
+      canAssignModelUnits(booking.status)
+        ? findModelRequestShortfallsForBooking({
+            booking: {
+              id: booking.id,
+              from: booking.from,
+              to: booking.to,
+              modelRequests: booking.modelRequests,
+            },
+            organizationId,
+          })
+        : [],
+    ]);
     type CollapsedRow = {
       assetId: string;
       first: (typeof booking.bookingAssets)[number];
@@ -282,6 +378,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         quantity: ba.quantity,
         assetKitId: ba.assetKitId,
         kit: sliceKit,
+        sourceLocation:
+          ba.asset.type === AssetType.QUANTITY_TRACKED &&
+          isManualSourceSlice(ba) &&
+          multiPlacedPoolIds.has(ba.asset.id)
+            ? sourceLocationsById.get(ba.sourceLocationId) ?? null
+            : null,
       };
       const existing = byAssetId.get(ba.asset.id);
       if (existing) {
@@ -299,10 +401,23 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       }
     }
 
-    const assets = Array.from(byAssetId.values()).map((row) => {
+    const collapsedRows = Array.from(byAssetId.values());
+    // The result lines up with `collapsedRows`, one entry per asset.
+    const refreshedAssets = await refreshExpiredAssetImages(
+      collapsedRows.map((row) => row.first.asset),
+      { organizationId, ...ASSET_IMAGE_RESIGN_LIMITS }
+    );
+
+    const unorderedAssets = collapsedRows.map((row, index) => {
       // `assetLocations` is taken out here so the pivot never reaches the
       // payload; it is sent only as the flat `location` below.
-      const { assetKits, assetLocations, ...rest } = row.first.asset;
+      // `mainImageExpiration` only steers the re-sign above.
+      const {
+        assetKits,
+        assetLocations,
+        mainImageExpiration: _mainImageExpiration,
+        ...rest
+      } = refreshedAssets[index];
       // why: no `sourceKitId` fallback for detached kit residue here. This
       // response collapses per asset rather than grouping by kit, and the
       // unanimous rule below deliberately reports `null` rather than guessing
@@ -343,6 +458,161 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       };
     });
 
+    // Each quantity-tracked asset's slices, what its check-out sessions and
+    // disposition logs are counted across.
+    const qtyBookingAssetRowsByAsset = new Map<string, QtyBookingAssetRow[]>();
+    for (const ba of booking.bookingAssets) {
+      if (ba.asset.type !== AssetType.QUANTITY_TRACKED) continue;
+      const rows = qtyBookingAssetRowsByAsset.get(ba.asset.id) ?? [];
+      rows.push({
+        id: ba.id,
+        quantity: ba.quantity,
+        assetKitId: ba.assetKitId,
+      });
+      qtyBookingAssetRowsByAsset.set(ba.asset.id, rows);
+    }
+    // The kits those rows sit under. Only which kits matters for the lookup;
+    // the order the app receives them in follows the sorted assets below.
+    const kitIdsOnBooking = [
+      ...new Set(
+        unorderedAssets
+          .map((a) => a.kitId)
+          .filter((kitId): kitId is string => kitId !== null)
+      ),
+    ];
+
+    // Everything the rest of the handler reads, in one round trip:
+    // - the check-out sessions and disposition logs the asset order counts
+    //   units with (the sessions also feed the lifecycle progress);
+    // - the slice markers (`BookingAsset.checkedOutAt`/`checkedInAt`), the
+    //   dispatch truth for the lifecycle progress: the Check out button stamps
+    //   them but writes NO PartialBookingCheckout rows;
+    // - the booking's kits. The lookup is org-scoped as well as id-scoped: a
+    //   kit id reaching it came from a BookingAsset row, but scoping it keeps
+    //   the response's kit payload inside the caller's workspace by
+    //   construction.
+    const [checkoutSessionRows, dispositionLogRows, sliceRows, storedKitRows] =
+      await Promise.all([
+        db.partialBookingCheckout.findMany({
+          where: { bookingId: booking.id },
+          select: { assetIds: true, quantities: true, bookingAssetIds: true },
+        }),
+        qtyBookingAssetRowsByAsset.size > 0
+          ? db.consumptionLog.findMany({
+              where: {
+                bookingId: booking.id,
+                assetId: { in: [...qtyBookingAssetRowsByAsset.keys()] },
+                category: { in: [...BOOKING_DISPOSITION_CATEGORIES] },
+              },
+              select: {
+                assetId: true,
+                bookingAssetId: true,
+                category: true,
+                quantity: true,
+              },
+            })
+          : Promise.resolve([]),
+        db.bookingAsset.findMany({
+          where: { bookingId: booking.id },
+          select: {
+            id: true,
+            assetId: true,
+            quantity: true,
+            assetKitId: true,
+            checkedOutAt: true,
+            checkedInAt: true,
+            // Cumulative units this slice has sent out. The markers say
+            // WHETHER a slice went out; only this says HOW MANY, which is what
+            // sizes a check-in.
+            checkedOutQuantity: true,
+          },
+        }),
+        kitIdsOnBooking.length > 0
+          ? db.kit.findMany({
+              where: { id: { in: kitIdsOnBooking }, organizationId },
+              select: {
+                id: true,
+                // Scopes the write-back of a re-signed image below.
+                organizationId: true,
+                name: true,
+                status: true,
+                image: true,
+                imageExpiration: true,
+                category: { select: { id: true, name: true, color: true } },
+                location: { select: { id: true, name: true } },
+                // The kit's FULL membership, which is what tells the app
+                // whether the rows it holds are the whole kit — a removal that
+                // names the kit detaches every member, so it may only offer
+                // that when the booking holds all of them.
+                _count: { select: { assetKits: true } },
+              },
+            })
+          : Promise.resolve([]),
+      ]);
+    const { checkedOutByBookingAsset, dispositionedByBookingAsset } =
+      computeBookingSliceUnitCounts({
+        bookingAssetRowsByAsset: qtyBookingAssetRowsByAsset,
+        dispositionLogs: dispositionLogRows,
+        checkoutSessions: checkoutSessionRows,
+      });
+
+    /**
+     * Units each quantity-tracked asset has SENT OUT on this booking, and how
+     * many of those have come back.
+     *
+     * "Still out" is `dispatched - dispositioned`, and it is the only figure
+     * that answers whether a row can be checked in. `remainingToCheckIn` —
+     * booked minus dispositioned — cannot: it counts booked units that never
+     * left, and `partialCheckinBooking` refuses a row no slice of which was
+     * ever stamped with "Cannot check in assets that were never checked out".
+     *
+     * Departures come from {@link combineDispatchedWithStoredUnits}, which the
+     * completion gate `isBookingFullyCheckedIn` reads through its one-call
+     * form. Sharing it is what keeps the check-in this route OFFERS and the
+     * check-in that gate DEMANDS from answering differently.
+     *
+     * Returns are summed straight off the logs, UNCAPPED, which is the pairing
+     * that helper requires: the per-slice attribution bounds each slice at one
+     * booked quantity, so a row that went out, came back and went out again
+     * would report more departures than returns and read as permanently out.
+     */
+    // The per-trip figure. Also what the lifecycle progress bar reads further
+    // down, which asks how far through THIS trip the booking is — a different
+    // question from what is still out, so it keeps the bounded count.
+    const dispatchedUnitsByAsset = computeDispatchedUnitsByAsset({
+      slices: sliceRows,
+      checkoutSessions: checkoutSessionRows,
+    });
+    const dispatchedUnitsTotalByAsset = combineDispatchedWithStoredUnits({
+      slices: sliceRows,
+      dispatchedByAsset: dispatchedUnitsByAsset,
+    });
+    // The log query is already scoped to this booking, to its quantity-tracked
+    // assets and to the four disposition categories, so a plain sum per asset
+    // IS the uncapped figure.
+    const dispositionedUnitsTotalByAsset = new Map<string, number>();
+    for (const log of dispositionLogRows) {
+      dispositionedUnitsTotalByAsset.set(
+        log.assetId,
+        (dispositionedUnitsTotalByAsset.get(log.assetId) ?? 0) + log.quantity
+      );
+    }
+
+    /**
+     * The assets in the web booking overview's default order, which the app
+     * renders as sent: items still to check out first and checked-out items
+     * last, each kit's members kept together, ties A→Z by name. Each slice is
+     * judged by the counts above, exactly as the web judges its rows. Every
+     * list below that follows `assets` inherits this order, including `kits`.
+     */
+    const assets = sortCollapsedBookingAssets({
+      assets: unorderedAssets,
+      checkedOutByBookingAsset,
+      dispositionedByBookingAsset,
+      partialCheckinDetails,
+      bookingStatus: booking.status,
+    });
+
     // The kits the app groups those assets under. Only the UNANIMOUS kit ids
     // qualify: an asset whose slices disagree carries `kitId: null` above and
     // renders standalone, exactly as web's `shapeBookingAssets` keys on
@@ -370,61 +640,74 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     );
     const remainingByAsset = new Map(qtRemaining.map((r) => [r.assetId, r]));
 
+    /**
+     * Units of a quantity-tracked asset that are out, not yet back, and that
+     * `partialCheckinBooking` would accept.
+     *
+     * Bounded by `remainingToCheckIn` because that is the cap the endpoint
+     * applies to every claim. The two agree on every single-trip booking; they
+     * part on a row that went out, came back and went out again inside one
+     * booking, where the departure count keeps climbing while the endpoint's
+     * cap — booked minus everything dispositioned — has already reached zero.
+     * The app applies the same bound, so the flag and the rows agree.
+     */
+    const unitsStillOut = (assetId: string): number =>
+      Math.min(
+        Math.max(
+          0,
+          (dispatchedUnitsTotalByAsset.get(assetId) ?? 0) -
+            (dispositionedUnitsTotalByAsset.get(assetId) ?? 0)
+        ),
+        remainingByAsset.get(assetId)?.remainingToCheckIn ?? 0
+      );
+
     // Compute booking capability flags
     const checkedOutCount = assets.filter(
       (a) => a.status === AssetStatus.CHECKED_OUT
     ).length;
     const totalAssets = assets.length;
 
-    // Book-by-model: a booking with unfulfilled model reservations cannot be
-    // checked out. The shared checkout service hard-blocks the RESERVED →
-    // ONGOING transition until every `BookingModelRequest` is assigned to
-    // concrete assets (`checkoutBookingWritesWithinTx` throws a 400 while any
-    // request is outstanding). Read through the same predicate the service
-    // uses, and fold it into the state flag so the app never offers a "Check
-    // Out" the server would reject — the app instead guides the operator to
-    // assign the reserved units first (see the booking-detail "Assign to
-    // check out" CTA).
-    const hasOutstandingModelRequests =
-      getOutstandingModelRequests(booking.modelRequests).length > 0;
-
-    const canCheckoutByState =
-      booking.status === "RESERVED" &&
-      totalAssets > 0 &&
-      !hasOutstandingModelRequests;
+    // A check-out needs at least one item on the booking and nothing more.
+    // Unassigned model reservations stay open on the ongoing booking, so they
+    // play no part in this flag; the app confirms them with the operator
+    // before submitting.
+    const canCheckoutByState = booking.status === "RESERVED" && totalAssets > 0;
     // Checkinable while ONGOING/OVERDUE AND something is still to check in.
-    // INDIVIDUAL: global status CHECKED_OUT. QUANTITY_TRACKED: booked units not
-    // yet reconciled = remainingToCheckIn > 0 (booked − returned/consumed/lost/
-    // damaged) — the SAME "remaining" the web check-in drawer caps at. Status
-    // cannot answer this for a QT asset: it stays AVAILABLE while some of its
-    // units are still out.
-    const hasCheckinable = assets.some((a) => {
-      if (a.type === AssetType.QUANTITY_TRACKED) {
-        const rem = remainingByAsset.get(a.id);
-        return rem ? rem.remainingToCheckIn > 0 : false;
-      }
-      return a.status === AssetStatus.CHECKED_OUT;
-    });
-    const canCheckinByState =
-      (booking.status === "ONGOING" || booking.status === "OVERDUE") &&
-      hasCheckinable;
+    // INDIVIDUAL: global status CHECKED_OUT. QUANTITY_TRACKED: units that went
+    // out on this booking and are not back yet. Status cannot answer this for a
+    // QT asset — it stays AVAILABLE while some of its units are still out — and
+    // neither can `remainingToCheckIn`, which counts booked units that never
+    // left, so a booking holding only never-dispatched rows would offer a
+    // check-in the server then refuses.
+    const hasCheckinable = assets.some((a) =>
+      a.type === AssetType.QUANTITY_TRACKED
+        ? unitsStillOut(a.id) > 0
+        : a.status === AssetStatus.CHECKED_OUT
+    );
+    const isActiveBooking =
+      booking.status === "ONGOING" || booking.status === "OVERDUE";
+    // Gates the EXPLICIT paths — scan and select — which submit to
+    // `partialCheckinBooking` and so need units that actually went out. The
+    // quick full check-in is gated separately, below.
+    const canCheckinByState = isActiveBooking && hasCheckinable;
 
     // Quick "check in all" and "check out all" are disallowed when the
     // workspace requires EXPLICIT (scan/select) check-in or check-out for the
-    // caller's role. Mirrors the web booking action's `checkIn`, `checkOut` and
-    // `checkOutRemaining` guards, so the app never offers an action the web /
-    // workspace settings forbid.
+    // caller, judged by the caller's access (its effective role). Mirrors the
+    // web booking action's `checkIn`, `checkOut` and `checkOutRemaining`
+    // guards, so the app never offers an action the web / workspace settings
+    // forbid.
     const bookingSettings =
       await getBookingSettingsForOrganization(organizationId);
-    const canQuickCheckin = !(
-      (effectiveRole === OrganizationRoles.ADMIN &&
-        bookingSettings.requireExplicitCheckinForAdmin) ||
-      (effectiveRole === OrganizationRoles.SELF_SERVICE &&
-        bookingSettings.requireExplicitCheckinForSelfService)
-    );
-    const canQuickCheckout = !isExplicitCheckoutRequired({
-      role: effectiveRole,
-      bookingSettings,
+    const canQuickCheckin = !isExplicitScanRequired({
+      access,
+      settings: bookingSettings,
+      direction: "checkin",
+    });
+    const canQuickCheckout = !isExplicitScanRequired({
+      access,
+      settings: bookingSettings,
+      direction: "checkout",
     });
 
     // Per-booking lifecycle-action availability, mirroring the web
@@ -441,6 +724,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       canDeletePerm,
       canCheckoutPerm,
       canCheckinPerm,
+      canExtendPerm,
     ] = await Promise.all([
       hasPermission({
         userId: user.id,
@@ -484,37 +768,87 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         entity: PermissionEntity.booking,
         action: PermissionAction.checkin,
       }),
+      hasPermission({
+        userId: user.id,
+        organizationId,
+        roles,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.extend,
+      }),
     ]);
     // State says the booking COULD be checked out or in; the role says whether
     // this caller may. Both have to hold, or the app draws a button the server
     // then refuses — the endpoints gate on these same permissions regardless,
     // so without this the user meets the rule as a 403 instead of an absence.
-    const canCheckout = canCheckoutByState && canCheckoutPerm;
-    const canCheckin = canCheckinByState && canCheckinPerm;
+    // Seeing a booking (the workspace see-toggles) never grants writing it:
+    // every lifecycle endpoint runs `validateBookingOwnership`, so a booking
+    // this caller may only read offers no actions.
+    const writesBooking = canWriteBooking({
+      booking: {
+        creatorId: booking.creator?.id ?? null,
+        custodianUserId: booking.custodianUserId,
+      },
+      userId: user.id,
+      access,
+    });
+    const canCheckout = writesBooking && canCheckoutByState && canCheckoutPerm;
+    const canCheckin = writesBooking && canCheckinByState && canCheckinPerm;
+    /**
+     * Whether the quick "check in all" is offered.
+     *
+     * Deliberately NOT gated on `hasCheckinable`. It submits to
+     * `checkinBooking`, which completes a booking whatever went out and has no
+     * never-checked-out guard, so web offers it on any active booking the
+     * caller may check in (`CheckinDropdown` in `edit-booking-form.tsx`).
+     * Gating it on units being out would leave a booking whose rows were all
+     * added after check-out closable from a browser and from nowhere on the
+     * phone.
+     */
+    const canCheckinAll =
+      writesBooking && isActiveBooking && canCheckinPerm && canQuickCheckin;
 
     const bookingActions = {
+      // Edit: an open booking this caller writes. `booking:update` is held by
+      // every role, so writing THIS booking is the whole rule; a booking the
+      // workspace only lets them see offers no edit the save would refuse.
+      canEdit:
+        !["COMPLETE", "ARCHIVED", "CANCELLED"].includes(booking.status) &&
+        writesBooking,
       // Cancel: RESERVED/ONGOING/OVERDUE + cancel permission.
       canCancel:
         (booking.status === "RESERVED" ||
           booking.status === "ONGOING" ||
           booking.status === "OVERDUE") &&
+        writesBooking &&
         canCancelPerm,
       // Archive: shared web-parity rule (COMPLETE, or RESERVED already past
       // its end date) + archive permission.
       canArchive:
         isBookingArchivable({ status: booking.status, to: booking.to }) &&
+        writesBooking &&
         canArchivePerm,
-      // Duplicate: any status; gated by create permission (web's duplicate
-      // route enforces create — we hide it for those who lack it rather than
-      // 403 on tap).
-      canDuplicate: canCreatePerm,
-      // Delete: requires the delete permission AND (admin/owner any status |
-      // self-service/base only on DRAFT). Mirrors the web client gate; the
-      // server endpoint enforces ownership + the same BASE-only-DRAFT rule.
+      // Duplicate: any status; gated by create permission and by writing this
+      // booking, the two checks the duplicate endpoint makes.
+      canDuplicate: writesBooking && canCreatePerm,
+      // Delete: the delete permission, and drafts only for roles whose policy
+      // says so, the same rule the endpoint enforces (`assertCanDeleteBooking`).
+      // The companion reads this server-computed flag as is.
       canDelete:
-        ((isSelfServiceOrBase && booking.status === "DRAFT") ||
-          !isSelfServiceOrBase) &&
+        (!access.policy.bookings.deleteOnlyDrafts ||
+          booking.status === "DRAFT") &&
+        writesBooking &&
         canDeletePerm,
+      // Extend: the service's state rules (started, something still out) +
+      // extend permission, so the app never offers an extension it refuses.
+      canExtend:
+        isExtendableStatus(booking.status) &&
+        hasItemsStillOutToExtend({
+          assets: booking.bookingAssets.map((ba) => ba.asset),
+          checkedInAssetIds,
+          slices: sliceRows,
+        }) &&
+        writesBooking &&
+        canExtendPerm,
     };
 
     // Flatten book-by-model reservations into a mobile-friendly shape. Each
@@ -540,9 +874,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       0
     );
 
-    // Attach the per-asset remaining (computed up-front, above) to each QT
+    // Attach the per-asset counters (computed up-front, above) to each QT
     // asset so the app's pickers can cap inputs; INDIVIDUAL rows pass through
     // unchanged.
+    //
+    // `remainingToCheckIn` and `remainingToCheckOut` keep their meaning and
+    // their values: app bundles already in the field read them, and a bundle
+    // that does not know the two counters beside them falls back to the older
+    // rule rather than losing the picker entirely.
     const assetsForResponse = assets.map((a) => {
       const rem = remainingByAsset.get(a.id);
       return rem
@@ -550,67 +889,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             ...a,
             remainingToCheckIn: rem.remainingToCheckIn,
             remainingToCheckOut: rem.remainingToCheckOut,
+            dispatchedUnitsTotal: dispatchedUnitsTotalByAsset.get(a.id) ?? 0,
+            dispositionedUnitsTotal:
+              dispositionedUnitsTotalByAsset.get(a.id) ?? 0,
           }
         : a;
     });
 
-    // Segmented lifecycle progress (Booked / Partial / Checked out / Returned)
-    // for the booking's progress bar — computed with the SAME shared helper the
-    // web booking overview uses (`calculateBookingLifecycleProgress`), so the
-    // mobile bar and the web bar can never disagree. QT rows bucket by their
-    // per-asset unit counters; INDIVIDUAL rows by status + `checkedInAssetIds`.
-    // Dispatch truth comes from the slice markers
-    // (`BookingAsset.checkedOutAt`/`checkedInAt`): the Check out button
-    // stamps them but writes NO PartialBookingCheckout rows, so session
-    // records cannot tell a button-checked-out asset from a
-    // never-checked-out one on a booking that also has scan records. The
-    // sessions are still fetched: per-asset dispatched units are judged
-    // slice by slice from stamps + session attribution (an asset can mix a
-    // button-checked-out slice with a progressively-scanned sibling — see
-    // `computeDispatchedUnitsByAsset`).
-    //
-    // The kit lookup rides along here rather than taking a round trip of its
-    // own. It is org-scoped as well as id-scoped: a kit id reaching this query
-    // came from a BookingAsset row, but scoping it keeps the response's kit
-    // payload inside the caller's workspace by construction.
-    const [sliceRows, checkoutSessionRows, storedKitRows] = await Promise.all([
-      db.bookingAsset.findMany({
-        where: { bookingId: booking.id },
-        select: {
-          id: true,
-          assetId: true,
-          quantity: true,
-          assetKitId: true,
-          checkedOutAt: true,
-          checkedInAt: true,
-        },
-      }),
-      db.partialBookingCheckout.findMany({
-        where: { bookingId: booking.id },
-        select: { assetIds: true, quantities: true, bookingAssetIds: true },
-      }),
-      bookingKitIds.length > 0
-        ? db.kit.findMany({
-            where: { id: { in: bookingKitIds }, organizationId },
-            select: {
-              id: true,
-              // Scopes the write-back of a re-signed image below.
-              organizationId: true,
-              name: true,
-              status: true,
-              image: true,
-              imageExpiration: true,
-              category: { select: { id: true, name: true, color: true } },
-              location: { select: { id: true, name: true } },
-              // The kit's FULL membership, which is what tells the app whether
-              // the rows it holds are the whole kit — a removal that names the
-              // kit detaches every member, so it may only offer that when the
-              // booking holds all of them.
-              _count: { select: { assetKits: true } },
-            },
-          })
-        : Promise.resolve([]),
-    ]);
     // A kit's `image` is a signed storage URL that stops working once
     // `imageExpiration` passes, and the app has no way to renew it. Re-sign the
     // lapsed ones so a kit header never receives a dead link. `organizationId`
@@ -618,10 +903,18 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const kitRows = (await refreshExpiredKitImages(storedKitRows)).map(
       ({ organizationId: _organizationId, ...kit }) => kit
     );
-    const dispatchedUnitsByAsset = computeDispatchedUnitsByAsset({
-      slices: sliceRows,
-      checkoutSessions: checkoutSessionRows,
-    });
+
+    // Segmented lifecycle progress (Booked / Partial / Checked out / Returned)
+    // for the booking's progress bar — computed with the SAME shared helper the
+    // web booking overview uses (`calculateBookingLifecycleProgress`), so the
+    // mobile bar and the web bar can never disagree. QT rows bucket by their
+    // per-asset unit counters; INDIVIDUAL rows by status + `checkedInAssetIds`.
+    // Dispatch truth comes from the slice markers read above: session records
+    // cannot tell a button-checked-out asset from a never-checked-out one on a
+    // booking that also has scan records. The sessions still count: per-asset
+    // dispatched units are judged slice by slice from stamps + session
+    // attribution (an asset can mix a button-checked-out slice with a
+    // progressively-scanned sibling — see `computeDispatchedUnitsByAsset`).
     const sliceMarkersByAssetId = new Map<
       string,
       { out: boolean; allStampedIn: boolean }
@@ -706,6 +999,26 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           ).hasAlreadyBookedAssets
         : false;
 
+    /**
+     * Pools on this booking that sit at two or more locations and have not
+     * gone out yet, with the options a "From location" picker needs. The same
+     * data the web check-out dialogs read, so the phone can ask the same
+     * question and send the answers as `sourceLocations`. Empty unless the
+     * booking can still check out. Additive: older apps ignore it.
+     */
+    const checkoutSourceQuestions = (
+      [
+        BookingStatus.RESERVED,
+        BookingStatus.ONGOING,
+        BookingStatus.OVERDUE,
+      ] as BookingStatus[]
+    ).includes(booking.status)
+      ? await getCheckoutSourceQuestions({
+          organizationId,
+          bookingId: booking.id,
+        })
+      : [];
+
     return data({
       booking: {
         id: booking.id,
@@ -737,6 +1050,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         modelRequests,
         modelRequestCount,
         outstandingModelUnitCount,
+        modelReservationShortfalls,
         lifecycleProgress,
         hasAlreadyBookedAssets,
       },
@@ -749,8 +1063,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       canCheckout,
       canCheckin,
       canQuickCheckin,
+      canCheckinAll,
       canQuickCheckout,
       bookingActions,
+      checkoutSourceQuestions,
     });
   } catch (cause) {
     const reason = makeShelfError(cause);
