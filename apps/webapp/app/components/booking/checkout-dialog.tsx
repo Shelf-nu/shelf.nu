@@ -1,5 +1,6 @@
 import type { Booking } from "@prisma/client";
 import { Zap } from "lucide-react";
+import { useDisabled } from "~/hooks/use-disabled";
 import type { CheckoutSourceQuestion } from "~/modules/booking/checkout-source-location";
 import { isBookingEarlyCheckout } from "~/modules/booking/helpers";
 import type { UnassignedModelUnits } from "~/utils/booking-model-requests";
@@ -79,9 +80,19 @@ type CheckoutDialogProps = {
    * Pools on the booking that sit at two or more locations and are about to
    * go out for the first time. When any are listed, the trigger opens a
    * confirmation with one "From location" select per pool; otherwise the
-   * check-out stays one click.
+   * check-out needs no extra question.
    */
   sourceQuestions?: CheckoutSourceQuestion[];
+  /**
+   * Whether a plain check-out (not early, nothing unassigned, no source
+   * question) asks once before it submits. Defaults to `true`, so a quick
+   * check-out from the booking header opens a "Check out booking" dialog.
+   * Pass `false` from a drawer or dialog that is itself the confirmation
+   * step, so the operator is not asked twice; the trigger then submits
+   * directly. Early check-outs, unassigned units and source questions open
+   * the dialog either way.
+   */
+  confirm?: boolean;
 };
 
 /**
@@ -99,13 +110,16 @@ const NO_SOURCE_QUESTIONS: CheckoutSourceQuestion[] = [];
 function checkoutDialogTitle({
   hasUnassigned,
   isEarlyCheckout,
+  asksSource,
 }: {
   hasUnassigned: boolean;
   isEarlyCheckout: boolean;
+  asksSource: boolean;
 }): string {
   if (hasUnassigned) return "Some reserved units aren't assigned";
   if (isEarlyCheckout) return "Early Check-Out Warning";
-  return "Where do the units come from?";
+  if (asksSource) return "Where do the units come from?";
+  return "Check out booking";
 }
 
 export default function CheckoutDialog({
@@ -121,7 +135,10 @@ export default function CheckoutDialog({
   fullWidth = false,
   unassignedUnits = NO_UNASSIGNED_UNITS,
   sourceQuestions = NO_SOURCE_QUESTIONS,
+  confirm = true,
 }: CheckoutDialogProps) {
+  const isNavigating = useDisabled();
+  const isDisabled = disabled || isNavigating;
   const isEarlyCheckout =
     !suppressEarlyCheckoutPrompt && isBookingEarlyCheckout(booking.from);
   const unassignedSummary = summarizeUnassignedUnits(unassignedUnits);
@@ -154,11 +171,16 @@ export default function CheckoutDialog({
   );
 
   const asksSource = sourceQuestions.length > 0;
+  /** No early, unassigned or source reason applies: only the plain confirmation. */
+  const isPlainCheckout = !isEarlyCheckout && !unassignedSummary && !asksSource;
+  /** "Check out remaining" leaves the already checked-out assets alone. */
+  const checkoutScope =
+    intent === "checkOutRemaining" ? "the remaining assets" : "every asset";
 
-  if (!isEarlyCheckout && !unassignedSummary && !asksSource) {
+  if (isPlainCheckout && !confirm) {
     return (
       <Button
-        disabled={disabled}
+        disabled={isDisabled}
         className={resolvedTriggerClassName}
         size={isDropdown ? undefined : "sm"}
         type="submit"
@@ -177,7 +199,7 @@ export default function CheckoutDialog({
     <AlertDialog>
       <AlertDialogTrigger asChild>
         <Button
-          disabled={disabled}
+          disabled={isDisabled}
           className={resolvedTriggerClassName}
           size={isDropdown ? undefined : "sm"}
           type="button"
@@ -194,10 +216,22 @@ export default function CheckoutDialog({
             {checkoutDialogTitle({
               hasUnassigned: Boolean(unassignedSummary),
               isEarlyCheckout,
+              asksSource,
             })}
           </AlertDialogTitle>
           <AlertDialogDescription asChild>
             <div className="flex flex-col gap-3">
+              {isPlainCheckout ? (
+                <p>
+                  This checks out {checkoutScope} of{" "}
+                  <span className="font-bold text-gray-700">
+                    {booking.name}
+                  </span>
+                  {intent === "checkOutRemaining"
+                    ? "."
+                    : " and starts the booking."}
+                </p>
+              ) : null}
               {unassignedSummary ? (
                 <p>
                   <span className="font-bold text-gray-700">
@@ -241,7 +275,7 @@ export default function CheckoutDialog({
                 question={question}
                 fieldKey={question.sliceId}
                 formId={formId}
-                disabled={Boolean(disabled)}
+                disabled={Boolean(isDisabled)}
               />
             ))}
           </div>
@@ -249,7 +283,7 @@ export default function CheckoutDialog({
 
         <AlertDialogFooter>
           <AlertDialogCancel asChild>
-            <Button type="button" disabled={disabled} variant="secondary">
+            <Button type="button" disabled={isDisabled} variant="secondary">
               Cancel
             </Button>
           </AlertDialogCancel>
@@ -258,7 +292,7 @@ export default function CheckoutDialog({
             <>
               <input type="hidden" name="intent" value={intent} form={formId} />
               <Button
-                disabled={disabled}
+                disabled={isDisabled}
                 className="flex-1"
                 type="submit"
                 variant="secondary"
@@ -270,7 +304,7 @@ export default function CheckoutDialog({
               </Button>
 
               <Button
-                disabled={disabled}
+                disabled={isDisabled}
                 className="flex-1"
                 type="submit"
                 name="checkoutIntentChoice"
@@ -282,7 +316,7 @@ export default function CheckoutDialog({
             </>
           ) : (
             <Button
-              disabled={disabled}
+              disabled={isDisabled}
               className="flex-1"
               type="submit"
               name="intent"

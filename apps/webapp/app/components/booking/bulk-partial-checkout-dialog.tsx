@@ -832,6 +832,8 @@ export default function BulkPartialCheckoutDialog({
                 fullWidth
                 unassignedUnits={unassignedUnits}
                 suppressEarlyCheckoutPrompt={!isEarlyCheckout}
+                // This dialog is already the confirmation step.
+                confirm={false}
               />
             ) : (
               <Button
