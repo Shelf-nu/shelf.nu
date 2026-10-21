@@ -46,7 +46,7 @@
  * @see {@link file://../../emails/low-stock-copy.ts} - email wording
  */
 
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { db } from "~/database/db.server";
 import type { StockLevelEmailProps } from "~/emails/components/stock-level-email";
 import { lowStockAlertHtml, lowStockAlertText } from "~/emails/low-stock-alert";
@@ -64,7 +64,12 @@ import {
   lowStockRecoveredText,
 } from "~/emails/low-stock-recovered";
 import { sendEmail } from "~/emails/mail.server";
-import { buildLowStockWhere } from "~/modules/asset/utils.server";
+import {
+  generateWhereClause,
+  POOL_AGGREGATE_JOIN,
+  POOL_AVAILABLE_EXPR,
+} from "~/modules/asset/query.server";
+import { computeCheckedOutBreakdownForAsset } from "~/modules/booking/checked-out.server";
 import {
   MOVE_CATEGORY,
   OPENING_BALANCE_CATEGORY,
@@ -246,6 +251,41 @@ function toMinimumChange(
 }
 
 /**
+ * How many other assets in the workspace the mail's "other low items" link
+ * finds. The recipients are owners and admins, who see the advanced list, so
+ * this counts with that list's `lowStockOnly` predicate: Free now at or below
+ * the Min quantity, archived assets left out.
+ *
+ * @param params.organizationId - Workspace to count in
+ * @param params.assetId - The asset the mail is about, left out of the count
+ * @returns The number of other low-stock assets
+ */
+async function countOtherLowStockAssets({
+  organizationId,
+  assetId,
+}: {
+  organizationId: string;
+  assetId: string;
+}): Promise<number> {
+  const where = generateWhereClause(
+    organizationId,
+    null,
+    [],
+    undefined,
+    null,
+    "UTC",
+    true
+  );
+  const rows = await db.$queryRaw<{ count: number }[]>`
+    SELECT COUNT(*)::int AS count
+    FROM "Asset" a
+    ${POOL_AGGREGATE_JOIN}
+    ${where} AND a.id <> ${assetId}
+  `;
+  return rows[0]?.count ?? 0;
+}
+
+/**
  * Sends the low-stock alert (or back-in-stock notice) to every member whose
  * role receives inventory alerts (`notifications.inventoryAlerts`), rendered
  * once per recipient so each copy greets them,
@@ -349,17 +389,7 @@ async function sendLowStockEmails({
         ids
       ),
       optionalRead(
-        () =>
-          db.asset.count({
-            // The `lowStockOnly` list filter the mail links to, so the
-            // count matches what the link shows.
-            where: {
-              organizationId,
-              id: { not: assetId },
-              archivedAt: null,
-              ...buildLowStockWhere(),
-            },
-          }),
+        () => countOtherLowStockAssets({ organizationId, assetId }),
         "count of other low-stock items",
         ids
       ),
@@ -547,10 +577,29 @@ async function runLowStockCheck({
   assetId,
   userId,
   organizationId,
+  silent = false,
 }: {
   assetId: string;
   userId?: string | null;
   organizationId: string;
+  /**
+   * Run the state transitions WITHOUT sending anything, no email, no in-app
+   * toast. The `lowStockNotifiedAt` marker is still stamped or cleared exactly
+   * as it would be, so a later genuine crossing and the "back in stock"
+   * recovery notice both still work.
+   *
+   * Exists for BULK callers. This notifier emails the owner AND every admin,
+   * and a bulk threshold change can put hundreds of assets into the low band in
+   * one click, that is hundreds of notifier runs, each mailing several people,
+   * for a change the user just made deliberately and can already see as amber
+   * badges on the screen in front of them. Alerting is for stock moving while
+   * nobody is watching, not for the operation the user just performed.
+   *
+   * Do NOT reach for this to quieten a noisy single-asset path; the debounce
+   * marker already handles repeat firing. Defaults to `false` so every existing
+   * call site behaves exactly as before.
+   */
+  silent?: boolean;
 }): Promise<void> {
   const asset = await db.asset.findFirst({
     // org-scoped: scope the low-stock lookup to the caller's org
@@ -598,13 +647,41 @@ async function runLowStockCheck({
     return;
   }
 
-  /** Compute available = total - inCustody */
-  const custodySum = await db.custody.aggregate({
-    where: { assetId },
-    _sum: { quantity: true },
-  });
+  /**
+   * Free now, measured the way `getAssetAvailability` measures it: direct
+   * custody only (a kit's inherited custody rows sit inside the kit figure),
+   * units earmarked to kits, and standalone units that have actually left on
+   * a booking. The `Stock status` column and the "Low stock only" filter read
+   * the same three terms, so this alert fires exactly when they show
+   * Running low, never for a row they call Enough, and never silent on a row
+   * they flag.
+   *
+   * `inCustody` is what the email reports as held by people, so it keeps the
+   * kit custody rows too.
+   */
+  const [directCustodySum, custodySum, kitSum, checkedOut] = await Promise.all([
+    db.custody.aggregate({
+      where: { assetId, kitCustodyId: null },
+      _sum: { quantity: true },
+    }),
+    db.custody.aggregate({
+      where: { assetId },
+      _sum: { quantity: true },
+    }),
+    db.assetKit.aggregate({
+      where: { assetId, organizationId },
+      _sum: { quantity: true },
+    }),
+    computeCheckedOutBreakdownForAsset(db, assetId, organizationId),
+  ]);
   const inCustody = custodySum._sum.quantity ?? 0;
-  const available = (asset.quantity ?? 0) - inCustody;
+  const available = Math.max(
+    0,
+    (asset.quantity ?? 0) -
+      (directCustodySum._sum.quantity ?? 0) -
+      (kitSum._sum.quantity ?? 0) -
+      checkedOut.standalone
+  );
 
   /**
    * PRESERVED predicate: low iff available is at or below the threshold.
@@ -617,8 +694,8 @@ async function runLowStockCheck({
   if (isLow && asset.lowStockNotifiedAt == null) {
     /* ----------------------- Enter low: fire alert ----------------------- */
 
-    /** In-app notification for the acting user (skipped when none). */
-    if (userId) {
+    /** In-app notification for the acting user (skipped when none, or silent). */
+    if (userId && !silent) {
       notifyInAppBestEffort({
         title: "Low stock alert",
         message: `${asset.title} has ${available} ${unitLabel} available (threshold: ${asset.minQuantity})`,
@@ -627,22 +704,28 @@ async function runLowStockCheck({
       });
     }
 
-    await sendLowStockEmails({
-      variant: "alert",
-      organizationId,
-      assetId,
-      assetTitle: asset.title,
-      available,
-      minQuantity: asset.minQuantity,
-      unitOfMeasure: asset.unitOfMeasure,
-      inCustody,
-      userId,
-    });
+    if (!silent) {
+      await sendLowStockEmails({
+        variant: "alert",
+        organizationId,
+        assetId,
+        assetTitle: asset.title,
+        available,
+        minQuantity: asset.minQuantity,
+        unitOfMeasure: asset.unitOfMeasure,
+        inCustody,
+        userId,
+      });
+    }
 
     /**
      * Stamp the debounce marker AFTER sending so a further decrement while the
-     * asset stays low won't re-alert. Best-effort (see file header): a failed
-     * stamp just means the next decrement re-fires — never a rollback.
+     * asset stays low won't re-alert. Stamped even in silent mode: the marker
+     * records "this low-stock episode is accounted for", which is exactly true
+     * when the user set the threshold themselves, and leaving it null would
+     * make the very next stock movement fire the alert we just suppressed.
+     * Best-effort (see file header): a failed stamp just means the next
+     * decrement re-fires, never a rollback.
      */
     try {
       await db.asset.update({
@@ -691,7 +774,7 @@ async function runLowStockCheck({
     }
 
     /** In-app notification for the acting user (skipped when none). */
-    if (userId) {
+    if (userId && !silent) {
       notifyInAppBestEffort({
         title: "Back in stock",
         message: `${asset.title} is back above its threshold: ${available} ${unitLabel} available (threshold: ${asset.minQuantity})`,
@@ -700,17 +783,19 @@ async function runLowStockCheck({
       });
     }
 
-    await sendLowStockEmails({
-      variant: "recovered",
-      organizationId,
-      assetId,
-      assetTitle: asset.title,
-      available,
-      minQuantity: asset.minQuantity,
-      unitOfMeasure: asset.unitOfMeasure,
-      inCustody,
-      userId,
-    });
+    if (!silent) {
+      await sendLowStockEmails({
+        variant: "recovered",
+        organizationId,
+        assetId,
+        assetTitle: asset.title,
+        available,
+        minQuantity: asset.minQuantity,
+        unitOfMeasure: asset.unitOfMeasure,
+        inCustody,
+        userId,
+      });
+    }
   }
   /* else: no transition — already-notified-and-still-low, or fine-and-was-fine. */
 }
@@ -747,6 +832,95 @@ export async function checkAndNotifyLowStock(
           assetId: params.assetId,
           organizationId: params.organizationId,
         },
+      })
+    );
+  }
+}
+
+/** One row of the {@link syncLowStockMarkers} read. */
+type LowStockMarkerRow = {
+  id: string;
+  /** A threshold is set and Free now is at or below it. */
+  is_low: boolean;
+  /** `lowStockNotifiedAt` is set. */
+  marked: boolean;
+};
+
+/**
+ * Brings `lowStockNotifiedAt` up to date for many assets at once, with the
+ * marker transitions of {@link checkAndNotifyLowStock} in silent mode and none
+ * of its notices: no email, no in-app toast.
+ *
+ * For bulk callers that move assets into or out of the low band on purpose (a
+ * bulk Min quantity change), where the user can already see the result and a
+ * notice per asset would mail several people hundreds of times. The marker
+ * still has to follow the band, or the next stock movement alerts for an
+ * episode that is already known.
+ *
+ * Per quantity-tracked, active asset among `assetIds` in the workspace:
+ * - low (threshold set, Free now at or below it) and unmarked: stamp now
+ * - not low (including no threshold) and marked: clear
+ * - otherwise: leave it
+ *
+ * Free now is read with the SQL the asset index uses (`POOL_AGGREGATE_JOIN`
+ * and `POOL_AVAILABLE_EXPR`), so a stamped asset is one the "Low stock" toggle
+ * finds. Costs one read and at most two writes, whatever the number of assets.
+ *
+ * Best-effort: runs after the caller's write has committed, so a failure is
+ * logged and never thrown. A stale marker only means the next stock movement
+ * re-evaluates.
+ *
+ * @param params.assetIds - Assets to reconcile; ids outside the workspace are ignored
+ * @param params.organizationId - Workspace that scopes every read and write
+ */
+export async function syncLowStockMarkers({
+  assetIds,
+  organizationId,
+}: {
+  assetIds: string[];
+  organizationId: string;
+}): Promise<void> {
+  if (assetIds.length === 0) return;
+
+  try {
+    const rows = await db.$queryRaw<LowStockMarkerRow[]>(Prisma.sql`
+      SELECT
+        a.id,
+        COALESCE(
+          a."minQuantity" IS NOT NULL AND ${POOL_AVAILABLE_EXPR} <= a."minQuantity",
+          false
+        ) AS is_low,
+        (a."lowStockNotifiedAt" IS NOT NULL) AS marked
+      FROM public."Asset" a
+      ${POOL_AGGREGATE_JOIN}
+      WHERE a."organizationId" = ${organizationId}
+        AND a."archivedAt" IS NULL
+        AND a.type = 'QUANTITY_TRACKED'
+        AND a.id = ANY(${assetIds}::text[])
+    `);
+
+    const toStamp = rows.filter((r) => r.is_low && !r.marked).map((r) => r.id);
+    const toClear = rows.filter((r) => !r.is_low && r.marked).map((r) => r.id);
+
+    if (toStamp.length > 0) {
+      await db.asset.updateMany({
+        where: { id: { in: toStamp }, organizationId },
+        data: { lowStockNotifiedAt: new Date() },
+      });
+    }
+    if (toClear.length > 0) {
+      await db.asset.updateMany({
+        where: { id: { in: toClear }, organizationId },
+        data: { lowStockNotifiedAt: null },
+      });
+    }
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Failed to sync low-stock markers",
+        additionalData: { organizationId, assetCount: assetIds.length },
+        label: "Notification",
       })
     );
   }

@@ -162,6 +162,46 @@ describe("bulk QR download", () => {
     // Still no per-asset lookup: the batched read is authoritative.
     expect(qrMocks.getQrByAssetId).not.toHaveBeenCalled();
   });
+
+  it("returns a labels.csv row per asset, in the same order as the images", async () => {
+    (db.asset.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        ...assets[0],
+        category: { name: "Cameras" },
+        assetLocations: [{ location: { name: "Studio" } }],
+      },
+      { ...assets[1], category: null, assetLocations: [] },
+    ]);
+
+    const response = (await runLoader()) as unknown as {
+      data: {
+        error?: unknown;
+        assets: Array<Record<string, unknown>>;
+        labelsCsv: string;
+      };
+    };
+
+    expect(response.data.error).toBeFalsy();
+    expect(db.asset.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          category: { select: { name: true } },
+          assetLocations: expect.objectContaining({ take: 1 }),
+        }),
+      })
+    );
+    // Category and location travel only in the CSV, not the image payload.
+    expect(response.data.assets[0]).not.toHaveProperty("category");
+    expect(response.data.assets[0]).not.toHaveProperty("assetLocations");
+    // No shortener in the test environment: codes encode this server's /qr.
+    expect(
+      response.data.labelsCsv.replace(/^\uFEFF/, "").split("\r\n")
+    ).toEqual([
+      '"Asset name","SAM ID","QR ID","QR URL","Category","Location"',
+      '"Asset 0","SAM-0","qr-asset-0","http://localhost:3000/qr/qr-asset-0","Cameras","Studio"',
+      '"Asset 1","SAM-1","qr-asset-1","http://localhost:3000/qr/qr-asset-1","",""',
+    ]);
+  });
 });
 
 const runSelectAll = (query: string) =>

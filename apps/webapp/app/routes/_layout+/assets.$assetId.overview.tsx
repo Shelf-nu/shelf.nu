@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { RenderableTreeNode } from "@markdoc/markdoc";
 import { AssetStatus, CustomFieldType } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
 import type {
   MetaFunction,
   ActionFunctionArgs,
@@ -60,6 +61,7 @@ import {
   MOVE_UNITS_INTENT_FIELD,
   type MoveAxis,
 } from "~/modules/asset/move-units.types";
+import { resolveOverCommitment } from "~/modules/asset/over-commitment";
 import {
   buildQuantityData,
   type QuantityData,
@@ -92,6 +94,7 @@ import { getTeamMembersForQuantityCustody } from "~/modules/team-member/service.
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { assetDescriptionSchema } from "~/utils/asset-description";
 import { formatAssetValueWithBreakdown } from "~/utils/asset-value";
+import { canSeeBooking } from "~/utils/booking-authorization.server";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint } from "~/utils/client-hints";
 import { ASSET_DESCRIPTION_MAX_LENGTH } from "~/utils/constants";
@@ -257,6 +260,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * (`reservedTotal`), just no longer baked into the headline.
      */
     let quantityData: QuantityData | null = null;
+    let overCommitmentReads: Awaited<
+      ReturnType<typeof loadOverCommitmentReads>
+    > | null = null;
 
     if (isQuantityTracked(asset)) {
       // Sum each location's slice — the asset's pool that has a physical
@@ -281,10 +287,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         0
       );
 
-      const availability = await getAssetAvailability({
-        assetId: asset.id,
-        organizationId,
-      });
+      // Run together: both availability reads and the booking lookup are
+      // independent, and each walks the asset's active bookings.
+      const [availability, overCommitment] = await Promise.all([
+        getAssetAvailability({
+          assetId: asset.id,
+          organizationId,
+        }),
+        loadOverCommitmentReads(asset.id, organizationId),
+      ]);
+      overCommitmentReads = overCommitment;
 
       quantityData = buildQuantityData({
         availability,
@@ -309,6 +321,79 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // `bookingAssets` is already the asset's current booking: the query keeps
     // only the slice that is out (`CURRENT_BOOKING_SLICE_FILTER`), so the first
     // row is the one the page shows. Nothing further is derived from it here.
+
+    /**
+     * Is this pool promised beyond its size at any point ahead, and which
+     * upcoming booking asks for the most units?
+     *
+     * `asset.bookingAssets` cannot answer it: `getAssetOverviewFields` filters
+     * that relation to ONGOING/OVERDUE, so no upcoming booking is ever in it.
+     * The peak comes from the same primitive the booking engine consults,
+     * windowed from now onwards so it is the future peak, not a sum.
+     *
+     * The booking is ONE grouped row, never a list: an asset can carry
+     * hundreds of future bookings and this page must not pay for all of them
+     * to name one. Standalone slices only, a kit's slices are its `inKits`
+     * units, and the primitive excludes them for the same reason. The figure
+     * is the booked quantity of the largest upcoming RESERVED booking, which
+     * the page names as the biggest upcoming booking, not as part of the peak.
+     */
+    const [availabilityAhead, topReservedBooking] = overCommitmentReads ?? [
+      null,
+      null,
+    ];
+
+    /**
+     * The shortfall first, without a booking: the booking's name is read only
+     * for a pool that is actually over-committed, since nothing shows it
+     * otherwise.
+     */
+    const shortfall = availabilityAhead
+      ? resolveOverCommitment({
+          total: availabilityAhead.total,
+          inCustody: availabilityAhead.inCustody,
+          inKits: availabilityAhead.inKits,
+          peakBooked: availabilityAhead.reserved,
+          topBooking: null,
+        })
+      : null;
+
+    /**
+     * The booking is named and linked only for a viewer who may open it, by
+     * the same `canSeeBooking` rule the booking page enforces. Anyone else
+     * still reads the shortfall, without a name or a link that would 403.
+     */
+    const topReservedBookingRow =
+      shortfall && topReservedBooking
+        ? await db.booking.findFirst({
+            where: { id: topReservedBooking.bookingId, organizationId },
+            select: {
+              name: true,
+              custodianUserId: true,
+              custodianTeamMember: { select: { userId: true } },
+            },
+          })
+        : null;
+
+    const overCommitment =
+      shortfall &&
+      topReservedBooking &&
+      topReservedBookingRow &&
+      canSeeBooking({
+        access,
+        booking: topReservedBookingRow,
+        userId,
+      })
+        ? {
+            ...shortfall,
+            booking: {
+              id: topReservedBooking.bookingId,
+              name: topReservedBookingRow.name,
+              units: topReservedBooking._sum.quantity ?? 0,
+            },
+          }
+        : shortfall;
+
     /** We only need customField with same category of asset or without any category */
     const customFields = asset.categoryId
       ? asset.customFields.filter(
@@ -439,6 +524,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       qrObj,
       reminders,
       quantityData,
+      overCommitment,
       teamMembers,
       totalTeamMembers,
       categories,
@@ -455,6 +541,44 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     throw data(error(reason), { status: reason.status });
   }
 }
+
+/**
+ * The reads behind the over-commitment notice: the pool's availability from
+ * now on, and the largest upcoming RESERVED booking's standalone units. See
+ * the note where the loader uses them.
+ */
+function loadOverCommitmentReads(assetId: string, organizationId: string) {
+  return Promise.all([
+    getAssetAvailability({
+      assetId,
+      organizationId,
+      window: { from: new Date(), to: AVAILABILITY_HORIZON },
+    }),
+    db.bookingAsset
+      .groupBy({
+        by: ["bookingId"],
+        where: {
+          assetId,
+          assetKitId: null,
+          booking: {
+            status: BookingStatus.RESERVED,
+            to: { gt: new Date() },
+          },
+        },
+        _sum: { quantity: true },
+        orderBy: { _sum: { quantity: "desc" } },
+        take: 1,
+      })
+      .then((rows) => rows[0] ?? null),
+  ]);
+}
+
+/**
+ * "From now on" for the over-commitment peak. A window end the booking
+ * engine's filter can hold: Prisma refuses to serialise the package's
+ * `FAR_FUTURE_SENTINEL` (the JS max date) as a DateTime argument.
+ */
+const AVAILABILITY_HORIZON = new Date("9999-12-31T00:00:00.000Z");
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
@@ -807,6 +931,7 @@ export default function AssetOverview() {
     currentOrganization,
     userId,
     quantityData,
+    overCommitment,
     allCustomFieldDefs,
     moveDestinations,
     unplacedQuantity,
@@ -1466,8 +1591,12 @@ export default function AssetOverview() {
                                     ?.filter(
                                       (o: string) => o !== null && o !== ""
                                     )
-                                    .map((option: string) => (
-                                      <option key={option} value={option}>
+                                    .map((option: string, index: number) => (
+                                      // Legacy fields can hold the same option twice.
+                                      <option
+                                        key={`${index}-${option}`}
+                                        value={option}
+                                      >
                                         {option}
                                       </option>
                                     ))}
@@ -1877,6 +2006,7 @@ export default function AssetOverview() {
               inLocationsQuantity={quantityData?.inLocations}
               inLocationsManualQuantity={quantityData?.inLocationsManual}
               reservedQuantity={quantityData?.reserved}
+              overCommitment={overCommitment}
               reservingBookingCount={quantityData?.reservingBookingCount}
               checkedOutQuantity={quantityData?.checkedOut}
               canUpdate={canUpdateAvailability}

@@ -13,7 +13,7 @@
  */
 
 import type { ActivityAction } from "@prisma/client";
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
@@ -93,12 +93,18 @@ export async function assetChangeHistory({
  *
  * `toValue` holds the new status as a JSON string (e.g. `"ONGOING"`), so a
  * raw groupBy is used — Prisma's typed `groupBy` does not accept a Json column.
+ *
+ * @param args.bookingIds - When set, counts only these bookings' events. The
+ *   ids travel as one array parameter, so the list has no size limit.
  */
 export async function bookingStatusTransitionCounts({
   organizationId,
   from,
   to,
-}: ReportScope): Promise<Array<{ toStatus: string; count: number }>> {
+  bookingIds,
+}: ReportScope & { bookingIds?: string[] }): Promise<
+  Array<{ toStatus: string; count: number }>
+> {
   try {
     // `#>> '{}'` extracts the JSON scalar as text — works for any top-level
     // JSON primitive. Indexed on (organizationId, action, occurredAt).
@@ -111,6 +117,11 @@ export async function bookingStatusTransitionCounts({
         AND action = 'BOOKING_STATUS_CHANGED'
         AND "occurredAt" >= ${from}
         AND "occurredAt" <= ${to}
+        ${
+          bookingIds
+            ? Prisma.sql`AND "bookingId" = ANY(${bookingIds})`
+            : Prisma.empty
+        }
       GROUP BY to_status
       ORDER BY count DESC
     `;

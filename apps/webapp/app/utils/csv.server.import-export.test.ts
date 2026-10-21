@@ -18,7 +18,11 @@ import { describe, expect, it, vi } from "vitest";
 // and an unmocked client attempts `void db.$connect()` on import, which
 // surfaces as an unhandled rejection in the test run.
 vi.mock("~/database/db.server", () => ({
-  db: {},
+  db: {
+    // why: the index export reads the workspace's custom field names to keep
+    // its QR URL column off a custom field's header; none exist here.
+    customField: { findMany: vi.fn(() => Promise.resolve([])) },
+  },
 }));
 // why: csv.server.ts transitively pulls in a component that renders a
 // lottie-react animation; lottie-web crashes in the jsdom/happy-dom test
