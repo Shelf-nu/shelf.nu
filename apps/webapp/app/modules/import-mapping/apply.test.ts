@@ -3,7 +3,13 @@ import { ASSET_CSV_HEADERS } from "~/modules/asset/utils.server";
 import { extractCSVDataFromContentImport } from "~/utils/import.server";
 import { applyMapping } from "./apply";
 import type { ColumnMapping } from "./types";
-import { columnMappingListSchema, findDuplicateTargets } from "./types";
+import {
+  MAX_HEADER_LENGTH,
+  MAX_MAPPED_COLUMNS,
+  MAX_MAPPING_FIELD_LENGTH,
+  columnMappingListSchema,
+  findDuplicateTargets,
+} from "./types";
 
 /** Builds a mapping entry with no samples. */
 function col(source: string, target: ColumnMapping["target"]): ColumnMapping {
@@ -113,6 +119,22 @@ describe("columnMappingListSchema", () => {
       col("a", { kind: "customField", name: "Size, cm", type: "TEXT" }),
     ]);
     expect(result.success).toBe(false);
+  });
+
+  it("fits the largest mapping the analysis accepts in the form field limit", () => {
+    // Control characters are the worst case: each one is a six-character escape.
+    const longest = "\u0001".repeat(MAX_HEADER_LENGTH);
+    const columns = Array.from({ length: MAX_MAPPED_COLUMNS }, () =>
+      col(longest, {
+        kind: "customField",
+        name: longest,
+        type: "MULTILINE_TEXT",
+      })
+    );
+    expect(columnMappingListSchema.safeParse(columns).success).toBe(true);
+    expect(JSON.stringify(columns).length).toBeLessThanOrEqual(
+      MAX_MAPPING_FIELD_LENGTH
+    );
   });
 
   it("rejects targets outside the importer's headers", () => {

@@ -24,11 +24,19 @@ export const MAX_MAPPED_COLUMNS = 200;
 export const MAX_HEADER_LENGTH = 1000;
 
 /**
- * Largest `mapping` form field accepted: every column at the longest heading,
- * plus room for its target. Samples are not posted back.
+ * Most characters `JSON.stringify` can write for one character of a string: a
+ * control character becomes a six-character `\u00XX` escape.
+ */
+const JSON_ESCAPE_FACTOR = 6;
+
+/**
+ * Largest `mapping` form field accepted. Every mapping the analysis accepts
+ * must fit, so it allows each column the longest heading and the longest
+ * custom field name, both at the worst JSON escaping, plus room for the keys
+ * and the other target fields. Samples are not posted back.
  */
 export const MAX_MAPPING_FIELD_LENGTH =
-  MAX_MAPPED_COLUMNS * (MAX_HEADER_LENGTH + 400);
+  MAX_MAPPED_COLUMNS * (2 * JSON_ESCAPE_FACTOR * MAX_HEADER_LENGTH + 400);
 
 /** Most sample cells kept per column. */
 export const MAX_SAMPLES_PER_COLUMN = 3;
