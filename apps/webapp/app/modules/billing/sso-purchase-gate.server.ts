@@ -3,9 +3,10 @@
  *
  * Institutions that sign their members in through SSO need a guarantee that
  * those members cannot buy a subscription. A user flagged `sso` may start a
- * purchase only when they own a TEAM workspace (the workspace owner is
- * `Organization.userId`), and never for the `tier_1` plan. Everyone else is
- * unaffected.
+ * purchase only for a Team plan and only when they own a TEAM workspace (the
+ * workspace owner is `Organization.userId`). Billing their personal workspace
+ * is always refused. Everyone else is unaffected. The target is required so a
+ * caller can never fall through to an owner check by omission.
  *
  * `ssoUserMayPurchase` is the pure rule; `assertUserMayPurchase` loads the facts
  * and throws a 403 for routes to call before any checkout or trial starts.
@@ -19,66 +20,70 @@ import { ShelfError } from "~/utils/error";
 
 import { PURCHASES_UNAVAILABLE_MESSAGE } from "./purchase-copy";
 
-/** Plans a purchase can target. */
-type PurchaseTier = "tier_1" | "tier_2";
+/**
+ * Which workspace a purchase bills. "personal" is the user's own personal
+ * workspace (Plus, onboarding add-on trials); "team" is a Team plan.
+ */
+export type PurchaseTarget = "personal" | "team";
 
 /**
  * Decides whether a user may start a purchase.
  *
  * @param args.sso - Whether the user signs in through SSO
  * @param args.ownsTeamWorkspace - Whether the user owns at least one TEAM workspace
- * @param args.shelfTier - The plan being purchased, when known
- * @returns `true` for non-SSO users. For SSO users, `false` for `tier_1`,
+ * @param args.target - The workspace the purchase bills
+ * @returns `true` for non-SSO users. For SSO users, `false` for "personal",
  * otherwise whether they own a TEAM workspace.
  */
 export function ssoUserMayPurchase({
   sso,
   ownsTeamWorkspace,
-  shelfTier,
+  target,
 }: {
   sso: boolean;
   ownsTeamWorkspace: boolean;
-  shelfTier?: PurchaseTier;
+  target: PurchaseTarget;
 }): boolean {
   if (!sso) return true;
-  if (shelfTier === "tier_1") return false;
+  if (target === "personal") return false;
   return ownsTeamWorkspace;
 }
 
 /**
  * Throws unless the user may start a purchase.
  *
- * The workspace count is only queried for SSO users, since the rule ignores it
- * for everyone else.
+ * The workspace count is only queried for SSO users buying a Team plan, since
+ * the rule ignores it in every other case.
  *
  * @param args.userId - The signed-in user starting the purchase
- * @param args.shelfTier - The plan being purchased, when known
+ * @param args.target - The workspace the purchase bills
  * @throws {ShelfError} 403 (not captured) when the rule refuses the purchase
  */
 export async function assertUserMayPurchase({
   userId,
-  shelfTier,
+  target,
 }: {
   userId: string;
-  shelfTier?: PurchaseTier;
+  target: PurchaseTarget;
 }): Promise<void> {
   const { sso } = await db.user.findUniqueOrThrow({
     where: { id: userId },
     select: { sso: true },
   });
 
-  const ownsTeamWorkspace = sso
-    ? (await db.organization.count({ where: { userId, type: "TEAM" } })) > 0
-    : false;
+  const ownsTeamWorkspace =
+    sso && target === "team"
+      ? (await db.organization.count({ where: { userId, type: "TEAM" } })) > 0
+      : false;
 
-  if (!ssoUserMayPurchase({ sso, ownsTeamWorkspace, shelfTier })) {
+  if (!ssoUserMayPurchase({ sso, ownsTeamWorkspace, target })) {
     throw new ShelfError({
       cause: null,
       message: PURCHASES_UNAVAILABLE_MESSAGE,
       title: "Purchases unavailable",
       status: 403,
       shouldBeCaptured: false,
-      additionalData: { userId, shelfTier },
+      additionalData: { userId, target },
       label: "Subscription",
     });
   }

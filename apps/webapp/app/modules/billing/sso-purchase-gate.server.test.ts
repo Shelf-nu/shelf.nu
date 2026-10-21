@@ -2,7 +2,7 @@
  * SSO purchase gate.
  *
  * Pins the rule that non-SSO users always may purchase, and that SSO users may
- * only when they own a TEAM workspace and the plan is not `tier_1`.
+ * only when they buy a Team plan and own a TEAM workspace.
  *
  * @see {@link file://./sso-purchase-gate.server.ts}
  */
@@ -10,7 +10,6 @@
 import { beforeEach, describe, expect, it, vitest } from "vitest";
 import { db } from "~/database/db.server";
 
-import { PURCHASES_UNAVAILABLE_MESSAGE } from "./purchase-copy";
 import {
   assertUserMayPurchase,
   ssoUserMayPurchase,
@@ -33,41 +32,31 @@ beforeEach(() => {
 });
 
 describe("ssoUserMayPurchase", () => {
-  it.each([["tier_1" as const], ["tier_2" as const], [undefined]])(
-    "lets a non-SSO user purchase (tier %s) without owning a team workspace",
-    (shelfTier) => {
+  it.each([["personal" as const], ["team" as const]])(
+    "lets a non-SSO user purchase for target %s without owning a team workspace",
+    (target) => {
       expect(
-        ssoUserMayPurchase({
-          sso: false,
-          ownsTeamWorkspace: false,
-          shelfTier,
-        })
+        ssoUserMayPurchase({ sso: false, ownsTeamWorkspace: false, target })
       ).toBe(true);
     }
   );
 
-  it("lets an SSO team owner purchase tier_2", () => {
+  it("lets an SSO team owner purchase a team plan", () => {
     expect(
       ssoUserMayPurchase({
         sso: true,
         ownsTeamWorkspace: true,
-        shelfTier: "tier_2",
+        target: "team",
       })
     ).toBe(true);
   });
 
-  it("lets an SSO team owner purchase when the tier is unspecified", () => {
-    expect(ssoUserMayPurchase({ sso: true, ownsTeamWorkspace: true })).toBe(
-      true
-    );
-  });
-
-  it("refuses tier_1 to an SSO team owner", () => {
+  it("refuses a personal purchase to an SSO team owner", () => {
     expect(
       ssoUserMayPurchase({
         sso: true,
         ownsTeamWorkspace: true,
-        shelfTier: "tier_1",
+        target: "personal",
       })
     ).toBe(false);
   });
@@ -77,28 +66,31 @@ describe("ssoUserMayPurchase", () => {
       ssoUserMayPurchase({
         sso: true,
         ownsTeamWorkspace: false,
-        shelfTier: "tier_2",
+        target: "team",
       })
     ).toBe(false);
   });
 });
 
 describe("assertUserMayPurchase", () => {
-  it("resolves for a non-SSO user without counting workspaces", async () => {
-    findUserMock.mockResolvedValue({ sso: false });
+  it.each([["personal" as const], ["team" as const]])(
+    "resolves for a non-SSO user (target %s) without counting workspaces",
+    async (target) => {
+      findUserMock.mockResolvedValue({ sso: false });
 
-    await expect(
-      assertUserMayPurchase({ userId: "user-1" })
-    ).resolves.toBeUndefined();
-    expect(countMock).not.toHaveBeenCalled();
-  });
+      await expect(
+        assertUserMayPurchase({ userId: "user-1", target })
+      ).resolves.toBeUndefined();
+      expect(countMock).not.toHaveBeenCalled();
+    }
+  );
 
-  it("resolves for an SSO user who owns a TEAM workspace", async () => {
+  it("resolves for an SSO user who owns a TEAM workspace buying a team plan", async () => {
     findUserMock.mockResolvedValue({ sso: true });
     countMock.mockResolvedValue(1);
 
     await expect(
-      assertUserMayPurchase({ userId: "user-1", shelfTier: "tier_2" })
+      assertUserMayPurchase({ userId: "user-1", target: "team" })
     ).resolves.toBeUndefined();
     expect(countMock).toHaveBeenCalledWith({
       where: { userId: "user-1", type: "TEAM" },
@@ -110,11 +102,22 @@ describe("assertUserMayPurchase", () => {
     countMock.mockResolvedValue(0);
 
     await expect(
-      assertUserMayPurchase({ userId: "user-1", shelfTier: "tier_2" })
+      assertUserMayPurchase({ userId: "user-1", target: "team" })
     ).rejects.toMatchObject({
       status: 403,
       title: "Purchases unavailable",
-      message: PURCHASES_UNAVAILABLE_MESSAGE,
+      message:
+        "Billing for single sign-on accounts is managed by your workspace owner.",
     });
+  });
+
+  it("rejects a personal purchase by an SSO team owner without counting", async () => {
+    findUserMock.mockResolvedValue({ sso: true });
+    countMock.mockResolvedValue(1);
+
+    await expect(
+      assertUserMayPurchase({ userId: "user-1", target: "personal" })
+    ).rejects.toMatchObject({ status: 403 });
+    expect(countMock).not.toHaveBeenCalled();
   });
 });
