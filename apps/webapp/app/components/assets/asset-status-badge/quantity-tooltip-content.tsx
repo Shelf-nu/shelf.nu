@@ -216,9 +216,9 @@ export function QuantityTooltipContent({ data }: { data: QuantityBreakdown }) {
      * a SUM ACROSS BOOKINGS while `total` is a stock level, so the comparison
      * is a category error the moment an asset is busy. A cable booked every
      * week for a year reads "500 reserved" against a pool of 10 and nothing is
-     * wrong. The card used to render "500 of 10 reserved", then "10 available"
-     * directly beneath it: two statements that cannot both be true in any plain
-     * reading, and an alarm where there was no problem.
+     * wrong, so "500 of 10 reserved" above "10 available" would be two
+     * statements that cannot both be true, and an alarm where there is no
+     * problem.
      *
      * Above the pool, state the aggregation instead of the false comparison.
      * Genuine over-commitment is a PER-BOOKING fact and is flagged on the
@@ -226,10 +226,10 @@ export function QuantityTooltipContent({ data }: { data: QuantityBreakdown }) {
      */
     const exceedsPool = headlineCount > total;
     /**
-     * The assets index sends totals but no slices (see `StatusColumn`), so
-     * `bookingCount` is 0 there. Saying "across 0 bookings" would be worse than
-     * saying nothing, drop to the bare count and let the date line carry the
-     * "these are in the future" signal.
+     * The assets index sends totals first and its slices arrive with the lazy
+     * fetch (see `StatusColumn`), so `bookingCount` can be 0 there. Saying
+     * "across 0 bookings" would be worse than saying nothing, drop to the bare
+     * count and let the date line carry the "these are in the future" signal.
      */
     const headline = !exceedsPool
       ? `${headlineCount} of ${total} ${headlineLabel}`

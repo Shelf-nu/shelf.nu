@@ -242,10 +242,9 @@ export type AdvancedIndexAsset = Pick<
   /** Units that booking asks for, so the hover can say so beside its name. */
   topBookingUnits: number | null;
   /**
-   * Derived pool verdict powering the `Stock status` column. Computed in SQL as
-   * the twin of `classifyStockStatus` (`@shelf/quantity-control`), which stays
-   * the tested source of truth and feeds mobile, the two are pinned to the
-   * same case matrix. `null` for INDIVIDUAL assets.
+   * Derived pool verdict powering the `Stock status` column, computed in SQL
+   * by `POOL_STOCK_STATUS_EXPR` (`query.server.ts`), which is its only source.
+   * `null` for INDIVIDUAL assets.
    */
   stockStatus: StockStatus | null;
   assetModelId?: string | null;

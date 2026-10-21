@@ -105,8 +105,8 @@ export const fixedFields = [
   "upcomingBookings",
   "assetModel",
   // Quantity-pool columns. All three are derived per row rather than stored:
-  // `available` and `reserved` are aggregates, `stockStatus` is the verdict
-  // from `classifyStockStatus` (@shelf/quantity-control). They render empty for
+  // `available` and `reserved` are aggregates, `stockStatus` is the SQL verdict
+  // `POOL_STOCK_STATUS_EXPR` (modules/asset/query.server.ts). They render empty for
   // INDIVIDUAL assets, exactly as `quantity` already does.
   "available",
   "reserved",
@@ -420,8 +420,7 @@ export function insertMissingDefaultColumns(
 
   return toInsert.reduce<Column[]>((acc, field) => {
     const position =
-      positionInQuantityBlock(acc, field.name) ??
-      afterStatus(acc, field.name);
+      positionInQuantityBlock(acc, field.name) ?? afterStatus(acc, field.name);
 
     if (position === undefined) {
       const maxPosition = acc.reduce(

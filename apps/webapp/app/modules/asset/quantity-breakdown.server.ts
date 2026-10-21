@@ -109,27 +109,22 @@ export async function getAssetQuantityRows(
     });
   }
 
-  const stillOutByBooking = await computeCheckedOutByBookingForAsset(
-    db,
-    asset.id,
-    organizationId
-  );
-
-  // The engine's figure, so "free right now" in the tooltip matches the asset
-  // page and the assets index even when units sit in kits.
-  const freeNow =
-    asset.type === "QUANTITY_TRACKED"
-      ? Math.max(
-          0,
-          (
-            await getAssetAvailabilityBatch([asset.id], {
-              organizationId,
-              window: null,
-              db: db as unknown as AvailabilityBatchClient,
-            })
-          ).get(asset.id)?.physicalAvailable ?? 0
-        )
-      : null;
+  // Independent reads. Free now is the engine's figure, so "free right now"
+  // in the tooltip matches the asset page and the assets index even when
+  // units sit in kits.
+  const [stillOutByBooking, availability] = await Promise.all([
+    computeCheckedOutByBookingForAsset(db, asset.id, organizationId),
+    isQuantityTracked(asset)
+      ? getAssetAvailabilityBatch([asset.id], {
+          organizationId,
+          window: null,
+          db: db as unknown as AvailabilityBatchClient,
+        })
+      : null,
+  ]);
+  const freeNow = availability
+    ? Math.max(0, availability.get(asset.id)?.physicalAvailable ?? 0)
+    : null;
 
   return {
     ...asset,

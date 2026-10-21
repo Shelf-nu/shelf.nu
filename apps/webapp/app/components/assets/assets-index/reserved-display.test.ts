@@ -3,8 +3,8 @@
  *
  * The cases that matter are the healthy busy rows: many upcoming bookings whose
  * SUM dwarfs the pool while they never overlap, and a pool that is out today
- * and booked again after it returns. Both are normal data, and earlier versions
- * of this cell flagged both as shortages.
+ * and booked again after it returns. Both are normal data and neither is a
+ * shortage.
  *
  * @see {@link file://./reserved-display.ts}
  */

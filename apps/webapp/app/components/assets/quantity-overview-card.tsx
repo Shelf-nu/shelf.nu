@@ -109,9 +109,8 @@ export interface QuantityOverviewCardProps {
    */
   reservedQuantity?: number;
   /**
-   * Set when the pool is promised beyond its size. The card previously listed
-   * four numbers and never said the asset was over-committed, so the page you
-   * land on to FIX the problem was the one page that did not mention it.
+   * Set when the pool is promised beyond its size. The card states the
+   * shortfall itself, because this page is where someone lands to fix it.
    */
   overCommitment?: {
     shortBy: number;

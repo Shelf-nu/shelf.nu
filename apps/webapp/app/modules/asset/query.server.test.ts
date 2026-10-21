@@ -14,6 +14,8 @@ import {
   generateWhereClause,
   parseSortingOptions,
   POOL_AGGREGATE_JOIN,
+  POOL_AVAILABLE_EXPR,
+  POOL_STOCK_STATUS_EXPR,
 } from "./query.server";
 
 // why: mocking location descendants to avoid database queries during tests
@@ -2033,5 +2035,154 @@ describe("assetReturnFragment argument count", () => {
     for (const count of counts) {
       expect(count).toBeLessThanOrEqual(100);
     }
+  });
+});
+
+describe("parseSortingOptions - pool columns", () => {
+  it.each(["asc", "desc"])(
+    "sorts Stock status %s by severity, with individual assets last",
+    (direction) => {
+      const { orderByInner } = parseSortingOptions([
+        `stockStatus:${direction}`,
+      ]);
+      const sql = orderByInner.replace(/\s+/g, " ");
+
+      expect(sql).toContain('CASE "assetStockStatus"');
+      // Worst first: Short, then None free, Low, Enough, No threshold
+      expect(sql).toContain("WHEN 'SHORT' THEN 0");
+      expect(sql).toContain("WHEN 'NONE_FREE' THEN 1");
+      expect(sql).toContain("WHEN 'LOW' THEN 2");
+      expect(sql).toContain("WHEN 'ENOUGH' THEN 3");
+      expect(sql).toContain("WHEN 'NO_THRESHOLD' THEN 4");
+      expect(sql).toMatch(new RegExp(`END ${direction} NULLS LAST`));
+    }
+  );
+
+  it.each([
+    ["available", "assetAvailable"],
+    ["reserved", "assetReservedDisplay"],
+  ])(
+    "sorts %s by its pool alias, with individual assets last",
+    (column, alias) => {
+      expect(parseSortingOptions([`${column}:asc`]).orderByInner).toContain(
+        `"${alias}" asc NULLS LAST`
+      );
+      expect(parseSortingOptions([`${column}:desc`]).orderByInner).toContain(
+        `"${alias}" desc NULLS LAST`
+      );
+    }
+  );
+});
+
+describe("generateWhereClause - Stock status filter", () => {
+  /** A Stock status filter with the given operator and value. */
+  function stockStatusFilter(
+    operator: Filter["operator"],
+    value: string
+  ): Filter {
+    return { name: "stockStatus", type: "enum", operator, value };
+  }
+
+  it("matches one verdict with 'is'", () => {
+    const result = generateWhereClause("org-1", null, [
+      stockStatusFilter("is", "LOW"),
+    ]);
+    const sql = getSqlString(result);
+
+    expect(sql).toContain("THEN 'SHORT'");
+    expect(sql).toMatch(/END\) = \?/);
+    expect(result.values).toContain("LOW");
+  });
+
+  it("keeps individual assets out of 'is not', since they have no verdict", () => {
+    const result = generateWhereClause("org-1", null, [
+      stockStatusFilter("isNot", "ENOUGH"),
+    ]);
+    const sql = getSqlString(result);
+
+    expect(sql).toMatch(/END\) IS NOT NULL AND \(CASE/);
+    expect(sql).toMatch(/END\) != \?/);
+    expect(result.values).toContain("ENOUGH");
+  });
+
+  it("matches any of several verdicts with 'contains any'", () => {
+    const result = generateWhereClause("org-1", null, [
+      stockStatusFilter("containsAny", "SHORT, NONE_FREE"),
+    ]);
+    const sql = getSqlString(result);
+
+    expect(sql).toMatch(/END\) = ANY\(ARRAY\[/);
+    expect(result.values).toEqual(
+      expect.arrayContaining(["SHORT", "NONE_FREE"])
+    );
+  });
+
+  it("leaves the clause unchanged for an empty 'contains any'", () => {
+    const base = generateWhereClause("org-1", null, []);
+    const result = generateWhereClause("org-1", null, [
+      stockStatusFilter("containsAny", ""),
+    ]);
+
+    expect(getSqlString(result)).toBe(getSqlString(base));
+    expect(result.values).toEqual(base.values);
+  });
+});
+
+describe("generateWhereClause - Reserved filter", () => {
+  it("filters Reserved through the same expression the column shows", () => {
+    const filter: Filter = {
+      name: "reserved",
+      type: "number",
+      operator: "gt",
+      value: 2,
+    };
+    const result = generateWhereClause("org-1", null, [filter]);
+
+    expect(getSqlString(result)).toContain(
+      `(CASE WHEN a.type = 'INDIVIDUAL' THEN pool.reserved_all ELSE pool.reserved END)::float > ?`
+    );
+    expect(result.values).toContain(2);
+  });
+});
+
+describe("POOL_STOCK_STATUS_EXPR", () => {
+  /** The expression with whitespace collapsed, for order assertions. */
+  const sql = POOL_STOCK_STATUS_EXPR.sql.replace(/\s+/g, " ");
+
+  it("judges the verdicts most urgent first", () => {
+    // SHORT before NONE_FREE: an over-committed pool is usually also empty,
+    // and the over-commitment is what needs acting on. NO_THRESHOLD before
+    // ENOUGH: a pool with no floor must never read as fine.
+    const order = [
+      "'SHORT'",
+      "'NONE_FREE'",
+      "'LOW'",
+      "'NO_THRESHOLD'",
+      "'ENOUGH'",
+    ].map((verdict) => sql.indexOf(verdict));
+
+    expect(order.every((at) => at >= 0)).toBe(true);
+    expect([...order].sort((x, y) => x - y)).toEqual(order);
+  });
+
+  it("gives individually-tracked assets no verdict", () => {
+    expect(sql).toContain("WHEN a.type <> 'QUANTITY_TRACKED' THEN NULL");
+  });
+
+  it("judges SHORT on custody, kits and the booking peak against the total", () => {
+    expect(sql).toContain(
+      "WHEN (pool.in_custody + pool.in_kits + pool.peak_booked) > COALESCE(a.quantity, 0) THEN 'SHORT'"
+    );
+  });
+
+  it("uses the same Free now arithmetic as the Free now column", () => {
+    const freeNow =
+      "GREATEST(COALESCE(a.quantity, 0) - pool.in_custody - pool.in_kits - pool.checked_out, 0)";
+
+    expect(POOL_AVAILABLE_EXPR.sql).toContain(freeNow);
+    expect(sql).toContain(`WHEN ${freeNow} <= 0 THEN 'NONE_FREE'`);
+    expect(sql).toContain(
+      `WHEN a."minQuantity" IS NOT NULL AND ${freeNow} <= a."minQuantity" THEN 'LOW'`
+    );
   });
 });

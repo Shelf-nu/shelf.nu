@@ -1,11 +1,9 @@
 /**
  * Bulk "Set min quantity" dialog.
  *
- * Sets `Asset.minQuantity` across a selection. This is the cure for the state
- * the Stock status column spends most of its time reporting: measured on a live
- * workspace, 10 of 12 quantity assets had no reorder point, so the column reads
- * blank and says, correctly, that we have no opinion. Without a bulk way to fix
- * that, the column diagnoses a problem the product cannot treat.
+ * Sets `Asset.minQuantity` across a selection. Most quantity assets have no
+ * min quantity, so the Stock status column reads blank for them until one is
+ * set, and setting it one asset at a time does not scale.
  *
  * Clearing is supported by submitting an empty field, undoing a threshold you
  * set by mistake should not require editing assets one at a time either.
@@ -45,6 +43,15 @@ export const BulkSetReorderPointSchema = z.object({
   ),
 });
 
+/**
+ * Bulk dialog that sets or clears the min quantity on the selected assets.
+ *
+ * Reads the selection from the bulk-update dialog atoms and posts to
+ * `/api/assets/bulk-update-reorder-point`; a blank field clears the value.
+ * Takes no props.
+ *
+ * @returns The dialog content for the assets index bulk actions menu.
+ */
 export default function BulkSetReorderPointDialog() {
   const zo = useZorm("BulkSetReorderPoint", BulkSetReorderPointSchema);
 

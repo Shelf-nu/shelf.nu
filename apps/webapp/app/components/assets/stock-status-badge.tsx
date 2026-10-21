@@ -2,8 +2,8 @@
  * Stock Status Badge
  *
  * Renders the assets-index `Stock status` column: the derived verdict for a
- * QUANTITY_TRACKED asset's pool, from `classifyStockStatus`
- * (`@shelf/quantity-control`).
+ * QUANTITY_TRACKED asset's pool, computed in SQL by `POOL_STOCK_STATUS_EXPR`
+ * (`~/modules/asset/query.server`) from the values in `@shelf/quantity-control`.
  *
  * Two deliberate rendering rules live here rather than at the call site, so
  * every surface that shows this verdict agrees:
@@ -253,8 +253,8 @@ function StockStatusDetail({
   /**
    * The one-line reason, quoting the comparison the verdict actually made.
    * `SHORT` quotes custody + kits + the booking PEAK rather than the reserved
-   * total, because that is the figure `classifyStockStatus` used, so it is
-   * read back through the same helper rather than re-added by hand here.
+   * total, because that is the figure the verdict judges, so it is read back
+   * through the shared helper rather than re-added by hand here.
    */
   const reason =
     status === "SHORT"

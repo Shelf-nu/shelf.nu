@@ -568,7 +568,8 @@ export const CONSUMPTION_TYPE_ADJECTIVES = Object.freeze({
 });
 
 // Stock-status verdicts for the assets-index `Stock status` column. Derived
-// per QUANTITY_TRACKED asset by `classifyStockStatus` in
+// per QUANTITY_TRACKED asset by `POOL_STOCK_STATUS_EXPR` in the webapp's
+// modules/asset/query.server.ts, over the `STOCK_STATUSES` values in
 // @shelf/quantity-control; INDIVIDUAL assets get no verdict and render blank.
 //
 // Deliberately NOT stock-shop words. Shelf serves two cohorts and one of them

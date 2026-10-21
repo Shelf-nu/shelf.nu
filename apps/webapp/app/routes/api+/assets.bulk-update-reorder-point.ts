@@ -27,6 +27,17 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
+/**
+ * Sets or clears `minQuantity` on the selected quantity-tracked assets.
+ *
+ * Expects `assetIds` (or the select-all key plus `currentSearchParams`) and
+ * `minQuantity`, where a blank value clears it. Individually-tracked and
+ * archived assets are never written.
+ *
+ * @returns `{ success: true }` and a notification stating how many assets
+ *   changed, or an error payload with the refusal's status.
+ * @throws Never; every failure is returned as an error response.
+ */
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const userId = authSession.userId;

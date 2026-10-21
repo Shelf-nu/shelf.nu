@@ -12,8 +12,8 @@
  * Pure and separate from the card so the rule is unit-testable, and so both
  * surfaces state the same shortfall. It defers to `committedUnits` from
  * `@shelf/quantity-control` rather than re-adding the claims by hand, the same
- * helper `classifyStockStatus` uses, so the page and the index can never quote
- * different numbers for the same asset.
+ * sum the Stock status verdict judges, so the page and the index can never
+ * quote different numbers for the same asset.
  *
  * The booking figure is the PEAK, not the largest booking: the most units owed
  * to bookings at any single instant from now on, which is what

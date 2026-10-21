@@ -1,62 +1,48 @@
 /**
- * `@shelf/quantity-control`, stock-status classification.
+ * `@shelf/quantity-control`, stock-status vocabulary and arithmetic.
  *
- * The single derived verdict behind the assets index's `Stock status` column:
+ * The values and figures behind the assets index's `Stock status` column:
  * "for this pool of units, can I hand one out today, and is anything promised
- * beyond what the workspace owns?" One value per QUANTITY_TRACKED asset,
- * computed from figures the caller has already resolved.
+ * beyond what the workspace owns?" One verdict per QUANTITY_TRACKED asset.
  *
- * ## Why this exists as a derived enum rather than more filters
+ * The verdict itself is computed in SQL (`POOL_STOCK_STATUS_EXPR` in the
+ * webapp's `modules/asset/query.server.ts`), because the list filters and
+ * sorts on it in the database. This module owns what both apps share with
+ * that expression: the set of verdicts and their severity order, and the
+ * shortfall arithmetic the badge and the Reserved cell print.
  *
- * The advanced index derives its filters from its COLUMNS, and a filter can
- * only compare a field to a typed-in literal, there is no field-to-field
- * operator, so "available below its own minQuantity" is not expressible as a
- * user-authored filter. The webapp worked around that once already with the
- * standalone `lowStockOnly` URL param and its bespoke SQL branch in
- * `generateWhereClause`. Collapsing the whole question into ONE enum column
- * means the remaining states (short / none free / no threshold) arrive through
- * the normal column→filter→sort path instead of three more bespoke params, and
- * they become visible in the row rather than only findable by someone who
- * already suspects the problem.
+ * ## The verdicts, most urgent first
+ *
+ * 1. `SHORT`: at some instant ahead, more units are owed than exist
+ *    ({@link shortfallUnits} > 0). Judged before `NONE_FREE` because an
+ *    over-committed pool is usually also empty, and "you promised more than
+ *    you have" is the actionable half. The only verdict that needs no floor.
+ * 2. `NONE_FREE`: nothing to hand over today.
+ * 3. `LOW`: free units at or below the floor (`isLowStock`).
+ * 4. `NO_THRESHOLD`: free stock, but no floor to judge it against. A
+ *    first-class verdict, not a fallback: rendered as an empty cell so it is
+ *    never read as "you're fine".
+ * 5. `ENOUGH`: above a floor somebody drew.
  *
  * ## The figures, and where each one is measured
  *
  * Every input mirrors the availability primitive in the webapp
  * (`getAssetAvailability` / `getAssetAvailabilityBatch`), which is what the
  * booking engine itself consults. Two rules from that primitive are
- * load-bearing here and easy to get wrong:
+ * load-bearing:
  *
  * - **Units inside a kit are counted once, as `inKits`.** A kit in custody
  *   writes custody rows for its members, and a booked kit writes booking rows
  *   for its members; both are the SAME units `inKits` already holds. Callers
- *   must pass operator custody only and standalone booking slices only.
- * - **Bookings are intervals, not a sum.** Two bookings that never overlap
- *   never compete for the same units, and a booking that is out today is not
- *   competing with one that starts after it returns. `peakBooked` is the most
- *   units owed to bookings at any single instant from now on, the same
+ *   pass operator custody only and standalone booking slices only.
+ * - **Bookings are intervals, not a sum.** `peakBooked` is the most units
+ *   owed to bookings at any single instant from now on, the same
  *   peak-concurrency sweep the booking engine runs before it accepts a
  *   reservation, so `SHORT` fires exactly when that engine would refuse.
  *
- * ## Threshold semantics
- *
- * `LOW` reuses {@link isLowStock} verbatim, so the badge can never disagree
- * with the low-stock alert, provided both are fed the same `available` figure
- * (the webapp's `physicalAvailable`).
- *
- * ## `NO_THRESHOLD` is a first-class verdict, not a fallback
- *
- * A null `minQuantity` is the common state in real workspaces: nothing in the
- * product requires one. Collapsing it into `ENOUGH` would print a confident
- * "you're fine" on rows where no floor was ever drawn. Callers render it as an
- * empty cell rather than a badge, so it cannot be read as a level, while still
- * being filterable as the setup worklist.
- *
- * @see {@link file://./low-stock.ts}, the threshold predicate this delegates to.
  * @see {@link file://./availability.ts}, `peakConcurrent`, the sweep behind `peakBooked`.
  * @see {@link file://../../labels/index.js}, the user-facing strings.
  */
-
-import { isLowStock } from "./low-stock";
 
 /**
  * Every stock-status verdict, ordered MOST to LEAST urgent. The union type
@@ -167,53 +153,4 @@ export function shortfallUnits(a: {
   inKits: number;
 }): number {
   return Math.max(0, committedUnits(a) - a.total);
-}
-
-/**
- * Classifies one QUANTITY_TRACKED asset's pool.
- *
- * Evaluated most-urgent first, and the order is load-bearing:
- *
- * 1. `SHORT`, at some instant ahead, more units are owed than exist. Checked
- *    BEFORE `NONE_FREE` because an over-committed pool is usually also empty,
- *    and "you promised more than you have" is the actionable half of that. It
- *    is the only verdict that fires without a threshold being set, because it
- *    is an integrity problem rather than a stock level, and for booking-led
- *    workspaces it is a double-booking.
- * 2. `NONE_FREE`, nothing to hand over today. Named for what is true of both a
- *    sold-out consumable and a fully checked-out equipment pool, without
- *    prescribing the opposite actions those two need (buy more vs. wait).
- * 3. `LOW`, at or below the floor, via {@link isLowStock}. Self-gating: with
- *    no `minQuantity` it cannot fire, so workspaces that never set thresholds
- *    never see it.
- * 4. `NO_THRESHOLD`, free stock, but no floor to judge it against.
- * 5. `ENOUGH`, above a floor somebody actually drew.
- *
- * @param a - Resolved figures for the asset (see {@link StockStatusInputs}).
- * @returns The verdict. Callers pass only QUANTITY_TRACKED assets; INDIVIDUAL
- *   assets have no pool and should render an empty cell without calling this.
- */
-export function classifyStockStatus(a: StockStatusInputs): StockStatus {
-  if (committedUnits(a) > a.total) return "SHORT";
-  if (a.available <= 0) return "NONE_FREE";
-  if (isLowStock({ available: a.available, minQuantity: a.minQuantity })) {
-    return "LOW";
-  }
-  if (a.minQuantity == null) return "NO_THRESHOLD";
-  return "ENOUGH";
-}
-
-/**
- * Whether a verdict should draw attention, used to decide the row highlight
- * and which footer counters are worth rendering.
- *
- * `NO_THRESHOLD` is deliberately NOT actionable: for a stock account it is a
- * setup worklist, but for an equipment rental account it is the correct and
- * permanent state, and painting it as a problem would nag that cohort forever.
- *
- * @param s - A verdict, or `null` for an INDIVIDUAL asset.
- * @returns `true` for `SHORT`, `NONE_FREE` and `LOW`.
- */
-export function isActionableStockStatus(s: StockStatus | null): boolean {
-  return s === "SHORT" || s === "NONE_FREE" || s === "LOW";
 }

@@ -47,10 +47,10 @@ function labelFor(input: QuantityAwareAsset): string | null {
 
 describe("quantity pool status label", () => {
   it("says Partially checked out while units remain on the shelf", () => {
-    // why: THE regression. 5 out on a booking, 5 reserved for next month, 10
-    // owned. The reservation-aware number hits zero and the badge used to read
-    // "Checked out", while five units were physically present, and the
-    // Free now column on the same row correctly said 5.
+    // why: 5 out on a booking, 5 reserved for next month, 10 owned. The
+    // reservation-aware number hits zero, but five units are physically
+    // present, so the badge must not read "Checked out" while the Free now
+    // column on the same row says 5.
     const label = labelFor(
       asset({
         quantity: 10,
@@ -134,7 +134,7 @@ describe("quantity pool status label", () => {
 
   it("never reports a negative free-now figure", () => {
     // why: the tooltip footer renders this number. `available` goes negative
-    // once commitments exceed the pool and used to print "-2 free right now".
+    // once commitments exceed the pool, and "-2 free right now" is never true.
     const data = getQuantityData(
       asset({ quantity: 10, bookingAssets: [slice(12, "RESERVED")] })
     );

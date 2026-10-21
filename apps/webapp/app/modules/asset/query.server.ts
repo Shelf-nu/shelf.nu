@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import type { CustomFieldType } from "@prisma/client";
 
 import type { BarcodeType } from "@prisma/client";
+import { STOCK_STATUSES, STOCK_STATUS_SEVERITY } from "@shelf/quantity-control";
 
 import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
 import { normalizeBarcodeValue } from "~/modules/barcode/validation";
@@ -95,22 +96,15 @@ export function generateWhereClause(
   }
 
   if (lowStockOnly) {
-    // The "Low stock only" quick toggle, now resolved through the SAME verdict
-    // the Stock status column and the low-stock email use.
+    // The "Low stock only" quick toggle. It compares Free now, not the total,
+    // with the threshold, so it finds exactly the rows the low-stock email is
+    // about: an asset with 6 total, 2 in custody and a threshold of 5 is low.
     //
-    // It used to compare TOTAL quantity against the threshold, while the alert
-    // (`isLowStock`) compares AVAILABLE. Those disagree the moment any unit is
-    // in custody: an asset with 6 total, 2 in custody and a threshold of 5 is
-    // low by the alert's reckoning (4 <= 5) and NOT low by the filter's
-    // (6 > 5), so the email fired and this toggle could not find the row.
-    // Expressed as the ALERT's predicate (`isLowStock`: a threshold is set and
-    // available is at or below it) rather than as `verdict = 'LOW'`.
-    //
-    // The verdict is a priority ladder, so an asset with a threshold that has
-    // run out entirely reads NONE_FREE, not LOW, matching only 'LOW' silently
-    // dropped the most urgent rows from a toggle whose own label reads "at or
-    // below reorder threshold". Zero is at or below any threshold, and the
-    // alert emails about it, so the toggle must find it.
+    // Expressed as the alert's predicate (`isLowStock`: a threshold is set and
+    // Free now is at or below it), never as `verdict = 'LOW'`. The verdict is a
+    // priority ladder, so a pool that has run out entirely reads NONE_FREE (or
+    // SHORT), and the toggle must still find it: zero is at or below any
+    // threshold.
     whereClause = Prisma.sql`${whereClause} AND a."type" = 'QUANTITY_TRACKED' AND a."minQuantity" IS NOT NULL AND ${POOL_AVAILABLE_EXPR} <= a."minQuantity"`;
   }
 
@@ -1773,21 +1767,14 @@ export function parseSortingOptions(sortBy: string[]): {
       //
       // Stock status sorts by SEVERITY, not alphabetically, "worst first" is
       // the only ordering anyone wants from it, and `Enough` < `Low` < `None
-      // free` < `Short` alphabetically is meaningless. The ranks mirror
+      // free` < `Short` alphabetically is meaningless. The ranks come from
       // STOCK_STATUS_SEVERITY in @shelf/quantity-control. NULL (individually
       // tracked) sorts last in both directions via NULLS LAST, so an ascending
       // "worst first" never buries real problems under rows that have no
       // verdict.
       if (field.name === "stockStatus") {
         orderByParts.push(
-          `CASE "assetStockStatus"
-             WHEN 'SHORT' THEN 0
-             WHEN 'NONE_FREE' THEN 1
-             WHEN 'LOW' THEN 2
-             WHEN 'ENOUGH' THEN 3
-             WHEN 'NO_THRESHOLD' THEN 4
-             ELSE NULL
-           END ${field.direction} NULLS LAST`
+          `CASE "assetStockStatus" ${STOCK_STATUS_SORT_RANKS} ELSE NULL END ${field.direction} NULLS LAST`
         );
       } else {
         const alias =
@@ -2714,6 +2701,14 @@ export const POOL_AGGREGATE_JOIN = Prisma.sql`
   ) pool ON TRUE`;
 
 /**
+ * Free now as a bare SQL expression over the `pool` LATERAL: total minus
+ * operator custody, kit units and units out, never below 0. Shared by
+ * {@link POOL_AVAILABLE_EXPR} and {@link POOL_STOCK_STATUS_EXPR} so the column
+ * and the verdict cannot use different arithmetic.
+ */
+const POOL_FREE_NOW_SQL = `GREATEST(COALESCE(a.quantity, 0) - pool.in_custody - pool.in_kits - pool.checked_out, 0)`;
+
+/**
  * Units free to hand over right now. The ONE definition, referenced by the
  * projection, the `available` filter and the `available` sort.
  *
@@ -2724,28 +2719,44 @@ export const POOL_AGGREGATE_JOIN = Prisma.sql`
  * then leaves it out, the sort puts it last, and the projection matches the
  * dash its cell shows.
  */
-const POOL_AVAILABLE_EXPR = Prisma.raw(
-  `CASE WHEN a."type" = 'QUANTITY_TRACKED' THEN GREATEST(COALESCE(a.quantity, 0) - pool.in_custody - pool.in_kits - pool.checked_out, 0) END`
+export const POOL_AVAILABLE_EXPR = Prisma.raw(
+  `CASE WHEN a."type" = 'QUANTITY_TRACKED' THEN ${POOL_FREE_NOW_SQL} END`
 );
 
 /**
- * The stock verdict. SQL twin of `classifyStockStatus`
- * (`@shelf/quantity-control`), which stays the tested source of truth and feeds
- * mobile. Precedence is load-bearing and identical in both; the pair is pinned
- * to one shared case matrix.
+ * The stock verdict, the only place it is computed. Evaluated most urgent
+ * first, and the order is load-bearing:
+ *
+ * 1. `SHORT`: custody + kits + the booking peak exceed the total. Before
+ *    `NONE_FREE` because an over-committed pool is usually also empty, and
+ *    the over-commitment is the actionable half. Needs no threshold.
+ * 2. `NONE_FREE`: Free now is 0.
+ * 3. `LOW`: a threshold is set and Free now is at or below it.
+ * 4. `NO_THRESHOLD`: no threshold to judge against.
+ * 5. `ENOUGH`: above a threshold somebody set.
+ *
+ * NULL for individually-tracked assets. The values are `STOCK_STATUSES` from
+ * `@shelf/quantity-control`; pinned in `query.server.test.ts`.
  */
-const POOL_STOCK_STATUS_EXPR = Prisma.raw(`CASE
+export const POOL_STOCK_STATUS_EXPR = Prisma.raw(`CASE
     WHEN a.type <> 'QUANTITY_TRACKED' THEN NULL
     WHEN (pool.in_custody + pool.in_kits + pool.peak_booked)
          > COALESCE(a.quantity, 0) THEN 'SHORT'
-    WHEN GREATEST(COALESCE(a.quantity, 0) - pool.in_custody - pool.in_kits - pool.checked_out, 0) <= 0
-         THEN 'NONE_FREE'
+    WHEN ${POOL_FREE_NOW_SQL} <= 0 THEN 'NONE_FREE'
     WHEN a."minQuantity" IS NOT NULL
-         AND GREATEST(COALESCE(a.quantity, 0) - pool.in_custody - pool.in_kits - pool.checked_out, 0)
-             <= a."minQuantity" THEN 'LOW'
+         AND ${POOL_FREE_NOW_SQL} <= a."minQuantity" THEN 'LOW'
     WHEN a."minQuantity" IS NULL THEN 'NO_THRESHOLD'
     ELSE 'ENOUGH'
   END`);
+
+/**
+ * `WHEN 'SHORT' THEN 0 ...` for the Stock status sort, ranked by
+ * `STOCK_STATUS_SEVERITY` so "worst first" follows the shared order. The
+ * values are fixed constants, never user input.
+ */
+const STOCK_STATUS_SORT_RANKS = STOCK_STATUSES.map(
+  (status) => `WHEN '${status}' THEN ${STOCK_STATUS_SEVERITY[status]}`
+).join(" ");
 
 /**
  * Units promised to upcoming bookings. A pool counts standalone slices only
@@ -3217,7 +3228,7 @@ export const POOL_COLUMN_NAMES = [
  * @param sortBy - Raw sort specs (`field:direction[:fieldType]`).
  * @returns `true` when a pool column is filtered or sorted on.
  */
-function detectPoolKeys(filters: Filter[], sortBy: string[]): boolean {
+export function detectPoolKeys(filters: Filter[], sortBy: string[]): boolean {
   const names: string[] = [...POOL_COLUMN_NAMES];
   return (
     filters.some((f) => names.includes(f.name)) ||
