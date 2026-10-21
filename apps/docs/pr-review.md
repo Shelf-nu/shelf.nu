@@ -68,7 +68,10 @@ read your working tree. A detached HEAD at the PR's head commit is fine.
    one-line reason; say "restore D2" to bring one back. Pre-existing nits are
    not listed.
 
-After the report you can say "fix 1-4", "restore D2", or "prove 3". `prove N`
+After the report the skill asks what to do next in a picker: which findings to
+fix (must + should, everything, or a custom range typed under "Other"), and
+which of prove, restore and post to run. You can also type "fix 1-4",
+"restore D2", or "prove 3". `prove N`
 is the one exception to read-only: it writes a throwaway test under
 `apps/webapp/test/` that fails if finding N is real, runs only that file
 (`pnpm webapp:test -- --run <file>`), shows the output, and says proven, not

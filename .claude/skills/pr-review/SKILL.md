@@ -220,7 +220,27 @@ Rules:
 
 ## After the report
 
-Stop. Do not fix anything until the user asks.
+Do not fix anything until the user picks it. Right after printing the report,
+ask with the `AskUserQuestion` tool, built from the same options the Next line
+offers. With "Next: nothing to fix.", skip the question and stop.
+
+- **Question 1, header "Fix"** (single select), only when there are findings:
+  1. "Must + should fix (<range>) (Recommended)": only when any exist.
+  2. "Everything (<full range>)": only when nits or "Spotted along the way" exist.
+  3. "Nothing for now".
+     Fill in real numbers. The tool adds "Other", where the user can type a custom
+     range such as "1-4, 7". For a merged PR, label the fix options "in a follow-up
+     PR". Never more than 4 options.
+- **Question 2, header "Also"** (multi select): the other applicable options,
+  "Prove <n>" (one option per candidate, at most the 2 most severe),
+  "Restore D<range>" and "Post a request-changes review", each with a one-line
+  description of what it does. Add "Nothing else" when fewer than 2 apply.
+  Keep it to 4 options; leave out lower-value prove options first.
+
+Then run what was picked in this order: restore, prove, post (show the body
+and confirm as below), fix. Selecting a fix option is the user asking. If
+`AskUserQuestion` is unavailable, or the user dismisses it, stop and wait for
+a typed reply to the Next line.
 
 **"restore D<n>":** bring that dismissed entry back as a normal finding with
 the next free number, at its original severity, with its saved impact, trigger
