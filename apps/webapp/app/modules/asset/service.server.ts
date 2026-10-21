@@ -421,8 +421,12 @@ export async function setKitCustodyAfterAssetImport({
  * - Assets with custody being imported into kits that exist but are not in custody,
  * - Existing kits with different custodians,
  * - Multiple custodians assigned to the same kit within the same import.
+ *
+ * @param args.data - Import rows; only rows with both a kit and a custodian matter
+ * @param args.organizationId - Workspace whose kits are checked
+ * @throws {ShelfError} 400 when a kit would end up with conflicting custodians
  */
-async function validateKitCustodyConflicts({
+export async function validateKitCustodyConflicts({
   data,
   organizationId,
 }: {
@@ -548,7 +552,8 @@ async function validateKitCustodyConflicts({
   if (conflicts.length > 0) {
     throw new ShelfError({
       cause: null,
-      message: `We found custody conflicts with existing kits. Assets with custody cannot be imported into existing kits that are not in custody.`,
+      message:
+        "Some rows have conflicting kit custody assignments. See the issue on each row.",
       additionalData: {
         kitCustodyConflicts: conflicts,
       },

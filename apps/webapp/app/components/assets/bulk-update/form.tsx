@@ -38,7 +38,6 @@ type ImportState = {
   stage: Stage;
   preview: UpdatePreview | null;
   result: BulkUpdateResult | null;
-  agreed: string;
 };
 
 type ImportAction =
@@ -46,7 +45,6 @@ type ImportAction =
   | { type: "client_validation"; validation: ClientValidation }
   | { type: "preview_loaded"; preview: UpdatePreview }
   | { type: "result_loaded"; result: BulkUpdateResult }
-  | { type: "set_agreed"; value: string }
   | { type: "reset_for_new_file" }
   | { type: "reset" };
 
@@ -56,7 +54,6 @@ const INITIAL_IMPORT_STATE: ImportState = {
   stage: "upload",
   preview: null,
   result: null,
-  agreed: "",
 };
 
 function importReducer(state: ImportState, action: ImportAction): ImportState {
@@ -73,8 +70,6 @@ function importReducer(state: ImportState, action: ImportAction): ImportState {
       return { ...state, preview: action.preview, stage: "preview" };
     case "result_loaded":
       return { ...state, result: action.result, stage: "results" };
-    case "set_agreed":
-      return { ...state, agreed: action.value };
     case "reset_for_new_file":
       return { ...INITIAL_IMPORT_STATE, selectedFile: state.selectedFile };
     case "reset":
@@ -101,8 +96,7 @@ export function UpdateImportForm({
   const applyFetcher = useFetcherWithReset<typeof action>();
 
   const [state, dispatch] = useReducer(importReducer, INITIAL_IMPORT_STATE);
-  const { selectedFile, clientValidation, stage, preview, result, agreed } =
-    state;
+  const { selectedFile, clientValidation, stage, preview, result } = state;
   const lastProcessedPreview = useRef<UpdatePreview | null>(null);
   const lastProcessedResult = useRef<BulkUpdateResult | null>(null);
   const activeFileNonce = useRef(0);
@@ -312,13 +306,10 @@ export function UpdateImportForm({
         <PreviewDisplay
           preview={preview}
           formRef={formRef}
-          agreed={agreed}
-          setAgreed={(value) => dispatch({ type: "set_agreed", value })}
           applyFetcher={applyFetcher}
           isApplyLoading={isApplyLoading}
           selectedFile={selectedFile}
           onReanalyze={() => {
-            dispatch({ type: "set_agreed", value: "" });
             previewFetcher.reset();
             applyFetcher.reset();
             requestAnimationFrame(() => {
