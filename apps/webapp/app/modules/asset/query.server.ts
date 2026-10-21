@@ -2965,7 +2965,11 @@ export const assetReturnFragment = (options: AssetReturnOptions = {}) => {
           'valuation', aq."assetValue",
           'quantity', aq."assetQuantity",
           'unitOfMeasure', aq."assetUnitOfMeasure",
-          'minQuantity', aq."assetMinQuantity",
+          'minQuantity', aq."assetMinQuantity"
+        ) || jsonb_build_object(
+          -- A second object: Postgres caps a function at 100 arguments, and
+          -- one jsonb_build_object with every key passes that limit once the
+          -- optional fields below are added. The two merge with ||.
           'available', aq."assetAvailable",
           'reserved', aq."assetReservedDisplay",
           'stockStatus', aq."assetStockStatus",

@@ -1990,3 +1990,48 @@ describe("lastAuditDate filter and sort", () => {
     expect(slimCte(["name:asc"])).not.toContain('AS "lastAuditDate"');
   });
 });
+
+describe("assetReturnFragment argument count", () => {
+  /**
+   * The top-level arguments of each `jsonb_build_object(` call in `sql`.
+   * Nested calls and parenthesised expressions count as one argument.
+   */
+  function topLevelArgumentCounts(sql: string): number[] {
+    const counts: number[] = [];
+    const opener = "jsonb_build_object(";
+    let index = sql.indexOf(opener);
+    while (index !== -1) {
+      let depth = 1;
+      let args = 1;
+      let inString = false;
+      for (let i = index + opener.length; i < sql.length && depth > 0; i++) {
+        const char = sql[i];
+        if (char === "'" || char === '"') inString = !inString;
+        if (inString) continue;
+        if (char === "(") depth++;
+        if (char === ")") depth--;
+        if (char === "," && depth === 1) args++;
+      }
+      counts.push(args);
+      index = sql.indexOf(opener, index + opener.length);
+    }
+    return counts;
+  }
+
+  it("keeps every jsonb_build_object call under Postgres's 100-argument cap", () => {
+    // why: one object holding every asset key passed the cap once the stock
+    // columns and the last audit date were both added, and the advanced index
+    // failed with "cannot pass more than 100 arguments to a function".
+    const sql = assetReturnFragment({
+      withBookings: true,
+      withBarcodes: true,
+      withLastAuditDate: true,
+    }).strings.join("?");
+
+    const counts = topLevelArgumentCounts(sql);
+    expect(counts.length).toBeGreaterThan(1);
+    for (const count of counts) {
+      expect(count).toBeLessThanOrEqual(100);
+    }
+  });
+});
