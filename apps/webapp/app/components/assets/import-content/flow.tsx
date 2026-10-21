@@ -37,16 +37,19 @@ import type { ExistingCustomField } from "~/modules/import-mapping/heuristics";
 import {
   buildFormatNotes,
   isAlreadyShelfFormat,
+  suggestQuantityTracking,
 } from "~/modules/import-mapping/heuristics";
 import { summarizeMapping } from "~/modules/import-mapping/summary";
 import type {
   ColumnMapping,
   ColumnTarget,
   MappingProposal,
+  QuantityTracking,
 } from "~/modules/import-mapping/types";
 import {
   customFieldNameSchema,
   findDuplicateTargets,
+  needsQuantityTracking,
 } from "~/modules/import-mapping/types";
 import type { action } from "~/routes/_layout+/assets.import";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
@@ -57,6 +60,7 @@ import {
   MappingReview,
   existingTypeFor,
 } from "../import-mapping/mapping-review";
+import { QuantityTrackingChoice } from "../import-mapping/quantity-tracking-choice";
 import { ImportErrorDetails } from "../import-preview/import-error-details";
 
 /** What the `analyze` intent returns. */
@@ -78,6 +82,11 @@ type FlowState = {
   analysis: MappingAnalysis | null;
   /** The mapping as the user has edited it, in file order. */
   columns: ColumnMapping[];
+  /**
+   * How rows are tracked when the mapping has quantity but no type column;
+   * `null` until the user picks one (or the proposal suggests one).
+   */
+  quantityTracking: QuantityTracking | null;
   /** Server preview of the mapped file; set once the stage is `preview`. */
   preview: ContentImportPreview | null;
 };
@@ -87,6 +96,7 @@ type FlowAction =
   | { type: "file_selected"; file: File }
   | { type: "analysis_loaded"; analysis: MappingAnalysis }
   | { type: "target_changed"; index: number; target: ColumnTarget }
+  | { type: "quantity_tracking_changed"; value: QuantityTracking }
   | { type: "back_to_upload" }
   | { type: "preview_loaded"; preview: ContentImportPreview }
   | { type: "reset" };
@@ -96,6 +106,7 @@ const INITIAL_FLOW_STATE: FlowState = {
   selectedFile: null,
   analysis: null,
   columns: [],
+  quantityTracking: null,
   preview: null,
 };
 
@@ -119,6 +130,9 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
         stage: "map",
         analysis: action.analysis,
         columns: action.analysis.proposal.columns,
+        quantityTracking: suggestQuantityTracking(
+          action.analysis.proposal.columns
+        ),
         preview: null,
       };
     case "target_changed": {
@@ -131,18 +145,30 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
         );
         if (existingType) target = { ...target, type: existingType };
       }
+      const columns = state.columns.map((column, index) =>
+        index === action.index
+          ? { ...column, target, confidence: "high" as const }
+          : column
+      );
+      // A choice the user made stays; until then, follow the edited mapping.
       return {
         ...state,
-        columns: state.columns.map((column, index) =>
-          index === action.index
-            ? { ...column, target, confidence: "high" as const }
-            : column
-        ),
+        columns,
+        quantityTracking:
+          state.quantityTracking ?? suggestQuantityTracking(columns),
       };
     }
+    case "quantity_tracking_changed":
+      return { ...state, quantityTracking: action.value };
     case "back_to_upload":
       // Keeps the chosen file, so Continue analyses it again.
-      return { ...state, stage: "upload", analysis: null, columns: [] };
+      return {
+        ...state,
+        stage: "upload",
+        analysis: null,
+        columns: [],
+        quantityTracking: null,
+      };
     case "preview_loaded":
       return { ...state, stage: "preview", preview: action.preview };
     case "reset":
@@ -179,7 +205,8 @@ export function ContentImportFlow({
   const previewFetcher = useFetcherWithReset<typeof action>();
   const confirmFetcher = useFetcherWithReset<typeof action>();
   const [state, dispatch] = useReducer(flowReducer, INITIAL_FLOW_STATE);
-  const { stage, selectedFile, preview, analysis, columns } = state;
+  const { stage, selectedFile, preview, analysis, columns, quantityTracking } =
+    state;
   const lastProcessedAnalysis = useRef<unknown>(null);
   const lastProcessedPreview = useRef<ContentImportPreview | null>(null);
   const isAnalyzing = useDisabled(analyzeFetcher);
@@ -234,6 +261,8 @@ export function ContentImportFlow({
   );
   const allSkipped =
     columns.length > 0 && columns.every(({ target }) => target.kind === "skip");
+  /** The mapping has quantity but no type, so the user says how to track. */
+  const asksQuantityTracking = needsQuantityTracking(columns);
   const summary = analysis
     ? summarizeMapping({
         columns,
@@ -291,6 +320,9 @@ export function ContentImportFlow({
       JSON.stringify(columns.map((column) => ({ ...column, sample: [] })))
     );
     formData.set("mappingChanged", String(changed));
+    if (asksQuantityTracking && quantityTracking) {
+      formData.set("quantityTracking", quantityTracking);
+    }
     // The review already knows which custom fields are new; the server only
     // reports the count, so it need not load the workspace's fields again.
     formData.set(
@@ -363,6 +395,15 @@ export function ContentImportFlow({
             summary={summary}
           />
 
+          {asksQuantityTracking ? (
+            <QuantityTrackingChoice
+              value={quantityTracking}
+              onChange={(value) =>
+                dispatch({ type: "quantity_tracking_changed", value })
+              }
+            />
+          ) : null}
+
           {duplicateRows.size > 0 ? (
             <p role="alert" className="mt-2 text-[14px] text-error-600">
               Two or more columns go to the same Shelf field. Fix the rows
@@ -393,6 +434,7 @@ export function ContentImportFlow({
                 duplicateRows.size > 0 ||
                 hasInvalidName ||
                 allSkipped ||
+                (asksQuantityTracking && !quantityTracking) ||
                 isPreviewLoading ||
                 uploadBlocked
               }

@@ -45,8 +45,20 @@ export type SynonymTarget =
   | { kind: "field"; name: AssetCsvHeader }
   | { kind: "customField"; name: string; type: CustomFieldType };
 
-/** One destination and every heading that means it. */
-export type SynonymGroup = { target: SynonymTarget; headings: string[] };
+/**
+ * One destination and every heading that means it. `guesses` are headings
+ * that only loosely mean it ("Variant Details" for description): they are
+ * proposed as a guess, so a column that clearly means the same destination
+ * wins it.
+ */
+export type SynonymGroup = {
+  target: SynonymTarget;
+  headings: string[];
+  guesses?: string[];
+};
+
+/** What a heading usually means, and whether that is only a guess. */
+export type SynonymMatch = { target: SynonymTarget; guess: boolean };
 
 const field = (name: AssetCsvHeader): SynonymTarget => ({
   kind: "field",
@@ -111,8 +123,8 @@ export const SYNONYM_GROUPS: SynonymGroup[] = [
       "remarks",
       "item description",
       "asset description",
-      "variant details",
     ],
+    guesses: ["variant details"],
   },
   {
     target: field("category"),
@@ -373,19 +385,25 @@ export const SYNONYM_GROUPS: SynonymGroup[] = [
   },
 ];
 
-const BY_HEADING = new Map<string, SynonymTarget>(
-  SYNONYM_GROUPS.flatMap(({ target, headings }) =>
-    headings.map((heading) => [normalizeHeader(heading), target] as const)
-  )
+const BY_HEADING = new Map<string, SynonymMatch>(
+  SYNONYM_GROUPS.flatMap(({ target, headings, guesses = [] }) => [
+    ...headings.map(
+      (heading) => [normalizeHeader(heading), { target, guess: false }] as const
+    ),
+    ...guesses.map(
+      (heading) => [normalizeHeader(heading), { target, guess: true }] as const
+    ),
+  ])
 );
 
 /**
  * Looks up the destination a heading usually means.
  *
  * @param header - Header text as it appears in the file
- * @returns The destination, or `undefined` when the heading is not listed
+ * @returns The destination and whether it is a guess, or `undefined` when
+ *   the heading is not listed
  */
-export function lookupSynonym(header: string): SynonymTarget | undefined {
+export function lookupSynonym(header: string): SynonymMatch | undefined {
   // "Price (EUR)" and "Weight [kg]" carry a unit in brackets; the heading
   // without it is what the table lists.
   const withoutUnit = header.replace(/\([^)]*\)|\[[^\]]*\]/g, " ");

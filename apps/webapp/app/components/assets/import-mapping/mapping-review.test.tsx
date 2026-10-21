@@ -92,6 +92,22 @@ describe("MappingReview", () => {
     ).toBeTruthy();
   });
 
+  it("labels a custom field's name and type where the user can see them", () => {
+    renderReview();
+    const serialRow = screen.getAllByRole("row")[2];
+    const name = within(serialRow).getByRole("textbox", {
+      name: "Custom field name",
+    });
+    expect(name).toHaveValue("Serial number");
+    expect(
+      within(serialRow).getByRole("combobox", { name: "Field type" })
+    ).toBeTruthy();
+    // Visible text, not only an accessible name.
+    expect(within(serialRow).getByText("Custom field name")).not.toHaveClass(
+      "sr-only"
+    );
+  });
+
   it("flags every row of a clash", () => {
     renderReview({ duplicateRows: new Set([0, 2]) });
     expect(

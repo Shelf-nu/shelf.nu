@@ -181,3 +181,45 @@ export function headerForTarget(
   if (target.kind === "field") return target.name;
   return `cf:${target.name.trim()}, type:${target.type.toLowerCase()}`;
 }
+
+/**
+ * How the rows of a file are tracked when it maps a quantity column but no
+ * type column: as individual assets (quantity must then be 1, which the
+ * importer checks), or every row as stock with this consumption type.
+ */
+export const QUANTITY_TRACKING = ["INDIVIDUAL", "TWO_WAY", "ONE_WAY"] as const;
+
+/** One of {@link QUANTITY_TRACKING}. */
+export type QuantityTracking = (typeof QUANTITY_TRACKING)[number];
+
+/** Validates the quantity choice posted with a reviewed mapping. */
+export const quantityTrackingSchema = z.enum(QUANTITY_TRACKING);
+
+/** Whether a mapping sends some column to this Shelf field. */
+function mapsField(columns: ColumnMapping[], name: AssetCsvHeader): boolean {
+  return columns.some(
+    ({ target }) => target.kind === "field" && target.name === name
+  );
+}
+
+/**
+ * Whether the review must ask how rows are tracked: a quantity column is
+ * mapped and no type column is, so the file cannot say which rows are stock.
+ *
+ * @param columns - The mapping, in file order
+ * @returns `true` when a {@link QuantityTracking} choice applies
+ */
+export function needsQuantityTracking(columns: ColumnMapping[]): boolean {
+  return mapsField(columns, "quantity") && !mapsField(columns, "type");
+}
+
+/**
+ * Whether a mapping sends some column to `consumptionType`, which a stock
+ * choice then leaves to the file instead of filling in.
+ *
+ * @param columns - The mapping, in file order
+ * @returns `true` when the file carries its own consumption types
+ */
+export function mapsConsumptionType(columns: ColumnMapping[]): boolean {
+  return mapsField(columns, "consumptionType");
+}

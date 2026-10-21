@@ -108,6 +108,77 @@ describe("applyMapping", () => {
   });
 });
 
+describe("applyMapping with a quantity choice", () => {
+  const STOCK_FILE = [
+    ["Entry Name", "Quantity", "Sortly ID"],
+    ["Cable", "10", "S1"],
+    ["Battery", "1", "S2"],
+    ["", "", "S3"],
+  ];
+  const STOCK_MAPPING: ColumnMapping[] = [
+    col("Entry Name", { kind: "field", name: "title" }),
+    col("Quantity", { kind: "field", name: "quantity" }),
+    col("Sortly ID", { kind: "skip" }),
+  ];
+
+  it("tracks every row by quantity with the chosen consumption type", () => {
+    expect(applyMapping(STOCK_FILE, STOCK_MAPPING, "TWO_WAY")).toEqual([
+      ["title", "quantity", "type", "consumptionType"],
+      ["Cable", "10", "QUANTITY_TRACKED", "TWO_WAY"],
+      ["Battery", "1", "QUANTITY_TRACKED", "TWO_WAY"],
+    ]);
+  });
+
+  it("keeps a mapped consumptionType column and adds only the type", () => {
+    const rows = applyMapping(
+      [
+        ["Name", "Qty", "Usage"],
+        ["Tape", "4", "ONE_WAY"],
+      ],
+      [
+        col("Name", { kind: "field", name: "title" }),
+        col("Qty", { kind: "field", name: "quantity" }),
+        col("Usage", { kind: "field", name: "consumptionType" }),
+      ],
+      "TWO_WAY"
+    );
+    expect(rows).toEqual([
+      ["title", "quantity", "consumptionType", "type"],
+      ["Tape", "4", "ONE_WAY", "QUANTITY_TRACKED"],
+    ]);
+  });
+
+  it("adds nothing for individual assets", () => {
+    expect(applyMapping(STOCK_FILE, STOCK_MAPPING, "INDIVIDUAL")).toEqual(
+      applyMapping(STOCK_FILE, STOCK_MAPPING)
+    );
+  });
+
+  it("refuses a stock choice when the mapping has no quantity or has a type", () => {
+    expect(() =>
+      applyMapping(
+        [["Name"], ["a"]],
+        [col("Name", { kind: "field", name: "title" })],
+        "ONE_WAY"
+      )
+    ).toThrow("quantity");
+    expect(() =>
+      applyMapping(
+        [
+          ["Name", "Qty", "type"],
+          ["a", "2", "QUANTITY_TRACKED"],
+        ],
+        [
+          col("Name", { kind: "field", name: "title" }),
+          col("Qty", { kind: "field", name: "quantity" }),
+          col("type", { kind: "field", name: "type" }),
+        ],
+        "ONE_WAY"
+      )
+    ).toThrow("quantity");
+  });
+});
+
 describe("columnMappingListSchema", () => {
   it("accepts a custom field named like type: model, which the importer parses", () => {
     const columns = [

@@ -1,6 +1,8 @@
 /**
  * @file Name and type of a custom field a column maps to, edited inline under
- * the row's destination picker in the import mapping review.
+ * the row's destination picker in the import mapping review. Both inputs carry
+ * visible labels: a bare field name next to the picker reads as a value, not
+ * as the name of the Shelf field the column fills.
  *
  * @see {@link file://./mapping-review.tsx}
  */
@@ -50,7 +52,10 @@ export function CustomFieldTarget({
   return (
     <div className="mt-2 flex flex-col gap-2 sm:flex-row">
       <div className="flex-1">
-        <label htmlFor={`${id}-name`} className="sr-only">
+        <label
+          htmlFor={`${id}-name`}
+          className="mb-1 block text-xs font-medium text-gray-600"
+        >
           Custom field name
         </label>
         <input
@@ -73,6 +78,12 @@ export function CustomFieldTarget({
         ) : null}
       </div>
       <div className="sm:w-[190px]">
+        <label
+          htmlFor={`${id}-type`}
+          className="mb-1 block text-xs font-medium text-gray-600"
+        >
+          Field type
+        </label>
         <Select
           value={existingType ?? value.type}
           disabled={Boolean(existingType)}
@@ -80,10 +91,7 @@ export function CustomFieldTarget({
             onChange({ ...value, type: type as CustomFieldType })
           }
         >
-          <SelectTrigger
-            aria-label={`Type of custom field ${value.name}`}
-            className="py-1.5 text-[14px]"
-          >
+          <SelectTrigger id={`${id}-type`} className="py-1.5 text-[14px]">
             <SelectValue />
           </SelectTrigger>
           <SelectContent className="z-[999999]">

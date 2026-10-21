@@ -500,7 +500,7 @@ describe("ContentImportFlow column mapping", () => {
     return <ContentImportFlow uploadBlocked={useContext(UploadBlocked)} />;
   }
 
-  function renderMappingFlow() {
+  function renderMappingFlow(analysis: MappingAnalysis = ANALYSIS) {
     const posts: Record<string, string>[] = [];
     const Stub = createRoutesStub([
       {
@@ -516,7 +516,7 @@ describe("ContentImportFlow column mapping", () => {
           });
           posts.push(post);
           return post.intent === "analyze"
-            ? { ...ANALYSIS, intent: "analyze", error: null }
+            ? { ...analysis, intent: "analyze", error: null }
             : { error: null, intent: "preview", preview: PREVIEW };
         },
       },
@@ -652,6 +652,70 @@ describe("ContentImportFlow column mapping", () => {
     expect(
       screen.getByRole("button", { name: "Preview import" })
     ).toBeDisabled();
+  });
+
+  describe("a quantity column without a type column", () => {
+    /** An analysis whose second column maps to quantity. */
+    const withQuantity = (sample: string[]): MappingAnalysis => ({
+      ...ANALYSIS,
+      proposal: {
+        ...ANALYSIS.proposal,
+        columns: [
+          ANALYSIS.proposal.columns[0],
+          {
+            source: "Qty",
+            target: { kind: "field", name: "quantity" },
+            confidence: "high",
+            sample,
+          },
+        ],
+      },
+    });
+
+    it("waits for a choice when the file holds stock, then posts it", async () => {
+      const user = userEvent.setup();
+      const { posts } = renderMappingFlow(withQuantity(["10", "20"]));
+      await reachReview(user);
+
+      const preview = screen.getByRole("button", { name: "Preview import" });
+      expect(preview).toBeDisabled();
+
+      await user.click(
+        screen.getByRole("radio", { name: /Stock, returned after use/ })
+      );
+      expect(preview).toBeEnabled();
+      await user.click(preview);
+
+      await waitFor(() => expect(posts).toHaveLength(2));
+      expect(posts[1]).toMatchObject({
+        intent: "preview",
+        quantityTracking: "TWO_WAY",
+      });
+    });
+
+    it("starts on individual assets when every sampled quantity is 1", async () => {
+      const user = userEvent.setup();
+      renderMappingFlow(withQuantity(["1", "1"]));
+      await reachReview(user);
+
+      expect(
+        screen.getByRole("radio", { name: /Individual assets/ })
+      ).toBeChecked();
+      expect(
+        screen.getByRole("button", { name: "Preview import" })
+      ).toBeEnabled();
+    });
+
+    it("does not ask when no column goes to quantity", async () => {
+      const user = userEvent.setup();
+      const { posts } = renderMappingFlow();
+      await reachReview(user);
+
+      expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Preview import" }));
+      await waitFor(() => expect(posts).toHaveLength(2));
+      expect(posts[1]).not.toHaveProperty("quantityTracking");
+    });
   });
 
   it("blocks Preview import while two columns share a field", async () => {

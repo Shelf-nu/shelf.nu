@@ -35,6 +35,18 @@ describe("summarizeMapping", () => {
     expect(summary.rowsMayDrop).toBe(true);
   });
 
+  it("does not count Shelf's own id column as a skip that can empty a row", () => {
+    const summary = summarizeMapping({
+      columns: [
+        { ...col({ kind: "skip" }), source: "id" },
+        col({ kind: "field", name: "title" }),
+      ],
+      rowCount: 2,
+      existingCustomFieldNames: [],
+    });
+    expect(summary.rowsMayDrop).toBe(false);
+  });
+
   it("does not list custom fields the workspace already has", () => {
     const summary = summarizeMapping({
       columns: [

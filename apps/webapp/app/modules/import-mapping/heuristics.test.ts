@@ -1,10 +1,10 @@
 import { CustomFieldType } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 import {
-  QUANTITY_WITHOUT_TYPE_NOTE,
   buildColumnSamples,
   isAlreadyShelfFormat,
   proposeByRules,
+  suggestQuantityTracking,
 } from "./heuristics";
 
 /** Proposes for a header row plus data rows, with no existing fields. */
@@ -221,21 +221,35 @@ describe("proposeByRules", () => {
       []
     ).notes;
     // A real YYYY-MM-DD shape that is not a real day is refused on import.
-    expect(notes.join(" ")).toContain('"cf:Bought, type:date" has dates like');
+    expect(notes.join(" ")).toContain(
+      '"cf:Bought, type:date" has "2026-02-31"'
+    );
     // The importer trims and ignores case, so " YES " is a valid yes.
     expect(notes.join(" ")).not.toContain("cf:Insured");
   });
 
-  it("warns that quantities above 1 need a type column", () => {
-    expect(propose([["Qty"], ["1"]]).notes).toContain(
-      QUANTITY_WITHOUT_TYPE_NOTE
-    );
-    expect(
-      propose([
-        ["Qty", "type"],
-        ["12", "QUANTITY_TRACKED"],
-      ]).notes
-    ).not.toContain(QUANTITY_WITHOUT_TYPE_NOTE);
+  it("gives description to Notes over a Variant Details guess", () => {
+    const proposal = propose([
+      ["Variant Details", "Notes"],
+      ["Black", "Keep in bin 3"],
+    ]);
+    expect(proposal.columns.map((column) => column.target)).toEqual([
+      { kind: "skip" },
+      { kind: "field", name: "description" },
+    ]);
+  });
+
+  it("proposes a lone Variant Details column as description, marked a guess", () => {
+    expect(propose([["Variant Details"], ["Black"]]).columns[0]).toMatchObject({
+      target: { kind: "field", name: "description" },
+      confidence: "low",
+    });
+  });
+
+  it("says a YYYY-MM-DD value that is not a real day is not a real date", () => {
+    const [note] = propose([["cf:Bought, type:date"], ["2026-02-31"]]).notes;
+    expect(note).toContain("is not a real calendar date");
+    expect(note).not.toContain("needs YYYY-MM-DD");
   });
 
   it("keeps cf: headers and refuses malformed ones", () => {
@@ -359,5 +373,33 @@ describe("isAlreadyShelfFormat", () => {
   it("is false once a column has to be renamed", () => {
     const proposal = propose([["Name"], ["a"]]);
     expect(isAlreadyShelfFormat(proposal.columns)).toBe(false);
+  });
+});
+
+describe("suggestQuantityTracking", () => {
+  /** The proposal's columns for a header row plus data rows. */
+  const columnsOf = (rows: string[][]) => propose(rows).columns;
+
+  it("suggests individual assets when every sampled quantity is 1", () => {
+    expect(
+      suggestQuantityTracking(
+        columnsOf([
+          ["Name", "Qty"],
+          ["a", "1"],
+          ["b", " 1 "],
+        ])
+      )
+    ).toBe("INDIVIDUAL");
+  });
+
+  it("suggests nothing when a sampled quantity is above 1, so the user picks", () => {
+    expect(
+      suggestQuantityTracking(
+        columnsOf([
+          ["Name", "Qty"],
+          ["a", "10"],
+        ])
+      )
+    ).toBeNull();
   });
 });

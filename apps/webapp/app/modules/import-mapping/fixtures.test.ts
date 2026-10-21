@@ -8,9 +8,9 @@ import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { parseCsv } from "~/utils/csv.server";
 import {
-  QUANTITY_WITHOUT_TYPE_NOTE,
   buildColumnSamples,
   proposeByRules,
+  suggestQuantityTracking,
 } from "./heuristics";
 import type { ColumnTarget } from "./types";
 
@@ -61,14 +61,17 @@ describe("import mapping fixtures", () => {
       "Legacy ID": "skip",
     });
     expect(proposal.notes.join(" ")).toContain('"Purchased" has dates like');
-    expect(proposal.notes).toContain(QUANTITY_WITHOUT_TYPE_NOTE);
+    // Every quantity is 1, so the review starts on individual assets.
+    expect(suggestQuantityTracking(proposal.columns)).toBe("INDIVIDUAL");
   });
 
   it("maps a Sortly-style export", async () => {
     const proposal = await proposeFixture("sortly-export.csv", true);
     expect(targets(proposal.columns)).toMatchObject({
       "Entry Name": "title",
-      "Variant Details": "description",
+      // "Variant Details" only loosely means description, so Notes takes it.
+      "Variant Details": "skip",
+      Notes: "description",
       "Sortly ID": "skip",
       Unit: "unitOfMeasure",
       "Min Level": "minQuantity",

@@ -49,7 +49,11 @@ export function summarizeMapping({
   const existing = new Set(existingCustomFieldNames.map(customFieldNameKey));
   return {
     rows: rowCount,
-    rowsMayDrop: columns.some(({ target }) => target.kind === "skip"),
+    // Shelf's own `id` column is skipped on every import-ready export, beside
+    // a title in every row, so it does not make the count a ceiling.
+    rowsMayDrop: columns.some(
+      ({ source, target }) => target.kind === "skip" && source !== "id"
+    ),
     newCustomFields: columns.flatMap(({ target }) =>
       target.kind === "customField" &&
       !existing.has(customFieldNameKey(target.name))

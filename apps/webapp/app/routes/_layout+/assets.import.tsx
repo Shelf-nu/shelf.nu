@@ -28,6 +28,7 @@ import {
   MAX_MAPPED_COLUMNS,
   MAX_MAPPING_FIELD_LENGTH,
   columnMappingListSchema,
+  quantityTrackingSchema,
 } from "~/modules/import-mapping/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { csvDataFromRequest } from "~/utils/csv.server";
@@ -46,9 +47,10 @@ import { optionalNumberFromString } from "~/utils/zod-numeric";
  *
  * - `analyze` (multipart `file`): parses the CSV and proposes where each column
  *   goes (see `modules/import-mapping`). Nothing is stored.
- * - `preview` (multipart `file`, optional `mapping`): applies the reviewed
- *   mapping when one is posted (renames and drops columns, never changes a
- *   value), then stores the validated rows as a DRAFT import and returns the
+ * - `preview` (multipart `file`, optional `mapping` and `quantityTracking`):
+ *   applies the reviewed mapping when one is posted (renames and drops
+ *   columns, adds the stock columns the user chose, never changes a value),
+ *   then stores the validated rows as a DRAFT import and returns the
  *   preview. Nothing is created yet.
  * - `confirm` (`importId`): queues the draft for the background job and sends
  *   the user to its progress page.
@@ -133,11 +135,18 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
       });
     }
 
-    const { mapping, mappingChanged, mappingNewCustomFields } = parseData(
+    const {
+      mapping,
+      quantityTracking,
+      mappingChanged,
+      mappingNewCustomFields,
+    } = parseData(
       formData,
       z.object({
         /** JSON of the reviewed ColumnMapping[]; absent for a file posted as-is. */
         mapping: z.string().max(MAX_MAPPING_FIELD_LENGTH).optional(),
+        /** How rows are tracked when the mapping has quantity but no type. */
+        quantityTracking: quantityTrackingSchema.optional(),
         /** Columns the user changed in the review (analytics only). */
         mappingChanged: optionalNumberFromString({ blank: undefined }).pipe(
           z.number().int().min(0).max(1000).optional()
@@ -150,7 +159,9 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
     );
 
     const columns = mapping ? parseMapping(mapping) : null;
-    const mappedCsvData = columns ? applyMapping(csvData, columns) : csvData;
+    const mappedCsvData = columns
+      ? applyMapping(csvData, columns, quantityTracking)
+      : csvData;
 
     const file = formData.get("file");
     const preview = await buildContentImportPreview({

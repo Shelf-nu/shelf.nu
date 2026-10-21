@@ -13,6 +13,7 @@
  */
 import { CustomFieldType } from "@prisma/client";
 import {
+  CUSTOM_FIELD_DATE_FORMAT,
   getDefinitionFromCsvHeader,
   isImportableCustomFieldDate,
   parseYesNo,
@@ -20,13 +21,19 @@ import {
 import type { AssetCsvHeader } from "./fields";
 import { IMPORT_FIELDS, getImportField, isAssetCsvHeader } from "./fields";
 import { lookupSynonym, normalizeHeader } from "./synonyms";
-import type { ColumnMapping, ColumnTarget, MappingProposal } from "./types";
+import type {
+  ColumnMapping,
+  ColumnTarget,
+  MappingProposal,
+  QuantityTracking,
+} from "./types";
 import {
   MAX_PROPOSAL_NOTES,
   MAX_SAMPLE_LENGTH,
   MAX_SAMPLES_PER_COLUMN,
   customFieldNameKey,
   customFieldNameSchema,
+  needsQuantityTracking,
   targetKey,
 } from "./types";
 
@@ -235,11 +242,15 @@ function proposeColumn(
     };
   }
 
-  const synonym = lookupSynonym(header);
-  if (synonym) {
+  const match = lookupSynonym(header);
+  if (match) {
+    const { target: synonym } = match;
+    // A loose synonym is a guess, so a column that clearly means the same
+    // destination wins it (see `proposeByRules`).
+    const confidence = match.guess ? "low" : "high";
     if (synonym.kind === "field") {
       if (!fieldAllowed(synonym.name, options)) return skip;
-      return { target: synonym, confidence: "high" };
+      return { target: synonym, confidence };
     }
     // Prefer the workspace's own field of that name, with its stored type.
     const sameName = existing.find(synonym.name);
@@ -247,16 +258,12 @@ function proposeColumn(
       target: sameName
         ? { kind: "customField", name: sameName.name, type: sameName.type }
         : synonym,
-      confidence: "high",
+      confidence,
     };
   }
 
   return skip;
 }
-
-/** Shown when a column maps to quantity and none maps to type. */
-export const QUANTITY_WITHOUT_TYPE_NOTE =
-  "Rows with a quantity above 1 need a type column set to QUANTITY_TRACKED (and a consumptionType). Without it the importer rejects those rows.";
 
 /**
  * Short warnings about values the importer will refuse or drop under the
@@ -268,9 +275,6 @@ export const QUANTITY_WITHOUT_TYPE_NOTE =
  */
 export function buildFormatNotes(columns: ColumnMapping[]): string[] {
   const notes: string[] = [];
-  const hasTypeColumn = columns.some(
-    (column) => column.target.kind === "field" && column.target.name === "type"
-  );
 
   for (const { source, target, sample } of columns) {
     if (target.kind === "customField" && target.type === CustomFieldType.DATE) {
@@ -280,7 +284,9 @@ export function buildFormatNotes(columns: ColumnMapping[]): string[] {
       );
       if (bad) {
         notes.push(
-          `"${source}" has dates like "${bad}", but the importer needs YYYY-MM-DD. Fix the dates or pick a text field.`
+          CUSTOM_FIELD_DATE_FORMAT.test(bad.trim())
+            ? `"${source}" has "${bad}", which is not a real calendar date. Fix the dates or pick a text field.`
+            : `"${source}" has dates like "${bad}", but the importer needs YYYY-MM-DD. Fix the dates or pick a text field.`
         );
       }
     }
@@ -294,15 +300,6 @@ export function buildFormatNotes(columns: ColumnMapping[]): string[] {
           `"${source}" has values like "${bad}". Yes/no fields accept only yes or no; other values are left empty.`
         );
       }
-    }
-    // Samples cannot prove every row holds 1, so the note shows whenever a
-    // quantity column has no type column beside it.
-    if (
-      target.kind === "field" &&
-      target.name === "quantity" &&
-      !hasTypeColumn
-    ) {
-      notes.push(QUANTITY_WITHOUT_TYPE_NOTE);
     }
   }
 
@@ -390,4 +387,27 @@ export function isAlreadyShelfFormat(columns: ColumnMapping[]): boolean {
       return source === "id";
     })
   );
+}
+
+/**
+ * The quantity choice the review starts on, for a mapping that needs one
+ * ({@link needsQuantityTracking}).
+ *
+ * Individual assets only when every sampled quantity is 1, the one value the
+ * importer accepts on an individual asset. Otherwise nothing: the file holds
+ * stock, and only the user knows whether it is returned or used up. Samples
+ * cannot prove every row holds 1; the preview checks the whole file.
+ *
+ * @param columns - The mapping, in file order
+ * @returns The starting choice, or `null` when the user must pick one
+ */
+export function suggestQuantityTracking(
+  columns: ColumnMapping[]
+): QuantityTracking | null {
+  if (!needsQuantityTracking(columns)) return null;
+  const quantity = columns.find(
+    ({ target }) => target.kind === "field" && target.name === "quantity"
+  );
+  const allOne = (quantity?.sample ?? []).every((cell) => cell.trim() === "1");
+  return allOne ? "INDIVIDUAL" : null;
 }

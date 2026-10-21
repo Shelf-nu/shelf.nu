@@ -5,7 +5,10 @@ import { buildColumnSamples, proposeByRules } from "./heuristics";
 import { SYNONYM_GROUPS, lookupSynonym, normalizeHeader } from "./synonyms";
 import { customFieldNameSchema } from "./types";
 
-const ALL_HEADINGS = SYNONYM_GROUPS.flatMap(({ headings }) => headings);
+const ALL_HEADINGS = SYNONYM_GROUPS.flatMap(({ headings, guesses = [] }) => [
+  ...headings,
+  ...guesses,
+]);
 const compact = (text: string) => normalizeHeader(text).replace(/ /g, "");
 
 describe("SYNONYM_GROUPS", () => {
@@ -39,9 +42,8 @@ describe("SYNONYM_GROUPS", () => {
   it("ignores case and punctuation", () => {
     expect(lookupSynonym("S/N")).toEqual(lookupSynonym("sn"));
     expect(lookupSynonym("  Serial No. ")).toEqual({
-      kind: "customField",
-      name: "Serial number",
-      type: "TEXT",
+      target: { kind: "customField", name: "Serial number", type: "TEXT" },
+      guess: false,
     });
     expect(lookupSynonym("Sortly ID")).toBeUndefined();
   });
@@ -116,5 +118,15 @@ describe("common export headings", () => {
         ? `cf:${target.name}:${target.type}`
         : "skip";
     expect(actual).toBe(expected);
+  });
+});
+
+describe("lookupSynonym guesses", () => {
+  it("marks a heading that only loosely means its destination as a guess", () => {
+    expect(lookupSynonym("Variant Details")).toEqual({
+      target: { kind: "field", name: "description" },
+      guess: true,
+    });
+    expect(lookupSynonym("Notes")?.guess).toBe(false);
   });
 });

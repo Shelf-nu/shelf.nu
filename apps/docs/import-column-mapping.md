@@ -35,7 +35,8 @@ trying in order:
    "Item Name" becomes the title, "Qty" the quantity, "Serial No." a new
    "Serial number" custom field, "Purchased" a new "Purchase date" date field,
    and so on. Barcode synonyms are used only when the workspace has the barcode
-   add-on.
+   add-on. A heading listed under `guesses` only loosely means its destination
+   ("Variant Details" for description), so it is proposed as a guess.
 5. **Skip**, for anything else. Columns that hold another system's ids
    ("Sortly ID", "ID") are not in the synonym table, so they are skipped
    unless an earlier rule matched them, such as an existing custom field with
@@ -43,8 +44,8 @@ trying in order:
 
 When two columns resolve to the same destination, one keeps it and the others
 are skipped. A sure match beats a guess, so an exact "Category" column keeps
-the category over a "Type" column read as categories; between equals, the
-first column wins. The proposal also carries short notes about values the
+the category over a "Type" column read as categories, and "Notes" keeps the
+description over "Variant Details"; between equals, the first column wins. The proposal also carries short notes about values the
 importer will refuse, for example a date column in DD/MM/YYYY.
 
 `modules/import-mapping/propose.ts` is the single entry point. It accepts an
@@ -53,8 +54,9 @@ proposer can be added later without changing the route or the review table.
 
 ## The review step
 
-- Every row has a dropdown with all Shelf fields, "Custom field..." (name and
-  type) and "Skip".
+- Every row has a dropdown with all Shelf fields, "Custom field..." and "Skip".
+  A custom field shows its name and type in two labelled inputs under the
+  dropdown.
 - Two columns aimed at one destination are flagged inline and block Preview
   import.
 - A line under the table says how many rows will be imported and which custom
@@ -65,13 +67,23 @@ proposer can be added later without changing the route or the review table.
 - Format notes (dates that are not YYYY-MM-DD real days, yes/no values) use the
   importer's own rules from `~/utils/custom-fields`, so they warn about exactly
   what the import will refuse or leave empty.
+- When a quantity column is mapped and no type column is (every Sortly export),
+  the review asks how the rows are tracked: individual assets (every quantity
+  must be 1), stock returned after use, or stock used up. A stock answer makes
+  every row quantity-tracked with that consumption type. The review starts on
+  individual assets when every sampled quantity is 1, and otherwise waits for
+  an answer before Preview import.
+- A skipped `id` column (Shelf's own export) does not turn the count into
+  "Up to N".
 - Preview import is held while another import runs in the workspace.
 
 ## What the importer still checks
 
-Applying a mapping only renames and drops columns
-(`modules/import-mapping/apply.ts`), plus any row left blank once its skipped
-columns are gone. Cell values are never changed, so every
+Applying a mapping renames and drops columns
+(`modules/import-mapping/apply.ts`), drops any row left blank once its skipped
+columns are gone, and adds the `type` and `consumptionType` columns of a stock
+answer (a mapped `consumptionType` column is kept as it is). Cell values are
+never changed, so every
 existing import rule still applies: dates as YYYY-MM-DD, yes/no fields,
 quantity-tracked columns, barcodes, QR codes and the 10,000-row limit of the
 background import. Row

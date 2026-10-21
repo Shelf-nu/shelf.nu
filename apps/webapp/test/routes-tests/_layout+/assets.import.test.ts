@@ -504,6 +504,45 @@ describe("assets.import column mapping", () => {
       });
     });
 
+    it("tracks every row as stock when the user chose a consumption type", async () => {
+      vi.mocked(csvDataFromRequest).mockResolvedValue([
+        ["Entry Name", "Quantity"],
+        ["Cable", "10"],
+      ]);
+      await post({
+        intent: "preview",
+        mapping: JSON.stringify([
+          { ...MAPPING[0], source: "Entry Name" },
+          {
+            source: "Quantity",
+            target: { kind: "field", name: "quantity" },
+            confidence: "high",
+            sample: [],
+          },
+        ]),
+        quantityTracking: "ONE_WAY",
+      });
+
+      expect(buildContentImportPreview).toHaveBeenCalledWith(
+        expect.objectContaining({
+          csvData: [
+            ["title", "quantity", "type", "consumptionType"],
+            ["Cable", "10", "QUANTITY_TRACKED", "ONE_WAY"],
+          ],
+        })
+      );
+    });
+
+    it("refuses a quantity choice that is not one of the options", async () => {
+      const result = (await post({
+        intent: "preview",
+        mapping: JSON.stringify(MAPPING),
+        quantityTracking: "SOMETIMES",
+      })) as ActionResult;
+      expect(result.init?.status).toBe(400);
+      expect(buildContentImportPreview).not.toHaveBeenCalled();
+    });
+
     it("reports the mapping as confirmed only once the preview is built", async () => {
       vi.mocked(buildContentImportPreview).mockRejectedValue(
         new ShelfError({
