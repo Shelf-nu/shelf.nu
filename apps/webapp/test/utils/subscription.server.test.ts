@@ -111,39 +111,6 @@ describe("canUseAudits", () => {
   });
 });
 
-describe("resolveCanImportAssets", () => {
-  const args = {
-    organizationId: "org-1",
-    organizations: [],
-    userId: "user-1",
-    role: "ADMIN" as const,
-  };
-
-  /** Loads the module with the tier answer the test needs. */
-  async function load(canImportAssets: boolean) {
-    const subscriptionModule = await loadSubscriptionModule(true);
-    getOrganizationTierLimitMock.mockResolvedValue({ canImportAssets });
-    return subscriptionModule;
-  }
-
-  it("is true when the plan allows importing and the role may import", async () => {
-    const { resolveCanImportAssets } = await load(true);
-    await expect(resolveCanImportAssets(args)).resolves.toBe(true);
-  });
-
-  it("is false on a plan without importing", async () => {
-    const { resolveCanImportAssets } = await load(false);
-    await expect(resolveCanImportAssets(args)).resolves.toBe(false);
-  });
-
-  it("is false for a role without the import permission", async () => {
-    const { resolveCanImportAssets } = await load(true);
-    await expect(
-      resolveCanImportAssets({ ...args, role: "BASE" })
-    ).resolves.toBe(false);
-  });
-});
-
 describe("canUseReports", () => {
   it("follows the plan's switch when premium is enabled", async () => {
     const { canUseReports } = await loadSubscriptionModule(true);

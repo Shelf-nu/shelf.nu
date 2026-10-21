@@ -16,8 +16,6 @@ export interface CustomEmptyState {
     newButtonRoute?: string;
     newButtonContent?: string;
     buttonProps?: Partial<ComponentProps<typeof Button>>;
-    /** An optional second link, shown after the main button. */
-    secondaryButton?: { route: string; content: string };
   };
   modelName?: {
     singular: string;
@@ -202,25 +200,15 @@ export const EmptyState = ({
         {isFiltered
           ? clearButton
           : customContent?.newButtonRoute && (
-              <>
-                <Button
-                  to={customContent.newButtonRoute}
-                  aria-label={`new ${singular}`}
-                  {...(customContent?.buttonProps || undefined)}
-                >
-                  {customContent?.newButtonContent
-                    ? customContent.newButtonContent
-                    : `New ${singular}`}
-                </Button>
-                {customContent.secondaryButton ? (
-                  <Button
-                    to={customContent.secondaryButton.route}
-                    variant="secondary"
-                  >
-                    {customContent.secondaryButton.content}
-                  </Button>
-                ) : null}
-              </>
+              <Button
+                to={customContent.newButtonRoute}
+                aria-label={`new ${singular}`}
+                {...(customContent?.buttonProps || undefined)}
+              >
+                {customContent?.newButtonContent
+                  ? customContent.newButtonContent
+                  : `New ${singular}`}
+              </Button>
             )}
       </div>
     </div>
