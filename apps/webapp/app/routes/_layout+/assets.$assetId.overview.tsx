@@ -1582,8 +1582,12 @@ export default function AssetOverview() {
                                     ?.filter(
                                       (o: string) => o !== null && o !== ""
                                     )
-                                    .map((option: string) => (
-                                      <option key={option} value={option}>
+                                    .map((option: string, index: number) => (
+                                      // Legacy fields can hold the same option twice.
+                                      <option
+                                        key={`${index}-${option}`}
+                                        value={option}
+                                      >
                                         {option}
                                       </option>
                                     ))}
