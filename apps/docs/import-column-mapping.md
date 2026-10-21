@@ -83,7 +83,10 @@ runs exactly as it always did.
 
 ## Analytics
 
-The import route sends these PostHog events, with counts only:
+The importer sends these PostHog events. Each one is sent under the acting
+user's id and carries the workspace's `organizationId`; beyond that it holds
+counts, and `import_failed` a reason category. No file names, headings or cell
+values are sent.
 
 - `import_mapping_proposed`: columns, low-confidence columns.
 - `import_mapping_confirmed`: columns, columns changed in the review, new
