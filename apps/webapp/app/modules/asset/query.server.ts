@@ -3198,7 +3198,11 @@ const CHEAP_CUSTODY_JOINS = Prisma.sql`
 `;
 
 /** The three columns whose values come from the `pool` LATERAL. */
-const POOL_COLUMN_NAMES = ["available", "reserved", "stockStatus"] as const;
+export const POOL_COLUMN_NAMES = [
+  "available",
+  "reserved",
+  "stockStatus",
+] as const;
 
 /**
  * Whether the cheap phase needs the `pool` LATERAL and its derived selects.
