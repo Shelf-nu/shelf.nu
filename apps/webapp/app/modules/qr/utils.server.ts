@@ -4,18 +4,14 @@ import QRCode, {
   type ErrorCorrectionLevel,
 } from "qrcode-generator";
 import { db } from "~/database/db.server";
-import { SERVER_URL, URL_SHORTENER } from "~/utils/env";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { gifToPng } from "~/utils/gif-to-png";
+import { getQrUrl } from "./qr-url.server";
 // eslint-disable-next-line import/no-cycle
 import { createQr, getQrByAssetId, getQrByKitId } from "./service.server";
 
 const label: ErrorLabel = "QR";
-
-export function getQrBaseUrl() {
-  return URL_SHORTENER ? `https://${URL_SHORTENER}` : `${SERVER_URL}/qr`;
-}
 
 export async function generateCode({
   version,
@@ -28,11 +24,9 @@ export async function generateCode({
   qr: Qr;
   size: "cable" | "small" | "medium" | "large";
 }) {
-  const baseUrl = getQrBaseUrl();
-
   try {
     const code = QRCode(version, errorCorrection);
-    code.addData(`${baseUrl}/${qr.id}`);
+    code.addData(getQrUrl(qr.id));
     code.make();
 
     /** We use a margin of 0 because we handle this using canvas in the client */

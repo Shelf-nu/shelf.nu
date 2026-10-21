@@ -77,9 +77,11 @@ import { announce } from "@/lib/a11y";
 import { submitFromSheet } from "@/lib/sheet-submit";
 import { maybeAskForReview } from "@/lib/review-prompt";
 import { canOfferQuickCheckout } from "@/lib/booking-quick-actions";
+import { buildExtendPayload, canOfferExtend } from "@/lib/booking-extend";
 import { BOOKING_METHOD } from "@/lib/booking-method";
 import { CheckoutSourceSheet } from "@/components/checkout-source-sheet";
 import ConfirmDeleteSheet from "@/components/confirm-delete-sheet";
+import { ExtendBookingSheet } from "@/components/bookings/extend-booking-sheet";
 import { questionsForCheckouts } from "@/lib/custody-source-options";
 import {
   hasAssetsLeftToCheckOut,
@@ -155,7 +157,7 @@ function BookingDetailScreen({ id }: { id: string }) {
   const { user } = useAuth();
   const { colors, statusBadge, bookingStatusBadge } = useTheme();
   const styles = useStyles();
-  const { formatDateTime } = useDateFormatter();
+  const { formatDateTime, prefs } = useDateFormatter();
 
   const [booking, setBooking] = useState<BookingDetail | null>(null);
   const [checkedInAssetIds, setCheckedInAssetIds] = useState<string[]>([]);
@@ -192,7 +194,7 @@ function BookingDetailScreen({ id }: { id: string }) {
     questions: CheckoutSourceQuestion[];
     onConfirm: (sourceLocations: Record<string, string | null>) => void;
   } | null>(null);
-  // Per-booking lifecycle-action availability (cancel/archive/duplicate/delete),
+  // Per-booking lifecycle-action availability (extend/cancel/archive/duplicate/delete),
   // computed server-side mirroring the web ActionsDropdown gating.
   const [bookingActions, setBookingActions] = useState<
     BookingDetailResponse["bookingActions"]
@@ -206,6 +208,14 @@ function BookingDetailScreen({ id }: { id: string }) {
   const [showActionsMenu, setShowActionsMenu] = useState(false);
   // The typed-name delete confirmation (see ConfirmDeleteSheet).
   const [showDeleteSheet, setShowDeleteSheet] = useState(false);
+  // The new-end picker (see ExtendBookingSheet).
+  const [showExtendSheet, setShowExtendSheet] = useState(false);
+  // One Date per stored end: the sheet hands it to the native picker as its
+  // floor, and a fresh object on every render would re-key that picker.
+  const bookingEnd = useMemo(
+    () => (booking?.to ? new Date(booking.to) : null),
+    [booking?.to]
+  );
 
   /**
    * The member's access; booking item rules below read
@@ -824,7 +834,7 @@ function BookingDetailScreen({ id }: { id: string }) {
     );
   };
 
-  // ── Lifecycle actions (cancel / archive / delete / duplicate) ──────────
+  // ── Lifecycle actions (extend / cancel / archive / delete / duplicate) ──
   // Each is permission/status-gated server-side AND only offered when the
   // detail endpoint's `bookingActions` flag says this role/status may use it.
 
@@ -917,6 +927,34 @@ function BookingDetailScreen({ id }: { id: string }) {
     router.back();
   };
 
+  /**
+   * Sends the end picked in the extend sheet. The wall clock travels with the
+   * preference zone the sheet's picker edits in, as on the booking forms.
+   *
+   * @param newEnd - The end the user confirmed
+   * @returns The server's refusal, or `null` once the booking is extended
+   */
+  const performExtend = async (newEnd: Date): Promise<string | null> => {
+    if (!booking || !currentOrg) return "Please try again.";
+    const { data, error: err } = await api.extendBooking(
+      currentOrg.id,
+      buildExtendPayload(booking.id, newEnd, prefs.timeZone)
+    );
+    if (err || !data) return err || "Please try again.";
+    setShowExtendSheet(false);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    // Mutation changed this booking: force the list to refetch.
+    markBookingsListDirty();
+    Alert.alert(
+      "Booking extended",
+      `"${booking.name}" now ends ${formatDateTime(
+        new Date(data.booking.to)
+      )}.`,
+      [{ text: "OK", onPress: () => fetchBooking() }]
+    );
+    return null;
+  };
+
   const handleDuplicate = () => {
     if (!booking || !currentOrg) return;
     Alert.alert(
@@ -953,7 +991,7 @@ function BookingDetailScreen({ id }: { id: string }) {
   };
 
   // Build the available lifecycle actions for the overflow menu. Order: the
-  // non-destructive Duplicate first, destructive ones last.
+  // non-destructive Extend and Duplicate first, destructive ones last.
   const lifecycleActions: {
     key: string;
     label: string;
@@ -961,6 +999,14 @@ function BookingDetailScreen({ id }: { id: string }) {
     destructive: boolean;
     onPress: () => void;
   }[] = [];
+  if (canOfferExtend(bookingActions))
+    lifecycleActions.push({
+      key: "extend",
+      label: "Extend booking",
+      icon: "time-outline",
+      destructive: false,
+      onPress: () => setShowExtendSheet(true),
+    });
   if (bookingActions.canDuplicate)
     lifecycleActions.push({
       key: "duplicate",
@@ -2045,7 +2091,7 @@ function BookingDetailScreen({ id }: { id: string }) {
               </View>
             )}
 
-            {/* More lifecycle actions (duplicate / archive / cancel / delete).
+            {/* More lifecycle actions (extend / duplicate / archive / cancel / delete).
                 Shows for ANY status — including closed ones (Archive on
                 COMPLETE, Duplicate always) — gated by server-computed flags. */}
             {lifecycleActions.length > 0 && (
@@ -2774,6 +2820,17 @@ function BookingDetailScreen({ id }: { id: string }) {
           isDeleting={isActioning}
           onConfirm={(confirmation) => void performDelete(confirmation)}
           onClose={() => setShowDeleteSheet(false)}
+        />
+      )}
+      {booking && bookingEnd && (
+        <ExtendBookingSheet
+          visible={showExtendSheet}
+          bookingName={booking.name}
+          currentEnd={bookingEnd}
+          timeZone={prefs.timeZone}
+          formatDateTime={formatDateTime}
+          onClose={() => setShowExtendSheet(false)}
+          onExtend={performExtend}
         />
       )}
       <CheckoutSourceSheet

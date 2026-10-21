@@ -9,6 +9,7 @@ import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { isSafeSqlIdentifier } from "~/utils/sql";
 import { parseFilters } from "./filter-parsing";
+import { LAST_AUDIT_DATE_COLUMN } from "./last-audit-date-access";
 import { bookableListScopeSql } from "./list-scope.server";
 import type { BookableListScope } from "./list-scope.server";
 import { expandLocationHierarchyFilters } from "./location-filter.server";
@@ -152,7 +153,11 @@ export function generateWhereClause(
         whereClause = addBooleanFilter(whereClause, filter);
         break;
       case "date":
-        whereClause = addDateFilter(whereClause, filter, timeZone);
+        // `lastAuditDate` is a computed subquery, not an `Asset` column.
+        whereClause =
+          filter.name === LAST_AUDIT_DATE_COLUMN
+            ? addDateFilter(whereClause, filter, timeZone, LAST_AUDIT_DATE_SQL)
+            : addDateFilter(whereClause, filter, timeZone);
         break;
       case "enum":
         whereClause = addEnumFilter(whereClause, filter);
@@ -364,20 +369,32 @@ function addCustomFieldNumberFilter(
   }
 }
 
+/**
+ * The unit of measure as the advanced index shows it. Only QUANTITY_TRACKED
+ * assets have a unit there; an individual asset can still carry a stored unit
+ * (a CSV import writes whatever the row says), which the cell hides. Sorting
+ * and filtering read this expression, never the raw column, so a unit nobody
+ * can see neither matches a filter nor moves a row in a sort.
+ */
+const VISIBLE_UNIT_OF_MEASURE = Prisma.raw(
+  `CASE WHEN a."type" = 'QUANTITY_TRACKED' THEN a."unitOfMeasure" ELSE NULL END`
+);
+
 function addStringFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
+  const column =
+    filter.name === "unitOfMeasure"
+      ? VISIBLE_UNIT_OF_MEASURE
+      : Prisma.sql`a."${Prisma.raw(filter.name)}"`;
+
   switch (filter.operator) {
     case "is":
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(filter.name)}" = ${
-        filter.value
-      }`;
+      return Prisma.sql`${whereClause} AND ${column} = ${filter.value}`;
     case "isNot":
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(filter.name)}" != ${
-        filter.value
-      }`;
+      // IS DISTINCT FROM, not `!=`: an empty column (no description, no unit
+      // of measure) is "not" any value, and `!=` never matches NULL.
+      return Prisma.sql`${whereClause} AND ${column} IS DISTINCT FROM ${filter.value}`;
     case "contains":
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(
-        filter.name
-      )}" ILIKE ${`%${filter.value}%`}`;
+      return Prisma.sql`${whereClause} AND ${column} ILIKE ${`%${filter.value}%`}`;
     case "matchesAny": {
       // Split comma-separated values and remove whitespace
       const values = (filter.value as string).split(",").map((v) => v.trim());
@@ -386,16 +403,13 @@ function addStringFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         values.map((v) => Prisma.sql`${v}`),
         ", "
       );
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(
-        filter.name
-      )}" = ANY(ARRAY[${valuesArray}]::text[])`;
+      return Prisma.sql`${whereClause} AND ${column} = ANY(ARRAY[${valuesArray}]::text[])`;
     }
     case "containsAny": {
       const values = (filter.value as string).split(",").map((v) => v.trim());
       // Build OR condition for ILIKE
       const likeConditions = values.map(
-        (value) =>
-          Prisma.sql`a."${Prisma.raw(filter.name)}" ILIKE ${`%${value}%`}`
+        (value) => Prisma.sql`${column} ILIKE ${`%${value}%`}`
       );
       return Prisma.sql`${whereClause} AND (${Prisma.join(
         likeConditions,
@@ -475,24 +489,32 @@ function addBooleanFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
  * @param timeZone - IANA timezone name the day should be resolved in (the
  *   acting user's resolved pref tz). Bound as a SQL parameter, never
  *   string-interpolated, so it stays injection-safe.
+ * @param columnSql - Optional SQL expression replacing `a."<filter.name>"`,
+ *   for computed columns such as `lastAuditDate`.
  * @returns The extended WHERE clause.
  */
 function addDateFilter(
   whereClause: Prisma.Sql,
   filter: Filter,
-  timeZone: string
+  timeZone: string,
+  columnSql?: Prisma.Sql
 ): Prisma.Sql {
+  // Computed columns (e.g. `lastAuditDate`) pass their own SQL expression; the
+  // default is the `Asset` column named by the filter.
+  const column = columnSql ?? Prisma.sql`a."${Prisma.raw(filter.name)}"`;
+
   // The UTC-stored `timestamp` column truncated to a calendar date in the
   // user's tz. `AT TIME ZONE 'UTC'` reinterprets the bare wall clock as a UTC
   // instant; the second `AT TIME ZONE ${timeZone}` converts it to the user's
   // wall clock before `::date` (see the two-step rationale above). `'UTC'` is a
   // fixed literal; `timeZone` is a bound parameter (`AT TIME ZONE $n`), not raw
   // SQL, so it stays injection-safe.
-  const localDate = Prisma.sql`(a."${Prisma.raw(
-    filter.name
-  )}" AT TIME ZONE 'UTC' AT TIME ZONE ${timeZone})::date`;
+  const localDate = Prisma.sql`(${column} AT TIME ZONE 'UTC' AT TIME ZONE ${timeZone})::date`;
 
   switch (filter.operator) {
+    case "isEmpty":
+      // No value: matches rows where the column is NULL (e.g. never audited).
+      return Prisma.sql`${whereClause} AND ${column} IS NULL`;
     case "is":
       return Prisma.sql`${whereClause} AND ${localDate} = ${filter.value}::date`;
     case "isNot":
@@ -1492,6 +1514,7 @@ type DirectAssetField =
   | "availableToBook"
   | "type"
   | "quantity"
+  | "unitOfMeasure"
   | "minQuantity";
 
 const directAssetFields: Record<DirectAssetField, string> = {
@@ -1506,6 +1529,7 @@ const directAssetFields: Record<DirectAssetField, string> = {
   availableToBook: "assetAvailableToBook",
   type: "assetType",
   quantity: "assetQuantity",
+  unitOfMeasure: "assetUnitOfMeasure",
   minQuantity: "assetMinQuantity",
 };
 
@@ -1524,17 +1548,21 @@ const directAssetFields: Record<DirectAssetField, string> = {
  *
  * @param columnRef - The column or expression to sort. Caller-validated.
  * @param direction - Sort direction ('asc' or 'desc'). Caller-validated.
+ * @param options.nullsLast - Keep empty values last in both directions, for a
+ *   column most rows leave empty
  * @returns SQL string with normalized sorting expression
  */
 function getNormalizedSortExpression(
   columnRef: string,
-  direction: string
+  direction: string,
+  { nullsLast = false }: { nullsLast?: boolean } = {}
 ): string {
+  const order = nullsLast ? `${direction} NULLS LAST` : direction;
   return `
     LOWER(regexp_replace(${columnRef}, '([0-9]+)',
       lpad(regexp_replace(regexp_replace('\\1', '^0+', ''), '^$', '0'), 12, '0')
-    )) ${direction},
-    ${columnRef} ${direction}
+    )) ${order},
+    ${columnRef} ${order}
   `.trim();
 }
 
@@ -1657,9 +1685,13 @@ export function parseSortingOptions(sortBy: string[]): {
           getSequentialIdSortExpression(`"${columnName}"`, field.direction)
         );
       } else if (isTextColumn(field.name)) {
-        // Apply natural sort for other text columns
+        // Apply natural sort for other text columns. Individual assets have
+        // no unit of measure, so empty units stay last in both directions
+        // instead of filling the first pages of a descending sort.
         orderByParts.push(
-          getNormalizedSortExpression(`"${columnName}"`, field.direction)
+          getNormalizedSortExpression(`"${columnName}"`, field.direction, {
+            nullsLast: field.name === "unitOfMeasure",
+          })
         );
       } else if (field.name === "valuation") {
         // Quantity-aware: sort by TOTAL value (per-unit × quantity), matching
@@ -1675,6 +1707,10 @@ export function parseSortingOptions(sortBy: string[]): {
         // Use regular sorting for non-text columns
         orderByParts.push(`"${columnName}" ${field.direction}`);
       }
+    } else if (field.name === LAST_AUDIT_DATE_COLUMN) {
+      // Never-audited assets have a NULL date; keep them last in both
+      // directions so they do not crowd the top of a descending sort.
+      orderByParts.push(`"lastAuditDate" ${field.direction} NULLS LAST`);
     } else if (field.name === "qrId") {
       orderByParts.push(getNormalizedSortExpression(`"qrId"`, field.direction));
     } else if (field.name === "kit") {
@@ -1813,6 +1849,7 @@ function isTextColumn(fieldName: string): boolean {
     "sequentialId",
     "name",
     "description",
+    "unitOfMeasure",
   ];
   return textColumns.includes(fieldName as DirectAssetField);
 }
@@ -1877,6 +1914,12 @@ export type AssetQueryOptions = {
   withBookings?: boolean;
   withBarcodes?: boolean;
   /**
+   * Include the `lastAuditDate` scalar (latest completed audit that covered
+   * the asset). Off by default so callers that do not render the column pay
+   * nothing for it.
+   */
+  withLastAuditDate?: boolean;
+  /**
    * When true (default), includes full custom field definitions (helpText,
    * required, options, categories) in each custom field value — matching
    * the AdvancedIndexAsset type contract. Set to false for table views
@@ -1889,6 +1932,12 @@ export type AssetQueryOptions = {
 export type AssetReturnOptions = {
   withBookings?: boolean;
   withBarcodes?: boolean;
+  /**
+   * Include the `lastAuditDate` scalar (latest completed audit that covered
+   * the asset). Off by default so callers that do not render the column pay
+   * nothing for it.
+   */
+  withLastAuditDate?: boolean;
   /**
    * When provided, the emitted `json_agg` orders its elements by this SQL
    * expression: `json_agg(jsonb_build_object(...) ORDER BY <orderBy>)`. The
@@ -1959,13 +2008,33 @@ const utcJsonTimestamp = (
     | 'aq."assetUpdatedAt"'
     | 'aq."assetMainImageExpiration"'
     | 'ar."alertDateTime"'
+    | 'aq."lastAuditDate"'
 ) => Prisma.raw(`to_char(${column}, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`);
+
+/**
+ * Scalar subquery returning the completion time of the latest finished audit
+ * that covered the outer asset (`a`). Only COMPLETED and ARCHIVED sessions
+ * count, and `completedAt IS NOT NULL` drops archived audits that were never
+ * completed. The `s."organizationId" = a."organizationId"` predicate keeps the
+ * lookup inside the asset's workspace. References only `a.id` and
+ * `a."organizationId"`, so it needs no GROUP BY additions.
+ */
+export const LAST_AUDIT_DATE_SQL = Prisma.sql`(
+  SELECT MAX(s."completedAt")
+  FROM public."AuditAsset" aa
+  JOIN public."AuditSession" s ON s.id = aa."auditSessionId"
+  WHERE aa."assetId" = a.id
+    AND s."organizationId" = a."organizationId"
+    AND s.status IN ('COMPLETED', 'ARCHIVED')
+    AND s."completedAt" IS NOT NULL
+)`;
 
 // Convert to functions that accept options
 export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
   const {
     withBookings = false,
     withBarcodes = false,
+    withLastAuditDate = false,
     withCustomFieldDefinitions = true,
   } = options;
 
@@ -2075,8 +2144,13 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
     ) AS bookings`
     : Prisma.sql``;
 
+  const lastAuditDateSelect = withLastAuditDate
+    ? Prisma.sql`,
+    ${LAST_AUDIT_DATE_SQL} AS "lastAuditDate"`
+    : Prisma.sql``;
+
   // Everything between the backticks below is a template literal, so a stray
-  // backtick or dollar-brace anywhere in it — SQL comments included — ends the
+  // backtick or dollar-brace anywhere in it (SQL comments included) ends the
   // literal and reinterprets the rest of the query as JavaScript.
   const barcodesSelect = withBarcodes
     ? Prisma.sql`,
@@ -2296,7 +2370,7 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
         ORDER BY 
           ar."alertDateTime" ASC
         LIMIT 1
-      ) AS upcomingReminder${bookingsSelect}${barcodesSelect}
+      ) AS upcomingReminder${bookingsSelect}${barcodesSelect}${lastAuditDateSelect}
   `;
 };
 
@@ -2436,11 +2510,21 @@ export const assetQueryJoins = Prisma.sql`
  * @returns Prisma.Sql fragment that safely handles no results
  */
 export const assetReturnFragment = (options: AssetReturnOptions = {}) => {
-  const { withBookings = false, withBarcodes = false, orderBy } = options;
+  const {
+    withBookings = false,
+    withBarcodes = false,
+    withLastAuditDate = false,
+    orderBy,
+  } = options;
 
   const bookingsField = withBookings
     ? Prisma.sql`,
         'bookings', COALESCE(aq.bookings, '[]'::jsonb)`
+    : Prisma.sql``;
+
+  const lastAuditDateField = withLastAuditDate
+    ? Prisma.sql`,
+        'lastAuditDate', ${utcJsonTimestamp('aq."lastAuditDate"')}`
     : Prisma.sql``;
 
   const barcodesField = withBarcodes
@@ -2518,7 +2602,7 @@ export const assetReturnFragment = (options: AssetReturnOptions = {}) => {
           'locations', COALESCE(aq.locations, '[]'::jsonb),
           'custody', aq.custody,
           'customFields', COALESCE(aq."customFields", '[]'::jsonb),
-          'upcomingReminder', aq.upcomingReminder${bookingsField}${barcodesField}
+          'upcomingReminder', aq.upcomingReminder${bookingsField}${barcodesField}${lastAuditDateField}
         )${aggOrderBy}
       ) FILTER (WHERE aq."assetId" IS NOT NULL),
       '[]'
@@ -2728,6 +2812,7 @@ function detectActiveSortKeys(sortBy: string[]): {
   categoryName: boolean;
   assetModelName: boolean;
   locationName: boolean;
+  lastAuditDate: boolean;
 } {
   let qrId = false;
   let custody = false;
@@ -2736,6 +2821,7 @@ function detectActiveSortKeys(sortBy: string[]): {
   let categoryName = false;
   let assetModelName = false;
   let locationName = false;
+  let lastAuditDate = false;
   for (const spec of sortBy) {
     const name = spec.split(":")[0] ?? "";
     if (name === "qrId") qrId = true;
@@ -2747,6 +2833,7 @@ function detectActiveSortKeys(sortBy: string[]): {
     else if (name === "category") categoryName = true;
     else if (name === "assetModel") assetModelName = true;
     else if (name === "location") locationName = true;
+    else if (name === LAST_AUDIT_DATE_COLUMN) lastAuditDate = true;
   }
   return {
     qrId,
@@ -2756,6 +2843,7 @@ function detectActiveSortKeys(sortBy: string[]): {
     categoryName,
     assetModelName,
     locationName,
+    lastAuditDate,
   };
 }
 
@@ -2775,6 +2863,8 @@ export type BuildAdvancedAssetsQueryParams = {
   withBookings: boolean;
   /** Include the barcodes jsonb aggregation. */
   withBarcodes: boolean;
+  /** Include the `lastAuditDate` scalar subquery. */
+  withLastAuditDate: boolean;
   /** `LIMIT/OFFSET` fragment, or `Prisma.empty` for takeAll (full export). */
   paginationClause: Prisma.Sql;
 };
@@ -2806,6 +2896,7 @@ export function buildAdvancedAssetsQuery({
   parsedFilters,
   withBookings,
   withBarcodes,
+  withLastAuditDate,
   paginationClause,
 }: BuildAdvancedAssetsQueryParams): Prisma.Sql {
   const customFieldSelect = generateCustomFieldSelect(customFieldSortings);
@@ -2818,6 +2909,7 @@ export function buildAdvancedAssetsQuery({
     categoryName: categoryNameSort,
     assetModelName: assetModelNameSort,
     locationName: locationNameSort,
+    lastAuditDate: lastAuditDateSort,
   } = detectActiveSortKeys(sortBy);
 
   // Custody joins are needed when EITHER a custody filter (WHERE references
@@ -2864,6 +2956,12 @@ export function buildAdvancedAssetsQuery({
     ? Prisma.sql`,
       ${BARCODE_SORT_KEY_SELECTS}`
     : Prisma.empty;
+  // The ORDER BY references the "lastAuditDate" alias, so the slim CTE must
+  // emit it whenever that sort is active.
+  const lastAuditDateSortSelect = lastAuditDateSort
+    ? Prisma.sql`,
+      ${LAST_AUDIT_DATE_SQL} AS "lastAuditDate"`
+    : Prisma.empty;
   const custodyJoins = custodyJoinsActive ? CHEAP_CUSTODY_JOINS : Prisma.empty;
 
   const kitJoin = needKitJoin ? CHEAP_KIT_JOIN : Prisma.empty;
@@ -2896,13 +2994,14 @@ export function buildAdvancedAssetsQuery({
           a."updatedAt" AS "assetUpdatedAt",
           a.value AS "assetValue",
           a.quantity AS "assetQuantity",
+          ${VISIBLE_UNIT_OF_MEASURE} AS "assetUnitOfMeasure",
           a."minQuantity" AS "assetMinQuantity",
           a.title AS "assetTitle",
           a."sequentialId" AS "assetSequentialId",
           a.status AS "assetStatus",
           a.type AS "assetType",
           a.description AS "assetDescription",
-          a."availableToBook" AS "assetAvailableToBook"${kitNameSelect}${categoryNameSelect}${assetModelNameSelect}${locationNameSelect}${qrIdSortSelect}${custodySortSelect}${barcodeSortSelects}${customFieldSelect}
+          a."availableToBook" AS "assetAvailableToBook"${kitNameSelect}${categoryNameSelect}${assetModelNameSelect}${locationNameSelect}${qrIdSortSelect}${custodySortSelect}${barcodeSortSelects}${lastAuditDateSortSelect}${customFieldSelect}
         ${baseJoins}
         ${custodyJoins}
         ${whereClause}
@@ -2928,6 +3027,7 @@ export function buildAdvancedAssetsQuery({
         ${assetReturnFragment({
           withBookings,
           withBarcodes,
+          withLastAuditDate,
           orderBy: rankOrderBy,
         })}
       FROM sorted_asset_query saq
@@ -2936,6 +3036,7 @@ export function buildAdvancedAssetsQuery({
         ${assetQueryFragment({
           withBookings,
           withBarcodes,
+          withLastAuditDate,
           withCustomFieldDefinitions: false,
         })}
         ${assetQueryJoins}

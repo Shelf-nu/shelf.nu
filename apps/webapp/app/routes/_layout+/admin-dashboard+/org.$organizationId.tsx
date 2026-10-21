@@ -12,7 +12,7 @@ import {
   useNavigation,
 } from "react-router";
 import { z } from "zod";
-import { FileForm } from "~/components/assets/import-content";
+import { FileForm } from "~/components/assets/import-content-file-form";
 import { Form } from "~/components/custom-form";
 import FormRow from "~/components/forms/form-row";
 import Input from "~/components/forms/input";

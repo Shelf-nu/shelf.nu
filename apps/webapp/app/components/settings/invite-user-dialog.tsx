@@ -22,7 +22,7 @@ import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
 import { validEmail } from "~/utils/misc";
-import { canAssignRole } from "~/utils/permissions/membership-access";
+import { canInviteRole } from "~/utils/permissions/membership-access";
 import type { OrganizationRole } from "~/utils/permissions/role-access";
 import {
   ROLE_DESCRIPTIONS,
@@ -89,7 +89,7 @@ export default function InviteUserDialog({
   const { ownsWorkspace } = useRoleAccess();
   /** Roles this member may grant; only the owner may grant an owner-only role. */
   const grantableRoles = INVITABLE_ROLES.filter((role) =>
-    canAssignRole({ actorOwnsWorkspace: ownsWorkspace, role })
+    canInviteRole({ actorOwnsWorkspace: ownsWorkspace, role })
   );
 
   const fetcher =

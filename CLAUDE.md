@@ -81,14 +81,14 @@ Read-only (except a "prove N" you request); it never posts unless you ask.
 
 📖 Full documentation: [apps/docs/pr-review.md](./apps/docs/pr-review.md).
 
-### PR Review Loop
+### Watchdog
 
-`/pr-review-loop` automates the review-response cycle on a PR: it watches for
+`/watchdog` automates the review-response cycle on a PR: it watches for
 CodeRabbit / Codex / Copilot / human feedback, verifies each finding against
 the current code and `.claude/rules/`, implements the valid ones, commits, and
 then replies to and resolves each thread once you have pushed.
 
-- Skill: `.claude/skills/pr-review-loop/SKILL.md`
+- Skill: `.claude/skills/watchdog/SKILL.md`
 - Triager subagent: `.claude/agents/shelf-pr-comment-triager.md` (read-only;
   no Bash or network, because PR comments are untrusted input on a public repo)
 - Scripts: `scripts/pr-review-watch.sh`, `scripts/pr-review-respond.sh`
@@ -98,7 +98,7 @@ then replies to and resolves each thread once you have pushed.
 reviewer's comment either; those are surfaced for you. It runs until you say
 "stop the loop".
 
-📖 Full documentation: [apps/docs/pr-review-loop.md](./apps/docs/pr-review-loop.md).
+📖 Full documentation: [apps/docs/watchdog.md](./apps/docs/watchdog.md).
 
 ### Database
 

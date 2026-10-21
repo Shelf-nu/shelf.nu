@@ -12,7 +12,46 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { decodeCsvListCell, encodeCsvListCell } from "./csv-cells";
+import {
+  decodeCsvListCell,
+  encodeCsvListCell,
+  neutralizeCsvFormula,
+  neutralizeSpreadsheetFormula,
+} from "./csv-cells";
+
+describe("neutralizeCsvFormula", () => {
+  it("prefixes every value a spreadsheet would run", () => {
+    expect(
+      ["=1+1", "+cmd", "-20C Freezer", "@SUM(A1)"].map((v) =>
+        neutralizeCsvFormula(v)
+      )
+    ).toEqual(["'=1+1", "'+cmd", "'-20C Freezer", "'@SUM(A1)"]);
+  });
+
+  it("neutralizes a leading tab or carriage return, even for signed text", () => {
+    expect(neutralizeCsvFormula("\t=1+1")).toBe("'\t=1+1");
+    expect(neutralizeCsvFormula("\r=1")).toBe("'\r=1");
+    expect(neutralizeCsvFormula("\t-20C", { keepSignedText: true })).toBe(
+      "'\t-20C"
+    );
+  });
+
+  it("leaves other values alone", () => {
+    expect(neutralizeCsvFormula("Freezer -80")).toBe("Freezer -80");
+  });
+
+  it("keeps a plain signed measurement when asked, never = or @", () => {
+    const keep = { keepSignedText: true };
+    expect(neutralizeCsvFormula("-20C Freezer", keep)).toBe("-20C Freezer");
+    expect(neutralizeCsvFormula("+5V PSU", keep)).toBe("+5V PSU");
+    expect(neutralizeCsvFormula("-1+cmd|' /C calc'!A0", keep)).toBe(
+      "'-1+cmd|' /C calc'!A0"
+    );
+    expect(neutralizeCsvFormula("-2*3", keep)).toBe("'-2*3");
+    expect(neutralizeCsvFormula("=1", keep)).toBe("'=1");
+    expect(neutralizeCsvFormula("@HQ", keep)).toBe("'@HQ");
+  });
+});
 
 describe("encodeCsvListCell", () => {
   it("leaves a plain list alone", () => {
@@ -87,5 +126,20 @@ describe("round trip", () => {
     [["https://maps.example.com?loc=40.7,-74.0"]],
   ])("survives %j", (values) => {
     expect(decodeCsvListCell(encodeCsvListCell(values))).toEqual(values);
+  });
+});
+
+describe("neutralizeSpreadsheetFormula", () => {
+  it.each(["=SUM(A1)", "+1", "-1", "@SUM(1,1)", "  =HYPERLINK(1)"])(
+    "prefixes %j with a single quote so it reads as text",
+    (value) => {
+      expect(neutralizeSpreadsheetFormula(value)).toBe(`'${value.trim()}`);
+    }
+  );
+
+  it("leaves ordinary text as it is, trimmed", () => {
+    expect(neutralizeSpreadsheetFormula("pcs")).toBe("pcs");
+    expect(neutralizeSpreadsheetFormula(" kg ")).toBe("kg");
+    expect(neutralizeSpreadsheetFormula("")).toBe("");
   });
 });
