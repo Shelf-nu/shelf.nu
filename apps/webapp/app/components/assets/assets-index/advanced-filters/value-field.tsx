@@ -132,6 +132,9 @@ function resolveFilterDefault(
   if (filter.type === "enum") {
     if (filter.name === "type") return "INDIVIDUAL";
     if (filter.name === "status") return Object.values(AssetStatus)[0];
+    // The picker shows its first option when empty, so the filter starts on
+    // it too, or the row would read SHORT while filtering on nothing.
+    if (filter.name === "stockStatus") return STOCK_STATUSES[0];
     if (filter.name.startsWith("cf_")) {
       const options =
         customFields.find((f) => f?.name === filter.name.slice(3))?.options ??
