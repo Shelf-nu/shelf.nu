@@ -344,46 +344,55 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     ];
 
     /**
+     * The shortfall first, without a booking: the booking's name is read only
+     * for a pool that is actually over-committed, since nothing shows it
+     * otherwise.
+     */
+    const shortfall = availabilityAhead
+      ? resolveOverCommitment({
+          total: availabilityAhead.total,
+          inCustody: availabilityAhead.inCustody,
+          inKits: availabilityAhead.inKits,
+          peakBooked: availabilityAhead.reserved,
+          topBooking: null,
+        })
+      : null;
+
+    /**
      * The booking is named and linked only for a viewer who may open it, by
      * the same `canSeeBooking` rule the booking page enforces. Anyone else
      * still reads the shortfall, without a name or a link that would 403.
      */
-    const topReservedBookingRow = topReservedBooking
-      ? await db.booking.findFirst({
-          where: { id: topReservedBooking.bookingId, organizationId },
-          select: {
-            name: true,
-            custodianUserId: true,
-            custodianTeamMember: { select: { userId: true } },
-          },
-        })
-      : null;
-    const topReservedBookingName =
+    const topReservedBookingRow =
+      shortfall && topReservedBooking
+        ? await db.booking.findFirst({
+            where: { id: topReservedBooking.bookingId, organizationId },
+            select: {
+              name: true,
+              custodianUserId: true,
+              custodianTeamMember: { select: { userId: true } },
+            },
+          })
+        : null;
+
+    const overCommitment =
+      shortfall &&
+      topReservedBooking &&
       topReservedBookingRow &&
       canSeeBooking({
         access,
         booking: topReservedBookingRow,
         userId,
       })
-        ? topReservedBookingRow.name
-        : null;
-
-    const overCommitment = availabilityAhead
-      ? resolveOverCommitment({
-          total: availabilityAhead.total,
-          inCustody: availabilityAhead.inCustody,
-          inKits: availabilityAhead.inKits,
-          peakBooked: availabilityAhead.reserved,
-          topBooking:
-            topReservedBooking && topReservedBookingName !== null
-              ? {
-                  id: topReservedBooking.bookingId,
-                  name: topReservedBookingName,
-                  units: topReservedBooking._sum.quantity ?? 0,
-                }
-              : null,
-        })
-      : null;
+        ? {
+            ...shortfall,
+            booking: {
+              id: topReservedBooking.bookingId,
+              name: topReservedBookingRow.name,
+              units: topReservedBooking._sum.quantity ?? 0,
+            },
+          }
+        : shortfall;
 
     /** We only need customField with same category of asset or without any category */
     const customFields = asset.categoryId
