@@ -10,6 +10,10 @@ import { data, useFetcher, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { CustodyCard } from "~/components/assets/asset-custody-card";
+import {
+  AssetLastAuditCard,
+  LAST_AUDIT_CARD_RECENT_LIMIT,
+} from "~/components/assets/asset-last-audit-card";
 import { AssetReminderCards } from "~/components/assets/asset-reminder-cards";
 import { MoveUnitsDialog } from "~/components/assets/move-units-dialog";
 import { QuantityCustodyList } from "~/components/assets/quantity-custody-list";
@@ -51,6 +55,7 @@ import { usePosition } from "~/hooks/use-position";
 import { useRoleAccess } from "~/hooks/use-role-access";
 import { getAssetAvailability } from "~/modules/asset/availability.server";
 import { getAssetOverviewFields } from "~/modules/asset/fields";
+import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
 import {
   MOVE_UNITS_INTENT_FIELD,
   type MoveAxis,
@@ -77,6 +82,7 @@ import {
   isQuantityTracked,
 } from "~/modules/asset/utils";
 import { getRemindersForOverviewPage } from "~/modules/asset-reminder/service.server";
+import { getAssetAuditHistory } from "~/modules/audit/asset-audit-history.server";
 import { getCustodyCardHolderUserId } from "~/modules/custody/utils";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { moveAssetKitUnits } from "~/modules/kit/service.server";
@@ -179,8 +185,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
 
     /**
-     * We get the first QR code(for now we can only have 1)
-     * And using the ID of tha qr code, we find the latest scan.
+     * The latest scan of this asset, whichever code was scanned (QR, barcode
+     * or SAM ID).
      *
      * `getLastScanForViewer` applies the `scan:read` gate SERVER-SIDE and
      * returns null without it. The parsed scan carries the scanner's name and
@@ -188,13 +194,30 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * `<ScanDetails>` behind the same check, but a client-side check only
      * hides the data — BASE and SELF_SERVICE hold `scan: []` and were still
      * receiving all of it in the page payload.
+     *
+     * Read alongside it: the "Last audit" card's history. Gated server-side by
+     * the same rule as the "Last audit date" column: only callers who see
+     * every audit, in a workspace with the audits add-on, receive it. Everyone
+     * else gets null and no card, so no audit dates reach roles whose audits
+     * are assignment-scoped.
      */
-    const lastScan = await getLastScanForViewer({
-      qrId: asset.qrCodes[0]?.id,
-      userId,
-      organizationId,
-      roles,
-    });
+    const canSeeAuditHistory =
+      lastAuditDateAccessFor(access, currentOrganization) === "available";
+    const [lastScan, auditHistory] = await Promise.all([
+      getLastScanForViewer({
+        target: { assetId: asset.id },
+        userId,
+        organizationId,
+        roles,
+      }),
+      canSeeAuditHistory
+        ? getAssetAuditHistory({
+            assetId: asset.id,
+            organizationId,
+            limit: LAST_AUDIT_CARD_RECENT_LIMIT,
+          })
+        : null,
+    ]);
 
     const qrObj = await generateQrObj({
       assetId: asset.id,
@@ -409,6 +432,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       currentOrganization,
       userId,
       lastScan,
+      auditHistory,
       header,
       locale,
       timeZone,
@@ -779,6 +803,7 @@ export default function AssetOverview() {
     locale,
     qrObj,
     lastScan,
+    auditHistory,
     currentOrganization,
     userId,
     quantityData,
@@ -1541,6 +1566,8 @@ export default function AssetOverview() {
 
           <AssetReminderCards className="my-2" />
 
+          <AssetLastAuditCard assetId={asset.id} history={auditHistory} />
+
           {(() => {
             /**
              * A QUANTITY_TRACKED asset can belong to multiple kits at
@@ -1938,7 +1965,11 @@ export default function AssetOverview() {
               action: PermissionAction.read,
             })}
           >
-            <ScanDetails lastScan={lastScan} />
+            <ScanDetails
+              lastScan={lastScan}
+              target={{ assetId: asset.id }}
+              itemName={asset.title}
+            />
           </When>
         </div>
       </div>

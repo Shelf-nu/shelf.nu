@@ -80,6 +80,7 @@ vitest.mock("~/database/db.server", () => ({
 }));
 
 import { checkAndNotifyLowStock } from "./low-stock.server";
+import { MOVE_CATEGORY, OPENING_BALANCE_CATEGORY } from "./stock-ledger";
 
 const ASSET_ID = "asset-1";
 const ORG_ID = "org-1";
@@ -103,8 +104,8 @@ const logFindManyMock = db.consumptionLog.findMany as ReturnType<
 >;
 
 /**
- * Feeds the notifier's two-step log read: the newest row first, then, for a
- * row with a booking or custodian, every row of its operation.
+ * Feeds the notifier's two-step log read: the newest row first, then every
+ * row of its operation.
  *
  * @param rows - The asset's rows, newest first
  */
@@ -743,8 +744,37 @@ describe("checkAndNotifyLowStock: the facts each copy is rendered from", () => {
     );
     // A fresh log row explains the change, so the acting user is not loaded.
     expect(userFindUniqueMock).not.toHaveBeenCalled();
-    // A row with neither booking nor custodian stands alone: no second read.
-    expect(logFindManyMock).not.toHaveBeenCalled();
+    // A row with neither booking nor custodian is one write: the second read
+    // takes only that write's rows, the ones sharing its category and instant.
+    expect(logFindManyMock.mock.calls[0][0].where).toEqual({
+      assetId: ASSET_ID,
+      category: "CONSUME",
+      userId: "user-dana",
+      bookingId: null,
+      custodianId: null,
+      createdAt: LOGGED_AT,
+    });
+  });
+
+  it("sums one write the ledger split over two places", async () => {
+    findFirstMock.mockResolvedValue(assetRow({ quantity: 2, minQuantity: 5 }));
+    // One "used up 5": 2 off the unplaced units, 3 off a location.
+    logsAre([
+      { ...consumeRow, quantity: 2 },
+      { ...consumeRow, quantity: 3 },
+    ]);
+
+    await checkAndNotifyLowStock({
+      assetId: ASSET_ID,
+      userId: USER_ID,
+      organizationId: ORG_ID,
+    });
+
+    expect(alertRenders()[0].movement).toEqual(
+      expect.objectContaining({
+        text: expect.stringMatching(/^5 boards used up by Dana Reyes/),
+      })
+    );
   });
 
   it("names the acting user when no log row explains the change", async () => {
@@ -875,7 +905,11 @@ describe("checkAndNotifyLowStock: the facts each copy is rendered from", () => {
 
     expect(logFindFirstMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { assetId: ASSET_ID },
+        // Ledger bookkeeping rows record no operation, so the read skips them.
+        where: {
+          assetId: ASSET_ID,
+          category: { notIn: [MOVE_CATEGORY, OPENING_BALANCE_CATEGORY] },
+        },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       })
     );
@@ -883,6 +917,7 @@ describe("checkAndNotifyLowStock: the facts each copy is rendered from", () => {
     const operationRead = logFindManyMock.mock.calls[0][0];
     expect(operationRead.where).toEqual({
       assetId: ASSET_ID,
+      category: { notIn: [MOVE_CATEGORY, OPENING_BALANCE_CATEGORY] },
       userId: "user-dana",
       bookingId: "bk-1",
       custodianId: null,

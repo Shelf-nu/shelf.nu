@@ -130,7 +130,11 @@ export default function AssetCustomFields({
           </span>
         </label>
 
-        <OptionSelect field={field} getCustomFieldVal={getCustomFieldVal} />
+        <OptionSelect
+          field={field}
+          getCustomFieldVal={getCustomFieldVal}
+          error={getFieldError(field.id)}
+        />
       </>
     ),
     MULTILINE_TEXT: (field) => {
@@ -296,13 +300,24 @@ export default function AssetCustomFields({
   );
 }
 
-/** Component that renders select for CustomField OPTION fields */
+/**
+ * Component that renders select for CustomField OPTION fields.
+ *
+ * The value travels in a hidden input, so the browser never flags it as
+ * invalid on its own: the validation message has to be rendered here,
+ * under the trigger, or a required option field that is left empty blocks
+ * the save with nothing on screen to explain why.
+ *
+ * @param error - Validation message for this field, shown under the trigger
+ */
 function OptionSelect({
   field,
   getCustomFieldVal,
+  error,
 }: {
   field: CustomField;
   getCustomFieldVal: (id: string) => string;
+  error?: string;
 }) {
   // State for popover, search, selection
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
@@ -325,6 +340,17 @@ function OptionSelect({
   }, [field.options, searchQuery]);
 
   const displayValue = value || `Choose ${field.name}`;
+
+  /**
+   * Picking an option only updates the hidden input, which fires no form
+   * `change` event, so Zorm keeps reporting the error from the last submit.
+   * The option schema has exactly two errors, an empty required value and a
+   * value missing from `field.options`, and a value in that list satisfies
+   * both. Hide the error only then: a stored value that was removed from the
+   * options must keep its message.
+   */
+  const shownError =
+    value !== "" && field.options.includes(value) ? undefined : error;
 
   // Handle option selection
   function handleOptionClick(option: string) {
@@ -373,8 +399,13 @@ function OptionSelect({
           <Button
             type="button"
             variant="secondary"
-            className="w-full justify-start truncate whitespace-nowrap font-normal [&_span]:w-full [&_span]:max-w-full [&_span]:truncate [&_span]:text-left"
+            className={tw(
+              "w-full justify-start truncate whitespace-nowrap font-normal [&_span]:w-full [&_span]:max-w-full [&_span]:truncate [&_span]:text-left",
+              shownError && "border-error-300 focus:border-error-300"
+            )}
             ref={triggerRef}
+            aria-invalid={shownError ? true : undefined}
+            aria-describedby={shownError ? `cf-${field.id}-error` : undefined}
           >
             <div className="flex w-full items-center justify-between">
               <span className={value === "" ? "text-gray-500" : ""}>
@@ -450,6 +481,11 @@ function OptionSelect({
           </PopoverContent>
         </PopoverPortal>
       </Popover>
+      {shownError ? (
+        <div id={`cf-${field.id}-error`} className="text-sm text-error-500">
+          {shownError}
+        </div>
+      ) : null}
     </>
   );
 }

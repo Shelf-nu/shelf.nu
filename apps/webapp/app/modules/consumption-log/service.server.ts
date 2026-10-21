@@ -2,18 +2,20 @@
  * ConsumptionLog Service
  *
  * Manages quantity-tracking operations for assets in Shelf.nu.
- * Handles creating consumption logs (CHECKOUT, RETURN, RESTOCK, ADJUSTMENT, LOSS),
- * querying paginated log history, computing available quantities, and adjusting
- * the total quantity of a quantity-tracked asset.
+ * Handles hand-out and return logs (CHECKOUT, RETURN), querying paginated log
+ * history, computing available quantities, and adjusting the total quantity
+ * of a quantity-tracked asset (RESTOCK, ADJUSTMENT, LOSS).
  *
- * Consumption logs are immutable audit records — they are never updated or deleted.
- * Direction (add/subtract) is determined by the category:
- *   - CHECKOUT / LOSS → subtract from available pool
- *   - RETURN → add back to available pool
- *   - RESTOCK / ADJUSTMENT → change total quantity
+ * Consumption logs are immutable audit records: they are never updated or deleted.
+ * Two kinds of row share the table:
+ *   - CHECKOUT / RETURN hand units to a custodian or booking and take them
+ *     back. They change availability, not stock (`stockChange` 0).
+ *   - Every other category changes stock at one place and is the stock
+ *     ledger, written by `recordStockChanges` in `./stock-ledger.server.ts`.
  *
- * @see {@link file://./quantity-lock.server.ts} — Row-level locking for concurrency
- * @see {@link file://../../../packages/database/prisma/schema.prisma} — ConsumptionLog model
+ * @see {@link file://./quantity-lock.server.ts} Row-level locking for concurrency
+ * @see {@link file://./stock-ledger.server.ts} The stock ledger writes
+ * @see {@link file://../../../packages/database/prisma/schema.prisma} ConsumptionLog model
  */
 
 import type { ConsumptionCategory, Prisma } from "@prisma/client";
@@ -53,6 +55,7 @@ import { formatUnitCount } from "~/utils/asset-quantity";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 import { lockAssetForQuantityUpdate } from "./quantity-lock.server";
+import { readStockState, recordStockChanges } from "./stock-ledger.server";
 
 const label: ErrorLabel = "Consumption Log";
 
@@ -64,8 +67,12 @@ const label: ErrorLabel = "Consumption Log";
 type CreateConsumptionLogArgs = {
   /** The asset this log entry belongs to */
   assetId: string;
-  /** The category/type of consumption event */
-  category: ConsumptionCategory;
+  /**
+   * A hand-out or a return: units change hands, the stock does not. Every
+   * other category changes stock and is written by `recordStockChanges`
+   * (`./stock-ledger.server.ts`), which records where the units went.
+   */
+  category: Extract<ConsumptionCategory, "CHECKOUT" | "RETURN">;
   /** The number of units involved (must be > 0) */
   quantity: number;
   /** The user performing the action */
@@ -103,10 +110,12 @@ type CreateConsumptionLogArgs = {
 };
 
 /**
- * Creates a new consumption log entry for a quantity-tracked asset.
+ * Creates a CHECKOUT or RETURN log entry for a quantity-tracked asset.
  *
- * The `quantity` field is always stored as a positive integer. The direction
- * (add or subtract) is inferred from the `category` by consuming code.
+ * The `quantity` field is always stored as a positive integer. The row's
+ * `stockChange` is 0: handing units to a custodian or a booking, or taking
+ * them back, leaves them in stock at the same place. Stock changes go
+ * through `recordStockChanges` instead.
  *
  * @param args - The log entry details
  * @returns The created ConsumptionLog record
@@ -148,6 +157,7 @@ export async function createConsumptionLog({
         bookingAssetId: bookingAssetId ?? null,
         custodianId: custodianId ?? null,
         locationId: locationId ?? null,
+        stockChange: 0,
       },
     });
   } catch (cause) {
@@ -755,6 +765,12 @@ export async function adjustQuantity({
           ? currentQuantity + quantity
           : currentQuantity - quantity;
 
+      /** The stock before any write, for the ledger rows in step 7. */
+      const stockBefore = await readStockState(tx, {
+        assetId,
+        organizationId,
+      });
+
       /** Step 6: Update the asset's quantity */
       const updatedAsset = await tx.asset.update({
         // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` org-verified earlier in this transaction via the locked asset's organizationId guard
@@ -837,15 +853,27 @@ export async function adjustQuantity({
         }
       }
 
-      /** Step 7: Create an immutable audit log entry */
-      await createConsumptionLog({
-        assetId,
-        category,
-        quantity,
+      /**
+       * Step 7: Ledger rows, where the units actually arrived or left: the
+       * location when one was named, otherwise the unplaced units.
+       */
+      await recordStockChanges(tx, {
+        organizationId,
         userId,
-        locationId: atLocationId,
-        note,
-        tx,
+        changes: [
+          {
+            assetId,
+            before: stockBefore,
+            events: [
+              {
+                category,
+                change: direction === "add" ? quantity : -quantity,
+                locationId: atLocationId,
+                note,
+              },
+            ],
+          },
+        ],
       });
 
       /**

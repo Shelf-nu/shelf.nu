@@ -137,19 +137,21 @@ describe("resolveUserAction — resend invite role", () => {
     expect(createInvite).not.toHaveBeenCalled();
   });
 
-  it("refuses an ADMIN resending an Administrator invite, before invalidating anything", async () => {
-    await expect(
-      resolveUserAction(
-        resendRequest("Administrator"),
-        "org-1",
-        "admin-user",
-        accessFor([OrganizationRoles.ADMIN])
-      )
-    ).rejects.toMatchObject({ status: 403 });
+  it("lets an ADMIN resend an Administrator invite", async () => {
+    await resolveUserAction(
+      resendRequest("Administrator"),
+      "org-1",
+      "admin-user",
+      accessFor([OrganizationRoles.ADMIN])
+    );
 
-    // A rejected resend must leave the existing invite pending
-    expect(db.invite.updateMany).not.toHaveBeenCalled();
-    expect(createInvite).not.toHaveBeenCalled();
+    expect(db.invite.updateMany).toHaveBeenCalledTimes(1);
+    expect(createInvite).toHaveBeenCalledWith(
+      expect.objectContaining({
+        roles: [OrganizationRoles.ADMIN],
+        actorOwnsWorkspace: false,
+      })
+    );
   });
 
   it("lets the OWNER resend an Administrator invite", async () => {

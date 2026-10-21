@@ -288,6 +288,11 @@ export function ValueField({
       : "Enter value";
   }
 
+  // `isEmpty` ("Never audited") takes no value, so no input is rendered.
+  if (filter.operator === "isEmpty") {
+    return null;
+  }
+
   switch (filter.type) {
     case "string":
     case "text":

@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import { WITHHELD_CUSTODIAN_NAME } from "@shelf/labels";
 import { bookingCustodianIsSelf } from "./bookings";
 import { ShelfError } from "./error";
 import { canManageBookingItems } from "./permissions/role-access";
@@ -366,12 +367,12 @@ export function assertCanDeleteBooking({
 /**
  * The name shown in place of a custodian the viewer may not see.
  *
- * The literal the web badge draws (`TeamMemberBadge`), so a booking redacted
- * on one platform reads the same on the other. Distinct from `null`, which
- * means the booking has no custodian at all — collapsing the two reports an
+ * Owned by `@shelf/labels`, so the server, the web badge (`TeamMemberBadge`)
+ * and the companion app read the same literal. Distinct from `null`, which
+ * means the booking has no custodian at all: collapsing the two reports an
  * unassigned booking as a withheld one.
  */
-export const WITHHELD_CUSTODIAN_NAME = "private";
+export { WITHHELD_CUSTODIAN_NAME };
 
 /**
  * The custody links a booking row needs for its custodian to be named.

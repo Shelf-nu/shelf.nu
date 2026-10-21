@@ -37,6 +37,7 @@ import { canSeeAdminArea } from "./admin-areas";
 import { userHasCustodyViewPermission } from "./custody-and-bookings-permissions.validator.client";
 import {
   canAssignRole,
+  canInviteRole,
   holdsRoleWhere,
   roleChangeRequiresOwner,
   roleChangeTransfers,
@@ -387,6 +388,24 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
   // The invitable list is recorded sorted, and the labels in a fixed key order,
   // so the recorded values do not depend on the policy table's rank order.
   snapshot["D-04:invitable"] = [...INVITABLE_ROLES].sort();
+  // D-04: the invite guard (utils/permissions/role-assignment.server.ts), used
+  // by single invite, CSV import and resend: which invitable roles each caller
+  // may grant. Role changes on existing members are B9:D-07:change-role-guard.
+  snapshot["D-04:invite-guard"] = perCase(CALLER_ROLES, (caller) =>
+    Object.fromEntries(
+      [...INVITABLE_ROLES]
+        .sort()
+        .map((role) => [
+          role,
+          canInviteRole({
+            actorOwnsWorkspace: isWorkspaceOwner([caller]),
+            role,
+          })
+            ? "allowed"
+            : "refused",
+        ])
+    )
+  );
   snapshot["D-10:labels"] = Object.fromEntries(
     D10_KEY_ORDER.map((role) => [role, ROLE_LABELS[role]])
   );
@@ -679,6 +698,28 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
                 userId: "caller",
                 access: accessFor(roles),
                 action: "cancel",
+              })
+            ),
+        ],
+      ])
+    )
+  );
+
+  // B9:D-15: mobile extend (bookings.extend.ts: gate booking:extend, then
+  // ownership on the context's `access`).
+  snapshot["B9:D-15:mobile-extend"] = perRoleSet((roles) =>
+    perCase(RELATIONSHIP_NAMES, (rel) =>
+      firstRefusal([
+        ["denied:gate", () => !can(roles, E.booking, A.extend)],
+        [
+          "denied:owner",
+          () =>
+            throws(() =>
+              validateBookingOwnership({
+                booking: RELATIONSHIPS[rel],
+                userId: "caller",
+                access: accessFor(roles),
+                action: "extend",
               })
             ),
         ],

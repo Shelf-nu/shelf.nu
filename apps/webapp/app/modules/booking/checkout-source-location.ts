@@ -29,6 +29,7 @@
  */
 
 import { z } from "zod";
+import type { StockEvent } from "~/modules/consumption-log/stock-ledger";
 import {
   attributeDispositionsByBookingAsset,
   compareSlicesForGreedyFill,
@@ -434,6 +435,51 @@ export function checkinPlacementSources({
   if (!slice || !isManualSourceSlice(slice)) return [];
   const quantity = consumed + lost + damaged;
   return quantity > 0 ? [{ locationId: slice.sourceLocationId, quantity }] : [];
+}
+
+/**
+ * The stock ledger events of one check-in disposition: the units consumed,
+ * lost and damaged left the pool, each on its own row, tried first at the
+ * place {@link checkinPlacementSources} takes them from: the slice's manual
+ * source, or the unplaced units. Returned units
+ * change no stock and are logged as a RETURN on their own.
+ *
+ * @param args.slice - The slice being checked in, or `null` when unknown
+ * @param args.disposition - The units consumed, lost and damaged
+ * @param args.bookingId - The booking
+ * @param args.bookingAssetId - The slice the rows are attributed to
+ * @returns One event per non-zero category
+ */
+export function checkinStockEvents({
+  slice,
+  disposition,
+  bookingId,
+  bookingAssetId,
+}: {
+  slice: Pick<
+    CheckinSourceSlice,
+    "assetKitId" | "sourceKitId" | "sourceLocationId"
+  > | null;
+  disposition: { consumed?: number; lost?: number; damaged?: number };
+  bookingId: string;
+  bookingAssetId: string | null;
+}): StockEvent[] {
+  const locationId =
+    slice && isManualSourceSlice(slice) ? slice.sourceLocationId : null;
+  const legs = [
+    ["CONSUME", disposition.consumed ?? 0],
+    ["LOSS", disposition.lost ?? 0],
+    ["DAMAGE", disposition.damaged ?? 0],
+  ] as const;
+  return legs
+    .filter(([, units]) => units > 0)
+    .map(([category, units]) => ({
+      category,
+      change: -units,
+      locationId,
+      bookingId,
+      bookingAssetId,
+    }));
 }
 
 /**
