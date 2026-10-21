@@ -85,7 +85,7 @@
     "detectrtc": "^1.4.1",
     "framer-motion": "^12.38.0",
     "fuse.js": "^7.3.0",
-    "hono": "^4.13.7",
+    "hono": "^4.13.11",
     "hono-rate-limiter": "^0.5.3",
     "html-to-image": "1.11.11",
     "iconv-lite": "^0.7.2",
@@ -200,7 +200,7 @@
     "tsconfig-paths": "^4.2.0",
     "tsx": "^4.21.0",
     "typescript": "^6.0.2",
-    "vite": "^7.3.5",
+    "vite": "^7.3.7",
     "vite-plugin-cjs-interop": "^2.4.4",
     "vite-tsconfig-paths": "^6.1.1",
     "vitest": "^5.0.1"
