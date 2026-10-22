@@ -16,7 +16,7 @@ import SubHeading from "../shared/sub-heading";
 
 export default function OnboardingChecklist() {
   const fetcher = useFetcher();
-  const { checklistOptions } = useLoaderData<typeof loader>();
+  const { checklistOptions, canImportAssets } = useLoaderData<typeof loader>();
 
   return (
     <div className="mt-6 rounded border bg-white px-4 py-5 lg:px-20 lg:py-16">
@@ -77,6 +77,41 @@ export default function OnboardingChecklist() {
               </i>
             </div>
           </li>
+          {canImportAssets ? (
+            <li
+              className={tw(
+                " mx-1 mb-2 xl:w-[49%]",
+                checklistOptions.hasAssets && "completed"
+              )}
+            >
+              <div className="flex h-full items-start justify-between gap-1 rounded border p-4">
+                <div className="flex items-start">
+                  <div className="mr-3 inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
+                    <AssetsIcon />
+                  </div>
+                  <div className="text-[14px]">
+                    <div className="mb-3">
+                      <h6 className="font-medium text-gray-700">
+                        Import your assets
+                      </h6>
+                      <p className=" text-gray-600">
+                        Upload the spreadsheet you use today. Shelf matches its
+                        columns for you to review.
+                      </p>
+                    </div>
+                    <div className="flex gap-3">
+                      <Button variant="link" to="/assets/import">
+                        Import a spreadsheet
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+                <i className="hidden text-primary">
+                  <CheckmarkIcon />
+                </i>
+              </div>
+            </li>
+          ) : null}
           <li
             className={tw(
               " mx-1 mb-2 xl:w-[49%]",

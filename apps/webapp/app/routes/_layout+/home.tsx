@@ -55,18 +55,20 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { resolveCanImportAssetsOrFalse } from "~/utils/subscription.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
   try {
-    const { organizationId, currentOrganization } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.dashboard,
-      action: PermissionAction.read,
-    });
+    const { organizationId, currentOrganization, organizations, role } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.dashboard,
+        action: PermissionAction.read,
+      });
 
     const twelveMonthsAgo = new Date();
     twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 11);
@@ -386,6 +388,29 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const totalAssets = assetAggregation._count._all;
     const totalValuation = assetAggregation.totalValuation;
 
+    const onboardingChecklist = {
+      hasAssets: totalAssets > 0,
+      // `directCustodians` is already the "team members holding custody"
+      // query, with the same where clause a custody count would use, and
+      // `take: 20` cannot change a `> 0` test.
+      hasCustodies: directCustodians.length > 0,
+      ...checklistData,
+    };
+    const showsChecklist =
+      !cookieResult.skipOnboardingChecklist &&
+      !Object.values(onboardingChecklist).every(Boolean);
+
+    // The import flag only gates a checklist link, so it is looked up only
+    // while the checklist is on screen, and a failure reads as "cannot import".
+    const canImportAssets = showsChecklist
+      ? await resolveCanImportAssetsOrFalse({
+          organizationId,
+          organizations,
+          userId,
+          role,
+        })
+      : false;
+
     const header: HeaderData = {
       title: "Home",
     };
@@ -410,6 +435,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       valueKnownAssets,
       newAssets,
       skipOnboardingChecklist: cookieResult.skipOnboardingChecklist,
+      canImportAssets,
       custodiansData: getCustodiansOrderedByTotalCustodies({
         directCustodians,
         bookings: ongoingAndOverdueBookings as any,
@@ -422,15 +448,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             content: parseMarkdownToReact(announcement.content),
           }
         : null,
-      checklistOptions: {
-        hasAssets: totalAssets > 0,
-        // `directCustodians` is already the "team members holding custody"
-        // query, with the same where clause the dropped `custodiesCount`
-        // used — `take: 20` cannot change a `> 0` test — so counting them
-        // again server-side was a redundant round trip.
-        hasCustodies: directCustodians.length > 0,
-        ...checklistData,
-      },
+      checklistOptions: onboardingChecklist,
     });
   } catch (cause) {
     const reason = makeShelfError(cause);
