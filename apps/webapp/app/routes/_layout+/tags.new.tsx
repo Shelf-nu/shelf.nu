@@ -5,7 +5,7 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
 import { ColorInput } from "~/components/forms/color-input";
-import { FormRowErrors } from "~/components/forms/form-row-errors";
+import { FormRowErrors, rowErrorId } from "~/components/forms/form-row-errors";
 import Input from "~/components/forms/input";
 import MultiSelect from "~/components/multi-select/multi-select";
 import { Button } from "~/components/shared/button";
@@ -151,7 +151,9 @@ export default function NewTag() {
               disabled={disabled}
               error={nameError}
               hideErrorText
-              aria-describedby={nameError ? errorsId : undefined}
+              aria-describedby={
+                nameError ? rowErrorId(errorsId, "name") : undefined
+              }
               required={zodFieldIsRequired(NewTagFormSchema.shape.name)}
             />
             <Input
@@ -169,7 +171,9 @@ export default function NewTag() {
                 disabled={disabled}
                 error={colorError}
                 hideErrorText
-                aria-describedby={colorError ? errorsId : undefined}
+                aria-describedby={
+                  colorError ? rowErrorId(errorsId, "color") : undefined
+                }
                 colorFromServer={colorFromServer}
                 required={zodFieldIsRequired(NewTagFormSchema.shape.color)}
               />
@@ -204,7 +208,10 @@ export default function NewTag() {
           </div>
         </div>
 
-        <FormRowErrors id={errorsId} errors={[nameError, colorError]} />
+        <FormRowErrors
+          id={errorsId}
+          errors={{ name: nameError, color: colorError }}
+        />
         {/* Any other failure (e.g. a duplicate name) has no field to point at */}
         {actionData?.error && !nameError && !colorError ? (
           <div className="mt-3 text-sm text-error-500">

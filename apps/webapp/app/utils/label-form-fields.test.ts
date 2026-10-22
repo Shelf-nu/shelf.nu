@@ -1,3 +1,12 @@
+/**
+ * Label form field unit tests.
+ *
+ * Pins the shared category and tag field rules: hex colour normalisation and
+ * validation, and the name rule. The same schemas run in the browser
+ * (react-zorm) and in the route actions, so these cases hold on both sides.
+ *
+ * @see {@link file://./label-form-fields.ts}
+ */
 import { describe, expect, it } from "vitest";
 import {
   hexColorSchema,

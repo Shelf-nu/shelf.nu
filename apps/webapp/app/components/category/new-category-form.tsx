@@ -12,7 +12,7 @@ import { hexColorSchema, labelNameSchema } from "~/utils/label-form-fields";
 import { tw } from "~/utils/tw";
 import { zodFieldIsRequired } from "~/utils/zod";
 import { ColorInput } from "../forms/color-input";
-import { FormRowErrors } from "../forms/form-row-errors";
+import { FormRowErrors, rowErrorId } from "../forms/form-row-errors";
 import Input from "../forms/input";
 import { Button } from "../shared/button";
 
@@ -89,11 +89,11 @@ export default function NewCategoryForm({
   // are listed under the buttons instead.
   const showRowErrors = !hasOnSuccessFunc;
   const errorsId = useId();
-  const rowErrorProps = (error: string | undefined) =>
+  const rowErrorProps = (field: string, error: string | undefined) =>
     showRowErrors
       ? {
           hideErrorText: true,
-          "aria-describedby": error ? errorsId : undefined,
+          "aria-describedby": error ? rowErrorId(errorsId, field) : undefined,
         }
       : {};
 
@@ -116,7 +116,7 @@ export default function NewCategoryForm({
           name={zo.fields.name()}
           disabled={disabled}
           error={nameError}
-          {...rowErrorProps(nameError)}
+          {...rowErrorProps("name", nameError)}
           data-dialog-initial-focus
           required={zodFieldIsRequired(NewCategoryFormSchema.shape.name)}
         />
@@ -134,7 +134,7 @@ export default function NewCategoryForm({
             name={zo.fields.color()}
             disabled={disabled}
             error={colorError}
-            {...rowErrorProps(colorError)}
+            {...rowErrorProps("color", colorError)}
             colorFromServer={color}
             required
           />
@@ -183,7 +183,7 @@ export default function NewCategoryForm({
         {showRowErrors && (nameError || colorError) ? (
           <FormRowErrors
             id={errorsId}
-            errors={[nameError, colorError]}
+            errors={{ name: nameError, color: colorError }}
             className="mt-3 self-end text-sm text-error-500"
           />
         ) : (
