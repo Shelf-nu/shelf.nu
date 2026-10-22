@@ -15,7 +15,7 @@ import { ColorInput } from "./color-input";
 const renderColorInput = (props: Record<string, unknown> = {}) =>
   render(<ColorInput name="color" colorFromServer="#4f46e5" {...props} />);
 
-const hexField = () => screen.getByLabelText("Hex Color") as HTMLInputElement;
+const hexField = () => screen.getByLabelText("Color") as HTMLInputElement;
 const swatch = () =>
   screen.getByLabelText("Choose a color") as HTMLInputElement;
 

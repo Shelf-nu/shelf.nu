@@ -156,7 +156,7 @@ export const ColorInput = ({
         />
       </label>
       <Input
-        label="Hex Color"
+        label="Color"
         value={color}
         onChange={handleColorChange}
         className="w-full min-w-[120px] lg:max-w-[120px]"
