@@ -5,6 +5,7 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
 import { ColorInput } from "~/components/forms/color-input";
+import { FormRowErrors, rowErrorId } from "~/components/forms/form-row-errors";
 import Input from "~/components/forms/input";
 import MultiSelect from "~/components/multi-select/multi-select";
 import { Button } from "~/components/shared/button";
@@ -20,7 +21,12 @@ import {
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
+import { getValidationErrors } from "~/utils/http";
 import { payload, error, getParams, parseData } from "~/utils/http.server";
+import {
+  labelNameSchema,
+  optionalHexColorSchema,
+} from "~/utils/label-form-fields";
 
 import {
   PermissionAction,
@@ -30,14 +36,9 @@ import { requirePermission } from "~/utils/roles.server";
 import { zodFieldIsRequired } from "~/utils/zod";
 
 export const UpdateTagFormSchema = z.object({
-  name: z.string().min(3, "Name is required"),
+  name: labelNameSchema,
   description: z.string(),
-  color: z
-    .string()
-    .regex(/^#[0-9a-fA-F]{6}$/)
-    .optional()
-    .or(z.literal(""))
-    .transform((val) => (val === "" || !val ? null : val)),
+  color: optionalHexColorSchema,
   useFor: z
     .string()
     .optional()
@@ -129,6 +130,16 @@ export default function EditTag() {
   const zo = useZorm("NewQuestionWizardScreen", UpdateTagFormSchema);
   const { tag, tagUseFor, colorFromServer } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
+  /** Server-side errors, shown when client-side validation is bypassed */
+  const validationErrors = getValidationErrors<typeof UpdateTagFormSchema>(
+    actionData?.error
+  );
+  const nameError =
+    validationErrors?.name?.message || zo.errors.name()?.message;
+  const colorError =
+    validationErrors?.color?.message || zo.errors.color()?.message;
+  /** The row is bottom-aligned, so field errors render below it, not per input */
+  const errorsId = "tag-form-errors";
   const disabled = useDisabled();
 
   return tag ? (
@@ -147,8 +158,11 @@ export default function EditTag() {
               className="mb-4 lg:mb-0 lg:max-w-[180px]"
               name={zo.fields.name()}
               disabled={disabled}
-              error={zo.errors.name()?.message}
+              error={nameError}
               hideErrorText
+              aria-describedby={
+                nameError ? rowErrorId(errorsId, "name") : undefined
+              }
               required={zodFieldIsRequired(UpdateTagFormSchema.shape.name)}
               defaultValue={tag.name}
             />
@@ -168,8 +182,11 @@ export default function EditTag() {
               <ColorInput
                 name={zo.fields.color()}
                 disabled={disabled}
-                error={zo.errors.color()?.message}
+                error={colorError}
                 hideErrorText
+                aria-describedby={
+                  colorError ? rowErrorId(errorsId, "color") : undefined
+                }
                 colorFromServer={colorFromServer}
                 required={zodFieldIsRequired(UpdateTagFormSchema.shape.color)}
               />
@@ -206,9 +223,14 @@ export default function EditTag() {
           </div>
         </div>
 
-        {actionData?.error ? (
+        <FormRowErrors
+          id={errorsId}
+          errors={{ name: nameError, color: colorError }}
+        />
+        {/* Any other failure (e.g. a duplicate name) has no field to point at */}
+        {actionData?.error && !nameError && !colorError ? (
           <div className="mt-3 text-sm text-error-500">
-            {actionData?.error?.message}
+            {actionData.error.message}
           </div>
         ) : null}
       </Form>
