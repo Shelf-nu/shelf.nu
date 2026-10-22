@@ -15,6 +15,7 @@ import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
 import { useDiscardRemount } from "~/hooks/use-discard-remount";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { useRerenderAt } from "~/hooks/use-rerender-at";
 import { useReservationIsRequest } from "~/hooks/use-reservation-is-request";
 import { useRoleAccess } from "~/hooks/use-role-access";
 import { useTrackedFormRef } from "~/hooks/use-unsaved-changes";
@@ -55,6 +56,7 @@ import type { BookingFormSchemaType } from "./forms-schema";
 import {
   BookingFormSchema,
   getReserveStartBlockedReason,
+  getReserveStartBoundary,
 } from "./forms-schema";
 import { UnsavedChangesGuard } from "../../forms/unsaved-changes-bar";
 
@@ -301,14 +303,20 @@ function EditBookingFormInner({
   /**
    * Why the start date blocks Reserve, read from the date the form would
    * submit, so moving the start later re-enables the button before saving.
+   * The page re-renders at the next boundary, so a page left open disables
+   * Reserve when the start passes rather than on the next click.
    */
+  const startTiming = {
+    startDate: startDateAsDate,
+    bufferStartTime: bookingSettings.bufferStartTime,
+    bypassTimeLimits: roleAccess.policy.bookings.bypassTimeLimits,
+  };
   const startBlockedReason = bookingStatus?.isDraft
-    ? getReserveStartBlockedReason({
-        startDate: startDateAsDate,
-        bufferStartTime: bookingSettings.bufferStartTime,
-        bypassTimeLimits: roleAccess.policy.bookings.bypassTimeLimits,
-      })
+    ? getReserveStartBlockedReason(startTiming)
     : null;
+  useRerenderAt(
+    bookingStatus?.isDraft ? getReserveStartBoundary(startTiming) : null
+  );
 
   const zo = useZorm(
     "NewQuestionWizardScreen",

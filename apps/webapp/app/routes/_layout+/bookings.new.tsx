@@ -17,6 +17,7 @@ import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useRoleAccess } from "~/hooks/use-role-access";
 import { useUserData } from "~/hooks/use-user-data";
 import { isQuantityTracked } from "~/modules/asset/utils";
+import { DRAFT_CREATED_MESSAGE } from "~/modules/booking/constants";
 import type { KitSliceSpec } from "~/modules/booking/service.server";
 import {
   buildKitSlicesForBooking,
@@ -367,7 +368,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     sendNotification({
       title: "Draft created",
-      message: `Your booking is saved as a draft and holds nothing yet. Reserve it from the booking page when you are ready.${
+      message: `${DRAFT_CREATED_MESSAGE}${
         archivedMembersLeftOut > 0
           ? ` ${archivedAssetsLeftOut(archivedMembersLeftOut)}`
           : ""

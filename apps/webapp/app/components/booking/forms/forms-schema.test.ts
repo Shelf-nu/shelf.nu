@@ -9,6 +9,7 @@ import {
   DuplicateBookingSchema,
   ExtendBookingSchema,
   getReserveStartBlockedReason,
+  getReserveStartBoundary,
 } from "./forms-schema";
 
 /**
@@ -1484,6 +1485,69 @@ describe("getReserveStartBlockedReason", () => {
   it("leaves an unparseable date to the field's own error", () => {
     expect(
       getReserveStartBlockedReason({
+        startDate: new Date("not a date"),
+        bufferStartTime: 0,
+      })
+    ).toBeNull();
+  });
+});
+
+describe("getReserveStartBoundary", () => {
+  const NOW = new Date("2026-10-20T12:00:00Z");
+
+  beforeAll(() => {
+    // why: the boundary is relative to the current time, so pin it
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+  });
+
+  afterAll(() => {
+    vi.useRealTimers();
+  });
+
+  it("is the buffer edge while the start is still clear of the buffer", () => {
+    expect(
+      getReserveStartBoundary({
+        startDate: addHours(NOW, 5),
+        bufferStartTime: 2,
+      })
+    ).toEqual(addHours(NOW, 3));
+  });
+
+  it("is the start itself once inside the buffer", () => {
+    expect(
+      getReserveStartBoundary({
+        startDate: addHours(NOW, 1),
+        bufferStartTime: 2,
+      })
+    ).toEqual(addHours(NOW, 1));
+  });
+
+  it("is the start itself without a buffer or when limits are bypassed", () => {
+    expect(
+      getReserveStartBoundary({
+        startDate: addHours(NOW, 5),
+        bufferStartTime: 0,
+      })
+    ).toEqual(addHours(NOW, 5));
+    expect(
+      getReserveStartBoundary({
+        startDate: addHours(NOW, 5),
+        bufferStartTime: 2,
+        bypassTimeLimits: true,
+      })
+    ).toEqual(addHours(NOW, 5));
+  });
+
+  it("is null once the start has passed or cannot be read", () => {
+    expect(
+      getReserveStartBoundary({
+        startDate: addMinutes(NOW, -1),
+        bufferStartTime: 0,
+      })
+    ).toBeNull();
+    expect(
+      getReserveStartBoundary({
         startDate: new Date("not a date"),
         bufferStartTime: 0,
       })

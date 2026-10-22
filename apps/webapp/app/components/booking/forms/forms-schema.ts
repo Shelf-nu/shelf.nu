@@ -221,6 +221,36 @@ export function getReserveStartBlockedReason({
     : `${result.message}. Move it later to reserve.`;
 }
 
+/**
+ * The next instant at which {@link getReserveStartBlockedReason} changes its
+ * answer for this start, or `null` once nothing is left to change.
+ *
+ * While the start is clear of the buffer that is the buffer's edge; inside the
+ * buffer (or with no buffer, or limits bypassed) it is the start itself, where
+ * the reason becomes {@link BOOKING_RESERVE_BLOCKED_LABELS.START_PASSED}. Lets
+ * a page that stays open re-render exactly when the Reserve button must
+ * change, without polling.
+ *
+ * @param params - Same inputs as {@link getReserveStartBlockedReason}
+ * @returns The next boundary, or `null` when the start has passed or is invalid
+ */
+export function getReserveStartBoundary({
+  startDate,
+  bufferStartTime,
+  bypassTimeLimits = false,
+}: {
+  startDate: Date;
+  bufferStartTime: number;
+  bypassTimeLimits?: boolean;
+}): Date | null {
+  const now = new Date();
+  if (Number.isNaN(startDate.getTime()) || startDate <= now) return null;
+
+  const buffer = bypassTimeLimits ? 0 : bufferStartTime;
+  const bufferEdge = addHours(startDate, -buffer);
+  return buffer > 0 && bufferEdge > now ? bufferEdge : startDate;
+}
+
 interface BookingFormSchemaParams {
   /**
    * The acting user's fully-resolved formatting preferences. Only `timeZone` is
