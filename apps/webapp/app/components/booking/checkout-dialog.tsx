@@ -1,4 +1,4 @@
-import { useState, type MouseEvent } from "react";
+import { useRef, useState, type MouseEvent } from "react";
 import type { Booking } from "@prisma/client";
 import { Zap } from "lucide-react";
 import { useDisabled } from "~/hooks/use-disabled";
@@ -211,18 +211,26 @@ export default function CheckoutDialog({
    *
    * When the form fails constraint validation (a cleared booking name, an
    * out-of-range quantity) the browser does not submit. The modal would hide
-   * its message, so the dialog still closes and the form then reports the
-   * field that blocked the check-out.
+   * its message, so the dialog still closes and the form reports the field
+   * that blocked the check-out from `onCloseAutoFocus`: by then the dialog
+   * is gone, and cancelling Radix's focus restore keeps focus on that field
+   * rather than pulling it back to the trigger.
    */
   const [open, setOpen] = useState(false);
+  /** The form a blocked submit belongs to, reported once the dialog closes. */
+  const blockedFormRef = useRef<HTMLFormElement | null>(null);
   const closeOnSubmit = (event: MouseEvent<HTMLButtonElement>) => {
     /** `button.form` resolves `form={formId}` even from inside the portal. */
     const form = event.currentTarget.form;
-    const isBlocked = form ? !form.checkValidity() : false;
-    setTimeout(() => {
-      setOpen(false);
-      if (isBlocked) form?.reportValidity();
-    }, 0);
+    blockedFormRef.current = form && !form.checkValidity() ? form : null;
+    setTimeout(() => setOpen(false), 0);
+  };
+  const reportBlockedForm = (event: Event) => {
+    const form = blockedFormRef.current;
+    if (!form) return;
+    blockedFormRef.current = null;
+    event.preventDefault();
+    form.reportValidity();
   };
 
   if (isPlainCheckout && !confirm) {
@@ -258,7 +266,10 @@ export default function CheckoutDialog({
         </Button>
       </AlertDialogTrigger>
 
-      <AlertDialogContent portalProps={{ container: portalContainer }}>
+      <AlertDialogContent
+        portalProps={{ container: portalContainer }}
+        onCloseAutoFocus={reportBlockedForm}
+      >
         <AlertDialogHeader>
           <AlertDialogTitle>
             {checkoutDialogTitle({

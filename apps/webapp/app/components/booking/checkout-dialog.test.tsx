@@ -237,10 +237,16 @@ describe("CheckoutDialog confirmation", () => {
 
   it("submits nothing and points at the blocking field when the form is invalid", () => {
     vi.useFakeTimers();
-    const reportValidity = vi.spyOn(
-      HTMLFormElement.prototype,
-      "reportValidity"
-    );
+    /** Whether the dialog was still mounted when the form reported. */
+    const dialogMountedAtReport: boolean[] = [];
+    const reportValidity = vi
+      .spyOn(HTMLFormElement.prototype, "reportValidity")
+      .mockImplementation(() => {
+        dialogMountedAtReport.push(
+          document.querySelector('[role="alertdialog"]') !== null
+        );
+        return false;
+      });
     try {
       const submissions: unknown[] = [];
       render(
@@ -258,6 +264,11 @@ describe("CheckoutDialog confirmation", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "Check Out" }));
       fireEvent.click(screen.getByRole("button", { name: "Check out" }));
+      // First the deferred close commits, then Radix's focus scope runs its
+      // own close timer, which is where the form reports.
+      act(() => {
+        vi.runAllTimers();
+      });
       act(() => {
         vi.runAllTimers();
       });
@@ -266,7 +277,12 @@ describe("CheckoutDialog confirmation", () => {
       // The modal would hide the browser's message, so it steps aside and
       // the form reports the field that blocked the check-out.
       expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
-      expect(reportValidity).toHaveBeenCalled();
+      // Reported once the dialog is gone, and focus is not pulled back to the
+      // trigger over the field the browser just pointed at.
+      expect(dialogMountedAtReport).toEqual([false]);
+      expect(document.activeElement).not.toBe(
+        screen.getByRole("button", { name: "Check Out" })
+      );
     } finally {
       reportValidity.mockRestore();
       vi.useRealTimers();
