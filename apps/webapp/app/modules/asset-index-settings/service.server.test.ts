@@ -328,7 +328,9 @@ describe("getAssetIndexSettings with a column set saved before the quantity colu
     expect(
       newOrder.filter(
         (name) =>
-          !BLOCK.includes(name) || name === "quantity" || name === "unitOfMeasure"
+          !BLOCK.includes(name) ||
+          name === "quantity" ||
+          name === "unitOfMeasure"
       )
     ).toEqual(inOrder(reordered));
     const start = newOrder.indexOf("available");
@@ -542,9 +544,9 @@ describe("getAssetIndexSettings with a column set saved before the unit column",
 
     // Every saved column keeps its order and its visibility.
     const savedOrder = inOrder(saved);
-    expect(inOrder(columns).filter((name) => savedOrder.includes(name))).toEqual(
-      savedOrder
-    );
+    expect(
+      inOrder(columns).filter((name) => savedOrder.includes(name))
+    ).toEqual(savedOrder);
     for (const col of saved) {
       expect(columns.find((c) => c.name === col.name)?.visible).toBe(
         col.visible
@@ -582,9 +584,9 @@ describe("getAssetIndexSettings with a column set saved before the unit column",
     const columns = settings.columns as Column[];
 
     const savedOrder = inOrder(quantityMoved);
-    expect(inOrder(columns).filter((name) => savedOrder.includes(name))).toEqual(
-      savedOrder
-    );
+    expect(
+      inOrder(columns).filter((name) => savedOrder.includes(name))
+    ).toEqual(savedOrder);
     expect(nextAfter(columns, "quantity")).toBe("unitOfMeasure");
     expect(unitOf(columns)?.visible).toBe(true);
   });
