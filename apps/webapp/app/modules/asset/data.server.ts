@@ -37,7 +37,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import type { RoleAccess } from "~/utils/permissions/role-access";
-import { canImportAssets } from "~/utils/subscription.server";
+import { canExportAssets, canImportAssets } from "~/utils/subscription.server";
 import type { UserNameFields } from "~/utils/user";
 import { resolveUserDisplayName } from "~/utils/user";
 import {
@@ -535,6 +535,7 @@ export async function simpleModeLoader({
       modelName,
       hasActiveFilters,
       canImportAssets: canImportAssets(tierLimit) && canImport,
+      canExportAssets: canExportAssets(tierLimit),
       searchFieldLabel: "Search assets",
       searchFieldTooltip: {
         title: "Search your asset database",
@@ -1070,6 +1071,7 @@ export async function advancedModeLoader({
       modelName,
       hasActiveFilters,
       canImportAssets: canImportAssets(tierLimit) && advCanImport,
+      canExportAssets: canExportAssets(tierLimit),
       searchFieldLabel: "Search assets",
       searchFieldTooltip: {
         title: "Search your asset database",

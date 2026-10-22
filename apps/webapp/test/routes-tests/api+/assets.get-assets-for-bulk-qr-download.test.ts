@@ -1,14 +1,13 @@
 /**
  * Tests for `api+/assets.get-assets-for-bulk-qr-download`.
  *
- * The route renders up to 100 QR codes in one request. What it must not do is
- * ask the database for each one separately: the codes are read in a single
- * query, and only an asset that genuinely has none pays for a create. That is
- * the property pinned here, because nothing about the response shape would
- * reveal a hundred round trips.
+ * The route returns the data for up to 1,500 vector QR labels in one request.
+ * What it must not do is ask the database for each code separately: the codes
+ * ride along on the single asset query, and an asset with none is skipped
+ * rather than created. That is the property pinned here, because nothing about
+ * the response shape would reveal a thousand round trips.
  *
  * @see {@link file://../../../app/routes/api+/assets.get-assets-for-bulk-qr-download.ts}
- * @see {@link file://../../../app/modules/qr/utils.server.ts} generateQrObj
  * @see {@link file://../../../app/modules/asset/bulk-operations-helper.server.ts}
  */
 import type { LoaderFunctionArgs } from "react-router";
@@ -20,8 +19,8 @@ const qrMocks = vi.hoisted(() => ({
   createQr: vi.fn(),
 }));
 
-// why: the per-asset lookups are exactly what this route must stop making, so
-// the assertion is that these are never reached — not that they return a value.
+// why: the per-asset lookups and creates are exactly what this route must not
+// make, so the assertion is that these are never reached.
 vi.mock("~/modules/qr/service.server", () => qrMocks);
 
 const bulkMocks = vi.hoisted(() => ({
@@ -65,6 +64,16 @@ vi.mock("~/utils/roles.server", async () => {
     }),
   };
 });
+// why: the paid-feature gate and the branding tier lookup read subscription
+// state from the database and Stripe; both have their own coverage.
+vi.mock("~/utils/subscription.server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("~/utils/subscription.server")>()),
+  assertUserCanExportAssets: vi.fn().mockResolvedValue(undefined),
+  canHideShelfBranding: vi.fn().mockReturnValue(true),
+}));
+vi.mock("~/modules/tier/service.server", () => ({
+  getOrganizationTierLimit: vi.fn().mockResolvedValue({}),
+}));
 // why: the select-all path narrows a custodian filter through this, and it hits
 // the database. The stand-in keeps the real contract for a member who sees all
 // custody: it returns the requested ids, never the "all" sentinel.
@@ -76,8 +85,8 @@ vi.mock("~/modules/team-member/service.server", () => ({
 }));
 
 // why: the query COUNT is the assertion, so the delegates have to be
-// observable — `qr.findMany` is the batched read under test, `findFirst` and
-// `$queryRaw` belong to the locked create that only a missing code should reach.
+// observable — `asset.findMany` is the one read; `qr.*` and `$queryRaw` belong
+// to per-asset lookups or the locked create, which must never be reached.
 vi.mock("~/database/db.server", () => ({
   db: {
     asset: { findMany: vi.fn() },
@@ -89,26 +98,21 @@ vi.mock("~/database/db.server", () => ({
 
 import { accessFor } from "@helpers/role-access";
 import { db } from "~/database/db.server";
-import { loader } from "~/routes/api+/assets.get-assets-for-bulk-qr-download";
+import {
+  loader,
+  MAX_BULK_QR_EXPORT,
+} from "~/routes/api+/assets.get-assets-for-bulk-qr-download";
 import { requirePermission } from "~/utils/roles.server";
 
 const ASSET_COUNT = 20;
 const assets = Array.from({ length: ASSET_COUNT }, (_, index) => ({
   id: `asset-${index}`,
   title: `Asset ${index}`,
-  createdAt: new Date("2026-01-01"),
   sequentialId: `SAM-${index}`,
+  preferredBarcodeId: null,
+  qrCodes: [{ id: `qr-asset-${index}` }],
+  barcodes: [],
 }));
-
-const qrFor = (assetId: string) => ({
-  id: `qr-${assetId}`,
-  version: 0,
-  errorCorrection: "L",
-  assetId,
-  kitId: null,
-  userId: "user-1",
-  organizationId: "org-1",
-});
 
 const runLoader = () =>
   loader({
@@ -124,43 +128,37 @@ describe("bulk QR download", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (db.asset.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(assets);
-    (db.qr.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(
-      assets.map((asset) => qrFor(asset.id))
-    );
-    (db.$transaction as ReturnType<typeof vi.fn>).mockImplementation(
-      (callback: (tx: typeof db) => unknown) => callback(db)
-    );
   });
 
-  it("reads every code in one query instead of one per asset", async () => {
+  it("reads every code through the one asset query, never one per asset", async () => {
     const response = (await runLoader()) as unknown as {
-      data: { error?: unknown };
+      data: { error?: unknown; assets: unknown[] };
     };
 
     // Assert success first: the counts below would also hold for a handler
     // that threw after the reads.
     expect(response.data.error).toBeFalsy();
-    expect(db.qr.findMany).toHaveBeenCalledTimes(1);
-    // The per-asset lookup inside `generateQrObj` must not be reached, and no
-    // asset here is missing a code, so nothing should be created either.
+    expect(response.data.assets).toHaveLength(ASSET_COUNT);
+    expect(db.asset.findMany).toHaveBeenCalledTimes(1);
+    expect(db.qr.findMany).not.toHaveBeenCalled();
     expect(qrMocks.getQrByAssetId).not.toHaveBeenCalled();
     expect(qrMocks.createQr).not.toHaveBeenCalled();
   });
 
-  it("creates only for the asset that has no code", async () => {
-    // One asset is missing from the batched read.
-    (db.qr.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(
-      assets.slice(1).map((asset) => qrFor(asset.id))
-    );
-    (db.qr.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
-    qrMocks.createQr.mockResolvedValue(qrFor("asset-0"));
+  it("skips an asset that has no code instead of creating one", async () => {
+    (db.asset.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { ...assets[0], qrCodes: [] },
+      ...assets.slice(1),
+    ]);
 
-    await runLoader();
+    const response = (await runLoader()) as unknown as {
+      data: { skippedAssetCount: number; labelsCsv: string };
+    };
 
-    expect(db.qr.findMany).toHaveBeenCalledTimes(1);
-    expect(qrMocks.createQr).toHaveBeenCalledTimes(1);
-    // Still no per-asset lookup: the batched read is authoritative.
-    expect(qrMocks.getQrByAssetId).not.toHaveBeenCalled();
+    expect(response.data.skippedAssetCount).toBe(1);
+    // The skipped asset is absent from labels.csv too, so rows match images.
+    expect(response.data.labelsCsv).not.toContain("Asset 0");
+    expect(qrMocks.createQr).not.toHaveBeenCalled();
   });
 
   it("returns a labels.csv row per asset, in the same order as the images", async () => {
@@ -190,7 +188,7 @@ describe("bulk QR download", () => {
         }),
       })
     );
-    // Category and location travel only in the CSV, not the image payload.
+    // Category and location travel only in the CSV, not the label payload.
     expect(response.data.assets[0]).not.toHaveProperty("category");
     expect(response.data.assets[0]).not.toHaveProperty("assetLocations");
     // No shortener in the test environment: codes encode this server's /qr.
@@ -217,9 +215,6 @@ const runSelectAll = (query: string) =>
 describe("bulk QR download select-all", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    (db.qr.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(
-      assets.map((asset) => qrFor(asset.id))
-    );
   });
 
   it("resolves advanced-mode filters through the bulk helper", async () => {
@@ -292,9 +287,9 @@ describe("bulk QR download select-all", () => {
     );
   });
 
-  it("refuses more than 100 codes as a 400 the user can act on", async () => {
+  it("refuses more than the export cap as a 400 the user can act on", async () => {
     bulkMocks.resolveAssetIdsForBulkOperation.mockResolvedValue(
-      Array.from({ length: 101 }, (_, index) => `asset-${index}`)
+      Array.from({ length: MAX_BULK_QR_EXPORT + 1 }, (_, index) => `asset-${index}`)
     );
 
     const response = (await runSelectAll("")) as unknown as {
@@ -303,7 +298,7 @@ describe("bulk QR download select-all", () => {
     };
 
     expect(response.init?.status).toBe(400);
-    expect(response.data.error?.message).toMatch(/maximum 100 codes/);
+    expect(response.data.error?.message).toMatch(/limited to 1500 assets/);
     expect(db.asset.findMany).not.toHaveBeenCalled();
   });
 });

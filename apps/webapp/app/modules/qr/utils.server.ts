@@ -44,6 +44,9 @@ export async function generateCode({
         size: size,
         src,
         id: qr.id,
+        // The exact scan URL the QR encodes — lets the client re-render the code
+        // as vector (sharp downloads) without round-tripping the bitmap.
+        url: getQrUrl(qr.id),
       },
     };
   } catch (cause) {

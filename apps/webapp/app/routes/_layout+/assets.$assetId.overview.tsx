@@ -2082,6 +2082,7 @@ export default function AssetOverview() {
                 type: "asset",
               }}
               sequentialId={asset.sequentialId}
+              preferredBarcodeId={asset.preferredBarcodeId}
             />
           )}
           <When

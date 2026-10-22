@@ -50,7 +50,14 @@ function renderAs(roles: OrganizationRoles[] | undefined) {
   return render(
     <CodePreview
       item={{ id: "asset-1", name: "Drill", type: "asset" }}
-      qrObj={{ qr: { id: "qr-1", size: "medium", src: "data:image/png," } }}
+      qrObj={{
+        qr: {
+          id: "qr-1",
+          size: "medium",
+          src: "data:image/png,",
+          url: "https://eam.sh/qr-1",
+        },
+      }}
     />
   );
 }
