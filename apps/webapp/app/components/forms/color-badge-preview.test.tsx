@@ -3,13 +3,15 @@
  *
  * Pins that the preview shows the badge as categories and tags draw it (the
  * picked color tinted, never as-is), falls back to a placeholder name, and
- * always explains why the badge differs from the picked color.
+ * explains the tint only while a color is set. Also pins the preview state
+ * hook: it follows the loaded record and color, and keeps what was typed when
+ * neither changes.
  *
  * @see {@link file://./color-badge-preview.tsx}
  */
-import { render, screen } from "@testing-library/react";
+import { act, render, renderHook, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { ColorBadgePreview } from "./color-badge-preview";
+import { ColorBadgePreview, useColorBadgePreview } from "./color-badge-preview";
 
 describe("ColorBadgePreview", () => {
   it("shows the typed name as a badge tinted from the color", () => {
@@ -31,8 +33,51 @@ describe("ColorBadgePreview", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows the plain gray badge when there is no color", () => {
+  it("shows the plain gray badge and no tint explanation when there is no color", () => {
     render(<ColorBadgePreview name="Spare" color={null} />);
     expect(screen.getByText("Spare")).not.toHaveAttribute("style");
+    expect(screen.queryByText(/light tint of your color/)).toBeNull();
+  });
+});
+
+describe("useColorBadgePreview", () => {
+  type Props = { entityId: string; name: string; color: string | null };
+  const start: Props = { entityId: "cat-a", name: "Laptops", color: "#ba2e66" };
+  const renderPreview = () =>
+    renderHook((props: Props) => useColorBadgePreview(props), {
+      initialProps: start,
+    });
+
+  it("starts from the loaded name and color", () => {
+    const { result } = renderPreview();
+    expect(result.current.previewName).toBe("Laptops");
+    expect(result.current.previewColor).toBe("#ba2e66");
+  });
+
+  it("keeps typed values while the loaded record and color stay the same", () => {
+    const { result, rerender } = renderPreview();
+    act(() => {
+      result.current.setPreviewName("Notebooks");
+      result.current.setPreviewColor("#12b76a");
+    });
+    rerender({ ...start });
+    expect(result.current.previewName).toBe("Notebooks");
+    expect(result.current.previewColor).toBe("#12b76a");
+  });
+
+  it("follows a new loaded color and keeps the typed name", () => {
+    const { result, rerender } = renderPreview();
+    act(() => result.current.setPreviewName("Notebooks"));
+    rerender({ ...start, color: "#2e90fa" });
+    expect(result.current.previewColor).toBe("#2e90fa");
+    expect(result.current.previewName).toBe("Notebooks");
+  });
+
+  it("resets name and color when another record loads", () => {
+    const { result, rerender } = renderPreview();
+    act(() => result.current.setPreviewName("Notebooks"));
+    rerender({ entityId: "cat-b", name: "Cameras", color: null });
+    expect(result.current.previewName).toBe("Cameras");
+    expect(result.current.previewColor).toBeNull();
   });
 });

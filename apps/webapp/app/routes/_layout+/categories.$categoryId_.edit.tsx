@@ -1,10 +1,12 @@
-import { useState } from "react";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data, redirect, useActionData, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
-import { ColorBadgePreview } from "~/components/forms/color-badge-preview";
+import {
+  ColorBadgePreview,
+  useColorBadgePreview,
+} from "~/components/forms/color-badge-preview";
 import { ColorInput } from "~/components/forms/color-input";
 import { FormRowErrors, rowErrorId } from "~/components/forms/form-row-errors";
 import Input from "~/components/forms/input";
@@ -126,11 +128,12 @@ export default function EditCategory() {
   // Focus the Name input on mount of the edit page.
   const nameInputRef = useAutoFocus<HTMLInputElement>();
   const { colorFromServer, category } = useLoaderData<typeof loader>();
-  /** Live name and color for the badge preview under the field row */
-  const [previewName, setPreviewName] = useState<string>(category.name);
-  const [previewColor, setPreviewColor] = useState<string | null>(
-    colorFromServer || null
-  );
+  const { previewName, setPreviewName, previewColor, setPreviewColor } =
+    useColorBadgePreview({
+      entityId: category.id,
+      name: category.name,
+      color: colorFromServer,
+    });
   const actionData = useActionData<typeof action>();
   /** Server-side errors, shown when client-side validation is bypassed */
   const validationErrors = getValidationErrors<typeof UpdateCategoryFormSchema>(

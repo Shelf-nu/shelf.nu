@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo } from "react";
 import type { Category } from "@prisma/client";
 import { useZorm } from "react-zorm";
 import z from "zod";
@@ -11,7 +11,10 @@ import { getValidationErrors } from "~/utils/http";
 import { hexColorSchema, labelNameSchema } from "~/utils/label-form-fields";
 import { tw } from "~/utils/tw";
 import { zodFieldIsRequired } from "~/utils/zod";
-import { ColorBadgePreview } from "../forms/color-badge-preview";
+import {
+  ColorBadgePreview,
+  useColorBadgePreview,
+} from "../forms/color-badge-preview";
 import { ColorInput } from "../forms/color-input";
 import { FormRowErrors, rowErrorId } from "../forms/form-row-errors";
 import Input from "../forms/input";
@@ -50,9 +53,8 @@ export default function NewCategoryForm({
   const disabled = useDisabled(fetcher);
 
   const color = useMemo(() => getRandomColor(), []);
-  /** Live name and color for the badge preview under the fields */
-  const [previewName, setPreviewName] = useState("");
-  const [previewColor, setPreviewColor] = useState<string | null>(color);
+  const { previewName, setPreviewName, previewColor, setPreviewColor } =
+    useColorBadgePreview({ entityId: "new", name: "", color });
 
   // Focus the Name field on mount. When this form is rendered inside a
   // dialog the dialog's `data-dialog-initial-focus` handler typically wins;

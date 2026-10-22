@@ -1,11 +1,13 @@
-import { useState } from "react";
 import { TagUseFor } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data, redirect, useActionData, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
-import { ColorBadgePreview } from "~/components/forms/color-badge-preview";
+import {
+  ColorBadgePreview,
+  useColorBadgePreview,
+} from "~/components/forms/color-badge-preview";
 import { ColorInput } from "~/components/forms/color-input";
 import { FormRowErrors, rowErrorId } from "~/components/forms/form-row-errors";
 import Input from "~/components/forms/input";
@@ -121,11 +123,8 @@ export default function NewTag() {
   const nameInputRef = useAutoFocus<HTMLInputElement>();
   const zo = useZorm("NewQuestionWizardScreen", NewTagFormSchema);
   const { tagUseFor, colorFromServer } = useLoaderData<typeof loader>();
-  /** Live name and color for the badge preview under the field row */
-  const [previewName, setPreviewName] = useState<string>("");
-  const [previewColor, setPreviewColor] = useState<string | null>(
-    colorFromServer || null
-  );
+  const { previewName, setPreviewName, previewColor, setPreviewColor } =
+    useColorBadgePreview({ entityId: "new", name: "", color: colorFromServer });
 
   const disabled = useDisabled();
   const actionData = useActionData<typeof action>();

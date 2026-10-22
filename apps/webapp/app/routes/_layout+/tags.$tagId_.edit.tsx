@@ -1,11 +1,13 @@
-import { useState } from "react";
 import { TagUseFor } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data, redirect, useActionData, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
-import { ColorBadgePreview } from "~/components/forms/color-badge-preview";
+import {
+  ColorBadgePreview,
+  useColorBadgePreview,
+} from "~/components/forms/color-badge-preview";
 import { ColorInput } from "~/components/forms/color-input";
 import { FormRowErrors, rowErrorId } from "~/components/forms/form-row-errors";
 import Input from "~/components/forms/input";
@@ -131,11 +133,12 @@ export default function EditTag() {
   const nameInputRef = useAutoFocus<HTMLInputElement>();
   const zo = useZorm("NewQuestionWizardScreen", UpdateTagFormSchema);
   const { tag, tagUseFor, colorFromServer } = useLoaderData<typeof loader>();
-  /** Live name and color for the badge preview under the field row */
-  const [previewName, setPreviewName] = useState<string>(tag?.name ?? "");
-  const [previewColor, setPreviewColor] = useState<string | null>(
-    colorFromServer || null
-  );
+  const { previewName, setPreviewName, previewColor, setPreviewColor } =
+    useColorBadgePreview({
+      entityId: tag?.id ?? "",
+      name: tag?.name ?? "",
+      color: colorFromServer,
+    });
   const actionData = useActionData<typeof action>();
   /** Server-side errors, shown when client-side validation is bypassed */
   const validationErrors = getValidationErrors<typeof UpdateTagFormSchema>(
@@ -152,6 +155,9 @@ export default function EditTag() {
   return tag ? (
     <>
       <Form
+        // Remount the fields when another tag loads: the list below links
+        // straight to other tags' edit pages without leaving this route.
+        key={tag.id}
         method="post"
         className="block rounded-[12px] border border-gray-200 bg-white px-6 py-5 "
         ref={zo.ref}
