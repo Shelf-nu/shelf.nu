@@ -4,24 +4,31 @@ import type {
   Dispatch,
   SetStateAction,
 } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   Popover,
   PopoverTrigger,
   PopoverPortal,
   PopoverContent,
 } from "@radix-ui/react-popover";
-import { Reorder } from "framer-motion";
+import { Reorder, useDragControls } from "framer-motion";
 import { Search } from "lucide-react";
 import { useLoaderData } from "react-router";
 import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import { Switch } from "~/components/forms/switch";
-import { ChevronRight, HandleIcon, PlusIcon } from "~/components/icons/library";
+import { ChevronRight, PlusIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
+import {
+  ReorderHandle,
+  ReorderHint,
+  reorderItemProps,
+} from "~/components/shared/reorder-handle";
 import { useSearchParams } from "~/hooks/search-params";
 import { useAssetIndexView } from "~/hooks/use-asset-index-view";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
+import { useKeyboardReorder } from "~/hooks/use-keyboard-reorder";
+import { filterQueryableColumns } from "~/modules/asset/last-audit-date-access";
 import {
   parseColumnName,
   type Column,
@@ -39,6 +46,7 @@ import {
   getDefaultValueForFieldType,
   getUIFieldType,
   useInitialFilters,
+  valueForOperatorChange,
 } from "./advanced-filters/helpers";
 import {
   operatorsPerType,
@@ -100,9 +108,16 @@ const getTriggerClasses = (
 // react-doctor:no-giant-component — deferred for follow-up refactor
 function AdvancedFilter() {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
-  const { settings, customFields } = useLoaderData<AssetIndexLoaderData>();
+  const { settings, customFields, lastAuditDateAccess } =
+    useLoaderData<AssetIndexLoaderData>();
 
   const columns = settings.columns as Column[];
+  // Filtering by the last audit date needs queryable audits; a locked workspace
+  // sees the column but is not offered a filter on it, nor a restored chip.
+  const filterableColumns = filterQueryableColumns(
+    columns,
+    lastAuditDateAccess ?? "hidden"
+  );
   // Acting user's resolved pref timezone — seeds new date filters with the
   // user's local "today" rather than the server/UTC day (avoids off-by-one).
   const { timeZone } = useFormatPrefs();
@@ -111,13 +126,17 @@ function AdvancedFilter() {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [filters, setFilters] = useState<Filter[]>([]);
-  const initialFilters = useInitialFilters(columns);
+  const initialFilters = useInitialFilters(filterableColumns);
   const [hasUnappliedChanges, setHasUnappliedChanges] = useState(false);
 
   // Track if we're applying filters internally to avoid resetting state
   const isApplyingInternally = useRef(false);
 
-  const availableColumns = getAvailableColumns(columns, filters, "filter");
+  const availableColumns = getAvailableColumns(
+    filterableColumns,
+    filters,
+    "filter"
+  );
 
   // "Low stock" quick filter: a standalone `lowStockOnly` URL param
   // (QUANTITY_TRACKED assets at/below their reorder threshold). Surfaced INSIDE
@@ -381,7 +400,18 @@ function AdvancedFilter() {
                                 setFilter={(operator) => {
                                   setFilters((prev) => {
                                     const newFilters = [...prev];
-                                    newFilters[index].operator = operator;
+                                    const previous = newFilters[index];
+                                    newFilters[index] = {
+                                      ...previous,
+                                      operator,
+                                      value: valueForOperatorChange({
+                                        filter: previous,
+                                        operator,
+                                        columns: filterableColumns,
+                                        customFields,
+                                        timeZone,
+                                      }),
+                                    };
                                     return newFilters;
                                   });
                                   setHasUnappliedChanges(true);
@@ -437,7 +467,7 @@ function AdvancedFilter() {
                 `lowStockOnly` param immediately (independent of the Apply flow).
 
                 Hidden in the model view: low stock selects QUANTITY_TRACKED
-                assets at or below their reorder threshold, and asset models are
+                assets at or below their min quantity, and asset models are
                 an INDIVIDUAL-only concept, so the two predicates can never both
                 hold. Offering it there is a control that can only ever empty the
                 list. */}
@@ -455,9 +485,17 @@ function AdvancedFilter() {
                     lowStockActive ? "text-primary" : "text-white"
                   )}
                 />
-                Low stock only
+                {/* Deliberately NOT "Low stock". The Stock status column emits a
+                    badge literally reading "Running low", and filtering on that
+                    badge is a NARROWER question: it excludes items that have run
+                    out entirely, because "None free" outranks "Running low" on
+                    the verdict ladder. Two controls both called low stock,
+                    returning different counts, is the kind of thing that makes
+                    people stop trusting both. This one owns the broader
+                    reorder question and says so. */}
+                Needs reordering
                 <span className="text-gray-500">
-                  — at or below reorder threshold
+                  : at or below the min quantity you set
                 </span>
               </button>
             </When>
@@ -527,12 +565,27 @@ function AdvancedFilter() {
   );
 }
 
-function AdvancedSorting() {
+/**
+ * Sort popover of the advanced asset index. Rules are edited locally, reordered
+ * by drag or Alt+Arrow on their handles, and written to the URL as repeated
+ * `sortBy=name:direction[:cfType]` params on Apply.
+ */
+export function AdvancedSorting() {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const [sorts, setSorts] = useState<Sort[]>([]);
   const [searchParams, setSearchParams] = useSearchParams();
+  const { lastAuditDateAccess } = useLoaderData<AssetIndexLoaderData>();
+  // A sort on the last audit date the server ignores must not show as active.
+  const sortAccess = lastAuditDateAccess ?? "hidden";
 
   const disabled = useDisabled();
+
+  const { handleKeyDown, announcement, itemRefs } = useKeyboardReorder({
+    items: sorts,
+    onReorder: setSorts,
+    getItemName: (s) => parseColumnName(s.name),
+  });
+  const instructionsId = useId();
 
   // Track if we're applying sorts internally to avoid resetting state
   const isApplyingInternally = useRef(false);
@@ -564,25 +617,41 @@ function AdvancedSorting() {
       return;
     }
 
-    const parsedSorts = searchParams.getAll("sortBy").map((s) => {
-      const [name, direction, cfType] = s.split(":");
-      return { name, direction, cfType } as Sort;
-    });
+    const parsedSorts = filterQueryableColumns(
+      searchParams.getAll("sortBy").map((s) => {
+        const [name, direction, cfType] = s.split(":");
+        return { name, direction, cfType } as Sort;
+      }),
+      sortAccess
+    );
     setSorts(parsedSorts);
     lastSyncedUrlSorts.current = currentUrlSorts;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [relevantSearchParamsString]);
 
-  const initialSorts = searchParams.getAll("sortBy").map((s) => {
-    const [name, direction, cfType] = s.split(":");
-    return { name, direction, cfType } as Sort;
-  });
+  const initialSorts = filterQueryableColumns(
+    searchParams.getAll("sortBy").map((s) => {
+      const [name, direction, cfType] = s.split(":");
+      return { name, direction, cfType } as Sort;
+    }),
+    sortAccess
+  );
 
   const haveSortsChanged =
     JSON.stringify(initialSorts) !== JSON.stringify(sorts);
 
   function removeSort(columnName: Sort["name"]) {
     setSorts((prev) => prev.filter((s) => s.name !== columnName));
+  }
+
+  function toggleSortDirection(index: number) {
+    setSorts((prev) =>
+      prev.map((sort, i) =>
+        i === index
+          ? { ...sort, direction: sort.direction === "asc" ? "desc" : "asc" }
+          : sort
+      )
+    );
   }
 
   function applySorting() {
@@ -644,69 +713,43 @@ function AdvancedSorting() {
           )}
         >
           <div className="border-b p-4 pb-5">
+            <div
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+              className="sr-only"
+            >
+              {announcement}
+            </div>
             {sorts.length === 0 ? (
               <div>
                 <h5>No sorting applied to this view</h5>
                 <p>Add a column below to sort by</p>
               </div>
             ) : (
-              <Reorder.Group values={sorts} onReorder={setSorts}>
-                {sorts.map((s, index) => (
-                  <Reorder.Item key={s.name} value={s}>
-                    <div className="flex items-center justify-between">
-                      <div className="flex h-full items-center gap-2 py-[6px]">
-                        <div className="inline-block h-auto w-[10px] text-gray-500 hover:text-gray-600">
-                          <HandleIcon />
-                        </div>
-                        <div className="mt-[-2px]">
-                          <span className="text-gray-500 ">
-                            {index === 0 ? "sort" : "then"} by
-                          </span>{" "}
-                          {parseColumnName(s.name)}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-2">
-                          <label
-                            htmlFor={`sort-${s.name}`}
-                            className="text-[12px] text-gray-500"
-                          >
-                            ascending:{" "}
-                          </label>
-                          <Switch
-                            id={`sort-${s.name}`}
-                            checked={s.direction === "asc"}
-                            onCheckedChange={() => {
-                              setSorts((prev) => {
-                                const newSorts = prev.map((sort, i) => {
-                                  if (i === index) {
-                                    return {
-                                      ...sort,
-                                      direction: (sort.direction === "asc"
-                                        ? "desc"
-                                        : "asc") as "asc" | "desc",
-                                    };
-                                  }
-                                  return sort;
-                                });
-                                return newSorts;
-                              });
-                            }}
-                            className="h-[18px] w-[33px] [&_span]:size-[16px]"
-                          />
-                        </div>
-                        <Button
-                          type="button"
-                          variant="block-link-gray"
-                          className="mt-[2px] text-[10px] font-normal text-gray-600"
-                          icon="x"
-                          onClick={() => removeSort(s.name)}
-                        />
-                      </div>
-                    </div>
-                  </Reorder.Item>
-                ))}
-              </Reorder.Group>
+              <div>
+                <div className="sr-only" id={instructionsId}>
+                  Press Alt plus Arrow Up or Arrow Down on a drag handle to move
+                  the sort rule.
+                </div>
+                <Reorder.Group values={sorts} onReorder={setSorts}>
+                  {sorts.map((s, index) => (
+                    <SortRuleItem
+                      key={s.name}
+                      sort={s}
+                      index={index}
+                      instructionsId={instructionsId}
+                      handleRef={(el) => {
+                        itemRefs.current[index] = el;
+                      }}
+                      onHandleKeyDown={(e) => handleKeyDown(e, index)}
+                      onToggleDirection={() => toggleSortDirection(index)}
+                      onRemove={() => removeSort(s.name)}
+                    />
+                  ))}
+                </Reorder.Group>
+                {sorts.length > 1 ? <ReorderHint className="mt-2" /> : null}
+              </div>
             )}
           </div>
 
@@ -745,6 +788,86 @@ function AdvancedSorting() {
   );
 }
 
+function SortRuleItem({
+  sort,
+  index,
+  instructionsId,
+  handleRef,
+  onHandleKeyDown,
+  onToggleDirection,
+  onRemove,
+}: {
+  sort: Sort;
+  /** Position in the list; the first rule reads "sort by", the rest "then by". */
+  index: number;
+  /** Id of the sr-only keyboard instructions the handle points at. */
+  instructionsId: string;
+  /** Stores the handle in `useKeyboardReorder`'s `itemRefs` at `index`. */
+  handleRef: (element: HTMLButtonElement | null) => void;
+  /** Alt+Arrow handler from `useKeyboardReorder`, bound to `index`. */
+  onHandleKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void;
+  /** Flips the rule between ascending and descending. */
+  onToggleDirection: () => void;
+  /** Removes the rule from the list. */
+  onRemove: () => void;
+}) {
+  const dragControls = useDragControls();
+  const name = parseColumnName(sort.name);
+
+  return (
+    <Reorder.Item
+      value={sort}
+      dragListener={false}
+      dragControls={dragControls}
+      {...reorderItemProps}
+      // Bleeds into the popover padding so the lifted row has room around its
+      // text without shifting it.
+      className={tw(reorderItemProps.className, "-mx-2 px-2")}
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex h-full items-center gap-2 py-[6px]">
+          <ReorderHandle
+            ref={handleRef}
+            dragControls={dragControls}
+            label={name}
+            onKeyDown={onHandleKeyDown}
+            describedById={instructionsId}
+          />
+          <div className="mt-[-2px]">
+            <span className="text-gray-500 ">
+              {index === 0 ? "sort" : "then"} by
+            </span>{" "}
+            {name}
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <label
+              htmlFor={`sort-${sort.name}`}
+              className="text-[12px] text-gray-500"
+            >
+              ascending:{" "}
+            </label>
+            <Switch
+              id={`sort-${sort.name}`}
+              checked={sort.direction === "asc"}
+              onCheckedChange={onToggleDirection}
+              className="h-[18px] w-[33px] [&_span]:size-[16px]"
+            />
+          </div>
+          <Button
+            type="button"
+            variant="block-link-gray"
+            className="mt-[2px] text-[10px] font-normal text-gray-600"
+            icon="x"
+            onClick={onRemove}
+          />
+        </div>
+      </div>
+    </Reorder.Item>
+  );
+}
+
 function PickAColumnToSortBy({
   sorts,
   setSorts,
@@ -755,8 +878,16 @@ function PickAColumnToSortBy({
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
-  const { settings } = useLoaderData<AssetIndexLoaderData>();
-  const columns = settings.columns as Column[];
+  const { settings, lastAuditDateAccess } =
+    useLoaderData<AssetIndexLoaderData>();
+  const columns = useMemo(
+    () =>
+      filterQueryableColumns(
+        settings.columns as Column[],
+        lastAuditDateAccess ?? "hidden"
+      ),
+    [settings.columns, lastAuditDateAccess]
+  );
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   const availableColumns = useMemo(

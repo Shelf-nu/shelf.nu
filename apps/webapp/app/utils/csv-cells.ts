@@ -51,6 +51,72 @@ export function quoteCsvCell(value: string): string {
   return `"${(value ?? "").replace(/"/g, '""')}"`;
 }
 
+/**
+ * A cell starting with one of these is run as a formula by spreadsheets
+ * (CWE-1236). Tab and carriage return count too: importers that trim leading
+ * whitespace turn `\t=...` back into a live formula. Leading apostrophes are
+ * part of the match so that a value which already starts with `'` before a
+ * trigger gains one more on export and loses exactly one on import, which keeps
+ * the pair lossless.
+ */
+const FORMULA_TRIGGER = /^'*[=+\-@\t\r]/;
+
+/**
+ * A negative number as the exports write it: `-5`, `-1,234.50`, `-$5.00`.
+ * Digits, separators and at most one symbol cannot form a formula, and leaving
+ * them alone keeps valuations and amounts summable in a spreadsheet.
+ */
+const NEGATIVE_NUMBER = /^-[$€£¥₹₽₩₪₫฿₴₦₲₵₡₺₨]?\d[\d,]*(\.\d+)?$/;
+
+/**
+ * A leading sign followed only by digits, letters, spaces and unit marks
+ * (`-20C Freezer`, `+5V PSU`). A formula that does anything needs a call
+ * `(`, a DDE `|` or an operator beyond `-`, none of which this allows.
+ */
+const SIGNED_PLAIN_TEXT = /^[+-]\d[\p{L}\p{N}\s.,°%/-]*$/u;
+
+/**
+ * Neutralizes a value a spreadsheet would run as a formula (CWE-1236) by
+ * prefixing a `'`, which spreadsheets read as "this cell is text". A negative
+ * number is left as it is.
+ *
+ * Apply it to the raw value, before quoting. Every importer reads the cell back
+ * through {@link restoreCsvFormulaCell}, so a guarded file re-imports unchanged.
+ *
+ * Label printer software (Brady, P-touch, Dymo) prints that `'` literally, so
+ * a file meant for printing passes `keepSignedText` to leave a plain signed
+ * measurement such as `-20C Freezer` as typed. `=`, `@`, a leading tab and a
+ * leading carriage return are always neutralized.
+ *
+ * @param value - The raw cell value, before quoting.
+ * @param options.keepSignedText - Leave a `+`/`-` value alone when it holds no
+ * formula syntax.
+ * @returns The value, prefixed with `'` when a spreadsheet would run it.
+ */
+export function neutralizeCsvFormula(
+  value: string,
+  { keepSignedText = false }: { keepSignedText?: boolean } = {}
+): string {
+  if (!FORMULA_TRIGGER.test(value) || NEGATIVE_NUMBER.test(value)) {
+    return value;
+  }
+  if (keepSignedText && SIGNED_PLAIN_TEXT.test(value)) return value;
+  return `'${value}`;
+}
+
+/**
+ * Reverses {@link neutralizeCsvFormula} for one parsed cell: drops the single
+ * quote it added, and leaves every other value as it is.
+ *
+ * @param cell - The cell content, after the CSV parser has unquoted the cell.
+ * @returns The value as it was before export.
+ */
+export function restoreCsvFormulaCell(cell: string): string {
+  return cell.startsWith("'") && FORMULA_TRIGGER.test(cell)
+    ? cell.slice(1)
+    : cell;
+}
+
 /** An item needs quoting when a bare split would not give it back unchanged. */
 const NEEDS_QUOTING = /[",]/;
 
@@ -127,49 +193,4 @@ export function decodeCsvListCell(cell: string): string[] {
   pushCurrent();
 
   return items;
-}
-
-/**
- * A cell a spreadsheet would run as a formula: one starting with `=`, `+`, `-`
- * or `@` (CWE-1236). Leading apostrophes are part of the match so that a value
- * which already starts with `'` before one of those characters gains one more
- * on export and loses exactly one on import, which keeps the pair lossless.
- */
-const FORMULA_LEADING = /^'*[=+\-@]/;
-
-/**
- * A negative number as the exports write it: `-5`, `-1,234.50`, `-$5.00`.
- * Digits, separators and at most one symbol cannot form a formula, and leaving
- * them alone keeps valuations and amounts summable in a spreadsheet.
- */
-const NEGATIVE_NUMBER = /^-[$€£¥₹₽₩₪₫฿₴₦₲₵₡₺₨]?\d[\d,]*(\.\d+)?$/;
-
-/**
- * Neutralises spreadsheet formula injection in one cell value by prefixing it
- * with a single quote, which Excel and Google Sheets show as literal text.
- *
- * Apply it to the raw value, before quoting. Every importer reads the cell back
- * through {@link restoreCsvFormulaCell}, so a guarded file re-imports unchanged.
- *
- * @param value - The raw cell value.
- * @returns The value, prefixed with `'` when a spreadsheet would evaluate it.
- */
-export function neutralizeCsvFormula(value: string): string {
-  if (!FORMULA_LEADING.test(value) || NEGATIVE_NUMBER.test(value)) {
-    return value;
-  }
-  return `'${value}`;
-}
-
-/**
- * Reverses {@link neutralizeCsvFormula} for one parsed cell: drops the single
- * quote it added, and leaves every other value as it is.
- *
- * @param cell - The cell content, after the CSV parser has unquoted the cell.
- * @returns The value as it was before export.
- */
-export function restoreCsvFormulaCell(cell: string): string {
-  return cell.startsWith("'") && FORMULA_LEADING.test(cell)
-    ? cell.slice(1)
-    : cell;
 }

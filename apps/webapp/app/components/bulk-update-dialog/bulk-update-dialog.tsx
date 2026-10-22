@@ -55,7 +55,8 @@ type BulkDialogType =
   | "remove-from-kit"
   | "start-audit"
   | "add-to-audit"
-  | "delete-audit";
+  | "delete-audit"
+  | "reorder-point";
 
 type CommonBulkDialogProps = {
   type: BulkDialogType;

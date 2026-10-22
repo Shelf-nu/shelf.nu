@@ -8,7 +8,6 @@
  * @see {@link file://./../../../utils/import-update.server.ts} Server-side preview logic
  */
 import type React from "react";
-import { useAutoFocus } from "~/hooks/use-auto-focus";
 import type useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import type { action } from "~/routes/_layout+/assets.import-update";
 import type { UpdatePreview } from "~/utils/import-update.server";
@@ -18,20 +17,10 @@ import {
 } from "./helpers";
 import { SummaryPill } from "./shared";
 import { SpreadsheetPreview } from "./spreadsheet-preview";
-import Input from "../../forms/input";
-import { AlertIcon } from "../../icons/library";
 import { Button } from "../../shared/button";
-import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "../../shared/modal";
 import { Table, Td, Th, Tr } from "../../table";
+import { ConfirmImportDialog } from "../import-preview/confirm-import-dialog";
+import { NewEntitiesNotice } from "../import-preview/new-entities-notice";
 
 // ---------------------------------------------------------------------------
 // Preview Display (shown after CSV analysis, before apply)
@@ -46,8 +35,6 @@ import { Table, Td, Th, Tr } from "../../table";
 export function PreviewDisplay({
   preview,
   formRef,
-  agreed,
-  setAgreed,
   applyFetcher,
   isApplyLoading,
   selectedFile,
@@ -57,8 +44,6 @@ export function PreviewDisplay({
 }: {
   preview: UpdatePreview;
   formRef: React.RefObject<HTMLFormElement | null>;
-  agreed: string;
-  setAgreed: (v: string) => void;
   applyFetcher: ReturnType<typeof useFetcherWithReset<typeof action>>;
   isApplyLoading: boolean;
   selectedFile: File | null;
@@ -83,6 +68,24 @@ export function PreviewDisplay({
     preview.newEntities.locations.length > 0 ||
     preview.newEntities.tags.length > 0;
 
+  /** Human summary of what will be created, used in the confirm dialog. */
+  const newEntitiesSummary = [
+    preview.newEntities.categories.length > 0 &&
+      `${preview.newEntities.categories.length} new categor${
+        preview.newEntities.categories.length !== 1 ? "ies" : "y"
+      }`,
+    preview.newEntities.locations.length > 0 &&
+      `${preview.newEntities.locations.length} new location${
+        preview.newEntities.locations.length !== 1 ? "s" : ""
+      }`,
+    preview.newEntities.tags.length > 0 &&
+      `${preview.newEntities.tags.length} new tag${
+        preview.newEntities.tags.length !== 1 ? "s" : ""
+      }`,
+  ]
+    .filter(Boolean)
+    .join(", ");
+
   // Collect all field-level validation warnings
   const allWarnings = preview.assetsToUpdate.flatMap((asset) =>
     asset.changes
@@ -97,11 +100,12 @@ export function PreviewDisplay({
   );
   const hasWarnings = allWarnings.length > 0;
 
-  function submitApply() {
+  /** Submits the apply intent with the phrase the user typed in the dialog. */
+  function submitApply(confirmation: string) {
     if (!formRef.current || !selectedFile) return;
     const fd = new FormData(formRef.current);
     fd.set("intent", "apply-update");
-    fd.set("confirmation", agreed);
+    fd.set("confirmation", confirmation);
     void applyFetcher.submit(fd, {
       method: "post",
       encType: "multipart/form-data",
@@ -257,61 +261,13 @@ export function PreviewDisplay({
       )}
 
       {/* New entity creation warning */}
-      {hasNewEntities && (
-        <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 p-4">
-          <p className="mb-2 font-medium text-amber-800">
-            <AlertIcon className="inline-block size-4" /> New items will be
-            created
-          </p>
-          <p className="mb-2 text-sm text-amber-700">
-            The following items don't exist yet and will be created
-            automatically. Please check for typos:
-          </p>
-          <div className="space-y-1 text-sm text-amber-800">
-            {preview.newEntities.categories.length > 0 && (
-              <p>
-                <strong>New categories:</strong>{" "}
-                {preview.newEntities.categories.map((name, i) => (
-                  // The entity name is unique within its own list (dedup'd on
-                  // the server), so it's a stable key here.
-                  <span key={name}>
-                    {i > 0 && ", "}
-                    <span className="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs">
-                      {name}
-                    </span>
-                  </span>
-                ))}
-              </p>
-            )}
-            {preview.newEntities.locations.length > 0 && (
-              <p>
-                <strong>New locations:</strong>{" "}
-                {preview.newEntities.locations.map((name, i) => (
-                  <span key={name}>
-                    {i > 0 && ", "}
-                    <span className="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs">
-                      {name}
-                    </span>
-                  </span>
-                ))}
-              </p>
-            )}
-            {preview.newEntities.tags.length > 0 && (
-              <p>
-                <strong>New tags:</strong>{" "}
-                {preview.newEntities.tags.map((name, i) => (
-                  <span key={name}>
-                    {i > 0 && ", "}
-                    <span className="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs">
-                      {name}
-                    </span>
-                  </span>
-                ))}
-              </p>
-            )}
-          </div>
-        </div>
-      )}
+      <NewEntitiesNotice
+        entities={[
+          { label: "New categories", names: preview.newEntities.categories },
+          { label: "New locations", names: preview.newEntities.locations },
+          { label: "New tags", names: preview.newEntities.tags },
+        ]}
+      />
 
       {/* Failed rows */}
       {preview.failedRows.length > 0 && (
@@ -392,102 +348,45 @@ export function PreviewDisplay({
           "Start over" stays reachable in that case. */}
       <div className="mt-2 flex items-center gap-3">
         {totalAssets > 0 && (
-          <AlertDialog
-            onOpenChange={(open) => {
-              if (!open) {
-                setAgreed("");
-              }
-            }}
-          >
-            <AlertDialogTrigger asChild>
-              <Button type="button">
-                Apply {totalChanges} change
-                {totalChanges !== 1 ? "s" : ""} to {totalAssets} asset
-                {totalAssets !== 1 ? "s" : ""}
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent className="max-w-[600px]">
-              <AlertDialogHeader>
-                <AlertDialogTitle>Confirm bulk update</AlertDialogTitle>
-                <AlertDialogDescription>
-                  You are about to apply{" "}
-                  <strong>
-                    {totalChanges} change
-                    {totalChanges !== 1 ? "s" : ""}
-                  </strong>{" "}
-                  across <strong>{totalAssets}</strong> asset
-                  {totalAssets !== 1 ? "s" : ""}. This action cannot be undone.
-                  Empty cells will clear existing values where applicable.
-                </AlertDialogDescription>
+          <ConfirmImportDialog
+            triggerLabel={`Apply ${totalChanges} change${
+              totalChanges !== 1 ? "s" : ""
+            } to ${totalAssets} asset${totalAssets !== 1 ? "s" : ""}`}
+            title="Confirm bulk update"
+            description={
+              <>
+                You are about to apply{" "}
+                <strong>
+                  {totalChanges} change
+                  {totalChanges !== 1 ? "s" : ""}
+                </strong>{" "}
+                across <strong>{totalAssets}</strong> asset
+                {totalAssets !== 1 ? "s" : ""}. This action cannot be undone.
+                Empty cells will clear existing values where applicable.
                 {hasNewEntities && (
-                  <AlertDialogDescription>
-                    <span className="text-amber-600">
-                      This will also create{" "}
-                      {[
-                        preview.newEntities.categories.length > 0 &&
-                          `${
-                            preview.newEntities.categories.length
-                          } new categor${
-                            preview.newEntities.categories.length !== 1
-                              ? "ies"
-                              : "y"
-                          }`,
-                        preview.newEntities.locations.length > 0 &&
-                          `${
-                            preview.newEntities.locations.length
-                          } new location${
-                            preview.newEntities.locations.length !== 1
-                              ? "s"
-                              : ""
-                          }`,
-                        preview.newEntities.tags.length > 0 &&
-                          `${preview.newEntities.tags.length} new tag${
-                            preview.newEntities.tags.length !== 1 ? "s" : ""
-                          }`,
-                      ]
-                        .filter(Boolean)
-                        .join(", ")}
-                      .
-                    </span>
-                  </AlertDialogDescription>
+                  <span className="mt-2 block text-amber-600">
+                    This will also create {newEntitiesSummary}.
+                  </span>
                 )}
-                <AlertDialogDescription>
-                  Type <b>"I AGREE"</b> below to confirm.
-                </AlertDialogDescription>
-                {/* Server-side apply error shown inside the dialog */}
-                {applyFetcher.data?.error && (
-                  <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-600">
-                    {applyFetcher.data.error.message ||
-                      "An error occurred while applying changes."}
-                  </div>
-                )}
-                <ConfirmationInput
-                  agreed={agreed}
-                  setAgreed={setAgreed}
-                  isApplyLoading={isApplyLoading}
-                  submitApply={submitApply}
-                />
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel asChild>
-                  <Button type="button" variant="secondary">
-                    Cancel
-                  </Button>
-                </AlertDialogCancel>
-                <Button
-                  type="button"
-                  disabled={agreed !== "I AGREE" || isApplyLoading}
-                  onClick={submitApply}
-                >
-                  {isApplyLoading
-                    ? "Applying..."
-                    : `Apply ${totalChanges} change${
-                        totalChanges !== 1 ? "s" : ""
-                      }`}
-                </Button>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
+              </>
+            }
+            confirmLabel={
+              isApplyLoading
+                ? "Applying..."
+                : `Apply ${totalChanges} change${totalChanges !== 1 ? "s" : ""}`
+            }
+            isSubmitting={isApplyLoading}
+            onConfirm={submitApply}
+            error={
+              applyFetcher.data?.error
+                ? {
+                    message:
+                      applyFetcher.data.error.message ||
+                      "An error occurred while applying changes.",
+                  }
+                : null
+            }
+          />
         )}
         <Button type="button" variant="secondary" onClick={onReset}>
           Start over
@@ -502,51 +401,5 @@ export function PreviewDisplay({
         </p>
       )}
     </div>
-  );
-}
-
-/**
- * Confirmation input for the "I AGREE" apply dialog.
- *
- * Extracted into its own component so we can focus the input on mount via
- * `useAutoFocus` instead of the `autoFocus` attribute (flagged by
- * `jsx-a11y/no-autofocus` — autofocus hurts screen-reader and keyboard users).
- * The component is only mounted when the AlertDialog opens, so the focus
- * fires exactly when the user actually needs the input focused.
- */
-function ConfirmationInput({
-  agreed,
-  setAgreed,
-  isApplyLoading,
-  submitApply,
-}: {
-  agreed: string;
-  setAgreed: (v: string) => void;
-  isApplyLoading: boolean;
-  submitApply: () => void;
-}) {
-  // Focus once when the dialog opens so the user can start typing "I AGREE"
-  // immediately. Safe because this component only mounts inside the open
-  // AlertDialog, never ambiently.
-  const inputRef = useAutoFocus<HTMLInputElement>();
-
-  return (
-    <Input
-      ref={inputRef}
-      type="text"
-      label="Confirmation"
-      name="agree"
-      value={agreed}
-      onChange={(e) => setAgreed(e.target.value.toUpperCase())}
-      placeholder="I AGREE"
-      pattern="^I AGREE$"
-      required
-      onKeyDown={(e) => {
-        if (e.key === "Enter" && agreed === "I AGREE" && !isApplyLoading) {
-          e.preventDefault();
-          submitApply();
-        }
-      }}
-    />
   );
 }

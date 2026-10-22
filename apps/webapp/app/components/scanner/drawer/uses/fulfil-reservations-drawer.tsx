@@ -1067,6 +1067,8 @@ function FulfilCheckoutForm({
           unassignedUnits={unassignedUnits}
           sourceQuestions={sourceQuestions}
           suppressEarlyCheckoutPrompt={suppressEarlyCheckoutPrompt}
+          // The drawer lists what goes out, so it is the confirmation step.
+          confirm={false}
           // `grow` (the CheckoutDialog default) makes the button stretch
           // across the drawer — with the disabled primary-300 tint this
           // reads as an alarming peach block. Size to content instead.

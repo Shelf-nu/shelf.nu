@@ -74,6 +74,41 @@ vi.mock("~/modules/reports/helpers.server", () => ({
   monthlyBookingTrendsReport: vi.fn(),
 }));
 
+// why: the real resolver verifies filter ids against the database; the
+// loader's contract is only that it hands the resolved filters on. The fake
+// parses the query string with the real pure grammar and echoes the parsed
+// params inside the predicate, so each case can assert what reached the
+// report function.
+vi.mock("~/modules/reports/filters.server", async () => {
+  const { parseReportFilterParams } = await import(
+    "~/modules/reports/filter-params"
+  );
+  return {
+    resolveReportFilters: vi.fn(
+      ({ searchParams }: { searchParams: URLSearchParams }) => {
+        const params = parseReportFilterParams(searchParams);
+        return Promise.resolve({
+          params,
+          assetFilter: { where: { parsed: params }, sql: [], isEmpty: false },
+          bookingStatuses: params.statuses,
+          teamMemberId: params.teamMemberId,
+          assetId: params.assetId,
+          active: [],
+        });
+      }
+    ),
+  };
+});
+
+// why: the workspace's plan is its owner's tier, read from the database. These
+// cases are about the file, so the workspace is on a plan with reports; the
+// plan gate itself is covered in reports-plan-gate.test.ts
+vi.mock("~/modules/tier/service.server", () => ({
+  getOrganizationTierLimit: vi.fn(() =>
+    Promise.resolve({ canUseReports: true })
+  ),
+}));
+
 // why: format prefs are resolved from the database for the acting user
 vi.mock("~/utils/date-format.server", () => ({
   resolveUserFormatPrefsById: vi.fn(() =>
@@ -132,6 +167,15 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
         assetCount: 20,
         percentage: 100,
         totalValue: 40000,
+      },
+    ],
+    byAssetModel: [
+      {
+        id: "model-1",
+        groupName: "كاميرا",
+        assetCount: 5,
+        percentage: 25,
+        totalValue: 10000,
       },
     ],
   };
@@ -241,6 +285,16 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
       pageSize: 10000,
     });
 
+    /**
+     * Matcher for the predicate the fake resolver builds: it echoes the parsed
+     * params, so asserting on them proves the route forwarded the resolved
+     * filters rather than re-reading the query string itself.
+     */
+    const filterCarrying = (parsed: Record<string, unknown>) =>
+      expect.objectContaining({
+        where: { parsed: expect.objectContaining(parsed) },
+      });
+
     type PassthroughCase = {
       /** `reportId` param, matching a case in the loader's switch. */
       reportId: string;
@@ -266,15 +320,16 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
         mock: vi.mocked(custodySnapshotReport),
         expected: {
           teamMemberId: "tm-1",
-          locationId: "loc-1",
+          assetFilter: filterCarrying({ locationIds: ["loc-1"] }),
           currency: "USD",
         },
       },
       {
         reportId: "overdue-items",
-        query: "custodian=cust-1",
+        // Legacy spelling of the custodian filter must still reach the report.
+        query: "custodian=tm-1",
         mock: vi.mocked(overdueItemsReport),
-        expected: { custodianId: "cust-1", currency: "USD" },
+        expected: { custodianTeamMemberId: "tm-1", currency: "USD" },
       },
       {
         reportId: "idle-assets",
@@ -282,16 +337,30 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
         mock: vi.mocked(idleAssetsReport),
         expected: {
           idleThresholdDays: 60,
-          categoryId: "cat-1",
-          locationId: "loc-1",
+          assetFilter: filterCarrying({
+            categoryIds: ["cat-1"],
+            locationIds: ["loc-1"],
+          }),
           currency: "USD",
         },
       },
       {
         reportId: "top-booked-assets",
-        query: "category=cat-1&location=loc-1",
+        query: "category=cat-1&assetModel=model-1&cf=field-1:yes",
         mock: vi.mocked(topBookedAssetsReport),
-        expected: { categoryId: "cat-1", locationId: "loc-1" },
+        expected: {
+          assetFilter: filterCarrying({
+            categoryIds: ["cat-1"],
+            assetModelIds: ["model-1"],
+            customFieldValues: [{ customFieldId: "field-1", value: "yes" }],
+          }),
+        },
+      },
+      {
+        reportId: "monthly-booking-trends",
+        query: "category=cat-1",
+        mock: vi.mocked(monthlyBookingTrendsReport),
+        expected: { assetFilter: filterCarrying({ categoryIds: ["cat-1"] }) },
       },
       {
         reportId: "top-booked-kits",
@@ -304,13 +373,16 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
       },
       {
         reportId: "asset-inventory",
+        // Legacy comma-joined spellings must still reach the report.
         query:
           "categories=cat-1,cat-2&locations=loc-1&statuses=AVAILABLE,IN_CUSTODY",
         mock: vi.mocked(assetInventoryReport),
         expected: {
-          categoryIds: ["cat-1", "cat-2"],
-          locationIds: ["loc-1"],
-          statuses: ["AVAILABLE", "IN_CUSTODY"],
+          assetFilter: filterCarrying({
+            categoryIds: ["cat-1", "cat-2"],
+            locationIds: ["loc-1"],
+            statuses: ["AVAILABLE", "IN_CUSTODY"],
+          }),
           currency: "USD",
         },
       },
@@ -318,19 +390,31 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
         reportId: "asset-utilization",
         query: "category=cat-1&location=loc-1",
         mock: vi.mocked(assetUtilizationReport),
-        expected: { categoryId: "cat-1", locationId: "loc-1" },
+        expected: {
+          assetFilter: filterCarrying({
+            categoryIds: ["cat-1"],
+            locationIds: ["loc-1"],
+          }),
+        },
       },
       {
         reportId: "asset-activity",
         query: "asset=asset-1&category=cat-1",
         mock: vi.mocked(assetActivityReport),
-        expected: { assetId: "asset-1", categoryId: "cat-1" },
+        expected: {
+          assetId: "asset-1",
+          assetFilter: filterCarrying({ categoryIds: ["cat-1"] }),
+        },
       },
       {
         reportId: "distribution",
-        query: "",
+        query: "assetModel=model-1",
         mock: vi.mocked(assetDistributionReport),
-        expected: { organizationId: "org-1", currency: "USD" },
+        expected: {
+          organizationId: "org-1",
+          currency: "USD",
+          assetFilter: filterCarrying({ assetModelIds: ["model-1"] }),
+        },
       },
       {
         reportId: "audit-completion",
@@ -517,6 +601,62 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
         "audit-1,Q3 Warehouse,Completed,10,8,2,1,80%,Jane Doe,,,"
       );
       expect(rows[2]).toBe("audit-2,Q4 Office,Active,10,8,,1,,Jane Doe,,,");
+    });
+  });
+
+  describe("asset-inventory", () => {
+    it("writes the URL each QR code encodes next to its id", async () => {
+      vi.mocked(assetInventoryReport).mockResolvedValue({
+        rows: [
+          {
+            assetId: "SAM-0001",
+            assetName: "Camera",
+            category: "Cameras",
+            location: "Studio",
+            status: "AVAILABLE",
+            custodian: null,
+            quantity: null,
+            valuation: null,
+            // Dates are covered elsewhere; this test is about the QR columns.
+            createdAt: null,
+            qrId: "cm4abc123",
+          },
+          {
+            assetId: "SAM-0002",
+            assetName: "Tripod",
+            category: null,
+            location: null,
+            status: "AVAILABLE",
+            custodian: null,
+            quantity: null,
+            valuation: null,
+            createdAt: null,
+            qrId: null,
+          },
+        ],
+      } as unknown as Awaited<ReturnType<typeof assetInventoryReport>>);
+
+      const response = (await loader(
+        createLoaderArgs({
+          request: new Request(
+            "http://localhost:3000/reports/export/asset-inventory.csv?reportId=asset-inventory"
+          ),
+          params: { fileName: "asset-inventory" },
+          context,
+        })
+      )) as unknown as Response;
+      const rows = (await response.text())
+        .replace(/^\uFEFF/, "")
+        .trim()
+        .split("\n");
+
+      expect(rows[0].endsWith(",QR Code ID,QR Code URL")).toBe(true);
+      // No shortener in the test environment: codes encode this server's /qr.
+      expect(
+        rows[1].endsWith(",cm4abc123,http://localhost:3000/qr/cm4abc123")
+      ).toBe(true);
+      // An asset without a code leaves both cells empty.
+      expect(rows[2].endsWith(",,")).toBe(true);
     });
   });
 });

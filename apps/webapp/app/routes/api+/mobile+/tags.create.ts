@@ -7,9 +7,9 @@
  * usable on assets and bookings) with a server-picked color, mirroring the web
  * form's defaults.
  *
- * Body: `{ name: string }` — min 3 chars, same rule as the web
- * `NewTagFormSchema`. Duplicate names surface as a 400 via the tag service's
- * unique-constraint mapping.
+ * Body: `{ name: string }`: any non-blank name, stored trimmed. It is the same
+ * `labelNameSchema` the web tag forms use. Duplicate names surface as a 400 via
+ * the tag service's unique-constraint mapping.
  *
  * Query: ?orgId=...
  *
@@ -29,14 +29,15 @@ import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { createTag } from "~/modules/tag/service.server";
 import { makeShelfError } from "~/utils/error";
 import { getRandomColor } from "~/utils/get-random-color";
+import { labelNameSchema } from "~/utils/label-form-fields";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 
-/** Mirrors the web `NewTagFormSchema.name` rule (min 3 chars). */
+/** Shares the web tag forms' name rule, so both clients accept the same names. */
 const CreateTagSchema = z.object({
-  name: z.string().trim().min(3, "Name is required"),
+  name: labelNameSchema,
 });
 
 export async function action({ request }: ActionFunctionArgs) {

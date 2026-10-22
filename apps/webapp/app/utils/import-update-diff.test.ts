@@ -6,6 +6,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { decodeCsvListCell } from "~/utils/csv-cells";
+import { parseYesNo } from "~/utils/custom-fields";
 import { ShelfError } from "~/utils/error";
 import {
   analyzeUpdateHeaders,
@@ -15,7 +16,6 @@ import {
   describeBulkUpdateRowFailure,
   isBackupExportHeaderRow,
   normalizeExportedCurrencyValue,
-  parseYesNo,
 } from "./import-update-diff";
 import type { AssetForUpdate, HeaderAnalysis } from "./import-update-types";
 
@@ -194,6 +194,38 @@ describe("analyzeUpdateHeaders", () => {
     expect(result.ignoredColumns).toContain("Status");
     expect(result.ignoredColumns).toContain("Kit");
     expect(result.ignoredColumns).toContain("Custody");
+  });
+
+  it("updates a workspace custom field named like the export-only QR URL column", () => {
+    // The asset export leaves out its own QR URL column when a custom field
+    // already uses that header, so a "QR URL" header in such a workspace is
+    // the custom field.
+    const result = analyzeUpdateHeaders(
+      ["Asset ID", "Name", "QR URL"],
+      [...mockCustomFields, { id: "cf4", name: "QR URL", type: "TEXT" }]
+    );
+    expect(result.updatableColumns).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          csvHeader: "QR URL",
+          internalKey: "cf:QR URL",
+        }),
+      ])
+    );
+    expect(result.ignoredColumns).toEqual([]);
+  });
+
+  it("ignores the export-only QR URL and Total value columns", () => {
+    // A standard asset export fed back into the update importer carries these
+    // derived columns; they must be skipped, never reported as unknown.
+    const result = analyzeUpdateHeaders(
+      ["Asset ID", "Name", "QR ID", "QR URL", "Total value"],
+      mockCustomFields
+    );
+    expect(result.ignoredColumns).toEqual(
+      expect.arrayContaining(["QR URL", "Total value"])
+    );
+    expect(result.unrecognizedColumns).toEqual([]);
   });
 
   it("matches custom fields by name (case-insensitive)", () => {

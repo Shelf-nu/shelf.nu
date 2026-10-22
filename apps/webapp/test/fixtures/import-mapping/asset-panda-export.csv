@@ -1,0 +1,3 @@
+Asset ID,Asset Name,Serial Number,Make,Model,Purchase Date,Purchase Price,Assigned To,Status,Department,Location,Description
+AP-0001,QA Monitor 27,QA-MON-1,QA Make,QA Model 27,2024-03-01,199.00,QA Holder One,In use,QA Department,QA Mapping Office,Desk monitor
+AP-0002,QA Dock Station,QA-DCK-1,QA Make,QA Dock 2,2023-11-20,149.00,,In storage,QA Department,QA Mapping Office,USB-C dock

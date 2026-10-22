@@ -12,10 +12,13 @@ import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
+import { useDiscardRemount } from "~/hooks/use-discard-remount";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { useRerenderAt } from "~/hooks/use-rerender-at";
 import { useReservationIsRequest } from "~/hooks/use-reservation-is-request";
 import { useRoleAccess } from "~/hooks/use-role-access";
+import { useTrackedFormRef } from "~/hooks/use-unsaved-changes";
 import { useWorkingHours } from "~/hooks/use-working-hours";
 import type { UnavailableAssetRow } from "~/modules/booking/unavailable-assets";
 import type {
@@ -50,7 +53,12 @@ import BookingProcessSidebar from "../booking-process-sidebar";
 import CheckinDropdown from "../checkin-dropdown";
 import CheckoutDropdown from "../checkout-dropdown";
 import type { BookingFormSchemaType } from "./forms-schema";
-import { BookingFormSchema } from "./forms-schema";
+import {
+  BookingFormSchema,
+  getReserveStartBlockedReason,
+  getReserveStartBoundary,
+} from "./forms-schema";
+import { UnsavedChangesGuard } from "../../forms/unsaved-changes-bar";
 
 /**
  * How many blocking assets the Reserve tooltip names before it stops.
@@ -147,8 +155,45 @@ type BookingFormData = {
   action?: string;
 };
 
+/**
+ * Booking action intents that persist the form's name, description, tags and
+ * dates. Check-out, check-in and the other overview actions submit this form
+ * too but do not save those fields, so they leave the form dirty.
+ */
+const BOOKING_SAVE_INTENTS = ["save", "reserve"] as const;
+
+/**
+ * Edit form on the booking overview, with the unsaved-changes bar.
+ *
+ * Discard remounts the inner form (see `useDiscardRemount`), which resets
+ * the dates, custodian, tags and editor back to the loaded booking.
+ *
+ * @param props - The booking to edit and an optional form action
+ */
+export function EditBookingForm(props: BookingFormData) {
+  const { key, discard, discarded } = useDiscardRemount();
+  return (
+    <EditBookingFormInner
+      key={key}
+      {...props}
+      onDiscard={discard}
+      autoFocusName={!discarded}
+    />
+  );
+}
+
 // react-doctor:no-giant-component — deferred for follow-up refactor
-export function EditBookingForm({ booking, action }: BookingFormData) {
+function EditBookingFormInner({
+  booking,
+  action,
+  onDiscard,
+  autoFocusName,
+}: BookingFormData & {
+  /** Resets the form to the loaded values (remounts it). */
+  onDiscard: () => void;
+  /** Focus the Name field on mount; false after a Discard. */
+  autoFocusName: boolean;
+}) {
   const navigation = useNavigation();
   const {
     id,
@@ -255,6 +300,24 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
   const roleAccess = useRoleAccess();
   const reservationIsRequest = useReservationIsRequest();
 
+  /**
+   * Why the start date blocks Reserve, read from the date the form would
+   * submit, so moving the start later re-enables the button before saving.
+   * The page re-renders at the next boundary, so a page left open disables
+   * Reserve when the start passes rather than on the next click.
+   */
+  const startTiming = {
+    startDate: startDateAsDate,
+    bufferStartTime: bookingSettings.bufferStartTime,
+    bypassTimeLimits: roleAccess.policy.bookings.bypassTimeLimits,
+  };
+  const startBlockedReason = bookingStatus?.isDraft
+    ? getReserveStartBlockedReason(startTiming)
+    : null;
+  useRerenderAt(
+    bookingStatus?.isDraft ? getReserveStartBoundary(startTiming) : null
+  );
+
   const zo = useZorm(
     "NewQuestionWizardScreen",
     BookingFormSchema({
@@ -273,13 +336,18 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
    * resolved when the user opens check-in/check-out dialogs. Using zo.form
    * (which reads a ref) can return null on the first render cycle. */
   const [formElement, setFormElement] = useState<HTMLFormElement | null>(null);
-  const formRef = useCallback(
+  /** The header Save button; the unsaved-changes bar submits through it. */
+  const saveButtonRef = useRef<HTMLButtonElement>(null);
+  const onFormNode = useCallback(
     (node: HTMLFormElement | null) => {
       zo.ref(node);
       setFormElement(node);
     },
     [zo]
   );
+  /** The same element as a ref, for the unsaved-changes tracking. */
+  const { formRef: formElementRef, setFormRef: formRef } =
+    useTrackedFormRef(onFormNode);
 
   const actionData = useActionData<BookingPageActionData>();
   /** This handles server side errors in case client side validation fails */
@@ -350,6 +418,21 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
     defaultTeamMember?.userId === userId ||
     defaultTeamMember?.id === userId;
 
+  /**
+   * Saving a draft keeps it a draft, so both Save buttons say so: a plain
+   * "Save" reads as done, and the booking is not requested until Reserve.
+   */
+  const saveLabel = bookingStatus?.isDraft ? "Save draft" : "Save";
+
+  /** The header Save button exists only while the booking can be edited. */
+  const isEditable =
+    canSeeActions &&
+    !(
+      bookingStatus?.isCompleted ||
+      bookingStatus?.isCancelled ||
+      bookingStatus?.isArchived
+    );
+
   return (
     <Form
       ref={formRef}
@@ -358,6 +441,20 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
       className="edit-booking-form"
       id="edit-booking-form"
     >
+      {isEditable ? (
+        <UnsavedChangesGuard
+          formRef={formElementRef}
+          actionData={actionData}
+          saveIntents={BOOKING_SAVE_INTENTS}
+          onDiscard={onDiscard}
+          // why: the action routes on `intent`, so the bar submits through
+          // the header Save button to send intent=save
+          getSubmitter={() => saveButtonRef.current}
+          // why: mirrors the header Save, which waits for working hours
+          saveDisabled={isLoadingWorkingHours}
+          saveLabel={saveLabel}
+        />
+      ) : null}
       {/* Render the actions on top only when the form is in edit mode */}
       {canSeeActions ? (
         <AbsolutePositionedHeaderActions>
@@ -391,6 +488,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                   (e.g. Reserve) override this default without any client-side JS.
                 */}
                 <Button
+                  ref={saveButtonRef}
                   type="submit"
                   disabled={disabled || isLoadingWorkingHours}
                   variant="secondary"
@@ -399,7 +497,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                   className="grow"
                   size="sm"
                 >
-                  Save
+                  {saveLabel}
                 </Button>
               </>
             ) : null}
@@ -414,13 +512,13 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                     !bookingFlags?.hasModelRequests) ||
                   bookingFlags?.hasAlreadyBookedAssets ||
                   bookingFlags?.hasUnavailableAssets ||
-                  archivedAssetsReason
+                  archivedAssetsReason ||
+                  startBlockedReason
                     ? {
                         // Wording lives in @shelf/labels so the tooltip, the
                         // mobile route's 400, the in-transaction guard and the
-                        // companion's inline note can never say four different
-                        // things about the same rule (they did, and this copy
-                        // carried an "unavailble" typo).
+                        // companion's inline note all state each rule the same
+                        // way.
                         reason: archivedAssetsReason ? (
                           archivedAssetsReason
                         ) : bookingFlags?.hasUnavailableAssets ? (
@@ -429,6 +527,8 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                           />
                         ) : bookingFlags?.hasAlreadyBookedAssets ? (
                           BOOKING_RESERVE_BLOCKED_LABELS.ALREADY_BOOKED
+                        ) : startBlockedReason ? (
+                          startBlockedReason
                         ) : isProcessing ||
                           isLoadingWorkingHours ? undefined : (
                           BOOKING_RESERVE_BLOCKED_LABELS.NOTHING_TO_RESERVE
@@ -603,6 +703,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                     validationErrors?.name?.message || zo.errors.name()?.message
                   }
                   onChange={updateName}
+                  autoFocus={autoFocusName}
                 />
               </div>
               <div className="mt-[10px]">

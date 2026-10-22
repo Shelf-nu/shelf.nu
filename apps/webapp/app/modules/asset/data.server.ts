@@ -11,6 +11,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import type { AllowedModelNames } from "~/routes/api+/model-filters";
+import { redactTopBookingForViewer } from "~/utils/booking-visibility.server";
 import { bookingCustodianIsSelf } from "~/utils/bookings";
 import { getClientHint } from "~/utils/client-hints";
 import {
@@ -30,15 +31,18 @@ import { getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import { parseMarkdownToReact } from "~/utils/md";
 import { isPersonalOrg } from "~/utils/organization";
-import {
-  PermissionAction,
-  PermissionEntity,
-} from "~/utils/permissions/permission.data";
-import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import type { RoleAccess } from "~/utils/permissions/role-access";
-import { canImportAssets } from "~/utils/subscription.server";
+import { resolveCanImportAssets } from "~/utils/subscription.server";
 import type { UserNameFields } from "~/utils/user";
 import { resolveUserDisplayName } from "~/utils/user";
+import {
+  type LastAuditDateAccess,
+  LAST_AUDIT_DATE_COLUMN,
+  canQueryLastAuditDate,
+  isLastAuditDateParam,
+  stripHiddenAuditColumns,
+} from "./last-audit-date-access";
+import { lastAuditDateAccessFor } from "./last-audit-date-access.server";
 import { resolveBookableListScope } from "./list-scope.server";
 import type { BookableListScope } from "./list-scope.server";
 import { getStillOutBookingRowsByAsset } from "./quantity-breakdown.server";
@@ -75,7 +79,6 @@ import {
   getTeamMemberForForm,
   getTeamMembersForNotify,
 } from "../team-member/service.server";
-import { getOrganizationTierLimit } from "../tier/service.server";
 
 interface Props {
   request: Request;
@@ -273,9 +276,9 @@ export async function simpleModeLoader({
   const hasActiveFilters = computeHasActiveFilters(searchParams);
   const view = searchParams.get("view") ?? "table";
 
-  /** Query tierLimit, assets, presets, permissions & more — all in parallel */
+  /** Query the import gate, assets, presets, permissions and more, in parallel */
   let [
-    tierLimit,
+    canImport,
     {
       search,
       totalAssets,
@@ -299,12 +302,8 @@ export async function simpleModeLoader({
     teamMembersForFormData,
     notifyData,
     savedFilterPresets,
-    canImport,
   ] = await Promise.all([
-    getOrganizationTierLimit({
-      organizationId,
-      organizations,
-    }),
+    resolveCanImportAssets({ organizationId, organizations, userId, role }),
     getPaginatedAndFilterableAssets({
       request,
       organizationId,
@@ -389,14 +388,6 @@ export async function simpleModeLoader({
     listPresetsForUser({
       organizationId,
       ownerId: userId,
-    }),
-    // Import permission — only depends on organizationId, userId, role
-    hasPermission({
-      organizationId,
-      userId,
-      roles: role ? [role] : [],
-      entity: PermissionEntity.asset,
-      action: PermissionAction.import,
     }),
   ]);
 
@@ -486,6 +477,9 @@ export async function simpleModeLoader({
   return data(
     payload({
       header,
+      // Simple mode never shows the last audit date column; the field keeps
+      // the loader union uniform for the shared column renderer.
+      lastAuditDateAccess: "hidden" as LastAuditDateAccess,
       /**
        * `TeamMemberBadge` only decides whether to DRAW the custodian; the name
        * and `user.email` shipped in this payload regardless, so a restricted
@@ -522,7 +516,7 @@ export async function simpleModeLoader({
       totalPages,
       modelName,
       hasActiveFilters,
-      canImportAssets: canImportAssets(tierLimit) && canImport,
+      canImportAssets: canImport,
       searchFieldLabel: "Search assets",
       searchFieldTooltip: {
         title: "Search your asset database",
@@ -700,11 +694,26 @@ export async function advancedModeLoader({
   role,
   currentOrganization,
   user,
-  settings,
+  settings: loadedSettings,
   canSeeAllCustody,
   access,
 }: Props) {
   const { locale, timeZone } = getClientHint(request);
+
+  // The last audit date follows audit visibility and availability. Strip the
+  // column before anything parses filters or renders columns from the settings.
+  const lastAuditDateAccess = lastAuditDateAccessFor(
+    access,
+    currentOrganization
+  );
+  const settings: AssetIndexSettings = {
+    ...loadedSettings,
+    columns: stripHiddenAuditColumns(
+      loadedSettings.columns as Column[],
+      lastAuditDateAccess
+    ),
+  };
+
   const assignsSelfOnly = access.custody.assign === "self";
   const honorArchivedView = canViewArchivedAssets(access);
 
@@ -713,7 +722,16 @@ export async function advancedModeLoader({
     filters,
     serializedCookie: filtersCookie,
     redirectNeeded,
-  } = await getAdvancedFiltersFromRequest(request, organizationId, settings);
+  } = await getAdvancedFiltersFromRequest(
+    request,
+    organizationId,
+    settings,
+    // A caller who may not query the last audit date has no chip or sort to
+    // clear a stale one with, so it is stripped from the URL and the cookie.
+    canQueryLastAuditDate(lastAuditDateAccess)
+      ? undefined
+      : isLastAuditDateParam
+  );
 
   const currentFilterParams = new URLSearchParams(filters || "");
   const searchParams = filters
@@ -749,11 +767,16 @@ export async function advancedModeLoader({
   // Parse and expand location hierarchy filters ONCE — this avoids redundant
   // DB calls that were previously happening in both getAllSelectedValuesFromFilters
   // and getAdvancedPaginatedAndFilterableAssets independently.
-  const parsedFilters = await parseFiltersWithHierarchy(
+  const allParsedFilters = await parseFiltersWithHierarchy(
     filters ?? "",
     settings.columns as Column[],
     organizationId
   );
+  // A locked column keeps its header but must never be queried, so its filter
+  // is dropped here for every consumer (asset query and model rollup).
+  const parsedFilters = canQueryLastAuditDate(lastAuditDateAccess)
+    ? allParsedFilters
+    : allParsedFilters.filter((f) => f.name !== LAST_AUDIT_DATE_COLUMN);
 
   const {
     selectedTags,
@@ -780,7 +803,7 @@ export async function advancedModeLoader({
   // categories, locations, asset models). Its output is only used in the final
   // response payload — no other query depends on it. Running it inside
   // Promise.all lets it overlap with the asset query instead of blocking it.
-  /** Query entities, tierLimit, assets & more — all in parallel */
+  /** Query entities, the import gate, assets and more, in parallel */
   const [
     {
       tags,
@@ -792,7 +815,7 @@ export async function advancedModeLoader({
       assetModels,
       totalAssetModels,
     },
-    tierLimit,
+    advCanImport,
     assetsOrRollup,
     customFields,
     teamMembersData,
@@ -804,7 +827,6 @@ export async function advancedModeLoader({
     totalBookings,
     advNotifyData,
     advSavedFilterPresets,
-    advCanImport,
   ] = await Promise.all([
     getEntitiesWithSelectedValues({
       organizationId,
@@ -814,10 +836,7 @@ export async function advancedModeLoader({
       selectedLocationIds: selectedLocation,
       selectedAssetModelIds: selectedAssetModel,
     }),
-    getOrganizationTierLimit({
-      organizationId,
-      organizations,
-    }),
+    resolveCanImportAssets({ organizationId, organizations, userId, role }),
     isModelView
       ? getAssetModelRollupPage({
           request,
@@ -844,6 +863,7 @@ export async function advancedModeLoader({
           bookableScope: resolveBookableListScope({ access, userId }),
           preParsedFilters: parsedFilters,
           honorArchivedView,
+          lastAuditDateAccess,
           // Both arms carry the same keys so the caller reads them directly.
           // Discriminating a union by `in` here degrades to `unknown` at this
           // file's type complexity, and the failure lands on unrelated
@@ -924,14 +944,6 @@ export async function advancedModeLoader({
       organizationId,
       ownerId: userId,
     }),
-    // Import permission — only depends on organizationId, userId, role
-    hasPermission({
-      organizationId,
-      userId,
-      roles: role ? [role] : [],
-      entity: PermissionEntity.asset,
-      action: PermissionAction.import,
-    }),
   ]);
 
   const { search, totalAssets, perPage, page, assets, totalPages, cookie } =
@@ -1009,10 +1021,16 @@ export async function advancedModeLoader({
       // (`assets._index.tsx` refuses it to restricted roles), so this is a
       // no-op in practice — applied so the rule lives with the payload rather
       // than depending on a gate two files away.
-      items: redactCustodianForViewer(refreshedAssets, {
-        canSeeAllCustody,
-        userId,
-      }),
+      // The biggest upcoming booking a row names for its stock verdict is
+      // redacted by the same reasoning, for a viewer limited to their own
+      // bookings.
+      items: redactTopBookingForViewer(
+        redactCustodianForViewer(refreshedAssets, {
+          canSeeAllCustody,
+          userId,
+        }),
+        { canSeeAllBookings: access.bookings.seeAll }
+      ),
       search,
       page,
       totalItems: isModelView ? totalGroupsForPayload : totalAssets,
@@ -1021,7 +1039,7 @@ export async function advancedModeLoader({
       totalPages,
       modelName,
       hasActiveFilters,
-      canImportAssets: canImportAssets(tierLimit) && advCanImport,
+      canImportAssets: advCanImport,
       searchFieldLabel: "Search assets",
       searchFieldTooltip: {
         title: "Search your asset database",
@@ -1033,6 +1051,7 @@ export async function advancedModeLoader({
       timeZone,
       currentOrganization,
       settings,
+      lastAuditDateAccess,
       modelRollup,
       totalRollupAssets,
       modelSortBy,

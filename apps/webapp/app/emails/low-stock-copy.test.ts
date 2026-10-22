@@ -183,6 +183,21 @@ describe("describeStockMovement: one sentence per log category", () => {
     });
   });
 
+  it("INITIAL", () => {
+    expect(movement(logRow({ category: "INITIAL" }))?.text).toBe(
+      `2 Units added as starting stock by Dana Reyes ${WHEN}`
+    );
+  });
+
+  it("MOVE and OPENING_BALANCE still read as a sentence", () => {
+    expect(movement(logRow({ category: "MOVE" }))?.text).toBe(
+      `2 Units moved by Dana Reyes ${WHEN}`
+    );
+    expect(movement(logRow({ category: "OPENING_BALANCE" }))?.text).toBe(
+      `2 Units counted when stock history began by Dana Reyes ${WHEN}`
+    );
+  });
+
   it("LOSS", () => {
     expect(movement(logRow({ category: "LOSS" }))?.text).toBe(
       `2 Units reported lost by Dana Reyes ${WHEN}`
@@ -397,6 +412,15 @@ describe("describeStockMovement: one operation that wrote several rows", () => {
     expect(out?.text).toBe(
       `2 Units used up by Dana Reyes during booking Spring Fair ${WHEN}`
     );
+  });
+
+  it("sums one write the ledger split over two places", () => {
+    // One "lost 5": 2 off the unplaced units, 3 off a location, one instant.
+    const out = movement([
+      logRow({ category: "LOSS", quantity: 2 }),
+      logRow({ category: "LOSS", quantity: 3 }),
+    ]);
+    expect(out?.text).toBe(`5 Units reported lost by Dana Reyes ${WHEN}`);
   });
 
   it("never merges single-row writes such as adjustments made seconds apart", () => {

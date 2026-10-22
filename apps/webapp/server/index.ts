@@ -23,6 +23,7 @@ import {
   refreshSession,
   urlShortener,
 } from "./middleware";
+import { BUILD_ASSETS_PATH, missingBuildAsset } from "./missing-build-asset";
 import {
   appLoaderRateLimit,
   calendarFeedRateLimit,
@@ -135,6 +136,14 @@ export default createHonoServer<ServerEnv>({
      * Add logger middleware
      */
     server.use("*", logger());
+
+    /**
+     * Existing build files were already served before `configure`; whatever
+     * reaches here under the assets prefix is missing and must 404. After
+     * logger() so the miss is logged, before session()/protect() so it is not
+     * redirected to /login.
+     */
+    server.use(BUILD_ASSETS_PATH, missingBuildAsset());
 
     /**
      * Mobile API rate limit. Path-scoped so webapp routes are unaffected.
