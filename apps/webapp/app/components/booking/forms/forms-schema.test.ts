@@ -1,3 +1,4 @@
+import { BOOKING_RESERVE_BLOCKED_LABELS } from "@shelf/labels";
 import { addHours, addDays, subDays, addMinutes } from "date-fns";
 import { describe, it, expect, afterAll, beforeAll, vi } from "vitest";
 import { toIsoDateTimeToUserTimezone } from "~/utils/date-fns";
@@ -7,6 +8,7 @@ import {
   BookingFormSchema,
   DuplicateBookingSchema,
   ExtendBookingSchema,
+  getReserveStartBlockedReason,
 } from "./forms-schema";
 
 /**
@@ -1385,5 +1387,106 @@ describe("BookingFormSchema - custodian field", () => {
       result.success ||
         !result.error.issues.some((issue) => issue.path[0] === "custodian")
     ).toBe(true);
+  });
+});
+
+describe("getReserveStartBlockedReason", () => {
+  const NOW = new Date("2026-10-20T12:00:00Z");
+
+  beforeAll(() => {
+    // why: the rule compares against the current time, so pin it
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+  });
+
+  afterAll(() => {
+    vi.useRealTimers();
+  });
+
+  it("blocks a start that has already passed with the shared wording", () => {
+    expect(
+      getReserveStartBlockedReason({
+        startDate: addHours(NOW, -1),
+        bufferStartTime: 0,
+      })
+    ).toBe(BOOKING_RESERVE_BLOCKED_LABELS.START_PASSED);
+  });
+
+  it("blocks a passed start even when time limits are bypassed", () => {
+    expect(
+      getReserveStartBlockedReason({
+        startDate: addMinutes(NOW, -5),
+        bufferStartTime: 4,
+        bypassTimeLimits: true,
+      })
+    ).toBe(BOOKING_RESERVE_BLOCKED_LABELS.START_PASSED);
+  });
+
+  it("allows a future start", () => {
+    expect(
+      getReserveStartBlockedReason({
+        startDate: addHours(NOW, 1),
+        bufferStartTime: 0,
+      })
+    ).toBeNull();
+  });
+
+  it("blocks a future start inside the buffer with the buffer message", () => {
+    expect(
+      getReserveStartBlockedReason({
+        startDate: addHours(NOW, 1),
+        bufferStartTime: 2,
+      })
+    ).toBe(
+      "Start date must be at least 2 hours from now. Move it later to reserve."
+    );
+  });
+
+  it("ignores the buffer when time limits are bypassed", () => {
+    expect(
+      getReserveStartBlockedReason({
+        startDate: addHours(NOW, 1),
+        bufferStartTime: 2,
+        bypassTimeLimits: true,
+      })
+    ).toBeNull();
+  });
+
+  it("agrees with the form schema the server reserves with", () => {
+    const settings = {
+      bufferStartTime: 0,
+      tagsRequired: false,
+      maxBookingLength: null,
+      maxBookingLengthSkipClosedDays: false,
+    };
+    const startDate = addMinutes(NOW, -30);
+    const result = BookingFormSchema({
+      prefs: prefsFor("UTC"),
+      action: "reserve",
+      workingHours: null,
+      bookingSettings: settings,
+    }).safeParse({
+      name: "Camera kit",
+      custodian: JSON.stringify({ id: "tm-1", name: "Sam" }),
+      startDate: toIsoDateTimeToUserTimezone(startDate, "UTC").slice(0, 16),
+      endDate: toIsoDateTimeToUserTimezone(addDays(NOW, 1), "UTC").slice(0, 16),
+    });
+
+    expect(
+      !result.success &&
+        result.error.issues.some((issue) => issue.path[0] === "startDate")
+    ).toBe(true);
+    expect(
+      getReserveStartBlockedReason({ startDate, bufferStartTime: 0 })
+    ).not.toBeNull();
+  });
+
+  it("leaves an unparseable date to the field's own error", () => {
+    expect(
+      getReserveStartBlockedReason({
+        startDate: new Date("not a date"),
+        bufferStartTime: 0,
+      })
+    ).toBeNull();
   });
 });

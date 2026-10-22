@@ -202,8 +202,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
     });
 
     sendNotification({
-      title: "Booking saved",
-      message: "Your booking has been saved successfully",
+      title: "Draft created",
+      message:
+        "Your booking is saved as a draft and holds nothing yet. Reserve it from the booking page when you are ready.",
       icon: { name: "success", variant: "success" },
       senderId: userId,
     });

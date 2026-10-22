@@ -1,5 +1,6 @@
 import type { BookingSettings } from "@prisma/client";
 import { BookingStatus } from "@prisma/client";
+import { BOOKING_RESERVE_BLOCKED_LABELS } from "@shelf/labels";
 import { addHours, differenceInHours } from "date-fns";
 import { DateTime } from "luxon";
 import { z } from "zod";
@@ -180,6 +181,44 @@ function validateFutureDate(
   }
 
   return { isValid: true };
+}
+
+/**
+ * Why a draft's start date blocks Reserve, or `null` when it does not.
+ *
+ * Applies the same future-date rule as the start-date field of
+ * {@link BookingFormSchema}, so the disabled Reserve button and the server's
+ * refusal always agree. A start that has already passed gets the shared
+ * {@link BOOKING_RESERVE_BLOCKED_LABELS.START_PASSED} wording; a start still
+ * ahead but inside the buffer gets the buffer message.
+ *
+ * @param params.startDate - The start instant the form would submit
+ * @param params.bufferStartTime - The workspace's buffer, in hours
+ * @param params.bypassTimeLimits - The caller's `bookings.bypassTimeLimits`;
+ *   when true only a start in the past blocks
+ * @returns The reason to show on the button, or `null` when the start is fine
+ */
+export function getReserveStartBlockedReason({
+  startDate,
+  bufferStartTime,
+  bypassTimeLimits = false,
+}: {
+  startDate: Date;
+  bufferStartTime: number;
+  bypassTimeLimits?: boolean;
+}): string | null {
+  // An unparseable date is the field's error to report, not the button's
+  if (Number.isNaN(startDate.getTime())) return null;
+
+  const result = validateFutureDate(
+    startDate,
+    bypassTimeLimits ? 0 : bufferStartTime
+  );
+  if (result.isValid) return null;
+
+  return startDate <= new Date()
+    ? BOOKING_RESERVE_BLOCKED_LABELS.START_PASSED
+    : `${result.message}. Move it later to reserve.`;
 }
 
 interface BookingFormSchemaParams {

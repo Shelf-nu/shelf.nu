@@ -8,6 +8,7 @@ import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { useReservationIsRequest } from "~/hooks/use-reservation-is-request";
 import { useRoleAccess } from "~/hooks/use-role-access";
 import { useWorkingHours } from "~/hooks/use-working-hours";
 import { getBookingDefaultStartEndTimes } from "~/modules/working-hours/utils";
@@ -75,6 +76,7 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
 
   const roles = useOrganizationRoles();
   const roleAccess = useRoleAccess();
+  const reservationIsRequest = useReservationIsRequest();
 
   const { startDate: defaultStartDate, endDate: defaultEndDate } =
     getBookingDefaultStartEndTimes(
@@ -221,6 +223,16 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
               can resolve the kit's memberships into kit-driven slices. */}
           {kitId ? <input type="hidden" name="kitId" value={kitId} /> : null}
           <div className={tw("actions-wrapper flex flex-col gap-2")}>
+            {/* Every submit below creates a draft, which holds nothing until
+                it is reserved from the booking page. */}
+            <p
+              id="new-booking-draft-hint"
+              className="text-left text-sm text-gray-600"
+            >
+              This creates a draft. You can{" "}
+              {reservationIsRequest ? "request a reservation" : "reserve it"}{" "}
+              from the booking page.
+            </p>
             {!assetIds ? (
               <Button
                 icon="scan"
@@ -242,8 +254,9 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
               name="intent"
               disabled={disabled}
               width={"full"}
+              aria-describedby="new-booking-draft-hint"
             >
-              {assetIds ? "Create Booking" : "View assets list"}
+              {assetIds ? "Create draft" : "View assets list"}
             </Button>
             <hr />
             <Button
