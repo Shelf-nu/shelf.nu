@@ -4,6 +4,10 @@ import { data, redirect, useActionData, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
+import {
+  ColorBadgePreview,
+  useColorBadgePreview,
+} from "~/components/forms/color-badge-preview";
 import { ColorInput } from "~/components/forms/color-input";
 import { FormRowErrors, rowErrorId } from "~/components/forms/form-row-errors";
 import Input from "~/components/forms/input";
@@ -129,6 +133,12 @@ export default function EditTag() {
   const nameInputRef = useAutoFocus<HTMLInputElement>();
   const zo = useZorm("NewQuestionWizardScreen", UpdateTagFormSchema);
   const { tag, tagUseFor, colorFromServer } = useLoaderData<typeof loader>();
+  const { previewName, setPreviewName, previewColor, setPreviewColor } =
+    useColorBadgePreview({
+      entityId: tag?.id ?? "",
+      name: tag?.name ?? "",
+      color: colorFromServer,
+    });
   const actionData = useActionData<typeof action>();
   /** Server-side errors, shown when client-side validation is bypassed */
   const validationErrors = getValidationErrors<typeof UpdateTagFormSchema>(
@@ -145,6 +155,9 @@ export default function EditTag() {
   return tag ? (
     <>
       <Form
+        // Remount the fields when another tag loads: the list below links
+        // straight to other tags' edit pages without leaving this route.
+        key={tag.id}
         method="post"
         className="block rounded-[12px] border border-gray-200 bg-white px-6 py-5 "
         ref={zo.ref}
@@ -157,6 +170,7 @@ export default function EditTag() {
               placeholder="Tag name"
               className="mb-4 lg:mb-0 lg:max-w-[180px]"
               name={zo.fields.name()}
+              onChange={(e) => setPreviewName(e.target.value)}
               disabled={disabled}
               error={nameError}
               hideErrorText
@@ -188,6 +202,7 @@ export default function EditTag() {
                   colorError ? rowErrorId(errorsId, "color") : undefined
                 }
                 colorFromServer={colorFromServer}
+                onColorChange={setPreviewColor}
                 required={zodFieldIsRequired(UpdateTagFormSchema.shape.color)}
               />
             </div>
@@ -223,6 +238,7 @@ export default function EditTag() {
           </div>
         </div>
 
+        <ColorBadgePreview name={previewName} color={previewColor} />
         <FormRowErrors
           id={errorsId}
           errors={{ name: nameError, color: colorError }}
