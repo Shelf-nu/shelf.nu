@@ -6,6 +6,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { decodeCsvListCell } from "~/utils/csv-cells";
+import { parseYesNo } from "~/utils/custom-fields";
 import { ShelfError } from "~/utils/error";
 import {
   analyzeUpdateHeaders,
@@ -15,7 +16,6 @@ import {
   describeBulkUpdateRowFailure,
   isBackupExportHeaderRow,
   normalizeExportedCurrencyValue,
-  parseYesNo,
 } from "./import-update-diff";
 import type { AssetForUpdate, HeaderAnalysis } from "./import-update-types";
 

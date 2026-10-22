@@ -15,6 +15,7 @@ import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
 import { useDiscardRemount } from "~/hooks/use-discard-remount";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { useRerenderAt } from "~/hooks/use-rerender-at";
 import { useReservationIsRequest } from "~/hooks/use-reservation-is-request";
 import { useRoleAccess } from "~/hooks/use-role-access";
 import { useTrackedFormRef } from "~/hooks/use-unsaved-changes";
@@ -52,7 +53,11 @@ import BookingProcessSidebar from "../booking-process-sidebar";
 import CheckinDropdown from "../checkin-dropdown";
 import CheckoutDropdown from "../checkout-dropdown";
 import type { BookingFormSchemaType } from "./forms-schema";
-import { BookingFormSchema } from "./forms-schema";
+import {
+  BookingFormSchema,
+  getReserveStartBlockedReason,
+  getReserveStartBoundary,
+} from "./forms-schema";
 import { UnsavedChangesGuard } from "../../forms/unsaved-changes-bar";
 
 /**
@@ -295,6 +300,24 @@ function EditBookingFormInner({
   const roleAccess = useRoleAccess();
   const reservationIsRequest = useReservationIsRequest();
 
+  /**
+   * Why the start date blocks Reserve, read from the date the form would
+   * submit, so moving the start later re-enables the button before saving.
+   * The page re-renders at the next boundary, so a page left open disables
+   * Reserve when the start passes rather than on the next click.
+   */
+  const startTiming = {
+    startDate: startDateAsDate,
+    bufferStartTime: bookingSettings.bufferStartTime,
+    bypassTimeLimits: roleAccess.policy.bookings.bypassTimeLimits,
+  };
+  const startBlockedReason = bookingStatus?.isDraft
+    ? getReserveStartBlockedReason(startTiming)
+    : null;
+  useRerenderAt(
+    bookingStatus?.isDraft ? getReserveStartBoundary(startTiming) : null
+  );
+
   const zo = useZorm(
     "NewQuestionWizardScreen",
     BookingFormSchema({
@@ -395,6 +418,12 @@ function EditBookingFormInner({
     defaultTeamMember?.userId === userId ||
     defaultTeamMember?.id === userId;
 
+  /**
+   * Saving a draft keeps it a draft, so both Save buttons say so: a plain
+   * "Save" reads as done, and the booking is not requested until Reserve.
+   */
+  const saveLabel = bookingStatus?.isDraft ? "Save draft" : "Save";
+
   /** The header Save button exists only while the booking can be edited. */
   const isEditable =
     canSeeActions &&
@@ -423,6 +452,7 @@ function EditBookingFormInner({
           getSubmitter={() => saveButtonRef.current}
           // why: mirrors the header Save, which waits for working hours
           saveDisabled={isLoadingWorkingHours}
+          saveLabel={saveLabel}
         />
       ) : null}
       {/* Render the actions on top only when the form is in edit mode */}
@@ -467,7 +497,7 @@ function EditBookingFormInner({
                   className="grow"
                   size="sm"
                 >
-                  Save
+                  {saveLabel}
                 </Button>
               </>
             ) : null}
@@ -482,13 +512,13 @@ function EditBookingFormInner({
                     !bookingFlags?.hasModelRequests) ||
                   bookingFlags?.hasAlreadyBookedAssets ||
                   bookingFlags?.hasUnavailableAssets ||
-                  archivedAssetsReason
+                  archivedAssetsReason ||
+                  startBlockedReason
                     ? {
                         // Wording lives in @shelf/labels so the tooltip, the
                         // mobile route's 400, the in-transaction guard and the
-                        // companion's inline note can never say four different
-                        // things about the same rule (they did, and this copy
-                        // carried an "unavailble" typo).
+                        // companion's inline note all state each rule the same
+                        // way.
                         reason: archivedAssetsReason ? (
                           archivedAssetsReason
                         ) : bookingFlags?.hasUnavailableAssets ? (
@@ -497,6 +527,8 @@ function EditBookingFormInner({
                           />
                         ) : bookingFlags?.hasAlreadyBookedAssets ? (
                           BOOKING_RESERVE_BLOCKED_LABELS.ALREADY_BOOKED
+                        ) : startBlockedReason ? (
+                          startBlockedReason
                         ) : isProcessing ||
                           isLoadingWorkingHours ? undefined : (
                           BOOKING_RESERVE_BLOCKED_LABELS.NOTHING_TO_RESERVE

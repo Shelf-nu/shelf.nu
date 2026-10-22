@@ -31,13 +31,8 @@ import { getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import { parseMarkdownToReact } from "~/utils/md";
 import { isPersonalOrg } from "~/utils/organization";
-import {
-  PermissionAction,
-  PermissionEntity,
-} from "~/utils/permissions/permission.data";
-import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import type { RoleAccess } from "~/utils/permissions/role-access";
-import { canImportAssets } from "~/utils/subscription.server";
+import { resolveCanImportAssets } from "~/utils/subscription.server";
 import type { UserNameFields } from "~/utils/user";
 import { resolveUserDisplayName } from "~/utils/user";
 import {
@@ -84,7 +79,6 @@ import {
   getTeamMemberForForm,
   getTeamMembersForNotify,
 } from "../team-member/service.server";
-import { getOrganizationTierLimit } from "../tier/service.server";
 
 interface Props {
   request: Request;
@@ -282,9 +276,9 @@ export async function simpleModeLoader({
   const hasActiveFilters = computeHasActiveFilters(searchParams);
   const view = searchParams.get("view") ?? "table";
 
-  /** Query tierLimit, assets, presets, permissions & more — all in parallel */
+  /** Query the import gate, assets, presets, permissions and more, in parallel */
   let [
-    tierLimit,
+    canImport,
     {
       search,
       totalAssets,
@@ -308,12 +302,8 @@ export async function simpleModeLoader({
     teamMembersForFormData,
     notifyData,
     savedFilterPresets,
-    canImport,
   ] = await Promise.all([
-    getOrganizationTierLimit({
-      organizationId,
-      organizations,
-    }),
+    resolveCanImportAssets({ organizationId, organizations, userId, role }),
     getPaginatedAndFilterableAssets({
       request,
       organizationId,
@@ -398,14 +388,6 @@ export async function simpleModeLoader({
     listPresetsForUser({
       organizationId,
       ownerId: userId,
-    }),
-    // Import permission — only depends on organizationId, userId, role
-    hasPermission({
-      organizationId,
-      userId,
-      roles: role ? [role] : [],
-      entity: PermissionEntity.asset,
-      action: PermissionAction.import,
     }),
   ]);
 
@@ -534,7 +516,7 @@ export async function simpleModeLoader({
       totalPages,
       modelName,
       hasActiveFilters,
-      canImportAssets: canImportAssets(tierLimit) && canImport,
+      canImportAssets: canImport,
       searchFieldLabel: "Search assets",
       searchFieldTooltip: {
         title: "Search your asset database",
@@ -821,7 +803,7 @@ export async function advancedModeLoader({
   // categories, locations, asset models). Its output is only used in the final
   // response payload — no other query depends on it. Running it inside
   // Promise.all lets it overlap with the asset query instead of blocking it.
-  /** Query entities, tierLimit, assets & more — all in parallel */
+  /** Query entities, the import gate, assets and more, in parallel */
   const [
     {
       tags,
@@ -833,7 +815,7 @@ export async function advancedModeLoader({
       assetModels,
       totalAssetModels,
     },
-    tierLimit,
+    advCanImport,
     assetsOrRollup,
     customFields,
     teamMembersData,
@@ -845,7 +827,6 @@ export async function advancedModeLoader({
     totalBookings,
     advNotifyData,
     advSavedFilterPresets,
-    advCanImport,
   ] = await Promise.all([
     getEntitiesWithSelectedValues({
       organizationId,
@@ -855,10 +836,7 @@ export async function advancedModeLoader({
       selectedLocationIds: selectedLocation,
       selectedAssetModelIds: selectedAssetModel,
     }),
-    getOrganizationTierLimit({
-      organizationId,
-      organizations,
-    }),
+    resolveCanImportAssets({ organizationId, organizations, userId, role }),
     isModelView
       ? getAssetModelRollupPage({
           request,
@@ -966,14 +944,6 @@ export async function advancedModeLoader({
       organizationId,
       ownerId: userId,
     }),
-    // Import permission — only depends on organizationId, userId, role
-    hasPermission({
-      organizationId,
-      userId,
-      roles: role ? [role] : [],
-      entity: PermissionEntity.asset,
-      action: PermissionAction.import,
-    }),
   ]);
 
   const { search, totalAssets, perPage, page, assets, totalPages, cookie } =
@@ -1069,7 +1039,7 @@ export async function advancedModeLoader({
       totalPages,
       modelName,
       hasActiveFilters,
-      canImportAssets: canImportAssets(tierLimit) && advCanImport,
+      canImportAssets: advCanImport,
       searchFieldLabel: "Search assets",
       searchFieldTooltip: {
         title: "Search your asset database",

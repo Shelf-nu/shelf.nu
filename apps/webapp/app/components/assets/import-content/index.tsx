@@ -20,7 +20,6 @@ import { ContentImportFlow } from "./flow";
 import { isActiveStatus, useAssetImportStatus } from "./import-progress";
 import Icon from "../../icons/icon";
 import { Button } from "../../shared/button";
-import { WarningBox } from "../../shared/warning-box";
 import When from "../../when/when";
 
 /** Props for {@link ImportContent}. */
@@ -141,13 +140,11 @@ function ImportContentBody({
         - each row becomes a new asset.
       </p>
 
-      <WarningBox className="my-4">
-        <>
-          <strong>IMPORTANT</strong>: Use the template provided above, or a file
-          exported as Import-ready from the asset index. Any other file will
-          produce corrupted data.
-        </>
-      </WarningBox>
+      <p className="my-4 text-[14px] text-gray-600">
+        Already have a spreadsheet from another tool? Upload it as it is.
+        Before anything is imported, you will check how each of its columns
+        maps to a Shelf field.
+      </p>
 
       <div className="my-5 flex flex-col gap-4">
         {/* Base rules */}

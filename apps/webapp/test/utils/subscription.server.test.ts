@@ -111,6 +111,82 @@ describe("canUseAudits", () => {
   });
 });
 
+describe("resolveCanImportAssets", () => {
+  const args = {
+    organizationId: "org-1",
+    organizations: [],
+    userId: "user-1",
+    role: "ADMIN" as const,
+  };
+
+  /** Loads the module with the tier answer the test needs. */
+  async function load(canImportAssets: boolean) {
+    const subscriptionModule = await loadSubscriptionModule(true);
+    getOrganizationTierLimitMock.mockResolvedValue({ canImportAssets });
+    return subscriptionModule;
+  }
+
+  it("is true when the plan allows importing and the role may import", async () => {
+    const { resolveCanImportAssets } = await load(true);
+    await expect(resolveCanImportAssets(args)).resolves.toBe(true);
+  });
+
+  it("is false on a plan without importing", async () => {
+    const { resolveCanImportAssets } = await load(false);
+    await expect(resolveCanImportAssets(args)).resolves.toBe(false);
+  });
+
+  it("is false for a role without the import permission", async () => {
+    const { resolveCanImportAssets } = await load(true);
+    await expect(
+      resolveCanImportAssets({ ...args, role: "BASE" })
+    ).resolves.toBe(false);
+  });
+
+  it.each([true, false])(
+    "agrees with the import page's plan gate when the plan says %s",
+    async (planAllows) => {
+      const { resolveCanImportAssets, assertUserCanImportAssets } =
+        await load(planAllows);
+      const pageLetsIn = await assertUserCanImportAssets(args).then(
+        () => true,
+        () => false
+      );
+
+      await expect(resolveCanImportAssets(args)).resolves.toBe(pageLetsIn);
+    }
+  );
+});
+
+describe("resolveCanImportAssetsOrFalse", () => {
+  const args = {
+    organizationId: "org-1",
+    organizations: [],
+    userId: "user-1",
+    role: "ADMIN" as const,
+  };
+
+  it("passes the answer through when the lookup succeeds", async () => {
+    const { resolveCanImportAssetsOrFalse } =
+      await loadSubscriptionModule(true);
+    getOrganizationTierLimitMock.mockResolvedValue({ canImportAssets: true });
+
+    await expect(resolveCanImportAssetsOrFalse(args)).resolves.toBe(true);
+  });
+
+  it("logs and reads a failed lookup as cannot import", async () => {
+    const { resolveCanImportAssetsOrFalse } =
+      await loadSubscriptionModule(true);
+    const { Logger } = await import("~/utils/logger");
+    // why: the logger reports to Sentry; the test only checks it was called
+    const logError = vi.spyOn(Logger, "error").mockImplementation(() => {});
+    getOrganizationTierLimitMock.mockRejectedValue(new Error("db down"));
+
+    await expect(resolveCanImportAssetsOrFalse(args)).resolves.toBe(false);
+    expect(logError).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("canUseReports", () => {
   it("follows the plan's switch when premium is enabled", async () => {
     const { canUseReports } = await loadSubscriptionModule(true);

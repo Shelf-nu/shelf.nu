@@ -16,6 +16,8 @@ export * from "./asset";
 export * from "./organization";
 /** `createAssetModel` — an AssetModel row. */
 export * from "./assetModel";
+/** `createCustomField`: a CustomField row (active, TEXT, no options). */
+export * from "./customField";
 /** `createActivityEventInput` — one `recordEvent` payload. */
 export * from "./activityEvent";
 /** Audit session + audit asset factories. `createAuditAsset` requires an

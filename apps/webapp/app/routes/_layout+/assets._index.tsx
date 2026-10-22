@@ -370,7 +370,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
  * to "create your first asset". Neither is true, and the archived one is the
  * moment a worried user most needs to be told their asset is safe.
  */
-function useAssetsEmptyState() {
+function useAssetsEmptyState(canImportAssets: boolean) {
   const [searchParams] = useSearchParams();
   const archivedView = searchParams.get("archived");
 
@@ -386,6 +386,10 @@ function useAssetsEmptyState() {
     text: "Assets are the core of your inventory. Create your first asset to start tracking equipment, devices, or anything your team manages.",
     newButtonRoute: "/assets/new",
     newButtonContent: "Create your first asset",
+    // The import page refuses members whose plan or role cannot import.
+    secondaryButton: canImportAssets
+      ? { route: "/assets/import", content: "Import a spreadsheet" }
+      : undefined,
   };
 }
 
@@ -393,7 +397,7 @@ export default function AssetIndexPage() {
   const roles = useOrganizationRoles();
   const { canImportAssets } = useLoaderData<typeof loader>();
   const { modeIsAdvanced } = useAssetIndexViewState();
-  const emptyStateContent = useAssetsEmptyState();
+  const emptyStateContent = useAssetsEmptyState(canImportAssets);
   const canViewArchivedAssets = useCanViewArchivedAssets();
 
   return (
