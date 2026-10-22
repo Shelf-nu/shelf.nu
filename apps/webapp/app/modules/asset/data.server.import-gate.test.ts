@@ -5,13 +5,14 @@
  * Both loaders decide whether to offer "Import" through
  * `resolveCanImportAssets`, which combines the plan and the `asset: import`
  * permission. This pins the WIRING only: each loader asks that helper, with the
- * member's own workspace and role. The helper's answer is covered in
+ * member's own workspace and role, and the simple loader returns its answer as
+ * `canImportAssets`. The helper's answer is covered in
  * `test/utils/subscription.server.test.ts`.
  *
- * The loaders go on to read a dozen other things that are not stubbed here.
- * Every database call returns a promise that never settles, so each run parks
- * on its parallel reads; by then the helper has been called and its arguments
- * are recorded.
+ * The simple loader's reads are stubbed, so it runs to the end. The advanced
+ * loader reads a dozen more things that are not: every database call returns a
+ * promise that never settles, so it parks on its parallel reads, by which time
+ * the helper has been called and its arguments are recorded.
  *
  * @see {@link file://./data.server.ts}
  */
@@ -77,6 +78,54 @@ vi.mock("~/utils/date-format.server", async (importOriginal) => ({
   resolveUserFormatPrefsById: vi.fn(() => Promise.resolve({ timeZone: "UTC" })),
 }));
 
+// why: the simple loader's reads hit the database; they return an empty page.
+vi.mock("./service.server", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  getPaginatedAndFilterableAssets: vi.fn(() =>
+    Promise.resolve({
+      search: null,
+      totalAssets: 0,
+      perPage: 20,
+      page: 1,
+      categories: [],
+      tags: [],
+      assets: [],
+      totalPages: 0,
+      cookie: {},
+      totalCategories: 0,
+      totalTags: 0,
+      locations: [],
+      totalLocations: 0,
+      assetModels: [],
+      totalAssetModels: 0,
+      teamMembers: [],
+      totalTeamMembers: 0,
+    })
+  ),
+  refreshExpiredAssetImages: vi.fn((assets: unknown[]) =>
+    Promise.resolve(assets)
+  ),
+}));
+// why: same, for the simple loader's other parallel reads.
+vi.mock("../tag/service.server", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  getTagsForBookingTagsFilter: vi.fn(() =>
+    Promise.resolve({ tags: [], totalTags: 0 })
+  ),
+}));
+vi.mock("../team-member/service.server", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  getTeamMembersForNotify: vi.fn(() => Promise.resolve({})),
+}));
+vi.mock("../asset-filter-presets/service.server", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  listPresetsForUser: vi.fn(() => Promise.resolve([])),
+}));
+vi.mock("./quantity-breakdown.server", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  getStillOutBookingRowsByAsset: vi.fn(() => Promise.resolve(new Map())),
+}));
+
 const { mockResolveCanImport } = vi.hoisted(() => ({
   mockResolveCanImport: vi.fn(),
 }));
@@ -134,6 +183,21 @@ describe("assets index loaders: import gate", () => {
         userId: "user-1",
         role: OrganizationRoles.BASE,
       });
+    }
+  );
+
+  it.each([true, false])(
+    "the simple loader returns the helper's answer (%s) as canImportAssets",
+    async (answer) => {
+      mockResolveCanImport.mockResolvedValue(answer);
+
+      // Read as `unknown`: the loader's inferred return type is large, and
+      // the assertion below only needs one path through it.
+      const result: unknown = await (
+        simpleModeLoader as (args: unknown) => Promise<unknown>
+      )(props(OrganizationRoles.ADMIN, "SIMPLE"));
+
+      expect(result).toHaveProperty("data.canImportAssets", answer);
     }
   );
 });

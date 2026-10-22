@@ -220,6 +220,18 @@ export async function assertUserCanImportAssets({
   }
 }
 
+/** Who is asking to import, and where: the inputs to every import gate. */
+export type ImportEligibilityArgs = {
+  organizationId: Organization["id"];
+  /** The member's workspaces, as `requirePermission` returns them */
+  organizations: Parameters<
+    typeof getOrganizationTierLimit
+  >[0]["organizations"];
+  userId: string;
+  /** The member's role in this workspace, as `requirePermission` returns it */
+  role: OrganizationRoles;
+};
+
 /**
  * Whether a member may import assets into a workspace: the workspace's plan
  * allows importing AND the member's role holds `asset: import`. The single
@@ -242,14 +254,7 @@ export async function resolveCanImportAssets({
   organizations,
   userId,
   role,
-}: {
-  organizationId: Organization["id"];
-  organizations: Parameters<
-    typeof getOrganizationTierLimit
-  >[0]["organizations"];
-  userId: string;
-  role: OrganizationRoles;
-}): Promise<boolean> {
+}: ImportEligibilityArgs): Promise<boolean> {
   const [tierLimit, allowed] = await Promise.all([
     getOrganizationTierLimit({ organizationId, organizations }),
     hasPermission({
@@ -273,7 +278,7 @@ export async function resolveCanImportAssets({
  * @returns `true` when the member may import, `false` when not or on failure
  */
 export async function resolveCanImportAssetsOrFalse(
-  args: Parameters<typeof resolveCanImportAssets>[0]
+  args: ImportEligibilityArgs
 ): Promise<boolean> {
   try {
     return await resolveCanImportAssets(args);

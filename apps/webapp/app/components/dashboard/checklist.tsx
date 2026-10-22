@@ -77,13 +77,10 @@ export default function OnboardingChecklist() {
               </i>
             </div>
           </li>
+          {/* Offered only while the workspace has no assets (see
+              `resolveOnboardingChecklist`), so it is never shown as done. */}
           {canImportAssets ? (
-            <li
-              className={tw(
-                " mx-1 mb-2 xl:w-[49%]",
-                checklistOptions.hasAssets && "completed"
-              )}
-            >
+            <li className="mx-1 mb-2 xl:w-[49%]">
               <div className="flex h-full items-start justify-between gap-1 rounded border p-4">
                 <div className="flex items-start">
                   <div className="mr-3 inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
