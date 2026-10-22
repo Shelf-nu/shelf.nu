@@ -119,6 +119,10 @@ export type IconType =
   | "release-custody"
   | "partial-checkin"
   | "asset-label"
+  // Bulk "Set min quantity". The bulk-dialog trigger renders <Icon icon={type} />,
+  // so every BulkDialogType must also be an IconType. Reuses the graph glyph:
+  // a reorder point is a line you draw across a level.
+  | "reorder-point"
   | "lock"
   | "activate"
   | "deactivate"
@@ -192,6 +196,7 @@ export const iconsMap: IconsMap = {
   calendar: <CalendarIcon className="size-5" />,
   bookings: <BookingsIcon />,
   graph: <GraphIcon />,
+  "reorder-point": <GraphIcon />,
   scanQR: <ScanQRIcon />,
   switch: <SwitchIcon />,
   kit: <Package />,

@@ -41,6 +41,7 @@ import {
   getArchivedFilterFromParams,
 } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
+import { redactTopBookingForViewer } from "~/utils/booking-visibility.server";
 import { getClientHint } from "~/utils/client-hints";
 import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
@@ -279,10 +280,17 @@ export async function loadAssetModelBucketAssets({
     // after the query and before the payload leaves. Without it, a restricted
     // role's "private" badge in the UI is cosmetic: the raw response already
     // carries the name and email.
-    const redactedAssets = redactCustodianForViewer(assets, {
-      canSeeAllCustody: access.custody.seeAll,
-      userId,
-    });
+    //
+    // The same applies to the biggest upcoming booking each row names for its
+    // stock verdict: it is usually someone else's, so a viewer limited to
+    // their own bookings gets the units but not the booking's id or name.
+    const redactedAssets = redactTopBookingForViewer(
+      redactCustodianForViewer(assets, {
+        canSeeAllCustody: access.custody.seeAll,
+        userId,
+      }),
+      { canSeeAllBookings: access.bookings.seeAll }
+    );
 
     return data(
       payload({

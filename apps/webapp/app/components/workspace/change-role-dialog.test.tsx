@@ -9,10 +9,13 @@
  */
 import type { ReactNode } from "react";
 import { OrganizationRoles } from "@prisma/client";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ROLE_DESCRIPTIONS } from "~/utils/permissions/role-access";
+
 import { ChangeRoleDialog } from "./change-role-dialog";
+import { ROLES_HELP_URL } from "../settings/roles-help-link";
 
 /** Whether the viewer owns the workspace, per case. */
 const viewer = { ownsWorkspace: false };
@@ -38,8 +41,8 @@ vi.mock("~/hooks/use-role-access", () => ({
   useRoleAccess: () => ({ ownsWorkspace: viewer.ownsWorkspace }),
 }));
 
-/** Opens the role picker and returns the labels it offers. */
-function offeredRoles() {
+/** Opens the role picker and returns the options it offers. */
+function openRolePicker() {
   render(
     <ChangeRoleDialog
       userId="member-1"
@@ -50,7 +53,16 @@ function offeredRoles() {
     />
   );
   fireEvent.click(document.getElementById("role-select")!);
-  return screen.getAllByRole("option").map((option) => option.textContent);
+  return screen.getAllByRole("option");
+}
+
+/** Opens the role picker and returns the role names it offers. */
+function offeredRoles() {
+  return openRolePicker().map(
+    (option) =>
+      document.getElementById(option.getAttribute("aria-labelledby")!)
+        ?.textContent
+  );
 }
 
 describe("ChangeRoleDialog role options", () => {
@@ -60,6 +72,22 @@ describe("ChangeRoleDialog role options", () => {
 
   it("does not offer Administrator to an administrator", () => {
     expect(offeredRoles()).toEqual(["Manager", "Self service", "Base"]);
+  });
+
+  it("explains each role under its name and links to the roles article", () => {
+    const options = openRolePicker();
+
+    for (const [option, role] of [
+      [options[0], "MANAGER"],
+      [options[1], "SELF_SERVICE"],
+      [options[2], "BASE"],
+    ] as const) {
+      const description = within(option).getByText(ROLE_DESCRIPTIONS[role]);
+      expect(option).toHaveAttribute("aria-describedby", description.id);
+    }
+    expect(
+      screen.getByRole("link", { name: /learn more about roles/i })
+    ).toHaveAttribute("href", ROLES_HELP_URL);
   });
 
   it("offers Administrator to the workspace owner", () => {

@@ -1,25 +1,22 @@
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
-import {
-  data,
-  redirect,
-  useActionData,
-  useLoaderData,
-  useNavigation,
-} from "react-router";
+import { data, redirect, useActionData, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
 import { ColorInput } from "~/components/forms/color-input";
+import { FormRowErrors, rowErrorId } from "~/components/forms/form-row-errors";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
+import { useDisabled } from "~/hooks/use-disabled";
 
 import { getCategory, updateCategory } from "~/modules/category/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { isFormProcessing } from "~/utils/form";
+import { getValidationErrors } from "~/utils/http";
 import { error, getParams, payload, parseData } from "~/utils/http.server";
+import { hexColorSchema, labelNameSchema } from "~/utils/label-form-fields";
 
 import {
   PermissionAction,
@@ -29,9 +26,9 @@ import { requirePermission } from "~/utils/roles.server";
 import { zodFieldIsRequired } from "~/utils/zod";
 
 export const UpdateCategoryFormSchema = z.object({
-  name: z.string().min(3, "Name is required"),
+  name: labelNameSchema,
   description: z.string(),
-  color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+  color: hexColorSchema,
 });
 
 const title = "Edit category";
@@ -122,13 +119,22 @@ export async function action({ context, request, params }: LoaderFunctionArgs) {
 
 export default function EditCategory() {
   const zo = useZorm("NewQuestionWizardScreen", UpdateCategoryFormSchema);
-  const navigation = useNavigation();
-  const disabled = isFormProcessing(navigation.state);
+  const disabled = useDisabled();
 
   // Focus the Name input on mount of the edit page.
   const nameInputRef = useAutoFocus<HTMLInputElement>();
   const { colorFromServer, category } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
+  /** Server-side errors, shown when client-side validation is bypassed */
+  const validationErrors = getValidationErrors<typeof UpdateCategoryFormSchema>(
+    actionData?.error
+  );
+  const nameError =
+    validationErrors?.name?.message || zo.errors.name()?.message;
+  const colorError =
+    validationErrors?.color?.message || zo.errors.color()?.message;
+  /** The row is bottom-aligned, so field errors render below it, not per input */
+  const errorsId = "category-form-errors";
 
   return (
     <Form
@@ -146,8 +152,11 @@ export default function EditCategory() {
             className="mb-4 lg:mb-0 lg:max-w-[180px]"
             name={zo.fields.name()}
             disabled={disabled}
-            error={zo.errors.name()?.message}
+            error={nameError}
             hideErrorText
+            aria-describedby={
+              nameError ? rowErrorId(errorsId, "name") : undefined
+            }
             required={zodFieldIsRequired(UpdateCategoryFormSchema.shape.name)}
             defaultValue={category.name}
           />
@@ -167,12 +176,13 @@ export default function EditCategory() {
             <ColorInput
               name={zo.fields.color()}
               disabled={disabled}
-              error={zo.errors.color()?.message}
+              error={colorError}
               hideErrorText
+              aria-describedby={
+                colorError ? rowErrorId(errorsId, "color") : undefined
+              }
               colorFromServer={colorFromServer}
-              required={zodFieldIsRequired(
-                UpdateCategoryFormSchema.shape.color
-              )}
+              required
             />
           </div>
         </div>
@@ -181,14 +191,19 @@ export default function EditCategory() {
           <Button variant="secondary" to="/categories" size="sm">
             Cancel
           </Button>
-          <Button type="submit" size="sm">
+          <Button type="submit" size="sm" disabled={disabled}>
             Update
           </Button>
         </div>
       </div>
-      {actionData?.error ? (
+      <FormRowErrors
+        id={errorsId}
+        errors={{ name: nameError, color: colorError }}
+      />
+      {/* Any other failure (e.g. a duplicate name) has no field to point at */}
+      {actionData?.error && !nameError && !colorError ? (
         <div className="mt-3 text-sm text-error-500">
-          {actionData?.error?.message}
+          {actionData.error.message}
         </div>
       ) : null}
     </Form>

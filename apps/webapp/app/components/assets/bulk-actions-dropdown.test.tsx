@@ -93,6 +93,8 @@ vi.mock("../bulk-update-dialog/bulk-update-dialog", () => ({
     capturedDisabled[type] = disabled;
     return null;
   },
+  // The Set min quantity dialog renders its content straight from this module.
+  BulkUpdateDialogContent: () => null,
 }));
 
 // why: every dialog brings its own form, loader and atom chain, renders

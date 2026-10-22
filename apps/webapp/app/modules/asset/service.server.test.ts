@@ -20,9 +20,16 @@ import type * as AvailabilityPrimitivesModule from "~/modules/asset/availability
 import { findModelReservationsShortAfterArchive } from "~/modules/booking-model-request/service.server";
 import { createSystemBookingNotes } from "~/modules/booking-note/service.server";
 import { getCategory } from "~/modules/category/service.server";
-import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
+import {
+  checkAndNotifyLowStock,
+  syncLowStockMarkers,
+} from "~/modules/consumption-log/low-stock.server";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
 import { createConsumptionLog } from "~/modules/consumption-log/service.server";
+import {
+  readStockState,
+  recordStockChanges,
+} from "~/modules/consumption-log/stock-ledger.server";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { bulkAssignKitCustody } from "~/modules/kit/service.server";
 import {
@@ -74,6 +81,7 @@ import {
   renderBulkAssetTitle,
   updateAsset,
   uploadDuplicateAssetMainImage,
+  bulkUpdateAssetMinQuantity,
 } from "./service.server";
 import { buildLowStockWhere } from "./utils.server";
 
@@ -319,11 +327,35 @@ vitest.mock("~/modules/consumption-log/service.server", () => ({
   createConsumptionLog: vitest.fn().mockResolvedValue({}),
 }));
 
+// why: the ledger rows are derived from real placement reads, covered by
+// `stock-ledger.test.ts` and the in-memory `service.custody-source.test.ts`.
+// These suites assert the events each service hands the ledger.
+vitest.mock("~/modules/consumption-log/stock-ledger.server", () => ({
+  readStockState: vitest.fn().mockResolvedValue({
+    total: 0,
+    placed: new Map(),
+    ledgerStartedAt: null,
+  }),
+  readStockStates: vitest.fn().mockResolvedValue(new Map()),
+  recordStockChanges: vitest.fn().mockResolvedValue(undefined),
+}));
+
+/** Every ledger event the mocked `recordStockChanges` was handed, in order. */
+function recordedStockEvents() {
+  return vitest
+    .mocked(recordStockChanges)
+    .mock.calls.flatMap(([, { changes }]) =>
+      changes.flatMap((change) => change.events ?? [])
+    );
+}
+
 // why: wiring-only — assert that updateAsset invokes the low-stock notifier on
-// a quantity DROP without running the real debounce/email logic (that logic is
+// a quantity DROP, and that the bulk threshold change reconciles markers in
+// one call, without running the real debounce/email logic (that logic is
 // exhaustively tested in low-stock.server.test.ts).
 vitest.mock("~/modules/consumption-log/low-stock.server", () => ({
   checkAndNotifyLowStock: vitest.fn().mockResolvedValue(undefined),
+  syncLowStockMarkers: vitest.fn().mockResolvedValue(undefined),
 }));
 
 // why: avoid emitting real activity events during asset service tests; assert
@@ -1358,6 +1390,33 @@ describe("createAsset quantity validation", () => {
         type: "INDIVIDUAL",
       })
     ).resolves.toEqual({ id: "asset-new" });
+    expect(recordStockChanges).not.toHaveBeenCalled();
+  });
+
+  it("records the starting stock of a quantity-tracked asset as INITIAL", async () => {
+    await createAsset({
+      title: "Test Cables",
+      description: "USB cables",
+      userId: "user-1",
+      categoryId: null,
+      valuation: null,
+      organizationId: "org-1",
+      type: "QUANTITY_TRACKED",
+      consumptionType: "ONE_WAY",
+      quantity: 100,
+    });
+
+    expect(recordStockChanges).toHaveBeenCalledWith(expect.anything(), {
+      organizationId: "org-1",
+      userId: "user-1",
+      changes: [
+        {
+          assetId: "asset-new",
+          before: { total: 0, placed: new Map(), ledgerStartedAt: null },
+          events: [{ category: "INITIAL", change: 100, locationId: undefined }],
+        },
+      ],
+    });
   });
 });
 
@@ -1841,17 +1900,17 @@ describe("releaseQuantity — consumptionType disposition", () => {
       custodyAssign: "anyone",
     });
 
-    // Exactly one log, classified as consumption. Writing RETURN here is the
-    // shipped bug: consumption reporting counts the units as back on the shelf.
-    expect(mockCreateConsumptionLog).toHaveBeenCalledTimes(1);
-    expect(mockCreateConsumptionLog).toHaveBeenCalledWith(
+    // Exactly one ledger event, classified as consumption, and no RETURN.
+    // Writing RETURN here is the shipped bug: consumption reporting counts
+    // the units as back on the shelf.
+    expect(mockCreateConsumptionLog).not.toHaveBeenCalled();
+    expect(recordedStockEvents()).toEqual([
       expect.objectContaining({
-        assetId: "asset-1",
         category: "CONSUME",
-        quantity: 10,
+        change: -10,
         custodianId: "tm-1",
-      })
-    );
+      }),
+    ]);
     expect(mockAssetUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: "asset-1" },
@@ -1880,10 +1939,10 @@ describe("releaseQuantity — consumptionType disposition", () => {
 
     // 10 gloves used up, 30 handed back in good condition. Destroying all 40
     // is the over-correction this split exists to prevent.
-    expect(mockCreateConsumptionLog).toHaveBeenCalledTimes(2);
-    expect(mockCreateConsumptionLog).toHaveBeenCalledWith(
-      expect.objectContaining({ category: "CONSUME", quantity: 10 })
-    );
+    expect(recordedStockEvents()).toEqual([
+      expect.objectContaining({ category: "CONSUME", change: -10 }),
+    ]);
+    expect(mockCreateConsumptionLog).toHaveBeenCalledTimes(1);
     expect(mockCreateConsumptionLog).toHaveBeenCalledWith(
       expect.objectContaining({ category: "RETURN", quantity: 30 })
     );
@@ -3257,6 +3316,13 @@ describe("updateAsset stock-lowering guard", () => {
       name: "Storage B",
     });
 
+    const stockBefore = {
+      total: 10,
+      placed: new Map([["loc-1", 10]]),
+      ledgerStartedAt: new Date("2026-10-01T00:00:00.000Z"),
+    };
+    vi.mocked(readStockState).mockResolvedValueOnce(stockBefore);
+
     await updateAsset({
       id: "asset-1",
       userId: "user-1",
@@ -3267,6 +3333,24 @@ describe("updateAsset stock-lowering guard", () => {
     } as any);
 
     expect(db.asset.update).toHaveBeenCalled();
+    // The ledger diffs the stock read under the lock, before the first write,
+    // against the stock after the placement rewrite.
+    expect(vi.mocked(readStockState).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(db.asset.update).mock.invocationCallOrder[0]
+    );
+    expect(recordStockChanges).toHaveBeenCalledWith(expect.anything(), {
+      organizationId: "org-1",
+      userId: "user-1",
+      changes: [
+        {
+          assetId: "asset-1",
+          before: stockBefore,
+          events: [
+            expect.objectContaining({ category: "ADJUSTMENT", change: -5 }),
+          ],
+        },
+      ],
+    });
   });
 
   it("refuses when the replacement placement itself exceeds the new total", async () => {
@@ -3684,17 +3768,16 @@ describe("updateAsset quantity audit trail", () => {
       request: new Request("http://localhost"),
     } as any);
 
-    // ConsumptionLog stores the positive delta (|4 − 10| = 6) as an ADJUSTMENT,
-    // written inside the quantity tx (tx threaded through).
-    expect(mockCreateConsumptionLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        assetId: "asset-1",
-        category: "ADJUSTMENT",
-        quantity: 6,
-        userId: "user-1",
-      })
+    // The ledger gets the signed change (4 − 10 = −6) as an ADJUSTMENT,
+    // inside the quantity tx (tx threaded through).
+    expect(recordStockChanges).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ organizationId: "org-1", userId: "user-1" })
     );
-    // The direction the log can't carry is captured by the event's from/to.
+    expect(recordedStockEvents()).toEqual([
+      expect.objectContaining({ category: "ADJUSTMENT", change: -6 }),
+    ]);
+    // The activity event records the same change as from/to.
     expect(mockRecordEvents).toHaveBeenCalledWith(
       expect.arrayContaining([
         expect.objectContaining({
@@ -3801,8 +3884,8 @@ describe("updateAsset quantity audit trail", () => {
       request: new Request("http://localhost"),
     } as any);
 
-    // delta 0 → no stock-movement audit (createConsumptionLog rejects qty 0).
-    expect(mockCreateConsumptionLog).not.toHaveBeenCalled();
+    // delta 0 → no stock-movement event for the ledger.
+    expect(recordedStockEvents()).toEqual([]);
     // No field actually changed, so no quantity event is recorded.
     const emittedQuantityEvent = mockRecordEvents.mock.calls.some(([events]) =>
       (events as Array<{ action: string }>).some(
@@ -7491,6 +7574,190 @@ describe("bulkUpdateAssetLocation — location activity notes", () => {
       expect(content).toContain("asset-individual");
       expect(content).not.toContain("asset-qty");
     }
+  });
+});
+
+describe("bulkUpdateAssetMinQuantity", () => {
+  const mockAssetFindMany = db.asset.findMany as ReturnType<typeof vitest.fn>;
+  const mockAssetUpdateMany = db.asset.updateMany as ReturnType<
+    typeof vitest.fn
+  >;
+  const mockRecordEvents = recordEvents as ReturnType<typeof vitest.fn>;
+  const mockLowStock = checkAndNotifyLowStock as ReturnType<typeof vitest.fn>;
+  const mockSyncMarkers = syncLowStockMarkers as ReturnType<typeof vitest.fn>;
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    mockAssetUpdateMany.mockResolvedValue({ count: 2 });
+  });
+
+  /** Args every case shares; `settings` is only read by the mocked resolver. */
+  const args = {
+    organizationId: "org-1",
+    userId: "user-1",
+    settings: {} as never,
+    lastAuditDateAccess: "hidden" as const,
+  };
+
+  it("only asks the database for QUANTITY_TRACKED assets in the caller's org", async () => {
+    // why: the org scope is the IDOR guard for every id used downstream, and
+    // the type filter is what makes a mixed selection safe to submit, the
+    // dialog is reachable from a list containing individually-tracked assets.
+    mockAssetFindMany.mockResolvedValue([]);
+
+    await bulkUpdateAssetMinQuantity({
+      ...args,
+      assetIds: ["asset-1"],
+      minQuantity: 5,
+    });
+
+    expect(mockAssetFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          organizationId: "org-1",
+          type: "QUANTITY_TRACKED",
+        }),
+      })
+    );
+  });
+
+  it("writes and emits ASSET_MIN_QUANTITY_CHANGED only for rows that change", async () => {
+    mockAssetFindMany.mockResolvedValue([
+      { id: "asset-1", minQuantity: null }, // null -> 5, changes
+      { id: "asset-2", minQuantity: 5 }, // already 5, no-op
+    ]);
+
+    await bulkUpdateAssetMinQuantity({
+      ...args,
+      assetIds: ["asset-1", "asset-2"],
+      minQuantity: 5,
+    });
+
+    expect(mockAssetUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: { in: ["asset-1"] } },
+        data: { minQuantity: 5 },
+      })
+    );
+    expect(mockRecordEvents.mock.calls[0][0]).toEqual([
+      expect.objectContaining({
+        action: "ASSET_MIN_QUANTITY_CHANGED",
+        entityId: "asset-1",
+        field: "minQuantity",
+        fromValue: null,
+        toValue: 5,
+      }),
+    ]);
+  });
+
+  it("does not write at all when nothing would change", async () => {
+    // why: re-applying the same threshold is a normal accident on a bulk
+    // action, and it must not fill the activity feed with no-op entries.
+    mockAssetFindMany.mockResolvedValue([{ id: "asset-1", minQuantity: 5 }]);
+
+    await bulkUpdateAssetMinQuantity({
+      ...args,
+      assetIds: ["asset-1"],
+      minQuantity: 5,
+    });
+
+    expect(mockAssetUpdateMany).not.toHaveBeenCalled();
+    expect(mockRecordEvents).not.toHaveBeenCalled();
+  });
+
+  it("clears the threshold when passed null", async () => {
+    mockAssetFindMany.mockResolvedValue([{ id: "asset-1", minQuantity: 5 }]);
+
+    await bulkUpdateAssetMinQuantity({
+      ...args,
+      assetIds: ["asset-1"],
+      minQuantity: null,
+    });
+
+    expect(mockAssetUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { minQuantity: null } })
+    );
+  });
+
+  it("reconciles every changed asset's low-stock marker in one silent call", async () => {
+    // why: this is the guard against a mailbox flood and a timeout. The
+    // per-asset notifier emails the owner AND every admin and costs several
+    // queries per asset, so a threshold set across a large catalogue must
+    // neither mail anyone nor run once per asset. The marker still has to be
+    // updated, or the next stock movement fires the alert we meant to suppress.
+    mockAssetFindMany.mockResolvedValue([
+      { id: "asset-1", minQuantity: null },
+      { id: "asset-2", minQuantity: 3 },
+      { id: "asset-3", minQuantity: 8 },
+    ]);
+
+    await bulkUpdateAssetMinQuantity({
+      ...args,
+      assetIds: ["asset-1", "asset-2", "asset-3"],
+      minQuantity: 5,
+    });
+
+    expect(mockLowStock).not.toHaveBeenCalled();
+    expect(mockSyncMarkers).toHaveBeenCalledTimes(1);
+    expect(mockSyncMarkers).toHaveBeenCalledWith({
+      assetIds: ["asset-1", "asset-2", "asset-3"],
+      organizationId: "org-1",
+    });
+  });
+
+  it("does not reconcile markers when nothing changed", async () => {
+    mockAssetFindMany.mockResolvedValue([{ id: "asset-1", minQuantity: 5 }]);
+
+    await bulkUpdateAssetMinQuantity({
+      ...args,
+      assetIds: ["asset-1"],
+      minQuantity: 5,
+    });
+
+    expect(mockSyncMarkers).not.toHaveBeenCalled();
+  });
+
+  it("passes a deliberate refusal through with its own message", async () => {
+    // why: the route shows `error.message`. Wrapping a 400 (archived assets in
+    // the selection, say) in the generic 500 hid how to fix the selection.
+    const refusal = new ShelfError({
+      cause: null,
+      message: "Some selected assets are archived.",
+      status: 400,
+      label: "Assets",
+    });
+    (db.asset.count as ReturnType<typeof vitest.fn>).mockRejectedValueOnce(
+      refusal
+    );
+
+    await expect(
+      bulkUpdateAssetMinQuantity({
+        ...args,
+        assetIds: ["asset-1"],
+        minQuantity: 5,
+      })
+    ).rejects.toMatchObject({
+      message: "Some selected assets are archived.",
+      status: 400,
+    });
+  });
+
+  it("returns 0 when the selection held nothing to change", () => {
+    // why: the route builds its confirmation from this number. Returning a
+    // truthy value regardless is what let it claim "reorder point set" for a
+    // selection of individually-tracked assets, where nothing was written.
+    mockAssetFindMany.mockResolvedValue([]);
+
+    return expect(
+      bulkUpdateAssetMinQuantity({
+        organizationId: "org-1",
+        userId: "user-1",
+        settings: {} as never,
+        lastAuditDateAccess: "hidden",
+        assetIds: ["asset-1"],
+        minQuantity: 5,
+      })
+    ).resolves.toBe(0);
   });
 });
 
