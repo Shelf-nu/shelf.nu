@@ -18,6 +18,7 @@ import { Prisma } from "@prisma/client";
 import type { AssetImport } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { sendAssetImportFinishedEmail } from "~/emails/asset-import-finished";
+import { captureServerEvent } from "~/integrations/posthog/client.server";
 import { bulkAssignKitCustody } from "~/modules/kit/service.server";
 import { isLikeShelfError, isPrismaTransientError } from "~/utils/error";
 import { appendImportWarnings } from "./chunk-writer.server";
@@ -244,6 +245,12 @@ export async function runFinalizeStep(assetImport: AssetImport): Promise<void> {
   });
 
   if (completed.count === 1) {
+    // Counts only, no personal data: closes the import funnel in analytics.
+    captureServerEvent({
+      distinctId: assetImport.createdById,
+      event: "import_completed",
+      properties: { organizationId, rows: assetImport.totalRows },
+    });
     await sendAssetImportFinishedEmail({
       importId,
       organizationId,
