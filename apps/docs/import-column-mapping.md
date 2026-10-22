@@ -70,7 +70,9 @@ proposer can be added later without changing the route or the review table.
 - When a quantity column is mapped and no type column is (every Sortly export),
   the review asks how the rows are tracked: individual assets (every quantity
   must be 1), stock returned after use, or stock used up. A stock answer makes
-  every row quantity-tracked with that consumption type. The review starts on
+  every row quantity-tracked and gives every row that consumption type, unless
+  a column is mapped to `consumptionType`: then each row keeps the file's own
+  value. The review starts on
   individual assets when every sampled quantity is 1, and otherwise waits for
   an answer before Preview import.
 - A skipped `id` column (Shelf's own export) does not turn the count into

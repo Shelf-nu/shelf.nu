@@ -25,6 +25,7 @@ import type {
   ColumnMapping,
   MappingProposal,
 } from "~/modules/import-mapping/types";
+import { MAX_MAPPING_FIELD_LENGTH } from "~/modules/import-mapping/types";
 import { buildContentImportPreview } from "~/modules/asset-import/preview.server";
 import { action, loader } from "~/routes/_layout+/assets.import";
 import { csvDataFromRequest } from "~/utils/csv.server";
@@ -642,10 +643,14 @@ describe("assets.import column mapping", () => {
     it("refuses a mapping field larger than any real file needs", async () => {
       const result = (await post({
         intent: "preview",
-        mapping: "x".repeat(300_000),
+        mapping: "x".repeat(MAX_MAPPING_FIELD_LENGTH + 1),
       })) as ActionResult;
       expect(buildContentImportPreview).not.toHaveBeenCalled();
-      expect(result.data).toMatchObject({ error: expect.anything() });
+      expect(result.init?.status).toBe(400);
+      // The form-field limit refuses it before the mapping is ever parsed.
+      expect(result.data).toMatchObject({
+        error: { title: "Validation error" },
+      });
     });
   });
 

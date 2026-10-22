@@ -8,7 +8,7 @@
  * @see {@link file://./mapping-review.tsx} the table that renders one per row
  */
 import type { KeyboardEvent } from "react";
-import { useMemo, useState } from "react";
+import { useMemo, useReducer } from "react";
 import { CustomFieldType } from "@prisma/client";
 import {
   Popover,
@@ -26,6 +26,53 @@ import {
 } from "~/modules/import-mapping/types";
 import { FIELD_TYPE_NAME } from "~/utils/custom-fields";
 import { tw } from "~/utils/tw";
+
+/** Open state, search text and keyboard highlight of the picker. */
+type PickerState = { open: boolean; query: string; activeIndex: number };
+
+/** Transitions of {@link PickerState}. */
+type PickerAction =
+  | { type: "open_changed"; open: boolean }
+  | { type: "chosen" }
+  | { type: "searched"; query: string }
+  | { type: "moved"; delta: 1 | -1; count: number }
+  | { type: "hovered"; index: number };
+
+const CLOSED_PICKER: PickerState = { open: false, query: "", activeIndex: 0 };
+
+/**
+ * Reducer for {@link TargetSelect}. Opening or closing starts the highlight
+ * at the top and closing clears the search, so every opening begins fresh; a
+ * new search also starts at the top of the filtered list.
+ *
+ * @param state - Current picker state
+ * @param action - The transition to apply
+ * @returns The next state
+ */
+function pickerReducer(state: PickerState, action: PickerAction): PickerState {
+  switch (action.type) {
+    case "open_changed":
+      return action.open
+        ? { ...state, open: true, activeIndex: 0 }
+        : CLOSED_PICKER;
+    case "chosen":
+      return { ...state, open: false, query: "" };
+    case "searched":
+      return { ...state, query: action.query, activeIndex: 0 };
+    case "moved":
+      return {
+        ...state,
+        activeIndex: Math.min(
+          Math.max(state.activeIndex + action.delta, 0),
+          Math.max(action.count - 1, 0)
+        ),
+      };
+    case "hovered":
+      return { ...state, activeIndex: action.index };
+    default:
+      return state;
+  }
+}
 
 /** One entry of the picker list. */
 type Option = {
@@ -99,9 +146,10 @@ export function TargetSelect({
   invalid?: boolean;
   describedBy?: string;
 }) {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const [activeIndex, setActiveIndex] = useState(0);
+  const [{ open, query, activeIndex }, dispatch] = useReducer(
+    pickerReducer,
+    CLOSED_PICKER
+  );
 
   const options = useMemo<Option[]>(() => {
     const fields: Option[] = IMPORT_FIELDS.filter(
@@ -149,17 +197,16 @@ export function TargetSelect({
 
   const choose = (option: Option) => {
     onChange(option.target);
-    setOpen(false);
-    setQuery("");
+    dispatch({ type: "chosen" });
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      setActiveIndex((index) => Math.min(index + 1, visible.length - 1));
+      dispatch({ type: "moved", delta: 1, count: visible.length });
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
-      setActiveIndex((index) => Math.max(index - 1, 0));
+      dispatch({ type: "moved", delta: -1, count: visible.length });
     } else if (event.key === "Enter") {
       event.preventDefault();
       const option = visible[activeIndex];
@@ -172,11 +219,7 @@ export function TargetSelect({
   return (
     <Popover
       open={open}
-      onOpenChange={(next) => {
-        setOpen(next);
-        setActiveIndex(0);
-        if (!next) setQuery("");
-      }}
+      onOpenChange={(next) => dispatch({ type: "open_changed", open: next })}
     >
       <PopoverTrigger asChild>
         <Button
@@ -206,10 +249,9 @@ export function TargetSelect({
             placeholder="Search fields..."
             className="w-full border-0 border-b border-gray-200 px-4 py-2 text-[14px] focus:ring-0"
             value={query}
-            onChange={(event) => {
-              setQuery(event.target.value);
-              setActiveIndex(0);
-            }}
+            onChange={(event) =>
+              dispatch({ type: "searched", query: event.target.value })
+            }
             onKeyDown={handleKeyDown}
           />
           <div id={listId} role="listbox" aria-label="Shelf fields">
@@ -237,7 +279,7 @@ export function TargetSelect({
                       choose(option);
                     }
                   }}
-                  onMouseEnter={() => setActiveIndex(index)}
+                  onMouseEnter={() => dispatch({ type: "hovered", index })}
                 >
                   <div className="text-gray-900">{option.label}</div>
                   <div className="text-xs text-gray-500">{option.hint}</div>

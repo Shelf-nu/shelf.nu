@@ -445,13 +445,12 @@ export const buildCustomFieldValue = (
         // while ensuring the date remains the same in all timezones.
         const dateOnly = (raw as string).trim(); // expected: YYYY-MM-DD
 
-        // why: without a strict format guard, the positional split below silently
-        // mis-parses non-ISO input. e.g. "03-04-2026" → split → [3, 4, 2026] →
-        // Date.UTC(3, 3, 2026) rolls over to ~Oct 1908 — a VALID Date, so it is
-        // stored with no error while the UI keeps showing the raw string, poisoning
-        // the queryable valueDate (sort/filter/reports/reminders) invisibly.
-        // This mirrors the strict guard already used on the bulk-update import path
-        // (see compareCustomField's DATE case in ~/utils/import-update-diff).
+        // why: a stored date must be a real YYYY-MM-DD day. Any other shape is
+        // refused, because Date.UTC turns "03-04-2026" into a valid but wrong
+        // date that would then drive sorting, filters, reports and reminders;
+        // utcCalendarDate refuses a day Date.UTC would roll over (2026-02-31).
+        // The bulk-update diff applies the same rule via
+        // isImportableCustomFieldDate.
         const match = CUSTOM_FIELD_DATE_FORMAT.exec(dateOnly);
         if (!match) {
           throw new ShelfError({
