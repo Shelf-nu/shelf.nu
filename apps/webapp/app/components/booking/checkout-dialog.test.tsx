@@ -6,7 +6,8 @@
  * @see {@link file://./checkout-dialog.tsx}
  */
 import { render, screen, fireEvent } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { useNavigation } from "react-router";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { CheckoutSourceQuestion } from "~/modules/booking/checkout-source-location";
 
@@ -210,6 +211,48 @@ describe("CheckoutDialog confirmation", () => {
     expect(
       screen.getByRole("alertdialog", { name: "Early Check-Out Warning" })
     ).toBeInTheDocument();
+  });
+
+  it("closes once confirmed, so a refused check-out shows its error on the page", () => {
+    const { submissions } = renderInForm();
+
+    fireEvent.click(screen.getByRole("button", { name: "Check Out" }));
+    fireEvent.click(screen.getByRole("button", { name: "Check out" }));
+
+    expect(submissions).toHaveLength(1);
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+  });
+
+  it("names neither every asset nor the booking start for any other intent", () => {
+    renderInForm({ intent: "partial-checkout" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Check Out" }));
+
+    expect(
+      screen.getByText(/This checks out the selected assets of/)
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/every asset/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/starts the booking/)).not.toBeInTheDocument();
+  });
+});
+
+describe("CheckoutDialog while a submission is in flight", () => {
+  afterEach(() => {
+    vi.mocked(useNavigation).mockReturnValue({ state: "idle" } as never);
+  });
+
+  it("disables the trigger", () => {
+    vi.mocked(useNavigation).mockReturnValue({ state: "submitting" } as never);
+    renderInForm();
+
+    expect(screen.getByRole("button", { name: "Check Out" })).toBeDisabled();
+  });
+
+  it("disables the direct submit when the confirmation is off", () => {
+    vi.mocked(useNavigation).mockReturnValue({ state: "submitting" } as never);
+    renderInForm({ confirm: false });
+
+    expect(screen.getByRole("button", { name: "Check Out" })).toBeDisabled();
   });
 });
 

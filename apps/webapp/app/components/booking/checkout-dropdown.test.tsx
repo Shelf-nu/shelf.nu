@@ -6,7 +6,7 @@
  *
  * @see {@link file://./checkout-dropdown.tsx}
  */
-import type { ComponentProps } from "react";
+import { useState, type ComponentProps } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -17,17 +17,21 @@ import CheckoutDropdown from "./checkout-dropdown";
 let menuOpen = false;
 
 // why: the hook reads the URL through the app's search-param helpers, which
-// need a data router's loader data; these tests cover which options render,
-// not how the menu opens, so each test sets the open state it needs.
+// need a data router's loader data. Each test sets the starting open state,
+// and the menu applies every close Radix asks for, as the real hook does on a
+// phone after a QR auto-open, so a dialog inside the menu has to survive it.
 vi.mock("~/hooks/use-controlled-dropdown-menu", () => ({
-  useControlledDropdownMenu: () => ({
-    ref: { current: null },
-    defaultApplied: true,
-    open: menuOpen,
-    defaultOpen: menuOpen,
-    setOpen: vi.fn(),
-    onOpenChange: vi.fn(),
-  }),
+  useControlledDropdownMenu: () => {
+    const [open, setOpen] = useState(menuOpen);
+    return {
+      ref: { current: null },
+      defaultApplied: true,
+      open,
+      defaultOpen: menuOpen,
+      setOpen,
+      onOpenChange: setOpen,
+    };
+  },
 }));
 
 // why: `useDisabled` reads `useNavigation`, which needs a data router; the

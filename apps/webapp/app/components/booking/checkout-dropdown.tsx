@@ -270,7 +270,12 @@ export default function CheckoutDropdown({
           portalContainer={portalContainer}
         >
           <div className="fixed bottom-0 left-0">
-            <DropdownMenuItem className="py-1 lg:p-0">
+            {/* The row opens a dialog that lives inside this menu, so selecting
+                it must not close the menu: closing unmounts the dialog. */}
+            <DropdownMenuItem
+              className="py-1 lg:p-0"
+              onSelect={(event) => event.preventDefault()}
+            >
               <CheckoutDialog
                 booking={booking}
                 disabled={quickCheckoutDisabled}

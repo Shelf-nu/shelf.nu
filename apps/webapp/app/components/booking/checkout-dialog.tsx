@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { Booking } from "@prisma/client";
 import { Zap } from "lucide-react";
 import { useDisabled } from "~/hooks/use-disabled";
@@ -122,6 +123,30 @@ function checkoutDialogTitle({
   return "Check out booking";
 }
 
+/**
+ * What a plain check-out does, for the confirmation's body. Only the
+ * whole-booking `checkOut` starts the booking and takes every asset; any other
+ * intent gets wording that claims neither.
+ *
+ * @param intent - The form `intent` the confirm button submits
+ * @returns The sentence before and after the booking name
+ */
+function plainCheckoutSentence(intent: string): {
+  lead: string;
+  tail: string;
+} {
+  if (intent === "checkOut") {
+    return {
+      lead: "This checks out every asset of",
+      tail: " and starts the booking.",
+    };
+  }
+  if (intent === "checkOutRemaining") {
+    return { lead: "This checks out the remaining assets of", tail: "." };
+  }
+  return { lead: "This checks out the selected assets of", tail: "." };
+}
+
 export default function CheckoutDialog({
   disabled,
   booking,
@@ -173,9 +198,15 @@ export default function CheckoutDialog({
   const asksSource = sourceQuestions.length > 0;
   /** No early, unassigned or source reason applies: only the plain confirmation. */
   const isPlainCheckout = !isEarlyCheckout && !unassignedSummary && !asksSource;
-  /** "Check out remaining" leaves the already checked-out assets alone. */
-  const checkoutScope =
-    intent === "checkOutRemaining" ? "the remaining assets" : "every asset";
+  const plainSentence = plainCheckoutSentence(intent);
+  /**
+   * The dialog is controlled so a submit closes it: a refused check-out then
+   * shows its error on the page instead of behind the still-open dialog.
+   * Closing on click is safe because the form reads its fields, the ones
+   * inside this dialog included, while the submit event is dispatched.
+   */
+  const [open, setOpen] = useState(false);
+  const closeOnSubmit = () => setOpen(false);
 
   if (isPlainCheckout && !confirm) {
     return (
@@ -196,7 +227,7 @@ export default function CheckoutDialog({
   }
 
   return (
-    <AlertDialog>
+    <AlertDialog open={open} onOpenChange={setOpen}>
       <AlertDialogTrigger asChild>
         <Button
           disabled={isDisabled}
@@ -223,13 +254,11 @@ export default function CheckoutDialog({
             <div className="flex flex-col gap-3">
               {isPlainCheckout ? (
                 <p>
-                  This checks out {checkoutScope} of{" "}
+                  {plainSentence.lead}{" "}
                   <span className="font-bold text-gray-700">
                     {booking.name}
                   </span>
-                  {intent === "checkOutRemaining"
-                    ? "."
-                    : " and starts the booking."}
+                  {plainSentence.tail}
                 </p>
               ) : null}
               {unassignedSummary ? (
@@ -299,6 +328,7 @@ export default function CheckoutDialog({
                 name="checkoutIntentChoice"
                 value={CheckoutIntentEnum["without-adjusted-date"]}
                 form={formId}
+                onClick={closeOnSubmit}
               >
                 Don't Adjust Date
               </Button>
@@ -310,6 +340,7 @@ export default function CheckoutDialog({
                 name="checkoutIntentChoice"
                 value={CheckoutIntentEnum["with-adjusted-date"]}
                 form={formId}
+                onClick={closeOnSubmit}
               >
                 Adjust Date
               </Button>
@@ -322,6 +353,7 @@ export default function CheckoutDialog({
               name="intent"
               value={intent}
               form={formId}
+              onClick={closeOnSubmit}
             >
               {unassignedSummary ? "Check out anyway" : "Check out"}
             </Button>
