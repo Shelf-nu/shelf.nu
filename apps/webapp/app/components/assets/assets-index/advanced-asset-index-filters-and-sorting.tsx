@@ -565,7 +565,12 @@ function AdvancedFilter() {
   );
 }
 
-function AdvancedSorting() {
+/**
+ * Sort popover of the advanced asset index. Rules are edited locally, reordered
+ * by drag or Alt+Arrow on their handles, and written to the URL as repeated
+ * `sortBy=name:direction[:cfType]` params on Apply.
+ */
+export function AdvancedSorting() {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const [sorts, setSorts] = useState<Sort[]>([]);
   const [searchParams, setSearchParams] = useSearchParams();
@@ -723,7 +728,7 @@ function AdvancedSorting() {
                 <p>Add a column below to sort by</p>
               </div>
             ) : (
-              <div className="group">
+              <div>
                 <div className="sr-only" id={instructionsId}>
                   Press Alt plus Arrow Up or Arrow Down on a drag handle to move
                   the sort rule.
@@ -795,11 +800,17 @@ function SortRuleItem({
   onRemove,
 }: {
   sort: Sort;
+  /** Position in the list; the first rule reads "sort by", the rest "then by". */
   index: number;
+  /** Id of the sr-only keyboard instructions the handle points at. */
   instructionsId: string;
+  /** Stores the handle in `useKeyboardReorder`'s `itemRefs` at `index`. */
   handleRef: (element: HTMLButtonElement | null) => void;
+  /** Alt+Arrow handler from `useKeyboardReorder`, bound to `index`. */
   onHandleKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void;
+  /** Flips the rule between ascending and descending. */
   onToggleDirection: () => void;
+  /** Removes the rule from the list. */
   onRemove: () => void;
 }) {
   const dragControls = useDragControls();

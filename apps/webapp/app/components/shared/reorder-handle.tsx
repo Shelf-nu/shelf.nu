@@ -31,9 +31,11 @@ export const reorderItemProps = {
 export const ReorderHandle = forwardRef<
   HTMLButtonElement,
   {
+    /** Controls from the row's `useDragControls`; pointer-down starts the drag. */
     dragControls: DragControls;
     /** Name of the item, read out as "Reorder {label}". */
     label: string;
+    /** Keyboard handler, usually `useKeyboardReorder`'s `handleKeyDown`. */
     onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void;
     /** Id of the element holding the keyboard instructions. */
     describedById: string;
@@ -42,14 +44,13 @@ export const ReorderHandle = forwardRef<
   <button
     ref={ref}
     type="button"
-    data-reorder-handle
     onPointerDown={(event) => dragControls.start(event)}
     onKeyDown={onKeyDown}
     className="flex cursor-grab touch-none items-center p-1 text-gray-500 hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary active:cursor-grabbing"
     aria-label={`Reorder ${label}`}
     aria-describedby={describedById}
     aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
-    title="Drag to reorder"
+    title="Drag to reorder or use Alt+Arrow keys"
   >
     <span className="block h-3 w-2">
       <HandleIcon />
@@ -59,19 +60,13 @@ export const ReorderHandle = forwardRef<
 ReorderHandle.displayName = "ReorderHandle";
 
 /**
- * "Drag to reorder" hint that swaps to the keyboard shortcut while one of the
- * list's handles has keyboard focus. Render it inside a `group` element that
- * also contains the handles.
+ * Hint line naming both ways to reorder. The keyboard shortcut stays visible at
+ * all times so sighted keyboard users can find it before they reach a handle.
  */
 export function ReorderHint({ className }: { className?: string }) {
   return (
     <div className={tw("text-xs text-gray-400", className)}>
-      <span className="group-has-[[data-reorder-handle]:focus-visible]:hidden">
-        Drag to reorder
-      </span>
-      <span className="hidden group-has-[[data-reorder-handle]:focus-visible]:inline">
-        Alt + ↑ / ↓ to move
-      </span>
+      Drag or Alt + ↑ / ↓ to reorder
     </div>
   );
 }

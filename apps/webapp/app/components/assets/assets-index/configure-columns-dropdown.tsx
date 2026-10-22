@@ -152,7 +152,7 @@ export function ConfigureColumnsDropdown() {
                 </ColumnRow>
               </div>
 
-              <div className="group border-t py-[2px]">
+              <div className="border-t py-[2px]">
                 <div className="flex items-center justify-between px-[10px] py-2 text-gray-500">
                   <div>
                     <div>Columns ({currentColumns.length})</div>
@@ -165,8 +165,9 @@ export function ConfigureColumnsDropdown() {
                 </div>
                 {/* Screen reader instructions */}
                 <div className="sr-only" id={instructionsId}>
-                  Press Alt plus Arrow Up or Arrow Down on a drag handle to move
-                  the column.
+                  Press Space or Enter on a column label to toggle its
+                  visibility. Press Alt plus Arrow Up or Arrow Down on a drag
+                  handle to move the column.
                 </div>
                 <Reorder.Group
                   values={currentColumns}
@@ -221,11 +222,17 @@ function ColumnItem({
   onToggle,
 }: {
   column: Column;
+  /** Position in the list; also the index of the posted `columns[i]` inputs. */
   index: number;
+  /** Number of columns, read out as "position {index + 1} of {total}". */
   total: number;
+  /** Id of the sr-only keyboard instructions the handle points at. */
   instructionsId: string;
+  /** Stores the handle in `useKeyboardReorder`'s `itemRefs` at `index`. */
   handleRef: (element: HTMLButtonElement | null) => void;
+  /** Alt+Arrow handler from `useKeyboardReorder`, bound to `index`. */
   onHandleKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void;
+  /** Flips the column's visibility. */
   onToggle: () => void;
 }) {
   const dragControls = useDragControls();
