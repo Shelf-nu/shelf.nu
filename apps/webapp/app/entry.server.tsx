@@ -13,6 +13,7 @@ import { registerAssetImportWorkers } from "./modules/asset-import/worker.server
 import { regierAssetWorkers } from "./modules/asset-reminder/worker.server";
 import { registerAuditWorkers } from "./modules/audit/worker.server";
 import { registerBookingWorkers } from "./modules/booking/worker.server";
+import { registerPushWorkers } from "./modules/push/worker.server";
 import { ShelfError } from "./utils/error";
 import { Logger } from "./utils/logger";
 import * as schedulerService from "./utils/scheduler.server";
@@ -88,6 +89,17 @@ schedulerService
               cause,
               message:
                 "Something went wrong while registering addon trial workers.",
+              label: "Scheduler",
+            })
+          );
+        }),
+      registerPushWorkers()
+        .then(() => console.log("Push workers registered"))
+        .catch((cause) => {
+          Logger.error(
+            new ShelfError({
+              cause,
+              message: "Something went wrong while registering push workers.",
               label: "Scheduler",
             })
           );
