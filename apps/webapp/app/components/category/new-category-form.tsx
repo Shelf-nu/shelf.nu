@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useId, useMemo } from "react";
 import type { Category } from "@prisma/client";
 import { useZorm } from "react-zorm";
 import z from "zod";
@@ -12,6 +12,7 @@ import { hexColorSchema, labelNameSchema } from "~/utils/label-form-fields";
 import { tw } from "~/utils/tw";
 import { zodFieldIsRequired } from "~/utils/zod";
 import { ColorInput } from "../forms/color-input";
+import { FormRowErrors } from "../forms/form-row-errors";
 import Input from "../forms/input";
 import { Button } from "../shared/button";
 
@@ -82,6 +83,20 @@ export default function NewCategoryForm({
   const colorError =
     zo.errors.color()?.message ?? validationErrors?.color?.message;
 
+  // Inline (dialog) mode stacks the fields, so each shows its own error. The
+  // standalone page lays them out in one row, where per-field text would push
+  // that field out of line: there they keep the red outline and the messages
+  // are listed under the buttons instead.
+  const showRowErrors = !hasOnSuccessFunc;
+  const errorsId = useId();
+  const rowErrorProps = (error: string | undefined) =>
+    showRowErrors
+      ? {
+          hideErrorText: true,
+          "aria-describedby": error ? errorsId : undefined,
+        }
+      : {};
+
   return (
     <fetcher.Form
       method="post"
@@ -101,6 +116,7 @@ export default function NewCategoryForm({
           name={zo.fields.name()}
           disabled={disabled}
           error={nameError}
+          {...rowErrorProps(nameError)}
           data-dialog-initial-focus
           required={zodFieldIsRequired(NewCategoryFormSchema.shape.name)}
         />
@@ -118,6 +134,7 @@ export default function NewCategoryForm({
             name={zo.fields.color()}
             disabled={disabled}
             error={colorError}
+            {...rowErrorProps(colorError)}
             colorFromServer={color}
             required
           />
@@ -163,9 +180,17 @@ export default function NewCategoryForm({
           </Button>
         </div>
 
-        <div className="mt-3 self-end text-sm text-error-500">
-          {fetcher?.data?.error ? fetcher.data.error.message : " "}
-        </div>
+        {showRowErrors && (nameError || colorError) ? (
+          <FormRowErrors
+            id={errorsId}
+            errors={[nameError, colorError]}
+            className="mt-3 self-end text-sm text-error-500"
+          />
+        ) : (
+          <div className="mt-3 self-end text-sm text-error-500">
+            {fetcher?.data?.error ? fetcher.data.error.message : " "}
+          </div>
+        )}
       </div>
     </fetcher.Form>
   );
