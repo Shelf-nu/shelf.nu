@@ -235,6 +235,44 @@ describe("CheckoutDialog confirmation", () => {
     }
   });
 
+  it("submits nothing and points at the blocking field when the form is invalid", () => {
+    vi.useFakeTimers();
+    const reportValidity = vi.spyOn(
+      HTMLFormElement.prototype,
+      "reportValidity"
+    );
+    try {
+      const submissions: unknown[] = [];
+      render(
+        <form
+          id="edit-booking-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            submissions.push(event);
+          }}
+        >
+          <input name="name" required defaultValue="" aria-label="Name" />
+          <CheckoutDialog booking={booking} formId="edit-booking-form" />
+        </form>
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Check Out" }));
+      fireEvent.click(screen.getByRole("button", { name: "Check out" }));
+      act(() => {
+        vi.runAllTimers();
+      });
+
+      expect(submissions).toHaveLength(0);
+      // The modal would hide the browser's message, so it steps aside and
+      // the form reports the field that blocked the check-out.
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+      expect(reportValidity).toHaveBeenCalled();
+    } finally {
+      reportValidity.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it("names neither every asset nor the booking start for any other intent", () => {
     renderInForm({ intent: "partial-checkout" });
 

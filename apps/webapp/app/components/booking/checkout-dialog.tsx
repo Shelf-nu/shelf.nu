@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type MouseEvent } from "react";
 import type { Booking } from "@prisma/client";
 import { Zap } from "lucide-react";
 import { useDisabled } from "~/hooks/use-disabled";
@@ -208,10 +208,21 @@ export default function CheckoutDialog({
    * React commits a click's state update before the browser runs the
    * button's submission. Unmounting them first drops them from the form, so
    * the check-out sends nothing or sends it without its fields.
+   *
+   * When the form fails constraint validation (a cleared booking name, an
+   * out-of-range quantity) the browser does not submit. The modal would hide
+   * its message, so the dialog still closes and the form then reports the
+   * field that blocked the check-out.
    */
   const [open, setOpen] = useState(false);
-  const closeOnSubmit = () => {
-    setTimeout(() => setOpen(false), 0);
+  const closeOnSubmit = (event: MouseEvent<HTMLButtonElement>) => {
+    /** `button.form` resolves `form={formId}` even from inside the portal. */
+    const form = event.currentTarget.form;
+    const isBlocked = form ? !form.checkValidity() : false;
+    setTimeout(() => {
+      setOpen(false);
+      if (isBlocked) form?.reportValidity();
+    }, 0);
   };
 
   if (isPlainCheckout && !confirm) {
