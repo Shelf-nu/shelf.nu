@@ -11,6 +11,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import type { AllowedModelNames } from "~/routes/api+/model-filters";
+import { redactTopBookingForViewer } from "~/utils/booking-visibility.server";
 import { bookingCustodianIsSelf } from "~/utils/bookings";
 import { getClientHint } from "~/utils/client-hints";
 import {
@@ -1050,10 +1051,16 @@ export async function advancedModeLoader({
       // (`assets._index.tsx` refuses it to restricted roles), so this is a
       // no-op in practice — applied so the rule lives with the payload rather
       // than depending on a gate two files away.
-      items: redactCustodianForViewer(refreshedAssets, {
-        canSeeAllCustody,
-        userId,
-      }),
+      // The biggest upcoming booking a row names for its stock verdict is
+      // redacted by the same reasoning, for a viewer limited to their own
+      // bookings.
+      items: redactTopBookingForViewer(
+        redactCustodianForViewer(refreshedAssets, {
+          canSeeAllCustody,
+          userId,
+        }),
+        { canSeeAllBookings: access.bookings.seeAll }
+      ),
       search,
       page,
       totalItems: isModelView ? totalGroupsForPayload : totalAssets,

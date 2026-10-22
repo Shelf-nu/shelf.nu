@@ -26,6 +26,7 @@ import {
   CONFIRM_MODEL_SHORTFALL_FIELD,
   isModelShortfallMessage,
 } from "~/modules/asset/archive-shortfall";
+import { getAssetAvailability } from "~/modules/asset/availability.server";
 import { getCustodySourceSummary } from "~/modules/asset/custody-source.server";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { toStillOutBookingRows } from "~/modules/asset/quantity-breakdown.server";
@@ -170,14 +171,25 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           select: {
             quantity: true,
             assetKitId: true,
-            booking: { select: { id: true, name: true, status: true } },
+            // `from` lets the status tooltip say WHEN each claim starts, which
+            // is what reconciles "12 reserved" with "10 free right now".
+            // Mirrors the select in `getAssetQuantityRows`, the lazy-fetch
+            // endpoint and this inline-SSR path feed the SAME component, so a
+            // field added to one has to be added to the other or the tooltip
+            // silently loses the date on whichever surface was missed.
+            booking: {
+              select: { id: true, name: true, status: true, from: true },
+            },
           },
+          // Soonest first, the tooltip caps how many slices it renders, so
+          // this decides which ones survive the cut.
+          orderBy: { booking: { from: "asc" } },
         },
       },
     });
 
     /**
-     * Three reads only a QUANTITY_TRACKED asset needs, run together since none
+     * Four reads only a QUANTITY_TRACKED asset needs, run together since none
      * depends on another. An INDIVIDUAL asset's badge asks
      * `/api/assets/:id/ongoing-booking` instead of reading `bookingAssets`,
      * and it has no quantity custody dialogs, so it pays for none of them.
@@ -193,12 +205,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      *    header's actions menu and the overview's custody and quantity cards),
      *    so they always show the same numbers. Counts only, no names, so it
      *    needs no redaction.
+     *  - The engine's free-now figure for the header tooltip.
      */
     const qtyTracked = isQuantityTracked(asset);
     const [
       stillOutByBooking,
       { teamMembers, totalTeamMembers },
       custodySources,
+      freeNow,
     ] = qtyTracked
       ? await Promise.all([
           computeCheckedOutByBookingForAsset(db, asset.id, organizationId),
@@ -213,11 +227,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             organizationId,
             total: asset.quantity ?? 0,
           }),
+          // The engine's free-now figure, so the header tooltip's "free right
+          // now" matches the Quantity Overview and the assets index.
+          getAssetAvailability({ assetId: asset.id, organizationId }).then(
+            (availability) => Math.max(0, availability.physicalAvailable)
+          ),
         ])
       : [
           null,
           { teamMembers: [], totalTeamMembers: 0 },
           { multiSource: false, options: [], poolAvailable: 0 },
+          null,
         ];
 
     const assetWithEffectiveBookingAssets = stillOutByBooking
@@ -227,6 +247,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             asset.bookingAssets ?? [],
             stillOutByBooking
           ),
+          freeNow,
         }
       : asset;
 

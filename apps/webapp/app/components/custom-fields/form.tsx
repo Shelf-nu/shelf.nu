@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useReducer, useState } from "react";
 import { CustomFieldType, type CustomField } from "@prisma/client";
 import { useAtom } from "jotai";
 import { Link, useActionData, useNavigation } from "react-router";
@@ -7,6 +7,10 @@ import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useOrganizationId } from "~/hooks/use-organization-id";
+import {
+  createOptionListState,
+  optionListReducer,
+} from "~/modules/custom-field/option-list";
 import type { action as editCustomFieldsAction } from "~/routes/_layout+/settings.custom-fields.$fieldId_.edit";
 import type { action as newCustomFieldsAction } from "~/routes/_layout+/settings.custom-fields.new";
 import { FIELD_TYPE_NAME } from "~/utils/custom-fields";
@@ -85,6 +89,11 @@ export const NewCustomFieldFormSchema = z.object({
   // orphan every asset already pointing at the old spelling. Normalising what an
   // operator types is `OptionBuilder`'s job, where it touches only new input.
   options: z.array(z.string()).optional(),
+  // Saved spelling -> final option, for assets that follow a renamed or merged
+  // option. `updateCustomField` checks each pair against the saved options.
+  optionRenames: z
+    .array(z.object({ from: z.string(), to: z.string() }))
+    .optional(),
   categories: z
     .array(z.string().min(1, "Please select a category"))
     .optional()
@@ -123,6 +132,8 @@ interface Props {
   type?: CustomField["type"];
   active?: CustomField["active"];
   options?: CustomField["options"];
+  /** Assets per stored option spelling, shown beside each option when editing. */
+  optionUsage?: Record<string, number>;
   isEdit?: boolean;
   categories?: string[];
 }
@@ -154,6 +165,7 @@ export const CustomFieldForm = ({
   required,
   type,
   active,
+  optionUsage,
   isEdit = false,
   categories = EMPTY_CATEGORIES,
 }: Props) => {
@@ -161,7 +173,11 @@ export const CustomFieldForm = ({
   const zo = useZorm("NewQuestionWizardScreen", NewCustomFieldFormSchema);
   const disabled = isFormProcessing(navigation.state);
 
-  const [options, setOptions] = useState<Array<string>>(opts || []);
+  const [optionList, dispatchOptionList] = useReducer(
+    optionListReducer,
+    opts ?? [],
+    createOptionListState
+  );
   const [selectedType, setSelectedType] = useState<CustomFieldType>(
     type || "TEXT"
   );
@@ -256,24 +272,12 @@ export const CustomFieldForm = ({
             <>
               <FormRow rowLabel="" className="mt-0 border-b-0 pt-0">
                 <OptionBuilder
-                  onRemove={(i: number) => {
-                    options.splice(i, 1);
-                    setOptions([...options]);
-                  }}
-                  options={options}
-                  onAdd={(o: string) => setOptions([...options, o])}
+                  state={optionList}
+                  dispatch={dispatchOptionList}
+                  usageCounts={optionUsage}
+                  optionName={(i) => zo.fields.options(i)()}
+                  renameName={(i, side) => zo.fields.optionRenames(i)[side]()}
                 />
-                {options.map((op, i) => (
-                  // Option values are the stable identity here — the
-                  // OptionBuilder above disallows duplicates, so each
-                  // option string is unique within this list.
-                  <input
-                    key={op}
-                    type="hidden"
-                    name={zo.fields.options(i)()}
-                    value={op}
-                  />
-                ))}
                 {/* "At least one option" spans type + options, so it is refined
                     on the submission schema rather than on a single field and
                     arrives here as a server error. */}

@@ -677,9 +677,15 @@ export function applyCustodianAllowList(
 }
 
 /**
- * Low-stock fragment: QUANTITY_TRACKED assets at or below their minimum, the
- * same rows as the advanced index's `lowStockOnly` SQL. A function, not a
- * constant, because the field reference comes from the live client.
+ * Low-stock fragment for the simple list: QUANTITY_TRACKED assets whose TOTAL
+ * quantity is at or below their minimum.
+ *
+ * Deliberately not the advanced index's `lowStockOnly` rule, which compares
+ * Free now (total minus custody, kits and units out) and needs the SQL pool
+ * aggregate this Prisma query cannot express. The two lists can therefore
+ * disagree on an asset with units held or out; the low-stock email follows
+ * the advanced rule. A function, not a constant, because the field reference
+ * comes from the live client.
  */
 export function buildLowStockWhere(): Prisma.AssetWhereInput {
   return {

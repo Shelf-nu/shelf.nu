@@ -12,6 +12,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { db } from "~/database/db.server";
 import { captureServerEvent } from "~/integrations/posthog/client.server";
+import { buildReportAssetFilter } from "~/modules/reports/asset-filter";
+import { resolveReportFilters } from "~/modules/reports/filters.server";
 import { custodySnapshotReport } from "~/modules/reports/helpers.server";
 import { loader } from "~/routes/api+/reports.$reportId.generate-pdf";
 import { requirePermission } from "~/utils/roles.server";
@@ -75,6 +77,18 @@ vi.mock("~/utils/subscription.server", async (importOriginal) => ({
   workspaceCanUseReports: vi.fn().mockResolvedValue(true),
   assertUserCanUseReports: vi.fn().mockResolvedValue(undefined),
 }));
+
+// why: the resolver verifies filter ids against the database (its own suite
+// covers that). It runs for real unless a case supplies what it resolved.
+vi.mock("~/modules/reports/filters.server", async () => {
+  const actual = await vi.importActual<
+    typeof import("~/modules/reports/filters.server")
+  >("~/modules/reports/filters.server");
+  return {
+    ...actual,
+    resolveReportFilters: vi.fn(actual.resolveReportFilters),
+  };
+});
 
 // why: PostHog is an external service; record what would be sent.
 vi.mock("~/integrations/posthog/client.server", () => ({
@@ -142,5 +156,34 @@ describe("report PDF loader", () => {
         reportId: "custody-snapshot",
       },
     });
+  });
+});
+
+describe("report PDF loader: filters", () => {
+  it("hands the report the filters the page resolved, so the PDF holds the page's rows", async () => {
+    const assetFilter = buildReportAssetFilter({ categoryIds: ["cat-1"] });
+    vi.mocked(resolveReportFilters).mockResolvedValueOnce({
+      params: {
+        categoryIds: ["cat-1"],
+        locationIds: [],
+        teamMemberId: "tm-1",
+        statuses: [],
+        assetModelIds: [],
+        assetId: null,
+        customFieldValues: [],
+      },
+      assetFilter,
+      bookingStatuses: [],
+      teamMemberId: "tm-1",
+      assetId: null,
+      active: [],
+      ignoredCount: 0,
+    });
+
+    await loader(buildArgs());
+
+    expect(custodySnapshotReport).toHaveBeenCalledWith(
+      expect.objectContaining({ teamMemberId: "tm-1", assetFilter })
+    );
   });
 });

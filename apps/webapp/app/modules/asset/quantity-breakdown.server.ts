@@ -23,6 +23,7 @@ import { computeCheckedOutByBookingForAsset } from "~/modules/booking/checked-ou
 import { ShelfError } from "~/utils/error";
 import {
   computeCheckedOutByBookingBatch,
+  getAssetAvailabilityBatch,
   type AvailabilityBatchClient,
 } from "./availability.server";
 import { isQuantityTracked } from "./utils";
@@ -76,8 +77,17 @@ export async function getAssetQuantityRows(
         select: {
           quantity: true,
           assetKitId: true,
-          booking: { select: { id: true, name: true, status: true } },
+          // `from` lets the tooltip say WHEN, which is the fact that reconciles
+          // "12 reserved" with "10 free right now", those units have not left
+          // the shelf yet. Without it the two lines read as a contradiction.
+          booking: {
+            select: { id: true, name: true, status: true, from: true },
+          },
         },
+        // Soonest first. The tooltip renders only the first few slices for a
+        // heavily-booked asset, so the order decides WHICH ones survive the
+        // cut, and the booking starting next is the one worth showing.
+        orderBy: { booking: { from: "asc" } },
       },
       assetKits: {
         select: {
@@ -99,11 +109,22 @@ export async function getAssetQuantityRows(
     });
   }
 
-  const stillOutByBooking = await computeCheckedOutByBookingForAsset(
-    db,
-    asset.id,
-    organizationId
-  );
+  // Independent reads. Free now is the engine's figure, so "free right now"
+  // in the tooltip matches the asset page and the assets index even when
+  // units sit in kits.
+  const [stillOutByBooking, availability] = await Promise.all([
+    computeCheckedOutByBookingForAsset(db, asset.id, organizationId),
+    isQuantityTracked(asset)
+      ? getAssetAvailabilityBatch([asset.id], {
+          organizationId,
+          window: null,
+          db: db as unknown as AvailabilityBatchClient,
+        })
+      : null,
+  ]);
+  const freeNow = availability
+    ? Math.max(0, availability.get(asset.id)?.physicalAvailable ?? 0)
+    : null;
 
   return {
     ...asset,
@@ -111,6 +132,7 @@ export async function getAssetQuantityRows(
       asset.bookingAssets,
       stillOutByBooking
     ),
+    freeNow,
   };
 }
 
