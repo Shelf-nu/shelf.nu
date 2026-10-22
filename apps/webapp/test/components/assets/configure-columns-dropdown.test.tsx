@@ -8,8 +8,16 @@
  */
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ConfigureColumnsDropdown } from "~/components/assets/assets-index/configure-columns-dropdown";
+
+const dragStart = vi.hoisted(() => vi.fn());
+vi.mock("framer-motion", async () => ({
+  ...(await vi.importActual<object>("framer-motion")),
+  // why: real DragControls need layout measurement happy-dom does not provide;
+  // the spy shows which pointer-down starts a drag.
+  useDragControls: () => ({ start: dragStart, subscribe: () => () => {} }),
+}));
 
 const COLUMNS = [
   { name: "status", visible: true, position: 0 },
@@ -58,6 +66,24 @@ function postedColumns(form: FormData) {
 }
 
 describe("ConfigureColumnsDropdown", () => {
+  beforeEach(() => dragStart.mockClear());
+
+  it("starts a drag only from the handle, not from the column label", async () => {
+    renderDropdown();
+    await openPopover();
+    const label = screen.getByRole("checkbox", { name: /Status/ });
+
+    fireEvent.pointerDown(label);
+    expect(dragStart).not.toHaveBeenCalled();
+    // framer marks a row that drags from anywhere with touch-action: pan-x.
+    expect(label.closest("li")?.style.touchAction).not.toBe("pan-x");
+
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "Reorder Status" })
+    );
+    expect(dragStart).toHaveBeenCalledTimes(1);
+  });
+
   it("posts the new order and visibility after a keyboard move and a toggle", async () => {
     const posted = renderDropdown();
     await openPopover();

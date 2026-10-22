@@ -9,15 +9,23 @@
  * @see {@link file://./option-builder.tsx}
  */
 import { useReducer } from "react";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   createOptionListState,
   optionListReducer,
 } from "~/modules/custom-field/option-list";
 import OptionBuilder, { resolveOptionEntry } from "./option-builder";
+
+const dragStart = vi.hoisted(() => vi.fn());
+vi.mock("framer-motion", async () => ({
+  ...(await vi.importActual<object>("framer-motion")),
+  // why: real DragControls need layout measurement happy-dom does not provide;
+  // the spy shows which pointer-down starts a drag.
+  useDragControls: () => ({ start: dragStart, subscribe: () => () => {} }),
+}));
 
 describe("resolveOptionEntry", () => {
   it("adds a plain option", () => {
@@ -100,6 +108,21 @@ describe("OptionBuilder", () => {
     const form = container.querySelector("form") as HTMLFormElement;
     return () => [...new FormData(form).entries()];
   }
+
+  beforeEach(() => dragStart.mockClear());
+
+  it("starts a drag only from the handle, not from the option name", () => {
+    renderBuilder(["Sony", "Canon"]);
+    const name = screen.getByRole("button", { name: "Rename Sony" });
+
+    fireEvent.pointerDown(name);
+    expect(dragStart).not.toHaveBeenCalled();
+    // framer marks a row that drags from anywhere with touch-action: pan-x.
+    expect(name.closest("li")?.style.touchAction).not.toBe("pan-x");
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Reorder Sony" }));
+    expect(dragStart).toHaveBeenCalledTimes(1);
+  });
 
   it("posts the merged and renamed options with the renames that move their assets", async () => {
     const user = userEvent.setup();
