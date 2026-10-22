@@ -20,7 +20,12 @@ import {
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
+import { getValidationErrors } from "~/utils/http";
 import { payload, error, getParams, parseData } from "~/utils/http.server";
+import {
+  labelNameSchema,
+  optionalHexColorSchema,
+} from "~/utils/label-form-fields";
 
 import {
   PermissionAction,
@@ -30,14 +35,9 @@ import { requirePermission } from "~/utils/roles.server";
 import { zodFieldIsRequired } from "~/utils/zod";
 
 export const UpdateTagFormSchema = z.object({
-  name: z.string().min(3, "Name is required"),
+  name: labelNameSchema,
   description: z.string(),
-  color: z
-    .string()
-    .regex(/^#[0-9a-fA-F]{6}$/)
-    .optional()
-    .or(z.literal(""))
-    .transform((val) => (val === "" || !val ? null : val)),
+  color: optionalHexColorSchema,
   useFor: z
     .string()
     .optional()
@@ -129,6 +129,10 @@ export default function EditTag() {
   const zo = useZorm("NewQuestionWizardScreen", UpdateTagFormSchema);
   const { tag, tagUseFor, colorFromServer } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
+  /** Server-side errors, shown when client-side validation is bypassed */
+  const validationErrors = getValidationErrors<typeof UpdateTagFormSchema>(
+    actionData?.error
+  );
   const disabled = useDisabled();
 
   return tag ? (
@@ -147,8 +151,9 @@ export default function EditTag() {
               className="mb-4 lg:mb-0 lg:max-w-[180px]"
               name={zo.fields.name()}
               disabled={disabled}
-              error={zo.errors.name()?.message}
-              hideErrorText
+              error={
+                validationErrors?.name?.message || zo.errors.name()?.message
+              }
               required={zodFieldIsRequired(UpdateTagFormSchema.shape.name)}
               defaultValue={tag.name}
             />
@@ -168,8 +173,9 @@ export default function EditTag() {
               <ColorInput
                 name={zo.fields.color()}
                 disabled={disabled}
-                error={zo.errors.color()?.message}
-                hideErrorText
+                error={
+                  validationErrors?.color?.message || zo.errors.color()?.message
+                }
                 colorFromServer={colorFromServer}
                 required={zodFieldIsRequired(UpdateTagFormSchema.shape.color)}
               />

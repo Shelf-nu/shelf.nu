@@ -8,6 +8,7 @@ import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import type { action } from "~/routes/_layout+/categories.new";
 import { getRandomColor } from "~/utils/get-random-color";
 import { getValidationErrors } from "~/utils/http";
+import { hexColorSchema, labelNameSchema } from "~/utils/label-form-fields";
 import { tw } from "~/utils/tw";
 import { zodFieldIsRequired } from "~/utils/zod";
 import { ColorInput } from "../forms/color-input";
@@ -15,9 +16,9 @@ import Input from "../forms/input";
 import { Button } from "../shared/button";
 
 export const NewCategoryFormSchema = z.object({
-  name: z.string().min(3, "Name is required"),
+  name: labelNameSchema,
   description: z.string(),
-  color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+  color: hexColorSchema,
   preventRedirect: z.string().optional(),
 });
 
@@ -73,15 +74,13 @@ export default function NewCategoryForm({
     fetcher.data?.error
   );
 
-  // Compute field-specific errors: prefer Zod client-side validation errors,
-  // fall back to server validation errors only in inline mode
+  // Field errors: client-side Zod errors first, server validation errors as
+  // the fallback when client-side validation is bypassed.
   const nameError =
-    zo.errors.name()?.message ??
-    (hasOnSuccessFunc ? validationErrors?.name?.message : undefined);
+    zo.errors.name()?.message ?? validationErrors?.name?.message;
 
   const colorError =
-    zo.errors.color()?.message ??
-    (hasOnSuccessFunc ? validationErrors?.color?.message : undefined);
+    zo.errors.color()?.message ?? validationErrors?.color?.message;
 
   return (
     <fetcher.Form
@@ -102,7 +101,6 @@ export default function NewCategoryForm({
           name={zo.fields.name()}
           disabled={disabled}
           error={nameError}
-          hideErrorText={!hasOnSuccessFunc}
           data-dialog-initial-focus
           required={zodFieldIsRequired(NewCategoryFormSchema.shape.name)}
         />
@@ -113,7 +111,6 @@ export default function NewCategoryForm({
           disabled={disabled}
           data-test-id="categoryDescription"
           className={tw("mb-4 lg:mb-0", inputClassName)}
-          hideErrorText={!hasOnSuccessFunc}
           required={zodFieldIsRequired(NewCategoryFormSchema.shape.description)}
         />
         <div className={tw("mb-6 lg:mb-0", inputClassName)}>
@@ -121,9 +118,8 @@ export default function NewCategoryForm({
             name={zo.fields.color()}
             disabled={disabled}
             error={colorError}
-            hideErrorText={!hasOnSuccessFunc}
             colorFromServer={color}
-            required={zodFieldIsRequired(NewCategoryFormSchema.shape.color)}
+            required
           />
         </div>
 
