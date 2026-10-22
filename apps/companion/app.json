@@ -95,6 +95,14 @@
       "expo-font",
       "expo-web-browser",
       "expo-quick-actions",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/notification-icon.png",
+          "color": "#FF7809",
+          "defaultChannel": "default"
+        }
+      ],
       "./plugins/swift-concurrency-fix",
       "@sentry/react-native",
       [
