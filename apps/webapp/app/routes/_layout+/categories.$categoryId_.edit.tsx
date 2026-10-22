@@ -1,8 +1,10 @@
+import { useState } from "react";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data, redirect, useActionData, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
+import { ColorBadgePreview } from "~/components/forms/color-badge-preview";
 import { ColorInput } from "~/components/forms/color-input";
 import { FormRowErrors, rowErrorId } from "~/components/forms/form-row-errors";
 import Input from "~/components/forms/input";
@@ -124,6 +126,11 @@ export default function EditCategory() {
   // Focus the Name input on mount of the edit page.
   const nameInputRef = useAutoFocus<HTMLInputElement>();
   const { colorFromServer, category } = useLoaderData<typeof loader>();
+  /** Live name and color for the badge preview under the field row */
+  const [previewName, setPreviewName] = useState<string>(category.name);
+  const [previewColor, setPreviewColor] = useState<string | null>(
+    colorFromServer || null
+  );
   const actionData = useActionData<typeof action>();
   /** Server-side errors, shown when client-side validation is bypassed */
   const validationErrors = getValidationErrors<typeof UpdateCategoryFormSchema>(
@@ -151,6 +158,7 @@ export default function EditCategory() {
             placeholder="Category name"
             className="mb-4 lg:mb-0 lg:max-w-[180px]"
             name={zo.fields.name()}
+            onChange={(e) => setPreviewName(e.target.value)}
             disabled={disabled}
             error={nameError}
             hideErrorText
@@ -182,6 +190,7 @@ export default function EditCategory() {
                 colorError ? rowErrorId(errorsId, "color") : undefined
               }
               colorFromServer={colorFromServer}
+              onColorChange={setPreviewColor}
               required
             />
           </div>
@@ -196,6 +205,7 @@ export default function EditCategory() {
           </Button>
         </div>
       </div>
+      <ColorBadgePreview name={previewName} color={previewColor} />
       <FormRowErrors
         id={errorsId}
         errors={{ name: nameError, color: colorError }}

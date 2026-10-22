@@ -1,9 +1,11 @@
+import { useState } from "react";
 import { TagUseFor } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data, redirect, useActionData, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
+import { ColorBadgePreview } from "~/components/forms/color-badge-preview";
 import { ColorInput } from "~/components/forms/color-input";
 import { FormRowErrors, rowErrorId } from "~/components/forms/form-row-errors";
 import Input from "~/components/forms/input";
@@ -129,6 +131,11 @@ export default function EditTag() {
   const nameInputRef = useAutoFocus<HTMLInputElement>();
   const zo = useZorm("NewQuestionWizardScreen", UpdateTagFormSchema);
   const { tag, tagUseFor, colorFromServer } = useLoaderData<typeof loader>();
+  /** Live name and color for the badge preview under the field row */
+  const [previewName, setPreviewName] = useState<string>(tag?.name ?? "");
+  const [previewColor, setPreviewColor] = useState<string | null>(
+    colorFromServer || null
+  );
   const actionData = useActionData<typeof action>();
   /** Server-side errors, shown when client-side validation is bypassed */
   const validationErrors = getValidationErrors<typeof UpdateTagFormSchema>(
@@ -157,6 +164,7 @@ export default function EditTag() {
               placeholder="Tag name"
               className="mb-4 lg:mb-0 lg:max-w-[180px]"
               name={zo.fields.name()}
+              onChange={(e) => setPreviewName(e.target.value)}
               disabled={disabled}
               error={nameError}
               hideErrorText
@@ -188,6 +196,7 @@ export default function EditTag() {
                   colorError ? rowErrorId(errorsId, "color") : undefined
                 }
                 colorFromServer={colorFromServer}
+                onColorChange={setPreviewColor}
                 required={zodFieldIsRequired(UpdateTagFormSchema.shape.color)}
               />
             </div>
@@ -223,6 +232,7 @@ export default function EditTag() {
           </div>
         </div>
 
+        <ColorBadgePreview name={previewName} color={previewColor} />
         <FormRowErrors
           id={errorsId}
           errors={{ name: nameError, color: colorError }}

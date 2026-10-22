@@ -1,9 +1,11 @@
+import { useState } from "react";
 import { TagUseFor } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data, redirect, useActionData, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
+import { ColorBadgePreview } from "~/components/forms/color-badge-preview";
 import { ColorInput } from "~/components/forms/color-input";
 import { FormRowErrors, rowErrorId } from "~/components/forms/form-row-errors";
 import Input from "~/components/forms/input";
@@ -119,6 +121,11 @@ export default function NewTag() {
   const nameInputRef = useAutoFocus<HTMLInputElement>();
   const zo = useZorm("NewQuestionWizardScreen", NewTagFormSchema);
   const { tagUseFor, colorFromServer } = useLoaderData<typeof loader>();
+  /** Live name and color for the badge preview under the field row */
+  const [previewName, setPreviewName] = useState<string>("");
+  const [previewColor, setPreviewColor] = useState<string | null>(
+    colorFromServer || null
+  );
 
   const disabled = useDisabled();
   const actionData = useActionData<typeof action>();
@@ -148,6 +155,7 @@ export default function NewTag() {
               placeholder="Tag name"
               className="mb-4 lg:mb-0 lg:max-w-[180px]"
               name={zo.fields.name()}
+              onChange={(e) => setPreviewName(e.target.value)}
               disabled={disabled}
               error={nameError}
               hideErrorText
@@ -175,6 +183,7 @@ export default function NewTag() {
                   colorError ? rowErrorId(errorsId, "color") : undefined
                 }
                 colorFromServer={colorFromServer}
+                onColorChange={setPreviewColor}
                 required={zodFieldIsRequired(NewTagFormSchema.shape.color)}
               />
             </div>
@@ -208,6 +217,7 @@ export default function NewTag() {
           </div>
         </div>
 
+        <ColorBadgePreview name={previewName} color={previewColor} />
         <FormRowErrors
           id={errorsId}
           errors={{ name: nameError, color: colorError }}

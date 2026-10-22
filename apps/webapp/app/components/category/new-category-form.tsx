@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import type { Category } from "@prisma/client";
 import { useZorm } from "react-zorm";
 import z from "zod";
@@ -11,6 +11,7 @@ import { getValidationErrors } from "~/utils/http";
 import { hexColorSchema, labelNameSchema } from "~/utils/label-form-fields";
 import { tw } from "~/utils/tw";
 import { zodFieldIsRequired } from "~/utils/zod";
+import { ColorBadgePreview } from "../forms/color-badge-preview";
 import { ColorInput } from "../forms/color-input";
 import { FormRowErrors, rowErrorId } from "../forms/form-row-errors";
 import Input from "../forms/input";
@@ -49,6 +50,9 @@ export default function NewCategoryForm({
   const disabled = useDisabled(fetcher);
 
   const color = useMemo(() => getRandomColor(), []);
+  /** Live name and color for the badge preview under the fields */
+  const [previewName, setPreviewName] = useState("");
+  const [previewColor, setPreviewColor] = useState<string | null>(color);
 
   // Focus the Name field on mount. When this form is rendered inside a
   // dialog the dialog's `data-dialog-initial-focus` handler typically wins;
@@ -107,42 +111,49 @@ export default function NewCategoryForm({
       ref={zo.ref}
       action={apiUrl}
     >
-      <div className={tw("gap-4 md:flex md:items-center", className)}>
-        <Input
-          ref={nameInputRef}
-          label="Name"
-          placeholder="Category name"
-          className={tw("mb-4 lg:mb-0 lg:max-w-[180px]", inputClassName)}
-          name={zo.fields.name()}
-          disabled={disabled}
-          error={nameError}
-          {...rowErrorProps("name", nameError)}
-          data-dialog-initial-focus
-          required={zodFieldIsRequired(NewCategoryFormSchema.shape.name)}
-        />
-        <Input
-          label="Description"
-          placeholder="Description (optional)"
-          name={zo.fields.description()}
-          disabled={disabled}
-          data-test-id="categoryDescription"
-          className={tw("mb-4 lg:mb-0", inputClassName)}
-          required={zodFieldIsRequired(NewCategoryFormSchema.shape.description)}
-        />
-        <div className={tw("mb-6 lg:mb-0", inputClassName)}>
-          <ColorInput
-            name={zo.fields.color()}
+      <div className={tw("flex flex-col", hasOnSuccessFunc && "w-full")}>
+        <div className={tw("gap-4 md:flex md:items-center", className)}>
+          <Input
+            ref={nameInputRef}
+            label="Name"
+            placeholder="Category name"
+            className={tw("mb-4 lg:mb-0 lg:max-w-[180px]", inputClassName)}
+            name={zo.fields.name()}
+            onChange={(e) => setPreviewName(e.target.value)}
             disabled={disabled}
-            error={colorError}
-            {...rowErrorProps("color", colorError)}
-            colorFromServer={color}
-            required
+            error={nameError}
+            {...rowErrorProps("name", nameError)}
+            data-dialog-initial-focus
+            required={zodFieldIsRequired(NewCategoryFormSchema.shape.name)}
           />
-        </div>
+          <Input
+            label="Description"
+            placeholder="Description (optional)"
+            name={zo.fields.description()}
+            disabled={disabled}
+            data-test-id="categoryDescription"
+            className={tw("mb-4 lg:mb-0", inputClassName)}
+            required={zodFieldIsRequired(
+              NewCategoryFormSchema.shape.description
+            )}
+          />
+          <div className={tw("mb-6 lg:mb-0", inputClassName)}>
+            <ColorInput
+              name={zo.fields.color()}
+              disabled={disabled}
+              error={colorError}
+              {...rowErrorProps("color", colorError)}
+              colorFromServer={color}
+              onColorChange={setPreviewColor}
+              required
+            />
+          </div>
 
-        {hasOnSuccessFunc ? (
-          <input type="hidden" name="preventRedirect" value="true" />
-        ) : null}
+          {hasOnSuccessFunc ? (
+            <input type="hidden" name="preventRedirect" value="true" />
+          ) : null}
+        </div>
+        <ColorBadgePreview name={previewName} color={previewColor} />
       </div>
 
       <div className={buttonsClassName}>

@@ -51,6 +51,21 @@ describe("ColorInput", () => {
     expect(swatch()).not.toHaveAttribute("name");
   });
 
+  it("reports each valid color, and null while the hex is incomplete", () => {
+    // why: spy captures what ColorInput reports to the form's badge preview
+    const onColorChange = vi.fn();
+    renderColorInput({ onColorChange });
+
+    fireEvent.change(swatch(), { target: { value: "#12b76a" } });
+    expect(onColorChange).toHaveBeenLastCalledWith("#12b76a");
+
+    fireEvent.change(hexField(), { target: { value: "#FFF" } });
+    expect(onColorChange).toHaveBeenLastCalledWith("#ffffff");
+
+    fireEvent.change(hexField(), { target: { value: "#12" } });
+    expect(onColorChange).toHaveBeenLastCalledWith(null);
+  });
+
   it("disables the swatch with the field", () => {
     renderColorInput({ disabled: true });
     expect(swatch()).toBeDisabled();

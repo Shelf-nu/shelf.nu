@@ -10,6 +10,10 @@
  * only the hex field is submitted and validated (`hexColorSchema` /
  * `optionalHexColorSchema`).
  *
+ * The color is reported through `onColorChange` (a valid `#rrggbb`, or null
+ * while the hex is empty or half typed), so the form can render a
+ * `ColorBadgePreview` below its field row.
+ *
  * Focusing the hex field opens the picker too. Safari and Firefox show it as a
  * separate window, and closing that window hands focus back to the hex field;
  * that return must not reopen the picker, or the hex could never be typed.
@@ -18,7 +22,6 @@
  */
 import type { ChangeEvent, FocusEvent } from "react";
 import { useRef, useState } from "react";
-import { darkenColor } from "~/utils/color-contrast";
 import { getRandomColor } from "~/utils/get-random-color";
 import { hexColorSchema } from "~/utils/label-form-fields";
 import { tw } from "~/utils/tw";
@@ -44,14 +47,17 @@ function toSwatchColor(value: string | undefined) {
  * Color field with a native picker swatch, hex text input and random button.
  *
  * @param props.colorFromServer - Initial color; the field re-syncs when it changes
+ * @param props.onColorChange - Receives each valid color, or null while there is none
  * @param props.disabled - Disables the swatch along with the hex field
  * @param props.rest - Passed to the hex `Input` (name, error, required, ...)
  */
 export const ColorInput = ({
   colorFromServer,
+  onColorChange,
   ...rest
 }: {
   colorFromServer?: string;
+  onColorChange?: (color: string | null) => void;
   [key: string]: any;
 }) => {
   const [color, setColor] = useState<string>(() => colorFromServer || "");
@@ -80,6 +86,7 @@ export const ColorInput = ({
     if (next) {
       setSwatchColor(next);
     }
+    onColorChange?.(next);
   };
 
   const handleColorChange = (e: ChangeEvent<HTMLInputElement>) => {
@@ -119,8 +126,6 @@ export const ColorInput = ({
     focusLeftWindow.current = !document.hasFocus();
   };
 
-  // Use darkened color for icon text to match Badge component
-  const iconColor = color ? darkenColor(color, 0.5) : undefined;
   // An empty or half-typed hex leaves the swatch blank rather than showing a
   // color the form would not save.
   const hasColor = toSwatchColor(color) !== null;
@@ -166,11 +171,7 @@ export const ColorInput = ({
         as="a"
         onClick={handleRefresh}
         className="cursor-pointer p-2"
-        style={{
-          backgroundColor: `${color}33`,
-          color: iconColor,
-        }}
-        title="Generate random color (preview shows how badge will look)"
+        title="Generate random color"
         data-test-id="generateRandomColor"
       />
     </div>
