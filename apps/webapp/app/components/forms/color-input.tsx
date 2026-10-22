@@ -10,9 +10,13 @@
  * only the hex field is submitted and validated (`hexColorSchema` /
  * `optionalHexColorSchema`).
  *
+ * Focusing the hex field opens the picker too. Safari and Firefox show it as a
+ * separate window, and closing that window hands focus back to the hex field;
+ * that return must not reopen the picker, or the hex could never be typed.
+ *
  * @see {@link file://./../../utils/label-form-fields.ts}
  */
-import type { ChangeEvent } from "react";
+import type { ChangeEvent, FocusEvent } from "react";
 import { useRef, useState } from "react";
 import { darkenColor } from "~/utils/color-contrast";
 import { getRandomColor } from "~/utils/get-random-color";
@@ -67,6 +71,8 @@ export const ColorInput = ({
     setSwatchColor(toSwatchColor(colorFromServer) ?? SWATCH_FALLBACK);
   }
 
+  const disabled = Boolean(rest.disabled);
+
   /** Sets the hex field and, when it is a valid color, the swatch */
   const applyColor = (value: string) => {
     setColor(value);
@@ -84,9 +90,37 @@ export const ColorInput = ({
     applyColor(getRandomColor());
   };
 
+  const swatchRef = useRef<HTMLInputElement>(null);
+  /** Set when the hex field lost focus to another window (the picker's) */
+  const focusLeftWindow = useRef(false);
+
+  const handleHexFocus = (e: FocusEvent<HTMLInputElement>) => {
+    rest.onFocus?.(e);
+    if (focusLeftWindow.current) {
+      // Focus is only coming back from the picker window
+      focusLeftWindow.current = false;
+      return;
+    }
+    const picker = swatchRef.current;
+    if (disabled || typeof picker?.showPicker !== "function") {
+      return;
+    }
+    try {
+      picker.showPicker();
+    } catch {
+      // The browser refuses without a user gesture (e.g. a programmatic
+      // focus); the hex field still works on its own.
+    }
+  };
+
+  const handleHexBlur = (e: FocusEvent<HTMLInputElement>) => {
+    rest.onBlur?.(e);
+    // A blur while the document has no focus means another window took it
+    focusLeftWindow.current = !document.hasFocus();
+  };
+
   // Use darkened color for icon text to match Badge component
   const iconColor = color ? darkenColor(color, 0.5) : undefined;
-  const disabled = Boolean(rest.disabled);
   // An empty or half-typed hex leaves the swatch blank rather than showing a
   // color the form would not save.
   const hasColor = toSwatchColor(color) !== null;
@@ -109,6 +143,7 @@ export const ColorInput = ({
         <input
           type="color"
           aria-label="Choose a color"
+          ref={swatchRef}
           value={swatchColor}
           onChange={handleColorChange}
           disabled={disabled}
@@ -121,6 +156,8 @@ export const ColorInput = ({
         onChange={handleColorChange}
         className="w-full min-w-[120px] lg:max-w-[120px]"
         {...rest}
+        onFocus={handleHexFocus}
+        onBlur={handleHexBlur}
       />
       <Button
         icon="refresh"
