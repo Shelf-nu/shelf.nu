@@ -167,7 +167,7 @@ export declare function auditAssetStatusLabel(
 ): AuditAssetStatusLabel;
 
 /**
- * Why a booking cannot be reserved yet — the three rules web's Reserve button
+ * Why a booking cannot be reserved yet: the rules web's Reserve button
  * disables on, in one register for every surface that states them (web
  * tooltip, mobile route 400, in-transaction guard, companion client note).
  *
@@ -179,6 +179,7 @@ export declare const BOOKING_RESERVE_BLOCKED_LABELS: {
   readonly NOTHING_TO_RESERVE: "Add assets or reserve at least one model on this booking before you reserve it.";
   readonly UNAVAILABLE_ASSETS: "This booking holds assets marked as unavailable. Remove them, or make them available again, before reserving.";
   readonly ALREADY_BOOKED: "This booking holds assets already booked for that period. Remove them, or change the dates, before reserving.";
+  readonly START_PASSED: "The start time has passed. Move it later to reserve.";
 };
 
 /**
