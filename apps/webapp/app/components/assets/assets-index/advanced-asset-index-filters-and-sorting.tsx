@@ -708,7 +708,6 @@ function AdvancedSorting() {
           )}
         >
           <div className="border-b p-4 pb-5">
-            {/* ARIA live region for screen reader announcements */}
             <div
               role="status"
               aria-live="polite"
@@ -784,7 +783,6 @@ function AdvancedSorting() {
   );
 }
 
-/** One draggable sort rule: drag handle, column name, direction, remove. */
 function SortRuleItem({
   sort,
   index,
