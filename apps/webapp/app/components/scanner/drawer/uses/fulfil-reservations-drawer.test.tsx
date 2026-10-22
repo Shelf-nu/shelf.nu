@@ -95,14 +95,17 @@ vi.mock("~/components/booking/checkout-dialog", () => ({
   default: ({
     disabled,
     unassignedUnits,
+    confirm,
   }: {
     disabled?: boolean;
     unassignedUnits?: Array<{ name: string; count: number }>;
+    confirm?: boolean;
   }) => (
     <button
       type="submit"
       disabled={disabled}
       data-unassigned={JSON.stringify(unassignedUnits ?? [])}
+      data-confirm={String(confirm ?? true)}
     >
       Check out
     </button>
@@ -307,6 +310,15 @@ describe("FulfilReservationsDrawer layout", () => {
 
     expect(checkoutButton).toBeTruthy();
     expect(getScrollingList().contains(checkoutButton)).toBe(false);
+  });
+
+  it("does not ask for a second confirmation, since the drawer is the confirm step", () => {
+    renderDrawer(40);
+
+    expect(screen.getByRole("button", { name: "Check out" })).toHaveAttribute(
+      "data-confirm",
+      "false"
+    );
   });
 
   it("lets the header yield height so the pinned action cannot be pushed off", () => {
