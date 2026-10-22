@@ -141,9 +141,9 @@ function ImportContentBody({
       </p>
 
       <p className="my-4 text-[14px] text-gray-600">
-        Already have a spreadsheet from another tool? Upload it as it is.
-        Before anything is imported, you will check how each of its columns
-        maps to a Shelf field.
+        Already have a spreadsheet from another tool? Upload it as it is. Before
+        anything is imported, you will check how each of its columns maps to a
+        Shelf field.
       </p>
 
       <div className="my-5 flex flex-col gap-4">

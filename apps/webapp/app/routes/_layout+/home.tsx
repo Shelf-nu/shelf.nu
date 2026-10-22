@@ -46,6 +46,7 @@ import {
   buildMonthlyGrowthData,
   checklistOptions,
   getCustodiansOrderedByTotalCustodies,
+  resolveOnboardingChecklist,
 } from "~/utils/dashboard.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";
@@ -55,7 +56,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { resolveCanImportAssetsOrFalse } from "~/utils/subscription.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -396,20 +396,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       hasCustodies: directCustodians.length > 0,
       ...checklistData,
     };
-    const showsChecklist =
-      !cookieResult.skipOnboardingChecklist &&
-      !Object.values(onboardingChecklist).every(Boolean);
-
-    // The import flag only gates a checklist link, so it is looked up only
-    // while the checklist is on screen, and a failure reads as "cannot import".
-    const canImportAssets = showsChecklist
-      ? await resolveCanImportAssetsOrFalse({
-          organizationId,
-          organizations,
-          userId,
-          role,
-        })
-      : false;
+    const { showsChecklist, canImportAssets } =
+      await resolveOnboardingChecklist({
+        checklistOptions: onboardingChecklist,
+        skipOnboardingChecklist: Boolean(cookieResult.skipOnboardingChecklist),
+        importEligibility: { organizationId, organizations, userId, role },
+      });
 
     const header: HeaderData = {
       title: "Home",
@@ -434,7 +426,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       totalValuation,
       valueKnownAssets,
       newAssets,
-      skipOnboardingChecklist: cookieResult.skipOnboardingChecklist,
+      showsChecklist,
       canImportAssets,
       custodiansData: getCustodiansOrderedByTotalCustodies({
         directCustodians,
@@ -467,14 +459,12 @@ export const handle = {
 };
 
 export default function HomePage() {
-  const { skipOnboardingChecklist, checklistOptions } =
-    useLoaderData<typeof loader>();
-  const completedAllChecks = Object.values(checklistOptions).every(Boolean);
+  const { showsChecklist } = useLoaderData<typeof loader>();
 
   return (
     <div>
       <Header> </Header>
-      {completedAllChecks || skipOnboardingChecklist ? (
+      {!showsChecklist ? (
         <div className="pb-8">
           <AnnouncementBar />
 

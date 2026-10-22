@@ -34,7 +34,7 @@ import {
 import { generateClientId } from "~/utils/id/client-id";
 import { tw } from "~/utils/tw";
 import Input from "./input";
-import { HandleIcon, PenIcon } from "../icons/library";
+import { PenIcon } from "../icons/library";
 import { Button } from "../shared/button";
 import {
   AlertDialog,
@@ -45,6 +45,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "../shared/modal";
+import { ReorderHandle } from "../shared/reorder-handle";
 
 interface Props {
   /**
@@ -365,21 +366,13 @@ function OptionListItem({
       dragControls={dragControls}
       className="relative mt-2 flex items-center gap-3 rounded border bg-white px-3 py-2 text-[14px] text-gray-600"
     >
-      <button
-        type="button"
+      <ReorderHandle
         ref={handleRef}
-        onPointerDown={(event) => dragControls.start(event)}
+        dragControls={dragControls}
+        label={label}
         onKeyDown={onHandleKeyDown}
-        className="flex cursor-grab touch-none items-center p-1 text-gray-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-        aria-label={`Reorder ${label}`}
-        aria-describedby={instructionsId}
-        aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
-        title="Drag to reorder or use Alt+Arrow keys"
-      >
-        <span className="block h-3 w-2">
-          <HandleIcon />
-        </span>
-      </button>
+        describedById={instructionsId}
+      />
 
       <div className="min-w-0 flex-1">
         {isEditing ? (
