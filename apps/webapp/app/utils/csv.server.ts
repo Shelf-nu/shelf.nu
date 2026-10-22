@@ -850,7 +850,16 @@ export const buildCsvExportDataFromAssets = ({
 };
 
 /**
- * Safely formats a value for CSV export by properly escaping and quoting values
+ * Formats one value as a quoted CSV cell.
+ *
+ * The value is trimmed, a date is written as `yyyy-MM-dd`, and markdown is
+ * cleaned when asked. A value a spreadsheet would run as a formula gets a
+ * leading `'` (see `neutralizeCsvFormula`), which `parseCsv` removes on import;
+ * a plain negative number such as `-5` or `-$5.00` is left numeric.
+ *
+ * @param value - The cell value: text, number, boolean or date.
+ * @param isMarkdown - Strip markdown formatting before writing the cell.
+ * @returns The cell, wrapped in double quotes with inner quotes doubled.
  */
 export const formatValueForCsv = (value: any, isMarkdown = false): string => {
   // Handle null/undefined/empty values

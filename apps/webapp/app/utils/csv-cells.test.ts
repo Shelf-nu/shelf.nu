@@ -105,6 +105,7 @@ describe("neutralizeCsvFormula", () => {
     ["-2+3+cmd|' /C calc'!A0", "'-2+3+cmd|' /C calc'!A0"],
     ["-CHF 5.00", "'-CHF 5.00"],
     ["'=x", "''=x"],
+    ["-1e5+cmd", "'-1e5+cmd"],
   ])("prefixes %s", (value, expected) => {
     expect(neutralizeCsvFormula(value)).toBe(expected);
   });
@@ -114,6 +115,8 @@ describe("neutralizeCsvFormula", () => {
     "-1,234.50",
     "-$5.00",
     "-€0.99",
+    "-1e-7",
+    "-1e+21",
     "Laptop",
     "a=b",
     "'note",

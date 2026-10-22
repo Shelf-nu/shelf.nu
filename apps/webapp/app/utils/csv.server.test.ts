@@ -53,6 +53,16 @@ vi.mock("~/utils/env", async (importActual) => ({
 const parseFormDataMock = vi.mocked(parseFormData);
 
 describe("parseCsv", () => {
+  it("drops one apostrophe before a formula trigger and leaves others alone", async () => {
+    const bytes = new TextEncoder().encode(
+      ["title", "'=x", "''=x", "it's", "'note"].join("\n")
+    );
+
+    const result = await parseCsv(bytes.buffer as ArrayBuffer);
+
+    expect(result).toEqual([["title"], ["=x"], ["'=x"], ["it's"], ["'note"]]);
+  });
+
   it("parses CSV data with detected delimiters and escaped quotes", async () => {
     const csvContent =
       'name;description\n"MacBook ""Pro"" 16";"16-inch laptop"';
@@ -277,6 +287,19 @@ describe("formatValueForCsv", () => {
     expect(formatValueForCsv(dateValue)).toBe('"2024-01-02"');
 
     expect(formatValueForCsv("**Bold** text", true)).toBe('"Bold text"');
+  });
+
+  it("writes a formula-leading value as text, after markdown cleanup", () => {
+    expect(formatValueForCsv("=1+1")).toBe('"\'=1+1"');
+    expect(formatValueForCsv("  @SUM(A1)")).toBe('"\'@SUM(A1)"');
+    expect(formatValueForCsv("**=1+1**", true)).toBe('"\'=1+1"');
+    expect(formatValueForCsv('=A1&"x"')).toBe('"\'=A1&""x"""');
+  });
+
+  it("leaves negative numbers numeric", () => {
+    expect(formatValueForCsv(-5)).toBe('"-5"');
+    expect(formatValueForCsv("-$1,234.50")).toBe('"-$1,234.50"');
+    expect(formatValueForCsv(-0.0000001)).toBe('"-1e-7"');
   });
 });
 

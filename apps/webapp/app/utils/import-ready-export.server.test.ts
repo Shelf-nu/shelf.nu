@@ -4,6 +4,7 @@ import type { AdvancedIndexAsset } from "~/modules/asset/types";
 import { ASSET_CSV_HEADERS } from "~/modules/asset/utils.server";
 import type { Column } from "~/modules/asset-index-settings/helpers";
 import { defaultFields } from "~/modules/asset-index-settings/helpers";
+import { parseCsv } from "./csv.server";
 import {
   buildImportReadyColumns,
   buildImportReadyCsvFromAssets,
@@ -19,6 +20,11 @@ import { extractCSVDataFromContentImport } from "./import.server";
 // for the same pattern).
 vi.mock("~/database/db.server", () => ({
   db: {},
+}));
+
+// why: suppress lottie animation initialization when csv.server loads
+vi.mock("lottie-react", () => ({
+  default: () => null,
 }));
 
 /** Minimal visible-column config: only name + category visible. */
@@ -477,6 +483,34 @@ describe("buildImportReadyCsvFromAssets (round-trip)", () => {
     expect(parsed[0].type).toBe("QUANTITY_TRACKED");
     expect(parsed[0].consumptionType).toBe("ONE_WAY");
     expect(parsed[0]["cf:Brand,type:OPTION"]).toBe("amd");
+  });
+
+  it("writes formula-leading cells as text and re-imports them unchanged", async () => {
+    const args = {
+      columnScope: "all" as const,
+      settingsColumns: [],
+      activeCustomFields: [],
+      barcodesEnabled: false,
+      assets: [
+        makeAsset({
+          title: '=HYPERLINK("http://evil.example","x")',
+          description: "'=already",
+          valuation: -5,
+        }),
+      ],
+    };
+    const [header, row] = buildImportReadyRows(args);
+    const csv = buildImportReadyCsvFromAssets(args);
+
+    expect(csv).toContain(`"'=HYPERLINK(""http://evil.example"",""x"")"`);
+    expect(csv).toContain(`"''=already"`);
+    expect(row[header.indexOf("valuation")]).toBe("-5");
+    expect(csv).toContain('"-5"');
+
+    const bytes = new TextEncoder().encode(csv);
+    const parsed = await parseCsv(bytes.buffer as ArrayBuffer);
+
+    expect(parsed[1]).toEqual(row);
   });
 
   it("emits a quoted, CRLF-delimited CSV string", () => {

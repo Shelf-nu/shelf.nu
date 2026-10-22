@@ -62,11 +62,12 @@ export function quoteCsvCell(value: string): string {
 const FORMULA_TRIGGER = /^'*[=+\-@\t\r]/;
 
 /**
- * A negative number as the exports write it: `-5`, `-1,234.50`, `-$5.00`.
+ * A negative number as the exports write it: `-5`, `-1,234.50`, `-$5.00`, or
+ * the exponent form `String()` gives very small or large numbers (`-1e-7`).
  * Digits, separators and at most one symbol cannot form a formula, and leaving
  * them alone keeps valuations and amounts summable in a spreadsheet.
  */
-const NEGATIVE_NUMBER = /^-[$€£¥₹₽₩₪₫฿₴₦₲₵₡₺₨]?\d[\d,]*(\.\d+)?$/;
+const NEGATIVE_NUMBER = /^-[$€£¥₹₽₩₪₫฿₴₦₲₵₡₺₨]?\d[\d,]*(\.\d+)?(e[+-]?\d+)?$/;
 
 /**
  * A leading sign followed only by digits, letters, spaces and unit marks
