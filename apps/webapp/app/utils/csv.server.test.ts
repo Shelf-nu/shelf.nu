@@ -304,6 +304,9 @@ describe("formatValueForCsv", () => {
 });
 
 describe("buildCsvExportDataFromAssets", () => {
+  /** The builder's argument shape, for typing partial test fixtures. */
+  type BuildArgs = Parameters<typeof buildCsvExportDataFromAssets>[0];
+
   it("builds ordered CSV rows with fixed and custom field values", () => {
     const assets = [
       {
@@ -535,7 +538,6 @@ describe("buildCsvExportDataFromAssets", () => {
       { id: "asset-1", title: "Camera", qrId: "cm4abc123" },
       { id: "asset-2", title: "Tripod", qrId: null },
     ];
-    type BuildArgs = Parameters<typeof buildCsvExportDataFromAssets>[0];
 
     /** Builds the export over `columns` for a workspace with these fields. */
     const exportWith = (
@@ -654,7 +656,7 @@ describe("buildCsvExportDataFromAssets", () => {
         ],
       },
     ];
-    const columns = [
+    const columns: BuildArgs["columns"] = [
       { name: "name", visible: true, position: 0 },
       { name: "valuation", visible: true, position: 1 },
       { name: "tags", visible: true, position: 2 },
@@ -685,8 +687,8 @@ describe("buildCsvExportDataFromAssets", () => {
     ];
     const build = () =>
       buildCsvExportDataFromAssets({
-        assets: assets as any,
-        columns: columns as any,
+        assets: assets as unknown as BuildArgs["assets"],
+        columns,
         currentOrganization: {
           id: "org-1",
           barcodesEnabled: false,
