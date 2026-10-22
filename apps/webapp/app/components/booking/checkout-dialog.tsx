@@ -202,11 +202,17 @@ export default function CheckoutDialog({
   /**
    * The dialog is controlled so a submit closes it: a refused check-out then
    * shows its error on the page instead of behind the still-open dialog.
-   * Closing on click is safe because the form reads its fields, the ones
-   * inside this dialog included, while the submit event is dispatched.
+   *
+   * Close on the next task, never synchronously in `onClick`. The submitter,
+   * the hidden `intent` and the source selects all live in this dialog, and
+   * React commits a click's state update before the browser runs the
+   * button's submission. Unmounting them first drops them from the form, so
+   * the check-out sends nothing or sends it without its fields.
    */
   const [open, setOpen] = useState(false);
-  const closeOnSubmit = () => setOpen(false);
+  const closeOnSubmit = () => {
+    setTimeout(() => setOpen(false), 0);
+  };
 
   if (isPlainCheckout && !confirm) {
     return (

@@ -5,7 +5,7 @@
  *
  * @see {@link file://./checkout-dialog.tsx}
  */
-import { render, screen, fireEvent } from "@testing-library/react";
+import { act, render, screen, fireEvent } from "@testing-library/react";
 import { useNavigation } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -213,14 +213,26 @@ describe("CheckoutDialog confirmation", () => {
     ).toBeInTheDocument();
   });
 
-  it("closes once confirmed, so a refused check-out shows its error on the page", () => {
-    const { submissions } = renderInForm();
+  it("closes once confirmed, but only after the form has submitted", () => {
+    vi.useFakeTimers();
+    try {
+      const { submissions } = renderInForm();
 
-    fireEvent.click(screen.getByRole("button", { name: "Check Out" }));
-    fireEvent.click(screen.getByRole("button", { name: "Check out" }));
+      fireEvent.click(screen.getByRole("button", { name: "Check Out" }));
+      fireEvent.click(screen.getByRole("button", { name: "Check out" }));
 
-    expect(submissions).toHaveLength(1);
-    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+      // The submitter lives in the dialog: it must still be mounted when the
+      // browser runs the submission that follows the click.
+      expect(submissions).toHaveLength(1);
+      expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+
+      act(() => {
+        vi.runAllTimers();
+      });
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("names neither every asset nor the booking start for any other intent", () => {
