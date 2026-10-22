@@ -198,7 +198,7 @@ export const EmptyState = ({
           </div>
         )}
       </div>
-      <div className="flex justify-center gap-3">
+      <div className="flex flex-wrap justify-center gap-3">
         {isFiltered
           ? clearButton
           : customContent?.newButtonRoute && (

@@ -14,6 +14,7 @@ import {
 import { getUserByID } from "~/modules/user/service.server";
 import type { ErrorLabel } from "./error";
 import { ShelfError } from "./error";
+import { Logger } from "./logger";
 import { isPersonalOrg } from "./organization";
 import {
   PermissionAction,
@@ -224,11 +225,16 @@ export async function assertUserCanImportAssets({
  * allows importing AND the member's role holds `asset: import`. The single
  * answer behind every "Import" entry point (asset index, home checklist).
  *
+ * It mirrors the gate on `/assets/import`, which runs
+ * `requirePermission(asset: import)` and then `assertUserCanImportAssets`.
+ * Both halves read the same primitives (`canImportAssets(tierLimit)` and the
+ * `@shelf/permissions` matrix), so a change to the gate belongs in those
+ * primitives, never in one side alone.
+ *
  * @param args.organizationId - The workspace
  * @param args.organizations - The member's workspaces, as `requirePermission` returns them
  * @param args.userId - The member
- * @param args.role - The member's role in this workspace; when omitted, the
- *   roles are loaded from the database
+ * @param args.role - The member's role in this workspace, as `requirePermission` returns it
  * @returns `true` when the import page would let this member in
  */
 export async function resolveCanImportAssets({
@@ -242,20 +248,49 @@ export async function resolveCanImportAssets({
     typeof getOrganizationTierLimit
   >[0]["organizations"];
   userId: string;
-  role?: OrganizationRoles;
+  role: OrganizationRoles;
 }): Promise<boolean> {
   const [tierLimit, allowed] = await Promise.all([
     getOrganizationTierLimit({ organizationId, organizations }),
     hasPermission({
       organizationId,
       userId,
-      // Without a known role, let hasPermission load the member's roles.
-      ...(role ? { roles: [role] } : {}),
+      roles: [role],
       entity: PermissionEntity.asset,
       action: PermissionAction.import,
     }),
   ]);
   return canImportAssets(tierLimit) && allowed;
+}
+
+/**
+ * {@link resolveCanImportAssets} for surfaces where the answer only decides
+ * whether to show a link, such as the home checklist. A failed lookup is
+ * logged and read as "cannot import", so it can never take the page down.
+ * The import page itself still enforces the real gate.
+ *
+ * @param args - Same as {@link resolveCanImportAssets}
+ * @returns `true` when the member may import, `false` when not or on failure
+ */
+export async function resolveCanImportAssetsOrFalse(
+  args: Parameters<typeof resolveCanImportAssets>[0]
+): Promise<boolean> {
+  try {
+    return await resolveCanImportAssets(args);
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Failed to resolve import eligibility",
+        additionalData: {
+          userId: args.userId,
+          organizationId: args.organizationId,
+        },
+        label,
+      })
+    );
+    return false;
+  }
 }
 
 export const canImportNRM = (

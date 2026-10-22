@@ -49,14 +49,13 @@ import {
 } from "~/utils/dashboard.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";
-import { Logger } from "~/utils/logger";
 import { parseMarkdownToReact } from "~/utils/md";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { resolveCanImportAssets } from "~/utils/subscription.server";
+import { resolveCanImportAssetsOrFalse } from "~/utils/subscription.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -111,8 +110,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       checklistData,
       // Cookie
       cookieResult,
-      // Whether this member may import a spreadsheet (tier and role)
-      canImportAssets,
     ] = await Promise.all([
       // 1a. Asset count + total valuation
       // QT-aware: multiplies valuation × quantity so qty-tracked assets are not silently underreported.
@@ -386,29 +383,33 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
       // Cookie
       userPrefs.parse(request.headers.get("Cookie")).then((c: any) => c || {}),
-
-      // Only gates a checklist link: a failure here must not take the
-      // dashboard down, so it is logged and read as "cannot import".
-      resolveCanImportAssets({
-        organizationId,
-        organizations,
-        userId,
-        role,
-      }).catch((cause) => {
-        Logger.error(
-          new ShelfError({
-            cause,
-            message: "Failed to resolve import eligibility for the home page",
-            additionalData: { userId, organizationId },
-            label: "Dashboard",
-          })
-        );
-        return false;
-      }),
     ]);
 
     const totalAssets = assetAggregation._count._all;
     const totalValuation = assetAggregation.totalValuation;
+
+    const onboardingChecklist = {
+      hasAssets: totalAssets > 0,
+      // `directCustodians` is already the "team members holding custody"
+      // query, with the same where clause a custody count would use, and
+      // `take: 20` cannot change a `> 0` test.
+      hasCustodies: directCustodians.length > 0,
+      ...checklistData,
+    };
+    const showsChecklist =
+      !cookieResult.skipOnboardingChecklist &&
+      !Object.values(onboardingChecklist).every(Boolean);
+
+    // The import flag only gates a checklist link, so it is looked up only
+    // while the checklist is on screen, and a failure reads as "cannot import".
+    const canImportAssets = showsChecklist
+      ? await resolveCanImportAssetsOrFalse({
+          organizationId,
+          organizations,
+          userId,
+          role,
+        })
+      : false;
 
     const header: HeaderData = {
       title: "Home",
@@ -447,15 +448,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             content: parseMarkdownToReact(announcement.content),
           }
         : null,
-      checklistOptions: {
-        hasAssets: totalAssets > 0,
-        // `directCustodians` is already the "team members holding custody"
-        // query, with the same where clause the dropped `custodiesCount`
-        // used — `take: 20` cannot change a `> 0` test — so counting them
-        // again server-side was a redundant round trip.
-        hasCustodies: directCustodians.length > 0,
-        ...checklistData,
-      },
+      checklistOptions: onboardingChecklist,
     });
   } catch (cause) {
     const reason = makeShelfError(cause);
