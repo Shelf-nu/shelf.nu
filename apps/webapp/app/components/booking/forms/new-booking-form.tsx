@@ -222,17 +222,18 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
           {/* Submitted only when creating a booking FROM a kit, so the action
               can resolve the kit's memberships into kit-driven slices. */}
           {kitId ? <input type="hidden" name="kitId" value={kitId} /> : null}
-          <div className={tw("actions-wrapper flex flex-col gap-2")}>
-            {/* Every submit below creates a draft, which holds nothing until
-                it is reserved from the booking page. */}
-            <p
-              id="new-booking-draft-hint"
-              className="text-left text-sm text-gray-600"
-            >
-              This creates a draft. You can{" "}
-              {reservationIsRequest ? "request a reservation" : "reserve it"}{" "}
-              from the booking page.
-            </p>
+          {/* Every submit below creates a draft, which holds nothing until
+              it is reserved from the booking page. Kept outside the actions
+              row, which lays the buttons out side by side on the route page. */}
+          <p
+            id="new-booking-draft-hint"
+            className="mt-1 text-left text-sm text-gray-600"
+          >
+            This creates a draft. You can{" "}
+            {reservationIsRequest ? "request a reservation" : "reserve it"} from
+            the booking page.
+          </p>
+          <div className={tw("actions-wrapper mt-2 flex flex-col gap-2")}>
             {!assetIds ? (
               <Button
                 icon="scan"
