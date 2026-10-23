@@ -187,7 +187,7 @@
     "happy-dom": "20.8.9",
     "msw": "^2.13.2",
     "npm-run-all": "^4.1.5",
-    "postcss": "^8.5.23",
+    "postcss": "^8.5.31",
     "prettier": "3.0.3",
     "prettier-plugin-tailwindcss": "^0.5.14",
     "prisma": "^6.19.3",
