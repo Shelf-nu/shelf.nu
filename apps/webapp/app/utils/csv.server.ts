@@ -54,7 +54,7 @@ import { getBookingAssetCheckinLabel } from "./booking-assets";
 import { checkExhaustiveSwitch } from "./check-exhaustive-switch";
 import { getClientHint } from "./client-hints";
 import { getAdvancedFiltersFromRequest } from "./cookies.server";
-import { neutralizeSpreadsheetFormula } from "./csv-cells";
+import { neutralizeCsvFormula, restoreCsvFormulaCell } from "./csv-cells";
 import { formatCurrency } from "./currency";
 import { formatDate, type ResolvedFormatPrefs } from "./date-format";
 import { resolveUserFormatPrefsById } from "./date-format.server";
@@ -97,7 +97,7 @@ function guessDelimiters(csv: string, delimiters: string[]) {
 
 /** Parses csv Data into an array with type {@link CSVData} */
 export const parseCsv = (csvData: ArrayBuffer) => {
-  const results = [] as CSVData;
+  const results: string[][] = [];
   /** Detect the file encoding */
   const encoding = chardet.detect(Buffer.from(csvData));
 
@@ -115,16 +115,15 @@ export const parseCsv = (csvData: ArrayBuffer) => {
       ltrim: true, // Trim whitespace from left side of cell
       relax_column_count: true, // Ignore inconsistent column count
     })
-      .on("data", (data) => {
-        // Process each row of data as it is parsed
-        // @ts-ignore
-        results.push(data);
+      .on("data", (data: string[]) => {
+        // Undo the export's formula guard so a Shelf export re-imports as-is.
+        results.push(data.map(restoreCsvFormulaCell));
       })
       .on("error", (error) => {
         reject(error);
       })
       .on("end", () => {
-        resolve(results);
+        resolve(results as CSVData);
       });
 
     parser.write(csv);
@@ -762,11 +761,10 @@ export const buildCsvExportDataFromAssets = ({
                 : "";
             break;
           case "unitOfMeasure":
-            // Free text that starts its own cell, so a stored "=..." must not
-            // reach a spreadsheet as a formula.
+            // Free text; formatValueForCsv applies the formula guard to it.
             value =
               isQuantityTracked(asset) && asset.unitOfMeasure
-                ? neutralizeSpreadsheetFormula(asset.unitOfMeasure)
+                ? asset.unitOfMeasure
                 : "";
             break;
           case "minQuantity":
@@ -852,7 +850,16 @@ export const buildCsvExportDataFromAssets = ({
 };
 
 /**
- * Safely formats a value for CSV export by properly escaping and quoting values
+ * Formats one value as a quoted CSV cell.
+ *
+ * The value is trimmed, a date is written as `yyyy-MM-dd`, and markdown is
+ * cleaned when asked. A value a spreadsheet would run as a formula gets a
+ * leading `'` (see `neutralizeCsvFormula`), which `parseCsv` removes on import;
+ * a plain negative number such as `-5` or `-$5.00` is left numeric.
+ *
+ * @param value - The cell value: text, number, boolean or date.
+ * @param isMarkdown - Strip markdown formatting before writing the cell.
+ * @returns The cell, wrapped in double quotes with inner quotes doubled.
  */
 export const formatValueForCsv = (value: any, isMarkdown = false): string => {
   // Handle null/undefined/empty values
@@ -885,10 +892,10 @@ export const formatValueForCsv = (value: any, isMarkdown = false): string => {
     stringValue = cleanMarkdownFormatting(stringValue);
   }
 
-  // Escape quotes by doubling them
-  stringValue = stringValue.replace(/"/g, '""');
+  // Every caller writes member-typed text, so the formula guard is applied
+  // here rather than per column.
+  stringValue = neutralizeCsvFormula(stringValue).replace(/"/g, '""');
 
-  // Always wrap in quotes
   return `"${stringValue}"`;
 };
 
