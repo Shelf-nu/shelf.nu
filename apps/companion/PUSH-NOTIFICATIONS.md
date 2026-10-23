@@ -189,16 +189,20 @@ Xcode and EAS switch the value to `production` when archiving. The rules:
    ```bash
    curl -sS https://exp.host/--/api/v2/push/send \
      -H "content-type: application/json" \
+     -H "Authorization: Bearer <EAS access token>" \
      -d '{"to":"<ExponentPushToken>","title":"Shelf push test","body":"Hello"}'
    ```
 
-   Watch the lock screen with the app in the background.
+   The Authorization header is required once enhanced push security is on
+   (step 4); without the toggle it is ignored. Send the same header on the
+   receipt request below. Watch the lock screen with the app in the background.
 
 4. Fetch the receipt about 15 minutes later to confirm APNs accepted it:
 
    ```bash
    curl -sS https://exp.host/--/api/v2/push/getReceipts \
      -H "content-type: application/json" \
+     -H "Authorization: Bearer <EAS access token>" \
      -d '{"ids":["<ticket id from the send response>"]}'
    ```
 
