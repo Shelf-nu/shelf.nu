@@ -4,7 +4,7 @@ This guide covers everything you need to know for developing Shelf.nu locally af
 
 ## Prerequisites ✅
 
-- ✅ **Node.js** (>=22.20.0)
+- ✅ **Node.js** (>=22.23.4)
 - ✅ **pnpm** (9.15.4+) — install via `corepack enable && corepack prepare pnpm@9.15.4 --activate`
 - ✅ **Git**
 - ✅ **Supabase project** configured ([Setup Guide](./supabase-setup.md))
