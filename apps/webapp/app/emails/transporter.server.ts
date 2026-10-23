@@ -34,7 +34,7 @@ const transporterSettings = {
     },
   }),
   tls: {
-    // do not fail on invalid certs
+    // reject invalid or self-signed SMTP certificates
     rejectUnauthorized: true,
   },
 };

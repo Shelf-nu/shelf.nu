@@ -11,7 +11,7 @@ WORKDIR /src
 RUN apt-get update && \
     apt-get install -y openssl && \
     rm -rf /var/lib/apt/lists/* && \
-    corepack enable && corepack prepare pnpm@9.15.4 --activate
+    corepack enable && corepack prepare pnpm@9.15.9 --activate
 
 # Install dependencies using turbo prune for minimal install
 FROM base AS pruner
