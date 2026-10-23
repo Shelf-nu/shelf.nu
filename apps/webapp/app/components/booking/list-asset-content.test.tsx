@@ -1,7 +1,9 @@
 import type { ReactNode } from "react";
-import { render, screen } from "@testing-library/react";
+import { OrganizationRoles } from "@prisma/client";
+import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { accessFor } from "@helpers/role-access";
 
 import type { PartialCheckinDetailsType } from "~/modules/booking/service.server";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-assets";
@@ -103,13 +105,23 @@ vi.mock("~/hooks/use-booking-status", () => ({
     mockUseBookingStatusHelpers(status),
 }));
 
-// why: providing test user role context without auth dependencies
-vi.mock("~/hooks/user-user-role-helper", () => ({
-  useUserRoleHelper: () => ({
-    isBase: false,
-    isSelfService: false,
-    isBaseOrSelfService: false,
-  }),
+const mockUseOrganizationRoles = vi.fn();
+
+// why: providing test user role context without auth dependencies, and letting
+// a test choose the roles — the row's checkbox is gated on what those roles may
+// actually do with a selection.
+vi.mock("~/hooks/use-organization-roles", () => ({
+  useOrganizationRoles: () => mockUseOrganizationRoles(),
+}));
+
+/** The roles the organization-roles mock returns; the access mock reads the same. */
+let mockRoles: OrganizationRoles[] = [];
+
+// why: the row and the bulk-actions hook read the member's access from the
+// `_layout` loader, which is not mounted here; drive it from the same roles
+// the organization-roles mock returns.
+vi.mock("~/hooks/use-role-access", () => ({
+  useRoleAccess: () => accessFor(mockRoles),
 }));
 
 // why: providing test user data without session/auth lookups
@@ -127,15 +139,27 @@ vi.mock("~/hooks/use-current-organization", () => ({
   }),
 }));
 
-// why: controlling asset status logic to test returned badge vs status badge behavior
-vi.mock("~/utils/booking-assets", () => ({
-  getBookingContextAssetStatus: (
-    ...args: Parameters<typeof getBookingContextAssetStatusMock>
-  ) => getBookingContextAssetStatusMock(...args),
-  isAssetPartiallyCheckedIn: (
-    ...args: Parameters<typeof isAssetPartiallyCheckedInMock>
-  ) => isAssetPartiallyCheckedInMock(...args),
-}));
+// why: controlling asset status logic to test returned badge vs status badge
+// behavior. Only the two status resolvers are stubbed; the rest of the module
+// (notably the pure per-slice `isBookingRowQtyFullyCheckedOut`) uses the REAL
+// implementation via importActual so the per-slice checkout badge is exercised
+// for real, not mocked away. (The `import type` of service.server in the real
+// module is erased at runtime, so no server code is pulled in.)
+vi.mock("~/utils/booking-assets", async () => {
+  const actual = (await vi.importActual("~/utils/booking-assets")) as Record<
+    string,
+    unknown
+  >;
+  return {
+    ...actual,
+    getBookingContextAssetStatus: (
+      ...args: Parameters<typeof getBookingContextAssetStatusMock>
+    ) => getBookingContextAssetStatusMock(...args),
+    isAssetPartiallyCheckedIn: (
+      ...args: Parameters<typeof isAssetPartiallyCheckedInMock>
+    ) => isAssetPartiallyCheckedInMock(...args),
+  };
+});
 
 describe("ListAssetContent", () => {
   const basePartialDetails = {} as PartialCheckinDetailsType;
@@ -152,6 +176,11 @@ describe("ListAssetContent", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+
+    // Default: no roles, as while the layout data loads. Tests that care set
+    // their own.
+    mockUseOrganizationRoles.mockReturnValue(undefined);
+    mockRoles = [];
 
     mockUseBookingStatusHelpers.mockImplementation((status: string) => ({
       isCompleted: status === "COMPLETE",
@@ -212,6 +241,36 @@ describe("ListAssetContent", () => {
     expect(assetStatusBadgeMock).not.toHaveBeenCalled();
   });
 
+  it("still says Archived beside Returned for an asset archived after it came back (issue #382)", () => {
+    mockUseLoaderData.mockReturnValue({
+      booking: {
+        id: "booking-1",
+        status: "COMPLETE",
+        assets: [],
+        custodianUser: null,
+      },
+    });
+
+    render(
+      <table>
+        <tbody>
+          <tr>
+            <ListAssetContent
+              item={{ ...baseAsset, archivedAt: new Date("2026-09-01") }}
+              partialCheckinDetails={basePartialDetails}
+              shouldShowCheckinColumns={false}
+              partialCheckoutDetails={{}}
+              shouldShowCheckoutColumns={false}
+            />
+          </tr>
+        </tbody>
+      </table>
+    );
+
+    expect(screen.getByText("Returned")).toBeInTheDocument();
+    expect(screen.getByText("Archived")).toBeInTheDocument();
+  });
+
   it("does NOT show the returned badge for a never-checked-out asset on a complete booking", () => {
     // Progressive checkout: checkout records exist (for asset-2), but the asset
     // being rendered (asset-1) was never checked out, so it must NOT be marked
@@ -240,6 +299,7 @@ describe("ListAssetContent", () => {
                     id: "user-1",
                     firstName: "Test",
                     lastName: "User",
+                    displayName: null,
                     profilePicture: null,
                   },
                 },
@@ -281,6 +341,7 @@ describe("ListAssetContent", () => {
                     id: "user-1",
                     firstName: "Test",
                     lastName: "User",
+                    displayName: null,
                     profilePicture: null,
                   },
                 },
@@ -504,7 +565,7 @@ describe("ListAssetContent", () => {
           bookingAssets: [{ assetId: qtRow.id }],
           custodianUser: null,
         },
-        availableUnitsByAsset: { [qtRow.id]: 3 },
+        availableUnitsByAsset: { [qtRow.id]: { bookable: 3, physicalNow: 3 } },
       });
 
       render(
@@ -537,6 +598,51 @@ describe("ListAssetContent", () => {
       const tooltip = await screen.findByRole("tooltip");
       expect(tooltip.textContent).toMatch(/10 units/);
       expect(tooltip.textContent).toMatch(/only 3/);
+    });
+
+    it("renders no stock badge for a kit-driven QT row even when the loader reports no loose units", () => {
+      // A kit holding the asset's last units: the loose pool is 0/0, and the
+      // row is booked through the kit, so neither the red nor the amber badge
+      // applies. The same numbers on a standalone row are test (c)'s red case.
+      const kitRow = {
+        ...qtCheckedOutAsset,
+        status: "AVAILABLE",
+        bookedQuantity: 1,
+        isKitDriven: true,
+      } as unknown as AssetWithBooking;
+      // why: the loader map reports zero loose-pool units for this asset, the
+      // figure that would light the red badge on a standalone row.
+      mockUseLoaderData.mockReturnValue({
+        booking: {
+          id: "booking-reserved-kit",
+          status: "RESERVED",
+          bookingAssets: [{ assetId: kitRow.id }],
+          custodianUser: null,
+        },
+        availableUnitsByAsset: { [kitRow.id]: { bookable: 0, physicalNow: 0 } },
+      });
+
+      render(
+        <table>
+          <tbody>
+            <tr>
+              <ListAssetContent
+                item={kitRow}
+                isKitAsset
+                partialCheckinDetails={basePartialDetails}
+                shouldShowCheckinColumns={false}
+                partialCheckoutDetails={{}}
+                shouldShowCheckoutColumns={false}
+              />
+            </tr>
+          </tbody>
+        </table>
+      );
+
+      expect(screen.queryByText("Insufficient stock")).not.toBeInTheDocument();
+      expect(
+        screen.queryByText("Checked out elsewhere")
+      ).not.toBeInTheDocument();
     });
 
     it("still renders the amber 'Checked out' AvailabilityBadge for an INDIVIDUAL row whose asset is checked out elsewhere", () => {
@@ -593,7 +699,7 @@ describe("ListAssetContent", () => {
           bookingAssets: [{ assetId: qtRow.id }],
           custodianUser: null,
         },
-        availableUnitsByAsset: { [qtRow.id]: 5 },
+        availableUnitsByAsset: { [qtRow.id]: { bookable: 5, physicalNow: 5 } },
       });
 
       render(
@@ -613,6 +719,579 @@ describe("ListAssetContent", () => {
       );
 
       expect(screen.queryByText(/insufficient stock/i)).not.toBeInTheDocument();
+    });
+
+    it("renders the amber PendingReturnBadge on a not-started booking when rowQty fits bookable but exceeds physicalNow", async () => {
+      // (b) — "Boards" real case: 10 total, 7 needed for this RESERVED
+      // booking. The 7 currently out on another booking return before this
+      // booking's window opens, so bookable=10 (no in-window conflict) but
+      // physicalNow=3 (7 are literally off the shelf right now). Soft amber
+      // warning, NOT the red blocker.
+      const qtRow = {
+        ...qtCheckedOutAsset,
+        status: "AVAILABLE",
+        bookedQuantity: 7,
+      } as unknown as AssetWithBooking;
+      mockUseLoaderData.mockReturnValue({
+        booking: {
+          id: "booking-reserved",
+          status: "RESERVED",
+          bookingAssets: [{ assetId: qtRow.id }],
+          custodianUser: null,
+        },
+        availableUnitsByAsset: {
+          [qtRow.id]: { bookable: 10, physicalNow: 3 },
+        },
+      });
+
+      render(
+        <table>
+          <tbody>
+            <tr>
+              <ListAssetContent
+                item={qtRow}
+                partialCheckinDetails={basePartialDetails}
+                shouldShowCheckinColumns={false}
+                partialCheckoutDetails={{}}
+                shouldShowCheckoutColumns={false}
+              />
+            </tr>
+          </tbody>
+        </table>
+      );
+
+      // No red hard-blocker — the row fits within the booking's window.
+      expect(screen.queryByText(/insufficient stock/i)).not.toBeInTheDocument();
+
+      const trigger = screen.getByText("Checked out elsewhere");
+      expect(trigger).toBeInTheDocument();
+      // Amber (default `AvailabilityBadge` variant) — NOT the red variant.
+      expect(trigger).toHaveClass("bg-warning-50");
+      expect(trigger).toHaveClass("text-warning-700");
+
+      // Tooltip explains the "expected back before this booking starts" logic.
+      await userEvent.hover(trigger);
+      const tooltip = await screen.findByRole("tooltip");
+      expect(tooltip.textContent).toMatch(/7 units/);
+      expect(tooltip.textContent).toMatch(/only 3/);
+      expect(tooltip.textContent).toMatch(
+        /expected back before this booking starts/i
+      );
+    });
+
+    it("does NOT render any stock badge for a row that is already checked out, even though bookedQuantity exceeds bookable", () => {
+      // (d) — Regression guard for the "checked-out row showed Insufficient
+      // stock" bug: this slice's own 22 booked units are all checked out
+      // already (nothing returned yet), so `contextStatus` resolves to
+      // CHECKED_OUT via the real `isBookingRowQtyFullyCheckedOut` branch.
+      // Even though the workspace pool is critically low (bookable: 3), the
+      // row's own checkout already happened — nothing to warn about for it.
+      const qtRow = {
+        ...qtCheckedOutAsset,
+        status: "AVAILABLE",
+        bookedQuantity: 22,
+        checkedOutQuantity: 22,
+        dispositionedQuantity: 0,
+      } as unknown as AssetWithBooking;
+      mockUseLoaderData.mockReturnValue({
+        booking: {
+          id: "booking-ongoing-checked-out",
+          status: "ONGOING",
+          bookingAssets: [{ assetId: qtRow.id }],
+          custodianUser: null,
+        },
+        availableUnitsByAsset: {
+          [qtRow.id]: { bookable: 3, physicalNow: 3 },
+        },
+      });
+
+      render(
+        <table>
+          <tbody>
+            <tr>
+              <ListAssetContent
+                item={qtRow}
+                partialCheckinDetails={basePartialDetails}
+                shouldShowCheckinColumns={false}
+                partialCheckoutDetails={{}}
+                shouldShowCheckoutColumns={false}
+              />
+            </tr>
+          </tbody>
+        </table>
+      );
+
+      expect(screen.queryByText(/insufficient stock/i)).not.toBeInTheDocument();
+      expect(
+        screen.queryByText("Checked out elsewhere")
+      ).not.toBeInTheDocument();
+      // Confirms the row really did resolve to CHECKED_OUT (not silently
+      // skipped for an unrelated reason).
+      expect(assetStatusBadgeMock).toHaveBeenCalledWith(
+        expect.objectContaining({ status: "CHECKED_OUT" })
+      );
+    });
+  });
+
+  // Per-slice QT checkout status. A QUANTITY_TRACKED asset can have multiple
+  // BookingAsset slices on one booking (e.g. a kit-driven slice + a standalone
+  // free-pool slice). Each row's badge must reflect THIS slice's own checkout
+  // progress (`checkedOutQuantity` vs `bookedQuantity`), NOT the global
+  // `Asset.status` — which only flips to CHECKED_OUT when EVERY slice is fully
+  // out, so a single fully-checked-out slice would otherwise wrongly read
+  // "Available". Mirrors the existing per-row check-IN completion handling.
+  describe("QT per-slice checkout status", () => {
+    const qtKitSliceRow = {
+      ...baseAsset,
+      id: "asset-qt-pencils",
+      type: "QUANTITY_TRACKED",
+      // Global status stays AVAILABLE: the parallel standalone slice is still
+      // booked, so the asset-wide flip never fires. Mocked resolver returns
+      // AVAILABLE (default) to model exactly that.
+      status: "AVAILABLE",
+      bookingAssetId: "ba-kit-slice",
+      bookedQuantity: 22,
+      dispositionedQuantity: 0,
+    } as unknown as AssetWithBooking;
+
+    it("shows CHECKED_OUT for a slice whose own units are all checked out, even though the global asset status is AVAILABLE", () => {
+      mockUseLoaderData.mockReturnValue({
+        booking: {
+          id: "booking-ongoing-qt",
+          status: "ONGOING",
+          bookingAssets: [{ assetId: qtKitSliceRow.id }],
+          custodianUser: null,
+        },
+      });
+
+      render(
+        <table>
+          <tbody>
+            <tr>
+              <ListAssetContent
+                item={
+                  {
+                    ...qtKitSliceRow,
+                    // This slice's 22 booked units are all checked out; nothing
+                    // returned yet.
+                    checkedOutQuantity: 22,
+                  } as unknown as AssetWithBooking
+                }
+                partialCheckinDetails={basePartialDetails}
+                shouldShowCheckinColumns={false}
+                partialCheckoutDetails={{}}
+                shouldShowCheckoutColumns={false}
+              />
+            </tr>
+          </tbody>
+        </table>
+      );
+
+      expect(assetStatusBadgeMock).toHaveBeenCalledWith(
+        expect.objectContaining({ status: "CHECKED_OUT" })
+      );
+    });
+
+    it("still shows the pending-return badge (not CHECKED_OUT) when only SOME of the slice's units are checked out", () => {
+      mockUseLoaderData.mockReturnValue({
+        booking: {
+          id: "booking-ongoing-qt-partial",
+          status: "ONGOING",
+          bookingAssets: [{ assetId: qtKitSliceRow.id }],
+          custodianUser: null,
+        },
+      });
+
+      render(
+        <table>
+          <tbody>
+            <tr>
+              <ListAssetContent
+                item={
+                  {
+                    ...qtKitSliceRow,
+                    // 10 of 22 out → partial, must NOT read as fully CHECKED_OUT.
+                    checkedOutQuantity: 10,
+                  } as unknown as AssetWithBooking
+                }
+                partialCheckinDetails={basePartialDetails}
+                shouldShowCheckinColumns={false}
+                partialCheckoutDetails={{}}
+                shouldShowCheckoutColumns={false}
+              />
+            </tr>
+          </tbody>
+        </table>
+      );
+
+      expect(assetStatusBadgeMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: "PARTIALLY_CHECKED_OUT_QTY_PENDING_RETURN",
+        })
+      );
+    });
+  });
+
+  // Detached kit residue. Removing an asset from a kit nulls
+  // `BookingAsset.assetKitId` (ON DELETE SET NULL) but a non-planning booking
+  // KEEPS the slice, which then renders grouped under its original kit via
+  // `sourceKitId`. The loader flags those rows with `isRemovedFromKit` so the
+  // row can say so — otherwise it is indistinguishable from a live member.
+  describe("removed-from-kit badge", () => {
+    const finishedBooking = {
+      booking: {
+        id: "booking-complete",
+        status: "COMPLETE",
+        bookingAssets: [{ assetId: "asset-1" }],
+        custodianUser: null,
+      },
+    };
+
+    function renderRow(item: AssetWithBooking) {
+      return render(
+        <table>
+          <tbody>
+            <tr>
+              <ListAssetContent
+                item={item}
+                isKitAsset
+                partialCheckinDetails={basePartialDetails}
+                shouldShowCheckinColumns={false}
+                partialCheckoutDetails={{}}
+                shouldShowCheckoutColumns={false}
+              />
+            </tr>
+          </tbody>
+        </table>
+      );
+    }
+
+    it("labels a detached slice and explains it in a keyboard-reachable tooltip", async () => {
+      mockUseLoaderData.mockReturnValue(finishedBooking);
+
+      renderRow({
+        ...baseAsset,
+        // Membership is gone (`assetKits: []`) but the loader resolved the
+        // snapshot kit off `sourceKitId` and flagged the row.
+        assetKits: [],
+        isRemovedFromKit: true,
+      } as unknown as AssetWithBooking);
+
+      const trigger = screen.getByText("Removed from kit");
+      expect(trigger).toBeInTheDocument();
+      // Focusable trigger: the tooltip must not be hover-only (WCAG 2.1 AA).
+      expect(trigger.tagName).toBe("BUTTON");
+
+      await userEvent.hover(trigger);
+      const tooltip = await screen.findByRole("tooltip");
+      expect(tooltip.textContent).toMatch(/removed from the kit/i);
+      expect(tooltip.textContent).toMatch(/record of what was booked/i);
+    });
+
+    it("names the reserved model a row answered, and explains it in a keyboard-reachable tooltip", async () => {
+      mockUseLoaderData.mockReturnValue(finishedBooking);
+
+      renderRow({
+        ...baseAsset,
+        // The loader resolved the name behind `bookingModelRequestId`.
+        fulfilsModelName: "Dell Latitude 5550",
+      } as unknown as AssetWithBooking);
+
+      const trigger = screen.getByText("Fulfils Dell Latitude 5550");
+      expect(trigger).toBeInTheDocument();
+      // Focusable trigger: the tooltip must not be hover-only (WCAG 2.1 AA).
+      expect(trigger.tagName).toBe("BUTTON");
+
+      await userEvent.hover(trigger);
+      const tooltip = await screen.findByRole("tooltip");
+      expect(tooltip.textContent).toMatch(/without naming them/i);
+      expect(tooltip.textContent).toMatch(/counts toward it/i);
+    });
+
+    it("says which location a checked-out pool slice left from, even when its unit counter reads 0", () => {
+      mockUseLoaderData.mockReturnValue(finishedBooking);
+
+      renderRow({
+        ...baseAsset,
+        // A one-click check-out writes no scan session, so the row's
+        // session-derived counter stays 0; the recorded source still shows.
+        checkedOutQuantity: 0,
+        sourceLocation: { id: "loc-studio", name: "Studio" },
+      } as unknown as AssetWithBooking);
+
+      expect(screen.getByText("from Studio")).toBeInTheDocument();
+    });
+
+    it("says nothing about a source the loader did not resolve", () => {
+      mockUseLoaderData.mockReturnValue(finishedBooking);
+
+      renderRow({
+        ...baseAsset,
+        sourceLocation: null,
+      } as unknown as AssetWithBooking);
+
+      expect(screen.queryByText(/^from /)).not.toBeInTheDocument();
+    });
+
+    it("does NOT label a row that answered no reservation", () => {
+      mockUseLoaderData.mockReturnValue(finishedBooking);
+
+      // Every other row on a booking: added directly, with no promise to
+      // answer. That is most rows, so a badge here would be noise.
+      renderRow({ ...baseAsset } as unknown as AssetWithBooking);
+
+      expect(screen.queryByText(/^Fulfils /)).not.toBeInTheDocument();
+    });
+
+    it("does NOT label a live kit member", () => {
+      mockUseLoaderData.mockReturnValue(finishedBooking);
+
+      renderRow({
+        ...baseAsset,
+        assetKits: [{ kitId: "kit-1", kit: { id: "kit-1", name: "Kit One" } }],
+      } as unknown as AssetWithBooking);
+
+      expect(screen.queryByText("Removed from kit")).not.toBeInTheDocument();
+    });
+
+    it("does NOT label a genuinely standalone asset", () => {
+      mockUseLoaderData.mockReturnValue(finishedBooking);
+
+      renderRow({
+        ...baseAsset,
+        assetKits: [],
+      } as unknown as AssetWithBooking);
+
+      expect(screen.queryByText("Removed from kit")).not.toBeInTheDocument();
+    });
+  });
+
+  /**
+   * The row's checkbox exists to feed the bulk actions menu, so it is offered
+   * only when those roles have an action to take at this status. A checkbox
+   * that can only ever feed an empty menu is dead UI.
+   *
+   * These assert the WIRING, which the hook's own tests cannot: they prove this
+   * row reads `hasAny` at all. Without them the gate could be deleted outright
+   * and every test here would still pass.
+   */
+  describe("bulk-selection checkbox", () => {
+    const bookingAt = (status: string) => ({
+      booking: {
+        id: "booking-1",
+        status,
+        assets: [],
+        custodianUser: { id: "user-1" },
+      },
+    });
+
+    const renderAs = (
+      status: string,
+      roles: OrganizationRoles[] = [OrganizationRoles.BASE]
+    ) => {
+      mockUseOrganizationRoles.mockReturnValue(roles);
+      mockRoles = roles;
+      mockUseLoaderData.mockReturnValue(bookingAt(status));
+
+      render(
+        <table>
+          <tbody>
+            <tr>
+              <ListAssetContent
+                item={baseAsset}
+                partialCheckinDetails={basePartialDetails}
+                shouldShowCheckinColumns={false}
+                partialCheckoutDetails={{}}
+                shouldShowCheckoutColumns={false}
+              />
+            </tr>
+          </tbody>
+        </table>
+      );
+    };
+
+    it("offers a checkbox to a BASE custodian on a DRAFT booking", () => {
+      renderAs("DRAFT");
+
+      expect(screen.getByTestId("bulk-checkbox")).toBeInTheDocument();
+    });
+
+    /**
+     * The reported bug's surface: BASE may not remove past DRAFT and holds
+     * neither check-in nor check-out, so there is nothing a selection could do.
+     */
+    it("withholds it from a BASE custodian once the booking is reserved", () => {
+      renderAs("RESERVED");
+
+      expect(screen.queryByTestId("bulk-checkbox")).not.toBeInTheDocument();
+    });
+
+    /**
+     * Status is held constant and only the role varies, so the checkbox is the
+     * single difference between the two renders — this row's other columns come
+     * and go with status, which would otherwise swamp the comparison.
+     */
+    it("keeps the column aligned when the checkbox is withheld", () => {
+      renderAs("RESERVED", [OrganizationRoles.ADMIN]);
+      const withCheckbox = screen.getAllByRole("cell").length;
+
+      cleanup();
+
+      renderAs("RESERVED", [OrganizationRoles.BASE]);
+      const withoutCheckbox = screen.getAllByRole("cell").length;
+
+      // The fallback is an empty cell, not a missing one — dropping it would
+      // shift every column in the table by one for exactly these roles.
+      expect(withoutCheckbox).toBe(withCheckbox);
+    });
+  });
+  /**
+   * The row's actions menu. Members who write every booking see it on every
+   * row; others only on a booking they hold, within the statuses their policy
+   * lets them remove from. A kit member row never shows it: the kit row owns
+   * removal of its members.
+   */
+  describe("row actions menu", () => {
+    const renderRowAs = ({
+      roles,
+      status,
+      custodian,
+      partOfKit = false,
+      isKitAsset = false,
+      isKitDriven,
+    }: {
+      roles: OrganizationRoles[];
+      status: string;
+      custodian: boolean;
+      /** The asset belongs to a kit somewhere in the workspace. */
+      partOfKit?: boolean;
+      /** This row is rendered under a kit, which is a presentational fact. */
+      isKitAsset?: boolean;
+      /**
+       * Whether the kit actually drives this row (`BookingAsset.assetKitId`).
+       * `undefined` stands for a surface that does not project the field.
+       */
+      isKitDriven?: boolean;
+    }) => {
+      mockUseOrganizationRoles.mockReturnValue(roles);
+      mockRoles = roles;
+      mockUseLoaderData.mockReturnValue({
+        booking: {
+          id: "booking-1",
+          status,
+          assets: [],
+          custodianUser: { id: custodian ? "user-1" : "someone-else" },
+        },
+      });
+
+      const item = {
+        ...baseAsset,
+        isKitDriven,
+        assetKits: partOfKit
+          ? [{ kitId: "kit-1", kit: { id: "kit-1", name: "Kit One" } }]
+          : [],
+      } as unknown as AssetWithBooking;
+
+      render(
+        <table>
+          <tbody>
+            <tr>
+              <ListAssetContent
+                item={item}
+                isKitAsset={isKitAsset}
+                partialCheckinDetails={basePartialDetails}
+                shouldShowCheckinColumns={false}
+                partialCheckoutDetails={{}}
+                shouldShowCheckoutColumns={false}
+              />
+            </tr>
+          </tbody>
+        </table>
+      );
+    };
+
+    const R = OrganizationRoles;
+
+    it.each([
+      // [roles, status, custodian, shown]
+      [[R.ADMIN], "ONGOING", false, true],
+      // A membership holding ADMIN beside a restricted role is an admin.
+      [[R.ADMIN, R.SELF_SERVICE], "RESERVED", false, true],
+      [[R.SELF_SERVICE, R.ADMIN], "RESERVED", false, true],
+      [[R.SELF_SERVICE], "RESERVED", true, true],
+      [[R.SELF_SERVICE], "ONGOING", true, false],
+      [[R.SELF_SERVICE], "DRAFT", false, false],
+      [[R.BASE], "DRAFT", true, true],
+      [[R.BASE], "RESERVED", true, false],
+      // Roles not loaded yet: nothing is offered, even to the custodian.
+      [[], "DRAFT", true, false],
+    ])(
+      "%j on a %s booking (custodian: %s) -> menu shown: %s",
+      (roles, status, custodian, shown) => {
+        renderRowAs({ roles, status, custodian });
+
+        expect(Boolean(screen.queryByTestId("asset-actions"))).toBe(shown);
+      }
+    );
+
+    it("never shows it on a kit member row, even to an admin", () => {
+      renderRowAs({
+        roles: [R.ADMIN],
+        status: "DRAFT",
+        custodian: true,
+        partOfKit: true,
+        isKitAsset: true,
+        isKitDriven: true,
+      });
+
+      expect(screen.queryByTestId("asset-actions")).not.toBeInTheDocument();
+    });
+
+    it("hides it under a kit on a surface that does not say who drives the row", () => {
+      // Without the field there is no way to tell a live kit slice from a
+      // detached one, and showing Remove on a live slice takes the asset out
+      // of its kit. Absent means hidden.
+      renderRowAs({
+        roles: [R.ADMIN],
+        status: "DRAFT",
+        custodian: true,
+        partOfKit: true,
+        isKitAsset: true,
+        isKitDriven: undefined,
+      });
+
+      expect(screen.queryByTestId("asset-actions")).not.toBeInTheDocument();
+    });
+
+    it("shows it on a detached row that still renders under its old kit", () => {
+      // The kit no longer drives these units, so kit removal does not reach
+      // them. Without its own menu the row cannot be acted on at all.
+      renderRowAs({
+        roles: [R.ADMIN],
+        status: "DRAFT",
+        custodian: true,
+        partOfKit: true,
+        isKitAsset: true,
+        isKitDriven: false,
+      });
+
+      expect(screen.queryByTestId("asset-actions")).toBeInTheDocument();
+    });
+
+    it("shows it on a standalone row whose asset belongs to a kit elsewhere", () => {
+      // A quantity-tracked asset can hold a free-pool row and kit-driven rows
+      // on one booking. The free-pool row is the operator's to adjust and
+      // remove: what the kit owns is its own slices, not every row naming an
+      // asset that happens to be a member.
+      renderRowAs({
+        roles: [R.ADMIN],
+        status: "DRAFT",
+        custodian: true,
+        partOfKit: true,
+        isKitAsset: false,
+      });
+
+      expect(screen.queryByTestId("asset-actions")).toBeInTheDocument();
     });
   });
 });

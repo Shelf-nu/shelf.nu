@@ -40,7 +40,9 @@ const ASSET_UTILIZATION_COLUMNS: ColumnDef<AssetUtilizationRow>[] = [
       <AssetCell
         name={row.original.assetName}
         thumbnailImage={row.original.thumbnailImage}
+        mainImage={row.original.mainImage}
         assetId={row.original.assetId}
+        assetModel={row.original.assetModel}
       />
     ),
   },
@@ -175,9 +177,9 @@ export function AssetUtilizationContent({
             <span className="font-medium text-gray-700">
               How it's calculated:
             </span>{" "}
-            Usage rate = (total days booked ÷ days in period) × 100. Rates above
-            100% indicate overlapping bookings where the asset was reserved
-            multiple times simultaneously—a sign of high demand.
+            Usage rate = days the asset was on at least one booking in this
+            period ÷ days in the period × 100. Overlapping bookings count once,
+            so the rate tops out at 100%.
           </p>
         </div>
       </div>

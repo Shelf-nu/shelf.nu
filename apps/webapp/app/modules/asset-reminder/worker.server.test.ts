@@ -1,321 +1,247 @@
-// @vitest-environment node
-import { ReminderRecurrenceUnit } from "@prisma/client";
+/**
+ * Tests for the asset-reminder pg-boss worker.
+ *
+ * Focus: the worker-wrapping behavior around `regierAssetWorkers` — the
+ * catch/log/rethrow contract that determines whether pg-boss retries a
+ * failed reminder job or silently marks it COMPLETED. The handler is
+ * exercised through the callback captured from `scheduler.work`, since the
+ * event handlers themselves are not exported.
+ *
+ * @see {@link file://./worker.server.ts}
+ */
+import type PgBoss from "pg-boss";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import { Logger } from "~/utils/logger";
-import { scheduler } from "~/utils/scheduler.server";
-import { advanceRecurringReminder } from "./chain.server";
-import {
-  scheduleAssetReminder,
-  type AssetsSchedulerData,
-} from "./scheduler.server";
-import { regierAssetWorkers, RecurringAdvanceError } from "./worker.server";
+import { QueueNames, scheduler } from "~/utils/scheduler.server";
+import type { AssetsSchedulerData } from "./scheduler.server";
+import { regierAssetWorkers } from "./worker.server";
 import { createNote } from "../note/service.server";
 
-// why: testing the worker handler without a real database
-vitest.mock("~/database/db.server", () => ({
+// @vitest-environment node
+
+// why: testing worker handlers without executing actual database operations
+vi.mock("~/database/db.server", () => ({
   db: {
     assetReminder: {
-      findFirst: vitest.fn().mockResolvedValue(null),
+      findFirst: vi.fn(),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
     user: {
-      findFirst: vitest.fn().mockResolvedValue(null),
+      findFirst: vi.fn(),
     },
   },
 }));
 
-// why: preventing real pg-boss registration; the handler is extracted from
-// the work() mock
-vitest.mock("~/utils/scheduler.server", () => ({
+// why: preventing actual job scheduling during tests; captures the
+// registered callback + options so we can invoke it directly below
+vi.mock("~/utils/scheduler.server", () => ({
   scheduler: {
-    work: vitest.fn(),
-    cancel: vitest.fn(),
-    sendAfter: vitest.fn(),
+    work: vi.fn(),
   },
   QueueNames: {
     assetsQueue: "assets-queue",
   },
 }));
 
-// why: the advance step is unit-tested in chain.server.test.ts; here we only
-// verify the worker calls it at the right time and handles its outcomes
-vitest.mock("./chain.server", () => ({
-  ADVANCE_CLOCK_EPSILON_MS: 60 * 1000,
-  advanceRecurringReminder: vitest
-    .fn()
-    .mockResolvedValue({
-      next: null,
-      advanced: false,
-      paused: false,
-      ended: false,
-    }),
+// why: preventing actual email rendering/sending during worker tests
+vi.mock("./emails", () => ({
+  assetAlertEmailHtmlString: vi.fn().mockResolvedValue("<html></html>"),
+  assetAlertEmailText: vi.fn().mockReturnValue("text body"),
 }));
 
-// why: asserting the orphan-recovery branch re-arms the pending occurrence
-// without invoking the full scheduler
-vitest.mock("./scheduler.server", async (importOriginal) => {
-  const original = (await importOriginal()) as object;
-  return {
-    ...original,
-    scheduleAssetReminder: vitest.fn().mockResolvedValue(undefined),
-  };
-});
-
-// why: preventing real email template rendering during tests
-vitest.mock("./emails", () => ({
-  assetAlertEmailHtmlString: vitest.fn().mockResolvedValue("<html></html>"),
-  assetAlertEmailText: vitest.fn().mockReturnValue("text"),
+// why: preventing real email delivery while exercising the worker's
+// failure/retry paths — the tests assert on rethrow + logging, not on email I/O
+vi.mock("~/emails/mail.server", () => ({
+  sendEmail: vi.fn(),
 }));
 
-// why: preventing actual email sending during tests
-vitest.mock("~/emails/mail.server", () => ({
-  sendEmail: vitest.fn(),
+// why: avoiding actual note creation during worker tests
+vi.mock("../note/service.server", () => ({
+  createNote: vi.fn().mockResolvedValue({}),
 }));
 
-// why: preventing actual note creation during worker tests
-vitest.mock("../note/service.server", () => ({
-  createNote: vitest.fn().mockResolvedValue({}),
+// why: spying on Logger to verify logging behavior without touching Sentry/pino
+vi.mock("~/utils/logger", () => ({
+  Logger: {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  },
 }));
-
-// why: spying on Logger to verify warn/skip behavior without side effects
-vitest.mock("~/utils/logger", () => ({
-  Logger: { warn: vitest.fn(), info: vitest.fn(), error: vitest.fn() },
-}));
-
-type WorkerJob = { id?: string; data: AssetsSchedulerData };
 
 /**
- * Extracts the internal REMINDER handler by registering the worker and
- * capturing the callback passed to scheduler.work (same pattern as the
- * booking worker tests).
+ * Helper mirroring `apps/webapp/app/modules/booking/worker.server.test.ts`:
+ * registers the worker and extracts the callback pg-boss would invoke per
+ * job, since `ASSET_SCHEDULER_EVENT_HANDLERS` is module-private.
  */
-async function getWorkerHandler(): Promise<(job: WorkerJob) => Promise<void>> {
+async function getWorkerHandler(): Promise<{
+  handler: (job: PgBoss.JobWithMetadata<AssetsSchedulerData>) => Promise<void>;
+  queueName: unknown;
+  options: unknown;
+}> {
   await regierAssetWorkers();
-  const workMock = scheduler.work as ReturnType<typeof vitest.fn>;
-  return workMock.mock.calls[0][1];
+  const workMock = scheduler.work as ReturnType<typeof vi.fn>;
+  // scheduler.work is called with (queueName, options, callback). Captured
+  // here (rather than read from workMock.mock.calls in a test body) because
+  // beforeEach clears mock call history between tests below.
+  const [queueName, options, handler] = workMock.mock.calls[0];
+  return { handler, queueName, options };
 }
 
-function buildReminderRow(overrides: Record<string, unknown> = {}) {
+function buildJob(
+  overrides: Partial<PgBoss.JobWithMetadata<AssetsSchedulerData>> = {}
+): PgBoss.JobWithMetadata<AssetsSchedulerData> {
   return {
-    id: "reminder-1",
-    name: "Calibrate flow meter",
-    message: "Quarterly calibration",
-    organizationId: "org-1",
-    assetId: "asset-1",
-    createdById: "user-1",
-    alertDateTime: new Date(Date.now() - 60_000),
-    activeSchedulerReference: "job-1",
-    recurrenceUnit: null,
-    recurrenceInterval: null,
-    recurrenceTimezone: null,
-    recurrenceEndsAt: null,
-    teamMembers: [
-      {
-        user: {
-          email: "tech@example.com",
-          firstName: "Tess",
-          lastName: "Tech",
-          displayName: "Tess Tech",
-        },
-      },
-    ],
-    asset: {
-      id: "asset-1",
-      title: "Flow meter",
-      mainImage: null,
-      mainImageExpiration: null,
-    },
-    organization: { name: "Acme", customEmailFooter: null },
+    id: "job-1",
+    name: QueueNames.assetsQueue,
+    data: { reminderId: "reminder-1", eventType: "REMINDER" },
+    retrycount: 0,
+    retrylimit: 2,
     ...overrides,
-  };
+  } as PgBoss.JobWithMetadata<AssetsSchedulerData>;
 }
 
-const JOB: WorkerJob = {
-  id: "job-1",
-  data: { reminderId: "reminder-1", eventType: "REMINDER" },
-};
+describe("regierAssetWorkers", () => {
+  let workerHandler: (
+    job: PgBoss.JobWithMetadata<AssetsSchedulerData>
+  ) => Promise<void>;
+  let registeredQueueName: unknown;
+  let registeredOptions: unknown;
 
-let handler: (job: WorkerJob) => Promise<void>;
-
-beforeAll(async () => {
-  handler = await getWorkerHandler();
-});
-
-beforeEach(() => {
-  vitest.clearAllMocks();
-  (advanceRecurringReminder as any).mockResolvedValue({
-    next: null,
-    advanced: false,
-    paused: false,
-    ended: false,
+  beforeAll(async () => {
+    const registration = await getWorkerHandler();
+    workerHandler = registration.handler;
+    registeredQueueName = registration.queueName;
+    registeredOptions = registration.options;
   });
-});
 
-describe("REMINDER worker handler", () => {
-  it("fires a one-shot reminder: emails + note, no advance", async () => {
-    (db.assetReminder.findFirst as any).mockResolvedValue(buildReminderRow());
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
 
-    await handler(JOB);
-
-    expect(advanceRecurringReminder).not.toHaveBeenCalled();
-    expect(sendEmail).toHaveBeenCalledTimes(1);
-    expect(createNote).toHaveBeenCalledWith(
-      expect.objectContaining({
-        content: "**System** has sent **Calibrate flow meter** reminder.",
-      })
+  it("registers the queue with includeMetadata so retrycount/retrylimit are available", () => {
+    expect(registeredQueueName).toBe(QueueNames.assetsQueue);
+    expect(registeredOptions).toEqual(
+      expect.objectContaining({ includeMetadata: true })
     );
   });
 
-  it("skips silently when the reminder row is gone (deleted asset/reminder)", async () => {
-    (db.assetReminder.findFirst as any).mockResolvedValue(null);
+  it("returns cleanly (no throw) when the reminder no longer exists", async () => {
+    // @ts-expect-error missing vitest type
+    db.assetReminder.findFirst.mockResolvedValue(null);
 
-    await handler(JOB);
+    await expect(workerHandler(buildJob())).resolves.toBeUndefined();
 
     expect(Logger.warn).toHaveBeenCalled();
+    expect(Logger.error).not.toHaveBeenCalled();
+  });
+
+  it("sends nothing and writes no note when the reminder's asset is archived", async () => {
+    // @ts-expect-error missing vitest type
+    db.assetReminder.findFirst.mockResolvedValue({
+      id: "reminder-1",
+      assetId: "asset-1",
+      organizationId: "org-1",
+      createdById: "user-1",
+      name: "Service check",
+      teamMembers: [{ user: { email: "a@example.com", firstName: "A" } }],
+      asset: { id: "asset-1", title: "Camera", archivedAt: new Date() },
+      organization: { name: "ACME", customEmailFooter: null },
+    });
+
+    await expect(workerHandler(buildJob())).resolves.toBeUndefined();
+
     expect(sendEmail).not.toHaveBeenCalled();
     expect(createNote).not.toHaveBeenCalled();
+    expect(Logger.error).not.toHaveBeenCalled();
   });
 
-  it("skips a stale job (row tracks a different live job) without notifying or advancing", async () => {
-    (db.assetReminder.findFirst as any).mockResolvedValue(
-      buildReminderRow({ activeSchedulerReference: "job-NEWER" })
-    );
-
-    await handler(JOB);
-
-    expect(Logger.warn).toHaveBeenCalled();
-    expect(sendEmail).not.toHaveBeenCalled();
-    expect(advanceRecurringReminder).not.toHaveBeenCalled();
-  });
-
-  it("fires permissively when the stored reference is null (unknown state)", async () => {
-    (db.assetReminder.findFirst as any).mockResolvedValue(
-      buildReminderRow({ activeSchedulerReference: null })
-    );
-
-    await handler(JOB);
-
-    expect(sendEmail).toHaveBeenCalledTimes(1);
-  });
-
-  it("advances a due recurring series BEFORE notifying and mentions the next date in the note", async () => {
-    const next = new Date("2026-08-02T09:00:00.000Z");
-    const callOrder: string[] = [];
-    (advanceRecurringReminder as any).mockImplementation(() => {
-      callOrder.push("advance");
-      return Promise.resolve({
-        next,
-        advanced: true,
-        paused: false,
-        ended: false,
-      });
+  it("records the skip by clearing this job's scheduler reference", async () => {
+    // @ts-expect-error missing vitest type
+    db.assetReminder.findFirst.mockResolvedValue({
+      id: "reminder-1",
+      assetId: "asset-1",
+      organizationId: "org-1",
+      createdById: "user-1",
+      name: "Service check",
+      teamMembers: [],
+      asset: { id: "asset-1", title: "Camera", archivedAt: new Date() },
+      organization: { name: "ACME", customEmailFooter: null },
     });
-    (sendEmail as any).mockImplementation(() => {
-      callOrder.push("email");
+
+    await workerHandler(buildJob({ id: "job-7" }));
+
+    // Conditioned on the job, so a reminder rescheduled meanwhile keeps its
+    // new job reference.
+    expect(db.assetReminder.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "reminder-1",
+        organizationId: "org-1",
+        activeSchedulerReference: "job-7",
+      },
+      data: { activeSchedulerReference: null },
     });
-    (db.assetReminder.findFirst as any).mockResolvedValue(
-      buildReminderRow({
-        recurrenceUnit: ReminderRecurrenceUnit.MONTH,
-        recurrenceInterval: 1,
-        recurrenceTimezone: "UTC",
-      })
-    );
-
-    await handler(JOB);
-
-    expect(callOrder[0]).toBe("advance");
-    expect(callOrder).toContain("email");
-    expect(createNote).toHaveBeenCalledWith(
-      expect.objectContaining({
-        content: expect.stringContaining("Next reminder scheduled for"),
-      })
-    );
   });
 
-  it("re-arms an orphaned occurrence on retry (row advanced but next job never scheduled)", async () => {
-    // The row already points at a future occurrence, and THIS job is still the
-    // row's active reference (self-match) — the sendAfter failed on a prior
-    // attempt. The worker must re-schedule that occurrence, not advance again.
-    const future = new Date(Date.now() + 10 * 60_000);
-    (db.assetReminder.findFirst as any).mockResolvedValue(
-      buildReminderRow({
-        recurrenceUnit: ReminderRecurrenceUnit.MONTH,
-        recurrenceInterval: 1,
-        alertDateTime: future,
-        activeSchedulerReference: "job-1", // == JOB.id (not stale)
-      })
-    );
-
-    await handler(JOB);
-
-    expect(advanceRecurringReminder).not.toHaveBeenCalled();
-    expect(scheduleAssetReminder).toHaveBeenCalledWith(
-      expect.objectContaining({
-        when: future,
-        options: expect.objectContaining({ retryLimit: 3 }),
-      })
-    );
-    // the fired occurrence still notifies (at-least-once)
-    expect(sendEmail).toHaveBeenCalledTimes(1);
-  });
-
-  it("notes the final occurrence when the series ends (end date reached)", async () => {
-    (advanceRecurringReminder as any).mockResolvedValue({
-      next: null,
-      advanced: false,
-      paused: false,
-      ended: true,
+  it("emails and notes as usual when the reminder's asset is active", async () => {
+    // @ts-expect-error missing vitest type
+    db.assetReminder.findFirst.mockResolvedValue({
+      id: "reminder-1",
+      assetId: "asset-1",
+      organizationId: "org-1",
+      createdById: "user-1",
+      name: "Service check",
+      teamMembers: [{ user: { email: "a@example.com", firstName: "A" } }],
+      asset: { id: "asset-1", title: "Camera", archivedAt: null },
+      organization: { name: "ACME", customEmailFooter: null },
     });
-    (db.assetReminder.findFirst as any).mockResolvedValue(
-      buildReminderRow({
-        recurrenceUnit: ReminderRecurrenceUnit.MONTH,
-        recurrenceInterval: 1,
-      })
-    );
 
-    await handler(JOB);
+    await expect(workerHandler(buildJob())).resolves.toBeUndefined();
 
-    expect(createNote).toHaveBeenCalledWith(
-      expect.objectContaining({
-        content: expect.stringContaining("last occurrence"),
-      })
-    );
+    expect(sendEmail).toHaveBeenCalledOnce();
+    expect(createNote).toHaveBeenCalledOnce();
+    expect(db.assetReminder.updateMany).not.toHaveBeenCalled();
   });
 
-  it("notes the pause when the workspace tier lost recurrence", async () => {
-    (advanceRecurringReminder as any).mockResolvedValue({
-      next: null,
-      advanced: false,
-      paused: true,
-      ended: false,
-    });
-    (db.assetReminder.findFirst as any).mockResolvedValue(
-      buildReminderRow({
-        recurrenceUnit: ReminderRecurrenceUnit.MONTH,
-        recurrenceInterval: 1,
-      })
-    );
+  it("rethrows when the handler fails, so pg-boss retries the job", async () => {
+    const dbError = new Error("connection lost");
+    // @ts-expect-error missing vitest type
+    db.assetReminder.findFirst.mockRejectedValue(dbError);
 
-    await handler(JOB);
-
-    expect(createNote).toHaveBeenCalledWith(
-      expect.objectContaining({
-        content: expect.stringContaining("paused"),
-      })
-    );
+    await expect(
+      workerHandler(buildJob({ retrycount: 0, retrylimit: 2 }))
+    ).rejects.toThrow("connection lost");
   });
 
-  it("rethrows advance failures as RecurringAdvanceError so pg-boss retries (no email sent first)", async () => {
-    (advanceRecurringReminder as any).mockRejectedValue(new Error("boom"));
-    (db.assetReminder.findFirst as any).mockResolvedValue(
-      buildReminderRow({
-        recurrenceUnit: ReminderRecurrenceUnit.MONTH,
-        recurrenceInterval: 1,
-      })
-    );
+  it("does not log on an intermediate retry attempt (noise control)", async () => {
+    const dbError = new Error("connection lost");
+    // @ts-expect-error missing vitest type
+    db.assetReminder.findFirst.mockRejectedValue(dbError);
 
-    await expect(handler(JOB)).rejects.toBeInstanceOf(RecurringAdvanceError);
-    expect(sendEmail).not.toHaveBeenCalled();
-    expect(createNote).not.toHaveBeenCalled();
+    // pg-boss increments retrycount at fetch time, so with retrylimit 2 the
+    // handler observes retrycount 0, 1, 2 — the final attempt is retrycount
+    // === retrylimit (2). retrycount 1 is an intermediate retry: it should
+    // still rethrow (so pg-boss retries again) but must NOT log yet.
+    await expect(
+      workerHandler(buildJob({ retrycount: 1, retrylimit: 2 }))
+    ).rejects.toThrow();
+
+    expect(Logger.error).not.toHaveBeenCalled();
+  });
+
+  it("logs once on the final retry attempt before rethrowing", async () => {
+    const dbError = new Error("connection lost");
+    // @ts-expect-error missing vitest type
+    db.assetReminder.findFirst.mockRejectedValue(dbError);
+
+    // retrycount 2 of retrylimit 2 → this IS the true final attempt, since
+    // pg-boss's retrycount reaches retrylimit (not retrylimit - 1) on the
+    // last try.
+    await expect(
+      workerHandler(buildJob({ retrycount: 2, retrylimit: 2 }))
+    ).rejects.toThrow();
+
+    expect(Logger.error).toHaveBeenCalledOnce();
   });
 });

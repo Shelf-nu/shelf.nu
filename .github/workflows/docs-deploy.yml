@@ -20,6 +20,12 @@ jobs:
 
       - name: ⬇️ Checkout repo
         uses: actions/checkout@v4
+        with:
+          # `pnpm install` and `pnpm docs:build` below run fork-authored code
+          # (lifecycle scripts, vitepress config) BEFORE the deploy guard, and
+          # checkout persists GITHUB_TOKEN into .git/config by default. Nothing
+          # here needs git auth after checkout, so don't leave it on disk.
+          persist-credentials: false
 
       - name: 📦 Setup pnpm
         uses: pnpm/action-setup@v4
@@ -35,11 +41,38 @@ jobs:
       - name: 🔨 Build docs
         run: pnpm docs:build
 
+      # Fork PRs receive no repository secrets, so CLOUDFLARE_API_TOKEN is empty
+      # and the deploy is a guaranteed failure. Skip it for them — the docs
+      # BUILD above still runs, which is the part that can actually regress.
+      # The `push` arm is required: pushes to main have no pull_request context.
       - name: 📥 Install Wrangler
-        run: npm install -g wrangler
+        if: github.event_name == 'push' ||
+          github.event.pull_request.head.repo.full_name == github.repository
+        # Pinned EXACTLY, on purpose. This step hands CLOUDFLARE_API_TOKEN to
+        # whatever it installs, so a floating range would let a compromised
+        # release reach the credential. Wrangler pins all of its own non-optional
+        # deps exactly (esbuild, workerd, miniflare, unenv...), so an exact pin
+        # here resolves a deterministic tree without needing a lockfile entry.
+        #
+        # Bumping is MANUAL: Dependabot's github-actions ecosystem parses `uses:`
+        # references, not npm package names inside `run:` scripts, so nothing
+        # updates this automatically. That is the accepted trade — a stale
+        # wrangler fails loudly at deploy time, a compromised one fails silently.
+        #
+        # Not a devDependency of apps/docs: wrangler pulls in workerd (~127MB),
+        # and with no pnpm caching in CI every job in the monorepo would
+        # download it on every PR, to upload a static VitePress site.
+        # Not via pnpm/wrangler-action either — that hits the pnpm
+        # workspace-root restriction this step was written to avoid (acb25d0d1).
+        run: npm install -g wrangler@4.114.0
 
       - name: 🚀 Deploy to Cloudflare Pages
-        run: wrangler pages deploy apps/docs/.vitepress/dist --project-name=shelf-docs --branch=${{ github.event_name == 'push' && 'main' || github.head_ref }}
+        if: github.event_name == 'push' ||
+          github.event.pull_request.head.repo.full_name == github.repository
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # github.head_ref is attacker-controlled PR input (a branch name), so
+          # it goes through env instead of being interpolated into the script.
+          DEPLOY_BRANCH: ${{ github.event_name == 'push' && 'main' || github.head_ref }}
+        run: wrangler pages deploy apps/docs/.vitepress/dist --project-name=shelf-docs --branch="$DEPLOY_BRANCH"

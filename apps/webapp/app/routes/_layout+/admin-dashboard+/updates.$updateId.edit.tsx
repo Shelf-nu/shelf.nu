@@ -1,11 +1,16 @@
-import { UpdateStatus, OrganizationRoles } from "@prisma/client";
+import { UpdateStatus } from "@prisma/client";
+import { DateTime } from "luxon";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { data, redirect, useLoaderData } from "react-router";
 import { z } from "zod";
 import { Card } from "~/components/shared/card";
 import { UpdateForm } from "~/components/update/update-form";
+import { parseTargetRoles } from "~/modules/update/audience";
 import { getUpdateById, updateUpdate } from "~/modules/update/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { getClientHint } from "~/utils/client-hints";
+import { DATE_TIME_FORMAT } from "~/utils/constants";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
@@ -54,13 +59,16 @@ export const action = async ({
 
     const formData = await request.formData();
 
-    // Handle role targeting
-    const targetRoles: OrganizationRoles[] = [];
-    if (formData.get("targetAdmin")) targetRoles.push(OrganizationRoles.ADMIN);
-    if (formData.get("targetOwner")) targetRoles.push(OrganizationRoles.OWNER);
-    if (formData.get("targetSelfService"))
-      targetRoles.push(OrganizationRoles.SELF_SERVICE);
-    if (formData.get("targetBase")) targetRoles.push(OrganizationRoles.BASE);
+    // The roles the update targets; none checked means visible to everyone.
+    const targetRoles = parseTargetRoles(formData);
+
+    // Parse the submitted publish-date wall-clock in the acting admin's
+    // RESOLVED timezone preference (the same zone the form seeds it in), not
+    // the server zone, so the stored instant matches what the admin picked.
+    const { timeZone } = await resolveUserFormatPrefsById(
+      userId,
+      getClientHint(request)
+    );
 
     const payload = parseData(
       formData,
@@ -73,7 +81,11 @@ export const action = async ({
           .url("Must be a valid URL")
           .optional()
           .or(z.literal("")),
-        publishDate: z.string().transform((str) => new Date(str)),
+        publishDate: z.string().transform((str) =>
+          DateTime.fromFormat(str, DATE_TIME_FORMAT, {
+            zone: timeZone,
+          }).toJSDate()
+        ),
         status: z.nativeEnum(UpdateStatus),
       })
     );

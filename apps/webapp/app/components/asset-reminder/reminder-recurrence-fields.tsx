@@ -8,7 +8,6 @@
  *
  * @see {@link file://./set-or-edit-reminder-dialog.tsx}
  */
-import Input from "~/components/forms/input";
 import {
   Select,
   SelectContent,
@@ -17,6 +16,7 @@ import {
   SelectValue,
 } from "~/components/forms/select";
 import { Button } from "~/components/shared/button";
+import { DateTimePicker } from "~/components/shared/date-time-picker";
 import {
   REMINDER_REPEAT_PRESETS,
   type ReminderRepeatValue,
@@ -153,13 +153,14 @@ export default function ReminderRecurrenceFields({
 
       {canUseRecurringReminders && repeat !== "never" ? (
         <div>
-          <Input
+          <DateTimePicker
+            mode="date"
             defaultValue={endsAtDefault}
-            type="date"
             name={endsAtFieldName}
             error={endsAtError}
             label="Ends on (optional)"
             disabled={disabled}
+            clearable
             className="mb-2"
           />
           <p className="text-gray-500">

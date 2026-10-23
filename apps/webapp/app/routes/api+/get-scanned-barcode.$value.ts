@@ -1,9 +1,12 @@
 import type { Prisma } from "@prisma/client";
+import { ScanCodeType, ScanSource } from "@prisma/client";
 import { data } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
+import { serializeAssetImage } from "~/modules/asset/image-resolution";
 import { getBarcodeByValue } from "~/modules/barcode/service.server";
+import { recordScanNonFatal } from "~/modules/scan/service.server";
 import {
   getScannerPickerMeta,
   ScannerPickerContextSchema,
@@ -21,6 +24,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { readRawLastPathSegment } from "~/utils/raw-path-param";
 import { requirePermission } from "~/utils/roles.server";
 import {
   sanitizeAssetExtraInclude,
@@ -39,6 +43,20 @@ import {
 // Export types for barcode scanning
 export type AssetFromBarcode = AssetFromScanner;
 export type KitFromBarcode = KitFromScanner;
+
+/**
+ * GET /api/get-scanned-barcode/:value
+ *
+ * Resolves a camera-scanned barcode to its asset or kit in the caller's
+ * workspace. Every web scanner drawer calls it once per scanned barcode.
+ *
+ * Each resolve records the scan as `WEB_DRAWER`, with no note on the asset: a
+ * drawer row is a list entry, and the action the drawer performs keeps its
+ * own trail. A resolve carrying `auditSessionId` records nothing, because the
+ * audit's own writer (`recordAuditScan`) records that scan.
+ *
+ * @see {@link file://./get-scanned-item.$qrId.ts} the QR / SAM ID twin
+ */
 export async function loader({ request, params, context }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -75,8 +93,11 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       }
     );
 
-    // Decode the URL-encoded barcode value
-    const value = decodeURIComponent(encodedValue);
+    // Read the segment from the URL rather than the route param. React Router
+    // re-encodes a decoded `/` back to `%2F`, which makes a barcode containing
+    // a slash and one whose literal text is `%2F` indistinguishable by the time
+    // a loader sees them; the URL still has the difference.
+    const value = readRawLastPathSegment(request, encodedValue);
 
     const {
       assetExtraInclude,
@@ -181,6 +202,24 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       });
     }
 
+    if (!auditSessionId) {
+      // Non-fatal: a failed record never fails the resolve. Not awaited: a
+      // drawer row needs only the resolved item, and a scanner list resolves
+      // one code per scan.
+      void recordScanNonFatal({
+        codeType: ScanCodeType.BARCODE,
+        code: value,
+        source: ScanSource.WEB_DRAWER,
+        userAgent: request.headers.get("user-agent"),
+        userId,
+        barcodeId: barcode.id,
+        assetId: barcode.assetId,
+        kitId: barcode.kitId,
+        organizationId,
+        writeNote: false,
+      });
+    }
+
     // If audit session ID provided, fetch the auditAssetId and counts
     let auditAssetId: string | undefined;
     let auditNotesCount = 0;
@@ -233,7 +272,10 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
           type: barcode.asset ? "asset" : barcode.kit ? "kit" : undefined,
           asset: barcode.asset
             ? {
-                ...barcode.asset,
+                // Collapse the model-image cascade into the flat image
+                // fields the scanner drawers read; the nested relation is
+                // dropped so the row carries one source of truth.
+                ...serializeAssetImage(barcode.asset),
                 auditAssetId,
                 auditNotesCount,
                 auditImagesCount,

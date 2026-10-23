@@ -1,155 +1,85 @@
-import { format } from "date-fns";
-import { getDateTimeFormatFromHints, useHints } from "~/utils/client-hints";
-
 /**
- * Formats a date using locale-specific formatting without timezone conversion.
- * Used for absolute dates that should display exactly as stored (e.g., working hours overrides).
+ * `DateS` — the single client date-display primitive.
+ *
+ * Renders a date/time per the acting user's resolved formatting prefs
+ * (`useDateFormatter()` → `requestInfo.formatPrefs`), delegating all assembly to
+ * the pure `formatDate`. Order/separator, zero-padding, month name-vs-number, and
+ * 12/24h all come from the user's prefs — never from the browser locale — so every
+ * surface agrees. Timezone conversion is handled inside `formatDate` (skipped when
+ * `localeOnly` is set, for absolute dates like working-hours overrides).
+ *
+ * Always assumes `date` may be a string (loader-serialized) or a `Date`.
+ *
+ * @see {@link file://../../hooks/use-date-formatter.ts}
+ * @see {@link file://../../utils/date-format.ts} formatDate
  */
-export function formatAbsoluteDate(
-  date: string | Date,
-  options?: Intl.DateTimeFormatOptions
-): string {
-  // Extract just the date part and create a local date
-  let dateOnly: string;
-  if (typeof date === "string") {
-    dateOnly = date.includes("T") ? date.split("T")[0] : date;
-  } else {
-    if (isNaN(date.getTime())) {
-      throw new Error("Invalid Date object");
-    }
-    dateOnly = date.toISOString().split("T")[0];
-  }
-
-  const [year, month, day] = dateOnly.split("-").map(Number);
-  const dateToFormat = new Date(year, month - 1, day);
-
-  // Convert Intl.DateTimeFormatOptions to date-fns format string
-  let formatString: string;
-
-  if (options) {
-    const parts = [];
-
-    // Build format parts in logical order
-    if (options.weekday === "long") parts.push("EEEE");
-    else if (options.weekday === "short") parts.push("EEE");
-    else if (options.weekday === "narrow") parts.push("EEEEE");
-
-    // Month and day should be together without comma
-    let datePartFormat = "";
-    if (options.month === "long") datePartFormat += "MMMM";
-    else if (options.month === "short") datePartFormat += "MMM";
-    else if (options.month === "numeric") datePartFormat += "M";
-    else if (options.month === "2-digit") datePartFormat += "MM";
-
-    if (options.day === "numeric") datePartFormat += " d";
-    else if (options.day === "2-digit") datePartFormat += " dd";
-
-    if (datePartFormat) parts.push(datePartFormat);
-
-    if (options.year === "numeric") parts.push("yyyy");
-    else if (options.year === "2-digit") parts.push("yy");
-
-    if (parts.length > 0) {
-      formatString = parts.join(", ");
-    } else {
-      // Fallback if no valid parts found
-      formatString = "PPP"; // date-fns long localized date format
-    }
-  } else {
-    // Default locale-aware format when no options provided
-    // Use date-fns localized format that adapts to locale
-    // PPP = long localized date format (e.g., "April 29th, 2023" in en-US, "29 avril 2023" in fr-FR)
-    formatString = "PPP";
-  }
-
-  return format(dateToFormat, formatString);
-}
+import { useDateFormatter } from "~/hooks/use-date-formatter";
+import type { DateFormatOptions } from "~/utils/date-format";
 
 /**
- * Component that renders date based on the users locale and timezone.
- * This is used on client side so we assume that the date is always string due to loader data serialization.
- * Can optionally display time along with the date.
+ * Props for {@link DateS}. `options` is a superset of the Intl option shapes the
+ * app passes today; extra branches are handled by `formatDate`.
+ */
+type DateSProps = {
+  /** The value to render. `null` renders nothing (with a dev warning). */
+  date: string | Date | null;
+  /**
+   * Formatting options (weekday/year/month/day/hour/minute or dateStyle/timeStyle).
+   * Defaults inside `formatDate` are numeric year/month/day per the user's order.
+   */
+  options?: DateFormatOptions;
+  /** Append the time portion to the date. */
+  includeTime?: boolean;
+  /** Render only the time portion (no date). */
+  onlyTime?: boolean;
+  /**
+   * Format as an absolute date with NO timezone conversion (use for real-world,
+   * location-specific dates like working-hours overrides that must not shift with
+   * the viewer's timezone). Still honors the user's order/format prefs.
+   */
+  localeOnly?: boolean;
+};
+
+/**
+ * Renders a date/time string using the current user's resolved formatting prefs.
+ *
+ * @param props - See {@link DateSProps}.
+ * @returns A `<span>` with the formatted value, or `null` for a null `date`.
  */
 export const DateS = ({
   date,
   options,
-  includeTime = false,
-  onlyTime = false,
-  localeOnly = false,
-}: {
-  date: string | Date | null;
-  /**
-   * Options to pass to Intl.DateTimeFormat
-   * Default values are { year: 'numeric', month: 'numeric', day: 'numeric' }
-   * You can pass any options that Intl.DateTimeFormat accepts
-   */
-  options?: Intl.DateTimeFormatOptions;
-  /**
-   * Whether to include time in the formatted date
-   * When true, adds time formatting options (hour, minute) to the date format
-   */
-  includeTime?: boolean;
-  /**
-   * Whether to show only the time portion (no date)
-   * When true, formats only hours and minutes
-   */
-  onlyTime?: boolean;
-  /**
-   * Whether to format the date based on locale only, without timezone conversion.
-   * Use this for absolute dates like working hours overrides that represent
-   * real-world, location-specific dates that should not change based on user timezone.
-   */
-  localeOnly?: boolean;
-}) => {
-  const hints = useHints();
+  includeTime,
+  onlyTime,
+  localeOnly,
+}: DateSProps) => {
+  const { formatDate } = useDateFormatter();
+
+  // Resolve each formatting flag so an explicit prop wins, then a matching key
+  // inside `options`, then the `false` default. Without this, a `false` default
+  // spread after `...options` would silently overwrite a flag the caller passed
+  // via `options` (e.g. `options={{ onlyTime: true }}`).
+  const resolvedIncludeTime = includeTime ?? options?.includeTime ?? false;
+  const resolvedOnlyTime = onlyTime ?? options?.onlyTime ?? false;
+  const resolvedLocaleOnly = localeOnly ?? options?.localeOnly ?? false;
+
   if (!date) {
     // eslint-disable-next-line no-console
     console.warn("DateS component received null date:", date);
     return null;
   }
 
-  // Handle locale-only formatting (no timezone conversion)
-  if (localeOnly) {
-    if (includeTime) {
-      // eslint-disable-next-line no-console
-      console.warn("includeTime is not supported with localeOnly formatting");
-    }
-
-    const formattedDate = formatAbsoluteDate(date, options);
-    return <span>{formattedDate}</span>;
+  if (resolvedLocaleOnly && resolvedIncludeTime) {
+    // eslint-disable-next-line no-console
+    console.warn("includeTime is not supported with localeOnly formatting");
   }
 
-  // Standard timezone-aware formatting
-  let d = date;
-  if (typeof date === "string") {
-    d = new Date(date);
-  }
-
-  // Determine formatting options based on flags
-  let timeOptions: Intl.DateTimeFormatOptions;
-
-  if (onlyTime) {
-    // Only show time (no date)
-    // Use timeStyle to prevent default date options from being added
-    timeOptions = {
-      timeStyle: "short",
-      ...options,
-    };
-  } else if (includeTime) {
-    // Show both date and time
-    timeOptions = {
-      hour: "numeric",
-      minute: "numeric",
-      ...options,
-    };
-  } else {
-    // Show only date (default)
-    timeOptions = options || {};
-  }
-
-  const formattedDate = getDateTimeFormatFromHints(hints, timeOptions).format(
-    new Date(d)
-  );
+  const formattedDate = formatDate(date, {
+    ...options,
+    includeTime: resolvedIncludeTime,
+    onlyTime: resolvedOnlyTime,
+    localeOnly: resolvedLocaleOnly,
+  });
 
   return <span>{formattedDate}</span>;
 };

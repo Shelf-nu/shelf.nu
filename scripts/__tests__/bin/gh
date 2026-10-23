@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+#
+# Test double for the `gh` CLI.
+#
+# Serves fixture JSON based on the arguments it receives, so the watch and
+# respond scripts can be exercised without network access or a live PR.
+# The fixture set is selected by $GH_FIXTURE_DIR.
+#
+# Mutations (graphql with "mutation") are recorded to $GH_MUTATION_LOG rather
+# than executed, so idempotency and payload shape can be asserted.
+
+set -uo pipefail
+
+args="$*"
+
+# Record mutations instead of performing them.
+if [[ "$args" == *"mutation"* ]]; then
+  [[ -n "${GH_MUTATION_LOG:-}" ]] && printf '%s\n' "$args" >> "$GH_MUTATION_LOG"
+  printf '{"data":{"ok":true}}\n'
+  exit 0
+fi
+
+case "$args" in
+  *graphql*)      cat "$GH_FIXTURE_DIR/threads.json" ;;
+  */reviews*)     cat "$GH_FIXTURE_DIR/reviews.json" ;;
+  */check-runs*)  cat "$GH_FIXTURE_DIR/check-runs.json" ;;
+  */comments*)    cat "$GH_FIXTURE_DIR/issue-comments.json" ;;
+  *)
+    printf 'gh stub: unhandled args: %s\n' "$args" >&2
+    exit 1
+    ;;
+esac

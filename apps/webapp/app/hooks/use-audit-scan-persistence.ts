@@ -86,6 +86,17 @@ export function useAuditScanPersistence({
         continue;
       }
 
+      // Defensive: audits only track assets (kits have no AuditAsset
+      // record and record-scan would reject/fail on a kit id, hanging the
+      // retry loop forever). The normal path already keeps kits out of
+      // `scannedItems` with `data` set (see the `rejectItemType` guard in
+      // `generic-item-row.tsx`), but this check stands on its own so a
+      // non-asset item can never be submitted here regardless of how it
+      // entered the map.
+      if (item.type !== "asset") {
+        continue;
+      }
+
       const assetId = item.data.id;
 
       // Skip if already persisted or currently being persisted

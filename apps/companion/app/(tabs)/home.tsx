@@ -1,3 +1,4 @@
+import { AUDIT_STATUS_LABELS } from "@shelf/labels";
 import { useState, useCallback, useRef, memo, useEffect } from "react";
 import {
   View,
@@ -21,7 +22,8 @@ import {
 } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import { pushIntoTab } from "@/lib/navigation";
-import { formatDue } from "@/lib/audit-format";
+import { auditOwnership, formatDue } from "@/lib/audit-format";
+import { useDateFormatter, useFormatPrefs } from "@/lib/use-date-formatter";
 import { userHasPermission } from "@/lib/permissions";
 import {
   fontSize,
@@ -417,16 +419,10 @@ const BookingCard = memo(function BookingCard({
 }) {
   const { colors, bookingStatusBadge } = useTheme();
   const styles = useStyles();
+  const { formatDate } = useDateFormatter();
   const badge = bookingStatusBadge[booking.status] ?? {
     bg: colors.backgroundTertiary,
     text: colors.muted,
-  };
-
-  const formatShortDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString(undefined, {
-      month: "short",
-      day: "numeric",
-    });
   };
 
   return (
@@ -457,7 +453,10 @@ const BookingCard = memo(function BookingCard({
             color={colors.mutedLight}
           />
           <Text style={styles.metaText}>
-            {formatShortDate(booking.from)} – {formatShortDate(booking.to)}
+            {/* Compact month/day range (no year) to keep the dashboard card
+                glanceable, still in the user's timezone + format order. */}
+            {formatDate(booking.from, { month: "short", day: "numeric" })} –{" "}
+            {formatDate(booking.to, { month: "short", day: "numeric" })}
           </Text>
         </View>
         <View style={styles.metaItem}>
@@ -545,6 +544,7 @@ const AuditCard = memo(function AuditCard({
 }) {
   const { colors, auditStatusBadge } = useTheme();
   const styles = useStyles();
+  const prefs = useFormatPrefs();
   const badge = auditStatusBadge[audit.status] ?? {
     bg: colors.backgroundTertiary,
     text: colors.muted,
@@ -561,7 +561,7 @@ const AuditCard = memo(function AuditCard({
   // here vs "Due tomorrow" there). Home only ever shows active audits, but
   // pass the real flag so the helper stays honest if that changes.
   const isActive = audit.status === "PENDING" || audit.status === "ACTIVE";
-  const due = formatDue(audit.dueDate, isActive);
+  const due = formatDue(audit.dueDate, isActive, prefs);
   const dueColor =
     due.tier === "overdue"
       ? colors.error
@@ -569,27 +569,17 @@ const AuditCard = memo(function AuditCard({
       ? colors.warning
       : colors.mutedLight;
 
-  // Same ownership model the Audits list uses: 0 assignees = open for
-  // anyone to scan, otherwise yours or someone else's. `null` when the
-  // dashboard payload predates these fields (older/not-yet-deployed
-  // webapp) — we hide the row entirely rather than render "undefined
-  // assigned". The list endpoint already ships these fields, so the list
-  // shows ownership today; Home lights up once the dashboard deploy lands.
-  const ownership: "open" | "mine" | "others" | null =
-    audit.assigneeCount == null
-      ? null
-      : audit.assigneeCount === 0
-      ? "open"
-      : audit.isAssignedToMe
-      ? "mine"
-      : "others";
+  // Same ownership model the Audits list uses, resolved by the shared helper
+  // so the two screens state it identically: 0 assignees = open for anyone to
+  // scan, otherwise yours or someone else's. `ownership` is null when the
+  // dashboard payload predates these fields (older/not-yet-deployed webapp) —
+  // and so are both labels, so there is no branch that can render "undefined
+  // assigned" if a future edit drops the guard below.
+  const { ownership, label: ownershipLabel, a11yLabel } = auditOwnership(audit);
 
   const statusLabel =
-    audit.status === "PENDING"
-      ? "Pending"
-      : audit.status === "ACTIVE"
-      ? "Active"
-      : audit.status;
+    AUDIT_STATUS_LABELS[audit.status as keyof typeof AUDIT_STATUS_LABELS] ??
+    audit.status;
 
   return (
     <TouchableOpacity
@@ -599,7 +589,15 @@ const AuditCard = memo(function AuditCard({
         onPress();
       }}
       activeOpacity={0.6}
-      accessibilityLabel={`Audit: ${audit.name}, ${statusLabel}, ${audit.foundAssetCount} of ${audit.expectedAssetCount} found`}
+      // why: `a11yLabel`, not the visible `label` — the announcement is a
+      // comma-joined sentence, so it wants the spoken-prose variant
+      // ("assigned to you and 2 others") rather than the card's terse
+      // "You + 2 others", which reads as arithmetic when spoken.
+      accessibilityLabel={`Audit: ${audit.name}, ${statusLabel}, ${
+        audit.foundAssetCount
+      } of ${audit.expectedAssetCount} found${
+        a11yLabel ? `, ${a11yLabel}` : ""
+      }`}
       accessibilityRole="button"
     >
       <View style={styles.bookingHeader}>
@@ -673,15 +671,7 @@ const AuditCard = memo(function AuditCard({
                 },
               ]}
             >
-              {ownership === "open"
-                ? "Unassigned · anyone can scan"
-                : ownership === "mine"
-                ? audit.assigneeCount === 1
-                  ? "Assigned to you"
-                  : `You + ${(audit.assigneeCount ?? 1) - 1} other${
-                      (audit.assigneeCount ?? 1) - 1 === 1 ? "" : "s"
-                    }`
-                : `${audit.assigneeCount} assigned`}
+              {ownershipLabel}
             </Text>
           </View>
         )}

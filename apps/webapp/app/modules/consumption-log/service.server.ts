@@ -2,18 +2,20 @@
  * ConsumptionLog Service
  *
  * Manages quantity-tracking operations for assets in Shelf.nu.
- * Handles creating consumption logs (CHECKOUT, RETURN, RESTOCK, ADJUSTMENT, LOSS),
- * querying paginated log history, computing available quantities, and adjusting
- * the total quantity of a quantity-tracked asset.
+ * Handles hand-out and return logs (CHECKOUT, RETURN), querying paginated log
+ * history, computing available quantities, and adjusting the total quantity
+ * of a quantity-tracked asset (RESTOCK, ADJUSTMENT, LOSS).
  *
- * Consumption logs are immutable audit records — they are never updated or deleted.
- * Direction (add/subtract) is determined by the category:
- *   - CHECKOUT / LOSS → subtract from available pool
- *   - RETURN → add back to available pool
- *   - RESTOCK / ADJUSTMENT → change total quantity
+ * Consumption logs are immutable audit records: they are never updated or deleted.
+ * Two kinds of row share the table:
+ *   - CHECKOUT / RETURN hand units to a custodian or booking and take them
+ *     back. They change availability, not stock (`stockChange` 0).
+ *   - Every other category changes stock at one place and is the stock
+ *     ledger, written by `recordStockChanges` in `./stock-ledger.server.ts`.
  *
- * @see {@link file://./quantity-lock.server.ts} — Row-level locking for concurrency
- * @see {@link file://../../../packages/database/prisma/schema.prisma} — ConsumptionLog model
+ * @see {@link file://./quantity-lock.server.ts} Row-level locking for concurrency
+ * @see {@link file://./stock-ledger.server.ts} The stock ledger writes
+ * @see {@link file://../../../packages/database/prisma/schema.prisma} ConsumptionLog model
  */
 
 import type { ConsumptionCategory, Prisma } from "@prisma/client";
@@ -21,10 +23,39 @@ import {
   BookingStatus,
   ConsumptionCategory as ConsumptionCategoryEnum,
 } from "@prisma/client";
+import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
+// `recordEvent` writes the structured activity-event audit row alongside the
+// immutable ConsumptionLog. The activity-event service is a dependency-free
+// leaf (imports only db + error + its own types), so this does NOT reintroduce
+// the availability/booking cycle guarded against below.
+import { recordEvent } from "~/modules/activity-event/service.server";
+// Imported from the dependency-free leaf (NOT `availability.server`) to avoid
+// the cycle `consumption-log → availability.server → booking/service.server →
+// consumption-log`, which corrupts Vitest partial-mock bindings on
+// `createConsumptionLog` in the booking suite. See the leaf's header doc.
+import { assertAssetQuantityNotBelowReservations } from "~/modules/asset/availability-primitives.server";
+import {
+  bookedOutFromSource,
+  custodyFromSource,
+  hasMultipleSources,
+  isUnplacedSource,
+  placedAtSource,
+  sourceShortfall,
+  unitsLeftAtSource,
+} from "~/modules/asset/custody-source";
+import type { CustodySourceState } from "~/modules/asset/custody-source";
+import {
+  createCustodySourceLocationNote,
+  loadCustodySources,
+} from "~/modules/asset/custody-source.server";
+import { assertStockNotBelowManualPlacements } from "~/modules/asset/placement-reconcile.server";
+import { USER_NAME_SELECT } from "~/modules/user/fields";
+import { formatUnitCount } from "~/utils/asset-quantity";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 import { lockAssetForQuantityUpdate } from "./quantity-lock.server";
+import { readStockState, recordStockChanges } from "./stock-ledger.server";
 
 const label: ErrorLabel = "Consumption Log";
 
@@ -36,8 +67,12 @@ const label: ErrorLabel = "Consumption Log";
 type CreateConsumptionLogArgs = {
   /** The asset this log entry belongs to */
   assetId: string;
-  /** The category/type of consumption event */
-  category: ConsumptionCategory;
+  /**
+   * A hand-out or a return: units change hands, the stock does not. Every
+   * other category changes stock and is written by `recordStockChanges`
+   * (`./stock-ledger.server.ts`), which records where the units went.
+   */
+  category: Extract<ConsumptionCategory, "CHECKOUT" | "RETURN">;
   /** The number of units involved (must be > 0) */
   quantity: number;
   /** The user performing the action */
@@ -57,6 +92,13 @@ type CreateConsumptionLogArgs = {
   /** Optional team member who received/returned items */
   custodianId?: string;
   /**
+   * The location the units left or arrived at, when the movement had one:
+   * the custody source for CHECKOUT / RETURN / CONSUME, or the location a
+   * RESTOCK / LOSS / ADJUSTMENT was made at. Omit or pass null for the
+   * unplaced units.
+   */
+  locationId?: string | null;
+  /**
    * Optional Prisma interactive transaction client.
    * Typed as `any` because Prisma doesn't export a clean type for
    * `$transaction()` callbacks on extended PrismaClient instances —
@@ -68,10 +110,12 @@ type CreateConsumptionLogArgs = {
 };
 
 /**
- * Creates a new consumption log entry for a quantity-tracked asset.
+ * Creates a CHECKOUT or RETURN log entry for a quantity-tracked asset.
  *
- * The `quantity` field is always stored as a positive integer. The direction
- * (add or subtract) is inferred from the `category` by consuming code.
+ * The `quantity` field is always stored as a positive integer. The row's
+ * `stockChange` is 0: handing units to a custodian or a booking, or taking
+ * them back, leaves them in stock at the same place. Stock changes go
+ * through `recordStockChanges` instead.
  *
  * @param args - The log entry details
  * @returns The created ConsumptionLog record
@@ -86,6 +130,7 @@ export async function createConsumptionLog({
   bookingId,
   bookingAssetId,
   custodianId,
+  locationId,
   tx,
 }: CreateConsumptionLogArgs) {
   try {
@@ -111,6 +156,8 @@ export async function createConsumptionLog({
         bookingId: bookingId ?? null,
         bookingAssetId: bookingAssetId ?? null,
         custodianId: custodianId ?? null,
+        locationId: locationId ?? null,
+        stockChange: 0,
       },
     });
   } catch (cause) {
@@ -171,8 +218,7 @@ export async function getConsumptionLogs({
         include: {
           performedBy: {
             select: {
-              firstName: true,
-              lastName: true,
+              ...USER_NAME_SELECT,
               profilePicture: true,
             },
           },
@@ -214,27 +260,51 @@ export type AvailableQuantity = {
 };
 
 /**
+ * Minimal client surface {@link computeAvailableQuantity} reads through — the
+ * `asset` and `custody` delegates only. A `Pick` of {@link ExtendedPrismaClient}
+ * so BOTH the root `db` client and an interactive-transaction client satisfy it
+ * without a cast (an interactive tx is structurally a subset of the extended
+ * client), letting `getAssetAvailability` thread its active `tx` straight in.
+ */
+export type AvailableQuantityClient = Pick<
+  ExtendedPrismaClient,
+  "asset" | "custody"
+>;
+
+/**
  * Computes the available quantity for a quantity-tracked asset.
  *
  * Calculates how many units are currently in custody (summing all custody
  * records for the asset) and subtracts from the total to determine availability.
  *
  * @param assetId - The ID of the asset to compute availability for
+ * @param client - Prisma client or interactive transaction. Defaults to the
+ *   global `db`. `getAssetAvailability` passes its active `tx` so this read
+ *   joins the caller's transaction — row locks taken and uncommitted writes
+ *   made earlier in that tx are visible here, which is what keeps the
+ *   availability write guards race-safe (reading `total`/`inCustody` outside
+ *   the tx would defeat the `lockAssetForQuantityUpdate` serialization).
  * @returns The quantity breakdown: total, inCustody, and available
  * @throws {ShelfError} If the asset is not found or the query fails
  */
 export async function computeAvailableQuantity(
-  assetId: string
+  assetId: string,
+  client: AvailableQuantityClient = db
 ): Promise<AvailableQuantity> {
   try {
     const [asset, custodySum] = await Promise.all([
-      db.asset.findUniqueOrThrow({
-        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` org-verified by the caller (adjustQuantity / checkout flows validate the asset against organizationId before logging)
+      client.asset.findUniqueOrThrow({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries, local-rules/require-archived-at-check-on-asset-queries -- idor-safe: `assetId` org-verified by the caller (adjustQuantity / checkout flows validate the asset against organizationId before logging); why: availability math for a by-id asset; must not throw for an archived one
         where: { id: assetId },
         select: { quantity: true },
       }),
-      db.custody.aggregate({
-        where: { assetId },
+      client.custody.aggregate({
+        // `kitCustodyId: null` = OPERATOR custody only. Kit-inherited custody
+        // rows (a kit holding this asset that is itself assigned custody) carry
+        // a non-null `kitCustodyId`; those units are already accounted for via
+        // `AssetKit.quantity` (`inKits`) in the availability model, so counting
+        // them here too would double-deduct them from the pool.
+        where: { assetId, kitCustodyId: null },
         _sum: { quantity: true },
       }),
     ]);
@@ -420,6 +490,21 @@ type AdjustQuantityArgs = {
   organizationId: string;
   /** Optional note explaining the reason for the adjustment */
   note?: string;
+  /**
+   * Where the units arrived or were lost. A location id changes that
+   * manual placement along with the total; the unplaced units
+   * (`isUnplacedSource`) change the total only. Undefined keeps the adjustment total-only,
+   * exactly as when no location is asked.
+   */
+  locationId?: string | null;
+};
+
+/** Where an adjustment landed, for the caller's audit note. */
+export type AdjustmentLocationOutcome = {
+  locationId: string | null;
+  locationName: string | null;
+  /** Whether the pool was placed at two or more locations before the adjustment. */
+  multiSource: boolean;
 };
 
 /**
@@ -429,13 +514,19 @@ type AdjustQuantityArgs = {
  * operations. These change the total pool size, unlike CHECKOUT/RETURN which
  * move units between the available pool and custody.
  *
+ * With a location, the placement moves with the total: adding raises (or
+ * creates) that manual placement, removing lowers it (deleting a row that
+ * reaches zero) and may take no more than the location has left (placed
+ * there minus already in custody from there). Without one, only the total
+ * changes and a removal must still fit above the placed units.
+ *
  * Runs inside an interactive transaction with a row-level lock to prevent
  * concurrent modifications from producing inconsistent quantities.
  *
  * @param args - The adjustment details
- * @returns The updated Asset record
+ * @returns The updated Asset record and where the adjustment landed
  * @throws {ShelfError} If the asset is not QUANTITY_TRACKED, quantity is invalid,
- *   or subtracting would reduce quantity below zero
+ *   the location is not usable, or subtracting would reduce quantity below zero
  */
 export async function adjustQuantity({
   assetId,
@@ -445,6 +536,7 @@ export async function adjustQuantity({
   userId,
   organizationId,
   note,
+  locationId,
 }: AdjustQuantityArgs) {
   try {
     if (quantity <= 0) {
@@ -456,9 +548,13 @@ export async function adjustQuantity({
       });
     }
 
-    return await db.$transaction(async (tx) => {
+    const result = await db.$transaction(async (tx) => {
       /** Step 1: Acquire row-level lock to prevent concurrent modifications */
-      const asset = await lockAssetForQuantityUpdate(tx, assetId);
+      const asset = await lockAssetForQuantityUpdate(
+        tx,
+        assetId,
+        organizationId
+      );
 
       /**
        * Step 2: Validate asset belongs to the caller's organization.
@@ -466,6 +562,10 @@ export async function adjustQuantity({
        * user with `asset:update` in any org could mutate another org's
        * qty-tracked asset by passing its id. Mirrors the pattern used in
        * `checkOutQuantity` / `releaseQuantity` in `asset/service.server.ts`.
+       *
+       * Now defense-in-depth: `lockAssetForQuantityUpdate` is org-scoped, so a
+       * foreign-org id already 404'd at Step 1 (no lock taken) and never reaches
+       * here. We keep this belt-and-braces check to document the invariant.
        */
       if (asset.organizationId !== organizationId) {
         throw new ShelfError({
@@ -490,6 +590,113 @@ export async function adjustQuantity({
 
       const currentQuantity = asset.quantity ?? 0;
 
+      /**
+       * Step 3a: Resolve the location, read under the lock. `""` / `null`
+       * means the unplaced units (total only). A location must belong to
+       * this workspace; a removal must also come from an existing manual
+       * placement of this asset, capped at what that location has left.
+       */
+      const atLocationId =
+        locationId === undefined || isUnplacedSource(locationId)
+          ? null
+          : locationId;
+
+      /** Refuses a loss larger than what the named source has left. */
+      const assertSourceHasRoom = ({
+        state,
+        locationId: sourceId,
+        sourceName,
+      }: {
+        state: CustodySourceState;
+        locationId: string | null;
+        sourceName: string | null;
+      }) => {
+        const left = unitsLeftAtSource(state, sourceId);
+        if (quantity <= left) return;
+        throw new ShelfError({
+          cause: null,
+          ...sourceShortfall({
+            sourceName,
+            placedCount:
+              formatUnitCount(asset, placedAtSource(state, sourceId)) ??
+              "0 units",
+            inCustody: custodyFromSource(state, sourceId),
+            onBooking: bookedOutFromSource(state, sourceId),
+          }),
+          label,
+          status: 400,
+          additionalData: { assetId, locationId: sourceId, quantity, left },
+          shouldBeCaptured: false,
+        });
+      };
+      /** Read only when a location was named; the default path is total-only. */
+      const sources =
+        locationId === undefined
+          ? null
+          : await loadCustodySources(tx, { assetId, total: currentQuantity });
+      const multiSource = sources ? hasMultipleSources(sources.state) : false;
+      let atLocationName: string | null = null;
+      let existingPlacement: { id: string; quantity: number } | null = null;
+
+      if (atLocationId) {
+        const location = await tx.location.findFirst({
+          where: { id: atLocationId, organizationId },
+          select: { name: true },
+        });
+        if (!location) {
+          throw new ShelfError({
+            cause: null,
+            message: "The selected location does not exist in this workspace.",
+            label,
+            status: 404,
+            additionalData: { assetId, locationId: atLocationId },
+            shouldBeCaptured: false,
+          });
+        }
+        atLocationName = location.name;
+
+        existingPlacement = await tx.assetLocation.findFirst({
+          where: {
+            assetId,
+            locationId: atLocationId,
+            assetKitId: null,
+            organizationId,
+          },
+          select: { id: true, quantity: true },
+        });
+
+        if (direction === "subtract" && sources) {
+          if (!existingPlacement) {
+            throw new ShelfError({
+              cause: null,
+              message: `${location.name} has no units of this asset.`,
+              label,
+              status: 400,
+              additionalData: { assetId, locationId: atLocationId },
+              shouldBeCaptured: false,
+            });
+          }
+
+          assertSourceHasRoom({
+            state: sources.state,
+            locationId: atLocationId,
+            sourceName: location.name,
+          });
+        }
+      } else if (sources && direction === "subtract") {
+        /**
+         * The unplaced units, named on purpose: capped the same way, at the
+         * unplaced units minus custody recorded against them, so custody
+         * never claims more unplaced units than exist. An Adjust that names
+         * nothing (`sources` NULL) stays total-only.
+         */
+        assertSourceHasRoom({
+          state: sources.state,
+          locationId: null,
+          sourceName: null,
+        });
+      }
+
       /** Step 4: For subtraction, ensure the new total doesn't drop below in-custody */
       if (direction === "subtract") {
         const custodySum = await tx.custody.aggregate({
@@ -511,6 +718,45 @@ export async function adjustQuantity({
             additionalData: { assetId, quantity, currentQuantity, inCustody },
           });
         }
+
+        /**
+         * Reservations guard. The in-custody check above only protects units
+         * held by custodians right now; this also blocks lowering the total
+         * below what active bookings have RESERVED (their peak-concurrent
+         * booked footprint) or what's allocated into kits. This is the shared
+         * stock-lowering guard used by `updateAsset` too, so the `adjust
+         * quantity` endpoint can't strand a reservation the asset-edit path
+         * would reject. Runs inside this same tx with the asset already
+         * row-locked above, so the read-then-decide is race-safe.
+         */
+        await assertAssetQuantityNotBelowReservations({
+          assetId,
+          organizationId,
+          tx,
+          newTotal: currentQuantity - quantity,
+          assetTitle: asset.title,
+          unitOfMeasure: asset.unitOfMeasure,
+        });
+
+        /**
+         * Placement guard, the orthogonal axis the reservations guard does not
+         * cover, for a removal that names no location. Lowering only the
+         * total would leave locations claiming more units than the asset
+         * owns, so it is refused rather than trimming a location on the
+         * operator's behalf. A removal AT a location lowers that placement by
+         * the same amount below, which keeps the sum where it was relative to
+         * the total, so it needs no such guard.
+         */
+        if (!atLocationId) {
+          await assertStockNotBelowManualPlacements({
+            assetId,
+            organizationId,
+            tx,
+            newTotal: currentQuantity - quantity,
+            assetTitle: asset.title,
+            unitOfMeasure: asset.unitOfMeasure,
+          });
+        }
       }
 
       /** Step 5: Compute the new total quantity */
@@ -519,6 +765,12 @@ export async function adjustQuantity({
           ? currentQuantity + quantity
           : currentQuantity - quantity;
 
+      /** The stock before any write, for the ledger rows in step 7. */
+      const stockBefore = await readStockState(tx, {
+        assetId,
+        organizationId,
+      });
+
       /** Step 6: Update the asset's quantity */
       const updatedAsset = await tx.asset.update({
         // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` org-verified earlier in this transaction via the locked asset's organizationId guard
@@ -526,18 +778,160 @@ export async function adjustQuantity({
         data: { quantity: newQuantity },
       });
 
-      /** Step 7: Create an immutable audit log entry */
-      await createConsumptionLog({
-        assetId,
-        category,
-        quantity,
+      /**
+       * Step 6a: Move the placement with the total. Added units land at the
+       * location (creating the manual placement when the pool is not there
+       * yet); removed units come off it, and a row that reaches zero is
+       * deleted, like a move that drains its source. Placement rows that
+       * appear or disappear get an `ASSET_LOCATION_CHANGED` event, the same
+       * events the placement editor emits.
+       */
+      if (atLocationId) {
+        if (direction === "add") {
+          if (existingPlacement) {
+            await tx.assetLocation.update({
+              // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `existingPlacement.id` came from the org-scoped findFirst above, inside this locked tx
+              where: { id: existingPlacement.id },
+              data: { quantity: existingPlacement.quantity + quantity },
+            });
+          } else {
+            await tx.assetLocation.create({
+              data: {
+                assetId,
+                locationId: atLocationId,
+                organizationId,
+                quantity,
+              },
+            });
+            await recordEvent(
+              {
+                organizationId,
+                actorUserId: userId,
+                action: "ASSET_LOCATION_CHANGED",
+                entityType: "ASSET",
+                entityId: assetId,
+                assetId,
+                locationId: atLocationId,
+                field: "locationId",
+                fromValue: null,
+                toValue: atLocationId,
+                meta: { quantity },
+              },
+              tx
+            );
+          }
+        } else if (existingPlacement) {
+          const remaining = existingPlacement.quantity - quantity;
+          if (remaining <= 0) {
+            await tx.assetLocation.delete({
+              // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `existingPlacement.id` came from the org-scoped findFirst above, inside this locked tx
+              where: { id: existingPlacement.id },
+            });
+            await recordEvent(
+              {
+                organizationId,
+                actorUserId: userId,
+                action: "ASSET_LOCATION_CHANGED",
+                entityType: "ASSET",
+                entityId: assetId,
+                assetId,
+                locationId: atLocationId,
+                field: "locationId",
+                fromValue: atLocationId,
+                toValue: null,
+                meta: { quantity },
+              },
+              tx
+            );
+          } else {
+            await tx.assetLocation.update({
+              // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: same provenance as the delete above
+              where: { id: existingPlacement.id },
+              data: { quantity: remaining },
+            });
+          }
+        }
+      }
+
+      /**
+       * Step 7: Ledger rows, where the units actually arrived or left: the
+       * location when one was named, otherwise the unplaced units.
+       */
+      await recordStockChanges(tx, {
+        organizationId,
         userId,
-        note,
-        tx,
+        changes: [
+          {
+            assetId,
+            before: stockBefore,
+            events: [
+              {
+                category,
+                change: direction === "add" ? quantity : -quantity,
+                locationId: atLocationId,
+                note,
+              },
+            ],
+          },
+        ],
       });
 
-      return updatedAsset;
+      /**
+       * Step 8: Structured activity event for the reporting pipeline — one
+       * `ASSET_QUANTITY_CHANGED` per total-quantity change, emitted inside the
+       * SAME tx so it commits atomically with the asset update + log (see
+       * `.claude/rules/use-record-event.md`). `fromValue`/`toValue` capture the
+       * true direction the direction-agnostic ConsumptionLog cannot.
+       */
+      await recordEvent(
+        {
+          organizationId,
+          actorUserId: userId,
+          action: "ASSET_QUANTITY_CHANGED",
+          entityType: "ASSET",
+          entityId: assetId,
+          assetId,
+          field: "quantity",
+          fromValue: currentQuantity,
+          toValue: newQuantity,
+        },
+        tx
+      );
+
+      return {
+        asset: updatedAsset,
+        location: {
+          locationId: atLocationId,
+          locationName: atLocationName,
+          multiSource,
+        } satisfies AdjustmentLocationOutcome,
+      };
     });
+
+    /**
+     * The location's timeline records the restock or loss, for pools
+     * placed at two or more locations only (a pool at one location reads as
+     * it always has). Written after the commit, best-effort.
+     */
+    if (result.location.multiSource && result.location.locationId) {
+      await createCustodySourceLocationNote({
+        userId,
+        asset: result.asset,
+        locationId: result.location.locationId,
+        locationName: result.location.locationName,
+        quantity,
+        verb:
+          category === "RESTOCK"
+            ? "restocked"
+            : category === "LOSS"
+            ? "lost"
+            : direction === "add"
+            ? "added"
+            : "removed",
+      });
+    }
+
+    return result;
   } catch (cause) {
     /** Re-throw ShelfErrors as-is to preserve status/message */
     if (cause instanceof ShelfError) {

@@ -1,26 +1,35 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import type { Barcode, Kit } from "@prisma/client";
 import { useAtom, useAtomValue } from "jotai";
-import { useActionData } from "react-router";
+import { useActionData, useLocation } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, assetImageValidateFileAtom } from "~/atoms/file";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
+import { useDiscardRemount } from "~/hooks/use-discard-remount";
+import { useTrackedFormRef } from "~/hooks/use-unsaved-changes";
 import type { action as editKitAction } from "~/routes/_layout+/kits.$kitId_.edit";
 import type { action as createKitAction } from "~/routes/_layout+/kits.new";
-import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
+import { resolveCancelTo } from "~/utils/cancel-destination";
 import { getValidationErrors } from "~/utils/http";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { tw } from "~/utils/tw";
 import { zodFieldIsRequired } from "~/utils/zod";
 import { Form } from "../custom-form";
+import KitImage from "./kit-image";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import BarcodesInput, { type BarcodesInputRef } from "../forms/barcodes-input";
 import FormRow from "../forms/form-row";
+import {
+  IMAGE_FIELD_PICTURE_CLASSES,
+  IMAGE_HINT_8MB,
+  ImageFileField,
+} from "../forms/image-file-field";
 import Input from "../forms/input";
 import { RefererRedirectInput } from "../forms/referer-redirect-input";
+import { UnsavedChangesGuard } from "../forms/unsaved-changes-bar";
 import ImageWithPreview from "../image-with-preview/image-with-preview";
 import InlineEntityCreationDialog from "../inline-entity-creation-dialog/inline-entity-creation-dialog";
 import { Button } from "../shared/button";
@@ -43,31 +52,89 @@ export const NewKitFormSchema = z.object({
 });
 
 type KitFormProps = Partial<
-  Pick<Kit, "name" | "description" | "categoryId" | "locationId">
+  Pick<Kit, "name" | "description" | "categoryId" | "locationId" | "image">
 > & {
+  /** Expiry of the saved image's signed URL; an expired one is refreshed. */
+  imageExpiration?: Kit["imageExpiration"] | string;
   className?: string;
+  /** Present when editing an existing kit; absent on create. Only used to
+   * pick a sensible Cancel destination when there's no referer. */
+  id?: string;
   qrId?: string | null;
   barcodes?: Pick<Barcode, "id" | "value" | "type">[];
   referer?: string | null;
 };
 
-export default function KitsForm({
+/**
+ * Create and edit form for kits: name, description, category, location,
+ * image and barcodes, with the unsaved-changes bar.
+ *
+ * Discard remounts the inner form (see `useDiscardRemount`), which resets
+ * every widget that keeps its value in React state.
+ *
+ * @param props - Current values when editing; omit them to create a kit
+ */
+export default function KitsForm(props: KitFormProps) {
+  const { key, discard, discarded } = useDiscardRemount();
+  return (
+    <KitsFormInner
+      key={key}
+      {...props}
+      onDiscard={discard}
+      autoFocusName={!discarded}
+    />
+  );
+}
+
+function KitsFormInner({
   className,
+  id,
   name,
   description,
   qrId,
   categoryId,
   barcodes,
   locationId,
+  image,
+  imageExpiration,
   referer,
-}: KitFormProps) {
+  onDiscard,
+  autoFocusName,
+}: KitFormProps & {
+  /** Resets the form to the loaded values (remounts it). */
+  onDiscard: () => void;
+  /** Focus the Name field on mount; false after a Discard. */
+  autoFocusName: boolean;
+}) {
   const disabled = useDisabled();
   const { canUseBarcodes } = useBarcodePermissions();
   const barcodesInputRef = useRef<BarcodesInputRef>(null);
 
+  /**
+   * Snapshot of the referer as it was when this form first mounted.
+   * Deliberately ignores later prop updates — see the matching comment in
+   * `~/components/assets/form.tsx`. The Referer header is only meaningful on
+   * arrival; any in-route navigation overwrites it with this page's own URL.
+   */
+  const [initialReferer] = useState(referer);
+
+  /**
+   * Where Cancel goes. The referer is best-effort and unusable in three
+   * separate cases (absent prop, no Referer header, and self-reference).
+   * `resolveCancelTo` owns all three — see its JSDoc.
+   */
+  const { pathname } = useLocation();
+  const cancelTo = resolveCancelTo({
+    referer: initialReferer,
+    currentPathname: pathname,
+    fallback: id ? `/kits/${id}` : "/kits",
+  });
+
   // Focus the Name field on mount so create/edit pages start the user
   // typing immediately instead of relying on a removed autoFocus prop.
-  const nameInputRef = useAutoFocus<HTMLInputElement>();
+  const nameInputRef = useAutoFocus<HTMLInputElement>({
+    when: autoFocusName,
+  });
 
   const actionData = useActionData<
     typeof createKitAction | typeof editKitAction
@@ -75,9 +142,11 @@ export default function KitsForm({
 
   const fileError = useAtomValue(fileErrorAtom);
   const [, updateDynamicTitle] = useAtom(updateDynamicTitleAtom);
-  const [, validateFile] = useAtom(assetImageValidateFileAtom);
 
   const zo = useZorm("NewKitForm", NewKitFormSchema);
+
+  /** The form element, shared by Zorm and the unsaved-changes tracking. */
+  const { formRef, setFormRef } = useTrackedFormRef(zo.ref);
 
   const serverValidationErrors = getValidationErrors(actionData?.error);
   const nameErrorMessage =
@@ -92,8 +161,13 @@ export default function KitsForm({
 
   return (
     <Card className={tw("w-full md:w-min", className)}>
+      <UnsavedChangesGuard
+        formRef={formRef}
+        actionData={actionData}
+        onDiscard={onDiscard}
+      />
       <Form
-        ref={zo.ref}
+        ref={setFormRef}
         method="post"
         className="flex w-full flex-col gap-2"
         encType="multipart/form-data"
@@ -279,26 +353,28 @@ export default function KitsForm({
         </FormRow>
 
         <FormRow rowLabel="Image" className="border-b-0 pt-[10px]">
-          <div>
-            <p className="hidden lg:block">
-              Accepts PNG, JPG, JPEG, or WebP (max.8 MB)
-            </p>
-            <Input
-              disabled={disabled}
-              accept={ACCEPT_SUPPORTED_IMAGES}
-              name="image"
-              type="file"
-              onChange={validateFile}
-              label="Image"
-              hideLabel
-              error={imageError}
-              className="mt-2"
-              inputClassName="border-0 shadow-none p-0 rounded-none"
-            />
-            <p className="mt-2 lg:hidden">
-              Accepts PNG, JPG, JPEG, or WebP (max.8 MB)
-            </p>
-          </div>
+          <ImageFileField
+            name="image"
+            label="Image"
+            currentImage={
+              // Same picture as the kits list: the saved image (its signed
+              // URL refreshed when expired) or the placeholder.
+              <KitImage
+                kit={{
+                  kitId: id ?? "new-kit",
+                  image: image ?? null,
+                  imageExpiration: imageExpiration ?? null,
+                  alt: "Kit image",
+                }}
+                className={IMAGE_FIELD_PICTURE_CLASSES}
+              />
+            }
+            previewAlt="Kit image"
+            validateFileAtom={assetImageValidateFileAtom}
+            hint={IMAGE_HINT_8MB}
+            error={imageError}
+            disabled={disabled}
+          />
         </FormRow>
 
         <When truthy={canUseBarcodes}>
@@ -320,7 +396,7 @@ export default function KitsForm({
 
         <FormRow className="border-y-0 pb-0 pt-5" rowLabel="">
           <div className="ml-auto flex gap-2">
-            <Button to={referer} variant="secondary" disabled={disabled}>
+            <Button to={cancelTo} variant="secondary" disabled={disabled}>
               Cancel
             </Button>
             <Button type="submit" disabled={disabled}>

@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { useDateFormatter } from "~/hooks/use-date-formatter";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 
 type TitleContainerProps = {
@@ -15,6 +16,7 @@ export default function TitleContainer({
   calendarView,
 }: TitleContainerProps) {
   const { isMd } = useViewportHeight();
+  const { formatDate } = useDateFormatter();
 
   const titleToRender = useMemo(() => {
     if (calendarTitle) {
@@ -22,12 +24,12 @@ export default function TitleContainer({
     }
 
     const currentDate = new Date();
-    const currentMonth = currentDate.toLocaleString("default", {
+    return formatDate(currentDate, {
       month: "long",
+      year: "numeric",
+      localeOnly: true,
     });
-    const currentYear = currentDate.getFullYear();
-    return `${currentMonth} ${currentYear}`;
-  }, [calendarTitle]);
+  }, [calendarTitle, formatDate]);
 
   return (
     <div className={className}>

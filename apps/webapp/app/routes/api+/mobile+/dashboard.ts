@@ -1,3 +1,14 @@
+/**
+ * Mobile API route: home dashboard.
+ *
+ * Serves the companion's Home screen in one request: KPI counts, assets by
+ * status, the newest assets, upcoming, active and overdue bookings, and active
+ * audits. Org-scoped behind the mobile bearer auth. Lapsed photo URLs on the
+ * newest assets are re-signed before the response is sent.
+ *
+ * @see {@link file://./../../../modules/asset/service.server.ts} refreshExpiredAssetImages
+ */
+import type { Prisma } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import {
@@ -5,8 +16,23 @@ import {
   requireOrganizationAccess,
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
-import { getBookings } from "~/modules/booking/service.server";
+import { resolveAssetImage } from "~/modules/asset/image-resolution";
+import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
+import {
+  bookableListScopeWhere,
+  resolveBookableListScope,
+} from "~/modules/asset/list-scope.server";
+import {
+  ASSET_IMAGE_RESIGN_LIMITS,
+  refreshExpiredAssetImages,
+} from "~/modules/asset/service.server";
+import {
+  getBookings,
+  resolveCustodianScope,
+} from "~/modules/booking/service.server";
+import { resolveBookingCustodianName } from "~/utils/booking-authorization.server";
 import { makeShelfError } from "~/utils/error";
+import type { UserNameFields } from "~/utils/user";
 
 /**
  * GET /api/mobile/dashboard
@@ -30,10 +56,54 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // (canUseAudits, surfaced through getMobileUserContext) so the
     // dashboard never serves activeAudits to non-add-on workspaces — a
     // paywall bypass / data leak even with the client cards hidden.
-    const { canUseAudits } = await getMobileUserContext(
+    // The same call yields `access.bookings.seeAll`, which decides which
+    // bookings the sections may draw from, and `access.custody.seeAll` for
+    // their names.
+    const { canUseAudits, access } = await getMobileUserContext(
       user.id,
       organizationId
     );
+
+    // The asset KPI, the status breakdown and the newest-assets list describe
+    // the same assets the caller's Assets tab lists: active assets only, and
+    // for a role whose `assets.listScope` is "bookable", those available for
+    // bookings plus the ones in the caller's custody. Each query names
+    // `archivedAt` itself so the archived-at lint rule can check it.
+    const bookableScope = resolveBookableListScope({
+      access,
+      userId: user.id,
+    });
+    const listScopeWhere: Prisma.AssetWhereInput = bookableScope
+      ? { AND: [bookableListScopeWhere(bookableScope)] }
+      : {};
+
+    // Which bookings the Home sections may draw from.
+    // `requireOrganizationAccess` above proves membership and performs NO role
+    // check, so without a restriction here any member could read every booking
+    // in the workspace — with custodian names attached — straight off the
+    // dashboard.
+    //
+    // `access.bookings.seeAll` is that decision: ADMIN and OWNER see every
+    // booking, SELF_SERVICE and BASE see only the ones they hold unless the
+    // workspace has switched their override on. Home reads the same flag the
+    // website does and lands on the same set of bookings.
+    //
+    // `resolveCustodianScope` rather than a bare `{ userId }`: custody lives
+    // on a user link OR any of the caller's team-member links, and a bare
+    // user-link filter hides a user's own booking whenever their custody comes
+    // from a team member. The list and calendar resolve it the same way; this
+    // is the third lens on the same rows. It reaches `getBookings` as
+    // `custodianScope`, a restriction ANDed into the query, so it can only ever
+    // narrow — and `null` lifts it entirely.
+    //
+    // NOTE: this deliberately does not mirror the web dashboard, which denies
+    // self-service/base the page outright (`PermissionEntity.dashboard` is
+    // empty for both). The companion's Home tab is the app's landing screen
+    // for every role, not an admin analytics surface — denying it would leave
+    // those users on a permanent error state rather than a scoped dashboard.
+    const custodianScope = access.bookings.seeAll
+      ? null
+      : await resolveCustodianScope({ userId: user.id, organizationId });
 
     // Run all queries in parallel for speed
     const [
@@ -43,14 +113,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
       teamMemberCount,
       assetsByStatus,
       myCustodyCount,
-      newestAssets,
+      storedNewestAssets,
       upcomingBookingsResult,
       activeBookingsResult,
       overdueBookingsResult,
       activeAudits,
     ] = await Promise.all([
-      // KPI: Total assets
-      db.asset.count({ where: { organizationId } }),
+      // KPI: Total assets, as the Assets tab lists them
+      db.asset.count({
+        where: { organizationId, archivedAt: null, ...listScopeWhere },
+      }),
 
       // KPI: Categories
       db.category.count({ where: { organizationId } }),
@@ -63,19 +135,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
         where: { organizationId, deletedAt: null },
       }),
 
-      // Assets by status
+      // Assets by status, over the same assets as the KPI
       db.asset.groupBy({
         by: ["status"],
-        where: { organizationId },
+        where: { organizationId, archivedAt: null, ...listScopeWhere },
         _count: { id: true },
       }),
 
-      // My custody count — assets currently in custody of this user.
-      // Phase 2 widened `Asset.custody` from 1:1 to 1:many for
-      // QUANTITY_TRACKED multi-custodian support, so we filter via `some`.
+      // My custody count: assets currently in this user's custody, bookable
+      // or not, like the custody tab. `Asset.custody` is one-to-many (a
+      // quantity-tracked asset can have several holders), so filter via `some`.
       db.asset.count({
         where: {
           organizationId,
+          // Dashboard KPI: active inventory only, like the status groupBy.
+          archivedAt: null,
           custody: {
             some: {
               custodian: {
@@ -86,9 +160,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
         },
       }),
 
-      // 5 newest assets
+      // 5 newest assets, from the same assets as the KPI
       db.asset.findMany({
-        where: { organizationId },
+        where: { organizationId, archivedAt: null, ...listScopeWhere },
         orderBy: { createdAt: "desc" },
         take: 5,
         select: {
@@ -96,6 +170,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
           title: true,
           status: true,
           mainImage: true,
+          thumbnailImage: true,
+          // Lets the re-sign below tell a lapsed photo URL.
+          mainImageExpiration: true,
+          // Model cover image; `serializeAssetImage` below resolves the cascade
+          ...ASSET_MODEL_IMAGE_SELECT,
           category: { select: { id: true, name: true, color: true } },
           createdAt: true,
         },
@@ -108,16 +187,26 @@ export async function loader({ request }: LoaderFunctionArgs) {
         perPage: 5,
         statuses: ["RESERVED"],
         userId: user.id,
+        custodianScope,
         bookingFrom: new Date(),
+        // The companion renders booking scalars, a custodian name and a count
+        // — never an asset row — so the per-booking asset payload is skipped
+        // and the count comes from the aggregate instead.
+        includeAssets: false,
         extraInclude: {
           custodianUser: {
+            // `id` and the team member's `userId` together answer "is the
+            // custodian the caller?", which keeps their own name visible.
             select: {
+              id: true,
               firstName: true,
               lastName: true,
+              displayName: true,
               profilePicture: true,
             },
           },
-          custodianTeamMember: { select: { name: true } },
+          custodianTeamMember: { select: { name: true, userId: true } },
+          _count: { select: { bookingAssets: true } },
         },
       }),
 
@@ -128,15 +217,26 @@ export async function loader({ request }: LoaderFunctionArgs) {
         perPage: 5,
         statuses: ["ONGOING"],
         userId: user.id,
+        custodianScope,
+        // The companion renders booking scalars, a custodian name and a count
+        // — never an asset row — so the per-booking asset payload is skipped
+        // and the count comes from the aggregate instead.
+        includeAssets: false,
         extraInclude: {
           custodianUser: {
+            // `id` and the team member's `userId` answer "is the caller the
+            // custodian?", which keeps their own name visible when the
+            // custody override is off.
             select: {
+              id: true,
               firstName: true,
               lastName: true,
+              displayName: true,
               profilePicture: true,
             },
           },
-          custodianTeamMember: { select: { name: true } },
+          custodianTeamMember: { select: { name: true, userId: true } },
+          _count: { select: { bookingAssets: true } },
         },
       }),
 
@@ -147,15 +247,26 @@ export async function loader({ request }: LoaderFunctionArgs) {
         perPage: 5,
         statuses: ["OVERDUE"],
         userId: user.id,
+        custodianScope,
+        // The companion renders booking scalars, a custodian name and a count
+        // — never an asset row — so the per-booking asset payload is skipped
+        // and the count comes from the aggregate instead.
+        includeAssets: false,
         extraInclude: {
           custodianUser: {
+            // `id` and the team member's `userId` answer "is the caller the
+            // custodian?", which keeps their own name visible when the
+            // custody override is off.
             select: {
+              id: true,
               firstName: true,
               lastName: true,
+              displayName: true,
               profilePicture: true,
             },
           },
-          custodianTeamMember: { select: { name: true } },
+          custodianTeamMember: { select: { name: true, userId: true } },
+          _count: { select: { bookingAssets: true } },
         },
       }),
 
@@ -167,6 +278,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
           organizationId,
           status: { in: ["PENDING", "ACTIVE"] },
           ...(canUseAudits ? {} : { id: { in: [] } }),
+          // Roles limited to assigned audits see only theirs, the same
+          // predicate `/api/mobile/audits` applies through `assignedOnly`.
+          ...(!access.audits.seeAll && {
+            assignments: { some: { userId: user.id } },
+          }),
         },
         select: {
           id: true,
@@ -194,19 +310,59 @@ export async function loader({ request }: LoaderFunctionArgs) {
       statusCounts[group.status] = group._count.id;
     }
 
+    /**
+     * The booking row shape the three `getBookings` calls above produce, as
+     * far as this projection reads it.
+     *
+     * Spelled out instead of `any` because the field it gets wrong is
+     * invisible at runtime: the previous `b._count?.assets` named a relation
+     * that does not exist on `Booking` (it is `bookingAssets`) and no `_count`
+     * was selected at all, so every booking reported `assetCount: 0` and the
+     * `any` kept the compiler quiet about it.
+     */
+    type MobileDashboardBooking = {
+      id: string;
+      name: string;
+      status: string;
+      from: Date | string | null;
+      to: Date | string | null;
+      /**
+       * `UserNameFields` rather than the name halves spelled out: it requires
+       * `displayName`, so this shape cannot drift back to naming the custodian
+       * by their legal name without failing to compile.
+       */
+      /**
+       * `id` and the team member's `userId` are REQUIRED for the same reason
+       * `UserNameFields` is: they answer "is the custodian the caller?", so a
+       * projection that drops one silently redacts a user's own booking rather
+       * than failing to compile.
+       */
+      custodianUser?: (UserNameFields & { id: string }) | null;
+      custodianTeamMember?: { name: string; userId: string | null } | null;
+      _count?: { bookingAssets: number };
+    };
+
+    const newestAssets = await refreshExpiredAssetImages(storedNewestAssets, {
+      organizationId,
+      ...ASSET_IMAGE_RESIGN_LIMITS,
+    });
+
     // Format booking results
-    const formatBooking = (b: any) => ({
+    const formatBooking = (b: MobileDashboardBooking) => ({
       id: b.id,
       name: b.name,
       status: b.status,
-      from: b.from?.toISOString?.() ?? b.from,
-      to: b.to?.toISOString?.() ?? b.to,
-      custodianName: b.custodianUser
-        ? [b.custodianUser.firstName, b.custodianUser.lastName]
-            .filter(Boolean)
-            .join(" ") || null
-        : b.custodianTeamMember?.name || null,
-      assetCount: b._count?.assets ?? 0,
+      from: b.from instanceof Date ? b.from.toISOString() : b.from,
+      to: b.to instanceof Date ? b.to.toISOString() : b.to,
+      // Custody visibility is its own workspace override. The shared resolver
+      // is what keeps Home naming a booking's holder the same way the list and
+      // the calendar do.
+      custodianName: resolveBookingCustodianName({
+        canSeeAllCustody: access.custody.seeAll,
+        booking: b,
+        userId: user.id,
+      }),
+      assetCount: b._count?.bookingAssets ?? 0,
     });
 
     return data({
@@ -218,14 +374,30 @@ export async function loader({ request }: LoaderFunctionArgs) {
         myCustody: myCustodyCount,
       },
       assetsByStatus: statusCounts,
-      newestAssets: newestAssets.map((a) => ({
-        id: a.id,
-        title: a.title,
-        status: a.status,
-        mainImage: a.mainImage,
-        category: a.category,
-        createdAt: a.createdAt.toISOString(),
-      })),
+      newestAssets: newestAssets.map((a) => {
+        // Hand-written projection, so typecheck can't catch a dropped field —
+        // resolve the model-image cascade explicitly here, or an asset that
+        // inherits its image shows blank on the companion's dashboard.
+        const { image, ...rest } = {
+          ...a,
+          image: resolveAssetImage({
+            mainImage: a.mainImage,
+            thumbnailImage: a.thumbnailImage,
+            assetModel: a.assetModel,
+          }),
+        };
+        return {
+          id: rest.id,
+          title: rest.title,
+          status: rest.status,
+          mainImage: image.source === "placeholder" ? null : image.fullUrl,
+          thumbnailImage:
+            image.source === "placeholder" ? null : image.thumbnailUrl,
+          imageSource: image.source,
+          category: rest.category,
+          createdAt: rest.createdAt.toISOString(),
+        };
+      }),
       upcomingBookings: upcomingBookingsResult.bookings.map(formatBooking),
       activeBookings: activeBookingsResult.bookings.map(formatBooking),
       overdueBookings: overdueBookingsResult.bookings.map(formatBooking),

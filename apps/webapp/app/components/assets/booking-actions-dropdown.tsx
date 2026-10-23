@@ -1,6 +1,11 @@
+import { archivedAssetBlockedReason } from "@shelf/labels";
 import { useLoaderData } from "react-router";
+import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
-import { getPrimaryKit } from "~/modules/asset/utils";
+import {
+  getPrimaryKit,
+  isDirectBookingBlockedByKit,
+} from "~/modules/asset/utils";
 import type { loader } from "~/routes/_layout+/assets.$assetId";
 import { isPersonalOrg } from "~/utils/organization";
 import { Button } from "../shared/button";
@@ -10,27 +15,47 @@ import { GenericBookActionsDropdown } from "../shared/generic-add-to-bookings-ac
 export default function BookingActionsDropdown() {
   const { asset } = useLoaderData<typeof loader>();
   const organization = useCurrentOrganization();
+  const canReinstate = useCanArchiveAssets();
   const { availableToBook } = asset;
 
   if (isPersonalOrg(organization)) return null;
 
   const assetKit = getPrimaryKit<{ id: string; name: string }>(asset);
-  const disabled = assetKit
-    ? {
-        reason: (
-          <>
-            Cannot book this asset directly because it's part of a kit. Please
-            book the{" "}
-            <Button to={`/kits/${assetKit.id}`} target="_blank" variant="link">
-              kit
-            </Button>{" "}
-            instead.
-          </>
-        ),
-      }
-    : false;
 
-  const disabledTrigger = availableToBook
+  /**
+   * Kit membership only blocks INDIVIDUAL assets — a QUANTITY_TRACKED asset
+   * allocates a slice of its pool to each kit and keeps the rest free for
+   * direct bookings (see `isDirectBookingBlockedByKit`). Blocking on mere
+   * membership hid the Book action from customers whose qty-tracked asset had
+   * standalone units left, even though the booking page's picker accepted it.
+   */
+  const disabled =
+    isDirectBookingBlockedByKit(asset) && assetKit
+      ? {
+          reason: (
+            <>
+              Cannot book this asset directly because it's part of a kit. Please
+              book the{" "}
+              <Button
+                to={`/kits/${assetKit.id}`}
+                target="_blank"
+                variant="link"
+              >
+                kit
+              </Button>{" "}
+              instead.
+            </>
+          ),
+        }
+      : false;
+
+  const disabledTrigger = asset.archivedAt
+    ? {
+        // Members without the archive grant (Manager, self service, base)
+        // cannot reinstate, so they are told who can.
+        reason: archivedAssetBlockedReason({ canReinstate, action: "book" }),
+      }
+    : availableToBook
     ? false
     : {
         reason: "This asset has been marked as unavailable for bookings.",

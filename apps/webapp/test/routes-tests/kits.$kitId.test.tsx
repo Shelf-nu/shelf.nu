@@ -15,12 +15,18 @@ import type { ActionFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { action } from "~/routes/_layout+/kits.$kitId";
+import {
+  fetchAssetKitDetachmentImpact,
+  mergeStandaloneCollisionsForKitDetachment,
+  preserveKitDrivenPlacements,
+  removeKitSlicesFromPlanningBookings,
+} from "~/modules/kit/service.server";
 import { requirePermission } from "~/utils/roles.server";
 import { getUserByID } from "~/modules/user/service.server";
 
 const dbMocks = vi.hoisted(() => ({
   kit: { update: vi.fn() },
-  asset: { update: vi.fn() },
+  asset: { update: vi.fn(), updateMany: vi.fn() },
   custody: { deleteMany: vi.fn(), count: vi.fn() },
   assetKit: { findMany: vi.fn() },
 }));
@@ -28,7 +34,10 @@ const dbMocks = vi.hoisted(() => ({
 vi.mock("~/database/db.server", () => ({
   db: {
     kit: { update: dbMocks.kit.update },
-    asset: { update: dbMocks.asset.update },
+    asset: {
+      update: dbMocks.asset.update,
+      updateMany: dbMocks.asset.updateMany,
+    },
     custody: {
       deleteMany: dbMocks.custody.deleteMany,
       count: dbMocks.custody.count,
@@ -40,7 +49,10 @@ vi.mock("~/database/db.server", () => ({
     $transaction: vi.fn((cb: (tx: unknown) => unknown) =>
       cb({
         kit: { update: dbMocks.kit.update },
-        asset: { update: dbMocks.asset.update },
+        asset: {
+          update: dbMocks.asset.update,
+          updateMany: dbMocks.asset.updateMany,
+        },
         custody: {
           deleteMany: dbMocks.custody.deleteMany,
           count: dbMocks.custody.count,
@@ -69,7 +81,6 @@ vi.mock("~/modules/note/service.server", () => ({
 // stub the imports we actually use.
 vi.mock("~/modules/kit/service.server", () => ({
   deleteKit: vi.fn(),
-  deleteKitImage: vi.fn(),
   // why: removeAsset action calls these helpers to coordinate with the
   // kit→booking cascade. They no-op in this unit test — the cascade
   // semantics are covered separately by kit/service.server.test.ts.
@@ -80,7 +91,9 @@ vi.mock("~/modules/kit/service.server", () => ({
   mergeStandaloneCollisionsForKitDetachment: vi
     .fn()
     .mockResolvedValue(undefined),
+  preserveKitDrivenPlacements: vi.fn().mockResolvedValue(undefined),
   relinkKitQrCode: vi.fn(),
+  removeKitSlicesFromPlanningBookings: vi.fn().mockResolvedValue([]),
 }));
 
 // why: barcode service is imported but unused in removeAsset path.
@@ -93,7 +106,7 @@ vi.mock("~/modules/qr/utils.server", () => ({
 }));
 
 vi.mock("~/modules/scan/service.server", () => ({
-  getScanByQrId: vi.fn(),
+  getLastScanForTarget: vi.fn(),
 }));
 
 vi.mock("~/modules/scan/utils.server", () => ({
@@ -131,7 +144,6 @@ vi.mock("~/utils/http.server", () => ({
     const result: Record<string, unknown> = {};
     if (formData.get("intent")) result.intent = formData.get("intent");
     if (formData.get("assetId")) result.assetId = formData.get("assetId");
-    if (formData.get("image")) result.image = formData.get("image");
     return result;
   }),
   getParams: vi.fn().mockImplementation((params: any) => ({
@@ -228,7 +240,7 @@ describe("kits/$kitId removeAsset action", () => {
 
     // Status flip path was NOT triggered — the asset still has custody
     // (operator-assigned), so it must stay IN_CUSTODY.
-    expect(dbMocks.asset.update).not.toHaveBeenCalled();
+    expect(dbMocks.asset.updateMany).not.toHaveBeenCalled();
   });
 
   it("flips asset status to AVAILABLE only when no custody rows remain", async () => {
@@ -247,9 +259,14 @@ describe("kits/$kitId removeAsset action", () => {
       where: { assetId: "asset-sole", kitCustodyId: "kc-2" },
     });
 
-    // Status flip happened.
-    expect(dbMocks.asset.update).toHaveBeenCalledWith({
-      where: { id: "asset-sole", organizationId: "org-1" },
+    // Status flip happened — guarded so an asset that is still checked out
+    // on a booking is never advertised as AVAILABLE by a custody release.
+    expect(dbMocks.asset.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "asset-sole",
+        organizationId: "org-1",
+        status: { not: "CHECKED_OUT" },
+      },
       data: { status: "AVAILABLE" },
     });
   });
@@ -266,6 +283,53 @@ describe("kits/$kitId removeAsset action", () => {
 
     expect(dbMocks.custody.deleteMany).not.toHaveBeenCalled();
     expect(dbMocks.custody.count).not.toHaveBeenCalled();
-    expect(dbMocks.asset.update).not.toHaveBeenCalled();
+    expect(dbMocks.asset.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("runs the full kit→booking detach sequence, in order, before the pivot delete", async () => {
+    // why: the four helpers are order-sensitive and this route is the one
+    // detach path that wires them by hand rather than through the service.
+    // `removeKitSlicesFromPlanningBookings` must run first (so the impact
+    // snapshot and the merge never see a row that is about to disappear), and
+    // `preserveKitDrivenPlacements` must run before `kit.update` fires the
+    // `assetKits: { deleteMany }` that cascades placements away.
+    dbMocks.kit.update.mockResolvedValue({
+      name: "Available Kit",
+      custody: null,
+    });
+    dbMocks.assetKit.findMany.mockResolvedValue([
+      {
+        id: "ak-1",
+        quantity: 1,
+        asset: { type: "INDIVIDUAL", unitOfMeasure: null },
+      },
+    ]);
+
+    await action(createActionArgs(buildRemoveAssetRequest("asset-free")));
+
+    // `organizationId` is the destructive helper's tenancy guard — this route
+    // must hand it the org `requirePermission` resolved, not rely on the ids
+    // it happened to read being org-scoped.
+    expect(removeKitSlicesFromPlanningBookings).toHaveBeenCalledWith(
+      expect.anything(),
+      ["ak-1"],
+      { actorUserId: "user-123", organizationId: "org-1" }
+    );
+    expect(preserveKitDrivenPlacements).toHaveBeenCalledWith(
+      expect.anything(),
+      ["ak-1"]
+    );
+
+    const order = (fn: { mock: { invocationCallOrder: number[] } }) =>
+      fn.mock.invocationCallOrder[0];
+    expect(order(vi.mocked(removeKitSlicesFromPlanningBookings))).toBeLessThan(
+      order(vi.mocked(fetchAssetKitDetachmentImpact))
+    );
+    expect(order(vi.mocked(fetchAssetKitDetachmentImpact))).toBeLessThan(
+      order(vi.mocked(mergeStandaloneCollisionsForKitDetachment))
+    );
+    expect(order(vi.mocked(preserveKitDrivenPlacements))).toBeLessThan(
+      dbMocks.kit.update.mock.invocationCallOrder[0]
+    );
   });
 });

@@ -12,7 +12,7 @@ export function createAssetModel(
     name: "Dell Latitude 5550",
     description: "Standard issue laptop",
     image: null,
-    imageExpiration: null,
+    thumbnailImage: null,
     defaultCategoryId: null,
     defaultValuation: null,
     organizationId: "org-123",

@@ -16,6 +16,7 @@ import type {
 import type { AssetWithStatus } from "~/utils/booking-assets";
 import {
   flattenSelectedBookingItems,
+  getRemainingCheckedOutAssetIds,
   isAssetCheckableIn,
 } from "~/utils/booking-assets";
 import { tw } from "~/utils/tw";
@@ -119,11 +120,12 @@ export default function BulkPartialCheckinDialog({
   // Source remaining-CHECKED_OUT assets from the denormalised `assetsList`
   // (pivot-aware) — `booking.assets` was the pre-pivot shape and no longer
   // exists. Check-in eligibility is fully encoded in `partialCheckinDetails`
-  // (see `isAssetCheckableIn`), so we only need the plain status probe here
-  // to detect the "final checkin" case.
-  const remainingCheckedOutAssets = assetsList.filter(
-    (asset) =>
-      asset.status === "CHECKED_OUT" && !checkedInAssetIds.has(asset.id)
+  // (see `isAssetCheckableIn`), so the shared helper's plain status probe is
+  // all the "final checkin" case needs. It returns distinct ids because the
+  // selection compared against it is deduped too.
+  const remainingCheckedOutAssetIds = getRemainingCheckedOutAssetIds(
+    assetsList,
+    checkedInAssetIds
   );
   // Deduped asset ids being checked in (kits excluded). The selection can
   // contain the same asset twice (e.g. selected standalone and as a kit
@@ -132,8 +134,8 @@ export default function BulkPartialCheckinDialog({
   const selectedAssetIds = Array.from(eligibleAssetIds);
 
   const isFinalCheckin =
-    selectedAssetIds.length === remainingCheckedOutAssets.length &&
-    remainingCheckedOutAssets.length > 0;
+    selectedAssetIds.length === remainingCheckedOutAssetIds.size &&
+    remainingCheckedOutAssetIds.size > 0;
 
   // Check if it's an early check-in (only relevant for final check-ins)
   const isEarlyCheckin = Boolean(
@@ -186,7 +188,7 @@ export default function BulkPartialCheckinDialog({
       <Dialog
         open={open}
         onClose={handleCloseDialog}
-        className={tw("bulk-tagging-dialog lg:w-[400px]")}
+        className="lg:w-[400px]"
         title={
           <div className="w-full">
             <div className={tw("mb-2")}>
@@ -291,6 +293,7 @@ export default function BulkPartialCheckinDialog({
                                 thumbnailImage: asset.thumbnailImage,
                                 mainImage: asset.mainImage,
                                 mainImageExpiration: asset.mainImageExpiration,
+                                assetModel: asset.assetModel ?? null,
                               }}
                               alt={`${asset.title} main image`}
                             />
@@ -322,6 +325,7 @@ export default function BulkPartialCheckinDialog({
                               thumbnailImage: asset.thumbnailImage,
                               mainImage: asset.mainImage,
                               mainImageExpiration: asset.mainImageExpiration,
+                              assetModel: asset.assetModel ?? null,
                             }}
                             alt={`${asset.title} main image`}
                           />
@@ -356,7 +360,13 @@ export default function BulkPartialCheckinDialog({
               Cancel
             </Button>
 
-            {/* Submit button - conditional based on early check-in */}
+            {/* Submit button: a confirming CheckinDialog for an early final
+                check-in, a plain submit otherwise. Both post this same form
+                with intent="partial-checkin", so the overview routes every
+                path through checkinAssets, which records the batch as
+                selected and applies the date choice. The whole-booking
+                checkIn intent is the header's one-click path, which the
+                explicit rule refuses. */}
             {isEarlyCheckin ? (
               <CheckinDialog
                 booking={{
@@ -370,6 +380,7 @@ export default function BulkPartialCheckinDialog({
                 disabled={disabled}
                 portalContainer={formElement || undefined}
                 formId="bulk-partial-checkin-form"
+                intent="partial-checkin"
                 onClose={handleCloseDialog}
                 specificAssetIds={selectedAssetIds}
                 fullWidth

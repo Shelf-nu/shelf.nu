@@ -1,5 +1,7 @@
 import { format, formatISO, parseISO } from "date-fns";
 import { fromZonedTime, toZonedTime } from "date-fns-tz";
+import { DateTime } from "luxon";
+import { formatDate, type ResolvedFormatPrefs } from "~/utils/date-format";
 
 export function getDifferenceInSeconds(
   dateLeft: Date,
@@ -12,13 +14,23 @@ export function getDifferenceInSeconds(
   return secondsDifference;
 }
 
-/** Prepares a date to be passed as default value for input with type `datetime-local` */
-export const dateForDateTimeInputValue = (date: Date) => {
-  const localDate = new Date(
-    date.getTime() - date.getTimezoneOffset() * 60 * 1000
-  );
-  return localDate.toISOString().slice(0, 19);
-};
+/**
+ * Renders an instant as the wall-clock wire string a datetime-local input takes.
+ *
+ * `timeZone` is REQUIRED and must be the acting user's RESOLVED preference zone
+ * — the same zone the field displays in and the server parses submissions in.
+ * This previously converted with `getTimezoneOffset()`, i.e. the DEVICE zone, so
+ * any user whose preference differed from their device got a seed offset by the
+ * difference between the two. Making the parameter required turns that mistake
+ * into a compile error rather than a silently wrong default.
+ *
+ * @param date - The instant to render.
+ * @param timeZone - IANA zone the wall clock should be read in.
+ * @returns `YYYY-MM-DDTHH:mm:ss` in `timeZone`. The shared `DateTimePicker`
+ *   normalises this to the minute-precision `DATE_TIME_FORMAT` on submit.
+ */
+export const dateForDateTimeInputValue = (date: Date, timeZone: string) =>
+  DateTime.fromJSDate(date).setZone(timeZone).toFormat("yyyy-MM-dd'T'HH:mm:ss");
 
 export function calcTimeDifference(
   date1: Date,
@@ -75,23 +87,37 @@ export function getWeekNumber(currentDate: Date) {
   return week;
 }
 
-export function getWeekStartingAndEndingDates(currentDate: Date) {
+/**
+ * Compute the 7-day range that contains `currentDate` and return the two
+ * endpoints formatted (day + long month) in the user's configured order. The
+ * week's first day is driven by `prefs.weekStartsOn` (0 = Sunday, 1 = Monday,
+ * 6 = Saturday) so the range matches the calendar's configured week start.
+ *
+ * @param currentDate - Any date within the target week
+ * @param prefs - Resolved user format prefs (drives week start + endpoint formatting)
+ * @returns `[startLabel, endLabel]`
+ */
+export function getWeekStartingAndEndingDates(
+  currentDate: Date,
+  prefs: ResolvedFormatPrefs
+) {
   // Get the day of the week as a number (0 for Sunday, 1 for Monday, etc.)
   const day = currentDate.getDay();
-  const diffToMonday = day === 0 ? 6 : day - 1; // if day is Sunday(0), set diffToMonday as 6, else day - 1
+  // Days elapsed since the configured week start (weekStartsOn: 0|1|6).
+  const diffToStart = (day - prefs.weekStartsOn + 7) % 7;
 
   // Calculate the start of the week
   const start = new Date(currentDate);
-  start.setDate(currentDate.getDate() - diffToMonday);
+  start.setDate(currentDate.getDate() - diffToStart);
 
   // Calculate the end of the week
   const end = new Date(currentDate);
   end.setDate(start.getDate() + 6);
 
-  // Format the dates as strings
-  const options: Intl.DateTimeFormatOptions = { day: "numeric", month: "long" };
-  const startStr = start.toLocaleDateString(undefined, options);
-  const endStr = end.toLocaleDateString(undefined, options);
+  // Format the endpoints per the user's prefs (absolute, no tz conversion)
+  const options = { day: "numeric", month: "long" } as const;
+  const startStr = formatDate(start, prefs, { ...options, localeOnly: true });
+  const endStr = formatDate(end, prefs, { ...options, localeOnly: true });
 
   return [startStr, endStr];
 }

@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { TagUseFor } from "@prisma/client";
+import { archivedAssetBlockedReason } from "@shelf/labels";
 import { useAtomValue } from "jotai";
 import type {
   ActionFunctionArgs,
@@ -39,10 +40,11 @@ import {
   error,
   getCurrentSearchParams,
   getParams,
-  getRefererPath,
+  getRefererPathExcludingSelf,
   parseData,
   safeRedirect,
 } from "~/utils/http.server";
+import { userCanReinstateAssets } from "~/utils/org-validation.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -101,6 +103,23 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
     });
 
+    // An archived asset is read-only (issue #382), and Save would be refused.
+    // Say so before the form is filled in, and send the user back to the asset.
+    if (asset.archivedAt) {
+      sendNotification({
+        title: "Asset is archived",
+        message: archivedAssetBlockedReason({
+          canReinstate: await userCanReinstateAssets({
+            userId,
+            organizationId,
+          }),
+        }),
+        icon: { name: "trash", variant: "error" },
+        senderId: userId,
+      });
+      return redirect(`/assets/${id}/overview`);
+    }
+
     const [
       { categories, totalCategories, tags, locations, totalLocations },
       { assetModels, totalAssetModels },
@@ -142,7 +161,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       totalAssetModels,
       currency: currentOrganization?.currency,
       customFields,
-      referer: getRefererPath(request),
+      referer: getRefererPathExcludingSelf(request),
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
@@ -207,12 +226,30 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       customFieldDef: customFields,
     });
 
-    await updateAssetMainImage({
+    const uploadedNewImage = await updateAssetMainImage({
       request,
       assetId: id,
       userId: authSession.userId,
       organizationId,
     });
+
+    /**
+     * "Use the model's image instead" / "Remove image" — drops the asset's own
+     * image so `resolveAssetImage` falls through to its model's cover image,
+     * or to the placeholder when it has no model.
+     *
+     * Applied as part of the `updateAsset` payload below rather than as its own
+     * committed write: `updateAsset` can still reject (kit-managed location,
+     * quantity over pool, barcode gating, preferred-barcode membership), and a
+     * standalone clear would already have nulled the image while the action
+     * reports failure. The URL is a signed one-way pointer, so the user could
+     * not restore it — the edit must be all-or-nothing.
+     *
+     * Suppressed when this same submit uploaded a replacement, so "clear +
+     * upload" keeps the upload.
+     */
+    const shouldClearImage =
+      formData.get("clearMainImage") === "true" && !uploadedNewImage;
 
     const {
       title,
@@ -234,10 +271,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     /** This checks if tags are passed and build the  */
     const tags = buildTagsSet(parsedData.tags);
 
-    /** Extract barcode data from form */
+    /**
+     * Barcodes are only read when the workspace holds the add-on. Without it
+     * the form has no barcode section, so `undefined` leaves the asset's
+     * existing barcodes untouched: `updateAsset` only reconciles a list it is
+     * given, and an empty list would read as "remove every barcode".
+     */
     const barcodes = canUseBarcodes
       ? extractBarcodesFromFormData(formData)
-      : [];
+      : undefined;
 
     await updateAsset({
       id,
@@ -261,6 +303,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       minQuantity,
       consumptionType,
       unitOfMeasure,
+      // Nulled inside updateAsset's transaction — see `shouldClearImage`.
+      ...(shouldClearImage && {
+        mainImage: null,
+        mainImageExpiration: null,
+        thumbnailImage: null,
+      }),
     });
 
     sendNotification({

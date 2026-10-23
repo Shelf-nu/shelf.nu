@@ -9,6 +9,7 @@
 import type { Asset, CustomField } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { getPrimaryLocation } from "~/modules/asset/utils";
+import { decodeCsvListCell } from "~/utils/csv-cells";
 import { getRandomColor } from "~/utils/get-random-color";
 import type {
   AssetChangePreview,
@@ -35,16 +36,32 @@ export async function fetchAssetsForUpdate(
   dbField: "sequentialId" | "id"
 ): Promise<Map<string, AssetForUpdate>> {
   const assets = await db.asset.findMany({
+    // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: archived rows must be found so the preview reports them as archived instead of not found
     where: { [dbField]: { in: identifierValues }, organizationId },
     include: {
       category: { select: { name: true } },
       // Pull location through the pivot and flatten to a singular `location`
       // below so the CSV-update diff logic keeps its `asset.location` contract.
+      // Ordered deterministically (oldest placement first) so "primary" is
+      // stable across the export query and this update-preview query — an
+      // unordered `assetLocations[0]` let the two disagree on which
+      // placement was "current" for a multi-placement asset (Bug 2).
+      // The `id` tiebreak mirrors the export query's
+      // `ORDER BY al."createdAt" ASC, al.id ASC` exactly. `AssetLocation.createdAt`
+      // defaults to `now()`, which is transaction-start time, so placements
+      // written in one transaction (kit cascade, bulk placement) share a
+      // timestamp — without the tiebreak the two queries can still disagree
+      // on which row is first.
       assetLocations: {
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         select: { location: { select: { id: true, name: true } } },
       },
       tags: { select: { id: true, name: true } },
       customFields: { include: { customField: true } },
+      // Needed so the diff can compare the CSV `assetModel` cell (a NAME,
+      // per the export) against the asset's current model NAME rather than
+      // its cuid — see `AssetForUpdate.assetModel`.
+      assetModel: { select: { id: true, name: true } },
     },
   });
 
@@ -60,11 +77,21 @@ export async function fetchAssetsForUpdate(
           value: unknown;
           customField: CustomField;
         }[];
+        assetModel: { id: string; name: string } | null;
       };
       // Synthesise the singular `location` the diff code expects.
       const asset = {
         ...raw,
         location: getPrimaryLocation(raw),
+        // Multi-placement guard input — see AssetForUpdate.locationPlacementCount.
+        locationPlacementCount: raw.assetLocations.length,
+        // Every placement's name, so the guard can recognise an untouched
+        // round-trip cell whichever placement the export happened to pick as
+        // "primary" — matching only against `location.name` would re-introduce
+        // the noise intermittently when the two orderings disagree.
+        locationPlacementNames: raw.assetLocations.map(
+          (al) => al.location.name
+        ),
       };
       const key = dbField === "id" ? asset.id : asset.sequentialId ?? "";
       return [key, asset];
@@ -96,6 +123,14 @@ export async function detectNewEntities(
 
   for (const asset of assetsToUpdate) {
     for (const change of asset.changes) {
+      // A warning-marked change (e.g. the multi-placement `location`
+      // guard, or assetModel-on-QUANTITY_TRACKED) is never written by the
+      // apply layer — skip it here too, or the preview would falsely
+      // advertise creating an entity (e.g. a location) that will never
+      // actually be created. Mirrors the apply pre-pass's own
+      // `if (change.warning) continue;` guard in `import-update.server.ts`.
+      if (change.warning) continue;
+
       const col = headerAnalysis.updatableColumns.find(
         (c) => c.csvHeader === change.field
       );
@@ -108,9 +143,8 @@ export async function detectNewEntities(
       } else if (col.internalKey === "location") {
         locationNames.add(change.newValue.trim());
       } else if (col.internalKey === "tags") {
-        for (const tag of change.newValue.split(",")) {
-          const t = tag.trim();
-          if (t) tagNames.add(t);
+        for (const tag of decodeCsvListCell(change.newValue)) {
+          tagNames.add(tag);
         }
       }
     }

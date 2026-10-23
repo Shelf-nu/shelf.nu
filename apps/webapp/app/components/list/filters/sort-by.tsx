@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { CaretSortIcon } from "@radix-ui/react-icons";
 import {
   Popover,
@@ -7,6 +8,7 @@ import {
 } from "@radix-ui/react-popover";
 import { useNavigation } from "react-router";
 
+import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { useSearchParams } from "~/hooks/search-params";
 
 import { isFormProcessing } from "~/utils/form";
@@ -21,6 +23,8 @@ type SortByProps<T extends TSort> = {
   defaultSortingBy: keyof T;
   defaultSortingDirection?: SortingDirection;
   className?: string;
+  /** Optional help content shown as an info tooltip beside "Sort by:". */
+  hint?: ReactNode;
 };
 
 export function SortBy<T extends Record<string, string>>({
@@ -28,6 +32,7 @@ export function SortBy<T extends Record<string, string>>({
   sortingOptions,
   defaultSortingBy,
   defaultSortingDirection = "desc",
+  hint,
 }: SortByProps<T>) {
   const [searchParams, setSearchParams] = useSearchParams();
   const rawOrderBy = searchParams.get("orderBy") || String(defaultSortingBy);
@@ -85,8 +90,17 @@ export function SortBy<T extends Record<string, string>>({
           className="z-[100]  flex flex-col gap-3 overflow-y-auto rounded-md border border-gray-300 bg-white p-4"
           onOpenAutoFocus={(event) => event.preventDefault()}
         >
-          <div>
+          <div className="flex items-center gap-1.5">
             <h5>Sort by:</h5>
+            {hint ? (
+              <InfoTooltip
+                content={hint}
+                iconClassName="size-4"
+                // Raise above this popover's `z-[100]` so the tooltip isn't
+                // hidden behind the sort panel it opens from.
+                contentClassName="z-[110]"
+              />
+            ) : null}
           </div>
 
           <div className="flex flex-col gap-2">

@@ -11,17 +11,21 @@
  */
 
 import { apiFetch, apiUpload } from "./client";
-import { cachedApiFetch } from "./cache";
+import { cachedApiFetch, invalidateResponseCache } from "./cache";
 import type {
   CategoriesResponse,
   TagsResponse,
+  CreateTagResponse,
   CreateAssetResponse,
   CustomFieldsResponse,
   CustomFieldValue,
   UpdateAssetPayload,
   UpdateAssetResponse,
   DeleteAssetResponse,
+  ReinstateAssetResponse,
   UpdateImageResponse,
+  AdjustQuantityResponse,
+  ManagePlacementsResponse,
 } from "./types";
 
 export const assetMutationsApi = {
@@ -32,6 +36,30 @@ export const assetMutationsApi = {
   /** Get tags assignable to assets (for the create-asset tag picker) */
   tags: (orgId: string) =>
     cachedApiFetch<TagsResponse>(`/api/mobile/tags?orgId=${orgId}`),
+
+  /**
+   * Create a new tag inline from the tag picker (admins/owners only — the
+   * server enforces `tag.create`; the picker hides the affordance via the
+   * `canCreate` flag on {@link TagsResponse}). Invalidates the cached tag
+   * list on success so the next picker load includes the new tag.
+   *
+   * @param orgId - the active organization
+   * @param name - the tag name (server requires 3+ chars, web parity)
+   */
+  createTag: async (orgId: string, name: string) => {
+    const result = await apiFetch<CreateTagResponse>(
+      `/api/mobile/tags/create?orgId=${orgId}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ name }),
+        // why: not retried. Each call creates a tag, so a request that timed
+        // out after the server had already written it would leave two.
+        retry: false,
+      }
+    );
+    if (!result.error) invalidateResponseCache("/api/mobile/tags");
+    return result;
+  },
 
   /**
    * Get the active custom field definitions for the org, optionally filtered
@@ -82,6 +110,9 @@ export const assetMutationsApi = {
     apiFetch<CreateAssetResponse>(`/api/mobile/asset/create?orgId=${orgId}`, {
       method: "POST",
       body: JSON.stringify(payload),
+      // why: not retried. Each call records a new row, so a request that
+      // timed out after the server had already written it would leave two.
+      retry: false,
     }),
 
   /** Update an existing asset (partial update -- only provided fields change) */
@@ -91,12 +122,84 @@ export const assetMutationsApi = {
       body: JSON.stringify(payload),
     }),
 
-  /** Delete an asset */
-  deleteAsset: (orgId: string, assetId: string) =>
+  /**
+   * Replace a QUANTITY_TRACKED asset's manual placement set (spread units
+   * across locations at per-location quantities). Mobile twin of the web
+   * "Manage placements" dialog — both call the same server service, which
+   * owns the invariants (sum within the row-locked total, one row per
+   * location, org scoping) and leaves kit-driven rows untouched. An empty
+   * array unplaces the asset. Idempotent (a retry re-submits the same full
+   * set), so the default timeout retry stays on.
+   */
+  managePlacements: async (
+    orgId: string,
+    assetId: string,
+    placements: { locationId: string; quantity: number }[]
+  ) => {
+    const result = await apiFetch<ManagePlacementsResponse>(
+      `/api/mobile/asset/manage-placements?orgId=${orgId}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ assetId, placements }),
+      }
+    );
+    if (!result.error) invalidateResponseCache("/api/mobile/locations");
+    return result;
+  },
+
+  /**
+   * Delete an asset. `confirmation` is the title the user typed in the delete
+   * sheet; the server checks it once every supported build sends it (#3175).
+   */
+  deleteAsset: (orgId: string, assetId: string, confirmation: string) =>
     apiFetch<DeleteAssetResponse>(`/api/mobile/asset/delete?orgId=${orgId}`, {
       method: "POST",
-      body: JSON.stringify({ assetId }),
+      body: JSON.stringify({ assetId, confirmation }),
     }),
+
+  /**
+   * Reinstate an archived asset: it becomes active, bookable and changeable
+   * again. Admins and owners only (`asset: archive`). The server refuses an
+   * asset whose kit is in custody or checked out. Not retried: a retry after
+   * a slow success would read "not archived" and report a failure.
+   */
+  reinstateAsset: (orgId: string, assetId: string) =>
+    apiFetch<ReinstateAssetResponse>(
+      `/api/mobile/asset/reinstate?orgId=${orgId}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ assetId }),
+        retry: false,
+      }
+    ),
+
+  /**
+   * Adjust total stock of a QUANTITY_TRACKED asset (restock / remove /
+   * correction). Mobile twin of the web's /api/assets/adjust-quantity —
+   * the server validates the type gate, org scope and the row-locked
+   * negative-stock check, writes the ConsumptionLog row, and fires the
+   * low-stock alert when the threshold is crossed.
+   */
+  adjustQuantity: (
+    orgId: string,
+    assetId: string,
+    args: {
+      quantity: number;
+      direction: "add" | "subtract";
+      category: "RESTOCK" | "ADJUSTMENT" | "LOSS";
+      note?: string;
+    }
+  ) =>
+    apiFetch<AdjustQuantityResponse>(
+      `/api/mobile/asset/adjust-quantity?orgId=${orgId}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ assetId, ...args }),
+        // why: non-idempotent — a timed-out-but-landed request must not be
+        // auto-retried, or the adjustment double-applies.
+        retry: false,
+      }
+    ),
 
   /** Update asset image (multipart upload) */
   updateImage: (

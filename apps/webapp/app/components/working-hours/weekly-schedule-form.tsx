@@ -1,6 +1,7 @@
 import type { FormEvent } from "react";
 import { useState } from "react";
 import { useFetcher } from "react-router";
+import { useDateFormatter } from "~/hooks/use-date-formatter";
 import { useDisabled } from "~/hooks/use-disabled";
 import {
   DAY_NAMES,
@@ -33,6 +34,7 @@ export const WeeklyScheduleForm = ({
 }: WeeklyScheduleFormProps) => {
   const fetcher = useFetcher({ key: "weeklySchedule" });
   const disabled = useDisabled(fetcher);
+  const { prefs } = useDateFormatter();
   const [validationErrors, setValidationErrors] = useState<
     Record<string, string>
   >({});
@@ -166,8 +168,10 @@ export const WeeklyScheduleForm = ({
         <div className="mb-4 border-b pb-4">
           <h3 className="text-text-lg font-semibold">Weekly Schedule</h3>
           <p className="text-sm text-gray-600">
-            Set your working hours for each day of the week. Times will be
-            displayed in your local format.
+            Set your working hours for each day of the week. These are the{" "}
+            <strong>local hours of your physical location</strong> — they are
+            not converted to anyone&apos;s timezone, so 9:00 means 9:00 on site
+            for everyone.
           </p>
 
           {validationErrors.general && (
@@ -218,6 +222,7 @@ export const WeeklyScheduleForm = ({
                           placeholder="Select opening time"
                           aria-label={`${dayName} opening time`}
                           required={dayState.isOpen}
+                          timeFormat={prefs.timeFormat}
                         />
                         <div> - </div>
                         <TimeSelect
@@ -230,6 +235,7 @@ export const WeeklyScheduleForm = ({
                           placeholder="Select closing time"
                           aria-label={`${dayName} closing time`}
                           required={dayState.isOpen}
+                          timeFormat={prefs.timeFormat}
                         />
                       </div>
                       {validationErrors[`${dayNumber}`] && (

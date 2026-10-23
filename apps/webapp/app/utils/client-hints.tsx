@@ -2,8 +2,14 @@
  * This file contains utilities for using client hints for user preference which
  * are needed by the server, but are only known by the browser.
  */
-import { parseISO } from "date-fns";
 import { parseAcceptLanguage } from "intl-parse-accept-language";
+import {
+  detectFormatPrefsFromHints,
+  formatDate,
+  isValidTimeZone,
+  type DetectedFormatPrefs,
+  type ResolvedFormatPrefs,
+} from "~/utils/date-format";
 import { ShelfError } from "./error";
 import { useRequestInfo } from "./request-info";
 
@@ -82,6 +88,59 @@ export const getClientHint = (request: Request): ClientHint => ({
 });
 
 /**
+ * The raw `CH-time-zone` cookie value the request carries, or null when absent.
+ * Decoded but NOT validated — callers decide what counts as a usable value.
+ */
+function getTimeZoneCookieValue(request: Request): string | null {
+  const cookieString =
+    typeof document !== "undefined"
+      ? document.cookie
+      : request.headers.get("Cookie") ?? "";
+  return getCookieValue(cookieString, "timeZone");
+}
+
+/**
+ * Whether the request actually carries the `CH-time-zone` cookie. Distinguishes
+ * a genuine UTC user (cookie present, value "UTC") from the "UTC" FALLBACK that
+ * {@link getHints} returns when the cookie is absent — e.g. the first
+ * authenticated request before {@link ClientHintCheck} sets the cookie + reloads,
+ * and server-established sessions (SSO / OAuth callbacks) that never render
+ * ClientHintCheck first.
+ *
+ * @param request - the incoming request
+ * @returns true when the timezone cookie is present (regardless of validity)
+ */
+export function hasTimeZoneHint(request: Request): boolean {
+  return getTimeZoneCookieValue(request) !== null;
+}
+
+/**
+ * Detected prefs for PERSISTENCE (new-user stamping + lazy backfill). Same as
+ * {@link detectFormatPrefsFromHints}, EXCEPT `timeZone` is null unless the request
+ * carries a VALID IANA zone in the CH-time-zone cookie. Both an absent cookie AND
+ * a present-but-MALFORMED one are treated as unknown: `detectFormatPrefsFromHints`
+ * maps a bad cookie to the "UTC" fallback, and persisting that UTC is
+ * indistinguishable from a real UTC — once stored it permanently blocks the lazy
+ * backfill from writing the user's true zone (the fast-path sees a non-null column
+ * and returns). Leaving the column null lets the read path resolve from live hints
+ * until a valid zone arrives, at which point the backfill fills it. The other three
+ * fields derive from the always-present accept-language header, so they are always
+ * safe to persist.
+ *
+ * @param request - the incoming request
+ * @returns detected prefs to store; `timeZone` null when the cookie is absent or invalid
+ */
+export function detectFormatPrefsForPersistence(
+  request: Request
+): DetectedFormatPrefs {
+  const detected = detectFormatPrefsFromHints(getClientHint(request));
+  const rawTimeZone = getTimeZoneCookieValue(request);
+  const timeZoneIsAuthoritative =
+    rawTimeZone !== null && isValidTimeZone(rawTimeZone);
+  return timeZoneIsAuthoritative ? detected : { ...detected, timeZone: null };
+}
+
+/**
  * @returns an object with the client hints and their values
  */
 export function useHints() {
@@ -89,22 +148,25 @@ export function useHints() {
   return requestInfo.hints;
 }
 
+/** Lifetime of the client hint cookies: one year, in seconds. */
+const CLIENT_HINT_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
+
 /**
- * @returns inline script element that checks for client hints and sets cookies
- * if they are not set then reloads the page if any cookie was set to an
- * inaccurate value.
+ * Source of the inline `<head>` script rendered by {@link ClientHintCheck}.
+ *
+ * It compares each hint cookie with the value the browser reports and, when one
+ * is missing or stale, writes the cookie and reloads so the server renders with
+ * the right hints.
+ *
+ * - The cookies carry a `max-age`, so they survive a browser restart and the
+ *   reload happens once per browser (or per time zone change), not on the first
+ *   tab of every browser session.
+ * - Before reloading, the script hides the document. Firefox lays out and paints
+ *   a document it is navigating away from, and at that point the stylesheets
+ *   linked after this script have not loaded, so the page would flash unstyled.
+ *   The reload replaces the document, so nothing has to un-hide it.
  */
-export function ClientHintCheck({ nonce }: { nonce: string }) {
-  // why: client hints detection script must execute in the browser;
-  // `<script>{text}</script>` in React renders the source as a text node and
-  // the browser will not run it, so injecting HTML is the only viable option
-  // here. The script body is built from our own clientHints map (no user
-  // input), so there is no XSS surface.
-  return (
-    <script
-      nonce={nonce}
-      dangerouslySetInnerHTML={{
-        __html: `
+export const CLIENT_HINT_CHECK_SCRIPT = `
 const cookies = document.cookie.split(';').map(c => c.trim()).reduce((acc, cur) => {
 	const [key, value] = cur.split('=');
 	acc[key] = value;
@@ -122,16 +184,32 @@ ${Object.values(clientHints)
 for (const hint of hints) {
 	if (decodeURIComponent(hint.cookie) !== hint.actual) {
 		cookieChanged = true;
-		document.cookie = encodeURIComponent(hint.name) + '=' + encodeURIComponent(hint.actual) + ';path=/';
+		document.cookie = encodeURIComponent(hint.name) + '=' + encodeURIComponent(hint.actual) + ';path=/;max-age=${CLIENT_HINT_COOKIE_MAX_AGE};samesite=lax';
 	}
 }
 // if the cookie changed, reload the page, unless the browser doesn't support
 // cookies (in which case we would enter an infinite loop of reloads)
 if (cookieChanged && navigator.cookieEnabled) {
+	document.documentElement.style.visibility = 'hidden';
 	window.location.reload();
 }
-			`,
-      }}
+`;
+
+/**
+ * @returns inline script element that checks for client hints and sets cookies
+ * if they are not set then reloads the page if any cookie was set to an
+ * inaccurate value. See {@link CLIENT_HINT_CHECK_SCRIPT}.
+ */
+export function ClientHintCheck({ nonce }: { nonce: string }) {
+  // why: client hints detection script must execute in the browser;
+  // `<script>{text}</script>` in React renders the source as a text node and
+  // the browser will not run it, so injecting HTML is the only viable option
+  // here. The script body is built from our own clientHints map (no user
+  // input), so there is no XSS surface.
+  return (
+    <script
+      nonce={nonce}
+      dangerouslySetInnerHTML={{ __html: CLIENT_HINT_CHECK_SCRIPT }}
     />
   );
 }
@@ -189,8 +267,20 @@ export function getLocale(request: Request) {
   return locales[0] ?? "en-US";
 }
 
-export function formatDateBasedOnLocaleOnly(value: string, locale: string) {
-  return parseISO(value).toLocaleDateString(locale);
+/**
+ * Render a date-only string as an absolute (working-hours) date using the
+ * caller's resolved format prefs — no timezone conversion. This is the spine
+ * behind custom-field DATE display and calendar labels.
+ *
+ * @param value - ISO date-only or date-time string
+ * @param prefs - Fully-resolved user format prefs
+ * @returns Numeric date string in the user's configured order
+ */
+export function formatDateBasedOnLocaleOnly(
+  value: string,
+  prefs: ResolvedFormatPrefs
+) {
+  return formatDate(value, prefs, { localeOnly: true });
 }
 
 /**

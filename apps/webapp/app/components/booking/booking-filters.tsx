@@ -2,7 +2,7 @@ import { BookingStatus } from "@prisma/client";
 import { ChevronRight } from "lucide-react";
 import { useMatches } from "react-router";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import type { RouteHandleWithName } from "~/modules/types";
 import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
@@ -28,7 +28,7 @@ export default function BookingFilters({
   className,
   hideSortBy = false,
 }: BookingFiltersProps) {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const organization = useCurrentOrganization();
   const matches = useMatches();
 
@@ -71,6 +71,10 @@ export default function BookingFilters({
             name: "teamMember",
             queryKey: "name",
             deletedAt: null,
+            // A read FILTER, so the workspace custody override governs. Without
+            // this the endpoint applies its stricter assignment default and the
+            // list shrinks the moment the user types.
+            custodyPurpose: "custody-filter",
           }}
           renderItem={(item) => resolveTeamMemberName(item, true)}
           label="Filter by custodian"

@@ -4,15 +4,32 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import {
+  resolveFormatPrefs,
+  type ResolvedFormatPrefs,
+  type DateFormatPreference,
+  type TimeFormatPreference,
+  type WeekStartPreference,
+} from "@shelf/datetime";
 import { useAuth } from "./auth-context";
 import { api, type Organization } from "./api";
 import { setSentryUser } from "./sentry";
 
-const SELECTED_ORG_KEY = "shelf_selected_org_id";
+/**
+ * Where an EXPLICIT workspace choice made on this device is persisted.
+ *
+ * Only the user's own switches are written here — automatic landings never
+ * are, so an empty key means "this device has no opinion" and the server's
+ * landing order decides. (The retired un-suffixed key was written by automatic
+ * landings too, which made it meaningless as a signal of choice; it is left
+ * behind unread.)
+ */
+const SELECTED_ORG_KEY = "shelf_selected_org_id_v2";
 
 /** User profile data returned by the /me endpoint */
 export type UserProfile = {
@@ -21,6 +38,15 @@ export type UserProfile = {
   firstName: string | null;
   lastName: string | null;
   profilePicture: string | null;
+  /**
+   * Raw date/time format preferences from `/api/mobile/me` (nullable, and
+   * absent on pre-format-prefs servers). Resolved into concrete `formatPrefs`
+   * below with a device-hint fallback; consumed via `useDateFormatter`.
+   */
+  dateFormat?: DateFormatPreference | null;
+  timeFormat?: TimeFormatPreference | null;
+  weekStart?: WeekStartPreference | null;
+  timeZone?: string | null;
 };
 
 type OrgState = {
@@ -28,6 +54,13 @@ type OrgState = {
   currentOrg: Organization | null;
   setCurrentOrg: (org: Organization) => void;
   userProfile: UserProfile | null;
+  /**
+   * The acting user's format preferences, resolved to concrete values (every
+   * field non-null) with a device-hint fallback. Always present — defaults to
+   * device-local formatting until the profile loads. Read via `useFormatPrefs`
+   * / `useDateFormatter` (`lib/use-date-formatter.ts`).
+   */
+  formatPrefs: ResolvedFormatPrefs;
   isLoading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
@@ -43,15 +76,32 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Persist selected org when it changes
+  /**
+   * The live selection, readable from async continuations. `fetchOrgs` is
+   * memoized on `[user]`, so its closure's `currentOrg` can be stale by the
+   * time a fetch resolves; a landing decision taken then must see the
+   * workspace the user has ACTUALLY selected meanwhile, not the one from
+   * when the fetch started.
+   */
+  const currentOrgRef = useRef<Organization | null>(null);
+
+  /** The user chose this workspace — apply it and remember the choice. */
   const handleSetCurrentOrg = useCallback((org: Organization) => {
+    currentOrgRef.current = org;
     setCurrentOrg(org);
     AsyncStorage.setItem(SELECTED_ORG_KEY, org.id).catch(() => {});
+  }, []);
+
+  /** The app landed here on its own — apply it without recording a choice. */
+  const applyLandingOrg = useCallback((org: Organization) => {
+    currentOrgRef.current = org;
+    setCurrentOrg(org);
   }, []);
 
   const fetchOrgs = useCallback(async () => {
     if (!user) {
       setOrganizations([]);
+      currentOrgRef.current = null;
       setCurrentOrg(null);
       setUserProfile(null);
       setIsLoading(false);
@@ -76,27 +126,36 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     const orgs = data.organizations;
     setOrganizations(orgs);
 
-    // Try to restore previously selected org from storage
+    // Landing hierarchy: an explicit choice made on THIS device wins, then the
+    // server's cross-device choice, then the server's landing order (which
+    // already leads with its own best pick).
     let savedOrgId: string | null = null;
     try {
       savedOrgId = await AsyncStorage.getItem(SELECTED_ORG_KEY);
     } catch {}
 
-    // Preserve current selection if still valid
-    if (currentOrg) {
-      const stillExists = orgs.find((o) => o.id === currentOrg.id);
-      if (!stillExists && orgs.length > 0) {
-        const restoredOrg = savedOrgId
-          ? orgs.find((o) => o.id === savedOrgId)
-          : null;
-        handleSetCurrentOrg(restoredOrg || orgs[0]);
-      }
-    } else if (orgs.length > 0) {
-      // First load — try restoring from storage, otherwise pick first
-      const restoredOrg = savedOrgId
+    const resolveLandingOrg = () => {
+      const deviceChoice = savedOrgId
         ? orgs.find((o) => o.id === savedOrgId)
         : null;
-      handleSetCurrentOrg(restoredOrg || orgs[0]);
+      if (deviceChoice) return deviceChoice;
+      const serverChoice = data.lastSelectedOrganizationId
+        ? orgs.find((o) => o.id === data.lastSelectedOrganizationId)
+        : null;
+      return serverChoice || orgs[0];
+    };
+
+    // Preserve the LIVE selection if still valid — read through the ref, so a
+    // workspace picked while this fetch was in flight is never stomped by a
+    // landing decision based on pre-fetch state.
+    const liveOrg = currentOrgRef.current;
+    if (liveOrg) {
+      const stillExists = orgs.find((o) => o.id === liveOrg.id);
+      if (!stillExists && orgs.length > 0) {
+        applyLandingOrg(resolveLandingOrg());
+      }
+    } else if (orgs.length > 0) {
+      applyLandingOrg(resolveLandingOrg());
     }
 
     setIsLoading(false);
@@ -117,12 +176,45 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     });
   }, [userProfile?.id, currentOrg?.id, currentOrg?.roles]);
 
+  // Resolve the acting user's raw prefs into concrete format prefs ONCE per
+  // profile change. `Intl.DateTimeFormat().resolvedOptions()` supplies the
+  // device locale + IANA zone (Hermes ships Intl, verified on-device); every
+  // unset pref field falls back to that device hint. Passing `null` while the
+  // profile loads (or against a pre-format-prefs server) yields fully
+  // device-local formatting rather than an arbitrary US/UTC default.
+  const formatPrefs = useMemo<ResolvedFormatPrefs>(() => {
+    // Capture device hints defensively. Hermes ships Intl, but guard anyway:
+    // where Intl timezone data is missing/partial, resolvedOptions() can yield an
+    // undefined/blank timeZone (or, in the extreme, throw). resolveFormatPrefs
+    // validates the zone downstream, but coalescing here keeps an undefined from
+    // ever flowing in as a hint, and a broken Intl from throwing out of render.
+    let locale = "en-US";
+    let timeZone = "UTC";
+    try {
+      const resolved = Intl.DateTimeFormat().resolvedOptions();
+      locale = resolved.locale || locale;
+      timeZone = resolved.timeZone || timeZone;
+    } catch {
+      // Keep the en-US / UTC fallbacks.
+    }
+    const raw = userProfile
+      ? {
+          dateFormat: userProfile.dateFormat ?? null,
+          timeFormat: userProfile.timeFormat ?? null,
+          weekStart: userProfile.weekStart ?? null,
+          timeZone: userProfile.timeZone ?? null,
+        }
+      : null;
+    return resolveFormatPrefs(raw, { locale, timeZone });
+  }, [userProfile]);
+
   const value = useMemo(
     () => ({
       organizations,
       currentOrg,
       setCurrentOrg: handleSetCurrentOrg,
       userProfile,
+      formatPrefs,
       isLoading,
       error,
       refresh: fetchOrgs,
@@ -132,6 +224,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       currentOrg,
       handleSetCurrentOrg,
       userProfile,
+      formatPrefs,
       isLoading,
       error,
       fetchOrgs,

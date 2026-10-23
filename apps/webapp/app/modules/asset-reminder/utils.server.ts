@@ -2,13 +2,15 @@ import type { AssetReminder, Organization } from "@prisma/client";
 import { DateTime, IANAZone } from "luxon";
 import { redirect } from "react-router";
 import { z } from "zod";
-import { editReminderServerSchema } from "~/components/asset-reminder/set-or-edit-reminder-dialog";
+import { createSetReminderSchema } from "~/components/asset-reminder/set-or-edit-reminder-dialog";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
-import { getHints } from "~/utils/client-hints";
+import { getClientHint } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, VALIDATION_ERROR } from "~/utils/error";
 import { payload, parseData, safeRedirect } from "~/utils/http.server";
+import { PermissionAction } from "~/utils/permissions/permission.data";
 import { canUseRecurringReminders } from "~/utils/subscription.server";
 import {
   REMINDER_REPEAT_PRESETS,
@@ -30,32 +32,31 @@ type OrganizationsForTier = {
  * Resolves the timezone-dependent parts of a reminder form submission:
  * the alertDateTime instant and the recurrence payload.
  *
- * - The datetime-local string is wall-clock in the USER's zone (client-hint
- *   cookie); we parse it with luxon in a VALIDATED zone (tampered/unknown
- *   cookie values fall back to UTC instead of producing an Invalid Date).
- * - The "date must be in the future" rule is enforced HERE, against the
- *   correctly-resolved instant. The zod schemas deliberately skip it
- *   server-side: z.coerce.date() would read the raw string in the server's
- *   zone and wrongly reject valid future times for users west of UTC.
+ * - The datetime-local string is wall-clock in the acting user's resolved
+ *   timezone preference (`resolveUserFormatPrefsById`), the same zone the form
+ *   schema validated it in. It is parsed with luxon in a VALIDATED zone: an
+ *   unknown value falls back to UTC instead of producing an Invalid Date.
+ * - The "date must be in the future" rule is re-checked here against the
+ *   resolved instant, so this function is safe to call on its own.
  * - The optional endsAt date (no time component) is interpreted as
  *   END-OF-DAY in that same zone so "ends on July 15" includes July 15's
- *   occurrence for users ahead of UTC.
+ *   occurrence. The same zone is stored as the series' recurrence timezone.
  *
  * @throws {ShelfError} 400 with a field-level validation error (matching the
  *         parseData shape so the form shows it on the input) when the
  *         resolved alertDateTime is not in the future.
  */
 export function resolveReminderPayloadDates({
-  request,
+  timeZone,
   formData,
   repeat,
 }: {
-  request: Request;
+  /** The acting user's resolved IANA timezone preference. */
+  timeZone: string;
   formData: FormData;
   repeat: ReminderRepeatValue;
 }): { alertDateTime: Date; recurrence: ReminderRecurrenceInput } {
-  const hints = getHints(request);
-  const zone = IANAZone.isValidZone(hints.timeZone) ? hints.timeZone : "UTC";
+  const zone = IANAZone.isValidZone(timeZone) ? timeZone : "UTC";
 
   const alertDateTime = DateTime.fromFormat(
     formData.get("alertDateTime")!.toString()!,
@@ -128,9 +129,43 @@ export function resolveReminderPayloadDates({
   };
 }
 
+/** The reminder intents the reminder tables submit. */
+const ReminderIntentSchema = z.enum(["edit-reminder", "delete-reminder"]);
+
+/** A reminder-table intent. */
+export type ReminderIntent = z.infer<typeof ReminderIntentSchema>;
+
+/** The `assetReminders` permission each reminder intent needs. */
+export const REMINDER_INTENT_PERMISSION: Record<
+  ReminderIntent,
+  PermissionAction
+> = {
+  "edit-reminder": PermissionAction.update,
+  "delete-reminder": PermissionAction.delete,
+};
+
 /**
- * This function handles the editing and deleting of reminders..
- * It is currently used in the assets/$assetId/reminders & reminders index.
+ * Reads the intent of a reminder-table submission without consuming the body,
+ * so the route can gate on it before `resolveRemindersActions` parses the form.
+ *
+ * @param request - The action request
+ * @returns The intent
+ * @throws {ShelfError} 400 for a missing or unknown intent
+ */
+export async function readReminderIntent(
+  request: Request
+): Promise<ReminderIntent> {
+  const { intent } = parseData(
+    await request.clone().formData(),
+    z.object({ intent: ReminderIntentSchema })
+  );
+  return intent;
+}
+
+/**
+ * Handles the editing and deleting of reminders from the reminder tables on
+ * the asset reminders page and the reminders index. The route gates the
+ * intent with `REMINDER_INTENT_PERMISSION` before calling this.
  */
 export async function resolveRemindersActions({
   request,
@@ -147,14 +182,25 @@ export async function resolveRemindersActions({
 
   const { intent } = parseData(
     formData,
-    z.object({ intent: z.enum(["edit-reminder", "delete-reminder"]) })
+    z.object({ intent: ReminderIntentSchema })
   );
 
   switch (intent) {
     case "edit-reminder": {
+      // Resolve the acting user's RESOLVED timezone preference BEFORE validating
+      // so the schema's "must be in the future" check runs in the SAME zone the
+      // value is stored in (below) and the SAME zone the client validated in.
+      // Validating with the default server-zone schema first, then storing in
+      // the pref zone, lets the two disagree for a wall-clock time near "now".
+      // Locale still comes from hints; only the timezone source changes.
+      const { timeZone } = await resolveUserFormatPrefsById(
+        userId,
+        getClientHint(request)
+      );
+
       const { redirectTo, ...payload } = parseData(
         formData,
-        editReminderServerSchema,
+        createSetReminderSchema({ timeZone }).extend({ id: z.string() }),
         // Expected user-input validation (e.g. "Please select a date in the
         // future") — a 400, not a server error. The create path already opts
         // out; mirror it here (was noise: SHELF-WEBAPP-1ME).
@@ -162,7 +208,7 @@ export async function resolveRemindersActions({
       );
 
       const { alertDateTime, recurrence } = resolveReminderPayloadDates({
-        request,
+        timeZone,
         formData,
         repeat: payload.repeat,
       });

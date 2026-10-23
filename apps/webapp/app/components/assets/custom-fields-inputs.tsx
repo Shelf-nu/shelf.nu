@@ -10,9 +10,9 @@ import {
 } from "@radix-ui/react-popover";
 import { Search } from "lucide-react";
 import { useLoaderData, useNavigation } from "react-router";
+import { useDateFormatter } from "~/hooks/use-date-formatter";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
 import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";
-import { useHints } from "~/utils/client-hints";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { isFormProcessing } from "~/utils/form";
 import { handleActivationKeyPress } from "~/utils/keyboard";
@@ -23,6 +23,7 @@ import { Switch } from "../forms/switch";
 import { CheckIcon, SearchIcon } from "../icons/library";
 import { MarkdownEditor } from "../markdown/markdown-editor";
 import { Button } from "../shared/button";
+import { DateTimePicker } from "../shared/date-time-picker";
 
 export default function AssetCustomFields({
   currency,
@@ -50,12 +51,12 @@ export default function AssetCustomFields({
 
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
-  const hints = useHints();
+  const { prefs } = useDateFormatter();
 
   const getCustomFieldVal = (id: string) => {
     const value = customFieldsValues?.find((cfv) => cfv.customFieldId === id)
       ?.value;
-    return value ? (getCustomFieldDisplayValue(value, hints) as string) : "";
+    return value ? (getCustomFieldDisplayValue(value, prefs) as string) : "";
   };
 
   // Get field errors from the plain object passed from parent
@@ -89,23 +90,28 @@ export default function AssetCustomFields({
     ),
     DATE: (field) => (
       <div className="flex w-full items-end">
-        <Input
-          className="w-full placeholder:text-gray-500"
+        <DateTimePicker
+          mode="date"
+          className="w-full"
           label={field.name}
           hideLabel
-          type="date"
           name={`cf-${field.id}`}
           value={dateObj[field.id]?.toISOString().split("T")[0] || ""}
-          onChange={(e) => {
-            let selectedDate = new Date(e.target.value);
+          clearable
+          onChange={(next) => {
+            if (!next) {
+              // Clear affordance emits an empty wire.
+              setDateObj({ ...dateObj, [field.id]: null });
+              return;
+            }
+
+            let selectedDate = new Date(next);
 
             /**
-             * While typing, user can enter invalid date
-             * so we have to make sure that we are saving a valid date
-             * to avoid any errors
-             * */
-            const isDateInvalid = isNaN(selectedDate.valueOf());
-            if (isDateInvalid) {
+             * Guard against an unparseable value so we never store an invalid
+             * Date (mirrors the previous native-input behaviour).
+             */
+            if (isNaN(selectedDate.valueOf())) {
               selectedDate = new Date();
             }
 
@@ -114,17 +120,6 @@ export default function AssetCustomFields({
           error={getFieldError(field.id)}
           disabled={disabled}
         />
-        {dateObj[field.id] ? (
-          <Button
-            className="ml-2 h-[42px] sm:h-full"
-            icon="x"
-            variant="secondary"
-            type="button"
-            onClick={() => {
-              setDateObj({ ...dateObj, [field.id]: null });
-            }}
-          />
-        ) : null}
       </div>
     ),
     OPTION: (field) => (
@@ -135,7 +130,11 @@ export default function AssetCustomFields({
           </span>
         </label>
 
-        <OptionSelect field={field} getCustomFieldVal={getCustomFieldVal} />
+        <OptionSelect
+          field={field}
+          getCustomFieldVal={getCustomFieldVal}
+          error={getFieldError(field.id)}
+        />
       </>
     ),
     MULTILINE_TEXT: (field) => {
@@ -301,13 +300,24 @@ export default function AssetCustomFields({
   );
 }
 
-/** Component that renders select for CustomField OPTION fields */
+/**
+ * Component that renders select for CustomField OPTION fields.
+ *
+ * The value travels in a hidden input, so the browser never flags it as
+ * invalid on its own: the validation message has to be rendered here,
+ * under the trigger, or a required option field that is left empty blocks
+ * the save with nothing on screen to explain why.
+ *
+ * @param error - Validation message for this field, shown under the trigger
+ */
 function OptionSelect({
   field,
   getCustomFieldVal,
+  error,
 }: {
   field: CustomField;
   getCustomFieldVal: (id: string) => string;
+  error?: string;
 }) {
   // State for popover, search, selection
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
@@ -330,6 +340,17 @@ function OptionSelect({
   }, [field.options, searchQuery]);
 
   const displayValue = value || `Choose ${field.name}`;
+
+  /**
+   * Picking an option only updates the hidden input, which fires no form
+   * `change` event, so Zorm keeps reporting the error from the last submit.
+   * The option schema has exactly two errors, an empty required value and a
+   * value missing from `field.options`, and a value in that list satisfies
+   * both. Hide the error only then: a stored value that was removed from the
+   * options must keep its message.
+   */
+  const shownError =
+    value !== "" && field.options.includes(value) ? undefined : error;
 
   // Handle option selection
   function handleOptionClick(option: string) {
@@ -378,8 +399,13 @@ function OptionSelect({
           <Button
             type="button"
             variant="secondary"
-            className="w-full justify-start truncate whitespace-nowrap font-normal [&_span]:w-full [&_span]:max-w-full [&_span]:truncate [&_span]:text-left"
+            className={tw(
+              "w-full justify-start truncate whitespace-nowrap font-normal [&_span]:w-full [&_span]:max-w-full [&_span]:truncate [&_span]:text-left",
+              shownError && "border-error-300 focus:border-error-300"
+            )}
             ref={triggerRef}
+            aria-invalid={shownError ? true : undefined}
+            aria-describedby={shownError ? `cf-${field.id}-error` : undefined}
           >
             <div className="flex w-full items-center justify-between">
               <span className={value === "" ? "text-gray-500" : ""}>
@@ -418,7 +444,8 @@ function OptionSelect({
                 return (
                   <div
                     id={`option-${index}`}
-                    key={option}
+                    // Legacy fields can hold the same option twice.
+                    key={`${index}-${option}`}
                     className={tw(
                       "flex items-center justify-between px-4 py-3 text-[14px] text-gray-600 hover:cursor-pointer hover:bg-gray-50",
                       isHighlighted && [
@@ -454,6 +481,11 @@ function OptionSelect({
           </PopoverContent>
         </PopoverPortal>
       </Popover>
+      {shownError ? (
+        <div id={`cf-${field.id}-error`} className="text-sm text-error-500">
+          {shownError}
+        </div>
+      ) : null}
     </>
   );
 }

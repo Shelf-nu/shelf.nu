@@ -1,8 +1,12 @@
-import type { Prisma, Organization } from "@prisma/client";
+import type { OrganizationRoles, Prisma, Organization } from "@prisma/client";
 import { OrganizationType } from "@prisma/client";
 import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
 import { countActiveCustomFields } from "~/modules/custom-field/service.server";
+import {
+  REPORTS_PLAN_MESSAGE,
+  REPORTS_PLAN_TITLE,
+} from "~/modules/reports/plan-copy";
 import {
   getOrganizationTierLimit,
   getUserTierLimit,
@@ -10,7 +14,13 @@ import {
 import { getUserByID } from "~/modules/user/service.server";
 import type { ErrorLabel } from "./error";
 import { ShelfError } from "./error";
+import { Logger } from "./logger";
 import { isPersonalOrg } from "./organization";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "./permissions/permission.data";
+import { hasPermission } from "./permissions/permission.validator.server";
 
 const label: ErrorLabel = "Tier";
 export const premiumIsEnabled = config.enablePremiumFeatures;
@@ -82,6 +92,90 @@ export async function assertUserCanExportAssets({
 
 /** End Export */
 
+/** Reports */
+
+/**
+ * Whether a workspace's plan includes reports. Reports are part of the Plus
+ * and Team plans, and of every custom plan unless it is switched off there.
+ *
+ * Pass the WORKSPACE's tier limit (`getOrganizationTierLimit`, which reads the
+ * owner's tier), never the viewer's own: an administrator on a Free account
+ * keeps reports inside a Team workspace.
+ *
+ * @param tierLimit - The tier limit of the workspace owner
+ * @returns `true` when the plan includes reports, or when premium features are
+ *   off (self-hosted instances have every feature)
+ */
+export const canUseReports = (
+  tierLimit: { canUseReports: boolean } | null | undefined
+) => {
+  if (!premiumIsEnabled) return true;
+  if (!tierLimit) return false;
+  return tierLimit.canUseReports;
+};
+
+/** The caller's workspaces, as `requirePermission` returns them. */
+type ReportsPlanArgs = {
+  organizationId: Organization["id"];
+  organizations: {
+    id: string;
+    type: OrganizationType;
+    name: string;
+    imageId: string | null;
+    userId: string;
+  }[];
+};
+
+/**
+ * Resolves whether the active workspace's plan includes reports, from its
+ * owner's tier. Call it after `requirePermission`, so a role that may not see
+ * reports still gets the role error first.
+ *
+ * @param args.organizationId - The active workspace
+ * @param args.organizations - The caller's workspaces, as `requirePermission` returns them
+ * @returns `true` when the workspace may open reports
+ */
+export async function workspaceCanUseReports({
+  organizationId,
+  organizations,
+}: ReportsPlanArgs) {
+  // Self-hosted instances have every feature; skip the tier lookup.
+  if (!premiumIsEnabled) return true;
+
+  const tierLimit = await getOrganizationTierLimit({
+    organizationId,
+    organizations,
+  });
+
+  return canUseReports(tierLimit);
+}
+
+/**
+ * Refuses a request for report data when the workspace's plan does not include
+ * reports. Used by the download doors (CSV and PDF); the report pages send a
+ * Free workspace to the unlock page instead.
+ *
+ * @param args.organizationId - The active workspace
+ * @param args.organizations - The caller's workspaces, as `requirePermission` returns them
+ * @throws {ShelfError} 403 when the workspace's plan does not include reports
+ */
+export async function assertUserCanUseReports(args: ReportsPlanArgs) {
+  if (!(await workspaceCanUseReports(args))) {
+    throw new ShelfError({
+      cause: null,
+      title: REPORTS_PLAN_TITLE,
+      message: REPORTS_PLAN_MESSAGE,
+      additionalData: { organizationId: args.organizationId },
+      label,
+      // `ShelfError.status` defaults to 500; a plan limit is a refusal, not a fault.
+      status: 403,
+      shouldBeCaptured: false,
+    });
+  }
+}
+
+/** End Reports */
+
 /** Import */
 /** Important:
  * For this to work properly it needs to receive the tierLimit of the organization owner not the current user
@@ -123,6 +217,84 @@ export async function assertUserCanImportAssets({
       label,
       shouldBeCaptured: false,
     });
+  }
+}
+
+/** Who is asking to import, and where: the inputs to every import gate. */
+export type ImportEligibilityArgs = {
+  organizationId: Organization["id"];
+  /** The member's workspaces, as `requirePermission` returns them */
+  organizations: Parameters<
+    typeof getOrganizationTierLimit
+  >[0]["organizations"];
+  userId: string;
+  /** The member's role in this workspace, as `requirePermission` returns it */
+  role: OrganizationRoles;
+};
+
+/**
+ * Whether a member may import assets into a workspace: the workspace's plan
+ * allows importing AND the member's role holds `asset: import`. The single
+ * answer behind every "Import" entry point (asset index, home checklist).
+ *
+ * It mirrors the gate on `/assets/import`, which runs
+ * `requirePermission(asset: import)` and then `assertUserCanImportAssets`.
+ * Both halves read the same primitives (`canImportAssets(tierLimit)` and the
+ * `@shelf/permissions` matrix), so a change to the gate belongs in those
+ * primitives, never in one side alone.
+ *
+ * @param args.organizationId - The workspace
+ * @param args.organizations - The member's workspaces, as `requirePermission` returns them
+ * @param args.userId - The member
+ * @param args.role - The member's role in this workspace, as `requirePermission` returns it
+ * @returns `true` when the import page would let this member in
+ */
+export async function resolveCanImportAssets({
+  organizationId,
+  organizations,
+  userId,
+  role,
+}: ImportEligibilityArgs): Promise<boolean> {
+  const [tierLimit, allowed] = await Promise.all([
+    getOrganizationTierLimit({ organizationId, organizations }),
+    hasPermission({
+      organizationId,
+      userId,
+      roles: [role],
+      entity: PermissionEntity.asset,
+      action: PermissionAction.import,
+    }),
+  ]);
+  return canImportAssets(tierLimit) && allowed;
+}
+
+/**
+ * {@link resolveCanImportAssets} for surfaces where the answer only decides
+ * whether to show a link, such as the home checklist. A failed lookup is
+ * logged and read as "cannot import", so it can never take the page down.
+ * The import page itself still enforces the real gate.
+ *
+ * @param args - Same as {@link resolveCanImportAssets}
+ * @returns `true` when the member may import, `false` when not or on failure
+ */
+export async function resolveCanImportAssetsOrFalse(
+  args: ImportEligibilityArgs
+): Promise<boolean> {
+  try {
+    return await resolveCanImportAssets(args);
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Failed to resolve import eligibility",
+        additionalData: {
+          userId: args.userId,
+          organizationId: args.organizationId,
+        },
+        label,
+      })
+    );
+    return false;
   }
 }
 

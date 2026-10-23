@@ -9,6 +9,7 @@
  */
 
 import { AssetType, OrganizationRoles } from "@prisma/client";
+import { permissionContext } from "@helpers/role-access";
 import type { ActionFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -30,20 +31,33 @@ const createDataMock = vi.hoisted(() => {
     });
 });
 
-const dbMocks = vi.hoisted(() => ({
-  bookingAssetFindFirst: vi.fn(),
-  $transaction: vi.fn(async (cb: any) =>
-    cb({
-      bookingAsset: { update: vi.fn().mockResolvedValue(undefined) },
-    })
-  ),
-}));
+const dbMocks = vi.hoisted(() => {
+  // Re-read of the slice's booked quantity UNDER the asset lock (the TOCTOU
+  // guard). Hoisted so tests can control the FRESH value per-scenario.
+  const bookingAssetFindUnique = vi.fn();
+  return {
+    bookingAssetFindFirst: vi.fn(),
+    bookingAssetFindUnique,
+    $transaction: vi.fn(async (cb: any) =>
+      cb({
+        bookingAsset: {
+          findUnique: bookingAssetFindUnique,
+          update: vi.fn().mockResolvedValue(undefined),
+        },
+      })
+    ),
+  };
+});
 
 const consumptionMocks = vi.hoisted(() => ({
-  computeBookingAvailableQuantity: vi
-    .fn()
-    .mockResolvedValue({ total: 10, inCustody: 0, available: 10 }),
   lockAssetForQuantityUpdate: vi.fn().mockResolvedValue(undefined),
+  // The route validates via `assertAssetQuantityAvailable` (windowed guard).
+  // Stub it to a no-op resolve so these ownership-guard tests exercise ONLY
+  // the authorization branch — the availability math has its own coverage in
+  // `availability.server.test.ts` / this route's `.availability.test.ts`. Mocking
+  // the module here also keeps the real `availability.server` (and its heavy
+  // `booking/service.server` import chain) out of this test's module graph.
+  assertAssetQuantityAvailable: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("~/database/db.server", () => ({
@@ -61,9 +75,8 @@ vi.mock("~/modules/consumption-log/quantity-lock.server", () => ({
   lockAssetForQuantityUpdate: consumptionMocks.lockAssetForQuantityUpdate,
 }));
 
-vi.mock("~/modules/consumption-log/service.server", () => ({
-  computeBookingAvailableQuantity:
-    consumptionMocks.computeBookingAvailableQuantity,
+vi.mock("~/modules/asset/availability.server", () => ({
+  assertAssetQuantityAvailable: consumptionMocks.assertAssetQuantityAvailable,
 }));
 
 vi.mock("~/utils/roles.server", () => ({
@@ -146,15 +159,17 @@ function buildArgs(request: Request): ActionFunctionArgs {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Default: the locked re-read observes the same quantity the outside-tx
+  // snapshot did (`buildBookingAsset` → 5). Tests that model a concurrent
+  // change override this per-scenario.
+  dbMocks.bookingAssetFindUnique.mockResolvedValue({ quantity: 5 });
 });
 
 describe("api/bookings/:bookingId/adjust-asset-quantity — ownership guard", () => {
   it("rejects SELF_SERVICE user adjusting someone else's booking with 403", async () => {
-    requirePermissionMock.mockResolvedValue({
-      organizationId: "org-1",
-      role: OrganizationRoles.SELF_SERVICE,
-      isSelfServiceOrBase: true,
-    } as any);
+    requirePermissionMock.mockResolvedValue(
+      permissionContext({ roles: [OrganizationRoles.SELF_SERVICE] }) as never
+    );
 
     dbMocks.bookingAssetFindFirst.mockResolvedValue(
       buildBookingAsset({
@@ -172,11 +187,9 @@ describe("api/bookings/:bookingId/adjust-asset-quantity — ownership guard", ()
   });
 
   it("rejects BASE user adjusting someone else's booking with 403", async () => {
-    requirePermissionMock.mockResolvedValue({
-      organizationId: "org-1",
-      role: OrganizationRoles.BASE,
-      isSelfServiceOrBase: true,
-    } as any);
+    requirePermissionMock.mockResolvedValue(
+      permissionContext({ roles: [OrganizationRoles.BASE] }) as never
+    );
 
     dbMocks.bookingAssetFindFirst.mockResolvedValue(
       buildBookingAsset({
@@ -194,11 +207,9 @@ describe("api/bookings/:bookingId/adjust-asset-quantity — ownership guard", ()
   });
 
   it("allows SELF_SERVICE user to adjust their own (creator) booking", async () => {
-    requirePermissionMock.mockResolvedValue({
-      organizationId: "org-1",
-      role: OrganizationRoles.SELF_SERVICE,
-      isSelfServiceOrBase: true,
-    } as any);
+    requirePermissionMock.mockResolvedValue(
+      permissionContext({ roles: [OrganizationRoles.SELF_SERVICE] }) as never
+    );
 
     dbMocks.bookingAssetFindFirst.mockResolvedValue(
       buildBookingAsset({
@@ -216,11 +227,9 @@ describe("api/bookings/:bookingId/adjust-asset-quantity — ownership guard", ()
   });
 
   it("allows SELF_SERVICE user when they're the custodian (not creator)", async () => {
-    requirePermissionMock.mockResolvedValue({
-      organizationId: "org-1",
-      role: OrganizationRoles.SELF_SERVICE,
-      isSelfServiceOrBase: true,
-    } as any);
+    requirePermissionMock.mockResolvedValue(
+      permissionContext({ roles: [OrganizationRoles.SELF_SERVICE] }) as never
+    );
 
     dbMocks.bookingAssetFindFirst.mockResolvedValue(
       buildBookingAsset({
@@ -238,11 +247,9 @@ describe("api/bookings/:bookingId/adjust-asset-quantity — ownership guard", ()
   });
 
   it("returns 404 when bookingAsset isn't found in this org", async () => {
-    requirePermissionMock.mockResolvedValue({
-      organizationId: "org-1",
-      role: OrganizationRoles.SELF_SERVICE,
-      isSelfServiceOrBase: true,
-    } as any);
+    requirePermissionMock.mockResolvedValue(
+      permissionContext({ roles: [OrganizationRoles.SELF_SERVICE] }) as never
+    );
 
     dbMocks.bookingAssetFindFirst.mockResolvedValue(null);
 
@@ -255,11 +262,9 @@ describe("api/bookings/:bookingId/adjust-asset-quantity — ownership guard", ()
   });
 
   it("skips the ownership check entirely for ADMIN users", async () => {
-    requirePermissionMock.mockResolvedValue({
-      organizationId: "org-1",
-      role: OrganizationRoles.ADMIN,
-      isSelfServiceOrBase: false,
-    } as any);
+    requirePermissionMock.mockResolvedValue(
+      permissionContext({ roles: [OrganizationRoles.ADMIN] }) as never
+    );
 
     dbMocks.bookingAssetFindFirst.mockResolvedValue(
       buildBookingAsset({
@@ -277,11 +282,9 @@ describe("api/bookings/:bookingId/adjust-asset-quantity — ownership guard", ()
   });
 
   it("skips the ownership check entirely for OWNER users", async () => {
-    requirePermissionMock.mockResolvedValue({
-      organizationId: "org-1",
-      role: OrganizationRoles.OWNER,
-      isSelfServiceOrBase: false,
-    } as any);
+    requirePermissionMock.mockResolvedValue(
+      permissionContext({ roles: [OrganizationRoles.OWNER] }) as never
+    );
 
     dbMocks.bookingAssetFindFirst.mockResolvedValue(
       buildBookingAsset({
@@ -296,5 +299,53 @@ describe("api/bookings/:bookingId/adjust-asset-quantity — ownership guard", ()
 
     expect(response.status).toBe(200);
     expect(dbMocks.$transaction).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("api/bookings/:bookingId/adjust-asset-quantity — TOCTOU re-read", () => {
+  it("measures availability against the re-read quantity under the lock, not the stale snapshot", async () => {
+    requirePermissionMock.mockResolvedValue(
+      permissionContext({ roles: [OrganizationRoles.ADMIN] }) as never
+    );
+
+    // Outside-tx snapshot reports 5 units (stale HIGH).
+    dbMocks.bookingAssetFindFirst.mockResolvedValue(
+      buildBookingAsset({ creatorId: "user-current", custodianUserId: null })
+    );
+    // A concurrent request already lowered the real booked qty to 2 before
+    // this request acquired the lock and re-read.
+    dbMocks.bookingAssetFindUnique.mockResolvedValue({ quantity: 2 });
+
+    await action(buildArgs(buildRequest(4)));
+
+    // The directional guard must see currentQuantity = 2 (the FRESH value): a
+    // submission of 4 is then a genuine INCREASE (2 → 4), not a reduction
+    // masked by the stale 5 that would skip the availability check entirely.
+    expect(consumptionMocks.assertAssetQuantityAvailable).toHaveBeenCalledWith(
+      expect.objectContaining({ currentQuantity: 2, requestedQuantity: 4 })
+    );
+  });
+
+  it("returns 404 when the slice vanishes under the lock (concurrent removal)", async () => {
+    requirePermissionMock.mockResolvedValue(
+      permissionContext({ roles: [OrganizationRoles.ADMIN] }) as never
+    );
+
+    dbMocks.bookingAssetFindFirst.mockResolvedValue(
+      buildBookingAsset({ creatorId: "user-current", custodianUserId: null })
+    );
+    // The row was deleted by a concurrent request between the outside-tx read
+    // and the locked re-read.
+    dbMocks.bookingAssetFindUnique.mockResolvedValue(null);
+
+    const response = (await action(
+      buildArgs(buildRequest())
+    )) as unknown as Response;
+
+    expect(response.status).toBe(404);
+    // Once the row is gone, neither the availability guard nor the write runs.
+    expect(
+      consumptionMocks.assertAssetQuantityAvailable
+    ).not.toHaveBeenCalled();
   });
 });

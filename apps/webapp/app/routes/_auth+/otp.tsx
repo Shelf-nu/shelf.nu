@@ -4,7 +4,13 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "react-router";
-import { data, redirect, useActionData, useFetcher } from "react-router";
+import {
+  data,
+  redirect,
+  useActionData,
+  useFetcher,
+  useLoaderData,
+} from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
@@ -13,14 +19,20 @@ import { Button } from "~/components/shared/button";
 import { useSearchParams } from "~/hooks/search-params";
 import { useDisabled } from "~/hooks/use-disabled";
 import { verifyOtpAndSignin } from "~/modules/auth/service.server";
+import { isSsoDomainEmail } from "~/modules/auth/sso-enforcement.server";
 import {
   getSelectedOrganization,
   setSelectedOrganizationIdCookie,
 } from "~/modules/organization/context.server";
-import { createUser, findUserByEmail } from "~/modules/user/service.server";
+import {
+  readSignupIntent,
+  signupIntentHeaders,
+} from "~/modules/signup-intent/cookie.server";
+import { createUser, findUserById } from "~/modules/user/service.server";
 import { generateUniqueUsername } from "~/modules/user/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { setCookie } from "~/utils/cookies.server";
+import { detectFormatPrefsForPersistence } from "~/utils/client-hints";
+import { expireListPreferenceCookies, setCookie } from "~/utils/cookies.server";
 import { ShelfError, makeShelfError, notAllowedMethod } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
@@ -35,16 +47,26 @@ import { getOtpPageData, type OtpVerifyMode } from "~/utils/otp";
 import { tw } from "~/utils/tw";
 import type { action as resendOtpAction } from "./resend-otp";
 
-export function loader({ context, request }: LoaderFunctionArgs) {
+export async function loader({ context, request }: LoaderFunctionArgs) {
   const { searchParams } = new URL(request.url);
   const mode = searchParams.get("mode") as OtpVerifyMode;
   const title = getOtpPageData(mode).title;
 
   if (context.isAuthenticated) {
-    return redirect("/assets");
+    return redirect("/");
   }
 
-  return payload({ title });
+  /**
+   * An address that must use SSO is sent no code, and the send answers as if
+   * it were. This page tells everyone on an SSO domain where to go instead. It
+   * depends only on the domain, so it says nothing about any one account.
+   */
+  const email = searchParams.get("email") ?? "";
+  const ssoDomainHint = validEmail(email)
+    ? await isSsoDomainEmail(email).catch(() => false)
+    : false;
+
+  return payload({ title, ssoDomainHint });
 }
 
 const OtpSchema = z.object({
@@ -87,28 +109,51 @@ export async function action({ context, request }: ActionFunctionArgs) {
         });
 
         const authSession = await verifyOtpAndSignin(email, otp);
-        const userExists = Boolean(await findUserByEmail(email));
+        // Whether this person already has an account is decided by the
+        // authenticated id, never by the address typed: the same person can
+        // type it with different capitals, and each spelling must reach the
+        // same account instead of creating another.
+        const existingUser = await findUserById(authSession.userId);
+        const userExists = Boolean(existingUser);
+
+        // What the signup link asked for, carried by cookie. A new account
+        // records it on its signup event; the cookie then travels on for
+        // onboarding to store and act on. A login is not a signup: the form
+        // posts back to this page's URL, so `mode` is on the request, and a
+        // login ignores whatever intent an earlier `/join` visit left behind.
+        const isLogin =
+          new URL(request.url).searchParams.get("mode") === "login";
+        const signupIntent = isLogin ? null : await readSignupIntent(request);
 
         if (!userExists) {
           try {
             const username = await generateUniqueUsername(authSession.email);
+            // Detect the caller's date/time/week/timezone prefs from browser
+            // hints (accept-language + CH-time-zone cookie) and stamp them on
+            // the new row. timeZone is left null when the cookie hasn't
+            // round-tripped yet (see detectFormatPrefsForPersistence), so the
+            // lazy backfill fills the real zone on a later load — never the
+            // "UTC" fallback, which would stick forever.
+            const formatPrefs = detectFormatPrefsForPersistence(request);
             await createUser({
               ...authSession,
               username,
+              formatPrefs,
+              signupIntent,
             });
           } catch (createError) {
-            // Handle race condition: if a concurrent request already
-            // created this user, verify they exist and proceed.
-            // This can happen when two OTP verification requests
-            // run simultaneously for the same user.
-            const userNowExists = Boolean(await findUserByEmail(email));
+            // Two sign-ins for the same person can run at once: if the other
+            // one created the account first, carry on with it.
+            const userNowExists = Boolean(
+              await findUserById(authSession.userId)
+            );
             if (!userNowExists) {
               throw createError;
             }
           }
         }
 
-        // Setting the auth session and redirecting user to assets page
+        // Setting the auth session and redirecting to the role's landing page
         context.setSession(authSession);
 
         const { organizationId } = await getSelectedOrganization({
@@ -116,9 +161,22 @@ export async function action({ context, request }: ActionFunctionArgs) {
           request,
         });
 
-        return redirect(safeRedirect("/assets"), {
+        // The link's `redirectTo` is followed only by an account that has
+        // already onboarded. Everyone else lands on `/`, whose role landing page
+        // sits inside the layout that sends them to onboarding: `redirectTo` can name a page outside that
+        // layout (the QR pages have no onboarding check), and following it
+        // would skip onboarding altogether.
+        const landing = existingUser?.onboarded
+          ? safeRedirect(signupIntent?.redirectTo, "/")
+          : "/";
+
+        return redirect(landing, {
           headers: [
+            ...(await expireListPreferenceCookies(request, {
+              event: "sign-in",
+            })),
             setCookie(await setSelectedOrganizationIdCookie(organizationId)),
+            ...(await signupIntentHeaders(signupIntent)),
           ],
         });
       }
@@ -143,6 +201,7 @@ export default function OtpPage() {
     type: "success" | "error";
   }>();
   const data = useActionData<typeof action>();
+  const { ssoDomainHint } = useLoaderData<typeof loader>();
   const [searchParams] = useSearchParams();
   const fetcher = useFetcher<resendAction>();
 
@@ -214,6 +273,17 @@ export default function OtpPage() {
               name="email"
               value={searchParams.get("email") || ""}
             />
+
+            {ssoDomainHint ? (
+              <p className="text-sm text-gray-600">
+                If your organization uses single sign-on, you may not receive a
+                code. Use{" "}
+                <Button variant="link" to="/sso-login">
+                  Login with SSO
+                </Button>{" "}
+                instead.
+              </p>
+            ) : null}
 
             {message?.message && (
               <p

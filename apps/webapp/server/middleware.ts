@@ -140,7 +140,14 @@ function isExpiringSoon(expiresAt: number | undefined) {
     return true;
   }
 
-  return (expiresAt - 60 * 0.1) * 1000 < Date.now(); // 1 minute left before token expires
+  /**
+   * Refresh only in the final seconds of the token's life. Kept narrow
+   * deliberately: a wider window lets more concurrent requests enter the
+   * refresh path at once, and refresh-token rotation makes the losers of that
+   * race fail. An expired token is fine here — the refresh token outlives it,
+   * so a request arriving after expiry still refreshes successfully.
+   */
+  return (expiresAt - 6) * 1000 < Date.now(); // 6 seconds before expiry
 }
 
 /**

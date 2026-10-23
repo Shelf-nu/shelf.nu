@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useLoaderData } from "react-router";
 
+import { useDateFormatter } from "~/hooks/use-date-formatter";
 import {
   formatFilterSummary,
   type FilterLookupData,
@@ -29,6 +30,10 @@ export function useFilterPreview(options?: {
     teamMembers = [],
   } = loaderData;
 
+  // Resolved user format prefs — passed to formatFilterSummary so date filter
+  // chips render in the user's configured order instead of hardcoded en-US.
+  const { prefs } = useDateFormatter();
+
   // Generate lookup data from loader
   const lookupData: FilterLookupData = useMemo(
     () => ({
@@ -52,7 +57,7 @@ export function useFilterPreview(options?: {
     ) {
       let summary: string;
       try {
-        summary = formatFilterSummary(query, columns, lookupData);
+        summary = formatFilterSummary(query, columns, lookupData, prefs);
       } catch (_error) {
         summary = "Unable to preview filters and sorting";
       }
@@ -98,7 +103,7 @@ export function useFilterPreview(options?: {
       );
     }
     return FormatSummary;
-  }, [lookupData]);
+  }, [lookupData, prefs]);
 
   // If query and columns are provided, generate the preview component
   const preview = useMemo(() => {

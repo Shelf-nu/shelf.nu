@@ -1,22 +1,29 @@
+/** CSV export route for selected non-registered members. */
 import { data, type LoaderFunctionArgs } from "react-router";
 import { NRM_ID_PARAM } from "~/components/nrm/export-nrm-button";
+import { csvResponse } from "~/utils/csv-utf8";
 import { exportNRMsToCsv } from "~/utils/csv.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { error, getCurrentSearchParams } from "~/utils/http.server";
+import {
+  buildContentDisposition,
+  error,
+  getCurrentSearchParams,
+} from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
-export async function loader({ context, request }: LoaderFunctionArgs) {
+/** Exports the requested non-registered members as a CSV download. */
+export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { userId } = context.getSession();
 
   try {
     const { organizationId } = await requirePermission({
       userId,
       request,
-      entity: PermissionEntity.teamMember,
+      entity: PermissionEntity.nonRegisteredMember,
       action: PermissionAction.export,
     });
 
@@ -34,11 +41,18 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const csvString = await exportNRMsToCsv({
       organizationId,
       nrmIds: nrmIds.split(","),
+      // The export button forwards the index's current search params, so
+      // "select all" exports exactly the filtered set the user can see.
+      search: searchParams.get("s"),
     });
 
-    return new Response(csvString, {
-      status: 200,
-      headers: { "Content-Type": "text/csv" },
+    return csvResponse(csvString, {
+      headers: {
+        "content-disposition": buildContentDisposition(null, {
+          fallback: "nrm",
+          filename: params.fileName ? `${params.fileName}.csv` : undefined,
+        }),
+      },
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });

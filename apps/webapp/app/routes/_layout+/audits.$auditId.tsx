@@ -1,4 +1,4 @@
-import { AuditStatus, OrganizationRoles } from "@prisma/client";
+import { AuditStatus } from "@prisma/client";
 import { DateTime } from "luxon";
 import type {
   ActionFunctionArgs,
@@ -22,6 +22,7 @@ import Header from "~/components/layout/header";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { completeAuditWithImages } from "~/modules/audit/complete-audit-with-images.server";
 import {
   getAuditSessionDetails,
@@ -36,6 +37,7 @@ import actionsCss from "~/styles/actions-dropdown.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getClientHint } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { error, getParams, payload } from "~/utils/http.server";
 import { parseData } from "~/utils/http.server";
@@ -43,6 +45,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 
 const label = "Audit";
@@ -70,7 +73,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         ? PermissionAction.delete
         : PermissionAction.update;
 
-    const { organizationId, isSelfServiceOrBase } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.audit,
@@ -78,14 +81,36 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     });
 
     if (intent === "edit-audit") {
+      // `audit:update` is held by every role that runs audits, so it does not
+      // decide who may change an audit's details. Editing (and reassigning)
+      // belongs to callers who manage others' audits, the same rule the
+      // actions menu applies before it offers Edit.
+      if (!access.policy.audits.manageOthers) {
+        throw new ShelfError({
+          cause: null,
+          title: "Not allowed",
+          message: "You are not allowed to edit this audit.",
+          additionalData: { userId, auditId },
+          label: "Audit",
+          status: 403,
+          shouldBeCaptured: false,
+        });
+      }
+
       const parsedData = parseData(formData, EditAuditSchema);
       const hints = getClientHint(request);
 
-      // Parse due date using Luxon (same pattern as create audit)
+      // Convert dueDate from the acting user's stored timezone preference to UTC.
+      // Parse against the SAME resolved timezone that date DISPLAY uses (the
+      // user's `timeZone` preference), NOT the browser hint — otherwise a
+      // browser/preference zone mismatch offsets the stored instant, and the
+      // edit path would store a different instant than the create path for the
+      // same typed wall-clock time. Resolve the preference lazily — only when a
+      // due date was actually submitted (no date → no parse → no DB lookup).
       const dueDateString = formData.get("dueDate")?.toString();
       const dueDateUTC = dueDateString
         ? DateTime.fromFormat(dueDateString, DATE_TIME_FORMAT, {
-            zone: hints.timeZone,
+            zone: (await resolveUserFormatPrefsById(userId, hints)).timeZone,
           }).toJSDate()
         : null;
 
@@ -116,14 +141,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
 
     if (intent === "complete-audit") {
-      // Only assignees can complete the audit
-      // Exception: if audit has no assignees, admins/owners can complete
+      // Assignee-gated: callers who see every audit may complete any audit,
+      // everyone else only when assigned.
       await requireAuditAssignee({
         auditSessionId: auditId,
         organizationId,
         userId,
-        request,
-        isSelfServiceOrBase,
+        assignedOnly: !access.audits.seeAll,
       });
 
       await completeAuditWithImages({
@@ -142,10 +166,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         auditSessionId: auditId,
         organizationId,
         userId,
-        // Admin/owner is the inverse of self-service/base in this codebase.
-        // Passing it through lets the service allow non-creator admin/owners
-        // to cancel — matches archive/delete permissions.
-        isAdminOrOwner: !isSelfServiceOrBase,
+        canManageOthers: access.policy.audits.manageOthers,
         hints,
       });
 
@@ -153,26 +174,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
 
     if (intent === "archive-audit") {
-      // Archiving requires the explicit "archive" permission.
-      // ADMIN/OWNER have it; BASE/SELF_SERVICE do not.
+      // Archiving requires `audit:archive`.
       await requirePermission({
         userId,
         request,
         entity: PermissionEntity.audit,
         action: PermissionAction.archive,
       });
-
-      // Only admin/owner can archive — UI gates this, but enforce server-side
-      // to prevent direct POST bypass by self-service/base roles
-      if (isSelfServiceOrBase) {
-        throw new ShelfError({
-          cause: null,
-          message: "You do not have permission to archive audits.",
-          additionalData: { userId, auditId },
-          label,
-          status: 403,
-        });
-      }
 
       await archiveAuditSession({
         auditSessionId: auditId,
@@ -184,20 +192,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
 
     if (intent === "delete-audit") {
-      // Outer requirePermission already gated on PermissionAction.delete
-      // for this intent — no redundant inner re-check.
-
-      // UI hides the button for self-service/base, but enforce server-side
-      // to prevent direct POST bypass.
-      if (isSelfServiceOrBase) {
-        throw new ShelfError({
-          cause: null,
-          message: "You do not have permission to delete audits.",
-          additionalData: { userId, auditId },
-          label,
-          status: 403,
-        });
-      }
+      // The outer requirePermission already gated on `audit:delete` for
+      // this intent, so no inner re-check.
 
       const { confirmation } = parseData(
         formData,
@@ -258,9 +254,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const { organizationId, userOrganizations } = permissionResult;
+    const { organizationId, userOrganizations, access } = permissionResult;
 
     const { session } = await getAuditSessionDetails({
+      // Reads `session` only, so no photo is signed here.
+      refreshExpectedAssetImages: false,
       id: auditId,
       organizationId,
       userOrganizations,
@@ -280,16 +278,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       unexpectedCount: session.unexpectedAssetCount,
     };
 
-    const rolesForOrg = userOrganizations.find(
-      (org) => org.organization.id === organizationId
-    )?.roles;
-
-    const isAdminOrOwner = rolesForOrg
-      ? rolesForOrg.includes(OrganizationRoles.ADMIN) ||
-        rolesForOrg.includes(OrganizationRoles.OWNER)
-      : false;
-
-    if (!isAdminOrOwner) {
+    // Callers limited to assigned audits may open only those.
+    if (!access.audits.seeAll) {
       const isAssignee = session.assignments.some(
         (assignment) => assignment.userId === userId
       );
@@ -326,7 +316,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       payload({
         header,
         session,
-        isAdminOrOwner,
+        canSeeAllAudits: access.audits.seeAll,
+        canManageOthersAudits: access.policy.audits.manageOthers,
         hasScans,
         stats,
         userId,
@@ -340,8 +331,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 }
 
 export default function AuditDetailsPage() {
-  const { session, isAdminOrOwner, hasScans, stats, userId } =
-    useLoaderData<typeof loader>();
+  const {
+    session,
+    canSeeAllAudits,
+    canManageOthersAudits,
+    hasScans,
+    stats,
+    userId,
+  } = useLoaderData<typeof loader>();
+  const roles = useOrganizationRoles();
 
   const isCompleted = session.status === AuditStatus.COMPLETED;
   const isCancelled = session.status === AuditStatus.CANCELLED;
@@ -353,13 +351,21 @@ export default function AuditDetailsPage() {
     (assignment) => assignment.userId === userId
   );
 
-  // Allow admin/owner to scan/complete if audit has no assignees
-  const hasNoAssignees = session.assignments.length === 0;
-  const canScanAndComplete = isAssignee || (isAdminOrOwner && hasNoAssignees);
+  // Members whose audit scope covers every audit can scan and complete any of
+  // them; everyone else only the audits assigned to them.
+  const canScanAndComplete = isAssignee || canSeeAllAudits;
 
+  // The activity loader requires `auditNote:read` and 403s without it, so the
+  // tab follows the same gate rather than routing the user into an error.
   const items = [
     { to: "overview", content: "Overview" },
-    { to: "activity", content: "Activity" },
+    ...(userHasPermission({
+      roles,
+      entity: PermissionEntity.auditNote,
+      action: PermissionAction.read,
+    })
+      ? [{ to: "activity", content: "Activity" }]
+      : []),
   ];
 
   const matches = useMatches();
@@ -390,7 +396,9 @@ export default function AuditDetailsPage() {
         {/* Action Buttons */}
         <div className="flex flex-wrap gap-2">
           {/* Show actions dropdown to anyone who can view the audit (for PDF download) */}
-          {(isAdminOrOwner || isCreator || isAssignee) && <ActionsDropdown />}
+          {(canManageOthersAudits || isCreator || isAssignee) && (
+            <ActionsDropdown />
+          )}
 
           {!isCompleted &&
             !isCancelled &&
@@ -409,11 +417,7 @@ export default function AuditDetailsPage() {
             !isCancelled &&
             !isArchived &&
             canScanAndComplete && (
-              <CompleteAuditDialog
-                disabled={!hasScans}
-                auditName={session.name}
-                stats={stats}
-              />
+              <CompleteAuditDialog auditName={session.name} stats={stats} />
             )}
         </div>
       </Header>

@@ -29,7 +29,9 @@ All database commands run via the `@shelf/database` package:
 ### Quality & Testing
 
 - `pnpm webapp:test -- --run` – Execute the Vitest unit test suite (always use `--run` to avoid watch mode).
-- `pnpm webapp:validate` – Run the full validation pipeline (Prisma generation, ESLint, Prettier, TypeScript, unit tests). Run this before committing substantive code changes.
+- `pnpm webapp:test:changed` – Run only the tests affected by your changes versus local `main`. This is the default way to verify a change locally.
+- `pnpm webapp:validate` – Run the validation pipeline (Prisma generation, ESLint, Prettier, TypeScript, affected unit tests). Run this before committing substantive code changes.
+- `pnpm webapp:validate:full` – Same, with the full test suite. Do not run it locally unless asked; CI runs the full suite on every PR, sharded across four runners.
 - `pnpm turbo lint` – ESLint checking (all packages).
 - `pnpm --filter @shelf/webapp lint:fix` – Fix ESLint issues automatically.
 - `pnpm turbo typecheck` – TypeScript type checking (all packages).
@@ -42,6 +44,7 @@ All database commands run via the `@shelf/database` package:
 - Happy DOM environment for React component testing
 - Run with `pnpm webapp:test -- --run` for a single run
 - **IMPORTANT:** Always use `--run` flag. Without it, Vitest runs in watch mode which consumes excessive memory.
+- **Locally, run only the affected tests** (`pnpm webapp:test:changed`). The full suite belongs to CI.
 
 #### Validation Pipeline
 
@@ -51,7 +54,10 @@ Always run `pnpm webapp:validate` before committing - this runs:
 2. ESLint with auto-fix
 3. Prettier formatting
 4. TypeScript checking
-5. Unit tests
+5. Unit tests affected by your changes versus local `main` (`vitest --changed main`)
+
+Use `pnpm webapp:validate:full` only when a full local run is explicitly needed;
+CI runs the full suite on every PR.
 
 ### Writing & Organizing Tests
 
@@ -75,6 +81,7 @@ Always run `pnpm webapp:validate` before committing - this runs:
 #### Organizing Mocks and Factories
 
 - **Test files**: Co-located with source files (e.g., `apps/webapp/app/modules/user/service.server.test.ts`)
+- **Route tests**: `apps/webapp/test/routes-tests/`, mirroring the route path — **never** inside `app/routes/`. Vite's dev-server warmup treats every file under `app/routes/` as a client module, so a co-located route test importing a `*.server` module breaks `pnpm webapp:dev` while `validate` and CI stay green. Import the route via `~/routes/...`, not a relative path. Enforced by the `local-rules/no-test-files-in-routes` ESLint rule (blocks the pre-commit hook).
 - **Shared mocks**: Place in `apps/webapp/test/mocks/` directory, organized by domain (remix.tsx, database.ts)
 - **Factories**: Place in `apps/webapp/test/factories/` directory for generating test data
 - **MSW handlers**: Keep in `apps/webapp/mocks/` directory for API mocking

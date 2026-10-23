@@ -20,9 +20,10 @@ import { getUserByID } from "../user/service.server";
 const label = "Asset Reminder";
 
 /**
+/**
  * Cadence payload for a recurring reminder. `null` = one-shot.
- * Callers derive (unit, interval) from the dialog's Repeat preset and capture
- * the timezone from client hints; the tier gate is enforced by the caller for
+ * Callers derive (unit, interval) from the dialog's Repeat preset and pass the
+ * acting user's resolved timezone; the tier gate is enforced by the caller for
  * create (assertUserCanUseRecurringReminders) and by editAssetReminder for
  * edit (compare-to-stored, so downgraded orgs can still edit other fields).
  */
@@ -34,15 +35,26 @@ export type ReminderRecurrenceInput = {
 } | null;
 
 /**
- * Creates a reminder (optionally recurring) for an asset and schedules its
- * pg-boss job. Recurring jobs are sent with retry + singleton options so a
- * transient failure cannot kill the chain.
+ * Creates a reminder (optionally recurring) on an asset and schedules its email.
  *
- * @returns The created AssetReminder.
- * @throws {ShelfError} 400 when the asset or recipients don't belong to the
- *         caller's organization or recipients are stale; wrapped errors for
- *         db/scheduler failures. The tier gate for recurrence is asserted by
- *         the calling action (assertUserCanUseRecurringReminders).
+ * The asset must belong to `organizationId`: the reminder is listed in, and
+ * emailed to, that workspace, and the email shows the asset's title and image.
+ * The ownership check, the reminder and its activity note commit in one
+ * transaction, so a refused request (asset or recipient outside the workspace)
+ * writes nothing. The email is scheduled only after that commit, so no job is
+ * ever queued for a rolled-back reminder. Scheduling itself is not
+ * transactional: if it fails, the reminder and note remain and this throws.
+ * Recurring jobs are sent with retry + singleton options so a transient
+ * failure cannot kill the chain.
+ *
+ * @param args.assetId - Asset the reminder is about; must be in `organizationId`
+ * @param args.organizationId - The caller's validated workspace
+ * @param args.teamMembers - Recipients; must be linked users of the same workspace
+ * @param args.recurrence - Cadence for a recurring reminder, `null` for one-shot.
+ *        The tier gate is asserted by the calling action
+ *        (assertUserCanUseRecurringReminders).
+ * @returns The created reminder
+ * @throws {ShelfError} 400 when the asset is not in the workspace or a recipient is no longer available
  */
 export async function createAssetReminder({
   name,
@@ -66,13 +78,7 @@ export async function createAssetReminder({
   recurrence?: ReminderRecurrenceInput;
 }) {
   try {
-    await Promise.all([
-      // why: assetId is user-supplied (route param) — prove it belongs to the
-      // caller's org BEFORE creating, per org-scope-user-supplied-ids rule
-      // (the note write below validates too, but only after the row exists)
-      assertAssetsBelongToOrg({ assetIds: [assetId], organizationId }),
-      validateTeamMembersForReminder(teamMembers, organizationId),
-    ]);
+    await validateTeamMembersForReminder(teamMembers, organizationId);
 
     const user = await getUserByID(createdById, {
       select: {
@@ -82,56 +88,65 @@ export async function createAssetReminder({
         displayName: true,
       } satisfies Prisma.UserSelect,
     });
-    const assetReminder = await db.assetReminder.create({
-      data: {
-        name,
-        message,
-        alertDateTime,
-        assetId,
-        createdById,
-        organizationId,
-        recurrenceUnit: recurrence?.unit ?? null,
-        recurrenceInterval: recurrence?.interval ?? null,
-        recurrenceTimezone: recurrence?.timezone ?? null,
-        recurrenceEndsAt: recurrence?.endsAt ?? null,
-        teamMembers: {
-          connect: teamMembers.map((id) => ({ id })),
+
+    const assetReminder = await db.$transaction(async (tx) => {
+      await assertAssetsBelongToOrg(
+        { assetIds: [assetId], organizationId },
+        tx
+      );
+
+      const reminder = await tx.assetReminder.create({
+        data: {
+          name,
+          message,
+          alertDateTime,
+          assetId,
+          createdById,
+          organizationId,
+          recurrenceUnit: recurrence?.unit ?? null,
+          recurrenceInterval: recurrence?.interval ?? null,
+          recurrenceTimezone: recurrence?.timezone ?? null,
+          recurrenceEndsAt: recurrence?.endsAt ?? null,
+          teamMembers: {
+            connect: teamMembers.map((id) => ({ id })),
+          },
         },
-      },
+      });
+
+      await createNote(
+        {
+          assetId,
+          organizationId,
+          userId: createdById,
+          type: "UPDATE",
+          content: `${wrapUserLinkForNote({
+            ...user,
+            id: createdById,
+          })} created a new reminder ${wrapLinkForNote(
+            `/assets/${assetId}/reminders?${new URLSearchParams({
+              s: reminder.name,
+            }).toString()}`,
+            reminder.name
+          )}.`,
+        },
+        tx
+      );
+
+      return reminder;
     });
 
-    await Promise.all([
-      createNote({
-        assetId,
-        // why: scope the note's asset to the reminder's org so a caller
-        // cannot attach a note to another tenant's asset (cross-org IDOR)
-        organizationId,
-        userId: createdById,
-        type: "UPDATE",
-        content: `${wrapUserLinkForNote({
-          id: createdById,
-          firstName: user.firstName,
-          lastName: user.lastName,
-        })} created a new reminder ${wrapLinkForNote(
-          `/assets/${assetId}/reminders?${new URLSearchParams({
-            s: assetReminder.name,
-          }).toString()}`,
-          assetReminder.name
-        )}.`,
-      }),
-      scheduleAssetReminder({
-        data: {
-          reminderId: assetReminder.id,
-          eventType: ASSETS_EVENT_TYPE_MAP.REMINDER,
-        },
-        when: alertDateTime,
-        // why: recurring jobs need retries + singleton dedupe or a transient
-        // failure kills the chain; one-shot jobs keep historical semantics
-        options: recurrence
-          ? recurringReminderJobOptions(assetReminder.id, alertDateTime)
-          : {},
-      }),
-    ]);
+    await scheduleAssetReminder({
+      data: {
+        reminderId: assetReminder.id,
+        eventType: ASSETS_EVENT_TYPE_MAP.REMINDER,
+      },
+      when: alertDateTime,
+      // why: recurring jobs need retries + singleton dedupe or a transient
+      // failure kills the chain; one-shot jobs keep their plain options
+      options: recurrence
+        ? recurringReminderJobOptions(assetReminder.id, alertDateTime)
+        : {},
+    });
 
     return assetReminder;
   } catch (cause) {
@@ -258,9 +273,8 @@ export async function getPaginatedAndFilterableReminders({
       db.assetReminder.count({ where: finalWhere }),
     ]);
 
-    // why: divide by `take` — the clamped page size the query actually used
-    // (the raw per_page param defaults to 0 → Infinity, and an out-of-range
-    // cookie perPage wouldn't match the query either)
+    // Divide by the page size the query used. The raw `per_page` param is 0
+    // whenever the URL carries none.
     const totalPages = Math.ceil(totalReminders / take);
 
     return {
@@ -493,6 +507,9 @@ export async function getUpcomingRemindersForHomePage({
         alertDateTime: {
           gte: new Date(),
         },
+        // A reminder on an archived asset will not fire, so it is not
+        // upcoming. It stays listed, marked, on /reminders.
+        asset: { archivedAt: null },
       },
       take,
       include: ASSET_REMINDER_INCLUDE_FIELDS,

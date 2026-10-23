@@ -1,11 +1,10 @@
 import type { EventContentArg } from "@fullcalendar/core";
-import { HoverCardPortal } from "@radix-ui/react-hover-card";
 import { ExternalLinkIcon } from "@radix-ui/react-icons";
-import { ArrowRightIcon } from "lucide-react";
+import { ArrowRightIcon, Boxes, CheckIcon } from "lucide-react";
 
 import { type CalendarExtendedProps } from "~/routes/_layout+/calendar";
 import { bookingStatusColorMap } from "~/utils/bookings";
-import { isOneDayEvent } from "~/utils/calendar";
+import { calendarDisplayStatus, isOneDayEvent } from "~/utils/calendar";
 import { tw } from "~/utils/tw";
 import { BookingStatusBadge } from "../booking/booking-status-badge";
 import { DateS } from "../shared/date";
@@ -30,6 +29,19 @@ export default function renderEventCard({ event }: EventCardProps) {
   const viewType = event._context.calendarApi.view.type;
   const booking = event.extendedProps as CalendarExtendedProps;
   const _isOneDayEvent = isOneDayEvent(booking.start, booking.end);
+
+  // Availability view only — booking calendar never sets `slices` → glyph hidden.
+  const slices = booking.slices ?? [];
+  const sliceCount = booking.sliceCount ?? slices.length;
+  const hasKitSlice = slices.some((s) => s.assetKitId !== null);
+  const showKitGlyph = hasKitSlice || sliceCount > 1;
+  // End-user copy (avoid internal "slice"/pivot jargon). Multi-slice reads as a
+  // reservation count; the hover tooltip carries the full standalone/kit
+  // breakdown. Singular guarded so a lone reservation never reads "1 times".
+  const glyphLabel =
+    sliceCount > 1
+      ? `Reserved ${sliceCount} times on this booking`
+      : "Booked via a kit";
 
   // Ref callback to set up scroll tracking
   const triggerRefCallback = (element: HTMLDivElement | null) => {
@@ -184,7 +196,9 @@ export default function renderEventCard({ event }: EventCardProps) {
     (element as any)._cleanup = cleanup;
   };
 
-  const colors = bookingStatusColorMap[booking.status];
+  // The bar's text colour follows what the bar is drawn as, so a returned
+  // bar reads green throughout; the popover badge below keeps the real status.
+  const colors = bookingStatusColorMap[calendarDisplayStatus(booking)];
   return (
     <HoverCard openDelay={0} closeDelay={0}>
       <HoverCardTrigger asChild>
@@ -204,24 +218,52 @@ export default function renderEventCard({ event }: EventCardProps) {
                 <div className="fc-daygrid-event-dot inline-block" />
               </When>
             )}
-            <DateS date={booking.start} options={{ timeStyle: "short" }} /> |{" "}
-            {event.title}
+            {/* The bar must read without hovering: a returned asset shows
+                when it came back instead of when the booking started. */}
+            {booking.returnedAt ? (
+              <span data-testid="event-card-returned-prefix">
+                Returned{" "}
+                <DateS
+                  date={booking.returnedAt}
+                  options={{ timeStyle: "short" }}
+                />
+              </span>
+            ) : (
+              <DateS date={booking.start} options={{ timeStyle: "short" }} />
+            )}{" "}
+            | {event.title}
+            {showKitGlyph ? (
+              <span
+                className="inline-flex items-center gap-0.5"
+                title={glyphLabel}
+                role="img"
+                aria-label={glyphLabel}
+              >
+                <Boxes className="size-3" aria-hidden="true" />
+                {sliceCount > 1 ? (
+                  <span
+                    className="text-xs font-medium tabular-nums"
+                    aria-hidden="true"
+                  >
+                    {sliceCount}
+                  </span>
+                ) : null}
+              </span>
+            ) : null}
             <ExternalLinkIcon
               className={tw("external-link-icon mt-px", "hidden")}
             />
           </div>
         </div>
       </HoverCardTrigger>
-      <HoverCardPortal>
-        <HoverCardContent
-          className="pointer-events-none z-[99999] md:w-auto md:max-w-[450px]"
-          side="top"
-          sideOffset={8}
-          collisionPadding={16}
-        >
-          <EventCardContent booking={booking} />
-        </HoverCardContent>
-      </HoverCardPortal>
+      <HoverCardContent
+        className="pointer-events-none z-[99999] md:w-auto md:max-w-[450px]"
+        side="top"
+        sideOffset={8}
+        collisionPadding={16}
+      >
+        <EventCardContent booking={booking} />
+      </HoverCardContent>
     </HoverCard>
   );
 }
@@ -231,6 +273,28 @@ export function EventCardContent({
 }: {
   booking: CalendarExtendedProps;
 }) {
+  const slices = booking.slices ?? [];
+  const showBreakdown =
+    slices.length >= 2 || slices.some((s) => s.assetKitId !== null);
+  // Quantities only carry meaning for QUANTITY_TRACKED assets. For INDIVIDUAL
+  // assets (single physical units, always qty 1) hide the per-slice `Qty` and
+  // the total — the kit/standalone attribution still shows, just without the
+  // redundant "Qty 1" / "Total reserved 1 unit".
+  const showQuantities = booking.quantityTracked === true;
+  const bookedTotal =
+    booking.bookedTotal ?? slices.reduce((sum, s) => sum + s.quantity, 0);
+
+  // Deterministic display order: the standalone slice (assetKitId === null)
+  // sorts first, then kit-driven slices by kit name. Neither loader guarantees
+  // order (advanced-mode `jsonb_agg` has no ORDER BY; the simple-mode Prisma
+  // include is unordered), so sort here so the tooltip always reads
+  // "Standalone" before `via "Kit"`.
+  const orderedSlices = [...slices].sort((a, b) => {
+    if (a.assetKitId === null && b.assetKitId !== null) return -1;
+    if (a.assetKitId !== null && b.assetKitId === null) return 1;
+    return (a.kitName ?? "").localeCompare(b.kitName ?? "");
+  });
+
   return (
     <>
       <div className="mb-3 mt-2 flex items-center gap-2 ">
@@ -246,6 +310,18 @@ export function EventCardContent({
         <ArrowRightIcon className="size-3 text-gray-600" />
         <DateS date={booking.end} options={DATE_FORMAT_OPTIONS} />
       </div>
+
+      {/* The period above is the booking's; this asset left it earlier. */}
+      {booking.returnedAt ? (
+        <div
+          className="mb-3 flex w-full items-center gap-x-2 text-sm text-success-700"
+          data-testid="event-card-returned"
+        >
+          <CheckIcon className="size-3" aria-hidden="true" />
+          <span>Returned</span>
+          <DateS date={booking.returnedAt} options={DATE_FORMAT_OPTIONS} />
+        </div>
+      ) : null}
 
       <div className="flex items-center gap-5">
         <div>
@@ -269,6 +345,36 @@ export function EventCardContent({
               <GrayBadge key={tag.id}>{tag.name}</GrayBadge>
             ))}
           </div>
+        </>
+      ) : null}
+
+      {showBreakdown ? (
+        <>
+          <p className="mb-1 text-sm font-normal">Reserved on this booking:</p>
+          <ul className="mb-3 flex flex-col gap-1">
+            {orderedSlices.map((slice, index) => (
+              <li
+                key={slice.assetKitId ?? `standalone-${index}`}
+                className="flex items-center justify-between gap-4 text-sm text-gray-600"
+              >
+                <span>
+                  {slice.assetKitId === null
+                    ? "Standalone"
+                    : slice.kitName
+                    ? `via "${slice.kitName}"`
+                    : "via a kit"}
+                </span>
+                {showQuantities ? (
+                  <span className="tabular-nums">Qty {slice.quantity}</span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+          {showQuantities ? (
+            <p className="mb-3 text-sm font-medium text-gray-700">
+              Total reserved {bookedTotal} unit{bookedTotal === 1 ? "" : "s"}
+            </p>
+          ) : null}
         </>
       ) : null}
 

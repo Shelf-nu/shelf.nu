@@ -18,11 +18,20 @@ export type BookingNoteTxClient = {
       where: { id: string; organizationId: string };
       select: { id: true };
     }) => Promise<{ id: string } | null>;
+    /** Batched ownership check used by {@link createSystemBookingNotes} */
+    findMany: (args: {
+      where: { id: { in: string[] }; organizationId: string };
+      select: { id: true };
+    }) => Promise<{ id: string }[]>;
   };
   bookingNote: {
     create: (args: {
       data: Prisma.BookingNoteCreateInput;
     }) => Promise<BookingNote>;
+    /** Batched insert used by {@link createSystemBookingNotes} */
+    createMany: (args: {
+      data: Prisma.BookingNoteCreateManyInput[];
+    }) => Promise<{ count: number }>;
   };
 };
 
@@ -206,6 +215,80 @@ export function createSystemBookingNote(
 }
 
 /**
+ * Bulk variant of {@link createSystemBookingNote} — writes many system notes,
+ * possibly spanning several bookings, in a fixed TWO statements regardless of
+ * how many notes are passed.
+ *
+ * The singular helper costs two statements PER note (ownership check + insert),
+ * which is fine one-off but adds up inside a transaction: a caller writing
+ * notes for N bookings issues 2N serial round-trips against the 15s
+ * transaction budget. This validates every distinct booking in ONE query, then
+ * inserts with a single `createMany`.
+ *
+ * @param notes - Note content paired with its target booking id
+ * @param organizationId - Organization ALL target bookings must belong to
+ * @param tx - Optional transaction client so the check + insert commit with the
+ *   caller's mutation
+ * @throws {ShelfError} 404 if any target booking is not in `organizationId`
+ */
+export async function createSystemBookingNotes(
+  {
+    notes,
+    organizationId,
+  }: {
+    notes: Array<Pick<BookingNote, "content"> & { bookingId: Booking["id"] }>;
+    organizationId: string;
+  },
+  tx?: BookingNoteTxClient
+) {
+  if (notes.length === 0) {
+    return;
+  }
+
+  try {
+    const client = tx ?? db;
+    const bookingIds = [...new Set(notes.map((note) => note.bookingId))];
+
+    // Single ownership check covering every target booking. Same invariant the
+    // singular helper enforces per note — a missing id means it either doesn't
+    // exist or belongs to another organization; both are a hard 404.
+    const found = await client.booking.findMany({
+      where: { id: { in: bookingIds }, organizationId },
+      select: { id: true },
+    });
+
+    if (found.length !== bookingIds.length) {
+      throw new ShelfError({
+        cause: null,
+        message: "Booking not found or access denied",
+        additionalData: { bookingIds, organizationId },
+        label,
+        status: 404,
+        shouldBeCaptured: false,
+      });
+    }
+
+    await client.bookingNote.createMany({
+      data: notes.map((note) => ({
+        content: note.content,
+        type: "UPDATE" as const,
+        bookingId: note.bookingId,
+      })),
+    });
+  } catch (cause) {
+    if (cause instanceof ShelfError) {
+      throw cause;
+    }
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while creating booking notes",
+      additionalData: { organizationId },
+      label,
+    });
+  }
+}
+
+/**
  * Gets booking notes for a specific booking with security validation.
  *
  * SECURITY CHECKS:
@@ -296,7 +379,10 @@ export async function getBookingNotes({
  * @param bookingId - Booking the note must belong to (typically the route's `:bookingId` param)
  * @param userId - User ID (must match note creator)
  * @param organizationId - Organization the note's booking must belong to
- * @returns Delete operation result (0 if the note did not match the constraints)
+ * @returns The delete result; its `count` is always 1
+ * @throws {ShelfError} 403 when no note matched — not the caller's, not on this
+ *   booking, or not in this organization
+ * @throws {ShelfError} 500 when the database operation fails
  */
 export async function deleteBookingNote({
   id,
@@ -316,8 +402,34 @@ export async function deleteBookingNote({
         booking: { id: bookingId, organizationId },
       },
     });
+
+    /**
+     * The predicate carries the authorization: a note that is not the caller's,
+     * or not on a booking in their organization, simply does not match. Zero
+     * rows is therefore a refusal, not a quiet success — and the caller has no
+     * other way to tell, so reporting it here is what stops a non-author being
+     * told their delete worked. Mirrors `deleteNote`, `deleteTeamMemberNote`
+     * and `deleteLocationNote`.
+     */
+    if (result.count === 0) {
+      throw new ShelfError({
+        cause: null,
+        message: "Note not found or you don't have permission to delete it.",
+        additionalData: { id, bookingId, userId, organizationId },
+        label,
+        status: 403,
+        shouldBeCaptured: false,
+      });
+    }
+
     return result;
   } catch (cause) {
+    // The refusal above is a deliberate 4xx; re-wrapping it would replace a
+    // message written for the user with "something went wrong".
+    if (cause instanceof ShelfError) {
+      throw cause;
+    }
+
     throw new ShelfError({
       cause,
       message: "Something went wrong while deleting the booking note",

@@ -1,4 +1,5 @@
 import { CustomFieldType } from "@prisma/client";
+import { ASSET_QUANTITY_FIGURE_LABELS } from "@shelf/labels";
 import { z } from "zod";
 
 export type Column = {
@@ -7,6 +8,78 @@ export type Column = {
   position: number;
   cfType?: CustomFieldType;
 };
+/**
+ * Brings one custom field's column in a single settings row into step with the
+ * field, returning the updated column list.
+ *
+ * Every settings row in the organization is reconciled separately — there is
+ * one per user — and a row is not obliged to have a column for the field.
+ * A row written before the field existed does not, and `validateColumns` only
+ * re-adds the FIXED columns on read, never custom-field ones. So "there is no
+ * column here" is an ordinary state, and on deactivation it means there is
+ * nothing to do.
+ *
+ * That case is the trap this function exists to contain. `findIndex` reports a
+ * miss as `-1`, and `-1` is a perfectly valid `splice` start index — it counts
+ * from the end — so a removal aimed at an absent column silently takes the LAST
+ * column instead. The row then loses a column that has nothing to do with the
+ * field: a fixed one returns on the next read but reset to the static default,
+ * losing whatever the user had chosen for it, and a custom-field one does not
+ * return at all.
+ *
+ * @param columns - The row's current columns; not modified
+ * @param field.oldName - The field's name BEFORE this change, which is what the
+ *   existing column is keyed on
+ * @param field.newName - The field's name after it, used for the column it
+ *   keeps or gains
+ * @param field.active - Whether the field is active after this change
+ * @param field.cfType - The field's type, recorded on the column
+ * @returns A new column list reflecting the change
+ */
+export function syncCustomFieldColumn(
+  columns: Column[],
+  {
+    oldName,
+    newName,
+    active,
+    cfType,
+  }: {
+    oldName: string;
+    newName: string;
+    active: boolean;
+    cfType?: CustomFieldType;
+  }
+): Column[] {
+  const next = [...columns];
+  const index = next.findIndex((col) => col?.name === `cf_${oldName}`);
+
+  if (!active) {
+    // Absent is not an error, and it is emphatically not "remove the last one".
+    return index === -1 ? next : next.filter((_, i) => i !== index);
+  }
+
+  const name = `cf_${newName}` as Column["name"];
+
+  if (index === -1) {
+    const highestPosition = next.reduce(
+      (acc, col) => (col.position > acc ? col.position : acc),
+      0
+    );
+    next.push({ name, visible: true, position: highestPosition + 1, cfType });
+    return next;
+  }
+
+  // The column is the user's: they chose whether to show it and where to put
+  // it, and reactivating or renaming the field is not a reason to override that.
+  next[index] = {
+    name,
+    visible: next[index].visible,
+    position: next[index].position,
+    cfType,
+  };
+  return next;
+}
+
 // Define the fixed fields
 export const fixedFields = [
   "id",
@@ -26,9 +99,19 @@ export const fixedFields = [
   "upcomingReminder",
   "actions",
   "quantity",
+  "unitOfMeasure",
+  "minQuantity",
   "type",
   "upcomingBookings",
   "assetModel",
+  // Quantity-pool columns. All three are derived per row rather than stored:
+  // `available` and `reserved` are aggregates, `stockStatus` is the SQL verdict
+  // `POOL_STOCK_STATUS_EXPR` (modules/asset/query.server.ts). They render empty for
+  // INDIVIDUAL assets, exactly as `quantity` already does.
+  "available",
+  "reserved",
+  "stockStatus",
+  "lastAuditDate",
 ] as const;
 
 // Define barcode field names
@@ -56,17 +139,25 @@ type CustomFieldColumnKey = `cf_${string}`;
 // schema (`generateColumnsSchema`), so it never appears in user column
 // settings or the UI's "manage columns" picker. Including it here keeps
 // the type system honest when the export caller injects it.
+//
+// `qrUrl` is export-only for the same reason: the CSV export places it right
+// after `qrId` whenever the QR ID column is exported (unless a workspace
+// custom field already uses the "QR URL" header), so label printers get the
+// exact URL each code encodes.
 export type ColumnLabelKey =
   | FixedField
   | BarcodeField
   | "name"
   | "total_value"
+  | "qrUrl"
   | CustomFieldColumnKey;
 
 export const columnsLabelsMap: { [key in ColumnLabelKey]: string } = {
   id: "ID",
   sequentialId: "Asset ID",
   qrId: "QR ID",
+  // Export-only synthetic column (see `ColumnLabelKey` comment above).
+  qrUrl: "QR URL",
   name: "Name",
   status: "Status",
   description: "Description",
@@ -88,34 +179,279 @@ export const columnsLabelsMap: { [key in ColumnLabelKey]: string } = {
   barcode_DataMatrix: "DataMatrix",
   barcode_ExternalQR: "External QR",
   barcode_EAN13: "EAN-13",
-  quantity: "Quantity",
+  // Renamed from "Quantity": with `available` beside it, the bare word was read
+  // as "how many can I use" by three separate customers. Same field, clearer name.
+  quantity: "Total quantity",
+  unitOfMeasure: "Unit of measure",
+  minQuantity: "Min quantity",
+  // "Free now", not "Available". Three things in this product were called
+  // "Available" at once: this column, the `AssetStatus` badge, and the
+  // `Available to book` column beside it. Worse, this one is the only one that
+  // is time-bound, it means "free on the shelf TODAY", while the neighbouring
+  // `Reserved` and `Stock status` describe a FUTURE booking window. Printing a
+  // now-figure and a later-figure side by side under interchangeable names
+  // produced rows that read as self-contradicting: 10 free, 12 reserved, Short.
+  // The word "now" is what makes the contrast legible. The column KEY stays
+  // `available`, so saved filters, URLs and stored column configs are unaffected.
+  available: ASSET_QUANTITY_FIGURE_LABELS.FREE_NOW,
+  reserved: "Reserved",
+  stockStatus: "Stock status",
   type: "Tracking method",
   upcomingBookings: "Upcoming Bookings",
   assetModel: "Asset model",
+  lastAuditDate: "Last audit date",
 };
 
 export const defaultFields: Column[] = [
+  // The quantity columns sit together right after `status`, in
+  // QUANTITY_COLUMN_BLOCK order. Only Free now and Stock status start visible:
+  // Free now reads "14 of 20 pcs", so it already carries the total and the
+  // unit, and Stock status says how short a pool is. Total quantity, Reserved
+  // and Min quantity are one switch away in the columns list.
   { name: "id", visible: false, position: 0 },
   { name: "sequentialId", visible: true, position: 1 },
   { name: "qrId", visible: true, position: 2 },
   { name: "status", visible: true, position: 3 },
-  { name: "description", visible: true, position: 4 },
-  { name: "valuation", visible: true, position: 5 },
-  { name: "availableToBook", visible: true, position: 6 },
-  { name: "createdAt", visible: true, position: 7 },
-  { name: "updatedAt", visible: true, position: 8 },
-  { name: "category", visible: true, position: 9 },
-  { name: "tags", visible: true, position: 10 },
-  { name: "location", visible: true, position: 11 },
-  { name: "kit", visible: true, position: 12 },
-  { name: "custody", visible: true, position: 13 },
-  { name: "upcomingReminder", visible: true, position: 14 },
-  { name: "actions", visible: true, position: 15 },
-  { name: "upcomingBookings", visible: true, position: 16 },
-  { name: "quantity", visible: false, position: 17 },
-  { name: "type", visible: false, position: 18 },
-  { name: "assetModel", visible: false, position: 19 },
+  { name: "available", visible: true, position: 4 },
+  { name: "quantity", visible: false, position: 5 },
+  { name: "unitOfMeasure", visible: false, position: 6 },
+  { name: "reserved", visible: false, position: 7 },
+  { name: "stockStatus", visible: true, position: 8 },
+  { name: "minQuantity", visible: false, position: 9 },
+  { name: "description", visible: true, position: 10 },
+  { name: "valuation", visible: true, position: 11 },
+  { name: "availableToBook", visible: true, position: 12 },
+  { name: "createdAt", visible: true, position: 13 },
+  { name: "updatedAt", visible: true, position: 14 },
+  { name: "category", visible: true, position: 15 },
+  { name: "tags", visible: true, position: 16 },
+  { name: "location", visible: true, position: 17 },
+  { name: "kit", visible: true, position: 18 },
+  { name: "custody", visible: true, position: 19 },
+  { name: "upcomingReminder", visible: true, position: 20 },
+  { name: "actions", visible: true, position: 21 },
+  { name: "upcomingBookings", visible: true, position: 22 },
+  { name: "type", visible: false, position: 23 },
+  { name: "assetModel", visible: false, position: 24 },
+  { name: "lastAuditDate", visible: true, position: 25 },
 ];
+
+/**
+ * The quantity columns, in the order they sit side by side. They describe one
+ * pool, so they are kept together: a saved column set that lacks some of them
+ * gets each missing one placed next to the ones it already has.
+ */
+export const QUANTITY_COLUMN_BLOCK: readonly ColumnLabelKey[] = [
+  "available",
+  "quantity",
+  // The Total quantity cell holds only the number, so its unit sits beside it.
+  "unitOfMeasure",
+  "reserved",
+  "stockStatus",
+  // The floor Stock status judges against, so it sits beside the verdict.
+  "minQuantity",
+];
+
+/**
+ * Whether a column belongs to {@link QUANTITY_COLUMN_BLOCK}.
+ *
+ * @param name - A column name
+ * @returns `true` for Free now, Total quantity, Unit of measure, Reserved,
+ *   Stock status and Min quantity
+ */
+export function isQuantityColumn(name: ColumnLabelKey): boolean {
+  return QUANTITY_COLUMN_BLOCK.includes(name);
+}
+
+/**
+ * The default columns for a column set created from scratch.
+ *
+ * Free now and Stock status only have values for quantity-tracked assets, so a
+ * workspace without any starts with every quantity column hidden instead of
+ * two columns of dashes. This decides the starting state only: nothing is
+ * switched on or off later when the workspace adds quantity-tracked assets.
+ *
+ * @param hasQuantityAssets - Whether the workspace has any quantity-tracked asset
+ * @returns A fresh copy of {@link defaultFields} with that visibility applied
+ */
+export function defaultColumnsForWorkspace({
+  hasQuantityAssets,
+}: {
+  hasQuantityAssets: boolean;
+}): Column[] {
+  return defaultFields.map((column) =>
+    !hasQuantityAssets && isQuantityColumn(column.name)
+      ? { ...column, visible: false }
+      : { ...column }
+  );
+}
+
+/**
+ * Default columns that belong right after another column, keyed by the column
+ * they follow. The Total quantity cell holds only the number and the unit lives
+ * in `unitOfMeasure`, so the unit column sits next to Total quantity and is
+ * shown whenever Total quantity is.
+ */
+const followsColumn: Partial<Record<ColumnLabelKey, ColumnLabelKey>> = {
+  unitOfMeasure: "quantity",
+};
+
+/**
+ * Where a missing quantity column goes in a saved column set: right after the
+ * nearest block column before it, or else right before the nearest one after
+ * it. `undefined` when the column is not a quantity column or the set has none.
+ */
+function positionInQuantityBlock(
+  columns: Column[],
+  name: ColumnLabelKey
+): number | undefined {
+  const index = QUANTITY_COLUMN_BLOCK.indexOf(name);
+  if (index === -1) return undefined;
+
+  const find = (blockName: ColumnLabelKey) =>
+    columns.find((col) => col.name === blockName);
+
+  const before = QUANTITY_COLUMN_BLOCK.slice(0, index)
+    .reverse()
+    .map(find)
+    .find(Boolean);
+  if (before) return before.position + 1;
+
+  const after = QUANTITY_COLUMN_BLOCK.slice(index + 1)
+    .map(find)
+    .find(Boolean);
+  return after?.position;
+}
+
+/**
+ * Where a quantity column goes in a saved set that has no quantity column yet:
+ * right after Status, where a fresh set has the block. `undefined` for any
+ * other column, or when the set has no Status column.
+ */
+function afterStatus(
+  columns: Column[],
+  name: ColumnLabelKey
+): number | undefined {
+  if (!isQuantityColumn(name)) return undefined;
+  const status = columns.find((col) => col.name === "status");
+  return status ? status.position + 1 : undefined;
+}
+
+/**
+ * Moves a saved set's hidden quantity columns right after its Status column,
+ * when its Total quantity is hidden.
+ *
+ * A saved set keeps Total quantity wherever the user left it, and for most
+ * sets that is hidden near the end of the list. Quantity columns added next to
+ * it would then open far past the right edge of the table. Only hidden columns
+ * move, so nothing the user can see changes place; a quantity column the user
+ * shows stays where it is.
+ *
+ * @param columns - A saved column set; not modified
+ * @returns The same columns, re-positioned, or the input when Total quantity
+ *   is shown or the set has no Status or Total quantity column
+ */
+function gatherHiddenQuantityColumnsAfterStatus(columns: Column[]): Column[] {
+  const quantity = columns.find((col) => col.name === "quantity");
+  const hasStatus = columns.some((col) => col.name === "status");
+  if (!quantity || quantity.visible || !hasStatus) return columns;
+
+  const ordered = [...columns].sort((a, b) => a.position - b.position);
+  const isMoving = (col: Column) => isQuantityColumn(col.name) && !col.visible;
+
+  const staying = ordered.filter((col) => !isMoving(col));
+  // In block order, so the moved columns already sit the way a fresh set has them.
+  const moving = QUANTITY_COLUMN_BLOCK.flatMap((name) =>
+    ordered.filter((col) => col.name === name && isMoving(col))
+  );
+  const statusIndex = staying.findIndex((col) => col.name === "status");
+
+  return [
+    ...staying.slice(0, statusIndex + 1),
+    ...moving,
+    ...staying.slice(statusIndex + 1),
+  ].map((col, position) => ({ ...col, position }));
+}
+
+/**
+ * Adds default columns that a saved column set lacks.
+ *
+ * Settings rows are per user and outlive the default list, so a fixed column
+ * added to `defaultFields` is missing from every row saved before it existed.
+ * A saved set keeps the positions its user arranged, so a missing column never
+ * takes its static default position: another column may already sit there, and
+ * two columns sharing a position order by array index. Every saved column at or
+ * after an inserted one moves down by one, so the user's own order is kept.
+ *
+ * - A quantity column goes next to the quantity columns the set already has
+ *   (see {@link QUANTITY_COLUMN_BLOCK}): next to Total quantity when the user
+ *   shows it, else right after Status, where the hidden quantity columns are
+ *   gathered first (see {@link gatherHiddenQuantityColumnsAfterStatus}), and
+ *   right after Status too when the set has no quantity column yet. In a
+ *   workspace with quantity-tracked assets it takes its default visibility, so
+ *   Free now and Stock status appear and the rest stay one switch away. In a
+ *   workspace without any it starts hidden, instead of as a column of dashes.
+ * - A column listed in {@link followsColumn} is also shown when the column it
+ *   follows is shown, so adding it never hides what the user already saw.
+ * - Any other column goes after every column the set already has, in default
+ *   order and with its default visibility.
+ *
+ * @param columns - The row's saved columns; not modified
+ * @param missing - Names of the default columns to add
+ * @param options.hasQuantityAssets - Whether the workspace has any quantity-tracked asset
+ * @returns A new column list with the missing default columns added, or
+ *   `columns` itself when nothing is missing
+ */
+export function insertMissingDefaultColumns(
+  columns: Column[],
+  missing: ColumnLabelKey[],
+  { hasQuantityAssets }: { hasQuantityAssets: boolean }
+): Column[] {
+  // Ascending default order, so block columns missing together are inserted
+  // in block order, each next to the one before it.
+  const toInsert = defaultFields
+    .filter((field) => missing.includes(field.name))
+    .sort((a, b) => a.position - b.position);
+  if (toInsert.length === 0) return columns;
+
+  const start = toInsert.some((field) => isQuantityColumn(field.name))
+    ? gatherHiddenQuantityColumnsAfterStatus(columns)
+    : [...columns];
+
+  return toInsert.reduce<Column[]>((acc, field) => {
+    const position =
+      positionInQuantityBlock(acc, field.name) ?? afterStatus(acc, field.name);
+
+    if (position === undefined) {
+      const maxPosition = acc.reduce(
+        (max, col) => Math.max(max, col.position),
+        -1
+      );
+      const visible =
+        isQuantityColumn(field.name) && !hasQuantityAssets
+          ? false
+          : field.visible;
+      return [...acc, { ...field, position: maxPosition + 1, visible }];
+    }
+
+    const partnerName = followsColumn[field.name];
+    const partnerShown = partnerName
+      ? acc.some((col) => col.name === partnerName && col.visible)
+      : false;
+    const visible =
+      partnerShown ||
+      (isQuantityColumn(field.name) && !hasQuantityAssets
+        ? false
+        : field.visible);
+
+    return [
+      ...acc.map((col) =>
+        col.position >= position ? { ...col, position: col.position + 1 } : col
+      ),
+      { ...field, position, visible },
+    ];
+  }, start);
+}
 
 // Generate barcode columns when barcodes are enabled
 export const generateBarcodeColumns = (): Column[] =>

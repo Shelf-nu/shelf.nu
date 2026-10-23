@@ -16,6 +16,38 @@ export const isValidDomain = (val: string) =>
   /^([a-zA-Z0-9][a-zA-Z0-9-]{1,61}[a-zA-Z0-9]\.)+[a-zA-Z]{2,}$/.test(val);
 
 /**
+ * Parses a comma-separated string of domains into a cleaned, lowercased array.
+ *
+ * Shelf stores an organization's SSO domains as a single comma-separated string
+ * on `SsoDetails.domain`; this normalizes it for comparison.
+ *
+ * @param domainsString - Comma-separated string of domains (e.g. "a.com, b.io")
+ * @returns Array of trimmed, lowercased, non-empty domain strings
+ */
+export function parseDomains(domainsString: string): string[] {
+  return domainsString
+    .split(",")
+    .map((domain) => domain.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+/**
+ * Checks whether an email domain matches any domain in a comma-separated list.
+ *
+ * @param emailDomain - The domain portion of an email (e.g. "example.com")
+ * @param domainsString - Comma-separated string of allowed domains, or null
+ * @returns `true` when `emailDomain` exactly matches one of the parsed domains
+ */
+export function emailMatchesDomains(
+  emailDomain: string,
+  domainsString: string | null
+): boolean {
+  if (!emailDomain || !domainsString) return false;
+  const domains = parseDomains(domainsString);
+  return domains.includes(emailDomain.toLowerCase());
+}
+
+/**
  * Checks that a string is a well-formed `http:`/`https:` URL we can attempt to
  * fetch an image from during CSV import.
  *

@@ -49,29 +49,15 @@ export function TimeframeRangeIndicator({ timeframe }: Props) {
       (toMidnight.getTime() - fromMidnight.getTime()) / (1000 * 60 * 60 * 24)
     ) + 1;
 
-  // Decide whether to show the year on each endpoint. Mirrors the previous
-  // hand-rolled logic: hide year when both dates fall in the current year
-  // and don't span across years; otherwise show it where it disambiguates.
-  const fromYear = from.getFullYear();
-  const toYear = to.getFullYear();
-  const showYear = fromYear !== toYear || toYear !== new Date().getFullYear();
-  const fromOptions: Intl.DateTimeFormatOptions = {
-    month: "short",
-    day: "numeric",
-    ...(showYear && fromYear !== toYear ? { year: "numeric" } : {}),
-  };
-  const toOptions: Intl.DateTimeFormatOptions = {
-    month: "short",
-    day: "numeric",
-    ...(showYear ? { year: "numeric" } : {}),
-  };
-
+  // Both endpoints render as full pref dates (incl. year) so the range reads
+  // consistently in the user's chosen order/separator; `DateS` decides
+  // numeric-vs-name month, so no shape options are passed here.
   return (
     <span className="hidden text-xs text-gray-500 sm:inline-flex sm:items-center sm:gap-1.5">
       <span className="inline-flex items-center gap-1">
-        <DateS date={from} options={fromOptions} />
+        <DateS date={from} />
         <span>–</span>
-        <DateS date={to} options={toOptions} />
+        <DateS date={to} />
       </span>
       <span className="text-gray-300">·</span>
       <span className="font-medium text-gray-600">

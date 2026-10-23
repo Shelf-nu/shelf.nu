@@ -1,3 +1,30 @@
+/**
+ * Booking Service
+ *
+ * The booking domain's server-side business logic — every mutation and read a
+ * booking goes through, from DRAFT to ARCHIVED.
+ *
+ * Responsibilities:
+ * - Lifecycle transitions: create, edit, reserve, check out, check in, extend,
+ *   cancel, revert to draft, archive, duplicate, and their bulk counterparts.
+ * - Partial check-out / check-in, including per-asset quantity dispositions for
+ *   `QUANTITY_TRACKED` assets and the "how much is left" computations.
+ * - Membership: standalone assets and kit-driven slices on the `BookingAsset`
+ *   pivot (see `.claude/rules/kit-members-via-kit-slices.md`).
+ * - The audit trail every transition leaves: system notes, `ActivityEvent`
+ *   records, notification emails, and the expiry/reminder scheduler jobs.
+ *
+ * Two invariants worth knowing before editing:
+ * - `originalFrom`/`originalTo` are the PLANNED period and are frozen once a
+ *   booking starts; `from`/`to` are the live one. See
+ *   `.claude/rules/booking-planned-period-is-frozen.md`.
+ * - Any id that arrives from request input is org-scoped before use, per
+ *   `.claude/rules/org-scope-user-supplied-ids.md`.
+ *
+ * @see {@link file://./lateness.ts}
+ * @see {@link file://./../reports/helpers.server.ts}
+ */
+
 import {
   BookingStatus,
   AssetStatus,
@@ -15,45 +42,108 @@ import type {
   Tag,
   OrganizationRoles,
 } from "@prisma/client";
+import {
+  BOOKING_EMPTY_RESERVED_MESSAGE,
+  BOOKING_RESERVE_BLOCKED_LABELS,
+  kitsWithoutActiveAssetsRefusal,
+} from "@shelf/labels";
 import { isBefore } from "date-fns";
 import { DateTime } from "luxon";
 import { redirect } from "react-router";
 import z from "zod";
 import type { AuthSession } from "@server/session";
+import type { BookingsList } from "~/components/booking/bookings-list-fields";
 import { CheckinIntentEnum } from "~/components/booking/checkin-dialog";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 import type { HeaderData } from "~/components/layout/header/types";
 import type { SortingDirection } from "~/components/list/filters/sort-by";
 import { partialCheckinAssetsSchema } from "~/components/scanner/drawer/uses/partial-checkin-drawer";
 import { partialCheckoutAssetsSchema } from "~/components/scanner/drawer/uses/partial-checkout-drawer";
-import { db } from "~/database/db.server";
+import { db, type ExtendedPrismaClient } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { sendEmail } from "~/emails/mail.server";
-import type { BookingForEmail } from "~/emails/types";
-import { isQuantityTracked } from "~/modules/asset/utils";
-import { materializeModelRequestForAsset } from "~/modules/booking-model-request/service.server";
+import type { BookingEmailActor, BookingForEmail } from "~/emails/types";
+import { lockAssetsForArchiveGuard } from "~/modules/asset/archive-lock.server";
+import {
+  ACTIVE_BOOKING_STATUSES,
+  assertAssetQuantitiesAvailable,
+  getAssetAvailability,
+  getAssetAvailabilityBatch,
+} from "~/modules/asset/availability.server";
+import {
+  reconcileManualPlacementsForStockDecrease,
+  reportAmbiguousPlacementReconcile,
+} from "~/modules/asset/placement-reconcile.server";
+import {
+  isDirectBookingBlockedByKit,
+  isQuantityTracked,
+} from "~/modules/asset/utils";
+import { stripMarkdocDelimiters } from "~/modules/audit/note-content.server";
+import {
+  assertKitsCheckoutable,
+  assertKitsHaveActiveAssets,
+  getKitIdsHeldByOtherLiveBookings,
+} from "~/modules/booking/kit-holds.server";
+import {
+  assertModelUnitsNotReservedElsewhere,
+  assertOutstandingModelRequestsFit,
+  assertReservationBatchWithinLimit,
+  claimUnstampedBookingRows,
+  fulfilModelRequestsForAssets,
+  loadActorBestEffort,
+  lockModelsForOutstandingRequests,
+  RESERVATION_BATCH_TX_TIMEOUT_MS,
+  writeBookingModelRequestInTx,
+} from "~/modules/booking-model-request/service.server";
+import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
+import { createConsumptionLog } from "~/modules/consumption-log/service.server";
 import {
-  computeBookingAvailableQuantity,
-  createConsumptionLog,
-} from "~/modules/consumption-log/service.server";
+  readStockState,
+  recordStockChanges,
+  type StockChangeInput,
+} from "~/modules/consumption-log/stock-ledger.server";
+import {
+  emitAssetKitDetachmentNotes,
+  removeDestroyedUnitsFromKits,
+  type DestroyedKitUnitsResult,
+  type EmptiedKitMembership,
+} from "~/modules/kit/service.server";
 import { assetQtyMeta, formatUnitCount } from "~/utils/asset-quantity";
-import { validateBookingOwnership } from "~/utils/booking-authorization.server";
-import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import {
-  getClientHint,
-  getDateTimeFormatFromHints,
-  type ClientHint,
-} from "~/utils/client-hints";
+  bookingAddableStatusClause,
+  bookingWriteScopeClause,
+  assertCanAddBookingItems,
+  assertCanDuplicateBooking,
+  validateBookingOwnership,
+} from "~/utils/booking-authorization.server";
+import { canUserRemoveBookingAssets } from "~/utils/bookings";
+import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
+import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import {
   getFiltersFromRequest,
   updateCookieWithPerPage,
 } from "~/utils/cookies.server";
 import { calcTimeDifference } from "~/utils/date-fns";
+import {
+  formatDate,
+  resolveFormatPrefs,
+  type ResolvedFormatPrefs,
+} from "~/utils/date-format";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
+import {
+  assertBulkDeleteConfirmed,
+  assertDeleteConfirmedFor,
+} from "~/utils/delete-confirmation.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import type { ErrorLabel } from "~/utils/error";
-import { isLikeShelfError, isNotFoundError, ShelfError } from "~/utils/error";
+import {
+  isLikeShelfError,
+  isNotFoundError,
+  rethrowIfClientError,
+  ShelfError,
+} from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
 import {
   payload,
@@ -75,6 +165,7 @@ import {
   wrapDescriptionForNote,
 } from "~/utils/markdoc-wrappers";
 import {
+  assertAssetsAreNotArchived,
   assertAssetsBelongToOrg,
   assertAssetKitsBelongToOrg,
   assertKitsBelongToOrg,
@@ -82,15 +173,49 @@ import {
   assertTeamMemberBelongsToOrg,
   assertUserBelongsToOrg,
 } from "~/utils/org-validation.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { hasPermission } from "~/utils/permissions/permission.validator.server";
+import type { RoleAccess } from "~/utils/permissions/role-access";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import { resolveUserDisplayName } from "~/utils/user";
 import type { MergeInclude } from "~/utils/utils";
 import {
+  attributeDispositionsByBookingAsset,
+  attributeSessionCheckoutToSlices,
+  checkoutSessionsToLogsByAsset,
+  compareSlicesForGreedyFill,
+  computeDispatchedUnitsTotalByAsset,
+  computeSlicesRemainingToCheckOut,
+} from "./checkout-attribution";
+import {
+  bookingMethodClause,
+  bookingMethodMeta,
+  narrowSelectedBookingAssetIds,
+  outstandingSliceIds,
+  scannedRowPredicate,
+  type BatchSliceId,
+  type BookingMethodProvenance,
+} from "./checkout-method";
+import type { SourceLocationSubmission } from "./checkout-source-location";
+import {
+  checkinPlacementSources,
+  checkinStockEvents,
+  parseSourceLocationsFromFormData,
+  sliceForDisposition,
+  untaggedCheckinPlacementSources,
+} from "./checkout-source-location";
+import { recordCheckoutSourceLocations } from "./checkout-source-location.server";
+import {
+  ADDABLE_BOOKING_STATUSES,
   BOOKING_COMMON_INCLUDE,
   BOOKING_INCLUDE_FOR_EMAIL,
   BOOKING_INCLUDE_FOR_RESERVATION_EMAIL,
   BOOKING_SCHEDULER_EVENTS_ENUM,
   BOOKING_WITH_ASSETS_INCLUDE,
+  BOOKINGS_LIST_ASSETS_INCLUDE,
 } from "./constants";
 import type {
   ReservationEmailAsset,
@@ -102,16 +227,36 @@ import {
   completedBookingEmailContent,
   deletedBookingEmailContent,
   extendBookingEmailContent,
+  resolveBookingEmailActor,
+  revertedToDraftEmailContent,
   sendBookingUpdatedEmail,
   sendCheckinReminder,
 } from "./email-helpers";
 import {
+  getAssetsStillOutForExtend,
+  getKitMembershipIdsStillOut,
+  isExtendableStatus,
+} from "./extend-eligibility";
+import {
+  buildAddToActiveBookingBlockerWhere,
   hasAssetBookingConflicts,
+  isBookingArchivable,
   isBookingEarlyCheckin,
   isBookingEarlyCheckout,
+  outranksReservations,
 } from "./helpers";
+import {
+  findConflictingKits,
+  type ConflictingKit,
+} from "./kit-conflicts.server";
+import { assertScannedUnitsAreNotKitMembers } from "./kit-member-scan-guard.server";
 import { getBookingNotificationRecipients } from "./notification-recipients.server";
 import type { NotificationRecipient } from "./notification-recipients.server";
+import { resolveSliceKitIds } from "./slice-kit-attribution";
+import {
+  isSliceOutByMarker,
+  makeIsIndividualSliceOutstanding,
+} from "./slice-return";
 import type {
   BookingLoaderResponse,
   BookingWithExtraInclude,
@@ -119,13 +264,20 @@ import type {
   SchedulerData,
 } from "./types";
 import {
+  assertBookingIsCheckinable,
+  assertBookingIsOpen,
+  assertBulkSelectionWithinOwnership,
   createBookingConflictConditions,
-  getBookingWhereInput,
+  lockBookingForStatusCheck,
+  getBookingOwnershipScope,
   isBookingExpired,
 } from "./utils.server";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
 import type { ActivityEventInput } from "../activity-event/types";
-import { createSystemBookingNote } from "../booking-note/service.server";
+import {
+  createSystemBookingNote,
+  createSystemBookingNotes,
+} from "../booking-note/service.server";
 import { createNotes } from "../note/service.server";
 
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
@@ -141,33 +293,55 @@ const label: ErrorLabel = "Booking";
  * Sends an individual personalized email to each resolved notification
  * recipient. Each email includes a per-recipient footer that explains
  * why the person received the notification (e.g., "you are the custodian",
- * "you are an admin"), driven by `recipient.reason`.
+ * "you manage bookings in the workspace"), driven by `recipient.reason`.
  *
  * Emails are fired concurrently (non-awaited `sendEmail` calls) to avoid
  * blocking the booking flow on slow SMTP delivery.
  *
+ * Each recipient's date/time formatting is resolved from their already-loaded
+ * row (the four raw pref fields on `NotificationRecipient`) via the pure
+ * `resolveFormatPrefs` — no per-recipient DB fetch (avoids an N+1). The
+ * `buildText`/`buildHeading` callbacks receive those resolved prefs so the
+ * plain-text body and heading dates honor each recipient.
+ *
  * @param recipients - Pre-resolved list from `getBookingNotificationRecipients()`
  * @param booking - The booking data used to render the email template
  * @param subject - Email subject line
- * @param textContent - Plain-text fallback content
- * @param heading - Primary heading rendered in the HTML template
- * @param hints - Client hints for date/time formatting
+ * @param buildText - Builds the plain-text body from a recipient's resolved prefs
+ *   and the actor, passed together so the text and HTML lines always agree
+ * @param buildHeading - Builds the HTML heading from a recipient's resolved prefs
+ * @param hints - Acting user's hints, only the null-field fallback for recipients
+ * @param actor - Who acted and when, shown under the heading and handed to
+ *   `buildText` for the plain-text body
  * @param templateProps - Additional props forwarded to the email template
  */
 async function sendBookingEmailToAllRecipients({
   recipients,
   booking,
   subject,
-  textContent,
-  heading,
+  buildText,
+  buildHeading,
   hints,
+  actor,
   templateProps,
 }: {
   recipients: NotificationRecipient[];
   booking: BookingForEmail;
   subject: string;
-  textContent: string;
-  heading: string;
+  /** From `resolveBookingEmailActor`; `undefined` leaves the line out. */
+  actor: BookingEmailActor | undefined;
+  /**
+   * Built per recipient. Spread `textArgs` into the text builder: it carries
+   * the recipient's resolved prefs and the actor, so the plain-text body gets
+   * the same actor line as the HTML.
+   */
+  buildText: (textArgs: {
+    prefs: ResolvedFormatPrefs;
+    actor: BookingEmailActor | undefined;
+  }) => string;
+  /** Built per recipient with their resolved prefs. */
+  buildHeading: (prefs: ResolvedFormatPrefs) => string;
+  /** Acting user's hints — only the null-field fallback for recipients. */
   hints: ClientHint;
   templateProps?: {
     hideViewButton?: boolean;
@@ -178,11 +352,17 @@ async function sendBookingEmailToAllRecipients({
   };
 }) {
   for (const recipient of recipients) {
+    // Recipient prefs resolved from the ALREADY-LOADED row (raw pref fields on
+    // NotificationRecipient); hints is the null-field fallback only. Pure —
+    // no per-recipient DB fetch (avoids an N+1 in the fan-out).
+    const recipientPrefs = resolveFormatPrefs(recipient, hints);
+
     const html = await bookingUpdatesTemplateString({
       booking,
-      heading,
+      heading: buildHeading(recipientPrefs),
+      actor,
       assetCount: booking._count.bookingAssets,
-      hints,
+      prefs: recipientPrefs,
       recipientReason: recipient.reason,
       recipientEmail: recipient.email,
       ...templateProps,
@@ -191,7 +371,7 @@ async function sendBookingEmailToAllRecipients({
     sendEmail({
       to: recipient.email,
       subject,
-      text: textContent,
+      text: buildText({ prefs: recipientPrefs, actor }),
       html,
     });
   }
@@ -222,71 +402,73 @@ async function cancelScheduler(
 }
 
 /**
- * Creates a consistent status transition note for booking activity logs
+ * The value to write to `originalTo` when a flow is about to rewrite `to`.
  *
- * @param bookingId - The booking ID to add the note to
- * @param organizationId - Organization the booking belongs to (enforced at note-service layer)
- * @param fromStatus - The previous booking status
- * @param toStatus - The new booking status
- * @param userId - ID of the user who performed the action (if manual)
- * @param action - Optional custom action description (e.g., "checked-out", "checked-in")
- * @param custodianUserId - Optional custodian user ID for status badge extra info
+ * A booking's planned period (`originalFrom`/`originalTo`) is written while it
+ * is still being planned — create, DRAFT edit, reserve — and frozen once it
+ * starts. `from`/`to` are what move afterwards: extension pushes `to` out, and
+ * check-in rewrites it to the actual return moment. So this only ever SEEDS
+ * the column for rows created before it existed; on every other row it returns
+ * `undefined`, which Prisma reads as "leave unchanged".
+ *
+ * Overwriting instead would discard the deadline the custodian agreed to
+ * whenever a booking was extended before check-in, and Booking Compliance
+ * would then measure the return against the extension rather than the plan.
+ *
+ * @param booking - The booking as it is BEFORE the rewrite.
+ * @returns The date to seed, or `undefined` to leave `originalTo` alone.
  */
-export async function createStatusTransitionNote({
-  bookingId,
+function plannedEndToPreserve(booking: {
+  to: Date | null;
+  originalTo: Date | null;
+}): Date | undefined {
+  return booking.originalTo ? undefined : booking.to ?? undefined;
+}
+
+/**
+ * The value to write to `originalFrom` when a flow is about to rewrite `from`.
+ *
+ * The mirror of {@link plannedEndToPreserve}, for the early-check-out
+ * adjust-date path. Same rule: seed only, never overwrite.
+ *
+ * @param booking - The booking as it is BEFORE the rewrite.
+ * @returns The date to seed, or `undefined` to leave `originalFrom` alone.
+ */
+function plannedStartToPreserve(booking: {
+  from: Date | null;
+  originalFrom: Date | null;
+}): Date | undefined {
+  return booking.originalFrom ? undefined : booking.from ?? undefined;
+}
+
+/**
+ * Records the canonical `BOOKING_STATUS_CHANGED` activity event.
+ *
+ * Best-effort by design, and the single implementation for every caller: the
+ * status change is already committed by the time this runs, so a failed
+ * analytics insert can never roll back a check-out or check-in that physically
+ * happened. `resolveCheckInAt` carries the matching fallback for the rare miss
+ * (COMPLETE bookings fall back to `updatedAt`).
+ *
+ * @param args.organizationId - Workspace the booking belongs to.
+ * @param args.bookingId - Booking whose status changed.
+ * @param args.userId - Actor, or null/undefined for system transitions.
+ * @param args.fromStatus - Status before the change.
+ * @param args.toStatus - Status after the change.
+ */
+async function recordBookingStatusChangedEvent({
   organizationId,
+  bookingId,
+  userId,
   fromStatus,
   toStatus,
-  userId,
-  action,
-  custodianUserId,
 }: {
-  bookingId: string;
   organizationId: string;
+  bookingId: string;
+  userId?: string | null;
   fromStatus: BookingStatus;
   toStatus: BookingStatus;
-  userId?: string;
-  action?: string;
-  custodianUserId?: string;
-}) {
-  const fromStatusBadge = wrapBookingStatusForNote(fromStatus, custodianUserId);
-  const toStatusBadge = wrapBookingStatusForNote(toStatus, custodianUserId);
-
-  let content: string;
-
-  if (userId) {
-    // User-initiated transition
-    const user = await getUserByID(userId, {
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-        displayName: true,
-      } satisfies Prisma.UserSelect,
-    });
-    const userLink = wrapUserLinkForNote({
-      id: userId,
-      firstName: user?.firstName,
-      lastName: user?.lastName,
-    });
-
-    const actionText =
-      action || getActionTextFromTransition(fromStatus, toStatus);
-    content = `${userLink} ${actionText}. Status changed from ${fromStatusBadge} to ${toStatusBadge}`;
-  } else {
-    // System-initiated transition
-    const actionText = getSystemActionText(fromStatus, toStatus);
-    content = `${actionText}. Status changed from ${fromStatusBadge} to ${toStatusBadge}`;
-  }
-
-  await createSystemBookingNote({
-    bookingId,
-    organizationId,
-    content,
-  });
-
-  // Activity event — records the canonical status transition for reports.
-  // Best-effort: don't fail the note creation if event recording fails.
+}): Promise<void> {
   try {
     await recordEvent({
       organizationId,
@@ -309,6 +491,83 @@ export async function createStatusTransitionNote({
       })
     );
   }
+}
+
+/**
+ * Creates a consistent status transition note for booking activity logs
+ *
+ * @param bookingId - The booking ID to add the note to
+ * @param organizationId - Organization the booking belongs to (enforced at note-service layer)
+ * @param fromStatus - The previous booking status
+ * @param toStatus - The new booking status
+ * @param userId - ID of the user who performed the action (if manual)
+ * @param action - Optional custom action description (e.g., "checked-out", "checked-in")
+ * @param custodianUserId - Optional custodian user ID for status badge extra info
+ */
+export async function createStatusTransitionNote({
+  bookingId,
+  organizationId,
+  fromStatus,
+  toStatus,
+  userId,
+  action,
+  custodianUserId,
+  methodClause = "",
+}: {
+  bookingId: string;
+  organizationId: string;
+  fromStatus: BookingStatus;
+  toStatus: BookingStatus;
+  userId?: string;
+  action?: string;
+  custodianUserId?: string;
+  /**
+   * How the user made the transition, as {@link bookingMethodClause} words it
+   * (" (scanned on the phone)"). Appended to the action text of a user-initiated
+   * note; a system transition has no method.
+   */
+  methodClause?: string;
+}) {
+  const fromStatusBadge = wrapBookingStatusForNote(fromStatus, custodianUserId);
+  const toStatusBadge = wrapBookingStatusForNote(toStatus, custodianUserId);
+
+  let content: string;
+
+  if (userId) {
+    // User-initiated transition
+    const user = await getUserByID(userId, {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        displayName: true,
+      } satisfies Prisma.UserSelect,
+    });
+    const userLink = wrapUserLinkForNote({ ...user, id: userId });
+
+    const actionText =
+      action || getActionTextFromTransition(fromStatus, toStatus);
+    content = `${userLink} ${actionText}${methodClause}. Status changed from ${fromStatusBadge} to ${toStatusBadge}`;
+  } else {
+    // System-initiated transition
+    const actionText = getSystemActionText(fromStatus, toStatus);
+    content = `${actionText}. Status changed from ${fromStatusBadge} to ${toStatusBadge}`;
+  }
+
+  await createSystemBookingNote({
+    bookingId,
+    organizationId,
+    content,
+  });
+
+  // Activity event — records the canonical status transition for reports.
+  await recordBookingStatusChangedEvent({
+    organizationId,
+    bookingId,
+    userId,
+    fromStatus,
+    toStatus,
+  });
 }
 
 /**
@@ -335,6 +594,7 @@ export function getActionTextFromTransition(
     case "OVERDUE->COMPLETE":
       return "checked-in the booking";
     case "COMPLETE->ARCHIVED":
+    case "RESERVED->ARCHIVED":
       return "archived the booking";
     default:
       return "changed the booking status";
@@ -355,17 +615,33 @@ export function getSystemActionText(
       return "Booking became overdue";
     case "COMPLETE->ARCHIVED":
       return "Booking was automatically archived";
+    case "RESERVED->ARCHIVED":
+      return "Booking was archived";
     default:
       return "Booking status changed";
   }
 }
 
+/**
+ * Schedules a booking's next lifecycle job and stores its id as the booking's
+ * `activeSchedulerReference`.
+ *
+ * @param params.data - The job payload; `data.id` is the booking
+ * @param params.when - When the job fires
+ * @param params.expected - The booking state this job was planned for. When
+ *   given, the reference is stored only while the booking still has this end
+ *   and this reference; otherwise a concurrent write has planned its own job,
+ *   so the new one is cancelled and the booking left as it is.
+ * @throws {ShelfError} When the job cannot be sent or stored
+ */
 export async function scheduleNextBookingJob({
   data,
   when,
+  expected,
 }: {
   data: SchedulerData;
   when: Date;
+  expected?: { to: Date; activeSchedulerReference: string | null };
 }) {
   try {
     const id = await scheduler.sendAfter(
@@ -374,6 +650,21 @@ export async function scheduleNextBookingJob({
       {},
       when
     );
+    if (expected) {
+      const { count } = await db.booking.updateMany({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: internal scheduler bookkeeping; data.id always comes from a booking already org-validated by the caller and SchedulerData carries no organizationId; this only writes activeSchedulerReference, not a data read
+        where: {
+          id: data.id,
+          to: expected.to,
+          activeSchedulerReference: expected.activeSchedulerReference,
+        },
+        data: { activeSchedulerReference: id },
+      });
+      if (count === 0) {
+        await cancelScheduler({ id: data.id, activeSchedulerReference: id });
+      }
+      return;
+    }
     await db.booking.update({
       // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: internal scheduler bookkeeping; data.id always comes from a booking already org-validated by every caller (e.g. checkoutBooking L1265, reserveBooking L1020) and SchedulerData carries no organizationId; this only writes activeSchedulerReference, not a data read
       where: { id: data.id },
@@ -387,6 +678,97 @@ export async function scheduleNextBookingJob({
       label,
     });
   }
+}
+
+/**
+ * Schedules the one-shot "auto-archive expired reservation" job for a single
+ * booking, to fire `autoArchiveDays` after its end date.
+ *
+ * Unlike {@link scheduleNextBookingJob} this deliberately does NOT touch
+ * `activeSchedulerReference` — it runs independently of the checkout / overdue /
+ * auto-archive chain, so it can coexist with a booking's checkout reminder. The
+ * handler self-validates at fire time, so this job is never cancelled; a stale
+ * one simply no-ops.
+ *
+ * @see {@link file://./worker.server.ts} `autoArchiveExpiredHandler`
+ */
+export async function scheduleExpiryArchiveJob({
+  bookingId,
+  to,
+  autoArchiveDays,
+  hints,
+  dedupe = true,
+}: {
+  bookingId: Booking["id"];
+  to: NonNullable<Booking["to"]>;
+  autoArchiveDays: number;
+  hints: ClientHint;
+  /**
+   * Whether to attach the per-booking `singletonKey` (pg-boss keeps at most one
+   * pending job per booking). Defaults to `true` for the external hooks
+   * (reserve + on-enable backlog sweep) that could otherwise queue duplicates.
+   *
+   * The handler's own not-yet-due reschedule MUST pass `false`: it runs while
+   * its job is still `active` and thus already holds that singletonKey, so a
+   * keyed re-queue collides with pg-boss's unique-incomplete-job index and is
+   * silently dropped — which would leave the booking never auto-archived. An
+   * unkeyed enqueue can't be suppressed, and the handler's idempotent
+   * re-validation bounds this to at most one extra no-op fire.
+   */
+  dedupe?: boolean;
+}) {
+  // Fire `autoArchiveDays` after the end date. A `when` in the past makes
+  // pg-boss run the job on the next tick — exactly what we want when enabling
+  // the setting for already-expired reservations.
+  const when = new Date(to);
+  when.setDate(when.getDate() + autoArchiveDays);
+
+  await scheduler.sendAfter(
+    QueueNames.bookingQueue,
+    {
+      id: bookingId,
+      hints,
+      eventType: BOOKING_SCHEDULER_EVENTS_ENUM.autoArchiveExpiredHandler,
+    },
+    // Per-booking singleton (external hooks only): the reserve hook and the
+    // on-enable backlog sweep can both target the same booking; without this
+    // they'd pile up duplicate pending jobs (queue bloat + repeated no-op
+    // fires). The handler's self-reschedule opts out via `dedupe: false` —
+    // it can't key against its own still-active job (see `dedupe` above).
+    dedupe ? { singletonKey: `booking-auto-archive-expired:${bookingId}` } : {},
+    when
+  );
+}
+
+/**
+ * When an org enables "auto-archive expired reservations", schedule the expiry
+ * job for every currently-RESERVED booking — so the existing backlog of
+ * past-due reservations is cleaned up too, not just future ones.
+ */
+export async function scheduleExpiryArchiveForExistingReservations({
+  organizationId,
+  autoArchiveDays,
+  hints,
+}: {
+  organizationId: Organization["id"];
+  autoArchiveDays: number;
+  hints: ClientHint;
+}) {
+  const reserved = await db.booking.findMany({
+    where: { organizationId, status: BookingStatus.RESERVED },
+    select: { id: true, to: true },
+  });
+
+  await Promise.all(
+    reserved.map((b) =>
+      scheduleExpiryArchiveJob({
+        bookingId: b.id,
+        to: b.to,
+        autoArchiveDays,
+        hints,
+      })
+    )
+  );
 }
 
 /**
@@ -418,15 +800,20 @@ export async function scheduleNextBookingJob({
  *   - **`AVAILABLE`** — no other active booking, no custody. Safe to release
  *     back onto the shelf.
  *
- * `excludeBookingId` is REQUIRED so the source booking's own
+ * `excludeBookingIds` is REQUIRED so the exiting bookings' own
  * about-to-be-removed `BookingAsset` rows (cancel / remove / delete) do not
  * count themselves as "another active booking" and pin the asset to
- * `CHECKED_OUT` forever. Callers should invoke this BEFORE deleting the source
- * booking's pivot rows so the `bookingId: { not: excludeBookingId }` filter
- * does the work — OR (equivalently) call it AFTER the deletes, in which case
- * the filter is redundant but harmless.
+ * `CHECKED_OUT` forever. Pass EVERY booking leaving in this operation: a bulk
+ * exit can drop several bookings that share an asset, and if they are not all
+ * excluded, two bookings on their way out vouch for each other. Callers should
+ * invoke this BEFORE deleting the exiting bookings' pivot rows so the
+ * `bookingId: { notIn: excludeBookingIds }` filter does the work — OR
+ * (equivalently) call it AFTER the deletes, in which case the filter is
+ * redundant but harmless.
  *
- * Use this helper on every IN-flow exit path (cancel / remove / delete). The
+ * Use this helper on every IN-flow exit path, single or bulk (cancel / remove /
+ * delete). Blanket-writing `AVAILABLE` across a selection is never correct: it
+ * frees assets that another live booking or a custody row still holds. The
  * RESERVED → ONGOING OUT-flow uses its own targeted `tx.asset.updateMany`
  * inline because every asset is unambiguously transitioning to `CHECKED_OUT`
  * there and no per-asset reconciliation is needed.
@@ -436,9 +823,9 @@ export async function scheduleNextBookingJob({
  *             and the status flip commit atomically.
  * @param args.assetIds - Assets exiting the booking. Each is reconciled
  *             independently; ordering does not matter.
- * @param args.excludeBookingId - The source booking's id. Excluded from the
- *             "other active bookings" count so the source booking's own
- *             rows do not block release.
+ * @param args.excludeBookingIds - Every exiting booking's id. Excluded from
+ *             the "other active bookings" count so those bookings' own rows
+ *             neither block release nor vouch for one another.
  * @param args.organizationId - Active org. Used to org-scope the asset write
  *             (defence-in-depth against cross-org IDOR — see
  *             `~/utils/org-validation.server`).
@@ -456,13 +843,20 @@ export async function scheduleNextBookingJob({
 async function reconcileAssetStatusForBookingExit({
   tx,
   assetIds,
-  excludeBookingId,
+  excludeBookingIds,
   organizationId,
 }: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   tx: any;
   assetIds: Asset["id"][];
-  excludeBookingId: Booking["id"];
+  /**
+   * Every booking leaving in this operation, not just one. A bulk exit can
+   * cancel or delete several bookings that share an asset, and each of them
+   * must be invisible to the others' reconciliation — otherwise two bookings
+   * on their way out vouch for each other and the asset stays checked out
+   * against nothing.
+   */
+  excludeBookingIds: Booking["id"][];
   organizationId: Organization["id"];
 }): Promise<Map<Asset["id"], AssetStatus>> {
   // De-dupe up front: an asset can appear on the booking through both a kit
@@ -473,50 +867,86 @@ async function reconcileAssetStatusForBookingExit({
   if (uniqueAssetIds.length === 0) return resolvedStatuses;
 
   try {
-    for (const assetId of uniqueAssetIds) {
-      // Run both queries in parallel — each is a single indexed count, and
-      // they are independent. Scoped to the active tx snapshot so a
-      // concurrent booking write cannot race the decision.
-      const [otherActiveBookings, custodyCount] = await Promise.all([
-        tx.bookingAsset.count({
-          where: {
-            assetId,
-            // Exclude the source booking's own rows so we don't self-pin.
-            bookingId: { not: excludeBookingId },
-            booking: {
-              status: {
-                in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
-              },
+    /**
+     * Two set-based reads for the whole batch, not two per asset. A bulk exit
+     * runs inside an interactive transaction and its selection is uncapped —
+     * select-all spans every page — so per-asset round trips would hold locks
+     * long enough to hit the transaction timeout and roll the booking mutation
+     * back with it.
+     *
+     * Scoped to the active tx snapshot so a concurrent booking write cannot
+     * race the decision.
+     */
+    const [slicesStillOut, custodies] = await Promise.all([
+      tx.bookingAsset.findMany({
+        where: {
+          assetId: { in: uniqueAssetIds },
+          // Exclude the exiting bookings' own rows so they cannot pin the
+          // asset, or each other.
+          bookingId: { notIn: excludeBookingIds },
+          booking: {
+            status: {
+              in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
             },
           },
-        }),
-        tx.custody.count({ where: { assetId } }),
-      ]);
+          // A live booking is not by itself evidence that it holds this asset.
+          // Only the slice's own markers say that: one added after checkout has
+          // never left, and one already reconciled has come back. Counting
+          // either would pin the asset to CHECKED_OUT with nothing in the
+          // field, and no later exit could clear it. Partially returned
+          // QUANTITY_TRACKED slices keep a null `checkedInAt` and so still
+          // count, which is correct — some of their units are still out.
+          checkedOutAt: { not: null },
+          checkedInAt: null,
+        },
+        select: { assetId: true },
+        distinct: ["assetId"],
+      }),
+      tx.custody.findMany({
+        where: { assetId: { in: uniqueAssetIds } },
+        select: { assetId: true },
+        distinct: ["assetId"],
+      }),
+    ]);
 
-      // Pick the strongest commitment first: CHECKED_OUT beats IN_CUSTODY
-      // beats AVAILABLE. See JSDoc above for the rationale on not
-      // downgrading to IN_CUSTODY when both a booking and a custody coexist.
-      let nextStatus: AssetStatus;
-      if (otherActiveBookings > 0) {
-        nextStatus = AssetStatus.CHECKED_OUT;
-      } else if (custodyCount > 0) {
-        nextStatus = AssetStatus.IN_CUSTODY;
+    const heldByAnotherBooking = new Set(
+      (slicesStillOut as Array<{ assetId: string }>).map((row) => row.assetId)
+    );
+    const heldInCustody = new Set(
+      (custodies as Array<{ assetId: string }>).map((row) => row.assetId)
+    );
+
+    // Pick the strongest commitment first: CHECKED_OUT beats IN_CUSTODY beats
+    // AVAILABLE. See JSDoc above for the rationale on not downgrading to
+    // IN_CUSTODY when both a booking and a custody coexist.
+    const assetIdsByStatus = new Map<AssetStatus, Asset["id"][]>();
+    for (const assetId of uniqueAssetIds) {
+      const nextStatus = heldByAnotherBooking.has(assetId)
+        ? AssetStatus.CHECKED_OUT
+        : heldInCustody.has(assetId)
+        ? AssetStatus.IN_CUSTODY
+        : AssetStatus.AVAILABLE;
+      const bucket = assetIdsByStatus.get(nextStatus);
+      if (bucket) {
+        bucket.push(assetId);
       } else {
-        nextStatus = AssetStatus.AVAILABLE;
+        assetIdsByStatus.set(nextStatus, [assetId]);
       }
+      resolvedStatuses.set(assetId, nextStatus);
+    }
 
-      // Use `updateMany` so we can compound `id` + `organizationId` in the
-      // where clause without depending on a `@@unique` constraint. Org-scope
-      // is defence-in-depth: even though `assetId` originated from a booking
-      // already loaded org-scoped by every caller, this filter makes the
-      // IDOR impossible to (re)introduce by a future refactor. The lint rule
-      // for `require-org-scope-on-id-queries` is exactly what this satisfies.
+    // One write per distinct status, so the whole batch costs at most three.
+    // `updateMany` compounds `id` + `organizationId` without depending on a
+    // `@@unique` constraint. Org-scope is defence-in-depth: even though the
+    // asset ids originated from a booking already loaded org-scoped by every
+    // caller, this filter makes the IDOR impossible to (re)introduce by a
+    // future refactor. The `require-org-scope-on-id-queries` lint rule is
+    // exactly what this satisfies.
+    for (const [nextStatus, idsForStatus] of assetIdsByStatus) {
       await tx.asset.updateMany({
-        where: { id: assetId, organizationId },
+        where: { id: { in: idsForStatus }, organizationId },
         data: { status: nextStatus },
       });
-
-      resolvedStatuses.set(assetId, nextStatus);
     }
 
     return resolvedStatuses;
@@ -527,7 +957,7 @@ async function reconcileAssetStatusForBookingExit({
         "Something went wrong while reconciling asset statuses after a booking exit.",
       additionalData: {
         assetIds: uniqueAssetIds,
-        excludeBookingId,
+        excludeBookingIds,
         organizationId,
       },
       label,
@@ -535,17 +965,94 @@ async function reconcileAssetStatusForBookingExit({
   }
 }
 
+/**
+ * Hands kits back to the shelf when a booking lets go of them.
+ *
+ * Two things stand between the caller's kit ids and the write, because
+ * `Kit.status` is workspace-wide state that one booking's exit must not
+ * overwrite on another's behalf:
+ *
+ *  - `status: CHECKED_OUT` leaves a kit that is IN_CUSTODY (or already
+ *    AVAILABLE) alone: only a kit a booking took out is a booking's to hand
+ *    back;
+ *  - a kit any OTHER live booking still has out is dropped outright. That one
+ *    the status filter cannot catch, because such a kit is legitimately
+ *    CHECKED_OUT, and releasing it would let it be booked again while it is
+ *    physically away (`assertKitsAddableToActiveBooking` gates on this column).
+ *
+ * A released kit goes back to whatever still holds it once the booking lets
+ * go: IN_CUSTODY when it carries a `KitCustody` row, AVAILABLE otherwise.
+ * Check-out refuses a kit in custody (`assertKitsCheckoutable`), so a kit
+ * that is CHECKED_OUT with a custodian predates that guard; it goes back to
+ * its custodian rather than staying CHECKED_OUT with nothing holding it.
+ *
+ * @param client Pass the active `tx` when called inside a transaction.
+ * @param args.excludeBookingIds The exiting bookings, so their own slices
+ *   cannot pin the kit, or each other.
+ */
+async function releaseCheckedOutKits(
+  client: Pick<ExtendedPrismaClient, "kit" | "assetKit" | "bookingAsset">,
+  {
+    kitIds,
+    organizationId,
+    excludeBookingIds,
+  }: {
+    kitIds: string[];
+    organizationId: string;
+    excludeBookingIds: string[];
+  }
+) {
+  if (kitIds.length === 0) return;
+
+  const heldByAnotherBooking = await getKitIdsHeldByOtherLiveBookings(client, {
+    kitIds,
+    organizationId,
+    excludeBookingIds,
+  });
+
+  const releasableKitIds = kitIds.filter(
+    (kitId) => !heldByAnotherBooking.has(kitId)
+  );
+  if (releasableKitIds.length === 0) return;
+
+  const checkedOutReleasable = {
+    id: { in: releasableKitIds },
+    organizationId,
+    status: KitStatus.CHECKED_OUT,
+  };
+
+  await client.kit.updateMany({
+    where: { ...checkedOutReleasable, custody: { isNot: null } },
+    data: { status: KitStatus.IN_CUSTODY },
+  });
+  await client.kit.updateMany({
+    where: { ...checkedOutReleasable, custody: { is: null } },
+    data: { status: KitStatus.AVAILABLE },
+  });
+}
+
 async function updateBookingKitStates({
   kitIds,
   status,
   organizationId,
+  excludeBookingIds,
 }: {
   kitIds: string[];
   status: KitStatus;
   /** Org that owns the booking — scopes the update so we never touch another org's kits */
   organizationId: string;
+  /** The exiting bookings, for the release path's held-elsewhere check. */
+  excludeBookingIds: string[];
 }) {
   try {
+    if (status === KitStatus.AVAILABLE) {
+      return await releaseCheckedOutKits(db, {
+        kitIds,
+        organizationId,
+        excludeBookingIds,
+      });
+    }
+
     return await db.kit.updateMany({
       where: { id: { in: kitIds }, organizationId },
       data: { status },
@@ -564,6 +1071,7 @@ export async function createBooking({
   booking,
   assetIds,
   kitSlices,
+  modelRequests,
   hints,
 }: {
   /**
@@ -603,13 +1111,48 @@ export async function createBooking({
    * distinct kit-driven rows (the kit partial unique is on
    * `(bookingId, assetKitId)`).
    */
-  kitSlices?: Array<{ assetId: string; assetKitId: string; quantity: number }>;
+  kitSlices?: KitSliceSpec[];
+
+  /**
+   * Optional model-level reservations to create with the booking — units of an
+   * `AssetModel` promised to the booking without naming which physical assets
+   * will serve them. Each becomes a `BookingModelRequest` row.
+   *
+   * Written inside this function's own transaction, so the booking never
+   * commits without the reservations it was created to hold, and a model whose
+   * pool cannot cover its quantity aborts the create entirely.
+   *
+   * Bounded by `MAX_MODELS_PER_RESERVATION_BATCH` distinct models, which is
+   * what that transaction can carry inside its budget. Repeated entries for
+   * one model are summed into a single write, so they count once.
+   *
+   * Every caller that books concrete assets omits this.
+   */
+  modelRequests?: { assetModelId: string; quantity: number }[];
 
   /**
    * Hints are used for setting the timezone of the booking
    */
   hints: ClientHint;
 }) {
+  /**
+   * Bounded on the same limit the add-to-existing-booking batch uses.
+   *
+   * Both paths take their selection from the asset index's model view and walk
+   * the same per-model write, so the per-model cost inside the transaction is
+   * identical: whatever number that write can carry there, it can carry from
+   * either caller. This transaction also creates the booking and connects its
+   * assets, so it starts with less of the budget left than the
+   * reservations-only batch does.
+   *
+   * Outside the `try` below, matching the sibling batch: a selection that is
+   * too large is a user decision to report back verbatim, not a service
+   * failure to dress in the create path's `additionalData`.
+   */
+  assertReservationBatchWithinLimit(
+    (modelRequests ?? []).map((reservation) => reservation.assetModelId)
+  );
+
   try {
     const dataToCreate: Prisma.BookingCreateInput = {
       name: booking.name,
@@ -654,12 +1197,26 @@ export async function createBooking({
     // free-pool standalone slice may legitimately coexist with kit slices), so
     // we only pay for a type lookup when there is an actual overlap.
     const kitSliceAssetIds = new Set(slices.map((s) => s.assetId));
+
+    /**
+     * Archived assets can't be booked (issue #382). Guarding the UNION here,
+     * not just the standalone bucket, is the point: a kit carries its members
+     * in as `kitSlices`, so a kit holding an archived asset would otherwise
+     * walk one straight into a booking that can then be reserved and checked
+     * out. Every "create a booking with assets" route lands here.
+     */
+    /** Locked and re-checked inside the transaction below. */
+    const archiveGuardAssetIds = [
+      ...new Set([...dedupedAssetIds, ...kitSliceAssetIds]),
+    ];
+
     const overlapAssetIds = dedupedAssetIds.filter((id) =>
       kitSliceAssetIds.has(id)
     );
     let individualOverlapAssetIds = new Set<string>();
     if (overlapAssetIds.length > 0) {
       const overlapTypes = await db.asset.findMany({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: type lookup runs before the archive guard below, which must be the one to refuse archived ids
         where: {
           id: { in: overlapAssetIds },
           organizationId: booking.organizationId,
@@ -677,31 +1234,17 @@ export async function createBooking({
     );
 
     /**
-     * Build the `BookingAsset` rows to create:
-     * - Standalone rows (`{ assetId }`) keep the historical shape exactly —
-     *   `quantity` defaults to 1 and `assetKitId` stays NULL via the schema
-     *   default, so the no-kit path is unchanged byte-for-byte.
-     * - Kit-driven rows carry a non-null `assetKitId` (a plain scalar column,
-     *   settable directly in a nested create — mirrors `duplicateBooking`). A
-     *   QUANTITY_TRACKED asset may be both standalone AND a kit member (two
-     *   distinct rows under the two partial uniques); INDIVIDUAL overlaps were
-     *   already removed from the standalone bucket above.
+     * Standalone rows (`{ assetId }`) keep the historical shape exactly —
+     * `quantity` defaults to 1 and `assetKitId` stays NULL via the schema
+     * default, so the no-kit path is unchanged byte-for-byte.
+     *
+     * Kit-driven rows are assembled INSIDE the transaction below, because
+     * their `sourceKitId` has to come from the org-scoped guard's lookup
+     * rather than from the request payload — see the comment there.
      */
-    const bookingAssetRows = [
-      ...standaloneCreateAssetIds.map((id) => ({ assetId: id })),
-      ...slices.map((s) => ({
-        assetId: s.assetId,
-        quantity: s.quantity,
-        assetKitId: s.assetKitId,
-      })),
-    ];
-
-    // Only set the nested create when there's at least one row — this covers
-    // standalone-only, kit-only, and mixed inputs (and avoids an empty
-    // `create: []` when neither is supplied).
-    if (bookingAssetRows.length > 0) {
-      dataToCreate.bookingAssets = { create: bookingAssetRows };
-    }
+    const standaloneCreateRows = standaloneCreateAssetIds.map((id) => ({
+      assetId: id,
+    }));
 
     if (booking.custodianUserId) {
       dataToCreate.custodianUser = {
@@ -715,152 +1258,307 @@ export async function createBooking({
       };
     }
 
-    // Use transaction to ensure booking creation and activity events are atomic
-    const createdBooking = await db.$transaction(async (tx) => {
-      // SECURITY (cross-org IDOR): the asset IDs, tag IDs and custodian team
-      // member ID all originate from request/form input. Before connecting
-      // them to the new booking we must prove they belong to the booking's
-      // organization — otherwise an attacker in Org A could supply Org B's
-      // IDs and link foreign-org entities into their own booking. Validation
-      // runs with the active `tx` so it commits atomically with the create.
-      if (dedupedAssetIds.length > 0) {
-        await assertAssetsBelongToOrg(
-          { assetIds: dedupedAssetIds, organizationId: booking.organizationId },
-          tx
-        );
-      }
+    // Normalize the optional model reservations once, mirroring `slices`.
+    const reservations = modelRequests ?? [];
 
-      // SECURITY (cross-org IDOR): kit-slice asset ids and their source
-      // `AssetKit` ids also originate from request/form input and are written
-      // straight onto `BookingAsset` rows. Prove both belong to the booking's
-      // org before the create — otherwise an attacker could attach Org B's
-      // assets/kit memberships to their own booking. Runs with the active `tx`
-      // so it commits atomically with the create.
-      if (slices.length > 0) {
-        await assertAssetsBelongToOrg(
+    /**
+     * Loaded before the transaction opens, for the reason
+     * `upsertBookingModelRequest` hoists the same call: the actor read is a
+     * plain `User` lookup with nothing to serialise against the reservation
+     * write, so holding it inside the interactive transaction would widen the
+     * window past the rows that matter. One read serves every reservation.
+     *
+     * Non-null exactly when there is something to reserve — a single condition,
+     * so it also carries the narrowing for the loop below.
+     */
+    const reservationActor =
+      reservations.length > 0
+        ? await loadActorBestEffort(booking.creatorId)
+        : null;
+
+    /**
+     * One transaction, so the booking, its assets, its activity events and its
+     * model reservations all commit together or not at all.
+     *
+     * On the shared reservation-batch budget rather than Prisma's five-second
+     * default, because this transaction carries strictly more than the
+     * reservations-only batch does: the booking row, its asset connections and
+     * their events come first, and the per-model reservation loop runs on
+     * whatever is left. Extending the window only affects transactions that
+     * would otherwise have expired and rolled back, so no create that succeeds
+     * today behaves differently.
+     */
+    const createdBooking = await db.$transaction(
+      async (tx) => {
+        /**
+         * Archived assets can't be booked (issue #382). Both the lock and the
+         * check live INSIDE the transaction: a check before it could pass and
+         * then have an archive commit before this booking's rows are written.
+         * The archive services take the same lock, so the two serialize.
+         */
+        await lockAssetsForArchiveGuard(
+          tx,
+          archiveGuardAssetIds,
+          booking.organizationId
+        );
+        await assertAssetsAreNotArchived(
           {
-            assetIds: slices.map((s) => s.assetId),
+            assetIds: archiveGuardAssetIds,
             organizationId: booking.organizationId,
+            actorUserId: booking.creatorId,
           },
           tx
         );
-        await assertAssetKitsBelongToOrg(
-          {
-            assetKitIds: slices.map((s) => s.assetKitId),
-            organizationId: booking.organizationId,
-          },
-          tx
-        );
-      }
 
-      if (booking.tags.length > 0) {
-        await assertTagsBelongToOrg(
-          {
-            tagIds: booking.tags.map((t) => t.id),
-            organizationId: booking.organizationId,
-          },
-          tx
-        );
-      }
-
-      await assertTeamMemberBelongsToOrg(
-        {
-          teamMemberId: booking.custodianTeamMemberId,
-          organizationId: booking.organizationId,
-        },
-        tx
-      );
-
-      // SECURITY (cross-org IDOR): custodianUserId is also request input and a
-      // valid team member does not prove the paired user belongs to the org.
-      if (booking.custodianUserId) {
-        await assertUserBelongsToOrg(
-          {
-            userId: booking.custodianUserId,
-            organizationId: booking.organizationId,
-          },
-          tx
-        );
-      }
-
-      const created = await tx.booking.create({
-        data: dataToCreate,
-        include: { ...BOOKING_COMMON_INCLUDE, organization: true },
-      });
-
-      // Activity event for booking creation - must be inside transaction
-      await recordEvent(
-        {
-          organizationId: booking.organizationId,
-          actorUserId: booking.creatorId,
-          action: "BOOKING_CREATED",
-          entityType: "BOOKING",
-          entityId: created.id,
-          bookingId: created.id,
-          // Count the rows actually created (standalone + kit-driven). For the
-          // no-kit path this equals `assetIds.length` (unchanged); mirrors
-          // `duplicateBooking`, which counts its create payload.
-          meta: { assetCount: bookingAssetRows.length },
-        },
-        tx
-      );
-
-      // One BOOKING_ASSETS_ADDED event per asset attached at creation —
-      // standalone ids PLUS kit-member asset ids, deduped (an asset can be
-      // both a standalone row and a kit member). Look up `type`/`unitOfMeasure`
-      // so the event meta carries `quantity` for QUANTITY_TRACKED assets
-      // (no-op for INDIVIDUAL).
-      const eventAssetIds = [
-        ...new Set([...dedupedAssetIds, ...slices.map((s) => s.assetId)]),
-      ];
-      if (eventAssetIds.length > 0) {
-        const assetTypes = await tx.asset.findMany({
-          where: {
-            id: { in: eventAssetIds },
-            organizationId: booking.organizationId,
-          },
-          select: { id: true, type: true, unitOfMeasure: true },
-        });
-        const assetTypeById = new Map(assetTypes.map((a) => [a.id, a]));
-
-        // Sum the booked quantity per asset across every row this create is
-        // responsible for: each standalone row contributes 1 (schema default —
-        // `createBooking` takes no per-asset quantity input) plus each kit
-        // slice's own quantity. Mirrors `updateBookingAssets` so the same
-        // asset added both standalone and via N kits reports the true count.
-        const addedQtyByAssetId = new Map<string, number>();
-        for (const sid of dedupedAssetIds) {
-          addedQtyByAssetId.set(sid, (addedQtyByAssetId.get(sid) ?? 0) + 1);
-        }
-        for (const slice of slices) {
-          addedQtyByAssetId.set(
-            slice.assetId,
-            (addedQtyByAssetId.get(slice.assetId) ?? 0) + slice.quantity
+        // SECURITY (cross-org IDOR): the asset IDs, tag IDs and custodian team
+        // member ID all originate from request/form input. Before connecting
+        // them to the new booking we must prove they belong to the booking's
+        // organization — otherwise an attacker in Org A could supply Org B's
+        // IDs and link foreign-org entities into their own booking. Validation
+        // runs with the active `tx` so it commits atomically with the create.
+        if (dedupedAssetIds.length > 0) {
+          await assertAssetsBelongToOrg(
+            {
+              assetIds: dedupedAssetIds,
+              organizationId: booking.organizationId,
+            },
+            tx
           );
         }
 
-        await recordEvents(
-          eventAssetIds.map((assetId) => {
-            const asset = assetTypeById.get(assetId);
-            return {
+        // SECURITY (cross-org IDOR): kit-slice asset ids and their source
+        // `AssetKit` ids also originate from request/form input and are written
+        // straight onto `BookingAsset` rows. Prove both belong to the booking's
+        // org before the create — otherwise an attacker could attach Org B's
+        // assets/kit memberships to their own booking. Runs with the active `tx`
+        // so it commits atomically with the create.
+        let kitIdByAssetKitId = new Map<string, string>();
+        if (slices.length > 0) {
+          await assertAssetsBelongToOrg(
+            {
+              assetIds: slices.map((s) => s.assetId),
               organizationId: booking.organizationId,
-              actorUserId: booking.creatorId,
-              action: "BOOKING_ASSETS_ADDED" as const,
-              entityType: "BOOKING" as const,
-              entityId: created.id,
-              bookingId: created.id,
-              assetId,
-              meta: asset
-                ? assetQtyMeta(asset, addedQtyByAssetId.get(assetId))
-                : {},
-            };
-          }),
+            },
+            tx
+          );
+          kitIdByAssetKitId = await assertAssetKitsBelongToOrg(
+            {
+              assetKitIds: slices.map((s) => s.assetKitId),
+              organizationId: booking.organizationId,
+            },
+            tx
+          );
+        }
+
+        /**
+         * Kit-driven rows carry a non-null `assetKitId` (a plain scalar column,
+         * settable directly in a nested create) plus `sourceKitId`, the durable
+         * copy of the owning kit that outlives the `AssetKit` row.
+         *
+         * `sourceKitId` is taken from the guard's org-proven map, NEVER from
+         * `slice.kitId`: that value is request input and the column's FK accepts
+         * any `Kit` row in any organization, so trusting it would let a caller in
+         * Org A stamp Org B's kit onto its own booking. Deriving it from the same
+         * lookup that validated `assetKitId` also enforces the schema invariant
+         * that the two AGREE. The map is total over the validated ids (the guard
+         * throws otherwise), so `?? null` is unreachable — it only satisfies the
+         * type.
+         *
+         * A QUANTITY_TRACKED asset may be both standalone AND a kit member (two
+         * distinct rows under the two partial uniques); INDIVIDUAL overlaps were
+         * already removed from the standalone bucket above.
+         */
+        const bookingAssetRows = [
+          ...standaloneCreateRows,
+          ...slices.map((s) => ({
+            assetId: s.assetId,
+            quantity: s.quantity,
+            assetKitId: s.assetKitId,
+            sourceKitId: kitIdByAssetKitId.get(s.assetKitId) ?? null,
+          })),
+        ];
+
+        // Only set the nested create when there's at least one row — this covers
+        // standalone-only, kit-only, and mixed inputs (and avoids an empty
+        // `create: []` when neither is supplied).
+        if (bookingAssetRows.length > 0) {
+          dataToCreate.bookingAssets = { create: bookingAssetRows };
+        }
+
+        if (booking.tags.length > 0) {
+          await assertTagsBelongToOrg(
+            {
+              tagIds: booking.tags.map((t) => t.id),
+              organizationId: booking.organizationId,
+            },
+            tx
+          );
+        }
+
+        await assertTeamMemberBelongsToOrg(
+          {
+            teamMemberId: booking.custodianTeamMemberId,
+            organizationId: booking.organizationId,
+          },
           tx
         );
-      }
 
-      return created;
-    });
+        // SECURITY (cross-org IDOR): custodianUserId is also request input and a
+        // valid team member does not prove the paired user belongs to the org.
+        if (booking.custodianUserId) {
+          await assertUserBelongsToOrg(
+            {
+              userId: booking.custodianUserId,
+              organizationId: booking.organizationId,
+            },
+            tx
+          );
+        }
+
+        const created = await tx.booking.create({
+          data: dataToCreate,
+          include: { ...BOOKING_COMMON_INCLUDE, organization: true },
+        });
+
+        // Activity event for booking creation - must be inside transaction
+        await recordEvent(
+          {
+            organizationId: booking.organizationId,
+            actorUserId: booking.creatorId,
+            action: "BOOKING_CREATED",
+            entityType: "BOOKING",
+            entityId: created.id,
+            bookingId: created.id,
+            // Count the rows actually created (standalone + kit-driven). For the
+            // no-kit path this equals `assetIds.length` (unchanged); mirrors
+            // `duplicateBooking`, which counts its create payload.
+            meta: { assetCount: bookingAssetRows.length },
+          },
+          tx
+        );
+
+        // One BOOKING_ASSETS_ADDED event per asset attached at creation —
+        // standalone ids PLUS kit-member asset ids, deduped (an asset can be
+        // both a standalone row and a kit member). Look up `type`/`unitOfMeasure`
+        // so the event meta carries `quantity` for QUANTITY_TRACKED assets
+        // (no-op for INDIVIDUAL).
+        const eventAssetIds = [
+          ...new Set([...dedupedAssetIds, ...slices.map((s) => s.assetId)]),
+        ];
+        if (eventAssetIds.length > 0) {
+          const assetTypes = await tx.asset.findMany({
+            where: {
+              archivedAt: null,
+              id: { in: eventAssetIds },
+              organizationId: booking.organizationId,
+            },
+            select: { id: true, type: true, unitOfMeasure: true },
+          });
+          const assetTypeById = new Map(assetTypes.map((a) => [a.id, a]));
+
+          // Sum the booked quantity per asset across every row this create is
+          // responsible for: each standalone row contributes 1 (schema default —
+          // `createBooking` takes no per-asset quantity input) plus each kit
+          // slice's own quantity. Mirrors `updateBookingAssets` so the same
+          // asset added both standalone and via N kits reports the true count.
+          const addedQtyByAssetId = new Map<string, number>();
+          for (const sid of dedupedAssetIds) {
+            addedQtyByAssetId.set(sid, (addedQtyByAssetId.get(sid) ?? 0) + 1);
+          }
+          for (const slice of slices) {
+            addedQtyByAssetId.set(
+              slice.assetId,
+              (addedQtyByAssetId.get(slice.assetId) ?? 0) + slice.quantity
+            );
+          }
+
+          await recordEvents(
+            eventAssetIds.map((assetId) => {
+              const asset = assetTypeById.get(assetId);
+              return {
+                organizationId: booking.organizationId,
+                actorUserId: booking.creatorId,
+                action: "BOOKING_ASSETS_ADDED" as const,
+                entityType: "BOOKING" as const,
+                entityId: created.id,
+                bookingId: created.id,
+                assetId,
+                meta: asset
+                  ? assetQtyMeta(asset, addedQtyByAssetId.get(assetId))
+                  : {},
+              };
+            }),
+            tx
+          );
+        }
+
+        /**
+         * Model-level reservations are written with the booking, in the booking's
+         * own transaction: a booking that committed while one of its reservations
+         * failed would promise a workspace something nobody recorded, and a model
+         * that cannot cover its quantity must take the whole create down with it.
+         *
+         * `assetModelId` is request input like every other id here, but it does
+         * NOT get an `assert…BelongToOrg` call beside the guards above:
+         * `writeBookingModelRequestInTx` looks the model up with
+         * `where: { id: assetModelId, organizationId }` and throws 404 when it is
+         * not in the workspace, using the same `tx`. The org check is one level
+         * down, not missing — adding a second one here would only duplicate it.
+         *
+         * Sequential rather than concurrent on purpose: each write measures the
+         * free pool through `tx`, so two models sharing assets must be measured
+         * one after the other to see each other's reservation.
+         */
+        if (reservationActor) {
+          /**
+           * One entry per model, quantities summed.
+           *
+           * Every write takes an absolute target, so a model listed twice would
+           * be written twice and the second write would REPLACE the first rather
+           * than add to it — and the write still succeeds, so nothing reports the
+           * units that went missing. Summing here matches
+           * `upsertBookingModelRequests`, which folds for the same reason.
+           *
+           * Iterated in model-id order, NOT the order the caller listed them.
+           * Each write takes `SELECT … FOR UPDATE` on its model and holds it to
+           * commit, so two concurrent batches covering the same models in
+           * opposite orders would each hold what the other waits for; Postgres
+           * breaks that by aborting one, turning a valid booking into a spurious
+           * failure. A deterministic global order cannot form a cycle. Plain
+           * code-unit order, matching `upsertBookingModelRequests` exactly: the
+           * two paths lock the same rows, so a second, locale-dependent ordering
+           * from `localeCompare` would reopen the cycle it closes.
+           */
+          const quantityByModelId = new Map<string, number>();
+          for (const reservation of reservations) {
+            quantityByModelId.set(
+              reservation.assetModelId,
+              (quantityByModelId.get(reservation.assetModelId) ?? 0) +
+                reservation.quantity
+            );
+          }
+          const orderedModelIds = [...quantityByModelId.keys()].sort();
+
+          for (const assetModelId of orderedModelIds) {
+            await writeBookingModelRequestInTx(tx, {
+              bookingId: created.id,
+              assetModelId,
+              // The quantity is an absolute target, never a delta. A booking
+              // created in this call reserves nothing yet, so the amount asked
+              // for IS the target — unlike the add-to-existing path, which has to
+              // sum against what the booking already reserves.
+              quantity: quantityByModelId.get(assetModelId)!,
+              organizationId: booking.organizationId,
+              userId: booking.creatorId,
+              actor: reservationActor,
+            });
+          }
+        }
+
+        return created;
+      },
+      { timeout: RESERVATION_BATCH_TX_TIMEOUT_MS }
+    );
 
     return createdBooking;
   } catch (cause) {
@@ -869,7 +1567,10 @@ export async function createBooking({
       message: isLikeShelfError(cause)
         ? cause.message
         : "Something went wrong while trying to create or update the booking. Please try again or contact support.",
-      additionalData: { booking, hints },
+      // `modelRequests` is carried because a short model pool aborts the whole
+      // create: without it the report says a booking failed and nothing says
+      // which reservation was the one that did not fit.
+      additionalData: { booking, hints, modelRequests },
       label,
       shouldBeCaptured: isLikeShelfError(cause)
         ? cause.shouldBeCaptured
@@ -1001,6 +1702,8 @@ export async function updateBasicBooking({
         title: "Update failed",
         message: "Booking update is not allowed at this state of booking",
         label,
+        status: 400,
+        shouldBeCaptured: false,
       });
     }
 
@@ -1098,23 +1801,26 @@ export async function updateBasicBooking({
     // Collect plain-text change descriptions for the email
     const changes: string[] = [];
 
+    // Acting-user compromise: the embedded change list uses the editor's
+    // resolved prefs (rebuilding the diff per recipient is disproportionate).
+    const actingPrefs = userId
+      ? await resolveUserFormatPrefsById(userId, hints ?? null)
+      : null;
+
     // Helper to format dates for email change descriptions
-    const formatDateForEmail = (date: Date) => {
-      if (hints) {
-        return getDateTimeFormatFromHints(hints, {
-          dateStyle: "short",
-          timeStyle: "short",
-        }).format(date);
-      }
-      return date.toISOString();
-    };
+    const formatDateForEmail = (date: Date) =>
+      actingPrefs
+        ? formatDate(date, actingPrefs, { includeTime: true })
+        : date.toISOString();
 
     // Check and log name changes
     if (name && name !== booking.name) {
       await createSystemBookingNote({
         bookingId: booking.id,
         organizationId,
-        content: `${userLink} changed booking name from **${booking.name}** to **${name}**.`,
+        content: `${userLink} changed booking name from **${stripMarkdocDelimiters(
+          booking.name
+        )}** to **${stripMarkdocDelimiters(name)}**.`,
       });
       changes.push(`Booking name changed from "${booking.name}" to "${name}"`);
     }
@@ -1293,15 +1999,21 @@ export async function updateBasicBooking({
 
     if (JSON.stringify(oldTagIds) !== JSON.stringify(newTagIds)) {
       // Get tag names for better readability
+      // Tag names are free-form user input and land in Markdoc-rendered note
+      // content as literal text, so strip tag delimiters from each.
       const oldTagNames =
-        booking.tags.map((tag) => tag.name).join(", ") || "(none)";
+        booking.tags
+          .map((tag) => stripMarkdocDelimiters(tag.name))
+          .join(", ") || "(none)";
 
       // Get new tag names - we need to fetch them since we only have IDs
       const newTags = await db.tag.findMany({
         where: { id: { in: newTagIds }, organizationId },
         select: { name: true },
       });
-      const newTagNames = newTags.map((tag) => tag.name).join(", ") || "(none)";
+      const newTagNames =
+        newTags.map((tag) => stripMarkdocDelimiters(tag.name)).join(", ") ||
+        "(none)";
 
       await createSystemBookingNote({
         bookingId: booking.id,
@@ -1342,6 +2054,118 @@ export async function updateBasicBooking({
   }
 }
 
+/** Arguments shared by {@link findKitsBookedElsewhere} and its assert. */
+type KitsBookedElsewhereArgs = {
+  /** The booking's slices, or the kit slices being added */
+  slices: BookingSliceKitProvenance[];
+  /** The booking being judged; its own slices never conflict */
+  bookingId: Booking["id"];
+  /** Start of the window to check; nothing conflicts without one */
+  from: Date | string | null | undefined;
+  /** End of the window to check */
+  to: Date | string | null | undefined;
+  /** Scopes every read */
+  organizationId: Organization["id"];
+  /** Pass only when the booking is already in flight, see {@link outranksReservations} */
+  ignoreReservedConflicts?: boolean;
+};
+
+/**
+ * Finds the kits among `slices` that another booking holds: one overlapping
+ * the window, or one the kit is still out on past its due date.
+ *
+ * A kit is one physical case, so it is exclusive the way an INDIVIDUAL asset
+ * is. The asset conflict check at each write checkpoint cannot provide that on
+ * its own: it exempts QUANTITY_TRACKED assets, so a kit made only of those
+ * would never be refused.
+ *
+ * Only a LIVE kit-driven slice (`assetKitId` set) holds its kit. A detached row
+ * keeps `sourceKitId` but is a standalone asset, so it is dropped before the
+ * kit ids are resolved — {@link getKitIdsByBookingSlices} reads `sourceKitId`
+ * first and would otherwise attribute it to the kit.
+ *
+ * The booking writes refuse on this through {@link assertKitsNotBookedElsewhere};
+ * the check-out scanner reads it to raise the same refusal as a blocker before
+ * the submit.
+ *
+ * @param client - Pass the active `tx` when called inside a transaction
+ * @returns The held kits, each with the asset ids this booking took from it
+ */
+export async function findKitsBookedElsewhere(
+  {
+    slices,
+    bookingId,
+    from,
+    to,
+    organizationId,
+    ignoreReservedConflicts = false,
+  }: KitsBookedElsewhereArgs,
+  client: Pick<ExtendedPrismaClient, "assetKit" | "bookingAsset"> = db
+): Promise<(ConflictingKit & { assetIds: string[] })[]> {
+  // Truthiness rather than `!== null`, for the reason given in
+  // `resolveKitIdByAssetKitId`.
+  const liveKitSlices = slices.filter((slice) => Boolean(slice.assetKitId));
+  if (liveKitSlices.length === 0) return [];
+
+  const assetIdsByKitId = await getKitIdsByBookingSlices({
+    slices: liveKitSlices,
+    organizationId,
+    client,
+  });
+
+  const conflicting = await findConflictingKits(
+    {
+      kitIds: [...assetIdsByKitId.keys()],
+      bookingId,
+      from,
+      to,
+      organizationId,
+      ignoreReservedConflicts,
+    },
+    client
+  );
+
+  return conflicting.map((kit) => ({
+    ...kit,
+    assetIds: [...(assetIdsByKitId.get(kit.id) ?? [])],
+  }));
+}
+
+/**
+ * Refuses a booking write when another booking holds one of the kits it
+ * involves (see {@link findKitsBookedElsewhere}). Call this beside the asset
+ * conflict check, over the same window.
+ *
+ * @param args.action - Completes "Cannot …" in the message, e.g. "reserve booking"
+ * @param client - Pass the active `tx` when called inside a transaction
+ * @throws {ShelfError} 400 naming the kits another booking holds
+ */
+async function assertKitsNotBookedElsewhere(
+  { action, ...args }: KitsBookedElsewhereArgs & { action: string },
+  client: Pick<ExtendedPrismaClient, "assetKit" | "bookingAsset"> = db
+) {
+  const { bookingId } = args;
+  const conflicting = await findKitsBookedElsewhere(args, client);
+  if (conflicting.length === 0) return;
+
+  const names = conflicting
+    .slice(0, 3)
+    .map((kit) => kit.name)
+    .join(", ");
+  const more =
+    conflicting.length > 3 ? ` and ${conflicting.length - 3} more` : "";
+
+  throw new ShelfError({
+    cause: null,
+    status: 400,
+    label,
+    title: "Booking conflict",
+    message: `Cannot ${action}. Some kits are already booked or checked out for an overlapping period: ${names}${more}. Please remove them and try again.`,
+    additionalData: { bookingId, kitIds: conflicting.map((k) => k.id) },
+    shouldBeCaptured: false,
+  });
+}
+
 /**
  * Changes the status of a booking to RESERVED
  */
@@ -1355,7 +2179,7 @@ export async function reserveBooking({
   description,
   organizationId,
   hints,
-  isSelfServiceOrBase,
+  alertsOrgOnReservation,
   tags,
   userId,
 }: Partial<
@@ -1373,7 +2197,11 @@ export async function reserveBooking({
 > &
   Pick<Booking, "id" | "organizationId"> & {
     hints: ClientHint;
-    isSelfServiceOrBase: boolean;
+    /**
+     * Whether this reservation triggers the workspace booking broadcast: the
+     * caller's `notifications.reservationAlertsAdmins`.
+     */
+    alertsOrgOnReservation: boolean;
     tags: { id: string }[];
     userId?: User["id"];
   }) {
@@ -1390,6 +2218,19 @@ export async function reserveBooking({
                   ...BOOKING_INCLUDE_FOR_RESERVATION_EMAIL.bookingAssets.include
                     .asset.select,
                   status: true,
+                  // why: `availableToBook` is deliberately NOT selected here.
+                  // The availability guard reads it through `tx` immediately
+                  // before the status write (see the transaction below); this
+                  // outer read happens before the working-hours and settings
+                  // queries, so its copy would be stale at exactly the moment
+                  // it mattered.
+                  // Needed for the QUANTITY_TRACKED windowed-availability
+                  // guard's shortfall message (see the DRAFT → RESERVED
+                  // transaction below).
+                  unitOfMeasure: true,
+                  // Groups the standalone INDIVIDUAL rows by model for the
+                  // model reservation guard in the same transaction.
+                  assetModelId: true,
                   bookingAssets: {
                     ...createBookingConflictConditions({
                       currentBookingId: id,
@@ -1438,6 +2279,18 @@ export async function reserveBooking({
       });
     }
 
+    // Backstop for issue #382: every path that adds assets to a booking
+    // refuses archived ones, but a booking is the last place to catch any that
+    // got in another way, before it commits to a pickup.
+    await assertAssetsAreNotArchived({
+      assetIds: [
+        ...new Set(bookingFound.bookingAssets.map((ba) => ba.asset.id)),
+      ],
+      organizationId,
+      fix: "remove-from-booking",
+      actorUserId: userId,
+    });
+
     /** Server-side conflict validation to prevent race conditions */
     if (from && to && bookingFound.bookingAssets) {
       const conflictedAssets = bookingFound.bookingAssets
@@ -1459,10 +2312,20 @@ export async function reserveBooking({
           label,
           title: "Booking conflict",
           message: `Cannot reserve booking. Some assets are already booked or checked out: ${conflictedAssetNames}${additionalText}. Please remove conflicted assets and try again.`,
+          status: 400,
           shouldBeCaptured: false,
         });
       }
     }
+
+    await assertKitsNotBookedElsewhere({
+      slices: bookingFound.bookingAssets,
+      bookingId: id,
+      from,
+      to,
+      organizationId,
+      action: "reserve booking",
+    });
 
     /** Validate the booking dates */
     if (!from || !to) {
@@ -1470,6 +2333,8 @@ export async function reserveBooking({
         cause: null,
         label,
         message: "Booking dates are missing.",
+        status: 400,
+        shouldBeCaptured: false,
       });
     }
 
@@ -1479,6 +2344,8 @@ export async function reserveBooking({
         cause: null,
         label,
         message: "Booking start date should be in future.",
+        status: 400,
+        shouldBeCaptured: false,
       });
     }
 
@@ -1488,6 +2355,8 @@ export async function reserveBooking({
         cause: null,
         label,
         message: "Booking end date should be after start date.",
+        status: 400,
+        shouldBeCaptured: false,
       });
     }
 
@@ -1566,10 +2435,209 @@ export async function reserveBooking({
       });
     }
 
-    const updatedBooking = await db.booking.update({
-      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingFound id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) at L1020; this is the write on that same proven id
-      where: { id: bookingFound.id },
-      data: dataToUpdate,
+    /**
+     * QUANTITY_TRACKED windowed-availability guard, run atomically with the
+     * DRAFT → RESERVED status flip.
+     *
+     * The conflict check above (`hasAssetBookingConflicts`) only catches
+     * INDIVIDUAL-asset date collisions — it always returns `false` for
+     * QUANTITY_TRACKED rows (their whole premise is that several bookings
+     * legitimately share the same asset's pool). Without this guard a
+     * DRAFT booking whose QT asset already exceeds the windowed pool
+     * (e.g. built before other bookings consumed the stock, or hand-typed
+     * with too high a quantity) could commit straight to RESERVED
+     * unchecked — the over-commit-on-create bug this wiring closes.
+     *
+     * Uses `bookingFound.bookingAssets` (already loaded above, outside the
+     * tx) rather than a fresh read for WHICH assets/quantities to check —
+     * mirrors `checkoutBooking`'s existing precedent (its own
+     * `qtyTrackedBookingAssets`/`uniqueQtyTrackedAssetIds` are derived the
+     * same way). Only the POOL read itself (`assertAssetQuantitiesAvailable`
+     * → `getAssetAvailabilityBatch`) needs to be transaction-fresh and
+     * lock-guarded — that's the number racing writers can change; this
+     * booking's own composition cannot change concurrently through any
+     * other code path while this request is in flight. Aggregates BOTH
+     * standalone (`assetKitId: null`) and kit-driven `BookingAsset` rows per
+     * unique asset id, since both compete for the same physical pool.
+     *
+     * Mirrors `checkoutBookingWritesWithinTx`'s pattern: lock every unique
+     * QT asset via `lockAssetForQuantityUpdate` (serializing concurrent
+     * writers on the same asset) before reading availability, all inside
+     * the SAME transaction as the status write, so the read-then-decide
+     * can't race a sibling reservation/checkout/quantity-adjustment.
+     */
+    // Only STANDALONE (free-pool) slices are validated against `bookable`.
+    // Kit-driven slices (`assetKitId != null`) draw from their kit's own
+    // allocation, which `getAssetAvailability` already subtracts from the pool
+    // via `inKits` — validating them against the free pool too would
+    // double-count and reject a booking whose kit legitimately owns those units
+    // (e.g. an asset entirely allocated to a kit has `bookable = 0`, yet
+    // reserving a booking that contains that kit must still succeed). Codex P1.
+    const qtyTrackedBookingAssets = bookingFound.bookingAssets.filter(
+      (ba) => isQuantityTracked(ba.asset) && ba.assetKitId == null
+    );
+    const uniqueQtyTrackedAssetIds = Array.from(
+      new Set(qtyTrackedBookingAssets.map((ba) => ba.asset.id))
+    );
+
+    const updatedBooking = await db.$transaction(async (tx) => {
+      /**
+       * Eligibility, re-read through `tx` immediately before the status write.
+       *
+       * The callers check this earlier - the web overview disables its Reserve
+       * button from loader flags, the mobile route refuses up front with a
+       * better message - but both read the booking before the working-hours and
+       * settings queries, so a concurrent edit could still land in RESERVED.
+       * `availableToBook` is the one that really moves: it is an asset-level
+       * flag toggled from the asset page, with nothing to do with this booking.
+       *
+       * This does not make the transition serializable on its own. Closing the
+       * window completely would mean locking every asset in the booking, which
+       * the QT path below already does for the assets whose pool is contested.
+       * This narrows it to the width of the transaction.
+       */
+      // Constant-cost probes, not a materialised list. Both questions are
+      // existence questions, and this runs inside the transaction that goes on
+      // to take a per-asset advisory lock for every QT asset below — loading N
+      // slices and their assets here would widen that lock window for nothing.
+      const sliceCount = await tx.bookingAsset.count({
+        where: { bookingId: id },
+      });
+
+      if (sliceCount === 0) {
+        const modelRequestCount = await tx.bookingModelRequest.count({
+          where: { bookingId: id },
+        });
+
+        if (modelRequestCount === 0) {
+          throw new ShelfError({
+            cause: null,
+            label,
+            title: "Nothing to reserve",
+            message: BOOKING_RESERVE_BLOCKED_LABELS.NOTHING_TO_RESERVE,
+            status: 400,
+            shouldBeCaptured: false,
+          });
+        }
+      }
+
+      // Only worth asking when the booking actually holds assets.
+      if (sliceCount > 0) {
+        const unavailableSlice = await tx.bookingAsset.findFirst({
+          where: { bookingId: id, asset: { availableToBook: false } },
+          select: { id: true },
+        });
+
+        if (unavailableSlice) {
+          throw new ShelfError({
+            cause: null,
+            label,
+            title: "Unavailable assets",
+            message: BOOKING_RESERVE_BLOCKED_LABELS.UNAVAILABLE_ASSETS,
+            status: 400,
+            shouldBeCaptured: false,
+          });
+        }
+      }
+
+      if (uniqueQtyTrackedAssetIds.length > 0) {
+        const assetById = new Map(
+          qtyTrackedBookingAssets.map((ba) => [ba.asset.id, ba.asset])
+        );
+
+        // Sum the requested units per unique QT asset across the standalone
+        // BookingAsset rows that reference it (kit rows excluded above).
+        const requestedQtyByAssetId = new Map<string, number>();
+        for (const ba of qtyTrackedBookingAssets) {
+          requestedQtyByAssetId.set(
+            ba.asset.id,
+            (requestedQtyByAssetId.get(ba.asset.id) ?? 0) + ba.quantity
+          );
+        }
+
+        // Acquire locks in a deterministic (sorted) global order so two
+        // concurrent transactions touching the same assets can never deadlock
+        // by locking them in opposite orders. Mirrors `updateBookingAssets`
+        // and the checkout guard.
+        for (const assetId of [...uniqueQtyTrackedAssetIds].sort()) {
+          await lockAssetForQuantityUpdate(tx, assetId, organizationId);
+        }
+
+        await assertAssetQuantitiesAvailable(
+          uniqueQtyTrackedAssetIds.map((assetId) => ({
+            assetId,
+            requestedQuantity: requestedQtyByAssetId.get(assetId) ?? 0,
+            assetTitle: assetById.get(assetId)?.title ?? "",
+            unitOfMeasure: assetById.get(assetId)?.unitOfMeasure,
+          })),
+          {
+            organizationId,
+            tx,
+            window: from && to ? { from, to } : null,
+            excludeBookingId: id,
+          }
+        );
+      }
+
+      /**
+       * The INDIVIDUAL units the draft holds by name, in the order the two
+       * model-pool guards below need them. Kit-driven rows are included: the
+       * pool a reservation draws on loses the unit either way, and a member
+       * reaches the draft through a kit without ever passing the add-time
+       * guards. Quantity-tracked rows are judged by the guard above.
+       */
+      const namedIndividualAssets = bookingFound.bookingAssets
+        .filter((ba) => ba.asset.type === AssetType.INDIVIDUAL)
+        .map((ba) => ba.asset);
+
+      /**
+       * The units the draft still owes by model, measured against their pools
+       * in the transaction that flips the status.
+       *
+       * A draft's reservations claim nothing, so two drafts can each promise a
+       * model's entire pool. RESERVED is where those promises start to compete,
+       * and this is the only point that can tell whether they still fit. The
+       * guard below covers the by-name half of the same pools; both run here,
+       * over the same window, so a booking cannot pass one and break the other.
+       *
+       * Runs FIRST so one sorted pass covers every `AssetModel` row this
+       * transaction locks: `alsoLockAssetModelIds` carries the models the
+       * by-name guard goes on to measure, and its own pass then re-acquires
+       * locks this transaction already holds.
+       */
+      await assertOutstandingModelRequestsFit({
+        bookingId: id,
+        organizationId,
+        from,
+        to,
+        action: "reserve booking",
+        alsoLockAssetModelIds: namedIndividualAssets
+          .map((asset) => asset.assetModelId)
+          .filter((assetModelId): assetModelId is string => !!assetModelId),
+        tx,
+      });
+
+      /**
+       * Units booked by name claim the same pool that other bookings' model
+       * reservations draw from. Every INDIVIDUAL unit on the draft is checked
+       * here, in the transaction that flips the status, so a draft assembled
+       * before those reservations existed cannot commit past them.
+       */
+      await assertModelUnitsNotReservedElsewhere({
+        assets: namedIndividualAssets,
+        bookingId: id,
+        bookingStatus: bookingFound.status,
+        organizationId,
+        from,
+        to,
+        tx,
+      });
+
+      return tx.booking.update({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingFound id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) at L1020; this is the write on that same proven id
+        where: { id: bookingFound.id },
+        data: dataToUpdate,
+      });
     });
 
     /** Calculate the time difference between the booking.to and the current time */
@@ -1599,15 +2667,49 @@ export async function reserveBooking({
       });
     }
 
+    /**
+     * If the org auto-archives expired reservations, schedule the one-shot
+     * archive job for this booking (end date + grace). Independent of the
+     * checkout-reminder slot; the handler self-validates, so we never cancel it.
+     */
+    const expiryArchiveSettings = await db.bookingSettings.findUnique({
+      where: { organizationId },
+      select: { autoArchiveExpiredReservations: true, autoArchiveDays: true },
+    });
+    if (expiryArchiveSettings?.autoArchiveExpiredReservations) {
+      // Best-effort: the booking is already persisted as RESERVED, so a
+      // scheduler/queue hiccup must not fail the reservation. Log and continue —
+      // the job is re-established if the org re-toggles the setting.
+      try {
+        await scheduleExpiryArchiveJob({
+          bookingId: bookingFound.id,
+          to,
+          autoArchiveDays: expiryArchiveSettings.autoArchiveDays,
+          hints,
+        });
+      } catch (cause) {
+        Logger.error(
+          new ShelfError({
+            cause,
+            message:
+              "Failed to schedule auto-archive-expired job after reserving booking",
+            additionalData: { bookingId: bookingFound.id, organizationId },
+            label,
+            shouldBeCaptured: false,
+          })
+        );
+      }
+    }
+
     // Resolve notification recipients and send emails.
-    // Pass isSelfServiceOrBase so admin broadcast only fires for
-    // reservations made by base/self-service users (pickup requests).
+    // Forwarded so the broadcast fires only for reservations whose maker's
+    // role triggers it.
     const recipients = await getBookingNotificationRecipients({
       booking: bookingFound,
       eventType: "RESERVATION",
       organizationId,
       editorUserId: userId,
-      isSelfServiceOrBase,
+      alertsOrgOnReservation,
     });
 
     if (recipients.length > 0) {
@@ -1627,25 +2729,30 @@ export async function reserveBooking({
           modelName: req.assetModel.name,
         }));
 
-      const text = assetReservedEmailContent({
-        bookingName: bookingFound.name,
-        assetsCount: bookingFound._count.bookingAssets,
-        custodian,
-        from,
-        to,
-        hints,
-        bookingId: bookingFound.id,
-        customEmailFooter: bookingFound.organization.customEmailFooter,
-        modelRequests: outstandingModelRequests,
+      const actor = await resolveBookingEmailActor({
+        userId,
+        label: "Reserved by",
       });
 
       await sendBookingEmailToAllRecipients({
         recipients,
         booking: bookingFound,
         subject: `✅ Booking reserved (${bookingFound.name}) - shelf.nu`,
-        textContent: text,
-        heading: `Booking reservation for ${custodian}`,
+        buildText: (textArgs) =>
+          assetReservedEmailContent({
+            ...textArgs,
+            bookingName: bookingFound.name,
+            assetsCount: bookingFound._count.bookingAssets,
+            custodian,
+            from,
+            to,
+            bookingId: bookingFound.id,
+            customEmailFooter: bookingFound.organization.customEmailFooter,
+            modelRequests: outstandingModelRequests,
+          }),
+        buildHeading: () => `Booking reservation for ${custodian}`,
         hints,
+        actor,
         templateProps: {
           assets: bookingFound.bookingAssets,
           // Forward any outstanding `BookingModelRequest` rows so the
@@ -1766,38 +2873,182 @@ async function scheduleCheckinReminderForBooking(
 }
 
 /**
+ * The slices a full check-out of this booking sends out, read before it stamps
+ * anything.
+ *
+ * Two answers, both derived from the per-slice markers and scan sessions:
+ * `departingSlices` leave whole (never out, or out and back in full), and
+ * `checkoutTopUps` are quantity-tracked slices an earlier scan session sent
+ * out only partly, whose remaining units leave now.
+ *
+ * {@link checkoutBookingWritesWithinTx} reads its departures here, before the
+ * marker writes make departing slices indistinguishable from ones an earlier
+ * batch sent out.
+ *
+ * @param tx - Interactive transaction client
+ * @param bookingId - A booking the caller has already org-checked
+ * @returns The whole-slice departures and the partial top-ups
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function readFullCheckoutDepartures(
+  tx: any,
+  bookingId: Booking["id"]
+): Promise<{
+  departingSlices: Array<{
+    id: string;
+    assetId: string;
+    assetKitId: string | null;
+    quantity: number;
+  }>;
+  checkoutTopUps: Array<{
+    id: string;
+    assetId: string;
+    assetKitId: string | null;
+    residue: number;
+  }>;
+}> {
+  /**
+   * A quantity-tracked slice partially dispatched by progressive scans before
+   * this full checkout keeps its earlier stamp, but its residual units go out
+   * NOW and would otherwise leave no record of their own: dispatched units
+   * are judged from session attribution wherever a slice has session units
+   * (see `computeDispatchedUnitsByAsset`), so an unrecorded residue would let
+   * the booking complete once just the scanned units return. Read the
+   * pre-stamp state here; the matching session row is written below, after
+   * the stamps.
+   */
+  const preStampedQtySlices = (await tx.bookingAsset.findMany({
+    // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingId was org-checked by the caller's findUniqueOrThrow({where:{id,organizationId}})
+    where: {
+      bookingId,
+      checkedOutAt: { not: null },
+      asset: { type: AssetType.QUANTITY_TRACKED },
+    },
+    select: { id: true, assetId: true, quantity: true, assetKitId: true },
+  })) as Array<{
+    id: string;
+    assetId: string;
+    quantity: number;
+    assetKitId: string | null;
+  }>;
+  const checkoutTopUps: Array<{
+    id: string;
+    assetId: string;
+    assetKitId: string | null;
+    residue: number;
+  }> = [];
+  if (preStampedQtySlices.length > 0) {
+    const priorSessions = (await tx.partialBookingCheckout.findMany({
+      where: { bookingId },
+      select: { assetIds: true, quantities: true, bookingAssetIds: true },
+    })) as Array<{
+      assetIds: string[];
+      quantities: number[];
+      bookingAssetIds: string[];
+    }>;
+    const logsByAsset = checkoutSessionsToLogsByAsset(
+      priorSessions,
+      () => true
+    );
+    const slicesByAsset = new Map<string, typeof preStampedQtySlices>();
+    for (const s of preStampedQtySlices) {
+      const group = slicesByAsset.get(s.assetId);
+      if (group) group.push(s);
+      else slicesByAsset.set(s.assetId, [s]);
+    }
+    for (const [assetId, group] of slicesByAsset) {
+      const attributed = attributeDispositionsByBookingAsset({
+        bookingAssetRows: group.map((s) => ({
+          id: s.id,
+          quantity: s.quantity,
+          assetKitId: s.assetKitId,
+        })),
+        consumptionLogs: logsByAsset.get(assetId) ?? [],
+      });
+      for (const s of group) {
+        const units = attributed.get(s.id) ?? 0;
+        // Only a slice with SOME session units under-reads — a stamped slice
+        // with none reads back as fully dispatched from its stamp alone.
+        if (units > 0 && units < s.quantity) {
+          checkoutTopUps.push({
+            id: s.id,
+            assetId: s.assetId,
+            assetKitId: s.assetKitId,
+            residue: s.quantity - units,
+          });
+        }
+      }
+    }
+  }
+
+  /**
+   * The slices this call sends out, read while they are still identifiable —
+   * the marker writes below are what distinguish them, so afterwards nothing
+   * separates them from slices an earlier batch sent out.
+   *
+   * Two groups depart, and both count. A slice that never left is the obvious
+   * one. A slice that already went out and came back IN FULL is departing
+   * again: the re-out write below clears its `checkedInAt`, and its units are
+   * physically gone a second time. Counting only the first group would let the
+   * derived "still out" figure go negative, because the return that came
+   * between the two departures is already recorded against it.
+   *
+   * An all-at-once checkout sends every unit of every slice it touches, so each
+   * one's count grows by its full booked quantity.
+   */
+  const departingSlices = await tx.bookingAsset.findMany({
+    // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingId was org-checked by the caller's findUniqueOrThrow({where:{id,organizationId}})
+    where: {
+      bookingId,
+      OR: [
+        { checkedOutAt: null },
+        { checkedOutAt: { not: null }, checkedInAt: { not: null } },
+      ],
+    },
+    select: { id: true, assetId: true, assetKitId: true, quantity: true },
+  });
+
+  return { departingSlices, checkoutTopUps };
+}
+
+/**
  * Transaction-body helper shared by {@link checkoutBooking} and
  * {@link fulfilModelRequestsAndCheckout}.
  *
  * Runs the write-side of the RESERVED → ONGOING transition under the
  * caller's transaction:
- *   1. Re-reads `BookingModelRequest` rows with `quantity > 0` and throws
- *      a 400 `ShelfError` if any remain (hard block — model requests must
- *      all be fulfilled before checkout).
+ *   1. Refuses when the booking holds no items: a check-out needs at least
+ *      one item to go out. That is the only completeness rule. Model
+ *      reservations that are still unassigned stay open on the ongoing
+ *      booking, to be scanned later or released, and never hold it back.
  *   2. For every QUANTITY_TRACKED booking asset, acquires a row lock and
  *      validates available pool capacity inside the tx — closes the TOCTOU
  *      window against sibling writers (other checkouts, custody
  *      assignments, quantity adjustments).
- *   3. Flips the checked-out assets + kits to `CHECKED_OUT` and updates
+ *   3. On a booking leaving DRAFT, measures whatever it still owes by model
+ *      against those models' pools: that exit is the only other point where
+ *      unnamed units start competing, and it bypasses `reserveBooking`.
+ *   4. Flips the checked-out assets + kits to `CHECKED_OUT` and updates
  *      the booking row with `dataToUpdate` (status + optional adjusted
  *      dates).
  *
  * Extracted so `fulfilModelRequestsAndCheckout` can compose
  * `addScannedAssetsToBookingWithinTx` and this body into a single atomic
- * unit — a failure here (availability, outstanding request, etc.) rolls
- * back BookingAsset creation AND the model-request materialisation in one
- * shot.
+ * unit — a failure here (availability, an empty booking, etc.) rolls back
+ * BookingAsset creation AND the model-request materialisation in one shot.
  *
  * @param tx - Prisma transaction client
  * @param args.bookingId - Booking being transitioned
+ * @param args.bookingStatus - The booking's status before this transition, read under its row lock
  * @param args.bookingAssetIds - All asset IDs currently on the booking (used to fan the CHECKED_OUT status update)
  * @param args.qtyTrackedBookingAssets - Booking-asset pairs whose asset is QUANTITY_TRACKED (used for the availability guard)
  * @param args.uniqueQtyTrackedAssetIds - Deduplicated IDs from the above list
  * @param args.dataToUpdate - Pre-computed update payload for the booking row (status, optional from/originalFrom)
  * @param args.kitIds - Kits to flip to `CHECKED_OUT`
  * @param args.hasKits - Whether the kit update should fire
- * @throws {ShelfError} 400 when any model request is unfulfilled
+ * @throws {ShelfError} 400 when the booking holds no items to check out
  * @throws {ShelfError} 400 when any QUANTITY_TRACKED asset lacks sufficient pool availability
+ * @throws {ShelfError} 400 when a DRAFT booking's outstanding model reservations no longer fit
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function checkoutBookingWritesWithinTx(
@@ -1805,16 +3056,33 @@ async function checkoutBookingWritesWithinTx(
   {
     bookingId,
     organizationId,
+    bookingStatus,
     bookingAssetIds,
     qtyTrackedBookingAssets,
     uniqueQtyTrackedAssetIds,
     dataToUpdate,
     kitIds,
     hasKits,
+    from,
+    to,
+    checkedOutById,
+    sourceLocations,
   }: {
     bookingId: Booking["id"];
     organizationId: Booking["organizationId"];
+    /**
+     * The booking's status as this transaction holds it, before the flip below.
+     * Read under the booking's row lock, because it decides whether the
+     * model-reservation guard runs and a pre-lock snapshot could have it wrong.
+     */
+    bookingStatus: BookingStatus;
     bookingAssetIds: Asset["id"][];
+    /**
+     * Acting user, stamped onto each slice's checkout marker. Nullable because
+     * `checkoutBooking`'s `userId` is optional (scheduler-driven checkouts have
+     * no acting user) and the column is nullable to match.
+     */
+    checkedOutById: string | null;
     qtyTrackedBookingAssets: Array<{
       quantity: number;
       asset: Pick<Asset, "id" | "title">;
@@ -1823,69 +3091,59 @@ async function checkoutBookingWritesWithinTx(
     dataToUpdate: Prisma.BookingUpdateInput;
     kitIds: string[];
     hasKits: boolean;
+    /**
+     * The booking's own committed reservation window (`Booking.from`/`.to`
+     * — non-nullable in the schema). Used to windowed-scope the
+     * QUANTITY_TRACKED availability guard below via
+     * {@link getAssetAvailability}'s `window`, so that OTHER bookings whose
+     * dates don't overlap this one no longer count against it (the #2724
+     * "checkout wrongly refused" bug — the previous guard summed every
+     * active reservation for the asset GLOBALLY, all-time). This is
+     * deliberately the booking's PERSISTED dates, not the optional
+     * conflict-check override params `checkoutBooking`/
+     * `fulfilModelRequestsAndCheckout` accept for early-checkout handling —
+     * those gate a different, pre-tx guard.
+     */
+    from: Booking["from"];
+    to: Booking["to"];
+    /**
+     * Where each pool's units come from, as picked in the check-out dialog
+     * or sent by the phone. Missing answers resolve to the default; see
+     * {@link recordCheckoutSourceLocations}.
+     */
+    sourceLocations?: SourceLocationSubmission;
   }
 ) {
   /**
-   * Checkout guard for unfulfilled `BookingModelRequest` rows. Model
-   * requests (Book-by-Model) represent units that
-   * were reserved at the model level but haven't been assigned to
-   * a concrete asset yet (the usual recovery path is to scan
-   * matching assets, which decrements the request). If any remain
-   * at checkout we refuse the RESERVED → ONGOING transition and
-   * surface the outstanding counts so the operator can either:
-   *   1. scan matching assets to drain the request, or
-   *   2. edit the requests from manage-assets (allowed while the
-   *      booking is still RESERVED — see the model-request service).
-   * This is a hard block — there is no force-partial escape hatch
-   * because ONGOING implies "assets are physically out", which
-   * unfulfilled requests directly contradict.
-   *
-   * Also enforced independently by `fulfilModelRequestsAndCheckout`
-   * as defence in depth: the drawer disables submit while
-   * `remaining > 0`, but a tampered payload would still hit this
-   * guard inside the shared transaction and roll everything back.
+   * A check-out sends at least one item out. `bookingAssetIds` is read after
+   * any scan in the same transaction has landed, so a reservation-only booking
+   * with nothing assigned is refused here rather than going ongoing empty.
    */
-  const outstandingRequests = await tx.bookingModelRequest.findMany({
-    // `fulfilledAt IS NULL` is the canonical "outstanding" filter —
-    // replaces the pre-audit-trail `quantity > 0` check. Rows where
-    // every unit has been materialised into a `BookingAsset` carry a
-    // timestamp and must not block checkout.
-    where: { bookingId, fulfilledAt: null },
-    include: { assetModel: { select: { name: true } } },
-  });
-
-  if (outstandingRequests.length > 0) {
-    // `tx` is typed `any` so the result shape is lost; annotate the callback.
-    //
-    // Report `req.quantity` (the original reservation intent), NOT
-    // `quantity - fulfilledQuantity`. This throw rolls the whole tx
-    // back — including the in-tx `fulfilledQuantity` increments from
-    // `addScannedAssetsToBookingWithinTx`. So the number the operator
-    // sees post-failure is the pre-tx outstanding count, which equals
-    // `quantity` for rows whose `fulfilledAt` is still null. Showing
-    // `quantity - fulfilledQuantity` here would report a mid-tx view
-    // that doesn't match post-rollback reality.
-    const outstanding: Array<{ assetModelName: string; remaining: number }> =
-      outstandingRequests.map(
-        (req: { assetModel: { name: string }; quantity: number }) => ({
-          assetModelName: req.assetModel.name,
-          remaining: req.quantity,
-        })
-      );
-
-    const summary = outstanding
-      .map((row) => `${row.remaining} × ${row.assetModelName}`)
-      .join(", ");
-
+  if (bookingAssetIds.length === 0) {
     throw new ShelfError({
       cause: null,
       label,
       status: 400,
       shouldBeCaptured: false,
-      message: `Cannot check out — ${summary} still unassigned. Scan matching assets to fulfil the reservation.`,
-      additionalData: { outstanding },
+      message:
+        "There's nothing to check out yet. Add or scan at least one item to this booking first.",
+      additionalData: { bookingId },
     });
   }
+
+  // In the transaction that stamps the kits, so a kit put in custody or taken
+  // out elsewhere since the caller's read is still refused.
+  if (hasKits) {
+    await assertKitsCheckoutable(tx, { kitIds, bookingId, organizationId });
+  }
+
+  // What this call sends out, read before any write below: the guard measures
+  // these units against the shelf, and the stamps further down make departing
+  // slices indistinguishable from ones an earlier batch sent out.
+  const { departingSlices, checkoutTopUps } = await readFullCheckoutDepartures(
+    tx,
+    bookingId
+  );
 
   /**
    * Validate quantity availability for QUANTITY_TRACKED assets.
@@ -1897,36 +3155,90 @@ async function checkoutBookingWritesWithinTx(
    * concurrent writers can both pass this guard against the same
    * snapshot.
    *
-   * `computeBookingAvailableQuantity` doesn't take a `tx`, but
-   * read-committed isolation combined with the row lock acquired
-   * above guarantees that once any competing writer has committed
-   * its change it is visible here; any still-open writer is
-   * blocked on the same row lock until we commit or roll back.
+   * Windowed by this booking's own `[from, to]` via
+   * {@link getAssetAvailability} — NOT a global all-time sum. The prior
+   * implementation (`computeBookingAvailableQuantity`) summed every
+   * RESERVED/ONGOING/OVERDUE reservation for the asset regardless of
+   * date, so three non-overlapping bookings of 7 against a 10-qty asset
+   * would wrongly block each other's checkout (#2724). Peak-concurrent
+   * sweeping (inside {@link getAssetAvailability}) only counts
+   * reservations that actually overlap this booking's window.
+   *
+   * `getAssetAvailability` is called with `db: tx` so its reads run
+   * inside this same transaction; combined with the row lock acquired
+   * above, read-committed isolation guarantees that once any competing
+   * writer has committed its change it is visible here, and any
+   * still-open writer is blocked on the same row lock until we commit or
+   * roll back.
    */
   if (uniqueQtyTrackedAssetIds.length > 0) {
     const insufficientQtyWarnings: string[] = [];
 
-    for (const assetId of uniqueQtyTrackedAssetIds) {
-      await lockAssetForQuantityUpdate(tx, assetId);
-
-      const { available } = await computeBookingAvailableQuantity(
+    /**
+     * Standalone units of each pool that physically leave in this call: whole
+     * departing slices plus the residue of slices an earlier scan sent out
+     * only partly. Units this booking already has out are off the shelf, and
+     * `physicalAvailable` has subtracted them, so they are not charged again.
+     * Kit-driven slices draw on their kit's allocation, as in `requested`.
+     */
+    const leavingNowByAsset = new Map<string, number>();
+    const addLeaving = (assetId: string, units: number) =>
+      leavingNowByAsset.set(
         assetId,
-        bookingId
+        (leavingNowByAsset.get(assetId) ?? 0) + units
       );
+    for (const slice of departingSlices) {
+      if (slice.assetKitId == null) addLeaving(slice.assetId, slice.quantity);
+    }
+    for (const topUp of checkoutTopUps) {
+      if (topUp.assetKitId == null) addLeaving(topUp.assetId, topUp.residue);
+    }
 
-      // Sum the requested units for this asset on this booking.
-      // (Typically there's one BookingAsset per asset, but we sum
-      // defensively in case the invariant ever changes.)
+    // Sorted so concurrent transactions acquire these row locks in the same
+    // global order — prevents deadlocks with `reserveBooking` /
+    // `updateBookingAssets`, which lock the same assets sorted too.
+    for (const assetId of [...uniqueQtyTrackedAssetIds].sort()) {
+      await lockAssetForQuantityUpdate(tx, assetId, organizationId);
+
+      const { bookable, physicalAvailable } = await getAssetAvailability({
+        assetId,
+        organizationId,
+        window: { from, to },
+        excludeBookingId: bookingId,
+        db: tx,
+      });
+      // Sum the requested STANDALONE units for this asset on this booking.
+      // Callers pre-filter `qtyTrackedBookingAssets` to `assetKitId == null`
+      // slices (kit-driven units are covered by `inKits`, already reserved out
+      // of `bookable`), so every row here is a free-pool request against the
+      // free-pool capacity — an apples-to-apples comparison (#2790).
       const requested = qtyTrackedBookingAssets
         .filter((ba) => ba.asset.id === assetId)
         .reduce((sum, ba) => sum + ba.quantity, 0);
 
-      if (requested > available) {
-        const title =
-          qtyTrackedBookingAssets.find((ba) => ba.asset.id === assetId)?.asset
-            .title ?? "";
+      // The units leave now, so they must also be on the shelf now. `bookable`
+      // is windowed by this booking's planned dates and leaves out units
+      // another booking still has out when it ends before this one starts,
+      // which an early check-out hands over too soon. The shelf is measured
+      // against what leaves in this call, the window against the booking's
+      // whole standalone quantity.
+      const leavingNow = leavingNowByAsset.get(assetId) ?? 0;
+      const title =
+        qtyTrackedBookingAssets.find((ba) => ba.asset.id === assetId)?.asset
+          .title ?? "";
+      if (leavingNow > physicalAvailable) {
         insufficientQtyWarnings.push(
-          `"${title}": requested ${requested}, only ${available} available`
+          `"${title}": requested ${leavingNow}, only ${Math.max(
+            0,
+            physicalAvailable
+          )} available right now`
+        );
+      } else if (requested > bookable) {
+        insufficientQtyWarnings.push(
+          `"${title}": requested ${requested}, only ${Math.max(
+            0,
+            bookable
+          )} available in this window`
         );
       }
     }
@@ -1944,6 +3256,33 @@ async function checkoutBookingWritesWithinTx(
     }
   }
 
+  /**
+   * A booking may reach ONGOING straight from DRAFT, which skips
+   * {@link reserveBooking} and with it the only other point that measures what
+   * the booking still owes by model. A draft's reservations claim nothing, so
+   * two drafts can each promise a model's whole pool; this transition is where
+   * those promises start competing, and it has to hold the units it is about to
+   * send out.
+   *
+   * DRAFT only. A booking that came through RESERVED was measured there, and
+   * refusing it here would strand an operator over a pool that shrank for
+   * reasons the booking did not cause. The units it owes stay open on the
+   * ongoing booking either way.
+   *
+   * The window is the booking's own committed one, the same `from`/`to` the
+   * quantity-tracked guard above is scoped by.
+   */
+  if (bookingStatus === BookingStatus.DRAFT) {
+    await assertOutstandingModelRequestsFit({
+      bookingId,
+      organizationId,
+      from,
+      to,
+      action: "check out booking",
+      tx,
+    });
+  }
+
   // SECURITY (cross-org IDOR): scope the status mutation to the caller's
   // organization so it can never flip the status of an asset that lives in
   // another workspace, even if a foreign asset ID slipped into the list.
@@ -1953,6 +3292,154 @@ async function checkoutBookingWritesWithinTx(
       organizationId,
     },
     data: { status: AssetStatus.CHECKED_OUT },
+  });
+
+  /**
+   * Record where each pool slice's units leave from, before the counters
+   * below grow: only a slice still at 0 gets a source, so a slice going out
+   * again keeps the one it has. The placements are read in this transaction,
+   * after the standalone pools' row locks above. An invalid pick throws and
+   * rolls the whole check-out back.
+   */
+  await recordCheckoutSourceLocations(tx, {
+    organizationId,
+    sliceIds: departingSlices.map((s: { id: string }) => s.id),
+    submission: sourceLocations,
+  });
+
+  /**
+   * Record the checkout on each slice. Together with the residue session row
+   * below, this is what marks an all-at-once checkout — the path writes no
+   * `PartialBookingCheckout` row for slices without prior session units — and
+   * it is what the check-in guard reads to decide eligibility.
+   *
+   * Scoped to slices not already out so a progressive batch that ran earlier
+   * keeps its own (earlier, more accurate) timestamp. Any stale check-in marker
+   * is cleared: a full checkout sends the whole booking back out.
+   */
+
+  await tx.bookingAsset.updateMany({
+    // Keyed on the ids read above, not on `checkedOutAt: null`, so the marker
+    // write and the counter increment below cover the SAME slices. A slice
+    // that went out, came back in full and is departing again has a stamped
+    // `checkedOutAt`, so a `checkedOutAt: null` filter skipped it: its counter
+    // grew while its `checkedInAt` stayed set, and the completion gate reads
+    // that stale marker as "already reconciled" while the units are out.
+    // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: these ids were read above from a bookingId the caller org-checked
+    where: { id: { in: departingSlices.map((s: { id: string }) => s.id) } },
+    data: {
+      checkedOutAt: new Date(),
+      checkedOutById,
+      checkedInAt: null,
+      checkedInById: null,
+    },
+  });
+
+  /**
+   * Size those departures, each slice's count becoming its full booked
+   * quantity.
+   *
+   * Grouped by quantity because `updateMany`'s `data` takes literals only and
+   * cannot name another column on the row. Real bookings carry very few
+   * distinct quantities — every `INDIVIDUAL` slice is 1 — so this is a handful
+   * of statements, not one per slice.
+   *
+   * Incremented, never assigned: the column is cumulative, so a slice on its
+   * second departure adds to what its first one recorded. Only the slices read
+   * above — a slice a progressive batch had partly sent out is not among them,
+   * because its residue rather than its whole quantity departs now; it is
+   * topped up alongside the residue session row below.
+   */
+  const departingSliceIdsByQuantity = new Map<number, string[]>();
+  for (const slice of departingSlices) {
+    const ids = departingSliceIdsByQuantity.get(slice.quantity);
+    if (ids) {
+      ids.push(slice.id);
+    } else {
+      departingSliceIdsByQuantity.set(slice.quantity, [slice.id]);
+    }
+  }
+  for (const [quantity, sliceIds] of departingSliceIdsByQuantity) {
+    await tx.bookingAsset.updateMany({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: these ids were read above from a bookingId the caller org-checked
+      where: { id: { in: sliceIds } },
+      data: { checkedOutQuantity: { increment: quantity } },
+    });
+  }
+
+  /**
+   * The residue of partially-scanned slices, recorded in BOTH places that
+   * answer "how many units left", because two readers ask it differently and
+   * a residue in only one of them is a disagreement rather than a record.
+   *
+   * The session row makes the slice's full obligation read back out of session
+   * attribution (tagged per slice — no greedy ambiguity), which is what
+   * completion and the lifecycle progress derive from.
+   * `BookingAsset.checkedOutQuantity` is the stored counter every quantity
+   * surface reads, and the departure statement above cannot carry these
+   * slices: it adds a whole booked quantity, while only the residue departs
+   * here. Topping it up by the same figure keeps the stored count and the
+   * derived one equal.
+   */
+  if (checkoutTopUps.length > 0) {
+    await tx.partialBookingCheckout.create({
+      data: {
+        bookingId,
+        checkedOutById,
+        assetIds: checkoutTopUps.map((t) => t.assetId),
+        quantities: checkoutTopUps.map((t) => t.residue),
+        bookingAssetIds: checkoutTopUps.map((t) => t.id),
+        checkoutCount: checkoutTopUps.length,
+      },
+    });
+
+    // A slice already counted by the departure statement is skipped here.
+    // `checkoutTopUps` is derived from every stamped slice, including one that
+    // went out earlier and came back IN FULL — that slice departs again whole,
+    // so the statement above already added its entire booked quantity, and
+    // adding a residue on top would count units that never left. Only a slice
+    // still partly out reaches this loop, which is the case the residue
+    // describes. Its session row is written regardless: that row records the
+    // dispatch, while this counter records the units.
+    const departingSliceIds = new Set(
+      departingSlices.map((s: { id: string }) => s.id)
+    );
+
+    // Grouped by residue for the same reason the departure statement groups by
+    // quantity: `updateMany`'s `data` takes literals and cannot name a column.
+    const topUpSliceIdsByResidue = new Map<number, string[]>();
+    for (const topUp of checkoutTopUps) {
+      if (departingSliceIds.has(topUp.id)) continue;
+      const ids = topUpSliceIdsByResidue.get(topUp.residue);
+      if (ids) {
+        ids.push(topUp.id);
+      } else {
+        topUpSliceIdsByResidue.set(topUp.residue, [topUp.id]);
+      }
+    }
+    for (const [residue, sliceIds] of topUpSliceIdsByResidue) {
+      await tx.bookingAsset.updateMany({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: these ids were read above from a bookingId the caller org-checked
+        where: { id: { in: sliceIds } },
+        data: { checkedOutQuantity: { increment: residue } },
+      });
+    }
+  }
+
+  /**
+   * Slices that were already out AND reconciled return to outstanding. The
+   * statement above cannot reach them — it only matches unmarked slices — and
+   * leaving `checkedInAt` set would make physically-out units read as fully
+   * returned, which the check-in guard then refuses.
+   */
+  await tx.bookingAsset.updateMany({
+    // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingId was org-checked by the caller's findUniqueOrThrow({where:{id,organizationId}})
+    where: {
+      bookingId,
+      checkedOutAt: { not: null },
+      checkedInAt: { not: null },
+    },
+    data: { checkedInAt: null, checkedInById: null },
   });
 
   await tx.booking.update({
@@ -1991,20 +3478,28 @@ async function runCheckoutSideEffects({
   bookingFound,
   userId,
   effectiveStatus,
-  effectiveBooking,
   effectiveTo,
   hints,
   organizationId,
   isExpired,
+  provenance,
+  bookingSliceIds,
 }: {
   bookingFound: BookingForEmail;
   userId?: string;
   effectiveStatus: BookingStatus;
-  effectiveBooking: BookingForEmail;
   effectiveTo: Date | null | undefined;
   hints: ClientHint;
   organizationId: Booking["organizationId"];
   isExpired: boolean;
+  /** How the check-out was made, for the activity line; see {@link checkoutBooking}. */
+  provenance?: BookingMethodProvenance;
+  /**
+   * The booking's slices, so a batch that scanned some rows and ticked others
+   * before closing the booking reads "scanned and selected" rather than one of
+   * the two. The one-click actions pass none.
+   */
+  bookingSliceIds?: readonly BatchSliceId[];
 }) {
   // Create status transition note. `organizationId` is required by
   // the hardened signature merged from `main` (cross-org safety
@@ -2017,12 +3512,9 @@ async function runCheckoutSideEffects({
       toStatus: effectiveStatus,
       userId,
       custodianUserId: bookingFound.custodianUserId || undefined,
+      methodClause: bookingMethodClause(provenance, bookingSliceIds),
     });
   }
-
-  /** Calculate the time difference between the booking.to and the current time */
-  const { hours } = calcTimeDifference(effectiveTo!, new Date());
-  const lessThanOneHourToCheckin = hours < 1;
 
   /** We cancel just in case there is something pending */
   await cancelScheduler(bookingFound);
@@ -2063,12 +3555,26 @@ export async function checkoutBooking({
   from,
   to,
   userId,
+  provenance,
+  sourceLocations,
 }: Pick<Booking, "id" | "organizationId"> & {
   hints: ClientHint;
   intentChoice?: CheckoutIntentEnum;
   from?: Date | null;
   to?: Date | null;
   userId?: string;
+  /**
+   * How and from where the check-out was made. Recorded on every
+   * `BOOKING_CHECKED_OUT` event and said on the booking's activity line. The
+   * routes always pass it; the one-click actions are `method: "quick"`.
+   */
+  provenance?: BookingMethodProvenance;
+  /**
+   * Where each pool's units come from, keyed by slice or asset id. Only
+   * pools at two or more placements are asked; anything missing resolves to
+   * the default (see {@link recordCheckoutSourceLocations}).
+   */
+  sourceLocations?: SourceLocationSubmission;
 }) {
   try {
     const bookingFound = await db.booking
@@ -2111,6 +3617,21 @@ export async function checkoutBooking({
         });
       });
 
+    // Not a reported finding — the twin of D084 on the check-out side, swept
+    // in because it is the same missing guard. Unlocked early exit; the
+    // authoritative locked check runs inside the write transaction below.
+    // Deliberately rejects only the
+    // CLOSED statuses: an existing pinned test checks out a DRAFT booking, so
+    // narrowing this to RESERVED would be a behaviour change rather than a
+    // fix. Re-running a FULL checkout on an ONGOING booking is a separate
+    // integrity problem (it re-processes every asset and duplicates events)
+    // and is left alone here for the same reason.
+    assertBookingIsOpen({
+      status: bookingFound.status,
+      operation: "check out",
+      bookingId: id,
+    });
+
     // SECURITY (defense-in-depth): reject checkout if any attached asset is
     // not in this org BEFORE any asset-derived logic runs. A legacy
     // pre-remediation cross-org link would otherwise (a) leak the foreign
@@ -2126,6 +3647,15 @@ export async function checkoutBooking({
         organizationId,
       });
     }
+
+    // Backstop for issue #382: an archived asset is out of service and must
+    // never go out, however it reached this booking.
+    await assertAssetsAreNotArchived({
+      assetIds: bookingFoundAssetIds,
+      organizationId,
+      fix: "remove-from-booking",
+      actorUserId: userId,
+    });
 
     /** Server-side conflict validation to prevent race conditions */
     if (from && to && bookingFound.bookingAssets) {
@@ -2155,6 +3685,15 @@ export async function checkoutBooking({
         });
       }
     }
+
+    await assertKitsNotBookedElsewhere({
+      slices: bookingFound.bookingAssets,
+      bookingId: id,
+      from,
+      to,
+      organizationId,
+      action: "check out booking",
+    });
 
     /**
      * Server-side validation: Block checkout if any INDIVIDUAL asset is
@@ -2197,8 +3736,15 @@ export async function checkoutBooking({
      * (other booking checkouts, direct custody assignments, quantity
      * adjustments) that could oversubscribe the same physical pool.
      */
-    const qtyTrackedBookingAssets = bookingFound.bookingAssets.filter((ba) =>
-      isQuantityTracked(ba.asset)
+    // Only STANDALONE (free-pool) slices are validated against `bookable` —
+    // kit-driven slices draw from the kit's fixed allocation, which is already
+    // reserved out of `bookable` via `inKits`. Counting them here would
+    // double-charge those units against the standalone pool and wrongly block
+    // checkout of a booking whose kit legitimately owns them (#2790: Boards had
+    // 4 standalone + 3+3 in kits → "requested 10, only 4 available"). Mirrors
+    // the reserve path's identical `assetKitId == null` filter above (Codex P1).
+    const qtyTrackedBookingAssets = bookingFound.bookingAssets.filter(
+      (ba) => isQuantityTracked(ba.asset) && ba.assetKitId == null
     );
 
     /**
@@ -2213,11 +3759,14 @@ export async function checkoutBooking({
     };
 
     /**
-     * Get the kitIds because we need them to update their status later on
+     * The kits this check-out takes off the shelf, so their status can be
+     * stamped below. Resolved per slice: a kit is out only when the booking
+     * holds its own units. See {@link getKitIdsToAcquire}.
      */
-    const kitIds = getKitIdsByAssets(
-      bookingFound.bookingAssets.map((ba) => ba.asset)
-    );
+    const kitIds = await getKitIdsToAcquire({
+      slices: bookingFound.bookingAssets,
+      organizationId,
+    });
     const hasKits = kitIds.length > 0;
 
     const isEarlyCheckout = isBookingEarlyCheckout(bookingFound.from!);
@@ -2230,8 +3779,8 @@ export async function checkoutBooking({
       isEarlyCheckout &&
       intentChoice === CheckoutIntentEnum["with-adjusted-date"]
     ) {
-      // Update originalFrom to old `from` date of booking
-      dataToUpdate.originalFrom = bookingFound.from;
+      // Keep the planned start intact; only seeds rows predating the column.
+      dataToUpdate.originalFrom = plannedStartToPreserve(bookingFound);
 
       // Update `from` date to current date
       const fromDateStr = DateTime.fromJSDate(new Date(), {
@@ -2292,8 +3841,29 @@ export async function checkoutBooking({
 
     await db.$transaction(
       async (tx) => {
+        // Authoritative status check. The pre-transaction assert above is a
+        // cheap early exit; THIS one is the one that holds, because it locks
+        // the row and the lock is kept until this transaction commits.
+        //
+        // The race is not theoretical: cancelling a RESERVED booking from
+        // another tab while this checkout is in flight would otherwise leave a
+        // CANCELLED booking whose assets are all CHECKED_OUT.
+        const lockedStatus = await lockBookingForStatusCheck(
+          tx,
+          id,
+          organizationId
+        );
+        assertBookingIsOpen({
+          status: lockedStatus,
+          operation: "check out",
+          bookingId: id,
+        });
+
         await checkoutBookingWritesWithinTx(tx, {
           bookingId: bookingFound.id,
+          // The status this transaction holds, not the pre-transaction read:
+          // it decides whether the model-reservation guard runs.
+          bookingStatus: lockedStatus,
           // SECURITY (cross-org IDOR): the helper scopes the asset/kit
           // status mutations to this org so a foreign asset id that slipped
           // into the booking's list can never be flipped.
@@ -2304,6 +3874,12 @@ export async function checkoutBooking({
           dataToUpdate,
           kitIds,
           hasKits,
+          // Booking's own committed window — windows the QT availability
+          // guard (see the doc comment on `checkoutBookingWritesWithinTx`).
+          from: bookingFound.from,
+          to: bookingFound.to,
+          checkedOutById: userId ?? null,
+          sourceLocations,
         });
 
         // Activity events — one BOOKING_CHECKED_OUT per asset on the
@@ -2324,7 +3900,18 @@ export async function checkoutBooking({
                 entityId: bookingFound.id,
                 bookingId: bookingFound.id,
                 assetId,
-                meta: asset ? assetQtyMeta(asset, totalQty) : {},
+                meta: {
+                  ...(asset ? assetQtyMeta(asset, totalQty) : {}),
+                  // A batch that closes the booking through this path may have
+                  // ticked one of the asset's slices and scanned another, so
+                  // the asset's event resolves over all of its slices.
+                  ...bookingMethodMeta(
+                    provenance,
+                    bookingFound.bookingAssets
+                      .filter((ba) => ba.asset.id === assetId)
+                      .map((ba) => ba.id)
+                  ),
+                },
               };
             }),
             tx
@@ -2334,22 +3921,13 @@ export async function checkoutBooking({
       { timeout: 15000 }
     );
 
-    /** Build effective post-checkout values by merging bookingFound with any
-     * fields modified by dataToUpdate (adjusted dates, status). This avoids
-     * re-reading from the DB and ensures downstream logic (notes, scheduling)
-     * uses the correct post-checkout values. */
-    const effectiveFrom =
-      (dataToUpdate.from as Date | undefined) ?? bookingFound.from;
+    /** The post-checkout values, taken from `dataToUpdate` where it changed
+     * them and from `bookingFound` otherwise. Avoids re-reading the row, and
+     * keeps downstream logic (notes, scheduling) on post-checkout truth. */
     const effectiveTo =
       (dataToUpdate.to as Date | undefined) ?? bookingFound.to;
     const effectiveStatus =
       (dataToUpdate.status as BookingStatus) ?? bookingFound.status;
-    const effectiveBooking = {
-      ...bookingFound,
-      from: effectiveFrom,
-      to: effectiveTo,
-      status: effectiveStatus,
-    };
 
     // Extracted to a shared helper so `fulfilModelRequestsAndCheckout`
     // can run the same post-commit work (status transition note,
@@ -2363,11 +3941,12 @@ export async function checkoutBooking({
       bookingFound,
       userId,
       effectiveStatus,
-      effectiveBooking,
       effectiveTo,
       hints,
       organizationId,
       isExpired,
+      provenance,
+      bookingSliceIds: bookingFound.bookingAssets.map((ba) => ba.id),
     });
   } catch (cause) {
     throw new ShelfError({
@@ -2381,26 +3960,22 @@ export async function checkoutBooking({
 }
 
 /**
- * Combined service that fulfils outstanding `BookingModelRequest` rows via
- * scanned assets AND transitions the booking from RESERVED to
+ * Combined service that assigns scanned assets to the booking's outstanding
+ * `BookingModelRequest` rows AND transitions the booking from RESERVED to
  * ONGOING/OVERDUE in a single atomic transaction.
  *
- * Used by the fulfil-and-checkout drawer — the operator
- * scans the assets that satisfy their model-level reservations, optionally
- * adds off-model scans that get checked out along with everything else,
- * and clicks Check Out. The route action then delegates here instead of
- * calling `addScannedAssetsToBooking` + `checkoutBooking` sequentially,
- * because a sequential call pattern would leak half-materialised state if
- * availability validation failed AFTER requests had already been drained.
+ * Every item on the booking goes out, scanned or already assigned. Reserved
+ * units that no scan covered stay open on the ongoing booking; the only
+ * refusal for completeness is a booking left with no items at all.
+ *
+ * Called by `fulfilAndCheckOut` when the explicit check-out requirement does
+ * not apply.
  *
  * Atomicity guarantees (all-or-nothing):
  *   - `BookingModelRequest` decrements (via `materializeModelRequestForAsset`)
  *   - `BookingAsset` row creation for the scanned assets
  *   - Booking `from`/`originalFrom` adjustment for early checkout
  *   - Booking status transition + kit/asset CHECKED_OUT flags
- *   - Outstanding-request guard (defence in depth — the drawer also
- *     blocks submit while any `remaining > 0`, but the server enforces
- *     independently in case the payload is tampered with)
  *   - QUANTITY_TRACKED availability guard (with row locks against
  *     concurrent checkouts)
  *
@@ -2420,13 +3995,14 @@ export async function checkoutBooking({
  * @param args.organizationId - Organisation scope for all reads/writes
  * @param args.userId - User performing the scan + checkout (attribution for notes + materialised logs)
  * @param args.assetIds - Scanned asset IDs (QRs resolved to assets). May include off-model scans; those bypass the model-request drain and land as direct BookingAssets.
- * @param args.kitIds - Optional scanned kit IDs. Kits don't participate in model requests (out of scope for Book-by-Model), so this is forwarded purely for note attribution + kit status sync.
+ * @param args.kitIds - Optional scanned kit IDs, forwarded for note attribution + kit status sync. The members that land on the booking come from `kitSlices`, not from these ids.
+ * @param args.kitSlices - Optional kit-driven slice specs for those kits. Their INDIVIDUAL members discharge matching model requests like any other unit of their model.
  * @param args.checkoutIntentChoice - If `"with-adjusted-date"` and the booking is an early checkout, `booking.from` is rewritten to "now" and the original value preserved on `booking.originalFrom`. Same semantics as `checkoutBooking`'s `intentChoice`.
  * @param args.hints - Client hints used for scheduler timestamps + check-in reminder emails post-commit.
  * @param args.from - Optional booking.from for conflict detection (mirrors `checkoutBooking`'s pre-tx conflict guard).
  * @param args.to - Optional booking.to for conflict detection.
  * @returns The hydrated booking with reservation-email includes (same shape as `checkoutBooking`).
- * @throws {ShelfError} 400 if any model request remains unfulfilled after scanning (drawer also guards, server enforces).
+ * @throws {ShelfError} 400 if the booking holds no items after the scan.
  * @throws {ShelfError} 400 if any QUANTITY_TRACKED asset lacks pool availability.
  * @throws {ShelfError} If any asset is in custody / conflicted with another booking window.
  */
@@ -2436,20 +4012,38 @@ export async function fulfilModelRequestsAndCheckout({
   userId,
   assetIds,
   kitIds = [],
+  kitSlices = [],
   checkoutIntentChoice,
   hints,
   from,
   to,
+  provenance,
+  sourceLocations,
 }: {
   bookingId: Booking["id"];
   organizationId: Booking["organizationId"];
   userId: string;
   assetIds: Asset["id"][];
   kitIds?: string[];
+  /**
+   * Kit-driven slice specs for the scanned kits — one per `AssetKit`
+   * membership. Resolved by the caller with {@link buildKitSlicesForBooking}
+   * so memberships already on the booking are skipped and the org scope is
+   * proven before anything is written.
+   */
+  kitSlices?: ScannedKitSliceSpec[];
   checkoutIntentChoice?: CheckoutIntentEnum;
   hints: ClientHint;
   from?: Date | null;
   to?: Date | null;
+  /** How the scan was made; see {@link checkoutBooking}. */
+  provenance?: BookingMethodProvenance;
+  /**
+   * Where each pool's units come from. Keyed by asset id when the scan adds
+   * the slice in this same request (the slice id does not exist yet), or by
+   * slice id for slices already on the booking.
+   */
+  sourceLocations?: SourceLocationSubmission;
 }) {
   try {
     /**
@@ -2522,6 +4116,15 @@ export async function fulfilModelRequestsAndCheckout({
       }
     }
 
+    await assertKitsNotBookedElsewhere({
+      slices: bookingFound.bookingAssets,
+      bookingId,
+      from,
+      to,
+      organizationId,
+      action: "check out booking",
+    });
+
     /**
      * Server-side validation: Block checkout if any INDIVIDUAL asset is
      * in custody. QUANTITY_TRACKED is exempt — see the parallel guard in
@@ -2571,8 +4174,8 @@ export async function fulfilModelRequestsAndCheckout({
       isEarlyCheckout &&
       checkoutIntentChoice === CheckoutIntentEnum["with-adjusted-date"]
     ) {
-      // Update originalFrom to old `from` date of booking
-      dataToUpdate.originalFrom = bookingFound.from;
+      // Keep the planned start intact; only seeds rows predating the column.
+      dataToUpdate.originalFrom = plannedStartToPreserve(bookingFound);
 
       // Update `from` date to current date (timezone-aware, matching
       // `checkoutBooking`)
@@ -2591,9 +4194,18 @@ export async function fulfilModelRequestsAndCheckout({
      * kits on the booking so kit status reflects reality after commit
      * (matches `checkoutBooking`'s behaviour).
      */
-    const preExistingKitIds = getKitIdsByAssets(
-      bookingFound.bookingAssets.map((ba) => ba.asset)
-    );
+    const preExistingKitIds = await getKitIdsToAcquire({
+      slices: bookingFound.bookingAssets,
+      organizationId,
+    });
+
+    /** The assets the scan actually put on the booking, for the notes below. */
+    let addedAssetIds: string[] = [];
+    /**
+     * Assets whose row was already on the booking and answered a reservation
+     * when scanned. They went through the scanner without gaining a row.
+     */
+    let claimedAssetIds: string[] = [];
 
     /**
      * Single atomic transaction:
@@ -2601,24 +4213,56 @@ export async function fulfilModelRequestsAndCheckout({
      *      + create `BookingAsset` rows (shared helper).
      *   2. Re-read bookingAssets inside the tx so the checkout writes
      *      operate on the post-scan snapshot (includes the scanned rows).
-     *   3. Run the checkout writes (outstanding guard, qty availability,
+     *   3. Run the checkout writes (at-least-one-item guard, qty availability,
      *      status flips) via the shared helper.
      *
-     * If any guard throws — unfulfilled requests, insufficient pool,
+     * If any guard throws — no items to check out, insufficient pool,
      * unique constraint on an already-added asset — the whole tx rolls
      * back: the scanned materialisations, the BookingAsset rows, the
      * early-date adjustment, and the status transition are all reverted
      * together.
      */
+    // Whether the scan named every row that went out, set inside the
+    // transaction. The activity line names the batch's method only then: a
+    // row the scan did not name is recorded with its method not said, and the
+    // line must not claim it was scanned.
+    let everyRowScanned = true;
     await db.$transaction(
       async (tx) => {
-        await addScannedAssetsToBookingWithinTx(tx, {
+        // Hold the booking and its model requests for the rest of the
+        // transaction, so the assignment below cannot interleave with a
+        // concurrent check-out or reservation edit on the same booking. The
+        // booking's lock comes from the shared helper, which returns the status
+        // it locked: read any other way it is a pre-lock snapshot, and the
+        // model-reservation guard downstream keys off whether this is a draft.
+        const lockedStatus = await lockBookingForStatusCheck(
+          tx,
+          bookingId,
+          organizationId
+        );
+        // Models before request rows. The reservation writers lock the model
+        // first and hold no booking lock, so taking the request rows first
+        // inverts that pair and deadlocks the two transactions against each
+        // other. The check-out guard downstream locks the same models; a row
+        // this transaction already holds re-locks for free.
+        await lockModelsForOutstandingRequests(tx, {
+          bookingId,
+          organizationId,
+        });
+        await tx.$queryRaw`SELECT id FROM "BookingModelRequest" WHERE "bookingId" = ${bookingId} FOR UPDATE`;
+
+        const scanResult = await addScannedAssetsToBookingWithinTx(tx, {
           assetIds,
           kitIds,
+          kitSlices,
           bookingId,
           organizationId,
           userId,
         });
+        // Read post-commit, for the notes below. A scan that only claimed a
+        // unit already on the booking added nothing to narrate.
+        addedAssetIds = scanResult.addedAssetIds;
+        claimedAssetIds = scanResult.claimedAssetIds;
 
         /**
          * Post-scan snapshot of every booking asset that needs
@@ -2628,7 +4272,14 @@ export async function fulfilModelRequestsAndCheckout({
         const postScanBookingAssets = await tx.bookingAsset.findMany({
           where: { bookingId },
           select: {
+            id: true,
+            // The kit a kit-driven slice came from, so a scanned kit label
+            // marks its members' rows as scanned below.
+            sourceKitId: true,
             quantity: true,
+            // Needed to exclude kit-driven slices from the standalone
+            // availability guard below (#2790) — see the filter's rationale.
+            assetKitId: true,
             asset: {
               // `unitOfMeasure` is widened so per-row BOOKING_CHECKED_OUT
               // events can carry `meta.quantity` via assetQtyMeta.
@@ -2642,8 +4293,12 @@ export async function fulfilModelRequestsAndCheckout({
           },
         });
 
-        const qtyTrackedBookingAssets = postScanBookingAssets.filter((ba) =>
-          isQuantityTracked(ba.asset)
+        // Standalone slices only — kit-driven units are reserved out of
+        // `bookable` via `inKits`, so validating them here double-charges the
+        // free pool and wrongly blocks checkout (#2790). Mirrors the reserve
+        // path and the non-scan checkout path above.
+        const qtyTrackedBookingAssets = postScanBookingAssets.filter(
+          (ba) => isQuantityTracked(ba.asset) && ba.assetKitId == null
         );
         const uniqueQtyTrackedAssetIds = Array.from(
           new Set(qtyTrackedBookingAssets.map((ba) => ba.asset.id))
@@ -2662,12 +4317,22 @@ export async function fulfilModelRequestsAndCheckout({
         await checkoutBookingWritesWithinTx(tx, {
           bookingId,
           organizationId,
+          // Read under the booking's row lock above, so a concurrent reserve
+          // cannot make a booking that is already claiming its pool look like a
+          // draft to the model-reservation guard.
+          bookingStatus: lockedStatus,
           bookingAssetIds: allBookingAssetIds,
           qtyTrackedBookingAssets,
           uniqueQtyTrackedAssetIds,
           dataToUpdate,
           kitIds: unionKitIds,
           hasKits,
+          // Booking's own committed window — windows the QT availability
+          // guard (see the doc comment on `checkoutBookingWritesWithinTx`).
+          from: bookingFound.from,
+          to: bookingFound.to,
+          checkedOutById: userId ?? null,
+          sourceLocations,
         });
 
         /**
@@ -2683,6 +4348,19 @@ export async function fulfilModelRequestsAndCheckout({
           // One event per BookingAsset ROW (not deduped). For multi-row
           // qty-tracked, each event carries that row's own quantity in
           // `meta.quantity` (no-op for INDIVIDUAL).
+          // A row went through the scanner when the scan named that row: see
+          // `scannedRowPredicate` for how a quantity asset's sibling slices
+          // are told apart. Rows the scan did not name go out with the batch
+          // unscanned, so their method is recorded as not said rather than as
+          // the batch's.
+          const wasScanned = scannedRowPredicate({
+            assetIds,
+            kitSlices,
+            kitIds,
+            addedAssetIds,
+            claimedAssetIds,
+          });
+          everyRowScanned = postScanBookingAssets.every(wasScanned);
           await recordEvents(
             postScanBookingAssets.map((ba) => ({
               organizationId,
@@ -2692,7 +4370,15 @@ export async function fulfilModelRequestsAndCheckout({
               entityId: bookingId,
               bookingId,
               assetId: ba.asset.id,
-              meta: assetQtyMeta(ba.asset, ba.quantity),
+              meta: {
+                ...assetQtyMeta(ba.asset, ba.quantity),
+                ...bookingMethodMeta(
+                  provenance && !wasScanned(ba)
+                    ? { ...provenance, method: null }
+                    : provenance,
+                  [ba.id]
+                ),
+              },
             })),
             tx
           );
@@ -2701,40 +4387,35 @@ export async function fulfilModelRequestsAndCheckout({
       { timeout: 15000 }
     );
 
-    /** Post-commit: activity notes for the scanned assets + kits */
+    /** Post-commit: activity notes for the assets that actually arrived */
     await createNotesForScannedAssetsAndKits({
       booking: { id: bookingFound.id, name: bookingFound.name },
-      assetIds,
+      assetIds: addedAssetIds,
       kitIds,
       organizationId,
       userId,
     });
 
-    /** Build an effective snapshot so the status-transition note + email
-     * scheduler see the post-checkout truth without re-reading the row. */
-    const effectiveFrom =
-      (dataToUpdate.from as Date | undefined) ?? bookingFound.from;
+    /** The post-checkout values, so the status-transition note and the email
+     * scheduler see post-checkout truth without re-reading the row. */
     const effectiveTo =
       (dataToUpdate.to as Date | undefined) ?? bookingFound.to;
     const effectiveStatus =
       (dataToUpdate.status as BookingStatus) ?? bookingFound.status;
-    const effectiveBooking = {
-      ...bookingFound,
-      from: effectiveFrom,
-      to: effectiveTo,
-      status: effectiveStatus,
-    };
 
     /** Post-commit checkout side-effects shared with `checkoutBooking` */
     return await runCheckoutSideEffects({
       bookingFound,
       userId,
       effectiveStatus,
-      effectiveBooking,
       effectiveTo,
       hints,
       organizationId,
       isExpired,
+      provenance:
+        provenance && !everyRowScanned
+          ? { ...provenance, method: null }
+          : provenance,
     });
   } catch (cause) {
     throw new ShelfError({
@@ -2779,6 +4460,62 @@ const CHECKIN_DISPOSITION_CATEGORIES = [
 ] as const;
 
 /**
+ * Whether a `ConsumptionLog.category` is one of the check-in dispositions in
+ * {@link CHECKIN_DISPOSITION_CATEGORIES}.
+ *
+ * @param category - Any consumption log category
+ * @returns True for RETURN, CONSUME, LOSS and DAMAGE
+ */
+function isCheckinDispositionCategory(
+  category: string
+): category is (typeof CHECKIN_DISPOSITION_CATEGORIES)[number] {
+  return (CHECKIN_DISPOSITION_CATEGORIES as readonly string[]).includes(
+    category
+  );
+}
+
+/**
+ * The {@link DispositionCategoryBreakdown} field each disposition category
+ * fills. Every category in {@link CHECKIN_DISPOSITION_CATEGORIES} needs an
+ * entry, or its units silently drop out of every breakdown built from it.
+ */
+const CATEGORY_FIELD = {
+  RETURN: "returned",
+  CONSUME: "consumed",
+  LOSS: "lost",
+  DAMAGE: "damaged",
+} as const satisfies Record<
+  (typeof CHECKIN_DISPOSITION_CATEGORIES)[number],
+  keyof DispositionCategoryBreakdown
+>;
+
+/**
+ * Units a slice actually sent out on its booking.
+ *
+ * Whether a slice left is answered by its own `checkedOutAt` and nothing else:
+ * {@link computeBookingAssetsSliceRemainingToCheckOut} reports a slice with no
+ * session claims as fully dispatched whenever the booking is live and the
+ * ASSET reads CHECKED_OUT, and that status is global, so a sibling slice being
+ * out is enough to trigger it. A slice that never left sent nothing.
+ *
+ * A slice marked out that the sessions cannot size falls back to its booked
+ * quantity, the direction that keeps its kit held while the two disagree.
+ *
+ * @param slice - The slice's booked quantity and its check-out marker
+ * @param remainingToCheckOut - What the slice can still check out, from
+ *   {@link computeBookingAssetsSliceRemainingToCheckOut}
+ * @returns Units the slice sent out, at most its booked quantity
+ */
+export function unitsSentOutOnSlice(
+  slice: { quantity: number; checkedOutAt: Date | null },
+  remainingToCheckOut: number
+): number {
+  if (!slice.checkedOutAt) return 0;
+  const dispatched = slice.quantity - remainingToCheckOut;
+  return dispatched > 0 ? dispatched : slice.quantity;
+}
+
+/**
  * Returns how many units of a QUANTITY_TRACKED asset still need to be
  * accounted for in a booking.
  *
@@ -2796,76 +4533,12 @@ const CHECKIN_DISPOSITION_CATEGORIES = [
  * @param bookingId - Booking to measure against
  * @param assetId - Asset whose remaining quantity we want
  */
-/**
- * Distributes a (booking, asset) pair's ConsumptionLog dispositions
- * across its BookingAsset rows for per-row "logged" reads.
- *
- * Logs with a non-null `bookingAssetId` are attributed exactly to
- * that row (the Polish-6+ contract). Logs with `bookingAssetId IS NULL`
- * (legacy rows + back-compat callers) are greedy-filled: kit-driven
- * rows first by `createdAt`, then standalone rows by `createdAt`, each
- * taking up to its booked quantity until the legacy pool is exhausted.
- *
- * Kit-driven slices fill first because they were created via an
- * automated path (kit add) that the user is unlikely to be returning
- * units against ad-hoc; attribute their fixed allocation as "done"
- * before opening the more flexible standalone pool.
- *
- * Returns a Map<bookingAssetId, dispositionedQuantity>. Rows with no
- * attribution are present in the map with `0`.
- *
- * Pure derivation — no DB calls. Caller pre-fetches the rows and logs.
- */
-export function attributeDispositionsByBookingAsset(args: {
-  bookingAssetRows: Array<{
-    id: string;
-    quantity: number;
-    assetKitId: string | null;
-  }>;
-  consumptionLogs: Array<{
-    bookingAssetId: string | null;
-    quantity: number;
-  }>;
-}): Map<string, number> {
-  const { bookingAssetRows, consumptionLogs } = args;
-  const out = new Map<string, number>();
-  for (const row of bookingAssetRows) out.set(row.id, 0);
-
-  let legacyPool = 0;
-  for (const log of consumptionLogs) {
-    if (log.bookingAssetId) {
-      out.set(
-        log.bookingAssetId,
-        (out.get(log.bookingAssetId) ?? 0) + (log.quantity ?? 0)
-      );
-    } else {
-      legacyPool += log.quantity ?? 0;
-    }
-  }
-
-  if (legacyPool === 0) return out;
-
-  // Greedy fill: kit-driven first, then standalone. Within each bucket,
-  // sort by `id` ascending — BookingAsset.id is a cuid, which is
-  // chronologically sortable (creation-time prefix), so this stands in
-  // for "by createdAt" without needing the column on the model.
-  const ordered = [...bookingAssetRows].sort((a, b) => {
-    const aIsKit = a.assetKitId != null;
-    const bIsKit = b.assetKitId != null;
-    if (aIsKit !== bIsKit) return aIsKit ? -1 : 1;
-    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-  });
-  for (const row of ordered) {
-    if (legacyPool === 0) break;
-    const already = out.get(row.id) ?? 0;
-    const capacity = Math.max(0, row.quantity - already);
-    if (capacity === 0) continue;
-    const take = Math.min(capacity, legacyPool);
-    out.set(row.id, already + take);
-    legacyPool -= take;
-  }
-  return out;
-}
+// `attributeDispositionsByBookingAsset` now lives in `./checkout-attribution`
+// (next to the parser that feeds it) so pure read sites can import it without
+// this heavyweight module. It is imported above for the internal call sites
+// below and re-exported here so existing `~/modules/booking/service.server`
+// import sites (routes, tests) keep working unchanged.
+export { attributeDispositionsByBookingAsset };
 
 /** Per-category disposition split for a single BookingAsset row. */
 export type DispositionCategoryBreakdown = {
@@ -2918,13 +4591,6 @@ export function attributeCategorizedDispositionsByBookingAsset(args: {
     runningTotal.set(row.id, 0);
   }
 
-  const CATEGORY_FIELD = {
-    RETURN: "returned",
-    CONSUME: "consumed",
-    LOSS: "lost",
-    DAMAGE: "damaged",
-  } as const;
-
   // Exact pass: logs that already know their slice land precisely.
   const legacyByCategory = new Map<string, number>();
   for (const log of consumptionLogs) {
@@ -2943,13 +4609,17 @@ export function attributeCategorizedDispositionsByBookingAsset(args: {
     }
   }
 
-  // Greedy pass: fill legacy pool category-by-category, kit-driven rows
-  // first, respecting the SHARED running total so a row never exceeds
-  // its booked quantity across all categories combined.
+  // Greedy pass: fill legacy pool category-by-category, standalone rows
+  // first (loose items are scanned/returned individually; kits are handled
+  // as a whole), then kit-driven — consistent with
+  // {@link attributeDispositionsByBookingAsset}'s check-out fallback so both
+  // surfaces credit the same slice for identical untagged data. Respects the
+  // SHARED running total so a row never exceeds its booked quantity across
+  // all categories combined.
   const ordered = [...bookingAssetRows].sort((a, b) => {
     const aIsKit = a.assetKitId != null;
     const bIsKit = b.assetKitId != null;
-    if (aIsKit !== bIsKit) return aIsKit ? -1 : 1;
+    if (aIsKit !== bIsKit) return aIsKit ? 1 : -1;
     return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
   });
   for (const category of ["RETURN", "CONSUME", "LOSS", "DAMAGE"] as const) {
@@ -2968,6 +4638,133 @@ export function attributeCategorizedDispositionsByBookingAsset(args: {
   }
 
   return breakdown;
+}
+
+/** A check-in disposition category, as `ConsumptionLog.category` stores it. */
+type CheckinDispositionCategory =
+  (typeof CHECKIN_DISPOSITION_CATEGORIES)[number];
+
+/**
+ * Spreads ONE check-in session's dispositions over an asset's slices on a
+ * booking and returns what each slice received, per category.
+ *
+ * A tagged disposition lands on the slice it names. An untagged one (the mobile
+ * check-in names no slice) is spread by
+ * {@link attributeCategorizedDispositionsByBookingAsset}: standalone slices
+ * before kit-driven ones, returns before consumption, loss and damage, each
+ * slice taking what it can still hold.
+ *
+ * What a slice can still hold is measured in two passes. The first measures
+ * against the units the slice actually sent out (`owed`), because a unit used
+ * up in the field can only have come from a slice that left: a standalone slice
+ * that never went out must not absorb units a kit brought back consumed. Units
+ * the first pass cannot place are spread against the booked quantity, the bound
+ * the check-in cap itself enforces, but only over slices that went out: a slice
+ * that never left holds nothing that could have been used up, so it absorbs
+ * nothing in either pass, and its kit keeps its units. Whatever both passes
+ * leave unplaced lands on no slice. In both passes the dispositions of earlier
+ * sessions fill each slice first, spread the same way, so this session only
+ * claims what they left.
+ *
+ * Pure derivation, no DB calls.
+ *
+ * @param args.slices - Every slice of ONE asset on the booking, with its booked
+ *   quantity and the units it sent out
+ * @param args.priorLogs - The asset's dispositions from earlier sessions
+ * @param args.sessionLogs - This session's dispositions for the asset
+ * @returns Map keyed by every slice `id` to this session's breakdown on it
+ */
+export function spreadSessionDispositionsOverSlices(args: {
+  slices: Array<{
+    id: string;
+    assetKitId: string | null;
+    booked: number;
+    owed: number;
+  }>;
+  priorLogs: Array<{ bookingAssetId: string | null; quantity: number }>;
+  sessionLogs: Array<{
+    bookingAssetId: string | null;
+    category: CheckinDispositionCategory;
+    quantity: number;
+  }>;
+}): Map<string, DispositionCategoryBreakdown> {
+  const { slices, priorLogs, sessionLogs } = args;
+
+  /** The slices as attribution rows, each holding `capacity` units. */
+  const rowsHolding = (capacity: (slice: (typeof slices)[number]) => number) =>
+    slices.map((slice) => ({
+      id: slice.id,
+      assetKitId: slice.assetKitId,
+      quantity: Math.max(0, capacity(slice)),
+    }));
+  const total = (breakdown?: DispositionCategoryBreakdown) =>
+    breakdown
+      ? breakdown.returned +
+        breakdown.consumed +
+        breakdown.lost +
+        breakdown.damaged
+      : 0;
+
+  const priorOnOwed = attributeDispositionsByBookingAsset({
+    bookingAssetRows: rowsHolding((slice) => slice.owed),
+    consumptionLogs: priorLogs,
+  });
+  const firstPass = attributeCategorizedDispositionsByBookingAsset({
+    bookingAssetRows: rowsHolding(
+      (slice) => slice.owed - (priorOnOwed.get(slice.id) ?? 0)
+    ),
+    consumptionLogs: sessionLogs,
+  });
+
+  // Tagged logs always land, so anything unplaced is untagged overflow.
+  const leftover: typeof sessionLogs = [];
+  for (const category of CHECKIN_DISPOSITION_CATEGORIES) {
+    const requested = sessionLogs
+      .filter((log) => log.category === category)
+      .reduce((sum, log) => sum + log.quantity, 0);
+    const placed = [...firstPass.values()].reduce(
+      (sum, breakdown) => sum + breakdown[CATEGORY_FIELD[category]],
+      0
+    );
+    if (requested > placed) {
+      leftover.push({
+        bookingAssetId: null,
+        category,
+        quantity: requested - placed,
+      });
+    }
+  }
+  if (leftover.length === 0) return firstPass;
+
+  /** Booked capacity, for the slices that went out. */
+  const bookedIfSentOut = (slice: (typeof slices)[number]) =>
+    slice.owed > 0 ? slice.booked : 0;
+  const priorOnBooked = attributeDispositionsByBookingAsset({
+    bookingAssetRows: rowsHolding(bookedIfSentOut),
+    consumptionLogs: priorLogs,
+  });
+  const secondPass = attributeCategorizedDispositionsByBookingAsset({
+    bookingAssetRows: rowsHolding(
+      (slice) =>
+        bookedIfSentOut(slice) -
+        (priorOnBooked.get(slice.id) ?? 0) -
+        total(firstPass.get(slice.id))
+    ),
+    consumptionLogs: leftover,
+  });
+
+  const spread = new Map<string, DispositionCategoryBreakdown>();
+  for (const slice of slices) {
+    const first = firstPass.get(slice.id);
+    const second = secondPass.get(slice.id);
+    spread.set(slice.id, {
+      returned: (first?.returned ?? 0) + (second?.returned ?? 0),
+      consumed: (first?.consumed ?? 0) + (second?.consumed ?? 0),
+      lost: (first?.lost ?? 0) + (second?.lost ?? 0),
+      damaged: (first?.damaged ?? 0) + (second?.damaged ?? 0),
+    });
+  }
+  return spread;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -3051,6 +4848,194 @@ export async function computeBookingAssetSliceRemaining(
 }
 
 /**
+ * Minimal Prisma surface the batched checkout "remaining" helpers touch. Both
+ * the extended top-level client (`db`) and an interactive transaction client
+ * satisfy this structurally, so callers can pass either without a cast — mirrors
+ * the `OrgValidationTxClient` / `RecordEventTxClient` pattern used elsewhere for
+ * the extended client, whose interactive-tx type does not reduce to the
+ * generated `Prisma.TransactionClient`.
+ */
+type CheckoutRemainingTxClient = Pick<
+  ExtendedPrismaClient,
+  "bookingAsset" | "partialBookingCheckout" | "booking"
+>;
+
+/**
+ * Batched sibling of {@link computeBookingAssetRemainingToCheckOut}: computes
+ * the still-checkoutable remaining for MANY assets on ONE booking in a FIXED
+ * three queries total, regardless of how many assets are requested.
+ *
+ * The singular helper fires three round-trips (per-asset pivots + ALL sessions
+ * + booking status) on every call. The sessions and booking status are
+ * BOOKING-level — identical for every asset — so calling the singular helper
+ * inside a per-asset loop makes an interactive transaction do `O(3·M)`
+ * sequential reads. On large bookings that blows the default 5s transaction
+ * timeout and rolls the whole partial checkout back (Sentry SHELF-WEBAPP-217).
+ * This batched core fetches the booking-level inputs ONCE and derives each
+ * asset's remaining in memory instead.
+ *
+ * Per-asset semantics are byte-for-byte identical to the singular helper:
+ * `Σ(BookingAsset.quantity for the asset) − Σ(PartialBookingCheckout claims for
+ * the asset)`, floored at 0, INCLUDING the all-at-once fallback
+ * (booked > 0, no claims for the asset, every slice of it on this booking
+ * carries `checkedOutAt`, booking ONGOING/OVERDUE ⇒ remaining 0). The
+ * shared positional parser {@link checkoutSessionsToLogsByAsset} is reused with
+ * a set-membership predicate so the aligned/legacy quantity handling and the
+ * `""` → greedy sentinel match every other read site.
+ *
+ * @param tx - Prisma transaction client (or the default `db` client)
+ * @param bookingId - Booking the assets belong to
+ * @param assetIds - Assets to measure (deduped internally). Ids not actually on
+ *                   the booking resolve to `0` (never on the booking → nothing
+ *                   to check out).
+ * @returns Map keyed by every requested `assetId` → non-negative remaining
+ *          units still checkoutable for that asset on this booking
+ */
+export async function computeBookingAssetsRemainingToCheckOut(
+  tx: CheckoutRemainingTxClient,
+  bookingId: Booking["id"],
+  assetIds: Asset["id"][]
+): Promise<Map<string, number>> {
+  const uniqueAssetIds = [...new Set(assetIds)];
+  const remainingByAsset = new Map<string, number>();
+  // Nothing requested → nothing to read. Early-return so callers can invoke
+  // this unconditionally (e.g. an INDIVIDUAL-only batch has no qty assets to
+  // measure) without paying for a pointless round-trip.
+  if (uniqueAssetIds.length === 0) {
+    return remainingByAsset;
+  }
+
+  const requestedSet = new Set(uniqueAssetIds);
+
+  const [pivots, sessions, booking] = await Promise.all([
+    tx.bookingAsset.findMany({
+      where: { bookingId, assetId: { in: uniqueAssetIds } },
+      // Each slice with its markers: the all-at-once fallback below is
+      // decided per slice (see `computeSlicesRemainingToCheckOut`).
+      select: {
+        id: true,
+        assetId: true,
+        quantity: true,
+        assetKitId: true,
+        checkedOutAt: true,
+        checkedInAt: true,
+      },
+    }),
+    tx.partialBookingCheckout.findMany({
+      where: { bookingId },
+      select: { assetIds: true, quantities: true, bookingAssetIds: true },
+    }),
+    // Cheap PK read — needed only so the legacy all-at-once fallback below can
+    // distinguish "checked out via all-at-once (no PBC rows by design)" from
+    // "RESERVED, not yet touched". Mirrors the singular helper exactly.
+    tx.booking.findUnique({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: pure read helper called from already-org-scoped contexts (the bookingId was resolved by callers via an org-scoped findUniqueOrThrow). Only reads non-sensitive `status` metadata. Mirrors computeBookingAssetRemainingToCheckOut.
+      where: { id: bookingId },
+      select: { status: true },
+    }),
+  ]);
+
+  type PivotSlice = {
+    id: string;
+    quantity: number;
+    assetKitId: string | null;
+    checkedOutAt: Date | null;
+    checkedInAt: Date | null;
+  };
+  // Booked total and slices per requested asset.
+  const bookedByAsset = new Map<string, number>();
+  const slicesByAsset = new Map<string, PivotSlice[]>();
+  const pivotRows = pivots as Array<{
+    id?: string;
+    assetId?: string;
+    quantity: number;
+    assetKitId?: string | null;
+    checkedOutAt?: Date | null;
+    checkedInAt?: Date | null;
+  }>;
+  pivotRows.forEach((p, index) => {
+    // The query is filtered to the requested assets. With a single one, every
+    // row provably belongs to it, so a row need not project its own `assetId`.
+    const assetId =
+      uniqueAssetIds.length === 1 ? uniqueAssetIds[0] : p.assetId ?? "";
+    bookedByAsset.set(
+      assetId,
+      (bookedByAsset.get(assetId) ?? 0) + (p.quantity ?? 0)
+    );
+    const list = slicesByAsset.get(assetId) ?? [];
+    list.push({
+      // `id` is always selected; the fallback only keeps rows distinct when a
+      // caller's client omits it.
+      id: p.id ?? `${assetId}:${index}`,
+      quantity: p.quantity ?? 0,
+      assetKitId: p.assetKitId ?? null,
+      checkedOutAt: p.checkedOutAt ?? null,
+      checkedInAt: p.checkedInAt ?? null,
+    });
+    slicesByAsset.set(assetId, list);
+  });
+
+  const sessionsArr = sessions as Array<{
+    assetIds: string[];
+    quantities: number[];
+    bookingAssetIds: string[];
+  }>;
+  // Booking-level half of the legacy signal (see JSDoc): only an active booking
+  // can have units physically off the shelf. Deliberately NOT "the booking has
+  // zero sessions" — one progressive batch for ONE asset would otherwise
+  // switch every OTHER all-at-once asset back to "fully remaining" and invite a
+  // duplicate checkout. The per-asset test below is what decides coverage.
+  const bookingStatus = (booking as { status: BookingStatus } | null)?.status;
+  const isActiveBooking =
+    bookingStatus === BookingStatus.ONGOING ||
+    bookingStatus === BookingStatus.OVERDUE;
+
+  // Parse every session ONCE into per-asset checkout logs through the shared
+  // positional-array parser, scoped to the requested assets via set membership
+  // so the INDIVIDUAL-vs-QT skip in the parser never drops a requested asset.
+  const logsByAsset = checkoutSessionsToLogsByAsset(sessionsArr, (id) =>
+    requestedSet.has(id)
+  );
+
+  for (const assetId of uniqueAssetIds) {
+    const booked = bookedByAsset.get(assetId) ?? 0;
+    const checkoutClaims = logsByAsset.get(assetId) ?? [];
+    const claimed = checkoutClaims.reduce((sum, log) => sum + log.quantity, 0);
+
+    // Decided per SLICE, through the same helper the per-slice reader uses, so
+    // this total and the sum over the asset's slices cannot disagree. A slice
+    // the all-at-once checkout sent out (out by its markers, no claim of its
+    // own) has nothing left; a slice added afterwards, or one that fully came
+    // back, keeps its real remaining (GitHub #2815). Never `Asset.status`: it
+    // is global, so an asset another booking has out reads CHECKED_OUT while
+    // nothing of it left on this one.
+    //
+    // Per slice rather than "the booking has zero sessions" is what makes this
+    // survive a later batch: once "check out remaining" records the first
+    // session for a newly-added asset, a booking-level test would flip every
+    // already-out slice back to "fully remaining" and allow a duplicate
+    // checkout of stock that is already in the field.
+    let sliceTotal = 0;
+    for (const units of computeSlicesRemainingToCheckOut({
+      slices: slicesByAsset.get(assetId) ?? [],
+      checkoutClaims,
+      isActiveBooking,
+    }).values()) {
+      sliceTotal += units;
+    }
+
+    // `booked − claimed` stays the ceiling: a tagged claim larger than its
+    // slice still comes off the asset's total.
+    remainingByAsset.set(
+      assetId,
+      Math.min(sliceTotal, Math.max(0, booked - claimed))
+    );
+  }
+
+  return remainingByAsset;
+}
+
+/**
  * Remaining units of an asset that can still be checked OUT on this booking.
  *
  * `Σ(BookingAsset.quantity for this asset) − Σ(PartialBookingCheckout claims
@@ -3065,20 +5050,23 @@ export async function computeBookingAssetSliceRemaining(
  * keeps the read backward-compatible with the existing all-at-once and
  * pre-Wave-B partial-checkout history without a backfill.
  *
- * Legacy-ONGOING fallback (bug #96 follow-up): an ONGOING/OVERDUE booking
- * with ZERO {@link PartialBookingCheckout} rows can only exist if it was
- * checked out via the legacy all-at-once flow (the new partial flow writes
- * a session row on every batch, so an ONGOING booking born from it always
- * has ≥1 row). In that legacy state, EVERY booked unit is physically off
- * the shelf — the per-asset `AssetStatus.CHECKED_OUT` flip the all-at-once
- * path performs is the equivalent signal — so `remaining` is 0, not
- * `booked`. Without this fallback, {@link computeCheckedOutForAsset}
- * (which reads `booked − remaining` as the checked-out portion) would
- * compute `booked − booked = 0` for legacy ONGOING bookings and the asset
- * overview "checked out" tile would silently drop them. RESERVED bookings
- * never trip the fallback (no units out yet). The fetch is a single
- * indexed-PK read against `Booking.status`, idempotent and safe to call
- * from inside or outside a transaction.
+ * All-at-once fallback: the all-at-once checkout stamps `checkedOutAt` on
+ * every slice it sends out but writes NO {@link PartialBookingCheckout} rows,
+ * so an asset whose slices on an ONGOING/OVERDUE booking all carry the marker
+ * and have no claims has every booked unit off the shelf: `remaining` is 0,
+ * not `booked`. The test reads the slice marker, never `Asset.status`, which
+ * is global: an asset another booking has out reads CHECKED_OUT while nothing
+ * of it has left on this one.
+ *
+ * The test is PER ASSET, deliberately not "this booking has zero sessions":
+ * one progressive batch for ONE asset would otherwise switch every other
+ * all-at-once asset back to "fully remaining" and invite a duplicate checkout
+ * of stock already in the field. An asset WITH claims needs no fallback
+ * (`booked − claimed` is exact), and an asset ADDED after the checkout
+ * carries no marker so it keeps its real remaining (GitHub #2815). RESERVED
+ * bookings never trip it (no units out yet). The status fetch is a single
+ * indexed-PK read against `Booking.status`, idempotent and safe to call from
+ * inside or outside a transaction.
  *
  * @param tx - Prisma transaction client (or default `db`)
  * @param bookingId - Booking the asset belongs to
@@ -3090,177 +5078,15 @@ export async function computeBookingAssetRemainingToCheckOut(
   bookingId: Booking["id"],
   assetId: Asset["id"]
 ): Promise<number> {
-  const [pivots, sessions, booking] = await Promise.all([
-    tx.bookingAsset.findMany({
-      where: { bookingId, assetId },
-      select: { quantity: true },
-    }),
-    tx.partialBookingCheckout.findMany({
-      where: { bookingId },
-      select: { assetIds: true, quantities: true },
-    }),
-    // Cheap PK read — needed only so the legacy-ONGOING fallback below can
-    // distinguish "checked out via all-at-once (no PBC rows by design)"
-    // from "RESERVED, not yet touched" — both look identical from the
-    // sessions/pivots side but mean opposite things for "remaining".
-    tx.booking.findUnique({
-      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: pure read helper called from already-org-scoped contexts (the bookingId was resolved by callers via an org-scoped findUniqueOrThrow). Only reads non-sensitive `status` metadata. Mirrors the sibling helpers computeBookingAssetRemaining / computeBookingAssetSliceRemaining which take the same un-scoped (tx, bookingId, assetId) signature.
-      where: { id: bookingId },
-      select: { status: true },
-    }),
-  ]);
-
-  const booked = (pivots as Array<{ quantity: number }>).reduce(
-    (sum, p) => sum + (p.quantity ?? 0),
-    0
+  // Delegate to the batched core with a single-element set so this helper stays
+  // byte-for-byte identical for its ~6 external callers while the attribution,
+  // legacy all-at-once fallback, and positional-parser handling live in ONE place.
+  const remainingByAsset = await computeBookingAssetsRemainingToCheckOut(
+    tx,
+    bookingId,
+    [assetId]
   );
-
-  // Legacy-ONGOING fallback — see JSDoc above. Guarded on `booked > 0` so a
-  // booking that doesn't actually hold this asset (pivots empty) short-circuits
-  // through the normal `Math.max(0, 0 - 0) = 0` rather than synthesizing a
-  // misleading "fully checked out" for an asset that was never on it.
-  const sessionsArr = sessions as Array<{
-    assetIds: string[];
-    quantities: number[];
-  }>;
-  const bookingStatus = (booking as { status: BookingStatus } | null)?.status;
-  if (
-    booked > 0 &&
-    sessionsArr.length === 0 &&
-    (bookingStatus === BookingStatus.ONGOING ||
-      bookingStatus === BookingStatus.OVERDUE)
-  ) {
-    return 0;
-  }
-
-  let claimed = 0;
-  for (const session of sessionsArr) {
-    const ids = session.assetIds ?? [];
-    const qtys = session.quantities ?? [];
-    // Wave B: aligned arrays — sum quantities[i] when assetIds[i] matches.
-    // Legacy: quantities[] is empty (pre-Wave-B rows) — count one unit per
-    // occurrence so the historical all-at-once / pre-Wave-B partial paths
-    // remain readable without a backfill.
-    if (qtys.length === ids.length) {
-      for (let i = 0; i < ids.length; i += 1) {
-        if (ids[i] === assetId) claimed += qtys[i] ?? 0;
-      }
-    } else {
-      for (const id_ of ids) {
-        if (id_ === assetId) claimed += 1;
-      }
-    }
-  }
-
-  return Math.max(0, booked - claimed);
-}
-
-/**
- * TRUE checked-out unit count for an asset, summed across every
- * ONGOING / OVERDUE booking the asset is on in the given organization.
- *
- * For each active booking that holds slices of this asset:
- *
- *   `checkedOutOnBooking = Σ(BookingAsset.quantity for this asset)
- *                          − computeBookingAssetRemainingToCheckOut(...)`
- *
- * — i.e. "what's booked minus what's still on the shelf for this booking"
- * — and the per-booking values are summed (floored at 0) to give the
- * organization-wide checked-out total for the asset.
- *
- * This is the single source of truth for the "checked out" tile in the
- * asset overview sidebar (bug #96) AND for the equivalent field returned
- * by the public quantity API endpoint — both surfaces previously summed
- * `BookingAsset.quantity` naively, which over-counted whenever a booking
- * was ONGOING but had only been partially scanned out (the un-scanned
- * slices were still on the shelf yet shown as checked out).
- *
- * Attribution of {@link PartialBookingCheckout} claims to this asset is
- * delegated to {@link computeBookingAssetRemainingToCheckOut} — the SAME
- * helper the OUT-flow uses to decide "how many more units can still be
- * scanned out". Reusing that primitive (rather than re-implementing the
- * Wave-B aligned-array / legacy-fallback math here) guarantees the
- * overview-side and the OUT-side agree byte-for-byte on what
- * "checked out" means, and means any future fix to the attribution
- * logic lands in one place.
- *
- * Booking statuses are scoped to `ONGOING` + `OVERDUE` because those are
- * the only states where the asset can be physically off-premises under
- * this booking. RESERVED bookings have not been scanned out yet, and
- * COMPLETE/ARCHIVED bookings have already been returned — neither
- * contributes to "currently checked out". This matches the scope of the
- * naive aggregate the helper is replacing (see
- * `apps/webapp/app/routes/_layout+/assets.$assetId.overview.tsx`).
- *
- * Org-scoped: the BookingAsset query joins through `booking.organizationId`
- * so a caller can never accidentally surface checked-out counts from
- * another workspace.
- *
- * @param tx - Prisma transaction client (or the default `db` client)
- * @param assetId - Asset whose true checked-out count we want
- * @param organizationId - Caller's organization — required to scope the
- *                        active-booking lookup and prevent cross-org leaks
- * @returns Non-negative integer — units of `assetId` currently
- *          considered checked out across all active bookings in this org
- */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function computeCheckedOutForAsset(
-  tx: any,
-  assetId: Asset["id"],
-  organizationId: string
-): Promise<number> {
-  // Pull every BookingAsset slice for this asset on an active booking
-  // in this organization. We need the booking id so we can reuse the
-  // per-booking "remaining" primitive that powers the OUT flow — that
-  // primitive is the authoritative attribution source for Wave-B
-  // partial checkouts and any future evolution of the claim shape.
-  const pivots = (await tx.bookingAsset.findMany({
-    where: {
-      assetId,
-      booking: {
-        status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
-        organizationId,
-      },
-    },
-    select: { quantity: true, bookingId: true },
-  })) as Array<{ quantity: number; bookingId: string }>;
-
-  if (pivots.length === 0) return 0;
-
-  // Sum booked units per booking — an asset can have multiple slices on
-  // one booking (kit-driven + standalone of the same asset), and the
-  // OUT-side primitive is asset-on-booking, not slice-on-booking, so we
-  // need the per-booking total to derive its checked-out portion.
-  const bookedByBooking = new Map<string, number>();
-  for (const p of pivots) {
-    bookedByBooking.set(
-      p.bookingId,
-      (bookedByBooking.get(p.bookingId) ?? 0) + (p.quantity ?? 0)
-    );
-  }
-
-  // For each booking the asset is on, ask the OUT-side primitive how
-  // many units are still un-scanned. The complement (booked − remaining)
-  // is the slice that's actually off the shelf for this booking. Run
-  // the per-booking lookups in parallel — bookings are independent.
-  const perBookingCheckedOut = await Promise.all(
-    Array.from(bookedByBooking.entries()).map(
-      async ([bookingId, bookedOnBooking]) => {
-        const remainingOnBooking = await computeBookingAssetRemainingToCheckOut(
-          tx,
-          bookingId,
-          assetId
-        );
-        // Floor at 0 defensively — `remaining` is itself floored at 0,
-        // but pathological data (e.g. a manual DB edit that pushed
-        // PartialBookingCheckout claims above the booked total) could
-        // otherwise drive the per-booking subtraction negative.
-        return Math.max(0, bookedOnBooking - remainingOnBooking);
-      }
-    )
-  );
-
-  return perBookingCheckedOut.reduce((sum, n) => sum + n, 0);
+  return remainingByAsset.get(assetId) ?? 0;
 }
 
 /**
@@ -3302,94 +5128,310 @@ export async function computeBookingAssetSliceRemainingToCheckOut(
   bookingId: Booking["id"],
   bookingAssetId: string
 ): Promise<number> {
-  // Fetch this slice — we need its assetId so we can pool claims across every
-  // sibling slice of the same asset on this booking before attributing.
-  const slice = await tx.bookingAsset.findUnique({
-    where: { id: bookingAssetId },
-    select: { id: true, assetId: true, quantity: true, assetKitId: true },
-  });
-  if (!slice) return 0;
+  // Delegate to the batched core with a single-element list so this helper stays
+  // byte-for-byte identical for its external caller (getRemainingCheckoutPayload)
+  // while the slice fetch, session parsing, and greedy attribution live in ONE
+  // place. The batched core is what the in-transaction disposition loop calls to
+  // avoid an O(K) per-slice read fan-out (Sentry SHELF-WEBAPP-217).
+  const remainingBySlice = await computeBookingAssetsSliceRemainingToCheckOut(
+    tx,
+    bookingId,
+    [bookingAssetId]
+  );
+  return remainingBySlice.get(bookingAssetId) ?? 0;
+}
 
-  // Fetch ALL slices of this asset on this booking (kit + standalone, etc.) —
-  // the attributor needs the full slice set so the greedy fill order
-  // (kit-driven first, standalone after) matches the loader.
-  const [allSlices, sessions] = await Promise.all([
+/**
+ * Batched sibling of {@link computeBookingAssetSliceRemainingToCheckOut}:
+ * computes the still-checkoutable remaining for MANY slices on ONE booking in a
+ * FIXED number of queries (at most three), independent of how many slices are
+ * requested.
+ *
+ * The singular helper issues three round-trips (the slice, the asset's full
+ * slice set, and ALL sessions) on EVERY call. The sessions are BOOKING-level and
+ * the slice sets depend only on the involved assets — so calling the singular
+ * helper once per slice-tagged QUANTITY_TRACKED disposition inside an
+ * interactive transaction makes it do `O(3·K)` sequential reads. On a batch with
+ * many QT slices that compounds the asset-level fan-out already fixed in
+ * {@link computeBookingAssetsRemainingToCheckOut} and can blow the transaction
+ * timeout (Sentry SHELF-WEBAPP-217). This batched core fetches the requested
+ * slices, every sibling slice of the involved assets, and every session ONCE,
+ * then attributes per asset in memory.
+ *
+ * Per-slice semantics are byte-for-byte identical to the singular helper:
+ * `slice.quantity − Σ(PartialBookingCheckout claims attributed to this slice)`,
+ * floored at 0, using the SAME greedy standalone-first fill via
+ * {@link attributeDispositionsByBookingAsset} over the asset's FULL slice set
+ * (so a claim tagged to one slice never leaks into a sibling). The shared
+ * positional parser {@link checkoutSessionsToLogsByAsset} is reused with a
+ * set-membership predicate so the `""` → greedy sentinel and the aligned/legacy
+ * quantity handling match every other read site.
+ *
+ * That parity INCLUDES the all-at-once fallback (quantity > 0, no claims for
+ * the slice, slice carries `checkedOutAt`, booking ONGOING/OVERDUE ⇒ remaining 0).
+ * Without it this per-slice reader
+ * disagreed with its asset-level sibling on exactly one booking shape — one
+ * checked out all-at-once — and the disagreement was load-bearing:
+ * {@link getRemainingCheckoutPayload} PROPOSES from here while
+ * {@link partialCheckoutBooking} CAPS with the asset-level helper, so "Check
+ * out remaining" proposed the full booked quantity for an already-out QT slice,
+ * the cap rejected it as "Only 0 units left…", and the whole batch rolled back
+ * — taking any genuinely-outstanding asset in the same batch down with it
+ * (GitHub #2814).
+ *
+ * @param tx - Prisma transaction client (or the default `db` client)
+ * @param bookingId - Booking the slices belong to
+ * @param bookingAssetIds - BookingAsset row ids to measure (deduped internally).
+ *   An id that is not actually a slice on this booking resolves to `0`.
+ * @returns Map keyed by EVERY requested `bookingAssetId` → non-negative
+ *   remaining units still checkoutable for that slice on this booking. Empty
+ *   input ⇒ empty map with no query issued.
+ */
+export async function computeBookingAssetsSliceRemainingToCheckOut(
+  tx: CheckoutRemainingTxClient,
+  bookingId: Booking["id"],
+  bookingAssetIds: string[]
+): Promise<Map<string, number>> {
+  const uniqueSliceIds = [...new Set(bookingAssetIds)];
+  const remainingBySlice = new Map<string, number>();
+  // Seed every requested id with 0 so callers always get an entry back, even
+  // for ids that turn out not to be slices on this booking (nothing to check
+  // out).
+  for (const sliceId of uniqueSliceIds) {
+    remainingBySlice.set(sliceId, 0);
+  }
+  // Nothing requested → nothing to read (e.g. an INDIVIDUAL-only batch has no
+  // slice-tagged QT dispositions), so callers can invoke this unconditionally
+  // without paying for a pointless round-trip.
+  if (uniqueSliceIds.length === 0) {
+    return remainingBySlice;
+  }
+
+  // (1) Fetch the requested slices ONCE — we need each slice's `assetId` (to
+  // pool claims across its siblings) and its own `quantity` (the cap remaining
+  // is subtracted from). Scope by `bookingId` even though it's redundant for
+  // legitimate callers (a slice id from this booking's own dialog): the ids
+  // originate from user input (`checkouts[].bookingAssetId`), so scoping keeps
+  // a foreign/cross-org slice id from ever surfacing a row here — it falls
+  // through to the seeded 0 directly (org-scope-user-supplied-ids rule), rather
+  // than relying only on the downstream assetCap to neutralize it.
+  const requestedRows = (await tx.bookingAsset.findMany({
+    where: { bookingId, id: { in: uniqueSliceIds } },
+    select: {
+      id: true,
+      assetId: true,
+      quantity: true,
+      assetKitId: true,
+      checkedOutAt: true,
+      checkedInAt: true,
+    },
+  })) as Array<{
+    id: string;
+    assetId: string;
+    quantity: number;
+    assetKitId: string | null;
+    checkedOutAt?: Date | null;
+    checkedInAt?: Date | null;
+  }>;
+
+  // Keep only genuinely-requested rows (a widened query or a static test mock
+  // could surface extras) and collect the assets those slices belong to.
+  const requestedSet = new Set(uniqueSliceIds);
+  const requestedById = new Map<
+    string,
+    {
+      assetId: string;
+      quantity: number;
+      assetKitId: string | null;
+      checkedOutAt: Date | null;
+      checkedInAt: Date | null;
+    }
+  >();
+  const involvedAssetIds = new Set<string>();
+  for (const row of requestedRows) {
+    if (!requestedSet.has(row.id)) continue;
+    requestedById.set(row.id, {
+      assetId: row.assetId,
+      quantity: row.quantity,
+      assetKitId: row.assetKitId,
+      checkedOutAt: row.checkedOutAt ?? null,
+      checkedInAt: row.checkedInAt ?? null,
+    });
+    involvedAssetIds.add(row.assetId);
+  }
+  // No requested id resolved to a real slice → every entry stays 0, no further
+  // reads needed.
+  if (involvedAssetIds.size === 0) {
+    return remainingBySlice;
+  }
+
+  const involvedAssetIdList = [...involvedAssetIds];
+
+  // (2) The FULL slice set of every involved asset (the greedy standalone-first
+  // fill needs every sibling, not just the requested ones) + (3) ALL sessions +
+  // (4) the booking's status, all fetched ONCE and in parallel. The status read
+  // is a cheap indexed-PK lookup and rides along in the same round-trip batch,
+  // so the fixed-query-count guarantee in the JSDoc is unaffected.
+  const [allSlices, sessions, booking] = await Promise.all([
     tx.bookingAsset.findMany({
-      where: { bookingId, assetId: slice.assetId },
-      select: { id: true, quantity: true, assetKitId: true },
+      where: { bookingId, assetId: { in: involvedAssetIdList } },
+      select: {
+        id: true,
+        assetId: true,
+        quantity: true,
+        assetKitId: true,
+        checkedOutAt: true,
+        checkedInAt: true,
+      },
     }),
     tx.partialBookingCheckout.findMany({
       where: { bookingId },
-      select: { assetIds: true, quantities: true },
+      select: { assetIds: true, quantities: true, bookingAssetIds: true },
+    }),
+    tx.booking.findUnique({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: pure read helper called from already-org-scoped contexts (the bookingId was resolved by callers via an org-scoped findUniqueOrThrow). Only reads non-sensitive `status` metadata. Mirrors computeBookingAssetsRemainingToCheckOut.
+      where: { id: bookingId },
+      select: { status: true },
     }),
   ]);
 
-  // Sum claims for this assetId across every PartialBookingCheckout session.
-  // Legacy fallback (`quantities.length !== assetIds.length`): each occurrence
-  // counts as one unit — mirror of `computeBookingAssetRemainingToCheckOut`
-  // so per-asset and per-slice agree on the pool size.
-  let totalClaimed = 0;
-  for (const session of sessions as Array<{
+  const sessionsArr = sessions as Array<{
     assetIds: string[];
     quantities: number[];
+    bookingAssetIds: string[];
+  }>;
+
+  // Booking-level half of the legacy signal — the per-slice mirror of the
+  // branch in {@link computeBookingAssetsRemainingToCheckOut}. Only an active
+  // booking can have units physically off the shelf; everything else about the
+  // decision is per slice below. Deliberately NOT "the booking has zero
+  // sessions": one progressive batch for one asset would otherwise flip every
+  // other already-out slice back to "fully remaining".
+  const bookingStatus = (booking as { status: BookingStatus } | null)?.status;
+  const isActiveBooking =
+    bookingStatus === BookingStatus.ONGOING ||
+    bookingStatus === BookingStatus.OVERDUE;
+
+  // Group each involved asset's slices so the attributor sees its full set.
+  const slicesByAsset = new Map<
+    string,
+    Array<{
+      id: string;
+      quantity: number;
+      assetKitId: string | null;
+      checkedOutAt: Date | null;
+      checkedInAt: Date | null;
+    }>
+  >();
+  for (const row of allSlices as Array<{
+    id: string;
+    assetId: string;
+    quantity: number;
+    assetKitId: string | null;
+    checkedOutAt?: Date | null;
+    checkedInAt?: Date | null;
   }>) {
-    const ids = session.assetIds ?? [];
-    const qtys = session.quantities ?? [];
-    if (qtys.length === ids.length) {
-      for (let i = 0; i < ids.length; i += 1) {
-        if (ids[i] === slice.assetId) totalClaimed += qtys[i] ?? 0;
-      }
+    const entry = {
+      id: row.id,
+      quantity: row.quantity,
+      assetKitId: row.assetKitId,
+      checkedOutAt: row.checkedOutAt ?? null,
+      checkedInAt: row.checkedInAt ?? null,
+    };
+    const list = slicesByAsset.get(row.assetId);
+    if (list) {
+      list.push(entry);
     } else {
-      for (const id_ of ids) {
-        if (id_ === slice.assetId) totalClaimed += 1;
-      }
+      slicesByAsset.set(row.assetId, [entry]);
     }
   }
 
-  // Feed the pool into the shared attributor as a single legacy
-  // (`bookingAssetId === null`) entry so the kit-first / id-sort fill order
-  // is identical to what the disposition attributor uses on the check-IN
-  // side. The attributor returns the slice → attributed-claim map; we read
-  // back the entry for the slice we were asked about.
-  const claimLogs =
-    totalClaimed > 0
-      ? [{ bookingAssetId: null as string | null, quantity: totalClaimed }]
-      : [];
-  const attributed = attributeDispositionsByBookingAsset({
-    bookingAssetRows: allSlices,
-    consumptionLogs: claimLogs,
-  });
-  const claimedForThisSlice = attributed.get(bookingAssetId) ?? 0;
+  // Parse every session ONCE into per-asset checkout logs, scoped to the
+  // involved assets via set membership so the parser's INDIVIDUAL-vs-QT skip
+  // never drops a requested asset. Logs tagged with an exact `bookingAssetId`
+  // attribute to that slice; untagged (`""` → null) logs greedy-fill.
+  const logsByAsset = checkoutSessionsToLogsByAsset(sessionsArr, (id) =>
+    involvedAssetIds.has(id)
+  );
 
-  return Math.max(0, slice.quantity - claimedForThisSlice);
+  // Remaining for every slice of each involved asset, computed over its FULL
+  // slice set (the greedy standalone-first fill needs every sibling) through
+  // the same helper the asset-level reader sums, so the two cannot disagree.
+  const remainingBySliceId = new Map<string, number>();
+  for (const assetId of involvedAssetIdList) {
+    for (const [sliceId, units] of computeSlicesRemainingToCheckOut({
+      slices: slicesByAsset.get(assetId) ?? [],
+      checkoutClaims: logsByAsset.get(assetId) ?? [],
+      isActiveBooking,
+    })) {
+      remainingBySliceId.set(sliceId, units);
+    }
+  }
+
+  for (const sliceId of uniqueSliceIds) {
+    const requested = requestedById.get(sliceId);
+    // Unknown slice (not on the booking) → keep the seeded 0.
+    if (!requested) continue;
+    remainingBySlice.set(
+      sliceId,
+      remainingBySliceId.get(sliceId) ??
+        // The full read always includes a requested slice; this only covers a
+        // client that returned it from the first read alone.
+        computeSlicesRemainingToCheckOut({
+          slices: [{ id: sliceId, ...requested }],
+          checkoutClaims: logsByAsset.get(requested.assetId) ?? [],
+          isActiveBooking,
+        }).get(sliceId) ??
+        0
+    );
+  }
+
+  return remainingBySlice;
+}
+
+/**
+ * Up to three asset titles for an error message, then a count of the rest.
+ */
+function nameList(assets: { title: string }[]): string {
+  return `${assets
+    .slice(0, 3)
+    .map((a) => a.title)
+    .join(", ")}${assets.length > 3 ? ` and ${assets.length - 3} more` : ""}`;
 }
 
 /**
  * Determines whether a booking has been fully checked in across all of
  * its assets.
  *
- * Progressive semantics (Wave B): when a booking has been through at
- * least one progressive `PartialBookingCheckout`, assets/units that were
- * NEVER checked out do not need to be reconciled. They were "left at the
- * warehouse" and there is nothing to check in. Only the slices/units that
- * actually went out the door gate the COMPLETE transition.
+ * Dispatch is judged per asset from that asset's OWN records — the slice
+ * markers (`BookingAsset.checkedOutAt`, stamped by both the all-at-once
+ * checkout and progressive scans) plus its progressive session units. There
+ * is deliberately no booking-level "has any progressive checkout" mode
+ * switch: `PartialBookingCheckout` rows record scan SESSIONS, absence proves
+ * nothing (the Check-out button writes none — see the model's doc comment),
+ * and a booking-level test would let one scanned asset strip the return
+ * obligation off every button-checked-out asset on the booking.
  *
- * Legacy (non-progressive) semantics: when there are NO PartialBookingCheckout
- * rows for this booking (e.g. all-at-once flow), the function preserves the
- * original behaviour byte-for-byte — every BookingAsset must be reconciled.
+ * For `INDIVIDUAL` assets: every slice that went out has to be back, judged
+ * by `makeIsIndividualSliceOutstanding`: `checkedInAt`, or a
+ * `PartialBookingCheckin` session for rows reconciled before the marker
+ * existed, no older than the slice's latest departure. Slices never
+ * dispatched (added onto an ONGOING booking, or left behind by a progressive
+ * checkout) have nothing to check in and never block.
  *
- * For `INDIVIDUAL` assets: must appear in at least one
- * `PartialBookingCheckin.assetIds` row — but only if it was ever checked out
- * (recorded in a `PartialBookingCheckout` OR live `CHECKED_OUT`). Assets never
- * checked out are skipped.
+ * For `QUANTITY_TRACKED` assets: obligated units are judged PER SLICE and
+ * summed — a slice's session-attributed units when any exist (capped by its
+ * booked quantity), otherwise its whole booked quantity when its marker is
+ * stamped (an all-at-once stamp dispatches the full slice). One asset can
+ * mix both across its slices, so neither source alone may answer for the
+ * asset (see `computeDispatchedUnitsByAsset`). Complete when every obligated
+ * unit is reconciled; units that never left the warehouse carry no
+ * obligation.
  *
- * For `QUANTITY_TRACKED` assets: `min(checkedOutUnits, slice.quantity) -
- * checkedInUnits === 0` per slice. Uncheck-outed units cannot block COMPLETE
- * because there is nothing to check in.
- *
- * Called by both `partialCheckinBooking` and `checkinBooking` to decide
- * the ONGOING/OVERDUE → COMPLETE transition. Keeping this in one place
- * prevents the two code paths from drifting.
+ * Called by `partialCheckinBooking` to decide the ONGOING/OVERDUE →
+ * COMPLETE transition. Its all-returned shortcut applies the same per-slice
+ * test before handing a final batch to `checkinBooking`, which completes
+ * unconditionally; the two must keep sharing it.
  *
  * @param tx - Prisma transaction client
  * @param bookingId - Booking to evaluate
@@ -3403,23 +5445,45 @@ export async function isBookingFullyCheckedIn(
     tx.bookingAsset.findMany({
       where: { bookingId },
       select: {
+        // `id` + `assetKitId` feed the per-slice session attribution in
+        // `computeDispatchedUnitsByAsset` (tagged claims name a slice; greedy
+        // fill orders by the discriminator).
+        id: true,
         assetId: true,
         quantity: true,
-        // `status` is needed to detect assets checked out via the all-at-once
-        // flow (which writes no PartialBookingCheckout records but flips the
-        // asset to CHECKED_OUT). This mirrors the union-with-live-status
-        // fallback in `partialCheckoutBooking` so completion stays consistent
-        // whether checkout happened progressively or all-at-once.
-        asset: { select: { id: true, type: true, status: true } },
+        assetKitId: true,
+        // The slice markers are the per-booking dispatch record — stamped by
+        // the all-at-once checkout (which writes no PartialBookingCheckout
+        // rows) and by progressive scans alike. They are the same source the
+        // check-in eligibility guard reads, so an item gates completion
+        // exactly when it is checkinable.
+        checkedOutAt: true,
+        checkedInAt: true,
+        // Cumulative units this slice has sent out, across every departure.
+        // The markers say WHETHER a slice is out; only this says HOW MANY
+        // units have left in total, which is what a second departure changes.
+        checkedOutQuantity: true,
+        asset: { select: { id: true, type: true } },
       },
     }),
     tx.partialBookingCheckin.findMany({
       where: { bookingId },
-      select: { assetIds: true },
+      // The timestamp is what ties a session to the departure it answers. A
+      // slice can depart twice, and a session from the first trip must not
+      // reconcile the second.
+      select: { assetIds: true, checkinTimestamp: true },
     }),
     tx.partialBookingCheckout.findMany({
       where: { bookingId },
-      select: { assetIds: true, quantities: true },
+      // The timestamp records a departure the slice marker cannot: a
+      // progressive check-out keeps a slice's first `checkedOutAt`, so a
+      // later departure of the same asset is dated here and nowhere else.
+      select: {
+        assetIds: true,
+        quantities: true,
+        bookingAssetIds: true,
+        checkoutTimestamp: true,
+      },
     }),
   ]);
 
@@ -3428,112 +5492,285 @@ export async function isBookingFullyCheckedIn(
     return true;
   }
 
-  const individuallyCheckedInIds = new Set<string>();
-  for (const row of partialCheckins as Array<{ assetIds: string[] }>) {
-    for (const id of row.assetIds) {
-      individuallyCheckedInIds.add(id);
-    }
-  }
+  /** Whether an INDIVIDUAL slice is still out — see the shared test. */
+  const isIndividualSliceOutstanding = makeIsIndividualSliceOutstanding({
+    checkinSessions: partialCheckins as Array<{
+      assetIds: string[];
+      checkinTimestamp: Date | null;
+    }>,
+    checkoutSessions: partialCheckouts as Array<{
+      assetIds: string[];
+      checkoutTimestamp: Date | null;
+    }>,
+  });
 
-  // Aggregate per-asset checked-out units across every PartialBookingCheckout
-  // session for this booking. `quantities` is positional with `assetIds`:
-  // INDIVIDUAL rows record `1`, QUANTITY_TRACKED rows record the unit count.
-  // Legacy rows (pre-Wave-B) have an empty `quantities[]` — fall back to a
-  // count of 1 per assetId entry so they still register as "checked out"
-  // (matches their INDIVIDUAL-only origin where 1 unit per id was the only
-  // possibility).
-  const checkedOutAssetIds = new Set<string>();
-  const checkedOutUnitsByAsset = new Map<string, number>();
-  for (const row of partialCheckouts as Array<{
-    assetIds: string[];
-    quantities: number[];
-  }>) {
-    for (let i = 0; i < row.assetIds.length; i++) {
-      const id = row.assetIds[i];
-      const units = row.quantities[i] ?? 1;
-      checkedOutAssetIds.add(id);
-      checkedOutUnitsByAsset.set(
-        id,
-        (checkedOutUnitsByAsset.get(id) ?? 0) + units
-      );
-    }
-  }
-
-  // Detect whether ANY progressive checkout has occurred. If not, preserve the
-  // legacy "every BookingAsset must reconcile" semantics so all-at-once flows
-  // and pre-Wave-B bookings behave exactly as before.
-  const hasProgressiveCheckout = partialCheckouts.length > 0;
-
-  for (const ba of bookingAssets as Array<{
+  type SliceRow = {
+    id: string;
     assetId: string;
     quantity: number;
-    asset: { id: string; type: AssetType; status: AssetStatus } | null;
-  }>) {
+    assetKitId: string | null;
+    checkedOutAt: Date | null;
+    checkedInAt: Date | null;
+    checkedOutQuantity: number | null;
+    asset: { id: string; type: AssetType } | null;
+  };
+  const slices = bookingAssets as SliceRow[];
+
+  // Units sent out per ASSET, judged slice by slice and across every departure.
+  // The shared helper is what keeps this gate and the check-in the mobile
+  // booking route offers on the same answer.
+  const dispatchedUnitsTotalByAsset = computeDispatchedUnitsTotalByAsset({
+    slices,
+    checkoutSessions: partialCheckouts as Array<{
+      assetIds: string[];
+      quantities: number[];
+      bookingAssetIds: string[];
+    }>,
+  });
+
+  /** QT assets already judged — an asset's slices are evaluated as one. */
+  const qtyAssetIdsEvaluated = new Set<string>();
+
+  for (const ba of slices) {
     const isQtyTrackedAsset = ba.asset?.type === AssetType.QUANTITY_TRACKED;
 
     if (!isQtyTrackedAsset) {
-      // INDIVIDUAL. Under progressive semantics: an asset that was NEVER
-      // checked out (not in any PartialBookingCheckout AND not currently
-      // CHECKED_OUT) cannot — and need not — be checked in. Under legacy
-      // semantics (no PartialBookingCheckout rows at all), the asset must
-      // appear in a partial-checkin session, preserving previous behaviour.
-      const wasCheckedOut =
-        checkedOutAssetIds.has(ba.assetId) ||
-        ba.asset?.status === AssetStatus.CHECKED_OUT;
-
-      if (hasProgressiveCheckout && !wasCheckedOut) {
-        // Never went out → nothing to reconcile.
-        continue;
-      }
-
-      if (!individuallyCheckedInIds.has(ba.assetId)) return false;
+      // INDIVIDUAL. Dispatch is read from the slice marker, the same source
+      // the scan check-in guard reads, so a slice never dispatched on THIS
+      // booking has nothing to reconcile and never blocks.
+      //
+      // Reconciliation is judged against the slice's latest departure, while
+      // the scan check-in guard reads `checkedInAt` alone. The progressive
+      // checkout refuses to send a returned INDIVIDUAL slice out again, and the
+      // all-at-once checkout refreshes `checkedOutAt` and clears `checkedInAt`
+      // when it does, so the two agree on every slice the writers produce.
+      // They part on a slice whose markers were stamped from each side's
+      // earliest session and which a later scan departure sent out again: this
+      // gate holds the booking, the scan flow refuses the slice as already
+      // checked in, and the all-at-once check-in is the path that closes the
+      // booking.
+      if (isIndividualSliceOutstanding(ba)) return false;
       continue;
     }
 
-    // QUANTITY_TRACKED. Under legacy semantics, require zero remaining
-    // (booked − logged === 0). Under progressive semantics, the cap is
-    // `min(checkedOutUnits, slice.quantity)` — uncheck-outed units have no
-    // reconciliation obligation.
-    if (!hasProgressiveCheckout) {
-      const remaining = await computeBookingAssetRemaining(
-        tx,
+    // QUANTITY_TRACKED — judged once per ASSET, because `remaining` and the
+    // unit sums span all of the asset's slices.
+    if (qtyAssetIdsEvaluated.has(ba.assetId)) continue;
+    qtyAssetIdsEvaluated.add(ba.assetId);
+
+    // Obligated units = what actually went out for this asset, judged slice by
+    // slice and summed across every departure. Judging per slice keeps one
+    // progressively-scanned sibling from erasing a button-checked-out slice's
+    // obligation, and one scanned-out asset from stripping the obligation off
+    // every other asset on the booking.
+    const obligatedUnits = dispatchedUnitsTotalByAsset.get(ba.assetId) ?? 0;
+    if (obligatedUnits === 0) {
+      // Never dispatched in any form — nothing to reconcile.
+      continue;
+    }
+
+    // Reconciled units, uncapped. `computeBookingAssetRemaining` clamps to the
+    // booked quantity, which would hide returns from a second trip the same
+    // way the cap above hid the departure, so read the log directly.
+    const reconciledSum = await tx.consumptionLog.aggregate({
+      where: {
+        assetId: ba.assetId,
         bookingId,
-        ba.assetId
-      );
-      if (remaining > 0) return false;
-      continue;
-    }
-
-    const checkedOutUnits = checkedOutUnitsByAsset.get(ba.assetId) ?? 0;
-    if (checkedOutUnits === 0) {
-      // This asset was never checked out under the progressive flow — nothing
-      // to reconcile for this slice (or any other slice of the same asset).
-      continue;
-    }
-
-    // `computeBookingAssetRemaining` returns `booked − logged` clamped at 0.
-    // The "logged" half is what we actually care about (units already checked
-    // in); recover it via `booked - remaining` where `booked` sums every slice
-    // of the same asset. Cap by `checkedOutUnits` so units that never left the
-    // warehouse don't block COMPLETE.
-    const [bookedSum, remaining] = await Promise.all([
-      tx.bookingAsset.aggregate({
-        where: { bookingId, assetId: ba.assetId },
-        _sum: { quantity: true },
-      }),
-      computeBookingAssetRemaining(tx, bookingId, ba.assetId),
-    ]);
-    const booked =
-      (bookedSum as { _sum: { quantity: number | null } })._sum.quantity ?? 0;
-    const checkedInUnits = Math.max(0, booked - remaining);
-    const obligatedUnits = Math.min(checkedOutUnits, booked);
-    if (obligatedUnits - checkedInUnits > 0) return false;
+        category: { in: CHECKIN_DISPOSITION_CATEGORIES },
+      },
+      _sum: { quantity: true },
+    });
+    const reconciledUnits =
+      (reconciledSum as { _sum?: { quantity: number | null } })._sum
+        ?.quantity ?? 0;
+    if (obligatedUnits - reconciledUnits > 0) return false;
   }
 
   return true;
 }
 
+/**
+ * Runs the best-effort low-stock check for every quantity-tracked asset whose
+ * pool dropped during a check-in. Only CONSUME / LOSS / DAMAGE reduce the pool;
+ * RETURN restores units and cannot cross a threshold downward, so it is skipped
+ * (predicate: `consumed + lost + damaged > 0`). Asset ids are de-duplicated so
+ * an asset with several dispositions is checked once.
+ *
+ * MUST be called AFTER the mutation transaction commits — it reads committed
+ * state, and its failures are logged and never propagated, so a notification
+ * problem cannot fail a committed check-in.
+ *
+ * Shared by {@link checkinBooking} and {@link partialCheckinBooking} so the
+ * predicate and error handling can't drift between the two flows.
+ *
+ * @param params.summaries - Per-asset disposition summaries from the transaction
+ * @param params.organizationId - Organization that owns the assets
+ * @param params.bookingId - Booking the check-in belongs to (log context)
+ * @param params.userId - Acting user, when one exists (may be undefined)
+ * @param params.context - Short label naming the calling flow, used in the log
+ */
+async function notifyLowStockForDecrementedAssets({
+  summaries,
+  organizationId,
+  bookingId,
+  userId,
+  context,
+}: {
+  summaries: Array<{
+    assetId: string;
+    consumed: number;
+    lost: number;
+    damaged: number;
+  }>;
+  organizationId: string;
+  bookingId: string;
+  userId?: string;
+  context: string;
+}): Promise<void> {
+  const decrementedAssetIds = [
+    ...new Set(
+      summaries
+        .filter((s) => s.consumed + s.lost + s.damaged > 0)
+        .map((s) => s.assetId)
+    ),
+  ];
+
+  for (const assetId of decrementedAssetIds) {
+    try {
+      await checkAndNotifyLowStock({ assetId, userId, organizationId });
+    } catch (lowStockError) {
+      Logger.error(
+        new ShelfError({
+          cause: lowStockError,
+          message: `Failed to run low-stock check after ${context}`,
+          label,
+          additionalData: { assetId, bookingId, organizationId },
+        })
+      );
+    }
+  }
+}
+
 /* -------------------------------------------------------------------------- */
+
+/**
+ * Notes for the kit memberships a check-in emptied, written after the
+ * transaction commits.
+ *
+ * - Each asset that left a kit gets a note naming the kit and the booking, so
+ *   its activity explains why the kit no longer lists it. One that only lost
+ *   some of its units in the kit gets a note saying how many the kit holds now.
+ * - Every OTHER live booking whose slice of that kit became standalone gets
+ *   the kit service's detachment note. The booking being checked in is left
+ *   out: its slice is the one that was just settled.
+ *
+ * Best-effort, like the other check-in notes: a failure is logged and never
+ * propagated, because the check-in itself has already committed.
+ *
+ * @param args.result - What {@link removeDestroyedUnitsFromKits} changed
+ * @param args.booking - The booking that was checked in
+ * @param args.userId - User who checked it in
+ * @param args.organizationId - Organization that owns the booking
+ */
+async function noteKitUnitsDestroyedAtCheckin({
+  result,
+  booking,
+  userId,
+  organizationId,
+}: {
+  result: DestroyedKitUnitsResult;
+  booking: { id: string; name: string };
+  userId: string;
+  organizationId: string;
+}) {
+  if (
+    result.emptiedMemberships.length === 0 &&
+    result.shrunkMemberships.length === 0 &&
+    result.detachmentImpact.length === 0
+  ) {
+    return;
+  }
+
+  try {
+    const user = await getUserByID(userId, {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        displayName: true,
+      } satisfies Prisma.UserSelect,
+    });
+    const actor = { ...user, id: userId };
+    const actorLink = wrapUserLinkForNote(actor);
+    const bookingLink = wrapLinkForNote(
+      `/bookings/${booking.id}`,
+      booking.name
+    );
+
+    /** A unit count in the asset's own unit of measure. */
+    const unitCount = (membership: EmptiedKitMembership, units: number) =>
+      formatUnitCount(
+        { type: membership.assetType, unitOfMeasure: membership.unitOfMeasure },
+        units
+      ) ?? String(units);
+    const kitLinkFor = (membership: EmptiedKitMembership) =>
+      wrapKitsWithDataForNote(
+        { id: membership.kitId, name: membership.kitName.trim() },
+        "removed"
+      );
+
+    for (const membership of result.emptiedMemberships) {
+      await createNotes({
+        content: `${actorLink} checked in ${bookingLink}. The last **${unitCount(
+          membership,
+          membership.quantity
+        )}** in ${kitLinkFor(
+          membership
+        )} were not returned, so the asset is no longer part of the kit.`,
+        type: "UPDATE",
+        userId,
+        assetIds: [membership.assetId],
+        organizationId,
+      });
+    }
+
+    for (const membership of result.shrunkMemberships) {
+      await createNotes({
+        content: `${actorLink} checked in ${bookingLink}. **${unitCount(
+          membership,
+          membership.quantity
+        )}** in ${kitLinkFor(
+          membership
+        )} were not returned, so the kit now holds **${unitCount(
+          membership,
+          membership.remainingInKit
+        )}**.`,
+        type: "UPDATE",
+        userId,
+        assetIds: [membership.assetId],
+        organizationId,
+      });
+    }
+
+    await emitAssetKitDetachmentNotes({
+      impact: result.detachmentImpact.filter(
+        (row) => row.bookingId !== booking.id
+      ),
+      actor,
+      organizationId,
+    });
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message:
+          "Failed to write the notes for kit units destroyed at check-in",
+        label,
+        additionalData: { userId, bookingId: booking.id },
+      })
+    );
+  }
+}
 
 export async function checkinBooking({
   id,
@@ -3543,10 +5780,18 @@ export async function checkinBooking({
   userId,
   specificAssetIds,
   checkins,
+  provenance,
 }: Pick<Booking, "id" | "organizationId"> & {
   hints: ClientHint;
   intentChoice?: CheckinIntentEnum;
   userId?: string;
+  /**
+   * How and from where the check-in was made. Recorded on every
+   * `BOOKING_CHECKED_IN` event and said on the booking's activity line. The
+   * routes always pass it: the one-click check-in is `method: "quick"`, a
+   * "Check in selected items" that closes the booking is `"selected"`.
+   */
+  provenance?: BookingMethodProvenance;
   specificAssetIds?: string[];
   /**
    * Optional per-asset dispositions. When omitted, qty-tracked assets
@@ -3571,6 +5816,20 @@ export async function checkinBooking({
               id: true,
               assetId: true,
               quantity: true,
+              // Kit provenance: which kit this slice came from, which survives
+              // the member being detached from the kit mid-booking. Required by
+              // `getKitIdsToAcquire`, so dropping either is a type error.
+              assetKitId: true,
+              sourceKitId: true,
+              // Whether the slice left, which bounds what the auto-default may
+              // consume on it.
+              checkedOutAt: true,
+              // Whether the slice already came back, so its check-in event does
+              // not claim the method of this check-in.
+              checkedInAt: true,
+              // Where the slice's units left from at check-out: consumed, lost
+              // and damaged units come off that placement below.
+              sourceLocationId: true,
               asset: {
                 select: {
                   id: true,
@@ -3611,6 +5870,17 @@ export async function checkinBooking({
         });
       });
 
+    // `dataToUpdate` below sets COMPLETE unconditionally. Without this guard a
+    // direct POST against a DRAFT or RESERVED booking marked it COMPLETE while
+    // checking in nothing: the asset filter keeps only CHECKED_OUT assets, and
+    // on those statuses there are none. The booking then reads as finished
+    // although it never happened. (detail.dev D084)
+    //
+    // This read is NOT locked — `bookingFound` is loaded outside the write
+    // transaction — so treat it as a cheap early exit only. The authoritative,
+    // locked check runs inside the transaction below.
+    assertBookingIsCheckinable({ status: bookingFound.status, bookingId: id });
+
     const dataToUpdate: Prisma.BookingUpdateInput = {
       status: BookingStatus.COMPLETE,
     };
@@ -3618,8 +5888,24 @@ export async function checkinBooking({
     /** Map bookingAssets to flat asset array for downstream logic */
     const bookingFoundAssets = bookingFound.bookingAssets.map((ba) => ba.asset);
 
-    const kitIds = getKitIdsByAssets(bookingFoundAssets);
-    const hasKits = kitIds.length > 0;
+    /**
+     * Kits this booking took out, resolved exactly as the check-out that
+     * stamped them did — release has to be the inverse of acquire, or it
+     * either strands a kit or hands back one it never held. In particular a
+     * standalone `QUANTITY_TRACKED` slice stamps no kit, so it releases none:
+     * its units come out of the free pool, and every kit holding that asset
+     * kept its own slice throughout.
+     *
+     * Kept per slice so `kitIdsToRelease` below can tell which kit a member
+     * that stays out belongs to.
+     */
+    const kitIdsBySliceId = await getKitIdsToAcquireBySlice({
+      slices: bookingFound.bookingAssets,
+      organizationId,
+    });
+    const kitIds = [
+      ...new Set([...kitIdsBySliceId.values()].flatMap((ids) => [...ids])),
+    ];
 
     const isEarlyCheckin = isBookingEarlyCheckin(bookingFound.to!);
 
@@ -3631,8 +5917,8 @@ export async function checkinBooking({
       isEarlyCheckin &&
       intentChoice === CheckinIntentEnum["with-adjusted-date"]
     ) {
-      // Update originalTo to booking's to date
-      dataToUpdate.originalTo = bookingFound.to;
+      // Keep the planned end intact; only seeds rows predating the column.
+      dataToUpdate.originalTo = plannedEndToPreserve(bookingFound);
 
       // Update the `to` date to current date
       const toDateStr = DateTime.fromJSDate(new Date(), {
@@ -3648,8 +5934,8 @@ export async function checkinBooking({
      * If booking was overdue then we have to adjust the endDate of booking
      * */
     if (bookingFound.status === BookingStatus.OVERDUE) {
-      // Update originalTo to booking's to date
-      dataToUpdate.originalTo = bookingFound.to;
+      // Keep the planned end intact; only seeds rows predating the column.
+      dataToUpdate.originalTo = plannedEndToPreserve(bookingFound);
 
       const toDateStr = DateTime.fromJSDate(new Date(), {
         zone: hints.timeZone,
@@ -3735,20 +6021,34 @@ export async function checkinBooking({
       })
       .map((asset) => asset.id);
 
-    // Pre-compute which kits to check in
     const assetsToCheckinSet = new Set(assetsToCheckin);
-    const kitsToCheckin = hasKits
-      ? kitIds.filter((kitId) => {
-          const kitAssetsInBooking = bookingFoundAssets.filter(
-            (asset) => asset.assetKits?.[0]?.kitId === kitId
-          );
-          return kitAssetsInBooking.every(
-            (asset) =>
-              assetsToCheckinSet.has(asset.id) ||
-              asset.status === AssetStatus.AVAILABLE
-          );
-        })
-      : [];
+
+    /**
+     * The kits this check-in hands back. A kit stays CHECKED_OUT while one of
+     * its `INDIVIDUAL` members does: the filter above leaves such a member out
+     * when another live booking lists it, and a kit released around it would
+     * read AVAILABLE, and be bookable, with that member still away.
+     *
+     * Only `INDIVIDUAL` members gate. A `QUANTITY_TRACKED` member's status is
+     * one value across every kit and booking holding its units, so it reads
+     * CHECKED_OUT while any OTHER kit holding it is out, which says nothing
+     * about this kit. Whether another live booking still has this kit out is
+     * decided per slice by `releaseCheckedOutKits`.
+     */
+    const kitIdsKeptOut = new Set<string>();
+    for (const slice of bookingFound.bookingAssets) {
+      if (
+        slice.asset.type !== AssetType.INDIVIDUAL ||
+        slice.asset.status !== AssetStatus.CHECKED_OUT ||
+        assetsToCheckinSet.has(slice.asset.id)
+      ) {
+        continue;
+      }
+      for (const kitId of kitIdsBySliceId.get(slice.id) ?? []) {
+        kitIdsKeptOut.add(kitId);
+      }
+    }
+    const kitIdsToRelease = kitIds.filter((kitId) => !kitIdsKeptOut.has(kitId));
 
     /**
      * Build the lookups of explicit dispositions. Qty-tracked slices
@@ -3788,9 +6088,27 @@ export async function checkinBooking({
       .map((ba) => ({
         id: ba.id,
         assetId: ba.assetId,
+        assetKitId: ba.assetKitId,
+        sourceKitId: ba.sourceKitId,
+        sourceLocationId: ba.sourceLocationId,
         consumptionType: ba.asset.consumptionType,
         title: ba.asset.title,
-      }));
+        quantity: ba.quantity,
+        checkedOutAt: ba.checkedOutAt ?? null,
+      }))
+      // The relation carries no ORDER BY, so the order is fixed here. By asset
+      // first: the loop locks each asset as it reaches it, and two check-ins
+      // must lock shared assets in the same order or they can deadlock. Then,
+      // within an asset, standalone before kit-driven, the order every untagged
+      // claim uses, because an asset-level disposition applies to the FIRST
+      // slice of its asset.
+      .sort((a, b) =>
+        a.assetId !== b.assetId
+          ? a.assetId < b.assetId
+            ? -1
+            : 1
+          : compareSlicesForGreedyFill(a, b)
+      );
 
     /** Distinct qty-tracked asset ids touched by the slices above. */
     const qtyTrackedAssetIds = [
@@ -3820,8 +6138,22 @@ export async function checkinBooking({
 
     const qtySummariesRef: { value: CheckinQtySummary[] } = { value: [] };
 
+    /** Kit memberships the check-in shrank or emptied, for the post-tx notes. */
+    const destroyedKitUnitsRef: { value: DestroyedKitUnitsResult | null } = {
+      value: null,
+    };
+
     const updatedBooking = await db.$transaction(
       async (tx) => {
+        // Authoritative status check — the pre-transaction assert above is a
+        // cheap early exit, this is the one that holds. Locking matters here
+        // because two concurrent check-ins would otherwise both read ONGOING
+        // and both run the completion writes.
+        assertBookingIsCheckinable({
+          status: await lockBookingForStatusCheck(tx, id, organizationId),
+          bookingId: id,
+        });
+
         /**
          * Per-qty-tracked-asset disposition work. Runs FIRST so the
          * pool-drain guard can read the current `Asset.quantity` before
@@ -3884,6 +6216,116 @@ export async function checkinBooking({
          */
         const summaryByAssetId = new Map<string, CheckinQtySummary>();
 
+        // Structured `ASSET_QUANTITY_CHANGED` events for the pool decrements
+        // below — collected across slices and flushed once with `recordEvents`
+        // (one round-trip) so the per-slice loop can't blow the interactive-tx
+        // budget on large check-ins.
+        const quantityChangeEvents: Parameters<typeof recordEvents>[0] = [];
+
+        /**
+         * Units consumed, lost or damaged out of each kit slice, keyed by the
+         * slice's `AssetKit` id. Every log this loop writes is tagged with its
+         * slice, so the attribution is exact.
+         */
+        const destroyedUnitsByAssetKitId = new Map<string, number>();
+
+        /**
+         * Each pool's stock before this loop's first write to it, and the
+         * ledger events of every slice that used up its units. Recorded once
+         * after the loop, so a check-in of many slices reads each pool twice
+         * in all, not twice per slice. Safe here because each slice is
+         * visited once and caps itself on its own rows plus the in-memory
+         * `assetRemainingSoFar`; `partialCheckinBooking` re-reads the
+         * booking's rows per disposition and so writes per disposition.
+         */
+        const stockChangesByAssetId = new Map<string, StockChangeInput>();
+
+        /**
+         * What each ONE_WAY slice can still check out, to size the units it
+         * sent out. Only read for slices that left: one that never did sent
+         * nothing, and no read is needed to say so.
+         */
+        const remainingToCheckOutBySlice =
+          await computeBookingAssetsSliceRemainingToCheckOut(
+            tx,
+            id,
+            qtyTrackedSlices
+              .filter(
+                (slice) =>
+                  slice.consumptionType === "ONE_WAY" && slice.checkedOutAt
+              )
+              .map((slice) => slice.id)
+          );
+
+        /**
+         * Units already accounted for on each ONE_WAY slice, from every
+         * disposition this booking has logged for the asset. An earlier
+         * mobile check-in names no slice, so its logs are untagged; they are
+         * spread over the slices with {@link spreadSessionDispositionsOverSlices},
+         * the attribution the partial check-in used when it took that
+         * session's units out of the kit. Counting tagged logs alone would
+         * credit those units to no slice, consume a slice's units a second
+         * time and leave the kit holding units that are gone.
+         */
+        const oneWayAssetIds = [
+          ...new Set(
+            qtyTrackedSlices
+              .filter((slice) => slice.consumptionType === "ONE_WAY")
+              .map((slice) => slice.assetId)
+          ),
+        ];
+        const accountedBySliceId = new Map<string, number>();
+        if (oneWayAssetIds.length > 0) {
+          const loggedRows = await tx.consumptionLog.findMany({
+            where: {
+              bookingId: id,
+              assetId: { in: oneWayAssetIds },
+              category: { in: [...CHECKIN_DISPOSITION_CATEGORIES] },
+            },
+            select: {
+              assetId: true,
+              bookingAssetId: true,
+              category: true,
+              quantity: true,
+            },
+          });
+          // The query already filters to these categories; this narrows the
+          // type for the spread.
+          const loggedDispositions = loggedRows.flatMap((row) =>
+            isCheckinDispositionCategory(row.category)
+              ? [{ ...row, category: row.category }]
+              : []
+          );
+          for (const assetId of oneWayAssetIds) {
+            const spread = spreadSessionDispositionsOverSlices({
+              slices: qtyTrackedSlices
+                .filter((slice) => slice.assetId === assetId)
+                .map((slice) => ({
+                  id: slice.id,
+                  assetKitId: slice.assetKitId,
+                  booked: slice.quantity,
+                  owed: unitsSentOutOnSlice(
+                    slice,
+                    remainingToCheckOutBySlice.get(slice.id) ?? 0
+                  ),
+                })),
+              priorLogs: [],
+              sessionLogs: loggedDispositions.filter(
+                (log) => log.assetId === assetId
+              ),
+            });
+            for (const [sliceId, onSlice] of spread) {
+              accountedBySliceId.set(
+                sliceId,
+                onSlice.returned +
+                  onSlice.consumed +
+                  onSlice.lost +
+                  onSlice.damaged
+              );
+            }
+          }
+        }
+
         for (const slice of qtyTrackedSlices) {
           const sliceRemaining = await computeBookingAssetSliceRemaining(
             tx,
@@ -3916,18 +6358,33 @@ export async function checkinBooking({
             }
           }
 
+          /**
+           * Units of a ONE_WAY slice that left and are not accounted for yet.
+           * Its auto-default consumes these and no more: units that never left
+           * the shelf were not used up, and consuming them would destroy stock
+           * (and, on a kit slice, take them out of the kit).
+           */
+          const unitsStillOut = Math.max(
+            0,
+            unitsSentOutOnSlice(
+              slice,
+              remainingToCheckOutBySlice.get(slice.id) ?? 0
+            ) - (accountedBySliceId.get(slice.id) ?? 0)
+          );
+
           const disposition: CheckinDispositionInput = explicit ?? {
             assetId: slice.assetId,
-            // Auto-default claims exactly `cap` units — never more than the
-            // pool can cover, so it can't throw on legacy-NULL-reduced pools.
+            // Auto-default never claims more than `cap`, the most the pool can
+            // cover, so it can't throw on legacy-NULL-reduced pools.
             ...(slice.consumptionType === "ONE_WAY"
-              ? { consumed: cap }
+              ? { consumed: Math.min(cap, unitsStillOut) }
               : { returned: cap }),
           };
 
           const claimed = sumDisposition(disposition);
           if (claimed === 0) {
-            // Explicit disposition with no quantities — "leave pending".
+            // An explicit disposition with no quantities ("leave pending"), or
+            // a ONE_WAY slice with nothing still out.
             continue;
           }
 
@@ -3944,12 +6401,27 @@ export async function checkinBooking({
             });
           }
 
-          const locked = await lockAssetForQuantityUpdate(tx, slice.assetId);
+          const locked = await lockAssetForQuantityUpdate(
+            tx,
+            slice.assetId,
+            organizationId
+          );
 
           const poolDecrement =
             (disposition.consumed ?? 0) +
             (disposition.lost ?? 0) +
             (disposition.damaged ?? 0);
+
+          if (poolDecrement > 0 && !stockChangesByAssetId.has(slice.assetId)) {
+            stockChangesByAssetId.set(slice.assetId, {
+              assetId: slice.assetId,
+              before: await readStockState(tx, {
+                assetId: slice.assetId,
+                organizationId,
+              }),
+              events: [],
+            });
+          }
 
           if (poolDecrement > 0) {
             const custodyAgg = await tx.custody.aggregate({
@@ -3982,49 +6454,84 @@ export async function checkinBooking({
               userId: userId!,
               bookingId: id,
               bookingAssetId: dispBookingAssetId,
-              tx,
-            });
-          }
-          if ((disposition.consumed ?? 0) > 0) {
-            await createConsumptionLog({
-              assetId: slice.assetId,
-              category: "CONSUME",
-              quantity: disposition.consumed!,
-              userId: userId!,
-              bookingId: id,
-              bookingAssetId: dispBookingAssetId,
-              tx,
-            });
-          }
-          if ((disposition.lost ?? 0) > 0) {
-            await createConsumptionLog({
-              assetId: slice.assetId,
-              category: "LOSS",
-              quantity: disposition.lost!,
-              userId: userId!,
-              bookingId: id,
-              bookingAssetId: dispBookingAssetId,
-              tx,
-            });
-          }
-          if ((disposition.damaged ?? 0) > 0) {
-            await createConsumptionLog({
-              assetId: slice.assetId,
-              category: "DAMAGE",
-              quantity: disposition.damaged!,
-              userId: userId!,
-              bookingId: id,
-              bookingAssetId: dispBookingAssetId,
+              // The location the slice's units left from: returned units go
+              // back there, used-up ones come off it.
+              locationId: slice.sourceLocationId,
               tx,
             });
           }
 
           if (poolDecrement > 0) {
+            const beforeQuantity = locked.quantity ?? 0;
             await tx.asset.update({
               // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `slice.assetId` comes from `bookingFound.bookingAssets` loaded org-scoped via findUniqueOrThrow({where:{id,organizationId}}) at the top of checkinBooking
               where: { id: slice.assetId },
               data: { quantity: { decrement: poolDecrement } },
             });
+            // Audit the stock drop. `locked` was freshly re-read per slice, so
+            // for multiple slices of the same asset the from/to values chain
+            // through the sequential decrements.
+            quantityChangeEvents.push({
+              organizationId,
+              actorUserId: userId ?? null,
+              action: "ASSET_QUANTITY_CHANGED",
+              entityType: "ASSET",
+              entityId: slice.assetId,
+              assetId: slice.assetId,
+              field: "quantity",
+              fromValue: beforeQuantity,
+              toValue: beforeQuantity - poolDecrement,
+            });
+
+            /**
+             * Consumed / lost / damaged units are destroyed, which lowers the
+             * total the PRD's location-axis invariant is measured against
+             * (`SUM(AssetLocation.quantity WHERE assetKitId IS NULL) <=
+             * Asset.quantity`). Reconcile in the same tx, or a placement sum
+             * that was valid before check-in silently exceeds the total and
+             * blocks the next legitimate placement edit.
+             */
+            const reconcile = await reconcileManualPlacementsForStockDecrease({
+              assetId: slice.assetId,
+              newTotal: beforeQuantity - poolDecrement,
+              tx,
+              // The units left from the location recorded at check-out, so
+              // that placement loses them. None recorded (or a kit slice):
+              // the unplaced units absorb the drop, as before.
+              sources: checkinPlacementSources({
+                slice,
+                consumed: disposition.consumed,
+                lost: disposition.lost,
+                damaged: disposition.damaged,
+              }),
+            });
+
+            reportAmbiguousPlacementReconcile({
+              result: reconcile,
+              context: "Check-in",
+              additionalData: { assetId: slice.assetId, bookingId: id },
+            });
+
+            /**
+             * Ledger events for the destroyed units, tried first at the
+             * slice's source. The rows land where the reconcile actually
+             * took them from.
+             */
+            stockChangesByAssetId.get(slice.assetId)?.events?.push(
+              ...checkinStockEvents({
+                slice,
+                disposition,
+                bookingId: id,
+                bookingAssetId: dispBookingAssetId,
+              })
+            );
+            if (slice.assetKitId) {
+              destroyedUnitsByAssetKitId.set(
+                slice.assetKitId,
+                (destroyedUnitsByAssetKitId.get(slice.assetKitId) ?? 0) +
+                  poolDecrement
+              );
+            }
           }
 
           // Decrement the per-asset running pool by the amount claimed so
@@ -4047,6 +6554,20 @@ export async function checkinBooking({
           existing.lost += disposition.lost ?? 0;
           existing.damaged += disposition.damaged ?? 0;
           summaryByAssetId.set(slice.assetId, existing);
+        }
+
+        if (stockChangesByAssetId.size > 0) {
+          await recordStockChanges(tx, {
+            organizationId,
+            userId: userId!,
+            changes: [...stockChangesByAssetId.values()],
+          });
+        }
+
+        // Flush the accumulated pool-decrement audit events atomically with
+        // the decrements (same tx, single insert).
+        if (quantityChangeEvents.length > 0) {
+          await recordEvents(quantityChangeEvents, tx);
         }
 
         qtySummariesRef.value.push(...summaryByAssetId.values());
@@ -4085,30 +6606,33 @@ export async function checkinBooking({
             await reconcileAssetStatusForBookingExit({
               tx,
               assetIds: qtyAssetIds,
-              excludeBookingId: id,
+              excludeBookingIds: [id],
               organizationId,
             });
           }
         }
         /* If there are any kits associated with the booking, then update their status */
-        if (hasKits) {
-          if (kitsToCheckin.length > 0) {
-            await tx.kit.updateMany({
-              where: { id: { in: kitsToCheckin }, organizationId },
-              data: { status: KitStatus.AVAILABLE },
-            });
-          }
+        if (kitIdsToRelease.length > 0) {
+          await releaseCheckedOutKits(tx, {
+            kitIds: kitIdsToRelease,
+            organizationId,
+            excludeBookingIds: [id],
+          });
         }
 
-        // Activity events — one BOOKING_CHECKED_IN per BookingAsset ROW that
-        // was actually checked in. Progressive checkout can leave some assets
-        // never-checked-out; those must NOT get a check-in event. Walk the
-        // `bookingAssets` pivot (filtered by assetsToCheckin) so per-row
-        // `meta.quantity` is sourced from the pivot row (qty-tracked only via
-        // assetQtyMeta). Atomic with the booking status update for audit
-        // trail consistency.
-        const checkedInBookingAssets = bookingFound.bookingAssets.filter((ba) =>
-          assetsToCheckinSet.has(ba.asset.id)
+        // Activity events: one BOOKING_CHECKED_IN per slice this check-in
+        // reconciles, which is the same scope as the marker write below (out,
+        // not yet back). A slice that never left, or came back on an earlier
+        // return, gets no event: `Asset.status` is global, so filtering by
+        // asset alone would also emit for a sibling slice and claim it came
+        // back now. Per-row `meta.quantity` is sourced from the pivot row
+        // (qty-tracked only via assetQtyMeta). Atomic with the booking status
+        // update for audit trail consistency.
+        const checkedInBookingAssets = bookingFound.bookingAssets.filter(
+          (ba) =>
+            assetsToCheckinSet.has(ba.asset.id) &&
+            Boolean(ba.checkedOutAt) &&
+            !ba.checkedInAt
         );
         if (checkedInBookingAssets.length > 0) {
           await recordEvents(
@@ -4120,10 +6644,49 @@ export async function checkinBooking({
               entityId: bookingFound.id,
               bookingId: bookingFound.id,
               assetId: ba.asset.id,
-              meta: assetQtyMeta(ba.asset, ba.quantity),
+              meta: {
+                ...assetQtyMeta(ba.asset, ba.quantity),
+                ...bookingMethodMeta(provenance, [ba.id]),
+              },
             })),
             tx
           );
+        }
+
+        /**
+         * Mark every outstanding slice as returned. This path writes no
+         * `PartialBookingCheckin` row, so without this a completed booking
+         * leaves its slices looking permanently checked out.
+         *
+         * Scoped to slices that actually went out: one never checked out has
+         * nothing to reconcile, and stamping it would claim it came back.
+         */
+        await tx.bookingAsset.updateMany({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingFound id already org-checked via findUniqueOrThrow({where:{id,organizationId}})
+          where: {
+            bookingId: bookingFound.id,
+            checkedOutAt: { not: null },
+            checkedInAt: null,
+          },
+          data: { checkedInAt: new Date(), checkedInById: userId },
+        });
+
+        /**
+         * Units destroyed out of a kit slice leave the kit too. Runs after
+         * every read of this booking's slices above, because emptying a
+         * membership can merge its slice into a standalone sibling.
+         *
+         * `userId` only narrows the type: without one, the guard at the top
+         * of this transaction refuses any check-in with units left to
+         * disposition, so nothing can have been destroyed.
+         */
+        if (userId && destroyedUnitsByAssetKitId.size > 0) {
+          destroyedKitUnitsRef.value = await removeDestroyedUnitsFromKits(tx, {
+            destroyedUnitsByAssetKitId,
+            organizationId,
+            actorUserId: userId,
+            bookingId: bookingFound.id,
+          });
         }
 
         /** Finally update the booking */
@@ -4164,6 +6727,7 @@ export async function checkinBooking({
 
         // Get asset and kit data for consistent formatting
         const assetsWithKitInfo = await db.asset.findMany({
+          // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: check-in note names assets already on the booking, archived ones included
           where: { id: { in: specificAssetIds }, organizationId },
           select: {
             id: true,
@@ -4240,42 +6804,28 @@ export async function checkinBooking({
           organizationId,
           content: `${wrapUserLinkForNote(
             user!
-          )} performed a partial check-in: ${itemsDescription} and completed the booking. Status changed from ${fromStatusBadge} to ${toStatusBadge}`,
+          )} performed a partial check-in: ${itemsDescription}${bookingMethodClause(
+            provenance,
+            outstandingSliceIds(
+              bookingFound.bookingAssets.filter((ba) =>
+                specificAssetIds.includes(ba.asset.id)
+              )
+            )
+          )} and completed the booking. Status changed from ${fromStatusBadge} to ${toStatusBadge}`,
         });
 
         // Record the canonical status transition event for reports.
         // The custom system note above replaces the standard transition note,
         // but downstream consumers (Booking Compliance report) still need the
         // BOOKING_STATUS_CHANGED → COMPLETE ActivityEvent to know when the
-        // booking was actually checked in. Best-effort, mirroring the pattern
-        // inside createStatusTransitionNote.
-        try {
-          await recordEvent({
-            organizationId,
-            // We're inside `if (userId)` — `userId` is a string here.
-            actorUserId: userId,
-            action: "BOOKING_STATUS_CHANGED",
-            entityType: "BOOKING",
-            entityId: updatedBooking.id,
-            bookingId: updatedBooking.id,
-            field: "status",
-            fromValue: bookingFound.status,
-            toValue: BookingStatus.COMPLETE,
-          });
-        } catch (err) {
-          Logger.error(
-            new ShelfError({
-              cause: err,
-              message:
-                "Failed to record BOOKING_STATUS_CHANGED event for partial check-in completion",
-              additionalData: {
-                bookingId: updatedBooking.id,
-                fromStatus: bookingFound.status,
-              },
-              label,
-            })
-          );
-        }
+        // booking was actually checked in.
+        await recordBookingStatusChangedEvent({
+          organizationId,
+          bookingId: updatedBooking.id,
+          userId,
+          fromStatus: bookingFound.status,
+          toStatus: BookingStatus.COMPLETE,
+        });
       } else {
         // Standard status transition note
         await createStatusTransitionNote({
@@ -4285,6 +6835,10 @@ export async function checkinBooking({
           toStatus: BookingStatus.COMPLETE,
           userId,
           custodianUserId: updatedBooking.custodianUserId || undefined,
+          methodClause: bookingMethodClause(
+            provenance,
+            outstandingSliceIds(bookingFound.bookingAssets)
+          ),
         });
       }
     }
@@ -4305,11 +6859,7 @@ export async function checkinBooking({
             displayName: true,
           } satisfies Prisma.UserSelect,
         });
-        const actor = wrapUserLinkForNote({
-          id: userId,
-          firstName: actorUser?.firstName,
-          lastName: actorUser?.lastName,
-        });
+        const actor = wrapUserLinkForNote({ ...actorUser, id: userId });
 
         /**
          * Shared booking link — per-asset notes point back to the booking
@@ -4384,6 +6934,15 @@ export async function checkinBooking({
       }
     }
 
+    if (userId && destroyedKitUnitsRef.value) {
+      await noteKitUnitsDestroyedAtCheckin({
+        result: destroyedKitUnitsRef.value,
+        booking: { id: updatedBooking.id, name: updatedBooking.name },
+        userId,
+        organizationId,
+      });
+    }
+
     /**
      * At this point when user is checking in the booking,
      * we just have to cancel all active scheduler (if there is any).
@@ -4432,26 +6991,52 @@ export async function checkinBooking({
         updatedBooking.custodianTeamMember?.name ||
         "";
 
-      const text = completedBookingEmailContent({
-        bookingName: updatedBooking.name,
-        assetsCount: updatedBooking._count.bookingAssets,
-        custodian,
-        from: updatedBooking.from!,
-        to: updatedBooking.to!,
-        bookingId: updatedBooking.id,
-        hints,
-        customEmailFooter: updatedBooking.organization.customEmailFooter,
+      // "Completed by", not "Checked in by": the person who completes the
+      // booking may not be the one who scanned every item back.
+      const actor = await resolveBookingEmailActor({
+        userId,
+        label: "Completed by",
       });
 
       await sendBookingEmailToAllRecipients({
         recipients,
         booking: updatedBooking,
         subject: `🎉 Booking complete (${updatedBooking.name}) - shelf.nu`,
-        textContent: text,
-        heading: `Your booking has been completed: "${updatedBooking.name}"`,
+        buildText: (textArgs) =>
+          completedBookingEmailContent({
+            ...textArgs,
+            bookingName: updatedBooking.name,
+            assetsCount: updatedBooking._count.bookingAssets,
+            custodian,
+            from: updatedBooking.from!,
+            to: updatedBooking.to!,
+            bookingId: updatedBooking.id,
+            customEmailFooter: updatedBooking.organization.customEmailFooter,
+          }),
+        buildHeading: () =>
+          `Your booking has been completed: "${updatedBooking.name}"`,
         hints,
+        actor,
       });
     }
+
+    /**
+     * Low-stock check for every qty-tracked asset whose pool actually dropped
+     * this check-in (CONSUME / LOSS / DAMAGE — RETURN puts units back so it
+     * can't cross a threshold DOWN). Derived from the per-asset summaries: a
+     * decrement happened iff consumed + lost + damaged > 0. Runs OUTSIDE the
+     * committed transaction (best-effort — a notification failure must never
+     * roll back a successful check-in). `userId` may be undefined here
+     * (legacy signature); the notifier emails owner+admins regardless and
+     * only skips the in-app sender when there is no acting user.
+     */
+    await notifyLowStockForDecrementedAssets({
+      summaries: qtySummariesRef.value,
+      organizationId,
+      bookingId: id,
+      userId,
+      context: "booking check-in",
+    });
 
     return updatedBooking;
   } catch (cause) {
@@ -4520,6 +7105,15 @@ export type CheckoutDispositionInput = {
   /** Units to claim from this asset's BookingAsset slice on this booking.
    *  Required for QUANTITY_TRACKED; clamped to [1, remaining-to-check-out]. */
   quantity: number;
+  /**
+   * INTERNAL ONLY — never set by an API caller. The legacy `assetIds[]`
+   * fallback tags a QUANTITY_TRACKED asset scanned with no explicit count so
+   * the in-tx loop resolves it to "all remaining units" (the per-asset cap
+   * under the row lock) instead of the sentinel `quantity: 1`. Mirrors the
+   * "Check Out All" default so a bare mobile scan takes the whole line, not one
+   * unit. Explicit per-unit `quantity` payloads are honored verbatim.
+   */
+  defaultAllRemaining?: boolean;
 };
 
 /**
@@ -4599,13 +7193,80 @@ function buildQtyPerAssetFragment(
 }
 
 /**
- * Build a markdoc fragment naming each qty-tracked asset checked OUT in
- * this session. Mirror of {@link buildQtyPerAssetFragment} but unidirectional —
- * checkout only carries one count per asset (no return/consume/loss/damage
+ * A reservation that was outranked by an in-flight booking's check-out.
+ *
+ * @see {@link buildOverriddenReservationNotes}
+ */
+export type OverriddenReservation = {
+  /** The RESERVED booking that lost the asset(s) */
+  id: string;
+  /** Its user-supplied name — untrusted, must never be spliced raw */
+  name: string;
+  /** The assets it reserved that were just checked out elsewhere */
+  assets: Array<{ id: string; title: string }>;
+};
+
+/**
+ * Build the pair of system notes recording that an in-flight booking checked
+ * out an asset an overlapping RESERVED booking also held.
+ *
+ * Both sides get a note so the clash is never silent: the checking-out booking
+ * records what it overrode, and the reservation records that its asset is gone
+ * — the reservation's owner would otherwise not discover it until their own
+ * check-out failed.
+ *
+ * All user-supplied values (booking names, asset titles) go through the
+ * markdoc wrappers, which place them inside quoted, escaped tag attributes —
+ * never raw — so a booking named `{% link to="javascript:…" /%}` cannot inject
+ * a live tag into the rendered note feed.
+ *
+ * @param reservation - The outranked reservation and the assets it lost
+ * @param current - The in-flight booking that checked the assets out
+ * @returns Note content for the current booking and for the reservation
+ */
+export function buildOverriddenReservationNotes(
+  reservation: OverriddenReservation,
+  current: { id: string; name: string }
+): { currentBookingNote: string; reservedBookingNote: string } {
+  const assetsFragment = wrapAssetsWithDataForNote(
+    reservation.assets,
+    "checked out"
+  );
+  const isPlural = reservation.assets.length > 1;
+  const verb = isPlural ? "were" : "was";
+  const pronoun = isPlural ? "them" : "it";
+
+  const reservationLink = wrapLinkForNote(
+    `/bookings/${reservation.id}`,
+    reservation.name
+  );
+  const currentLink = wrapLinkForNote(`/bookings/${current.id}`, current.name);
+
+  return {
+    currentBookingNote:
+      `${assetsFragment} ${verb} also reserved by ${reservationLink} for an overlapping period. ` +
+      `This booking is already checked out, so it takes priority — that reservation may need ${pronoun} replaced.`,
+    reservedBookingNote:
+      `${assetsFragment} ${verb} checked out by ${currentLink}, which overlaps this reservation and is already in progress. ` +
+      `You may need to replace ${pronoun} before this booking starts.`,
+  };
+}
+
+/**
+ * Build a markdoc fragment naming each qty-tracked slice checked OUT in this
+ * session. Mirror of {@link buildQtyPerAssetFragment} but unidirectional —
+ * checkout only carries one count per slice (no return/consume/loss/damage
  * fan-out).
  *
- * Produces something like:
- *   `{% link to="/assets/<id>" text="Pens" /%} (10 checked out, 5 still booked)`
+ * Layer 3: each row is now rendered PER SLICE with a label, so a slice-level
+ * checkout reports slice-level totals instead of the whole asset's booked
+ * count. A tagged slice (dialog checkout, `bookingAssetId` set) produces:
+ *   `{% link ... text="Gloves" /%} · standalone (11 of 22 boxes checked out, 11 still booked)`
+ *   `{% link ... text="Gloves" /%} · in kit Kittington (100 of 100 boxes checked out)`
+ * — the `, N still booked` clause is omitted when the slice is fully out. A
+ * legacy / greedy disposition (no `bookingAssetId`, e.g. the scanner) has no
+ * slice context, so it falls back to the pre-Layer-3 asset-level phrasing:
+ *   `{% link ... text="Pens" /%} (10 boxes checked out, 5 boxes still booked)`
  *
  * Returns an empty string when no row has a positive count so callers can
  * safely concatenate without extra guards.
@@ -4618,6 +7279,10 @@ function buildQtyPerAssetCheckoutFragment(
     unitOfMeasure: string | null;
     checkedOut: number;
     remainingAfter: number;
+    bookingAssetId: string | null;
+    assetKitId: string | null;
+    kitName: string | null;
+    sliceBooked: number;
   }>
 ): string {
   const fragments: string[] = [];
@@ -4628,13 +7293,39 @@ function buildQtyPerAssetCheckoutFragment(
     const fmt = (qty: number) =>
       formatUnitCount({ type: s.type, unitOfMeasure: s.unitOfMeasure }, qty) ??
       String(qty);
+    const link = wrapLinkForNote(`/assets/${s.assetId}`, s.title);
 
+    // Per-slice phrasing — dialog checkouts carry the exact BookingAsset id.
+    if (s.bookingAssetId) {
+      const sliceLabel = s.assetKitId
+        ? // SECURITY: `kitName` is free-form user input (Kit.name) spliced into
+          // note text that is rendered through Markdoc. Strip Markdoc delimiters
+          // so a kit named e.g. `X{% link to="javascript:..." /%}` cannot inject
+          // a live tag (stored XSS). Sanitize-at-write — see
+          // .claude/rules/sanitize-note-content-markdoc.md.
+          `in kit ${stripMarkdocDelimiters(s.kitName ?? "kit") || "kit"}`
+        : "standalone";
+      // The unit rides on the slice total via `formatUnitCount` ("22 boxes");
+      // the checked-out count stays a bare number so the phrase reads
+      // "11 of 22 boxes checked out". `still booked` is a bare number too, and
+      // is omitted entirely when the slice is fully out (remaining 0).
+      const sliceParts = [
+        `${s.checkedOut} of ${fmt(s.sliceBooked)} checked out`,
+      ];
+      if (s.remainingAfter > 0) {
+        sliceParts.push(`${s.remainingAfter} still booked`);
+      }
+      fragments.push(`${link} · ${sliceLabel} (${sliceParts.join(", ")})`);
+      continue;
+    }
+
+    // Legacy / greedy disposition (no slice tag) → asset-level phrasing.
     const parts: string[] = [];
     if (s.checkedOut > 0) parts.push(`${fmt(s.checkedOut)} checked out`);
-    if (s.remainingAfter > 0)
+    if (s.remainingAfter > 0) {
       parts.push(`${fmt(s.remainingAfter)} still booked`);
+    }
     if (parts.length === 0) continue;
-    const link = wrapLinkForNote(`/assets/${s.assetId}`, s.title);
     fragments.push(`${link} (${parts.join(", ")})`);
   }
   return fragments.join(", ");
@@ -4648,6 +7339,7 @@ export async function partialCheckinBooking({
   userId,
   hints,
   intentChoice,
+  provenance,
 }: Pick<Booking, "id" | "organizationId"> & {
   /** Legacy payload — asset IDs only, no per-asset quantities. */
   assetIds?: Asset["id"][];
@@ -4656,6 +7348,15 @@ export async function partialCheckinBooking({
   userId: User["id"];
   hints: ClientHint;
   intentChoice?: CheckinIntentEnum;
+  /**
+   * How and from where the batch was made. Recorded on every
+   * `BOOKING_PARTIAL_CHECKIN` event and said on the booking's activity line.
+   * The web scan page passes `"scanned"` with the ticked slices in
+   * `selectedBookingAssetIds`; the list dialog passes `"selected"`; the phone
+   * passes what the app declared, or `null` when an older bundle declared
+   * nothing.
+   */
+  provenance?: BookingMethodProvenance;
 }) {
   try {
     // Dedupe once up front so counts, the PartialBookingCheckin record, and the
@@ -4694,6 +7395,14 @@ export async function partialCheckinBooking({
      */
     const seenDispositionKeys = new Set<string>();
     const assetIdsWithDisposition = new Set<string>();
+    /**
+     * Bare (assetIds-only) scans of QUANTITY_TRACKED assets. These carry no
+     * disposition and mean "check in all remaining units" for that asset —
+     * resolved in the tx loop below (mirrors checkinBooking's big-button
+     * default). Tracked so the zero-disposition guard exempts them: only an
+     * EXPLICIT drawer disposition must carry a non-zero amount.
+     */
+    const bareCheckinAssetIds = new Set<string>();
     for (const d of checkins ?? []) {
       const key = `${d.assetId}::${d.bookingAssetId ?? "null"}`;
       if (seenDispositionKeys.has(key)) continue;
@@ -4713,6 +7422,7 @@ export async function partialCheckinBooking({
       if (!assetIdsWithDisposition.has(assetId)) {
         assetIdsWithDisposition.add(assetId);
         dispositions.push({ assetId });
+        bareCheckinAssetIds.add(assetId);
       }
     }
 
@@ -4754,6 +7464,8 @@ export async function partialCheckinBooking({
         where: { id, organizationId },
         include: {
           bookingAssets: {
+            // `checkedOutAt`/`checkedInAt` drive the per-slice check-in
+            // eligibility guard below.
             include: {
               asset: {
                 select: {
@@ -4814,7 +7526,14 @@ export async function partialCheckinBooking({
     // defend server-side too.
     for (const d of dispositions) {
       const isQty = assetTypeById.get(d.assetId) === AssetType.QUANTITY_TRACKED;
-      if (isQty && sumDisposition(d) === 0) {
+      // Bare scans (assetIds-only) auto-default to "all remaining" in the tx
+      // loop below, so exempt them here — only an EXPLICIT drawer disposition
+      // must carry a non-zero amount.
+      if (
+        isQty &&
+        sumDisposition(d) === 0 &&
+        !bareCheckinAssetIds.has(d.assetId)
+      ) {
         throw new ShelfError({
           cause: null,
           status: 400,
@@ -4832,71 +7551,233 @@ export async function partialCheckinBooking({
     // to check those in is invalid and must be rejected before the
     // "covers all remaining" early-exit (which would otherwise complete the
     // booking and flip never-checked-out assets to AVAILABLE no-ops).
-    // Eligibility is per-booking, NOT global asset status. An asset can be
-    // CHECKED_OUT by a different active booking yet never checked out here, so
-    // keying on global status would wrongly accept it. The per-booking checkout
-    // history is the PartialBookingCheckout records (progressive checkouts,
-    // including the final batch). An all-at-once checkout leaves no records, so
-    // fall back to "every booking asset is eligible".
-    const checkedOutForThisBooking = new Set(
-      await getPartiallyCheckedOutAssetIds({ bookingId: id, organizationId })
+    // Eligibility is per SLICE, read from `BookingAsset.checkedOutAt`, and
+    // neither of the two obvious stand-ins can replace it:
+    //   - global `Asset.status`: an asset may be CHECKED_OUT by a DIFFERENT
+    //     active booking while never having gone out on this one.
+    //   - "does this booking have any PartialBookingCheckout rows?": those
+    //     record progressive scan SESSIONS, and the all-at-once checkout writes
+    //     none. A booking checked out with the button that later gains ONE
+    //     scanned asset gets its first row, and a booking-level test then
+    //     reports every button-checked-out asset as never checked out.
+    /**
+     * Slices by id, for the per-disposition checks below. Built from the
+     * booking's own rows, which `findUniqueOrThrow({ id, organizationId })`
+     * already org-scoped — so a `bookingAssetId` naming a foreign or unrelated
+     * slice is ineligible by construction rather than by a separate lookup.
+     */
+    const sliceById = new Map(
+      bookingFound.bookingAssets.map((ba) => [ba.id, ba])
     );
-    const eligibleCheckinAssetIds =
-      checkedOutForThisBooking.size > 0
-        ? checkedOutForThisBooking
-        : new Set(bookingFoundAssets.map((asset) => asset.id));
+
+    /**
+     * Asset-level view of the same markers, for UNTAGGED callers only: the
+     * mobile endpoint and legacy `assetIds`-only scans send no
+     * `bookingAssetId`, and an INDIVIDUAL asset has a single slice per booking,
+     * so asset-level and slice-level coincide for them.
+     *
+     * A tagged disposition must NOT be judged through this — one slice's marker
+     * would authorise a sibling that never went out.
+     */
+    const assetIdsWithACheckedOutSlice = new Set(
+      bookingFound.bookingAssets
+        .filter((ba) => Boolean(ba.checkedOutAt))
+        .map((ba) => ba.assetId)
+    );
+    const assetIdsWithAReconciledSlice = new Set(
+      bookingFound.bookingAssets
+        .filter((ba) => Boolean(ba.checkedInAt))
+        .map((ba) => ba.assetId)
+    );
+    /**
+     * Slices still out: gone out and not yet reconciled. An asset can hold a
+     * reconciled slice AND an outstanding one at the same time — a qty-tracked
+     * asset carries a standalone slice plus one per kit — so a reconciled slice
+     * alone does not mean the asset is finished with.
+     */
+    const assetIdsWithAnOutstandingSlice = new Set(
+      bookingFound.bookingAssets
+        .filter((ba) => Boolean(ba.checkedOutAt) && !ba.checkedInAt)
+        .map((ba) => ba.assetId)
+    );
+
+    /**
+     * Tagged dispositions are judged against their EXACT slice. A
+     * `QUANTITY_TRACKED` asset can hold a standalone slice plus N kit-driven
+     * slices on one booking (see the partial uniques on `BookingAsset`), and a
+     * slice added to an already-ONGOING booking carries no checkout marker —
+     * so "some slice of this asset is out" is not permission to reconcile
+     * units of a different one.
+     */
+    for (const d of dispositions) {
+      if (!d.bookingAssetId) continue;
+      const slice = sliceById.get(d.bookingAssetId);
+      if (!slice || slice.assetId !== d.assetId) {
+        throw new ShelfError({
+          cause: null,
+          status: 400,
+          label,
+          message:
+            "One of the submitted items does not belong to this booking.",
+          shouldBeCaptured: false,
+        });
+      }
+      if (slice.checkedInAt) {
+        throw new ShelfError({
+          cause: null,
+          status: 400,
+          label,
+          message: "These assets are already checked in.",
+          shouldBeCaptured: false,
+        });
+      }
+      if (!slice.checkedOutAt) {
+        throw new ShelfError({
+          cause: null,
+          status: 400,
+          label,
+          message: "Cannot check in assets that were never checked out.",
+          shouldBeCaptured: false,
+        });
+      }
+    }
+
+    /**
+     * Assets whose eligibility the asset-level path still decides: everything
+     * scanned that no TAGGED disposition already covered. Derived by exclusion
+     * rather than from the untagged dispositions, because a bare `assetIds`
+     * scan carries no disposition entry at all and must still be judged.
+     */
+    const assetIdsCoveredBySliceCheck = new Set(
+      dispositions.filter((d) => d.bookingAssetId).map((d) => d.assetId)
+    );
 
     const scannedAssets = await db.asset.findMany({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: check-in must reach assets already on the booking, archived ones included
       where: { id: { in: effectiveAssetIds }, organizationId },
       select: { id: true, title: true },
     });
-    const notCheckedOut = scannedAssets.filter(
-      (a) => !eligibleCheckinAssetIds.has(a.id)
+
+    // Checked in already: a duplicate request, not an invalid one. Tested
+    // FIRST, and independently of `checkedOutAt` — a reconciled slice carries
+    // both markers, and "never checked out" would be the wrong reason to give.
+    //
+    // "Already" has to mean the whole asset, not one of its slices. An untagged
+    // claim names no slice, so it is a claim on whatever the asset still has
+    // out; while any slice is outstanding there is something left to check in,
+    // and refusing would strand it with no way for the operator around it.
+    const alreadyCheckedIn = scannedAssets.filter(
+      (a) =>
+        !assetIdsCoveredBySliceCheck.has(a.id) &&
+        assetIdsWithAReconciledSlice.has(a.id) &&
+        !assetIdsWithAnOutstandingSlice.has(a.id)
     );
-    if (notCheckedOut.length > 0) {
-      // why: with progressive checkout a booking can hold still-Booked
-      // (AVAILABLE) assets that were never checked out — they cannot be checked in.
-      const names = notCheckedOut
-        .slice(0, 3)
-        .map((a) => a.title)
-        .join(", ");
-      const more =
-        notCheckedOut.length > 3 ? ` and ${notCheckedOut.length - 3} more` : "";
+    if (alreadyCheckedIn.length > 0) {
       throw new ShelfError({
         cause: null,
         status: 400,
         label,
-        message: `Cannot check in assets that were never checked out: ${names}${more}.`,
+        message: `These assets are already checked in: ${nameList(
+          alreadyCheckedIn
+        )}.`,
+        shouldBeCaptured: false,
       });
     }
 
-    // Early exit: if this batch returns every asset still outstanding for THIS
-    // booking, run a complete check-in instead of recording another partial one.
+    const notCheckedOut = scannedAssets.filter(
+      (a) =>
+        !assetIdsCoveredBySliceCheck.has(a.id) &&
+        !assetIdsWithACheckedOutSlice.has(a.id) &&
+        !assetIdsWithAReconciledSlice.has(a.id)
+    );
+    if (notCheckedOut.length > 0) {
+      // A booking can hold still-Booked (AVAILABLE) assets that were added
+      // after checkout — `updateBookingAssets` deliberately does not
+      // auto-check-out onto an ONGOING booking — and those cannot be checked in.
+      throw new ShelfError({
+        cause: null,
+        status: 400,
+        label,
+        message: `Cannot check in assets that were never checked out: ${nameList(
+          notCheckedOut
+        )}.`,
+        // User-input validation, like the sibling guards above. Without this it
+        // defaulted to captured and filled Sentry with a working guard.
+        shouldBeCaptured: false,
+      });
+    }
+
+    // Early exit: if this batch returns every asset still out on THIS booking,
+    // run a complete check-in instead of recording another partial one.
     //
-    // Completion is decided from this booking's PartialBookingCheckin records —
-    // NOT from the assets' global `status`. Assets are shared across overlapping
-    // bookings, so an asset that was returned for this booking can be
-    // CHECKED_OUT again by a later booking. Keying completion on global status
-    // therefore left the booking stuck ONGOING/OVERDUE even though every item
-    // was returned here. The records are the per-booking source of truth and
-    // match what the check-in progress bar shows the user (fix from main:
-    // ddafe62fd / 9df00afff).
+    // `checkinBooking` returns every checked-out asset on the booking, so the
+    // batch has to cover each one that is genuinely out. "Out" is judged per
+    // slice by the test the completion gate uses (see `isBookingFullyCheckedIn`):
+    // the slice markers, held against the slice's latest departure. An asset
+    // whose earlier trip was checked in and which has gone out again is out,
+    // whatever check-in sessions name it. Never the assets' global `status`:
+    // assets are shared across overlapping bookings, and one returned here can
+    // be CHECKED_OUT by a later booking.
+    //
+    // A QUANTITY_TRACKED asset is out while EITHER no check-in session names it
+    // OR any of its slices is out by its markers. Never read it from the
+    // markers alone: a slice is settled once the units that left are back, but
+    // booked units that never left still count against it, and
+    // `checkinBooking` would log every one of them as returned. A session names
+    // the asset only once every booked unit is accounted for, which catches
+    // that; the marker catches a slice sent out again after the session was
+    // written.
     //
     // Only safe when no qty dispositions are in play, because per-asset qty
     // work needs to run in this function's transaction (so we don't split
     // consumption-log writes across two services).
     if (!hasQuantityDispositions) {
-      const alreadyCheckedInAssetIds = await getPartiallyCheckedInAssetIds(id);
-      const recordedAssetIdSet = new Set(alreadyCheckedInAssetIds);
+      const [checkinSessions, checkoutSessions] = await Promise.all([
+        db.partialBookingCheckin.findMany({
+          where: { bookingId: id, booking: { organizationId } },
+          select: { assetIds: true, checkinTimestamp: true },
+        }),
+        db.partialBookingCheckout.findMany({
+          where: { bookingId: id, booking: { organizationId } },
+          select: { assetIds: true, checkoutTimestamp: true },
+        }),
+      ]);
+      const isIndividualSliceOutstanding = makeIsIndividualSliceOutstanding({
+        checkinSessions,
+        checkoutSessions,
+      });
+      const outstandingIndividualAssetIds = new Set(
+        bookingFound.bookingAssets
+          .filter(
+            (ba) =>
+              ba.asset.type !== AssetType.QUANTITY_TRACKED &&
+              isIndividualSliceOutstanding(ba)
+          )
+          .map((ba) => ba.assetId)
+      );
+      const sessionReturnedAssetIds = new Set(
+        checkinSessions.flatMap((session) => session.assetIds)
+      );
+      const qtyAssetIdsOutByMarker = new Set(
+        bookingFound.bookingAssets
+          .filter(
+            (ba) =>
+              ba.asset.type === AssetType.QUANTITY_TRACKED &&
+              isSliceOutByMarker(ba)
+          )
+          .map((ba) => ba.assetId)
+      );
       const providedAssetIds = new Set(effectiveAssetIds);
 
-      // Outstanding = CHECKED-OUT-for-this-booking assets not yet checked
-      // back in. Crucially this is the eligible (checked-out) set, NOT every
-      // booking asset: a progressive booking can hold never-checked-out items,
-      // and counting those as outstanding would keep it stuck ONGOING forever
-      // after the actually checked-out items are all returned.
-      const outstandingAssetIds = [...eligibleCheckinAssetIds].filter(
-        (assetId) => !recordedAssetIdSet.has(assetId)
+      // Only assets that went out on this booking can be outstanding: a
+      // progressive booking can hold items that never left, and counting
+      // those would keep it ONGOING after everything that did leave is back.
+      const outstandingAssetIds = [...assetIdsWithACheckedOutSlice].filter(
+        (assetId) =>
+          assetTypeById.get(assetId) === AssetType.QUANTITY_TRACKED
+            ? !sessionReturnedAssetIds.has(assetId) ||
+              qtyAssetIdsOutByMarker.has(assetId)
+            : outstandingIndividualAssetIds.has(assetId)
       );
 
       if (
@@ -4904,15 +7785,22 @@ export async function partialCheckinBooking({
         outstandingAssetIds.length > 0 &&
         outstandingAssetIds.every((assetId) => providedAssetIds.has(assetId))
       ) {
-        // Don't create a PartialBookingCheckin row — the redirect to
-        // `checkinBooking` handles completion itself.
-        const actor = wrapUserLinkForNote({
-          id: userId,
-          firstName: user?.firstName,
-          lastName: user?.lastName,
-        });
+        // No PartialBookingCheckin row: `checkinBooking` handles completion
+        // itself. The asset-side note says how this batch was made, as the
+        // provenance recorded it; the batch may have been scanned, selected
+        // from the list, or both. Resolved over the booking's own slices for
+        // the batch's assets, as the delegated events are: a bare asset-id
+        // payload names no slice itself.
+        const actor = wrapUserLinkForNote({ ...user, id: userId });
         await createNotes({
-          content: `${actor} checked in via explicit check-in scanner. All assets were scanned, so complete check-in was performed.`,
+          content: `${actor} checked in the last items still out${bookingMethodClause(
+            provenance,
+            outstandingSliceIds(
+              bookingFound.bookingAssets.filter((ba) =>
+                effectiveAssetIds.includes(ba.assetId)
+              )
+            )
+          )}, which completed the booking.`,
           type: "UPDATE",
           userId,
           assetIds: effectiveAssetIds,
@@ -4926,6 +7814,9 @@ export async function partialCheckinBooking({
           intentChoice,
           userId,
           specificAssetIds: effectiveAssetIds,
+          // The batch closes the booking through the full check-in, which
+          // writes the events; the rows were still scanned or selected here.
+          provenance,
         });
 
         return {
@@ -4937,27 +7828,29 @@ export async function partialCheckinBooking({
       }
     }
 
-    // For kits: only flip kit status if ALL of its assets are being checked
-    // in this session. Qty-tracked assets aren't kitted, so this logic only
-    // applies to individuals.
-    const assetsBeingCheckedIn = bookingFoundAssets.filter((a) =>
-      effectiveAssetIds.includes(a.id)
-    );
-    const kitIdsBeingCheckedIn = getKitIdsByAssets(assetsBeingCheckedIn);
-
-    const completeKitIds: string[] = [];
-    for (const kitId of kitIdsBeingCheckedIn) {
-      const kitAssetsInBooking = bookingFoundAssets.filter(
-        (a) => a.assetKits?.[0]?.kitId === kitId
-      );
-      const kitAssetsBeingCheckedIn = assetsBeingCheckedIn.filter(
-        (a) => a.assetKits?.[0]?.kitId === kitId
-      );
-
-      if (kitAssetsInBooking.length === kitAssetsBeingCheckedIn.length) {
-        completeKitIds.push(kitId);
-      }
-    }
+    /**
+     * The kits each of this booking's slices belongs to.
+     *
+     * Slice-grained because that is the grain the release gate has to answer
+     * at. A QUANTITY_TRACKED asset holds a standalone slice plus one per kit it
+     * belongs to on the same booking — the two partial uniques on
+     * `BookingAsset` allow exactly that — so an asset id names several kits at
+     * once and cannot say which of them a given return came back to.
+     *
+     * Which kits this session actually releases is decided inside the
+     * transaction, once the slices it settled are known: see `completeKitIds`
+     * there.
+     */
+    const kitIdsBySliceId = await getKitIdsBySlice({
+      slices: bookingFound.bookingAssets.map((ba) => ({
+        id: ba.id,
+        assetKitId: ba.assetKitId ?? null,
+        sourceKitId: ba.sourceKitId ?? null,
+        assetKits: ba.asset?.assetKits ?? [],
+        assetType: ba.asset.type,
+      })),
+      organizationId,
+    });
 
     /**
      * Per-asset disposition summary — populated inside the transaction as
@@ -4994,12 +7887,108 @@ export async function partialCheckinBooking({
       const qtySummaries: QtyDispositionSummary[] = [];
       const fullyReconciledQtyAssetIds: string[] = [];
 
+      // Structured `ASSET_QUANTITY_CHANGED` events for the pool decrements
+      // below — collected across dispositions and flushed once with
+      // `recordEvents` so the loop stays within the interactive-tx budget.
+      const quantityChangeEvents: Parameters<typeof recordEvents>[0] = [];
+
+      /**
+       * Quantity-tracked assets holding at least one kit slice on this
+       * booking. Units destroyed out of a kit slice leave the kit too, so for
+       * these the session's dispositions are kept and later spread over the
+       * slices (see `spreadSessionDispositionsOverSlices`).
+       */
+      const qtyAssetIdsWithKitSlice = new Set(
+        bookingFound.bookingAssets
+          .filter(
+            (ba) =>
+              ba.assetKitId &&
+              assetTypeById.get(ba.assetId) === AssetType.QUANTITY_TRACKED
+          )
+          .map((ba) => ba.assetId)
+      );
+      /** Dispositions logged before this session, per kit-holding asset. */
+      const priorLogsByAssetId = new Map<
+        string,
+        Array<{ bookingAssetId: string | null; quantity: number }>
+      >();
+      /** This session's dispositions, per kit-holding asset. */
+      const sessionLogsByAssetId = new Map<
+        string,
+        Array<{
+          bookingAssetId: string | null;
+          category: CheckinDispositionCategory;
+          quantity: number;
+        }>
+      >();
+
+      /**
+       * Lock every QUANTITY_TRACKED asset this session touches up front, in
+       * sorted id order, the order every other booking flow locks in. The
+       * loop below walks `dispositions` in payload order, so locking as it goes
+       * would let two sessions that share assets take the locks in reverse and
+       * deadlock. Its own lock call then re-acquires a row this transaction
+       * already holds, which only re-reads it.
+       */
+      for (const assetId of [
+        ...new Set(
+          dispositions
+            .filter(
+              (d) => assetTypeById.get(d.assetId) === AssetType.QUANTITY_TRACKED
+            )
+            .map((d) => d.assetId)
+        ),
+      ].sort()) {
+        await lockAssetForQuantityUpdate(tx, assetId, organizationId);
+      }
+
+      /**
+       * What each bare-scanned asset's slices that went out can still check
+       * out, to size the units they sent. A bare scan of a consumable is
+       * defaulted below to the units still out, never to units that stayed on
+       * the shelf. Read once for the session, under the locks above.
+       */
+      const bareScanRemainingToCheckOutBySlice =
+        await computeBookingAssetsSliceRemainingToCheckOut(
+          tx,
+          id,
+          bookingFound.bookingAssets
+            .filter(
+              (slice) =>
+                bareCheckinAssetIds.has(slice.assetId) && slice.checkedOutAt
+            )
+            .map((slice) => slice.id)
+        );
+
       for (const disp of dispositions) {
         if (assetTypeById.get(disp.assetId) !== AssetType.QUANTITY_TRACKED) {
           continue;
         }
 
-        const lockedAsset = await lockAssetForQuantityUpdate(tx, disp.assetId);
+        const lockedAsset = await lockAssetForQuantityUpdate(
+          tx,
+          disp.assetId,
+          organizationId
+        );
+
+        // Read under the asset lock and before this session writes any log
+        // for the asset, so a concurrent session cannot slip in between.
+        if (
+          qtyAssetIdsWithKitSlice.has(disp.assetId) &&
+          !priorLogsByAssetId.has(disp.assetId)
+        ) {
+          priorLogsByAssetId.set(
+            disp.assetId,
+            await tx.consumptionLog.findMany({
+              where: {
+                bookingId: id,
+                assetId: disp.assetId,
+                category: { in: [...CHECKIN_DISPOSITION_CATEGORIES] },
+              },
+              select: { bookingAssetId: true, quantity: true },
+            })
+          );
+        }
 
         /**
          * Re-query remaining inside the transaction, AFTER the lock. This
@@ -5011,7 +8000,6 @@ export async function partialCheckinBooking({
           id,
           disp.assetId
         );
-        const claimed = sumDisposition(disp);
 
         /**
          * Per-slice cap (Polish-7b): when the drawer targets a specific
@@ -5032,6 +8020,69 @@ export async function partialCheckinBooking({
           cap = Math.min(cap, sliceRemaining);
         }
 
+        // Bare scan of a QUANTITY_TRACKED asset (no explicit disposition):
+        // default to "all remaining" — return all for a returnable (TWO_WAY)
+        // asset, consume all for a consumable (ONE_WAY) one. Mirrors
+        // checkinBooking's big-button default. Only bare ids reach here with a
+        // zero disposition (the guard above rejects an explicit zero), so this
+        // never overrides an operator's explicit returned/consumed split.
+        if (
+          bareCheckinAssetIds.has(disp.assetId) &&
+          sumDisposition(disp) === 0
+        ) {
+          // Re-scan of an asset with no units left to check in (`cap === 0`):
+          // reject instead of writing a no-op PartialBookingCheckin + event.
+          // Matches the `claimed > cap` rejection an explicit re-scan gets.
+          if (cap <= 0) {
+            throw new ShelfError({
+              cause: null,
+              status: 400,
+              label,
+              message: `Cannot check in "${lockedAsset.title}" — no units remain to check in on this booking.`,
+              shouldBeCaptured: false,
+            });
+          }
+          if (lockedAsset.consumptionType === "ONE_WAY") {
+            /**
+             * Units of the asset that left and are not accounted for yet. Only
+             * these can have been used up: consuming units that never left
+             * the shelf would destroy stock, and on a kit slice leave the kit
+             * holding units the stock no longer has. Mirrors the ONE_WAY
+             * auto-default in `checkinBooking`.
+             */
+            const slices = bookingFound.bookingAssets.filter(
+              (slice) => slice.assetId === disp.assetId
+            );
+            const sentOut = slices.reduce(
+              (sum, slice) =>
+                sum +
+                unitsSentOutOnSlice(
+                  slice,
+                  bareScanRemainingToCheckOutBySlice.get(slice.id) ?? 0
+                ),
+              0
+            );
+            const logged =
+              slices.reduce((sum, slice) => sum + slice.quantity, 0) -
+              remaining;
+            const unitsStillOut = Math.max(0, sentOut - logged);
+            if (unitsStillOut === 0) {
+              throw new ShelfError({
+                cause: null,
+                status: 400,
+                label,
+                message: `Cannot check in "${lockedAsset.title}": none of its units are out on this booking.`,
+                shouldBeCaptured: false,
+              });
+            }
+            disp.consumed = Math.min(cap, unitsStillOut);
+          } else {
+            disp.returned = cap;
+          }
+        }
+
+        const claimed = sumDisposition(disp);
+
         if (claimed > cap) {
           throw new ShelfError({
             cause: null,
@@ -5044,6 +8095,15 @@ export async function partialCheckinBooking({
 
         const poolDecrement =
           (disp.consumed ?? 0) + (disp.lost ?? 0) + (disp.damaged ?? 0);
+
+        /** The pool's stock before this disposition's write, for the ledger. */
+        const stockBefore =
+          poolDecrement > 0
+            ? await readStockState(tx, {
+                assetId: disp.assetId,
+                organizationId,
+              })
+            : null;
 
         /**
          * Pool-drain guard: `Asset.quantity` must stay ≥ current custody
@@ -5073,6 +8133,47 @@ export async function partialCheckinBooking({
         // the slice (drawer post-Polish-6); legacy callers leave it null and
         // the loader's greedy-fill handles them on read.
         const dispBookingAssetId = disp.bookingAssetId ?? null;
+        /**
+         * The slice these units belong to, for the location they left from.
+         * A disposition that names no slice (an older phone app) resolves
+         * only when the asset has a single slice on this booking.
+         */
+        const sourceSlice = sliceForDisposition(bookingFound.bookingAssets, {
+          assetId: disp.assetId,
+          bookingAssetId: disp.bookingAssetId,
+        });
+        /**
+         * Where used-up, lost and damaged units come off. With no single
+         * slice (untagged, several slices) the units are spread over the
+         * slices the way the readers will attribute the logs written below,
+         * so read the asset's earlier logs first, under the asset lock.
+         */
+        let placementSources = checkinPlacementSources({
+          slice: sourceSlice,
+          consumed: disp.consumed,
+          lost: disp.lost,
+          damaged: disp.damaged,
+        });
+        if (!sourceSlice && !disp.bookingAssetId && poolDecrement > 0) {
+          const priorLogs = await tx.consumptionLog.findMany({
+            where: {
+              bookingId: id,
+              assetId: disp.assetId,
+              category: { in: [...CHECKIN_DISPOSITION_CATEGORIES] },
+            },
+            select: { bookingAssetId: true, quantity: true },
+          });
+          placementSources = untaggedCheckinPlacementSources({
+            slices: bookingFound.bookingAssets.filter(
+              (ba) => ba.assetId === disp.assetId
+            ),
+            priorLogs,
+            returned: disp.returned,
+            consumed: disp.consumed,
+            lost: disp.lost,
+            damaged: disp.damaged,
+          });
+        }
         if ((disp.returned ?? 0) > 0) {
           await createConsumptionLog({
             assetId: disp.assetId,
@@ -5081,50 +8182,88 @@ export async function partialCheckinBooking({
             userId,
             bookingId: id,
             bookingAssetId: dispBookingAssetId,
+            locationId: sourceSlice?.sourceLocationId ?? null,
             tx,
           });
         }
-        if ((disp.consumed ?? 0) > 0) {
-          await createConsumptionLog({
-            assetId: disp.assetId,
-            category: "CONSUME",
-            quantity: disp.consumed!,
-            userId,
-            bookingId: id,
-            bookingAssetId: dispBookingAssetId,
-            tx,
-          });
-        }
-        if ((disp.lost ?? 0) > 0) {
-          await createConsumptionLog({
-            assetId: disp.assetId,
-            category: "LOSS",
-            quantity: disp.lost!,
-            userId,
-            bookingId: id,
-            bookingAssetId: dispBookingAssetId,
-            tx,
-          });
-        }
-        if ((disp.damaged ?? 0) > 0) {
-          await createConsumptionLog({
-            assetId: disp.assetId,
-            category: "DAMAGE",
-            quantity: disp.damaged!,
-            userId,
-            bookingId: id,
-            bookingAssetId: dispBookingAssetId,
-            tx,
-          });
+
+        if (qtyAssetIdsWithKitSlice.has(disp.assetId)) {
+          const sessionLogs = sessionLogsByAssetId.get(disp.assetId) ?? [];
+          for (const category of CHECKIN_DISPOSITION_CATEGORIES) {
+            const quantity = disp[CATEGORY_FIELD[category]] ?? 0;
+            if (quantity > 0) {
+              sessionLogs.push({
+                bookingAssetId: dispBookingAssetId,
+                category,
+                quantity,
+              });
+            }
+          }
+          sessionLogsByAssetId.set(disp.assetId, sessionLogs);
         }
 
         // Decrement the pool for CONSUME/LOSS/DAMAGE only. RETURN leaves
         // the pool alone — the unit is back where it came from.
         if (poolDecrement > 0) {
+          const beforeQuantity = lockedAsset.quantity ?? 0;
           await tx.asset.update({
             // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `disp.assetId` validated against `bookingFoundAssets` (loaded org-scoped) before this loop
             where: { id: disp.assetId },
             data: { quantity: { decrement: poolDecrement } },
+          });
+          // Audit the stock drop. `lockedAsset` was freshly re-read per
+          // disposition, so from/to chains through sequential decrements when
+          // one asset has several dispositions.
+          quantityChangeEvents.push({
+            organizationId,
+            actorUserId: userId,
+            action: "ASSET_QUANTITY_CHANGED",
+            entityType: "ASSET",
+            entityId: disp.assetId,
+            assetId: disp.assetId,
+            field: "quantity",
+            fromValue: beforeQuantity,
+            toValue: beforeQuantity - poolDecrement,
+          });
+
+          /**
+           * Same reconcile as the full check-in path above: destroyed units
+           * lower the total the location-axis invariant is measured against,
+           * so bring the placement sum back inside it within this tx.
+           */
+          const reconcile = await reconcileManualPlacementsForStockDecrease({
+            assetId: disp.assetId,
+            newTotal: beforeQuantity - poolDecrement,
+            tx,
+            sources: placementSources,
+          });
+
+          reportAmbiguousPlacementReconcile({
+            result: reconcile,
+            context: "Partial check-in",
+            additionalData: { assetId: disp.assetId, bookingId: id },
+          });
+
+          /**
+           * Written per disposition, not once after the loop: the next
+           * disposition of this asset caps itself on this booking's
+           * CONSUME / LOSS / DAMAGE rows, so it must see these.
+           */
+          await recordStockChanges(tx, {
+            organizationId,
+            userId,
+            changes: [
+              {
+                assetId: disp.assetId,
+                before: stockBefore,
+                events: checkinStockEvents({
+                  slice: sourceSlice,
+                  disposition: disp,
+                  bookingId: id,
+                  bookingAssetId: dispBookingAssetId,
+                }),
+              },
+            ],
           });
         }
 
@@ -5144,6 +8283,12 @@ export async function partialCheckinBooking({
           damaged: disp.damaged ?? 0,
           pendingAfter,
         });
+      }
+
+      // Flush the accumulated pool-decrement audit events atomically with the
+      // decrements (same tx, single insert).
+      if (quantityChangeEvents.length > 0) {
+        await recordEvents(quantityChangeEvents, tx);
       }
 
       // ---- Individual asset status updates (unchanged) ----
@@ -5195,13 +8340,6 @@ export async function partialCheckinBooking({
         }
       }
 
-      if (completeKitIds.length > 0) {
-        await tx.kit.updateMany({
-          where: { id: { in: completeKitIds }, organizationId },
-          data: { status: KitStatus.AVAILABLE },
-        });
-      }
-
       /**
        * PartialBookingCheckin session row. `assetIds` intentionally only
        * lists assets FULLY reconciled in this session:
@@ -5227,6 +8365,331 @@ export async function partialCheckinBooking({
         },
       });
 
+      /**
+       * The slices this session finished, at slice grain.
+       *
+       * `checkedInAt` means FULLY reconciled, and "fully" is a property of the
+       * SLICE. `sessionReconciledAssetIds` above is asset-level on purpose —
+       * the session row and `isBookingFullyCheckedIn` read it as an asset-level
+       * obligation — and an asset's `remaining` sums across every slice it has
+       * on the booking. Returning one kit's slice in full finishes that slice
+       * whatever its siblings still owe, and finishes nothing else, so the
+       * marker and the kit gate need their own set.
+       */
+      const settledSliceIds = new Set<string>();
+
+      /**
+       * Units this session consumed, lost or damaged out of each kit slice,
+       * keyed by the slice's `AssetKit` id. Filled below, where each slice's
+       * sent-out units are known.
+       */
+      const destroyedUnitsByAssetKitId = new Map<string, number>();
+
+      /** Went out on this booking and has not been reconciled yet. */
+      const isOutstandingSlice = (slice: {
+        checkedOutAt: Date | null;
+        checkedInAt: Date | null;
+      }) => Boolean(slice.checkedOutAt) && !slice.checkedInAt;
+
+      const bookingSlicesByAssetId = new Map<
+        string,
+        (typeof bookingFound.bookingAssets)[number][]
+      >();
+      for (const slice of bookingFound.bookingAssets) {
+        const bucket = bookingSlicesByAssetId.get(slice.assetId);
+        if (bucket) {
+          bucket.push(slice);
+        } else {
+          bookingSlicesByAssetId.set(slice.assetId, [slice]);
+        }
+      }
+
+      /**
+       * INDIVIDUAL assets reconcile by presence: scanning one returns every
+       * slice of it that went out. Unchanged from what the marker has always
+       * done for them.
+       */
+      for (const assetId of individualAssetIds) {
+        for (const slice of bookingSlicesByAssetId.get(assetId) ?? []) {
+          if (isOutstandingSlice(slice)) {
+            settledSliceIds.add(slice.id);
+          }
+        }
+      }
+
+      /**
+       * A QUANTITY_TRACKED slice is finished when everything that actually LEFT
+       * on it is accounted for — not when its booked quantity is. Progressive
+       * checkout stamps `checkedOutAt` as soon as any unit goes, so a slice
+       * booked at 10 with 3 in the field is ordinary; measuring against 10 would
+       * leave it outstanding after all 3 came back, and its kit checked out with
+       * nothing of it anywhere.
+       *
+       * Read this booking's dispositions back — including the rows written above
+       * — and spread them with
+       * {@link attributeDispositionsByBookingAsset}, the same function every
+       * read site uses: a log tagged with a slice lands on it, an untagged one
+       * greedy-fills in `compareSlicesForGreedyFill` order.
+       *
+       * Resolving an untagged claim any other way would settle a slice the
+       * booking's own screens still report as out — the agreement
+       * `.claude/rules/booking-checkout-is-recorded-per-slice` requires between
+       * the marker writer and the quantity attribution.
+       *
+       * One query for every touched asset rather than one per slice: this loop
+       * runs over a whole batch inside an interactive transaction that already
+       * spends several round-trips per disposition (SHELF-WEBAPP-217).
+       */
+      const qtyAssetIdsTouched = [
+        ...new Set(qtySummaries.map((s) => s.assetId)),
+      ];
+      if (qtyAssetIdsTouched.length > 0) {
+        /**
+         * Units dispatched per slice = booked minus what is still checkoutable.
+         * {@link computeBookingAssetsSliceRemainingToCheckOut} is the reader
+         * every checkout surface already uses, including its all-at-once
+         * fallback, so a slice sent out by the button reports its whole
+         * quantity dispatched and settles exactly as it always has.
+         */
+        const remainingToCheckOutBySlice =
+          await computeBookingAssetsSliceRemainingToCheckOut(
+            tx,
+            id,
+            qtyAssetIdsTouched.flatMap((assetId) =>
+              (bookingSlicesByAssetId.get(assetId) ?? []).map((s) => s.id)
+            )
+          );
+
+        const dispositionLogs = await tx.consumptionLog.findMany({
+          where: {
+            bookingId: id,
+            assetId: { in: qtyAssetIdsTouched },
+            category: { in: [...CHECKIN_DISPOSITION_CATEGORIES] },
+          },
+          select: { assetId: true, bookingAssetId: true, quantity: true },
+        });
+
+        const logsByAssetId = new Map<
+          string,
+          Array<{ bookingAssetId: string | null; quantity: number }>
+        >();
+        for (const log of dispositionLogs) {
+          const entry = {
+            bookingAssetId: log.bookingAssetId,
+            quantity: log.quantity,
+          };
+          const bucket = logsByAssetId.get(log.assetId);
+          if (bucket) {
+            bucket.push(entry);
+          } else {
+            logsByAssetId.set(log.assetId, [entry]);
+          }
+        }
+
+        for (const assetId of qtyAssetIdsTouched) {
+          const slices = bookingSlicesByAssetId.get(assetId) ?? [];
+          if (slices.length === 0) continue;
+
+          /**
+           * What each slice owes: the units it actually sent out.
+           *
+           * Both halves of the decision below measure against this one number.
+           * As the CAPACITY it stops a slice that never left from absorbing an
+           * untagged return — the mobile payload names no slice, so its units
+           * are spread standalone-first, and every unit swallowed by a slice
+           * that owes nothing is one the kit-driven slice needs to settle. As
+           * the THRESHOLD it settles a slice on what it owes rather than what
+           * it booked. Sizing the two differently strands a kit either way.
+           *
+           * How a slice is sized, including a slice that never left, is
+           * {@link unitsSentOutOnSlice}.
+           */
+          const owedBySlice = new Map<string, number>();
+          for (const slice of slices) {
+            owedBySlice.set(
+              slice.id,
+              unitsSentOutOnSlice(
+                slice,
+                remainingToCheckOutBySlice.get(slice.id) ?? 0
+              )
+            );
+          }
+
+          // Units this session destroyed out of each kit slice of the asset,
+          // spread over what each slice actually sent out.
+          const sessionLogs = sessionLogsByAssetId.get(assetId);
+          if (sessionLogs) {
+            const spread = spreadSessionDispositionsOverSlices({
+              slices: slices.map((slice) => ({
+                id: slice.id,
+                assetKitId: slice.assetKitId,
+                booked: slice.quantity,
+                owed: owedBySlice.get(slice.id) ?? 0,
+              })),
+              priorLogs: priorLogsByAssetId.get(assetId) ?? [],
+              sessionLogs,
+            });
+            for (const slice of slices) {
+              const onSlice = spread.get(slice.id);
+              const destroyed = onSlice
+                ? onSlice.consumed + onSlice.lost + onSlice.damaged
+                : 0;
+              if (slice.assetKitId && destroyed > 0) {
+                destroyedUnitsByAssetKitId.set(
+                  slice.assetKitId,
+                  (destroyedUnitsByAssetKitId.get(slice.assetKitId) ?? 0) +
+                    destroyed
+                );
+              }
+            }
+          }
+
+          // The asset's FULL slice set, so a claim tagged to one slice never
+          // leaks into a sibling and the untagged pool is capped per slice.
+          const attributed = attributeDispositionsByBookingAsset({
+            bookingAssetRows: slices.map((slice) => ({
+              id: slice.id,
+              quantity: owedBySlice.get(slice.id) ?? 0,
+              assetKitId: slice.assetKitId,
+            })),
+            consumptionLogs: logsByAssetId.get(assetId) ?? [],
+          });
+          for (const slice of slices) {
+            const owed = owedBySlice.get(slice.id) ?? 0;
+            if (
+              isOutstandingSlice(slice) &&
+              owed > 0 &&
+              (attributed.get(slice.id) ?? 0) >= owed
+            ) {
+              settledSliceIds.add(slice.id);
+            }
+          }
+        }
+      }
+
+      /**
+       * Mark the slices this session fully reconciled.
+       *
+       * Keyed by `BookingAsset.id`. Keyed by `assetId` it stamped a return on
+       * every sibling slice at once — kit B reading as returned because kit A's
+       * units came back — and, in the other direction, refused to stamp kit A's
+       * slice until kit B's units were accounted for too, because an asset's
+       * remaining sums across all of them.
+       *
+       * `checkedOutAt: { not: null }` still guards the write: a slice added
+       * after checkout never left, and stamping `checkedInAt` beside a NULL
+       * `checkedOutAt` claims a return for units that never went anywhere.
+       *
+       * `checkedInAt: null` keeps the first reconciliation: where one slice was
+       * settled in an earlier session and a sibling in this one, each keeps the
+       * moment it was actually reconciled.
+       */
+      if (settledSliceIds.size > 0) {
+        await tx.bookingAsset.updateMany({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: these slice ids come from this booking's own rows, which the action's `findUniqueOrThrow({ id, organizationId })` already org-checked
+          where: {
+            bookingId: id,
+            id: { in: [...settledSliceIds] },
+            checkedOutAt: { not: null },
+            checkedInAt: null,
+          },
+          data: { checkedInAt: new Date(), checkedInById: userId },
+        });
+      }
+
+      /**
+       * Kits released by this session: one whose slices this session finished,
+       * and which has nothing left out on this booking.
+       *
+       * Both halves are per slice. Counted by asset, a kit's own returned slice
+       * read as outstanding because a SIBLING kit's slice of the same asset had
+       * not come back — the kit stayed CHECKED_OUT with nothing of its own out
+       * — and a kit was released because a sibling kit's slice had come back,
+       * sending it AVAILABLE with its units in the field. Over-release is the
+       * failure that loses equipment, so a kit needs BOTH: something of its own
+       * settled here, and nothing of its own still owed.
+       *
+       * A partially returned QUANTITY_TRACKED slice is outstanding by exactly
+       * this test — `checkedInAt` stays NULL while it still owes units — so its
+       * kit keeps reading CHECKED_OUT until the last unit is logged.
+       */
+      const kitIdsSettledHere = new Set<string>();
+      const kitIdsStillOut = new Set<string>();
+      for (const slice of bookingFound.bookingAssets) {
+        const kitIds = kitIdsBySliceId.get(slice.id);
+        if (!kitIds) continue;
+        if (settledSliceIds.has(slice.id)) {
+          for (const kitId of kitIds) kitIdsSettledHere.add(kitId);
+        } else if (isOutstandingSlice(slice)) {
+          for (const kitId of kitIds) kitIdsStillOut.add(kitId);
+        }
+      }
+
+      /**
+       * Slices this request never saw.
+       *
+       * The booking was loaded before the transaction opened — several
+       * round-trips earlier — so a progressive checkout that committed in
+       * between is invisible to it, and releasing a kit whose gear left in that
+       * window is the failure this gate exists to prevent.
+       *
+       * Read as a VETO only: it runs when a kit is already a candidate, and
+       * only slices absent from the snapshot contribute. It can hold a kit
+       * back; it can never release one. So a read that comes back short leaves
+       * the decision exactly where the snapshot put it.
+       */
+      if (kitIdsSettledHere.size > 0) {
+        const stillOutNow = await tx.bookingAsset.findMany({
+          where: {
+            bookingId: id,
+            checkedOutAt: { not: null },
+            checkedInAt: null,
+          },
+          select: {
+            id: true,
+            assetKitId: true,
+            sourceKitId: true,
+            asset: {
+              select: {
+                // `type` decides whether a slice with no provenance answers
+                // from live membership — see `getKitIdsBySlice`.
+                type: true,
+                assetKits: { select: { kitId: true } },
+              },
+            },
+          },
+        });
+        const unseenSlices = stillOutNow.filter(
+          (slice) => !sliceById.has(slice.id)
+        );
+        if (unseenSlices.length > 0) {
+          const unseenKitIds = await getKitIdsBySlice({
+            slices: unseenSlices.map((slice) => ({
+              id: slice.id,
+              assetKitId: slice.assetKitId,
+              sourceKitId: slice.sourceKitId,
+              assetKits: slice.asset?.assetKits ?? [],
+              assetType: slice.asset.type,
+            })),
+            organizationId,
+            client: tx,
+          });
+          for (const kitIds of unseenKitIds.values()) {
+            for (const kitId of kitIds) kitIdsStillOut.add(kitId);
+          }
+        }
+      }
+
+      const completeKitIds = [...kitIdsSettledHere].filter(
+        (kitId) => !kitIdsStillOut.has(kitId)
+      );
+
+      await releaseCheckedOutKits(tx, {
+        kitIds: completeKitIds,
+        organizationId,
+        excludeBookingIds: [id],
+      });
+
       // Activity events — one BOOKING_PARTIAL_CHECKIN per asset that had
       // activity in this session (qty disposition or individual flip).
       // Inside the tx so audit-trail recording is atomic with the writes
@@ -5241,6 +8704,17 @@ export async function partialCheckinBooking({
           ...qtySummaries.map((s) => s.assetId),
         ]),
       ];
+      /**
+       * The slices each asset's dispositions named. The asset's one event
+       * covers all of them, so its method is the one they share, or `null`
+       * when a ticked slice met a scanned one in the same batch.
+       */
+      const sliceIdsByAssetId = new Map<string, BatchSliceId[]>();
+      for (const d of dispositions) {
+        const slices = sliceIdsByAssetId.get(d.assetId) ?? [];
+        slices.push(d.bookingAssetId);
+        sliceIdsByAssetId.set(d.assetId, slices);
+      }
       if (assetIdsTouchedInTx.length > 0) {
         await recordEvents(
           assetIdsTouchedInTx.map((assetId) => ({
@@ -5251,6 +8725,10 @@ export async function partialCheckinBooking({
             entityId: id,
             bookingId: id,
             assetId,
+            meta: bookingMethodMeta(
+              provenance,
+              sliceIdsByAssetId.get(assetId) ?? []
+            ),
           })),
           tx
         );
@@ -5259,6 +8737,22 @@ export async function partialCheckinBooking({
       // Determine completion uniformly via the shared helper — keeps
       // individual + qty-tracked semantics in one place.
       const bookingIsComplete = await isBookingFullyCheckedIn(tx, id);
+
+      /**
+       * Units destroyed out of a kit slice leave the kit too. Runs after the
+       * completion decision above and every other read of this booking's
+       * slices, because emptying a membership can merge its slice into a
+       * standalone sibling.
+       */
+      const destroyedKitUnits =
+        destroyedUnitsByAssetKitId.size > 0
+          ? await removeDestroyedUnitsFromKits(tx, {
+              destroyedUnitsByAssetKitId,
+              organizationId,
+              actorUserId: userId,
+              bookingId: id,
+            })
+          : null;
 
       const updatedBookingSnapshot = await tx.booking.findUniqueOrThrow({
         // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking `id` already org-checked via findUniqueOrThrow({where:{id,organizationId}}) in partialCheckinBooking
@@ -5272,10 +8766,41 @@ export async function partialCheckinBooking({
       });
 
       if (bookingIsComplete) {
+        const dataToComplete: Prisma.BookingUpdateInput = {
+          status: BookingStatus.COMPLETE,
+        };
+
+        /**
+         * Same end-date rewrite `checkinBooking` performs, so a booking's
+         * period does not depend on which check-in route completed it: `to`
+         * becomes the actual return moment when the booking is being returned
+         * late, or early with the operator's consent. The planned end stays in
+         * `originalTo` (seeded only for rows predating that column).
+         */
+        const shouldAdjustEndDate =
+          updatedBookingSnapshot.status === BookingStatus.OVERDUE ||
+          (!!updatedBookingSnapshot.to &&
+            isBookingEarlyCheckin(updatedBookingSnapshot.to) &&
+            intentChoice === CheckinIntentEnum["with-adjusted-date"]);
+
+        if (shouldAdjustEndDate) {
+          dataToComplete.originalTo = plannedEndToPreserve(
+            updatedBookingSnapshot
+          );
+
+          const toDateStr = DateTime.fromJSDate(new Date(), {
+            zone: hints.timeZone,
+          }).toFormat(DATE_TIME_FORMAT);
+
+          dataToComplete.to = DateTime.fromFormat(toDateStr, DATE_TIME_FORMAT, {
+            zone: hints.timeZone,
+          }).toJSDate();
+        }
+
         const completedBooking = await tx.booking.update({
           // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking `id` already org-checked via findUniqueOrThrow({where:{id,organizationId}}) in partialCheckinBooking
           where: { id },
-          data: { status: BookingStatus.COMPLETE },
+          data: dataToComplete,
           include: {
             bookingAssets: true,
             custodianUser: true,
@@ -5291,6 +8816,7 @@ export async function partialCheckinBooking({
           qtySummaries,
           individualAssetIds,
           completeKitIds,
+          destroyedKitUnits,
         };
       }
 
@@ -5301,8 +8827,36 @@ export async function partialCheckinBooking({
         qtySummaries,
         individualAssetIds,
         completeKitIds,
+        destroyedKitUnits,
       };
     });
+
+    if (txResult.destroyedKitUnits) {
+      await noteKitUnitsDestroyedAtCheckin({
+        result: txResult.destroyedKitUnits,
+        booking: { id: txResult.booking.id, name: txResult.booking.name },
+        userId,
+        organizationId,
+      });
+    }
+
+    /**
+     * Canonical status-transition event for the completion. This path writes
+     * its own system note instead of calling `createStatusTransitionNote`, so
+     * the event it would normally emit has to be recorded here — the Booking
+     * Compliance report reads a booking's check-in moment from
+     * `BOOKING_STATUS_CHANGED → COMPLETE` (see `resolveCheckInTimes`) and
+     * otherwise falls back to `updatedAt`, which drifts on any later edit.
+     */
+    if (txResult.isComplete) {
+      await recordBookingStatusChangedEvent({
+        organizationId,
+        bookingId: id,
+        userId,
+        fromStatus: txResult.previousStatus,
+        toStatus: BookingStatus.COMPLETE,
+      });
+    }
 
     /**
      * Activity notes — best-effort, OUTSIDE the transaction.
@@ -5313,11 +8867,7 @@ export async function partialCheckinBooking({
      * captured server-side via `Logger.error`.
      */
     try {
-      const actor = wrapUserLinkForNote({
-        id: userId,
-        firstName: user?.firstName,
-        lastName: user?.lastName,
-      });
+      const actor = wrapUserLinkForNote({ ...user, id: userId });
 
       /**
        * Shared booking link used by every asset-side note below so the
@@ -5419,10 +8969,14 @@ export async function partialCheckinBooking({
         ...txResult.individualAssetIds,
         ...txResult.qtySummaries.map((s) => s.assetId),
       ];
+      /** The slice of every disposition that touched an asset in this batch. */
+      const touchedSliceIds = dispositions
+        .filter((d) => assetIdsTouched.includes(d.assetId))
+        .map((d) => d.bookingAssetId);
       const assetsWithKitInfo =
         assetIdsTouched.length > 0
           ? await db.asset.findMany({
-              // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetIdsTouched` derive from the org-scoped booking assets/qty summaries in partialCheckinBooking
+              // eslint-disable-next-line local-rules/require-org-scope-on-id-queries, local-rules/require-archived-at-check-on-asset-queries -- idor-safe: `assetIdsTouched` derive from the org-scoped booking assets/qty summaries in partialCheckinBooking; why: check-in note names assets already on the booking, archived ones included
               where: { id: { in: assetIdsTouched } },
               select: {
                 id: true,
@@ -5506,13 +9060,19 @@ export async function partialCheckinBooking({
           // the `qtyTail` suffix surfaces per-disposition counts
           // (returned / consumed / lost / damaged) when present.
           organizationId,
-          content: `${actor} performed a partial check-in: ${itemsDescription}${qtyTail} and completed the booking. Status changed from ${fromStatusBadge} to ${toStatusBadge}`,
+          content: `${actor} performed a partial check-in: ${itemsDescription}${qtyTail}${bookingMethodClause(
+            provenance,
+            touchedSliceIds
+          )} and completed the booking. Status changed from ${fromStatusBadge} to ${toStatusBadge}`,
         });
       } else {
         await createSystemBookingNote({
           bookingId: id,
           organizationId,
-          content: `${actor} performed a partial check-in: ${itemsDescription}${qtyTail}.`,
+          content: `${actor} performed a partial check-in: ${itemsDescription}${qtyTail}${bookingMethodClause(
+            provenance,
+            touchedSliceIds
+          )}.`,
         });
       }
     } catch (noteError) {
@@ -5527,32 +9087,71 @@ export async function partialCheckinBooking({
     }
 
     // Compute a coarse "remaining" count for the toast: bookingAssets not
-    // yet fully reconciled. Individuals count as remaining if not in any
-    // PartialBookingCheckin session; qty-tracked count as remaining if
-    // `computeBookingAssetRemaining > 0`.
+    // yet fully reconciled. An individual counts as remaining while it is out
+    // by the shared per-slice test, the same judgement the completion gate
+    // makes, so one that never went out is not counted and one that went out
+    // again after an earlier return is. A qty-tracked slice counts while its
+    // booked units are not all accounted for (`computeBookingAssetRemaining`
+    // > 0) OR while it is out by its markers, which is what a slice sent out
+    // again after a full return looks like.
     const outstandingBookingAssets = await db.bookingAsset.findMany({
       where: { bookingId: id },
       select: {
         assetId: true,
+        checkedOutAt: true,
+        checkedInAt: true,
         asset: { select: { type: true } },
       },
     });
-    const allSessions = await db.partialBookingCheckin.findMany({
-      where: { bookingId: id },
-      select: { assetIds: true },
+    const [allSessions, allCheckoutSessions] = await Promise.all([
+      db.partialBookingCheckin.findMany({
+        where: { bookingId: id },
+        select: { assetIds: true, checkinTimestamp: true },
+      }),
+      db.partialBookingCheckout.findMany({
+        where: { bookingId: id },
+        select: { assetIds: true, checkoutTimestamp: true },
+      }),
+    ]);
+    const isIndividualSliceStillOut = makeIsIndividualSliceOutstanding({
+      checkinSessions: allSessions,
+      checkoutSessions: allCheckoutSessions,
     });
-    const reconciledIndividualIds = new Set<string>(
-      allSessions.flatMap((s) => s.assetIds as string[])
-    );
-    let remainingAssetCount = 0;
+    // Counted per ASSET, not per slice: a quantity-tracked asset can hold a
+    // standalone slice and several kit-driven ones on one booking, and
+    // `computeBookingAssetRemaining` already answers for all of them.
+    const slicesByAssetId = new Map<string, typeof outstandingBookingAssets>();
     for (const ba of outstandingBookingAssets) {
-      if (ba.asset?.type === AssetType.QUANTITY_TRACKED) {
-        const rem = await computeBookingAssetRemaining(db, id, ba.assetId);
-        if (rem > 0) remainingAssetCount += 1;
-      } else if (!reconciledIndividualIds.has(ba.assetId)) {
+      const slices = slicesByAssetId.get(ba.assetId);
+      if (slices) slices.push(ba);
+      else slicesByAssetId.set(ba.assetId, [ba]);
+    }
+    let remainingAssetCount = 0;
+    for (const [assetId, slices] of slicesByAssetId) {
+      if (slices[0].asset?.type === AssetType.QUANTITY_TRACKED) {
+        const rem = await computeBookingAssetRemaining(db, id, assetId);
+        if (rem > 0 || slices.some(isSliceOutByMarker))
+          remainingAssetCount += 1;
+      } else if (slices.some(isIndividualSliceStillOut)) {
         remainingAssetCount += 1;
       }
     }
+
+    /**
+     * Low-stock check for every qty-tracked asset whose pool actually dropped
+     * this session (CONSUME / LOSS / DAMAGE — RETURN puts units back so it
+     * can't cross a threshold DOWN). Derived from the tx's per-slice
+     * summaries: a decrement happened iff consumed + lost + damaged > 0.
+     * Runs OUTSIDE the committed transaction (best-effort — a notification
+     * failure must never roll back a successful check-in).
+     */
+    await notifyLowStockForDecrementedAssets({
+      summaries: txResult.qtySummaries,
+      organizationId,
+      bookingId: id,
+      userId,
+      context: "partial booking check-in",
+    });
 
     return {
       booking: txResult.booking,
@@ -5607,6 +9206,8 @@ export async function partialCheckoutBooking({
   userId,
   hints,
   intentChoice,
+  provenance,
+  sourceLocations,
 }: Pick<Booking, "id" | "organizationId"> & {
   /** Legacy payload — asset IDs only, no per-asset quantities. INDIVIDUAL rows
    *  implicitly carry quantity = 1. */
@@ -5618,6 +9219,18 @@ export async function partialCheckoutBooking({
   userId: User["id"];
   hints: ClientHint;
   intentChoice?: CheckoutIntentEnum;
+  /**
+   * How and from where the batch was made. Recorded on every
+   * `BOOKING_PARTIAL_CHECKOUT` event and said on the booking's activity line;
+   * see {@link partialCheckinBooking} for who passes what.
+   */
+  provenance?: BookingMethodProvenance;
+  /**
+   * Where each pool's units come from, keyed by slice or asset id. Recorded
+   * on a slice the first time it goes out; see
+   * {@link recordCheckoutSourceLocations}.
+   */
+  sourceLocations?: SourceLocationSubmission;
 }) {
   try {
     // Dedupe once up front so counts, the PartialBookingCheckout record, and the
@@ -5646,8 +9259,14 @@ export async function partialCheckoutBooking({
     for (const assetId of assetIds) {
       if (!assetIdsWithDisposition.has(assetId)) {
         assetIdsWithDisposition.add(assetId);
-        // Legacy / INDIVIDUAL fallback: implicit quantity = 1, no slice tag.
-        dispositions.push({ assetId, quantity: 1 });
+        // Legacy / INDIVIDUAL fallback: no slice tag. INDIVIDUAL keeps the
+        // implicit quantity = 1; a QUANTITY_TRACKED asset scanned with no
+        // explicit count is tagged `defaultAllRemaining` so the in-tx loop
+        // resolves it to "all remaining units". The sentinel 1 is still used by
+        // the delegate gate below (where `1 < remaining` keeps a >1-unit QT
+        // asset on this partial path — so it never delegates with a wrong
+        // count). Harmless for INDIVIDUAL: the flag is only read on the QT path.
+        dispositions.push({ assetId, quantity: 1, defaultAllRemaining: true });
       }
     }
 
@@ -5685,6 +9304,20 @@ export async function partialCheckoutBooking({
             select: {
               id: true,
               quantity: true,
+              // Slice discriminator: `null` = standalone (free pool), non-null
+              // = kit-driven slice (FK → `AssetKit.id`). Drives the per-slice
+              // checkout note label ("standalone" vs "in kit X").
+              assetKitId: true,
+              // Kit provenance, paired with `assetKitId` so the slice can name
+              // the kit it was booked under even after a detach. Both are
+              // required by `getKitIdsToAcquireBySlice`.
+              sourceKitId: true,
+              // Whether the slice is out on THIS booking (see
+              // `isSliceOutByMarker`), which decides what is still outstanding.
+              checkedOutAt: true,
+              // Set once the slice is back: an INDIVIDUAL asset whose slice
+              // carries it cannot go out again on this booking.
+              checkedInAt: true,
               asset: {
                 select: {
                   id: true,
@@ -5692,7 +9325,18 @@ export async function partialCheckoutBooking({
                   type: true,
                   title: true,
                   unitOfMeasure: true,
-                  assetKits: { select: { kitId: true } },
+                  // `kitId` retained for the complete-kit status logic below.
+                  // `id` + `kit.name` added so the per-slice checkout note can
+                  // resolve a kit-driven slice's kit label by matching the
+                  // slice's `assetKitId` (an `AssetKit.id`) against these
+                  // memberships — no extra round-trip inside the qty loop.
+                  assetKits: {
+                    select: {
+                      id: true,
+                      kitId: true,
+                      kit: { select: { name: true } },
+                    },
+                  },
                 },
               },
             },
@@ -5788,6 +9432,16 @@ export async function partialCheckoutBooking({
       });
     }
 
+    // An archived asset is out of service and must never go out (issue #382).
+    // Partial check-out is its own path, so it needs the same backstop the
+    // full check-out has.
+    await assertAssetsAreNotArchived({
+      assetIds: effectiveAssetIds,
+      organizationId,
+      fix: "remove-from-booking",
+      actorUserId: userId,
+    });
+
     // QUANTITY_TRACKED dispositions must carry a positive `quantity`. INDIVIDUAL
     // rows always get implicit `quantity = 1` upstream, so this guard only fires
     // on malformed qty payloads from a direct API caller.
@@ -5805,27 +9459,98 @@ export async function partialCheckoutBooking({
       }
     }
 
-    // Assets already checked out for THIS booking. Source of truth is the
-    // PartialBookingCheckout records, but a booking checked out via the
-    // all-at-once flow leaves NO records while its assets are live CHECKED_OUT —
-    // so also treat any currently-CHECKED_OUT booking asset as already checked
-    // out. Without this, a progressive scan over an all-at-once booking would
-    // re-check-out CHECKED_OUT assets (dup records/events) and misreport
-    // outstanding/remaining counts.
+    // SECURITY (per-slice IDOR / data integrity): `bookingAssetId` is
+    // caller-supplied and now load-bearing — it drives the per-slice checkout
+    // cap AND the exact per-slice attribution persisted on
+    // `PartialBookingCheckout`. A stale UI or a direct/mobile client could tag a
+    // disposition with a slice id from a DIFFERENT asset or booking; the
+    // exact-attribution reader would then credit the wrong slice, corrupting
+    // per-slice remaining + notes. Validate every tagged disposition's slice
+    // belongs to THIS booking AND matches its `assetId` before it is used for
+    // caps or stored (covers both the delegate and progressive paths below).
+    const assetIdBySliceId = new Map(
+      bookingFound.bookingAssets.map((ba) => [ba.id, ba.asset.id])
+    );
+    for (const d of dispositions) {
+      if (
+        d.bookingAssetId &&
+        assetIdBySliceId.get(d.bookingAssetId) !== d.assetId
+      ) {
+        throw new ShelfError({
+          cause: null,
+          status: 400,
+          label,
+          message: "Invalid booking asset slice supplied for check-out.",
+          shouldBeCaptured: false,
+        });
+      }
+    }
+
+    /**
+     * An INDIVIDUAL asset checked back in on this booking is finished with it
+     * and does not leave again under the same booking. Every client already
+     * withholds it from check-out; this is the server's copy of that rule. The
+     * slice's `checkedInAt` is the record, whichever flow reconciled it.
+     * `QUANTITY_TRACKED` assets are judged by their unit counts instead.
+     */
+    const returnedIndividualAssetIds = new Set(
+      bookingFound.bookingAssets
+        .filter(
+          (ba) =>
+            ba.asset.type !== AssetType.QUANTITY_TRACKED &&
+            Boolean(ba.checkedInAt)
+        )
+        .map((ba) => ba.asset.id)
+    );
+    const returnedScanned = bookingAssetsDeduped.filter(
+      (asset) =>
+        returnedIndividualAssetIds.has(asset.id) &&
+        effectiveAssetIds.includes(asset.id)
+    );
+    if (returnedScanned.length > 0) {
+      throw new ShelfError({
+        cause: null,
+        status: 400,
+        label,
+        message: `These assets were already checked in for this booking and cannot be checked out again: ${nameList(
+          returnedScanned
+        )}.`,
+        shouldBeCaptured: false,
+      });
+    }
+
+    // Assets already checked out for THIS booking: the session records, plus
+    // the slice markers below for the all-at-once checkout, which writes none.
+    // Missing either would re-check-out assets already out (duplicate records
+    // and events) and misreport the outstanding and remaining counts.
     const alreadyCheckedOutAssetIds = await getPartiallyCheckedOutAssetIds({
       bookingId: id,
       organizationId,
     });
     const recordedAssetIdSet = new Set(alreadyCheckedOutAssetIds);
+    // An asset is out on THIS booking when its sessions say so or every one of
+    // its slices here carries the checkout marker, which the all-at-once
+    // checkout stamps without writing a session. Never `Asset.status`: it is
+    // global, so an asset another booking has out reads CHECKED_OUT while its
+    // slice here has not left, and it must stay outstanding.
+    const slicesByAssetId = new Map<
+      string,
+      (typeof bookingFound.bookingAssets)[number][]
+    >();
+    for (const ba of bookingFound.bookingAssets) {
+      const list = slicesByAssetId.get(ba.asset.id) ?? [];
+      list.push(ba);
+      slicesByAssetId.set(ba.asset.id, list);
+    }
     const alreadyCheckedOutSet = new Set([
       ...recordedAssetIdSet,
-      ...bookingAssetsDeduped
-        .filter((asset) => asset.status === AssetStatus.CHECKED_OUT)
-        .map((asset) => asset.id),
+      ...[...slicesByAssetId]
+        .filter(([, slices]) => slices.every(isSliceOutByMarker))
+        .map(([assetId]) => assetId),
     ]);
     const providedAssetIds = new Set(effectiveAssetIds);
 
-    // Booking assets not yet checked out (by record OR live status) = still Booked.
+    // Booking assets not yet checked out on this booking = still Booked.
     const outstandingAssetIds = bookingAssetsDeduped
       .map((asset) => asset.id)
       .filter((assetId) => !alreadyCheckedOutSet.has(assetId));
@@ -5873,6 +9598,12 @@ export async function partialCheckoutBooking({
       qtyClaimsCoverFullRemaining;
 
     if (shouldDelegateToFullCheckout) {
+      // The departure this session records. A session dates the departure it
+      // describes, never a later instant: the completion gate reads the later
+      // of a session's timestamp and the slice marker as the departure a
+      // check-in has to answer, and the row below is written only after the
+      // checkout has committed and its side effects have run.
+      const departedAt = new Date();
       const fullyCheckedOut = await checkoutBooking({
         id,
         organizationId,
@@ -5881,6 +9612,11 @@ export async function partialCheckoutBooking({
         from: bookingFound.from,
         to: bookingFound.to,
         userId,
+        // The batch takes the whole booking out through the full check-out,
+        // which writes the events; the rows were still scanned or selected
+        // here, so what the route said about them travels with the delegate.
+        provenance,
+        sourceLocations,
       });
 
       // Record the final batch in the partial-checkout source of truth.
@@ -5893,11 +9629,21 @@ export async function partialCheckoutBooking({
       // already recorded in an earlier batch don't get duplicated.
       if (outstandingAssetIds.length > 0) {
         // Mirror the main-path `sessionAssetIds`/`sessionQuantities` invariant:
-        // `assetIds[i]` and `quantities[i]` must be positionally aligned so
-        // downstream readers (computeBookingAssetRemainingToCheckOut, the
-        // completion gate in isBookingFullyCheckedIn) get correct per-slice
-        // figures. INDIVIDUAL ids without an explicit disposition carry the
-        // implicit quantity = 1.
+        // `assetIds[i]`, `quantities[i]` and `bookingAssetIds[i]` must be
+        // positionally aligned so downstream readers
+        // (computeBookingAssetRemainingToCheckOut, the completion gate in
+        // isBookingFullyCheckedIn, and the per-slice attributor) get correct
+        // per-slice figures. INDIVIDUAL ids without an explicit disposition
+        // carry the implicit quantity = 1 and no slice tag (`""` → greedy).
+        // This is the first all-items scan of a RESERVED booking, so
+        // `outstandingAssetIds` is deduped per asset. A multi-slice QT asset
+        // (e.g. standalone + kit slices of the same battery) has more than one
+        // `bookingAssetId`, so a per-asset entry cannot faithfully name a
+        // single slice — recording one arbitrary slice's tag would starve the
+        // other slice's per-slice remaining. Since a full checkout claims
+        // EVERY slice, we record greedy `""` for all entries and let the
+        // standalone-first greedy attributor split the pool across slices on
+        // read.
         const checkoutQtyByAssetId = new Map<string, number>();
         for (const d of checkouts ?? []) {
           checkoutQtyByAssetId.set(d.assetId, d.quantity);
@@ -5905,12 +9651,18 @@ export async function partialCheckoutBooking({
         const outstandingQuantities = outstandingAssetIds.map(
           (assetId) => checkoutQtyByAssetId.get(assetId) ?? 1
         );
+        // Greedy `""` for every deduped entry (see comment above).
+        const outstandingBookingAssetIds = outstandingAssetIds.map(() => "");
         await db.partialBookingCheckout.create({
           data: {
             bookingId: id,
             checkedOutById: userId,
+            // Dated from the capture above, not from the row's own default, so
+            // the session never postdates the marker it accompanies.
+            checkoutTimestamp: departedAt,
             assetIds: outstandingAssetIds,
             quantities: outstandingQuantities,
+            bookingAssetIds: outstandingBookingAssetIds,
             checkoutCount: outstandingAssetIds.length,
           },
         });
@@ -5930,6 +9682,7 @@ export async function partialCheckoutBooking({
     // look at conflicting BookingAsset rows (the `asset.bookings[]`
     // implicit relation no longer exists).
     const scannedAssetsWithConflicts = await db.asset.findMany({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: conflict read for scanned assets already on the booking; dropping archived ids here would skip their checks silently
       where: { id: { in: assetIds }, organizationId },
       include: {
         bookingAssets: {
@@ -5940,7 +9693,9 @@ export async function partialCheckoutBooking({
           }),
           select: {
             booking: {
-              select: { id: true, status: true },
+              // `name` powers the overridden-reservation note below — a
+              // conflict the user can act on has to name the other booking.
+              select: { id: true, status: true, name: true },
             },
           },
         },
@@ -5970,9 +9725,48 @@ export async function partialCheckoutBooking({
       });
     }
 
+    /**
+     * An already-in-flight booking outranks a not-yet-started reservation for
+     * the same asset, so overlapping RESERVED bookings do not block THIS
+     * check-out (see {@link outranksReservations}). A RESERVED booking checking
+     * out still hits the full guard — this only relaxes the ONGOING/OVERDUE
+     * direction, and only for reservations: an asset physically CHECKED_OUT on
+     * another in-flight booking is still a hard block.
+     */
+    const inFlight = outranksReservations(bookingFound.status);
+
+    /**
+     * Reservations we are overriding by checking out anyway, deduped by booking
+     * id. Drives the system notes written after the transaction commits so the
+     * clash is visible to both sides instead of silently resolving in favour of
+     * whoever clicked first.
+     */
+    const overriddenReservations = new Map<
+      string,
+      { id: string; name: string; assets: { id: string; title: string }[] }
+    >();
+    if (inFlight && bookingFound.from && bookingFound.to) {
+      for (const asset of scannedAssetsWithConflicts) {
+        // Only INDIVIDUAL assets can be starved this way — the helper leaves
+        // QUANTITY_TRACKED availability to the per-slice caps inside the tx.
+        if (isQuantityTracked(asset)) continue;
+        for (const { booking } of asset.bookingAssets) {
+          if (booking.id === id) continue;
+          if (booking.status !== BookingStatus.RESERVED) continue;
+          const entry = overriddenReservations.get(booking.id) ?? {
+            id: booking.id,
+            name: booking.name,
+            assets: [],
+          };
+          entry.assets.push({ id: asset.id, title: asset.title });
+          overriddenReservations.set(booking.id, entry);
+        }
+      }
+    }
+
     if (bookingFound.from && bookingFound.to) {
       const conflicted = scannedAssetsWithConflicts.filter((a) =>
-        hasAssetBookingConflicts(a, id)
+        hasAssetBookingConflicts(a, id, { ignoreReservedConflicts: inFlight })
       );
       if (conflicted.length > 0) {
         const names = conflicted
@@ -5992,13 +9786,31 @@ export async function partialCheckoutBooking({
       }
     }
 
-    // Defensive: skip assets already checked out for this booking — by record
-    // OR by live CHECKED_OUT status (idempotent re-scan, incl. all-at-once
-    // checkouts that left no records).
+    // Every scanned asset, not only the legacy `assetIds` the asset check
+    // reads: quantity-tracked members arrive through `checkouts` alone, and a
+    // kit made only of those is exactly the case the asset rule exempts.
+    await assertKitsNotBookedElsewhere({
+      slices: bookingFound.bookingAssets
+        .filter((ba) => providedAssetIds.has(ba.asset.id))
+        .map((ba) => ({
+          assetId: ba.asset.id,
+          assetKitId: ba.assetKitId,
+          sourceKitId: ba.sourceKitId,
+        })),
+      bookingId: id,
+      from: bookingFound.from,
+      to: bookingFound.to,
+      organizationId,
+      ignoreReservedConflicts: inFlight,
+      action: "check out",
+    });
+
+    // Defensive: skip assets already checked out for this booking, by record
+    // or by slice marker (idempotent re-scan, incl. all-at-once checkouts that
+    // left no records).
     // NOTE: for QUANTITY_TRACKED assets "already checked out" is a per-asset
-    // boolean and intentionally lossy — partial qty already claimed shows up
-    // there only when the asset's status flipped to CHECKED_OUT (every unit
-    // claimed). The per-slice cap inside the tx is the precise gate.
+    // boolean and intentionally lossy, so they are never skipped here. The
+    // per-slice cap inside the tx is the precise gate.
     const assetIdsToCheckOut = effectiveAssetIds.filter(
       (assetId) =>
         !alreadyCheckedOutSet.has(assetId) ||
@@ -6013,27 +9825,29 @@ export async function partialCheckoutBooking({
       });
     }
 
-    // For kits: only update kit status if ALL assets of a kit are being checked out.
-    // Post-pivot, kit membership lives on `Asset.assetKits[]`; collapse to the
-    // first kitId per asset (kits-as-bag-of-assets is still a 1:1 relation in
-    // the customer-facing semantics of this flow).
-    const assetsBeingCheckedOut = bookingAssetsDeduped.filter((a) =>
-      assetIdsToCheckOut.includes(a.id)
-    );
-    const kitIdsBeingCheckedOut = getKitIdsByAssets(assetsBeingCheckedOut);
+    /**
+     * The slices each kit contributed to this booking.
+     *
+     * Kept at SLICE grain all the way to the decision. An asset id cannot
+     * carry the answer: a `QUANTITY_TRACKED` asset can hold a standalone slice
+     * AND a kit-driven slice on one booking, so "this asset is going out" is
+     * true when only the free-pool half leaves and the kit's units have not
+     * moved. Which kits a slice belongs to is
+     * {@link getKitIdsToAcquireBySlice}'s answer; whether those slices have
+     * actually left is decided inside the transaction, once the markers and
+     * per-slice quantities this batch writes are visible.
+     */
+    const acquireKitIdsBySliceId = await getKitIdsToAcquireBySlice({
+      slices: bookingFound.bookingAssets,
+      organizationId,
+    });
 
-    // Only process kits where ALL their assets in this booking are being checked out
-    const completeKitIds: string[] = [];
-    for (const kitId of kitIdsBeingCheckedOut) {
-      const kitAssetsInBooking = bookingAssetsDeduped.filter(
-        (a) => a.assetKits?.[0]?.kitId === kitId
-      );
-      const kitAssetsBeingCheckedOut = assetsBeingCheckedOut.filter(
-        (a) => a.assetKits?.[0]?.kitId === kitId
-      );
-
-      if (kitAssetsInBooking.length === kitAssetsBeingCheckedOut.length) {
-        completeKitIds.push(kitId);
+    const sliceIdsByKitId = new Map<string, Set<string>>();
+    for (const ba of bookingFound.bookingAssets) {
+      for (const kitId of acquireKitIdsBySliceId.get(ba.id) ?? []) {
+        const bucket = sliceIdsByKitId.get(kitId) ?? new Set<string>();
+        bucket.add(ba.id);
+        sliceIdsByKitId.set(kitId, bucket);
       }
     }
 
@@ -6051,548 +9865,1186 @@ export async function partialCheckoutBooking({
       unitOfMeasure: string | null;
       checkedOut: number;
       remainingAfter: number;
+      /**
+       * The exact `BookingAsset.id` this checked-out slice came from, or `null`
+       * for a legacy / greedy disposition that carried no slice tag. Drives the
+       * per-slice vs. asset-level phrasing in the checkout note.
+       */
+      bookingAssetId: string | null;
+      /** `AssetKit.id` when the slice is kit-driven; `null` when standalone/legacy. */
+      assetKitId: string | null;
+      /** Kit display name for a kit-driven slice; `null` when standalone/legacy. */
+      kitName: string | null;
+      /** `BookingAsset.quantity` — units booked on THIS slice (0 for legacy). */
+      sliceBooked: number;
     };
 
-    const result = await db.$transaction(async (tx) => {
-      /**
-       * Wave B: per-disposition qty-tracked loop. Mirrors the partial-checkin
-       * row-lock pattern — lock → re-read remaining inside tx → enforce cap →
-       * (no ConsumptionLog write here; checkout records live on
-       * `PartialBookingCheckout` rows that we batch-create below).
-       *
-       * Critical invariant: subsequent iterations of THIS batch must see the
-       * claims made by earlier iterations. `PartialBookingCheckout` is written
-       * once at the end, so we accumulate per-asset / per-slice claims in
-       * memory and subtract them from each iteration's freshly-read remaining
-       * before enforcing the cap. Without this, two slices of the same asset
-       * (kit + standalone) would both see the same `committedRemaining` and
-       * over-claim.
-       */
-      const qtySummaries: CheckoutQtySummary[] = [];
-      const claimedByAssetThisBatch = new Map<string, number>();
-      const claimedBySliceThisBatch = new Map<string, number>();
-      /**
-       * Track which asset titles each disposition saw so the post-loop status
-       * flip can reuse them without re-reading the asset. Populated only for
-       * qty-tracked dispositions (the only path that goes through the lock).
-       */
-      const titleByAssetId = new Map<string, string>();
-      /** Track type+unitOfMeasure for `assetQtyMeta` of qty events post-loop. */
-      const qtyShapeByAssetId = new Map<
-        string,
-        { type: AssetType; unitOfMeasure: string | null }
-      >();
+    /**
+     * Per-slice lookup for the checkout note (Layer 3): `BookingAsset.id` → its
+     * booked quantity + kit label. Built once from the already-loaded booking
+     * graph so the qty loop can attribute each disposition to its exact slice
+     * without an extra DB round-trip. `assetKitId`/`kitName` are `null` for
+     * standalone slices; the kit name is resolved by matching the slice's
+     * `assetKitId` (an `AssetKit.id`) against the asset's `assetKits`
+     * memberships loaded above.
+     */
+    const sliceInfoById = new Map<
+      string,
+      { sliceBooked: number; assetKitId: string | null; kitName: string | null }
+    >();
+    for (const ba of bookingFound.bookingAssets) {
+      const assetKitId = ba.assetKitId ?? null;
+      const kitName = assetKitId
+        ? ba.asset.assetKits.find((ak) => ak.id === assetKitId)?.kit?.name ??
+          null
+        : null;
+      sliceInfoById.set(ba.id, {
+        sliceBooked: ba.quantity ?? 0,
+        assetKitId,
+        kitName,
+      });
+    }
 
-      for (const disp of dispositions) {
-        if (assetTypeById.get(disp.assetId) !== AssetType.QUANTITY_TRACKED) {
-          continue;
-        }
-
-        // Row lock the asset BEFORE any remaining-read — closes the race with a
-        // concurrent checkout session on the same asset.
-        const lockedAsset = await lockAssetForQuantityUpdate(tx, disp.assetId);
-        titleByAssetId.set(disp.assetId, lockedAsset.title);
-        qtyShapeByAssetId.set(disp.assetId, {
-          type: lockedAsset.type,
-          unitOfMeasure: lockedAsset.unitOfMeasure,
-        });
-
-        // Committed remaining = booking total − Σ(prior PBC sessions). Does NOT
-        // include this batch's prior iterations — that comes from the in-memory
-        // running map below.
-        const committedRemaining = await computeBookingAssetRemainingToCheckOut(
-          tx,
-          id,
-          disp.assetId
-        );
-
-        const claimedSoFarThisBatch =
-          claimedByAssetThisBatch.get(disp.assetId) ?? 0;
-        const assetCap = Math.max(
-          0,
-          committedRemaining - claimedSoFarThisBatch
-        );
+    const result = await db.$transaction(
+      async (tx) => {
+        /**
+         * Wave B: per-disposition qty-tracked loop. Mirrors the partial-checkin
+         * row-lock pattern — lock → re-read remaining inside tx → enforce cap →
+         * (no ConsumptionLog write here; checkout records live on
+         * `PartialBookingCheckout` rows that we batch-create below).
+         *
+         * Critical invariant: subsequent iterations of THIS batch must see the
+         * claims made by earlier iterations. `PartialBookingCheckout` is written
+         * once at the end, so we accumulate per-asset / per-slice claims in
+         * memory and subtract them from each iteration's freshly-read remaining
+         * before enforcing the cap. Without this, two slices of the same asset
+         * (kit + standalone) would both see the same `committedRemaining` and
+         * over-claim.
+         */
+        const qtySummaries: CheckoutQtySummary[] = [];
+        const claimedByAssetThisBatch = new Map<string, number>();
+        const claimedBySliceThisBatch = new Map<string, number>();
+        /**
+         * Track which asset titles each disposition saw so the post-loop status
+         * flip can reuse them without re-reading the asset. Populated only for
+         * qty-tracked dispositions (the only path that goes through the lock).
+         */
+        const titleByAssetId = new Map<string, string>();
+        /** Track type+unitOfMeasure for `assetQtyMeta` of qty events post-loop. */
+        const qtyShapeByAssetId = new Map<
+          string,
+          { type: AssetType; unitOfMeasure: string | null }
+        >();
+        /**
+         * Locked-asset row per qty asset touched this batch, captured during the
+         * pre-lock pass below so the disposition loop can reuse its
+         * title/type/unitOfMeasure without re-reading (and without re-locking a
+         * shared asset once per slice).
+         */
+        const lockedAssetById = new Map<
+          string,
+          Awaited<ReturnType<typeof lockAssetForQuantityUpdate>>
+        >();
 
         /**
-         * Per-slice cap (Polish-7b parity): when the disposition targets a
-         * specific BookingAsset slice (kit-driven + standalone of the same
-         * asset both flow as separate dispositions), bound the claim by BOTH
-         * the slice's own remaining AND the asset-level remaining. The slice
-         * remaining ALSO subtracts the running batch claim for the same slice
-         * so a double-submit of the same slice can't over-claim. Legacy
-         * callers omit `bookingAssetId` → asset-level cap only.
+         * Distinct qty-tracked assets in this batch. Used to (a) row-lock each
+         * asset ONCE up front and (b) issue a SINGLE batched committed-remaining
+         * read for all of them — replacing one lock + three queries PER
+         * disposition, which scaled the transaction's round-trips with the batch
+         * (and, via the singular helper's per-call booking-level reads, with the
+         * booking size) and blew the tx timeout (Sentry SHELF-WEBAPP-217).
+         *
+         * Sorted so every concurrent checkout acquires the per-asset row locks
+         * in the SAME deterministic order — two batches touching the same assets
+         * in opposite payload order can't take the locks in reverse and deadlock.
+         * Disposition processing below keeps its original `dispositions` order.
          */
-        let cap = assetCap;
-        if (disp.bookingAssetId) {
-          const sliceCommittedRemaining =
-            await computeBookingAssetSliceRemaining(
-              tx,
-              id,
-              disp.bookingAssetId
-            );
-          const claimedThisSliceSoFar =
-            claimedBySliceThisBatch.get(disp.bookingAssetId) ?? 0;
-          const sliceCap = Math.max(
-            0,
-            sliceCommittedRemaining - claimedThisSliceSoFar
-          );
-          cap = Math.min(cap, sliceCap);
-        }
+        const qtyDispositionAssetIds = [
+          ...new Set(
+            dispositions
+              .filter(
+                (d) =>
+                  assetTypeById.get(d.assetId) === AssetType.QUANTITY_TRACKED
+              )
+              .map((d) => d.assetId)
+          ),
+        ].sort();
 
-        const claimed = disp.quantity;
-        if (claimed > cap) {
-          // Render `cap` with the asset's unit of measure so qty-tracked rows
-          // say "Only 5 boxes left to check out for \"Cardboard Boxes\""
-          // instead of "Only 5 left". Including the asset title disambiguates
-          // multi-asset error reports and makes the message actionable on
-          // mobile (no row-level context). INDIVIDUAL would fall through, but
-          // this branch is only reachable for QUANTITY_TRACKED rows.
-          const capRendered =
-            formatUnitCount(
-              {
-                type: lockedAsset.type,
-                unitOfMeasure: lockedAsset.unitOfMeasure,
-              },
-              cap
-            ) ?? `${cap} units`;
-          throw new ShelfError({
-            cause: null,
-            status: 400,
-            label,
-            message: `Only ${capRendered} left to check out for "${lockedAsset.title}"`,
-            shouldBeCaptured: false,
+        // Row-lock every qty asset BEFORE reading committed remaining, preserving
+        // the lock-before-read ordering the per-disposition loop relied on: a
+        // concurrent checkout on the same asset can't slip a claim between our
+        // read and our lock. Capture title/type/unitOfMeasure while we hold it.
+        for (const assetId of qtyDispositionAssetIds) {
+          const lockedAsset = await lockAssetForQuantityUpdate(
+            tx,
+            assetId,
+            organizationId
+          );
+          lockedAssetById.set(assetId, lockedAsset);
+          titleByAssetId.set(assetId, lockedAsset.title);
+          qtyShapeByAssetId.set(assetId, {
+            type: lockedAsset.type,
+            unitOfMeasure: lockedAsset.unitOfMeasure,
           });
         }
 
-        // Record the claim so the NEXT iteration sees the running total.
-        claimedByAssetThisBatch.set(
-          disp.assetId,
-          claimedSoFarThisBatch + claimed
+        /**
+         * Each pool's availability before this session, read under the row
+         * locks above and before any write below, so the free-stock check
+         * after attribution measures this session's departures against the
+         * pool as it found it. `physicalAvailable` (stock less what custody,
+         * kits and every booking hold out) ignores the window; `bookable`
+         * also sets aside other bookings' reservations over this booking's
+         * window, the figure the Check out button's guard reads.
+         */
+        const availabilityBeforeByAsset = await getAssetAvailabilityBatch(
+          qtyDispositionAssetIds,
+          {
+            organizationId,
+            window:
+              bookingFound.from && bookingFound.to
+                ? { from: bookingFound.from, to: bookingFound.to }
+                : null,
+            excludeBookingId: id,
+            db: tx,
+          }
         );
-        if (disp.bookingAssetId) {
-          claimedBySliceThisBatch.set(
-            disp.bookingAssetId,
-            (claimedBySliceThisBatch.get(disp.bookingAssetId) ?? 0) + claimed
+
+        // ONE batched committed-remaining read (booking total − Σ prior PBC
+        // sessions) for every qty asset. This value is CONSTANT across the
+        // disposition loop below: it reads only prior/committed sessions (this
+        // batch's own claims are tracked in `claimedByAssetThisBatch` and the new
+        // session row is written AFTER the loop), so precomputing it once is
+        // exactly equivalent to re-reading it per disposition.
+        const committedRemainingByAsset =
+          await computeBookingAssetsRemainingToCheckOut(
+            tx,
+            id,
+            qtyDispositionAssetIds
+          );
+
+        /**
+         * Distinct slice-tagged BookingAsset ids across this batch's QT
+         * dispositions. Read their committed per-slice remaining in ONE batched
+         * call (mirroring the asset-level precompute above) instead of firing the
+         * singular helper — three queries each — once per slice inside the loop,
+         * which fanned out `O(3·K)` sequential reads and compounded the tx-timeout
+         * (Sentry SHELF-WEBAPP-217). Like the asset-level value, this is CONSTANT
+         * across the loop: it reads only prior/committed sessions (this batch's
+         * per-slice claims live in `claimedBySliceThisBatch`; the new session row
+         * is written AFTER the loop), so precomputing once is exactly equivalent.
+         */
+        const sliceTaggedBookingAssetIds = [
+          ...new Set(
+            dispositions
+              .filter(
+                (d) =>
+                  d.bookingAssetId &&
+                  assetTypeById.get(d.assetId) === AssetType.QUANTITY_TRACKED
+              )
+              .map((d) => d.bookingAssetId!)
+          ),
+        ];
+        /**
+         * Assets claimed WITHOUT a slice tag. The mobile route accepts
+         * `{ assetId, quantity }` and the companion sends exactly that, so a
+         * qty-tracked asset can be claimed with no slice named. The
+         * `checkedOutAt` marker still has to name specific slices, so their
+         * remainings are read in the same batch — widening this call rather
+         * than adding a second round-trip inside the transaction.
+         */
+        const untaggedQtyAssetIds = new Set(
+          dispositions
+            .filter(
+              (d) =>
+                !d.bookingAssetId &&
+                assetTypeById.get(d.assetId) === AssetType.QUANTITY_TRACKED
+            )
+            .map((d) => d.assetId)
+        );
+        const untaggedQtySliceIds = bookingFound.bookingAssets
+          .filter((ba) => untaggedQtyAssetIds.has(ba.asset.id))
+          .map((ba) => ba.id);
+        /**
+         * Every slice of every kit this booking holds is read too, not just the
+         * ones this batch names. The kit-completeness test below asks what each
+         * of a kit's slices still owes, and an absent entry there would read as
+         * "owes nothing" — stamping a kit whose other member was never scanned.
+         *
+         * Free: the helper dedupes its id list and costs a fixed number of
+         * queries however long it is, so widening this call is what keeps the
+         * answer complete without a second round-trip.
+         */
+        const kitSliceIds = [...sliceIdsByKitId.values()].flatMap((ids) => [
+          ...ids,
+        ]);
+        const sliceCommittedRemainingBySlice =
+          await computeBookingAssetsSliceRemainingToCheckOut(tx, id, [
+            ...sliceTaggedBookingAssetIds,
+            ...untaggedQtySliceIds,
+            ...kitSliceIds,
+          ]);
+
+        for (const disp of dispositions) {
+          if (assetTypeById.get(disp.assetId) !== AssetType.QUANTITY_TRACKED) {
+            continue;
+          }
+
+          // Reuse the row-lock captured in the pre-lock pass above (the asset was
+          // locked BEFORE the batched committed-remaining read). Non-null is safe:
+          // `disp.assetId` is QUANTITY_TRACKED here, so it is in
+          // `qtyDispositionAssetIds` and therefore in `lockedAssetById`.
+          const lockedAsset = lockedAssetById.get(disp.assetId)!;
+
+          // Committed remaining = booking total − Σ(prior PBC sessions). Does NOT
+          // include this batch's prior iterations — that comes from the in-memory
+          // running map below.
+          const committedRemaining =
+            committedRemainingByAsset.get(disp.assetId) ?? 0;
+
+          const claimedSoFarThisBatch =
+            claimedByAssetThisBatch.get(disp.assetId) ?? 0;
+          const assetCap = Math.max(
+            0,
+            committedRemaining - claimedSoFarThisBatch
+          );
+
+          /**
+           * Per-slice cap (Polish-7b parity): when the disposition targets a
+           * specific BookingAsset slice (kit-driven + standalone of the same
+           * asset both flow as separate dispositions), bound the claim by BOTH
+           * the slice's own remaining AND the asset-level remaining. The slice
+           * remaining ALSO subtracts the running batch claim for the same slice
+           * so a double-submit of the same slice can't over-claim. Legacy
+           * callers omit `bookingAssetId` → asset-level cap only.
+           */
+          let cap = assetCap;
+          // Hoisted out of the slice branch so the per-slice `remainingAfter` in
+          // the summary below can reuse them. `null` for a legacy disposition
+          // (no slice tag) → the summary falls back to the asset-level remaining.
+          let sliceCommittedRemaining: number | null = null;
+          let claimedThisSliceSoFar = 0;
+          if (disp.bookingAssetId) {
+            // Checkout-side per-slice remaining: booked − prior
+            // `PartialBookingCheckout` claims attributed to THIS slice. Must NOT
+            // use the check-IN helper (`computeBookingAssetSliceRemaining`), which
+            // only subtracts return `ConsumptionLog`s and would let a slice with
+            // prior checkouts be over-claimed here — and would mis-report the
+            // note's per-slice "still booked" (which reuses this value below).
+            // Read from the batched precompute above (constant across the loop):
+            // committed-only, so the in-memory `claimedThisSliceSoFar` supplies
+            // this batch's running claim.
+            sliceCommittedRemaining =
+              sliceCommittedRemainingBySlice.get(disp.bookingAssetId) ?? 0;
+            claimedThisSliceSoFar =
+              claimedBySliceThisBatch.get(disp.bookingAssetId) ?? 0;
+            const sliceCap = Math.max(
+              0,
+              sliceCommittedRemaining - claimedThisSliceSoFar
+            );
+            cap = Math.min(cap, sliceCap);
+          }
+
+          // Bare QUANTITY_TRACKED scan (assetIds-only, no explicit count):
+          // resolve to "all remaining" for this asset — the per-asset `cap`
+          // computed above (the asset was row-locked in the pre-lock pass).
+          // Mutating the disposition so the
+          // `PartialBookingCheckout.quantities[]` ledger write below records
+          // the real units, not the sentinel 1. Mirrors the "Check Out All"
+          // default; explicit per-unit `quantity` payloads are left untouched.
+          //
+          // Only resolve when units remain. On a re-scan of an already
+          // fully-checked-out asset `cap === 0`; we KEEP the sentinel
+          // `quantity: 1` so the `claimed > cap` guard below throws
+          // "Only 0 units left…" — the same rejection an explicit re-scan
+          // gets — instead of persisting a bogus `quantities: [0]` row +
+          // audit events.
+          if (disp.defaultAllRemaining && cap > 0) {
+            disp.quantity = cap;
+          }
+
+          const claimed = disp.quantity;
+          if (claimed > cap) {
+            // Render `cap` with the asset's unit of measure so qty-tracked rows
+            // say "Only 5 boxes left to check out for \"Cardboard Boxes\""
+            // instead of "Only 5 left". Including the asset title disambiguates
+            // multi-asset error reports and makes the message actionable on
+            // mobile (no row-level context). INDIVIDUAL would fall through, but
+            // this branch is only reachable for QUANTITY_TRACKED rows.
+            const capRendered =
+              formatUnitCount(
+                {
+                  type: lockedAsset.type,
+                  unitOfMeasure: lockedAsset.unitOfMeasure,
+                },
+                cap
+              ) ?? `${cap} units`;
+            throw new ShelfError({
+              cause: null,
+              status: 400,
+              label,
+              message: `Only ${capRendered} left to check out for "${lockedAsset.title}"`,
+              shouldBeCaptured: false,
+            });
+          }
+
+          // Record the claim so the NEXT iteration sees the running total.
+          claimedByAssetThisBatch.set(
+            disp.assetId,
+            claimedSoFarThisBatch + claimed
+          );
+          if (disp.bookingAssetId) {
+            claimedBySliceThisBatch.set(
+              disp.bookingAssetId,
+              (claimedBySliceThisBatch.get(disp.bookingAssetId) ?? 0) + claimed
+            );
+          }
+
+          // Layer 3 per-slice attribution for the checkout note. When the
+          // disposition carries a slice tag, resolve the slice's booked total +
+          // kit label from the in-memory booking graph (no round-trip) and report
+          // the PER-SLICE remaining. Legacy dispositions (scanner / untagged)
+          // keep the asset-level remaining and null slice fields, so the note
+          // formatter falls back to the pre-Layer-3 asset-level phrasing.
+          const sliceInfo = disp.bookingAssetId
+            ? sliceInfoById.get(disp.bookingAssetId)
+            : undefined;
+          const remainingAfter =
+            disp.bookingAssetId && sliceCommittedRemaining !== null
+              ? // Per-slice: this slice's committed remaining minus the batch's
+                // running claim for the SAME slice (this iteration inclusive).
+                Math.max(
+                  0,
+                  sliceCommittedRemaining - claimedThisSliceSoFar - claimed
+                )
+              : // Legacy: asset-level remaining after this iteration.
+                Math.max(
+                  0,
+                  committedRemaining - claimedSoFarThisBatch - claimed
+                );
+
+          qtySummaries.push({
+            assetId: disp.assetId,
+            title: lockedAsset.title,
+            type: lockedAsset.type,
+            unitOfMeasure: lockedAsset.unitOfMeasure,
+            checkedOut: claimed,
+            bookingAssetId: disp.bookingAssetId ?? null,
+            assetKitId: sliceInfo?.assetKitId ?? null,
+            kitName: sliceInfo?.kitName ?? null,
+            sliceBooked: sliceInfo?.sliceBooked ?? 0,
+            remainingAfter,
+          });
+        }
+
+        /**
+         * INDIVIDUAL assets in this batch: always flip to CHECKED_OUT.
+         * QUANTITY_TRACKED assets: per-asset flip only when ALL booked units
+         * (sum of pivot quantities across all slices for this asset) have been
+         * claimed across ALL sessions (prior + this batch). The conflict +
+         * custody validation upstream already rejects ineligible assets.
+         */
+        const individualToFlip = assetIdsToCheckOut.filter(
+          (assetId) => assetTypeById.get(assetId) !== AssetType.QUANTITY_TRACKED
+        );
+        if (individualToFlip.length > 0) {
+          /**
+           * The conflict + custody guards above ran on a PRE-transaction
+           * snapshot. An overlapping booking can check one of these assets out
+           * (or take custody) in the window between that read and this write —
+           * the in-flight override widens that window, because a booking that
+           * merely looked RESERVED at read time no longer blocks us. Without a
+           * precondition both bookings would record a check-out of the same
+           * physical asset.
+           *
+           * Constraining the UPDATE itself makes the re-check atomic: Postgres
+           * blocks on any row a concurrent transaction is updating, then
+           * re-evaluates this `where` against the committed row. A row taken
+           * meanwhile no longer matches, so `count` comes up short and we abort
+           * the whole batch rather than double-claiming it.
+           */
+          const flipped = await tx.asset.updateMany({
+            where: {
+              id: { in: individualToFlip },
+              organizationId,
+              status: {
+                notIn: [AssetStatus.CHECKED_OUT, AssetStatus.IN_CUSTODY],
+              },
+            },
+            data: { status: AssetStatus.CHECKED_OUT },
+          });
+
+          if (flipped.count !== individualToFlip.length) {
+            // Error path only — resolve the titles for a message that names
+            // what was lost instead of failing anonymously.
+            const taken = await tx.asset.findMany({
+              // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: error-path title lookup for ids this call just tried to flip
+              where: {
+                id: { in: individualToFlip },
+                organizationId,
+                status: {
+                  in: [AssetStatus.CHECKED_OUT, AssetStatus.IN_CUSTODY],
+                },
+              },
+              select: { title: true },
+            });
+            const names = taken
+              .slice(0, 3)
+              .map((a) => a.title)
+              .join(", ");
+            const more =
+              taken.length > 3 ? ` and ${taken.length - 3} more` : "";
+            throw new ShelfError({
+              cause: null,
+              status: 409,
+              label,
+              title: "Booking conflict",
+              message: `Cannot check out. Some assets were checked out or taken into custody elsewhere while this check-out was being processed: ${names}${more}. Refresh and try again.`,
+              shouldBeCaptured: false,
+            });
+          }
+        }
+
+        /**
+         * Per-asset QT status flip across ALL sessions. For each qty-tracked
+         * asset touched in this batch, compute `bookedTotal` (sum of all
+         * `BookingAsset.quantity` pivot rows for this asset on this booking)
+         * and compare against `priorCommittedClaims + thisBatchClaims`. Flip
+         * to CHECKED_OUT only when the asset is fully claimed across every
+         * session — a partial slice must leave the status alone (the pool is
+         * still partly available for the same or other bookings).
+         */
+        const qtyAssetsTouched = [
+          ...new Set(qtySummaries.map((s) => s.assetId)),
+        ];
+        const bookedTotalByAsset = (() => {
+          const map = new Map<string, number>();
+          for (const ba of bookingFound.bookingAssets) {
+            const prev = map.get(ba.asset.id) ?? 0;
+            map.set(ba.asset.id, prev + (ba.quantity ?? 0));
+          }
+          return map;
+        })();
+        // Collect the qty assets that this batch fully claimed across every
+        // session. We then issue ONE `updateMany` for the whole set rather than
+        // one write per asset — fewer round-trips + mirrors the INDIVIDUAL flip
+        // path above + lets the org-scope `where` clause be enforced on the
+        // batched query (defense-in-depth — the assetIds already came from
+        // qtySummaries which were validated against the org-scoped booking).
+        const qtyAssetsToFlip: string[] = [];
+        for (const assetId of qtyAssetsTouched) {
+          // Committed remaining (prior sessions only) for this asset was already
+          // resolved by the batched pre-loop read — reuse it instead of a fresh
+          // per-asset round-trip. `qtyAssetsTouched ⊆ qtyDispositionAssetIds`, and
+          // no PartialBookingCheckout row is written until below, so the pre-loop
+          // value is still current. Combined with this batch's running total it
+          // gives "remaining after all sessions including this batch", which
+          // drives the flip decision.
+          const committedRemaining =
+            committedRemainingByAsset.get(assetId) ?? 0;
+          const thisBatchClaim = claimedByAssetThisBatch.get(assetId) ?? 0;
+          const remainingAfterAllSessions = Math.max(
+            0,
+            committedRemaining - thisBatchClaim
+          );
+          const bookedTotal = bookedTotalByAsset.get(assetId) ?? 0;
+          // Flip only when every booked unit has been claimed. Guard against
+          // `bookedTotal === 0` (defensive: shouldn't happen for valid bookings)
+          // by requiring positive total before flipping.
+          if (bookedTotal > 0 && remainingAfterAllSessions === 0) {
+            qtyAssetsToFlip.push(assetId);
+          }
+        }
+        if (qtyAssetsToFlip.length > 0) {
+          await tx.asset.updateMany({
+            where: { id: { in: qtyAssetsToFlip }, organizationId },
+            data: { status: AssetStatus.CHECKED_OUT },
+          });
+        }
+
+        /**
+         * `PartialBookingCheckout` session row. `assetIds[i]` and `quantities[i]`
+         * are positionally aligned: every entry corresponds to one disposition
+         * (INDIVIDUAL or qty-tracked slice). Repeated `assetId` entries are
+         * legal — they record multiple slices of the same asset in one session.
+         */
+        const sessionAssetIds: string[] = [];
+        const sessionQuantities: number[] = [];
+        // Positional with `sessionAssetIds`/`sessionQuantities`: the exact
+        // `BookingAsset.id` a slice was checked out from, or `""` when the
+        // disposition carries no slice tag (INDIVIDUAL / legacy). Read back by
+        // `checkoutSessionsToLogsByAsset` so per-slice attribution is exact and
+        // `""` collapses to greedy. Prisma `String[]` cannot hold `null`, hence
+        // the `""` sentinel.
+        const sessionBookingAssetIds: string[] = [];
+        for (const disp of dispositions) {
+          if (!assetIdsToCheckOut.includes(disp.assetId)) continue;
+          sessionAssetIds.push(disp.assetId);
+          // INDIVIDUAL rows always count as 1 unit (the legacy implicit), even if
+          // an upstream caller set a different value by mistake. QUANTITY_TRACKED
+          // rows record their explicit per-slice quantity.
+          const qty =
+            assetTypeById.get(disp.assetId) === AssetType.QUANTITY_TRACKED
+              ? disp.quantity
+              : 1;
+          sessionQuantities.push(qty);
+          // QT dialog dispositions carry `bookingAssetId`; INDIVIDUAL / legacy
+          // fallback dispositions do not → `""` (single-slice, greedy == exact).
+          sessionBookingAssetIds.push(disp.bookingAssetId ?? "");
+        }
+
+        const createdSession = await tx.partialBookingCheckout.create({
+          data: {
+            bookingId: id,
+            checkedOutById: userId,
+            assetIds: sessionAssetIds,
+            quantities: sessionQuantities,
+            bookingAssetIds: sessionBookingAssetIds,
+            // `checkoutCount` historically counted distinct assetIds, but the
+            // existing reports treat it as the array length — preserve that
+            // semantic (one entry per row, including repeated slices).
+            checkoutCount: sessionAssetIds.length,
+          },
+          select: { id: true },
+        });
+
+        /**
+         * Mark the slices this session sent out. The session row above owns
+         * per-slice QUANTITY attribution; this marker owns the boolean "is it
+         * out", which is what the check-in guard reads. Both are needed: the
+         * row cannot answer it for assets the all-at-once flow sent out.
+         */
+        /**
+         * Scoped to the slices this batch actually claimed. `assetId`-wide
+         * would stamp every sibling slice of a multi-slice qty-tracked asset —
+         * standalone plus N kit-driven rows can coexist for one (booking,
+         * asset) — recording units that never left as out, which the check-in
+         * guard then reads as permission to reconcile them.
+         *
+         * Asset-wide is exact only when the claim covers every outstanding unit
+         * of the asset. That holds for INDIVIDUAL entries (one slice per
+         * booking) and for a bare scan, whose `defaultAllRemaining` resolves to
+         * the whole asset-level remaining. A PARTIAL untagged qty-tracked claim
+         * is neither: the mobile route accepts `{ assetId, quantity }` with no
+         * slice tag and the companion sends exactly that, so those are resolved
+         * to a greedy slice prefix below.
+         */
+        const taggedSliceIds = sessionBookingAssetIds.filter(Boolean);
+        const untaggedAssetIds = sessionAssetIds.filter(
+          (_, i) => !sessionBookingAssetIds[i]
+        );
+
+        /** Untagged claim per asset, summed across this batch's entries. */
+        const untaggedClaimByAsset = new Map<string, number>();
+        sessionAssetIds.forEach((assetId, i) => {
+          if (sessionBookingAssetIds[i]) return;
+          untaggedClaimByAsset.set(
+            assetId,
+            (untaggedClaimByAsset.get(assetId) ?? 0) +
+              (sessionQuantities[i] ?? 0)
+          );
+        });
+
+        /**
+         * Resolve an untagged qty-tracked claim to the slices it actually
+         * takes: walk that asset's slices in the shared greedy order and
+         * consume each one's remaining until the claim is covered.
+         *
+         * Capacity is the slice's REMAINING, not its booked quantity, which is
+         * where this parts company with the quantity attribution in
+         * {@link attributeDispositionsByBookingAsset}. A slice already fully
+         * out has room in the booked sense and would swallow the claim, so the
+         * slice the units are really leaving from would go unmarked — and an
+         * unmarked slice reads as "never checked out" at check-in.
+         *
+         * An asset is left to the asset-wide branch when the claim covers
+         * everything outstanding, and also when the walk cannot cover it (the
+         * claim disagrees with what we read as remaining). Under-marking is the
+         * worse failure of the two: it refuses a check-in outright, with no way
+         * for the operator around it.
+         */
+        const greedySliceIds: string[] = [];
+        const resolvedUntaggedAssetIds = new Set<string>();
+        for (const [assetId, claimed] of untaggedClaimByAsset) {
+          if (assetTypeById.get(assetId) !== AssetType.QUANTITY_TRACKED) {
+            continue;
+          }
+          if (claimed >= (committedRemainingByAsset.get(assetId) ?? 0)) {
+            continue;
+          }
+          let toCover = claimed;
+          const picked: string[] = [];
+          const slices = bookingFound.bookingAssets
+            .filter((ba) => ba.asset.id === assetId)
+            .sort(compareSlicesForGreedyFill);
+          for (const slice of slices) {
+            if (toCover <= 0) break;
+            const capacity = sliceCommittedRemainingBySlice.get(slice.id) ?? 0;
+            if (capacity <= 0) continue;
+            picked.push(slice.id);
+            toCover -= capacity;
+          }
+          if (toCover > 0) continue;
+          greedySliceIds.push(...picked);
+          resolvedUntaggedAssetIds.add(assetId);
+        }
+
+        const assetWideIds = untaggedAssetIds.filter(
+          (assetId) => !resolvedUntaggedAssetIds.has(assetId)
+        );
+        const exactSliceIds = [...taggedSliceIds, ...greedySliceIds];
+        const sliceScope = {
+          bookingId: id,
+          OR: [
+            ...(exactSliceIds.length ? [{ id: { in: exactSliceIds } }] : []),
+            ...(assetWideIds.length ? [{ assetId: { in: assetWideIds } }] : []),
+          ],
+        };
+
+        if (sliceScope.OR.length > 0) {
+          // First marker wins: a slice a previous batch sent out keeps its
+          // original "out since / out by", matching the full-checkout writer.
+          await tx.bookingAsset.updateMany({
+            // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `id` was org-checked by this action's booking lookup
+            where: { ...sliceScope, checkedOutAt: null },
+            data: {
+              checkedOutAt: new Date(),
+              checkedOutById: userId,
+              checkedInAt: null,
+              checkedInById: null,
+            },
+          });
+
+          // A slice that was reconciled and is going out again returns to
+          // outstanding without losing its original checkout marker. The
+          // statement above cannot reach it, and leaving `checkedInAt` set
+          // makes physically-out units read as fully returned.
+          await tx.bookingAsset.updateMany({
+            // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `id` was org-checked by this action's booking lookup
+            where: {
+              ...sliceScope,
+              checkedOutAt: { not: null },
+              checkedInAt: { not: null },
+            },
+            data: { checkedInAt: null, checkedInById: null },
+          });
+        }
+
+        /**
+         * Size what this session sent out, per slice.
+         *
+         * The marker above says a slice is out; this says how many of its units
+         * went, which is the part a timestamp cannot carry. Read from the three
+         * positionally-aligned arrays the session row was just built from, so
+         * the count and the session can never describe different departures.
+         *
+         * {@link attributeSessionCheckoutToSlices} owns the per-slice split and
+         * the capacity rule that keeps it agreeing with the marker above.
+         *
+         * Cumulative: a slice returned in full and sent out again adds to its
+         * count rather than replacing it.
+         */
+        const unitsBySliceId = attributeSessionCheckoutToSlices({
+          sliceRows: bookingFound.bookingAssets.map((ba) => ({
+            id: ba.id,
+            assetId: ba.asset.id,
+            quantity: ba.quantity,
+            assetKitId: ba.assetKitId,
+          })),
+          committedRemainingBySlice: sliceCommittedRemainingBySlice,
+          // The session arrays are positionally aligned and carry "" for an
+          // untagged claim, which the attributor reads as "names no slice".
+          claims: sessionAssetIds.map((assetId, index) => ({
+            assetId,
+            bookingAssetId: sessionBookingAssetIds[index] || null,
+            quantity: sessionQuantities[index] ?? 1,
+          })),
+        });
+
+        /**
+         * A pool's units are held by one thing at a time: custody, a kit or a
+         * booking. The caps above only bound a claim by what this booking
+         * still owes, so this checks the units leaving standalone slices
+         * against the pool's free stock. Kit-driven slices draw on their
+         * kit's allocation, which the free figure already sets aside.
+         *
+         * A booking already out outranks a reservation (see
+         * {@link outranksReservations}), so for it only units physically held
+         * count. A reserved booking does not yet, so other bookings'
+         * reservations over its window count too: the same `bookable` limit
+         * the Check out button's in-tx guard applies to a batch covering the
+         * whole booking, which reaches it through the delegate above.
+         */
+        const standaloneUnitsByAsset = new Map<string, number>();
+        for (const ba of bookingFound.bookingAssets) {
+          if (ba.assetKitId != null) continue;
+          if (assetTypeById.get(ba.asset.id) !== AssetType.QUANTITY_TRACKED) {
+            continue;
+          }
+          const units = unitsBySliceId.get(ba.id) ?? 0;
+          if (units <= 0) continue;
+          standaloneUnitsByAsset.set(
+            ba.asset.id,
+            (standaloneUnitsByAsset.get(ba.asset.id) ?? 0) + units
+          );
+        }
+        const freeStockShortfalls: string[] = [];
+        for (const [assetId, units] of standaloneUnitsByAsset) {
+          const availability = availabilityBeforeByAsset.get(assetId);
+          const physicalFree = availability?.physicalAvailable ?? 0;
+          const free = inFlight
+            ? physicalFree
+            : Math.min(physicalFree, availability?.bookable ?? 0);
+          if (units > free) {
+            // Name the limit that binds: the shelf, or other bookings'
+            // reservations over this booking's window.
+            freeStockShortfalls.push(
+              `"${
+                titleByAssetId.get(assetId) ?? ""
+              }": requested ${units}, only ${Math.max(0, free)} available ${
+                free === physicalFree ? "right now" : "in this window"
+              }`
+            );
+          }
+        }
+        if (freeStockShortfalls.length > 0) {
+          throw new ShelfError({
+            cause: null,
+            label,
+            status: 400,
+            shouldBeCaptured: false,
+            message: `Some quantity-tracked assets have insufficient availability:\n${freeStockShortfalls.join(
+              "\n"
+            )}\nThe rest are in custody, in kits, or out on or reserved for other bookings. Release custody, check units in or adjust quantities, then try again.`,
+            additionalData: { bookingId: id, organizationId },
+          });
+        }
+
+        /**
+         * Record where each pool slice's units leave from, before the counter
+         * below grows: only a slice still at 0 gets a source, so a slice this
+         * booking sent out in an earlier session keeps the one it has. An
+         * invalid pick throws and rolls the whole session back.
+         */
+        await recordCheckoutSourceLocations(tx, {
+          organizationId,
+          sliceIds: [...unitsBySliceId]
+            .filter(([, units]) => units > 0)
+            .map(([sliceId]) => sliceId),
+          submission: sourceLocations,
+        });
+
+        for (const [sliceId, units] of unitsBySliceId) {
+          if (units <= 0) continue;
+          await tx.bookingAsset.updateMany({
+            // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: slice ids come from this booking's own rows, loaded org-scoped by this action's booking lookup
+            where: { id: sliceId, bookingId: id },
+            data: { checkedOutQuantity: { increment: units } },
+          });
+        }
+
+        /**
+         * A kit is CHECKED_OUT once every slice it contributed to this booking
+         * has nothing left to send out, and only when this batch is what moved
+         * one of them.
+         *
+         * Decided per SLICE, never per asset: a `QUANTITY_TRACKED` asset can
+         * hold a standalone slice and a kit-driven slice on one booking, so its
+         * id appears on both sides and says nothing about which units left.
+         * Sending the free-pool half out must leave the kit alone.
+         *
+         * `sliceCommittedRemainingBySlice` is what each slice still owed before
+         * this batch, so a slice already fully out enters at 0 and a slice this
+         * batch finishes lands there. What moved comes from `unitsBySliceId`,
+         * the same per-slice attribution the departure markers were written
+         * from — so the kit decision and the markers can never disagree, and
+         * INDIVIDUAL and untagged claims are counted, which the QT-only
+         * disposition ledger does not carry.
+         */
+        const movedThisBatch = (sliceId: string) =>
+          unitsBySliceId.get(sliceId) ?? 0;
+        const remainingAfterBatch = (sliceId: string) =>
+          (sliceCommittedRemainingBySlice.get(sliceId) ?? 0) -
+          movedThisBatch(sliceId);
+
+        const completeKitIds: string[] = [];
+        const movedKitIds: string[] = [];
+        for (const [kitId, sliceIds] of sliceIdsByKitId) {
+          const ids = [...sliceIds];
+          // A kit none of whose slices moved keeps the status it had.
+          if (!ids.some((sliceId) => movedThisBatch(sliceId) > 0)) continue;
+          movedKitIds.push(kitId);
+          if (ids.every((sliceId) => remainingAfterBatch(sliceId) <= 0)) {
+            completeKitIds.push(kitId);
+          }
+        }
+
+        // Any unit of a kit leaving is a check-out of that kit, complete or
+        // not. Refusing here rolls back the whole batch with it.
+        await assertKitsCheckoutable(tx, {
+          kitIds: movedKitIds,
+          bookingId: id,
+          organizationId,
+        });
+
+        if (completeKitIds.length > 0) {
+          await tx.kit.updateMany({
+            where: { id: { in: completeKitIds }, organizationId },
+            data: { status: KitStatus.CHECKED_OUT },
+          });
+        }
+
+        // Layer 3: the per-asset fold that previously collapsed both slices of an
+        // asset into one summary is gone — the checkout note pipeline now renders
+        // one line PER SLICE so a slice-level action reports slice-level totals
+        // (a standalone-slice checkout no longer shows the whole asset's booked
+        // count). The per-slice `qtySummaries` flow straight to the note fragment
+        // and the post-tx per-asset note loop.
+
+        // Create audit notes for INDIVIDUAL rows. Qty-tracked rows get their
+        // own per-asset note written OUTSIDE the tx (with unit-aware phrasing).
+        const actor = wrapUserLinkForNote({ ...user, id: userId });
+        if (individualToFlip.length > 0) {
+          await createNotes(
+            {
+              content: `${actor} checked out via partial check-out.`,
+              type: "UPDATE",
+              userId,
+              assetIds: individualToFlip,
+              organizationId,
+            },
+            tx
           );
         }
 
-        qtySummaries.push({
-          assetId: disp.assetId,
-          title: lockedAsset.title,
-          type: lockedAsset.type,
-          unitOfMeasure: lockedAsset.unitOfMeasure,
-          checkedOut: claimed,
-          // `remainingAfter` here is per-iteration: committedRemaining minus
-          // claims accumulated up to and including this iteration. Aggregated
-          // post-loop into the per-asset summary used by notes / events.
-          remainingAfter: Math.max(
-            0,
-            committedRemaining - claimedSoFarThisBatch - claimed
-          ),
-        });
-      }
-
-      /**
-       * INDIVIDUAL assets in this batch: always flip to CHECKED_OUT.
-       * QUANTITY_TRACKED assets: per-asset flip only when ALL booked units
-       * (sum of pivot quantities across all slices for this asset) have been
-       * claimed across ALL sessions (prior + this batch). The conflict +
-       * custody validation upstream already rejects ineligible assets.
-       */
-      const individualToFlip = assetIdsToCheckOut.filter(
-        (assetId) => assetTypeById.get(assetId) !== AssetType.QUANTITY_TRACKED
-      );
-      if (individualToFlip.length > 0) {
-        await tx.asset.updateMany({
-          where: { id: { in: individualToFlip }, organizationId },
-          data: { status: AssetStatus.CHECKED_OUT },
-        });
-      }
-
-      /**
-       * Per-asset QT status flip across ALL sessions. For each qty-tracked
-       * asset touched in this batch, compute `bookedTotal` (sum of all
-       * `BookingAsset.quantity` pivot rows for this asset on this booking)
-       * and compare against `priorCommittedClaims + thisBatchClaims`. Flip
-       * to CHECKED_OUT only when the asset is fully claimed across every
-       * session — a partial slice must leave the status alone (the pool is
-       * still partly available for the same or other bookings).
-       */
-      const qtyAssetsTouched = [...new Set(qtySummaries.map((s) => s.assetId))];
-      const bookedTotalByAsset = (() => {
-        const map = new Map<string, number>();
-        for (const ba of bookingFound.bookingAssets) {
-          const prev = map.get(ba.asset.id) ?? 0;
-          map.set(ba.asset.id, prev + (ba.quantity ?? 0));
+        /**
+         * Activity events — one `BOOKING_PARTIAL_CHECKOUT` per disposition row.
+         * `meta.quantity` is set for QUANTITY_TRACKED rows (via `assetQtyMeta`,
+         * which returns `{}` for INDIVIDUAL). `meta.partialCheckoutSessionId`
+         * groups events from the same scan batch for the reports.
+         */
+        const eventInputs: ActivityEventInput[] = dispositions
+          .filter((d) => assetIdsToCheckOut.includes(d.assetId))
+          .map((d) => {
+            // Prefer the locked-asset shape captured in-loop (truth-source for
+            // qty rows); fall back to the deduped booking pivot snapshot for
+            // INDIVIDUAL rows so `assetQtyMeta` still returns `{}` cleanly.
+            const qtyShape =
+              qtyShapeByAssetId.get(d.assetId) ??
+              (() => {
+                const ba = bookingAssetsDeduped.find((a) => a.id === d.assetId);
+                return ba
+                  ? { type: ba.type, unitOfMeasure: ba.unitOfMeasure }
+                  : null;
+              })();
+            const qtyMeta = qtyShape ? assetQtyMeta(qtyShape, d.quantity) : {};
+            return {
+              organizationId,
+              actorUserId: userId,
+              action: "BOOKING_PARTIAL_CHECKOUT",
+              entityType: "BOOKING",
+              entityId: id,
+              bookingId: id,
+              assetId: d.assetId,
+              meta: {
+                ...qtyMeta,
+                partialCheckoutSessionId: createdSession.id,
+                ...bookingMethodMeta(provenance, [d.bookingAssetId]),
+              },
+            };
+          });
+        if (eventInputs.length > 0) {
+          await recordEvents(eventInputs, tx);
         }
-        return map;
-      })();
-      // Collect the qty assets that this batch fully claimed across every
-      // session. We then issue ONE `updateMany` for the whole set rather than
-      // one write per asset — fewer round-trips + mirrors the INDIVIDUAL flip
-      // path above + lets the org-scope `where` clause be enforced on the
-      // batched query (defense-in-depth — the assetIds already came from
-      // qtySummaries which were validated against the org-scoped booking).
-      const qtyAssetsToFlip: string[] = [];
-      for (const assetId of qtyAssetsTouched) {
-        // Re-read committed remaining for THIS asset post-loop. Combined with
-        // this batch's running total, this is the "remaining after all
-        // sessions including this batch" figure — drives the flip decision.
-        const committedRemaining = await computeBookingAssetRemainingToCheckOut(
-          tx,
-          id,
-          assetId
-        );
-        const thisBatchClaim = claimedByAssetThisBatch.get(assetId) ?? 0;
-        const remainingAfterAllSessions = Math.max(
-          0,
-          committedRemaining - thisBatchClaim
-        );
-        const bookedTotal = bookedTotalByAsset.get(assetId) ?? 0;
-        // Flip only when every booked unit has been claimed. Guard against
-        // `bookedTotal === 0` (defensive: shouldn't happen for valid bookings)
-        // by requiring positive total before flipping.
-        if (bookedTotal > 0 && remainingAfterAllSessions === 0) {
-          qtyAssetsToFlip.push(assetId);
+
+        // First scan marks the booking checked out: RESERVED → ONGOING/OVERDUE.
+        let bookingStatusChanged = false;
+        if (bookingFound.status === BookingStatus.RESERVED) {
+          const expired = bookingFound.to
+            ? isBookingExpired({ to: bookingFound.to })
+            : false;
+
+          const transitionData: Prisma.BookingUpdateInput = {
+            status: expired ? BookingStatus.OVERDUE : BookingStatus.ONGOING,
+          };
+
+          // Early checkout: if the booking hasn't started yet and the user chose
+          // to adjust the date (via the early-checkout dialog), move `from` to now
+          // and preserve the original start in `originalFrom`. Mirrors the
+          // all-at-once checkoutBooking path so a partial early checkout doesn't
+          // leave a future start time while custody has already begun.
+          if (
+            bookingFound.from &&
+            isBookingEarlyCheckout(bookingFound.from) &&
+            intentChoice === CheckoutIntentEnum["with-adjusted-date"]
+          ) {
+            transitionData.originalFrom = plannedStartToPreserve(bookingFound);
+            const fromDateStr = DateTime.fromJSDate(new Date(), {
+              zone: hints.timeZone,
+            }).toFormat(DATE_TIME_FORMAT);
+            transitionData.from = DateTime.fromFormat(
+              fromDateStr,
+              DATE_TIME_FORMAT,
+              { zone: hints.timeZone }
+            ).toJSDate();
+          }
+
+          await tx.booking.update({
+            // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) above
+            where: { id },
+            data: transitionData,
+            select: { id: true },
+          });
+          bookingStatusChanged = true;
         }
-      }
-      if (qtyAssetsToFlip.length > 0) {
-        await tx.asset.updateMany({
-          where: { id: { in: qtyAssetsToFlip }, organizationId },
-          data: { status: AssetStatus.CHECKED_OUT },
+
+        // BOOKING ACTIVITY LOG: Log partial check-out activity.
+        // Get the kit and standalone asset data for consistent formatting.
+        // Post-pivot, kit membership lives on `Asset.assetKits[]`; project the
+        // related kit through the pivot row (kits-as-bag-of-assets still treats
+        // each asset as a member of at most one kit in this code path).
+        const assetsWithKitInfo = await tx.asset.findMany({
+          // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: activity note names the assets this check-out touched, by id
+          where: { id: { in: assetIdsToCheckOut }, organizationId },
+          select: {
+            id: true,
+            title: true,
+            assetKits: {
+              select: {
+                kit: { select: { id: true, name: true } },
+              },
+              take: 1,
+            },
+          },
         });
-      }
 
-      // Only update kit status for kits that are completely checked out
-      if (completeKitIds.length > 0) {
-        await tx.kit.updateMany({
-          where: { id: { in: completeKitIds }, organizationId },
-          data: { status: KitStatus.CHECKED_OUT },
-        });
-      }
+        // Separate complete kits from individual assets
+        const completeKits: Array<{ id: string; name: string }> = [];
+        const standaloneAssets: Array<{ id: string; title: string }> = [];
+        const processedKitIds = new Set<string>();
 
-      /**
-       * `PartialBookingCheckout` session row. `assetIds[i]` and `quantities[i]`
-       * are positionally aligned: every entry corresponds to one disposition
-       * (INDIVIDUAL or qty-tracked slice). Repeated `assetId` entries are
-       * legal — they record multiple slices of the same asset in one session.
-       */
-      const sessionAssetIds: string[] = [];
-      const sessionQuantities: number[] = [];
-      for (const disp of dispositions) {
-        if (!assetIdsToCheckOut.includes(disp.assetId)) continue;
-        sessionAssetIds.push(disp.assetId);
-        // INDIVIDUAL rows always count as 1 unit (the legacy implicit), even if
-        // an upstream caller set a different value by mistake. QUANTITY_TRACKED
-        // rows record their explicit per-slice quantity.
-        const qty =
-          assetTypeById.get(disp.assetId) === AssetType.QUANTITY_TRACKED
-            ? disp.quantity
-            : 1;
-        sessionQuantities.push(qty);
-      }
-
-      const createdSession = await tx.partialBookingCheckout.create({
-        data: {
-          bookingId: id,
-          checkedOutById: userId,
-          assetIds: sessionAssetIds,
-          quantities: sessionQuantities,
-          // `checkoutCount` historically counted distinct assetIds, but the
-          // existing reports treat it as the array length — preserve that
-          // semantic (one entry per row, including repeated slices).
-          checkoutCount: sessionAssetIds.length,
-        },
-        select: { id: true },
-      });
-
-      /**
-       * Aggregated per-asset summary used by the post-tx note pipeline.
-       * Multiple slices for the same asset (kit + standalone) fold into one
-       * entry: sum `checkedOut`, take the final `remainingAfter` (the running
-       * total after the asset's last iteration in this batch).
-       */
-      const aggregatedQtySummaries: CheckoutQtySummary[] = (() => {
-        const byAsset = new Map<string, CheckoutQtySummary>();
-        for (const s of qtySummaries) {
-          const prev = byAsset.get(s.assetId);
-          if (!prev) {
-            byAsset.set(s.assetId, { ...s });
-          } else {
-            prev.checkedOut += s.checkedOut;
-            prev.remainingAfter = s.remainingAfter;
+        for (const asset of assetsWithKitInfo) {
+          const kit = asset.assetKits?.[0]?.kit ?? null;
+          if (
+            kit &&
+            completeKitIds.includes(kit.id) &&
+            !processedKitIds.has(kit.id)
+          ) {
+            completeKits.push({ id: kit.id, name: kit.name });
+            processedKitIds.add(kit.id);
+          } else if (!kit || !completeKitIds.includes(kit.id)) {
+            // Asset belongs to a kit that is only partially being checked
+            // in/out: the kit isn't a complete-kit line, so name the individual
+            // asset (the same way standalone assets are shown) instead of
+            // dropping it. Without this, a batch made up entirely of such
+            // assets produced an empty note (e.g. "partial check-out: .").
+            standaloneAssets.push({ id: asset.id, title: asset.title });
           }
         }
-        return [...byAsset.values()];
-      })();
 
-      // Create audit notes for INDIVIDUAL rows. Qty-tracked rows get their
-      // own per-asset note written OUTSIDE the tx (with unit-aware phrasing).
-      const actor = wrapUserLinkForNote({
-        id: userId,
-        firstName: user?.firstName,
-        lastName: user?.lastName,
-      });
-      if (individualToFlip.length > 0) {
-        await createNotes(
+        const hasKits = completeKits.length > 0;
+        const hasAssets = standaloneAssets.length > 0;
+
+        let itemsDescription = "";
+        if (hasKits && hasAssets) {
+          const kitContent = wrapKitsWithDataForNote(
+            completeKits,
+            "checked out"
+          );
+          const assetContent = wrapAssetsWithDataForNote(
+            standaloneAssets,
+            "checked out"
+          );
+          itemsDescription = `${assetContent} and ${kitContent}`;
+        } else if (hasKits) {
+          const kitContent = wrapKitsWithDataForNote(
+            completeKits,
+            "checked out"
+          );
+          itemsDescription = kitContent;
+        } else if (hasAssets) {
+          const assetContent = wrapAssetsWithDataForNote(
+            standaloneAssets,
+            "checked out"
+          );
+          itemsDescription = assetContent;
+        }
+
+        // Get the updated booking with all original assets to calculate remaining count.
+        // Post-pivot, assets live behind `bookingAssets[].asset`; `_count` mirrors
+        // the pivot rows (not unique asset count — we dedup below if needed).
+        const updatedBookingForNote = await tx.booking.findUniqueOrThrow({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) above; this re-fetches the same proven id
+          where: { id },
+          include: {
+            bookingAssets: { include: { asset: true } },
+            custodianUser: true,
+            custodianTeamMember: true,
+            _count: { select: { bookingAssets: true } },
+          },
+        });
+
+        const statusNote = bookingStatusChanged
+          ? ` and checked out the booking (status changed to ${
+              bookingFound.to && isBookingExpired({ to: bookingFound.to })
+                ? "Overdue"
+                : "Ongoing"
+            })`
+          : "";
+
+        /**
+         * Per-slice qty fragment for the booking-side note — names each
+         * qty-tracked slice touched in this session (linked) with its
+         * `standalone`/`in kit X` label and `checked out / still booked` counts.
+         * Empty string when there's nothing to say, so the `itemsDescription`
+         * concatenation stays clean for INDIVIDUAL-only batches. Layer 3: fed the
+         * per-slice `qtySummaries` directly (no per-asset fold) so a slice-level
+         * checkout reports slice-level totals.
+         */
+        const qtyPerAsset = buildQtyPerAssetCheckoutFragment(qtySummaries);
+
+        /**
+         * Layer 3 redundancy fix: when the batch is ONLY qty-tracked slices (no
+         * INDIVIDUAL assets, no complete kits), `itemsDescription` merely re-names
+         * the same qty-tracked asset(s) that `qtyPerAsset` already describes in
+         * per-slice detail. In that case render the per-slice fragment as the
+         * whole items description instead of the duplicated
+         * "{asset} checked out — qty: {asset} · standalone (…)". The mixed case
+         * (INDIVIDUAL and/or complete kits present) keeps the "— qty:" tail so
+         * those non-qty items are still named.
+         */
+        const qtyOnlyCheckout =
+          individualToFlip.length === 0 &&
+          completeKits.length === 0 &&
+          qtyPerAsset !== "";
+        const itemsBody = qtyOnlyCheckout
+          ? qtyPerAsset
+          : `${itemsDescription}${qtyPerAsset ? ` — qty: ${qtyPerAsset}` : ""}`;
+
+        await createSystemBookingNote(
           {
-            content: `${actor} checked out via partial check-out.`,
-            type: "UPDATE",
-            userId,
-            assetIds: individualToFlip,
+            bookingId: id,
             organizationId,
+            content: `${wrapUserLinkForNote(
+              user!
+            )} performed a partial check-out: ${itemsBody}${statusNote}${bookingMethodClause(
+              provenance,
+              dispositions
+                .filter((d) => assetIdsToCheckOut.includes(d.assetId))
+                .map((d) => d.bookingAssetId)
+            )}.`,
           },
           tx
         );
-      }
 
-      /**
-       * Activity events — one `BOOKING_PARTIAL_CHECKOUT` per disposition row.
-       * `meta.quantity` is set for QUANTITY_TRACKED rows (via `assetQtyMeta`,
-       * which returns `{}` for INDIVIDUAL). `meta.partialCheckoutSessionId`
-       * groups events from the same scan batch for the reports.
-       */
-      const eventInputs: ActivityEventInput[] = dispositions
-        .filter((d) => assetIdsToCheckOut.includes(d.assetId))
-        .map((d) => {
-          // Prefer the locked-asset shape captured in-loop (truth-source for
-          // qty rows); fall back to the deduped booking pivot snapshot for
-          // INDIVIDUAL rows so `assetQtyMeta` still returns `{}` cleanly.
-          const qtyShape =
-            qtyShapeByAssetId.get(d.assetId) ??
-            (() => {
-              const ba = bookingAssetsDeduped.find((a) => a.id === d.assetId);
-              return ba
-                ? { type: ba.type, unitOfMeasure: ba.unitOfMeasure }
-                : null;
-            })();
-          const qtyMeta = qtyShape ? assetQtyMeta(qtyShape, d.quantity) : {};
-          return {
-            organizationId,
-            actorUserId: userId,
-            action: "BOOKING_PARTIAL_CHECKOUT",
-            entityType: "BOOKING",
-            entityId: id,
-            bookingId: id,
-            assetId: d.assetId,
-            meta: {
-              ...qtyMeta,
-              partialCheckoutSessionId: createdSession.id,
-            },
-          };
-        });
-      if (eventInputs.length > 0) {
-        await recordEvents(eventInputs, tx);
-      }
+        /**
+         * Record every reservation this check-out outranked, on BOTH bookings.
+         * Written inside the tx so a rolled-back check-out can't leave a note
+         * claiming an asset was taken. Only populated when this booking is
+         * already in flight — see the guard above.
+         *
+         * Collected first and written in ONE batch: a large batch can override
+         * many distinct reservations, and two singular note writes each (a
+         * check + an insert apiece) would spend the transaction's 15s budget on
+         * audit notes and roll the check-out back.
+         */
+        const overrideNotes: Array<{ content: string; bookingId: string }> = [];
+        for (const reservation of overriddenReservations.values()) {
+          // An idempotent re-scan carries assets that were already out; only
+          // the ones this batch actually took belong in the note.
+          const takenNow = reservation.assets.filter((asset) =>
+            assetIdsToCheckOut.includes(asset.id)
+          );
+          if (takenNow.length === 0) continue;
 
-      // First scan marks the booking checked out: RESERVED → ONGOING/OVERDUE.
-      let bookingStatusChanged = false;
-      if (bookingFound.status === BookingStatus.RESERVED) {
-        const expired = bookingFound.to
-          ? isBookingExpired({ to: bookingFound.to })
-          : false;
+          const { currentBookingNote, reservedBookingNote } =
+            buildOverriddenReservationNotes(
+              { ...reservation, assets: takenNow },
+              { id, name: bookingFound.name }
+            );
 
-        const transitionData: Prisma.BookingUpdateInput = {
-          status: expired ? BookingStatus.OVERDUE : BookingStatus.ONGOING,
+          overrideNotes.push(
+            { bookingId: id, content: currentBookingNote },
+            { bookingId: reservation.id, content: reservedBookingNote }
+          );
+        }
+        await createSystemBookingNotes(
+          { notes: overrideNotes, organizationId },
+          tx
+        );
+
+        /**
+         * Unit-level remaining count + completion. For each unique booking
+         * asset, compare `booked total` to `committed checked-out units (incl.
+         * THIS batch — the session row was written above so the read sees it)`.
+         * Asset counts as remaining when `booked - checkedOut > 0`.
+         *
+         * Replaces the legacy asset-id-set filter: a 5-of-50 QT slice no longer
+         * reports `isComplete: true` just because the asset id is in
+         * `checkedOutAfterThisBatch`.
+         */
+        const uniqueBookingAssetIds = [
+          ...new Set(
+            updatedBookingForNote.bookingAssets.map((ba) => ba.asset.id)
+          ),
+        ];
+        // ONE batched read for EVERY unique booking asset, then count in memory.
+        // This is the dominant fix for Sentry SHELF-WEBAPP-217: the old per-asset
+        // loop fired three sequential queries PER asset (via the singular helper),
+        // so a large booking issued `O(3·M)` round-trips here even when checking
+        // out a single item — blowing the transaction timeout. The batched call
+        // reads the booking-level sessions (INCLUDING the row created above, so
+        // completion is computed against this batch) exactly once.
+        const remainingByBookingAsset =
+          await computeBookingAssetsRemainingToCheckOut(
+            tx,
+            id,
+            uniqueBookingAssetIds
+          );
+        let remainingAssetCount = 0;
+        for (const assetId of uniqueBookingAssetIds) {
+          if ((remainingByBookingAsset.get(assetId) ?? 0) > 0) {
+            remainingAssetCount += 1;
+          }
+        }
+
+        return {
+          booking: updatedBookingForNote,
+          checkedOutAssetCount: assetIdsToCheckOut.length,
+          remainingAssetCount,
+          // A later final batch (after earlier partial checkouts) completes the
+          // checkout here in the partial path rather than via the delegation
+          // above, so report completion from the remaining count.
+          isComplete: remainingAssetCount === 0,
+          bookingStatusChanged,
+          // Layer 3: pass the PER-SLICE summaries downstream so the post-tx
+          // per-asset note loop renders one note per slice with slice-level
+          // counts (a standalone-slice checkout no longer reports the whole
+          // asset's remaining). Legacy/untagged dispositions still carry the
+          // asset-level remaining and render the pre-Layer-3 phrasing.
+          qtySummaries,
+          individualAssetIds: individualToFlip,
         };
-
-        // Early checkout: if the booking hasn't started yet and the user chose
-        // to adjust the date (via the early-checkout dialog), move `from` to now
-        // and preserve the original start in `originalFrom`. Mirrors the
-        // all-at-once checkoutBooking path so a partial early checkout doesn't
-        // leave a future start time while custody has already begun.
-        if (
-          bookingFound.from &&
-          isBookingEarlyCheckout(bookingFound.from) &&
-          intentChoice === CheckoutIntentEnum["with-adjusted-date"]
-        ) {
-          transitionData.originalFrom = bookingFound.from;
-          const fromDateStr = DateTime.fromJSDate(new Date(), {
-            zone: hints.timeZone,
-          }).toFormat(DATE_TIME_FORMAT);
-          transitionData.from = DateTime.fromFormat(
-            fromDateStr,
-            DATE_TIME_FORMAT,
-            { zone: hints.timeZone }
-          ).toJSDate();
-        }
-
-        await tx.booking.update({
-          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) above
-          where: { id },
-          data: transitionData,
-          select: { id: true },
-        });
-        bookingStatusChanged = true;
-      }
-
-      // BOOKING ACTIVITY LOG: Log partial check-out activity.
-      // Get the kit and standalone asset data for consistent formatting.
-      // Post-pivot, kit membership lives on `Asset.assetKits[]`; project the
-      // related kit through the pivot row (kits-as-bag-of-assets still treats
-      // each asset as a member of at most one kit in this code path).
-      const assetsWithKitInfo = await tx.asset.findMany({
-        where: { id: { in: assetIdsToCheckOut }, organizationId },
-        select: {
-          id: true,
-          title: true,
-          assetKits: {
-            select: {
-              kit: { select: { id: true, name: true } },
-            },
-            take: 1,
-          },
-        },
-      });
-
-      // Separate complete kits from individual assets
-      const completeKits: Array<{ id: string; name: string }> = [];
-      const standaloneAssets: Array<{ id: string; title: string }> = [];
-      const processedKitIds = new Set<string>();
-
-      for (const asset of assetsWithKitInfo) {
-        const kit = asset.assetKits?.[0]?.kit ?? null;
-        if (
-          kit &&
-          completeKitIds.includes(kit.id) &&
-          !processedKitIds.has(kit.id)
-        ) {
-          completeKits.push({ id: kit.id, name: kit.name });
-          processedKitIds.add(kit.id);
-        } else if (!kit || !completeKitIds.includes(kit.id)) {
-          // Asset belongs to a kit that is only partially being checked
-          // in/out: the kit isn't a complete-kit line, so name the individual
-          // asset (the same way standalone assets are shown) instead of
-          // dropping it. Without this, a batch made up entirely of such
-          // assets produced an empty note (e.g. "partial check-out: .").
-          standaloneAssets.push({ id: asset.id, title: asset.title });
-        }
-      }
-
-      const hasKits = completeKits.length > 0;
-      const hasAssets = standaloneAssets.length > 0;
-
-      let itemsDescription = "";
-      if (hasKits && hasAssets) {
-        const kitContent = wrapKitsWithDataForNote(completeKits, "checked out");
-        const assetContent = wrapAssetsWithDataForNote(
-          standaloneAssets,
-          "checked out"
-        );
-        itemsDescription = `${assetContent} and ${kitContent}`;
-      } else if (hasKits) {
-        const kitContent = wrapKitsWithDataForNote(completeKits, "checked out");
-        itemsDescription = kitContent;
-      } else if (hasAssets) {
-        const assetContent = wrapAssetsWithDataForNote(
-          standaloneAssets,
-          "checked out"
-        );
-        itemsDescription = assetContent;
-      }
-
-      // Get the updated booking with all original assets to calculate remaining count.
-      // Post-pivot, assets live behind `bookingAssets[].asset`; `_count` mirrors
-      // the pivot rows (not unique asset count — we dedup below if needed).
-      const updatedBookingForNote = await tx.booking.findUniqueOrThrow({
-        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) above; this re-fetches the same proven id
-        where: { id },
-        include: {
-          bookingAssets: { include: { asset: true } },
-          custodianUser: true,
-          custodianTeamMember: true,
-          _count: { select: { bookingAssets: true } },
-        },
-      });
-
-      const statusNote = bookingStatusChanged
-        ? ` and checked out the booking (status changed to ${
-            bookingFound.to && isBookingExpired({ to: bookingFound.to })
-              ? "Overdue"
-              : "Ongoing"
-          })`
-        : "";
-
-      /**
-       * Per-asset qty fragment for the booking-side note — names each
-       * qty-tracked asset touched in this session (linked) along with its
-       * `checkedOut` / `remainingAfter` counts. Mirror of the partial-checkin
-       * `qtyTail` pattern: empty string when nothing to say, so the existing
-       * `itemsDescription` concatenation stays clean for INDIVIDUAL-only
-       * batches. Reads from the aggregated summary so multi-slice claims of
-       * the same asset render as a single line.
-       */
-      const qtyPerAsset = buildQtyPerAssetCheckoutFragment(
-        aggregatedQtySummaries
-      );
-      const qtyTail = qtyPerAsset ? ` — qty: ${qtyPerAsset}` : "";
-
-      await createSystemBookingNote(
-        {
-          bookingId: id,
-          organizationId,
-          content: `${wrapUserLinkForNote(
-            user!
-          )} performed a partial check-out: ${itemsDescription}${qtyTail}${statusNote}.`,
-        },
-        tx
-      );
-
-      /**
-       * Unit-level remaining count + completion. For each unique booking
-       * asset, compare `booked total` to `committed checked-out units (incl.
-       * THIS batch — the session row was written above so the read sees it)`.
-       * Asset counts as remaining when `booked - checkedOut > 0`.
-       *
-       * Replaces the legacy asset-id-set filter: a 5-of-50 QT slice no longer
-       * reports `isComplete: true` just because the asset id is in
-       * `checkedOutAfterThisBatch`.
-       */
-      const uniqueBookingAssetIds = [
-        ...new Set(
-          updatedBookingForNote.bookingAssets.map((ba) => ba.asset.id)
-        ),
-      ];
-      let remainingAssetCount = 0;
-      for (const assetId of uniqueBookingAssetIds) {
-        const remaining = await computeBookingAssetRemainingToCheckOut(
-          tx,
-          id,
-          assetId
-        );
-        if (remaining > 0) remainingAssetCount += 1;
-      }
-
-      return {
-        booking: updatedBookingForNote,
-        checkedOutAssetCount: assetIdsToCheckOut.length,
-        remainingAssetCount,
-        // A later final batch (after earlier partial checkouts) completes the
-        // checkout here in the partial path rather than via the delegation
-        // above, so report completion from the remaining count.
-        isComplete: remainingAssetCount === 0,
-        bookingStatusChanged,
-        // Pass the aggregated (per-asset) summary downstream so the post-tx
-        // per-asset note loop renders one note per asset rather than per
-        // slice.
-        qtySummaries: aggregatedQtySummaries,
-        individualAssetIds: individualToFlip,
-      };
-    });
+        // Defense-in-depth: match the 15s timeout the sibling checkout/checkin
+        // transactions in this file use. The per-asset query fan-out above is now
+        // batched to O(1), but a large booking still does meaningful work inside
+        // the tx, so keep the same generous ceiling as the all-at-once path.
+      },
+      { timeout: 15000 }
+    );
 
     /**
-     * Per-asset qty-tracked notes (post-tx, best-effort). Uses
+     * Per-slice qty-tracked asset-timeline notes (post-tx, best-effort). Uses
      * `wrapAssetWithCountForNote` so qty-tracked rows render as
-     * "You checked out 10 boxes of {asset} on {booking}". Wrapped in
+     * "You checked out 10 boxes of {asset} on {booking}". Layer 3: iterates the
+     * per-slice summaries, so a multi-slice checkout of one asset writes one
+     * note per slice with slice-level `remainingAfter` (tagged slices) or the
+     * asset-level remaining (legacy/untagged dispositions). Wrapped in
      * try/catch — a markdoc hiccup here must not roll back the already-
      * committed checkout.
      */
     try {
-      const actorLink = wrapUserLinkForNote({
-        id: userId,
-        firstName: user?.firstName,
-        lastName: user?.lastName,
-      });
+      const actorLink = wrapUserLinkForNote({ ...user, id: userId });
       const bookingLink = wrapLinkForNote(
         `/bookings/${result.booking.id}`,
         result.booking.name
@@ -6645,6 +11097,18 @@ export async function partialCheckoutBooking({
     // overwrites activeSchedulerReference, so without the explicit cancel the
     // old job would be orphaned in the queue.
     if (result.bookingStatusChanged) {
+      // This batch writes its own partial check-out note instead of a status
+      // transition note, so it records the transition event itself. The
+      // returned booking is read back after the status write, so its status is
+      // the one this batch persisted.
+      await recordBookingStatusChangedEvent({
+        organizationId,
+        bookingId: id,
+        userId,
+        fromStatus: BookingStatus.RESERVED,
+        toStatus: result.booking.status,
+      });
+
       await cancelScheduler(bookingFound);
 
       const expired = bookingFound.to
@@ -6679,21 +11143,57 @@ export async function partialCheckoutBooking({
 }
 
 /**
+ * One kit-driven booking slice to insert.
+ *
+ * Carries BOTH kit pointers because they answer different questions and have
+ * different lifetimes:
+ * - `assetKitId` is the live `AssetKit` membership row. The DB `SET NULL`s it
+ *   when the asset leaves the kit, which is what makes it useless as history.
+ * - `kitId` is the owning `Kit`, persisted to `BookingAsset.sourceKitId`, and
+ *   survives that deletion.
+ *
+ * `kitId` is required so the compiler flags any producer that forgets it —
+ * a missing value is unrecoverable once the membership row is gone.
+ */
+export type KitSliceSpec = {
+  assetId: string;
+  assetKitId: string;
+  kitId: string;
+  quantity: number;
+};
+
+/**
+ * Scanner-path variant of {@link KitSliceSpec} where `quantity` may be omitted.
+ *
+ * The scan drawer only knows which `AssetKit` memberships were scanned, not
+ * their slice quantities — `addScannedAssetsToBookingWithinTx` resolves the
+ * fallback from `AssetKit.quantity` server-side.
+ *
+ * `kitId` stays REQUIRED at the type level so the compiler keeps flagging
+ * producers that forget it, but it is NOT a trusted input: the write site
+ * re-resolves it from the org-proven `AssetKit` row and that value wins. The
+ * scan route's runtime validator therefore tolerates a stale client omitting
+ * it (passing `""`) rather than rejecting the request.
+ */
+export type ScannedKitSliceSpec = Omit<KitSliceSpec, "quantity"> & {
+  quantity?: number;
+};
+
+/**
  * Resolves a set of kits into the kit-driven `BookingAsset` slice specs needed
  * to add those kits to a booking.
  *
  * Each `AssetKit` membership row becomes one slice in the shape the booking
- * write paths expect (`{ assetId, assetKitId, quantity }`). A kit with N member
- * assets yields N slices; the SAME asset belonging to MULTIPLE kits yields
+ * write paths expect ({@link KitSliceSpec}). A kit with N member assets yields
+ * N slices; the SAME asset belonging to MULTIPLE kits yields
  * MULTIPLE slices (one per `AssetKit.id`). That one-slice-per-membership shape
  * is exactly what lets a single quantity-tracked asset produce multiple
  * distinct kit-driven rows — the kit partial unique is on
  * `(bookingId, assetKitId)`, not `(bookingId, assetId)`.
  *
- * Centralizes the resolution previously inlined in the `manage-kits` route
- * action so `createBooking`, the kit-add route, and any future kit→booking flow
- * build slices the exact same, org-scoped way (per the repo's
- * code-abstraction rule).
+ * Every kit-to-booking flow (booking creation, manage-kits, the kit-add route,
+ * the mobile scan) builds its slices here, so they are all resolved the same
+ * org-scoped way and refuse the same kits.
  *
  * SECURITY (cross-org IDOR): `kitIds` originate from request/form input, so the
  * lookup is scoped by `organizationId`. `AssetKit` carries its own
@@ -6706,36 +11206,49 @@ export async function partialCheckoutBooking({
  * @param params.existingAssetKitIds - Optional set of `AssetKit.id`s already
  *   represented on the target booking; matching memberships are skipped so
  *   re-adding a kit that's already (partly) present is idempotent per slice.
- * @returns One slice spec per newly-added `AssetKit` membership
- * @throws {ShelfError} If the database lookup fails
+ * @param params.kitIdsOnBooking - Optional kits already on the target booking.
+ *   They are not joining it, so they are never refused for having no active
+ *   member: they only contribute whatever new active memberships they have.
+ *   For callers that submit the booking's whole kit selection, not just the
+ *   kits being added.
+ * @returns One slice spec per newly-added `AssetKit` membership of an active
+ *   (not archived) asset
+ * @throws {ShelfError} 400 naming any kit with no active asset, or if the
+ *   database lookup fails
  */
 export async function buildKitSlicesForBooking({
   kitIds,
   organizationId,
   existingAssetKitIds,
+  kitIdsOnBooking,
 }: {
   kitIds: string[];
   organizationId: string;
   existingAssetKitIds?: Set<string>;
-}): Promise<Array<{ assetId: string; assetKitId: string; quantity: number }>> {
-  // Nothing to resolve — short-circuit so callers can pass an empty list freely.
+  kitIdsOnBooking?: Set<string>;
+}): Promise<KitSliceSpec[]> {
+  // Nothing to resolve: short-circuit so callers can pass an empty list freely.
   if (kitIds.length === 0) return [];
 
+  let assetKits: Array<{
+    id: string;
+    assetId: string;
+    quantity: number;
+    kitId: string;
+  }>;
   try {
-    const assetKits = await db.assetKit.findMany({
-      where: { kitId: { in: kitIds }, organizationId },
-      select: { id: true, assetId: true, quantity: true },
+    assetKits = await db.assetKit.findMany({
+      // Archived members are left out: the kit is booked with its active
+      // members, the same way kit custody and kit moves skip archived ones, so
+      // one archived member never makes the whole kit unbookable.
+      where: {
+        kitId: { in: kitIds },
+        organizationId,
+        asset: { archivedAt: null },
+      },
+      // `kitId` is already the filter column, so selecting it costs nothing.
+      select: { id: true, assetId: true, quantity: true, kitId: true },
     });
-
-    // One slice per AssetKit membership, skipping memberships already on the
-    // booking so re-adding a kit doesn't duplicate its slices.
-    return assetKits
-      .filter((ak) => !existingAssetKitIds?.has(ak.id))
-      .map((ak) => ({
-        assetId: ak.assetId,
-        assetKitId: ak.id,
-        quantity: ak.quantity,
-      }));
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -6745,6 +11258,75 @@ export async function buildKitSlicesForBooking({
       label,
     });
   }
+
+  // A kit whose members are all archived (or that has none) would join the
+  // booking as nothing at all, so it is refused by name. Decided from the same
+  // read that builds the slices: a separate check could pass a kit whose last
+  // active member is archived before this read, and the kit would then drop
+  // out unnoticed whenever another kit still produced slices. A kit id from
+  // another workspace resolves to no kit and refuses nothing. A kit already
+  // on the booking is not joining it, so it is never refused here.
+  const kitIdsWithActiveMembers = new Set(assetKits.map((ak) => ak.kitId));
+  const kitIdsWithoutActiveMembers = kitIds.filter(
+    (kitId) =>
+      !kitIdsWithActiveMembers.has(kitId) && !kitIdsOnBooking?.has(kitId)
+  );
+  if (kitIdsWithoutActiveMembers.length > 0) {
+    await assertKitsHaveActiveAssets(db, {
+      kitIds: kitIdsWithoutActiveMembers,
+      organizationId,
+      action: "booking",
+    });
+  }
+
+  // One slice per AssetKit membership, skipping memberships already on the
+  // booking so re-adding a kit doesn't duplicate its slices.
+  return assetKits
+    .filter((ak) => !existingAssetKitIds?.has(ak.id))
+    .map((ak) => ({
+      assetId: ak.assetId,
+      assetKitId: ak.id,
+      // Durable provenance: see `BookingAsset.sourceKitId`.
+      kitId: ak.kitId,
+      quantity: ak.quantity,
+    }));
+}
+
+/**
+ * How many archived members of the given kits this add leaves out.
+ * {@link buildKitSlicesForBooking} skips archived members, and the kit-booking
+ * routes say so in their success message rather than let the booked count
+ * quietly differ from the kit's size.
+ *
+ * A membership already on the booking is not left out by this add, even when
+ * its asset was archived after it was booked (archiving keeps DRAFT bookings'
+ * rows), so it is not counted.
+ *
+ * @param args.kitIds - Kits being booked
+ * @param args.organizationId - The caller's workspace
+ * @param args.existingAssetKitIds - `AssetKit` ids already on the booking
+ * @returns The number of archived memberships this add leaves out
+ */
+export async function countArchivedKitMembers({
+  kitIds,
+  organizationId,
+  existingAssetKitIds,
+}: {
+  kitIds: string[];
+  organizationId: string;
+  existingAssetKitIds?: ReadonlySet<string>;
+}): Promise<number> {
+  if (kitIds.length === 0) return 0;
+  return db.assetKit.count({
+    where: {
+      ...(existingAssetKitIds && existingAssetKitIds.size > 0
+        ? { id: { notIn: [...existingAssetKitIds] } }
+        : {}),
+      kitId: { in: kitIds },
+      organizationId,
+      asset: { archivedAt: { not: null } },
+    },
+  });
 }
 
 export async function updateBookingAssets({
@@ -6755,7 +11337,15 @@ export async function updateBookingAssets({
   userId,
   quantities,
   kitSlices,
+  skipBookingNote,
+  access,
 }: Pick<Booking, "id" | "organizationId"> & {
+  /**
+   * The adding caller's access. Its add-items rule is checked against the
+   * booking status read under the row lock below, so a booking that leaves
+   * the caller's add statuses after the route's own check still refuses.
+   */
+  access: RoleAccess;
   /**
    * Standalone assets to add (no kit attribution). Kit-driven rows are
    * supplied separately via `kitSlices` so the same asset can be both
@@ -6778,7 +11368,31 @@ export async function updateBookingAssets({
    * slice is a distinct, legal row. Non-kit callers (manage-assets
    * picker, asset bulk actions) omit this and only add standalone rows.
    */
-  kitSlices?: Array<{ assetId: string; assetKitId: string; quantity: number }>;
+  kitSlices?: KitSliceSpec[];
+  /**
+   * Opt out of the booking-side `"… added … to the booking."` note written
+   * near the end of this function. Callers that compose their OWN
+   * booking-side note MUST pass `true`.
+   *
+   * Without it the booking activity feed shows the same add twice, and for a
+   * single INDIVIDUAL asset the two rows are byte-identical: the service's
+   * `wrapAssetWithCountForNote` degrades to the same bare asset link the
+   * caller's `wrapAssetsWithDataForNote` emits at count 1, because
+   * `formatUnitCount` returns null for anything that is not
+   * QUANTITY_TRACKED. A reader cannot tell whether one asset was added or
+   * two — the audit trail says something untrue.
+   *
+   * Until now the ONLY way to suppress this note was to pass a non-empty
+   * `kitIds`, which is why the kit routes are unaffected and the asset route
+   * is not: `kitIds` was standing in for "the caller writes its own note",
+   * and a caller with no kits had no way to say so. This flag states the
+   * ownership directly instead of inferring it.
+   *
+   * Scope is the BOOKING-side note only. Asset-side notes (`createNotes`),
+   * `BOOKING_ASSETS_ADDED` events and model-request fulfilment all still
+   * happen — those are keyed to different feeds and must not be suppressed.
+   */
+  skipBookingNote?: boolean;
 }) {
   try {
     const { booking, addedAssetIds } = await db.$transaction(async (tx) => {
@@ -6791,8 +11405,31 @@ export async function updateBookingAssets({
           id: true,
           name: true,
           status: true,
+          // Needed to window the QUANTITY_TRACKED availability guard below
+          // to this booking's own dates.
+          from: true,
+          to: true,
         },
       });
+
+      // Every caller checks the status in a read of its own first, so the
+      // status these writes depend on is decided here, under a row lock held
+      // until the transaction commits. A plain re-read is not enough: under
+      // READ COMMITTED it takes no lock, and a concurrent check-in,
+      // cancellation or reservation could still commit before the writes.
+      // The closed-booking refusal applies to everyone; the add-items rule is
+      // the caller's own (restricted roles add only to drafts).
+      const lockedStatus = await lockBookingForStatusCheck(
+        tx,
+        id,
+        organizationId
+      );
+      assertBookingIsOpen({
+        status: lockedStatus,
+        operation: "change the items on",
+        bookingId: id,
+      });
+      assertCanAddBookingItems({ access, bookingStatus: lockedStatus });
 
       const slices = kitSlices ?? [];
 
@@ -6804,14 +11441,36 @@ export async function updateBookingAssets({
         ...new Set([...assetIds, ...slices.map((s) => s.assetId)]),
       ];
 
+      /**
+       * Archived assets can't be booked (issue #382). The union matters here
+       * too: a kit-add passes its members as `kitSlices` with an empty
+       * `assetIds`, so guarding only the standalone bucket would let a kit
+       * carry an archived asset into the booking. Read on `tx` so it sees the
+       * same snapshot as the write.
+       */
+      await lockAssetsForArchiveGuard(tx, uniqueAssetIds, organizationId);
+      await assertAssetsAreNotArchived(
+        { assetIds: uniqueAssetIds, organizationId, actorUserId: userId },
+        tx
+      );
+
       // Validate that all asset IDs exist before inserting into the join table
       // to prevent FK violations when assets are deleted between UI load and
       // submission. `type` is selected so we can enforce the standalone/
       // kit-driven invariant below (INDIVIDUAL assets can't legitimately be
-      // both in the same booking).
+      // both in the same booking). `title`/`unitOfMeasure` are selected too
+      // so the QUANTITY_TRACKED availability guard below can build its
+      // shortfall message without a second read, and `assetModelId` groups
+      // the new standalone rows by model for the model reservation guard.
       const validAssets = await tx.asset.findMany({
-        where: { id: { in: uniqueAssetIds }, organizationId },
-        select: { id: true, type: true },
+        where: { id: { in: uniqueAssetIds }, organizationId, archivedAt: null },
+        select: {
+          id: true,
+          type: true,
+          title: true,
+          unitOfMeasure: true,
+          assetModelId: true,
+        },
       });
       const validAssetIds = validAssets.map((a) => a.id);
 
@@ -6842,7 +11501,11 @@ export async function updateBookingAssets({
       // must prove each AssetKit belongs to the caller's org (the asset
       // ids were already validated above; this closes the cross-org gap
       // for the kit ids).
-      await assertAssetKitsBelongToOrg(
+      //
+      // The guard hands back the org-proven `assetKitId -> kitId` map, which
+      // is the ONLY source we accept for `sourceKitId` below — `slice.kitId`
+      // is request input and that column's FK accepts any org's kit.
+      const kitIdByAssetKitId = await assertAssetKitsBelongToOrg(
         { assetKitIds: slices.map((s) => s.assetKitId), organizationId },
         tx
       );
@@ -6919,6 +11582,15 @@ export async function updateBookingAssets({
       const kitAssetIds = effectiveSlices.map((s) => s.assetId);
       const kitQuantities = effectiveSlices.map((s) => s.quantity);
       const kitAssetKitIds = effectiveSlices.map((s) => s.assetKitId);
+      // Index-aligned with the three arrays above. Persisted to
+      // `BookingAsset.sourceKitId` so the row still names its kit after the
+      // `AssetKit` membership (and therefore `assetKitId`) is gone. Sourced
+      // from the org-scoped guard's map, never from `s.kitId` — see the
+      // comment on `kitIdByAssetKitId`. The map is total over the validated
+      // ids (the guard throws otherwise), so the `?? null` is unreachable.
+      const kitSourceKitIds = effectiveSlices.map(
+        (s) => kitIdByAssetKitId.get(s.assetKitId) ?? null
+      );
 
       // The complete set of assets touched by this call — standalone +
       // kit-driven, deduped. Everything after the insert (status flip,
@@ -6927,6 +11599,238 @@ export async function updateBookingAssets({
       const addedAssetIds = [
         ...new Set([...standaloneAssetIds, ...kitAssetIds]),
       ];
+
+      /**
+       * QUANTITY_TRACKED windowed-availability guard for assets being
+       * added/updated on an already-ACTIVE booking (RESERVED/ONGOING/
+       * OVERDUE). A DRAFT booking is exempt here — it hasn't committed to
+       * holding any stock yet, and `reserveBooking`'s own guard validates
+       * the full asset list at the DRAFT → RESERVED transition, so
+       * checking twice would only reject drafts prematurely while they're
+       * still being assembled.
+       *
+       * Scope: only the STANDALONE quantities THIS CALL is writing
+       * (`standaloneQuantities`) are validated against the free pool. Kit
+       * slices (`effectiveSlices`) draw from their kit's own allocation, which
+       * `getAssetAvailability` already subtracts from the pool via `inKits` —
+       * counting them here too would double-count and reject a legitimate kit
+       * booking (Codex P1). The standalone amount IS the row's new target
+       * quantity (the upsert below sets it exactly).
+       *
+       * `currentQuantity` is this booking's EXISTING standalone quantity for
+       * the asset (fetched below), so the shared guard's directional rule
+       * treats a reduction as always-allowed: a booking already over-committed
+       * by OTHER bookings must still be reducible via the manage-assets route
+       * (the same #2725 recovery rule the adjust dialog relies on). Without it,
+       * `excludeBookingId: id` removes this booking's own reservation from the
+       * pool and every edit — including reductions — would be checked as a
+       * fresh increase against every OTHER booking's demand, re-creating the
+       * over-reservation dead-end.
+       */
+      if (
+        (ACTIVE_BOOKING_STATUSES as readonly BookingStatus[]).includes(b.status)
+      ) {
+        const qtAssetIds = new Set(
+          validAssets
+            .filter((asset) => isQuantityTracked(asset))
+            .map((a) => a.id)
+        );
+
+        if (qtAssetIds.size > 0) {
+          const requestedQtyByAssetId = new Map<string, number>();
+          standaloneAssetIds.forEach((assetId, index) => {
+            if (!qtAssetIds.has(assetId)) return;
+            requestedQtyByAssetId.set(
+              assetId,
+              (requestedQtyByAssetId.get(assetId) ?? 0) +
+                standaloneQuantities[index]
+            );
+          });
+
+          if (requestedQtyByAssetId.size > 0) {
+            const assetById = new Map(validAssets.map((a) => [a.id, a]));
+            // Sorted for a deterministic global lock order (deadlock-safety) —
+            // matches `reserveBooking` / the checkout guard.
+            const affectedAssetIds = Array.from(
+              requestedQtyByAssetId.keys()
+            ).sort();
+
+            for (const assetId of affectedAssetIds) {
+              await lockAssetForQuantityUpdate(tx, assetId, organizationId);
+            }
+
+            // This booking's CURRENT standalone quantity per affected asset
+            // (pre-upsert), so a reduction is recognized as directional and
+            // always allowed by the guard.
+            const existingStandalone = await tx.bookingAsset.groupBy({
+              by: ["assetId"],
+              where: {
+                bookingId: id,
+                assetId: { in: affectedAssetIds },
+                assetKitId: null,
+              },
+              _sum: { quantity: true },
+            });
+            const currentQtyByAssetId = new Map<string, number>(
+              existingStandalone.map(
+                (row: {
+                  assetId: string;
+                  _sum: { quantity: number | null };
+                }) => [row.assetId, row._sum.quantity ?? 0]
+              )
+            );
+
+            await assertAssetQuantitiesAvailable(
+              affectedAssetIds.map((assetId) => ({
+                assetId,
+                requestedQuantity: requestedQtyByAssetId.get(assetId) ?? 0,
+                currentQuantity: currentQtyByAssetId.get(assetId) ?? 0,
+                assetTitle: assetById.get(assetId)?.title ?? "",
+                unitOfMeasure: assetById.get(assetId)?.unitOfMeasure,
+              })),
+              {
+                organizationId,
+                tx,
+                window: b.from && b.to ? { from: b.from, to: b.to } : null,
+                excludeBookingId: id,
+              }
+            );
+          }
+        }
+      }
+
+      /**
+       * Which assets already hold a STANDALONE row on this booking.
+       *
+       * A model reservation is a promise of LOOSE units from the free pool, so
+       * it is discharged by a new standalone `BookingAsset` row and by nothing
+       * else. Two things follow:
+       *
+       *  - The scope must be `assetKitId: null`. Otherwise an asset present
+       *    only as a kit slice reads as "already here", and picking it to
+       *    discharge a reservation silently does nothing: the booking gains the
+       *    asset a second time while the reservation stays open.
+       *  - Only NEW rows may discharge. `addedAssetIds` is "every asset this
+       *    call touched", and the manage-assets dialog reposts the whole
+       *    selection on every save against an upsert, so keying off it lets a
+       *    plain re-save decrement again — a 3-unit reservation reaching 3/3
+       *    with two physical assets behind it.
+       *
+       * Read BEFORE the inserts below, or every asset looks pre-existing.
+       *
+       * @see {@link file://./../booking-model-request/service.server.ts} —
+       *   `fulfilModelRequestsForAssets`, which the survivors are handed to.
+       */
+      const preExistingRows: Array<{
+        assetId: string;
+        assetKitId: string | null;
+      }> =
+        addedAssetIds.length > 0
+          ? await tx.bookingAsset.findMany({
+              where: { bookingId: id, assetId: { in: addedAssetIds } },
+              select: { assetId: true, assetKitId: true },
+            })
+          : [];
+
+      const preExistingStandaloneAssetIds = new Set<string>(
+        preExistingRows
+          .filter((row) => row.assetKitId === null)
+          .map((row) => row.assetId)
+      );
+
+      /**
+       * `AssetKit` ids already represented on this booking. Used only to tell a
+       * genuinely new kit slice from a re-submitted one, since the kit insert
+       * below is `ON CONFLICT DO NOTHING` and therefore creates nothing the
+       * second time.
+       */
+      const preExistingAssetKitIds = new Set<string>(
+        preExistingRows
+          .map((row) => row.assetKitId)
+          .filter((assetKitId): assetKitId is string => assetKitId !== null)
+      );
+
+      /**
+       * The assets whose standalone row is genuinely new on this call.
+       *
+       * Deliberately built from `standaloneAssetIds`, NOT `addedAssetIds`.
+       * The latter unions in `kitSlices[].assetId`, which belongs to the
+       * kit-driven set below and is counted there — taking it from both would
+       * discharge one arrival twice.
+       */
+      const newlyStandaloneAssetIds = new Set<string>(
+        standaloneAssetIds.filter(
+          (assetId: string) => !preExistingStandaloneAssetIds.has(assetId)
+        )
+      );
+
+      /**
+       * Where each asset that may discharge a reservation on this call landed:
+       * `null` for its standalone row, otherwise the `AssetKit.id` of the
+       * kit-driven row it arrived on. Iteration order is insertion order, so
+       * the standalone bucket is seeded first and wins any tie.
+       *
+       * A unit of a model satisfies a "N units, any units" promise whether it
+       * is picked loose or arrives inside a kit — the promise and the delivery
+       * are the same physical thing. What the map adds is WHICH row records
+       * that: `BookingAsset.bookingModelRequestId` lives on exactly one row per
+       * discharge, so the stamp below can name it instead of guessing.
+       *
+       * The kit half is INDIVIDUAL-only. A QUANTITY_TRACKED asset is the one
+       * type whose standalone row and kit rows legitimately coexist, so it has
+       * no single arrival row to point at — and it is not a model unit anyway
+       * (`getAssetModelAvailability` counts the pool INDIVIDUAL-only). The
+       * standalone half needs no such filter: one row per asset either way,
+       * and `materializeModelRequestForAsset` turns the rest away itself.
+       */
+      const individualAssetIds = new Set<string>(
+        validAssets
+          .filter((asset) => asset.type === AssetType.INDIVIDUAL)
+          .map((asset) => asset.id)
+      );
+      const arrivalRowByAssetId = new Map<string, string | null>();
+      for (const assetId of newlyStandaloneAssetIds) {
+        arrivalRowByAssetId.set(assetId, null);
+      }
+      for (const slice of effectiveSlices) {
+        // `ON CONFLICT DO NOTHING` on the kit insert below: a membership
+        // already on the booking creates no row, so it delivers nothing new
+        // and must not discharge.
+        if (preExistingAssetKitIds.has(slice.assetKitId)) continue;
+        if (!individualAssetIds.has(slice.assetId)) continue;
+        if (arrivalRowByAssetId.has(slice.assetId)) continue;
+        arrivalRowByAssetId.set(slice.assetId, slice.assetKitId);
+      }
+
+      /**
+       * Units booked by name claim the same pool that other bookings' model
+       * reservations draw from. Judged over `arrivalRowByAssetId`, the same set
+       * fulfilment draws from: a model pool has ONE axis, and
+       * `getAssetModelAvailability` counts every INDIVIDUAL `BookingAsset` row
+       * of the model without looking at `assetKitId`. So a unit arriving inside
+       * a kit leaves the loose pool exactly as a loose one does.
+       *
+       * Whatever may discharge a reservation must be measured against the pool
+       * it draws from, or a unit can answer this booking's promise while going
+       * unmeasured against everyone else's. Quantity-tracked rows stay out:
+       * they are judged by the pool guard above and are not model units.
+       *
+       * Runs before the inserts and before fulfilment, while this booking's
+       * own requests are still outstanding and therefore still exempt.
+       */
+      await assertModelUnitsNotReservedElsewhere({
+        assets: validAssets.filter(
+          (asset) =>
+            arrivalRowByAssetId.has(asset.id) &&
+            asset.type === AssetType.INDIVIDUAL
+        ),
+        bookingId: id,
+        bookingStatus: lockedStatus,
+        organizationId,
+        from: b.from,
+        to: b.to,
+        tx,
+      });
 
       await Promise.all([
         // Standalone branch: upsert against the manual partial unique
@@ -6945,8 +11849,8 @@ export async function updateBookingAssets({
         // (kit qty edits cascade from `updateKitAssets`, not from here).
         kitAssetIds.length > 0
           ? tx.$executeRaw`
-              INSERT INTO "BookingAsset" ("id", "assetId", "bookingId", "quantity", "assetKitId")
-              SELECT gen_random_uuid()::text, unnest(${kitAssetIds}::text[]), ${id}, unnest(${kitQuantities}::int[]), unnest(${kitAssetKitIds}::text[])
+              INSERT INTO "BookingAsset" ("id", "assetId", "bookingId", "quantity", "assetKitId", "sourceKitId")
+              SELECT gen_random_uuid()::text, unnest(${kitAssetIds}::text[]), ${id}, unnest(${kitQuantities}::int[]), unnest(${kitAssetKitIds}::text[]), unnest(${kitSourceKitIds}::text[])
               ON CONFLICT ("bookingId", "assetKitId") WHERE "assetKitId" IS NOT NULL DO NOTHING
             `
           : Promise.resolve(),
@@ -6978,11 +11882,71 @@ export async function updateBookingAssets({
       // the same asset on this call — mirrors the actual booked count
       // even when the same asset is added both standalone and via N kits.
       if (addedAssetIds.length > 0) {
+        // `title` + `assetModelId` widen this select purely so the same rows
+        // can feed model-request fulfilment below without a second round-trip.
         const assetTypeRows = await tx.asset.findMany({
-          where: { id: { in: addedAssetIds }, organizationId },
-          select: { id: true, type: true, unitOfMeasure: true },
+          where: {
+            id: { in: addedAssetIds },
+            organizationId,
+            archivedAt: null,
+          },
+          select: {
+            id: true,
+            type: true,
+            unitOfMeasure: true,
+            title: true,
+            assetModelId: true,
+          },
         });
         const assetTypeById = new Map(assetTypeRows.map((a) => [a.id, a]));
+
+        /**
+         * Discharge any model reservation these assets answer.
+         *
+         * Naming a concrete unit of model M satisfies a "N units of M, any
+         * units" reservation — the promise and the delivery are the same
+         * physical thing, whichever surface added it. See
+         * {@link fulfilModelRequestsForAssets} for the full rationale.
+         */
+        const fulfilledRequestIdByAssetId = await fulfilModelRequestsForAssets({
+          bookingId: b.id,
+          // Only assets that gained a row on this call — see
+          // `arrivalRowByAssetId` for which rows count and why a re-submitted
+          // one does not.
+          assets: assetTypeRows.filter((asset: { id: string }) =>
+            arrivalRowByAssetId.has(asset.id)
+          ),
+          organizationId,
+          userId,
+          tx,
+        });
+
+        // Persist which reservation each asset discharged, on the row it
+        // arrived on.
+        //
+        // `IS NOT DISTINCT FROM` rather than `=` because the standalone case
+        // compares against NULL, where `=` yields NULL and matches nothing.
+        //
+        // The row is named, never guessed. An earlier version ordered by
+        // `("assetKitId" IS NOT NULL)` to "prefer" one row, but a preference is
+        // not a constraint: with the preferred row absent the ordering simply
+        // fell through and stamped whatever remained, recording an arrival that
+        // never happened. `arrivalRowByAssetId` knows which row this call
+        // created, so the `WHERE` states it.
+        for (const [assetId, requestId] of fulfilledRequestIdByAssetId) {
+          const arrivalAssetKitId = arrivalRowByAssetId.get(assetId) ?? null;
+          await tx.$executeRaw`
+            UPDATE "BookingAsset" SET "bookingModelRequestId" = ${requestId}
+            WHERE "id" = (
+              SELECT "id" FROM "BookingAsset"
+              WHERE "bookingId" = ${b.id}
+                AND "assetId" = ${assetId}
+                AND "assetKitId" IS NOT DISTINCT FROM ${arrivalAssetKitId}::text
+                AND "bookingModelRequestId" IS NULL
+              LIMIT 1
+            )
+          `;
+        }
 
         // Sum the booked quantity per asset across all rows this call
         // is responsible for. Standalone defaults to 1 when missing
@@ -7001,8 +11965,43 @@ export async function updateBookingAssets({
           );
         }
 
+        /**
+         * One event per asset that ACTUALLY arrived.
+         *
+         * `addedAssetIds` is every asset the call touched, so the pure
+         * quantity-edit path — which re-submits assets already on the booking —
+         * was emitting `BOOKING_ASSETS_ADDED` for assets that were already
+         * there. Suppressing the human-readable note via `skipBookingNote`
+         * without filtering here left the machine-readable feed, which reports
+         * aggregate, still claiming a phantom add. An asset is "added" if this
+         * call created its standalone row or any of its kit-driven rows.
+         */
+        /**
+         * An asset was ADDED by this call if it gained a standalone row or a
+         * kit-driven row that did not exist before.
+         *
+         * The previous version read
+         * `newlyStandaloneAssetIds.has(id) || !preExistingStandaloneAssetIds.has(id)`,
+         * whose first operand is a strict subset of the second — so it reduced
+         * to the second alone and never looked at kit rows at all, despite the
+         * comment claiming it did. Harmless in practice (the kit insert is
+         * `ON CONFLICT DO NOTHING` and the picker filters already-added kits),
+         * but code and comment disagreeing is how the next reader gets misled.
+         */
+        const assetsGainingAKitSlice = new Set<string>(
+          effectiveSlices
+            .filter((slice) => !preExistingAssetKitIds.has(slice.assetKitId))
+            .map((slice) => slice.assetId)
+        );
+
+        const newlyAddedAssetIds = addedAssetIds.filter(
+          (assetId: string) =>
+            newlyStandaloneAssetIds.has(assetId) ||
+            assetsGainingAKitSlice.has(assetId)
+        );
+
         await recordEvents(
-          addedAssetIds.map((assetId) => {
+          newlyAddedAssetIds.map((assetId: string) => {
             const asset = assetTypeById.get(assetId);
             return {
               organizationId,
@@ -7026,17 +12025,24 @@ export async function updateBookingAssets({
 
     // BOOKING ACTIVITY LOG: Log asset addition activity
     // Creates user-attributed note when assets are added to a booking
-    // Skip note creation if kits are involved - kit notes are created separately
+    // Skip note creation if kits are involved (kit notes are created
+    // separately), or if the caller told us it writes its own booking-side
+    // note (`skipBookingNote`). The `kitIds` arm was doing both jobs; the
+    // explicit flag is what a non-kit caller needs to avoid a duplicate.
     // Note creation is best-effort — the booking update already succeeded,
     // so we log failures instead of throwing to prevent false error reports.
-    if (!kitIds || kitIds.length === 0) {
+    if (!skipBookingNote && (!kitIds || kitIds.length === 0)) {
       try {
         // Widen the select to type+unitOfMeasure so the single-asset
         // branch can prefix a unit count ("added 50 units of Pens to
         // the booking"). The multi-asset summary uses
         // `wrapAssetsWithDataForNote`'s popover unchanged.
         const assets = await db.asset.findMany({
-          where: { id: { in: addedAssetIds }, organizationId },
+          where: {
+            id: { in: addedAssetIds },
+            organizationId,
+            archivedAt: null,
+          },
           select: {
             id: true,
             title: true,
@@ -7162,7 +12168,12 @@ export async function archiveBooking({
     const booking = await db.booking
       .findUniqueOrThrow({
         where: { id, organizationId },
-        select: { id: true, status: true, activeSchedulerReference: true },
+        select: {
+          id: true,
+          status: true,
+          to: true,
+          activeSchedulerReference: true,
+        },
       })
       .catch((cause) => {
         throw new ShelfError({
@@ -7175,20 +12186,52 @@ export async function archiveBooking({
         });
       });
 
-    /** Booking can be archived only if it is COMPLETE */
-    if (booking.status !== BookingStatus.COMPLETE) {
+    /**
+     * Archivable when COMPLETE (gear was checked back in) or a past-due
+     * RESERVED booking (a reservation whose window elapsed without checkout).
+     * ONGOING/OVERDUE are rejected — their assets are still CHECKED_OUT.
+     * @see {@link isBookingArchivable}
+     */
+    if (!isBookingArchivable({ status: booking.status, to: booking.to })) {
       throw new ShelfError({
         cause: null,
         label,
-        message: "Archiving is only allowed for Completed bookings.",
+        message:
+          "This booking can't be archived. Only completed bookings, or reserved bookings whose end date has passed, can be archived.",
       });
     }
 
-    const updatedBooking = await db.booking.update({
-      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) at L2546; this is the write on that same proven id
-      where: { id: booking.id },
-      data: { status: BookingStatus.ARCHIVED },
-    });
+    /**
+     * A booking archived straight from RESERVED was never checked in, so flag
+     * it: return-behaviour reports (Booking Compliance) exclude these.
+     */
+    const archivedWithoutCheckin = booking.status === BookingStatus.RESERVED;
+
+    /**
+     * Guard the write on the status we just read. If a concurrent checkout
+     * flipped a RESERVED booking to ONGOING/OVERDUE between the read above and
+     * this write, the update matches no row and we abort — otherwise we'd
+     * archive a booking whose assets are now physically checked out (TOCTOU).
+     */
+    const updatedBooking = await db.booking
+      .update({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) above; this is the write on that same proven id
+        where: { id: booking.id, status: booking.status },
+        data: {
+          status: BookingStatus.ARCHIVED,
+          ...(archivedWithoutCheckin ? { archivedWithoutCheckin: true } : {}),
+        },
+      })
+      .catch(() => null);
+
+    if (!updatedBooking) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message:
+          "This booking's status changed before it could be archived. Please refresh and try again.",
+      });
+    }
 
     // Cancel any pending auto-archive job
     await cancelScheduler(booking);
@@ -7248,6 +12291,9 @@ export async function cancelBooking({
               asset: {
                 select: {
                   id: true,
+                  // `type` decides whether a standalone slice releases this
+                  // asset's kits — see `getKitIdsToAcquire`.
+                  type: true,
                   assetKits: { select: { kitId: true } },
                 },
               },
@@ -7275,14 +12321,33 @@ export async function cancelBooking({
     ];
 
     if (!allowedStatusForCancel.includes(bookingFound.status)) {
+      // User-input validation, not a server fault: the Cancel action is gated in
+      // the UI, so this only fires on a genuine race (the booking's status
+      // changed elsewhere between render and submit). A 400 keeps it out of the
+      // Sentry error pipeline; the outer catch inherits status/shouldBeCaptured
+      // from this cause. See SHELF-WEBAPP-222.
       throw new ShelfError({
         cause: null,
         label,
         message: "Booking cannot be cancelled at the current state.",
+        status: 400,
+        shouldBeCaptured: false,
+        additionalData: { bookingId: id, status: bookingFound.status },
       });
     }
 
-    const kitIds = getKitIdsByAssets(cancelAssets);
+    /**
+     * Kits this booking took out, resolved exactly as the check-out that
+     * stamped them did — release has to be the inverse of acquire, or it
+     * either strands a kit or hands back one it never held. In particular a
+     * standalone `QUANTITY_TRACKED` slice stamps no kit, so it releases none:
+     * its units come out of the free pool, and every kit holding that asset
+     * kept its own slice throughout.
+     */
+    const kitIds = await getKitIdsToAcquire({
+      slices: bookingFound.bookingAssets,
+      organizationId,
+    });
     const hasKits = kitIds.length > 0;
 
     const booking = await db.$transaction(async (tx) => {
@@ -7310,15 +12375,16 @@ export async function cancelBooking({
         await reconcileAssetStatusForBookingExit({
           tx,
           assetIds: cancelAssets.map((a) => a.id),
-          excludeBookingId: bookingFound.id,
+          excludeBookingIds: [bookingFound.id],
           organizationId,
         });
 
         /** If there are any kits, then update their status as well */
         if (hasKits) {
-          await tx.kit.updateMany({
-            where: { id: { in: kitIds }, organizationId },
-            data: { status: KitStatus.AVAILABLE },
+          await releaseCheckedOutKits(tx, {
+            kitIds,
+            organizationId,
+            excludeBookingIds: [bookingFound.id],
           });
         }
       }
@@ -7350,25 +12416,31 @@ export async function cancelBooking({
         ? resolveUserDisplayName(booking.custodianUser)
         : booking.custodianTeamMember?.name ?? "";
 
-      const text = cancelledBookingEmailContent({
-        bookingName: booking.name,
-        assetsCount: booking._count.bookingAssets,
-        custodian,
-        from: booking.from!,
-        to: booking.to!,
-        bookingId: booking.id,
-        hints,
-        customEmailFooter: booking.organization.customEmailFooter,
-        cancellationReason: cancellationReason || undefined,
+      const actor = await resolveBookingEmailActor({
+        userId,
+        label: "Cancelled by",
       });
 
       await sendBookingEmailToAllRecipients({
         recipients,
         booking,
         subject: `❌ Booking cancelled (${booking.name}) - shelf.nu`,
-        textContent: text,
-        heading: `Your booking has been cancelled: "${booking.name}"`,
+        buildText: (textArgs) =>
+          cancelledBookingEmailContent({
+            ...textArgs,
+            bookingName: booking.name,
+            assetsCount: booking._count.bookingAssets,
+            custodian,
+            from: booking.from!,
+            to: booking.to!,
+            bookingId: booking.id,
+            customEmailFooter: booking.organization.customEmailFooter,
+            cancellationReason: cancellationReason || undefined,
+          }),
+        buildHeading: () =>
+          `Your booking has been cancelled: "${booking.name}"`,
         hints,
+        actor,
         templateProps: {
           cancellationReason: cancellationReason || undefined,
         },
@@ -7404,6 +12476,12 @@ export async function cancelBooking({
       message: isLikeShelfError(cause)
         ? cause.message
         : "Something went wrong while cancelling the booking, please try again.",
+      // ShelfError inherits status/shouldBeCaptured from a ShelfError cause but
+      // NOT additionalData — forward it so the handled-400 branch's { bookingId,
+      // status } debug context survives the re-wrap. See SHELF-WEBAPP-222.
+      additionalData: isLikeShelfError(cause)
+        ? cause.additionalData
+        : undefined,
     });
   }
 }
@@ -7412,8 +12490,11 @@ export async function revertBookingToDraft({
   id,
   organizationId,
   userId,
+  hints,
 }: Pick<Booking, "id" | "organizationId"> & {
   userId?: User["id"];
+  /** Acting user's client hints — fallback prefs for the notification emails. */
+  hints: ClientHint;
 }) {
   try {
     const booking = await db.booking
@@ -7437,40 +12518,106 @@ export async function revertBookingToDraft({
         cause: null,
         label,
         message: "Booking can be reverted to draft only for reserved state.",
+        status: 400,
+        shouldBeCaptured: false,
       });
     }
 
-    const cancelledBooking = await db.booking.update({
+    const draftBooking = await db.booking.update({
       // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) at L2773; this is the write on that same proven id
       where: { id: booking.id },
       data: { status: BookingStatus.DRAFT },
+      // The custodian (and other notification recipients) are emailed below,
+      // so pull the same payload the other lifecycle emails use.
+      include: BOOKING_INCLUDE_FOR_EMAIL,
     });
 
     // Add activity log for booking revert to draft
     if (userId) {
       await createStatusTransitionNote({
-        bookingId: cancelledBooking.id,
+        bookingId: draftBooking.id,
         organizationId,
         fromStatus: booking.status,
         toStatus: BookingStatus.DRAFT,
         userId,
-        custodianUserId: cancelledBooking.custodianUserId || undefined,
+        custodianUserId: draftBooking.custodianUserId || undefined,
       });
     } else {
       // System-initiated revert (fallback)
       await createStatusTransitionNote({
-        bookingId: cancelledBooking.id,
+        bookingId: draftBooking.id,
         organizationId,
         fromStatus: booking.status,
         toStatus: BookingStatus.DRAFT,
-        custodianUserId: cancelledBooking.custodianUserId || undefined,
+        custodianUserId: draftBooking.custodianUserId || undefined,
       });
     }
 
     /** Cancels all scheduled events */
-    await cancelScheduler(cancelledBooking);
+    await cancelScheduler(draftBooking);
 
-    return cancelledBooking;
+    // Notify the custodian (and other configured recipients) that their
+    // reservation went back to draft — the same fan-out every other booking
+    // lifecycle transition (reserve, cancel, check-in, …) already does. The
+    // admin broadcast doesn't apply to this event type, and the acting user
+    // is excluded by the resolver.
+    //
+    // The status write above is already committed, so a notification failure
+    // must not fail the revert: it would report an error for a transition
+    // that happened, and a retry would trip the RESERVED-only guard. Log and
+    // return instead.
+    try {
+      const recipients = await getBookingNotificationRecipients({
+        booking: draftBooking,
+        eventType: "REVERT_TO_DRAFT",
+        organizationId,
+        editorUserId: userId,
+      });
+
+      if (recipients.length > 0) {
+        const custodian = draftBooking.custodianUser
+          ? resolveUserDisplayName(draftBooking.custodianUser)
+          : draftBooking.custodianTeamMember?.name ?? "";
+
+        const actor = await resolveBookingEmailActor({
+          userId,
+          label: "Reverted by",
+        });
+
+        await sendBookingEmailToAllRecipients({
+          recipients,
+          booking: draftBooking,
+          subject: `↩️ Booking reverted to draft (${draftBooking.name}) - shelf.nu`,
+          buildText: (textArgs) =>
+            revertedToDraftEmailContent({
+              ...textArgs,
+              bookingName: draftBooking.name,
+              assetsCount: draftBooking._count.bookingAssets,
+              custodian,
+              from: draftBooking.from!,
+              to: draftBooking.to!,
+              bookingId: draftBooking.id,
+              customEmailFooter: draftBooking.organization.customEmailFooter,
+            }),
+          buildHeading: () =>
+            `Your booking has been reverted to draft: "${draftBooking.name}"`,
+          hints,
+          actor,
+        });
+      }
+    } catch (cause) {
+      Logger.error(
+        new ShelfError({
+          cause,
+          message:
+            "Failed to send the reverted-to-draft notification emails. The booking itself was reverted successfully.",
+          additionalData: { bookingId: draftBooking.id, organizationId },
+          label,
+        })
+      );
+    }
+
+    return draftBooking;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -7482,18 +12629,39 @@ export async function revertBookingToDraft({
   }
 }
 
+/**
+ * Extends an ongoing or overdue booking to a new end date.
+ *
+ * @param params.id - The booking to extend
+ * @param params.organizationId - The caller's workspace; the lookup is scoped to it
+ * @param params.newEndDate - The new live end (`to`); the planned end is left alone
+ * @param params.hints - Client hints, for the note's dates, the check-in
+ *   reminder and the scheduled overdue job
+ * @param params.userId - The caller
+ * @param params.access - The caller's access, for the ownership gate
+ * @param params.roles - Every role on the caller's membership, for the
+ *   `booking:extend` grant
+ * @returns The updated booking
+ * @throws {ShelfError} 403 when the caller lacks `booking:extend` or does not
+ *   own the booking
+ * @throws {ShelfError} 400 when `newEndDate` is not after the booking's end,
+ *   or when the booking changed between the read and the write (another
+ *   extension landed, or the booking was closed)
+ */
 export async function extendBooking({
   id,
   organizationId,
   newEndDate,
   hints,
   userId,
-  role,
+  access,
+  roles,
 }: Pick<Booking, "id" | "organizationId"> & {
   newEndDate: Date;
   hints: ClientHint;
   userId: string;
-  role: OrganizationRoles;
+  access: RoleAccess;
+  roles: OrganizationRoles[];
 }) {
   try {
     const booking = await db.booking
@@ -7506,7 +12674,17 @@ export async function extendBooking({
           activeSchedulerReference: true,
           bookingAssets: {
             include: {
-              asset: { select: { id: true, status: true } },
+              // `type`, `assetModelId` and `title` feed the model guard that
+              // re-measures the booking against the extended window.
+              asset: {
+                select: {
+                  id: true,
+                  status: true,
+                  type: true,
+                  assetModelId: true,
+                  title: true,
+                },
+              },
             },
           },
           from: true,
@@ -7525,21 +12703,28 @@ export async function extendBooking({
         });
       });
 
-    validateBookingOwnership({
-      booking,
+    // `booking:extend` is its own grant (BASE does not hold it). The route
+    // gates on it too; this keeps the service safe for any other caller.
+    const canExtend = await hasPermission({
       userId,
-      role,
-      action: "extend",
-      blockBaseEntirely: true,
+      organizationId,
+      roles,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.extend,
     });
+    if (!canExtend) {
+      throw new ShelfError({
+        cause: null,
+        label: "Booking",
+        message: "You are not authorized to extend this booking.",
+        status: 403,
+        shouldBeCaptured: false,
+      });
+    }
 
-    /** Extending booking is allowed only for these status */
-    const allowedStatus: BookingStatus[] = [
-      BookingStatus.ONGOING,
-      BookingStatus.OVERDUE,
-    ];
+    validateBookingOwnership({ booking, userId, access, action: "extend" });
 
-    if (!allowedStatus.includes(booking.status)) {
+    if (!isExtendableStatus(booking.status)) {
       throw new ShelfError({
         cause: null,
         label,
@@ -7547,23 +12732,31 @@ export async function extendBooking({
       });
     }
 
-    /** Get assets that have been returned via partial check-in */
-    const checkedInAssetIds = booking.partialCheckins.flatMap(
-      (checkin) => checkin.assetIds
+    // An extension only ever moves the end later; an earlier end is a
+    // different operation.
+    if (newEndDate <= booking.to) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message: "The new end date must be after the current end date.",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
+    /** Assets still out, not returned through partial check-in */
+    const activeAssets = getAssetsStillOutForExtend(
+      booking.bookingAssets.map((ba) => ba.asset),
+      booking.partialCheckins.flatMap((checkin) => checkin.assetIds)
     );
 
-    /** Filter to only assets that are actively checked out (not returned) */
-    const activeAssets = booking.bookingAssets
-      .map((ba) => ba.asset)
-      .filter(
-        (asset) =>
-          (asset.status === AssetStatus.CHECKED_OUT ||
-            asset.status === AssetStatus.IN_CUSTODY) &&
-          !checkedInAssetIds.includes(asset.id)
-      );
+    /** Kit memberships still out, read from the slice markers */
+    const kitMembershipIdsStillOut = getKitMembershipIdsStillOut(
+      booking.bookingAssets
+    );
 
     /** Validate that there are still active assets to extend the booking for */
-    if (activeAssets.length === 0) {
+    if (activeAssets.length === 0 && kitMembershipIdsStillOut.length === 0) {
       throw new ShelfError({
         cause: null,
         label,
@@ -7575,7 +12768,32 @@ export async function extendBooking({
 
     /** Wrap conflict detection and update in a transaction to prevent race conditions */
     const updatedBooking = await db.$transaction(async (tx) => {
-      /** Checking if the booking period is clashing with any other booking containing the same active asset(s).*/
+      /**
+       * Every membership of the kits still out. A reservation holds a kit
+       * through any of its memberships, not only the ones this booking's slices
+       * point at.
+       */
+      let heldKitMembershipIds: string[] = [];
+      if (kitMembershipIdsStillOut.length > 0) {
+        const heldMemberships = await tx.assetKit.findMany({
+          where: { id: { in: kitMembershipIdsStillOut }, organizationId },
+          select: { kitId: true },
+        });
+        const heldKitIds = [...new Set(heldMemberships.map((m) => m.kitId))];
+        if (heldKitIds.length > 0) {
+          const memberships = await tx.assetKit.findMany({
+            where: { kitId: { in: heldKitIds }, organizationId },
+            select: { id: true },
+          });
+          heldKitMembershipIds = memberships.map((m) => m.id);
+        }
+      }
+
+      const activeAssetsClause: Prisma.BookingAssetWhereInput = {
+        assetId: { in: activeAssets.map((a) => a.id) },
+      };
+
+      /** Checking if the booking period is clashing with any other booking containing the same active asset(s) or kit(s).*/
       const clashingBookings: ClashingBooking[] = await tx.booking.findMany({
         where: {
           id: { not: booking.id },
@@ -7584,7 +12802,15 @@ export async function extendBooking({
             in: [BookingStatus.RESERVED],
           },
           bookingAssets: {
-            some: { assetId: { in: activeAssets.map((a) => a.id) } },
+            some:
+              heldKitMembershipIds.length > 0
+                ? {
+                    OR: [
+                      activeAssetsClause,
+                      { assetKitId: { in: heldKitMembershipIds } },
+                    ],
+                  }
+                : activeAssetsClause,
           },
           // Check for bookings that start within the extension period
           from: {
@@ -7608,21 +12834,69 @@ export async function extendBooking({
         });
       }
 
-      return tx.booking.update({
-        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) at L2853; this is the write on that same proven id
-        where: { id: booking.id },
-        data: {
-          /**
-           * If booking is currently OVERDUE we have to make it ONGOING
-           */
-          status:
-            booking.status === BookingStatus.OVERDUE
-              ? BookingStatus.ONGOING
-              : undefined,
-          to: newEndDate,
-        },
-        include: BOOKING_INCLUDE_FOR_EMAIL,
+      /**
+       * The days being added may overlap model reservations that other
+       * bookings hold, which the clash check above cannot see: a
+       * `BookingModelRequest` names no asset. Every INDIVIDUAL unit the
+       * booking holds by name is measured again against the pool for the new
+       * dates, kit-driven rows included — the extension takes the unit off
+       * that pool for the added days however it got onto the booking.
+       */
+      await assertModelUnitsNotReservedElsewhere({
+        assets: booking.bookingAssets
+          .filter((ba) => ba.asset.type === AssetType.INDIVIDUAL)
+          .map((ba) => ba.asset),
+        bookingId: booking.id,
+        bookingStatus: booking.status,
+        windowChanged: true,
+        organizationId,
+        from: booking.from,
+        to: newEndDate,
+        tx,
       });
+
+      // The row must still be exactly as read when the lock is taken: an
+      // extension that landed since the read above, a booking closed, or the
+      // overdue job flipping it meanwhile leaves no row to update. So the
+      // note and the events below, built from that read, describe the change
+      // this write made. Either live status reads ONGOING once extended.
+      return tx.booking
+        .update({
+          where: {
+            id: booking.id,
+            organizationId,
+            status: booking.status,
+            to: booking.to,
+          },
+          data: {
+            status: BookingStatus.ONGOING,
+            /**
+             * Only the LIVE end date moves. `originalTo` holds the end date
+             * the booking was planned for, and extension is allowed only
+             * once the booking has started (ONGOING/OVERDUE), so the plan is
+             * already fixed: moving it here would erase the deadline the
+             * custodian actually agreed to, and with it every late return
+             * from Booking Compliance.
+             */
+            to: newEndDate,
+          },
+          include: BOOKING_INCLUDE_FOR_EMAIL,
+        })
+        .catch((cause) => {
+          if (isNotFoundError(cause)) {
+            // `cause: null`: a Prisma not-found cause would turn this into a
+            // 404, and the booking does exist; its row just moved on.
+            throw new ShelfError({
+              cause: null,
+              label,
+              message:
+                "The booking changed while you were extending it. Reload it and try again.",
+              status: 400,
+              shouldBeCaptured: false,
+            });
+          }
+          throw cause;
+        });
     });
 
     // Add activity log for booking extension
@@ -7703,32 +12977,33 @@ export async function extendBooking({
         ? resolveUserDisplayName(updatedBooking.custodianUser)
         : updatedBooking.custodianTeamMember?.name ?? "";
 
-      const text = extendBookingEmailContent({
-        bookingName: updatedBooking.name,
-        assetsCount: updatedBooking._count.bookingAssets,
-        custodian,
-        from: updatedBooking.from!,
-        to: updatedBooking.to!,
-        hints,
-        bookingId: updatedBooking.id,
-        oldToDate: booking.to,
-        customEmailFooter: updatedBooking.organization.customEmailFooter,
-      });
-
-      const { format } = getDateTimeFormatFromHints(hints, {
-        dateStyle: "short",
-        timeStyle: "short",
+      const actor = await resolveBookingEmailActor({
+        userId,
+        label: "Extended by",
       });
 
       await sendBookingEmailToAllRecipients({
         recipients,
         booking: updatedBooking,
         subject: `Booking extended (${updatedBooking.name}) - shelf.nu`,
-        textContent: text,
-        heading: `Booking extended from ${format(booking.to)} to ${format(
-          newEndDate
-        )}`,
+        buildText: (textArgs) =>
+          extendBookingEmailContent({
+            ...textArgs,
+            bookingName: updatedBooking.name,
+            assetsCount: updatedBooking._count.bookingAssets,
+            custodian,
+            from: updatedBooking.from!,
+            to: updatedBooking.to!,
+            bookingId: updatedBooking.id,
+            oldToDate: booking.to,
+            customEmailFooter: updatedBooking.organization.customEmailFooter,
+          }),
+        buildHeading: (prefs) =>
+          `Booking extended from ${formatDate(booking.to, prefs, {
+            includeTime: true,
+          })} to ${formatDate(newEndDate, prefs, { includeTime: true })}`,
         hints,
+        actor,
       });
     }
 
@@ -7736,7 +13011,26 @@ export async function extendBooking({
      * In case of ONGOING, a checkin reminder should have be scheduled. So we have to reschedule it.
      * And in case of OVERDUE all the jobs are completed, so we have to reschedule the checkin reminder.
      */
-    await cancelScheduler(booking);
+    // A later extension can commit after this one. The reminder belongs to
+    // the extension whose end is stored now: it cancels the job stored now,
+    // and stores its own only if neither has moved on again meanwhile.
+    const live = await db.booking.findUnique({
+      where: { id: booking.id, organizationId },
+      select: { to: true, activeSchedulerReference: true },
+    });
+    if (live && live.to.getTime() !== newEndDate.getTime()) {
+      return updatedBooking;
+    }
+    const storedReference =
+      live?.activeSchedulerReference ?? booking.activeSchedulerReference;
+    await cancelScheduler({
+      id: booking.id,
+      activeSchedulerReference: storedReference,
+    });
+    const expected = {
+      to: newEndDate,
+      activeSchedulerReference: storedReference,
+    };
 
     const { hours } = calcTimeDifference(newEndDate, new Date());
 
@@ -7759,10 +13053,12 @@ export async function extendBooking({
           eventType: BOOKING_SCHEDULER_EVENTS_ENUM.overdueHandler,
         },
         when: newEndDate,
+        expected,
       });
     } else {
-      const when = newEndDate;
-      when.setHours(newEndDate.getHours() - 1);
+      // A copy: `expected.to` must stay the stored end.
+      const when = new Date(newEndDate);
+      when.setHours(when.getHours() - 1);
 
       await scheduleNextBookingJob({
         data: {
@@ -7771,6 +13067,7 @@ export async function extendBooking({
           eventType: BOOKING_SCHEDULER_EVENTS_ENUM.checkinReminder,
         },
         when,
+        expected,
       });
     }
 
@@ -7790,6 +13087,57 @@ export async function extendBooking({
   }
 }
 
+/**
+ * Resolves the `custodianScope` restriction for one user in one organization —
+ * the "these bookings are mine" clause that {@link getBookings} ANDs in so a
+ * restricted (SELF_SERVICE / BASE) user only ever sees their own bookings.
+ *
+ * Resolves **every** `TeamMember` row the user has in the org, not just one:
+ * the schema has no unique constraint on `(userId, organizationId)` (the
+ * demotion backfill migration depends on that), so a user can hold more than
+ * one team-member row, and a legacy booking's custody link may point at any of
+ * them. A `findFirst` would silently hide bookings linked via the other rows.
+ *
+ * Returns `teamMemberIds: []` when the user has no team member — callers that
+ * require one (the index, the iCal feed) throw on that; list surfaces simply
+ * fall back to matching on the user link alone.
+ *
+ * @param params.userId - The user whose bookings the scope restricts to
+ * @param params.organizationId - The active workspace
+ * @returns A `custodianScope` with all of the user's team-member ids in the org
+ */
+export async function resolveCustodianScope({
+  userId,
+  organizationId,
+}: {
+  userId: User["id"];
+  organizationId: Organization["id"];
+}): Promise<{ userId: string; teamMemberIds: string[] }> {
+  const teamMembers = await db.teamMember.findMany({
+    where: { userId, organizationId },
+    select: { id: true },
+  });
+
+  return { userId, teamMemberIds: teamMembers.map((tm) => tm.id) };
+}
+
+/**
+ * The page-level values a bookings list loader needs besides its rows: page,
+ * per-page cookie, sort, the search and team-member values the filter UI
+ * shows, the saved-filters cookie, and a restricted viewer's custodian scope.
+ *
+ * Which bookings the list holds is not decided here: the loaders build that
+ * with {@link getBookingsListWhereParams} from the same URL params, so the
+ * query and a "Select all" on it share one definition.
+ *
+ * @param params.request - The list page request (URL params and cookies)
+ * @param params.userId - The viewer
+ * @param params.canSeeAllBookings - Whether the viewer may see every booking
+ * @param params.organizationId - The viewer's (validated) organization
+ * @returns The page-level values, plus `selfServiceData.custodianScope` for a
+ *   restricted viewer (otherwise `null`)
+ * @throws {ShelfError} when a restricted viewer has no team member in the workspace
+ */
 export async function getBookingsFilterData({
   request,
   userId,
@@ -7811,7 +13159,7 @@ export async function getBookingsFilterData({
   });
 
   const searchParams = getCurrentSearchParams(request);
-  const { page, perPageParam, search, status, teamMemberIds, tags } =
+  const { page, perPageParam, search, teamMemberIds } =
     getParamsValues(searchParams);
 
   const cookie = await updateCookieWithPerPage(request, perPageParam);
@@ -7822,27 +13170,28 @@ export async function getBookingsFilterData({
     "asc") as SortingDirection;
 
   /**
-   * For self service and base users, we need to get the teamMember to be able to filter by it as well.
-   * This is to handle a case when a booking was assigned when there wasn't a user attached to a team member but they were later on linked.
-   * This is to ensure that the booking is still visible to the user that was assigned to it.
-   * Also this shouldn't really happen as we now have a fix implemented when accepting invites,
-   * to make sure it doesnt happen, hwoever its good to keep this as an extra safety thing.
-   * Ideally in the future we should remove this as it adds another query to the db
-   * @TODO this can safely be remove 3-6 months after this commit
+   * For self service and base users, we look up their team member so the
+   * restriction can match custody recorded on EITHER link.
+   *
+   * This handles the case where a booking was assigned while no user was
+   * attached to the team member, and the two were linked only later — the
+   * booking must stay visible to the user it was assigned to. It shouldn't
+   * normally happen (accepting an invite now links them), but it is kept as a
+   * safety net for rows that pre-date that fix.
+   *
+   * `custodianScope.teamMemberIds` is read by {@link buildBookingsWhere}, which
+   * ORs it with the user link inside a single AND-ed clause.
    */
   let selfServiceData = null;
 
   // Only fetch team member data if the user doesn't have permission to see all bookings
   if (!canSeeAllBookings) {
-    // Get the team member for the current user
-    const teamMember = await db.teamMember.findFirst({
-      where: {
-        userId,
-        organizationId,
-      },
+    const custodianScope = await resolveCustodianScope({
+      userId,
+      organizationId,
     });
 
-    if (!teamMember) {
+    if (!custodianScope.teamMemberIds.length) {
       throw new ShelfError({
         cause: null,
         title: "Team member not found",
@@ -7853,11 +13202,10 @@ export async function getBookingsFilterData({
       });
     }
 
-    selfServiceData = {
-      // If the user is self service/base without override, we only show bookings that belong to that user
-      custodianUserId: userId,
-      custodianTeamMemberId: teamMember.id,
-    };
+    // If the user is self service/base without override, we only show bookings
+    // that belong to that user — matched via their user link OR any of their
+    // team-member links.
+    selfServiceData = { custodianScope };
   }
 
   return {
@@ -7866,7 +13214,6 @@ export async function getBookingsFilterData({
     page,
     perPage,
     search,
-    status,
     teamMemberIds,
     orderBy,
     orderDirection,
@@ -7874,313 +13221,612 @@ export async function getBookingsFilterData({
     filtersCookie,
     filters,
     redirectNeeded,
-    tags,
   };
 }
 
-export async function getBookings(params: {
+/**
+ * Turns a {@link resolveCustodianScope} result into the single AND-able clause
+ * that expresses "these bookings are that person's" — custody on their user
+ * link OR on any of their team-member links.
+ *
+ * Extracted so {@link getBookings} and `/api/model-filters` cannot disagree on
+ * the shape. They previously did: the endpoint matched the user link alone, so
+ * a booking custodied through a legacy team-member row showed in the list a
+ * picker was seeded with and then vanished the moment the user typed.
+ *
+ * @param scope - Resolved custodian scope for ONE person.
+ * @returns A `Prisma.BookingWhereInput` to push into `where.AND` — never into a
+ *   top-level `OR`, where a user-supplied filter could widen it away.
+ */
+export function custodianScopeClause(scope: {
+  userId: string;
+  teamMemberIds?: string[];
+}): Prisma.BookingWhereInput {
+  const selfBranches: Prisma.BookingWhereInput[] = [
+    { custodianUserId: scope.userId },
+  ];
+
+  if (scope.teamMemberIds?.length) {
+    selfBranches.push({
+      custodianTeamMemberId: { in: scope.teamMemberIds },
+    });
+  }
+
+  return selfBranches.length === 1 ? selfBranches[0] : { OR: selfBranches };
+}
+
+/**
+ * DRAFT-visibility rule shared by every booking-list query: bookings that are
+ * not DRAFT are visible to everyone in the org, while DRAFT bookings are only
+ * visible to their creator. Extracted so heavy ({@link getBookings}) and slim
+ * ({@link getMinimalBookings}) list queries cannot drift apart on this
+ * permission-sensitive predicate.
+ *
+ * @param userId - The viewer, matched against `Booking.creatorId` for drafts.
+ * @returns A `Prisma.BookingWhereInput` OR-clause to push into `where.AND`.
+ */
+export function bookingDraftVisibilityClause(
+  userId: Booking["creatorId"]
+): Prisma.BookingWhereInput {
+  return {
+    OR: [
+      { status: { not: "DRAFT" } },
+      { AND: [{ status: "DRAFT" }, { creatorId: userId }] },
+    ],
+  };
+}
+
+/**
+ * Slim booking list for pickers that render only a name + date range and
+ * filter client-side (e.g. the bulk "add to existing booking" dialog). Unlike
+ * {@link getBookings} it selects a handful of scalar columns instead of the
+ * heavy asset/kit/custodian projection, and runs no count query — the caller
+ * gets every matching row (paginate-first is moot when only ~5 columns per row
+ * are fetched). Shares {@link bookingDraftVisibilityClause} so it honours the
+ * same DRAFT-creator visibility as the full index.
+ *
+ * @param params.organizationId - Workspace scope.
+ * @param params.userId - Viewer, for the DRAFT-visibility rule.
+ * @param params.statuses - Explicit status filter; defaults to excluding
+ *   ARCHIVED + CANCELLED (mirrors {@link getBookings}).
+ * @param params.custodianUserId - Restrict to a custodian (self-service views).
+ *
+ *   HAZARD — this is a *restriction*, not a user-supplied filter. It is safe
+ *   today only because every call site passes the session user and no
+ *   request-controlled value reaches it, so it stays AND-ed as a plain scalar.
+ *   {@link getBookings} deliberately separates the two concepts (`custodianScope`
+ *   = restriction, `custodianTeamMemberIds` = filter) because conflating them
+ *   let a self-service caller widen their own restriction by supplying a
+ *   custodian filter. If you add a custodian *filter* here, do not extend this
+ *   param — add a separate one and AND it, exactly as `getBookings` does.
+ *
+ * @returns `{ bookings }` — id, name, status, from, to, ordered by `from`
+ *   with a stable `id` tiebreaker.
+ * @throws {ShelfError} If the query fails.
+ */
+export async function getMinimalBookings(params: {
   organizationId: Organization["id"];
-  /** Page number. Starts at 1 */
-  page: number;
-  /** Assets to be loaded per page */
-  perPage?: number;
+  userId: Booking["creatorId"];
+  statuses?: Booking["status"][] | null;
+  /**
+   * Restrict to bookings that are the acting user's own. Takes a flag rather
+   * than an id so the caller cannot express the restriction narrowly: custody
+   * lives on either the user link OR a team-member link, and this resolves
+   * both through {@link custodianScopeClause}.
+   */
+  restrictToCustodian?: boolean;
+}) {
+  const { organizationId, userId, statuses, restrictToCustodian } = params;
+
+  try {
+    const andClauses: Prisma.BookingWhereInput[] = [
+      bookingDraftVisibilityClause(userId),
+    ];
+
+    if (restrictToCustodian && userId) {
+      // AND-ed, never merged into a top-level OR where a filter could widen it.
+      andClauses.push(
+        custodianScopeClause(
+          await resolveCustodianScope({ userId, organizationId })
+        )
+      );
+    }
+
+    const where: Prisma.BookingWhereInput = {
+      organizationId,
+      AND: andClauses,
+    };
+
+    if (statuses?.length) {
+      where.status = { in: statuses };
+    } else {
+      // Default: hide archived & cancelled, matching getBookings.
+      where.status = {
+        notIn: [BookingStatus.ARCHIVED, BookingStatus.CANCELLED],
+      };
+    }
+
+    const bookings = await db.booking.findMany({
+      where,
+      select: {
+        id: true,
+        name: true,
+        status: true,
+        from: true,
+        to: true,
+      },
+      // `id` tiebreaker so the (unpaginated) order is stable across requests.
+      orderBy: [{ from: "asc" }, { id: "asc" }],
+    });
+
+    return { bookings };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while fetching the bookings. Please try again or contact support.",
+      additionalData: { ...params },
+      label,
+    });
+  }
+}
+
+/**
+ * The filters and restrictions that decide WHICH bookings a list holds, as
+ * opposed to which page of them is fetched or what each row carries. Read by
+ * {@link buildBookingsWhere}.
+ */
+export type BookingsWhereParams = {
+  organizationId: Organization["id"];
   search?: string | null;
   statuses?: Booking["status"][] | null;
+  /** Bookings holding any of these assets. Set this or `kitId`, not both. */
   assetIds?: Asset["id"][] | null;
-  custodianUserId?: Booking["custodianUserId"] | null;
-  /** Accepts an array of team member IDs instead of a single ID so it can be used for filtering of bookings on index */
+  /**
+   * A RESTRICTION scoping results to the bookings of ONE person, matched via
+   * either custody link. Set ONLY by callers that have established the viewer
+   * is allowed to see no more than that person's bookings.
+   *
+   * Both halves identify the SAME person: a booking is theirs if custody sits on
+   * their user link OR on their team-member link (legacy rows where
+   * `custodianUserId` was never backfilled). Those halves are OR-ed with each
+   * other, then the whole thing is AND-ed into the query as ONE clause, so this
+   * ALWAYS narrows and can never be widened away by a user-supplied filter.
+   * That AND-ing is the security contract; do not move it into a top-level `OR`.
+   *
+   * Usually the caller themselves (self-service/base users restricted to their
+   * own bookings). NOT always: the team-member profile route scopes to the
+   * profile BEING VIEWED, having already gated access with a
+   * `teamMemberProfile.read` permission check. Hence the neutral name: pass
+   * whichever person the caller has proven the viewer may see.
+   *
+   * Distinct from `custodianTeamMemberIds`, which is a user-facing FILTER built
+   * from unvalidated search params. Never feed a filter value into this
+   * restriction: `?teamMember=<victim-id>` would then reach someone else's
+   * bookings.
+   */
+  custodianScope?: {
+    /** The person whose bookings the results are scoped to. */
+    userId: string;
+    /** That person's team-member ids in this org. Optional; omit to match on the user link only. */
+    teamMemberIds?: string[];
+  } | null;
+  /**
+   * User-facing FILTER ("show me this person's bookings") built from
+   * unvalidated `?teamMember=` search params, so the values are
+   * attacker-controlled. It is NEVER a restriction: it is always AND-ed, so it
+   * can only narrow what the caller is already allowed to see. To restrict a
+   * user to their own bookings use `custodianScope` instead.
+   *
+   * Accepts an array so the bookings index can filter by several team members.
+   */
   custodianTeamMemberIds?: string[] | null;
+  /**
+   * RESTRICTION scoping results to bookings this person may MUTATE. See
+   * {@link bookingWriteScopeClause}. Set only by pickers whose selection feeds
+   * an action gated by `validateBookingOwnership`; omit for read-only lists.
+   *
+   * ONE object rather than two sibling params on purpose: a half-set pair
+   * (id without access, or access without id) would silently skip the
+   * restriction entirely. Both halves are required together or not at all.
+   */
+  writableBy?: { userId: string; access: RoleAccess } | null;
   excludeBookingIds?: Booking["id"][] | null;
   bookingFrom?: Booking["from"] | null;
   bookingTo?: Booking["to"] | null;
   userId: Booking["creatorId"];
-  extraInclude?: Prisma.BookingInclude;
-  /** Controls whether entries should be paginated or not */
-  takeAll?: boolean;
-  orderBy?: string;
-  orderDirection?: SortingDirection;
+  /**
+   * Bookings holding a member of this kit. Set this or `assetIds`, not both:
+   * each is a condition on `bookingAssets`, and the `where` keeps only this one.
+   */
   kitId?: string;
   tags?: Tag["id"][];
-}) {
+};
+
+/**
+ * Builds the Prisma `where` that defines a bookings list: its filters, its
+ * default status set, the rule that a draft is visible to its creator only, and
+ * any restriction the caller applies.
+ *
+ * {@link getBookings} queries and counts with it, and "Select all" on a
+ * bookings list resolves its selection with it (see
+ * {@link getBulkBookingsWhereInput}), so a bulk action reaches exactly the rows
+ * the list counted. Change which bookings a list holds here, never at a caller.
+ *
+ * @param params - The list's filters and restrictions
+ * @returns A `Prisma.BookingWhereInput` scoped to the organization
+ */
+export function buildBookingsWhere(
+  params: BookingsWhereParams
+): Prisma.BookingWhereInput {
   const {
     organizationId,
-    page = 1,
-    perPage = 8,
+    userId,
     search,
     statuses,
-    custodianUserId,
+    custodianScope,
     custodianTeamMemberIds,
+    writableBy,
     assetIds,
-    bookingTo,
     excludeBookingIds,
     bookingFrom,
+    bookingTo,
+    kitId,
+    tags,
+  } = params;
+
+  /** Default value of where. Takes the bookings belonging to the current org */
+  const where: Prisma.BookingWhereInput = { organizationId };
+
+  /**
+   * Clauses that must NARROW the result set. Everything AND-ed here composes:
+   * no clause can widen another away.
+   *
+   * The idea is that only the creator of a draft booking can see it
+   * This condition will fetch all bookings that are not in 'DRAFT' status, and also the bookings that are in 'DRAFT' status but only if their creatorId is the same as the userId
+   */
+  const andClauses: Prisma.BookingWhereInput[] = [
+    bookingDraftVisibilityClause(userId),
+  ];
+
+  /** If the search string exists, add it to the where object */
+  if (search?.trim()?.length) {
+    const searchTerms = search
+      .toLowerCase()
+      .trim()
+      .split(",")
+      .map((term) => term.trim())
+      .filter(Boolean);
+
+    where.OR = searchTerms.map((term) => ({
+      OR: [
+        // Search in booking fields
+        { name: { contains: term, mode: "insensitive" } },
+        { description: { contains: term, mode: "insensitive" } },
+        // Search in tags
+        { tags: { some: { name: { contains: term, mode: "insensitive" } } } },
+        // Search in custodian team member name
+        {
+          custodianTeamMember: {
+            name: { contains: term, mode: "insensitive" },
+          },
+        },
+        // Search in custodian user names. `displayName` is one of them: it
+        // replaces first/last name in the UI for users who set one, so it is
+        // the name a searcher can actually see on the booking row.
+        {
+          custodianUser: {
+            OR: [
+              { firstName: { contains: term, mode: "insensitive" } },
+              { lastName: { contains: term, mode: "insensitive" } },
+              { displayName: { contains: term, mode: "insensitive" } },
+            ],
+          },
+        },
+        // Search in asset titles, QR codes, and barcodes
+        {
+          bookingAssets: {
+            some: {
+              asset: {
+                // The workspace on the asset itself, not only on the
+                // booking: without it Postgres evaluates the OR below
+                // against every workspace's assets before joining back to
+                // these bookings. With it, the match starts from this
+                // workspace's asset index.
+                organizationId,
+                OR: [
+                  { title: { contains: term, mode: "insensitive" } },
+                  {
+                    qrCodes: {
+                      some: { id: { contains: term, mode: "insensitive" } },
+                    },
+                  },
+                  {
+                    barcodes: {
+                      some: {
+                        value: { contains: term, mode: "insensitive" },
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        },
+      ],
+    }));
+  }
+
+  /**
+   * The restriction: AND-ed as ONE clause whose internal OR matches either
+   * custody link. Nesting the OR inside a single AND member is what keeps it
+   * un-widenable: a top-level `where.OR` is a single slot that the search
+   * block also writes, so the two would overwrite each other.
+   */
+  if (custodianScope) {
+    andClauses.push(custodianScopeClause(custodianScope));
+  }
+
+  /**
+   * A SECOND, independent restriction: the caller may only be offered
+   * bookings they are allowed to WRITE to. Set by mutation-target pickers
+   * (the "Add to existing booking" dialogs), never by read-only lists.
+   *
+   * Scalars rather than a where-input, so a call site cannot hand this a
+   * request-controlled predicate: the clause itself is fixed by
+   * {@link bookingWriteScopeClause}. AND-ed alongside `custodianScope`, so
+   * the two intersect and neither can widen the other.
+   */
+  if (writableBy) {
+    const writeScope = bookingWriteScopeClause(writableBy);
+
+    if (writeScope) {
+      andClauses.push(writeScope);
+    }
+
+    // The picker also offers only the statuses the add action accepts.
+    const addableStatus = bookingAddableStatusClause({
+      access: writableBy.access,
+    });
+
+    if (addableStatus) {
+      andClauses.push(addableStatus);
+    }
+  }
+
+  /** The filter: independent, always AND-ed, never a restriction. */
+  if (custodianTeamMemberIds?.length) {
+    andClauses.push({
+      custodianTeamMemberId: { in: custodianTeamMemberIds },
+    });
+  }
+
+  where.AND = andClauses;
+
+  if (statuses?.length) {
+    where.status = {
+      in: statuses,
+    };
+  } else {
+    where.status = {
+      notIn: [BookingStatus.ARCHIVED, BookingStatus.CANCELLED], // By default we dont show archived & cancelled bookings
+    };
+  }
+
+  if (assetIds?.length) {
+    where.bookingAssets = {
+      some: {
+        assetId: {
+          in: assetIds,
+        },
+      },
+    };
+  }
+
+  if (excludeBookingIds?.length) {
+    where.id = { notIn: excludeBookingIds };
+  }
+
+  if (bookingFrom && bookingTo) {
+    // Add date filtering to AND clause instead of overriding OR clause
+    // to preserve search conditions
+    if (!where.AND) {
+      where.AND = [];
+    }
+    where.AND.push({
+      OR: [
+        {
+          from: { lte: bookingTo },
+          to: { gte: bookingFrom },
+        },
+        {
+          from: { gte: bookingFrom },
+          to: { lte: bookingTo },
+        },
+      ],
+    });
+  }
+
+  if (kitId) {
+    where.bookingAssets = {
+      some: { asset: { assetKits: { some: { kitId } } } },
+    };
+  }
+
+  if (tags?.length) {
+    if (tags.includes("untagged")) {
+      where.tags = { none: {} };
+    } else {
+      where.tags = { some: { id: { in: tags } } };
+    }
+  }
+
+  return where;
+}
+
+/**
+ * The statuses a kit's or an asset's Bookings tab lists when the user has not
+ * picked one: every status but ARCHIVED and CANCELLED.
+ */
+const BOOKINGS_TAB_DEFAULT_STATUSES: BookingStatus[] = [
+  BookingStatus.DRAFT,
+  BookingStatus.COMPLETE,
+  BookingStatus.ONGOING,
+  BookingStatus.OVERDUE,
+  BookingStatus.RESERVED,
+];
+
+/**
+ * The {@link buildBookingsWhere} params for one bookings list at the given URL
+ * params, for one viewer: the list's search, status, team-member and tag
+ * filters, its default statuses, and its kit or asset.
+ *
+ * Each list's loader (`bookings._index`, `kits.$kitId.bookings`,
+ * `assets.$assetId.bookings`) builds its rows with this, and "Select all" on
+ * that list resolves its selection with it (see
+ * {@link getBulkBookingsWhereInput}), so the two reach the same bookings.
+ * Change what a list holds here.
+ *
+ * @param params.list - Which list: the index, a kit's tab or an asset's tab
+ * @param params.searchParams - The list page's URL params
+ * @param params.organizationId - The viewer's (validated) organization
+ * @param params.userId - The viewer, whose own drafts the list shows
+ * @param params.custodianScope - The viewer's custodian scope when they may
+ *   see only their own bookings, otherwise null
+ * @returns The params that decide which bookings the list holds
+ */
+export function getBookingsListWhereParams({
+  list,
+  searchParams,
+  organizationId,
+  userId,
+  custodianScope,
+}: {
+  list: BookingsList;
+  searchParams: URLSearchParams;
+  organizationId: Organization["id"];
+  userId: User["id"];
+  custodianScope: BookingsWhereParams["custodianScope"];
+}): BookingsWhereParams {
+  const { search, status, teamMemberIds, tags } = getParamsValues(searchParams);
+
+  const filters = {
+    organizationId,
     userId,
+    search,
+    custodianScope,
+    custodianTeamMemberIds: teamMemberIds,
+    tags,
+  };
+
+  switch (list.kind) {
+    case "index":
+      // No status picked: buildBookingsWhere's default applies.
+      return { ...filters, statuses: status ? [status] : null };
+    case "kit":
+      return {
+        ...filters,
+        statuses: status ? [status] : BOOKINGS_TAB_DEFAULT_STATUSES,
+        kitId: list.kitId,
+      };
+    case "asset":
+      return {
+        ...filters,
+        statuses: status ? [status] : BOOKINGS_TAB_DEFAULT_STATUSES,
+        assetIds: [list.assetId],
+      };
+  }
+}
+
+/**
+ * Lists one page of bookings, and counts every booking the list holds.
+ *
+ * `params` has two halves. The {@link BookingsWhereParams} decide WHICH
+ * bookings the list holds and go through {@link buildBookingsWhere} (bookings
+ * lists build them with {@link getBookingsListWhereParams}). The rest decide
+ * which page is fetched, its order and what each row carries.
+ *
+ * @param params - The list's filters and restrictions, plus pagination, sort
+ *   and include options
+ * @returns `{ bookings, bookingCount }`; `bookingCount` is 0 with `skipCount`
+ * @throws {ShelfError} If the query fails
+ */
+export async function getBookings(
+  params: BookingsWhereParams & {
+    /** Page number. Starts at 1 */
+    page: number;
+    /** Assets to be loaded per page */
+    perPage?: number;
+    extraInclude?: Prisma.BookingInclude;
+    /** Controls whether entries should be paginated or not */
+    takeAll?: boolean;
+    orderBy?: string;
+    orderDirection?: SortingDirection;
+    /**
+     * Skip the `db.booking.count` companion query and return `bookingCount: 0`.
+     * For callers that only need the rows and never read the total (e.g. the
+     * iCal feed), this avoids a wasted aggregate on every call. Defaults to
+     * `false`, so paginated callers are unaffected.
+     */
+    skipCount?: boolean;
+    /**
+     * Attach the `bookingAssets` payload, by far the heaviest part of this
+     * query. Callers that render no asset data (the calendar, the dashboard
+     * widgets, the bookings-list surfaces whose drawer fetches on open) pass
+     * `false`, which omits the key from the Prisma include entirely. Defaults
+     * to `true`, so existing callers are unaffected.
+     */
+    includeAssets?: boolean;
+    /**
+     * Hard row cap, bypassing the `perPage` ≤ 100 clamp below. For callers that
+     * fetch one bounded set in a single query rather than a page of it. Unlike
+     * `takeAll` the query stays bounded; ignored when `takeAll` is set.
+     */
+    takeCap?: number;
+  }
+) {
+  const {
+    page = 1,
+    perPage = 8,
     extraInclude,
     takeAll = false,
     orderBy = "from",
     orderDirection = "asc",
-    kitId,
-    tags,
+    skipCount = false,
+    includeAssets = true,
+    takeCap,
   } = params;
 
   try {
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 25 per page
 
-    /** Default value of where. Takes the assetss belonging to current org */
-    const where: Prisma.BookingWhereInput = { organizationId };
-
-    /** The idea is that only the creator of a draft booking can see it
-     * This condition will fetch all bookings that are not in 'DRAFT' status, and also the bookings that are in 'DRAFT' status but only if their creatorId is the same as the userId
-     */
-    where.AND = [
-      {
-        OR: [
-          {
-            status: {
-              not: "DRAFT",
-            },
-          },
-          {
-            AND: [
-              {
-                status: "DRAFT",
-              },
-              {
-                creatorId: userId,
-              },
-            ],
-          },
-        ],
-      },
-    ];
-
-    /** If the search string exists, add it to the where object */
-    if (search?.trim()?.length) {
-      const searchTerms = search
-        .toLowerCase()
-        .trim()
-        .split(",")
-        .map((term) => term.trim())
-        .filter(Boolean);
-
-      where.OR = searchTerms.map((term) => ({
-        OR: [
-          // Search in booking fields
-          { name: { contains: term, mode: "insensitive" } },
-          { description: { contains: term, mode: "insensitive" } },
-          // Search in tags
-          { tags: { some: { name: { contains: term, mode: "insensitive" } } } },
-          // Search in custodian team member name
-          {
-            custodianTeamMember: {
-              name: { contains: term, mode: "insensitive" },
-            },
-          },
-          // Search in custodian user names
-          {
-            custodianUser: {
-              OR: [
-                { firstName: { contains: term, mode: "insensitive" } },
-                { lastName: { contains: term, mode: "insensitive" } },
-              ],
-            },
-          },
-          // Search in asset titles, QR codes, and barcodes
-          {
-            bookingAssets: {
-              some: {
-                asset: {
-                  OR: [
-                    { title: { contains: term, mode: "insensitive" } },
-                    {
-                      qrCodes: {
-                        some: { id: { contains: term, mode: "insensitive" } },
-                      },
-                    },
-                    {
-                      barcodes: {
-                        some: {
-                          value: { contains: term, mode: "insensitive" },
-                        },
-                      },
-                    },
-                  ],
-                },
-              },
-            },
-          },
-        ],
-      }));
-    }
-
-    /** Handle combination of custodianTeamMemberIds and custodianUserId */
-    if (
-      custodianTeamMemberIds &&
-      custodianTeamMemberIds?.length &&
-      custodianUserId
-    ) {
-      where.OR = [
-        {
-          custodianTeamMemberId: {
-            in: custodianTeamMemberIds,
-          },
-        },
-        {
-          custodianUserId,
-        },
-      ];
-    } else {
-      /** Handle custodianTeamMemberIds if present */
-      if (custodianTeamMemberIds?.length) {
-        where.custodianTeamMemberId = {
-          in: custodianTeamMemberIds,
-        };
-      }
-      /** Handle custodianUserId if present */
-      if (custodianUserId) {
-        where.custodianUserId = custodianUserId;
-      }
-    }
-
-    if (statuses?.length) {
-      where.status = {
-        in: statuses,
-      };
-    } else {
-      where.status = {
-        notIn: [BookingStatus.ARCHIVED, BookingStatus.CANCELLED], // By default we dont show archived & cancelled bookings
-      };
-    }
-
-    if (assetIds?.length) {
-      where.bookingAssets = {
-        some: {
-          assetId: {
-            in: assetIds,
-          },
-        },
-      };
-    }
-
-    if (excludeBookingIds?.length) {
-      where.id = { notIn: excludeBookingIds };
-    }
-
-    if (bookingFrom && bookingTo) {
-      // Add date filtering to AND clause instead of overriding OR clause
-      // to preserve search conditions
-      if (!where.AND) {
-        where.AND = [];
-      }
-      where.AND.push({
-        OR: [
-          {
-            from: { lte: bookingTo },
-            to: { gte: bookingFrom },
-          },
-          {
-            from: { gte: bookingFrom },
-            to: { lte: bookingTo },
-          },
-        ],
-      });
-    }
-
-    if (kitId) {
-      where.bookingAssets = {
-        some: { asset: { assetKits: { some: { kitId } } } },
-      };
-    }
-
-    if (tags?.length) {
-      if (tags.includes("untagged")) {
-        where.tags = { none: {} };
-      } else {
-        where.tags = { some: { id: { in: tags } } };
-      }
-    }
+    const where = buildBookingsWhere(params);
 
     const [bookings, bookingCount] = await Promise.all([
       db.booking.findMany({
         ...(!takeAll && {
           skip,
-          take,
+          take: takeCap ?? take,
         }),
         where,
         include: {
           ...BOOKING_COMMON_INCLUDE,
-          bookingAssets: {
-            // Explicit `select` (instead of `include`) so the inferred
-            // type surfaces `assetKitId` on each row — the bookings list
-            // sidebar (`BookingAssetsSidebar`) groups by it. Without an
-            // explicit select, Prisma's type inference for
-            // `include + nested include` doesn't expose the parent
-            // scalars in a form the local component types accept.
-            select: {
-              id: true,
-              quantity: true,
-              assetKitId: true,
-              asset: {
-                select: {
-                  title: true,
-                  id: true,
-                  type: true,
-                  quantity: true,
-                  custody: true,
-                  availableToBook: true,
-                  status: true,
-                  mainImage: true,
-                  thumbnailImage: true,
-                  mainImageExpiration: true,
-                  // Asset-code resolution fields — see `app/modules/barcode/display.ts`.
-                  // Surfaced by the BookingAssetsSidebar so the chip matches the
-                  // simple-mode booking overview list and every other code-bearing
-                  // surface (see .claude/rules/code-bearing-entity-list-consistency.md).
-                  sequentialId: true,
-                  preferredBarcodeId: true,
-                  qrCodes: { take: 1, select: { id: true } },
-                  barcodes: { select: { id: true, type: true, value: true } },
-                  category: {
-                    select: {
-                      id: true,
-                      name: true,
-                      color: true,
-                    },
-                  },
-                  bookingAssets: {
-                    select: {
-                      bookingId: true,
-                    },
-                  },
-                  assetKits: {
-                    select: {
-                      // See the comment in `bookings.$bookingId.overview.tsx`
-                      // for why both `id` (the AssetKit row id) and `kitId`
-                      // are needed for kit-source grouping.
-                      id: true,
-                      kitId: true,
-                      kit: {
-                        select: {
-                          id: true,
-                          name: true,
-                          image: true,
-                          imageExpiration: true,
-                          category: {
-                            select: {
-                              id: true,
-                              name: true,
-                              color: true,
-                            },
-                          },
-                        },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
+          // NOTE: deliberately NO `bookingAssets` when `includeAssets` is
+          // false — the calendar, the dashboard widgets and the five
+          // bookings-list surfaces render no asset data. The cast keeps the
+          // inferred row type stable for default-true callers; opt-out
+          // callers must not read `bookingAssets` (the same runtime/static
+          // divergence `extraInclude` already has). A conditional generic
+          // would type this honestly, but this webapp sits at TypeScript's
+          // instantiation ceiling over the extended Prisma client, where a
+          // generic here surfaces as TS2321 somewhere unrelated.
+          //
+          // The include itself lives in `./constants` so the assets-sidebar
+          // resource route serves the byte-identical shape.
+          ...((includeAssets
+            ? BOOKINGS_LIST_ASSETS_INCLUDE
+            : {}) as typeof BOOKINGS_LIST_ASSETS_INCLUDE),
           creator: {
             select: {
               id: true,
@@ -8192,9 +13838,20 @@ export async function getBookings(params: {
           },
           ...(extraInclude || undefined),
         },
-        orderBy: { [orderBy]: orderDirection },
+        // Stable `id` tiebreaker so rows tied on the sort key (same `from`
+        // date, same name, ...) keep a fixed order across requests. Without
+        // it, skip/take paging over ties can duplicate or drop rows between
+        // pages. Skipped when the caller already sorts by id (duplicate
+        // ORDER BY key). Mirrors the tiebreaker the advanced asset index
+        // uses (see parseSortingOptions in asset/query.server.ts).
+        orderBy: [
+          { [orderBy]: orderDirection },
+          ...(orderBy !== "id" ? [{ id: "asc" as const }] : []),
+        ],
       }),
-      db.booking.count({ where }),
+      // Callers that never read the total (skipCount) avoid the aggregate
+      // while the row fetch above still runs; the normal path is unchanged.
+      skipCount ? Promise.resolve(0) : db.booking.count({ where }),
     ]);
 
     return { bookings, bookingCount };
@@ -8213,10 +13870,12 @@ export async function removeAssets({
   booking,
   firstName,
   lastName,
+  displayName,
   userId,
   kitIds = [],
   kits = [],
   assets = [],
+  standaloneAssetIds,
   organizationId,
 }: {
   booking: Pick<Booking, "id"> & {
@@ -8224,10 +13883,34 @@ export async function removeAssets({
   };
   firstName: string;
   lastName: string;
+  /**
+   * The acting user's `User.displayName`. It wins over the legal-name halves
+   * when set, so it must travel with them — a caller that passes only
+   * `firstName`/`lastName` names the actor by a name they asked us not to use.
+   */
+  displayName: string | null;
   userId: string;
   kitIds?: Kit["id"][];
   kits?: Array<{ id: string; name: string }>;
   assets?: Array<{ id: string; title: string }>;
+  /**
+   * Assets whose *standalone* booking row the caller explicitly wants gone,
+   * even if the same asset also holds kit-driven rows on this booking.
+   *
+   * Naming an asset here scopes its deletion to its free-pool row
+   * (`assetKitId: null`), whether or not `kitIds` is also given. Leaving the
+   * field off keeps the whole-asset scope: every slice of every asset in
+   * `booking.assetIds` goes. So a caller that can see WHICH row the operator
+   * acted on must say so, or a removal aimed at one free-pool row takes the
+   * asset out of its kits on this booking too.
+   *
+   * Omit it and the service falls back to inferring standalone intent from
+   * kit membership. That inference cannot see a user who ticked BOTH an
+   * asset's standalone row and the kit it also sits in, so callers that can
+   * observe that distinction (the booking-overview bulk action, the mobile
+   * remove endpoint) should pass it.
+   */
+  standaloneAssetIds?: Asset["id"][];
   organizationId: Booking["organizationId"];
 }) {
   try {
@@ -8288,7 +13971,25 @@ export async function removeAssets({
       sourceBookingStatus = sourceBooking.status;
       sourceBookingName = sourceBooking.name;
 
+      // Race-proof backstop for the callers' own status gates. Those read the
+      // booking before calling, so a booking completed/archived/cancelled in
+      // between would still have its rows deleted. This read shares the tx
+      // snapshot with the `deleteMany` below, so the status the check sees is
+      // the status the delete commits against.
+      if (!canUserRemoveBookingAssets(sourceBooking)) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "Removing items is not allowed for the current status of the booking.",
+          additionalData: { bookingId: id, status: sourceBooking.status },
+          label,
+          status: 403,
+          shouldBeCaptured: false,
+        });
+      }
+
       const removedAssets = await tx.asset.findMany({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: removing assets from a booking must reach archived ones it holds
         where: { id: { in: assetIds }, organizationId },
         select: {
           id: true,
@@ -8309,28 +14010,99 @@ export async function removeAssets({
         });
       }
 
-      // When the caller is the manage-kits flow removing one or more
-      // kits, scope the deletion to the kit-driven BookingAsset rows for
-      // those kits' AssetKits. Otherwise removing a kit would also blow
-      // away any standalone slice the user added separately for the
-      // same asset (e.g. Gloves booked standalone at qty 22 alongside
-      // the kit's slice of 87 — only the 87 should disappear).
+      // When the caller removes one or more kits, scope the kit half of the
+      // deletion to the kit-driven BookingAsset rows for those kits'
+      // AssetKits. Otherwise removing a kit would also blow away any
+      // standalone slice the user added separately for the same asset
+      // (e.g. Gloves booked standalone at qty 22 alongside the kit's slice
+      // of 87 — only the 87 should disappear).
+      //
+      // `assetIds` can ALSO carry genuinely standalone assets in the same
+      // call — the booking-overview bulk "Remove assets/kits" action and the
+      // mobile remove-assets endpoint both send kits and loose assets
+      // together. Those need the second, `assetKitId: null`-scoped clause;
+      // without it the kit scope matched none of their rows and the loose
+      // assets silently stayed on the booking.
       //
       // When `kitIds` is empty, the call comes from the manage-assets
-      // picker or asset-bulk remove flow, where the intent is to remove
+      // picker or single-asset remove flow, where the intent is to remove
       // ALL slices of the asset from the booking (legacy behaviour).
       let rowsToDeleteWhere: Prisma.BookingAssetWhereInput;
       if (kitIds.length > 0) {
-        const kitDrivenAssetKitIds = await tx.assetKit.findMany({
+        const kitDrivenAssetKits = await tx.assetKit.findMany({
           where: { kitId: { in: kitIds }, assetId: { in: assetIds } },
-          select: { id: true },
+          select: { id: true, assetId: true },
         });
-        rowsToDeleteWhere = {
-          bookingId: id,
-          assetKitId: {
-            in: kitDrivenAssetKitIds.map((ak: { id: string }) => ak.id),
+
+        // Prefer the caller's explicit list — it is the only thing that can
+        // distinguish "the user ticked this asset's standalone row" from
+        // "this asset came along because its kit was ticked". An asset can
+        // hold BOTH a standalone row and kit-driven rows on one booking, so
+        // inferring from kit membership silently spares the standalone row.
+        //
+        // Fall back to the inference for callers that can't observe the
+        // distinction: anything in `assetIds` that is NOT a member of a kit
+        // being removed is, by definition, a loose asset the caller wants
+        // gone. Members of the removed kits are covered by the kit clause.
+        const kitMemberAssetIds = new Set(
+          kitDrivenAssetKits.map((ak: { assetId: string }) => ak.assetId)
+        );
+        const resolvedStandaloneAssetIds =
+          standaloneAssetIds ??
+          assetIds.filter((assetId) => !kitMemberAssetIds.has(assetId));
+
+        const orClauses: Prisma.BookingAssetWhereInput[] = [
+          {
+            assetKitId: {
+              in: kitDrivenAssetKits.map((ak: { id: string }) => ak.id),
+            },
           },
-        };
+        ];
+        if (resolvedStandaloneAssetIds.length > 0) {
+          // `assetKitId: null` preserves the protection above in the other
+          // direction: a loose asset's own slice goes, but slices it holds
+          // via kits the caller did NOT select stay put. Paired with the
+          // `bookingId` scope on the outer where, it also pins the delete to
+          // exactly one row per asset (the partial unique index allows only
+          // one standalone row per booking+asset), so caller-supplied ids
+          // can't reach another booking's or another org's rows.
+          orClauses.push({
+            assetId: { in: resolvedStandaloneAssetIds },
+            assetKitId: null,
+          });
+        }
+
+        rowsToDeleteWhere =
+          orClauses.length === 1
+            ? { bookingId: id, ...orClauses[0] }
+            : { bookingId: id, OR: orClauses };
+      } else if (standaloneAssetIds) {
+        // No kit named, but the caller can see row provenance. Scope the ids
+        // it named to their free-pool rows and leave any kit-driven slices of
+        // the same asset alone; anything else in the call keeps the
+        // whole-asset scope.
+        const standaloneSet = new Set(standaloneAssetIds);
+        const wholeAssetIds = assetIds.filter(
+          (assetId) => !standaloneSet.has(assetId)
+        );
+
+        const orClauses: Prisma.BookingAssetWhereInput[] = [];
+        if (standaloneAssetIds.length > 0) {
+          orClauses.push({
+            assetId: { in: standaloneAssetIds },
+            assetKitId: null,
+          });
+        }
+        if (wholeAssetIds.length > 0) {
+          orClauses.push({ assetId: { in: wholeAssetIds } });
+        }
+
+        rowsToDeleteWhere =
+          orClauses.length === 0
+            ? { bookingId: id, assetId: { in: assetIds } }
+            : orClauses.length === 1
+            ? { bookingId: id, ...orClauses[0] }
+            : { bookingId: id, OR: orClauses };
       } else {
         rowsToDeleteWhere = { bookingId: id, assetId: { in: assetIds } };
       }
@@ -8341,7 +14113,8 @@ export async function removeAssets({
       // are gone and we'd lose the count.
       const rowsBeingDeleted = await tx.bookingAsset.findMany({
         where: rowsToDeleteWhere,
-        select: { assetId: true, quantity: true },
+        // `bookingModelRequestId` drives the reservation rollback below.
+        select: { assetId: true, quantity: true, bookingModelRequestId: true },
       });
       for (const row of rowsBeingDeleted) {
         removedQtyByAssetId.set(
@@ -8352,49 +14125,155 @@ export async function removeAssets({
 
       await tx.bookingAsset.deleteMany({ where: rowsToDeleteWhere });
 
-      // Count removals per assetModelId so we decrement each request
-      // in one update rather than N.
-      const removalsByModel = new Map<string, number>();
-      for (const asset of removedAssets) {
-        if (!asset.assetModelId) continue;
-        removalsByModel.set(
-          asset.assetModelId,
-          (removalsByModel.get(asset.assetModelId) ?? 0) + 1
+      /**
+       * The zero-asset invariant, defended from the removal side.
+       *
+       * `reserveBooking` refuses to take a booking into RESERVED with nothing
+       * in it, but that only guards the transition — emptying the booking
+       * afterwards reached exactly the same state from the other direction,
+       * leaving a booking that reserves nothing and cannot be checked out.
+       * Enforced here, in the shared service, rather than at the six call
+       * sites (web overview bulk + single, manage-assets, manage-kits, the
+       * mobile endpoint), so no future caller can miss it.
+       *
+       * RESERVED only, deliberately. An empty DRAFT is normal
+       * work-in-progress; COMPLETE / ARCHIVED / CANCELLED hold nothing any
+       * more; and ONGOING / OVERDUE must stay emptiable, because pulling a
+       * checked-out asset off a live booking is a real correction flow that
+       * this service already reconciles asset status for (bug #99 coverage).
+       *
+       * Throwing inside the tx rolls the delete back, so the booking is never
+       * observably empty.
+       */
+      if (sourceBooking.status === BookingStatus.RESERVED) {
+        const remainingSlices = await tx.bookingAsset.count({
+          where: { bookingId: id },
+        });
+
+        if (remainingSlices === 0) {
+          // Model reservations survive asset removal (the rollback below only
+          // decrements `fulfilledQuantity`), so a booking held purely by
+          // outstanding model requests is still holding something.
+          const remainingModelRequests = await tx.bookingModelRequest.count({
+            where: { bookingId: id },
+          });
+
+          if (remainingModelRequests === 0) {
+            throw new ShelfError({
+              cause: null,
+              label,
+              title: "Booking would be left empty",
+              message: BOOKING_EMPTY_RESERVED_MESSAGE,
+              status: 400,
+              shouldBeCaptured: false,
+              additionalData: { bookingId: id, organizationId },
+            });
+          }
+        }
+      }
+
+      /**
+       * Re-open reservations that the removed rows had discharged.
+       *
+       * Counted from `bookingModelRequestId` — the row's own record of which
+       * promise it answered — NOT from `assetModelId`. Grouping by model
+       * counts every removed asset that merely SHARES a model with a
+       * reservation, including ones that never discharged anything:
+       *
+       *   Reserve 2 x Dell. Add 3 matching assets: two discharge the
+       *   reservation, the third is an ordinary add. Removing that third one
+       *   must leave the reservation fulfilled, because both discharging assets
+       *   are still on the booking. A model-based count would re-open it.
+       */
+      /**
+       * `fulfilledAt` reversals to report, one per request this loop reopens.
+       * Batched and flushed after the loop so N affected requests cost one
+       * insert rather than N — same reasoning as the `recordEvents` docs.
+       */
+      const modelRequestReopenEvents: ActivityEventInput[] = [];
+
+      const removalsByRequest = new Map<string, number>();
+      for (const row of rowsBeingDeleted) {
+        if (!row.bookingModelRequestId) continue;
+        removalsByRequest.set(
+          row.bookingModelRequestId,
+          (removalsByRequest.get(row.bookingModelRequestId) ?? 0) + 1
         );
       }
 
-      for (const [assetModelId, decrementBy] of removalsByModel) {
+      for (const [requestId, decrementBy] of removalsByRequest) {
         const request = await tx.bookingModelRequest.findUnique({
-          where: {
-            bookingId_assetModelId: { bookingId: id, assetModelId },
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `requestId` comes from BookingAsset rows on this booking, which was org-checked above
+          where: { id: requestId },
+          // `fulfilledAt`, the model id and its name feed the reopen event
+          // below; without the before-state we cannot report what changed.
+          select: {
+            quantity: true,
+            fulfilledQuantity: true,
+            bookingId: true,
+            fulfilledAt: true,
+            assetModelId: true,
+            assetModel: { select: { name: true } },
           },
-          select: { quantity: true, fulfilledQuantity: true },
         });
-        if (!request || request.fulfilledQuantity === 0) continue;
+        // Belt and braces: the FK guarantees it, but never touch a request
+        // belonging to another booking.
+        if (!request || request.bookingId !== id) continue;
+        if (request.fulfilledQuantity === 0) continue;
 
-        // Cap at 0 — if the operator removes more than what was
-        // materialised (they scanned direct + via request, now removing
-        // some), we only decrement the fulfilled share.
         const nextFulfilled = Math.max(
           0,
           request.fulfilledQuantity - decrementBy
         );
-        // If we're dropping below the reserved `quantity`, the request
-        // has outstanding units again — clear the completion stamp so
-        // the Reserved Models card + CTAs surface again.
+        // Dropping below the reserved `quantity` means there is outstanding
+        // work again — clear the completion stamp so the reservations section
+        // and its CTAs come back.
         const nextFulfilledAt =
           nextFulfilled < request.quantity ? null : undefined;
 
         await tx.bookingModelRequest.update({
-          where: {
-            bookingId_assetModelId: { bookingId: id, assetModelId },
-          },
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: same row just proven to belong to this booking
+          where: { id: requestId },
           data: {
             fulfilledQuantity: nextFulfilled,
             ...(nextFulfilledAt === null ? { fulfilledAt: null } : {}),
           },
         });
+
+        /**
+         * Report the reversal, but only on a genuine set → unset flip.
+         * `nextFulfilledAt === null` is also true for a request that was
+         * never complete, so gating on it alone would emit spurious
+         * null → null events on every removal from an outstanding request.
+         *
+         * This is the mirror of the null → timestamp events emitted in
+         * `booking-model-request/service.server.ts`. Without it the stream
+         * records reservations closing and never reopening, and
+         * `fulfilledAt IS NULL` consumers reconstruct this one as still
+         * fulfilled after the removal reopened it.
+         */
+        if (request.fulfilledAt != null && nextFulfilledAt === null) {
+          modelRequestReopenEvents.push({
+            organizationId,
+            actorUserId: userId,
+            action: "BOOKING_MODEL_REQUEST_CHANGED",
+            entityType: "BOOKING",
+            entityId: id,
+            bookingId: id,
+            field: "fulfilledAt",
+            fromValue: request.fulfilledAt.toISOString(),
+            toValue: null,
+            meta: {
+              assetModelId: request.assetModelId,
+              assetModelName: request.assetModel.name,
+            },
+          });
+        }
       }
+
+      // Same tx as the decrement above — a rolled-back removal must not
+      // leave an event claiming the reservation reopened.
+      await recordEvents(modelRequestReopenEvents, tx);
 
       /** When removing an asset from an ONGOING/OVERDUE booking we need to
        * reconcile each asset's terminal status — NOT blanket-flip to
@@ -8402,10 +14281,14 @@ export async function removeAssets({
        *
        * The blanket flip was unsafe: an asset can simultaneously sit on a
        * different ONGOING/OVERDUE booking OR be held by a Custody row, and
-       * stamping AVAILABLE silently stripped those signals (bug #99). The
-       * source booking's slice has already been deleted above in this same
-       * tx, so `excludeBookingId` is informational (the rows are gone
-       * anyway) but kept for symmetry with the other exit paths.
+       * stamping AVAILABLE silently stripped those signals (bug #99).
+       *
+       * Nothing is excluded, this booking included. A removal scoped to an
+       * asset's free-pool row leaves its kit-driven slices in place, and a
+       * surviving slice that is still checked out is exactly the evidence
+       * this reconciliation must weigh: excluding the booking would free an
+       * asset whose kit units are still in the field. Rows the delete above
+       * took are already gone, so they cannot be counted either way.
        *
        * RESERVED/DRAFT removals are unchanged: the asset was never out, so
        * there is nothing to reconcile.
@@ -8428,7 +14311,7 @@ export async function removeAssets({
         await reconcileAssetStatusForBookingExit({
           tx,
           assetIds,
-          excludeBookingId: id,
+          excludeBookingIds: [],
           organizationId,
         });
       }
@@ -8460,19 +14343,33 @@ export async function removeAssets({
       b.status === BookingStatus.ONGOING ||
       b.status === BookingStatus.OVERDUE
     ) {
-      if (kitIds.length > 0) {
-        // Kit status keeps the blanket flip — kit status is a coarser
-        // indicator and out of scope for the per-asset #99 fix.
-        await db.kit.updateMany({
-          where: { id: { in: kitIds }, organizationId },
-          data: { status: KitStatus.AVAILABLE },
-        });
-      }
+      await releaseCheckedOutKits(db, {
+        kitIds,
+        organizationId,
+        excludeBookingIds: [id],
+      });
     }
 
-    const userForNotes = { firstName, lastName, id: userId };
+    const userForNotes = { firstName, lastName, displayName, id: userId };
 
     const bookingLink = wrapLinkForNote(`/bookings/${b.id}`, b.name);
+
+    /**
+     * Assets that genuinely lost a `BookingAsset` row on this call.
+     *
+     * `assetIds` is the caller's REQUEST, not the outcome: the bulk-remove
+     * handler passes every member of a selected kit, including members added
+     * to the kit after the booking was created and therefore never on it.
+     * Reporting those as removed forges the audit trail — a note and a
+     * `BOOKING_ASSETS_REMOVED` event for something that never left.
+     *
+     * `removedQtyByAssetId` was populated inside the tx from the rows about to
+     * be deleted, so it is the exact record of what actually went.
+     */
+    const actuallyRemovedAssetIds = assetIds.filter((assetId) =>
+      removedQtyByAssetId.has(assetId)
+    );
+
     // Asset-timeline note — one row per asset. Previously every asset
     // shared the same "removed assets from {booking}" string via
     // createNotes (one content for N ids); now qty-tracked rows surface
@@ -8481,7 +14378,7 @@ export async function removeAssets({
     // byte-for-byte. why: content now differs per asset, so a single
     // shared `createNotes({assetIds: […]})` call no longer fits — we
     // flatMap one note per asset instead.
-    const removalNoteData = assetIds.map((assetId) => {
+    const removalNoteData = actuallyRemovedAssetIds.map((assetId) => {
       const assetForNote = removedAssetMeta.get(assetId);
       const removedQty = removedQtyByAssetId.get(assetId);
       // Only switch to the qty-aware per-asset phrasing when we have the
@@ -8518,10 +14415,10 @@ export async function removeAssets({
     // Best-effort: don't fail the removal if event recording fails.
     // `meta.quantity` is the sum of BookingAsset.quantity from rows
     // dropped for that asset on this call (qty-tracked only).
-    if (assetIds.length > 0) {
+    if (actuallyRemovedAssetIds.length > 0) {
       try {
         await recordEvents(
-          assetIds.map((assetId) => {
+          actuallyRemovedAssetIds.map((assetId) => {
             const asset = removedAssetMeta.get(assetId);
             const removedQty = removedQtyByAssetId.get(assetId);
             return {
@@ -8605,12 +14502,45 @@ export async function removeAssets({
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message:
-        "Something went wrong while removing assets from the booking. Please try again or contact support.",
+      // Keep a deliberate message (e.g. the closed-booking 403 above) instead
+      // of burying it under the generic one. `status` and `shouldBeCaptured`
+      // already carry over from a ShelfError cause.
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while removing assets from the booking. Please try again or contact support.",
       additionalData: { booking, userId },
       label,
     });
   }
+}
+
+/**
+ * Refuses a single booking delete unless the user typed its name, as the delete
+ * dialog asks. A booking that is already gone passes, so the delete itself
+ * reports it.
+ *
+ * @param params.id - The booking to delete
+ * @param params.organizationId - The caller's organization
+ * @param params.confirmation - What the user typed in the dialog
+ * @throws {ShelfError} 400 when the confirmation does not match
+ */
+export async function assertBookingDeleteConfirmed({
+  id,
+  organizationId,
+  confirmation,
+}: {
+  id: string;
+  organizationId: string;
+  confirmation: string | null | undefined;
+}) {
+  await assertDeleteConfirmedFor({
+    confirmation,
+    findName: () =>
+      db.booking
+        .findFirst({ where: { id, organizationId }, select: { name: true } })
+        .then((booking) => booking?.name ?? null),
+    label,
+  });
 }
 
 /**
@@ -8651,15 +14581,21 @@ export async function removeAssets({
  * @param booking - Org-scoped booking identifier
  * @param hints - Client hints used to format email subject lines and times
  * @param userId - Optional editor user id, used to skip notifying the actor
+ * @param options.onlyIfDraft - The caller's policy allows deleting drafts only
+ *          (`access.policy.bookings.deleteOnlyDrafts`). The delete then
+ *          matches a DRAFT row only, so a booking reserved after the caller's
+ *          check is refused instead of deleted.
  * @returns The deleted booking row (with the includes needed for email
  *          rendering and the post-tx caller).
- * @throws {ShelfError} 404 if the booking does not exist; otherwise wraps
- *          any underlying Prisma/email failure.
+ * @throws {ShelfError} 404 if the booking does not exist; 403 when
+ *          `onlyIfDraft` is set and the booking is no longer a draft; otherwise
+ *          wraps any underlying Prisma/email failure.
  */
 export async function deleteBooking(
   booking: Pick<Booking, "id" | "organizationId">,
   hints: ClientHint,
-  userId?: string
+  userId?: string,
+  options: { onlyIfDraft?: boolean } = {}
 ) {
   const { id, organizationId } = booking;
   const currentBooking = await db.booking.findUnique({
@@ -8670,6 +14606,9 @@ export async function deleteBooking(
           asset: {
             select: {
               id: true,
+              // `type` decides whether a standalone slice releases this
+              // asset's kits — see `getKitIdsToAcquire`.
+              type: true,
               assetKits: { select: { kitId: true } },
             },
           },
@@ -8697,12 +14636,15 @@ export async function deleteBooking(
         ? currentBooking
         : null;
 
-    const activeBookingAssets =
-      activeBooking?.bookingAssets.map((ba) => ba.asset) ?? [];
-    const assetKitIds = activeBookingAssets
-      .map((a) => a.assetKits?.[0]?.kitId)
-      .filter((id): id is string => Boolean(id));
-    const uniqueKitIds = new Set(assetKitIds);
+    // Release mirrors acquire — see the twin in `checkinBooking`.
+    const uniqueKitIds = new Set(
+      activeBooking
+        ? await getKitIdsToAcquire({
+            slices: activeBooking.bookingAssets,
+            organizationId,
+          })
+        : []
+    );
     const hasKits = uniqueKitIds.size > 0;
 
     // Capture the active asset IDs BEFORE entering the tx: `Booking.delete`
@@ -8718,18 +14660,40 @@ export async function deleteBooking(
      * atomicity rationale.
      */
     const b = await db.$transaction(async (tx) => {
-      const deleted = await tx.booking.delete({
-        where: { id, organizationId },
-        include: {
-          ...BOOKING_COMMON_INCLUDE,
-          ...BOOKING_INCLUDE_FOR_EMAIL,
-          bookingAssets: {
-            include: {
-              asset: { select: { id: true } },
+      const deleted = await tx.booking
+        .delete({
+          where: {
+            id,
+            organizationId,
+            ...(options.onlyIfDraft ? { status: BookingStatus.DRAFT } : {}),
+          },
+          include: {
+            ...BOOKING_COMMON_INCLUDE,
+            ...BOOKING_INCLUDE_FOR_EMAIL,
+            bookingAssets: {
+              include: {
+                asset: { select: { id: true } },
+              },
             },
           },
-        },
-      });
+        })
+        .catch((cause: unknown) => {
+          // With `onlyIfDraft`, no matching row means the booking stopped
+          // being a draft after the caller's check.
+          if (options.onlyIfDraft && isNotFoundError(cause)) {
+            // `cause: null`: a not-found cause would set the status to 404.
+            throw new ShelfError({
+              cause: null,
+              label,
+              message:
+                "You are not authorized to delete this booking. Only draft bookings can be deleted.",
+              status: 403,
+              shouldBeCaptured: false,
+              additionalData: { id, organizationId },
+            });
+          }
+          throw cause;
+        });
 
       /** Assets that were checked out on an ONGOING/OVERDUE booking need
        * terminal-status reconciliation, NOT a blanket flip to AVAILABLE.
@@ -8743,7 +14707,7 @@ export async function deleteBooking(
         await reconcileAssetStatusForBookingExit({
           tx,
           assetIds: activeAssetIds,
-          excludeBookingId: activeBooking.id,
+          excludeBookingIds: [activeBooking.id],
           organizationId,
         });
       }
@@ -8764,39 +14728,43 @@ export async function deleteBooking(
         ? resolveUserDisplayName(b.custodianUser)
         : b.custodianTeamMember?.name ?? "";
 
-      const text = deletedBookingEmailContent({
-        bookingName: b.name,
-        assetsCount: b._count.bookingAssets,
-        custodian,
-        from: b.from as Date,
-        to: b.to as Date,
-        bookingId: b.id,
-        hints,
-        customEmailFooter: b.organization.customEmailFooter,
+      const actor = await resolveBookingEmailActor({
+        userId,
+        label: "Deleted by",
       });
 
       await sendBookingEmailToAllRecipients({
         recipients,
         booking: b,
         subject: `🗑️ Booking deleted (${b.name}) - shelf.nu`,
-        textContent: text,
-        heading: `Your booking has been deleted: "${b.name}"`,
+        buildText: (textArgs) =>
+          deletedBookingEmailContent({
+            ...textArgs,
+            bookingName: b.name,
+            assetsCount: b._count.bookingAssets,
+            custodian,
+            from: b.from as Date,
+            to: b.to as Date,
+            bookingId: b.id,
+            customEmailFooter: b.organization.customEmailFooter,
+          }),
+        buildHeading: () => `Your booking has been deleted: "${b.name}"`,
         hints,
+        actor,
         templateProps: {
           hideViewButton: true,
         },
       });
     }
 
-    // Kit blanket flip — out of the tx on purpose. Kit status is a coarser
-    // indicator than asset status; the singular cancel path treats it the
-    // same way and the bug #99 atomicity fix is intentionally scoped to
-    // assets.
+    // Outside the tx on purpose: kit status is a coarser indicator than asset
+    // status, and the singular cancel path releases kits the same way.
     if (activeBooking && hasKits) {
       await updateBookingKitStates({
         kitIds: [...uniqueKitIds],
         status: KitStatus.AVAILABLE,
         organizationId,
+        excludeBookingIds: [b.id],
       });
     }
 
@@ -8811,8 +14779,9 @@ export async function deleteBooking(
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message:
-        "Something went wrong while deleting the booking. Please try again or contact support.",
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while deleting the booking. Please try again or contact support.",
       additionalData: { booking, hints },
       label,
     });
@@ -9056,13 +15025,12 @@ export async function getBookingsForCalendar(params: {
     canSeeAllCustody,
   } = params;
 
-  const { searchParams, search, status, teamMemberIds, tags, selfServiceData } =
-    await getBookingsFilterData({
-      request,
-      canSeeAllBookings,
-      organizationId,
-      userId,
-    });
+  const { searchParams, selfServiceData } = await getBookingsFilterData({
+    request,
+    canSeeAllBookings,
+    organizationId,
+    userId,
+  });
 
   const start = searchParams.get("start") as string;
   const end = searchParams.get("end") as string;
@@ -9083,23 +15051,37 @@ export async function getBookingsForCalendar(params: {
 
   try {
     const { bookings } = await getBookings({
-      organizationId,
-      page: 1,
-      perPage: 1000,
-      search,
-      userId,
-      ...(status && {
-        // If status is in the params, we filter based on it
-        statuses: [status],
+      // The bookings index's filters, narrowed to the visible date range.
+      ...getBookingsListWhereParams({
+        list: { kind: "index" },
+        searchParams,
+        organizationId,
+        userId,
+        custodianScope: selfServiceData?.custodianScope ?? null,
       }),
+      page: 1,
       bookingFrom: startDate,
       bookingTo: endDate,
-      custodianTeamMemberIds: teamMemberIds,
-      ...selfServiceData,
-      tags,
+      // Calendar events carry no asset data — the mapping below projects
+      // booking scalars, two names and the tags — so the per-booking asset
+      // subtree is pure transfer cost here.
+      includeAssets: false,
+      // Only `bookings` is read below; skip the COUNT companion query.
+      skipCount: true,
       extraInclude: {
-        custodianTeamMember: true,
-        custodianUser: true,
+        // Narrow selects: the mapping reads `name` off the team member and
+        // the display-name fields + picture off the two users. `true` pulled
+        // whole `User` rows (every column, per booking, per request).
+        custodianTeamMember: { select: { id: true, name: true } },
+        custodianUser: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            displayName: true,
+            profilePicture: true,
+          },
+        },
         creator: {
           select: {
             id: true,
@@ -9111,6 +15093,8 @@ export async function getBookingsForCalendar(params: {
         },
         tags: TAG_WITH_COLOR_SELECT,
       },
+      // Every booking in the window, not a page of them. `takeAll` ignores
+      // `perPage`, which is why the old `perPage: 1000` was already dead.
       takeAll: true,
     });
 
@@ -9146,11 +15130,16 @@ export async function getBookingsForCalendar(params: {
             end: (booking.to as Date).toISOString(),
             custodian: {
               name: custodianName,
+              // Named field by field rather than spread: the loaded row is a
+              // full `User`, and this payload is serialized to the calendar
+              // client. `displayName` belongs on the list — it outranks the
+              // legal-name halves wherever this custodian is rendered.
               user: booking.custodianUser
                 ? {
                     id: booking.custodianUserId,
                     firstName: booking.custodianUser?.firstName,
                     lastName: booking.custodianUser?.lastName,
+                    displayName: booking.custodianUser?.displayName,
                     profilePicture: booking.custodianUser?.profilePicture,
                   }
                 : undefined,
@@ -9164,6 +15153,7 @@ export async function getBookingsForCalendar(params: {
                     id: booking.creator.id,
                     firstName: booking.creator.firstName,
                     lastName: booking.creator.lastName,
+                    displayName: booking.creator.displayName,
                     profilePicture: booking.creator.profilePicture,
                   }
                 : null,
@@ -9185,20 +15175,465 @@ export async function getBookingsForCalendar(params: {
   }
 }
 
+/**
+ * A booking shaped for the iCal feed: scalars + custodian + asset titles.
+ * The literal `include` keeps the Prisma payload type precise for the route.
+ * Assets are reached through the `bookingAssets` pivot (`ba.asset.title`).
+ */
+export type ICalFeedBooking = Prisma.BookingGetPayload<{
+  include: {
+    custodianUser: true;
+    custodianTeamMember: true;
+    bookingAssets: { select: { asset: { select: { title: true } } } };
+  };
+}>;
+
+/**
+ * Fetches the bookings to render into a member's subscribable iCal feed.
+ *
+ * Scoping (minus unconfirmed DRAFTs): members who can see all bookings get the
+ * whole workspace; self-service/base members are restricted to their own —
+ * matched by custodian user OR their linked team member — which can only ever
+ * *narrow* visibility to this member, never widen it. DRAFT, ARCHIVED and
+ * CANCELLED bookings are excluded, and results are windowed (~last month → next
+ * year) so the feed stays bounded.
+ *
+ * @param params.organizationId - Workspace the feed belongs to
+ * @param params.userId - The subscribing member
+ * @param params.canSeeAllBookings - Derived from the member's role + org settings
+ * @returns Bookings with custodian + asset titles for VEVENT rendering
+ * @throws {ShelfError} If a restricted member has no team-member record, or on a DB error
+ */
+export async function getBookingsForICalFeed(params: {
+  organizationId: Organization["id"];
+  userId: string;
+  canSeeAllBookings: boolean;
+}): Promise<ICalFeedBooking[]> {
+  const { organizationId, userId, canSeeAllBookings } = params;
+
+  // Bounded window: recent past through ~1 year out.
+  const now = new Date();
+  const bookingFrom = new Date(now);
+  bookingFrom.setMonth(bookingFrom.getMonth() - 1);
+  const bookingTo = new Date(now);
+  bookingTo.setFullYear(bookingTo.getFullYear() + 1);
+
+  // Members without the "see all bookings" override only get their own bookings,
+  // matched by custodian user OR their linked team member (the documented legacy
+  // case in getBookingsFilterData where a booking is assigned to the team member
+  // but custodianUserId is null). Both halves describe this one member, so they
+  // travel together as a single restriction that getBookings ANDs into the
+  // query — it can only ever narrow visibility to this member, never widen it.
+  let custodianScope: {
+    userId: string;
+    teamMemberIds: string[];
+  } | null = null;
+  if (!canSeeAllBookings) {
+    custodianScope = await resolveCustodianScope({ userId, organizationId });
+    if (!custodianScope.teamMemberIds.length) {
+      throw new ShelfError({
+        cause: null,
+        title: "Team member not found",
+        message:
+          "You are not part of a team in this organization. Please contact your organization admin to resolve this.",
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+  }
+
+  try {
+    const { bookings } = await getBookings({
+      organizationId,
+      userId,
+      page: 1,
+      // Return every matching booking in the window (takeAll ignores perPage).
+      // Bounded by the ~13-month window for a single workspace, and the public
+      // feed route is rate-limited per feed (calendarFeedRateLimit, keyed by the
+      // secret-token path — not by IP, since calendar providers share rotating
+      // egress IPs), so this is not an amplification vector. Revisit with
+      // windowed pagination only if a workspace ever has an impractically large
+      // booking volume.
+      takeAll: true,
+      // The feed renders rows only; skip the wasted COUNT companion query.
+      skipCount: true,
+      custodianScope,
+      statuses: [
+        BookingStatus.RESERVED,
+        BookingStatus.ONGOING,
+        BookingStatus.OVERDUE,
+        BookingStatus.COMPLETE,
+      ],
+      bookingFrom,
+      bookingTo,
+      // Assets come through the `bookingAssets` pivot; a tight nested select
+      // (title only) overrides getBookings' heavier default assets payload.
+      extraInclude: {
+        custodianUser: true,
+        custodianTeamMember: true,
+        bookingAssets: { select: { asset: { select: { title: true } } } },
+      },
+    });
+
+    // `getBookings`' declared return type is computed from its literal
+    // `include`, not the `extraInclude` we pass, so the runtime shape (custodian
+    // relations + title-only bookingAssets) is narrower/wider than the static
+    // type in ways TS can't reconcile with a direct assertion. Cast through
+    // `unknown` — the `extraInclude` above is what actually guarantees the
+    // ICalFeedBooking shape at runtime.
+    return bookings as unknown as ICalFeedBooking[];
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while fetching the bookings for the calendar feed.",
+      additionalData: { organizationId, userId },
+      label,
+    });
+  }
+}
+
 type AssetWithKitId = Pick<Asset, "id"> & {
   assetKits: { kitId: string }[];
 };
 
+/**
+ * Every kit these assets are LIVE members of.
+ *
+ * Naming only, for note and summary text that groups an operation's assets
+ * under a kit heading. It cannot decide `Kit.status` in either direction:
+ * membership does not say which kit a booking took an asset from, and a
+ * `QUANTITY_TRACKED` asset may belong to several kits at once. Acquire and
+ * release both go through {@link getKitIdsToAcquire}, which reads the slice.
+ *
+ * EVERY membership counts, not just the first: `AssetKit` rows come back
+ * unordered, so a first-row read names an arbitrary kit and drops the rest.
+ */
 export function getKitIdsByAssets(assets: AssetWithKitId[]) {
   // Defensive `?.` on `assetKits` tolerates fixtures / payloads where the
   // pivot relation isn't projected (older mocks, narrower selects).
   const allKitIds = assets
-    .map((a) => a.assetKits?.[0]?.kitId)
+    .flatMap((a) => a.assetKits ?? [])
+    .map((membership) => membership?.kitId)
     .filter((id): id is string => Boolean(id));
 
   const uniqueKitIds = new Set(allKitIds);
 
   return [...uniqueKitIds];
+}
+
+/**
+ * One `BookingAsset` row's kit provenance.
+ *
+ * Both provenance fields are REQUIRED, deliberately. `getKitIdsByAssets` above
+ * tolerates an unprojected relation with a defensive `?.`, which lets a narrow
+ * `select` resolve silently to zero kits. Here that silence is the failure mode
+ * being designed out: with required props, a caller that forgets to project
+ * them is a type error rather than a no-op that leaves a kit stuck.
+ */
+type BookingSliceKitProvenance = {
+  assetId: string;
+  assetKitId: string | null;
+  sourceKitId: string | null;
+};
+
+/**
+ * The `AssetKit -> Kit` hop for rows written before `sourceKitId` existed.
+ *
+ * Shared by the two slice resolvers below so the org-scoped lookup and its
+ * deliberate tolerance of a missing row live in one place. Rows carrying
+ * `sourceKitId` need no lookup at all, which is why the query is skipped when
+ * there are no legacy rows.
+ */
+async function resolveKitIdByAssetKitId({
+  slices,
+  organizationId,
+  client,
+}: {
+  slices: Array<{ assetKitId: string | null; sourceKitId: string | null }>;
+  organizationId: Organization["id"];
+  client: Pick<ExtendedPrismaClient, "assetKit">;
+}): Promise<Map<string, string>> {
+  // Truthiness rather than `!== null`: test fixtures hand us rows whose
+  // provenance columns are absent entirely, and `undefined !== null` is true.
+  const legacyAssetKitIds = slices
+    .filter((s) => !s.sourceKitId && Boolean(s.assetKitId))
+    .map((s) => s.assetKitId as string);
+
+  if (legacyAssetKitIds.length === 0) return new Map();
+
+  // Deliberately not `assertAssetKitsBelongToOrg`: that throws a 400 when a
+  // row is missing, and a concurrent detach makes a row legitimately vanish
+  // between these two reads — the very operation these resolvers exist for.
+  // A missing row means "no kit to release", not "reject the check-in".
+  const rows = await client.assetKit.findMany({
+    where: { id: { in: legacyAssetKitIds }, organizationId },
+    select: { id: true, kitId: true },
+  });
+  return new Map(rows.map((r) => [r.id, r.kitId]));
+}
+
+/**
+ * One `BookingAsset` row, with everything needed to decide which kits it takes
+ * off the shelf.
+ *
+ * `asset.type` is required because the answer differs by type for a slice that
+ * carries no provenance — see {@link getKitIdsToAcquire}.
+ */
+type AcquireSliceKitAttribution = {
+  /** `BookingAsset.id` — the grain {@link getKitIdsToAcquireBySlice} answers at. */
+  id: string;
+  assetKitId: string | null;
+  sourceKitId: string | null;
+  asset: {
+    type: AssetType;
+    assetKits: { kitId: string }[];
+  };
+};
+
+/**
+ * The kits a check-out takes off the shelf, resolved per SLICE.
+ *
+ * `Kit.status` answers "is this kit out", so only a booking that actually took
+ * the kit's own units may stamp it. Three cases, and the middle one is the
+ * reason this cannot be answered from the asset alone:
+ *
+ * | Slice                                   | Kits it stamps                    |
+ * | --------------------------------------- | --------------------------------- |
+ * | kit-driven (`sourceKitId`/`assetKitId`) | exactly the kit it was booked under |
+ * | standalone, `INDIVIDUAL`                | the asset's live kits             |
+ * | standalone, `QUANTITY_TRACKED`          | none                              |
+ *
+ * A kit-driven slice belongs to the kit it names, never to its asset's other
+ * kits: a `QUANTITY_TRACKED` asset may sit in several kits at distinct slices,
+ * so reading membership instead would stamp an arbitrary one of them — and
+ * `AssetKit` rows come back unordered, so "arbitrary" can differ between the
+ * check-out and the check-in that has to undo it.
+ *
+ * A standalone slice draws on the free pool, which is a separate axis from the
+ * kit slices (`enforce_asset_kit_sum_within_total` bounds the kit axis alone).
+ * Booking loose units of a `QUANTITY_TRACKED` kit member therefore leaves every
+ * kit holding that asset fully intact, and stamps nothing. An `INDIVIDUAL`
+ * asset has no pool to draw on — the one physical item leaves, so its kit is
+ * genuinely incomplete and does get stamped.
+ *
+ * Slice-grained, because a `QUANTITY_TRACKED` asset can hold a standalone slice
+ * and one slice per kit it belongs to on the SAME booking (the two partial
+ * uniques on `BookingAsset`). Collapsed to an asset id, the standalone slice's
+ * answer and the kit slice's answer are indistinguishable.
+ *
+ * @param args.slices The booking's `BookingAsset` rows.
+ * @param args.client Pass the active `tx` when called inside a transaction.
+ * @returns `BookingAsset.id` to the kit ids that slice takes off the shelf. A
+ *   slice that stamps no kit is absent from the map.
+ */
+export async function getKitIdsToAcquireBySlice({
+  slices,
+  organizationId,
+  client = db,
+}: {
+  slices: AcquireSliceKitAttribution[];
+  organizationId: Organization["id"];
+  client?: Pick<ExtendedPrismaClient, "assetKit">;
+}): Promise<Map<string, Set<string>>> {
+  const kitIdByAssetKitId = await resolveKitIdByAssetKitId({
+    slices,
+    organizationId,
+    client,
+  });
+
+  const kitIdsBySliceId = new Map<string, Set<string>>();
+  for (const slice of slices) {
+    const kitIds = new Set<string>();
+
+    if (slice.sourceKitId || slice.assetKitId) {
+      const kitId =
+        slice.sourceKitId ??
+        (slice.assetKitId
+          ? kitIdByAssetKitId.get(slice.assetKitId)
+          : undefined);
+      if (kitId) kitIds.add(kitId);
+    } else if (slice.asset?.type === AssetType.INDIVIDUAL) {
+      for (const membership of slice.asset.assetKits ?? []) {
+        if (membership?.kitId) kitIds.add(membership.kitId);
+      }
+    }
+
+    if (kitIds.size > 0) kitIdsBySliceId.set(slice.id, kitIds);
+  }
+
+  return kitIdsBySliceId;
+}
+
+/**
+ * Flattened {@link getKitIdsToAcquireBySlice}, for the callers that only need
+ * "which kits does this check-out stamp".
+ *
+ * @param args.client Pass the active `tx` when called inside a transaction.
+ * @returns Unique kit ids to stamp, in first-seen order.
+ */
+export async function getKitIdsToAcquire(args: {
+  slices: AcquireSliceKitAttribution[];
+  organizationId: Organization["id"];
+  client?: Pick<ExtendedPrismaClient, "assetKit">;
+}): Promise<string[]> {
+  const kitIdsBySliceId = await getKitIdsToAcquireBySlice(args);
+  const kitIds = new Set<string>();
+  for (const sliceKitIds of kitIdsBySliceId.values()) {
+    for (const kitId of sliceKitIds) kitIds.add(kitId);
+  }
+  return [...kitIds];
+}
+
+/**
+ * The kits a booking holds, resolved from the BOOKING's own rows rather than
+ * from the assets' current membership.
+ *
+ * A kit whose member was detached while the booking was live is invisible to
+ * membership-based resolution, so nothing releases it and `Kit.status` stays
+ * CHECKED_OUT with nothing out. The booking's rows still remember which kit the
+ * slice came from, so they can answer where membership cannot.
+ *
+ * Two legs, mirroring {@link computeBookingKitDrift}: `sourceKitId` is the
+ * durable pointer that survives the detach, and `assetKitId` resolved through
+ * `AssetKit` is the legacy fallback. Keep both. The
+ * "assetKitId non-null implies sourceKitId non-null" invariant is enforced by
+ * code alone with no CHECK constraint, and the migration lands before the code,
+ * so a rolling deploy can still write a kit-driven row with a NULL
+ * `sourceKitId`.
+ *
+ * Returns kit id to the asset ids this booking took from that kit. That grain
+ * answers "which kits did this booking touch", not "which kit does THIS row
+ * belong to" — a QUANTITY_TRACKED asset's several rows all collapse to one
+ * asset id here. A gate that must keep them apart wants
+ * {@link getKitIdsBySlice}.
+ *
+ * @param client Pass the active `tx` when called inside a transaction.
+ *
+ * Provenance ALONE cannot answer "which kits did this booking take out": a
+ * standalone slice carries none by design, and one belonging to an INDIVIDUAL
+ * kit member does empty its kit. {@link getKitIdsToAcquire} joins the two legs
+ * and is what both the acquire and the release writes read.
+ */
+export async function getKitIdsByBookingSlices({
+  slices,
+  organizationId,
+  client = db,
+}: {
+  slices: BookingSliceKitProvenance[];
+  organizationId: Organization["id"];
+  client?: Pick<typeof db, "assetKit">;
+}): Promise<Map<string, Set<string>>> {
+  const kitIdByAssetKitId = await resolveKitIdByAssetKitId({
+    slices,
+    organizationId,
+    client,
+  });
+
+  const assetIdsByKitId = new Map<string, Set<string>>();
+  for (const slice of slices) {
+    const kitId =
+      slice.sourceKitId ??
+      (slice.assetKitId ? kitIdByAssetKitId.get(slice.assetKitId) : undefined);
+    if (!kitId) continue;
+    const bucket = assetIdsByKitId.get(kitId) ?? new Set<string>();
+    bucket.add(slice.assetId);
+    assetIdsByKitId.set(kitId, bucket);
+  }
+
+  return assetIdsByKitId;
+}
+
+/**
+ * One `BookingAsset` row, with everything needed to name the kits it is part
+ * of.
+ *
+ * Every field is REQUIRED for the reason spelled out on
+ * {@link BookingSliceKitProvenance}: a caller that forgets to project one is a
+ * type error rather than a silent resolution to zero kits. `assetKits` earns
+ * that treatment too — dropping it makes every standalone slice look like it
+ * belongs to no kit, and the release gate stops seeing it as something a kit
+ * still owes.
+ */
+type BookingSliceKitAttribution = {
+  /** `BookingAsset.id` — the grain this resolver answers at. */
+  id: string;
+  assetKitId: string | null;
+  sourceKitId: string | null;
+  /** LIVE kit membership of this slice's asset (`Asset.assetKits`). */
+  assetKits: { kitId: string }[];
+  /**
+   * Decides whether a slice carrying no provenance answers from that
+   * membership: only an `INDIVIDUAL` asset empties its kit by going out
+   * standalone.
+   */
+  assetType: AssetType;
+};
+
+/**
+ * Slice-grained sibling of {@link getKitIdsByBookingSlices}: the kits a SINGLE
+ * `BookingAsset` row is part of.
+ *
+ * `getKitIdsByBookingSlices` collapses to `kitId -> assetIds`, which answers
+ * which kits a booking touches. The release gate asks the other question — does
+ * kit K still have something out — and at asset grain that cannot be answered:
+ * a QUANTITY_TRACKED asset holds a standalone slice plus one slice per kit it
+ * belongs to on the same booking (the two partial uniques on `BookingAsset`),
+ * and collapsed to one asset id, returning kit A's slice reads as returning kit
+ * B's.
+ *
+ * A kit-driven slice belongs to exactly the kit it was booked under:
+ * `sourceKitId`, the durable pointer that survives a detach, or the
+ * `assetKitId -> AssetKit.kitId` hop for rows written before that column. It
+ * does NOT belong to its asset's other kits — the slice names its own.
+ *
+ * A standalone slice carries no provenance by design, so it answers from its
+ * asset's LIVE kits — but only for an `INDIVIDUAL` asset, mirroring what
+ * {@link getKitIdsToAcquire} was willing to stamp. A standalone
+ * `QUANTITY_TRACKED` slice draws on the free pool and takes no kit's units, so
+ * it owes no kit anything on the way back. Release must be the exact inverse of
+ * acquire: gate on a kit acquire never stamped and it never comes back.
+ *
+ * EVERY live membership counts, not just the first — `AssetKit` rows come back
+ * unordered, so a first-row read names an arbitrary kit and drops the rest.
+ *
+ * A sibling rather than a new shape for {@link getKitIdsByBookingSlices}: five
+ * of its six callers read `.keys()` only, and both shapes are `Map<string,
+ * Set<string>>`, so repointing the value from asset ids to slice ids would
+ * compile everywhere and silently redefine what the remaining caller reads.
+ *
+ * @param client Pass the active `tx` when called inside a transaction.
+ *   `Pick<ExtendedPrismaClient, …>` rather than `Pick<typeof db, …>` for the
+ *   reason given on `CheckoutRemainingTxClient`: the interactive-tx client does
+ *   not reduce to `Prisma.TransactionClient`, but satisfies this structurally.
+ * @returns `BookingAsset.id` to the kit ids that slice is part of. A slice
+ *   belonging to no kit is absent from the map.
+ */
+export async function getKitIdsBySlice({
+  slices,
+  organizationId,
+  client = db,
+}: {
+  slices: BookingSliceKitAttribution[];
+  organizationId: Organization["id"];
+  client?: Pick<ExtendedPrismaClient, "assetKit">;
+}): Promise<Map<string, Set<string>>> {
+  const kitIdByAssetKitId = await resolveKitIdByAssetKitId({
+    slices,
+    organizationId,
+    client,
+  });
+
+  const kitIdsBySliceId = new Map<string, Set<string>>();
+  for (const slice of slices) {
+    const kitIds = resolveSliceKitIds(
+      { ...slice, assetKits: slice.assetKits ?? [] },
+      kitIdByAssetKitId
+    );
+    if (kitIds.size > 0) kitIdsBySliceId.set(slice.id, kitIds);
+  }
+
+  return kitIdsBySliceId;
 }
 
 export async function getBookingFlags(
@@ -9219,13 +15654,22 @@ export async function getBookingFlags(
   const assets = await db.asset.findMany({
     // why: organizationId scoping prevents flag computation from reading
     // assets that belong to another tenant.
+    // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: flags are computed over assets already on the booking, archived ones included
     where: {
       id: { in: booking.assetIds },
       organizationId: booking.organizationId,
     },
-    include: {
-      category: true,
-      custody: true,
+    // why: `select`, not `include`. This function returns only booleans, so the
+    // row shape is private to it — and the previous `include` fetched every
+    // Asset scalar plus `category` and `custody` relations that no flag below
+    // reads (`hasAssetsInCustody` is derived from `status`, not the relation).
+    // On a large booking that payload is paid on every Reserve tap.
+    select: {
+      id: true,
+      type: true,
+      status: true,
+      availableToBook: true,
+      archivedAt: true,
       assetKits: { select: { kitId: true } },
       bookingAssets: {
         where: {
@@ -9267,7 +15711,7 @@ export async function getBookingFlags(
               : { id: { not: booking.id } }),
           },
         },
-        include: {
+        select: {
           booking: {
             select: { id: true, status: true },
           },
@@ -9279,6 +15723,11 @@ export async function getBookingFlags(
   const hasAssets = assets.length > 0;
 
   const hasUnavailableAssets = assets.some((asset) => !asset.availableToBook);
+
+  // An archived asset can sit in a draft (archiving refuses only reserved and
+  // checked-out bookings), and reserve and check-out refuse it. Named on the
+  // page by `buildArchivedAssets`, which reads the same field.
+  const hasArchivedAssets = assets.some((asset) => asset.archivedAt !== null);
 
   /**
    * QUANTITY_TRACKED assets are exempt from the `CHECKED_OUT` /
@@ -9329,37 +15778,327 @@ export async function getBookingFlags(
   const hasKits = assets.some((asset) => (asset.assetKits ?? []).length > 0);
   const hasModelRequests = (booking.modelRequestCount ?? 0) > 0;
 
+  // A kit in custody cannot be checked out whatever its members are, which the
+  // asset-level flag above cannot see for a quantity-only kit. Resolved from
+  // the booking's own slices, as the check-out resolves the kits it takes, so
+  // the button and `assertKitsCheckoutable` agree. Not gated on `hasKits`: a
+  // slice keeps naming its kit through `sourceKitId` after its asset leaves it.
+  let hasKitsInCustody = false;
+  if (hasAssets) {
+    const slices = await db.bookingAsset.findMany({
+      where: {
+        bookingId: booking.id,
+        booking: { organizationId: booking.organizationId },
+      },
+      select: {
+        id: true,
+        assetKitId: true,
+        sourceKitId: true,
+        asset: {
+          select: { type: true, assetKits: { select: { kitId: true } } },
+        },
+      },
+    });
+    const kitIds = await getKitIdsToAcquire({
+      slices,
+      organizationId: booking.organizationId,
+    });
+    hasKitsInCustody =
+      kitIds.length > 0 &&
+      (await db.kit.count({
+        where: {
+          id: { in: kitIds },
+          organizationId: booking.organizationId,
+          custody: { isNot: null },
+        },
+      })) > 0;
+  }
+
   return {
     hasAssets,
     hasUnavailableAssets,
+    hasArchivedAssets,
     hasCheckedOutAssets,
     hasAlreadyBookedAssets,
     hasAssetsInCustody,
+    hasKitsInCustody,
     hasKits,
     hasModelRequests,
   };
 }
 
+/**
+ * Builds the complete `where` for a bulk booking action.
+ *
+ * Shared by `bulkDeleteBookings`, `bulkArchiveBookings` and
+ * `bulkCancelBookings` so the three resolve a selection the same way, and so
+ * the ownership scope cannot be forgotten on one of them.
+ *
+ * - **Explicit ids**: those bookings, in the caller's workspace. `list` is not
+ *   read.
+ * - **Select all** (`bookingIds` holds {@link ALL_SELECTED_KEY}): the bookings
+ *   `list` shows at `currentSearchParams`, see {@link getBookingsListWhere}.
+ *   Refused when `list` is missing: the request came from a page that does not
+ *   say which list the user saw, and guessing could reach bookings they never
+ *   saw.
+ *
+ * The ownership predicate is AND-ed onto BOTH branches on purpose. Applying it
+ * only to "select all" would still let a restricted caller act on someone
+ * else's booking by posting its id directly.
+ *
+ * @param params.bookingIds - Explicit ids, or `[ALL_SELECTED_KEY]` for select-all
+ * @param params.organizationId - The caller's (validated) organization
+ * @param params.currentSearchParams - The list page's URL params, for select-all
+ * @param params.list - The list select-all stands for; `null` when the form named none
+ * @param params.access - The caller's access
+ * @param params.userId - The caller
+ * @returns A `Prisma.BookingWhereInput` scoped to org, selection and ownership
+ * @throws {ShelfError} when a restricted caller, or a select-all, has no user to scope to
+ * @throws {ShelfError} 400 when a select-all names no list
+ */
+export async function getBulkBookingsWhereInput({
+  bookingIds,
+  organizationId,
+  currentSearchParams,
+  list,
+  access,
+  userId,
+}: {
+  bookingIds: Booking["id"][];
+  organizationId: Organization["id"];
+  currentSearchParams?: string | null;
+  list?: BookingsList | null;
+  access: RoleAccess;
+  /** Absent for system-initiated calls, which have no acting user */
+  userId?: User["id"];
+}): Promise<Prisma.BookingWhereInput> {
+  const ownership = getBookingOwnershipScope({ access, userId });
+  const selectAll = bookingIds.includes(ALL_SELECTED_KEY);
+
+  if (selectAll && !list) {
+    throw new ShelfError({
+      cause: null,
+      title: "Nothing was changed",
+      message:
+        "This page is out of date. Reload it and select the bookings again. Nothing was changed.",
+      additionalData: { organizationId },
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
+
+  const base: Prisma.BookingWhereInput =
+    selectAll && list
+      ? await getBookingsListWhere({
+          list,
+          currentSearchParams,
+          organizationId,
+          access,
+          userId,
+        })
+      : { id: { in: bookingIds }, organizationId };
+
+  if (!ownership) {
+    return base;
+  }
+
+  // AND rather than a spread: `base` may carry its own OR, and merging the two
+  // would union them, widening a destructive action instead of narrowing it.
+  return { AND: [base, ownership] };
+}
+
+/**
+ * The `where` of one bookings list at the given URL params, for this viewer:
+ * the rows "Select all N entries" stands for.
+ *
+ * Builds with {@link getBookingsListWhereParams}, which that list's loader
+ * also builds with, and {@link buildBookingsWhere}, which {@link getBookings}
+ * queries with. A viewer who may not see every booking gets the custodian
+ * scope the loaders apply. `bulk-select-all-matches-list.server.test.ts`
+ * compares each list with its loader URL by URL.
+ *
+ * A posted `list` only narrows: its kit or asset is AND-ed with the caller's
+ * organization, so an id from another workspace cannot reach that
+ * workspace's bookings.
+ *
+ * @param params.list - The list select-all stands for
+ * @param params.currentSearchParams - The list page's URL params
+ * @param params.organizationId - The caller's (validated) organization
+ * @param params.access - The viewer's access, for the custodian scope
+ * @param params.userId - The viewer, for draft visibility and the custodian scope
+ * @returns The `where` the list's loader lists and counts with
+ * @throws {ShelfError} when there is no viewer, since drafts are visible to their creator only
+ */
+async function getBookingsListWhere({
+  list,
+  currentSearchParams,
+  organizationId,
+  access,
+  userId,
+}: {
+  list: BookingsList;
+  currentSearchParams?: string | null;
+  organizationId: Organization["id"];
+  access: RoleAccess;
+  userId?: User["id"];
+}): Promise<Prisma.BookingWhereInput> {
+  if (!userId) {
+    // Without a viewer the draft rule has nobody to match, and leaving it out
+    // would reach every draft in the workspace. Fail closed.
+    throw new ShelfError({
+      cause: null,
+      message:
+        "Cannot resolve which bookings this list shows. Please contact support.",
+      additionalData: { organizationId },
+      label,
+    });
+  }
+
+  return buildBookingsWhere(
+    getBookingsListWhereParams({
+      list,
+      searchParams: new URLSearchParams(currentSearchParams ?? ""),
+      organizationId,
+      userId,
+      custodianScope: access.bookings.seeAll
+        ? null
+        : await resolveCustodianScope({ userId, organizationId }),
+    })
+  );
+}
+
+/**
+ * Refuses a "Select all" whose list holds bookings the caller may not act on.
+ *
+ * A restricted caller can be shown more bookings than they may write: the
+ * workspace see-toggles widen what a list shows, never what its bulk actions
+ * reach (see `getBookingOwnershipScope`). {@link getBulkBookingsWhereInput}
+ * narrows the selection to the caller's own rows, so without this check the
+ * action would quietly reach a subset of the "N entries" the user selected.
+ * The whole request is refused instead, the same rule
+ * `assertBulkSelectionWithinOwnership` applies to explicit ids.
+ *
+ * @param params.bookingIds - The submitted ids, or `[ALL_SELECTED_KEY]`
+ * @param params.matchedCount - How many rows the ownership-scoped selection matched
+ * @param params.organizationId - The caller's (validated) organization
+ * @param params.currentSearchParams - The list page's URL params
+ * @param params.list - The list select-all stands for
+ * @param params.access - The caller's access
+ * @param params.userId - The caller
+ * @param params.action - Verb for the refusal message ("delete", "archive", ...)
+ * @throws {ShelfError} 403 when the list holds bookings outside the caller's ownership scope
+ */
+async function assertSelectAllWithinOwnership({
+  bookingIds,
+  matchedCount,
+  organizationId,
+  currentSearchParams,
+  list,
+  access,
+  userId,
+  action,
+}: {
+  bookingIds: Booking["id"][];
+  matchedCount: number;
+  organizationId: Organization["id"];
+  currentSearchParams?: string | null;
+  list?: BookingsList | null;
+  access: RoleAccess;
+  userId?: User["id"];
+  action: string;
+}): Promise<void> {
+  if (
+    access.bookings.writeAll ||
+    !list ||
+    !bookingIds.includes(ALL_SELECTED_KEY)
+  ) {
+    return;
+  }
+
+  const listCount = await db.booking.count({
+    where: await getBookingsListWhere({
+      list,
+      currentSearchParams,
+      organizationId,
+      access,
+      userId,
+    }),
+  });
+
+  if (listCount === matchedCount) {
+    return;
+  }
+
+  throw new ShelfError({
+    cause: null,
+    title: "Nothing was changed",
+    message: `You can only ${action} bookings you created or hold, and this list also shows other bookings. Select your bookings one by one instead. Nothing was changed.`,
+    additionalData: { organizationId, listCount, matchedCount },
+    label,
+    status: 403,
+    shouldBeCaptured: false,
+  });
+}
+
+/**
+ * Deletes a selection of bookings in one request.
+ *
+ * The selection is the explicit ids, or with select-all every booking the
+ * list shows for its filters, and in both cases only the bookings the caller
+ * may act on (see {@link getBulkBookingsWhereInput}). Roles whose
+ * policy limits delete to drafts are refused the whole
+ * request when the selection contains any non-draft booking, the same rule
+ * `assertCanDeleteBooking` applies to a single delete.
+ *
+ * @param params.bookingIds - Selected booking ids, or the select-all key
+ * @param params.organizationId - The caller's workspace
+ * @param params.userId - The caller
+ * @param params.hints - Client hints for the notification emails
+ * @param params.currentSearchParams - The list filters, used with select-all
+ * @param params.list - The list select-all stands for; `null` when the form named none
+ * @param params.access - The caller's access
+ * @throws {ShelfError} 403 when the caller may not delete every selected booking
+ */
 export async function bulkDeleteBookings({
   bookingIds,
   organizationId,
   userId,
   hints,
   currentSearchParams,
+  list,
+  access,
+  confirmation,
 }: {
   bookingIds: Booking["id"][];
   organizationId: Organization["id"];
   userId: User["id"];
   hints: ClientHint;
   currentSearchParams?: string | null;
+  /** The list a select-all stands for; `null` when the form named none, which a select-all refuses */
+  list?: BookingsList | null;
+  /** Caller's access, which decides whether ownership scoping applies */
+  access: RoleAccess;
+  /**
+   * The number the user typed in the delete dialog. Must equal the number of
+   * bookings this call removes, see {@link assertBulkDeleteConfirmed}.
+   */
+  confirmation: string | null | undefined;
 }) {
   try {
-    /** If all are selected in the list, then we have to consider filter */
-    const where: Prisma.BookingWhereInput = bookingIds.includes(
-      ALL_SELECTED_KEY
-    )
-      ? getBookingWhereInput({ currentSearchParams, organizationId })
-      : { id: { in: bookingIds }, organizationId };
+    /**
+     * Scopes to the filters the user had applied AND to the bookings they are
+     * allowed to act on. Without the ownership half, a restricted caller could
+     * delete every booking in the workspace with one request.
+     */
+    const where = await getBulkBookingsWhereInput({
+      bookingIds,
+      organizationId,
+      currentSearchParams,
+      list,
+      access,
+      userId,
+    });
 
     const [bookings, user] = await Promise.all([
       db.booking.findMany({
@@ -9371,6 +16110,9 @@ export async function bulkDeleteBookings({
               asset: {
                 select: {
                   id: true,
+                  // `type` decides whether a standalone slice releases this
+                  // asset's kits — see `getKitIdsToAcquire`.
+                  type: true,
                   assetKits: { select: { kitId: true } },
                 },
               },
@@ -9388,6 +16130,52 @@ export async function bulkDeleteBookings({
       }),
     ]);
 
+    // A foreign id is filtered out by the ownership scope above; refuse the
+    // selection instead of acting on the rest and reporting success.
+    assertBulkSelectionWithinOwnership({
+      bookingIds,
+      foundIds: bookings.map((booking) => booking.id),
+      access,
+      action: "delete",
+    });
+    await assertSelectAllWithinOwnership({
+      bookingIds,
+      matchedCount: bookings.length,
+      organizationId,
+      currentSearchParams,
+      list,
+      access,
+      userId,
+      action: "delete",
+    });
+
+    // Before any write: the typed count must be the number about to go.
+    assertBulkDeleteConfirmed({
+      selectedIds: bookingIds,
+      confirmation,
+      matchedCount: bookings.length,
+      noun: { one: "booking", many: "bookings" },
+      label,
+    });
+
+    // Roles whose policy limits delete to drafts may not delete a selection
+    // that contains anything else. The whole request is refused rather than
+    // silently deleting part of it.
+    if (
+      access.policy.bookings.deleteOnlyDrafts &&
+      bookings.some((booking) => booking.status !== BookingStatus.DRAFT)
+    ) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message:
+          "You are not authorized to delete these bookings. Only draft bookings can be deleted.",
+        status: 403,
+        shouldBeCaptured: false,
+        additionalData: { bookingIds, organizationId },
+      });
+    }
+
     /** If some booking was OVERDUE or ONGOING, we have to make their assets and kits available */
     const overdueOrOngoingBookings = bookings.filter(
       (booking) => booking.status === "OVERDUE" || booking.status === "ONGOING"
@@ -9399,13 +16187,36 @@ export async function bulkDeleteBookings({
     );
 
     await db.$transaction(async (tx) => {
-      /** Deleting all selected bookings */
-      await tx.booking.deleteMany({
+      /**
+       * Deleting all selected bookings. For a drafts-only role the write
+       * re-checks the status itself: a booking reserved after the read above
+       * matches nothing, and a short count refuses the whole request so the
+       * transaction rolls back before any note, reconciliation or email.
+       */
+      const { count } = await tx.booking.deleteMany({
         where: {
           id: { in: bookings.map((booking) => booking.id) },
           organizationId,
+          ...(access.policy.bookings.deleteOnlyDrafts
+            ? { status: BookingStatus.DRAFT }
+            : {}),
         },
       });
+
+      if (
+        access.policy.bookings.deleteOnlyDrafts &&
+        count !== bookings.length
+      ) {
+        throw new ShelfError({
+          cause: null,
+          label,
+          message:
+            "You are not authorized to delete these bookings. Only draft bookings can be deleted.",
+          status: 403,
+          shouldBeCaptured: false,
+          additionalData: { bookingIds, organizationId },
+        });
+      }
 
       /** Making assets and kits available */
       if (overdueOrOngoingBookings.length > 0) {
@@ -9413,23 +16224,38 @@ export async function bulkDeleteBookings({
           booking.bookingAssets.map((ba) => ba.asset)
         );
 
-        const allKitIds = allAssets
-          .map((asset) => asset.assetKits?.[0]?.kitId)
-          .filter((id): id is string => Boolean(id));
-
-        const uniqueKitIds = new Set(allKitIds);
-
-        await tx.asset.updateMany({
-          where: {
-            id: { in: allAssets.map((asset) => asset.id) },
+        // Union of live membership and booking-slice provenance — a kit whose
+        // member was detached mid-booking is invisible to membership alone.
+        // Release mirrors acquire — see the twin in `checkinBooking`.
+        const uniqueKitIds = new Set(
+          await getKitIdsToAcquire({
+            slices: overdueOrOngoingBookings.flatMap((b) => b.bookingAssets),
             organizationId,
-          },
-          data: { status: AssetStatus.AVAILABLE },
+          })
+        );
+
+        /**
+         * Per asset, never a blanket flip. An asset on one of these bookings
+         * can also sit on a live booking outside the selection, or be held by
+         * a Custody row, and writing AVAILABLE across the set strips those
+         * signals — putting an asset someone is still holding back into the
+         * pool for anyone to book.
+         *
+         * Runs after the `deleteMany` above, so the selection's own pivot rows
+         * are already gone; passing their ids keeps the exclusion explicit
+         * rather than resting on that ordering.
+         */
+        await reconcileAssetStatusForBookingExit({
+          tx,
+          assetIds: allAssets.map((asset) => asset.id),
+          excludeBookingIds: bookings.map((booking) => booking.id),
+          organizationId,
         });
 
-        await tx.kit.updateMany({
-          where: { id: { in: [...uniqueKitIds] }, organizationId },
-          data: { status: KitStatus.AVAILABLE },
+        await releaseCheckedOutKits(tx, {
+          kitIds: [...uniqueKitIds],
+          organizationId,
+          excludeBookingIds: bookings.map((booking) => booking.id),
         });
       }
 
@@ -9439,9 +16265,9 @@ export async function bulkDeleteBookings({
           booking.bookingAssets.map((ba) => ({
             userId,
             assetId: ba.asset.id,
-            content: `**${resolveUserDisplayName(user)}** deleted booking **${
-              booking.name
-            }**.`,
+            content: `**${stripMarkdocDelimiters(
+              resolveUserDisplayName(user)
+            )}** deleted booking **${stripMarkdocDelimiters(booking.name)}**.`,
             type: "UPDATE" as const,
           }))
         )
@@ -9454,6 +16280,13 @@ export async function bulkDeleteBookings({
     await Promise.all(
       bookingsWithSchedulerReference.map((booking) => cancelScheduler(booking))
     );
+
+    // Resolved once so every deleted booking's email names the same person
+    // and moment.
+    const actor =
+      bookings.length > 0
+        ? await resolveBookingEmailActor({ userId, label: "Deleted by" })
+        : undefined;
 
     // Resolve notification recipients and send personalized emails for each deleted booking
     for (const b of bookings) {
@@ -9470,23 +16303,23 @@ export async function bulkDeleteBookings({
           b.custodianTeamMember?.name ||
           "";
 
-        const text = deletedBookingEmailContent({
-          bookingName: b.name,
-          assetsCount: b.bookingAssets.length,
-          custodian,
-          from: b.from as Date,
-          to: b.to as Date,
-          bookingId: b.id,
-          hints,
-        });
-
         await sendBookingEmailToAllRecipients({
           recipients,
           booking: b,
           subject: `🗑️ Booking deleted (${b.name}) - shelf.nu`,
-          textContent: text,
-          heading: `Your booking has been deleted: "${b.name}"`,
+          buildText: (textArgs) =>
+            deletedBookingEmailContent({
+              ...textArgs,
+              bookingName: b.name,
+              assetsCount: b.bookingAssets.length,
+              custodian,
+              from: b.from as Date,
+              to: b.to as Date,
+              bookingId: b.id,
+            }),
+          buildHeading: () => `Your booking has been deleted: "${b.name}"`,
           hints,
+          actor,
           templateProps: {
             hideViewButton: true,
           },
@@ -9494,6 +16327,9 @@ export async function bulkDeleteBookings({
       }
     }
   } catch (cause) {
+    // A refused confirmation carries the count to type in its additionalData.
+    rethrowIfClientError(cause);
+
     const message =
       cause instanceof ShelfError
         ? cause.message
@@ -9513,6 +16349,8 @@ export async function bulkArchiveBookings({
   organizationId,
   userId,
   currentSearchParams,
+  list,
+  access,
 }: {
   bookingIds: Booking["id"][];
   organizationId: Organization["id"];
@@ -9524,63 +16362,178 @@ export async function bulkArchiveBookings({
    */
   userId?: User["id"];
   currentSearchParams?: string | null;
+  /** The list a select-all stands for; `null` when the form named none, which a select-all refuses */
+  list?: BookingsList | null;
+  /** Caller's access, which decides whether ownership scoping applies */
+  access: RoleAccess;
 }) {
   try {
-    /** If all are selected in the list, then we have to consider filter */
-    const where: Prisma.BookingWhereInput = bookingIds.includes(
-      ALL_SELECTED_KEY
-    )
-      ? getBookingWhereInput({ currentSearchParams, organizationId })
-      : { id: { in: bookingIds }, organizationId };
+    /**
+     * Scopes to the filters the user had applied AND to the bookings they are
+     * allowed to act on. Without the ownership half, a restricted caller could
+     * delete every booking in the workspace with one request.
+     */
+    const where = await getBulkBookingsWhereInput({
+      bookingIds,
+      organizationId,
+      currentSearchParams,
+      list,
+      access,
+      userId,
+    });
 
-    const bookings = await db.booking.findMany({
+    const selectedBookings = await db.booking.findMany({
       where,
       select: {
         id: true,
         status: true,
+        to: true,
         custodianUserId: true,
         activeSchedulerReference: true,
       },
     });
 
-    const someBookingNotComplete = bookings.some(
-      (b) => b.status !== "COMPLETE"
+    // A foreign id is filtered out by the ownership scope above; refuse the
+    // selection instead of acting on the rest and reporting success. Checked
+    // against every row found, archived ones included, so a re-archive of an
+    // owned booking is never mistaken for a foreign id.
+    assertBulkSelectionWithinOwnership({
+      bookingIds,
+      foundIds: selectedBookings.map((booking) => booking.id),
+      access,
+      action: "archive",
+    });
+    await assertSelectAllWithinOwnership({
+      bookingIds,
+      matchedCount: selectedBookings.length,
+      organizationId,
+      currentSearchParams,
+      list,
+      access,
+      userId,
+      action: "archive",
+    });
+
+    // A booking that is already archived needs nothing more, so archiving is
+    // idempotent: a repeat click, or a list still showing rows an earlier
+    // click archived, finishes quietly instead of refusing the batch.
+    const bookings = selectedBookings.filter(
+      (b) => b.status !== BookingStatus.ARCHIVED
     );
 
-    /** Bookings must be complete to add them in archive */
-    if (someBookingNotComplete) {
+    /**
+     * Archivable = COMPLETE (returned) or a past-due RESERVED booking (a
+     * reservation whose window elapsed without checkout). All-or-nothing: if
+     * any selected booking is ineligible we reject the whole batch, mirroring
+     * the UI which only enables Archive when every selected row qualifies.
+     * @see {@link isBookingArchivable}
+     */
+    const ineligibleBookings = bookings.filter(
+      (b) => !isBookingArchivable({ status: b.status, to: b.to })
+    );
+
+    if (ineligibleBookings.length > 0) {
       throw new ShelfError({
         cause: null,
         message:
-          "Some bookings are not complete. Please make sure you are selecting completed bookings to archive them.",
+          "Some selected bookings can't be archived. You can only archive completed bookings, or reserved bookings whose end date has passed.",
         label,
         additionalData: {
-          bookings,
+          bookings: ineligibleBookings,
           organizationId,
           bookingIds,
         },
+        status: 400,
+        shouldBeCaptured: false,
       });
     }
 
-    /** Update all selected bookings to ARCHIVED. This is a single statement —
-     * atomic on its own — so it needs no interactive transaction. The prior
-     * `$transaction` wrapper added no atomicity (the per-booking notes below
-     * write via the global `db`, not a passed `tx`) and on large selections
-     * held the interactive connection open long enough to trip Prisma's 5s
-     * default → P2028 (Sentry SHELF-WEBAPP-1KQ). */
-    await db.booking.updateMany({
-      where: { id: { in: bookings.map((b) => b.id) }, organizationId },
-      data: { status: BookingStatus.ARCHIVED },
-    });
+    /**
+     * Bookings archived straight from RESERVED were never checked in — flag them
+     * so return-behaviour reports (Booking Compliance) exclude them; COMPLETE
+     * bookings keep the default `false`. Two scoped updateMany statements (each
+     * atomic on its own, no interactive transaction) so the flag lands only on
+     * the never-returned rows.
+     *
+     * These are plain `db.booking.updateMany` calls, NOT wrapped in an
+     * interactive `$transaction` — a prior `$transaction` wrapper here added no
+     * atomicity (the per-booking notes below write via the global `db`, not a
+     * passed `tx`) and on large selections held the interactive connection open
+     * long enough to trip Prisma's 5s default → P2028 (Sentry SHELF-WEBAPP-1KQ). */
+    const reservedIds = bookings
+      .filter((b) => b.status === BookingStatus.RESERVED)
+      .map((b) => b.id);
+    const completeIds = bookings
+      .filter((b) => b.status === BookingStatus.COMPLETE)
+      .map((b) => b.id);
+
+    let archivedCompleteCount = 0;
+    if (completeIds.length > 0) {
+      const { count } = await db.booking.updateMany({
+        // status guard: only rows still COMPLETE are archived, in case one was
+        // transitioned between the findMany above and this write.
+        where: {
+          id: { in: completeIds },
+          organizationId,
+          status: BookingStatus.COMPLETE,
+        },
+        data: { status: BookingStatus.ARCHIVED },
+      });
+      archivedCompleteCount = count;
+    }
+
+    let archivedReservedCount = 0;
+    if (reservedIds.length > 0) {
+      const { count } = await db.booking.updateMany({
+        // status guard: a reservation checked out between the findMany above and
+        // this write is no longer RESERVED, so it is skipped — its now
+        // checked-out assets keep their active booking (no orphaned custody).
+        where: {
+          id: { in: reservedIds },
+          organizationId,
+          status: BookingStatus.RESERVED,
+        },
+        data: { status: BookingStatus.ARCHIVED, archivedWithoutCheckin: true },
+      });
+      archivedReservedCount = count;
+    }
 
     /**
-     * Per-booking lifecycle event — mirrors the single `archiveBooking`
-     * emission so reports treat bulk + single archival identically.
-     * Best-effort (same as the notes below); the updateMany already
-     * committed so a recordEvents failure cannot undo the archival.
+     * Reconcile the follow-up writes (activity events, transition notes,
+     * scheduler cleanup) against the rows the status-guarded updateMany
+     * ACTUALLY flipped — not the rows originally fetched. If a booking's status
+     * changed between the findMany and the guarded write (e.g. a RESERVED
+     * booking was checked out mid-batch), its row is skipped by the guard;
+     * without this we'd log a phantom "archived" note + BOOKING_ARCHIVED event
+     * for a booking that is still ONGOING, and cancel a scheduler it still
+     * needs. Every eligible booking is COMPLETE or past-due RESERVED (asserted
+     * above), so the candidate count equals `bookings.length`; when the archived
+     * count matches, no row was skipped and we reuse `bookings` without an extra
+     * read. Only the rare concurrent-transition case pays the reconciling query.
      */
+    const archivedCount = archivedCompleteCount + archivedReservedCount;
+    let archivedBookings = bookings;
+    if (archivedCount !== completeIds.length + reservedIds.length) {
+      const archivedRows = await db.booking.findMany({
+        where: {
+          id: { in: bookings.map((b) => b.id) },
+          organizationId,
+          status: BookingStatus.ARCHIVED,
+        },
+        select: { id: true },
+      });
+      const archivedIds = new Set(archivedRows.map((b) => b.id));
+      archivedBookings = bookings.filter((b) => archivedIds.has(b.id));
+    }
+
+    /**
+     * One BOOKING_ARCHIVED activity event per booking ACTUALLY archived —
+     * parity with the single `archiveBooking` path so reports counting
+     * BOOKING_ARCHIVED treat bulk + single archival identically. Best-effort:
+     * the updateMany already committed, so a recordEvents failure can't undo it.
+     * `recordEvents([])` is a no-op, so an all-skipped batch writes nothing. */
     await recordEvents(
-      bookings.map((booking) => ({
+      archivedBookings.map((booking) => ({
         organizationId,
         actorUserId: userId ?? null,
         action: "BOOKING_ARCHIVED" as const,
@@ -9590,7 +16543,7 @@ export async function bulkArchiveBookings({
       }))
     );
 
-    /** Create booking status transition notes for each booking.
+    /** Create booking status transition notes for each archived booking.
      *
      * Done AFTER the status update, NOT inside an interactive transaction:
      * `createStatusTransitionNote` writes via the global `db` (not a passed
@@ -9598,7 +16551,7 @@ export async function bulkArchiveBookings({
      * the status change. It only held the interactive-tx connection open across
      * N sequential note writes, which on large selections blew past Prisma's
      * 5s default and aborted the commit with P2028 (Sentry SHELF-WEBAPP-1KQ). */
-    for (const booking of bookings) {
+    for (const booking of archivedBookings) {
       await createStatusTransitionNote({
         bookingId: booking.id,
         organizationId,
@@ -9609,8 +16562,8 @@ export async function bulkArchiveBookings({
       });
     }
 
-    /** Cancel any active schedulers */
-    await Promise.all(bookings.map((b) => cancelScheduler(b)));
+    /** Cancel active schedulers only for the bookings actually archived. */
+    await Promise.all(archivedBookings.map((b) => cancelScheduler(b)));
   } catch (cause) {
     const isShelfError = isLikeShelfError(cause);
 
@@ -9636,20 +16589,33 @@ export async function bulkCancelBookings({
   userId,
   hints,
   currentSearchParams,
+  list,
+  access,
 }: {
   bookingIds: Booking["id"][];
   organizationId: Organization["id"];
   userId: User["id"];
   hints: ClientHint;
   currentSearchParams?: string | null;
+  /** The list a select-all stands for; `null` when the form named none, which a select-all refuses */
+  list?: BookingsList | null;
+  /** Caller's access, which decides whether ownership scoping applies */
+  access: RoleAccess;
 }) {
   try {
-    /** If all are selected in the list, then we have to consider filter */
-    const where: Prisma.BookingWhereInput = bookingIds.includes(
-      ALL_SELECTED_KEY
-    )
-      ? getBookingWhereInput({ currentSearchParams, organizationId })
-      : { id: { in: bookingIds }, organizationId };
+    /**
+     * Scopes to the filters the user had applied AND to the bookings they are
+     * allowed to act on. Without the ownership half, a restricted caller could
+     * delete every booking in the workspace with one request.
+     */
+    const where = await getBulkBookingsWhereInput({
+      bookingIds,
+      organizationId,
+      currentSearchParams,
+      list,
+      access,
+      userId,
+    });
 
     const [bookings, user] = await Promise.all([
       db.booking.findMany({
@@ -9661,6 +16627,9 @@ export async function bulkCancelBookings({
               asset: {
                 select: {
                   id: true,
+                  // `type` decides whether a standalone slice releases this
+                  // asset's kits — see `getKitIdsToAcquire`.
+                  type: true,
                   assetKits: { select: { kitId: true } },
                 },
               },
@@ -9677,6 +16646,25 @@ export async function bulkCancelBookings({
         } satisfies Prisma.UserSelect,
       }),
     ]);
+
+    // A foreign id is filtered out by the ownership scope above; refuse the
+    // selection instead of acting on the rest and reporting success.
+    assertBulkSelectionWithinOwnership({
+      bookingIds,
+      foundIds: bookings.map((booking) => booking.id),
+      access,
+      action: "cancel",
+    });
+    await assertSelectAllWithinOwnership({
+      bookingIds,
+      matchedCount: bookings.length,
+      organizationId,
+      currentSearchParams,
+      list,
+      access,
+      userId,
+      action: "cancel",
+    });
 
     /** Bookings with any of these statuses cannot be cancelled */
     const unavailableBookingStatus: BookingStatus[] = [
@@ -9726,31 +16714,44 @@ export async function bulkCancelBookings({
         const allAssets = ongoingOrOverdueBookings.flatMap((b) =>
           b.bookingAssets.map((ba) => ba.asset)
         );
-        const allKitIds = allAssets
-          .map((a) => a.assetKits?.[0]?.kitId)
-          .filter((id): id is string => Boolean(id));
+        // Union of live membership and booking-slice provenance — a kit whose
+        // member was detached mid-booking is invisible to membership alone.
+        // Release mirrors acquire — see the twin in `checkinBooking`.
+        const uniqueKitIds = new Set(
+          await getKitIdsToAcquire({
+            slices: ongoingOrOverdueBookings.flatMap((b) => b.bookingAssets),
+            organizationId,
+          })
+        );
 
-        const uniqueKitIds = new Set(allKitIds);
-
-        /** Making assets available */
-        await tx.asset.updateMany({
-          where: { id: { in: allAssets.map((a) => a.id) }, organizationId },
-          data: { status: AssetStatus.AVAILABLE },
+        /**
+         * Per asset, never a blanket flip. An asset on one of these bookings
+         * can also sit on a live booking outside the selection, or be held by
+         * a Custody row, and writing AVAILABLE across the set strips those
+         * signals — putting an asset someone is still holding back into the
+         * pool for anyone to book.
+         *
+         * Runs after the status write above, so the selection is already
+         * CANCELLED and out of the ONGOING/OVERDUE count; passing the ids keeps
+         * the exclusion explicit rather than resting on that ordering.
+         */
+        await reconcileAssetStatusForBookingExit({
+          tx,
+          assetIds: allAssets.map((a) => a.id),
+          excludeBookingIds: bookings.map((b) => b.id),
+          organizationId,
         });
 
         /** Making kits available */
-        await tx.kit.updateMany({
-          where: { id: { in: [...uniqueKitIds] }, organizationId },
-          data: { status: KitStatus.AVAILABLE },
+        await releaseCheckedOutKits(tx, {
+          kitIds: [...uniqueKitIds],
+          organizationId,
+          excludeBookingIds: bookings.map((b) => b.id),
         });
       }
 
       /** Making notes for all the assets */
-      const actor = wrapUserLinkForNote({
-        id: userId,
-        firstName: user?.firstName,
-        lastName: user?.lastName,
-      });
+      const actor = wrapUserLinkForNote({ ...user, id: userId });
       const notesData = bookings
         .map((b) =>
           b.bookingAssets.map((ba) => ({
@@ -9802,6 +16803,13 @@ export async function bulkCancelBookings({
       bookingsWithSchedulerReference.map((booking) => cancelScheduler(booking))
     );
 
+    // Resolved once so every cancelled booking's email names the same person
+    // and moment.
+    const actor =
+      bookings.length > 0
+        ? await resolveBookingEmailActor({ userId, label: "Cancelled by" })
+        : undefined;
+
     // Resolve notification recipients and send personalized cancellation emails
     for (const b of bookings) {
       const recipients = await getBookingNotificationRecipients({
@@ -9817,24 +16825,24 @@ export async function bulkCancelBookings({
           b.custodianTeamMember?.name ||
           "";
 
-        const text = cancelledBookingEmailContent({
-          bookingName: b.name,
-          assetsCount: b._count.bookingAssets,
-          custodian,
-          from: b.from as Date,
-          to: b.to as Date,
-          bookingId: b.id,
-          hints,
-          customEmailFooter: b.organization.customEmailFooter,
-        });
-
         await sendBookingEmailToAllRecipients({
           recipients,
           booking: b,
           subject: `❌ Booking cancelled (${b.name}) - shelf.nu`,
-          textContent: text,
-          heading: `Your booking has been cancelled: "${b.name}"`,
+          buildText: (textArgs) =>
+            cancelledBookingEmailContent({
+              ...textArgs,
+              bookingName: b.name,
+              assetsCount: b._count.bookingAssets,
+              custodian,
+              from: b.from as Date,
+              to: b.to as Date,
+              bookingId: b.id,
+              customEmailFooter: b.organization.customEmailFooter,
+            }),
+          buildHeading: () => `Your booking has been cancelled: "${b.name}"`,
           hints,
+          actor,
         });
       }
     }
@@ -9873,8 +16881,9 @@ async function createNotesForScannedAssetsAndKits({
   // Fetch assets and kits in parallel for better performance.
   // type+unitOfMeasure widen the select so per-asset notes can prefix
   // a qty-tracked unit count via wrapAssetWithCountForNote.
-  const [assets, kits, bookedRows] = await Promise.all([
+  const [assets, scannedKits, bookedRows] = await Promise.all([
     db.asset.findMany({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: note title lookup for assets already scanned onto the booking
       where: { id: { in: assetIds }, organizationId },
       select: {
         id: true,
@@ -9916,6 +16925,13 @@ async function createNotesForScannedAssetsAndKits({
   }
   const assetById = new Map(assets.map((a) => [a.id, a]));
 
+  // A kit is named in the notes only when one of its members arrived on this
+  // call: re-scanning a kit the booking already holds adds nothing.
+  const arrivedAssetIds = new Set(assetIds);
+  const kits = scannedKits.filter((kit) =>
+    kit.assetKits.some((ak) => arrivedAssetIds.has(ak.assetId))
+  );
+
   // Create a map of asset ID to kit name for assets that came from kits
   const assetIdToKitName = new Map<string, string>();
   kits.forEach((kit) => {
@@ -9939,11 +16955,7 @@ async function createNotesForScannedAssetsAndKits({
       displayName: true,
     } satisfies Prisma.UserSelect,
   });
-  const userForNotes = {
-    firstName: user?.firstName || "",
-    lastName: user?.lastName || "",
-    id: userId,
-  };
+  const userForNotes = { ...user, id: userId };
 
   // Create booking notes
   // why: out of this rule — multi-asset popover, per-asset qty deferred.
@@ -10087,12 +17099,14 @@ async function createNotesForScannedAssetsAndKits({
  * {@link fulfilModelRequestsAndCheckout}.
  *
  * Performs the pure write-side of "add scanned assets":
- *   1. For every scanned asset, calls `materializeModelRequestForAsset` so
- *      that any outstanding `BookingModelRequest` for the asset's model is
- *      decremented (or deleted when it hits zero). Failures here roll the
+ *   1. Calls {@link fulfilModelRequestsForAssets} so any outstanding
+ *      `BookingModelRequest` for a scanned asset's model is decremented.
+ *      `updateBookingAssets` calls the same helper, so scanning and picking
+ *      from a list discharge reservations identically. Failures here roll the
  *      whole transaction back — the caller never ends up with concrete
  *      `BookingAsset` rows alongside a stale request count.
- *   2. Creates the `BookingAsset` rows on the booking.
+ *   2. Creates the `BookingAsset` rows on the booking, stamping
+ *      `bookingModelRequestId` on the row that discharged each reservation.
  *   3. If the booking is already ONGOING/OVERDUE, syncs the newly added
  *      asset + kit rows to CHECKED_OUT status so they reflect reality.
  *
@@ -10111,7 +17125,12 @@ async function createNotesForScannedAssetsAndKits({
  * @param args.bookingId - Booking being modified
  * @param args.organizationId - Organization scope for the booking + assets
  * @param args.userId - User performing the scan (attributed on materialized logs)
- * @returns `{ id, name, status }` of the updated booking
+ * @returns The updated booking's `{ id, name, status }`, `addedAssetIds` (assets
+ *   that gained a new `BookingAsset` row on this call) and `claimedAssetIds`
+ *   (assets whose pre-existing row answered a reservation without a new row).
+ *   A scan that touched nothing new returns both arrays empty.
+ *   `archivedKitMembersLeftOut` counts the archived members of scanned kits
+ *   that were left out, for the caller's success message.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function addScannedAssetsToBookingWithinTx(
@@ -10123,6 +17142,7 @@ async function addScannedAssetsToBookingWithinTx(
     userId,
     quantities = {},
     kitSlices = [],
+    callerAccess,
   }: {
     /** Directly-scanned (standalone) asset IDs — written with `assetKitId = null`. */
     assetIds: Asset["id"][];
@@ -10152,11 +17172,14 @@ async function addScannedAssetsToBookingWithinTx(
      * partial unique. The slice's quantity defaults to the kit's
      * `AssetKit.quantity` when omitted.
      */
-    kitSlices?: Array<{
-      assetId: string;
-      assetKitId: string;
-      quantity?: number;
-    }>;
+    kitSlices?: ScannedKitSliceSpec[];
+    /**
+     * The adding caller's access. When given, its add-items rule is checked
+     * against the status read under the row lock, so a booking that leaves
+     * the caller's add statuses after the route's check still refuses. The
+     * fulfil-and-checkout flow omits it: it runs the check-out rule instead.
+     */
+    callerAccess?: RoleAccess;
   }
 ) {
   // The deduped union of standalone + kit-slice asset ids. Model-request
@@ -10189,6 +17212,163 @@ async function addScannedAssetsToBookingWithinTx(
     tx
   );
 
+  // Closed bookings refuse every caller, and only a read inside this
+  // transaction sees the status the write lands on. The routes gate the
+  // caller's ownership and role-specific add rule; this is the backstop.
+  //
+  // Locked rather than merely re-read: this runs inside the caller's
+  // transaction, and a plain SELECT there takes no lock under READ COMMITTED.
+  const scanTargetStatus = await lockBookingForStatusCheck(
+    tx,
+    bookingId,
+    organizationId
+  );
+  assertBookingIsOpen({
+    status: scanTargetStatus,
+    operation: "add scanned items to",
+    bookingId,
+  });
+  if (callerAccess) {
+    assertCanAddBookingItems({
+      access: callerAccess,
+      bookingStatus: scanTargetStatus,
+    });
+  }
+
+  /**
+   * The window every overlap guard below measures against, read once through
+   * `tx` so the conflict guard, the quantity-tracked pool guard and the model
+   * pool guard all judge the same dates. Null ends mean a draft without dates:
+   * nothing overlaps, so the windowed guards skip.
+   */
+  const bookingWindow: { from: Date | null; to: Date | null } | null =
+    await tx.booking.findFirst({
+      where: { id: bookingId, organizationId },
+      select: { from: true, to: true },
+    });
+
+  /**
+   * Archived assets (issue #382). A directly scanned one is refused by name, so
+   * the operator can take it off the list. A scanned kit is booked with its
+   * active members, as every other kit-add path does: its archived members are
+   * left out and counted for the caller's message. A kit with no active member
+   * left has nothing to book and is refused.
+   */
+  let archivedKitMembersLeftOut = 0;
+  if (allScannedAssetIds.length > 0) {
+    // Row-lock first, the same lock the archive services and the other booking
+    // writes take: a plain read here could pass, then an archive commit before
+    // the BookingAsset rows below are written. Taken after the booking lock
+    // above, so the order matches `updateBookingAssets` (booking, then assets).
+    await lockAssetsForArchiveGuard(tx, allScannedAssetIds, organizationId);
+    await assertAssetsAreNotArchived(
+      {
+        assetIds,
+        organizationId,
+        fix: "remove-from-list",
+        actorUserId: userId,
+      },
+      tx
+    );
+
+    // Counted first, as the archived guard does: the common scan has no
+    // archived member, and the ids are read only when there is one.
+    const kitMemberIds = [...new Set(kitSlices.map((slice) => slice.assetId))];
+    const archivedKitMemberCount =
+      kitMemberIds.length > 0
+        ? await tx.asset.count({
+            where: {
+              id: { in: kitMemberIds },
+              organizationId,
+              archivedAt: { not: null },
+            },
+          })
+        : 0;
+    const archivedKitMemberIds = new Set<string>(
+      archivedKitMemberCount > 0
+        ? (
+            await tx.asset.findMany({
+              where: {
+                id: { in: kitMemberIds },
+                organizationId,
+                archivedAt: { not: null },
+              },
+              select: { id: true },
+            })
+          ).map((asset: { id: string }) => asset.id)
+        : []
+    );
+
+    if (archivedKitMemberIds.size > 0) {
+      // Each slice's kit is read from its `AssetKit` row, which
+      // `assertAssetKitsBelongToOrg` has proven in-org. The spec's `kitId` is
+      // client-supplied and may be blank or foreign, and grouping by it would
+      // let an emptied kit pass with no slices left to book.
+      const kitIdByAssetKitId = new Map<string, string>(
+        (
+          await tx.assetKit.findMany({
+            // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: every id was proven in-org by assertAssetKitsBelongToOrg above
+            where: {
+              id: {
+                in: [
+                  ...new Set(
+                    kitSlices.map((slice) => slice.assetKitId).filter(Boolean)
+                  ),
+                ],
+              },
+            },
+            select: { id: true, kitId: true },
+          })
+        ).map((ak: { id: string; kitId: string }) => [ak.id, ak.kitId])
+      );
+      const kitIdOf = (slice: ScannedKitSliceSpec) =>
+        kitIdByAssetKitId.get(slice.assetKitId);
+
+      const activeKitSlices = kitSlices.filter(
+        (slice) => !archivedKitMemberIds.has(slice.assetId)
+      );
+      const kitIdsStillBooked = new Set(activeKitSlices.map(kitIdOf));
+      const emptiedKitIds = [
+        ...new Set(
+          kitSlices
+            .filter((slice) => archivedKitMemberIds.has(slice.assetId))
+            .map(kitIdOf)
+            .filter(
+              (kitId): kitId is string =>
+                Boolean(kitId) && !kitIdsStillBooked.has(kitId)
+            )
+        ),
+      ];
+      if (emptiedKitIds.length > 0) {
+        const emptiedKits: { id: string; name: string }[] =
+          await tx.kit.findMany({
+            where: { id: { in: emptiedKitIds }, organizationId },
+            select: { id: true, name: true },
+          });
+        throw new ShelfError({
+          cause: null,
+          title: "Kit has no active assets",
+          message: kitsWithoutActiveAssetsRefusal({
+            kits: emptiedKits.map((kit) => ({
+              name: kit.name,
+              hasArchivedAssets: true,
+            })),
+            action: "booking",
+          }),
+          additionalData: {
+            bookingId,
+            kitIdsWithoutActiveAssets: emptiedKits.map((kit) => kit.id),
+          },
+          label: "Booking",
+          status: 400,
+          shouldBeCaptured: false,
+        });
+      }
+      archivedKitMembersLeftOut = archivedKitMemberIds.size;
+      kitSlices = activeKitSlices;
+    }
+  }
+
   /**
    * Conflict guard (mirrors the reserve/checkout guards): reject the add
    * when any scanned asset (standalone OR kit-driven) is already RESERVED
@@ -10196,74 +17376,95 @@ async function addScannedAssetsToBookingWithinTx(
    * booking's from/to. Runs inside the same tx as the writes below so the
    * read-then-write is atomic against concurrent reservations.
    *
-   * Adapted from the main-side guard that previously lived inline in
-   * `addScannedAssetsToBooking` (resolved during 2026-06-25 merge): we
-   * already have `allScannedAssetIds` (union of standalone + kit-driven),
-   * so we skip main's `tx.asset.findMany({where: {kitId: ...}})` expansion
-   * — pre-pivot main relied on `Asset.kitId`, which Phase 4a removed.
+   * `allScannedAssetIds` already unions standalone and kit-driven ids, so no
+   * kit-membership expansion is needed here.
    */
-  if (allScannedAssetIds.length > 0) {
-    const conflictBooking = await tx.booking.findFirst({
-      where: { id: bookingId, organizationId },
-      select: { from: true, to: true },
-    });
-
-    if (conflictBooking?.from && conflictBooking?.to) {
-      const candidates = await tx.asset.findMany({
-        where: { id: { in: allScannedAssetIds }, organizationId },
-        select: {
-          id: true,
-          title: true,
-          status: true,
-          // Post-Phase-3a: bookings reach assets through the BookingAsset
-          // pivot. `hasAssetBookingConflicts` reads `asset.bookingAssets`
-          // (not `asset.bookings`) — the conflict-conditions helper now
-          // returns `Prisma.Asset$bookingAssetsArgs` accordingly.
-          bookingAssets: {
-            ...createBookingConflictConditions({
-              currentBookingId: bookingId,
-              fromDate: conflictBooking.from,
-              toDate: conflictBooking.to,
-            }),
-            select: {
-              booking: { select: { id: true, status: true } },
-            },
+  if (
+    allScannedAssetIds.length > 0 &&
+    bookingWindow?.from &&
+    bookingWindow.to
+  ) {
+    const candidates = await tx.asset.findMany({
+      where: {
+        id: { in: allScannedAssetIds },
+        organizationId,
+        archivedAt: null,
+      },
+      select: {
+        id: true,
+        title: true,
+        status: true,
+        // why: `hasAssetBookingConflicts` exempts QUANTITY_TRACKED assets only
+        // when it can see the type. Without it, a pool another booking holds a
+        // few units of reads as booked, and a kit sharing that pool with a
+        // reserved sibling kit is refused. Units are judged further down: a
+        // kit's own slice by the kit rule, standalone units by the pool guard.
+        type: true,
+        // Bookings reach assets through the `BookingAsset` pivot, which is
+        // what `hasAssetBookingConflicts` reads and what the
+        // conflict-conditions helper returns.
+        bookingAssets: {
+          ...createBookingConflictConditions({
+            currentBookingId: bookingId,
+            fromDate: bookingWindow.from,
+            toDate: bookingWindow.to,
+          }),
+          select: {
+            booking: { select: { id: true, status: true } },
           },
         },
+      },
+    });
+
+    // Typed locally because `tx` is `any` (the dynamic extended Prisma
+    // client's tx type doesn't reduce to `Prisma.TransactionClient`).
+    type ConflictCandidate = {
+      id: string;
+      title: string;
+      status: string;
+      type: string;
+      bookingAssets: Array<{ booking: { id: string; status: string } }>;
+    };
+    const conflicted = (candidates as ConflictCandidate[]).filter((asset) =>
+      hasAssetBookingConflicts(asset, bookingId)
+    );
+
+    if (conflicted.length > 0) {
+      const conflictedNames = conflicted
+        .slice(0, 3)
+        .map((asset) => asset.title)
+        .join(", ");
+      const additionalCount = conflicted.length > 3 ? conflicted.length - 3 : 0;
+      const additionalText =
+        additionalCount > 0 ? ` and ${additionalCount} more` : "";
+
+      throw new ShelfError({
+        cause: null,
+        label,
+        title: "Booking conflict",
+        message: `Cannot add to booking. Some assets are already booked or checked out for an overlapping period: ${conflictedNames}${additionalText}. Please remove them and try again.`,
+        status: 400,
+        shouldBeCaptured: false,
       });
-
-      // Typed locally because `tx` is `any` (the dynamic extended Prisma
-      // client's tx type doesn't reduce to `Prisma.TransactionClient`).
-      type ConflictCandidate = {
-        id: string;
-        title: string;
-        status: string;
-        bookingAssets: Array<{ booking: { id: string; status: string } }>;
-      };
-      const conflicted = (candidates as ConflictCandidate[]).filter((asset) =>
-        hasAssetBookingConflicts(asset, bookingId)
-      );
-
-      if (conflicted.length > 0) {
-        const conflictedNames = conflicted
-          .slice(0, 3)
-          .map((asset) => asset.title)
-          .join(", ");
-        const additionalCount =
-          conflicted.length > 3 ? conflicted.length - 3 : 0;
-        const additionalText =
-          additionalCount > 0 ? ` and ${additionalCount} more` : "";
-
-        throw new ShelfError({
-          cause: null,
-          label,
-          title: "Booking conflict",
-          message: `Cannot add to booking. Some assets are already booked or checked out for an overlapping period: ${conflictedNames}${additionalText}. Please remove them and try again.`,
-          status: 400,
-          shouldBeCaptured: false,
-        });
-      }
     }
+
+    // The client-supplied `kitId` is untrusted, so each kit is resolved from
+    // its org-proven membership row rather than from the spec.
+    await assertKitsNotBookedElsewhere(
+      {
+        slices: kitSlices.map((slice) => ({
+          assetId: slice.assetId,
+          assetKitId: slice.assetKitId,
+          sourceKitId: null,
+        })),
+        bookingId,
+        from: bookingWindow.from,
+        to: bookingWindow.to,
+        organizationId,
+        action: "add to booking",
+      },
+      tx
+    );
   }
 
   /**
@@ -10289,7 +17490,11 @@ async function addScannedAssetsToBookingWithinTx(
   const scannedAssetsMeta: ScannedAssetMeta[] =
     allScannedAssetIds.length > 0
       ? await tx.asset.findMany({
-          where: { id: { in: allScannedAssetIds }, organizationId },
+          where: {
+            id: { in: allScannedAssetIds },
+            organizationId,
+            archivedAt: null,
+          },
           select: {
             id: true,
             title: true,
@@ -10303,16 +17508,273 @@ async function addScannedAssetsToBookingWithinTx(
     scannedAssetsMeta.map((a) => [a.id, a])
   );
 
-  for (const assetId of allScannedAssetIds) {
-    const meta = scannedAssetsMetaById.get(assetId);
-    if (!meta) continue; // asset not found in org — caught later by FK
-    await materializeModelRequestForAsset({
-      bookingId,
-      asset: meta,
-      organizationId,
-      userId,
-      tx,
-    });
+  /**
+   * Which scanned assets already hold a STANDALONE row on this booking.
+   *
+   * Same rule as `updateBookingAssets`: a reservation promises LOOSE units, so
+   * only a NEW standalone row discharges one. Passing every scanned id let the
+   * same reservation be discharged twice for one physical asset — scan a kit
+   * whose member is a match (kit row, 1 of 2), then scan that member's own QR
+   * (standalone row). The two partial uniques let both rows coexist, so it
+   * decremented again to 2/2, the check-out guard passed, and the booking left
+   * with one camera where two were promised. The mobile
+   * `bookings.add-scanned-assets` endpoint reaches this same code, so it was
+   * reachable from the app too.
+   */
+  const preExistingStandaloneRows: { assetId: string; quantity: number }[] =
+    allScannedAssetIds.length > 0
+      ? await tx.bookingAsset.findMany({
+          where: {
+            bookingId,
+            assetId: { in: allScannedAssetIds },
+            assetKitId: null,
+          },
+          // `quantity` feeds the availability guard below: what this booking
+          // will hold after the scan is what competes for the pool, and its
+          // own existing rows are excluded from `bookable`.
+          select: { assetId: true, quantity: true },
+        })
+      : [];
+
+  const preExistingStandaloneScannedIds = new Set<string>(
+    preExistingStandaloneRows.map((row) => row.assetId)
+  );
+
+  /**
+   * Kit memberships to actually write, dropping those whose INDIVIDUAL member
+   * the booking already holds loose.
+   *
+   * An INDIVIDUAL asset is one physical unit, and the two partial uniques let
+   * a standalone row and a kit-driven row for the same `(booking, asset)`
+   * coexist — so without this the booking would hold that one camera twice,
+   * inflating every count and its availability pressure on other bookings.
+   * The same rule `updateBookingAssets` applies to its own slices.
+   *
+   * QUANTITY_TRACKED is deliberately exempt: a free-pool slice legitimately
+   * coexists with kit slices, bounded on the separate kit axis.
+   * @see {@link file://./../../../../../.claude/rules/kit-members-via-kit-slices.md}
+   *
+   * The skipped member is still on the booking through the row it already
+   * has, so callers checking a scanned kit out must keep naming it.
+   */
+  const effectiveKitSlices = kitSlices.filter(
+    (slice) =>
+      !(
+        preExistingStandaloneScannedIds.has(slice.assetId) &&
+        scannedAssetsMetaById.get(slice.assetId)?.type === AssetType.INDIVIDUAL
+      )
+  );
+
+  /**
+   * Quantity-tracked standalone scans draw on the shared pool, and nothing
+   * above measures it: the conflict guard is INDIVIDUAL semantics — one asset
+   * can be in one booking at a time — whereas a quantity-tracked asset
+   * legitimately sits in many at once, bounded only by the sum of their
+   * quantities. Without this the same units can be promised twice.
+   *
+   * Kit slices are deliberately excluded, matching `updateBookingAssets`: a
+   * kit-driven row is committed to its kit and bounded on the separate kit
+   * axis, not the loose pool.
+   */
+  const qtScannedAssetIds = [
+    ...new Set(
+      assetIds.filter(
+        (assetId) =>
+          scannedAssetsMetaById.get(assetId)?.type ===
+          AssetType.QUANTITY_TRACKED
+      )
+    ),
+  ];
+
+  if (qtScannedAssetIds.length > 0) {
+    const preExistingQtyByAssetId = new Map<string, number>(
+      preExistingStandaloneRows.map((row) => [row.assetId, row.quantity])
+    );
+
+    // Sorted so two transactions touching the same assets acquire them in
+    // one global order and cannot deadlock by taking them in opposite ones.
+    // Mirrors `updateBookingAssets` and the checkout guard.
+    for (const assetId of [...qtScannedAssetIds].sort()) {
+      await lockAssetForQuantityUpdate(tx, assetId, organizationId);
+    }
+
+    await assertAssetQuantitiesAvailable(
+      qtScannedAssetIds.map((assetId) => {
+        const meta = scannedAssetsMetaById.get(assetId);
+        return {
+          assetId,
+          // `bookable` excludes this booking, so the figure measured against
+          // it is everything this booking will hold once the scan lands —
+          // the units already on it plus the ones being added now.
+          requestedQuantity:
+            (preExistingQtyByAssetId.get(assetId) ?? 0) +
+            (quantities[assetId] ?? 1),
+          assetTitle: meta?.title ?? "",
+          unitOfMeasure: meta?.unitOfMeasure,
+        };
+      }),
+      {
+        organizationId,
+        tx,
+        window:
+          bookingWindow?.from && bookingWindow?.to
+            ? { from: bookingWindow.from, to: bookingWindow.to }
+            : null,
+        excludeBookingId: bookingId,
+      }
+    );
+  }
+
+  /**
+   * Scans that gain a standalone row on this call: the ones this booking does
+   * not already hold loose. Deduped, because one asset owns at most one
+   * standalone row per booking.
+   *
+   * `assertAssetsBelongToOrg` above has already refused a foreign id, so an
+   * asset missing from `scannedAssetsMetaById` cannot reach here.
+   */
+  const newStandaloneScans = [...new Set(assetIds)]
+    .filter((assetId) => !preExistingStandaloneScannedIds.has(assetId))
+    .map((assetId) => scannedAssetsMetaById.get(assetId))
+    .filter((meta): meta is ScannedAssetMeta => meta !== undefined);
+
+  /**
+   * `AssetKit` memberships among the scanned slices that this booking already
+   * holds. A membership already on the booking has already had whatever
+   * effect it was going to have, so re-scanning its kit is a no-op: its slice
+   * is dropped from `newKitSlices` below. The create is a plain insert, and a
+   * slice written twice collides with `BookingAsset_kit_unique`
+   * (`bookingId`, `assetKitId`).
+   */
+  const scannedAssetKitIds = [
+    ...new Set(effectiveKitSlices.map((slice) => slice.assetKitId)),
+  ];
+  const preExistingScannedAssetKitIds = new Set<string>(
+    scannedAssetKitIds.length > 0
+      ? (
+          await tx.bookingAsset.findMany({
+            where: { bookingId, assetKitId: { in: scannedAssetKitIds } },
+            select: { assetKitId: true },
+          })
+        ).map((row: { assetKitId: string | null }) => row.assetKitId)
+      : []
+  );
+
+  /**
+   * The kit slices this call will actually write: `effectiveKitSlices` minus
+   * any membership the booking already holds. Every downstream read of the
+   * scanned kit slices (fulfilment candidates, the `BookingAsset` create, the
+   * emitted events, the per-asset quantity summary) must use this set, not
+   * `effectiveKitSlices` directly, which still contains memberships the
+   * booking already holds.
+   */
+  const newKitSlices = effectiveKitSlices.filter(
+    (slice) => !preExistingScannedAssetKitIds.has(slice.assetKitId)
+  );
+
+  /**
+   * Provenance for the rows created below: which reservation each asset
+   * discharged, and on which row.
+   *
+   * A unit of a model satisfies a "N units, any units" promise whether it is
+   * scanned loose or arrives inside a scanned kit. At most one request per
+   * asset, incremented by exactly one unit, so exactly ONE of the rows created
+   * for that asset may carry the stamp — the `stampedAssetIds` guard at the
+   * create site enforces that, and the standalone rows are built first so they
+   * win when an asset somehow arrives both ways.
+   *
+   * INDIVIDUAL only for the kit half: a QUANTITY_TRACKED asset is not a model
+   * unit (`getAssetModelAvailability` counts the pool INDIVIDUAL-only), and it
+   * is the one type whose standalone and kit rows legitimately coexist, so it
+   * has no single arrival row to stamp.
+   */
+  const newKitDrivenScans = newKitSlices
+    .map((slice) => scannedAssetsMetaById.get(slice.assetId))
+    .filter((meta): meta is ScannedAssetMeta => meta !== undefined)
+    .filter((meta) => meta.type === AssetType.INDIVIDUAL);
+
+  // Deduped by asset id: one asset arriving both loose and in a kit on the
+  // same scan is still one physical unit, so it may claim only once. Both
+  // buckets hold the same `scannedAssetsMetaById` object for an asset, so
+  // which duplicate survives is immaterial — only the count is.
+  const fulfilmentCandidates = [
+    ...new Map(
+      [...newStandaloneScans, ...newKitDrivenScans].map((meta) => [
+        meta.id,
+        meta,
+      ])
+    ).values(),
+  ];
+
+  /**
+   * Units scanned by name claim the same pool that other bookings' model
+   * reservations draw from. Measured over the same INDIVIDUAL candidates
+   * fulfilment draws from, kit-driven arrivals included: a model pool has ONE
+   * axis, and `getAssetModelAvailability` counts every INDIVIDUAL
+   * `BookingAsset` row of the model without looking at `assetKitId`, so a unit
+   * arriving inside a scanned kit leaves the loose pool exactly as a loose one
+   * does. Anything allowed to discharge a reservation has to be measured
+   * against that pool, or it answers this booking's promise while going
+   * unmeasured against everyone else's.
+   *
+   * Quantity-tracked scans stay out: they are judged by the pool guard above
+   * and are not model units. Runs before fulfilment, while this booking's own
+   * requests are still outstanding and therefore still exempt their model.
+   */
+  await assertModelUnitsNotReservedElsewhere({
+    assets: fulfilmentCandidates.filter(
+      (meta) => meta.type === AssetType.INDIVIDUAL
+    ),
+    bookingId,
+    bookingStatus: scanTargetStatus,
+    organizationId,
+    from: bookingWindow?.from,
+    to: bookingWindow?.to,
+    tx,
+  });
+
+  const modelRequestIdByAssetId = await fulfilModelRequestsForAssets({
+    bookingId,
+    assets: fulfilmentCandidates,
+    organizationId,
+    userId,
+    tx,
+  });
+
+  /**
+   * Scans whose standalone row was already here get to answer a reservation
+   * too, if that row carries no stamp.
+   *
+   * They are deliberately absent from `fulfilmentCandidates`: no row is being
+   * inserted for them, and re-sending one must not discharge a reservation a
+   * second time. That rule is about the STAMP, not about the row, so the claim
+   * below re-reads them and takes only the unstamped ones. Without it a unit
+   * added before its reservation existed can never answer it, however often it
+   * is scanned.
+   */
+  const preExistingScannedAssetIds = [...new Set(assetIds)].filter((assetId) =>
+    preExistingStandaloneScannedIds.has(assetId)
+  );
+
+  /**
+   * Assets whose pre-existing row answered a reservation on this call,
+   * without a new `BookingAsset` row. Empty is the ordinary outcome, not a
+   * failure: a rescanned unit that already carries a stamp claims nothing.
+   * Callers use this alongside `addedAssetIds` to tell "counted toward a
+   * reservation" apart from "this scan changed nothing at all".
+   */
+  let claimedAssetIds: string[] = [];
+  if (preExistingScannedAssetIds.length > 0) {
+    const claimedRequestIdByAssetId = await claimUnstampedBookingRows(
+      {
+        bookingId,
+        assetIds: preExistingScannedAssetIds,
+        organizationId,
+        userId,
+      },
+      tx
+    );
+    claimedAssetIds = Array.from(claimedRequestIdByAssetId.keys());
   }
 
   /**
@@ -10324,21 +17786,54 @@ async function addScannedAssetsToBookingWithinTx(
    * the AssetKit rows for the referenced ids and use their quantity as
    * the fallback. An explicit `slice.quantity` (when the caller already
    * resolved it) still wins.
+   *
+   * The same rows also give us the authoritative owning `kitId` for
+   * `BookingAsset.sourceKitId` at no extra round-trip. We prefer it over the
+   * client-supplied `slice.kitId` on purpose: `assetKitId` has already been
+   * proven in-org by `assertAssetKitsBelongToOrg` above, whereas `kitId`
+   * arrives straight from the scan drawer's JSON payload and is written to a
+   * column whose FK accepts ANY kit — including another org's.
    */
   const referencedAssetKitIds = Array.from(
-    new Set(kitSlices.map((s) => s.assetKitId).filter(Boolean))
+    new Set(newKitSlices.map((s) => s.assetKitId).filter(Boolean))
   );
-  const assetKitQtyById = new Map<string, number>(
+  const assetKitById = new Map<string, { quantity: number; kitId: string }>(
     referencedAssetKitIds.length > 0
       ? (
           await tx.assetKit.findMany({
             // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `referencedAssetKitIds` come from the org-scoped booking assets loaded earlier in this flow
             where: { id: { in: referencedAssetKitIds } },
-            select: { id: true, quantity: true },
+            select: { id: true, quantity: true, kitId: true },
           })
-        ).map((ak: { id: string; quantity: number }) => [ak.id, ak.quantity])
+        ).map((ak: { id: string; quantity: number; kitId: string }) => [
+          ak.id,
+          { quantity: ak.quantity, kitId: ak.kitId },
+        ])
       : []
   );
+
+  /**
+   * Assets whose stamp has already been spent. One matched request unit means
+   * exactly one stamped row: an asset arriving as a standalone scan AND via
+   * two kits creates three rows but discharged a single unit, so stamping all
+   * three would make "which assets fulfilled this reservation?" over-count by
+   * two.
+   *
+   * The standalone rows are built first in the `create` array below, so when
+   * an asset somehow arrives both ways in one scan the loose row takes the
+   * stamp and the kit rows get `null` — a stable choice rather than whichever
+   * the array happened to reach first.
+   */
+  const stampedAssetIds = new Set<string>();
+
+  /** Consumes the stamp for `assetId`, returning it at most once. */
+  function takeModelRequestId(assetId: string): string | null {
+    if (stampedAssetIds.has(assetId)) return null;
+    const requestId = modelRequestIdByAssetId.get(assetId);
+    if (!requestId) return null;
+    stampedAssetIds.add(assetId);
+    return requestId;
+  }
 
   const booking = await tx.booking.update({
     where: { id: bookingId, organizationId },
@@ -10351,18 +17846,46 @@ async function addScannedAssetsToBookingWithinTx(
         create: [
           // Standalone scans: `assetKitId = null`. Quantity precedence:
           // explicit per-row qty input → 1 (schema default).
-          ...assetIds.map((id) => ({
-            assetId: id,
-            quantity: quantities[id] ?? 1,
+          //
+          // `newStandaloneScans`, not the raw scan: a scanned asset the
+          // booking already holds loose keeps the row it has. Every caller
+          // sends what the operator scanned, which legitimately includes
+          // units already on the booking, and a second standalone row for one
+          // of them collides with `BookingAsset_manual_unique`.
+          ...newStandaloneScans.map((meta) => ({
+            assetId: meta.id,
+            quantity: quantities[meta.id] ?? 1,
             assetKitId: null,
+            // No kit provenance for a standalone scan — kept explicit so the
+            // "assetKitId null ⇔ sourceKitId null" invariant reads locally.
+            sourceKitId: null,
+            bookingModelRequestId: takeModelRequestId(meta.id),
           })),
-          // Kit-driven slices: `assetKitId` set. Quantity precedence:
-          // explicit slice qty → kit's `AssetKit.quantity` → 1.
-          ...kitSlices.map((slice) => ({
+          // Kit-driven slices: `assetKitId` set, plus `sourceKitId` — the
+          // durable owning-kit pointer that survives the membership row's
+          // deletion. Quantity precedence: explicit slice qty → kit's
+          // `AssetKit.quantity` → 1.
+          //
+          // Kit precedence: the org-validated `AssetKit.kitId` ALWAYS wins;
+          // `slice.kitId` is only a fallback. `||` (not `??`) because a
+          // pre-deploy client that never learned to send `kitId` arrives as
+          // the empty string — writing that would violate the FK, so it
+          // normalizes to NULL. Both falling through is unreachable: a missing
+          // `AssetKit` row means `assetKitId` below fails the FK first.
+          ...newKitSlices.map((slice) => ({
             assetId: slice.assetId,
             quantity:
-              slice.quantity ?? assetKitQtyById.get(slice.assetKitId) ?? 1,
+              slice.quantity ??
+              assetKitById.get(slice.assetKitId)?.quantity ??
+              1,
             assetKitId: slice.assetKitId,
+            sourceKitId:
+              assetKitById.get(slice.assetKitId)?.kitId || slice.kitId || null,
+            // A kit member discharges a reservation like any other unit of
+            // its model. `takeModelRequestId` has already been offered every
+            // standalone row above, so this only fires for an asset that
+            // arrived solely via a kit.
+            bookingModelRequestId: takeModelRequestId(slice.assetId),
           })),
         ],
       },
@@ -10384,17 +17907,36 @@ async function addScannedAssetsToBookingWithinTx(
    * (from `quantities` map, default 1) plus every kit-driven slice qty
    * for the same asset created on this call.
    */
-  if (allScannedAssetIds.length > 0) {
+  /**
+   * The assets this call actually put on the booking.
+   *
+   * Not the raw scan. A scanned asset the booking already holds keeps the row
+   * it has, a kit slice for a member already held loose is dropped, and a kit
+   * slice whose membership the booking already holds is dropped too: none of
+   * these gained anything here. An audit row and a note are claims about what
+   * happened, and "added X to booking" for a unit that was already on it is a
+   * false one: it shows up in the feed, in reports, and in the asset's own
+   * timeline with a quantity it never gained.
+   * @see {@link file://./../../../../../.claude/rules/bulk-event-parity.md}
+   */
+  const addedAssetIds = Array.from(
+    new Set([
+      ...newStandaloneScans.map((meta) => meta.id),
+      ...newKitSlices.map((slice) => slice.assetId),
+    ])
+  );
+
+  if (addedAssetIds.length > 0) {
     const addedQtyByAssetId = new Map<string, number>();
-    for (const sid of assetIds) {
+    for (const meta of newStandaloneScans) {
       addedQtyByAssetId.set(
-        sid,
-        (addedQtyByAssetId.get(sid) ?? 0) + (quantities[sid] ?? 1)
+        meta.id,
+        (addedQtyByAssetId.get(meta.id) ?? 0) + (quantities[meta.id] ?? 1)
       );
     }
-    for (const slice of kitSlices) {
+    for (const slice of newKitSlices) {
       const sliceQty =
-        slice.quantity ?? assetKitQtyById.get(slice.assetKitId) ?? 1;
+        slice.quantity ?? assetKitById.get(slice.assetKitId)?.quantity ?? 1;
       addedQtyByAssetId.set(
         slice.assetId,
         (addedQtyByAssetId.get(slice.assetId) ?? 0) + sliceQty
@@ -10402,7 +17944,7 @@ async function addScannedAssetsToBookingWithinTx(
     }
 
     await recordEvents(
-      allScannedAssetIds.map((assetId) => {
+      addedAssetIds.map((assetId) => {
         const asset = scannedAssetsMetaById.get(assetId);
         return {
           organizationId,
@@ -10428,7 +17970,12 @@ async function addScannedAssetsToBookingWithinTx(
    * flow ({@link partialCheckoutBooking}), never as a side-effect of scanning.
    */
 
-  return booking;
+  // `addedAssetIds` travels out because the notes are written post-commit, by
+  // callers that only hold the raw scan and so cannot tell an arrival from a
+  // rescan. `claimedAssetIds` travels out for the same reason a caller that
+  // wants to report what a scan actually did (as opposed to what it asked
+  // for) needs both sets, not just one.
+  return { booking, addedAssetIds, claimedAssetIds, archivedKitMembersLeftOut };
 }
 
 /**
@@ -10441,6 +17988,12 @@ async function addScannedAssetsToBookingWithinTx(
  * @param {string} params.bookingId - The ID of the booking to update.
  * @param {string} params.organizationId - The organization ID associated with the booking.
  * @param {string} params.userId - The ID of the user performing the action.
+ * @returns The updated `booking` (`{ id, name, status }`), plus:
+ *   - `addedAssetIds` and `claimedAssetIds`, so a caller can tell a genuine
+ *     add apart from a rescan that only answered a reservation, or from a scan
+ *     that changed nothing at all;
+ *   - `archivedKitMembersLeftOut`, the number of archived members of scanned
+ *     kits that were not booked.
  */
 export async function addScannedAssetsToBooking({
   assetIds,
@@ -10450,12 +18003,30 @@ export async function addScannedAssetsToBooking({
   userId,
   quantities = {},
   kitSlices = [],
+  access,
+  inSameTransaction,
 }: {
   assetIds: Asset["id"][];
   kitIds?: string[];
   bookingId: Booking["id"];
   organizationId: Booking["organizationId"];
   userId: string;
+  /**
+   * Further writes that must commit or roll back with the add. Runs inside
+   * the add's transaction, after its writes and before its notes, so a
+   * refusal here leaves the booking exactly as it was.
+   */
+  inSameTransaction?: (
+    tx: Parameters<Parameters<typeof db.$transaction>[0]>[0]
+  ) => Promise<void>;
+  /**
+   * The caller's access. Its add-items rule is enforced inside the write
+   * transaction against the locked booking status. `null` only for a flow
+   * that has already authorized the add under a different rule: fulfil and
+   * check out, which runs the check-out rule. Required so no caller skips the
+   * check by forgetting it.
+   */
+  access: RoleAccess | null;
   /**
    * Per-asset quantity for standalone QUANTITY_TRACKED scans. Missing
    * entries default `BookingAsset.quantity` to 1.
@@ -10465,23 +18036,33 @@ export async function addScannedAssetsToBooking({
    * Kit-driven slice specs — one per `AssetKit` membership scanned.
    * See the within-tx helper for full semantics.
    */
-  kitSlices?: Array<{
-    assetId: string;
-    assetKitId: string;
-    quantity?: number;
-  }>;
+  kitSlices?: ScannedKitSliceSpec[];
 }) {
   try {
+    // A scanned kit's members arrive as `kitSlices`, never in `assetIds`, so no
+    // kit exempts a loose member here: one in `assetIds` would be booked alone.
+    await assertScannedUnitsAreNotKitMembers({
+      bookingId,
+      organizationId,
+      looseAssetIds: assetIds,
+      exemptKitIds: [],
+    });
+
     /**
      * Step 1: Add assets to booking inside a transaction so we can mirror the
      * status-sync behaviour used in manage-assets. The pure-tx body lives in
      * {@link addScannedAssetsToBookingWithinTx} so the fulfil-and-checkout
      * flow can reuse the same writes under a shared transaction. The
-     * overlap-conflict guard main added inline here was moved INTO the helper
-     * so both call sites get it atomically with the writes.
+     * overlap-conflict guard lives in the helper, so both call sites get it
+     * atomically with the writes.
      */
-    const updatedBooking = await db.$transaction(async (tx) =>
-      addScannedAssetsToBookingWithinTx(tx, {
+    const {
+      booking: updatedBooking,
+      addedAssetIds,
+      claimedAssetIds,
+      archivedKitMembersLeftOut,
+    } = await db.$transaction(async (tx) => {
+      const result = await addScannedAssetsToBookingWithinTx(tx, {
         assetIds,
         kitIds,
         bookingId,
@@ -10489,26 +18070,33 @@ export async function addScannedAssetsToBooking({
         userId,
         quantities,
         kitSlices,
-      })
-    );
+        callerAccess: access ?? undefined,
+      });
+      await inSameTransaction?.(tx);
+      return result;
+    });
 
     /**
-     * Step 2: Create activity notes. The notes helper derives standalone
-     * vs kit-driven attribution from `kitIds` membership, so it needs the
-     * full union of standalone + kit-slice asset ids.
+     * Step 2: Create activity notes, for the assets that actually arrived.
+     * The helper derives standalone vs kit-driven attribution from `kitIds`
+     * membership, so it takes the union of both kinds, but a rescan of a unit
+     * already on the booking added nothing and must not be narrated as if it
+     * had.
      */
-    const allAddedAssetIds = Array.from(
-      new Set([...assetIds, ...kitSlices.map((s) => s.assetId)])
-    );
     await createNotesForScannedAssetsAndKits({
       booking: updatedBooking,
-      assetIds: allAddedAssetIds,
+      assetIds: addedAssetIds,
       kitIds,
       organizationId,
       userId,
     });
 
-    return updatedBooking;
+    return {
+      booking: updatedBooking,
+      addedAssetIds,
+      claimedAssetIds,
+      archivedKitMembersLeftOut,
+    };
   } catch (cause) {
     const message =
       cause instanceof ShelfError
@@ -10608,8 +18196,15 @@ export async function getExistingBookingDetails(
 /**
  * Resolves the subset of the given asset IDs that can be added to a booking.
  *
- * Assets that belong to a kit are rejected (kits are added as a unit, not as
- * loose assets).
+ * INDIVIDUAL assets that belong to a kit are rejected — they live entirely
+ * inside their kit, so kits are added as a unit rather than as loose assets.
+ *
+ * QUANTITY_TRACKED kit members are ACCEPTED: each `AssetKit` row claims only a
+ * slice of the pool (`AssetKit.quantity`) and a QT asset may sit in several
+ * kits at once while keeping free-pool units, which are legitimately bookable
+ * on their own. That's the same rule the booking page's asset picker already
+ * applies. Over-allocation is caught downstream by the windowed availability
+ * guard in `updateBookingAssets`. See `isDirectBookingBlockedByKit`.
  *
  * @param assetIds - Asset IDs sourced from request/form input
  * @param organizationId - The caller's validated organization ID. Scopes the
@@ -10617,30 +18212,52 @@ export async function getExistingBookingDetails(
  *   be returned), preventing a cross-org IDOR where an attacker in Org A could
  *   add Org B's assets to a booking.
  * @returns The IDs of the assets that exist in `organizationId` and are not
- *   part of a kit
- * @throws {ShelfError} If any selected asset belongs to a kit
+ *   blocked by kit membership
+ * @throws {ShelfError} If any selected INDIVIDUAL asset belongs to a kit
  */
 export async function getAvailableAssetsIdsForBooking(
   assetIds: Asset["id"][],
-  organizationId: string
+  organizationId: string,
+  /** The acting user, so an archived refusal is worded for their role. */
+  actorUserId?: string
 ): Promise<string[]> {
   try {
+    // Archived assets are refused, not quietly dropped (issue #382): an asset
+    // archived after the page loaded would otherwise vanish from the
+    // selection while the rest booked, with nothing telling the user. Every
+    // other unbookable case in this flow rejects the same way. Org-scoped, so
+    // a foreign id still reads as missing rather than archived.
+    await assertAssetsAreNotArchived({ assetIds, organizationId, actorUserId });
+
     const selectedAssets = await db.asset.findMany({
       // SECURITY (cross-org IDOR): scope by organizationId so an attacker
       // cannot resolve / attach assets that live in another workspace.
-      where: { id: { in: assetIds }, organizationId },
+      // Archived assets (archivedAt set) are excluded so they can't be booked,
+      // even via a direct/crafted add — they're hidden from pickers but the
+      // server must enforce it too (issue #382).
+      where: { id: { in: assetIds }, organizationId, archivedAt: null },
       select: {
         status: true,
         id: true,
+        // `type` decides whether kit membership actually blocks the add —
+        // only INDIVIDUAL members are exclusive to their kit.
+        type: true,
         assetKits: { select: { kitId: true } },
       },
     });
 
-    if (selectedAssets.some((asset) => asset.assetKits.length > 0)) {
+    if (selectedAssets.some(isDirectBookingBlockedByKit)) {
+      // User-input validation, not a server fault: adding INDIVIDUAL kit-member
+      // assets directly is disallowed (kits are added as a unit). A 400 keeps
+      // this out of the Sentry error pipeline (handled client error). The outer
+      // catch re-wraps but inherits status/shouldBeCaptured from this cause. See
+      // SHELF-WEBAPP-21Y.
       throw new ShelfError({
         cause: null,
         message: "Cannot add assets that belong to a kit.",
         label: "Booking",
+        status: 400,
+        shouldBeCaptured: false,
       });
     }
 
@@ -10665,10 +18282,10 @@ export async function getAvailableAssetsIdsForBooking(
  * @param organizationId - The caller's validated organization ID. Forwarded to
  *   {@link getAvailableAssetsIdsForBooking} so foreign-org assets cannot be
  *   added to the booking (cross-org IDOR protection).
- * @param auth - The acting user's id and org role. Used to enforce per-user
- *   booking ownership: `booking:create/update` is granted org-wide to
- *   SELF_SERVICE/BASE, so without this a non-owner could add items to another
- *   user's booking (cross-user IDOR). ADMIN/OWNER are unrestricted.
+ * @param auth - The acting user's id and access. Enforces per-user booking
+ *   ownership for callers that do not write every booking: `booking:update`
+ *   is granted org-wide, so without this a non-owner could add items to
+ *   another user's booking (cross-user IDOR).
  * @returns The resolved (org-scoped) asset IDs and the booking details
  * @throws {ShelfError} If no assets are available, the booking lookup fails, or
  *   the caller does not own the booking
@@ -10677,16 +18294,16 @@ export async function processBooking(
   bookingId: string,
   assetIds: string[],
   organizationId: string,
-  auth: { userId: string; role: OrganizationRoles }
+  auth: { userId: string; access: RoleAccess }
 ) {
   try {
     const [finalAssetIds, bookingInfo] = await Promise.all([
-      getAvailableAssetsIdsForBooking(assetIds, organizationId),
+      getAvailableAssetsIdsForBooking(assetIds, organizationId, auth.userId),
       getExistingBookingDetails(bookingId, organizationId),
     ]);
 
-    // Cross-user IDOR guard: SELF_SERVICE/BASE may only add to bookings they
-    // created or are custodian of. No-op for ADMIN/OWNER. Runs before any
+    // Cross-user IDOR guard: a caller who does not write every booking may
+    // only add to bookings they created or are custodian of. Runs before any
     // mutation-shaping logic below.
     validateBookingOwnership({
       booking: {
@@ -10694,8 +18311,15 @@ export async function processBooking(
         custodianUserId: bookingInfo.custodianUserId,
       },
       userId: auth.userId,
-      role: auth.role,
+      access: auth.access,
       action: "add items to",
+    });
+
+    // Restricted roles add items only while the booking is a draft; the
+    // booking page applies the same rule to its manage-assets flow.
+    assertCanAddBookingItems({
+      access: auth.access,
+      bookingStatus: bookingInfo.status,
     });
 
     if (!finalAssetIds.length) {
@@ -10719,6 +18343,11 @@ export async function processBooking(
     // CHECKED_OUT status can be owned by this same booking (progressive
     // checkout), and re-submitting them is handled downstream by the
     // duplicate / "add only the rest" flow — not by this guard.
+    //
+    // Scoped to INDIVIDUAL assets by `buildAddToActiveBookingBlockerWhere`: a
+    // QUANTITY_TRACKED pool reads CHECKED_OUT while one unit is out and the
+    // rest is free to stage, so per-unit capacity is
+    // `assertAssetQuantitiesAvailable`'s job inside `updateBookingAssets`.
     if (
       bookingInfo.status === BookingStatus.ONGOING ||
       bookingInfo.status === BookingStatus.OVERDUE
@@ -10733,11 +18362,10 @@ export async function processBooking(
       const checkedOutAssets =
         newAssetIdsToCheck.length > 0
           ? await db.asset.findMany({
-              where: {
-                id: { in: newAssetIdsToCheck },
+              where: buildAddToActiveBookingBlockerWhere({
+                assetIds: newAssetIdsToCheck,
                 organizationId,
-                status: AssetStatus.CHECKED_OUT,
-              },
+              }),
               select: { id: true, title: true },
             })
           : [];
@@ -10776,6 +18404,105 @@ export async function processBooking(
 }
 
 /**
+ * Guards the "add kits to an existing booking" flow: a kit that is physically
+ * CHECKED_OUT on ANOTHER active booking cannot be added to an ONGOING/OVERDUE
+ * booking — there is nothing available to stage. Kits added to an active booking
+ * otherwise stay AVAILABLE until purposefully checked out (progressive
+ * checkout). This is the kit counterpart of the asset guard inside
+ * {@link processBooking}.
+ *
+ * No-op for DRAFT/RESERVED targets — they accept checked-out kits, which become
+ * available by the time the booking starts.
+ *
+ * Kits already represented on the target booking are excluded: their
+ * CHECKED_OUT status can be owned by this same booking, and re-adding only
+ * attaches newly-added members ({@link buildKitSlicesForBooking} skips existing
+ * memberships).
+ *
+ * NOTE: the manage-kits route keeps its own richer, partial-checkin-aware guard
+ * ({@link isKitPartiallyCheckedIn}) because it operates on kits already loaded
+ * with their memberships/status and must permit re-checkout of kits that are
+ * partially checked in within that booking — semantics that don't apply when
+ * adding genuinely-new kits here.
+ *
+ * @param params.kitIds - Org-scoped kit ids the caller wants to add.
+ * @param params.existingAssetKitIds - AssetKit ids already on the target
+ *   booking (from its `bookingAssets[].assetKitId`), used to skip kits that are
+ *   already represented.
+ * @param params.bookingStatus - Current status of the target booking.
+ * @param params.bookingId - Target booking id (for the error payload).
+ * @param params.organizationId - Caller's validated organization id; scopes
+ *   every query so foreign-org kits/memberships can't influence the check.
+ * @throws {ShelfError} 400 if any newly-added kit is checked out elsewhere.
+ */
+export async function assertKitsAddableToActiveBooking({
+  kitIds,
+  existingAssetKitIds,
+  bookingStatus,
+  bookingId,
+  organizationId,
+}: {
+  kitIds: string[];
+  existingAssetKitIds: Set<string>;
+  bookingStatus: BookingStatus;
+  bookingId: string;
+  organizationId: string;
+}): Promise<void> {
+  // Only active bookings gate on checked-out status.
+  if (
+    bookingStatus !== BookingStatus.ONGOING &&
+    bookingStatus !== BookingStatus.OVERDUE
+  ) {
+    return;
+  }
+
+  // Kit ids that already have at least one membership on this booking — their
+  // checked-out status can belong to this same booking, so they're excluded.
+  const kitIdsAlreadyOnBooking = new Set(
+    existingAssetKitIds.size > 0
+      ? (
+          await db.assetKit.findMany({
+            where: {
+              id: { in: [...existingAssetKitIds] },
+              kitId: { in: kitIds },
+              organizationId,
+            },
+            select: { kitId: true },
+          })
+        ).map((ak) => ak.kitId)
+      : []
+  );
+
+  const kitIdsToGuard = kitIds.filter((id) => !kitIdsAlreadyOnBooking.has(id));
+  if (kitIdsToGuard.length === 0) {
+    return;
+  }
+
+  const checkedOutKits = await db.kit.findMany({
+    where: {
+      id: { in: kitIdsToGuard },
+      organizationId,
+      status: KitStatus.CHECKED_OUT,
+    },
+    select: { id: true, name: true },
+  });
+
+  if (checkedOutKits.length > 0) {
+    throw new ShelfError({
+      cause: null,
+      title: "Not allowed. Kits already checked out",
+      message: `The following kits are already checked out and cannot be added to the booking: ${checkedOutKits
+        .map((kit) => kit.name)
+        .join(", ")}`,
+      additionalData: { checkedOutKits, bookingId },
+      status: 400,
+      label,
+      shouldBeCaptured: false,
+    });
+  }
+}
+
+/**
  * Shared function to load booking data for both assets and kits routes for add-to-existing-booking
  * @param params - Parameters required for loading bookings
  * @returns Formatted booking data response
@@ -10784,13 +18511,18 @@ export async function loadBookingsData({
   request,
   organizationId,
   userId,
-  isSelfServiceOrBase,
+  access,
   ids,
 }: {
   request: Request;
   organizationId: string;
   userId: string;
-  isSelfServiceOrBase: boolean;
+  /**
+   * The caller's access: `bookings.seeAll` drives the READ scope,
+   * `bookings.writeAll` the WRITE scope. The pickers choose a mutation target,
+   * so they offer only bookings the submitting action accepts.
+   */
+  access: RoleAccess;
   ids?: string[];
 }): Promise<BookingLoaderResponse> {
   // Get search parameters and pagination settings
@@ -10801,17 +18533,31 @@ export async function loadBookingsData({
   // Fetch bookings with filters. Includes ONGOING/OVERDUE so assets/kits can be
   // added to active bookings (they stay AVAILABLE — progressive checkout), not
   // just to not-yet-started DRAFT/RESERVED ones.
+  // TWO independent restrictions, both server-derived, both AND-ed. They must
+  // be computed identically here and in `/api/model-filters`, which takes over
+  // the moment the user types into the picker — a rule applied on only one of
+  // the two makes the list change mid-search.
+  //
+  // 1. READ — the standard booking-visibility rule. Resolve the FULL custodian
+  //    scope (user link + every team-member link) so legacy rows aren't hidden
+  //    here while showing on the index.
+  const custodianScope = !access.bookings.seeAll
+    ? await resolveCustodianScope({ userId, organizationId })
+    : undefined;
+
   const { bookings, bookingCount } = await getBookings({
     organizationId,
     page,
     perPage,
     search,
     userId,
-    statuses: ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"],
-    // Here we just need the bookigns of the current user if they are self service or base, as they can edit only their own bookings
-    ...(isSelfServiceOrBase && {
-      custodianUserId: userId,
-    }),
+    statuses: ADDABLE_BOOKING_STATUSES,
+    ...(custodianScope && { custodianScope }),
+    // 2. WRITE — what `validateBookingOwnership` will accept on submit. Kept
+    //    separate from the read rule because the workspace visibility toggle
+    //    does NOT grant write: without this, enabling it offers a restricted
+    //    user bookings the action then rejects with a 403.
+    writableBy: { userId, access },
   });
 
   // Set up header and model name
@@ -10874,7 +18620,7 @@ export type BookingKitDrift = {
 
 /**
  * Compute per-kit membership drift for a booking, comparing the booking's
- * kit-driven `BookingAsset` snapshot against each kit's CURRENT `AssetKit`
+ * kit-sourced `BookingAsset` snapshot against each kit's CURRENT `AssetKit`
  * rows.
  *
  * **Why this exists.** `BookingAsset` rows are a snapshot taken at the moment
@@ -10884,19 +18630,28 @@ export type BookingKitDrift = {
  * tells the duplicate-confirmation modal exactly what will differ so the user
  * acknowledges the change explicitly before confirming.
  *
+ * **The snapshot is keyed on PROVENANCE, not live membership.** Removing an
+ * asset from a kit `SET NULL`s the booking slice's `assetKitId`, so a snapshot
+ * built from `assetKitId IS NOT NULL` structurally could not contain a removed
+ * asset — `removed` was unreachable and the modal's "Removed since the
+ * original" section never rendered. `sourceKitId` survives the detach, so
+ * selecting on it is what makes that half of the comparison work.
+ *
  * Returns one entry per kit that actually drifted (added or removed non-empty);
  * kits with no drift are omitted. Returns `[]` when the booking has no
- * kit-driven slices at all.
+ * kit-sourced slices at all.
  *
  * Org-scope: validates that every kit referenced by the booking belongs to
  * `organizationId` before issuing the AssetKit lookup. This is defence-in-
- * depth — `getBooking` already org-scopes the source booking — but follows
- * the project rule that any ID derived from request input is org-checked
- * before being read.
+ * depth — the caller's `requirePermission` already scopes the request — but
+ * follows the project rule that any ID derived from request input is
+ * org-checked before being read. It is load-bearing here rather than merely
+ * belt-and-braces: `sourceKitId`'s FK accepts a `Kit` in ANY org.
  *
- * **Caller:** `duplicateBooking` (to emit per-kit drift in
- * `BOOKING_CREATED.meta`, future-extension), and the duplicate route loader
- * (`bookings.$bookingId.overview.duplicate.tsx`) to render the modal.
+ * **Caller:** the duplicate route loader
+ * (`bookings.$bookingId.overview.duplicate.tsx`) to render the modal. This is
+ * a read-only, display-side helper — `duplicateBooking` does NOT call it and
+ * re-resolves kit membership independently.
  *
  * @param args.bookingId - The source booking to inspect
  * @param args.organizationId - The caller's organization id (for org-scope)
@@ -10911,12 +18666,8 @@ export async function computeBookingKitDrift({
   organizationId: Organization["id"];
 }): Promise<BookingKitDrift[]> {
   try {
-    // Fetch only what we need: kit-driven slices for the booking. The
-    // `AssetKit` link is resolved via a second query below — Prisma's
-    // `BookingAsset` model deliberately omits the `assetKit` relation
-    // accessor at the schema level (TS recursion limit, see schema
-    // comment on `BookingAsset.assetKitId`), so we can't `include` it.
-    const kitDrivenSlices = await db.bookingAsset.findMany({
+    // Fetch only what we need: every slice this booking took from a kit.
+    const kitSourcedSlices = await db.bookingAsset.findMany({
       // Org-scope at the source: a foreign-org `bookingId` will not match
       // any rows, so no slice data (incl. asset titles) is loaded into
       // memory before the downstream `assertKitsBelongToOrg` check fires.
@@ -10924,12 +18675,32 @@ export async function computeBookingKitDrift({
       where: {
         bookingId,
         booking: { organizationId },
-        assetKitId: { not: null },
+        /**
+         * Provenance, not live membership.
+         *
+         * `sourceKitId` is the durable pointer and matches BOTH live
+         * kit-driven slices and detached residue (`assetKitId` `SET NULL`'d
+         * when the asset left the kit) — the residue is exactly the "removed"
+         * case this function exists to report, so filtering on `assetKitId`
+         * alone made `removed` unreachable.
+         *
+         * The `assetKitId` leg is the LEGACY fallback, and it is NOT
+         * redundant: "assetKitId non-null ⇒ sourceKitId non-null" is enforced
+         * by code alone (no CHECK constraint), and the migration necessarily
+         * lands before the new code, so during a rolling deploy an older
+         * instance can still write a kit-driven row with a NULL
+         * `sourceKitId`. Dropping such a row here would hide its whole kit
+         * from the drift result while `duplicateBooking` — which keeps the
+         * same fallback — still re-resolves that kit, silently changing the
+         * duplicate's contents with NO warning in the modal.
+         */
+        OR: [{ sourceKitId: { not: null } }, { assetKitId: { not: null } }],
       },
       select: {
         assetId: true,
         quantity: true,
         assetKitId: true,
+        sourceKitId: true,
         asset: {
           select: {
             id: true,
@@ -10940,47 +18711,76 @@ export async function computeBookingKitDrift({
       },
     });
 
-    if (kitDrivenSlices.length === 0) return [];
+    if (kitSourcedSlices.length === 0) return [];
 
-    // Resolve `assetKitId -> kitId` via a separate AssetKit lookup.
-    const assetKitIds = kitDrivenSlices
+    /**
+     * Legacy fallback ONLY: resolve `assetKitId -> kitId` for rows written
+     * before `sourceKitId` existed. Rows written by current code carry their
+     * own provenance, so this query is skipped entirely once the deploy window
+     * closes. Prisma's `BookingAsset` model deliberately omits the `assetKit`
+     * relation accessor at the schema level (TS recursion limit, see the schema
+     * comment on `BookingAsset.assetKitId`), so this cannot be an `include`.
+     */
+    const legacyAssetKitIds = kitSourcedSlices
+      .filter((s) => s.sourceKitId === null)
       .map((s) => s.assetKitId)
       .filter((id): id is string => id !== null);
-    const assetKitRows = await db.assetKit.findMany({
-      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: assetKitIds were fetched above from BookingAsset rows scoped to bookingId; the booking itself is org-validated by the caller (computeBookingKitDrift is called from the duplicate route loader after requirePermission, and from duplicateBooking after getBooking). Pure read.
-      where: { id: { in: assetKitIds } },
-      select: { id: true, kitId: true },
-    });
-    const kitIdByAssetKitId = new Map(
-      assetKitRows.map((ak) => [ak.id, ak.kitId])
-    );
 
-    // Group source slices by the kit they came from (resolved via AssetKit.kitId).
-    // A kit-driven slice with no matching AssetKit row (e.g. the AssetKit was
-    // deleted) is excluded from the drift snapshot — there's nothing meaningful
-    // to compare against, and the duplicate's kit-driven copy will also skip it
-    // (see `duplicateBooking`).
-    const sliceByKitId = new Map<
-      string,
-      Array<{
-        assetId: string;
-        quantity: number;
-        title: string;
-        type: AssetType;
-      }>
-    >();
-    for (const slice of kitDrivenSlices) {
-      const kitId = slice.assetKitId
-        ? kitIdByAssetKitId.get(slice.assetKitId)
-        : undefined;
-      if (!kitId) continue; // AssetKit row gone — handled in duplicate path.
-      const bucket = sliceByKitId.get(kitId) ?? [];
-      bucket.push({
-        assetId: slice.assetId,
-        quantity: slice.quantity,
-        title: slice.asset.title,
-        type: slice.asset.type,
+    let kitIdByAssetKitId = new Map<string, string>();
+    if (legacyAssetKitIds.length > 0) {
+      const assetKitRows = await db.assetKit.findMany({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: legacyAssetKitIds were fetched above from BookingAsset rows scoped to bookingId; the booking itself is org-validated by the caller (the duplicate route loader runs this after requirePermission). Pure read of an id->id map, and every kitId it resolves still passes assertKitsBelongToOrg below before any kit data is read.
+        where: { id: { in: legacyAssetKitIds } },
+        select: { id: true, kitId: true },
       });
+      kitIdByAssetKitId = new Map(assetKitRows.map((ak) => [ak.id, ak.kitId]));
+    }
+
+    /**
+     * Group the source slices by the kit they came from, deduping by asset id
+     * within each kit.
+     *
+     * A booking can hold two slices for the same (kit, asset) pair: detached
+     * residue from an earlier membership (`assetKitId` NULL) plus a live slice
+     * from a later re-add (`assetKitId` set). Normally that pair is harmless
+     * here — the live `AssetKit` puts the asset in `currentAssetIds`, so it is
+     * reported zero times under "removed". The dedupe covers the race where
+     * that `AssetKit` is deleted BETWEEN the `bookingAsset` read above and the
+     * `kit.findMany` read below: both rows are then absent from
+     * `currentAssetIds` and would be emitted as two "removed" entries for one
+     * asset, which the modal renders with duplicate React keys.
+     *
+     * Two residue rows for the same pair cannot occur — the
+     * `BookingAsset_manual_unique (bookingId, assetId) WHERE assetKitId IS
+     * NULL` partial unique permits only one.
+     *
+     * Which row survives is DB order, so the surviving `quantity` is
+     * arbitrary. That is acceptable: `BookingKitDriftAsset.quantity` already
+     * documents "removed" quantities as indicative only.
+     */
+    const sliceByKitId = new Map<string, Map<string, BookingKitDriftAsset>>();
+    for (const slice of kitSourcedSlices) {
+      // Prefer the durable provenance; fall back to the legacy AssetKit hop.
+      const kitId =
+        slice.sourceKitId ??
+        (slice.assetKitId
+          ? kitIdByAssetKitId.get(slice.assetKitId)
+          : undefined);
+      // Reachable for a legacy row whose `AssetKit` was deleted between the two
+      // reads above (the FK `SET NULL` had not landed when we read the slice).
+      // Nothing meaningful to compare against, and `duplicateBooking` drops it
+      // for the same reason.
+      if (!kitId) continue;
+      const bucket =
+        sliceByKitId.get(kitId) ?? new Map<string, BookingKitDriftAsset>();
+      if (!bucket.has(slice.assetId)) {
+        bucket.set(slice.assetId, {
+          assetId: slice.assetId,
+          title: slice.asset.title,
+          type: slice.asset.type,
+          quantity: slice.quantity,
+        });
+      }
       sliceByKitId.set(kitId, bucket);
     }
 
@@ -11015,26 +18815,21 @@ export async function computeBookingKitDrift({
     const drifts: BookingKitDrift[] = [];
 
     for (const kitId of kitIds) {
+      /**
+       * A kit deleted since the booking was created cannot reach this loop:
+       * `sourceKitId` is `ON DELETE SET NULL` to `Kit`, and deleting a kit
+       * cascade-deletes its `AssetKit` rows which in turn `SET NULL`s
+       * `assetKitId` — so both legs of the snapshot predicate go NULL and the
+       * slices degrade to loose assets, matching pre-provenance behaviour.
+       * `assertKitsBelongToOrg` above has also already proven every id here
+       * exists in this org, so the guard only covers a delete racing between
+       * the two reads.
+       */
       const kit = kitsById.get(kitId);
-      const snapshotForKit = sliceByKitId.get(kitId) ?? [];
-      const snapshotAssetIds = new Set(snapshotForKit.map((s) => s.assetId));
+      if (!kit) continue;
 
-      // Kit was deleted entirely since source was created. Treat its entire
-      // snapshot as "removed" so the modal still surfaces the change.
-      if (!kit) {
-        drifts.push({
-          kitId,
-          kitName: "Deleted kit",
-          added: [],
-          removed: snapshotForKit.map((s) => ({
-            assetId: s.assetId,
-            title: s.title,
-            type: s.type,
-            quantity: s.quantity,
-          })),
-        });
-        continue;
-      }
+      const snapshotForKit = [...(sliceByKitId.get(kitId)?.values() ?? [])];
+      const snapshotAssetIds = new Set(snapshotForKit.map((s) => s.assetId));
 
       const currentAssetIds = new Set(kit.assetKits.map((ak) => ak.assetId));
 
@@ -11047,14 +18842,11 @@ export async function computeBookingKitDrift({
           quantity: ak.quantity,
         }));
 
-      const removed: BookingKitDriftAsset[] = snapshotForKit
-        .filter((s) => !currentAssetIds.has(s.assetId))
-        .map((s) => ({
-          assetId: s.assetId,
-          title: s.title,
-          type: s.type,
-          quantity: s.quantity,
-        }));
+      // Already `BookingKitDriftAsset`-shaped — the bucket stores the drift
+      // entry directly, so no re-mapping is needed here.
+      const removed: BookingKitDriftAsset[] = snapshotForKit.filter(
+        (s) => !currentAssetIds.has(s.assetId)
+      );
 
       if (added.length === 0 && removed.length === 0) continue;
 
@@ -11087,10 +18879,14 @@ export async function computeBookingKitDrift({
  * verbatim from the source. Instead, the duplicate's kit-driven slices are
  * rebuilt from each referenced kit's CURRENT `AssetKit` rows so the
  * duplicate reflects the kit's current contents (not a stale snapshot).
- * Standalone slices (`assetKitId IS NULL`) ARE copied verbatim, including
- * per-row `quantity`. The duplicate-confirmation modal surfaces the
- * resulting drift via {@link computeBookingKitDrift} so the user
- * acknowledges the change before confirming.
+ * Only GENUINE standalone slices (`assetKitId` AND `sourceKitId` both NULL)
+ * are copied verbatim, including per-row `quantity`. A slice whose
+ * `assetKitId` was `SET NULL` by a kit removal but which still carries
+ * `sourceKitId` is detached kit residue and is DROPPED — the kit it came
+ * from is re-resolved to its current membership instead. The
+ * duplicate-confirmation modal surfaces the resulting drift via
+ * {@link computeBookingKitDrift} so the user acknowledges the change before
+ * confirming.
  *
  * **Booking window.** The new booking's `from`/`to` are taken from the
  * caller-provided dates rather than being derived here, so the duplicate
@@ -11102,9 +18898,13 @@ export async function computeBookingKitDrift({
  * @param args.from - Start date for the new booking
  * @param args.to - End date for the new booking
  * @param args.request - The incoming request, forwarded to `getBooking` for
- *   client-hint resolution and ownership checks
+ *   client-hint resolution
+ * @param args.access - The caller's access. The duplicate guard runs on the
+ *   same source row the copy is built from, so a custodian reassigned after
+ *   any earlier read cannot slip into the copy unchecked.
  * @returns The newly created booking row
- * @throws {ShelfError} If anything in the transaction fails
+ * @throws {ShelfError} 403 if the caller may not duplicate the source
+ *   (`assertCanDuplicateBooking`), or if anything in the transaction fails
  */
 export async function duplicateBooking({
   bookingId,
@@ -11113,6 +18913,7 @@ export async function duplicateBooking({
   from,
   to,
   request,
+  access,
 }: {
   bookingId: Booking["id"];
   organizationId: Organization["id"];
@@ -11120,6 +18921,7 @@ export async function duplicateBooking({
   from: Date;
   to: Date;
   request: Request;
+  access: RoleAccess;
 }) {
   try {
     const bookingToDuplicate = await getBooking({
@@ -11131,27 +18933,48 @@ export async function duplicateBooking({
       },
     });
 
-    // Split the source's snapshot into standalone and kit-driven buckets.
-    // Standalone slices are copied verbatim. Kit-driven slices are
-    // re-resolved against the kit's CURRENT AssetKit rows below so the
-    // duplicate reflects the kit's current contents.
+    // Authorize the exact row every field of the copy is read from below.
+    assertCanDuplicateBooking({ booking: bookingToDuplicate, userId, access });
+
+    // Three-way split of the source's snapshot:
+    //  - genuine standalone (BOTH pointers null) -> copied verbatim. A user
+    //    deliberately added these by hand; dropping them loses real intent.
+    //  - detached kit residue (`sourceKitId` set, `assetKitId` null) -> DROPPED.
+    //    `assetKitId` is `ON DELETE SET NULL`, so removing an asset from a kit
+    //    silently demotes the booking's kit-driven slice to a standalone one.
+    //    Copying it would re-add a swapped-out asset to the duplicate as a
+    //    loose asset (the reported customer bug); the kit's CURRENT contents
+    //    are re-resolved below instead.
+    //  - kit-driven (`assetKitId` non-null) -> not copied; rebuilt from the
+    //    kit's CURRENT `AssetKit` rows.
     const standaloneSourceSlices = bookingToDuplicate.bookingAssets.filter(
-      (ba) => ba.assetKitId == null
-    );
-    const kitSourceSlices = bookingToDuplicate.bookingAssets.filter(
-      (ba) => ba.assetKitId != null
+      (ba) => ba.assetKitId == null && ba.sourceKitId == null
     );
 
-    // Distinct kit ids referenced by the source. Resolved from
-    // `asset.assetKits.find(ak => ak.id === ba.assetKitId)?.kitId` because
-    // `ba.assetKitId` is an `AssetKit` row id, not the kit id itself. A slice
-    // whose AssetKit row has been deleted since (no matching entry) is
-    // dropped from the duplicate — same shape as `computeBookingKitDrift`.
+    // Every kit the source booking referenced, whether or not its slices are
+    // still kit-driven. Iterating ALL slices (not just kit-driven ones) is what
+    // keeps a kit whose members were ALL removed since in the duplicate — it
+    // gets re-resolved to its current contents instead of vanishing.
     const distinctKitIds = new Set<string>();
-    for (const slice of kitSourceSlices) {
-      const kitId = slice.asset.assetKits.find(
-        (ak) => ak.id === slice.assetKitId
-      )?.kitId;
+    for (const slice of bookingToDuplicate.bookingAssets) {
+      /**
+       * `sourceKitId` is the durable provenance and is preferred. The legacy
+       * `assetKitId -> AssetKit -> kitId` hop is the FALLBACK, kept because the
+       * "assetKitId non-null ⇒ sourceKitId non-null" invariant is enforced by
+       * code alone (no CHECK constraint): the migration necessarily lands
+       * before the new code, so during a rolling deploy an older instance can
+       * still write a kit-driven row with a NULL `sourceKitId`. Without the
+       * fallback such a row is in neither bucket and its whole kit silently
+       * vanishes from the duplicate (a kit-only booking would copy to an EMPTY
+       * one). Costs no extra query — `asset.assetKits` is already selected by
+       * `BOOKING_WITH_ASSETS_INCLUDE`.
+       *
+       * This cannot resurrect detached residue: residue rows have
+       * `assetKitId === null`, so the `find` never matches for them.
+       */
+      const kitId =
+        slice.sourceKitId ??
+        slice.asset.assetKits.find((ak) => ak.id === slice.assetKitId)?.kitId;
       if (kitId) distinctKitIds.add(kitId);
     }
 
@@ -11163,6 +18986,8 @@ export async function duplicateBooking({
       assetId: string;
       quantity: number;
       assetKitId: string;
+      /** Owning kit, persisted to `BookingAsset.sourceKitId`. */
+      kitId: string;
       asset: { type: AssetType; unitOfMeasure: string | null };
     }> = [];
 
@@ -11172,12 +18997,19 @@ export async function duplicateBooking({
         organizationId,
       });
 
+      // `kitId` costs nothing extra here — the query is already filtered by
+      // `kitId IN (...)`, so selecting it just carries the org-proven owning
+      // kit through to `sourceKitId` (same pattern as
+      // `buildKitSlicesForBooking`). It is read off the `AssetKit` row rather
+      // than taken from any caller input: every id in `kitIdsList` came from
+      // the org-scoped source booking and passed `assertKitsBelongToOrg` above.
       const currentKitAssets = await db.assetKit.findMany({
         where: { kitId: { in: kitIdsList } },
         select: {
           id: true,
           assetId: true,
           quantity: true,
+          kitId: true,
           asset: {
             select: { type: true, unitOfMeasure: true },
           },
@@ -11188,6 +19020,7 @@ export async function duplicateBooking({
         assetId: ak.assetId,
         quantity: ak.quantity,
         assetKitId: ak.id,
+        kitId: ak.kitId,
         asset: ak.asset,
       }));
     }
@@ -11201,12 +19034,19 @@ export async function duplicateBooking({
       ...standaloneSourceSlices.map((ba) => ({
         assetId: ba.assetId,
         quantity: ba.quantity,
-        assetKitId: ba.assetKitId,
+        // Explicit nulls rather than `ba.assetKitId` / `ba.sourceKitId`: this
+        // bucket is genuine standalone by construction (both pointers null),
+        // so the "assetKitId null ⇔ sourceKitId null" invariant reads locally.
+        assetKitId: null,
+        sourceKitId: null,
       })),
       ...kitDrivenCreateRows.map((row) => ({
         assetId: row.assetId,
         quantity: row.quantity,
         assetKitId: row.assetKitId,
+        // Durable provenance — survives the AssetKit row being deleted, which
+        // is what stops a future detach from turning this into loose residue.
+        sourceKitId: row.kitId,
       })),
     ];
 
@@ -11218,6 +19058,35 @@ export async function duplicateBooking({
      * notification recipients), so we mirror the emission pattern here.
      */
     const newBooking = await db.$transaction(async (tx) => {
+      /**
+       * Archived assets are out of service (issue #382), and the source booking
+       * may hold some: archiving is allowed once a booking is finished. They
+       * are DROPPED from the copy rather than refusing it, the same way
+       * detached kit residue is dropped above: the duplicate is a new plan, and
+       * the rest of it is still worth having. Locked first, the lock every
+       * archive and booking write takes, so an archive cannot land between
+       * this read and the insert.
+       */
+      const sliceAssetIds = [...new Set(createSlices.map((s) => s.assetId))];
+      await lockAssetsForArchiveGuard(tx, sliceAssetIds, organizationId);
+      const archivedAssetIds = new Set(
+        sliceAssetIds.length > 0
+          ? (
+              await tx.asset.findMany({
+                where: {
+                  id: { in: sliceAssetIds },
+                  organizationId,
+                  archivedAt: { not: null },
+                },
+                select: { id: true },
+              })
+            ).map((a) => a.id)
+          : []
+      );
+      const isActive = (row: { assetId: string }) =>
+        !archivedAssetIds.has(row.assetId);
+      const slicesToCreate = createSlices.filter(isActive);
+
       const created = await tx.booking.create({
         data: {
           name: bookingToDuplicate.name + " (Copy)",
@@ -11231,11 +19100,13 @@ export async function duplicateBooking({
           custodianUserId: bookingToDuplicate.custodianUserId,
           bookingAssets: {
             /**
-             * Standalone slices (`assetKitId IS NULL`) are copied verbatim
-             * so per-row `quantity` is preserved for QUANTITY_TRACKED
-             * assets. Kit-driven slices are rebuilt from each referenced
-             * kit's CURRENT `AssetKit` rows so the duplicate reflects the
-             * kit's current contents, not the snapshot the source carried.
+             * Genuine standalone slices (`assetKitId` and `sourceKitId` both
+             * NULL) are copied verbatim so per-row `quantity` is preserved
+             * for QUANTITY_TRACKED assets. Kit-driven slices are rebuilt from
+             * each referenced kit's CURRENT `AssetKit` rows so the duplicate
+             * reflects the kit's current contents, not the snapshot the
+             * source carried — and detached kit residue is dropped rather
+             * than copied in as a loose asset.
              *
              * Polish-6 allows multiple BookingAsset rows per asset (one
              * standalone + N kit-driven). Each kit-driven row carries a
@@ -11248,7 +19119,7 @@ export async function duplicateBooking({
              * at checkout, so an over-reservation here is surfaced to the
              * user at the right time instead of being silently truncated.
              */
-            create: createSlices,
+            create: slicesToCreate,
           },
           tags: {
             connect: bookingToDuplicate.tags.map((tag) => ({ id: tag.id })),
@@ -11281,7 +19152,7 @@ export async function duplicateBooking({
           entityId: created.id,
           bookingId: created.id,
           meta: {
-            assetCount: createSlices.length,
+            assetCount: slicesToCreate.length,
             duplicatedFromBookingId: bookingToDuplicate.id,
           },
         },
@@ -11294,7 +19165,7 @@ export async function duplicateBooking({
       // event per slice, each carrying that slice's count. We iterate the
       // same create payload (standalone source rows + kit-driven current
       // rows) so the events reflect what was actually inserted.
-      if (createSlices.length > 0) {
+      if (slicesToCreate.length > 0) {
         const eventRows: Array<{
           assetId: string;
           quantity: number;
@@ -11310,7 +19181,7 @@ export async function duplicateBooking({
             quantity: row.quantity,
             asset: row.asset,
           })),
-        ];
+        ].filter(isActive);
 
         await recordEvents(
           eventRows.map((row) => ({
@@ -11327,10 +19198,18 @@ export async function duplicateBooking({
         );
       }
 
-      return created;
+      return {
+        booking: created,
+        droppedArchivedCount: archivedAssetIds.size,
+      };
     });
 
-    return newBooking;
+    // The caller tells the user how many archived assets were left out,
+    // rather than letting them vanish from the copy unannounced.
+    return {
+      ...newBooking.booking,
+      droppedArchivedCount: newBooking.droppedArchivedCount,
+    };
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -11435,6 +19314,7 @@ export async function getDetailedPartialCheckinData(bookingId: string) {
         id: string;
         firstName: string | null;
         lastName: string | null;
+        displayName: string | null;
         profilePicture: string | null;
       };
     }
@@ -11470,6 +19350,7 @@ export type PartialCheckinDetailsType = Record<
       id: string;
       firstName: string | null;
       lastName: string | null;
+      displayName: string | null;
       profilePicture: string | null;
     };
   }
@@ -11482,6 +19363,7 @@ export async function checkinAssets({
   organizationId,
   userId,
   authSession,
+  provenance,
 }: {
   formData: FormData;
   request: Request;
@@ -11489,8 +19371,21 @@ export async function checkinAssets({
   organizationId: string;
   userId: string;
   authSession: AuthSession;
+  /**
+   * How the route knows this batch was made: `"scanned"` from the scan page,
+   * `"selected"` from the list dialog. Slices the scan page's form names in
+   * `selectedBookingAssetIds` were ticked rather than scanned and are merged
+   * in here.
+   */
+  provenance: BookingMethodProvenance;
 }) {
-  const { assetIds, checkins, checkinIntentChoice, returnJson } = parseData(
+  const {
+    assetIds,
+    checkins,
+    selectedBookingAssetIds,
+    checkinIntentChoice,
+    returnJson,
+  } = parseData(
     formData,
     partialCheckinAssetsSchema.extend({
       checkinIntentChoice: z.nativeEnum(CheckinIntentEnum).optional(),
@@ -11529,6 +19424,11 @@ export async function checkinAssets({
     userId,
     hints,
     intentChoice: checkinIntentChoice,
+    provenance: withSelectedBookingAssetIds(
+      provenance,
+      selectedBookingAssetIds,
+      (checkins ?? []).map((checkin) => checkin.bookingAssetId)
+    ),
   });
 
   /** Effective count of assets touched in this session — for toast messaging. */
@@ -11619,6 +19519,7 @@ export async function getDetailedPartialCheckoutData({
           id: true,
           firstName: true,
           lastName: true,
+          displayName: true,
           profilePicture: true,
         },
       },
@@ -11635,6 +19536,7 @@ export async function getDetailedPartialCheckoutData({
         id: string;
         firstName: string | null;
         lastName: string | null;
+        displayName: string | null;
         profilePicture: string | null;
       };
     }
@@ -11678,6 +19580,7 @@ export type PartialCheckoutDetailsType = Record<
       id: string;
       firstName: string | null;
       lastName: string | null;
+      displayName: string | null;
       profilePicture: string | null;
     };
   }
@@ -11704,6 +19607,7 @@ export async function checkoutAssets({
   organizationId,
   userId,
   authSession,
+  provenance,
 }: {
   formData: FormData;
   request: Request;
@@ -11711,8 +19615,16 @@ export async function checkoutAssets({
   organizationId: string;
   userId: string;
   authSession: AuthSession;
+  /** How the route knows this batch was made; see {@link checkinAssets}. */
+  provenance: BookingMethodProvenance;
 }) {
-  const { assetIds, checkouts, checkoutIntentChoice, returnJson } = parseData(
+  const {
+    assetIds,
+    checkouts,
+    selectedBookingAssetIds,
+    checkoutIntentChoice,
+    returnJson,
+  } = parseData(
     formData,
     partialCheckoutAssetsSchema.extend({
       checkoutIntentChoice: z.nativeEnum(CheckoutIntentEnum).optional(),
@@ -11751,6 +19663,12 @@ export async function checkoutAssets({
     userId,
     hints,
     intentChoice: checkoutIntentChoice,
+    provenance: withSelectedBookingAssetIds(
+      provenance,
+      selectedBookingAssetIds,
+      (checkouts ?? []).map((checkout) => checkout.bookingAssetId)
+    ),
+    sourceLocations: parseSourceLocationsFromFormData(formData),
   });
 
   return respondToPartialCheckout({
@@ -11759,6 +19677,40 @@ export async function checkoutAssets({
     authSession,
     returnJson,
   });
+}
+
+/**
+ * Adds the slices a scan page's form marked as ticked to the route's
+ * provenance.
+ *
+ * The scan drawers post `selectedBookingAssetIds[]` for the quantity rows
+ * checked "without scanning"; the list dialogs post none. Only slices that are
+ * part of the batch are kept ({@link narrowSelectedBookingAssetIds}), and an
+ * empty result leaves the provenance as the route stated it.
+ *
+ * @param provenance - What the route knows about the batch
+ * @param selectedBookingAssetIds - The ticked slices, from the form
+ * @param batchBookingAssetIds - The slice of every disposition the batch
+ *   submits; asset-id-only rows name none and can never have been ticked
+ * @returns The provenance with the ticked slices named
+ */
+function withSelectedBookingAssetIds(
+  provenance: BookingMethodProvenance,
+  selectedBookingAssetIds: string[] | undefined,
+  batchBookingAssetIds: BatchSliceId[]
+): BookingMethodProvenance {
+  const ticked = narrowSelectedBookingAssetIds(
+    selectedBookingAssetIds,
+    batchBookingAssetIds
+  );
+  if (ticked.length === 0) return provenance;
+  return {
+    ...provenance,
+    selectedBookingAssetIds: [
+      ...(provenance.selectedBookingAssetIds ?? []),
+      ...ticked,
+    ],
+  };
 }
 
 /**
@@ -12018,6 +19970,7 @@ export async function checkoutRemainingAssets({
   organizationId,
   userId,
   authSession,
+  provenance,
 }: {
   formData: FormData;
   request: Request;
@@ -12025,6 +19978,8 @@ export async function checkoutRemainingAssets({
   organizationId: string;
   userId: string;
   authSession: AuthSession;
+  /** One click on the web, as the route states it. */
+  provenance: BookingMethodProvenance;
 }) {
   const { checkoutIntentChoice, returnJson } = parseData(
     formData,
@@ -12062,6 +20017,8 @@ export async function checkoutRemainingAssets({
     userId,
     hints,
     intentChoice: checkoutIntentChoice,
+    provenance,
+    sourceLocations: parseSourceLocationsFromFormData(formData),
   });
 
   return respondToPartialCheckout({

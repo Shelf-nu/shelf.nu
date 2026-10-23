@@ -20,25 +20,54 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const url = new URL(request.url);
     const search = url.searchParams.get("search") || "";
 
-    const locations = await db.location.findMany({
-      where: {
-        organizationId,
-        ...(search
-          ? { name: { contains: search, mode: "insensitive" as const } }
-          : {}),
-      },
-      select: {
-        id: true,
-        name: true,
-        description: true,
-        image: true,
-        parentId: true,
-      },
-      orderBy: { name: "asc" },
-      take: 50,
-    });
+    /**
+     * Pagination. The picker must be able to reach EVERY location, not just
+     * the first page — a workspace with more rooms than one page could not
+     * place an asset in the ones past the cut, and search only helps someone
+     * who already knows the name they are looking for.
+     *
+     * Defaults keep older clients working unchanged: no params means page 1.
+     */
+    const page = Math.max(
+      1,
+      parseInt(url.searchParams.get("page") || "1", 10) || 1
+    );
+    const perPage = Math.min(
+      100,
+      Math.max(1, parseInt(url.searchParams.get("perPage") || "50", 10) || 50)
+    );
 
-    return data({ locations });
+    const where = {
+      organizationId,
+      ...(search
+        ? { name: { contains: search, mode: "insensitive" as const } }
+        : {}),
+    };
+
+    const [locations, totalCount] = await Promise.all([
+      db.location.findMany({
+        where,
+        select: {
+          id: true,
+          name: true,
+          description: true,
+          image: true,
+          parentId: true,
+        },
+        orderBy: { name: "asc" },
+        skip: (page - 1) * perPage,
+        take: perPage,
+      }),
+      db.location.count({ where }),
+    ]);
+
+    return data({
+      locations,
+      page,
+      perPage,
+      totalCount,
+      totalPages: Math.max(1, Math.ceil(totalCount / perPage)),
+    });
   } catch (cause) {
     const reason = makeShelfError(cause);
     return data(

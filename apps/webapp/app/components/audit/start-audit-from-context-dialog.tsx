@@ -9,11 +9,13 @@ import Input from "~/components/forms/input";
 import Icon from "~/components/icons/icon";
 import { Dialog, DialogPortal } from "~/components/layout/dialog";
 import { Button } from "~/components/shared/button";
+import { DateTimePicker } from "~/components/shared/date-time-picker";
 import { Separator } from "~/components/shared/separator";
 import { useDisabled } from "~/hooks/use-disabled";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { isFormProcessing } from "~/utils/form";
+import { AUDIT_ANY_PERFORMER_SENTENCE } from "~/utils/permissions/role-audience";
 import AuditTeamMemberSelector from "./audit-team-member-selector";
 
 /**
@@ -235,10 +237,10 @@ export function StartAuditFromContextDialog({
                   {descriptionLength}/{AUDIT_DESCRIPTION_MAX_LENGTH}
                 </div>
 
-                <Input
+                <DateTimePicker
+                  mode="datetime"
                   name={zo.fields.dueDate()}
                   label="Due date"
-                  type="datetime-local"
                   error={zo.errors.dueDate()?.message}
                   disabled={isSubmitting}
                   className="mt-4"
@@ -271,9 +273,8 @@ export function StartAuditFromContextDialog({
                   Select assignee (optional).
                 </p>
                 <p className="border-b p-3 ">
-                  If no assignee is selected, any admin user can perform the
-                  audit. This can also be done by multiple users at different
-                  times.
+                  {AUDIT_ANY_PERFORMER_SENTENCE} Choosing assignees also lets
+                  those people perform it, including several at different times.
                 </p>
                 <AuditTeamMemberSelector />
               </div>

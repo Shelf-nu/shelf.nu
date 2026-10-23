@@ -41,7 +41,7 @@ import {
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import {
   getPaginatedAndFilterableAssets,
-  updateAssetQrCode,
+  relinkAssetQrCode,
 } from "~/modules/asset/service.server";
 import { getQr } from "~/modules/qr/service.server";
 import css from "~/styles/link-existing-asset.css?url";
@@ -110,6 +110,9 @@ export const loader = async ({
     } = await getPaginatedAndFilterableAssets({
       request,
       organizationId,
+      // This route ignores the custodian-filter seed, so scope it: no reason to
+      // fetch a roster nobody renders.
+      canSeeAllCustody: false,
     });
 
     if (totalPages !== 0 && page > totalPages) {
@@ -190,10 +193,19 @@ export const action = async ({
       z.object({ assetId: z.string() })
     );
 
-    await updateAssetQrCode({
-      newQrId: qrId,
+    /**
+     * Goes through `relinkAssetQrCode`, the same service the asset detail page
+     * and the mobile link endpoint use, rather than writing the link directly.
+     * The QR id arrives in the URL and nothing upstream vouches for it — this
+     * route tree has no layout loader — so the code's organization, its
+     * existing links, and the check-then-act window all have to be settled
+     * here.
+     */
+    await relinkAssetQrCode({
+      qrId,
       assetId,
       organizationId,
+      userId: authSession.userId,
     });
 
     return redirect(`/qr/${qrId}/successful-link?type=asset`);
@@ -335,7 +347,15 @@ export default function QrLinkExisting() {
   );
 }
 
-const RowComponent = ({ item }: { item: Asset }) => (
+const RowComponent = ({
+  item,
+}: {
+  item: Asset & {
+    /** Cover image of the asset's model, rendered when the asset has no image
+     * of its own. See `~/modules/asset/image-resolution`. */
+    assetModel: { image: string | null; thumbnailImage: string | null } | null;
+  };
+}) => (
   <>
     <Td className="w-full p-0 md:p-0">
       <div className="flex justify-between gap-3 p-4 md:px-6">
@@ -347,6 +367,7 @@ const RowComponent = ({ item }: { item: Asset }) => (
                 mainImage: item.mainImage,
                 thumbnailImage: item.thumbnailImage,
                 mainImageExpiration: item.mainImageExpiration,
+                assetModel: item.assetModel ?? null,
               }}
               alt={`Image of ${item.title}`}
               className="size-full rounded-[4px] border object-cover"

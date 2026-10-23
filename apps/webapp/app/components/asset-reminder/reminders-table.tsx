@@ -1,11 +1,15 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import type { Prisma } from "@prisma/client";
 import { RepeatIcon } from "lucide-react";
 import { useParams } from "react-router";
 import colors from "tailwindcss/colors";
 import type { ASSET_REMINDER_INCLUDE_FIELDS } from "~/modules/asset-reminder/fields";
 import { describeRecurrence } from "~/modules/asset-reminder/recurrence";
+import { ArchivedBadge } from "../assets/archived-badge";
 import { List } from "../list";
+import ActionsDropdown from "./actions-dropdown";
+import { getReminderStatus } from "./reminder-status";
+import type { ReminderStatus } from "./reminder-status";
 import ReminderTeamMembers from "./reminder-team-members";
 import SetOrEditReminderDialog from "./set-or-edit-reminder-dialog";
 import { ListContentWrapper } from "../list/content-wrapper";
@@ -15,7 +19,6 @@ import { Badge } from "../shared/badge";
 import { Button } from "../shared/button";
 import { DateS } from "../shared/date";
 import { Td, Th } from "../table";
-import ActionsDropdown from "./actions-dropdown";
 import When from "../when/when";
 
 type RemindersTableProps = {
@@ -29,11 +32,34 @@ export const REMINDERS_SORTING_OPTIONS = {
   updatedAt: "Date Updated",
 } as const;
 
+/**
+ * Dot colour per status. Paused and Not sent are grey: the archived asset's
+ * reminder is waiting on a reinstate, not on time.
+ */
+const REMINDER_STATUS_COLORS: Record<ReminderStatus, string> = {
+  Pending: colors.yellow["500"],
+  "Reminder sent": colors.green["500"],
+  Paused: colors.gray["500"],
+  "Not sent": colors.gray["500"],
+};
+
 export default function RemindersTable({
   isAssetReminderPage,
 }: RemindersTableProps) {
   const [isReminderDialogOpen, setIsReminderDialogOpen] = useState(false);
   const { assetId } = useParams<{ assetId: string }>();
+
+  /**
+   * Stable identity across renders so `SetOrEditReminderDialog`'s
+   * success-handling effect (which lists `onClose` as a dependency) doesn't
+   * re-fire on every unrelated re-render. See
+   * `.claude/rules/react-render-stability.md` and the `successHandledRef`
+   * latch in `set-or-edit-reminder-dialog.tsx` for the full mechanism this
+   * guards against.
+   */
+  const handleCloseReminderDialog = useCallback(() => {
+    setIsReminderDialogOpen(false);
+  }, []);
 
   const emptyStateTitle = isAssetReminderPage
     ? "No reminders for this asset"
@@ -94,9 +120,7 @@ export default function RemindersTable({
       <SetOrEditReminderDialog
         action={isAssetReminderPage ? `/assets/${assetId}` : undefined}
         open={isReminderDialogOpen}
-        onClose={() => {
-          setIsReminderDialogOpen(false);
-        }}
+        onClose={handleCloseReminderDialog}
       />
     </ListContentWrapper>
   );
@@ -111,15 +135,16 @@ function ListContent({
   }>;
   extraProps: { isAssetReminderPage: boolean };
 }) {
-  const now = new Date();
   /**
    * For an ACTIVE recurring reminder, alertDateTime is always the next
-   * occurrence (the worker advances it in place), so "Pending" stays
-   * correct; once a series ends the date stays in the past and the badge
-   * flips to "Reminder sent" — same rule as one-shots.
+   * occurrence (the worker advances it in place), so it reads like a one-shot
+   * that has not fired yet; once a series ends the date stays in the past.
    */
-  const status =
-    now < new Date(item.alertDateTime) ? "Pending" : "Reminder sent";
+  const status = getReminderStatus({
+    alertDateTime: item.alertDateTime,
+    schedulerReference: item.activeSchedulerReference,
+    assetArchivedAt: item.asset.archivedAt,
+  });
   const recurrenceLabel = describeRecurrence(item);
 
   return (
@@ -128,14 +153,17 @@ function ListContent({
       <Td className="max-w-62 md:max-w-96">{item.message}</Td>
       <When truthy={!extraProps.isAssetReminderPage}>
         <Td>
-          <Button
-            className="hover:underline"
-            to={`/assets/${item.asset.id}/overview`}
-            target="_blank"
-            variant={"link-gray"}
-          >
-            {item.asset.title}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              className="hover:underline"
+              to={`/assets/${item.asset.id}/overview`}
+              target="_blank"
+              variant={"link-gray"}
+            >
+              {item.asset.title}
+            </Button>
+            {item.asset.archivedAt ? <ArchivedBadge /> : null}
+          </div>
         </Td>
       </When>
       <Td>
@@ -148,13 +176,7 @@ function ListContent({
         ) : null}
       </Td>
       <Td>
-        <Badge
-          color={
-            status === "Pending" ? colors.yellow["500"] : colors.green["500"]
-          }
-        >
-          {status}
-        </Badge>
+        <Badge color={REMINDER_STATUS_COLORS[status]}>{status}</Badge>
       </Td>
       <Td>
         <ReminderTeamMembers

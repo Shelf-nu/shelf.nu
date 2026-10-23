@@ -9,6 +9,7 @@ import { ServerRouter } from "react-router";
 import type { AppLoadContext, EntryContext } from "react-router";
 import { registerEmailWorkers } from "./emails/email.worker.server";
 import { registerAddonTrialWorkers } from "./modules/addon-trial/worker.server";
+import { registerAssetImportWorkers } from "./modules/asset-import/worker.server";
 import { reconcileRecurringReminders } from "./modules/asset-reminder/chain.server";
 import { regierAssetWorkers } from "./modules/asset-reminder/worker.server";
 import { registerAuditWorkers } from "./modules/audit/worker.server";
@@ -64,6 +65,18 @@ schedulerService
             new ShelfError({
               cause,
               message: "Something went wrong while registering audit workers.",
+              label: "Scheduler",
+            })
+          );
+        }),
+      registerAssetImportWorkers()
+        .then(() => console.log("Asset import workers registered"))
+        .catch((cause) => {
+          Logger.error(
+            new ShelfError({
+              cause,
+              message:
+                "Something went wrong while registering asset import workers.",
               label: "Scheduler",
             })
           );

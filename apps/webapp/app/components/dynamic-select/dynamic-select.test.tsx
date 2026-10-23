@@ -1,9 +1,14 @@
 import type { ChangeEvent } from "react";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import resolveConfig from "tailwindcss/resolveConfig";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModelFilterItem } from "~/hooks/use-model-filters";
-import DynamicSelect from "./dynamic-select";
+import DynamicSelect, {
+  MobileStyles,
+  PICKER_PHONE_MEDIA_QUERY,
+} from "./dynamic-select";
+import tailwindConfig from "../../../tailwind.config";
 
 // why: controlling navigation state to test component without triggering actual Remix navigation
 vi.mock("react-router", async () => {
@@ -169,6 +174,61 @@ describe("DynamicSelect", () => {
       );
 
       expect(screen.getByText("Choose a category")).toBeInTheDocument();
+    });
+  });
+
+  describe("Scrolling inside a modal dialog", () => {
+    /**
+     * Every `Sheet` is a modal Radix Dialog, which mounts
+     * `react-remove-scroll`. That listens for `wheel` on `document` and
+     * cancels any whose target is outside the dialog content. This popover is
+     * portalled to `document.body`, so it counts as outside and its option
+     * list stops responding to the wheel — while the scrollbar, a pointer
+     * interaction, keeps working. Stopping the event before it reaches
+     * `document` is what keeps the list scrollable.
+     */
+    it("stops wheel events from reaching document", async () => {
+      const items = createTestItems(3);
+      mockUseModelFilters.mockReturnValue(
+        createMockUseModelFiltersReturn(items)
+      );
+
+      render(
+        <DynamicSelect
+          model={defaultModel}
+          initialDataKey="categories"
+          countKey="totalCategories"
+          contentLabel="Category"
+        />
+      );
+
+      const user = userEvent.setup();
+      await act(async () => {
+        await user.click(screen.getByRole("button"));
+      });
+      await waitFor(() => {
+        expect(screen.getByText("Item 1")).toBeInTheDocument();
+      });
+
+      // Stands in for react-remove-scroll's document-level listener.
+      const documentListener = vi.fn();
+      document.addEventListener("wheel", documentListener);
+
+      try {
+        act(() => {
+          screen.getByText("Item 1").dispatchEvent(
+            new WheelEvent("wheel", {
+              bubbles: true,
+              cancelable: true,
+              deltaY: 120,
+            })
+          );
+        });
+
+        expect(documentListener).not.toHaveBeenCalled();
+      } finally {
+        document.removeEventListener("wheel", documentListener);
+      }
     });
   });
 
@@ -879,5 +939,72 @@ describe("DynamicSelect", () => {
       // The trigger still shows the selected model, not the placeholder.
       expect(screen.getByRole("button")).toHaveTextContent("Item 2");
     });
+  });
+
+  describe("Validation error", () => {
+    function renderWithError(error?: string) {
+      return render(
+        <DynamicSelect
+          model={defaultModel}
+          initialDataKey="categories"
+          countKey="totalCategories"
+          contentLabel="Category"
+          error={error}
+        />
+      );
+    }
+
+    it("renders nothing extra when there is no error", () => {
+      renderWithError();
+
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      expect(screen.getByRole("button")).not.toHaveAttribute(
+        "aria-describedby"
+      );
+    });
+
+    it("announces the message, because a picker that refuses to submit is otherwise silent", () => {
+      renderWithError("Please select an asset model");
+
+      // `role="alert"` is what makes submit-time validation audible — without
+      // it a screen-reader user only experiences the form not submitting.
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Please select an asset model"
+      );
+    });
+
+    it("points the trigger at the message via aria-describedby", () => {
+      renderWithError("Please select an asset model");
+
+      const describedBy = screen
+        .getByRole("button")
+        .getAttribute("aria-describedby");
+
+      expect(describedBy).toBeTruthy();
+      expect(screen.getByRole("alert")).toHaveAttribute("id", describedBy);
+    });
+  });
+});
+
+describe("MobileStyles", () => {
+  it("keeps the phone layout to phone widths", () => {
+    const { screens } = resolveConfig(tailwindConfig).theme;
+
+    // The exact complement of `sm`: tablets get the regular dropdown.
+    expect(PICKER_PHONE_MEDIA_QUERY).toBe(
+      `not all and (min-width: ${screens.sm})`
+    );
+  });
+
+  it("lifts the panel above its overlay at every width the overlay shows", () => {
+    const { container } = render(<MobileStyles open />);
+
+    // The overlay shows below `sm` and sits above the panel's own z-index, so
+    // the panel rule must cover the same widths. Where it does not, the
+    // overlay covers the options and a tap on one only closes the select.
+    expect(container.querySelector(".extra-overlay")).toHaveClass("sm:hidden");
+    expect(container.querySelector("style")?.textContent).toContain(
+      `@media ${PICKER_PHONE_MEDIA_QUERY} {`
+    );
   });
 });

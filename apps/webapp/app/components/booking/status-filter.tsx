@@ -44,9 +44,15 @@ export function StatusFilter(props: StatusFilterProps) {
       /** If the value is "ALL", we just remove the param */
       if (value === "ALL") {
         prev.delete(name);
-        return prev;
+      } else {
+        prev.set(name, value);
       }
-      prev.set(name, value);
+      /**
+       * Reset pagination when the filter changes — otherwise a stale `page`
+       * offset can land on an empty page (e.g. switching to a filter whose
+       * results all fit on page 1). Mirrors the search and per-page controls.
+       */
+      prev.delete("page");
       return prev;
     });
   }

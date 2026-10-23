@@ -74,6 +74,21 @@ type GenericItemRowProps<T> = {
   searchParams?: Record<string, string>;
   /** Optional className to apply to the row wrapper (Tr) */
   className?: string;
+  /**
+   * Some drawers only support one item type (e.g. audits are asset-only —
+   * kits have no `AuditAsset` record). When the resolved item matches this
+   * type, it is stored with just an `error` instead of `data`/`type` — the
+   * same shape already used for "Failed to fetch item" and duplicate-scan
+   * errors. This routes the row through `renderLoading` (an error row: no
+   * detail link, no clickable content) instead of `renderItem`, and keeps
+   * it out of `data`-driven persistence loops entirely.
+   */
+  rejectItemType?: "asset" | "kit";
+  /**
+   * Message shown in the error row when the item matches `rejectItemType`.
+   * Falls back to a generic message if omitted.
+   */
+  rejectItemMessage?: string;
 };
 
 /**
@@ -90,6 +105,8 @@ export function GenericItemRow<T>({
   kitExtraInclude,
   searchParams: additionalSearchParams,
   className: rowClassName,
+  rejectItemType,
+  rejectItemMessage,
 }: GenericItemRowProps<T>) {
   const setItem = useSetAtom(updateScannedItemAtom);
 
@@ -143,6 +160,23 @@ export function GenericItemRow<T>({
         ? (apiResponse as BarcodeApiResponse).barcode
         : (apiResponse as QrApiResponse).qr;
 
+      // Reject unsupported item types at the point they resolve, before
+      // they ever get `data`/`type` set. Storing only `error` reuses the
+      // existing error-row rendering path (see `shouldShowItem` below),
+      // so a rejected item never becomes clickable and never enters a
+      // `data`-driven persistence pipeline.
+      if (dataSource && dataSource.type === rejectItemType) {
+        setItem({
+          qrId,
+          item: {
+            error:
+              rejectItemMessage ??
+              `Scanning a ${rejectItemType} is not supported here.`,
+          },
+        });
+        return;
+      }
+
       if (dataSource && dataSource.type === "asset") {
         const itemWithType: ScanListItem = {
           data: dataSource.asset,
@@ -163,7 +197,7 @@ export function GenericItemRow<T>({
         }
       }
     },
-    [isBarcode, qrId, setItem]
+    [isBarcode, qrId, setItem, rejectItemType, rejectItemMessage]
   );
 
   /**
@@ -243,7 +277,7 @@ export function Tr({
   skipEntrance?: boolean;
   className?: string;
 }) {
-  // Only hint the compositor to promote this row while the entrance/exit
+  // Only hint the compositor to promote this row while the entrance
   // animation is actually running, so we don't leave will-change set
   // permanently (which wastes GPU memory and can degrade performance).
   const [isAnimating, setIsAnimating] = useState(!skipEntrance);
@@ -257,7 +291,11 @@ export function Tr({
       initial={skipEntrance ? false : { opacity: 0, y: -80 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
-      exit={{ opacity: 0 }}
+      // Deliberately no `exit`. An exiting `m.tr` here never reports its
+      // animation complete, so `AnimatePresence` never calls `safeToRemove`
+      // and keeps the removed row mounted at its full 80px, leaving a gap
+      // the operator cannot clear. Without an exit animation there is
+      // nothing to wait on and removal lands on the next frame.
       onAnimationStart={() => setIsAnimating(true)}
       onAnimationComplete={() => setIsAnimating(false)}
       className={tw(

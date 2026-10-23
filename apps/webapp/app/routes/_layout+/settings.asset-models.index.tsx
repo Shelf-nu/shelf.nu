@@ -10,13 +10,14 @@ import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data } from "react-router";
 import AssetModelQuickActions from "~/components/asset-model/asset-model-quick-actions";
 import AssetModelBulkActionsDropdown from "~/components/asset-model/bulk-actions-dropdown";
+import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 import type { HeaderData } from "~/components/layout/header/types";
 import LineBreakText from "~/components/layout/line-break-text";
 import { List } from "~/components/list";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Th, Td } from "~/components/table";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { getAssetModels } from "~/modules/asset-model/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
@@ -31,6 +32,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
@@ -42,7 +44,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       userId: authSession.userId,
       request,
       entity: PermissionEntity.assetModel,
-      action: PermissionAction.read,
+      // `update`, matching the parent layout: this is the management list,
+      // not the read access that lets a role pick a model elsewhere.
+      action: PermissionAction.update,
     });
 
     const searchParams = getCurrentSearchParams(request);
@@ -94,7 +98,18 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function AssetModelsIndexPage() {
-  const { isBaseOrSelfService } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
+  // The bulk menu offers Delete only.
+  const showBulkActions = userHasPermission({
+    roles,
+    entity: PermissionEntity.assetModel,
+    action: PermissionAction.delete,
+  });
+  const canCreateAssetModel = userHasPermission({
+    roles,
+    entity: PermissionEntity.assetModel,
+    action: PermissionAction.create,
+  });
 
   return (
     <>
@@ -106,18 +121,20 @@ export default function AssetModelsIndexPage() {
             define default values and track groups of identical items.
           </p>
         </div>
-        <Button
-          to="new"
-          role="link"
-          aria-label="new asset model"
-          data-test-id="createNewAssetModel"
-        >
-          New asset model
-        </Button>
+        {canCreateAssetModel ? (
+          <Button
+            to="new"
+            role="link"
+            aria-label="new asset model"
+            data-test-id="createNewAssetModel"
+          >
+            New asset model
+          </Button>
+        ) : null}
       </div>
       <List
         bulkActions={
-          isBaseOrSelfService ? undefined : <AssetModelBulkActionsDropdown />
+          showBulkActions ? <AssetModelBulkActionsDropdown /> : undefined
         }
         ItemComponent={AssetModelItem}
         headerChildren={
@@ -137,16 +154,40 @@ export default function AssetModelsIndexPage() {
 const AssetModelItem = ({
   item,
 }: {
-  item: Pick<AssetModel, "id" | "description" | "name"> & {
+  item: Pick<
+    AssetModel,
+    "id" | "description" | "name" | "image" | "thumbnailImage"
+  > & {
+    /** Every linked asset; the delete dialog warns about all of them. */
     _count: {
       assets: number;
     };
+    /** Linked assets that are not archived; what the Assets column shows. */
+    activeAssetCount: number;
     defaultCategory?: Pick<Category, "id" | "name" | "color"> | null;
   };
 }) => (
   <>
     <Td title={`Asset model: ${item.name}`} className="w-1/4">
-      {item.name}
+      {/*
+        Image + name in one cell, matching the kit and asset list rows: the
+        picture is the fastest way to confirm you're looking at the right
+        model, and it's the same picture its assets now show.
+      */}
+      <div className="flex items-center gap-3">
+        {item.image ? (
+          // `imageUrl` is required alongside `withPreview` — see the note at the
+          // matching call site in components/asset-model/form.tsx.
+          <ImageWithPreview
+            imageUrl={item.image}
+            thumbnailUrl={item.thumbnailImage ?? item.image}
+            alt={`${item.name} image`}
+            className="size-10 shrink-0 rounded border object-cover"
+            withPreview
+          />
+        ) : null}
+        <span className="word-break">{item.name}</span>
+      </div>
     </Td>
     <Td className="max-w-62 md:w-2/4">
       {item.description ? (
@@ -167,7 +208,7 @@ const AssetModelItem = ({
         <span className="text-gray-400">—</span>
       )}
     </Td>
-    <Td>{item._count.assets}</Td>
+    <Td>{item.activeAssetCount}</Td>
     <Td>
       <AssetModelQuickActions assetModel={item} />
     </Td>

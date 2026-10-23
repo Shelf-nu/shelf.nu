@@ -2,6 +2,8 @@ import { transporter } from "~/emails/transporter.server";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
+import { formatRecipientList, parseRecipientList } from "./recipient-list";
+import { redactEmailPayloadForLog } from "./redact-email-payload";
 import type { EmailPayloadType } from "./types";
 import { SMTP_FROM, SUPPORT_EMAIL } from "../utils/env";
 
@@ -12,6 +14,22 @@ export const SOFT_DELETED_EMAIL_DOMAIN = "@deleted.shelf.nu";
 // increase teamSize if you need better concurrency
 // but keep email provider rate limiting and a potential n/w throughput load on postgress in mind
 // teamSize of 20-25 is a good limit if we need to scale email throughput in the future
+/**
+ * Registers the pg-boss worker that processes queued emails
+ * (`~/emails/mail.server.ts` pushes onto this queue with `retryLimit: 15`
+ * when a synchronous `triggerEmail` attempt fails).
+ *
+ * why: at-least-once delivery is an accepted trade-off, not a bug. If the
+ * process dies AFTER `transporter.sendMail` succeeds but BEFORE pg-boss
+ * records the job as completed, the retry loop re-sends the same email on
+ * the next attempt — `transporter.sendMail` is not idempotent and pg-boss
+ * has no way to know the send already happened. We accept this rare,
+ * non-catastrophic duplicate rather than build exactly-once delivery, which
+ * would require a dedup store (an idempotency key + a table/cache to check
+ * it against) that does not exist today. If duplicate sends become a real
+ * user complaint, that dedup store is the fix — not a smaller retryLimit
+ * (which would trade duplicates for silently-dropped emails instead).
+ */
 export const registerEmailWorkers = async () => {
   await scheduler.work<EmailPayloadType>(
     QueueNames.emailQueue,
@@ -20,10 +38,14 @@ export const registerEmailWorkers = async () => {
       try {
         await triggerEmail(job.data);
       } catch (cause) {
+        // why: pg-boss increments retrycount at fetch time, so with N retries
+        // the handler observes retrycount = 0, 1, 2, ... N — the final attempt
+        // has retrycount === retrylimit. Using `- 1` here double-logs (fires on
+        // both the second-to-last AND the final attempt).
         const isLastRetry =
           job.retrycount != null &&
           job.retrylimit != null &&
-          job.retrycount >= job.retrylimit - 1;
+          job.retrycount >= job.retrylimit;
 
         if (isLastRetry) {
           Logger.error(
@@ -31,7 +53,7 @@ export const registerEmailWorkers = async () => {
               cause,
               message: "Email permanently failed after exhausting all retries",
               additionalData: {
-                payload: job.data,
+                payload: redactEmailPayloadForLog(job.data),
                 retryCount: job.retrycount,
                 retryLimit: job.retrylimit,
               },
@@ -54,19 +76,38 @@ export const triggerEmail = async ({
   from,
   replyTo,
 }: EmailPayloadType) => {
-  if (to.endsWith(SOFT_DELETED_EMAIL_DOMAIN)) {
+  /**
+   * `to` can carry a comma separated list of addresses (in-app feedback goes
+   * to every inbox in FEEDBACK_EMAIL). Each address is checked on its own:
+   * one soft-deleted recipient does not suppress the others, and the outcome
+   * does not depend on address order. An empty `to` is passed through
+   * untouched so it fails loudly in nodemailer rather than being silently
+   * swallowed here.
+   */
+  const recipients = parseRecipientList(to);
+  const deliverableRecipients = recipients.filter(
+    // Lower-cased first: domains are case-insensitive, so an address stored
+    // as "@DELETED.SHELF.NU" is the same dead inbox and must not be mailed
+    ({ address }) => !address.toLowerCase().endsWith(SOFT_DELETED_EMAIL_DOMAIN)
+  );
+
+  if (recipients.length > 0 && deliverableRecipients.length === 0) {
     Logger.warn(
       `Skipping email to soft-deleted user: ${to} (subject: ${subject})`
     );
     return;
   }
 
+  const toHeader = deliverableRecipients.length
+    ? formatRecipientList(deliverableRecipients)
+    : to;
+
   try {
     // send mail with defined transport object
     await transporter.sendMail({
       from: from || SMTP_FROM || `"Shelf" <hello@example.com>`, // sender address
       replyTo: replyTo || SUPPORT_EMAIL, // reply to
-      to, // list of receivers
+      to: toHeader, // list of receivers
       subject, // Subject line
       text, // plain text body
       html: html || "", // html body

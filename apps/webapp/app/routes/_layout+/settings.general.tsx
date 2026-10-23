@@ -1,8 +1,5 @@
-import { Currency, OrganizationRoles, OrganizationType } from "@prisma/client";
-import {
-  MaxFileSizeExceededError,
-  parseFormData,
-} from "@remix-run/form-data-parser";
+import { Currency, OrganizationType } from "@prisma/client";
+import { parseFormData } from "@remix-run/form-data-parser";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -11,7 +8,6 @@ import type {
 import { data, redirect, useLoaderData } from "react-router";
 
 import { z } from "zod";
-import { ExportBackupButton } from "~/components/assets/export-backup-button";
 import { ErrorContent } from "~/components/errors";
 
 import type { HeaderData } from "~/components/layout/header/types";
@@ -19,13 +15,13 @@ import TransferOwnershipCard, {
   TransferOwnershipSchema,
 } from "~/components/settings/transfer-ownership-card";
 
-import { Card } from "~/components/shared/card";
 import {
   EditGeneralWorkspaceSettingsFormSchema,
   EditWorkspacePermissionsSettingsFormSchema,
   EditWorkspaceSSOSettingsFormSchema,
   WorkspaceEditForms,
 } from "~/components/workspace/edit-form";
+import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
 import {
   getOrganizationAdmins,
@@ -33,12 +29,14 @@ import {
   updateOrganization,
   updateOrganizationPermissions,
 } from "~/modules/organization/service.server";
+import { generateScimToken } from "~/modules/scim/auth.server";
 import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { resolveShowShelfBranding } from "~/utils/branding";
 import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
+import { isMaxFileSizeError } from "~/utils/form-data-parse-errors.server";
 import { payload, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
@@ -49,11 +47,7 @@ import {
   getOwnerSubscriptionInfo,
   premiumIsEnabled,
 } from "~/utils/stripe.server";
-import {
-  canExportAssets,
-  canHideShelfBranding,
-} from "~/utils/subscription.server";
-import { tw } from "~/utils/tw";
+import { canHideShelfBranding } from "~/utils/subscription.server";
 import { resolveUserDisplayName } from "~/utils/user";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
@@ -69,60 +63,77 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         action: PermissionAction.read,
       });
 
-    const [user, tierLimit, admins, ownerSubscriptionInfo] = await Promise.all([
-      db.user
-        .findUniqueOrThrow({
-          where: {
-            id: userId,
-          },
-          select: {
-            firstName: true,
-            displayName: true,
-            tierId: true,
-            userOrganizations: {
-              include: {
-                organization: {
-                  include: {
-                    ssoDetails: true,
-                    _count: {
-                      select: {
-                        assets: true,
-                        members: true,
-                        locations: true,
+    const [user, tierLimit, admins, ownerSubscriptionInfo, scimTokens] =
+      await Promise.all([
+        db.user
+          .findUniqueOrThrow({
+            where: {
+              id: userId,
+            },
+            select: {
+              firstName: true,
+              displayName: true,
+              tierId: true,
+              userOrganizations: {
+                include: {
+                  organization: {
+                    include: {
+                      ssoDetails: true,
+                      _count: {
+                        select: {
+                          assets: true,
+                          members: true,
+                          locations: true,
+                        },
                       },
-                    },
-                    owner: {
-                      select: {
-                        id: true,
-                        firstName: true,
-                        lastName: true,
-                        displayName: true,
-                        profilePicture: true,
+                      owner: {
+                        select: {
+                          id: true,
+                          firstName: true,
+                          lastName: true,
+                          displayName: true,
+                          profilePicture: true,
+                        },
                       },
                     },
                   },
                 },
               },
             },
-          },
-        })
-        .catch((cause) => {
-          throw new ShelfError({
-            cause,
-            message: "User not found",
-            additionalData: { userId, organizationId },
-            label: "Settings",
-          });
+          })
+          .catch((cause) => {
+            throw new ShelfError({
+              cause,
+              message: "User not found",
+              additionalData: { userId, organizationId },
+              label: "Settings",
+            });
+          }),
+        /* Check the tier limit */
+        getOrganizationTierLimit({
+          organizationId,
+          organizations,
         }),
-      /* Check the tier limit */
-      getOrganizationTierLimit({
-        organizationId,
-        organizations,
-      }),
-      getOrganizationAdmins({ organizationId }),
-      // Get subscription info for the workspace owner (for transfer dialog)
-      getOwnerSubscriptionInfo(currentOrganization.userId, organizationId),
-    ]);
+
+        getOrganizationAdmins({ organizationId }),
+        // Get subscription info for the workspace owner (for transfer dialog)
+        getOwnerSubscriptionInfo(currentOrganization.userId, organizationId),
+        // Load SCIM tokens for SSO-enabled organizations. Skipped entirely when
+        // the SCIM feature flag is off, so a deployment with SCIM disabled never
+        // queries the table.
+        config.enableScim && currentOrganization.enabledSso
+          ? db.scimToken.findMany({
+              where: { organizationId },
+              select: {
+                id: true,
+                label: true,
+                lastUsedAt: true,
+                createdAt: true,
+              },
+              orderBy: { createdAt: "desc" },
+            })
+          : Promise.resolve([]),
+      ]);
 
     const header: HeaderData = {
       title: "General",
@@ -149,7 +160,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     return payload({
       header,
       organization: currentOrganization,
-      canExportAssets: canExportAssets(tierLimit),
       canHideShelfBranding: canHideBrandingForThisWorkspace,
       user,
       curriences: Object.keys(Currency),
@@ -159,6 +169,16 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       ownerSubscriptionInfo,
       ownerOtherTeamWorkspacesCount,
       premiumIsEnabled,
+      // Surfaced through the loader (not read from `config` in the component):
+      // ENABLE_SCIM is server-only and absent from `getBrowserEnv()`, so a
+      // client-side `config.enableScim` would always be false.
+      scimEnabled: config.enableScim,
+      scimTokens: scimTokens.map((t) => ({
+        id: t.id,
+        label: t.label,
+        createdAt: t.createdAt.toISOString(),
+        lastUsedAt: t.lastUsedAt?.toISOString() ?? null,
+      })),
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
@@ -181,7 +201,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, currentOrganization, role, organizations } =
+    const { organizationId, currentOrganization, access, organizations } =
       await requirePermission({
         userId: authSession.userId,
         request,
@@ -215,7 +235,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const { intent } = parseData(
       formData,
       z.object({
-        intent: z.enum(["general", "permissions", "sso", "transfer-ownership"]),
+        intent: z.enum([
+          "general",
+          "permissions",
+          "sso",
+          "transfer-ownership",
+          "generateScimToken",
+          "deleteScimToken",
+        ]),
       }),
       {
         additionalData: {
@@ -234,8 +261,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
           additionalData: { userId, organizationId },
         });
 
-        const { name, currency, id, qrIdDisplayPreference, showShelfBranding } =
-          payload;
+        const {
+          name,
+          currency,
+          id,
+          qrIdDisplayPreference,
+          showShelfBranding,
+          showQrCodesOnPdfs,
+        } = payload;
 
         /** User is allowed to edit his/her current organization only not other organizations. */
         if (currentOrganization.id !== id) {
@@ -243,6 +276,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
             cause: null,
             message: "You are not allowed to edit this organization.",
             label: "Organization",
+            status: 403,
             shouldBeCaptured: false,
           });
         }
@@ -262,7 +296,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
             maxFileSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
           });
         } catch (parseError) {
-          if (parseError instanceof MaxFileSizeExceededError) {
+          if (isMaxFileSizeError(parseError)) {
             const reason = new ShelfError({
               cause: parseError,
               message: `Image size exceeds maximum allowed size of ${
@@ -290,6 +324,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
           currency,
           qrIdDisplayPreference,
           showShelfBranding: nextShowShelfBranding,
+          // No tier gate and no resolver: the zod transform yields `undefined`
+          // when the switch was not part of the submit, and `updateOrganization`
+          // writes the column only for a real boolean.
+          showQrCodesOnPdfs,
         });
 
         sendNotification({
@@ -322,6 +360,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
             cause: null,
             message: "You are not allowed to edit this organization.",
             label: "Organization",
+            status: 403,
             shouldBeCaptured: false,
           });
         }
@@ -346,12 +385,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
         return redirect("/settings/general");
       }
       case "sso": {
-        if (role !== OrganizationRoles.OWNER) {
+        if (!access.ownsWorkspace) {
           throw new ShelfError({
             cause: null,
             title: "Permission denied",
             message: "You are not allowed to edit SSO settings.",
             label: "Settings",
+            status: 403,
+            shouldBeCaptured: false,
           });
         }
 
@@ -360,6 +401,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
             cause: null,
             message: "SSO is not enabled for this organization.",
             label: "Settings",
+            status: 400,
+            shouldBeCaptured: false,
           });
         }
         const schema = EditWorkspaceSSOSettingsFormSchema(
@@ -370,8 +413,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
           additionalData: { userId, organizationId },
         });
 
-        const { id, selfServiceGroupId, adminGroupId, baseUserGroupId } =
-          payload;
+        const {
+          id,
+          selfServiceGroupId,
+          adminGroupId,
+          managerGroupId,
+          baseUserGroupId,
+        } = payload;
 
         /** User is allowed to edit his/her current organization only not other organizations. */
         if (currentOrganization.id !== id) {
@@ -379,6 +427,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
             cause: null,
             message: "You are not allowed to edit this organization.",
             label: "Organization",
+            status: 403,
             shouldBeCaptured: false,
           });
         }
@@ -389,6 +438,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           ssoDetails: {
             selfServiceGroupId: selfServiceGroupId as string,
             adminGroupId: adminGroupId as string,
+            managerGroupId: managerGroupId as string,
             baseUserGroupId: baseUserGroupId as string,
           },
         });
@@ -403,6 +453,23 @@ export async function action({ context, request }: ActionFunctionArgs) {
         return redirect("/settings/general");
       }
       case "transfer-ownership": {
+        // Defense in depth: the transfer card is hidden from non-owners, but a
+        // hand-crafted POST must not be able to transfer the workspace either.
+        // `requirePermission` above cannot catch this — ADMIN and OWNER share
+        // every permission, so ownership has to be checked explicitly.
+        if (!access.ownsWorkspace) {
+          throw new ShelfError({
+            cause: null,
+            title: "Permission denied",
+            message: "Only the workspace owner can transfer ownership.",
+            label: "Settings",
+            status: 403,
+            // why: a blocked privilege escalation attempt is a client error, not
+            // a server fault — it should not page anyone via Sentry
+            shouldBeCaptured: false,
+          });
+        }
+
         const parsedData = parseData(formData, TransferOwnershipSchema, {
           additionalData: { userId, organizationId },
         });
@@ -425,6 +492,104 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         return redirect("/assets");
       }
+      case "generateScimToken": {
+        // Defense in depth: the UI is hidden when SCIM is off, but a
+        // hand-crafted POST must not be able to mint a token either.
+        if (!config.enableScim) {
+          throw new ShelfError({
+            cause: null,
+            message: "SCIM provisioning is not enabled on this instance.",
+            label: "SCIM",
+            status: 404,
+            shouldBeCaptured: false,
+          });
+        }
+
+        if (!access.ownsWorkspace) {
+          throw new ShelfError({
+            cause: null,
+            title: "Permission denied",
+            message: "You are not allowed to manage SCIM tokens.",
+            label: "SCIM",
+            status: 403,
+            shouldBeCaptured: false,
+          });
+        }
+
+        if (!currentOrganization.enabledSso) {
+          throw new ShelfError({
+            cause: null,
+            message: "SSO is not enabled for this organization.",
+            label: "SCIM",
+            status: 400,
+            shouldBeCaptured: false,
+          });
+        }
+
+        const { label: tokenLabel } = parseData(
+          formData,
+          z.object({ label: z.string().min(1, "Label is required") }),
+          { additionalData: { userId, organizationId } }
+        );
+
+        const { rawToken, tokenHash } = generateScimToken();
+
+        await db.scimToken.create({
+          data: {
+            tokenHash,
+            label: tokenLabel,
+            organizationId,
+            createdById: userId,
+          },
+        });
+
+        return payload({ rawToken });
+      }
+      case "deleteScimToken": {
+        // Defense in depth — see generateScimToken above.
+        if (!config.enableScim) {
+          throw new ShelfError({
+            cause: null,
+            message: "SCIM provisioning is not enabled on this instance.",
+            label: "SCIM",
+            status: 404,
+            shouldBeCaptured: false,
+          });
+        }
+
+        if (!access.ownsWorkspace) {
+          throw new ShelfError({
+            cause: null,
+            title: "Permission denied",
+            message: "You are not allowed to manage SCIM tokens.",
+            label: "SCIM",
+            status: 403,
+            shouldBeCaptured: false,
+          });
+        }
+
+        const { tokenId } = parseData(
+          formData,
+          z.object({ tokenId: z.string() }),
+          { additionalData: { userId, organizationId } }
+        );
+
+        await db.scimToken.delete({
+          where: {
+            id: tokenId,
+            organizationId, // Ensure token belongs to this organization
+          },
+        });
+
+        sendNotification({
+          title: "SCIM token deleted",
+          message: "The SCIM token has been deleted successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return redirect("/settings/general");
+      }
       default: {
         throw new ShelfError({
           cause: null,
@@ -444,11 +609,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
 export default function GeneralPage() {
   const {
     organization,
-    canExportAssets,
+    scimEnabled,
+    scimTokens,
     admins,
     ownerSubscriptionInfo,
     ownerOtherTeamWorkspacesCount,
     premiumIsEnabled: premiumEnabled,
+    isPersonalWorkspace,
   } = useLoaderData<typeof loader>();
   return (
     <div className="mb-2.5 flex flex-col justify-between">
@@ -456,28 +623,16 @@ export default function GeneralPage() {
         name={organization.name}
         currency={organization.currency}
         qrIdDisplayPreference={organization.qrIdDisplayPreference}
+        scimEnabled={scimEnabled}
+        scimTokens={scimTokens}
       />
-
-      <Card className={tw("mb-0")}>
-        <h4 className="text-text-lg font-semibold">Asset backup</h4>
-        <p className=" text-sm text-gray-600">
-          Download a backup of your assets. If you want to restore a backup,
-          please get in touch with support.
-        </p>
-        <p className=" font-italic mb-2 text-sm text-gray-600">
-          IMPORTANT NOTE: QR codes will not be included in the export. Due to
-          the nature of how Shelf's QR codes work, they currently cannot be
-          exported with assets because they have unique ids. <br />
-          Importing a backup will just create a new QR code for each asset.
-        </p>
-        <ExportBackupButton canExportAssets={canExportAssets} />
-      </Card>
 
       <TransferOwnershipCard
         admins={admins}
         ownerSubscriptionInfo={ownerSubscriptionInfo}
         ownerOtherTeamWorkspacesCount={ownerOtherTeamWorkspacesCount}
         premiumIsEnabled={premiumEnabled}
+        isPersonalWorkspace={isPersonalWorkspace}
       />
     </div>
   );

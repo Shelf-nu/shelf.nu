@@ -4,13 +4,17 @@ import { format } from "date-fns";
 import type { ZodRawShape } from "zod";
 import { z } from "zod";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
-import type { ClientHint } from "~/utils/client-hints";
+import type { ResolvedFormatPrefs } from "~/utils/date-format";
 import {
   formatDateBasedOnLocaleOnly,
   parseDateOnlyString,
 } from "./client-hints";
 import { ShelfError, isLikeShelfError } from "./error";
 import { parseMarkdownToReact } from "./md";
+import {
+  optionalNumberFromString,
+  requiredNumberFromString,
+} from "./zod-numeric";
 /** Returns the schema depending on the field type.
  * Also handles the required field error message.
  * This was greatly inspired and done with the help of @rphlmr (https://github.com/rphlmr)
@@ -65,12 +69,16 @@ const getSchema = ({
       }
       return v;
     }),
+    // Blank must stay blank rather than coerce to 0: `z.coerce.number()` reads
+    // `""` as zero, which stored a real zero for every optional numeric field the
+    // operator left empty (the downstream blank guard cannot catch it, because by
+    // then the value is the number 0, not an empty string).
     amount: required
-      ? z.coerce.number().refine((value) => value !== 0, "Please enter a value")
-      : z.coerce.number(params).optional().nullable(),
+      ? requiredNumberFromString({ fieldName: field_name })
+      : optionalNumberFromString({ blank: null, fieldName: field_name }),
     number: required
-      ? z.coerce.number().refine((value) => value !== 0, "Please enter a value")
-      : z.coerce.number(params).optional().nullable(),
+      ? requiredNumberFromString({ fieldName: field_name })
+      : optionalNumberFromString({ blank: null, fieldName: field_name }),
   } as Record<CustomFieldZodSchema["type"], z.ZodTypeAny>;
 };
 
@@ -190,6 +198,22 @@ function formatInvalidNumericMessage(
 }
 
 /**
+ * The subset of a custom-field definition needed to turn a raw cell into a
+ * stored value.
+ *
+ * Narrow on purpose: a definition parsed from a CSV column header
+ * (`getDefinitionFromCsvHeader`) has no database row behind it, so it carries
+ * no `id`. A persisted `CustomField` satisfies this shape too, and its `id`
+ * travels to Sentry when a numeric value is rejected.
+ */
+export type CustomFieldDefinitionForValue = Pick<
+  CustomField,
+  "name" | "type"
+> & {
+  id?: string;
+};
+
+/**
  * Sanitizes and validates numeric input for AMOUNT and NUMBER custom fields.
  *
  * Accepted formats:
@@ -213,7 +237,7 @@ function formatInvalidNumericMessage(
  */
 function sanitizeNumericInput(
   raw: unknown,
-  def: CustomField
+  def: CustomFieldDefinitionForValue
 ): { numericValue: number; normalizedText: string } {
   const throwInvalid = (reason?: string): never => {
     const baseMessage = formatInvalidNumericMessage(def.name, raw);
@@ -331,9 +355,64 @@ function sanitizeNumericInput(
   return throwInvalid();
 }
 
+/** The only date format a custom field import accepts: YYYY-MM-DD. */
+export const CUSTOM_FIELD_DATE_FORMAT = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/**
+ * UTC midnight of a calendar day, so the date stays the same in every time
+ * zone.
+ *
+ * @param year - Full year
+ * @param month - Month, 1 to 12
+ * @param day - Day of the month
+ * @returns The date, or `null` when the parts are not a real day: `Date`
+ *   rolls 2026-02-31 over to 2026-03-03, which must never be stored
+ */
+export function utcCalendarDate(
+  year: number,
+  month: number,
+  day: number
+): Date | null {
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+    ? date
+    : null;
+}
+
+/**
+ * Whether a value is a date a custom field import accepts: YYYY-MM-DD and a
+ * real calendar day. The caller decides whether to trim first.
+ *
+ * @param value - A CSV cell
+ * @returns `true` when the importer would store it
+ */
+export function isImportableCustomFieldDate(value: string): boolean {
+  const match = CUSTOM_FIELD_DATE_FORMAT.exec(value);
+  return (
+    match !== null &&
+    utcCalendarDate(Number(match[1]), Number(match[2]), Number(match[3])) !==
+      null
+  );
+}
+
+/**
+ * Reads a yes/no cell the way imports do. Case-insensitive, trims whitespace.
+ *
+ * @param value - Raw string from a CSV cell
+ * @returns `true` for "yes", `false` for "no", `undefined` for anything else
+ */
+export function parseYesNo(value: string): boolean | undefined {
+  const lower = value.trim().toLowerCase();
+  if (lower === "yes") return true;
+  if (lower === "no") return false;
+  return undefined;
+}
+
 export const buildCustomFieldValue = (
   value: ShelfAssetCustomFieldValueType["value"],
-  def: CustomField
+  def: CustomFieldDefinitionForValue
 ): ShelfAssetCustomFieldValueType["value"] | undefined => {
   try {
     const { raw } = value;
@@ -351,15 +430,10 @@ export const buildCustomFieldValue = (
       case "BOOLEAN": {
         let finalValue: boolean;
         if (typeof raw === "string") {
-          const normalized = raw.trim().toLowerCase();
-          if (normalized === "yes") {
-            finalValue = true;
-          } else if (normalized === "no") {
-            finalValue = false;
-          } else {
-            // Unrecognized boolean string — skip instead of coercing
-            return undefined;
-          }
+          const parsed = parseYesNo(raw);
+          // An unrecognized string is skipped instead of coerced.
+          if (parsed === undefined) return undefined;
+          finalValue = parsed;
         } else {
           finalValue = Boolean(raw);
         }
@@ -371,14 +445,13 @@ export const buildCustomFieldValue = (
         // while ensuring the date remains the same in all timezones.
         const dateOnly = (raw as string).trim(); // expected: YYYY-MM-DD
 
-        // why: without a strict format guard, the positional split below silently
-        // mis-parses non-ISO input. e.g. "03-04-2026" → split → [3, 4, 2026] →
-        // Date.UTC(3, 3, 2026) rolls over to ~Oct 1908 — a VALID Date, so it is
-        // stored with no error while the UI keeps showing the raw string, poisoning
-        // the queryable valueDate (sort/filter/reports/reminders) invisibly.
-        // This mirrors the strict guard already used on the bulk-update import path
-        // (see compareCustomField's DATE case in ~/utils/import-update-diff).
-        const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateOnly);
+        // why: a stored date must be a real YYYY-MM-DD day. Any other shape is
+        // refused, because Date.UTC turns "03-04-2026" into a valid but wrong
+        // date that would then drive sorting, filters, reports and reminders;
+        // utcCalendarDate refuses a day Date.UTC would roll over (2026-02-31).
+        // The bulk-update diff applies the same rule via
+        // isImportableCustomFieldDate.
+        const match = CUSTOM_FIELD_DATE_FORMAT.exec(dateOnly);
         if (!match) {
           throw new ShelfError({
             cause: null,
@@ -389,21 +462,12 @@ export const buildCustomFieldValue = (
           });
         }
 
-        const year = Number(match[1]);
-        const month = Number(match[2]);
-        const day = Number(match[3]);
-
-        // Create date at UTC midnight to preserve the date across all timezones.
-        const utcDate = new Date(Date.UTC(year, month - 1, day));
-
-        // why: new Date normalizes overflow (e.g. 2026-02-31 → 2026-03-03), so we
-        // must confirm the components round-trip — otherwise impossible calendar
-        // dates would be silently stored as a different (shifted) date.
-        if (
-          utcDate.getUTCFullYear() !== year ||
-          utcDate.getUTCMonth() !== month - 1 ||
-          utcDate.getUTCDate() !== day
-        ) {
+        const utcDate = utcCalendarDate(
+          Number(match[1]),
+          Number(match[2]),
+          Number(match[3])
+        );
+        if (!utcDate) {
           throw new ShelfError({
             cause: null,
             title: "Invalid date",
@@ -460,16 +524,17 @@ export const buildCustomFieldValue = (
 export { formatInvalidNumericMessage as formatInvalidNumericCustomFieldMessage };
 
 /**
- * Returns a display value for a custom field based on its type
- * For dates, uses the raw date string to avoid timezone conversions
+ * Produce the human-readable display value for a stored custom-field value.
  *
- * @param value - The custom field value to display
- * @param hints - Client hints containing locale information
- * @returns Formatted display value as string or markdown node
+ * @param value - The stored custom-field value shape
+ * @param prefs - Optional resolved format prefs; when supplied, DATE values
+ *   render in the user's configured order (absolute, no tz conversion).
+ *   When omitted, falls back to `PPP` (server / prefs-less contexts).
+ * @returns A string or renderable Markdoc node
  */
 export const getCustomFieldDisplayValue = (
   value: ShelfAssetCustomFieldValueType["value"],
-  hints?: ClientHint
+  prefs?: ResolvedFormatPrefs
 ): string | RenderableTreeNode => {
   if (value.valueMultiLineText) {
     return parseMarkdownToReact(value.raw as string);
@@ -482,13 +547,108 @@ export const getCustomFieldDisplayValue = (
   if (value.valueDate) {
     // Use raw date string directly for formatting
     // This ensures the date displayed matches the date entered
-    return hints
-      ? formatDateBasedOnLocaleOnly(value.raw as string, hints.locale)
+    return prefs
+      ? formatDateBasedOnLocaleOnly(value.raw as string, prefs)
       : format(parseDateOnlyString(value.raw as string), "PPP");
   }
 
   return String(value.raw);
 };
+
+/**
+ * The subset of a custom-field definition the asset-overview list needs.
+ *
+ * Deliberately narrow so BOTH sources satisfy it: the full `CustomField`
+ * records returned by `getActiveCustomFields`, and the trimmed definition
+ * nested inside each stored `AssetCustomFieldValue` row (see
+ * `getAssetOverviewFields`).
+ */
+export type CustomFieldDefinitionForDisplay = {
+  id: string;
+  name: string;
+  type: CustomFieldType;
+  options: string[];
+};
+
+/** A stored custom-field value paired with the definition it belongs to. */
+export type StoredCustomFieldValueForDisplay = {
+  value: unknown;
+  customField: CustomFieldDefinitionForDisplay;
+};
+
+/** One row of the asset-overview custom-fields list. */
+export type AssetOverviewCustomField<
+  TStored extends StoredCustomFieldValueForDisplay,
+> = {
+  /** The definition used to label and render the row */
+  def: CustomFieldDefinitionForDisplay;
+  /** The stored value, or `null` when the field has never been set */
+  storedValue: TStored | null;
+  /**
+   * Whether this field appears in `editableDefinitions`. Always `false` for
+   * view-only users, who receive none. A row can carry a value the caller is
+   * not offered for editing (see the uncategorized-asset case below); the
+   * route's action rejects those writes with a 400, so the UI must not present
+   * an editor for them.
+   */
+  isEditable: boolean;
+};
+
+/**
+ * Build the unified, alphabetically-sorted custom-fields list for the asset
+ * overview page.
+ *
+ * The list is seeded from the asset's STORED VALUES — each one already carries
+ * its own definition — and only then topped up with the org's editable
+ * definitions, which produce the "Not set" placeholder rows.
+ *
+ * Seeding from the values is what makes the list permission-independent. The
+ * loader only fetches `editableDefinitions` for users who can update the asset
+ * (skipping three queries for view-only users), so a list built from those
+ * alone renders empty for every BASE and SELF_SERVICE user. It also keeps a
+ * value visible when its definition falls outside the editable set — an
+ * uncategorized asset is offered only uncategorized definitions, yet may still
+ * hold a value written while it belonged to a category.
+ *
+ * @param params.storedValues - The asset's custom-field value rows; rows with
+ *   an empty `value` are treated as unset
+ * @param params.editableDefinitions - Active definitions the user may fill in;
+ *   pass an empty array for view-only users
+ * @returns One entry per distinct definition, sorted by name. Neither input
+ *   array is mutated.
+ */
+export function buildAssetOverviewCustomFields<
+  TStored extends StoredCustomFieldValueForDisplay,
+>({
+  storedValues,
+  editableDefinitions,
+}: {
+  storedValues: TStored[];
+  editableDefinitions: CustomFieldDefinitionForDisplay[];
+}): AssetOverviewCustomField<TStored>[] {
+  const editableIds = new Set(editableDefinitions.map((def) => def.id));
+  const rows = new Map<string, AssetOverviewCustomField<TStored>>();
+
+  for (const storedValue of storedValues) {
+    if (!storedValue.value) continue;
+    rows.set(storedValue.customField.id, {
+      def: storedValue.customField,
+      storedValue,
+      isEditable: editableIds.has(storedValue.customField.id),
+    });
+  }
+
+  for (const def of editableDefinitions) {
+    if (rows.has(def.id)) continue;
+    rows.set(def.id, { def, storedValue: null, isEditable: true });
+  }
+
+  // Spread before sorting: `.sort()` is in-place, and these entries reference
+  // arrays owned by the loader payload.
+  return [...rows.values()].sort((a, b) =>
+    a.def.name.localeCompare(b.def.name)
+  );
+}
 
 //header = "cf:name,type:text"
 export const getDefinitionFromCsvHeader = (

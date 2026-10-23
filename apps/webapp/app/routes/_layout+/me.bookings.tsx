@@ -1,7 +1,11 @@
 import type { MetaFunction } from "react-router";
 import { data, type LoaderFunctionArgs } from "react-router";
 import type { HeaderData } from "~/components/layout/header/types";
-import { getBookings } from "~/modules/booking/service.server";
+import { decorateBookingsForList } from "~/modules/booking/list-flags.server";
+import {
+  getBookings,
+  resolveCustodianScope,
+} from "~/modules/booking/service.server";
 import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -44,6 +48,14 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const cookie = await updateCookieWithPerPage(request, perPageParam);
     const { perPage } = cookie;
 
+    // Always scoped to the current user — /me/bookings only ever shows their
+    // own. Resolve the full scope (user link + every team-member link) so
+    // legacy team-member-linked bookings aren't hidden here.
+    const custodianScope = await resolveCustodianScope({
+      userId,
+      organizationId,
+    });
+
     const [{ bookings, bookingCount }, tagsData] = await Promise.all([
       getBookings({
         organizationId,
@@ -51,18 +63,45 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         perPage,
         search,
         userId,
-        custodianUserId: userId, // Here we just hardcode the userId because only current user can see their own bookings
+        custodianScope,
         ...(status && {
           // If status is in the params, we filter based on it
           statuses: [status],
         }),
         tags: filterTags,
-        extraInclude: { tags: TAG_WITH_COLOR_SELECT },
+        // PERF: the list renders booking-level fields plus an asset COUNT. The
+        // per-booking `bookingAssets` payload existed only for the assets
+        // drawer, which now fetches it from
+        // `/api/bookings/:bookingId/assets-sidebar` when a row is expanded.
+        includeAssets: false,
+        extraInclude: {
+          // Asset count for the row's drawer trigger, now that the pivot rows
+          // themselves are no longer loaded.
+          _count: { select: { bookingAssets: true } },
+          tags: TAG_WITH_COLOR_SELECT,
+          // The unassigned-units pill reads `item.modelRequests`, and this
+          // route renders the shared bookings row via `BookingsIndexPage`.
+          // Without the include the pill vanishes on my own bookings instead of
+          // reading zero — absence reads as "nothing to do".
+          modelRequests: {
+            include: {
+              assetModel: { select: { id: true, name: true } },
+            },
+          },
+        },
       }),
       getTagsForBookingTagsFilter({
         organizationId,
       }),
     ]);
+
+    // Flag bookings whose QUANTITY_TRACKED assets are over-committed in their
+    // window, so the shared list renders the amber "Stock conflict" pill here
+    // too (see `~/modules/booking/stock-conflicts.server`).
+    const decoratedBookings = await decorateBookingsForList({
+      bookings,
+      organizationId,
+    });
 
     const totalPages = Math.ceil(bookingCount / perPage);
 
@@ -76,7 +115,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     return data(
       payload({
         header,
-        items: bookings,
+        items: decoratedBookings,
         search,
         page,
         totalItems: bookingCount,

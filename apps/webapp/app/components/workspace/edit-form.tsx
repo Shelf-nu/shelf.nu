@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   type Organization,
   type Currency,
@@ -9,25 +10,42 @@ import { useFetcher, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
-import { fileErrorAtom, defaultValidateFileAtom } from "~/atoms/file";
+import { fileErrorAtom } from "~/atoms/file";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import type { loader } from "~/routes/_layout+/account-details.workspace.$workspaceId.edit";
-import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
+import { SSO_GROUP_ROLE, type SsoGroupField } from "~/utils/sso-group-roles";
 import { tw } from "~/utils/tw";
 import { zodFieldIsRequired } from "~/utils/zod";
 import CurrencySelector from "./currency-selector";
 import QrIdDisplayPreferenceSelector from "./qr-id-display-preference-selector";
+import { WorkspaceLogoField } from "./workspace-logo-field";
 import FormRow from "../forms/form-row";
 import { InnerLabel } from "../forms/inner-label";
 import Input from "../forms/input";
 import { Switch } from "../forms/switch";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
+import { DateS } from "../shared/date";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "../shared/modal";
 import { Spinner } from "../shared/spinner";
+
+export interface ScimTokenItem {
+  id: string;
+  label: string;
+  lastUsedAt: string | null;
+  createdAt: string;
+}
 
 /** Pass props of the values to be used as default for the form fields */
 interface Props {
@@ -35,6 +53,19 @@ interface Props {
   currency?: Organization["currency"];
   qrIdDisplayPreference?: Organization["qrIdDisplayPreference"];
   className?: string;
+  /**
+   * Whether SCIM provisioning is enabled on this deployment (the `ENABLE_SCIM`
+   * server flag, passed down through the route loader).
+   *
+   * Must arrive as a prop rather than being read from `~/config/shelf.config`:
+   * `ENABLE_SCIM` is server-only and deliberately absent from `getBrowserEnv()`,
+   * so a client-side config read would always be `false`.
+   *
+   * Only the workspace settings route supplies this, which is also what keeps
+   * the SCIM section off the other route that renders this form.
+   */
+  scimEnabled?: boolean;
+  scimTokens?: ScimTokenItem[];
 }
 
 export const EditGeneralWorkspaceSettingsFormSchema = (
@@ -55,6 +86,13 @@ export const EditGeneralWorkspaceSettingsFormSchema = (
         return value === "on";
       })
       .optional(),
+    showQrCodesOnPdfs: z
+      .union([z.literal("on"), z.literal("off"), z.undefined()])
+      .transform((value) => {
+        if (value === undefined) return undefined;
+        return value === "on";
+      })
+      .optional(),
   });
 
 export const WorkspaceEditForms = ({
@@ -62,6 +100,8 @@ export const WorkspaceEditForms = ({
   currency,
   qrIdDisplayPreference,
   className,
+  scimEnabled,
+  scimTokens,
 }: Props) => (
   <div className={tw("flex flex-col gap-3", className)}>
     <WorkspaceGeneralEditForms
@@ -71,6 +111,10 @@ export const WorkspaceEditForms = ({
     />
     <WorkspacePermissionsEditForm />
     <WorkspaceSSOEditForm />
+    <WorkspaceScimTokensSection
+      scimEnabled={scimEnabled}
+      scimTokens={scimTokens}
+    />
   </div>
 );
 
@@ -83,8 +127,10 @@ const WorkspaceGeneralEditForms = ({
   const { organization, isPersonalWorkspace, canHideShelfBranding } =
     useLoaderData<typeof loader>();
 
-  // Focus the Name input on mount, but skip when the field is disabled
-  // (personal workspaces don't allow renaming).
+  // Focus the Name input on mount, but skip it when the field is disabled
+  // (personal workspaces don't allow renaming). Arriving via a section anchor
+  // (e.g. /settings/general#transfer-ownership) no longer needs a guard here:
+  // useAutoFocus focuses with `preventScroll`, so the anchor scroll survives.
   const nameInputRef = useAutoFocus<HTMLInputElement>({
     when: !isPersonalWorkspace,
   });
@@ -94,7 +140,6 @@ const WorkspaceGeneralEditForms = ({
   const fetcher = useFetcher({ key: "general" });
   const disabled = useDisabled(fetcher);
   const fileError = useAtomValue(fileErrorAtom);
-  const [, validateFile] = useAtom(defaultValidateFileAtom);
   const [, updateTitle] = useAtom(updateDynamicTitleAtom);
 
   const fetcherError = (
@@ -150,26 +195,11 @@ const WorkspaceGeneralEditForms = ({
         </FormRow>
 
         <FormRow rowLabel={"Main image"} className="border-b-0">
-          <div>
-            <p className="hidden lg:block">
-              Accepts PNG, JPG, JPEG, or WebP (max.4 MB)
-            </p>
-            <Input
-              // disabled={disabled}
-              accept={ACCEPT_SUPPORTED_IMAGES}
-              name="image"
-              type="file"
-              onChange={validateFile}
-              label={"Main image"}
-              hideLabel
-              error={imageError}
-              className="mt-2"
-              inputClassName="border-0 shadow-none p-0 rounded-none"
-            />
-            <p className="mt-2 lg:hidden">
-              Accepts PNG, JPG, JPEG, or WebP (max.4 MB)
-            </p>
-          </div>
+          <WorkspaceLogoField
+            imageId={organization.imageId}
+            updatedAt={organization.updatedAt}
+            error={imageError}
+          />
         </FormRow>
 
         <div>
@@ -279,6 +309,49 @@ const WorkspaceGeneralEditForms = ({
                 className="text-[14px] text-gray-600"
               >
                 Toggle Shelf branding on downloadable QR and barcode labels.
+              </p>
+            </div>
+          </div>
+        </FormRow>
+
+        <FormRow
+          rowLabel={"Code images on PDFs"}
+          className={"border-b-0"}
+          subHeading={
+            <p>
+              Control whether each item's code is printed as a picture on the
+              booking checklist and the audit receipt.
+            </p>
+          }
+        >
+          <div className="flex items-center gap-3">
+            <input
+              type="hidden"
+              name={zo.fields.showQrCodesOnPdfs()}
+              value="off"
+            />
+            <Switch
+              id="showQrCodesOnPdfs"
+              name={zo.fields.showQrCodesOnPdfs()}
+              defaultChecked={organization.showQrCodesOnPdfs ?? true}
+              aria-labelledby="showQrCodesOnPdfs-label"
+              aria-describedby="showQrCodesOnPdfs-desc"
+            />
+            <div>
+              <label
+                id="showQrCodesOnPdfs-label"
+                htmlFor="showQrCodesOnPdfs"
+                className="cursor-pointer text-[14px] font-medium text-gray-700"
+              >
+                Print code images on PDFs
+              </label>
+              <p
+                id="showQrCodesOnPdfs-desc"
+                className="text-[14px] text-gray-600"
+              >
+                Prints the same code as the text: a QR code, or the barcode your
+                workspace uses. Turn this off when people should scan the label
+                on the item itself. The code still prints as text either way.
               </p>
             </div>
           </div>
@@ -488,18 +561,22 @@ export const EditWorkspaceSSOSettingsFormSchema = (sso: boolean = false) =>
   z
     .object({
       id: z.string(),
+      adminGroupId: z.string().optional(),
+      managerGroupId: z.string().optional(),
       selfServiceGroupId: z.string().optional(),
       baseUserGroupId: z.string().optional(),
-      adminGroupId: z.string().optional(),
     })
     .superRefine((data, ctx) => {
       if (!sso) return;
 
-      const hasAtLeastOneGroup = [
-        data.adminGroupId,
-        data.selfServiceGroupId,
-        data.baseUserGroupId,
-      ].some((value) => value != null && value.trim().length > 0);
+      /* Every group-id column counts, so a workspace that maps only one role
+         (whichever it is) passes. */
+      const hasAtLeastOneGroup = (
+        Object.keys(SSO_GROUP_ROLE) as SsoGroupField[]
+      ).some((field) => {
+        const value = data[field];
+        return value != null && value.trim().length > 0;
+      });
 
       if (!hasAtLeastOneGroup) {
         ctx.addIssue({
@@ -513,7 +590,7 @@ export const EditWorkspaceSSOSettingsFormSchema = (sso: boolean = false) =>
 
 const WorkspaceSSOEditForm = ({ className }: Props) => {
   const { organization } = useLoaderData<typeof loader>();
-  const { isOwner } = useUserRoleHelper();
+  const { ownsWorkspace: isOwner } = useRoleAccess();
   const fetcher = useFetcher({ key: "sso" });
   const schema = EditWorkspaceSSOSettingsFormSchema(organization.enabledSso);
   const zo = useZorm("NewQuestionWizardScreen", schema);
@@ -549,13 +626,22 @@ const WorkspaceSSOEditForm = ({ className }: Props) => {
             required, the rest can be left blank.
           </p>
           <p className="mt-2">
-            Enter the exact value your identity provider sends in the user's{" "}
+            Enter the value(s) your identity provider sends in the user's{" "}
             <b>groups</b> claim. <b>Google Workspace</b> returns group{" "}
             <b>names</b>. <b>Microsoft Entra</b> returns the group{" "}
             <b>Object ID</b>. <b>Okta</b> and most other providers return the
             group <b>name</b> (depending on how your groups attribute statement
-            is configured). Values are case-sensitive and must match your IdP
-            exactly.
+            is configured). <b>Shibboleth</b> releases the value from your{" "}
+            <b>isMemberOf</b>, <b>eduPersonEntitlement</b>, or{" "}
+            <b>eduPersonScopedAffiliation</b> attribute (e.g.{" "}
+            <b>staff@your.edu</b>, a Grouper path, or a group name/DN). Matching
+            is trimmed and case-insensitive, but paste the value(s) exactly as
+            your IdP sends them.
+          </p>
+          <p className="mt-2">
+            Each field accepts <b>one or more group IDs, separated by commas</b>{" "}
+            (e.g. <b>it-admins, shelf-admins</b>) — useful when more than one
+            IdP group should map to the same role.
           </p>
         </div>
 
@@ -597,6 +683,29 @@ const WorkspaceSSOEditForm = ({ className }: Props) => {
               zo.errors.adminGroupId()?.message
             }
             defaultValue={organization.ssoDetails.adminGroupId || undefined}
+          />
+        </FormRow>
+
+        <FormRow
+          rowLabel={`Manager role group`}
+          subHeading={
+            <div>
+              The group identifier that should be mapped to the <b>Manager</b>{" "}
+              role.
+            </div>
+          }
+          className="border-b-0 pb-[10px]"
+        >
+          <Input
+            label={"Manager role group"}
+            hideLabel
+            className="w-full"
+            name={zo.fields.managerGroupId()}
+            error={
+              validationErrors?.managerGroupId?.message ||
+              zo.errors.managerGroupId()?.message
+            }
+            defaultValue={organization.ssoDetails.managerGroupId || undefined}
           />
         </FormRow>
 
@@ -654,4 +763,225 @@ const WorkspaceSSOEditForm = ({ className }: Props) => {
       </Card>
     </fetcher.Form>
   ) : null;
+};
+
+const WorkspaceScimTokensSection = ({
+  scimEnabled,
+  scimTokens,
+  className,
+}: {
+  scimEnabled?: boolean;
+  scimTokens?: ScimTokenItem[];
+  className?: string;
+}) => {
+  const { organization } = useLoaderData<typeof loader>();
+  const { ownsWorkspace: isOwner } = useRoleAccess();
+  const generateFetcher = useFetcher({ key: "generateScimToken" });
+  const deleteFetcher = useFetcher({ key: "deleteScimToken" });
+  const generateDisabled = useDisabled(generateFetcher);
+  const [revealedToken, setRevealedToken] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [dismissedToken, setDismissedToken] = useState<string | null>(null);
+  const [tokenToDelete, setTokenToDelete] = useState<ScimTokenItem | null>(
+    null
+  );
+  const labelInputRef = useRef<HTMLInputElement>(null);
+
+  // Extract the raw token from the generate action response
+  const generateData = generateFetcher.data as
+    | { rawToken?: string }
+    | undefined;
+  const newToken = generateData?.rawToken;
+
+  // Show dialog when a new token is generated (but not if already dismissed)
+  useEffect(() => {
+    if (newToken && newToken !== revealedToken && newToken !== dismissedToken) {
+      setRevealedToken(newToken);
+      setCopied(false);
+      if (labelInputRef.current) {
+        labelInputRef.current.value = "";
+      }
+    }
+  }, [newToken, revealedToken, dismissedToken]);
+
+  const handleCopy = useCallback(() => {
+    if (revealedToken) {
+      void navigator.clipboard.writeText(revealedToken);
+      setCopied(true);
+    }
+  }, [revealedToken]);
+
+  if (
+    !scimEnabled ||
+    !isOwner ||
+    !organization.enabledSso ||
+    !organization.ssoDetails
+  ) {
+    return null;
+  }
+
+  return (
+    <>
+      <Card className={tw("my-0", className)}>
+        <div className="border-b pb-5">
+          <h2 className="text-[18px] font-semibold">SCIM provisioning</h2>
+          <p className="text-sm text-gray-600">
+            Manage bearer tokens for SCIM user provisioning (e.g. Microsoft
+            Entra ID).
+          </p>
+        </div>
+
+        {/* Token list */}
+        {scimTokens && scimTokens.length > 0 ? (
+          <div className="mt-4">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b text-xs text-gray-500">
+                  <th className="pb-2 font-medium">Label</th>
+                  <th className="pb-2 font-medium">Created</th>
+                  <th className="pb-2 font-medium">Last used</th>
+                  <th className="pb-2 text-right font-medium">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {scimTokens.map((token) => (
+                  <tr key={token.id} className="border-b last:border-b-0">
+                    <td className="py-3 font-medium">{token.label}</td>
+                    <td className="py-3 text-gray-600">
+                      <DateS date={token.createdAt} />
+                    </td>
+                    <td className="py-3 text-gray-600">
+                      {token.lastUsedAt ? (
+                        <DateS date={token.lastUsedAt} />
+                      ) : (
+                        <span className="text-gray-400">Never</span>
+                      )}
+                    </td>
+                    <td className="py-3 text-right">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="text-error-500 hover:text-error-600"
+                        onClick={() => setTokenToDelete(token)}
+                      >
+                        Delete
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="mt-4 text-sm text-gray-500">
+            No active SCIM tokens. Generate one to enable SCIM provisioning.
+          </p>
+        )}
+
+        {/* Generate form */}
+        <generateFetcher.Form method="post" className="mt-4 flex gap-2">
+          <Input
+            ref={labelInputRef}
+            label="Token label"
+            hideLabel
+            name="label"
+            placeholder="Token label (e.g. Entra ID Production)"
+            className="flex-1"
+            required
+          />
+          <Button
+            type="submit"
+            name="intent"
+            value="generateScimToken"
+            disabled={generateDisabled}
+          >
+            {generateDisabled ? <Spinner /> : "Generate token"}
+          </Button>
+        </generateFetcher.Form>
+      </Card>
+
+      {/* Delete confirmation dialog */}
+      <AlertDialog
+        open={!!tokenToDelete}
+        onOpenChange={(open) => {
+          if (!open) setTokenToDelete(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete SCIM token</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete the token &ldquo;
+              {tokenToDelete?.label}&rdquo;? Any SCIM integration using this
+              token will stop working immediately.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setTokenToDelete(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              className="bg-error-500 hover:bg-error-600"
+              onClick={async () => {
+                if (tokenToDelete) {
+                  await deleteFetcher.submit(
+                    { intent: "deleteScimToken", tokenId: tokenToDelete.id },
+                    { method: "post" }
+                  );
+                  setTokenToDelete(null);
+                }
+              }}
+            >
+              Delete
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Token reveal dialog */}
+      <AlertDialog
+        open={!!revealedToken}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDismissedToken(revealedToken);
+            setRevealedToken(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>SCIM token generated</AlertDialogTitle>
+            <AlertDialogDescription>
+              Copy this token now. It will not be shown again.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="my-2">
+            <code className="block break-all rounded border bg-gray-50 p-3 text-sm">
+              {revealedToken}
+            </code>
+          </div>
+          <AlertDialogFooter>
+            <Button type="button" variant="secondary" onClick={handleCopy}>
+              {copied ? "Copied!" : "Copy to clipboard"}
+            </Button>
+            <Button
+              type="button"
+              onClick={() => {
+                setDismissedToken(revealedToken);
+                setRevealedToken(null);
+              }}
+            >
+              Done
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
 };

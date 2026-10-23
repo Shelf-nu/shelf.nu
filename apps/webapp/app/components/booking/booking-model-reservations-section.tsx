@@ -1,0 +1,340 @@
+/**
+ * "Unassigned model reservations" section.
+ *
+ * A `BookingModelRequest` is a commitment to supply N units of an asset model
+ * without yet naming which physical assets. Until somebody scans units in, a
+ * booking carrying reservations is **not ready to leave**.
+ *
+ * This section is the single rendering of that state, shared by the booking
+ * overview and the bookings-index assets drawer. It deliberately sits ABOVE
+ * the Assets & Kits list rather than inside it, because reservations are not
+ * assets:
+ *
+ *   - Every count then describes the rows directly beneath it. The Assets &
+ *     Kits header counts asset/kit rows and there are exactly that many; this
+ *     header counts reservations and there are exactly that many. Nothing to
+ *     reconcile.
+ *   - Both denominators are stated together ("4 units across 2 models"), so a
+ *     reader never has to work out whether a number means rows or units.
+ *   - Reservations are not selectable, so keeping them out of the bulk-actions
+ *     table removes the mismatch rather than working around it.
+ *
+ * Previously the overview interleaved reservation rows into the assets table
+ * and added their count into the list header, which made the header disagree
+ * with both the visible rows and the bookings index. A customer reported that
+ * as a counting bug. See {@link file://./../../utils/booking-model-requests.ts}
+ * for the units-not-rows counting rule.
+ *
+ * @see {@link file://./booking-assets-column.tsx} — booking overview
+ * @see {@link file://./booking-assets-sidebar.tsx} — index drawer
+ * @see {@link file://./unassigned-model-units-pill.tsx} — index row signal
+ */
+import type { ReactNode } from "react";
+import { useState } from "react";
+import {
+  ChevronLeft as ChevronLeftIcon,
+  ChevronRight as ChevronRightIcon,
+  Package as PackageIcon,
+} from "lucide-react";
+import { Button } from "~/components/shared/button";
+import { BADGE_COLORS } from "~/utils/badge-colors";
+import {
+  countReservedModelUnits,
+  countUnassignedModelUnits,
+  getOutstandingModelRequests,
+} from "~/utils/booking-model-requests";
+import { tw } from "~/utils/tw";
+
+/**
+ * Shape of a reservation this section renders. Declared structurally so both
+ * call sites can pass their own loader-shaped rows without a widening cast.
+ */
+export type SectionModelRequest = {
+  id: string;
+  assetModelId: string;
+  quantity: number;
+  fulfilledQuantity: number;
+  fulfilledAt: Date | string | null;
+  assetModel: { id: string; name: string };
+};
+
+/** Props for {@link BookingModelReservationsSection}. */
+type BookingModelReservationsSectionProps = {
+  /**
+   * The booking's model requests. Fulfilled rows are filtered out here, so
+   * callers can pass the relation as-is. Tolerates `null`/`undefined`.
+   */
+  modelRequests: SectionModelRequest[] | null | undefined;
+  /**
+   * Trailing control for each row. The overview passes the full actions
+   * dropdown (scan to assign / remove); the drawer passes a plain
+   * "Scan to assign" link. Presentation stays identical either way — only the
+   * affordance differs, matching what each surface can actually do.
+   */
+  renderAction?: (request: SectionModelRequest) => ReactNode;
+  /**
+   * Primary action for the section as a whole, rendered beside the heading.
+   *
+   * Without it the only way to act on outstanding work was a per-row kebab,
+   * while the Assets & Kits list directly below carried two full-size buttons.
+   * The section describing what the booking still OWES had the weakest
+   * affordance on the page, so "what do I do about this" had no visible answer
+   * short of starting a check-out.
+   */
+  headerAction?: ReactNode;
+  /**
+   * Whether units can still be assigned (see `canAssignModelUnits`). When
+   * false the booking is finished, cancelled or archived, so the leftover
+   * units are history rather than work: the copy switches to past tense and
+   * the amber emphasis drops away. Defaults to `true` for callers that only
+   * ever render live bookings.
+   */
+  canAssign?: boolean;
+  /**
+   * Reservations the booking's dates can no longer fill (see
+   * `findModelRequestShortfallsForBooking`), e.g. after a unit was archived
+   * with "Archive anyway". Each is flagged on its row, and the header says
+   * what happens if nothing changes. Omitted by surfaces that do not measure.
+   */
+  shortfalls?: Array<{
+    assetModelId: string;
+    available: number;
+    short: number;
+  }>;
+  /** Extra classes for the outer wrapper (surface-specific spacing). */
+  className?: string;
+};
+
+/**
+ * States a single reservation's outstanding work.
+ *
+ * ALWAYS `"X of Y units still to assign"`, never a bare count, even when
+ * nothing has been assigned yet and X equals Y.
+ *
+ * An earlier version dropped the denominator on untouched rows, so a booking
+ * showed "3 units to assign" next to "1 of 2 units still to assign". Two rows
+ * of the same kind in two shapes, with the shape changing only once something
+ * had been scanned in. A reader could not tell whether the bare 3 meant three
+ * promised or three left, and checking the section total meant adding a bare
+ * number to the numerator of a fraction.
+ *
+ * Keeping one shape makes the whole section self-checking: the X's sum to the
+ * units still to assign, the Y's sum to the units reserved, and both totals
+ * appear in the header in the same `"X of Y"` form.
+ *
+ * @param request - The reservation.
+ * @returns e.g. `"3 of 3 units still to assign"`, `"1 of 2 units still to
+ *   assign"`.
+ */
+function describeOutstanding(
+  request: SectionModelRequest,
+  canAssign: boolean
+): string {
+  const remaining = Math.max(0, request.quantity - request.fulfilledQuantity);
+
+  // The noun agrees with the TOTAL, not the remainder, or it reads
+  // "1 of 2 unit".
+  const units = request.quantity === 1 ? "unit" : "units";
+
+  // Past tense once nothing can be assigned — "still to assign" on a
+  // cancelled booking states work that will never happen.
+  return canAssign
+    ? `${remaining} of ${request.quantity} ${units} still to assign`
+    : `${remaining} of ${request.quantity} ${units} never assigned`;
+}
+
+/**
+ * Reservations shown per page.
+ *
+ * The section sits ABOVE the Assets & Kits list, so its height is spent from
+ * the same screen as the list it introduces. A booking reserving dozens of
+ * models would otherwise push that list — and every control below it — past
+ * the bottom of the page. Ten rows state the shape of the outstanding work
+ * without displacing what follows.
+ */
+const RESERVATIONS_PAGE_SIZE = 10;
+
+/**
+ * Renders the outstanding reservations for a booking, or `null` when there is
+ * no outstanding work (so callers need no guard of their own).
+ */
+export function BookingModelReservationsSection({
+  modelRequests,
+  renderAction,
+  headerAction,
+  canAssign = true,
+  shortfalls,
+  className,
+}: BookingModelReservationsSectionProps) {
+  const [page, setPage] = useState(1);
+
+  const outstanding = getOutstandingModelRequests(modelRequests);
+
+  if (outstanding.length === 0) {
+    return null;
+  }
+
+  const units = countUnassignedModelUnits(modelRequests);
+  const reserved = countReservedModelUnits(modelRequests);
+  const shortfallByModelId = new Map(
+    (canAssign ? shortfalls ?? [] : []).map((s) => [s.assetModelId, s])
+  );
+
+  const totalPages = Math.max(
+    1,
+    Math.ceil(outstanding.length / RESERVATIONS_PAGE_SIZE)
+  );
+  // Assigning units removes rows, so the list can shrink underneath a reader
+  // sitting on the last page. Resolving the page on each render — rather than
+  // storing a corrected one — keeps that from rendering an empty table.
+  const currentPage = Math.min(page, totalPages);
+  const firstIndex = (currentPage - 1) * RESERVATIONS_PAGE_SIZE;
+  const visible = outstanding.slice(
+    firstIndex,
+    firstIndex + RESERVATIONS_PAGE_SIZE
+  );
+  const isPaged = outstanding.length > RESERVATIONS_PAGE_SIZE;
+
+  return (
+    <div className={tw("overflow-hidden rounded border bg-white", className)}>
+      <div className="flex items-start justify-between gap-3 border-b border-gray-200 p-4 md:px-6">
+        <div>
+          <h5 className="text-left text-text-sm font-semibold text-gray-900">
+            Unassigned model reservations
+          </h5>
+          {/* Same `"X of Y units"` shape the rows use, so the header is checkable
+            against them by eye: the rows' first numbers sum to X and their
+            second numbers sum to Y. Stating both stops a reader having to
+            guess whether a lone number means promised or remaining. */}
+          <p className="text-sm text-gray-600">
+            {units} of {reserved} {reserved === 1 ? "unit" : "units"}{" "}
+            {canAssign ? "still to assign" : "never assigned"}, across{" "}
+            {outstanding.length} {outstanding.length === 1 ? "model" : "models"}
+          </p>
+          {shortfallByModelId.size > 0 ? (
+            <p className="mt-1 text-sm font-medium text-error-600">
+              Not enough units are free for this booking&apos;s dates. Reduce
+              the reservation to what can be assigned.
+            </p>
+          ) : null}
+        </div>
+        {headerAction ? <div className="shrink-0">{headerAction}</div> : null}
+      </div>
+
+      <table className="w-full border-collapse">
+        <tbody>
+          {visible.map((request) => (
+            <tr
+              key={`model-reservation-${request.id}`}
+              className="border-b border-gray-200 last:border-b-0"
+            >
+              <td className="w-full whitespace-normal p-0 md:p-0">
+                <div className="flex items-center gap-3 p-4 md:px-6">
+                  {/* Neutral placeholder — models carry no image on this
+                      surface, and fetching one would cost an extra query. */}
+                  <div
+                    aria-hidden
+                    className="flex size-12 shrink-0 items-center justify-center rounded-[4px] border border-gray-200 bg-gray-50"
+                  >
+                    <PackageIcon className="size-5 text-gray-400" />
+                  </div>
+                  <div className="min-w-0">
+                    <span className="block truncate font-medium text-gray-900">
+                      {request.assetModel.name}
+                    </span>
+                    <span
+                      className="mt-1 inline-flex items-center rounded-2xl px-2 py-[2px] text-xs font-medium"
+                      style={{
+                        backgroundColor: canAssign
+                          ? BADGE_COLORS.amber.bg
+                          : BADGE_COLORS.gray.bg,
+                        color: canAssign
+                          ? BADGE_COLORS.amber.text
+                          : BADGE_COLORS.gray.text,
+                      }}
+                    >
+                      {describeOutstanding(request, canAssign)}
+                    </span>
+                    <ShortfallChip
+                      shortfall={shortfallByModelId.get(request.assetModelId)}
+                    />
+                  </div>
+                </div>
+              </td>
+
+              {renderAction ? (
+                <td className="pr-4 text-right align-middle md:pr-6">
+                  {renderAction(request)}
+                </td>
+              ) : null}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {/* Pager appears only once the list outgrows a page, so a booking with a
+          handful of reservations reads exactly as it always has. */}
+      {isPaged ? (
+        <div className="flex items-center justify-between gap-3 border-t border-gray-200 p-4 md:px-6">
+          <p className="text-sm text-gray-600">
+            Showing {firstIndex + 1}-{firstIndex + visible.length} of{" "}
+            {outstanding.length} models
+          </p>
+
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              aria-label="Go to previous page"
+              disabled={currentPage === 1}
+              onClick={() => setPage(currentPage - 1)}
+            >
+              <ChevronLeftIcon className="size-4" />
+            </Button>
+
+            <span className="text-sm tabular-nums text-gray-600">
+              {currentPage} / {totalPages}
+            </span>
+
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              aria-label="Go to next page"
+              disabled={currentPage === totalPages}
+              onClick={() => setPage(currentPage + 1)}
+            >
+              <ChevronRightIcon className="size-4" />
+            </Button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Says how far a reservation is short, beside its "still to assign" chip, so
+ * the row that cannot be filled is the one that looks wrong.
+ */
+function ShortfallChip({
+  shortfall,
+}: {
+  shortfall: { available: number; short: number } | undefined;
+}) {
+  if (!shortfall) return null;
+  return (
+    <span
+      className="ml-2 mt-1 inline-flex items-center rounded-2xl px-2 py-[2px] text-xs font-medium"
+      style={{
+        backgroundColor: BADGE_COLORS.red.bg,
+        color: BADGE_COLORS.red.text,
+      }}
+    >
+      {shortfall.available > 0
+        ? `${shortfall.short} short: only ${shortfall.available} free`
+        : `${shortfall.short} short: none free`}
+    </span>
+  );
+}

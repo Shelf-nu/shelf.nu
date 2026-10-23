@@ -1,0 +1,39 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  // Package-level override for @shelf/companion.
+  //
+  // `lint` here is not only ESLint: it also runs scripts/check-version-sync.mjs,
+  // which asserts the app version agrees across app.json, Info.plist, both
+  // MARKETING_VERSION build configs and Expo.plist's EXUpdatesRuntimeVersion.
+  // That version string is the OTA compatibility key (app.json carries it as a
+  // literal `runtimeVersion`, since bare iOS rejects version policies), so
+  // drift silently stops updates reaching installs.
+  //
+  // The root `lint` inputs cover only JS/TS sources, so a release bump touching
+  // *only* those five declarations would hash identically and replay a cached
+  // "lint passed" without ever running the check — a false green in exactly the
+  // scenario the check exists for. Turborepo replaces (does not merge) a task
+  // definition, so the root globs are repeated here alongside the extra paths.
+  "extends": ["//"],
+  "tasks": {
+    "lint": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "**/*.js",
+        "**/*.jsx",
+        "**/*.mjs",
+        "**/*.ts",
+        "**/*.tsx",
+        ".eslintrc",
+        ".eslintrc.*",
+        "eslint.config.*",
+        ".eslintignore",
+        "tsconfig.json",
+        "app.json",
+        "ios/Shelf/Info.plist",
+        "ios/Shelf/Supporting/Expo.plist",
+        "ios/Shelf.xcodeproj/project.pbxproj"
+      ]
+    }
+  }
+}

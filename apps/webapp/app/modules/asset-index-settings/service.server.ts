@@ -1,41 +1,64 @@
 import {
   AssetIndexMode,
-  OrganizationRoles,
+  AssetType,
   type CustomField,
+  type OrganizationRoles,
   type Prisma,
 } from "@prisma/client";
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
 import { ShelfError, type ErrorLabel } from "~/utils/error";
+import { ROLE_POLICIES, resolveRole } from "~/utils/permissions/role-access";
 import type { Column, ColumnLabelKey } from "./helpers";
+import { syncCustomFieldColumn } from "./helpers";
 import {
   barcodeFields,
+  defaultColumnsForWorkspace,
   defaultFields,
   fixedFields,
   generateBarcodeColumns,
+  insertMissingDefaultColumns,
+  isQuantityColumn,
 } from "./helpers";
 import { getOrganizationById } from "../organization/service.server";
 
 /**
- * Derive the default asset index mode for a given organization role.
- * BASE and SELF_SERVICE should remain in simple mode; elevated roles default to advanced.
+ * The asset index mode a member gets before saving a preference of their own:
+ * their role's `ui.defaultAssetIndexMode`. No role (a membership still loading)
+ * resolves to BASE, the least privileged role.
+ *
+ * @param role - The membership's effective role
+ * @returns The role's default mode
  */
-function getDefaultModeForRole(
+export function getDefaultModeForRole(
   role?: OrganizationRoles | null
 ): AssetIndexMode {
-  if (
-    !role ||
-    role === OrganizationRoles.BASE ||
-    role === OrganizationRoles.SELF_SERVICE
-  ) {
-    return AssetIndexMode.SIMPLE;
-  }
-
-  return AssetIndexMode.ADVANCED;
+  return ROLE_POLICIES[resolveRole(role ? [role] : [])].ui
+    .defaultAssetIndexMode;
 }
 
 const label: ErrorLabel = "Asset Index Settings";
+
+/**
+ * Whether the workspace has at least one quantity-tracked asset. Decides
+ * whether the quantity columns start visible in a column set.
+ *
+ * @param organizationId - The workspace to check
+ * @param client - The Prisma client or transaction to read through
+ * @returns `true` when any asset in the workspace is quantity-tracked
+ */
+async function workspaceHasQuantityAssets(
+  organizationId: string,
+  client: Pick<typeof db, "asset"> = db
+): Promise<boolean> {
+  const asset = await client.asset.findFirst({
+    // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: an archived quantity asset still makes this a counting workspace, and archived rows show in the list's Archived view
+    where: { organizationId, type: AssetType.QUANTITY_TRACKED },
+    select: { id: true },
+  });
+  return Boolean(asset);
+}
 
 export async function createUserAssetIndexSettings({
   userId,
@@ -55,11 +78,14 @@ export async function createUserAssetIndexSettings({
   const _db = tx || db;
 
   try {
-    const org = await getOrganizationById(organizationId, {
-      customFields: {
-        where: { active: true, deletedAt: null },
-      },
-    });
+    const [org, hasQuantityAssets] = await Promise.all([
+      getOrganizationById(organizationId, {
+        customFields: {
+          where: { active: true, deletedAt: null },
+        },
+      }),
+      workspaceHasQuantityAssets(organizationId, _db),
+    ]);
 
     /** We start at the default fields length */
     let position = defaultFields.length - 1;
@@ -80,7 +106,7 @@ export async function createUserAssetIndexSettings({
     });
 
     const columns = [
-      ...defaultFields,
+      ...defaultColumnsForWorkspace({ hasQuantityAssets }),
       ...barcodeColumns,
       ...customFieldsColumns,
     ];
@@ -274,35 +300,15 @@ export async function updateAssetIndexSettingsAfterCfUpdate({
     });
 
     const updates = settings.map((entry) => {
-      const columns = Array.from(entry.columns as Prisma.JsonArray) as Column[];
-      const cfIndex = columns.findIndex(
-        (col) => col?.name === `cf_${oldField.name}`
-      );
-
-      if (newField.active) {
-        /** Field is missing so we add it */
-        if (cfIndex === -1) {
-          const prevHighestPosition = columns.reduce(
-            (acc, col) => (col.position > acc ? col.position : acc),
-            0
-          );
-          columns.push({
-            name: `cf_${newField.name}`,
-            visible: true,
-            position: prevHighestPosition + 1,
-            cfType: newField.type,
-          });
-        } else {
-          columns[cfIndex] = {
-            name: `cf_${newField.name}`,
-            visible: columns[cfIndex].visible,
-            position: columns[cfIndex].position,
-            cfType: newField.type,
-          };
+      const columns = syncCustomFieldColumn(
+        Array.from(entry.columns as Prisma.JsonArray) as Column[],
+        {
+          oldName: oldField.name,
+          newName: newField.name,
+          active: newField.active,
+          cfType: newField.type,
         }
-      } else {
-        columns.splice(cfIndex, 1);
-      }
+      );
 
       return db.assetIndexSettings.update({
         // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: entry.id comes from the org-scoped findMany on lines 272-274 (where organizationId)
@@ -458,12 +464,19 @@ async function validateColumns({
       (name) => !existingDefaultFields.includes(name)
     );
 
-    // If default fields are missing, add them from our static defaults
+    // If default fields are missing, add them without moving any saved
+    // column out of the user's order
     if (missingDefaultFields.length > 0) {
-      const fieldsToAdd = defaultFields.filter((field) =>
-        missingDefaultFields.includes(field.name)
+      // Asked only when a quantity column is missing, which happens once per
+      // saved column set, not on every page load.
+      const hasQuantityAssets = missingDefaultFields.some(isQuantityColumn)
+        ? await workspaceHasQuantityAssets(organizationId)
+        : false;
+      updatedColumns = insertMissingDefaultColumns(
+        updatedColumns,
+        missingDefaultFields,
+        { hasQuantityAssets }
       );
-      updatedColumns = [...updatedColumns, ...fieldsToAdd];
       needsUpdate = true;
     }
 

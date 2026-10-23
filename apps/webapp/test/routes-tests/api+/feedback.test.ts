@@ -47,6 +47,11 @@ vitest.mock("~/emails/feedback/feedback-email", () => ({
   sendFeedbackEmail: vitest.fn(),
 }));
 
+// why: external email sending
+vitest.mock("~/emails/feedback/feedback-copy-email", () => ({
+  sendFeedbackCopyEmail: vitest.fn(),
+}));
+
 vitest.mock("~/utils/error", () => ({
   makeShelfError: vitest.fn(),
 }));
@@ -55,6 +60,7 @@ import { parseFileFormData, getPublicFileURL } from "~/utils/storage.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { getSelectedOrganization } from "~/modules/organization/context.server";
 import { sendFeedbackEmail } from "~/emails/feedback/feedback-email";
+import { sendFeedbackCopyEmail } from "~/emails/feedback/feedback-copy-email";
 
 const mockContext = {
   getSession: () => ({ userId: "user-1" }),
@@ -88,7 +94,7 @@ describe("/api/feedback", () => {
     });
 
     (getSelectedOrganization as any).mockResolvedValue({
-      currentOrganization: { name: "Acme Corp" },
+      currentOrganization: { id: "org-1", name: "Acme Corp" },
       organizationId: "org-1",
     });
 
@@ -103,6 +109,7 @@ describe("/api/feedback", () => {
     });
 
     (sendFeedbackEmail as any).mockResolvedValue(undefined);
+    (sendFeedbackCopyEmail as any).mockResolvedValue(undefined);
     (getPublicFileURL as any).mockReturnValue(
       "https://storage.example.com/file.png"
     );
@@ -126,11 +133,149 @@ describe("/api/feedback", () => {
       expect(sendFeedbackEmail).toHaveBeenCalledWith({
         userName: "Jane Doe",
         userEmail: "jane@example.com",
+        userId: "user-1",
         organizationName: "Acme Corp",
+        organizationId: "org-1",
+        type: "issue",
+        message: "Something is broken in the app",
+        screenshotUrl: null,
+        currentUrl: undefined,
+        viewport: undefined,
+        userAgent: null,
+        appVersion: "test",
+        errorContext: null,
+      });
+
+      expect(sendFeedbackCopyEmail).toHaveBeenCalledWith({
+        firstName: "Jane",
+        userEmail: "jane@example.com",
         type: "issue",
         message: "Something is broken in the app",
         screenshotUrl: null,
       });
+    });
+
+    it("should send the submitter a copy without the captured context", async () => {
+      const request = createFeedbackRequest({
+        type: "issue",
+        message: "Something is broken in the app",
+        currentUrl: "https://app.shelf.nu/kits",
+        viewport: "1512x824 @2x",
+        traceId: "trace_789",
+        sentryEventId: "evt_abc",
+        errorStatus: "500",
+        errorTitle: "Kit error",
+        errorMessage: "Something went wrong while fetching the kit",
+      });
+      request.headers.set("user-agent", "Mozilla/5.0 (Macintosh)");
+
+      await action(createActionArgs({ request, context: mockContext }));
+
+      // Exact match: any extra key (page, browser, ids, error details)
+      // would fail it
+      expect(sendFeedbackCopyEmail).toHaveBeenCalledOnce();
+      expect((sendFeedbackCopyEmail as any).mock.calls[0][0]).toStrictEqual({
+        firstName: "Jane",
+        userEmail: "jane@example.com",
+        type: "issue",
+        message: "Something is broken in the app",
+        screenshotUrl: null,
+      });
+    });
+
+    it("should greet the submitter by display name when set", async () => {
+      (getUserByID as any).mockResolvedValue({
+        firstName: "Jane",
+        lastName: "Doe",
+        displayName: "JD",
+        username: "janedoe",
+        email: "jane@example.com",
+      });
+      const request = createFeedbackRequest({
+        type: "issue",
+        message: "Something is broken in the app",
+      });
+
+      await action(createActionArgs({ request, context: mockContext }));
+
+      expect(sendFeedbackCopyEmail).toHaveBeenCalledWith(
+        expect.objectContaining({ firstName: "JD" })
+      );
+    });
+
+    it("should resize screenshots to a readable size, not a thumbnail", async () => {
+      const request = createFeedbackRequest({
+        type: "issue",
+        message: "Something is broken in the app",
+      });
+
+      await action(createActionArgs({ request, context: mockContext }));
+
+      // Regression guard: without resizeOptions, cropImage falls back to a
+      // 150x150 avatar-thumbnail crop and screenshots arrive unreadable.
+      // Both dimensions are bounded (fit "inside") so a very tall capture
+      // can't exceed WebP's dimension limit and crash the submission.
+      expect(parseFileFormData).toHaveBeenCalledWith(
+        expect.objectContaining({
+          resizeOptions: {
+            width: 1920,
+            height: 1920,
+            fit: "inside",
+            withoutEnlargement: true,
+          },
+        })
+      );
+    });
+
+    it("should redact secret-looking query params from the page URL", async () => {
+      const request = createFeedbackRequest({
+        type: "issue",
+        message: "Something is broken in the app",
+        currentUrl:
+          "https://app.shelf.nu/reset-password?token=supersecret&search=laptop",
+      });
+
+      await action(createActionArgs({ request, context: mockContext }));
+
+      expect(sendFeedbackEmail).toHaveBeenCalledWith(
+        expect.objectContaining({
+          currentUrl:
+            "https://app.shelf.nu/reset-password?token=redacted&search=laptop",
+        })
+      );
+    });
+
+    it("should forward the auto-captured context and error details", async () => {
+      const request = createFeedbackRequest({
+        type: "issue",
+        message: "Something is broken in the app",
+        currentUrl: "https://app.shelf.nu/kits",
+        viewport: "1512x824 @2x",
+        traceId: "trace_789",
+        sentryEventId: "evt_abc",
+        errorStatus: "500",
+        errorTitle: "Kit error",
+        errorMessage: "Something went wrong while fetching the kit",
+      });
+      request.headers.set("user-agent", "Mozilla/5.0 (Macintosh)");
+
+      await action(createActionArgs({ request, context: mockContext }));
+
+      expect(sendFeedbackEmail).toHaveBeenCalledWith(
+        expect.objectContaining({
+          currentUrl: "https://app.shelf.nu/kits",
+          viewport: "1512x824 @2x",
+          userAgent: "Mozilla/5.0 (Macintosh)",
+          appVersion: "test",
+          errorContext: {
+            traceId: "trace_789",
+            sentryEventId: "evt_abc",
+            errorStatus: "500",
+            errorTitle: "Kit error",
+            errorMessage: "Something went wrong while fetching the kit",
+          },
+        })
+      );
     });
 
     it("should use the selected organization, not an arbitrary one", async () => {
@@ -181,6 +326,8 @@ describe("/api/feedback", () => {
 
       // parseFileFormData should NOT be called when validation fails first
       expect(parseFileFormData).not.toHaveBeenCalled();
+      expect(sendFeedbackEmail).not.toHaveBeenCalled();
+      expect(sendFeedbackCopyEmail).not.toHaveBeenCalled();
     });
 
     it("should return error for non-POST requests", async () => {
@@ -221,6 +368,11 @@ describe("/api/feedback", () => {
       });
 
       expect(sendFeedbackEmail).toHaveBeenCalledWith(
+        expect.objectContaining({
+          screenshotUrl: "https://storage.example.com/file.png",
+        })
+      );
+      expect(sendFeedbackCopyEmail).toHaveBeenCalledWith(
         expect.objectContaining({
           screenshotUrl: "https://storage.example.com/file.png",
         })

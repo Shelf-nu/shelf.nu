@@ -1,0 +1,419 @@
+/**
+ * Smoke tests for {@link AdjustBookingAssetQuantityDialog}.
+ *
+ * Covers the windowed-max messaging fix: the dialog used to show
+ * `Max: {asset.quantity}` (the workspace TOTAL) with no explanation. It now
+ * accepts an optional `totalQuantity` (booking context) that switches the
+ * helper copy to "Available for these dates: {maxQuantity} of
+ * {totalQuantity}" plus a "reserved by other bookings" note when
+ * `reservedByOthers > 0`. The custody-list usage never passes
+ * `totalQuantity`, so it must keep rendering the original "Max: N" copy
+ * unchanged.
+ *
+ * Mocks:
+ * - `react-router`'s `useFetcher` — so we can drive fetcher state per test
+ *   without a data router; `Form` is swapped for a plain `<form>` whose
+ *   submit is captured by `mockSubmit`.
+ * - `~/hooks/use-disabled` — stable `false` so the Save button is never
+ *   disabled by navigation state.
+ * - `~/components/shared/modal` — Radix `AlertDialog` portals content and
+ *   gates on internally-managed state; swapped for a simple
+ *   `open ? children : null` shell (mirrors `move-units-dialog.test.tsx`).
+ *
+ * @see {@link file://./adjust-booking-asset-quantity-dialog.tsx}
+ */
+
+import type React from "react";
+import type { ReactNode } from "react";
+import { render, screen, fireEvent } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { accessFor } from "@helpers/role-access";
+import type { RoleAccess } from "~/utils/permissions/role-access";
+import { AdjustBookingAssetQuantityDialog } from "./adjust-booking-asset-quantity-dialog";
+
+/** Mutable per-test fetcher state, reassigned in `beforeEach`. */
+type FetcherState = {
+  state: "idle" | "submitting" | "loading";
+  data: { success?: boolean; error?: { message?: string } | null } | undefined;
+};
+
+let mockFetcherState: FetcherState = { state: "idle", data: undefined };
+let mockSubmit = vi.fn();
+/** Controls the viewer's access per test. Default: an admin. */
+let mockAccess: RoleAccess = accessFor(["ADMIN"]);
+
+// why: useFetcher returns a Form component + state we need to control per
+// test, and a `submit` we assert against for the happy-path case.
+vi.mock("react-router", async () => {
+  const actual = await vi.importActual<Record<string, unknown>>("react-router");
+  return {
+    ...actual,
+    // why: the real <Link> needs a Router context we don't set up here; render
+    // a plain <a> so the owner "View bookings" link is queryable by href.
+    Link: ({
+      to,
+      children,
+      ...rest
+    }: {
+      to: string;
+      children: ReactNode;
+      [key: string]: unknown;
+    }) => (
+      <a href={to} {...rest}>
+        {children}
+      </a>
+    ),
+    useFetcher: () => ({
+      ...mockFetcherState,
+      Form: ({
+        children,
+        onSubmit,
+        ...rest
+      }: {
+        children: ReactNode;
+        onSubmit?: (e: React.FormEvent<HTMLFormElement>) => void;
+        [key: string]: unknown;
+      }) => (
+        <form {...rest} onSubmit={onSubmit}>
+          {children}
+        </form>
+      ),
+      submit: mockSubmit,
+    }),
+  };
+});
+
+// why: useDisabled depends on useNavigation/fetcher plumbing; stabilise to
+// `false` so the Save button is always clickable in these tests.
+vi.mock("~/hooks/use-disabled", () => ({
+  useDisabled: () => false,
+}));
+
+// why: the dialog reads the viewer's booking visibility from the layout data
+vi.mock("~/hooks/use-role-access", () => ({
+  useRoleAccess: () => mockAccess,
+}));
+
+// why: AlertDialog from `~/components/shared/modal` uses Radix's portal +
+// internally-managed open state. Swap for a simple shell so the controlled
+// `open` prop directly drives visibility, matching the pattern in
+// `move-units-dialog.test.tsx`.
+vi.mock("~/components/shared/modal", () => {
+  const AlertDialog = ({
+    open,
+    children,
+  }: {
+    open?: boolean;
+    onOpenChange?: (open: boolean) => void;
+    children: ReactNode;
+  }) => <>{open ? children : null}</>;
+  const AlertDialogTrigger = ({ children }: { children: ReactNode }) => (
+    <>{children}</>
+  );
+  const AlertDialogContent = ({ children }: { children: ReactNode }) => (
+    <div role="alertdialog">{children}</div>
+  );
+  const AlertDialogHeader = ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  );
+  const AlertDialogTitle = ({ children }: { children: ReactNode }) => (
+    <h2>{children}</h2>
+  );
+  const AlertDialogDescription = ({ children }: { children: ReactNode }) => (
+    <p>{children}</p>
+  );
+  const AlertDialogFooter = ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  );
+  const AlertDialogCancel = ({ children }: { children: ReactNode }) => (
+    <>{children}</>
+  );
+  return {
+    AlertDialog,
+    AlertDialogTrigger,
+    AlertDialogContent,
+    AlertDialogHeader,
+    AlertDialogTitle,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogCancel,
+  };
+});
+
+describe("AdjustBookingAssetQuantityDialog", () => {
+  beforeEach(() => {
+    mockFetcherState = { state: "idle", data: undefined };
+    mockSubmit = vi.fn();
+    // Default: an admin (can view other bookings). Individual tests override.
+    mockAccess = accessFor(["ADMIN"]);
+  });
+
+  describe("booking context (totalQuantity provided)", () => {
+    it('leads with "3 of 10 items available" (not the old "Max: N" copy)', () => {
+      render(
+        <AdjustBookingAssetQuantityDialog
+          bookingId="booking-1"
+          assetId="asset-1"
+          assetTitle="Chairs"
+          currentQuantity={2}
+          maxQuantity={3}
+          totalQuantity={10}
+          reservedByOthers={7}
+          open
+          onOpenChange={vi.fn()}
+        />
+      );
+
+      expect(screen.getByText(/3 of 10 units available/i)).toBeInTheDocument();
+      expect(screen.queryByText(/^Max: 3/)).not.toBeInTheDocument();
+    });
+
+    it('shows the owner "reserved by other bookings" note + View bookings link when reservedByOthers > 0', () => {
+      render(
+        <AdjustBookingAssetQuantityDialog
+          bookingId="booking-1"
+          assetId="asset-1"
+          currentQuantity={2}
+          maxQuantity={3}
+          totalQuantity={10}
+          reservedByOthers={7}
+          open
+          onOpenChange={vi.fn()}
+        />
+      );
+
+      expect(
+        screen.getByRole("alertdialog").textContent?.replace(/\s+/g, " ")
+      ).toContain("reserved by other bookings");
+      const link = screen.getByRole("link", { name: /View bookings/i });
+      expect(link).toHaveAttribute("href", "/assets/asset-1/bookings");
+      // Opens in a new tab so the user keeps their place in the adjust dialog.
+      expect(link).toHaveAttribute("target", "_blank");
+    });
+
+    it("shows the generic note WITHOUT a link for self-service/base users", () => {
+      mockAccess = accessFor(["SELF_SERVICE"]);
+      render(
+        <AdjustBookingAssetQuantityDialog
+          bookingId="booking-1"
+          assetId="asset-1"
+          currentQuantity={2}
+          maxQuantity={3}
+          totalQuantity={10}
+          reservedByOthers={7}
+          open
+          onOpenChange={vi.fn()}
+        />
+      );
+
+      expect(
+        screen.getByText(/Some units are also reserved by other bookings\./i)
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole("link", { name: /View bookings/i })
+      ).not.toBeInTheDocument();
+    });
+
+    it("shows the View bookings link to SELF_SERVICE when the workspace lets them see bookings", () => {
+      // The link follows access.bookings.seeAll, which folds in the workspace toggle.
+      mockAccess = accessFor(["SELF_SERVICE"], {
+        selfServiceCanSeeBookings: true,
+      });
+      render(
+        <AdjustBookingAssetQuantityDialog
+          bookingId="booking-1"
+          assetId="asset-1"
+          currentQuantity={3}
+          maxQuantity={3}
+          totalQuantity={10}
+          reservedByOthers={7}
+          open
+          onOpenChange={() => {}}
+        />
+      );
+      expect(screen.getByRole("link", { name: /view bookings/i })).toBeTruthy();
+    });
+
+    it('does NOT show the "reserved by other bookings" note when reservedByOthers is 0', () => {
+      render(
+        <AdjustBookingAssetQuantityDialog
+          bookingId="booking-1"
+          assetId="asset-1"
+          currentQuantity={2}
+          maxQuantity={10}
+          totalQuantity={10}
+          reservedByOthers={0}
+          open
+          onOpenChange={vi.fn()}
+        />
+      );
+
+      expect(
+        screen.queryByText(/reserved by other bookings/i)
+      ).not.toBeInTheDocument();
+    });
+
+    it("allows reducing a quantity that is already above the windowed max", () => {
+      // Booking already holds 15 units, but the window now only supports 10
+      // (another booking grabbed 5) — the row must stay editable-down.
+      render(
+        <AdjustBookingAssetQuantityDialog
+          bookingId="booking-1"
+          assetId="asset-1"
+          currentQuantity={15}
+          maxQuantity={10}
+          totalQuantity={20}
+          reservedByOthers={10}
+          open
+          onOpenChange={vi.fn()}
+        />
+      );
+
+      const quantityInput = screen.getByLabelText(
+        /Quantity/i
+      ) as HTMLInputElement;
+      fireEvent.change(quantityInput, { target: { value: "12" } });
+
+      fireEvent.click(screen.getByRole("button", { name: /^Save$/ }));
+
+      expect(mockSubmit).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("custody usage (no totalQuantity)", () => {
+    it('keeps rendering the plain "Max: N" helper', () => {
+      render(
+        <AdjustBookingAssetQuantityDialog
+          bookingId="booking-1"
+          assetId="asset-1"
+          assetTitle="Chairs"
+          currentQuantity={2}
+          maxQuantity={10}
+          unitOfMeasure="pcs"
+          open
+          onOpenChange={vi.fn()}
+        />
+      );
+
+      expect(screen.getByText("Max: 10 pcs")).toBeInTheDocument();
+      expect(
+        screen.queryByText(/Available for these dates/i)
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(/reserved by other bookings/i)
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  describe("stale submission errors", () => {
+    const REFUSAL = "Only 2 units are available for these dates.";
+    const CLIENT_ERROR = /whole number greater than 0/i;
+
+    function dialog(open: boolean, onOpenChange: (v: boolean) => void) {
+      return (
+        <AdjustBookingAssetQuantityDialog
+          bookingId="booking-1"
+          assetId="asset-1"
+          assetTitle="Chairs"
+          currentQuantity={2}
+          maxQuantity={10}
+          open={open}
+          onOpenChange={onOpenChange}
+        />
+      );
+    }
+
+    it("shows a refusal the server has just sent back", () => {
+      const onOpenChange = vi.fn();
+      const { rerender } = render(dialog(true, onOpenChange));
+
+      mockFetcherState = { state: "submitting", data: undefined };
+      rerender(dialog(true, onOpenChange));
+      mockFetcherState = {
+        state: "idle",
+        data: { error: { message: REFUSAL } },
+      };
+      rerender(dialog(true, onOpenChange));
+
+      expect(screen.getByText(REFUSAL)).toBeInTheDocument();
+    });
+
+    it("drops that refusal when the dialog is opened again", () => {
+      const onOpenChange = vi.fn();
+      const { rerender } = render(dialog(true, onOpenChange));
+
+      mockFetcherState = { state: "submitting", data: undefined };
+      rerender(dialog(true, onOpenChange));
+      mockFetcherState = {
+        state: "idle",
+        data: { error: { message: REFUSAL } },
+      };
+      rerender(dialog(true, onOpenChange));
+      expect(screen.getByText(REFUSAL)).toBeInTheDocument();
+
+      // The operator closes the dialog and comes back to it later. The fetcher
+      // is keyed, so it is still handing back that same refusal.
+      rerender(dialog(false, onOpenChange));
+      rerender(dialog(true, onOpenChange));
+
+      expect(screen.queryByText(REFUSAL)).not.toBeInTheDocument();
+    });
+
+    it("drops a client-side validation error when the dialog is opened again", () => {
+      const onOpenChange = vi.fn();
+      const { rerender } = render(dialog(true, onOpenChange));
+
+      fireEvent.change(screen.getByLabelText(/Quantity/i), {
+        target: { value: "0" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: /^Save$/ }));
+      expect(screen.getByText(CLIENT_ERROR)).toBeInTheDocument();
+      expect(mockSubmit).not.toHaveBeenCalled();
+
+      rerender(dialog(false, onOpenChange));
+      rerender(dialog(true, onOpenChange));
+
+      expect(screen.queryByText(CLIENT_ERROR)).not.toBeInTheDocument();
+    });
+
+    it("stays open when mounted fresh while the fetcher holds an earlier success", () => {
+      // A parent that renders this dialog only while open mounts it fresh on
+      // every opening, with the keyed fetcher still holding the result of the
+      // last change that went through.
+      mockFetcherState = {
+        state: "idle",
+        data: { success: true, error: null },
+      };
+      const onOpenChange = vi.fn();
+
+      render(dialog(true, onOpenChange));
+
+      expect(onOpenChange).not.toHaveBeenCalled();
+    });
+
+    it("does not close itself again on reopen while the fetcher holds a success", () => {
+      const onOpenChange = vi.fn();
+      const { rerender } = render(dialog(true, onOpenChange));
+
+      mockFetcherState = { state: "submitting", data: undefined };
+      rerender(dialog(true, onOpenChange));
+      // `payload()` stamps `error: null` onto every success, so a success is
+      // told apart by the VALUE being null, never by the key being absent.
+      mockFetcherState = {
+        state: "idle",
+        data: { success: true, error: null },
+      };
+      rerender(dialog(true, onOpenChange));
+
+      // The accepted submission closes it once.
+      expect(onOpenChange).toHaveBeenCalledWith(false);
+      onOpenChange.mockClear();
+
+      rerender(dialog(false, onOpenChange));
+      rerender(dialog(true, onOpenChange));
+
+      expect(onOpenChange).not.toHaveBeenCalled();
+    });
+  });
+});

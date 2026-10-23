@@ -38,6 +38,14 @@ import { PickerField } from "@/components/asset-edit/picker-field";
 import { TagPickerField } from "@/components/asset-edit/tag-picker-field";
 import { CustomFieldInput } from "@/components/asset-edit/custom-field-input";
 import { ValuationField } from "@/components/asset-edit/valuation-field";
+import { CharacterCount } from "@/components/shared/character-count";
+import { valuationFromInput } from "@/lib/asset-valuation";
+import {
+  ASSET_DESCRIPTION_MAX_LENGTH,
+  ASSET_DESCRIPTION_TOO_LONG_MESSAGE,
+  countCharacters,
+  isAssetDescriptionTooLong,
+} from "@/lib/asset-description";
 
 /**
  * Build the JSON value payload for a single custom field update.
@@ -48,9 +56,7 @@ import { ValuationField } from "@/components/asset-edit/valuation-field";
  * single source of truth for BOOLEAN string → boolean normalization,
  * and the downstream `buildCustomFieldValue` handles number / date
  * parsing. Replicating coercion client-side here would duplicate that
- * logic and drift over time (which is what the previous `{ raw: ... }`
- * wrapper was trying to do — and got it wrong, the wrapped shape was
- * rejected by Zod).
+ * logic and drift over time.
  *
  * @param value The string value from the form input.
  * @returns     The raw string when present, or `null` to clear the
@@ -98,11 +104,23 @@ export default function EditAssetScreen() {
     isSubmitting: form.isSubmitting,
   });
 
+  const descriptionChanged =
+    form.description.trim() !== (form.originalAsset?.description ?? "").trim();
+  // why: the payload carries the description only when it changed, and the
+  // server checks only a description it receives. A stored description that is
+  // already over the limit and left untouched must not block saving the rest.
+  const descriptionTooLong =
+    descriptionChanged && isAssetDescriptionTooLong(form.description);
+
   // ── Submit ──────────────────────────────────────
   const handleSubmit = async () => {
     const trimmedTitle = form.title.trim();
     if (trimmedTitle.length < 2) {
       Alert.alert("Validation", "Title must be at least 2 characters.");
+      return;
+    }
+    if (descriptionTooLong) {
+      Alert.alert("Validation", ASSET_DESCRIPTION_TOO_LONG_MESSAGE);
       return;
     }
     if (!currentOrg || !assetId) return;
@@ -150,7 +168,7 @@ export default function EditAssetScreen() {
     if (trimmedTitle !== form.originalAsset?.title) {
       payload.title = trimmedTitle;
     }
-    if (form.description.trim() !== (form.originalAsset?.description || "")) {
+    if (descriptionChanged) {
       payload.description = form.description.trim();
     }
 
@@ -182,9 +200,7 @@ export default function EditAssetScreen() {
     }
 
     // Valuation
-    const numVal = form.valuation.trim()
-      ? parseFloat(form.valuation.trim())
-      : null;
+    const numVal = valuationFromInput(form.valuation);
     const origVal = form.originalAsset?.valuation ?? null;
     if (numVal !== origVal) {
       payload.valuation = numVal;
@@ -231,6 +247,7 @@ export default function EditAssetScreen() {
 
   const canSubmit =
     form.title.trim().length >= 2 &&
+    !descriptionTooLong &&
     !form.isSubmitting &&
     !form.isCustomFieldsLoading &&
     !form.customFieldsError;
@@ -324,9 +341,21 @@ export default function EditAssetScreen() {
               multiline
               numberOfLines={3}
               textAlignVertical="top"
-              maxLength={1000}
               accessibilityLabel="Description"
             />
+            <CharacterCount
+              count={countCharacters(form.description)}
+              max={ASSET_DESCRIPTION_MAX_LENGTH}
+            />
+            {descriptionTooLong && (
+              <Text
+                style={styles.errorHint}
+                accessibilityRole="alert"
+                accessibilityLiveRegion="polite"
+              >
+                {ASSET_DESCRIPTION_TOO_LONG_MESSAGE}
+              </Text>
+            )}
           </View>
 
           {/* ── Category Picker ──────────────────────── */}
@@ -409,6 +438,8 @@ export default function EditAssetScreen() {
             isLoading={form.isTagsLoading}
             isOpen={showTagsPicker}
             onToggle={setShowTagsPicker}
+            canCreate={form.canCreateTag}
+            onCreateTag={form.createTag}
           />
 
           {/* ── Valuation ──────────────────────────────── */}

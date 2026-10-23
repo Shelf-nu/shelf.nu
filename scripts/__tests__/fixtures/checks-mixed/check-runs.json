@@ -1,0 +1,14 @@
+{
+  "total_count": 5,
+  "check_runs": [
+    { "name": "build", "status": "completed", "conclusion": "success" },
+    { "name": "typecheck", "status": "completed", "conclusion": "success" },
+    { "name": "unit-tests", "status": "completed", "conclusion": "failure" },
+    {
+      "name": "deploy-gate",
+      "status": "completed",
+      "conclusion": "action_required"
+    },
+    { "name": "e2e", "status": "in_progress", "conclusion": null }
+  ]
+}

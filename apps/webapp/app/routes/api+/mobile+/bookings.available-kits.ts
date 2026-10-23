@@ -57,6 +57,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
         request,
         organizationId,
         currentBookingId,
+        // Booking kit picker: the companion never sends `?teamMember=` (see
+        // `apps/companion/lib/api/bookings.ts`), and the response carries no
+        // custodian, so the strict answer costs nothing here. A client that
+        // adds a custodian filter must switch this to the resolved flag from
+        // `getMobileUserContext` — otherwise an admin's filter matches nothing.
+        canSeeAllCustody: false,
+        userId: user.id,
       });
 
     return data({

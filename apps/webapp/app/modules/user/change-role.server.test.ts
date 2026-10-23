@@ -1,6 +1,12 @@
+/**
+ * changeUserRole: the refusals a role change applies before it writes, read
+ * from the member's whole membership and whether the actor owns the workspace.
+ *
+ * @see {@link file://./service.server.ts} changeUserRole
+ */
 // @vitest-environment node
 import { OrganizationRoles } from "@prisma/client";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import { changeUserRole } from "./service.server";
@@ -26,6 +32,7 @@ function mockUserOrg(roles: OrganizationRoles[]) {
     roles,
     createdAt: new Date(),
     updatedAt: new Date(),
+    calendarTokenId: null,
   });
 }
 
@@ -37,17 +44,23 @@ function mockUpdateSuccess(newRole: OrganizationRoles) {
     roles: [newRole],
     createdAt: new Date(),
     updatedAt: new Date(),
+    calendarTokenId: null,
   });
 }
 
 describe("changeUserRole", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("rejects assigning OWNER role", async () => {
     await expect(
       changeUserRole({
         userId: USER_ID,
         organizationId: ORG_ID,
         newRole: OrganizationRoles.OWNER,
-        callerRole: OrganizationRoles.OWNER,
+        actorOwnsWorkspace: true,
+        tx: db,
       })
     ).rejects.toThrow(ShelfError);
 
@@ -56,7 +69,8 @@ describe("changeUserRole", () => {
         userId: USER_ID,
         organizationId: ORG_ID,
         newRole: OrganizationRoles.OWNER,
-        callerRole: OrganizationRoles.OWNER,
+        actorOwnsWorkspace: true,
+        tx: db,
       })
     ).rejects.toThrow(/Cannot assign Owner role/);
   });
@@ -69,7 +83,8 @@ describe("changeUserRole", () => {
         userId: USER_ID,
         organizationId: ORG_ID,
         newRole: OrganizationRoles.BASE,
-        callerRole: OrganizationRoles.OWNER,
+        actorOwnsWorkspace: true,
+        tx: db,
       })
     ).rejects.toThrow(/not a member/);
   });
@@ -82,7 +97,8 @@ describe("changeUserRole", () => {
         userId: USER_ID,
         organizationId: ORG_ID,
         newRole: OrganizationRoles.ADMIN,
-        callerRole: OrganizationRoles.OWNER,
+        actorOwnsWorkspace: true,
+        tx: db,
       })
     ).rejects.toThrow(/Cannot change the Owner's role/);
   });
@@ -95,7 +111,8 @@ describe("changeUserRole", () => {
         userId: USER_ID,
         organizationId: ORG_ID,
         newRole: OrganizationRoles.ADMIN,
-        callerRole: OrganizationRoles.ADMIN,
+        actorOwnsWorkspace: false,
+        tx: db,
       })
     ).rejects.toThrow(/Only the workspace owner can promote/);
   });
@@ -108,7 +125,8 @@ describe("changeUserRole", () => {
         userId: USER_ID,
         organizationId: ORG_ID,
         newRole: OrganizationRoles.BASE,
-        callerRole: OrganizationRoles.ADMIN,
+        actorOwnsWorkspace: false,
+        tx: db,
       })
     ).rejects.toThrow(/Only the workspace owner can change an Administrator/);
   });
@@ -121,7 +139,8 @@ describe("changeUserRole", () => {
       userId: USER_ID,
       organizationId: ORG_ID,
       newRole: OrganizationRoles.ADMIN,
-      callerRole: OrganizationRoles.OWNER,
+      actorOwnsWorkspace: true,
+      tx: db,
     });
 
     expect(result.previousRole).toBe(OrganizationRoles.BASE);
@@ -146,7 +165,8 @@ describe("changeUserRole", () => {
       userId: USER_ID,
       organizationId: ORG_ID,
       newRole: OrganizationRoles.BASE,
-      callerRole: OrganizationRoles.OWNER,
+      actorOwnsWorkspace: true,
+      tx: db,
     });
 
     expect(result.previousRole).toBe(OrganizationRoles.ADMIN);
@@ -160,9 +180,78 @@ describe("changeUserRole", () => {
       userId: USER_ID,
       organizationId: ORG_ID,
       newRole: OrganizationRoles.SELF_SERVICE,
-      callerRole: OrganizationRoles.ADMIN,
+      actorOwnsWorkspace: false,
+      tx: db,
     });
 
     expect(result.previousRole).toBe(OrganizationRoles.BASE);
+  });
+
+  it("refuses changing a member who holds OWNER anywhere in the membership", async () => {
+    mockUserOrg([OrganizationRoles.ADMIN, OrganizationRoles.OWNER]);
+
+    await expect(
+      changeUserRole({
+        userId: USER_ID,
+        organizationId: ORG_ID,
+        newRole: OrganizationRoles.BASE,
+        actorOwnsWorkspace: true,
+        tx: db,
+      })
+    ).rejects.toThrow(/Cannot change the Owner's role/);
+    expect(db.userOrganization.update).not.toHaveBeenCalled();
+  });
+
+  it("an ADMIN may not change a member stored as [SELF_SERVICE, ADMIN]", async () => {
+    mockUserOrg([OrganizationRoles.SELF_SERVICE, OrganizationRoles.ADMIN]);
+
+    await expect(
+      changeUserRole({
+        userId: USER_ID,
+        organizationId: ORG_ID,
+        newRole: OrganizationRoles.BASE,
+        actorOwnsWorkspace: false,
+        tx: db,
+      })
+    ).rejects.toThrow(/Only the workspace owner can change an Administrator/);
+    expect(db.userOrganization.update).not.toHaveBeenCalled();
+  });
+
+  it("reports the effective role as the previous role of a mixed membership", async () => {
+    mockUserOrg([OrganizationRoles.SELF_SERVICE, OrganizationRoles.ADMIN]);
+    mockUpdateSuccess(OrganizationRoles.BASE);
+
+    const result = await changeUserRole({
+      userId: USER_ID,
+      organizationId: ORG_ID,
+      newRole: OrganizationRoles.BASE,
+      actorOwnsWorkspace: true,
+      tx: db,
+    });
+
+    expect(result.previousRole).toBe(OrganizationRoles.ADMIN);
+  });
+
+  it("refuses the two owner cases with client statuses, not a 500", async () => {
+    await expect(
+      changeUserRole({
+        userId: USER_ID,
+        organizationId: ORG_ID,
+        newRole: OrganizationRoles.OWNER,
+        actorOwnsWorkspace: true,
+        tx: db,
+      })
+    ).rejects.toMatchObject({ status: 400 });
+
+    mockUserOrg([OrganizationRoles.OWNER]);
+    await expect(
+      changeUserRole({
+        userId: USER_ID,
+        organizationId: ORG_ID,
+        newRole: OrganizationRoles.ADMIN,
+        actorOwnsWorkspace: true,
+        tx: db,
+      })
+    ).rejects.toMatchObject({ status: 403 });
   });
 });

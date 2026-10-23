@@ -96,11 +96,7 @@ export default function ActiveBookings() {
                                 : ""
                             }
                           >
-                            Due{" "}
-                            <DateS
-                              date={booking.to}
-                              options={{ month: "short", day: "numeric" }}
-                            />
+                            Due <DateS date={booking.to} />
                           </span>
                         </span>
                       </div>

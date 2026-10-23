@@ -13,32 +13,49 @@
  */
 import { useEffect } from "react";
 import type { AssetModel } from "@prisma/client";
+import { useAtom, useAtomValue } from "jotai";
 import { useActionData, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import z from "zod";
+import {
+  assetModelImageErrorAtom,
+  assetModelImageValidateFileAtom,
+} from "~/atoms/file";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import type { action } from "~/routes/_layout+/settings.asset-models.new";
+import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
 import { zodFieldIsRequired } from "~/utils/zod";
+import { optionalNumberFromString } from "~/utils/zod-numeric";
 import { Form } from "../custom-form";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import FormRow from "../forms/form-row";
+import {
+  IMAGE_FIELD_PICTURE_CLASSES,
+  IMAGE_HINT_8MB,
+  ImageFileField,
+} from "../forms/image-file-field";
 import Input from "../forms/input";
+import ImageWithPreview from "../image-with-preview/image-with-preview";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
+import When from "../when/when";
+
+/** Links each image input to the <p> stating its accepted formats and size. */
+const INLINE_IMAGE_HELP_ID = "asset-model-image-help-inline";
 
 /** Zod schema for creating/editing an asset model. */
 export const AssetModelFormSchema = z.object({
   name: z.string().min(2, "Name is required"),
   description: z.string().optional(),
   defaultCategoryId: z.string().optional(),
-  defaultValuation: z
-    .string()
-    .optional()
-    .transform((val) => (val ? +val : null)),
+  defaultValuation: optionalNumberFromString({
+    blank: null,
+    fieldName: "Default valuation",
+  }),
   preventRedirect: z.string().optional(),
 });
 
@@ -47,8 +64,17 @@ type AssetModelFormProps = {
   /** Pre-filled values for edit mode */
   assetModel?: Pick<
     AssetModel,
-    "name" | "description" | "defaultCategoryId" | "defaultValuation"
-  >;
+    | "name"
+    | "description"
+    | "defaultCategoryId"
+    | "defaultValuation"
+    | "image"
+    | "thumbnailImage"
+  > & {
+    /** Assets of this model that currently show its cover image (i.e. have no
+     * image of their own). Drives the blast-radius hint under the field. */
+    _count?: { assets: number };
+  };
   /** The API URL to submit the form to (used in inline/dialog mode). */
   apiUrl?: string;
   /** Callback function to handle cancel action when form is used inline. */
@@ -105,6 +131,22 @@ export default function AssetModelForm({
   const nameError =
     fetcherValidationErrors?.name?.message || zo.errors.name()?.message;
 
+  // Client-side file guard (type + 8MB cap). Deliberately SCOPED, not the shared
+  // `fileErrorAtom`: this dialog opens inside the asset form, whose own image
+  // input would otherwise surface — and clear — this field's error.
+  const [, validateFile] = useAtom(assetModelImageValidateFileAtom);
+  const fileError = useAtomValue(assetModelImageErrorAtom);
+
+  /**
+   * The image has no zod field (a File can't be parsed by the text schema), so
+   * its errors arrive either from the client-side guard or as the server's
+   * `field: "image"` ShelfError on the fetcher.
+   */
+  const inlineImageError =
+    (fetcher.data?.error?.additionalData?.field === "image"
+      ? fetcher.data.error.message
+      : undefined) ?? fileError;
+
   /* ------------------------------------------------------------------ */
   /*  Inline / dialog mode                                               */
   /* ------------------------------------------------------------------ */
@@ -116,6 +158,13 @@ export default function AssetModelForm({
         className="w-full rounded border border-gray-200 bg-white px-6 py-5"
         ref={zo.ref}
         action={apiUrl}
+        /**
+         * Multipart so this dialog can carry the cover image too. Without it the
+         * file input silently posts nothing and a model created from the asset
+         * form would have no image — leaving its assets nothing to inherit,
+         * which reads as "the feature doesn't work".
+         */
+        encType="multipart/form-data"
       >
         <div className="gap-4 md:flex md:items-end">
           <Input
@@ -139,6 +188,31 @@ export default function AssetModelForm({
             defaultValue={assetModel?.description || undefined}
           />
           <input type="hidden" name="preventRedirect" value="true" />
+        </div>
+
+        {/* Same cover-image field as the settings form, in a compact layout. */}
+        <div className="mt-4">
+          <Input
+            label="Image"
+            // Input spreads unknown props straight onto the <input> and adds no
+            // describedby of its own, so this is the only link between the field
+            // and its format/size requirements for assistive tech.
+            aria-describedby={INLINE_IMAGE_HELP_ID}
+            disabled={disabled}
+            accept={ACCEPT_SUPPORTED_IMAGES}
+            name="image"
+            type="file"
+            onChange={validateFile}
+            error={inlineImageError}
+            inputClassName="border-0 shadow-none p-0 rounded-none"
+          />
+          <p
+            id={INLINE_IMAGE_HELP_ID}
+            className="mt-1 text-[12px] text-gray-500"
+          >
+            Optional. Shown on every asset of this model that has no image of
+            its own. PNG, JPG, JPEG or WebP, max. 8 MB.
+          </p>
         </div>
 
         <div className="mt-4">
@@ -213,9 +287,28 @@ function FullPageForm({
     actionData?.error
   );
 
+  // Error slot of this form's own file guard (type + 8MB cap, the same rules
+  // as asset and kit images); the image field runs the guard itself.
+  const fileError = useAtomValue(assetModelImageErrorAtom);
+
+  /**
+   * The image upload has no zod field (a File can't be parsed by the text
+   * schema), so its errors arrive either as the client-side file guard's
+   * message or as the server's `field: "image"` ShelfError.
+   */
+  const imageError =
+    (actionData?.error?.additionalData?.field === "image"
+      ? actionData?.error?.message
+      : undefined) ?? fileError;
+
   return (
     <Card className="w-full lg:w-min">
-      <Form ref={zo.ref} method="post" className="flex w-full flex-col gap-2">
+      <Form
+        ref={zo.ref}
+        method="post"
+        className="flex w-full flex-col gap-2"
+        encType="multipart/form-data"
+      >
         {/* -- Top action bar (visible on md+) -- */}
         <div className="flex items-start justify-between border-b pb-5">
           <div>
@@ -321,6 +414,52 @@ function FullPageForm({
               {currency}
             </span>
           </div>
+        </FormRow>
+
+        {/* -- Image -- */}
+        <FormRow
+          rowLabel="Image"
+          subHeading="Uploaded once and shown on every asset of this model that has no image of its own."
+          className="border-b-0 pt-[10px]"
+        >
+          <ImageFileField
+            name="image"
+            label="Image"
+            currentImage={
+              assetModel?.image ? (
+                // `imageUrl` is required alongside `withPreview`: the preview
+                // trigger is keyboard-focusable and labelled "Open preview for
+                // ...", but its handler no-ops without a full-size URL.
+                <ImageWithPreview
+                  imageUrl={assetModel.image}
+                  thumbnailUrl={assetModel.thumbnailImage ?? assetModel.image}
+                  alt={`${assetModel.name} image`}
+                  className={IMAGE_FIELD_PICTURE_CLASSES}
+                  withPreview
+                />
+              ) : null
+            }
+            previewAlt="Asset model image"
+            validateFileAtom={assetModelImageValidateFileAtom}
+            hint={IMAGE_HINT_8MB}
+            belowInput={
+              // Blast radius: replacing this image changes what these assets
+              // show immediately. Nothing is copied, so every one of them
+              // resolves the new URL on its next render.
+              <When truthy={Boolean(assetModel?._count?.assets)}>
+                <p className="mt-2 text-[12px] text-gray-500">
+                  Used by <b>{assetModel?._count?.assets}</b>{" "}
+                  {assetModel?._count?.assets === 1 ? "asset" : "assets"} that
+                  {assetModel?._count?.assets === 1
+                    ? " doesn't"
+                    : " don't"}{" "}
+                  have an image of their own.
+                </p>
+              </When>
+            }
+            error={imageError}
+            disabled={disabled}
+          />
         </FormRow>
 
         {/* -- Bottom action bar -- */}

@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Test-rig attribute resolver for the local Shibboleth IdP.
+
+    Resolves 6 attributes from a single OpenLDAP data connector:
+      - mail, givenName, sn: straight passthrough (inetOrgPerson attrs).
+      - isMemberOf, eduPersonEntitlement, eduPersonScopedAffiliation:
+        stock OpenLDAP has no eduPerson/eduMember schema, so these are
+        sourced from standard inetOrgPerson/organizationalPerson attributes
+        (description, businessCategory, title respectively) and exposed
+        under their canonical eduPerson attribute IDs. See ldap/init.ldif
+        for the seeded values and idp-home/conf/attributes/custom/isMemberOf.properties
+        for the isMemberOf SAML encoding rule (eduPerson.xml already
+        provides encoding rules for eduPersonEntitlement/eduPersonScopedAffiliation;
+        inetOrgPerson.xml already covers mail/givenName/sn).
+-->
+<AttributeResolver xmlns="urn:mace:shibboleth:2.0:resolver"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="urn:mace:shibboleth:2.0:resolver http://shibboleth.net/schema/idp/shibboleth-attribute-resolver.xsd">
+
+  <AttributeDefinition xsi:type="Simple" id="mail">
+    <InputDataConnector ref="myLDAP" attributeNames="mail"/>
+  </AttributeDefinition>
+  <AttributeDefinition xsi:type="Simple" id="givenName">
+    <InputDataConnector ref="myLDAP" attributeNames="givenName"/>
+  </AttributeDefinition>
+  <AttributeDefinition xsi:type="Simple" id="sn">
+    <InputDataConnector ref="myLDAP" attributeNames="sn"/>
+  </AttributeDefinition>
+
+  <!-- group/affiliation/entitlement sourced from stock attrs, renamed to canonical ids -->
+  <AttributeDefinition xsi:type="Simple" id="isMemberOf">
+    <InputDataConnector ref="myLDAP" attributeNames="description"/>
+  </AttributeDefinition>
+  <AttributeDefinition xsi:type="Simple" id="eduPersonEntitlement">
+    <InputDataConnector ref="myLDAP" attributeNames="businessCategory"/>
+  </AttributeDefinition>
+  <AttributeDefinition xsi:type="Scoped" id="eduPersonScopedAffiliation" scope="%{idp.scope}">
+    <InputDataConnector ref="myLDAP" attributeNames="title"/>
+  </AttributeDefinition>
+
+  <DataConnector id="myLDAP" xsi:type="LDAPDirectory"
+      ldapURL="%{idp.attribute.resolver.LDAP.ldapURL}"
+      baseDN="%{idp.attribute.resolver.LDAP.baseDN}"
+      principal="%{idp.attribute.resolver.LDAP.bindDN}"
+      principalCredential="%{idp.attribute.resolver.LDAP.bindDNCredential}"
+      useStartTLS="false"
+      noResultIsError="true"
+      exportAttributes="%{idp.attribute.resolver.LDAP.returnAttributes}">
+    <FilterTemplate><![CDATA[%{idp.attribute.resolver.LDAP.searchFilter}]]></FilterTemplate>
+  </DataConnector>
+</AttributeResolver>

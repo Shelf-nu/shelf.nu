@@ -1,0 +1,58 @@
+<beans xmlns="http://www.springframework.org/schema/beans"
+    xmlns:context="http://www.springframework.org/schema/context"
+    xmlns:util="http://www.springframework.org/schema/util" xmlns:p="http://www.springframework.org/schema/p"
+    xmlns:c="http://www.springframework.org/schema/c" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+                           http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+                           http://www.springframework.org/schema/util http://www.springframework.org/schema/util/spring-util.xsd"
+                           
+    default-init-method="initialize"
+    default-destroy-method="destroy">
+                               
+    <!-- By default we look at resources whose names are derived from %{idp.home}. -->
+
+    <util:list id="shibboleth.RelyingPartyResolverResources">
+        <value>%{idp.home}/conf/relying-party.xml</value>
+        <value>%{idp.home}/conf/credentials.xml</value>
+    </util:list>
+
+    <util:list id="shibboleth.MetadataResolverResources">
+        <value>%{idp.home}/conf/metadata-providers.xml</value>
+    </util:list>
+
+    <util:list id ="shibboleth.AttributeResolverResources">
+        <value>%{idp.home}/conf/attribute-resolver.xml</value>
+    </util:list>
+
+    <!--
+    This is suitable for new installs but will usually produce duplicate Attribute
+    output if a legacy resolver file is used that contains AttributeEncoders.
+    -->
+    <util:list id ="shibboleth.AttributeRegistryResources">
+        <value>%{idp.home}/conf/attribute-registry.xml</value>
+        <value>%{idp.home}/conf/attributes/default-rules.xml</value>
+        <value>%{idp.home}/conf/attribute-resolver.xml</value>
+    </util:list>
+
+    <util:list id ="shibboleth.AttributeFilterResources">
+        <value>%{idp.home}/conf/attribute-filter.xml</value>
+    </util:list>
+
+    <util:list id ="shibboleth.NameIdentifierGenerationResources">
+        <value>%{idp.home}/conf/saml-nameid.xml</value>
+    </util:list>
+    
+    <util:list id="shibboleth.AccessControlResources">
+        <value>%{idp.home}/conf/access-control.xml</value>
+    </util:list>
+
+    <!--
+    This collection of resources differs slightly in that it should not include the file extension.
+    Message sources are internationalized, and Spring will search for a compatible language extension
+    and fall back to one with only a .properties extension.
+    -->
+    <util:list id="shibboleth.MessageSourceResources">
+        <value>%{idp.home}/messages/messages</value>
+    </util:list>
+    
+</beans>

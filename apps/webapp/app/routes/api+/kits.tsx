@@ -1,5 +1,7 @@
 import { data, type LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
+import { serializeAssetImage } from "~/modules/asset/image-resolution";
+import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { makeShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";
 import {
@@ -54,6 +56,9 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
                 title: true,
                 mainImage: true,
                 mainImageExpiration: true,
+                thumbnailImage: true,
+                // Model cover image for assets with no image of their own
+                ...ASSET_MODEL_IMAGE_SELECT,
                 category: {
                   select: {
                     name: true,
@@ -64,18 +69,29 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
           },
           orderBy: { asset: { title: "asc" } },
         },
-        _count: {
-          select: {
-            assetKits: true,
-          },
-        },
       },
       orderBy: {
         name: "asc",
       },
     });
 
-    return data(payload({ kits }));
+    /**
+     * Kit membership is stored as `AssetKit` pivot rows, but the popover only
+     * ever needs the member assets themselves — so the pivot is flattened away
+     * here and the wire shape stays a plain `assets` array. Each asset's image
+     * cascade is resolved server-side too, so the popover shows the model's
+     * cover image for assets without one of their own (`serializeAssetImage`).
+     */
+    return data(
+      payload({
+        kits: kits.map(({ assetKits, ...kit }) => ({
+          ...kit,
+          assets: assetKits.map((assetKit) =>
+            serializeAssetImage(assetKit.asset)
+          ),
+        })),
+      })
+    );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });

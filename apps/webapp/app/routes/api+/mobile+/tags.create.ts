@@ -1,0 +1,80 @@
+/**
+ * POST /api/mobile/tags/create
+ *
+ * Creates a new tag in the caller's organization so the mobile tag picker can
+ * mint tags inline (admins/owners only — same `tag.create` permission the web
+ * tag settings page enforces). The tag is created all-purpose (`useFor: []`,
+ * usable on assets and bookings) with a server-picked color, mirroring the web
+ * form's defaults.
+ *
+ * Body: `{ name: string }`: any non-blank name, stored trimmed. It is the same
+ * `labelNameSchema` the web tag forms use. Duplicate names surface as a 400 via
+ * the tag service's unique-constraint mapping.
+ *
+ * Query: ?orgId=...
+ *
+ * Response: `{ tag: { id, name } }` — the shape the picker consumes.
+ *
+ * @see {@link file://./tags.ts} the picker read (returns `canCreate` for UI gating).
+ * @see {@link file://../../_layout+/tags.new.tsx} the web equivalent this mirrors.
+ */
+import { data, type ActionFunctionArgs } from "react-router";
+import { z } from "zod";
+import {
+  requireMobileAuth,
+  requireMobilePermission,
+  requireOrganizationAccess,
+} from "~/modules/api/mobile-auth.server";
+import { parseMobileBody } from "~/modules/api/mobile-body.server";
+import { createTag } from "~/modules/tag/service.server";
+import { makeShelfError } from "~/utils/error";
+import { getRandomColor } from "~/utils/get-random-color";
+import { labelNameSchema } from "~/utils/label-form-fields";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+
+/** Shares the web tag forms' name rule, so both clients accept the same names. */
+const CreateTagSchema = z.object({
+  name: labelNameSchema,
+});
+
+export async function action({ request }: ActionFunctionArgs) {
+  try {
+    const { user } = await requireMobileAuth(request);
+    const organizationId = await requireOrganizationAccess(request, user.id);
+
+    await requireMobilePermission({
+      userId: user.id,
+      organizationId,
+      entity: PermissionEntity.tag,
+      action: PermissionAction.create,
+    });
+
+    // Unreadable JSON and a schema violation are both the caller's input, so
+    // both answer 400 rather than reaching the generic 500 branch.
+    const { name } = await parseMobileBody(CreateTagSchema, request, "Tag");
+
+    const tag = await createTag({
+      name,
+      description: null,
+      // The mobile form has no color input; pick one server-side like the web
+      // form's `colorFromServer` default.
+      color: getRandomColor(),
+      userId: user.id,
+      organizationId,
+      // All-purpose (assets AND bookings) — the web form's default when no
+      // "use for" restriction is ticked.
+      useFor: [],
+    });
+
+    return data({ tag: { id: tag.id, name: tag.name } });
+  } catch (cause) {
+    const reason = makeShelfError(cause);
+    return data(
+      { error: { message: reason.message } },
+      { status: reason.status }
+    );
+  }
+}

@@ -7,6 +7,12 @@ import {
   PopoverPortal,
   PopoverContent,
 } from "@radix-ui/react-popover";
+import {
+  ASSET_QUANTITY_FIGURE_LABELS,
+  ASSET_TYPE_LABELS,
+  CONSUMPTION_TYPE_DESCRIPTIONS,
+  CONSUMPTION_TYPE_LABELS,
+} from "@shelf/labels";
 import { useAtom, useAtomValue } from "jotai";
 import {
   useActionData,
@@ -22,19 +28,31 @@ import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, assetImageValidateFileAtom } from "~/atoms/file";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
+import { useDiscardRemount } from "~/hooks/use-discard-remount";
+import { useTrackedFormRef } from "~/hooks/use-unsaved-changes";
 import { getPrimaryKit, isQuantityTracked } from "~/modules/asset/utils";
 import type {
   AssetEditLoaderData,
   loader,
 } from "~/routes/_layout+/assets.$assetId_.edit";
-import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
+import {
+  ASSET_DESCRIPTION_MAX_LENGTH_LABEL,
+  assetDescriptionSchema,
+} from "~/utils/asset-description";
+import { resolveCancelTo } from "~/utils/cancel-destination";
+import { ASSET_DESCRIPTION_MAX_LENGTH } from "~/utils/constants";
 import type { CustomFieldZodSchema } from "~/utils/custom-fields";
 import { mergedSchema } from "~/utils/custom-fields";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
+import { scrollToFirstErrorOnNextFrame } from "~/utils/scroll-to-error";
 import { tw } from "~/utils/tw";
+import {
+  optionalNumberFromString,
+  requiredNumberFromString,
+} from "~/utils/zod-numeric";
 import { AssetImage } from "./asset-image";
 import { AssetModelFormRow } from "./asset-model-form-row";
 import {
@@ -48,18 +66,19 @@ import { Form } from "../custom-form";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import BarcodesInput, { type BarcodesInputRef } from "../forms/barcodes-input";
 import FormRow from "../forms/form-row";
+import {
+  IMAGE_FIELD_PICTURE_CLASSES,
+  ImageFileField,
+} from "../forms/image-file-field";
 import Input from "../forms/input";
 import { RefererRedirectInput } from "../forms/referer-redirect-input";
+import { UnsavedChangesGuard } from "../forms/unsaved-changes-bar";
 import ImageWithPreview from "../image-with-preview/image-with-preview";
 import InlineEntityCreationDialog from "../inline-entity-creation-dialog/inline-entity-creation-dialog";
 import { Button } from "../shared/button";
 import { ButtonGroup } from "../shared/button-group";
 import { Card } from "../shared/card";
-import {
-  HoverCard,
-  HoverCardContent,
-  HoverCardTrigger,
-} from "../shared/hover-card";
+import { DisabledReasonHoverCard } from "../shared/disabled-reason-hover-card";
 import {
   Tooltip,
   TooltipContent,
@@ -78,7 +97,7 @@ export const NewAssetFormSchema = z.object({
     .min(2, "Name is required")
     .transform((val) => val.trim()), // We trim to avoid white spaces at start and end
 
-  description: z.string().transform((val) => val.trim()),
+  description: assetDescriptionSchema.transform((val) => val.trim()),
   category: z.string(),
   assetModelId: z.string().optional(),
 
@@ -108,10 +127,10 @@ export const NewAssetFormSchema = z.object({
     .string()
     .optional()
     .transform((val) => (val && val.length > 0 ? val : null)),
-  valuation: z
-    .string()
-    .optional()
-    .transform((val) => (val ? +val : null)),
+  valuation: optionalNumberFromString({
+    blank: null,
+    fieldName: "Valuation",
+  }),
   addAnother: z
     .string()
     .optional()
@@ -120,9 +139,19 @@ export const NewAssetFormSchema = z.object({
 
   // Tracking method & quantity fields
   type: z.nativeEnum(AssetType).default(AssetType.INDIVIDUAL),
+  /**
+   * Deliberately NOT on `optionalNumberFromString`.
+   *
+   * This field needs absent and present-but-blank to differ: the input is not
+   * rendered for an INDIVIDUAL asset, so an absent key must pass, while a blank
+   * one on a QUANTITY_TRACKED asset must not. The shared builders map both to the
+   * same value and cannot express that, so the coercion stays local, and the `0`
+   * a blank produces is load-bearing: `.positive()` below is what rejects it.
+   */
   quantity: z
     .string()
     .optional()
+    // eslint-disable-next-line local-rules/no-hand-coerced-numeric-transform -- see the note above
     .transform((val) => (val === "" || val === undefined ? undefined : +val))
     .pipe(
       z
@@ -131,17 +160,21 @@ export const NewAssetFormSchema = z.object({
         .positive("Quantity is required and must be at least 1")
         .optional()
     ),
-  minQuantity: z
-    .string()
-    .optional()
-    .transform((val) => (val === "" || val === undefined ? null : +val))
-    .pipe(
-      z
-        .number({ invalid_type_error: "Min quantity must be a number" })
-        .int("Min quantity must be a whole number")
-        .positive("Min quantity must be at least 1")
-        .nullable()
-    ),
+  // Zero is a real threshold, not a missing one: it means "alert when nothing is
+  // left". `low-stock.server.ts` documents that semantics and tests
+  // `minQuantity != null` rather than truthiness, and the CSV importer accepts
+  // any non-negative whole number, so the bound here is non-negative while
+  // "no threshold" is carried by the null a blank input becomes.
+  minQuantity: optionalNumberFromString({
+    blank: null,
+    fieldName: "Min quantity",
+  }).pipe(
+    z
+      .number({ invalid_type_error: "Min quantity must be a number" })
+      .int("Min quantity must be a whole number")
+      .nonnegative("Min quantity cannot be negative")
+      .nullable()
+  ),
   consumptionType: z
     .nativeEnum(ConsumptionType, {
       errorMap: () => ({ message: "Please select a consumption type" }),
@@ -178,18 +211,13 @@ export const NewAssetBulkFormSchema = NewAssetFormSchema.extend({
     .string()
     .min(1, "Name template is required")
     .transform((val) => val.trim()),
-  count: z
-    .string()
-    .transform((val) =>
-      val === "" || val === undefined ? Number.NaN : Number(val)
-    )
-    .pipe(
-      z
-        .number({ invalid_type_error: "Count must be a number" })
-        .int("Count must be a whole number")
-        .min(2, "Count must be at least 2")
-        .max(100, "Count must be at most 100")
-    ),
+  count: requiredNumberFromString({ fieldName: "Count" }).pipe(
+    z
+      .number({ invalid_type_error: "Count must be a number" })
+      .int("Count must be a whole number")
+      .min(2, "Count must be at least 2")
+      .max(100, "Count must be at most 100")
+  ),
 });
 
 /** Pass props of the values to be used as default for the form fields */
@@ -242,8 +270,28 @@ type Props = Partial<
   bulkMode?: boolean;
 };
 
+/**
+ * Create and edit form for assets, with the unsaved-changes bar.
+ *
+ * Discard remounts the inner form (see `useDiscardRemount`), which resets
+ * every widget that keeps its value in React state.
+ *
+ * @param props - Current values when editing; omit them to create an asset
+ */
+export function AssetForm(props: Props) {
+  const { key, discard, discarded } = useDiscardRemount();
+  return (
+    <AssetFormInner
+      key={key}
+      {...props}
+      onDiscard={discard}
+      autoFocusName={!discarded}
+    />
+  );
+}
+
 // react-doctor:no-giant-component — deferred for follow-up refactor
-export const AssetForm = ({
+const AssetFormInner = ({
   id,
   sequentialId,
   title,
@@ -266,7 +314,14 @@ export const AssetForm = ({
   preferredBarcodeId,
   referer,
   bulkMode = false,
-}: Props) => {
+  onDiscard,
+  autoFocusName,
+}: Props & {
+  /** Resets the form to the loaded values (remounts it). */
+  onDiscard: () => void;
+  /** Focus the Name field on mount; false after a Discard. */
+  autoFocusName: boolean;
+}) => {
   const navigation = useNavigation();
   const { canUseBarcodes } = useBarcodePermissions();
   // Workspace's current code-display preference — used by PreferredBarcodeSelector
@@ -317,9 +372,14 @@ export const AssetForm = ({
   const zo = useZorm("NewAssetFormScreen", FormSchema);
   const disabled = isFormProcessing(navigation.state);
 
+  /** The form element, shared by Zorm and the unsaved-changes tracking. */
+  const { formRef, setFormRef } = useTrackedFormRef(zo.ref);
+
   // Focus the asset Title field on mount so create/edit pages start
   // ready for typing instead of relying on the removed autoFocus prop.
-  const titleInputRef = useAutoFocus<HTMLInputElement>();
+  const titleInputRef = useAutoFocus<HTMLInputElement>({
+    when: autoFocusName,
+  });
 
   // Extract custom field errors into a plain object to pass to AssetCustomFields
   // This avoids passing the complex zo object which causes React 19 issues
@@ -363,7 +423,6 @@ export const AssetForm = ({
   );
 
   const fileError = useAtomValue(fileErrorAtom);
-  const [, validateFile] = useAtom(assetImageValidateFileAtom);
   const [, updateDynamicTitle] = useAtom(updateDynamicTitleAtom);
 
   const { currency, asset } = useLoaderData<AssetEditLoaderData>();
@@ -373,6 +432,13 @@ export const AssetForm = ({
 
   /** Whether we are in edit mode (asset already exists). */
   const isEditMode = Boolean(id);
+
+  /** Sub-heading for the tracking-method row; repeated under the cards on
+   * narrow viewports because FormRow hides its label column there. */
+  const trackingMethodHint = isEditMode
+    ? "Tracking method cannot be changed after creation."
+    : "Choose how this asset is tracked. This cannot be changed later.";
+
   /** Track the selected asset type for conditional field rendering. */
   const [selectedAssetType, setSelectedAssetType] = useState<AssetType>(
     bulkMode ? AssetType.INDIVIDUAL : assetType ?? AssetType.INDIVIDUAL
@@ -444,13 +510,110 @@ export const AssetForm = ({
   const [hasPickedAssetModel, setHasPickedAssetModel] = useState<boolean>(
     Boolean(assetModelId)
   );
+  /**
+   * The model currently chosen in the form. Mirrors the DynamicSelect rather
+   * than reading the `assetModelId` prop, so the inherited-image preview
+   * updates the moment the user picks a different model on the create form —
+   * before anything is saved.
+   */
+  const [selectedAssetModelId, setSelectedAssetModelId] = useState<
+    string | undefined
+  >(assetModelId ?? undefined);
   const navigate = useNavigate();
   const location = useLocation();
 
+  /**
+   * Snapshot of the referer as it was when this form first mounted.
+   *
+   * Deliberately ignores later updates to the `referer` prop: this is not a
+   * stale-state bug. The Referer header is only meaningful at the moment the
+   * user arrives. Any in-route navigation re-runs the loader with this page's
+   * own URL as the Referer: picking an asset model navigates to
+   * `?category=<id>` (see `handleAssetModelChange`), so the loader's referer
+   * becomes `null` (it drops self-references) and "where I came from" is lost.
+   *
+   * Capturing once keeps Cancel and the post-save redirect pointing at the
+   * user's real origin (including its filters) for the whole life of the form.
+   */
+  const [initialReferer] = useState(referer);
+
+  /**
+   * Where Cancel goes. The referer is best-effort and unusable in three
+   * separate cases (absent prop, no Referer header, and self-reference).
+   * `resolveCancelTo` owns all three, see its JSDoc.
+   *
+   * The asset loaders already drop a self-referer, so the guard here is a
+   * fallback for any caller that passes one: the destination becomes the
+   * asset (or the index), never the form itself.
+   */
+  const cancelTo = resolveCancelTo({
+    referer: initialReferer,
+    currentPathname: location.pathname,
+    fallback: id ? `/assets/${id}` : "/assets",
+  });
+
   /** Asset models from the loader, used to look up defaults on selection. */
   const assetModelsData = useLoaderData<{
-    assetModels?: Array<{ id: string; defaultCategoryId?: string | null }>;
+    assetModels?: Array<{
+      id: string;
+      name?: string;
+      defaultCategoryId?: string | null;
+      image?: string | null;
+      thumbnailImage?: string | null;
+    }>;
   }>()?.assetModels;
+
+  /** The chosen model's row, used for the inherited-image preview + copy. */
+  const selectedAssetModel = selectedAssetModelId
+    ? assetModelsData?.find((m) => m.id === selectedAssetModelId)
+    : undefined;
+
+  /**
+   * Intent to drop this asset's own image so it falls back down the cascade —
+   * to its model's cover image, or to the placeholder. Submitted as a hidden
+   * field and applied by the edit action.
+   *
+   * Without this the override is one-way: there is no other way to remove an
+   * asset image, so an asset that once had its own could never show its
+   * model's again.
+   */
+  const [clearMainImage, setClearMainImage] = useState(false);
+
+  /**
+   * True while the image input holds a valid picked file. A picked file wins
+   * over `clearMainImage` in the edit action, so while one is picked the
+   * image-source controls give way to a note saying the pick is what saves.
+   */
+  const [hasPickedImage, setHasPickedImage] = useState(false);
+
+  /**
+   * True when the asset currently stores an image of its own.
+   *
+   * Decided by `mainImage` ALONE, mirroring the resolver. Requiring a
+   * thumbnail or an expiration here would misclassify every asset that has an
+   * image but no thumbnail yet — CSV imports, duplicated assets and legacy
+   * rows all land in that state, and thumbnails are generated lazily. Such an
+   * asset would be told it "inherits" its model's image and would lose access
+   * to the Remove control.
+   *
+   * @see {@link file://./../../modules/asset/image-resolution.ts}
+   */
+  const hasOwnImage = Boolean(id && mainImage);
+
+  /** Whether the preview should show the asset's own image. */
+  const showOwnImagePreview = hasOwnImage && !clearMainImage;
+
+  /**
+   * The model's cover image in the shape `AssetImage` expects. This is what
+   * makes "pick a model → see its picture" work with no copying: the create
+   * request simply omits an image and the cascade resolves it at render time.
+   */
+  const inheritableAssetModelImage = selectedAssetModel?.image
+    ? {
+        image: selectedAssetModel.image,
+        thumbnailImage: selectedAssetModel.thumbnailImage ?? null,
+      }
+    : null;
 
   /**
    * When a model is selected, apply its default category by updating
@@ -466,6 +629,7 @@ export const AssetForm = ({
     // hasn't committed the hidden input update yet) so it would
     // wrongly flash the error.
     setHasPickedAssetModel(Boolean(modelId));
+    setSelectedAssetModelId(modelId);
     const params = new URLSearchParams(location.search);
 
     if (!modelId) {
@@ -529,8 +693,16 @@ export const AssetForm = ({
         success={actionData?.bulkSuccess}
         sampleTitles={bulkPreviewTitles}
       />
+      {/* Bulk create has its own success modal flow, so it is not tracked. */}
+      {bulkMode ? null : (
+        <UnsavedChangesGuard
+          formRef={formRef}
+          actionData={actionData}
+          onDiscard={onDiscard}
+        />
+      )}
       <Form
-        ref={zo.ref}
+        ref={setFormRef}
         method="post"
         action="."
         className="flex w-full flex-col gap-2"
@@ -549,18 +721,25 @@ export const AssetForm = ({
               setConsumptionTypeError("Please select a consumption type");
               e.preventDefault();
               e.stopPropagation();
-              return false;
             } else {
               setConsumptionTypeError(undefined);
             }
           }
 
           // If there are barcode errors, prevent submission
-          // Zorm will handle its own validation and prevent submission if needed
           if (hasBarcodeErrors) {
             e.preventDefault();
             e.stopPropagation();
-            return false;
+          }
+
+          // A Save can be rejected by Zorm (its submit listener runs before
+          // this handler and cancels the event), by the consumption type
+          // check, or by the barcode check. Every one of them leaves the
+          // event cancelled, so this single check brings the first message
+          // into view. Without it, a Save pressed far above the failing field
+          // looks like it did nothing.
+          if (e.defaultPrevented) {
+            scrollToFirstErrorOnNextFrame(e.currentTarget);
           }
         }}
       >
@@ -569,7 +748,7 @@ export const AssetForm = ({
         {qrId && !bulkMode ? (
           <input type="hidden" name="qrId" value={qrId} />
         ) : null}
-        <RefererRedirectInput fieldName="redirectTo" referer={referer} />
+        <RefererRedirectInput fieldName="redirectTo" referer={initialReferer} />
 
         {/* Bulk-mode discriminator + synthetic title (satisfies the
             shared schema's title.min(2) check; the action ignores it
@@ -593,7 +772,7 @@ export const AssetForm = ({
           <div className="hidden flex-1 justify-end gap-2 md:flex">
             <Actions
               disabled={disabled}
-              referer={referer}
+              cancelTo={cancelTo}
               showAddAnother={!bulkMode}
             />
           </div>
@@ -720,9 +899,10 @@ export const AssetForm = ({
             rowLabel={"Tracking method"}
             className="border-b-0 pb-[10px]"
             subHeading={
-              isEditMode
-                ? "Tracking method cannot be changed after creation."
-                : "Choose how this asset is tracked. This cannot be changed later."
+              <p>
+                {trackingMethodHint}{" "}
+                <TrackingMethodGuideLink isEditMode={isEditMode} />
+              </p>
             }
             required={true}
           >
@@ -733,6 +913,13 @@ export const AssetForm = ({
               disabled={disabled || isEditMode}
               isEditMode={isEditMode}
             />
+            {/* FormRow hides the label column below `lg`, so the hint and
+                guide link are repeated here for narrow viewports — same
+                pattern as the main-image row's format note. */}
+            <p className="mt-2 text-[13px] text-gray-600 lg:hidden">
+              {trackingMethodHint}{" "}
+              <TrackingMethodGuideLink isEditMode={isEditMode} />
+            </p>
           </FormRow>
         </When>
 
@@ -744,14 +931,14 @@ export const AssetForm = ({
         <When truthy={isQtyTracked}>
           <div className="flex flex-col gap-2">
             <FormRow
-              rowLabel="Quantity"
+              rowLabel={ASSET_QUANTITY_FIGURE_LABELS.TOTAL}
               className="border-b-0 pb-[10px]"
               subHeading="Total number of items in this pool."
               required={true}
             >
               <Input
                 type="number"
-                label="Quantity"
+                label={ASSET_QUANTITY_FIGURE_LABELS.TOTAL}
                 hideLabel
                 name="quantity"
                 disabled={disabled}
@@ -794,7 +981,11 @@ export const AssetForm = ({
                 hideLabel
                 name="minQuantity"
                 disabled={disabled}
-                min={1}
+                // Zero is a real threshold here: "alert me when nothing is
+                // left". The schema accepts it, so the browser must too, or
+                // constraint validation rejects the value before submit and the
+                // bound in the schema is unreachable.
+                min={0}
                 step={1}
                 className="w-full"
                 defaultValue={minQuantity ?? ""}
@@ -865,49 +1056,142 @@ export const AssetForm = ({
         </When>
 
         <FormRow rowLabel={"Main image"} className="pt-[10px]">
-          <div className="flex items-center gap-2">
-            {id && thumbnailImage && mainImageExpiration ? (
-              <AssetImage
-                className="size-16"
-                asset={{
-                  id,
-                  thumbnailImage: thumbnailImage,
-                  mainImage: mainImage,
-                  mainImageExpiration: new Date(mainImageExpiration),
-                }}
-                alt={`${title} main image`}
-              />
-            ) : null}
-            <div>
-              <p className="hidden lg:block">
-                <HoverCard openDelay={50} closeDelay={50}>
-                  <HoverCardTrigger className={tw("inline-flex w-full  ")}>
-                    Accepts PNG, JPG, JPEG, or WebP (max.8 MB)
-                  </HoverCardTrigger>
-                  <HoverCardContent side="left">
-                    Images will be automatically resized on upload. Width will
-                    be set at 1200px and height will be adjusted accordingly to
-                    keep the aspect ratio.
-                  </HoverCardContent>
-                </HoverCard>
-              </p>
-              <Input
-                disabled={disabled}
-                accept={ACCEPT_SUPPORTED_IMAGES}
-                name="mainImage"
-                type="file"
-                onChange={validateFile}
-                label={"Main image"}
-                hideLabel
-                error={mainImageError}
-                className="mt-2"
-                inputClassName="border-0 shadow-none p-0 rounded-none"
-              />
-              <p className="mt-2 lg:hidden">
-                Accepts PNG, JPG, JPEG, or WebP (max.8 MB)
-              </p>
-            </div>
-          </div>
+          <ImageFileField
+            name="mainImage"
+            label="Main image"
+            /*
+              One picture for both tiers of the cascade. `clearMainImage` makes
+              the row behave as though the asset's own image were already gone,
+              so the user sees exactly what saving will produce: the model's
+              picture, or nothing.
+            */
+            currentImage={
+              id && showOwnImagePreview ? (
+                <AssetImage
+                  className={IMAGE_FIELD_PICTURE_CLASSES}
+                  asset={{
+                    id,
+                    // Null-safe: an asset can own an image without a thumbnail
+                    // (lazy generation) or without an expiration.
+                    thumbnailImage: thumbnailImage ?? null,
+                    mainImage: mainImage ?? null,
+                    mainImageExpiration: mainImageExpiration
+                      ? new Date(mainImageExpiration)
+                      : null,
+                    assetModel: inheritableAssetModelImage,
+                  }}
+                  alt={`${title} main image`}
+                />
+              ) : inheritableAssetModelImage ? (
+                <AssetImage
+                  className={IMAGE_FIELD_PICTURE_CLASSES}
+                  asset={{
+                    id: id ?? "new-asset",
+                    mainImage: null,
+                    thumbnailImage: null,
+                    mainImageExpiration: null,
+                    assetModel: inheritableAssetModelImage,
+                  }}
+                  alt={`Image from asset model ${
+                    selectedAssetModel?.name ?? "selected model"
+                  }`}
+                />
+              ) : null
+            }
+            previewAlt="Asset main image"
+            validateFileAtom={assetImageValidateFileAtom}
+            hint={
+              <>
+                Accepts PNG, JPG, JPEG, or WebP (max.8 MB). Resized to 1200px
+                wide on upload.
+              </>
+            }
+            onFileChange={(file) => setHasPickedImage(Boolean(file))}
+            aboveInput={
+              <>
+                <When
+                  truthy={
+                    hasPickedImage &&
+                    Boolean(inheritableAssetModelImage || hasOwnImage)
+                  }
+                >
+                  <p className="mb-1 text-sm text-gray-600">
+                    The picked image becomes this asset's own image when you
+                    save.
+                  </p>
+                </When>
+                <When
+                  truthy={
+                    !hasPickedImage && Boolean(inheritableAssetModelImage)
+                  }
+                >
+                  <p className="mb-1 text-sm text-gray-600">
+                    {showOwnImagePreview ? (
+                      <>
+                        This asset uses its own image.{" "}
+                        <Button
+                          type="button"
+                          variant="link"
+                          className="!p-0 text-sm"
+                          onClick={() => setClearMainImage(true)}
+                        >
+                          Use the model's image instead
+                        </Button>
+                      </>
+                    ) : (
+                      <>
+                        Using the image from{" "}
+                        <span className="font-medium text-gray-700">
+                          {selectedAssetModel?.name ?? "the selected model"}
+                        </span>
+                        . Upload one below to override it for this asset.
+                        <When truthy={clearMainImage}>
+                          {" "}
+                          <Button
+                            type="button"
+                            variant="link"
+                            className="!p-0 text-sm"
+                            onClick={() => setClearMainImage(false)}
+                          >
+                            Undo
+                          </Button>
+                        </When>
+                      </>
+                    )}
+                  </p>
+                </When>
+                {/*
+                  Signals the intent to drop the asset's own image so it falls
+                  back down the cascade. Read by the edit action; a create has no
+                  image to clear, so it is inert there.
+                */}
+                <input
+                  type="hidden"
+                  name="clearMainImage"
+                  value={clearMainImage ? "true" : "false"}
+                />
+                <When
+                  truthy={
+                    !hasPickedImage &&
+                    Boolean(hasOwnImage && !inheritableAssetModelImage)
+                  }
+                >
+                  <p className="mb-1 text-sm text-gray-600">
+                    <Button
+                      type="button"
+                      variant="link"
+                      className="!p-0 text-sm"
+                      onClick={() => setClearMainImage(!clearMainImage)}
+                    >
+                      {clearMainImage ? "Undo remove image" : "Remove image"}
+                    </Button>
+                  </p>
+                </When>
+              </>
+            }
+            error={mainImageError}
+            disabled={disabled}
+          />
         </FormRow>
 
         <div>
@@ -916,18 +1200,22 @@ export const AssetForm = ({
             subHeading={
               <p>
                 This is the initial object description. It will be shown on the
-                asset’s overview page. You can always change it. Maximum 1000
-                characters.
+                asset’s overview page. You can always change it. Maximum{" "}
+                {ASSET_DESCRIPTION_MAX_LENGTH_LABEL} characters.
               </p>
             }
             className="border-b-0"
           >
             <Input
               inputType="textarea"
-              maxLength={1000}
+              characterLimit={ASSET_DESCRIPTION_MAX_LENGTH}
               label={"Description"}
-              name="description"
+              name={zo.fields.description()}
               defaultValue={description || ""}
+              error={
+                validationErrors?.description?.message ||
+                zo.errors.description()?.message
+              }
               hideLabel
               placeholder="Add a description for your asset."
               disabled={disabled}
@@ -1049,33 +1337,32 @@ export const AssetForm = ({
             value={locationId || ""}
           />
           {isKitAsset ? (
-            <HoverCard openDelay={50} closeDelay={50}>
-              <HoverCardTrigger className="disabled w-full cursor-not-allowed">
-                <DynamicSelect
-                  disabled={locationDisabled}
-                  selectionMode="set"
-                  fieldName="newLocationId"
-                  triggerWrapperClassName="flex flex-col !gap-0 justify-start items-start [&_.inner-label]:w-full [&_.inner-label]:text-left "
-                  defaultValue={locationId || undefined}
-                  model={{ name: "location", queryKey: "name" }}
-                  contentLabel="Locations"
-                  label="Location"
-                  hideLabel
-                  initialDataKey="locations"
-                  countKey="totalLocations"
-                  closeOnSelect
-                  allowClear
-                />
-              </HoverCardTrigger>
-              <HoverCardContent side="left">
-                <h5 className="text-left text-[14px]">Action disabled</h5>
-                <p className="text-left text-[14px]">
+            <DisabledReasonHoverCard
+              triggerClassName="disabled w-full cursor-not-allowed"
+              reason={
+                <>
                   This asset's location is managed by its parent kit{" "}
                   <strong>"{kitMembership?.name}"</strong>. Update the kit's
                   location instead.
-                </p>
-              </HoverCardContent>
-            </HoverCard>
+                </>
+              }
+            >
+              <DynamicSelect
+                disabled={locationDisabled}
+                selectionMode="set"
+                fieldName="newLocationId"
+                triggerWrapperClassName="flex flex-col !gap-0 justify-start items-start [&_.inner-label]:w-full [&_.inner-label]:text-left "
+                defaultValue={locationId || undefined}
+                model={{ name: "location", queryKey: "name" }}
+                contentLabel="Locations"
+                label="Location"
+                hideLabel
+                initialDataKey="locations"
+                countKey="totalLocations"
+                closeOnSelect
+                allowClear
+              />
+            </DisabledReasonHoverCard>
           ) : (
             <DynamicSelect
               disabled={disabled}
@@ -1208,7 +1495,7 @@ export const AssetForm = ({
           <div className="flex flex-1 justify-end gap-2">
             <Actions
               disabled={disabled}
-              referer={referer}
+              cancelTo={cancelTo}
               showAddAnother={!bulkMode}
             />
           </div>
@@ -1220,11 +1507,14 @@ export const AssetForm = ({
 
 const Actions = ({
   disabled,
-  referer,
+  cancelTo,
   showAddAnother = true,
 }: {
   disabled: boolean;
-  referer?: string | null;
+  /** Already-resolved Cancel destination. Must never be null/undefined —
+   * the caller applies the fallback, because `<Button to>` degrades
+   * silently (dead button on `undefined`, links to `/` on `null`). */
+  cancelTo: string;
   /** "Add another" submits the form and reloads `/assets/new?` to clear
    * the fields for a second entry. In bulk-create mode it makes no
    * sense — one submit already creates many assets, and the success
@@ -1238,7 +1528,7 @@ const Actions = ({
     </Button>
 
     <ButtonGroup>
-      <Button to={referer} variant="secondary" disabled={disabled}>
+      <Button to={cancelTo} variant="secondary" disabled={disabled}>
         Cancel
       </Button>
       {showAddAnother ? <AddAnother disabled={disabled} /> : null}
@@ -1297,17 +1587,51 @@ function BulkCreatePreview({ titles }: { titles: string[] }) {
   );
 }
 
-/** Radio card options for the tracking method selector. */
+/**
+ * Knowledge-base guide behind the tracking-method row: the individual /
+ * model / quantity decision, and what can still change after creation.
+ */
+const TRACKING_METHOD_KB_URL =
+  "https://www.shelf.nu/knowledge-base/how-to-choose-a-tracking-method";
+
+/**
+ * Link into that guide. Create mode opens the decision guide itself; edit
+ * mode opens its "what you can and cannot change later" section, since the
+ * method is locked by then and the question is what to do about it.
+ */
+function TrackingMethodGuideLink({ isEditMode }: { isEditMode: boolean }) {
+  return (
+    <Button
+      to={
+        isEditMode
+          ? `${TRACKING_METHOD_KB_URL}#what-you-can-and-cannot-change-later`
+          : TRACKING_METHOD_KB_URL
+      }
+      variant="link-gray"
+      className="text-gray-600 underline"
+      target="_blank"
+    >
+      {isEditMode ? "Picked the wrong one?" : "Which should I pick?"}
+    </Button>
+  );
+}
+
+/**
+ * Radio card options for the tracking method selector.
+ *
+ * Titles come from `@shelf/labels` so the picker, the CSV importer's errors and
+ * the companion app name a tracking method identically.
+ */
 const TRACKING_OPTIONS = [
   {
     value: AssetType.INDIVIDUAL,
-    title: "Individually tracked",
+    title: ASSET_TYPE_LABELS.INDIVIDUAL,
     description:
       "Each item gets its own QR code, custody record, and booking entry. Best for unique or high-value items.",
   },
   {
     value: AssetType.QUANTITY_TRACKED,
-    title: "Tracked by quantity",
+    title: ASSET_TYPE_LABELS.QUANTITY_TRACKED,
     description:
       "A single record represents a pool of identical items. Custody and bookings are managed by numeric quantity.",
   },
@@ -1393,15 +1717,20 @@ function TrackingMethodCards({
   return cards;
 }
 
-/** Label + description pairs for consumption type options. */
+/**
+ * Label + description pairs for consumption type options.
+ *
+ * Both halves come from `@shelf/labels`, so this picker and the CSV importer's
+ * errors describe a consumption type in the same words.
+ */
 const CONSUMPTION_OPTIONS = [
   {
     value: ConsumptionType.ONE_WAY,
-    label: "Used up (one-way) — consumed and not returned",
+    label: `${CONSUMPTION_TYPE_LABELS.ONE_WAY}: ${CONSUMPTION_TYPE_DESCRIPTIONS.ONE_WAY}`,
   },
   {
     value: ConsumptionType.TWO_WAY,
-    label: "Returnable (two-way) — checked out and returned",
+    label: `${CONSUMPTION_TYPE_LABELS.TWO_WAY}: ${CONSUMPTION_TYPE_DESCRIPTIONS.TWO_WAY}`,
   },
 ] as const;
 

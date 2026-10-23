@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { formatDateForICal } from "./date-fns";
-import { escapeICalText, foldLine } from "./ics";
+import {
+  buildBookingICalendar,
+  buildBookingVEvent,
+  escapeICalText,
+  foldLine,
+} from "./ics";
 
 describe("escapeICalText", () => {
   it("escapes backslashes", () => {
@@ -125,5 +130,134 @@ describe("formatDateForICal", () => {
     // always output the UTC equivalent, not the local time.
     const date = new Date("2026-07-04T12:00:00-05:00"); // CDT
     expect(formatDateForICal(date)).toBe("20260704T170000Z");
+  });
+});
+
+describe("buildBookingVEvent", () => {
+  const baseInput = {
+    id: "booking-123",
+    name: "Studio shoot",
+    from: new Date(Date.UTC(2026, 5, 10, 9, 0, 0)),
+    to: new Date(Date.UTC(2026, 5, 10, 17, 0, 0)),
+    custodianName: "Erfan R",
+    assetTitles: ["Camera A", "Tripod"],
+    bookingUrl: "https://app.shelf.nu/bookings/booking-123",
+    updatedAt: new Date(Date.UTC(2026, 5, 1, 8, 0, 0)),
+  };
+
+  it("emits a well-formed VEVENT with summary, dates, description and alarm", () => {
+    const lines = buildBookingVEvent(baseInput);
+    expect(lines[0]).toBe("BEGIN:VEVENT");
+    expect(lines.at(-1)).toBe("END:VEVENT");
+    expect(lines).toContain("UID:booking-123");
+    expect(lines).toContain(`DTSTART:${formatDateForICal(baseInput.from)}`);
+    expect(lines).toContain(`DTEND:${formatDateForICal(baseInput.to)}`);
+    // DTSTAMP is booking-derived (stable per poll), not fetch time.
+    expect(lines).toContain(
+      `DTSTAMP:${formatDateForICal(baseInput.updatedAt)}`
+    );
+    // Summary includes the asset count
+    expect(lines).toContain("SUMMARY:Studio shoot (2 assets)");
+    // 1-day-before reminder alarm
+    expect(lines).toContain("BEGIN:VALARM");
+    expect(lines).toContain("TRIGGER;RELATED=END:-P1D");
+    // Description carries custodian, assets (comma escaped) and the link
+    const description = lines.find((l) => l.startsWith("DESCRIPTION:"));
+    expect(description).toContain("Custodian: Erfan R");
+    expect(description).toContain("Assets (2): Camera A\\, Tripod");
+    expect(description).toContain(
+      "View booking: https://app.shelf.nu/bookings/booking-123"
+    );
+  });
+
+  it("uses the singular label and 'No assets assigned' when there are no assets", () => {
+    const one = buildBookingVEvent({ ...baseInput, assetTitles: ["Only one"] });
+    expect(one).toContain("SUMMARY:Studio shoot (1 asset)");
+
+    const none = buildBookingVEvent({ ...baseInput, assetTitles: [] });
+    expect(none).toContain("SUMMARY:Studio shoot"); // no count suffix
+    const description = none.find((l) => l.startsWith("DESCRIPTION:"));
+    expect(description).toContain("Assets (0): No assets assigned");
+  });
+
+  it("omits the custodian line when custodianName is empty (custody hidden)", () => {
+    const lines = buildBookingVEvent({ ...baseInput, custodianName: "" });
+    const description = lines.find((l) => l.startsWith("DESCRIPTION:"));
+    expect(description).not.toContain("Custodian:");
+    expect(description).toContain("Assets (2):");
+  });
+
+  it("escapes special characters in the summary", () => {
+    const lines = buildBookingVEvent({
+      ...baseInput,
+      name: "Shoot; Berlin, Studio B",
+      assetTitles: [],
+    });
+    expect(lines).toContain("SUMMARY:Shoot\\; Berlin\\, Studio B");
+  });
+});
+
+describe("buildBookingICalendar", () => {
+  const vevent = buildBookingVEvent({
+    id: "b1",
+    name: "Booking one",
+    from: new Date(Date.UTC(2026, 0, 1, 10, 0, 0)),
+    to: new Date(Date.UTC(2026, 0, 1, 12, 0, 0)),
+    custodianName: "Sam",
+    assetTitles: ["Lens"],
+    bookingUrl: "https://app.shelf.nu/bookings/b1",
+    updatedAt: new Date(Date.UTC(2026, 0, 1, 9, 0, 0)),
+  });
+
+  it("wraps events in a VCALENDAR envelope with CRLF line endings", () => {
+    const ics = buildBookingICalendar([vevent]);
+    expect(ics.startsWith("BEGIN:VCALENDAR\r\n")).toBe(true);
+    expect(ics.endsWith("END:VCALENDAR")).toBe(true);
+    expect(ics).toContain("VERSION:2.0");
+    expect(ics).toContain("PRODID:-//Shelf.nu//Shelf Calendar 1.0//EN");
+    expect(ics).toContain("METHOD:PUBLISH");
+    expect(ics.split("\r\n")).toContain("BEGIN:VEVENT");
+  });
+
+  it("omits X-WR-CALNAME by default and includes it (escaped) when named", () => {
+    expect(buildBookingICalendar([vevent])).not.toContain("X-WR-CALNAME");
+    const named = buildBookingICalendar([vevent], {
+      calendarName: "Acme, Inc bookings",
+    });
+    expect(named).toContain("X-WR-CALNAME:Acme\\, Inc bookings");
+  });
+
+  it("includes every event in a multi-event feed", () => {
+    const second = buildBookingVEvent({
+      id: "b2",
+      name: "Booking two",
+      from: new Date(Date.UTC(2026, 0, 2, 10, 0, 0)),
+      to: new Date(Date.UTC(2026, 0, 2, 12, 0, 0)),
+      custodianName: "Pat",
+      assetTitles: [],
+      bookingUrl: "https://app.shelf.nu/bookings/b2",
+      updatedAt: new Date(Date.UTC(2026, 0, 2, 9, 0, 0)),
+    });
+    const ics = buildBookingICalendar([vevent, second]);
+    expect(ics).toContain("UID:b1");
+    expect(ics).toContain("UID:b2");
+    expect((ics.match(/BEGIN:VEVENT/g) ?? []).length).toBe(2);
+  });
+
+  it("folds long lines so every line stays within 75 octets", () => {
+    const longVevent = buildBookingVEvent({
+      id: "b3",
+      name: "X".repeat(200),
+      from: new Date(Date.UTC(2026, 0, 3, 10, 0, 0)),
+      to: new Date(Date.UTC(2026, 0, 3, 12, 0, 0)),
+      custodianName: "Q",
+      assetTitles: [],
+      bookingUrl: "https://app.shelf.nu/bookings/b3",
+      updatedAt: new Date(Date.UTC(2026, 0, 3, 9, 0, 0)),
+    });
+    const ics = buildBookingICalendar([longVevent]);
+    for (const line of ics.split("\r\n")) {
+      expect(new TextEncoder().encode(line).length).toBeLessThanOrEqual(75);
+    }
   });
 });

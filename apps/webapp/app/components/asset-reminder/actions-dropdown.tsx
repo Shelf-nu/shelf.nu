@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import type { Prisma } from "@prisma/client";
 import { PencilIcon } from "lucide-react";
 import { VerticalDotsIcon } from "~/components/icons/library";
@@ -36,6 +36,16 @@ export default function ActionsDropdown({ reminder }: ActionsDropdownProps) {
    */
   const isPending =
     now < new Date(reminder.alertDateTime) || isRecurringReminder(reminder);
+
+  /**
+   * Stable identity so `SetOrEditReminderDialog`'s success-handling effect
+   * (dependency: `onClose`) doesn't re-fire on every unrelated re-render —
+   * same sibling-occurrence fix as `reminders-table.tsx`'s create dialog.
+   * See `.claude/rules/react-render-stability.md`.
+   */
+  const handleCloseEditDialog = useCallback(() => {
+    setIsEditDialogOpen(false);
+  }, []);
 
   return (
     <DropdownMenu
@@ -85,9 +95,7 @@ export default function ActionsDropdown({ reminder }: ActionsDropdownProps) {
           recurrenceTimezone: reminder.recurrenceTimezone,
         }}
         open={isEditDialogOpen}
-        onClose={() => {
-          setIsEditDialogOpen(false);
-        }}
+        onClose={handleCloseEditDialog}
       />
     </DropdownMenu>
   );

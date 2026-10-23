@@ -61,7 +61,9 @@ const TOP_BOOKED_ASSETS_COLUMNS: ColumnDef<TopBookedAssetRow>[] = [
       <AssetCell
         name={row.original.assetName}
         thumbnailImage={row.original.thumbnailImage}
+        mainImage={row.original.mainImage}
         assetId={row.original.assetId}
+        assetModel={row.original.assetModel}
       />
     ),
   },
@@ -230,6 +232,10 @@ export function TopBookedAssetsContent({
                     asset={{
                       id: topAsset.assetId,
                       thumbnailImage: topAsset.thumbnailImage,
+                      // Bypasses AssetCell, so it needs the same fields —
+                      // `mainImage` decides the ownership tier.
+                      mainImage: topAsset.mainImage,
+                      assetModel: topAsset.assetModel,
                     }}
                     alt={`Image of ${topAsset.assetName}`}
                     className="size-8 rounded object-cover ring-1 ring-gray-200"

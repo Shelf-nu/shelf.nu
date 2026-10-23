@@ -73,20 +73,19 @@ pre-commit:
 commit-msg:
   commands:
     commitlint:
-      run: >
-        npx --no -- commitlint --edit {1} || {
-          echo "";
-          echo "Commit message doesn't follow Conventional Commits format";
-          echo "";
-          echo "Required format: type(scope?): description";
-          echo "";
-          echo "Examples:";
-          echo "  feat: add user authentication";
-          echo "  fix(api): resolve database connection issue";
-          echo "  docs: update README with installation steps";
-          echo "  chore: bump dependencies to latest versions";
-          echo "";
-          echo "Learn more: https://www.conventionalcommits.org";
-          echo "";
-          exit 1;
-        }
+      # {1} is the message file git passes in. From a linked worktree it is an
+      # absolute path under the main repo's .git, so quote it: a main checkout
+      # whose path contains a space would otherwise split it into two arguments.
+      run: npx --no -- commitlint --edit "{1}"
+      fail_text: |
+        Commit message doesn't follow Conventional Commits format
+
+        Required format: type(scope?): description
+
+        Examples:
+          feat: add user authentication
+          fix(api): resolve database connection issue
+          docs: update README with installation steps
+          chore: bump dependencies to latest versions
+
+        Learn more: https://www.conventionalcommits.org

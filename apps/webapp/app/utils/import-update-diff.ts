@@ -8,6 +8,17 @@
  * @see {@link file://./import-update.server.ts} Orchestration (server)
  */
 import type { CustomField } from "@prisma/client";
+import {
+  ASSET_DESCRIPTION_MAX_LENGTH_LABEL,
+  isAssetDescriptionTooLong,
+} from "~/utils/asset-description";
+import { countCharacters } from "~/utils/count-characters";
+import { decodeCsvListCell } from "~/utils/csv-cells";
+import {
+  getDefinitionFromCsvHeader,
+  isImportableCustomFieldDate,
+  parseYesNo,
+} from "~/utils/custom-fields";
 import { isLikeShelfError, type ShelfError } from "~/utils/error";
 import type {
   AssetChangePreview,
@@ -70,17 +81,52 @@ export function normalizeExportedCurrencyValue(value: string): string {
   return v;
 }
 
+// ---------------------------------------------------------------------------
+// Backup-Export Detection
+// ---------------------------------------------------------------------------
+
 /**
- * Normalizes a Yes/No string to a boolean. Case-insensitive, trims whitespace.
+ * Raw Prisma field/relation names that only ever appear TOGETHER as headers
+ * in a legacy workspace **backup** file. Shelf no longer produces these, but
+ * workspaces still hold old copies. The backup wrote `Object.keys(asset)`
+ * verbatim as its header row, including relation keys whose cells are raw
+ * JSON blobs (`{}`, `[]`, `{"name":"Foo"}`) rather than plain values.
  *
- * @param value - Raw string from CSV cell
- * @returns `true` for "yes", `false` for "no", `undefined` for anything else
+ * Identifier matching is case-insensitive and accepts the `sequentialId`
+ * alias, so a backup file's `id` column passes the identifier check. Let
+ * through, its `category`, `tags` and `assetModel` cells would be proposed as
+ * literal new entities (a category named `{}`, a tag named `[]`, an
+ * AssetModel with a JSON name).
+ *
+ * `isBackupExportHeaderRow` requires ALL of these to be present, not just
+ * one: a single marker like `notes` is a plausible name for a workspace's
+ * own custom field, and a custom field named "Notes" must not trip the
+ * guard. All five only co-occur in a raw backup file; they never appear in
+ * the asset-index export (which uses display labels like "Created at", with
+ * a space) or the import-ready export (which never emits them at all).
  */
-export function parseYesNo(value: string): boolean | undefined {
-  const lower = value.trim().toLowerCase();
-  if (lower === "yes") return true;
-  if (lower === "no") return false;
-  return undefined;
+const BACKUP_EXPORT_ONLY_HEADERS = [
+  "assetLocations",
+  "customFields",
+  "notes",
+  "createdAt",
+  "updatedAt",
+];
+
+/**
+ * Detects a legacy workspace backup file fed into the update importer by
+ * mistake.
+ * See {@link BACKUP_EXPORT_ONLY_HEADERS} for why requiring ALL markers
+ * (not just one) is what makes this a safe, unambiguous signal.
+ *
+ * @param headers - Trimmed header row from the uploaded CSV
+ * @returns `true` if the header row looks like a backup export
+ */
+export function isBackupExportHeaderRow(headers: string[]): boolean {
+  const lowerHeaders = new Set(headers.map((h) => h.trim().toLowerCase()));
+  return BACKUP_EXPORT_ONLY_HEADERS.every((h) =>
+    lowerHeaders.has(h.toLowerCase())
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -91,9 +137,20 @@ export function parseYesNo(value: string): boolean | undefined {
  * Analyzes CSV headers from an Asset Index export and classifies them
  * for the update import flow.
  *
- * Export CSV headers use human-readable labels from `columnsLabelsMap`
- * (e.g. "Name", "Category", "Available to book").
- * Custom field headers are the field name directly (e.g. "Purchase Date").
+ * Accepts headers from EITHER of Shelf's two CSV vocabularies: the
+ * asset-index export's display labels (e.g. "Name", "Category",
+ * "Available to book") or the content-importer's machine keys (e.g.
+ * "title", "category", "bookable" — see `ASSET_CSV_HEADERS`). Both are
+ * resolved to the same internal field via `EXPORT_HEADER_TO_FIELD_MAP`.
+ * Matching is case-insensitive throughout (fixed fields, identifier
+ * columns, and `cf:` headers) so "Asset Model" / "asset model" /
+ * "ASSETMODEL" and a SIMPLE-mode export's lowercase "id" all resolve.
+ *
+ * Custom field headers are accepted in two forms: a bare field name
+ * (e.g. "Purchase Date", from the asset-index export) or a
+ * self-describing `cf:<Name>,type:<TYPE>` header (from the content
+ * importer / import-ready export). Both resolve against the org's
+ * custom-field definitions by name.
  *
  * @param headers - Array of header strings from the CSV first row
  * @param orgCustomFields - Organization's custom field definitions
@@ -107,17 +164,42 @@ export function analyzeUpdateHeaders(
   const ignoredColumns: string[] = [];
   const unrecognizedColumns: string[] = [];
 
-  // Find all available identifier columns (priority order)
   const headersTrimmed = headers.map((h) => h.trim());
+
+  // Case-insensitive lookup: lowercased header text → first matching
+  // index. Built once, outside any per-header loop, so every lookup
+  // below (identifier columns AND fixed fields) shares it.
+  const headerIndexByLower = new Map<string, number>();
+  headersTrimmed.forEach((h, i) => {
+    const lower = h.toLowerCase();
+    if (!headerIndexByLower.has(lower)) headerIndexByLower.set(lower, i);
+  });
+
+  // Case-insensitive lookup of EXPORT_HEADER_TO_FIELD_MAP (both
+  // vocabularies), built once outside the classification loop below.
+  const fieldByLowerHeader = new Map<string, string>();
+  for (const [label, field] of Object.entries(EXPORT_HEADER_TO_FIELD_MAP)) {
+    fieldByLowerHeader.set(label.toLowerCase(), field);
+  }
+
+  // Find all available identifier columns (priority order). Each slot
+  // (see `IDENTIFIER_COLUMNS`) lists every accepted alias across both
+  // vocabularies — the first alias present in the CSV wins that slot.
   const foundIdCols: IdentifierColumn[] = [];
   for (const idCol of IDENTIFIER_COLUMNS) {
-    const idx = headersTrimmed.indexOf(idCol.header);
-    if (idx >= 0) {
-      foundIdCols.push({
-        index: idx,
-        dbField: idCol.dbField,
-        header: idCol.header,
-      });
+    for (const candidate of idCol.headers) {
+      const idx = headerIndexByLower.get(candidate.toLowerCase());
+      if (idx !== undefined) {
+        foundIdCols.push({
+          index: idx,
+          dbField: idCol.dbField,
+          // Use the header text actually present in the CSV (not the
+          // canonical alias) so downstream error messages reflect what
+          // the user wrote.
+          header: headersTrimmed[idx],
+        });
+        break;
+      }
     }
   }
 
@@ -129,13 +211,14 @@ export function analyzeUpdateHeaders(
   const idColumnHeader = primaryId?.header ?? "";
   const fallbackId = foundIdCols.length > 1 ? foundIdCols[1] : null;
 
-  // Set of internal field names used as identifiers — skip them during
-  // column classification so they aren't treated as updatable or ignored.
-  // Typed as `Set<string>` so it accepts the now-widened
-  // `EXPORT_HEADER_TO_FIELD_MAP` lookup result (the map gained
-  // import-only aliases that aren't in `ColumnLabelKey`).
-  const identifierFields = new Set<string>(
-    IDENTIFIER_COLUMNS.map((c) => c.internalField)
+  // Every accepted identifier alias text (lowercased), across all slots —
+  // used below to recognize an identifier-vocabulary header that is
+  // present but wasn't chosen as the primary matcher (e.g. a fallback
+  // "ID" column, or a duplicate alias for the same slot), so it's listed
+  // as ignored rather than misclassified as unrecognized or a stray
+  // custom field.
+  const identifierHeaderLower = new Set<string>(
+    IDENTIFIER_COLUMNS.flatMap((c) => c.headers.map((h) => h.toLowerCase()))
   );
 
   // Build a lookup of org custom fields by name (case-insensitive)
@@ -147,19 +230,31 @@ export function analyzeUpdateHeaders(
     const header = headersTrimmed[i];
     if (!header) continue;
 
-    // Check if it's a known fixed-field header via reverse map
-    const internalField = EXPORT_HEADER_TO_FIELD_MAP[header];
+    if (i === idColumnIndex) {
+      // The chosen primary identifier column — already consumed above.
+      continue;
+    }
 
-    if (internalField) {
-      // Skip identifier columns — they're handled above
-      if (identifierFields.has(internalField)) {
-        // If this isn't the one we picked as the matcher, list it as ignored
-        if (i !== idColumnIndex) {
-          ignoredColumns.push(header);
-        }
-        continue;
-      }
+    const lowerHeader = header.toLowerCase();
 
+    if (identifierHeaderLower.has(lowerHeader)) {
+      // A recognized identifier-vocabulary header that isn't the chosen
+      // primary (e.g. "ID" when "Asset ID" is also present) — ignored,
+      // mirrors the long-standing fallback-column behaviour.
+      ignoredColumns.push(header);
+      continue;
+    }
+
+    // Check if it's a known fixed-field header via the reverse map
+    // (case-insensitive — see map construction above).
+    const internalField = fieldByLowerHeader.get(lowerHeader);
+    // A workspace custom field outranks the export-only `qrUrl` column with
+    // the same header. The asset export leaves `qrUrl` out in that case, so
+    // the header can only be the custom field.
+    const isCustomFieldNamedQrUrl =
+      internalField === "qrUrl" && cfByName.has(lowerHeader);
+
+    if (internalField && !isCustomFieldNamedQrUrl) {
       if (UPDATABLE_FIELDS.has(internalField)) {
         updatableColumns.push({
           csvHeader: header,
@@ -171,33 +266,59 @@ export function analyzeUpdateHeaders(
         // Known field but not updatable (Status, Kit, etc.) — treat as ignored
         ignoredColumns.push(header);
       }
-    } else {
-      // Not a fixed field header — check if it's a custom field name
-      const cf = cfByName.get(header.toLowerCase());
-      if (cf) {
-        if (UPDATABLE_CF_TYPES.has(cf.type)) {
-          updatableColumns.push({
-            csvHeader: header,
-            internalKey: `cf:${cf.name}`,
-            kind: "customField",
-            csvIndex: i,
-            cfDef: {
-              name: cf.name,
-              type: cf.type,
-              helpText: "",
-              required: false,
-              active: true,
-            },
-          });
-        } else {
-          ignoredColumns.push(
-            `${header} (${cf.type.toLowerCase()} fields not supported for update)`
-          );
-        }
+      continue;
+    }
+
+    // Not a fixed field header — check if it's a custom field.
+    // Two forms are accepted: a self-describing `cf:<Name>,type:<TYPE>`
+    // header (content importer / import-ready export) or a bare field
+    // name (asset-index export display label). Both resolve against the
+    // SAME org custom-field lookup below.
+    let cfName = header;
+    if (header.length > 3 && header.slice(0, 3).toLowerCase() === "cf:") {
+      // `getDefinitionFromCsvHeader` is the EXACT parser the create
+      // importer uses (see ASSET_CSV_HEADERS handling) — reused here so
+      // both importers agree on how a `cf:` header decodes. It has a
+      // non-null assertion internally if no `cf:`-prefixed segment is
+      // found, hence the length + prefix guard above.
+      //
+      // Known limitation, shared with the create importer: the parser
+      // splits the header on `,`, so a custom field name containing a
+      // comma is truncated. Pre-existing behaviour — not fixed here.
+      cfName = getDefinitionFromCsvHeader(header).name;
+    }
+    // The declared `,type:` suffix (if any) is informational only — the
+    // workspace's stored custom-field type is the source of truth, so we
+    // deliberately do NOT compare/warn on a mismatch here. Adding that
+    // would require a new warnings channel through
+    // `HeaderAnalysis` → `UpdatePreview` for a case that's rare and
+    // always safely resolved by trusting the org's own schema.
+    const cf = cfByName.get(cfName.toLowerCase());
+    if (cf) {
+      if (UPDATABLE_CF_TYPES.has(cf.type)) {
+        updatableColumns.push({
+          csvHeader: header,
+          internalKey: `cf:${cf.name}`,
+          kind: "customField",
+          csvIndex: i,
+          cfDef: {
+            name: cf.name,
+            type: cf.type,
+            helpText: "",
+            required: false,
+            active: true,
+          },
+        });
       } else {
-        // Unknown column — don't block the import, just skip it
-        unrecognizedColumns.push(header);
+        ignoredColumns.push(
+          `${header} (${cf.type.toLowerCase()} fields not supported for update)`
+        );
       }
+    } else {
+      // Unknown column (including a `cf:` header naming a field that
+      // doesn't exist in this workspace) — don't block the import, just
+      // skip it.
+      unrecognizedColumns.push(header);
     }
   }
 
@@ -219,6 +340,67 @@ export function analyzeUpdateHeaders(
     idColumnHeader,
     fallbackId,
     columnIndexMap,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Multi-Placement Location Guard
+// ---------------------------------------------------------------------------
+
+/**
+ * Shared guard for the `location` column, used by BOTH `compareCoreField`
+ * (non-empty cell) and `detectClearing` (empty cell) so it fires
+ * regardless of the CSV cell's content.
+ *
+ * A QUANTITY_TRACKED asset can have units split across several
+ * `AssetLocation` placement rows (see
+ * .claude/rules/quantity-semantics-per-surface.md and
+ * kit-location-owns-member-placement.md). The CSV export can only ever
+ * write ONE `location` cell — there is no way to tell, from that single
+ * cell, whether the user's intent was "leave every placement alone" or
+ * "collapse everything into this one location". Applying it anyway calls
+ * `updateAsset` with `newLocationId` + `currentLocationId`, which would
+ * silently move units out of one placement into another — destroying
+ * placement structure the user never touched.
+ *
+ * Mirrors the QUANTITY_TRACKED `assetModel` branch below: returns a
+ * warning-marked `FieldChange` (skipped by the apply layer, surfaced in
+ * `result.warnings`) instead of either a silent no-op or a destructive
+ * write.
+ *
+ * @param asset - Existing asset loaded from the database
+ * @param csvValue - Trimmed CSV cell value (may be empty — the empty-cell
+ *   clearing path must also be guarded, since an empty cell would
+ *   otherwise wipe every placement)
+ * @param displayName - Human-readable column name for the change record
+ * @returns A warning-marked `FieldChange`, or `null` if the asset has 0 or 1 placements
+ */
+export function buildMultiPlacementLocationWarning(
+  asset: AssetForUpdate,
+  csvValue: string,
+  displayName: string
+): FieldChange | null {
+  if ((asset.locationPlacementCount ?? 0) <= 1) return null;
+  // A cell naming a location the asset already has units at proposes no
+  // write, so there is nothing to warn about — an untouched round-trip
+  // export must stay a silent no-op rather than reporting "needs fixing".
+  // Matched against EVERY placement, not just the primary: the export picks
+  // one of N and can disagree with this query's ordering.
+  if (
+    csvValue &&
+    (asset.locationPlacementNames ?? []).some(
+      (name) => name.toLowerCase() === csvValue.toLowerCase()
+    )
+  ) {
+    return null;
+  }
+  return {
+    field: displayName,
+    currentValue: "(multiple locations)",
+    newValue: csvValue || "(empty)",
+    warning:
+      "This asset has units in multiple locations — bulk location update " +
+      "isn't supported. Move units from the asset's location panel instead.",
   };
 }
 
@@ -254,6 +436,26 @@ export function compareCoreField(
       return null;
     }
 
+    case "description": {
+      // Plain scalar with a string-equality diff. The DB column is
+      // nullable, so an unset description reads as "". The cell arrives
+      // trimmed, so it is compared with the trimmed stored text: a stored
+      // description that differs only by surrounding whitespace is not a
+      // change. This function never sees an empty CSV cell
+      // (computeAssetDiffs branches to detectClearing first), and
+      // `description` isn't handled there either, so like `name`, an empty
+      // cell is a no-op, not a clear.
+      const current = asset.description ?? "";
+      if (csvValue !== current.trim()) {
+        return {
+          field: displayName,
+          currentValue: current || "(none)",
+          newValue: csvValue,
+        };
+      }
+      return null;
+    }
+
     case "category": {
       const current = asset.category?.name ?? "Uncategorized";
       if (csvValue.toLowerCase() !== current.toLowerCase()) {
@@ -267,6 +469,18 @@ export function compareCoreField(
     }
 
     case "location": {
+      // Multi-placement assets can't be safely diffed against a single
+      // "current" location — see `buildMultiPlacementLocationWarning`. This
+      // branch is TERMINAL: the helper returns either a warning, or `null`
+      // meaning the cell names a placement the asset already has (an
+      // untouched round trip). Falling through to the single-location
+      // comparison below would compare against the PRIMARY placement only,
+      // so a cell naming a non-primary placement would read as a real change
+      // and propose the destructive unit move this guard exists to prevent.
+      if ((asset.locationPlacementCount ?? 0) > 1) {
+        return buildMultiPlacementLocationWarning(asset, csvValue, displayName);
+      }
+
       const current = asset.location?.name ?? "";
       if (csvValue.toLowerCase() !== current.toLowerCase()) {
         return {
@@ -282,14 +496,11 @@ export function compareCoreField(
       const currentTags = asset.tags
         .map((t) => t.name)
         .sort((a, b) => a.localeCompare(b));
-      const csvTags = csvValue
-        .split(",")
-        .map((t) => t.trim())
-        .filter(Boolean)
-        .sort((a, b) => a.localeCompare(b));
+      const csvTags = decodeCsvListCell(csvValue).sort((a, b) =>
+        a.localeCompare(b)
+      );
 
       const currentStr = currentTags.join(", ");
-      const csvStr = csvTags.join(", ");
 
       // Case-insensitive set comparison
       const currentSet = new Set(currentTags.map((t) => t.toLowerCase()));
@@ -302,7 +513,10 @@ export function compareCoreField(
         return {
           field: displayName,
           currentValue: currentStr || "(none)",
-          newValue: csvStr,
+          // The cell verbatim, never the decoded list re-joined: `newValue` is
+          // what the apply flow decodes to resolve and connect the tags, and a
+          // plain join would hand it `Berlin, DE, small` to read as three.
+          newValue: csvValue,
         };
       }
       return null;
@@ -469,11 +683,17 @@ export function compareCoreField(
             "Asset model can only be set on INDIVIDUAL assets — this asset is quantity-tracked, so the cell was ignored.",
         };
       }
-      // Preview can't pre-resolve the model name → id; surface the cell
-      // value vs current model id so the user sees a change is queued.
-      // The apply path does the real resolution.
-      const current = asset.assetModelId ?? "";
-      if (csvValue !== current) {
+      // Compare NAME to NAME. The export writes the model's NAME to the
+      // CSV cell (`asset.assetModelName` in import-ready-export.server.ts),
+      // so comparing it against `assetModelId` (a cuid) can never match —
+      // that was Bug 1: EVERY row with a non-empty assetModel cell
+      // reported a phantom change, even on an untouched zero-edit round
+      // trip. Case-insensitive to mirror `batchResolveAssetModelNames`,
+      // which resolves model names case-insensitively at apply time, so a
+      // re-imported export with different casing is still correctly a
+      // no-op here. The apply path does the actual name → id resolution.
+      const current = asset.assetModel?.name ?? "";
+      if (csvValue.toLowerCase() !== current.toLowerCase()) {
         return {
           field: displayName,
           currentValue: current || "(none)",
@@ -573,18 +793,8 @@ export function compareCustomField(
       // Current raw value is also stored as the date string
       const currentDate = currentStr ? currentStr.substring(0, 10) : "";
       if (csvValue !== currentDate) {
-        // Validate format AND that the date is a real calendar date
-        // (new Date normalizes overflow — e.g. Feb 31 → Mar 3 — so we
-        // must check that the parsed date matches the original input)
-        let isValidDate = false;
-        if (/^\d{4}-\d{2}-\d{2}$/.test(csvValue)) {
-          const [y, m, d] = csvValue.split("-").map(Number);
-          const parsed = new Date(Date.UTC(y, m - 1, d));
-          isValidDate =
-            parsed.getUTCFullYear() === y &&
-            parsed.getUTCMonth() === m - 1 &&
-            parsed.getUTCDate() === d;
-        }
+        // Same rule as the importer: YYYY-MM-DD and a real calendar day.
+        const isValidDate = isImportableCustomFieldDate(csvValue);
         return {
           field: displayName,
           currentValue: currentDate || "(empty)",
@@ -676,6 +886,18 @@ export function detectClearing(
         return null;
       }
       case "location": {
+        // Same multi-placement guard as `compareCoreField` — MUST run
+        // before the clearing logic below. Without this, an empty
+        // `location` cell on a multi-placement asset would fall through
+        // to `newLocationId: null`, wiping every placement rather than
+        // just being a no-op on an untouched cell.
+        const multiPlacementWarning = buildMultiPlacementLocationWarning(
+          asset,
+          "",
+          displayName
+        );
+        if (multiPlacementWarning) return multiPlacementWarning;
+
         if (asset.location?.name) {
           return {
             field: displayName,
@@ -712,6 +934,12 @@ export function detectClearing(
         }
         return null;
       }
+      // `description` deliberately has no case — it falls through to
+      // `default: return null`, same as `name`/`availableToBook` above
+      // (just reached via the switch's default instead of the
+      // NON_CLEARABLE_CORE_FIELDS short-circuit). An empty description
+      // cell is a no-op, not a clear — see the `compareCoreField`
+      // "description" case for the rationale.
       default:
         return null;
     }
@@ -750,6 +978,19 @@ export function detectClearing(
 // ---------------------------------------------------------------------------
 // Diff Computation
 // ---------------------------------------------------------------------------
+
+/**
+ * The failed-row reason for a description the import would save over the
+ * length limit.
+ *
+ * @param description - The description the row would save
+ * @returns The reason, or `null` when the description fits
+ */
+function overLimitDescriptionReason(description: string): string | null {
+  if (!isAssetDescriptionTooLong(description)) return null;
+  const length = countCharacters(description).toLocaleString("en-US");
+  return `Description too long: ${length} characters, but the maximum is ${ASSET_DESCRIPTION_MAX_LENGTH_LABEL}. Shorten it and import again.`;
+}
 
 /**
  * Computes field-by-field diffs between CSV rows and existing assets.
@@ -824,6 +1065,18 @@ export function computeAssetDiffs({
       continue;
     }
 
+    // Archived assets are read-only (issue #382). `updateAsset` refuses them at
+    // apply time regardless; the preview reports the row as failed up front,
+    // because its job is to say what will happen BEFORE anything is saved.
+    if (existingAsset.archivedAt) {
+      failedRows.push({
+        rowNumber,
+        id: assetId,
+        reason: "Asset is archived — reinstate it before updating",
+      });
+      continue;
+    }
+
     // Check for duplicate assets by canonical UUID (not CSV identifier string)
     const firstSeenRow = seenIds.get(existingAsset.id);
     if (firstSeenRow !== undefined) {
@@ -886,10 +1139,37 @@ export function computeAssetDiffs({
 
     // Compute per-field diffs
     const changes: FieldChange[] = [];
+    /**
+     * Why the whole row is refused, when one of its changes cannot be saved.
+     * Only a description the file changes is measured, so a stored
+     * description already over the limit never blocks a row that leaves it
+     * as it is.
+     */
+    let rowRefusal: string | null = null;
 
     for (const [colIdx, column] of headerAnalysis.columnIndexMap) {
       const csvValue = row[colIdx]?.trim() ?? "";
-      const isEmpty = csvValue === "" || csvValue === '""';
+      // The Standard (human/analytics) export writes the literal string
+      // "Uncategorized" for assets with no category
+      // (`utils/csv.server.ts` — `asset.category?.name ?? "Uncategorized"`).
+      // Without this guard, re-importing that file would attempt to set
+      // the category to a real category literally named "Uncategorized"
+      // for every previously-uncategorized asset. Treat that cell exactly
+      // like an empty cell (same clearing / no-op semantics below) rather
+      // than inventing new behaviour here.
+      //
+      // Excluded when the asset's CURRENT category is itself literally named
+      // "Uncategorized" — an org can genuinely have one. For those assets the
+      // cell is a faithful round trip, so fall through to `compareCoreField`,
+      // whose display-value equality already no-ops it. Without this
+      // exclusion the guard read a correct cell as "empty" and silently
+      // stripped the real category on a zero-edit re-upload.
+      const isUncategorizedCell =
+        column.internalKey === "category" &&
+        csvValue.toLowerCase() === "uncategorized" &&
+        (existingAsset.category?.name ?? "").toLowerCase() !== "uncategorized";
+      const isEmpty =
+        csvValue === "" || csvValue === '""' || isUncategorizedCell;
 
       // Empty cell handling: detect clearing (had value → now empty)
       // Fields exempt from clearing: name (required), availableToBook (boolean)
@@ -914,6 +1194,9 @@ export function computeAssetDiffs({
         );
         if (change) {
           changes.push(change);
+          if (column.internalKey === "description") {
+            rowRefusal ??= overLimitDescriptionReason(change.newValue);
+          }
         }
       } else if (column.kind === "customField" && column.cfDef) {
         const change = compareCustomField(
@@ -928,7 +1211,9 @@ export function computeAssetDiffs({
       }
     }
 
-    if (changes.length === 0) {
+    if (rowRefusal) {
+      failedRows.push({ rowNumber, id: assetId, reason: rowRefusal });
+    } else if (changes.length === 0) {
       skippedAssets.push({
         id: assetId,
         title: existingAsset.title,

@@ -1,8 +1,11 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { BulkMarkAvailabilitySchema } from "~/components/assets/bulk-mark-availability-dialog";
+import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
 import { bulkMarkAvailability } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
+import { getClientHint } from "~/utils/client-hints";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
@@ -19,7 +22,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId, canUseBarcodes, role } = await requirePermission({
+    const {
+      organizationId,
+      canUseBarcodes,
+      role,
+      access,
+      currentOrganization,
+    } = await requirePermission({
       request,
       userId,
       entity: PermissionEntity.asset,
@@ -41,12 +50,22 @@ export async function action({ context, request }: ActionFunctionArgs) {
       BulkMarkAvailabilitySchema.and(CurrentSearchParamsSchema)
     );
 
+    // Acting user's timezone: when "select all" is active the affected set is
+    // resolved from the current date filters, which must truncate the day in
+    // the user's tz (avoids an off-by-one for non-UTC users).
+    const { timeZone } = await resolveUserFormatPrefsById(
+      userId,
+      getClientHint(request)
+    );
+
     await bulkMarkAvailability({
       organizationId,
       assetIds,
       type,
       currentSearchParams,
       settings,
+      lastAuditDateAccess: lastAuditDateAccessFor(access, currentOrganization),
+      timeZone,
     });
 
     sendNotification({

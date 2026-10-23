@@ -5,19 +5,50 @@ import { defineConfig } from "vite";
 import type { UserConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tsconfigPaths from "vite-tsconfig-paths";
+import { configDefaults } from "vitest/config";
 
 export default defineConfig({
-  plugins: [react(), tsconfigPaths()],
+  plugins: [
+    react(),
+    // Only the webapp's own tsconfig defines the aliases tests use (`~/*`,
+    // `@factories`, `@mocks`). Pointing the plugin at it stops it crawling
+    // every tsconfig in the monorepo.
+    tsconfigPaths({ projects: ["./tsconfig.json"] }),
+  ],
   test: {
     globals: true,
     environment: "happy-dom",
     setupFiles: ["./test/setup-test-env.ts"],
-    // Include both standard test files and .test.server.ts route tests.
-    // The `.server` infix avoids React Router typegen collisions (the typegen
-    // mirrors route filenames under .react-router/types, so a plain
-    // `foo.test.ts` would produce a generated file with the same name that
-    // Vitest would otherwise try to run as a second test file).
-    include: ["**/*.{test,spec}.?(c|m)[jt]s?(x)", "**/*.test.server.[jt]s"],
+    // Route tests import whole route modules inside `beforeAll`, and
+    // `pnpm webapp:validate` runs this suite beside lint and typecheck. Under
+    // that load a cold route import can outlast Vitest's 10-second hook
+    // default. Tests keep the default `testTimeout`, so a slow test body still
+    // fails fast.
+    hookTimeout: 30_000,
+    // Persists transformed modules under node_modules so later runs and
+    // other Vitest processes reuse them instead of re-transforming.
+    fsModuleCache: true,
+    // `vitest --changed` (behind `test:changed` and `validate`) picks tests
+    // through the import graph. The CSV and mobile-auth contract tests find
+    // their routes with `readdirSync` instead of importing them, so no graph
+    // edge links a route edit to them. A change under these globs forces the
+    // full suite so those contracts always run. Keep each glob in step with
+    // the directory its contract test enumerates, and keep the defaults
+    // (package.json, vite/vitest config) — setting this option replaces them.
+    forceRerunTriggers: [
+      ...configDefaults.forceRerunTriggers,
+      // test/routes-tests/csv-download-contract.test.ts
+      "**/app/routes/**/*\\[.csv\\].{ts,tsx}",
+      // test/routes-tests/api+/mobile-auth-contract.test.ts
+      "**/app/routes/api+/mobile+/**",
+    ],
+    // Route tests live in `test/routes-tests/`, NEVER under `app/routes/` —
+    // the dev server warms every file under `app/routes/` as a client module,
+    // so a co-located route test importing a `*.server` module breaks
+    // `pnpm webapp:dev`. Enforced by `local-rules/no-test-files-in-routes`.
+    // Do not name a test `*.test.server.ts`: the pattern below does not match
+    // that spelling, so such a file would silently never run.
+    include: ["**/*.{test,spec}.?(c|m)[jt]s?(x)"],
     includeSource: ["app/**/*.{js,ts}"],
     exclude: [
       "node_modules",
@@ -31,8 +62,8 @@ export default defineConfig({
     ],
     coverage: {
       reporter: ["text", "json", "html"],
+      // Also reports files no test imports, so untested modules show as 0%.
       include: ["app/**/*.{js,ts}"],
-      all: true,
     },
   },
 } as UserConfig);

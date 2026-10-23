@@ -40,6 +40,8 @@ import {
   type Tag,
   type MobileCustomFieldDefinition,
 } from "@/lib/api";
+import { ValuationField } from "@/components/asset-edit/valuation-field";
+import { valuationFromInput } from "@/lib/asset-valuation";
 import { useOrg } from "@/lib/org-context";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
@@ -47,6 +49,13 @@ import { createStyles } from "@/lib/create-styles";
 import { labelForRequired } from "@/lib/a11y";
 import { CustomFieldInput } from "@/components/asset-edit/custom-field-input";
 import { TagPickerField } from "@/components/asset-edit/tag-picker-field";
+import { CharacterCount } from "@/components/shared/character-count";
+import {
+  ASSET_DESCRIPTION_MAX_LENGTH,
+  ASSET_DESCRIPTION_TOO_LONG_MESSAGE,
+  countCharacters,
+  isAssetDescriptionTooLong,
+} from "@/lib/asset-description";
 
 // expo-image-picker requires native module — lazy-loaded to avoid crash
 // if the dev client hasn't been rebuilt yet
@@ -64,7 +73,11 @@ try {
 
 export default function CreateAssetScreen() {
   const router = useRouter();
-  const { qrId } = useLocalSearchParams<{ qrId?: string }>();
+  const { qrId: qrIdParam } = useLocalSearchParams<{ qrId?: string }>();
+  // A scanned QR links only ONE asset: the server ignores a qrId that is
+  // already claimed. Held as state so "Create Another" can drop it — the next
+  // asset is not linked, and the banner must stop saying it will be.
+  const [qrId, setQrId] = useState(qrIdParam);
   const { currentOrg } = useOrg();
   const { colors } = useTheme();
   const styles = useStyles();
@@ -72,6 +85,9 @@ export default function CreateAssetScreen() {
   // ── Form state ──────────────────────────────────
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  // Held as the raw string the field produces, not a number: an empty box
+  // means "not set", which is different from a deliberate 0.
+  const [valuation, setValuation] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(
     null
   );
@@ -93,6 +109,9 @@ export default function CreateAssetScreen() {
   const [isCategoriesLoading, setIsCategoriesLoading] = useState(false);
   const [isLocationsLoading, setIsLocationsLoading] = useState(false);
   const [isTagsLoading, setIsTagsLoading] = useState(false);
+  // Server-computed from GET /api/mobile/tags: whether the caller may mint
+  // tags inline (admins/owners). Gates the picker's "create tag" row.
+  const [canCreateTag, setCanCreateTag] = useState(false);
 
   // ── Picker visibility ───────────────────────────
   const [showCategoryPicker, setShowCategoryPicker] = useState(false);
@@ -171,6 +190,8 @@ export default function CreateAssetScreen() {
       if (requestId !== latestTagsRequestRef.current) return;
       const nextTags = data?.tags ?? [];
       setTags(nextTags);
+      // Server-computed create capability (false on older servers).
+      setCanCreateTag(data?.canCreate ?? false);
       setSelectedTags((prev) =>
         prev.filter((selected) =>
           nextTags.some((tag) => tag.id === selected.id)
@@ -182,6 +203,26 @@ export default function CreateAssetScreen() {
       }
     }
   }, [currentOrg]);
+
+  // Inline tag creation from the picker (admins/owners; the server enforces
+  // `tag.create`). Adds the new tag to the local list so the dropdown shows it
+  // without a refetch (the API helper already invalidated the cached list).
+  const handleCreateTag = useCallback(
+    async (name: string): Promise<Tag | null> => {
+      if (!currentOrg) return null;
+      const { data, error } = await api.createTag(currentOrg.id, name);
+      if (error || !data?.tag) {
+        Alert.alert("Couldn't create tag", error || "Please try again.");
+        return null;
+      }
+      const tag = data.tag;
+      setTags((prev) =>
+        [...prev, tag].sort((a, b) => a.name.localeCompare(b.name))
+      );
+      return tag;
+    },
+    [currentOrg]
+  );
 
   // ── Load custom fields for the selected category ──
   // Re-runs whenever the chosen category changes (including "no category").
@@ -248,6 +289,7 @@ export default function CreateAssetScreen() {
   const hasUnsavedChanges =
     title.trim().length > 0 ||
     description.trim().length > 0 ||
+    valuation.trim().length > 0 ||
     !!selectedCategory ||
     !!selectedLocation ||
     selectedTags.length > 0 ||
@@ -396,11 +438,17 @@ export default function CreateAssetScreen() {
       .filter((cf): cf is { id: string; value: string } => cf !== null);
   }, [customFieldDefs, customFieldValues]);
 
+  const descriptionTooLong = isAssetDescriptionTooLong(description);
+
   // ── Submit ──────────────────────────────────────
   const handleSubmit = async () => {
     const trimmedTitle = title.trim();
     if (trimmedTitle.length < 2) {
       Alert.alert("Validation", "Title must be at least 2 characters.");
+      return;
+    }
+    if (descriptionTooLong) {
+      Alert.alert("Validation", ASSET_DESCRIPTION_TOO_LONG_MESSAGE);
       return;
     }
     if (!currentOrg) return;
@@ -454,6 +502,9 @@ export default function CreateAssetScreen() {
       customFields:
         customFieldsPayload.length > 0 ? customFieldsPayload : undefined,
       qrId: qrId || undefined,
+      // Same rule as the edit screen: a blank box is no value and is left
+      // out, while a typed 0 is a real value and is sent.
+      valuation: valuationFromInput(valuation) ?? undefined,
     });
 
     setIsSubmitting(false);
@@ -503,6 +554,11 @@ export default function CreateAssetScreen() {
           setImageUri(null);
           setImageMimeType("image/jpeg");
           setCustomFieldValues({});
+          setValuation("");
+          setQrId(undefined);
+          // The route still carries the old qrId; clear it too, or a screen
+          // remount would re-seed the state and resurrect the banner.
+          router.setParams({ qrId: undefined });
         },
       },
     ]);
@@ -510,6 +566,7 @@ export default function CreateAssetScreen() {
 
   const canSubmit =
     title.trim().length >= 2 &&
+    !descriptionTooLong &&
     !isSubmitting &&
     !isCustomFieldsLoading &&
     !customFieldsError;
@@ -620,10 +677,29 @@ export default function CreateAssetScreen() {
             multiline
             numberOfLines={3}
             textAlignVertical="top"
-            maxLength={500}
             accessibilityLabel="Description"
           />
+          <CharacterCount
+            count={countCharacters(description)}
+            max={ASSET_DESCRIPTION_MAX_LENGTH}
+          />
+          {descriptionTooLong && (
+            <Text
+              style={styles.errorHint}
+              accessibilityRole="alert"
+              accessibilityLiveRegion="polite"
+            >
+              {ASSET_DESCRIPTION_TOO_LONG_MESSAGE}
+            </Text>
+          )}
         </View>
+
+        {/* ── Value (optional) ─────────────────────── */}
+        <ValuationField
+          value={valuation}
+          onChange={setValuation}
+          currency={currentOrg?.currency ?? "USD"}
+        />
 
         {/* ── Category Picker ──────────────────────── */}
         <View style={styles.field}>
@@ -866,6 +942,8 @@ export default function CreateAssetScreen() {
               setShowLocationPicker(false);
             }
           }}
+          canCreate={canCreateTag}
+          onCreateTag={handleCreateTag}
         />
 
         {/* ── Custom Fields (scoped to selected category) ────────── */}

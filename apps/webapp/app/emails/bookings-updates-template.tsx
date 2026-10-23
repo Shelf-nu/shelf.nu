@@ -11,8 +11,7 @@ import {
   type ReservationEmailAsset,
   type ReservationEmailModelRequest,
 } from "~/modules/booking/constants";
-import type { ClientHint } from "~/utils/client-hints";
-import { getDateTimeFormatFromHints } from "~/utils/client-hints";
+import { formatDate, type ResolvedFormatPrefs } from "~/utils/date-format";
 import { SERVER_URL } from "~/utils/env";
 import { resolveUserDisplayName } from "~/utils/user";
 import { CustomEmailFooter } from "./components/custom-footer";
@@ -23,13 +22,33 @@ import {
 } from "./components/footers";
 import { LogoForEmail } from "./logo";
 import { styles } from "./styles";
-import type { BookingForEmail } from "./types";
+import type { BookingEmailActor, BookingForEmail } from "./types";
+
+/**
+ * The actor line's text after the label: "<name> on <date, time>", with the
+ * moment in the recipient's own date, time and time zone preferences. The HTML
+ * template and the plain-text body both use it, so the two always agree.
+ */
+export function formatBookingEmailActorDetail(
+  actor: BookingEmailActor,
+  prefs: ResolvedFormatPrefs
+) {
+  return `${actor.name} on ${formatDate(actor.at, prefs, {
+    includeTime: true,
+  })}`;
+}
 
 interface Props {
   heading: string;
   booking: BookingForEmail;
+  /**
+   * Who performed the action and when, shown directly under the heading.
+   * Leave it out for emails nobody triggered, such as scheduled reminders.
+   */
+  actor?: BookingEmailActor;
   assetCount: number;
-  hints: ClientHint;
+  /** Resolved formatting prefs — the recipient's, for recipient-specific dates. */
+  prefs: ResolvedFormatPrefs;
   hideViewButton?: boolean;
   isAdminEmail?: boolean;
   cancellationReason?: string;
@@ -59,10 +78,21 @@ interface Props {
   recipientEmail?: string;
 }
 
+/**
+ * The HTML email sent for booking lifecycle events: reserved, completed,
+ * extended, reverted, cancelled, deleted, updated, and the scheduled
+ * reminders. One template serves them all; `heading` names the event and the
+ * optional sections (actor line, booked items, requested models, cancellation
+ * reason, change list) appear only when their prop is given.
+ *
+ * Every date is formatted with `prefs`, which are the RECIPIENT's resolved
+ * preferences, so each person sees times in their own format and time zone.
+ */
 export function BookingUpdatesEmailTemplate({
   booking,
   heading,
-  hints,
+  actor,
+  prefs,
   assetCount,
   hideViewButton = false,
   isAdminEmail = false,
@@ -80,14 +110,12 @@ export function BookingUpdatesEmailTemplate({
   const outstandingModelRequests = (modelRequests ?? []).filter(
     (req) => req.fulfilledAt === null
   );
-  const fromDate = getDateTimeFormatFromHints(hints, {
-    dateStyle: "short",
-    timeStyle: "short",
-  }).format(booking.from as Date);
-  const toDate = getDateTimeFormatFromHints(hints, {
-    dateStyle: "short",
-    timeStyle: "short",
-  }).format(booking.to as Date);
+  const fromDate = formatDate(booking.from as Date, prefs, {
+    includeTime: true,
+  });
+  const toDate = formatDate(booking.to as Date, prefs, {
+    includeTime: true,
+  });
   return (
     <Html>
       <Head>
@@ -116,6 +144,14 @@ export function BookingUpdatesEmailTemplate({
           <Heading as="h1" style={{ ...styles.h1 }}>
             {heading}
           </Heading>
+          {actor ? (
+            <p style={{ ...styles.p }}>
+              <span style={{ color: "#101828", fontWeight: "600" }}>
+                {`${actor.label}:`}
+              </span>{" "}
+              {formatBookingEmailActorDetail(actor, prefs)}
+            </p>
+          ) : null}
           <Heading as="h2" style={{ ...styles.h2 }}>
             {booking.name} | {assetCount}{" "}
             {assetCount === 1 ? "asset" : "assets"}
@@ -360,37 +396,10 @@ export function BookingUpdatesEmailTemplate({
   );
 }
 
-/*
- *The HTML content of an email will be accessed by a server file to send email,
-  we cannot import a TSX component in a server file so we are exporting TSX converted to HTML string using render function by react-email.
+/**
+ * Renders {@link BookingUpdatesEmailTemplate} to an HTML string, for server
+ * code that sends the email and cannot import a TSX component. Every prop is
+ * passed through unchanged.
  */
-export const bookingUpdatesTemplateString = ({
-  booking,
-  heading,
-  assetCount,
-  hints,
-  hideViewButton = false,
-  isAdminEmail = false,
-  cancellationReason,
-  changes,
-  assets,
-  modelRequests,
-  recipientReason,
-  recipientEmail,
-}: Props) =>
-  render(
-    <BookingUpdatesEmailTemplate
-      booking={booking}
-      heading={heading}
-      assetCount={assetCount}
-      hints={hints}
-      hideViewButton={hideViewButton}
-      isAdminEmail={isAdminEmail}
-      cancellationReason={cancellationReason}
-      changes={changes}
-      assets={assets}
-      modelRequests={modelRequests}
-      recipientReason={recipientReason}
-      recipientEmail={recipientEmail}
-    />
-  );
+export const bookingUpdatesTemplateString = (props: Props) =>
+  render(<BookingUpdatesEmailTemplate {...props} />);

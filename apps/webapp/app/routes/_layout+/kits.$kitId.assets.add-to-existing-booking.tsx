@@ -1,4 +1,5 @@
-import { BookingStatus, KitStatus, type Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
+import { archivedAssetsLeftOut } from "@shelf/labels";
 import { CalendarCheck } from "lucide-react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import {
@@ -13,10 +14,17 @@ import { Form } from "~/components/custom-form";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
-import { db } from "~/database/db.server";
 
+import { db } from "~/database/db.server";
 import {
+  ADDABLE_BOOKING_STATUSES,
+  isAddableBooking,
+} from "~/modules/booking/constants";
+import {
+  assertKitsAddableToActiveBooking,
   buildKitSlicesForBooking,
+  countArchivedKitMembers,
+  createKitBookingNote,
   getExistingBookingDetails,
   loadBookingsData,
   updateBookingAssets,
@@ -26,7 +34,10 @@ import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.
 import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { validateBookingOwnership } from "~/utils/booking-authorization.server";
+import {
+  assertCanAddBookingItems,
+  validateBookingOwnership,
+} from "~/utils/booking-authorization.server";
 import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -64,7 +75,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, isSelfServiceOrBase } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId: authSession?.userId,
       request,
       entity: PermissionEntity.booking,
@@ -75,7 +86,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
       organizationId,
       userId: authSession?.userId,
-      isSelfServiceOrBase,
+      access,
       ids: kitId ? [kitId] : undefined,
     });
 
@@ -108,7 +119,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, role } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId: authSession?.userId,
       request,
       entity: PermissionEntity.booking,
@@ -144,17 +155,22 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     // Cross-user IDOR guard: `booking:create` is granted org-wide to
     // SELF_SERVICE/BASE, so without this a non-owner could add kits to another
-    // user's booking. No-op for ADMIN/OWNER. Mirrors the asset flow's guard in
-    // processBooking and the sibling adjust-asset-quantity route.
+    // user's booking. No-op when `access.bookings.writeAll`. Mirrors the asset
+    // flow's guard in processBooking and the sibling adjust-asset-quantity
+    // route.
     validateBookingOwnership({
       booking: {
         creatorId: bookingInfo.creatorId,
         custodianUserId: bookingInfo.custodianUserId,
       },
       userId,
-      role,
+      access,
       action: "add kits to",
     });
+
+    // Restricted roles add kits only while the booking is a draft, the same
+    // rule the booking page's manage-kits flow applies.
+    assertCanAddBookingItems({ access, bookingStatus: bookingInfo.status });
 
     // AssetKit ids already represented on this booking. We dedupe by AssetKit
     // membership (NOT by asset id): a QUANTITY_TRACKED asset can sit on the
@@ -167,75 +183,32 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         .filter((id): id is string => id != null)
     );
 
-    // Progressive-checkout guard (parity with the manage-kits route): a kit that
-    // is physically CHECKED_OUT on ANOTHER active booking cannot be added to an
-    // ONGOING/OVERDUE booking. Kits added to an active booking otherwise stay
-    // AVAILABLE until purposefully checked out. Only fires for active targets;
-    // DRAFT/RESERVED bookings still accept checked-out kits.
-    //
-    // Kits already represented on this booking are excluded: their CHECKED_OUT
-    // status can be owned by this same booking, and re-adding only attaches
-    // newly-added members (buildKitSlicesForBooking skips existing memberships).
-    // Mirrors the manage-kits "newly added kits only" guard.
-    if (
-      bookingInfo.status === BookingStatus.ONGOING ||
-      bookingInfo.status === BookingStatus.OVERDUE
-    ) {
-      // Kit ids that already have at least one membership on this booking.
-      const kitIdsAlreadyOnBooking = new Set(
-        existingAssetKitIds.size > 0
-          ? (
-              await db.assetKit.findMany({
-                where: {
-                  id: { in: [...existingAssetKitIds] },
-                  kitId: { in: kitIds },
-                  organizationId,
-                },
-                select: { kitId: true },
-              })
-            ).map((ak) => ak.kitId)
-          : []
-      );
-      const kitIdsToGuard = kitIds.filter(
-        (id) => !kitIdsAlreadyOnBooking.has(id)
-      );
-
-      const checkedOutKits =
-        kitIdsToGuard.length > 0
-          ? await db.kit.findMany({
-              where: {
-                id: { in: kitIdsToGuard },
-                organizationId,
-                status: KitStatus.CHECKED_OUT,
-              },
-              select: { id: true, name: true },
-            })
-          : [];
-
-      if (checkedOutKits.length > 0) {
-        throw new ShelfError({
-          cause: null,
-          title: "Not allowed. Kits already checked out",
-          message: `The following kits are already checked out and cannot be added to the booking: ${checkedOutKits
-            .map((kit) => kit.name)
-            .join(", ")}`,
-          additionalData: { checkedOutKits, bookingId },
-          status: 400,
-          label: "Booking",
-          shouldBeCaptured: false,
-        });
-      }
-    }
+    // Progressive-checkout guard: a kit checked out on another active booking
+    // cannot be added to an ONGOING/OVERDUE booking. No-op for DRAFT/RESERVED;
+    // excludes kits already on this booking. Shared with future callers and
+    // covered by service-layer tests. See the helper's JSDoc for why the
+    // manage-kits route keeps its own partial-checkin-aware variant.
+    await assertKitsAddableToActiveBooking({
+      kitIds,
+      existingAssetKitIds,
+      bookingStatus: bookingInfo.status,
+      bookingId,
+      organizationId,
+    });
 
     // Resolve the kit memberships into kit-driven slice specs (org-scoped),
     // skipping any AssetKit already on the booking. Routing members through
     // `kitSlices` rather than the standalone `assetIds` bucket is what keeps the
     // kit recognizable in the booking overview (which groups by `assetKitId`).
-    const kitSlices = await buildKitSlicesForBooking({
-      kitIds,
-      organizationId,
-      existingAssetKitIds,
-    });
+    const [kitSlices, archivedMembersLeftOut] = await Promise.all([
+      buildKitSlicesForBooking({
+        kitIds,
+        organizationId,
+        existingAssetKitIds,
+      }),
+      // Archived members stay out of the booking; the toast below says so.
+      countArchivedKitMembers({ kitIds, organizationId, existingAssetKitIds }),
+    ]);
 
     // Empty slices means every membership of the selected kit(s) is already on
     // the booking — nothing new to add. Surface the same friendly message as
@@ -270,6 +243,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       kitSlices,
       kitIds,
       userId,
+      // Re-checks the add rule against the locked booking status.
+      access,
     });
 
     // Distinct member assets just added — used to attribute the per-asset
@@ -278,11 +253,35 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       new Set(kitSlices.map((slice) => slice.assetId))
     );
 
-    const actor = wrapUserLinkForNote({
-      id: authSession.userId,
-      firstName: user?.firstName,
-      lastName: user?.lastName,
+    /**
+     * Booking-side note for the kit add.
+     *
+     * This route forwards a non-empty `kitIds` to `updateBookingAssets`, which
+     * suppresses the service's own booking note on the assumption that a kit
+     * caller writes its own. `manage-kits` does. This route did not — so adding
+     * a kit to a booking from the KIT's page left the booking's activity feed
+     * completely silent, while the same action from the booking's page recorded
+     * it. Two doors to one outcome, two different audit trails.
+     *
+     * Names are fetched (rather than letting `createKitBookingNote` fall back
+     * to `wrapKitsForNote`'s id-only tag) so both doors produce an identical
+     * note. Org-scoped: `kitIds` is request-supplied.
+     */
+    const addedKits = await db.kit.findMany({
+      where: { id: { in: kitIds }, organizationId },
+      select: { id: true, name: true },
     });
+
+    await createKitBookingNote({
+      bookingId: booking.id,
+      organizationId,
+      kitIds,
+      kits: addedKits,
+      userId: authSession.userId,
+      action: "added",
+    });
+
+    const actor = wrapUserLinkForNote({ ...user, id: authSession.userId });
     const bookingLink = wrapLinkForNote(
       `/bookings/${booking.id}`,
       booking.name.trim()
@@ -297,7 +296,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     sendNotification({
       title: "Booking Updated",
-      message: "Your booking has been updated successfully",
+      message: `Your booking has been updated successfully.${
+        archivedMembersLeftOut > 0
+          ? ` ${archivedAssetsLeftOut(archivedMembersLeftOut)}`
+          : ""
+      }`,
       icon: { name: "success", variant: "success" },
       senderId: authSession.userId,
     });
@@ -319,18 +322,6 @@ export default function ExistingBooking() {
   const actionData = useActionData<typeof action>();
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
-  function isValidBooking(
-    booking: { status?: string | null } | null | undefined
-  ) {
-    // DRAFT/RESERVED (not yet started) + ONGOING/OVERDUE (active). Kits added to
-    // an active booking stay AVAILABLE until purposefully checked out
-    // (progressive checkout).
-    return (
-      !!booking?.status &&
-      ["RESERVED", "DRAFT", "ONGOING", "OVERDUE"].includes(booking.status)
-    );
-  }
-
   return (
     <Form method="post">
       <div className="modal-content-wrapper">
@@ -354,6 +345,10 @@ export default function ExistingBooking() {
             model={{
               name: "booking",
               queryKey: "name",
+              // Must mirror `isAddableBooking` and the statuses
+              // `loadBookingsData` seeds the list with — otherwise searching
+              // returns bookings this dialog then refuses to render.
+              status: ADDABLE_BOOKING_STATUSES.join(","),
             }}
             fieldName="bookingId"
             contentLabel=" Existing Bookings"
@@ -364,7 +359,7 @@ export default function ExistingBooking() {
             closeOnSelect
             required={true}
             renderItem={(item: any) =>
-              isValidBooking(item) ? (
+              isAddableBooking(item) ? (
                 <div
                   className="flex flex-col items-start gap-1 text-black"
                   key={item.id || item.name}

@@ -161,6 +161,40 @@ describe("POST /api/mobile/asset/update", () => {
     );
   });
 
+  it("accepts a description of exactly 5,000 characters", async () => {
+    (updateAsset as any).mockResolvedValue({ id: "asset-1", title: "Laptop" });
+    const description = "a".repeat(5000);
+
+    const result = await action(
+      createActionArgs({
+        request: createRequest({ assetId: "asset-1", description }),
+      })
+    );
+
+    expect((result as unknown as Response).status).toBe(200);
+    expect(vi.mocked(updateAsset).mock.calls[0][0].description).toBe(
+      description
+    );
+  });
+
+  it("rejects a description over 5,000 characters and does not update", async () => {
+    const result = await action(
+      createActionArgs({
+        request: createRequest({
+          assetId: "asset-1",
+          description: "a".repeat(5001),
+        }),
+      })
+    );
+
+    expect((result as unknown as Response).status).toBe(400);
+    const body = await (result as unknown as Response).json();
+    expect(body.error.message).toBe(
+      "Description must be 5,000 characters or fewer"
+    );
+    expect(updateAsset).not.toHaveBeenCalled();
+  });
+
   it("org-validates submitted tags and connects them on update", async () => {
     (updateAsset as any).mockResolvedValue({
       id: "asset-1",
@@ -395,13 +429,15 @@ describe("POST /api/mobile/asset/update", () => {
       const result = await action(createActionArgs({ request }));
 
       expect(result instanceof Response).toBe(true);
-      // Zod parse throws ZodError → caught by the route → makeShelfError
-      // wraps it. The mock at the top of this file (`vi.mock` for
-      // ~/utils/error) doesn't extract a status from ZodError, so the
-      // fallback `cause?.status || 500` returns 500. Assert that exact
-      // status — looser checks (e.g. `!= 200`) accept 401/403 and miss
-      // a future regression where auth fails before validation.
-      expect((result as unknown as Response).status).toBe(500);
+      // The body is validated through `parseMobileBody`, which converts the
+      // ZodError into a ShelfError carrying status 400 and
+      // `shouldBeCaptured: false`. This previously asserted 500 — a bare
+      // `schema.parse()` threw a ZodError that `makeShelfError` did not
+      // recognise, so a malformed client payload became a server error and a
+      // Sentry capture. Assert the exact status: looser checks (e.g. `!= 200`)
+      // accept 401/403 and would miss a regression where auth fails before
+      // validation.
+      expect((result as unknown as Response).status).toBe(400);
       expect(updateAsset).not.toHaveBeenCalled();
     });
 

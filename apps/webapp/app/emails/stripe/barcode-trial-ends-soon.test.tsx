@@ -25,10 +25,13 @@ vi.mock("~/utils/env", () => ({
   FREE_TRIAL_DAYS: "7",
   DISABLE_SIGNUP: false,
   DISABLE_SSO: false,
+  ENABLE_SCIM: false,
   SHOW_HOW_DID_YOU_FIND_US: false,
   COLLECT_BUSINESS_INTEL: false,
   GEOCODING_USER_AGENT: "",
 }));
+
+import { HARDCODED_DEFAULT_PREFS } from "~/utils/date-format";
 
 import {
   barcodeTrialEndsSoonEmailText,
@@ -43,6 +46,7 @@ describe("barcodeTrialEndsSoonEmailText", () => {
       firstName: "Alice",
       hasPaymentMethod: true,
       trialEndDate,
+      prefs: HARDCODED_DEFAULT_PREFS,
     });
     expect(text).toContain("ACTION REQUIRED");
     expect(text).toContain(
@@ -55,6 +59,7 @@ describe("barcodeTrialEndsSoonEmailText", () => {
       firstName: "Alice",
       hasPaymentMethod: false,
       trialEndDate,
+      prefs: HARDCODED_DEFAULT_PREFS,
     });
     expect(text).toContain("paused");
     expect(text).toContain("add a payment method");
@@ -65,6 +70,7 @@ describe("barcodeTrialEndsSoonEmailText", () => {
       firstName: "Alice",
       hasPaymentMethod: true,
       trialEndDate,
+      prefs: HARDCODED_DEFAULT_PREFS,
     });
     expect(text).toContain("March 24, 2026");
   });
@@ -74,6 +80,7 @@ describe("barcodeTrialEndsSoonEmailText", () => {
       firstName: "Bob",
       hasPaymentMethod: true,
       trialEndDate,
+      prefs: HARDCODED_DEFAULT_PREFS,
     });
     expect(text).toMatch(/^Hey Bob,/);
   });
@@ -90,6 +97,7 @@ describe("sendBarcodeTrialEndsSoonEmail", () => {
       email: "alice@example.com",
       hasPaymentMethod: true,
       trialEndDate: new Date("2026-03-24T00:00:00Z"),
+      prefs: HARDCODED_DEFAULT_PREFS,
     });
 
     expect(mockSendEmail).toHaveBeenCalledOnce();
@@ -112,6 +120,7 @@ describe("sendBarcodeTrialEndsSoonEmail", () => {
         email: "alice@example.com",
         hasPaymentMethod: true,
         trialEndDate: new Date("2026-03-24T00:00:00Z"),
+        prefs: HARDCODED_DEFAULT_PREFS,
       })
     ).resolves.toBeUndefined();
   });

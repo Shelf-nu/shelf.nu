@@ -1,15 +1,21 @@
 // @vitest-environment node
 /**
- * Parse-level tests for the reminder form schemas. These cover the two
- * multipart-form traps that would otherwise break the flows silently:
- * an empty optional date input submits "" (not undefined), and a disabled
- * Repeat select submits nothing at all.
+ * Parse-level tests for the reminder form schemas' recurrence fields. These
+ * cover the two multipart-form traps that would otherwise break the flows
+ * silently (an empty optional date input submits "" rather than undefined, and
+ * a disabled Repeat select submits nothing at all) and the split between the
+ * client-only endsAt ordering check and the shared schema the server parses.
+ * The timezone-aware future-date check is covered in
+ * `set-or-edit-reminder-dialog.test.tsx`.
  */
+import { z } from "zod";
 import {
-  editReminderServerSchema,
-  setReminderSchema,
-  setReminderServerSchema,
+  createSetReminderFormSchema,
+  createSetReminderSchema,
 } from "./set-or-edit-reminder-dialog";
+
+/** The dialog's client schema, in the runtime zone. */
+const setReminderSchema = createSetReminderFormSchema();
 
 const FUTURE = "2099-07-15T09:00";
 
@@ -23,7 +29,7 @@ function basePayload(overrides: Record<string, unknown> = {}) {
   };
 }
 
-describe("setReminderSchema", () => {
+describe("createSetReminderFormSchema", () => {
   it("defaults repeat to never when the field is absent (disabled/locked select)", () => {
     const parsed = setReminderSchema.parse(basePayload());
     expect(parsed.repeat).toBe("never");
@@ -77,7 +83,7 @@ describe("setReminderSchema", () => {
     ).not.toThrow();
   });
 
-  it("rejects a past alertDateTime at PARSE time on the CLIENT schema", () => {
+  it("rejects a past alertDateTime at PARSE time", () => {
     const result = setReminderSchema.safeParse(
       basePayload({ alertDateTime: "2020-01-01T09:00" })
     );
@@ -87,17 +93,9 @@ describe("setReminderSchema", () => {
     }
   });
 
-  it("runs NO date refinements on the SERVER schemas (zone-resolved checks happen in resolveReminderPayloadDates)", () => {
-    // Server-side, z.coerce.date() reads raw strings in the process zone, so
-    // both the future check and the endsAt ordering check would misfire for
-    // users in other zones. Both run on the resolved instants instead.
+  it("leaves endsAt ordering out of the shared server schema (it runs on the resolved instants in resolveReminderPayloadDates)", () => {
     expect(
-      setReminderServerSchema.safeParse(
-        basePayload({ alertDateTime: "2020-01-01T09:00" })
-      ).success
-    ).toBe(true);
-    expect(
-      setReminderServerSchema.safeParse(
+      createSetReminderSchema({ timeZone: "America/New_York" }).safeParse(
         basePayload({ repeat: "monthly", endsAt: "2099-07-01" })
       ).success
     ).toBe(true);
@@ -110,8 +108,12 @@ describe("setReminderSchema", () => {
   });
 });
 
-describe("editReminderServerSchema", () => {
-  it("requires the reminder id", () => {
+describe("createSetReminderSchema extended for edits", () => {
+  const editReminderServerSchema = createSetReminderSchema({
+    timeZone: "UTC",
+  }).extend({ id: z.string() });
+
+  it("requires the reminder id and keeps the recurrence fields", () => {
     const parsed = editReminderServerSchema.parse(
       basePayload({ id: "reminder-1", repeat: "yearly" })
     );

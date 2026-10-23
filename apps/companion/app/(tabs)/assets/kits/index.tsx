@@ -7,6 +7,7 @@
  * @see {@link file://../index.tsx} the asset twin of this screen
  * @see {@link file://../../../../lib/api/kits.ts} data source
  */
+import { ASSET_STATUS_LABELS } from "@shelf/labels";
 import { useState, useCallback, useEffect, useRef } from "react";
 import {
   View,
@@ -31,14 +32,19 @@ import { InventorySegment } from "@/components/kits/inventory-segment";
 
 const PAGE_SIZE = 20;
 
-/** Filter pills — status filters plus the special "My Custody" filter. */
+/** Filter pills — status filters plus the special "My custody" filter. */
 type KitFilter = { label: string; status: string; myCustody?: boolean };
 const FILTERS: KitFilter[] = [
   { label: "All", status: "" },
-  { label: "My Custody", status: "", myCustody: true },
-  { label: "Available", status: "AVAILABLE" },
-  { label: "In Custody", status: "IN_CUSTODY" },
-  { label: "Checked Out", status: "CHECKED_OUT" },
+  // why: sentence case to match the @shelf/labels chips below. Not a status,
+  // so it has no package entry.
+  { label: "My custody", status: "", myCustody: true },
+  // why: read from @shelf/labels, not hand-typed. These chips said "In Custody"
+  // and "Checked Out" while the badge on every row below them rendered
+  // formatStatus() — "In custody" and "Checked out". Same screen, two spellings.
+  { label: ASSET_STATUS_LABELS.AVAILABLE, status: "AVAILABLE" },
+  { label: ASSET_STATUS_LABELS.IN_CUSTODY, status: "IN_CUSTODY" },
+  { label: ASSET_STATUS_LABELS.CHECKED_OUT, status: "CHECKED_OUT" },
 ];
 
 const kitKeyExtractor = (item: KitListItem) => item.id;

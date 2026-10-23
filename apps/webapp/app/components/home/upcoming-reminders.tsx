@@ -54,11 +54,7 @@ export default function UpcomingReminders() {
                         {reminder.asset.title}
                       </span>
                       {" · "}
-                      <DateS
-                        date={reminder.alertDateTime}
-                        options={{ month: "short", day: "numeric" }}
-                        includeTime
-                      />
+                      <DateS date={reminder.alertDateTime} includeTime />
                       {isRecurringReminder(reminder) ? (
                         <RepeatIcon
                           className="ml-1 inline size-3 align-[-1px] text-gray-400"

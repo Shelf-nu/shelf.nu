@@ -1,6 +1,6 @@
 import type { BookingStatus, Tag as PrismaTag, User } from "@prisma/client";
 import type { BookingLifecycleProgress as BookingLifecycleProgressType } from "~/modules/booking/utils.server";
-import { resolveUserDisplayName } from "~/utils/user";
+import { BADGE_COLORS } from "~/utils/badge-colors";
 import { BookingLifecycleProgress as BookingLifecycleProgressBar } from "./booking-lifecycle-progress";
 import { CategoryBadge } from "../assets/category-badge";
 import ItemsWithViewMore from "../list/items-with-view-more";
@@ -15,6 +15,8 @@ export function BookingStatistics({
   totalAssets,
   kitsCount,
   assetsCount,
+  unassignedModelUnits,
+  canAssignModelUnits: canAssign,
   totalValue,
   allCategories,
   tags,
@@ -27,10 +29,24 @@ export function BookingStatistics({
   totalAssets: number;
   kitsCount: number;
   assetsCount: number;
+  /**
+   * Reserved model units still awaiting a physical asset. Counted in UNITS,
+   * not request rows, via `countUnassignedModelUnits`. `0` hides the row.
+   */
+  unassignedModelUnits: number;
+  /**
+   * Whether those units can still be assigned. On a finished, cancelled or
+   * archived booking they are history, so the amber "needs attention" emphasis
+   * is dropped and the label reads in the past tense.
+   */
+  canAssignModelUnits: boolean;
   totalValue: string;
   allCategories: { id: string; name: string; color: string }[];
   tags: Pick<PrismaTag, "id" | "name" | "color">[];
-  creator: Pick<User, "id" | "firstName" | "lastName" | "profilePicture">;
+  creator: Pick<
+    User,
+    "id" | "firstName" | "lastName" | "displayName" | "profilePicture"
+  >;
   /**
    * Segmented checkout/check-in lifecycle progress. When present (and the
    * booking has any partial checkout/check-in activity), renders the
@@ -89,6 +105,55 @@ export function BookingStatistics({
           </span>
           <span className="text-right font-medium">{totalAssets}</span>
         </div>
+
+        {/* Reserved model units that have no physical asset behind them yet.
+            Shown ONLY when there are some, and in the same amber the
+            reservations section and the bookings-index pill use.
+
+            Every count above this row is concrete assets, which is correct and
+            was also completely silent about a booking still owing units. A
+            summary that omits the outstanding work reads as "this booking is
+            complete" — the exact impression that produced the original report.
+            @see {@link file://./booking-model-reservations-section.tsx} */}
+        {unassignedModelUnits > 0 && (
+          <>
+            <Separator />
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-1 text-sm text-gray-500">
+                {canAssign
+                  ? "Unassigned model units"
+                  : "Model units never assigned"}{" "}
+                <InfoTooltip
+                  iconClassName="size-4"
+                  content={
+                    <p>
+                      Units reserved against an asset model
+                      {canAssign
+                        ? " that have not been matched to a physical asset yet."
+                        : " that were never matched to a physical asset."}{" "}
+                      They are not counted in the asset totals above, and they
+                      are not included in total value because no specific asset
+                      was ever chosen.
+                    </p>
+                  }
+                />
+              </span>
+              <span
+                className="rounded-2xl px-2 py-[2px] text-right text-xs font-medium"
+                style={{
+                  backgroundColor: canAssign
+                    ? BADGE_COLORS.amber.bg
+                    : BADGE_COLORS.gray.bg,
+                  color: canAssign
+                    ? BADGE_COLORS.amber.text
+                    : BADGE_COLORS.gray.text,
+                }}
+              >
+                {unassignedModelUnits}
+              </span>
+            </div>
+          </>
+        )}
         <Separator />
         <div className="flex items-center justify-between">
           <span className="text-sm text-gray-500">Total value</span>
@@ -131,10 +196,7 @@ export function BookingStatistics({
         <div className="flex items-start justify-between">
           <span className="text-sm text-gray-500">Created by</span>
 
-          <UserBadge
-            name={resolveUserDisplayName(creator)}
-            img={creator.profilePicture}
-          />
+          <UserBadge user={creator} />
         </div>
 
         {autoArchivedAt && status === "ARCHIVED" && (

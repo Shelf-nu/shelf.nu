@@ -17,6 +17,7 @@ import { getCategoriesForCreateAndEdit } from "~/modules/asset/service.server";
 import {
   getAssetModel,
   updateAssetModel,
+  updateAssetModelImage,
 } from "~/modules/asset-model/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -93,8 +94,14 @@ export async function action({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.update,
     });
 
+    /**
+     * Multipart form (optional cover image) — clone so the text fields and the
+     * streaming file parser each get their own read of the body.
+     */
+    const clonedRequest = request.clone();
+
     const parsedPayload = parseData(
-      await request.formData(),
+      await clonedRequest.formData(),
       AssetModelFormSchema,
       { additionalData: { userId, id, organizationId } }
     );
@@ -102,6 +109,17 @@ export async function action({ context, request, params }: LoaderFunctionArgs) {
     await updateAssetModel({
       ...parsedPayload,
       id,
+      organizationId,
+    });
+
+    /**
+     * Stores a newly-picked image and re-points every inheriting asset at it.
+     * No-ops when the user didn't pick a file, so a plain Save keeps the
+     * current image.
+     */
+    await updateAssetModelImage({
+      request,
+      assetModelId: id,
       organizationId,
     });
 

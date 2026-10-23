@@ -4,6 +4,7 @@ import { operatorsMap } from "~/components/assets/assets-index/advanced-filters/
 import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
 import { parseFilters } from "~/modules/asset/filter-parsing";
 import type { Column } from "~/modules/asset-index-settings/helpers";
+import { formatDate, type ResolvedFormatPrefs } from "~/utils/date-format";
 
 /**
  * Lookup data for resolving IDs to user-friendly names.
@@ -62,12 +63,16 @@ function formatSorting(
  * @param query - URL query string with filter parameters
  * @param columns - Column definitions for parsing filters
  * @param lookupData - Optional lookup data for resolving IDs to names
+ * @param prefs - Optional resolved user format prefs for rendering date values
+ *   in the user's configured order (supplied by the calling component via
+ *   `useDateFormatter().prefs`). When omitted, date values render raw.
  * @returns Formatted filter summary string
  */
 export function formatFilterSummary(
   query: string,
   columns: Column[],
-  lookupData?: FilterLookupData
+  lookupData?: FilterLookupData,
+  prefs?: ResolvedFormatPrefs
 ): string {
   if (!query) return "No filters or sorting";
 
@@ -95,7 +100,8 @@ export function formatFilterSummary(
         filter.type,
         filter.operator,
         filter.name,
-        lookupData
+        lookupData,
+        prefs
       );
 
       // Format: "Field operator: value" with colon after operator
@@ -165,7 +171,8 @@ function formatValue(
   type: string,
   operator: string,
   fieldName: string,
-  lookupData?: FilterLookupData
+  lookupData?: FilterLookupData,
+  prefs?: ResolvedFormatPrefs
 ): string {
   // Handle array values
   if (Array.isArray(value)) {
@@ -174,19 +181,26 @@ function formatValue(
         value[0],
         type,
         fieldName,
-        lookupData
-      )} and ${formatSingleValue(value[1], type, fieldName, lookupData)}`;
+        lookupData,
+        prefs
+      )} and ${formatSingleValue(
+        value[1],
+        type,
+        fieldName,
+        lookupData,
+        prefs
+      )}`;
     }
     // For multiple values, show count if more than 3
     if (value.length > 3) {
       return `${value.length} items`;
     }
     return value
-      .map((v) => formatSingleValue(v, type, fieldName, lookupData))
+      .map((v) => formatSingleValue(v, type, fieldName, lookupData, prefs))
       .join(", ");
   }
 
-  return formatSingleValue(value, type, fieldName, lookupData);
+  return formatSingleValue(value, type, fieldName, lookupData, prefs);
 }
 
 /**
@@ -196,7 +210,8 @@ function formatSingleValue(
   value: unknown,
   type: string,
   fieldName: string,
-  lookupData?: FilterLookupData
+  lookupData?: FilterLookupData,
+  prefs?: ResolvedFormatPrefs
 ): string {
   if (value === null || value === undefined) return "empty";
 
@@ -259,12 +274,17 @@ function formatSingleValue(
   // Date values
   if (type === "date" && typeof value === "string") {
     try {
-      const date = new Date(value);
-      return date.toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      });
+      // Render in the user's configured date order when prefs are supplied.
+      // `localeOnly` avoids timezone conversion — the filter value is a plain
+      // calendar date (YYYY-MM-DD), not a UTC instant.
+      return prefs
+        ? formatDate(value, prefs, {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+            localeOnly: true,
+          })
+        : value;
     } catch {
       return String(value);
     }

@@ -52,6 +52,7 @@ declare global {
       ENABLE_PREMIUM_FEATURES: string;
       DISABLE_SIGNUP: string;
       DISABLE_SSO: string;
+      ENABLE_SCIM: string;
       INVITE_TOKEN_SECRET: string;
       SMTP_PWD: string;
       SMTP_HOST: string;
@@ -66,6 +67,7 @@ declare global {
       /** Auto-injected on Fly machines; used as a fallback for SENTRY_RELEASE. */
       FLY_RELEASE_VERSION: string;
       ADMIN_EMAIL: string;
+      FEEDBACK_EMAIL: string;
       CHROME_EXECUTABLE_PATH: string;
       FINGERPRINT: string;
       FREE_TRIAL_DAYS: string;
@@ -76,6 +78,10 @@ declare global {
       COOKIE_DOMAIN: string;
       POSTHOG_API_KEY: string;
       POSTHOG_HOST: string;
+      COMPANION_SERVERS: string;
+      INSTANCE_NAME: string;
+      MIN_COMPANION_VERSION: string;
+      LATEST_COMPANION_VERSION: string;
     }
   }
 }
@@ -146,7 +152,12 @@ export const SUPABASE_SERVICE_ROLE = getEnv("SUPABASE_SERVICE_ROLE");
 export const INVITE_TOKEN_SECRET = getEnv("INVITE_TOKEN_SECRET", {
   isSecret: true,
 });
+/**
+ * Public: it is printed on every label and shipped to the browser through
+ * `getBrowserEnv`, where the scanner uses it to recognise Shelf QR codes.
+ */
 export const URL_SHORTENER = getEnv("URL_SHORTENER", {
+  isSecret: false,
   isRequired: false,
 });
 
@@ -210,6 +221,19 @@ export const ADMIN_EMAIL = getEnv("ADMIN_EMAIL", {
 });
 
 /**
+ * Internal inbox(es) that receive in-app feedback: issues, ideas and error
+ * reports. Accepts a comma separated list so more than one person gets
+ * notified (e.g. the support inbox plus whoever triages product feedback).
+ * Optional: when it is unset the feedback email goes to SUPPORT_EMAIL alone.
+ *
+ * Server side only, and deliberately absent from `getBrowserEnv()`: unlike
+ * SUPPORT_EMAIL it is never shown to users, it only routes internal mail.
+ */
+export const FEEDBACK_EMAIL = getEnv("FEEDBACK_EMAIL", {
+  isRequired: false,
+});
+
+/**
  * A comma separated list of customerIds that have custom install of shelf.
  * We need this in order to make our webhook work properly.
  */
@@ -229,6 +253,69 @@ export const POSTHOG_API_KEY = getEnv("POSTHOG_API_KEY", {
 });
 export const POSTHOG_HOST = getEnv("POSTHOG_HOST", {
   isSecret: true,
+  isRequired: false,
+});
+
+/**
+ * Companion-app server registry (Shelf Cloud only).
+ *
+ * JSON object mapping a lowercased email domain to the base URL of the Shelf
+ * instance that domain's users belong to, e.g.
+ * `{"acme.edu":"https://acme.i.shelf.nu"}`. Consumed exclusively by
+ * `resolveCompanionServer` so the storage can later become a database table
+ * without touching call sites.
+ *
+ * `isSecret: true` keeps the mapping out of the client-side `window.env`
+ * payload — it reveals which organisations run self-hosted Shelf.
+ *
+ * @see {@link file://./../modules/api/companion-servers.server.ts}
+ */
+export const COMPANION_SERVERS = getEnv("COMPANION_SERVERS", {
+  isSecret: true,
+  isRequired: false,
+});
+
+/**
+ * Human-readable name of this Shelf instance, surfaced to the companion app
+ * via `/api/mobile/config` and shown to the user as "Connected to <name>".
+ * Defaults to "Shelf" when unset.
+ *
+ * @see {@link file://./../routes/api+/mobile+/config.ts}
+ */
+export const INSTANCE_NAME = getEnv("INSTANCE_NAME", {
+  isSecret: false,
+  isRequired: false,
+});
+
+/**
+ * Lowest companion-app version this instance will accept, e.g. "1.4.0".
+ *
+ * Served on `/api/mobile/config`. An app older than this shows a blocking
+ * "update required" screen with a store link instead of connecting — the
+ * standard force-update pattern. Leave unset (the default) to accept any
+ * version; set it when a breaking `/api/mobile/*` change ships, so older
+ * installs fail with an actionable message rather than a pile of 4xx.
+ *
+ * @see {@link file://./../routes/api+/mobile+/config.ts}
+ */
+export const MIN_COMPANION_VERSION = getEnv("MIN_COMPANION_VERSION", {
+  isSecret: false,
+  isRequired: false,
+});
+
+/**
+ * Newest companion-app version in the app stores, e.g. "1.6.0".
+ *
+ * Served on `/api/mobile/config`. An app older than this shows a dismissible
+ * "new version available" banner with a store link. Unlike
+ * `MIN_COMPANION_VERSION` it blocks nothing. Leave unset (the default) to show
+ * no banner. Set it only once that version is live in BOTH stores: an earlier
+ * value sends people to a store page with nothing new to install.
+ *
+ * @see {@link file://./../routes/api+/mobile+/config.ts}
+ */
+export const LATEST_COMPANION_VERSION = getEnv("LATEST_COMPANION_VERSION", {
+  isSecret: false,
   isRequired: false,
 });
 
@@ -322,6 +409,29 @@ export const DISABLE_SSO =
     isSecret: false,
     isRequired: false,
   }) === "true" || false;
+
+/**
+ * Opt-in flag for SCIM user provisioning (RFC 7643/7644).
+ *
+ * Deliberately inverted relative to `DISABLE_SSO`: SCIM is OFF unless a
+ * deployment explicitly turns it on. The feature is usable for self-hosters but
+ * is not yet ready for Shelf Cloud (pending premium-plan gating and a decision
+ * on push vs. manual vs. nightly sync), so the safe default is disabled.
+ *
+ * Server-side only — intentionally absent from `getBrowserEnv()`. Surfaces that
+ * need it in the browser must receive it through a loader.
+ */
+export const ENABLE_SCIM =
+  getEnv("ENABLE_SCIM", {
+    isSecret: false,
+    isRequired: false,
+  }) === "true" || false;
+
+export const DEFAULT_SSO_DOMAIN =
+  getEnv("DEFAULT_SSO_DOMAIN", {
+    isSecret: false,
+    isRequired: false,
+  }) || "";
 
 export const SEND_ONBOARDING_EMAIL =
   getEnv("SEND_ONBOARDING_EMAIL", {

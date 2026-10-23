@@ -16,13 +16,17 @@ import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
 import { db } from "~/database/db.server";
 
+import { getAssetAvailability } from "~/modules/asset/availability.server";
 import { isQuantityTracked } from "~/modules/asset/utils";
+import {
+  ADDABLE_BOOKING_STATUSES,
+  isAddableBooking,
+} from "~/modules/booking/constants";
 import {
   loadBookingsData,
   processBooking,
   updateBookingAssets,
 } from "~/modules/booking/service.server";
-import { computeBookingAvailableQuantity } from "~/modules/consumption-log/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getUserByID } from "~/modules/user/service.server";
@@ -58,7 +62,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, isSelfServiceOrBase } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId: authSession?.userId,
       request,
       entity: PermissionEntity.booking,
@@ -73,10 +77,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         request,
         organizationId,
         userId: authSession?.userId,
-        isSelfServiceOrBase,
+        access,
         ids: assetId ? [assetId] : undefined,
       }),
       db.asset.findFirst({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: loads the one asset the dialog was opened for; updateBookingAssets refuses an archived asset with its own message
         where: { id: assetId, organizationId },
         select: {
           id: true,
@@ -97,7 +102,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      */
     const assetAvailability =
       asset && isQuantityTracked(asset)
-        ? await computeBookingAvailableQuantity(asset.id)
+        ? {
+            // Current physical stock as the modal's cap hint. The target
+            // booking (and its date window) isn't known at load time, so this
+            // is a conservative upper bound; `updateBookingAssets` does the
+            // authoritative WINDOWED over-allocation check at write time.
+            available: (
+              await getAssetAvailability({ assetId: asset.id, organizationId })
+            ).physicalAvailable,
+          }
         : null;
 
     return data(payload({ ...loaderData, asset, assetAvailability }), {
@@ -116,7 +129,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, role } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId: authSession?.userId,
       request,
       entity: PermissionEntity.booking,
@@ -137,7 +150,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       bookingId,
       assetIds,
       organizationId,
-      { userId, role }
+      { userId, access }
     );
 
     /**
@@ -149,24 +162,18 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     if (quantity != null && finalAssetIds.length === 1) {
       const assetId = finalAssetIds[0];
       const asset = await db.asset.findFirst({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: type lookup for one specific asset; the archive guard in updateBookingAssets must still see it to refuse with the archived message
         where: { id: assetId, organizationId },
         select: { id: true, title: true, type: true },
       });
 
       if (asset && isQuantityTracked(asset)) {
-        const availability = await computeBookingAvailableQuantity(
-          assetId,
-          bookingId
-        );
-        if (quantity > availability.available) {
-          throw new ShelfError({
-            cause: null,
-            message: `Cannot reserve ${quantity} units of "${asset.title}". Only ${availability.available} available.`,
-            label: "Booking",
-            shouldBeCaptured: false,
-            status: 400,
-          });
-        }
+        // The authoritative WINDOWED over-allocation guard runs inside
+        // `updateBookingAssets` (for active bookings, via
+        // `assertAssetQuantitiesAvailable`). We just forward the requested
+        // quantity — the old inline check here used the global, all-time
+        // `computeBookingAvailableQuantity`, which over-counted
+        // non-overlapping bookings (#2724).
         quantities = { [assetId]: quantity };
       }
     }
@@ -202,13 +209,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       assetIds: finalAssetIds,
       userId,
       quantities,
+      // Re-checks the add rule against the locked booking status.
+      access,
     });
 
-    const actor = wrapUserLinkForNote({
-      id: authSession.userId,
-      firstName: user?.firstName,
-      lastName: user?.lastName,
-    });
+    const actor = wrapUserLinkForNote({ ...user, id: authSession.userId });
     const bookingLink = wrapLinkForNote(
       `/bookings/${booking.id}`,
       booking.name
@@ -249,18 +254,6 @@ export default function ExistingBooking() {
   const unitLabel = asset?.unitOfMeasure || "units";
   const maxQuantity = assetAvailability?.available ?? undefined;
 
-  function isValidBooking(
-    booking: { status?: string | null } | null | undefined
-  ) {
-    // DRAFT/RESERVED (not yet started) + ONGOING/OVERDUE (active). Adding to an
-    // active booking keeps the asset AVAILABLE until it is purposefully checked
-    // out (progressive checkout).
-    return (
-      !!booking?.status &&
-      ["RESERVED", "DRAFT", "ONGOING", "OVERDUE"].includes(booking.status)
-    );
-  }
-
   return (
     <Form method="post">
       <div className="modal-content-wrapper">
@@ -289,8 +282,10 @@ export default function ExistingBooking() {
             model={{
               name: "booking",
               queryKey: "name",
-              // we can achieve it using this also. currently it is accepting only one status value.
-              // status: ['DRAFT', 'RESERVED']
+              // Must mirror `isAddableBooking` and the statuses
+              // `loadBookingsData` seeds the list with — otherwise searching
+              // returns bookings this dialog then refuses to render.
+              status: ADDABLE_BOOKING_STATUSES.join(","),
             }}
             fieldName="bookingId"
             contentLabel="Existing Bookings"
@@ -301,7 +296,7 @@ export default function ExistingBooking() {
             closeOnSelect
             required={true}
             renderItem={(item: any) =>
-              isValidBooking(item) ? (
+              isAddableBooking(item) ? (
                 <div
                   className="flex flex-col items-start gap-1 text-black"
                   key={item.id || item.name}

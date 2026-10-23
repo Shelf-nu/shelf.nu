@@ -6,11 +6,11 @@ import { z } from "zod";
 import { AuditNotes } from "~/components/audit/notes";
 import { NoPermissionsIcon } from "~/components/icons/library";
 import TextualDivider from "~/components/shared/textual-divider";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { getAuditNotes } from "~/modules/audit/note-service.server";
 import {
   getAuditSessionDetails,
-  requireAuditAssigneeForBaseSelfService,
+  requireAuditAssigneeForScopedViewer,
 } from "~/modules/audit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
@@ -37,6 +37,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
+    /**
+     * Two-step gate, ordered deliberately — same reasoning as the asset
+     * activity route.
+     *
+     * Step 1 is `audit:read` against the SELECTED workspace, because
+     * `getAuditSessionDetails` uses `userOrganizations` to detect an audit
+     * living in a different workspace of the same user and hand off to the
+     * switch-workspace path. Gating on `auditNote:read` here would 403 that
+     * deep link before the hand-off could happen.
+     */
     const permissionResult = await requirePermission({
       userId,
       request,
@@ -44,21 +54,37 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const { organizationId, userOrganizations, isSelfServiceOrBase } =
-      permissionResult;
+    const { organizationId, userOrganizations, access } = permissionResult;
 
     const { session } = await getAuditSessionDetails({
+      // Reads `session` only, so no photo is signed here.
+      refreshExpectedAssetImages: false,
       id: auditId,
       organizationId,
       userOrganizations,
       request,
     });
 
-    requireAuditAssigneeForBaseSelfService({
+    requireAuditAssigneeForScopedViewer({
       audit: session,
       userId,
-      isSelfServiceOrBase,
+      assignedOnly: !access.audits.seeAll,
       auditId,
+    });
+
+    /**
+     * Step 2: `auditNote:read`, enforced BEFORE any note is fetched, so the
+     * notes never reach the payload of a user without the right to read them.
+     *
+     * Every role currently holds `auditNote:read`, so this is not a live
+     * exposure today — it is the same shape as the asset gap, one permission
+     * edit away from becoming one.
+     */
+    await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.auditNote,
+      action: PermissionAction.read,
     });
 
     // Fetch audit notes
@@ -81,7 +107,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 }
 
 export default function AuditActivity() {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const canReadAuditNotes = userHasPermission({
     roles,
     entity: PermissionEntity.auditNote,

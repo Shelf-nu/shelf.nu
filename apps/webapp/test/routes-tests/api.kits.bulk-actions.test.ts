@@ -1,6 +1,7 @@
 import { OrganizationRoles } from "@prisma/client";
 import type { ActionFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { accessFor } from "@helpers/role-access";
 
 import { action } from "~/routes/api+/kits.bulk-actions";
 import { requirePermission } from "~/utils/roles.server";
@@ -48,6 +49,10 @@ vi.mock("~/modules/kit/service.server", () => ({
 // why: testing team member organization validation without database lookups
 vi.mock("~/modules/team-member/service.server", () => ({
   getTeamMember: teamMemberServiceMocks.getTeamMember,
+  // why: the custodian-filter narrowing has its own suite; here it only needs
+  // to avoid a database round trip. These tests all pass explicit `kitIds`, so
+  // no custodian filter is built and the return value is never consulted.
+  scopeCustodianFilterIds: vi.fn().mockResolvedValue([]),
 }));
 
 // why: preventing actual notification sending during route tests
@@ -110,6 +115,7 @@ describe("api/kits/bulk-actions - bulk-assign-custody", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.ADMIN,
+      access: accessFor(["ADMIN"]),
     } as any);
 
     // Custodian not found due to org filter
@@ -149,6 +155,7 @@ describe("api/kits/bulk-actions - bulk-assign-custody", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.ADMIN,
+      access: accessFor(["ADMIN"]),
     } as any);
 
     // Valid team member from same org
@@ -194,6 +201,7 @@ describe("api/kits/bulk-actions - bulk-assign-custody", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.SELF_SERVICE,
+      access: accessFor(["SELF_SERVICE"]),
     } as any);
 
     // Valid team member from same org, but different user
@@ -230,6 +238,7 @@ describe("api/kits/bulk-actions - bulk-assign-custody", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.SELF_SERVICE,
+      access: accessFor(["SELF_SERVICE"]),
     } as any);
 
     // Valid team member from same org, same user
@@ -269,6 +278,7 @@ describe("api/kits/bulk-actions - bulk-assign-custody", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.ADMIN,
+      access: accessFor(["ADMIN"]),
     } as any);
 
     const formData = new FormData();

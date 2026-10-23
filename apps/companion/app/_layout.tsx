@@ -8,12 +8,15 @@ import { AuthProvider, useAuth } from "@/lib/auth-context";
 import { OrgProvider } from "@/lib/org-context";
 import { ThemeProvider, useTheme } from "@/lib/theme-context";
 import { OfflineBanner } from "@/components/offline-banner";
+import { UpdateAvailableBanner } from "@/components/update-available-banner";
 import AnimatedSplash from "@/components/animated-splash";
 import { useDeepLinkHandler } from "@/lib/deep-links";
 import { useQuickActions } from "@/lib/quick-actions";
 import { getStartPage, getStartPageRoute } from "@/lib/start-page";
 import { preloadScanSound } from "@/lib/scan-sound";
-import { initSentry } from "@/lib/sentry";
+import { initSentry, trackServerTag } from "@/lib/sentry";
+import { hydrateActiveServer, refreshActiveServerConfig } from "@/lib/server";
+import { unlockOrientationOnTablets } from "@/lib/orientation";
 import * as Sentry from "@sentry/react-native";
 import Constants from "expo-constants";
 
@@ -22,6 +25,9 @@ initSentry();
 
 // Keep the native splash visible until our animated splash is mounted.
 SplashScreen.preventAutoHideAsync().catch(() => {});
+
+// Phones stay upright; an Android tablet follows its rotation from launch.
+unlockOrientationOnTablets();
 
 // ── Startup diagnostic (visible in Metro terminal) ──────────────────
 if (__DEV__) {
@@ -77,7 +83,9 @@ function RootLayoutNav() {
     <>
       <StatusBar style={isDark ? "light" : "dark"} />
       <OfflineBanner />
-      <Slot />
+      <UpdateAvailableBanner>
+        <Slot />
+      </UpdateAvailableBanner>
       {!splashComplete && (
         <AnimatedSplash
           isReady={!isLoading}
@@ -89,6 +97,31 @@ function RootLayoutNav() {
 }
 
 function RootLayout() {
+  const [serverReady, setServerReady] = useState(false);
+
+  // Restore the persisted Shelf server (and rebuild the Supabase client against
+  // it) BEFORE any provider that touches auth mounts. AuthProvider reads
+  // getSupabase() in its session effect, so mounting it first would bind it to
+  // the cloud client and force an immediate teardown.
+  // `.finally` — a failed hydration falls back to Shelf Cloud rather than
+  // leaving the user stuck on the splash.
+  useEffect(() => {
+    hydrateActiveServer().finally(() => {
+      setServerReady(true);
+      // Fire-and-forget: revalidating the connected server must never delay
+      // first paint, and it has nothing to say on a Shelf Cloud install.
+      void refreshActiveServerConfig();
+    });
+  }, []);
+
+  // Tag telemetry once the active server is known, then follow every switch.
+  useEffect(() => (serverReady ? trackServerTag() : undefined), [serverReady]);
+
+  // why: the native splash is still up (SplashScreen.preventAutoHideAsync at
+  // module scope), so rendering nothing here shows the splash, not a blank
+  // screen. Hydration is a single AsyncStorage read — a few milliseconds.
+  if (!serverReady) return null;
+
   return (
     <SafeAreaProvider>
       <ThemeProvider>

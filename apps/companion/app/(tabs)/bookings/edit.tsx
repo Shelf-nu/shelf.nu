@@ -28,49 +28,38 @@ import { useRouter, useLocalSearchParams } from "expo-router";
 import { useNavigation } from "@react-navigation/native";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
-import DateTimePicker, {
-  type DateTimePickerEvent,
-} from "@react-native-community/datetimepicker";
 import { api, type BookingTag } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import { markBookingDirty } from "@/lib/booking-refresh";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
+import { wallClockWireInZone } from "@shelf/datetime";
+import { keepEndAfterStart } from "@/lib/booking-dates";
+import { useDateFormatter } from "@/lib/use-date-formatter";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { labelForRequired } from "@/lib/a11y";
 import { TeamMemberPicker } from "@/components/team-member-picker";
-
-function getTimeZone(): string {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-  } catch {
-    return "UTC";
-  }
-}
-
-function toLocalWire(d: Date): string {
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(
-    d.getHours()
-  )}:${p(d.getMinutes())}`;
-}
-
-function formatDisplay(d: Date): string {
-  return d.toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
+import { DateTimeField } from "@/components/date-time-field";
+import { ErrorBoundary } from "@/components/error-boundary";
 
 export default function EditBookingScreen() {
+  return (
+    <ErrorBoundary screenName="Edit booking">
+      <EditBookingContent />
+    </ErrorBoundary>
+  );
+}
+
+function EditBookingContent() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { currentOrg } = useOrg();
   const { colors } = useTheme();
   const styles = useStyles();
+  // `from`/`to` are the booking's real instants throughout. Both pickers are
+  // driven in the preference zone via `timeZoneName`, so the times shown here
+  // match the detail screen the user just came from.
+  const { formatDateTime, prefs } = useDateFormatter();
 
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -185,34 +174,22 @@ export default function EditBookingScreen() {
   }, [navigation, isLoading, hasUnsavedChanges]);
 
   // ── Date pickers ────────────────────────────────
-  const onFromChange = useCallback(
-    (event: DateTimePickerEvent, selected: Date | undefined) => {
-      if (Platform.OS === "android") setShowFromPicker(false);
-      if (event.type === "dismissed") return;
-      if (selected) {
-        setFrom(selected);
-        setTo((prev) =>
-          prev && prev <= selected
-            ? new Date(selected.getTime() + 24 * 60 * 60 * 1000)
-            : prev
-        );
-        if (Platform.OS === "ios") setShowFromPicker(false);
-      }
+  const closeFromPicker = useCallback(() => setShowFromPicker(false), []);
+  const closeToPicker = useCallback(() => setShowToPicker(false), []);
+
+  const onFromConfirm = useCallback(
+    (selected: Date) => {
+      setShowFromPicker(false);
+      setFrom(selected);
+      setTo((prev) => keepEndAfterStart(prev, selected, prefs.timeZone));
     },
-    []
+    [prefs.timeZone]
   );
 
-  const onToChange = useCallback(
-    (event: DateTimePickerEvent, selected: Date | undefined) => {
-      if (Platform.OS === "android") setShowToPicker(false);
-      if (event.type === "dismissed") return;
-      if (selected) {
-        setTo(selected);
-        if (Platform.OS === "ios") setShowToPicker(false);
-      }
-    },
-    []
-  );
+  const onToConfirm = useCallback((selected: Date) => {
+    setShowToPicker(false);
+    setTo(selected);
+  }, []);
 
   const toggleTag = useCallback((tagId: string) => {
     setSelectedTagIds((prev) => {
@@ -249,9 +226,11 @@ export default function EditBookingScreen() {
       name: name.trim(),
       description: description.trim() || undefined,
       custodianTeamMemberId: custodian.id,
-      startDate: toLocalWire(from),
-      endDate: toLocalWire(to),
-      timeZone: getTimeZone(),
+      startDate: wallClockWireInZone(from, prefs.timeZone),
+      endDate: wallClockWireInZone(to, prefs.timeZone),
+      // The wire strings carry no offset, so the zone they were written in has
+      // to travel with them — that is the preference zone the pickers edit in.
+      timeZone: prefs.timeZone,
       tags: Array.from(selectedTagIds),
     });
     setIsSubmitting(false);
@@ -404,7 +383,7 @@ export default function EditBookingScreen() {
             }}
             accessibilityRole="button"
             accessibilityLabel={
-              from ? `Starts ${formatDisplay(from)}` : "Start"
+              from ? `Starts ${formatDateTime(from)}` : "Start"
             }
           >
             <Text
@@ -412,7 +391,7 @@ export default function EditBookingScreen() {
                 from ? styles.pickerSelectedText : styles.pickerPlaceholder
               }
             >
-              {from ? formatDisplay(from) : "Choose start..."}
+              {from ? formatDateTime(from) : "Choose start..."}
             </Text>
             {isDraft && (
               <Ionicons
@@ -423,17 +402,14 @@ export default function EditBookingScreen() {
             )}
           </TouchableOpacity>
           {isDraft && showFromPicker && (
-            <View
-              style={Platform.OS === "ios" ? styles.dateInlineWrap : undefined}
-            >
-              <DateTimePicker
-                value={from ?? new Date()}
-                mode="datetime"
-                display={Platform.OS === "ios" ? "inline" : "default"}
-                onChange={onFromChange}
-                accentColor={colors.primary}
-              />
-            </View>
+            <DateTimeField
+              value={from ?? new Date()}
+              timeZoneName={prefs.timeZone}
+              onConfirm={onFromConfirm}
+              onCancel={closeFromPicker}
+              inlineStyle={styles.dateInlineWrap}
+              accentColor={colors.primary}
+            />
           )}
         </View>
 
@@ -449,12 +425,12 @@ export default function EditBookingScreen() {
               setShowFromPicker(false);
             }}
             accessibilityRole="button"
-            accessibilityLabel={to ? `Ends ${formatDisplay(to)}` : "End"}
+            accessibilityLabel={to ? `Ends ${formatDateTime(to)}` : "End"}
           >
             <Text
               style={to ? styles.pickerSelectedText : styles.pickerPlaceholder}
             >
-              {to ? formatDisplay(to) : "Choose end..."}
+              {to ? formatDateTime(to) : "Choose end..."}
             </Text>
             {isDraft && (
               <Ionicons
@@ -465,18 +441,15 @@ export default function EditBookingScreen() {
             )}
           </TouchableOpacity>
           {isDraft && showToPicker && (
-            <View
-              style={Platform.OS === "ios" ? styles.dateInlineWrap : undefined}
-            >
-              <DateTimePicker
-                value={to ?? from ?? new Date()}
-                mode="datetime"
-                display={Platform.OS === "ios" ? "inline" : "default"}
-                minimumDate={from ?? undefined}
-                onChange={onToChange}
-                accentColor={colors.primary}
-              />
-            </View>
+            <DateTimeField
+              value={to ?? from ?? new Date()}
+              timeZoneName={prefs.timeZone}
+              minimumDate={from ?? undefined}
+              onConfirm={onToConfirm}
+              onCancel={closeToPicker}
+              inlineStyle={styles.dateInlineWrap}
+              accentColor={colors.primary}
+            />
           )}
         </View>
 

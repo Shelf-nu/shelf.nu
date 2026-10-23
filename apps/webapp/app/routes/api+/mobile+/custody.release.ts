@@ -7,9 +7,11 @@ import {
   requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
+import { parseMobileBody } from "~/modules/api/mobile-body.server";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import { releaseCustody } from "~/modules/custody/service.server";
 import { createNote } from "~/modules/note/service.server";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import {
   PermissionAction,
@@ -34,16 +36,42 @@ export async function action({ request }: ActionFunctionArgs) {
       action: PermissionAction.custody,
     });
 
-    // Caller's role — required so releaseCustody can enforce the SELF_SERVICE
-    // self-restriction (only release custody of assets assigned to themselves).
-    const { role } = await getMobileUserContext(user.id, organizationId);
+    // The caller's custody scope: `releaseCustody` enforces it.
+    const { access } = await getMobileUserContext(user.id, organizationId);
 
-    const body = await request.json();
-    const { assetId } = z
-      .object({
+    const { assetId } = await parseMobileBody(
+      z.object({
         assetId: z.string().min(1),
-      })
-      .parse(body);
+      }),
+      request,
+      "Assets"
+    );
+
+    // why: `releaseCustody` is INDIVIDUAL-only — its `deleteMany` releases
+    // EVERY custodian on the asset, which for a QUANTITY_TRACKED asset means
+    // one custodian's release would wipe all the others' slices. The web route
+    // (`assets.$assetId.overview.release-custody.tsx`) already refuses QT here;
+    // this endpoint did not, so the mobile app was the one way into that state.
+    // QT releases belong to POST /api/mobile/custody/release-quantity, which
+    // takes a quantity and releases a single slice.
+    const assetToRelease = await db.asset.findFirst({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: type guard for a specific asset; releasing custody must not 404 on an archived asset
+      where: { id: assetId, organizationId },
+      select: { type: true },
+    });
+
+    if (isQuantityTracked(assetToRelease)) {
+      throw new ShelfError({
+        cause: null,
+        title: "Action not allowed",
+        message:
+          "Quantity-tracked assets must have custody released individually through the quantity release flow.",
+        additionalData: { userId: user.id, assetId },
+        label: "Assets",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
 
     // why: read the current custody record so we can attach actor +
     // teamMember + targetUser to the CUSTODY_RELEASED activity event.
@@ -75,7 +103,7 @@ export async function action({ request }: ActionFunctionArgs) {
       assetId,
       organizationId,
       userId: user.id,
-      role,
+      custodyAssign: access.custody.assign,
       activityEvent: {
         actorUserId: user.id,
         teamMemberId: custodyRecord?.custodian?.id,
@@ -88,6 +116,7 @@ export async function action({ request }: ActionFunctionArgs) {
       id: user.id,
       firstName: user.firstName,
       lastName: user.lastName,
+      displayName: user.displayName,
     });
 
     await createNote({

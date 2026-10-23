@@ -15,14 +15,16 @@
  * If the submitted set equals ALL still-Booked assets in the booking, this is
  * a "final" checkout; combined with `isBookingEarlyCheckout(booking.from)` it
  * becomes an early checkout and we delegate to `CheckoutDialog` so the user
- * can choose whether to adjust the start date. Otherwise a plain
- * `partial-checkout` submit is used.
+ * can choose whether to adjust the start date. A batch that takes a RESERVED
+ * booking out while model reservations are still unassigned also goes through
+ * `CheckoutDialog`, which names those units for the user to confirm; they stay
+ * open on the booking. Otherwise a plain `partial-checkout` submit is used.
  *
  * @see {@link file://./bulk-partial-checkin-dialog.tsx} — the mirror source
  * @see {@link file://./checkout-dialog.tsx} — early-checkout confirmation
  * @see {@link file://./../../routes/_layout+/bookings.$bookingId.overview.tsx}
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AssetType } from "@prisma/client";
 import { useAtomValue, useSetAtom } from "jotai";
 import { useActionData, useLoaderData } from "react-router";
@@ -32,18 +34,21 @@ import {
   selectedBulkItemsAtom,
 } from "~/atoms/list";
 import { useDisabled } from "~/hooks/use-disabled";
-import { shouldPromptEarlyCheckout } from "~/modules/booking/helpers";
+import {
+  makeCheckoutEligibility,
+  shouldPromptEarlyCheckout,
+} from "~/modules/booking/helpers";
 import type {
   BookingPageLoaderData,
   BookingPageActionData,
 } from "~/routes/_layout+/bookings.$bookingId.overview";
 import type { AssetWithStatus } from "~/utils/booking-assets";
-import {
-  flattenSelectedBookingItems,
-  isAssetCheckableOut,
-} from "~/utils/booking-assets";
+import { flattenSelectedBookingItems } from "~/utils/booking-assets";
+import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
+import { numberInputWheelGuard } from "~/utils/number-input-wheel-guard";
 import { tw } from "~/utils/tw";
 import CheckoutDialog from "./checkout-dialog";
+import { CheckoutSourceSelect } from "./checkout-source-select";
 import { AssetImage } from "../assets/asset-image/component";
 import { Form } from "../custom-form";
 import KitImage from "../kits/kit-image";
@@ -132,6 +137,7 @@ function CheckoutQtyInput({
       <span className="text-xs font-medium text-gray-700">Checked out</span>
       <input
         type="number"
+        {...numberInputWheelGuard}
         min={1}
         max={max}
         step={1}
@@ -167,64 +173,68 @@ export default function BulkPartialCheckoutDialog({
   setOpen: (open: boolean) => void;
 }) {
   const disabled = useDisabled();
-  const { booking, checkedOutAssetIds, remainingToCheckOutByAsset } =
-    useLoaderData<BookingPageLoaderData>();
+  const {
+    booking,
+    checkedOutAssetIds,
+    remainingToCheckOutByAsset,
+    partialCheckinDetails,
+    checkoutSourceQuestions,
+  } = useLoaderData<BookingPageLoaderData>();
+
+  /** "From location" questions by slice id, for the pool rows below. */
+  const sourceQuestionBySliceId = useMemo(
+    () =>
+      new Map(
+        checkoutSourceQuestions.map((question) => [question.sliceId, question])
+      ),
+    [checkoutSourceQuestions]
+  );
 
   const rawSelectedItems = useAtomValue(selectedBulkItemsAtom);
 
-  // Denormalised, deduplicated asset list derived from the bookingAssets
-  // pivot. `booking.assets` no longer exists post-pivot, so we project the
-  // pivot rows down to one entry per asset id for `flattenSelectedBookingItems`
-  // (which keys lookups by asset id and merges fields into the selection).
+  // Denormalised asset list derived from the bookingAssets pivot — ONE entry
+  // per `BookingAsset` slice (NOT deduped by asset id). A QUANTITY_TRACKED
+  // asset can span multiple slices (standalone + kit-driven), and each slice
+  // must survive so `flattenSelectedBookingItems` (which keys its enrichment
+  // map by `bookingAssetId`) can enrich the exact selected slice. Deduping by
+  // asset.id used to collapse the two slices, clobbering the standalone
+  // slice's `kitId: null` with the kit slice's `kitId` → the row rendered in
+  // neither bucket (the multi-slice checkout bug). This mirrors the check-in
+  // dialog's un-deduped `assetsList`.
+  //
   // We spread the pivot's per-row fields onto each entry — `bookingAssetId`,
   // `bookedQuantity`, plus the row-level `kit`/`kitId` resolved through the
   // BookingAsset's `assetKitId` — so the flattened selection downstream has
-  // everything the qty picker and kit-grouping renderer need. Deduping by
-  // asset.id mirrors the lookup-by-id contract `flattenSelectedBookingItems`
-  // expects (later slices for the same asset are dropped). Memoised so its
+  // everything the qty picker and kit-grouping renderer need. Memoised so its
   // reference stays stable across renders while `booking.bookingAssets`
   // doesn't change — without this, the enriched-selection array would churn
   // → `qtySlices` would recompute → its consumer `useEffect` (which calls
   // `setQtyByBookingAssetId`) would fire on every render and trip React's
   // max-update-depth guard.
   const assetsList = useMemo<AssetWithStatus[]>(
-    () => [
-      ...new Map(
-        booking.bookingAssets.map((ba) => {
-          // Post-Phase-4a pivot: kit membership lives on `asset.assetKits[]`,
-          // not on `asset.kit` directly. When the row was booked under a
-          // specific kit slice, match it via `ba.assetKitId` so kit-driven
-          // rows surface `{ kit, kitId }` and standalone rows leave both
-          // null.
-          const matchedAssetKit = ba.assetKitId
-            ? ba.asset.assetKits?.find((ak) => ak.id === ba.assetKitId) ?? null
-            : null;
-          return [
-            ba.asset.id,
-            {
-              ...ba.asset,
-              bookingAssetId: ba.id,
-              // `?? 1` mirrors the overview loader's projection — defends
-              // against partial fixtures (component tests sometimes omit
-              // BookingAsset.quantity) so spreading this object doesn't
-              // overwrite a caller-supplied bookedQuantity with `undefined`.
-              bookedQuantity: ba.quantity ?? 1,
-              kitId: matchedAssetKit?.kitId ?? null,
-              kit: matchedAssetKit?.kit ?? null,
-            },
-          ];
-        })
-      ).values(),
-    ],
+    () =>
+      booking.bookingAssets.map((ba) => {
+        // Post-Phase-4a pivot: kit membership lives on `asset.assetKits[]`,
+        // not on `asset.kit` directly. When the row was booked under a
+        // specific kit slice, match it via `ba.assetKitId` so kit-driven
+        // rows surface `{ kit, kitId }` and standalone rows leave both
+        // null.
+        const matchedAssetKit = ba.assetKitId
+          ? ba.asset.assetKits?.find((ak) => ak.id === ba.assetKitId) ?? null
+          : null;
+        return {
+          ...ba.asset,
+          bookingAssetId: ba.id,
+          // `?? 1` mirrors the overview loader's projection — defends
+          // against partial fixtures (component tests sometimes omit
+          // BookingAsset.quantity) so spreading this object doesn't
+          // overwrite a caller-supplied bookedQuantity with `undefined`.
+          bookedQuantity: ba.quantity ?? 1,
+          kitId: matchedAssetKit?.kitId ?? null,
+          kit: matchedAssetKit?.kit ?? null,
+        };
+      }),
     [booking.bookingAssets]
-  );
-
-  // Set of asset ids already checked out for THIS booking (partial-checkout
-  // records). Asset `status === CHECKED_OUT` is checked separately by the
-  // shared `isAssetCheckableOut` helper.
-  const checkedOutIdsSet = useMemo(
-    () => new Set(checkedOutAssetIds || []),
-    [checkedOutAssetIds]
   );
 
   /**
@@ -232,20 +242,34 @@ export default function BulkPartialCheckoutDialog({
    * QUANTITY_TRACKED assets this is `sum(bookedQuantity) - sum(checkedOutQuantity)`
    * across every slice the asset has on this booking. An asset is "fully
    * out" only when its value reaches 0; while > 0 the user can still top
-   * off the remaining units via this dialog. Passed into the SHARED
-   * `isAssetCheckableOut` predicate so the dropdown, this dialog, and any
-   * future consumer all agree on top-off eligibility.
+   * off the remaining units via this dialog. Read through the shared
+   * check-out eligibility so the dropdown, this dialog and the scan drawer
+   * agree on top-off.
    */
   const remainingByAssetId = useMemo(
     () => remainingToCheckOutByAsset ?? {},
     [remainingToCheckOutByAsset]
   );
 
+  /**
+   * Which rows can still go out on this booking — the scan drawer's rule, so
+   * the dialog never offers what the server refuses. An item sent out by the
+   * Check out button and checked back in is named by no check-out session and
+   * reads AVAILABLE; only the returned set keeps it out of this dialog.
+   */
+  const checkoutEligibility = useMemo(
+    () =>
+      makeCheckoutEligibility({
+        checkedOutAssetIds: checkedOutAssetIds ?? [],
+        partialCheckinDetails: partialCheckinDetails ?? {},
+        remainingToCheckOutByAsset: remainingByAssetId,
+      }),
+    [checkedOutAssetIds, partialCheckinDetails, remainingByAssetId]
+  );
+
   // Flatten/enrich the selection via the SHARED resolver (single source of
   // truth with the dropdown and check-in dialog), then keep kits + the assets
-  // that are still actionable. The QT-aware branch lives inside
-  // `isAssetCheckableOut` via the `remainingByAssetId` option — collapsing
-  // our previous inline branch into one helper.
+  // that can still go out.
   const flattenedItems = useMemo(
     () => flattenSelectedBookingItems(rawSelectedItems, assetsList),
     [rawSelectedItems, assetsList]
@@ -254,11 +278,9 @@ export default function BulkPartialCheckoutDialog({
     () =>
       flattenedItems.filter((item) => {
         if (item.type === "kit" || (item.name && item._count)) return true;
-        return isAssetCheckableOut(item as AssetWithStatus, checkedOutIdsSet, {
-          remainingByAssetId,
-        });
+        return checkoutEligibility.isEligible(item as AssetWithStatus);
       }),
-    [flattenedItems, checkedOutIdsSet, remainingByAssetId]
+    [flattenedItems, checkoutEligibility]
   );
 
   /** Use state instead of ref so the component re-renders once the form
@@ -271,10 +293,12 @@ export default function BulkPartialCheckoutDialog({
   // `assetsList` (post-pivot — `booking.assets` no longer exists) and runs
   // the same shared predicate as the selection filter so dropdown, dialog,
   // and final-checkout detection all agree, including QT top-off semantics.
+  // A row that cannot go out is not "still Booked". On a reserved booking that
+  // is an item held in custody: counting it would keep checking out the last
+  // item that CAN leave from reading as final, and skip the early-checkout
+  // prompt.
   const remainingBookedAssets = assetsList.filter((asset) =>
-    isAssetCheckableOut(asset as AssetWithStatus, checkedOutIdsSet, {
-      remainingByAssetId,
-    })
+    checkoutEligibility.isEligible(asset as AssetWithStatus)
   );
 
   // Count only individual assets (exclude kit IDs), deduped, for final-checkout
@@ -306,6 +330,18 @@ export default function BulkPartialCheckoutDialog({
   const isEarlyCheckout = Boolean(
     isFinalCheckout && shouldPromptEarlyCheckout(booking.status, booking.from)
   );
+
+  // Reserved model units still unassigned. The batch that takes a RESERVED
+  // booking out leaves them open on it, so that batch asks first; once the
+  // booking is underway it already went out with them open.
+  const unassignedUnits =
+    booking.status === "RESERVED"
+      ? getOutstandingModelRequests(booking.modelRequests).map((request) => ({
+          name: request.assetModel.name,
+          count: request.quantity - request.fulfilledQuantity,
+        }))
+      : [];
+  const needsConfirmation = isEarlyCheckout || unassignedUnits.length > 0;
 
   function handleCloseDialog() {
     setOpen(false);
@@ -525,7 +561,7 @@ export default function BulkPartialCheckoutDialog({
       <Dialog
         open={open}
         onClose={handleCloseDialog}
-        className={tw("bulk-tagging-dialog lg:w-[400px]")}
+        className="lg:w-[400px]"
         title={
           <div className="w-full">
             <div className={tw("mb-2")}>
@@ -655,6 +691,7 @@ export default function BulkPartialCheckoutDialog({
                                   mainImage: asset.mainImage,
                                   mainImageExpiration:
                                     asset.mainImageExpiration,
+                                  assetModel: asset.assetModel ?? null,
                                 }}
                                 alt={`${asset.title} main image`}
                               />
@@ -695,6 +732,12 @@ export default function BulkPartialCheckoutDialog({
                         const qtyInfo = bookingAssetId
                           ? qtySliceByBookingAssetId.get(bookingAssetId)
                           : undefined;
+                        // A pool at two or more locations going out for the
+                        // first time asks where its units leave from.
+                        const sourceQuestion =
+                          qtyInfo && bookingAssetId
+                            ? sourceQuestionBySliceId.get(bookingAssetId)
+                            : undefined;
                         return (
                           <li
                             key={
@@ -702,33 +745,46 @@ export default function BulkPartialCheckoutDialog({
                                 ? `${asset.id}-${bookingAssetId}`
                                 : asset.id
                             }
-                            className="flex items-center gap-2 text-sm text-gray-700"
+                            className="flex flex-col gap-1 text-sm text-gray-700"
                           >
-                            <AssetImage
-                              className="size-5"
-                              asset={{
-                                id: asset.id,
-                                thumbnailImage: asset.thumbnailImage,
-                                mainImage: asset.mainImage,
-                                mainImageExpiration: asset.mainImageExpiration,
-                              }}
-                              alt={`${asset.title} main image`}
-                            />
-                            <span className="font-medium">{asset.title}</span>
-                            {asset.category && (
-                              <span className="text-gray-500">
-                                {" "}
-                                ({asset.category.name})
-                              </span>
-                            )}
-                            {qtyInfo && bookingAssetId ? (
-                              <CheckoutQtyInput
-                                bookingAssetId={bookingAssetId}
-                                max={qtyInfo.remaining}
-                                value={
-                                  qtyByBookingAssetId[bookingAssetId] ?? ""
-                                }
-                                onChange={handleQtyChange}
+                            <div className="flex items-center gap-2">
+                              <AssetImage
+                                className="size-5"
+                                asset={{
+                                  id: asset.id,
+                                  thumbnailImage: asset.thumbnailImage,
+                                  mainImage: asset.mainImage,
+                                  mainImageExpiration:
+                                    asset.mainImageExpiration,
+                                  assetModel: asset.assetModel ?? null,
+                                }}
+                                alt={`${asset.title} main image`}
+                              />
+                              <span className="font-medium">{asset.title}</span>
+                              {asset.category && (
+                                <span className="text-gray-500">
+                                  {" "}
+                                  ({asset.category.name})
+                                </span>
+                              )}
+                              {qtyInfo && bookingAssetId ? (
+                                <CheckoutQtyInput
+                                  bookingAssetId={bookingAssetId}
+                                  max={qtyInfo.remaining}
+                                  value={
+                                    qtyByBookingAssetId[bookingAssetId] ?? ""
+                                  }
+                                  onChange={handleQtyChange}
+                                />
+                              ) : null}
+                            </div>
+                            {sourceQuestion && bookingAssetId ? (
+                              <CheckoutSourceSelect
+                                question={sourceQuestion}
+                                fieldKey={bookingAssetId}
+                                disabled={disabled}
+                                variant="inline"
+                                className="pl-7"
                               />
                             ) : null}
                           </li>
@@ -752,14 +808,16 @@ export default function BulkPartialCheckoutDialog({
               Cancel
             </Button>
 
-            {/* Submit button - conditional based on early check-out. The
-                CheckoutDialog submits this same form (carrying the hidden
-                assetIds + returnJson). We pass intent="partial-checkout" so the
-                overview action routes to checkoutAssets/partialCheckoutBooking
-                (which records the batch + applies the date choice) rather than
-                the whole-booking checkoutBooking that the default intent would
-                trigger on this intent-routed page. */}
-            {isEarlyCheckout ? (
+            {/* Submit button - a confirming CheckoutDialog for an early
+                check-out or one that leaves reserved units unassigned, a
+                plain submit otherwise. The CheckoutDialog submits this same
+                form (carrying the hidden assetIds + returnJson). We pass
+                intent="partial-checkout" so the overview action routes to
+                checkoutAssets/partialCheckoutBooking (which records the batch
+                + applies the date choice) rather than the whole-booking
+                checkoutBooking that the default intent would trigger on this
+                intent-routed page. */}
+            {needsConfirmation ? (
               <CheckoutDialog
                 booking={{
                   id: booking.id,
@@ -767,10 +825,17 @@ export default function BulkPartialCheckoutDialog({
                   from: booking.from,
                 }}
                 intent="partial-checkout"
+                label={isEarlyCheckout ? undefined : "Check out items"}
                 disabled={disabled || noAssetsToCheckOut}
                 portalContainer={formElement || undefined}
                 formId="bulk-partial-checkout-form"
                 fullWidth
+                unassignedUnits={unassignedUnits}
+                suppressEarlyCheckoutPrompt={!isEarlyCheckout}
+                // This dialog is already the confirmation step. It renders
+                // CheckoutDialog only for early or unassigned check-outs, so
+                // this guards a plain one from asking a second time.
+                confirm={false}
               />
             ) : (
               <Button

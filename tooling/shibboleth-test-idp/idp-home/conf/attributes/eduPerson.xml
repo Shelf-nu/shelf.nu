@@ -1,0 +1,353 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:context="http://www.springframework.org/schema/context"
+       xmlns:util="http://www.springframework.org/schema/util"
+       xmlns:p="http://www.springframework.org/schema/p"
+       xmlns:c="http://www.springframework.org/schema/c"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+                           http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+                           http://www.springframework.org/schema/util http://www.springframework.org/schema/util/spring-util.xsd"
+                           
+       default-init-method="initialize"
+       default-destroy-method="destroy">
+
+    <!--
+    Note that all built-in rules rely on URI-naming and thus include the implied settings:
+    
+    <prop key="saml2.nameFormat">urn:oasis:names:tc:SAML:2.0:attrname-format:uri</prop>
+    <prop key="saml1.namespace">urn:mace:shibboleth:1.0:attributeNamespace:uri</prop>
+    -->
+       
+    <bean parent="shibboleth.TranscodingRuleLoader">
+    <constructor-arg>
+    <list>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">eduPersonAffiliation</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:1.3.6.1.4.1.5923.1.1.1.1</prop>
+                    <prop key="saml1.name">urn:mace:dir:attribute-def:eduPersonAffiliation</prop>
+                    <prop key="displayName.en">Affiliation</prop>
+                    <prop key="displayName.de">Zugehörigkeit</prop>
+                    <prop key="displayName.fr">Affiliation</prop>
+                    <prop key="displayName.it">Affiliazione</prop>
+                    <prop key="displayName.ja">職位</prop>
+                    <prop key="displayName.sk">Príslušnosť</prop>
+                    <prop key="description.en">Affiliation: Type of affiliation with Home Organization</prop>
+                    <prop key="description.de">Art der Zugehörigkeit zur Heimatorganisation</prop>
+                    <prop key="description.de-ch">Art der Zugehörigkeit zur Heimorganisation</prop>
+                    <prop key="description.fr">Type d'affiliation dans l'organisation</prop>
+                    <prop key="description.it">Affiliazione: Tipo di affiliazione presso l'organizzazione</prop>
+                    <prop key="description.ja">所属機関における職位(faculty，staff，student，memberなど)</prop>
+                    <prop key="description.sk">Príslušnosť: Typ príslušnosti k domovskej organizácii</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">eduPersonAssurance</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:1.3.6.1.4.1.5923.1.1.1.11</prop>
+                    <prop key="saml1.name">urn:mace:dir:attribute-def:eduPersonAssurance</prop>
+                    <prop key="displayName.en">Assurance level</prop>
+                    <prop key="displayName.de">Vertrauensprofil</prop>
+                    <prop key="displayName.fr">Niveau de confiance</prop>
+                    <prop key="displayName.it">Livello di garanzia dell'identita'</prop>
+                    <prop key="displayName.ja">保証レベル</prop>
+                    <prop key="displayName.sk">Úroveň dôveryhodnosti</prop>
+                    <prop key="description.en">Set of URIs that assert compliance with specific standards for identity assurance</prop>
+                    <prop key="description.de">URIs, die nach bestimmten Standards das Vertrauen in Identitäten bestätigen</prop>
+                    <prop key="description.fr">Un ensemble d'URI qui attestent la conformité selon un standard pour les niveaux d'assurance d'identités</prop>
+                    <prop key="description.it">Un insieme di URI che asseriscono l'osservanza dei livelli di garanzia dell'identita'</prop>
+                    <prop key="description.ja">IDの保証レベルに関して特定の基準に準拠していることを示すURI</prop>
+                    <prop key="description.sk">Sada URI, ktoré potvrdzujú súlad so špecifickými štandardmi pre zabezpečenie identity</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">eduPersonEntitlement</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:1.3.6.1.4.1.5923.1.1.1.7</prop>
+                    <prop key="saml1.name">urn:mace:dir:attribute-def:eduPersonEntitlement</prop>
+                    <prop key="displayName.en">Entitlement</prop>
+                    <prop key="displayName.de">Berechtigung</prop>
+                    <prop key="displayName.fr">Membre de</prop>
+                    <prop key="displayName.it">Diritti</prop>
+                    <prop key="displayName.ja">資格情報</prop>
+                    <prop key="displayName.sk">Autorizácia</prop>
+                    <prop key="description.en">Member of: URI (either URL or URN) that indicates a set of rights to specific resources based on an agreement across the releavant community</prop>
+                    <prop key="description.de">Zeichenkette, die Rechte für spezifische Ressourcen beschreibt</prop>
+                    <prop key="description.fr">Membre de: URI (soit une URL ou une URN) décrivant un droit spécific d'accès</prop>
+                    <prop key="description.it">Membro di: URI (sia URL, sia URN) che rappresentano diritti su specifiche risorse e basati su accordi tra le comunità interessate</prop>
+                    <prop key="description.ja">特定のアプリケーションもしくはコミュニティ内の複数リソースへのアクセス権限を持つことを示すURI(URLもしくはURN)</prop>
+                    <prop key="description.sk">Člen: URI (buď URL alebo URN), ktorý označuje súbor práv ku konkrétnym zdrojom na základe dohody v rámci príslušnej komunity</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">eduPersonNickname</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:1.3.6.1.4.1.5923.1.1.1.2</prop>
+                    <prop key="saml1.name">urn:mace:dir:attribute-def:eduPersonNickname</prop>
+                    <prop key="displayName.en">Nickname</prop>
+                    <prop key="displayName.de">Kurzname</prop>
+                    <prop key="displayName.de-ch">Übername</prop>
+                    <prop key="displayName.fr">Surnom</prop>
+                    <prop key="displayName.it">Soprannome</prop>
+                    <prop key="displayName.ja">ニックネーム</prop>
+                    <prop key="displayName.sk">Prezývka</prop>
+                    <prop key="description.en">Person's nickname, or the informal name by which they are accustomed to be hailed</prop>
+                    <prop key="description.de">Kurzname einer Person, oder üblicher Rufname zur Begrüßung</prop>
+                    <prop key="description.de-ch">Übername einer Person, oder üblicher Rufname zur Begrüssung</prop>
+                    <prop key="description.fr">Nom personnalisable pour un usage informel</prop>
+                    <prop key="description.it">Soprannome della persona</prop>
+                    <prop key="description.ja">利用者のニックネームもしくは通称</prop>
+                    <prop key="description.sk">Prezývka osoby alebo neformálne meno, ktorým je zvyknutá byť oslovovaná.</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">eduPersonOrgDN</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:1.3.6.1.4.1.5923.1.1.1.3</prop>
+                    <prop key="saml1.name">urn:mace:dir:attribute-def:eduPersonOrgDN</prop>
+                    <prop key="displayName.en">Organization distinguished name</prop>
+                    <prop key="displayName.de">Eindeutiger Name der Organisation</prop>
+                    <prop key="displayName.sk">Rozlišovací názov organizácie</prop>
+                    <prop key="description.en">Distinguished name (DN) of the directory entry representing the institution with which the person is associated</prop>
+                    <prop key="description.de">Distinguished Name (DN) des Verzeichniseintrags, der die Institution repräsentiert, der die Person zugeordnet ist</prop>
+                    <prop key="description.sk">Rozlišovacie meno (DN) položky adresára predstavujúcej inštitúciu, s ktorou je osoba spojená</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">eduPersonOrgUnitDN</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:1.3.6.1.4.1.5923.1.1.1.4</prop>
+                    <prop key="saml1.name">urn:mace:dir:attribute-def:eduPersonOrgUnitDN</prop>
+                    <prop key="displayName.en">Organization unit distinguished name</prop>
+                    <prop key="displayName.de">Eindeutiger Name der Organisationseinheit</prop>
+                    <prop key="displayName.fr">Structures de rattachement</prop>
+                    <prop key="displayName.sk">Rozlišovací názov organizačnej jednotky</prop>
+                    <prop key="description.en">Distinguished name(s) (DN) of the directory entries representing the person's Organizational Unit(s)</prop>
+                    <prop key="description.de">Distinguished Name(s) (DN) der Verzeichniseinträge, welche die Organisationseinheiten der Person repräsentieren</prop>
+                    <prop key="description.fr">Structures d'affectation (composante, service...) de la personne dans l'annuaire</prop>
+                    <prop key="description.sk">Rozlišujúce meno (DN) položiek adresára predstavujúcich organizačnú jednotku(y) osoby</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">eduPersonOrcid</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:1.3.6.1.4.1.5923.1.1.1.16</prop>
+                    <prop key="saml1.name">urn:oid:1.3.6.1.4.1.5923.1.1.1.16</prop>
+                    <prop key="displayName.en">ORCID</prop>
+                    <prop key="displayName.de">ORCID Identifikator</prop>
+                    <prop key="displayName.fr">identifiants ORCID</prop>
+                    <prop key="displayName.sk">ORCID Identifikátor</prop>
+                    <prop key="description.en">ORCID researcher identifier(s) belonging to a person</prop>
+                    <prop key="description.de">ORCID-Forscher-Identifikator(en), die zu einer Person gehören</prop>
+                    <prop key="description.fr">Identifiant(s) ORCID d'une personne</prop>
+                    <prop key="description.sk">Identifikátor(y) výskumníka ORCID patriaci(e) osobe</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">eduPersonPrimaryAffiliation</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:1.3.6.1.4.1.5923.1.1.1.5</prop>
+                    <prop key="saml1.name">urn:mace:dir:attribute-def:eduPersonPrimaryAffiliation</prop>
+                    <prop key="displayName.en">Primary affiliation</prop>
+                    <prop key="displayName.de">Primäre Zugehörigkeit</prop>
+                    <prop key="displayName.fr">Affiliation principale</prop>
+                    <prop key="displayName.it">Affiliazione principale</prop>
+                    <prop key="displayName.ja">主要職位</prop>
+                    <prop key="displayName.sk">Primárna príslušnosť</prop>
+                    <prop key="description.en">Specifies the person's primary relationship to the institution in broad categories such as student, faculty, staff, alum, etc.</prop>
+                    <prop key="description.de">Spezifiziert der Hauptbeziehung einer Person innerhalb ihrer Organisation in groben Kategorien wie Student, Mitarbeiter, Alumni, etc.</prop>
+                    <prop key="description.fr">Spécifie la relation principale d'une personne avec l'institution selon des majeures catégories comme étudiant, collaborateur, alumni etc.</prop>
+                    <prop key="description.it">Specifica la relazione principale della persona con l'istituzione secondo le categorie studente, collaboratore, alumni, etc.</prop>
+                    <prop key="description.ja">所属機関における主要な職位(faculty，staff，student，memberなど)</prop>
+                    <prop key="description.sk">Špecifikuje primárny vzťah osoby k inštitúcii vo všeobecných kategóriách, ako napríklad študent, fakulta, zamestnanec, absolvent atď.</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">eduPersonPrimaryOrgUnitDN</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:1.3.6.1.4.1.5923.1.1.1.8</prop>
+                    <prop key="saml1.name">urn:mace:dir:attribute-def:eduPersonPrimaryOrgUnitDN</prop>
+                    <prop key="displayName.en">Primary organization unit distinguished name</prop>
+                    <prop key="displayName.de">Eindeutiger Name der primären Organisationseinheit</prop>
+                    <prop key="displayName.fr">Structure de rattachement principal</prop>
+                    <prop key="displayName.sk">Rozlišovací názov primárnej organizačnej jednotky</prop>
+                    <prop key="description.en">Distinguished name (DN) of the directory entry representing the person's primary Organizational Unit</prop>
+                    <prop key="description.de">Eindeutiger Name (DN) des Verzeichniseintrags, der die primäre Organisationseinheit der Person repräsentiert</prop>
+                    <prop key="description.fr">Structure (composante, service) dans l'annuaire considérée comme affectation principale de la personne</prop>
+                    <prop key="description.sk">Rozlišovací názov (DN) položky adresára predstavujúcej primárnu organizačnú jednotku osoby</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">eduPersonPrincipalName</prop>
+                    <prop key="transcoder">SAML2ScopedStringTranscoder SAML1ScopedStringTranscoder CASScopedStringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:1.3.6.1.4.1.5923.1.1.1.6</prop>
+                    <prop key="saml1.name">urn:mace:dir:attribute-def:eduPersonPrincipalName</prop>
+                    <prop key="saml1.encodeType">false</prop>
+                    <prop key="displayName.en">Principal name</prop>
+                    <prop key="displayName.de">Persönliche ID</prop>
+                    <prop key="displayName.fr">Identifiant unique</prop>
+                    <prop key="displayName.it">ID personale</prop>
+                    <prop key="displayName.ja">プリンシパルID</prop>
+                    <prop key="displayName.sk">Osobné ID</prop>
+                    <prop key="description.en">A unique identifier for a person, mainly for inter-institutional user identification</prop>
+                    <prop key="description.de">Eindeutige Benutzeridentifikation</prop>
+                    <prop key="description.de-ch">Eindeutige Benützeridentifikation</prop>
+                    <prop key="description.fr">L'identifiant unique de l'utilisateur</prop>
+                    <prop key="description.it">Un ID personale che identifica chiaramente l'utente in seno alla sua organizzazione</prop>
+                    <prop key="description.ja">フェデレーション内で一意かつ永続的な利用者識別子</prop>
+                    <prop key="description.sk">Jedinečný identifikátor osoby, najmä na účely medziinštitucionálnej identifikácie používateľa.</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">eduPersonPrincipalNamePrior</prop>
+                    <prop key="transcoder">SAML2ScopedStringTranscoder SAML1ScopedStringTranscoder CASScopedStringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:1.3.6.1.4.1.5923.1.1.1.12</prop>
+                    <prop key="saml1.name">urn:oid:1.3.6.1.4.1.5923.1.1.1.12</prop>
+                    <prop key="saml1.encodeType">false</prop>
+                    <prop key="displayName.en">Prior principal name(s)</prop>
+                    <prop key="displayName.de">Frühere Principal Names</prop>
+                    <prop key="displayName.fr">Anciens identifiants EPPN</prop>
+                    <prop key="displayName.sk">Predchádzajúce mená/názvy osobného ID</prop>
+                    <prop key="description.en">eduPersonPrincipalName value(s) previously associated with the entry</prop>
+                    <prop key="description.de">Zuvor mit dem Eintrag verknüpfte Werte für Principal Name(n)</prop>
+                    <prop key="description.fr">Liste des valeurs de l'attribut eduPersonPrincipalName précédemment attribuées à la personne</prop>
+                    <prop key="description.sk">Hodnota(y) eduPersonPrincipalName priradené k záznamu osoby v minulosti</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">eduPersonScopedAffiliation</prop>
+                    <prop key="transcoder">SAML2ScopedStringTranscoder SAML1ScopedStringTranscoder CASScopedStringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:1.3.6.1.4.1.5923.1.1.1.9</prop>
+                    <prop key="saml1.name">urn:mace:dir:attribute-def:eduPersonScopedAffiliation</prop>
+                    <prop key="saml1.encodeType">false</prop>
+                    <prop key="displayName.en">Scoped affiliation</prop>
+                    <prop key="displayName.de">Zugehörigkeit</prop>
+                    <prop key="displayName.fr">Affiliation</prop>
+                    <prop key="displayName.it">Affiliazione</prop>
+                    <prop key="displayName.ja">スコープ付き職位</prop>
+                    <prop key="displayName.sk">Vymedzená príslušnosť</prop>
+                    <prop key="description.en">Specifies the person's affiliation within a particular security domain</prop>
+                    <prop key="description.de">Art der Zugehörigkeit zur Heimatorganisation</prop>
+                    <prop key="description.de-ch">Art der Zugehörigkeit zur Heimorganisation</prop>
+                    <prop key="description.fr">Type d'affiliation dans l'organisation</prop>
+                    <prop key="description.it">Affiliazione: Tipo di affiliazione pressocon l'organizzazione</prop>
+                    <prop key="description.ja">セキュリティドメインのスコープが付いた所属機関における職位</prop>
+                    <prop key="description.sk">Určuje príslušnosť osoby v rámci konkrétnej bezpečnostnej domény</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">eduPersonUniqueId</prop>
+                    <prop key="transcoder">SAML2ScopedStringTranscoder SAML1ScopedStringTranscoder CASScopedStringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:1.3.6.1.4.1.5923.1.1.1.13</prop>
+                    <prop key="saml1.name">urn:oid:1.3.6.1.4.1.5923.1.1.1.13</prop>
+                    <prop key="saml1.encodeType">false</prop>
+                    <prop key="displayName.en">Unique ID</prop>
+                    <prop key="displayName.de">Eindeutige ID</prop>
+                    <prop key="displayName.fr">ID unique</prop>
+                    <prop key="displayName.it">ID univoco</prop>
+                    <prop key="displayName.ja">ユニークID</prop>
+                    <prop key="displayName.sk">Jedinečné ID</prop>
+                    <prop key="description.en">A unique identifier for a person, mainly for inter-institutional user identification</prop>
+                    <prop key="description.de">Eindeutige Benutzeridentifikation</prop>
+                    <prop key="description.de-ch">Eindeutige Benützeridentifikation</prop>
+                    <prop key="description.fr">Identifiant unique de l'utilisateur</prop>
+                    <prop key="description.it">Un identificativo univoco che identifica chiaramente l'utente in seno alla sua organizzazione</prop>
+                    <prop key="description.ja">フェデレーション内で一意で永続的かつ難読化された利用者識別子(後継はサブジェクトID)</prop>
+                    <prop key="description.sk">Jedinečný identifikátor osoby, najmä na medziinštitucionálnu identifikáciu používateľa</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">eduPersonAnalyticsTag</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder CASStringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:1.3.6.1.4.1.5923.1.1.1.17</prop>
+                    <prop key="saml1.name">urn:oid:1.3.6.1.4.1.5923.1.1.1.17</prop>
+                    <prop key="saml1.encodeType">false</prop>
+                    <prop key="displayName.en">Aggregated analytics tag</prop>
+                    <prop key="displayName.de">Aggregiertes Analyse-Tag</prop>
+                    <prop key="displayName.sk">Agregovaná značka analytiky</prop>
+                    <prop key="description.en">Opaque string that aggregates the use of a service by a set of subjects for the purpose of reporting or analytics</prop>
+                    <prop key="description.de">Nicht interpretierbare Zeichenfolge, welche die Nutzung eines Dienstes durch eine Gruppe von Subjekten zum Zwecke der Berichterstattung oder Analyse aggregiert</prop>
+                    <prop key="description.sk">Neiterpretovaťeľný reťazec, ktorý agreguje používanie služby skupinou subjektov na účely prehľadov alebo analýzy</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">eduPersonDisplayPronouns</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder CASStringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:1.3.6.1.4.1.5923.1.1.1.18</prop>
+                    <prop key="saml1.name">urn:oid:1.3.6.1.4.1.5923.1.1.1.18</prop>
+                    <prop key="saml1.encodeType">false</prop>
+                    <prop key="displayName.en">Display Pronouns</prop>
+                    <prop key="displayName.de">Anzeigepronomen</prop>
+                    <prop key="displayName.sk">Uprednostňované prezývky</prop>
+                    <prop key="description.en">Personal pronouns by which the person prefers to be identified</prop>
+                    <prop key="description.de">Personalpronomen, mit denen die Person bevorzugt angesprochen werden möchte</prop>
+                    <prop key="description.sk">Uprednostňované prezývky, ktoré daná osoba uprednostňuje pri identifikácii</prop>
+                </props>
+            </property>
+        </bean>
+
+    </list>
+    </constructor-arg>
+    </bean>
+    
+</beans>

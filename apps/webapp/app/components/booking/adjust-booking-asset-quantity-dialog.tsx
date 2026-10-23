@@ -14,9 +14,10 @@
 
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useFetcher } from "react-router";
+import { Link, useFetcher } from "react-router";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
+import { DateS } from "~/components/shared/date";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -29,6 +30,8 @@ import {
 } from "~/components/shared/modal";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
+import { useFetcherOutcomeSinceOpen } from "~/hooks/use-fetcher-error-since-open";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { isFormProcessing } from "~/utils/form";
 
 /** Props for the AdjustBookingAssetQuantityDialog component */
@@ -41,8 +44,39 @@ export interface AdjustBookingAssetQuantityDialogProps {
   assetTitle?: string;
   /** The currently booked quantity (pre-fills the input) */
   currentQuantity: number;
-  /** Maximum quantity the user can set (available + currently booked) */
+  /**
+   * Maximum quantity the user can INCREASE to. In the booking context this
+   * is the real windowed max for the booking's dates (`bookable` from
+   * `~/modules/booking/booking-overview-availability.server`) — NOT the
+   * workspace total, since other overlapping bookings may already hold
+   * some units. Still caps the number input's `max` attribute, but
+   * decreases below `currentQuantity` are always allowed client-side even
+   * when `currentQuantity` already exceeds this (see `handleSubmit`) so an
+   * already-over-committed row stays editable-down.
+   */
   maxQuantity?: number;
+  /**
+   * Workspace total stock (`Asset.quantity`). When provided, the helper
+   * text switches from the plain "Max: N" line (custody-list usage) to
+   * "Available for these dates: {maxQuantity} of {totalQuantity}" so the
+   * user understands `maxQuantity` is a windowed figure, not the full
+   * stock. Omit for non-booking usages (e.g. custody release) to keep the
+   * original "Max: N" copy.
+   */
+  totalQuantity?: number;
+  /**
+   * Units held by OTHER bookings within this booking's window
+   * (`reserved` from the same builder). When > 0 and `totalQuantity` is
+   * provided, an extra helper line explains why the max is below the
+   * workspace total: "Some units are also reserved by other bookings."
+   */
+  reservedByOthers?: number;
+  /**
+   * The booking's window (start / end). When provided, the "Available for …"
+   * helper names the ACTUAL dates instead of the generic "these dates".
+   */
+  windowFrom?: string | Date | null;
+  windowTo?: string | Date | null;
   /** Unit of measure label (e.g., "pcs", "liters") */
   unitOfMeasure?: string | null;
   /** Trigger element. Omit when using controlled mode. */
@@ -66,11 +100,18 @@ export function AdjustBookingAssetQuantityDialog({
   assetTitle,
   currentQuantity,
   maxQuantity,
+  totalQuantity,
+  reservedByOthers,
+  windowFrom,
+  windowTo,
   unitOfMeasure,
   trigger,
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
 }: AdjustBookingAssetQuantityDialogProps) {
+  // The link opens the bookings index; offer it exactly when that index would
+  // show this member other people's bookings.
+  const canViewOtherBookings = useRoleAccess().bookings.seeAll;
   const [internalOpen, setInternalOpen] = useState(false);
   const isControlled = controlledOpen !== undefined;
   const open = isControlled ? controlledOpen : internalOpen;
@@ -97,20 +138,31 @@ export function AdjustBookingAssetQuantityDialog({
   const unitLabel = unitOfMeasure || "units";
   const isSubmitting = isFormProcessing(fetcher.state);
 
-  /** Server-side error message from the action response */
-  const serverError =
-    fetcher.data?.error != null
-      ? (fetcher.data.error as { message?: string })?.message
-      : null;
+  /**
+   * What the server has said during THIS opening. The fetcher is keyed, so it
+   * keeps handing back its last response after the dialog closes: read
+   * directly, an old refusal reappears and an old success closes the dialog
+   * the moment it opens.
+   */
+  const outcome = useFetcherOutcomeSinceOpen(fetcher, open);
+  const serverError = outcome.message;
 
-  /** Close on success */
+  // The client-side complaint belongs to one opening too: the operator fixing
+  // the number tomorrow should not be met with yesterday's objection to it.
   useEffect(() => {
-    if (fetcher.state === "idle" && fetcher.data && !fetcher.data.error) {
+    if (open) {
+      setQuantityError(null);
+    }
+  }, [open]);
+
+  /** Close once this opening's change has been accepted. */
+  useEffect(() => {
+    if (outcome.status === "accepted") {
       setOpen(false);
       setQuantityError(null);
       formRef.current?.reset();
     }
-  }, [fetcher.state, fetcher.data, setOpen]);
+  }, [outcome.status, setOpen]);
 
   /** Submit with client-side validation */
   function handleSubmit() {
@@ -125,7 +177,13 @@ export function AdjustBookingAssetQuantityDialog({
       return;
     }
 
-    if (maxQuantity != null && qty > maxQuantity) {
+    // Block genuine attempts to go ABOVE the max, but never block a
+    // reduction (or a no-op resubmit) below `currentQuantity` — an
+    // already-over-committed row (currentQuantity > maxQuantity, e.g. the
+    // window shrank after another booking grabbed units) must stay
+    // editable-down. The server guard is the real source of truth; this is
+    // purely a client-side UX nicety.
+    if (maxQuantity != null && qty > maxQuantity && qty > currentQuantity) {
       setQuantityError(
         `Only ${maxQuantity} ${unitLabel} available. Please reduce the quantity.`
       );
@@ -177,9 +235,54 @@ export function AdjustBookingAssetQuantityDialog({
               onChange={() => setQuantityError(null)}
             />
             {maxQuantity != null ? (
-              <p className="-mt-2 text-xs text-gray-500">
-                Max: {maxQuantity} {unitLabel}
-              </p>
+              totalQuantity != null ? (
+                // Booking context: `maxQuantity` is the windowed figure for
+                // THESE dates, not the workspace total — spell that out so
+                // "Max: 3" doesn't read as "we only own 3 of these".
+                <div className="-mt-2 flex flex-col gap-0.5">
+                  {/* Hero: the number the user most needs — how many they can
+                      book for these dates — reads first and boldest. */}
+                  <p className="text-xs font-semibold text-gray-700">
+                    {maxQuantity} of {totalQuantity} {unitLabel} available
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    {windowFrom && windowTo ? (
+                      <>
+                        for <DateS date={windowFrom} /> to{" "}
+                        <DateS date={windowTo} />
+                      </>
+                    ) : (
+                      "for the selected dates"
+                    )}
+                  </p>
+                  {reservedByOthers != null && reservedByOthers > 0 ? (
+                    canViewOtherBookings ? (
+                      <p className="text-xs text-gray-500">
+                        {reservedByOthers} {unitLabel} reserved by other
+                        bookings.{" "}
+                        <Link
+                          to={`/assets/${assetId}/bookings`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-medium text-primary underline"
+                        >
+                          View bookings
+                        </Link>
+                      </p>
+                    ) : (
+                      <p className="text-xs text-gray-500">
+                        Some units are also reserved by other bookings.
+                      </p>
+                    )
+                  ) : null}
+                </div>
+              ) : (
+                // Non-booking usage (e.g. custody release) — no workspace
+                // total to compare against, so keep the plain figure.
+                <p className="-mt-2 text-xs text-gray-500">
+                  Max: {maxQuantity} {unitLabel}
+                </p>
+              )
             ) : null}
           </div>
         </fetcher.Form>

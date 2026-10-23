@@ -4,6 +4,8 @@ import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
+import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
+import { rolesWhere } from "~/utils/permissions/role-access";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import {
   ADVANCE_CLOCK_EPSILON_MS,
@@ -20,11 +22,11 @@ import type { AssetsEventType, AssetsSchedulerData } from "./scheduler.server";
 import { createNote } from "../note/service.server";
 
 /**
- * Marks a failure of the recurring-reminder advance step. The worker wrapper
- * RETHROWS these (recurring jobs are sent with retryLimit 3, so pg-boss
- * retries the job) while keeping the historical swallow-and-log behavior for
- * everything else. Ordering guarantees retries cannot double-email: the
- * advance step runs BEFORE any notification is sent.
+ * Marks a failure of the recurring-reminder advance step. Like every handler
+ * failure it reaches pg-boss, which retries the job (recurring jobs are sent
+ * with a wider retry budget, see `recurringReminderJobOptions`). The advance
+ * step runs BEFORE any notification is sent, so a retry caused by it cannot
+ * double-email.
  */
 export class RecurringAdvanceError extends Error {
   constructor(cause: unknown, reminderId: string) {
@@ -53,6 +55,7 @@ const ASSET_REMINDER_INCLUDES_FOR_EMAIL = {
       title: true,
       mainImage: true,
       mainImageExpiration: true,
+      archivedAt: true,
     },
   },
   organization: { select: { name: true, customEmailFooter: true } },
@@ -113,6 +116,49 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
           label: "Asset Scheduler",
           shouldBeCaptured: false,
         })
+      );
+      return;
+    }
+
+    /**
+     * An archived asset is out of service: its reminders stay quiet, with no
+     * email and no "System has sent" note. The reminder row is kept.
+     *
+     * A one-shot reminder fires as usual if the asset is reinstated before its
+     * time. Clearing `activeSchedulerReference` records the skip: no job is
+     * left to deliver this reminder, and the reminders list reads a past-due
+     * reminder with no reference as "Not sent", whatever the asset's state
+     * later. The write is conditioned on this job, so a reminder rescheduled
+     * meanwhile keeps its new job.
+     *
+     * A recurring series instead advances silently to its next occurrence, so
+     * it keeps running while the asset is archived and resumes notifying once
+     * the asset is reinstated. Skipping without advancing would leave a dead
+     * chain that boot reconciliation keeps re-arming.
+     */
+    if (reminder.asset.archivedAt) {
+      if (isRecurringReminder(reminder)) {
+        try {
+          await advanceRecurringReminder({ reminder, now: new Date() });
+        } catch (cause) {
+          throw new RecurringAdvanceError(cause, reminder.id);
+        }
+        Logger.info(
+          `Asset reminder ${reminder.id} occurrence skipped: asset ${reminder.assetId} is archived.`
+        );
+        return;
+      }
+
+      await db.assetReminder.updateMany({
+        where: {
+          id: reminder.id,
+          organizationId: reminder.organizationId,
+          activeSchedulerReference: job.id,
+        },
+        data: { activeSchedulerReference: null },
+      });
+      Logger.info(
+        `Asset reminder ${reminder.id} skipped: asset ${reminder.assetId} is archived.`
       );
       return;
     }
@@ -189,7 +235,9 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
           userOrganizations: {
             some: {
               organizationId: reminder.organizationId,
-              roles: { has: "OWNER" },
+              roles: {
+                hasSome: rolesWhere((p) => p.membership.ownsWorkspace),
+              },
             },
           },
         },
@@ -219,7 +267,10 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
      * Note text reflects the chain state so users can see why a series
      * continues, ended, or stopped, straight from the asset activity.
      */
-    let noteContent = `**System** has sent **${reminder.name.trim()}** reminder.`;
+    // Reminder names are user-supplied and render as literal text here.
+    let noteContent = `**System** has sent **${stripMarkdocDelimiters(
+      reminder.name
+    )}** reminder.`;
     if (nextOccurrence) {
       noteContent += ` Next reminder scheduled for ${formatOccurrenceInZone(
         nextOccurrence,
@@ -276,34 +327,54 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
 /**
  * This function is used to register asset workers.
  * Workers are used to process scheduled events.
+ *
+ * On handler failure we log (last-retry only, mirroring the email worker's
+ * noise control in `emails/email.worker.server.ts`) and **rethrow** so
+ * pg-boss marks the job failed and retries it per the bounded `retryLimit`
+ * set on enqueue in `scheduler.server.ts`. Swallowing the error would make
+ * pg-boss mark the job COMPLETED and lose the reminder with no retry.
+ *
+ * @throws {ShelfError} Rethrows the wrapped cause after logging, so pg-boss
+ * treats the job as failed and retries it.
  */
 export async function regierAssetWorkers() {
   await scheduler.work<AssetsSchedulerData>(
     QueueNames.assetsQueue,
+    // why: includeMetadata exposes job.retrycount/job.retrylimit on the job
+    // object below, which we need to only log on the final retry attempt
+    { includeMetadata: true },
     async (job) => {
       const handler = ASSET_SCHEDULER_EVENT_HANDLERS[job.data.eventType];
 
       try {
         await handler(job);
       } catch (cause) {
-        Logger.error(
-          new ShelfError({
-            cause,
-            message: "Something went wrong while executing scheduled work.",
-            additionalData: { data: job.data, work: job.data.eventType },
-            label: "Asset Scheduler",
-          })
-        );
+        // why: pg-boss increments retrycount at fetch time, so with N retries
+        // the handler observes retrycount = 0, 1, 2, ... N — the final attempt
+        // has retrycount === retrylimit. Using `- 1` here double-logs (fires on
+        // both the second-to-last AND the final attempt).
+        const isLastRetry =
+          job.retrycount != null &&
+          job.retrylimit != null &&
+          job.retrycount >= job.retrylimit;
 
-        /**
-         * Recurring-chain advance failures must reach pg-boss so the job is
-         * retried (recurring jobs are sent with retryLimit 3). Everything
-         * else keeps the historical swallow-and-log (at-most-once) behavior
-         * so one-shot reminder semantics are unchanged.
-         */
-        if (cause instanceof RecurringAdvanceError) {
-          throw cause;
+        if (isLastRetry) {
+          Logger.error(
+            new ShelfError({
+              cause,
+              message: "Something went wrong while executing scheduled work.",
+              additionalData: {
+                data: job.data,
+                work: job.data.eventType,
+                retryCount: job.retrycount,
+                retryLimit: job.retrylimit,
+              },
+              label: "Asset Scheduler",
+            })
+          );
         }
+
+        throw cause;
       }
     }
   );

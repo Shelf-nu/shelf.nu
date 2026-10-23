@@ -25,6 +25,7 @@ vi.mock("~/utils/env", () => ({
   FREE_TRIAL_DAYS: "7",
   DISABLE_SIGNUP: false,
   DISABLE_SSO: false,
+  ENABLE_SCIM: false,
   SHOW_HOW_DID_YOU_FIND_US: false,
   COLLECT_BUSINESS_INTEL: false,
   GEOCODING_USER_AGENT: "",

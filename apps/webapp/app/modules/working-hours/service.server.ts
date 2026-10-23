@@ -4,22 +4,55 @@ import type { WeeklyScheduleForUpdate } from "./types";
 
 const label = "Working hours";
 
+/**
+ * Ensures a default `WorkingHours` row exists for an organization and returns
+ * it (with overrides).
+ *
+ * Idempotent and race-safe. Every caller reaches this through a check-then-create
+ * ("find, create if absent") path — the authenticated layout loader cold path
+ * ({@link getWorkingHoursForOrganization}), the override creator, and the admin
+ * dashboard — so two concurrent first requests for the same organization can
+ * otherwise race a unique-constraint violation on `WorkingHours.organizationId`
+ * (the same loader-path write race hardened for booking settings).
+ *
+ * We `upsert` (not a bare `create`), but returning a nested relation
+ * (`include`) makes Prisma **emulate** the upsert with a separate read + write
+ * instead of a native atomic `INSERT … ON CONFLICT`, so a concurrent first-hit
+ * can still surface `P2002`. We therefore also catch `P2002` and re-read the
+ * row the winning request created — closing the race regardless of which path
+ * Prisma takes.
+ *
+ * @param organizationId - The organization to create/fetch default hours for
+ * @returns The organization's `WorkingHours` row, including its overrides
+ * @throws {Error} Re-throws any non-`P2002` database error.
+ */
 export async function createDefaultWorkingHours(organizationId: string) {
   const defaultSchedule = getDefaultWeeklySchedule();
+  const include = { overrides: { orderBy: { date: "asc" as const } } };
 
-  const workingHours = await db.workingHours.create({
-    data: {
-      organizationId,
-      enabled: false,
-      weeklySchedule: defaultSchedule,
-    },
-    include: {
-      overrides: {
-        orderBy: { date: "asc" },
+  try {
+    return await db.workingHours.upsert({
+      where: { organizationId },
+      update: {},
+      create: {
+        organizationId,
+        enabled: false,
+        weeklySchedule: defaultSchedule,
       },
-    },
-  });
-  return workingHours;
+      include,
+    });
+  } catch (cause) {
+    // Emulated upsert lost the create race: a concurrent request already
+    // inserted the row between this call's read and its insert. The row exists
+    // now, so re-read it instead of surfacing the unique-constraint error.
+    if (cause instanceof Error && "code" in cause && cause.code === "P2002") {
+      return db.workingHours.findUniqueOrThrow({
+        where: { organizationId },
+        include,
+      });
+    }
+    throw cause;
+  }
 }
 
 export async function getWorkingHoursForOrganization(organizationId: string) {
@@ -185,6 +218,7 @@ export async function createWorkingHoursOverride({
 
 export async function updateWorkingHoursOverride({
   overrideId,
+  organizationId,
   date,
   isOpen,
   openTime,
@@ -192,6 +226,12 @@ export async function updateWorkingHoursOverride({
   reason,
 }: {
   overrideId: string;
+  /**
+   * Required for the same reason as on the delete path: the override carries
+   * no organizationId, so without scoping through its parent WorkingHours row
+   * any authenticated caller could edit another organization's override by id.
+   */
+  organizationId: string;
   date?: string; // YYYY-MM-DD format
   isOpen: boolean;
   openTime?: string; // HH:MM format
@@ -214,13 +254,33 @@ export async function updateWorkingHoursOverride({
       updateData.reason = reason;
     }
 
-    const updatedOverride = await db.workingHoursOverride.update({
-      where: { id: overrideId },
+    // updateMany, not update: `update` needs a unique where, and the scope
+    // comes through the parent WorkingHours row.
+    const updated = await db.workingHoursOverride.updateMany({
+      where: { id: overrideId, workingHours: { organizationId } },
       data: updateData,
     });
 
-    return updatedOverride;
+    if (updated.count === 0) {
+      throw new ShelfError({
+        cause: null,
+        message: "Override not found or you don't have permission to edit it.",
+        additionalData: { overrideId, organizationId },
+        label,
+        status: 403,
+      });
+    }
+
+    return await db.workingHoursOverride.findFirstOrThrow({
+      where: { id: overrideId, workingHours: { organizationId } },
+    });
   } catch (cause) {
+    // The 403 above is deliberate and user-facing; re-wrapping it would hide a
+    // refused cross-org write behind a generic 500.
+    if (cause instanceof ShelfError) {
+      throw cause;
+    }
+
     throw new ShelfError({
       cause,
       message: "Failed to update working hours override",
@@ -230,12 +290,39 @@ export async function updateWorkingHoursOverride({
   }
 }
 
-export async function deleteWorkingHoursOverride(overrideId: string) {
+export async function deleteWorkingHoursOverride(
+  overrideId: string,
+  /**
+   * Required: WorkingHoursOverride has no organizationId column, so without
+   * scoping through the parent WorkingHours row any authenticated caller could
+   * delete another organization's override by id.
+   */
+  organizationId: string
+) {
   try {
-    await db.workingHoursOverride.delete({
-      where: { id: overrideId },
+    // deleteMany, not delete: `delete` needs a unique where, and the scope
+    // comes through the parent WorkingHours row.
+    const deleted = await db.workingHoursOverride.deleteMany({
+      where: { id: overrideId, workingHours: { organizationId } },
     });
+
+    if (deleted.count === 0) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Override not found or you don't have permission to delete it.",
+        additionalData: { overrideId, organizationId },
+        label,
+        status: 403,
+      });
+    }
   } catch (cause) {
+    // The 403 above is deliberate and user-facing; re-wrapping it would hide a
+    // refused cross-org write behind a generic 500.
+    if (cause instanceof ShelfError) {
+      throw cause;
+    }
+
     throw new ShelfError({
       cause,
       message: "Failed to delete working hours override",

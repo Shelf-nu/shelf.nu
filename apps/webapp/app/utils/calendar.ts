@@ -4,8 +4,51 @@ import type {
   EventHoveringArg,
 } from "@fullcalendar/core";
 import type { BookingStatus } from "@prisma/client";
+import { formatDate, type ResolvedFormatPrefs } from "~/utils/date-format";
 import { getWeekStartingAndEndingDates } from "./date-fns";
 
+/**
+ * Class the availability hook puts on a bar whose asset has been checked in
+ * from the booking. Read back by the hover handlers below, which repaint every
+ * bar of a booking at once and must not turn a returned bar into a live one.
+ */
+export const RETURNED_EVENT_CLASS = "booking-returned";
+
+/**
+ * The status a calendar bar is DRAWN with. A returned bar borrows the
+ * COMPLETE palette so it reads as settled, while `status` itself keeps the
+ * booking's real value for the popover badge and any other status logic.
+ */
+export function calendarDisplayStatus(props: {
+  status: BookingStatus;
+  returned?: boolean;
+}): BookingStatus {
+  return props.returned ? "COMPLETE" : props.status;
+}
+
+/**
+ * Classes for one bar on the availability calendar. A returned bar is drawn
+ * with the COMPLETE palette and is never treated as a one-day event, because
+ * that treatment strips the fill and the bar's point is its fill up to the
+ * check-in time. Every other bar keeps the status and one-day rules as is.
+ */
+export function availabilityEventClassNames(
+  props: { status: BookingStatus; returned?: boolean },
+  start: Date | string | null,
+  end: Date | string | null,
+  viewType?: string
+): string[] {
+  const oneDay = props.returned ? false : isOneDayEvent(start, end);
+  return getStatusClasses(calendarDisplayStatus(props), oneDay, viewType);
+}
+
+/**
+ * Tailwind classes for a calendar bar of the given booking status.
+ * @param status - The status the bar is drawn as (see `calendarDisplayStatus`)
+ * @param oneDayEvent - True renders the dot-style, transparent one-day variant
+ * @param viewType - FullCalendar view type; time-grid views add the hover class
+ * @returns The class list for the bar element
+ */
 export function getStatusClasses(
   status: BookingStatus,
   oneDayEvent: boolean = false,
@@ -58,14 +101,17 @@ export function getStatusClasses(
         "md:focus:!bg-purple-100",
       ];
       break;
+    // Red, never amber: every surface that shows a booking status reads
+    // `bookingStatusColorMap`, which maps OVERDUE to the error palette, and
+    // the calendar must agree with them.
     case "OVERDUE":
       statusClasses = [
-        "md:!text-warning-700",
-        "md:bg-warning-50",
-        "md:border-warning-200",
-        "[&_.fc-daygrid-event-dot]:!border-warning-700",
-        "[&_.fc-list-event-dot]:!border-warning-700",
-        "md:focus:!bg-warning-100",
+        "md:!text-error-700",
+        "md:bg-error-50",
+        "md:border-error-200",
+        "[&_.fc-daygrid-event-dot]:!border-error-700",
+        "[&_.fc-list-event-dot]:!border-error-700",
+        "md:focus:!bg-error-100",
       ];
       break;
     case "COMPLETE":
@@ -96,10 +142,14 @@ export const statusClassesOnHover: Record<BookingStatus, string> = {
   CANCELLED: "md:!bg-gray-100",
   RESERVED: "md:!bg-blue-100",
   ONGOING: "md:!bg-purple-100",
-  OVERDUE: "md:!bg-warning-100",
+  OVERDUE: "md:!bg-error-100",
   COMPLETE: "md:!bg-success-100",
 };
 
+/**
+ * Whether the two instants fall on the same calendar day (local time).
+ * @returns False when either bound is missing
+ */
 export function isOneDayEvent(
   from: Date | string | null,
   to: Date | string | null
@@ -121,7 +171,9 @@ export function isOneDayEvent(
 
 /**
  * Handles the mouse enter event for calendar events.
- * It applies a hover effect based on the event's status and the allowed view type.
+ * Highlights every bar of the hovered booking, each in the hover colour of
+ * its own rendered state: the booking's status, or COMPLETE for a bar that
+ * carries `RETURNED_EVENT_CLASS`.
  * @param allowedViewType - The view type(s) where the hover effect should be applied.
  */
 export const handleEventMouseEnter =
@@ -177,24 +229,41 @@ export const handleEventMouseEnter =
       if (viewType !== allowedViewType) return;
     }
 
-    const statusClass: BookingStatus = info.event._def.extendedProps.status;
+    const statusClass = info.event._def.extendedProps.status as BookingStatus;
     const className = "bookingId-" + info.event._def.extendedProps.id;
     const elements = document.getElementsByClassName(className);
 
     for (let i = 0; i < elements.length; i++) {
       const element = elements[i] as HTMLElement;
-      element.classList.add(statusClassesOnHover[statusClass]);
+      element.classList.add(hoverClassForElement(element, statusClass));
     }
   };
 
 /**
+ * One booking spans several asset rows and the hover paints all of them, so
+ * each row picks its own hover colour from what it is drawn as: a bar marked
+ * returned takes the COMPLETE hover, every other bar takes the hover of the
+ * booking's real status. Which bar the pointer is on does not matter.
+ */
+function hoverClassForElement(
+  element: HTMLElement,
+  bookingStatus: BookingStatus
+): string {
+  return element.classList.contains(RETURNED_EVENT_CLASS)
+    ? statusClassesOnHover.COMPLETE
+    : statusClassesOnHover[bookingStatus];
+}
+
+/**
  * Handles the mouse leave event for calendar events.
- * It removes the hover effect based on the event's status and the allowed view type.
+ * Removes from every bar of the booking the hover class that
+ * `handleEventMouseEnter` added for that bar's rendered state, including
+ * the COMPLETE hover on bars carrying `RETURNED_EVENT_CLASS`.
  * @param allowedViewType - The view type(s) where the hover effect should be removed.
  */
 export const handleEventMouseLeave =
   (allowedViewType: string | string[]) => (info: EventHoveringArg) => {
-    // Show the new tab icon on hover
+    // Hide the new-tab icon again when the pointer leaves
     const newTabIcon = info.el?.querySelector(
       ".external-link-icon"
     ) as HTMLElement | null;
@@ -232,12 +301,12 @@ export const handleEventMouseLeave =
       if (viewType !== allowedViewType) return;
     }
 
-    const statusClass: BookingStatus = info.event._def.extendedProps.status;
+    const statusClass = info.event._def.extendedProps.status as BookingStatus;
     const className = "bookingId-" + info.event._def.extendedProps.id;
     const elements = document.getElementsByClassName(className);
     for (let i = 0; i < elements.length; i++) {
       const element = elements[i] as HTMLElement;
-      element.classList.remove(statusClassesOnHover[statusClass]);
+      element.classList.remove(hoverClassForElement(element, statusClass));
     }
   };
 
@@ -258,39 +327,50 @@ export function handleEventClick(info: EventClickArg) {
 }
 
 /**
- * This function returns the title and subtitle for the calendar
- * based on the current view type.
+ * Build the calendar header title + subtitle for the current view, formatting
+ * every visible date through the user's resolved prefs (absolute).
  *
- * @param viewType - The type of the calendar view (e.g., resourceTimelineWeek, timeGridWeek)
- * @param calendar - The CalendarApi instance to get the current date.
+ * @param viewType - FullCalendar view name (…Week / …Day / month)
+ * @param calendarApi - The CalendarApi instance to read the current date from
+ * @param prefs - Resolved user format prefs
  */
 export function getCalendarTitleAndSubtitle({
   viewType,
   calendarApi,
+  prefs,
 }: {
   viewType: string;
   calendarApi: CalendarApi;
+  prefs: ResolvedFormatPrefs;
 }) {
   const currentDate = calendarApi.getDate();
-  const currentMonth = currentDate.toLocaleString("default", { month: "long" });
-  const currentYear = currentDate.getFullYear();
+  const monthYear = formatDate(currentDate, prefs, {
+    month: "long",
+    year: "numeric",
+    localeOnly: true,
+  });
 
-  let title = `${currentMonth} ${currentYear}`;
+  let title = monthYear;
   let subtitle = "";
 
   if (viewType.endsWith("Week")) {
-    const [startingDay, endingDay] = getWeekStartingAndEndingDates(currentDate);
+    const [startingDay, endingDay] = getWeekStartingAndEndingDates(
+      currentDate,
+      prefs
+    );
 
-    title = `${currentMonth} ${currentYear}`;
+    title = monthYear;
     subtitle = `Week ${startingDay} - ${endingDay}`;
   } else if (viewType.endsWith("Day")) {
-    const formattedDate = currentDate.toLocaleDateString("default", {
+    const formattedDate = formatDate(currentDate, prefs, {
       day: "numeric",
       month: "long",
       year: "numeric",
+      localeOnly: true,
     });
-    const weekday = currentDate.toLocaleDateString("default", {
+    const weekday = formatDate(currentDate, prefs, {
       weekday: "long",
+      localeOnly: true,
     });
     title = formattedDate;
     subtitle = weekday;

@@ -4,7 +4,7 @@
  * Behavior tests for the multi-kit rendering on the advanced asset
  * index. A QUANTITY_TRACKED asset can belong to multiple kits with
  * different per-kit quantities; the column shows the primary kit plus
- * a "+N more" affordance whose hover tooltip lists every kit name.
+ * a "+N" affordance whose hover tooltip lists every kit name.
  *
  * Mirrors {@link file://./custody-column.test.tsx} — same shape, kit
  * data instead of custody data.
@@ -86,7 +86,7 @@ describe("KitColumn", () => {
     expect(screen.queryByTestId("kit-more-chip")).not.toBeInTheDocument();
   });
 
-  it("renders the primary kit link plus a +N more chip for multiple kits", () => {
+  it("renders the primary kit link plus a +N chip for multiple kits", () => {
     renderCell([
       makeKit("kit-1", "Photography Kit"),
       makeKit("kit-2", "Studio Kit"),
@@ -99,7 +99,8 @@ describe("KitColumn", () => {
 
     // Chip indicates 2 additional kits.
     const chip = screen.getByTestId("kit-more-chip");
-    expect(chip).toHaveTextContent("+2 more");
+    expect(chip).toHaveTextContent(/^\+2$/);
+    expect(chip).toHaveAttribute("aria-label", "+2 more kits");
   });
 
   it("lists every kit name in the tooltip on hover", async () => {

@@ -10,7 +10,14 @@
  * @see {@link file://./helpers.server.ts}
  */
 
-import type { AssetType, BookingStatus, Currency } from "@prisma/client";
+import type {
+  AssetType,
+  AuditStatus,
+  BookingStatus,
+  Currency,
+  CustomFieldType,
+} from "@prisma/client";
+import type { ResolvableAssetModelImage } from "../asset/image-resolution";
 
 // -----------------------------------------------------------------------------
 // KPI Types
@@ -78,20 +85,109 @@ export interface ResolvedTimeframe {
 // Filter Types
 // -----------------------------------------------------------------------------
 
-/** Filter types supported by reports */
+/**
+ * Filter types supported by reports. Each one the registry declares for a
+ * report is rendered by the filter bar and honoured by the report's loader,
+ * CSV and PDF through `resolveReportFilters`.
+ *
+ * - `custom_field`: "field is value" on the workspace's TEXT, OPTION and
+ *   BOOLEAN custom fields.
+ * - `asset_model`: assets of the chosen models.
+ */
 export type FilterType =
   | "status"
   | "location"
   | "category"
   | "team_member"
   | "asset"
-  | "booking";
+  | "booking"
+  | "custom_field"
+  | "asset_model";
 
 /** A single filter value */
 export interface ReportFilter {
   type: FilterType;
   value: string;
   label: string;
+}
+
+/**
+ * One filter currently applied to a report, labelled for the chip row and
+ * removable by deleting exactly `param=value` from the query string.
+ */
+export interface ActiveReportFilter {
+  type: FilterType;
+  /** Query key holding this filter (`category`, `cf`, ...). */
+  param: string;
+  /** Exact query value to delete to remove this one filter. */
+  value: string;
+  /** What the chip says, e.g. "Category: Cameras". */
+  label: string;
+}
+
+/** A custom field the filter bar offers, with the values it can take. */
+export interface ReportCustomFieldOption {
+  id: string;
+  name: string;
+  type: CustomFieldType;
+  /**
+   * Values to pick from; OPTION lists its options, BOOLEAN yes/no. Empty
+   * when {@link valuesOnDemand} is set.
+   */
+  values: string[];
+  /** True when a TEXT field holds more distinct values than were loaded. */
+  hasMoreValues: boolean;
+  /**
+   * True for TEXT fields: the picker loads their values from
+   * `/api/reports/custom-field-values` when the field is opened.
+   */
+  valuesOnDemand: boolean;
+}
+
+/**
+ * What `/api/reports/custom-field-values` answers: one TEXT field's distinct
+ * values, most frequent first.
+ */
+export type ReportCustomFieldValuesPayload = {
+  /** The field the values belong to, so a late answer cannot label another. */
+  customFieldId: string;
+  values: string[];
+  /** True when the field holds more values than were returned. */
+  hasMore: boolean;
+};
+
+/** One selectable status for the status dropdown. */
+export interface ReportStatusOption {
+  value: string;
+  label: string;
+}
+
+/**
+ * Pick-list payload for the filter bar. Lists stay empty for filter types
+ * the report does not declare. The paged lists (`categories`, `locations`,
+ * `teamMembers`, `assetModels`) and their totals are spread onto the report
+ * loader's top level, where the shared `DynamicDropdown` reads them.
+ */
+export interface ReportFilterOptions {
+  categories: { id: string; name: string; color: string }[];
+  totalCategories: number;
+  locations: { id: string; name: string }[];
+  totalLocations: number;
+  teamMembers: {
+    id: string;
+    name: string;
+    user: {
+      firstName: string | null;
+      lastName: string | null;
+      displayName: string | null;
+      email: string;
+    } | null;
+  }[];
+  totalTeamMembers: number;
+  assetModels: { id: string; name: string }[];
+  totalAssetModels: number;
+  customFields: ReportCustomFieldOption[];
+  statuses: ReportStatusOption[];
 }
 
 /** Active filters for a report */
@@ -305,6 +401,14 @@ export interface IdleAssetRow {
   assetName: string;
   /** Asset thumbnail image URL */
   thumbnailImage: string | null;
+  /** The asset's OWN full-size image. Required alongside `thumbnailImage`
+   * because `resolveAssetImage` decides the ownership tier from `mainImage`
+   * alone — without it an asset that has its own image is indistinguishable
+   * from one that has none, and renders its model's cover instead. */
+  mainImage: string | null;
+  /** Cover image of the asset's model, rendered when the asset has no
+   * image of its own. See `~/modules/asset/image-resolution`. */
+  assetModel: ResolvableAssetModelImage;
   category: string | null;
   location: string | null;
   /** Date of last booking checkout, null if never booked */
@@ -344,6 +448,14 @@ export interface CustodySnapshotRow {
   assetName: string;
   /** Asset thumbnail image URL */
   thumbnailImage: string | null;
+  /** The asset's OWN full-size image. Required alongside `thumbnailImage`
+   * because `resolveAssetImage` decides the ownership tier from `mainImage`
+   * alone — without it an asset that has its own image is indistinguishable
+   * from one that has none, and renders its model's cover instead. */
+  mainImage: string | null;
+  /** Cover image of the asset's model, rendered when the asset has no
+   * image of its own. See `~/modules/asset/image-resolution`. */
+  assetModel: ResolvableAssetModelImage;
   category: string | null;
   location: string | null;
   custodianId: string;
@@ -385,6 +497,14 @@ export interface TopBookedAssetRow {
   assetName: string;
   /** Asset thumbnail image URL */
   thumbnailImage: string | null;
+  /** The asset's OWN full-size image. Required alongside `thumbnailImage`
+   * because `resolveAssetImage` decides the ownership tier from `mainImage`
+   * alone — without it an asset that has its own image is indistinguishable
+   * from one that has none, and renders its model's cover instead. */
+  mainImage: string | null;
+  /** Cover image of the asset's model, rendered when the asset has no
+   * image of its own. See `~/modules/asset/image-resolution`. */
+  assetModel: ResolvableAssetModelImage;
   category: string | null;
   location: string | null;
   /** Number of times booked in the timeframe */
@@ -461,6 +581,8 @@ export interface DistributionBreakdown {
   byLocation: AssetDistributionRow[];
   /** Breakdown by status */
   byStatus: AssetDistributionRow[];
+  /** Breakdown by asset model; assets without a model form one bucket. */
+  byAssetModel: AssetDistributionRow[];
 }
 
 /** KPI IDs for the Asset Distribution report */
@@ -481,6 +603,14 @@ export interface AssetInventoryRow {
   assetName: string;
   /** Asset thumbnail image URL */
   thumbnailImage: string | null;
+  /** The asset's OWN full-size image. Required alongside `thumbnailImage`
+   * because `resolveAssetImage` decides the ownership tier from `mainImage`
+   * alone — without it an asset that has its own image is indistinguishable
+   * from one that has none, and renders its model's cover instead. */
+  mainImage: string | null;
+  /** Cover image of the asset's model, rendered when the asset has no
+   * image of its own. See `~/modules/asset/image-resolution`. */
+  assetModel: ResolvableAssetModelImage;
   category: string | null;
   location: string | null;
   status: string;
@@ -548,6 +678,14 @@ export interface AssetUtilizationRow {
   assetName: string;
   /** Asset thumbnail image URL */
   thumbnailImage: string | null;
+  /** The asset's OWN full-size image. Required alongside `thumbnailImage`
+   * because `resolveAssetImage` decides the ownership tier from `mainImage`
+   * alone — without it an asset that has its own image is indistinguishable
+   * from one that has none, and renders its model's cover instead. */
+  mainImage: string | null;
+  /** Cover image of the asset's model, rendered when the asset has no
+   * image of its own. See `~/modules/asset/image-resolution`. */
+  assetModel: ResolvableAssetModelImage;
   category: string | null;
   location: string | null;
   /** Total days in the period */
@@ -600,6 +738,14 @@ export interface AssetActivityRow {
   assetName: string;
   /** Asset thumbnail image URL */
   thumbnailImage: string | null;
+  /** The asset's OWN full-size image. Required alongside `thumbnailImage`
+   * because `resolveAssetImage` decides the ownership tier from `mainImage`
+   * alone — without it an asset that has its own image is indistinguishable
+   * from one that has none, and renders its model's cover instead. */
+  mainImage: string | null;
+  /** Cover image of the asset's model, rendered when the asset has no
+   * image of its own. See `~/modules/asset/image-resolution`. */
+  assetModel: ResolvableAssetModelImage;
   /** Type of activity */
   activityType: AssetActivityType;
   /** Human-readable description */
@@ -618,6 +764,61 @@ export type AssetActivityKpiId =
   | "custody_changes"
   | "booking_activities"
   | "most_active_asset";
+
+// -----------------------------------------------------------------------------
+// Audit Completion Report Types
+// -----------------------------------------------------------------------------
+
+/**
+ * Row type for the Audit Completion report: one audit session.
+ *
+ * `status` is the raw enum for badge rendering; whether the session is
+ * *finished* is answered by `completedAt`, never by the status column,
+ * because archiving rewrites `status` while leaving the timestamps intact.
+ */
+export interface AuditCompletionRow {
+  /** The audit session id. Row clicks navigate to `/audits/{id}`. */
+  id: string;
+  /** Session name as entered by the creator. */
+  name: string;
+  /** Raw status enum, rendered as a badge. Not a completion signal: see
+   * the interface doc, archiving rewrites this column. */
+  status: AuditStatus;
+  /** Assets the session expected to find. */
+  expectedAssetCount: number;
+  /** Expected assets actually scanned. */
+  foundAssetCount: number;
+  /** Expected assets never scanned. Null until the session completes: the
+   * counter counts down while scanning, so before completion it means "not
+   * yet scanned", not "lost". */
+  missingAssetCount: number | null;
+  /** Scanned assets that were not expected. */
+  unexpectedAssetCount: number;
+  /** Whether the session was cancelled (`cancelledAt` set). Stays true after
+   * archiving, which rewrites `status`. */
+  isCancelled: boolean;
+  /** found/expected as a whole percentage (0-100). Null until the session
+   * completes, and when it expected 0 assets (nothing to be accurate
+   * against). Null renders as an empty cell, never 0%. */
+  accuracy: number | null;
+  /** Display name of the user who created the session. */
+  createdByName: string;
+  /** When scanning began; null while the session is still pending. */
+  startedAt: Date | null;
+  /** Deadline for the session; null when none was set. */
+  dueDate: Date | null;
+  /** When the session finished; null while unfinished. The authoritative
+   * completion signal for this report. */
+  completedAt: Date | null;
+}
+
+/** KPI IDs for the Audit Completion report */
+export type AuditCompletionKpiId =
+  | "total_audits"
+  | "completed_audits"
+  | "completion_rate"
+  | "overdue_audits"
+  | "assets_missing";
 
 // -----------------------------------------------------------------------------
 // PDF Export Types
@@ -704,6 +905,9 @@ export interface AssetInventoryPdfMeta extends ReportPdfMetaBase {
     location: string | null;
     custodian: string | null;
     valuation: number | null;
+    /** Workspace stock; null means one unit. The PDF value column and the
+     * total multiply by it, matching the on-screen quantity-aware math. */
+    quantity: number | null;
     qrId: string | null;
   }>;
 }
@@ -723,6 +927,9 @@ export interface CustodySnapshotPdfMeta extends ReportPdfMetaBase {
     assignedAt: string;
     daysInCustody: number;
     valuation: number | null;
+    /** Units held in this custody row (`Custody.quantity`); null means one.
+     * The PDF value column and the total multiply by it. */
+    quantity: number | null;
   }>;
 }
 

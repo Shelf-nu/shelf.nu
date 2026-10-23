@@ -49,6 +49,12 @@ export function CustodianField({
           name: "teamMember",
           queryKey: "name",
           deletedAt: null,
+          // Who this BOOKING may be assigned to — not asset custody. BASE holds
+          // `booking:create`, so it must be able to name itself here even
+          // though it may never take custody of an asset. Without this the
+          // endpoint would apply its stricter default and return nothing,
+          // disagreeing with the `getTeamMemberForForm` seed.
+          custodyPurpose: "booking-custodian",
         }}
         fieldName="custodian"
         contentLabel="Team members"

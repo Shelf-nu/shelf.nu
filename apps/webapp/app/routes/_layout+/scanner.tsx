@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { OrganizationRoles } from "@prisma/client";
 import { useAtom, useSetAtom } from "jotai";
 import type {
   LinksFunction,
@@ -16,11 +15,14 @@ import { CodeScanner } from "~/components/scanner/code-scanner";
 import { scannerActionAtom } from "~/components/scanner/drawer/action-atom";
 import { ActionSwitcher } from "~/components/scanner/drawer/action-switcher";
 import { db } from "~/database/db.server";
+import { useFillViewportHeight } from "~/hooks/use-fill-viewport-height";
 import { useHapticFeedback } from "~/hooks/use-haptic-feedback";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
-import { useViewportHeight } from "~/hooks/use-viewport-height";
-import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
+import {
+  getTeamMemberForCustodianFilter,
+  resolveCustodianPickerScope,
+} from "~/modules/team-member/service.server";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
@@ -30,9 +32,9 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { requirePermission } from "~/utils/roles.server";
-import { tw } from "~/utils/tw";
 import {
   resolveAssetIdFromSamId,
   type ResolveAssetIdFromSamIdOptions,
@@ -53,13 +55,26 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, role, isSelfServiceOrBase } =
+    const { organizationId, access, userOrganizations } =
       await requirePermission({
         userId,
         request,
         entity: PermissionEntity.asset,
         action: PermissionAction.read,
       });
+    /**
+     * The locations feed the scanner's "update location" drawer, whose action
+     * requires `asset:update`; members without it get no location list.
+     */
+    const canUpdateLocations = await hasPermission({
+      organizationId,
+      userId,
+      roles:
+        userOrganizations.find((o) => o.organization.id === organizationId)
+          ?.roles ?? [],
+      entity: PermissionEntity.asset,
+      action: PermissionAction.update,
+    });
     const header: HeaderData = {
       title: "Locations",
     };
@@ -69,20 +84,32 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 
     /** Get team members for form teamMember select */
     const { teamMemberIds } = paramsValues;
+
+    /**
+     * An ASSIGNMENT picker: the role's `custody.assign` scope decides who it
+     * lists: everyone, only the caller, or no one.
+     */
+    const custodyScope = resolveCustodianPickerScope({
+      purpose: "custody-assignment",
+      access,
+      userId,
+    });
+
     const teamMemberData = await getTeamMemberForCustodianFilter({
       organizationId,
       selectedTeamMembers: teamMemberIds,
       getAll:
         searchParams.has("getAll") &&
         hasGetAllValue(searchParams, "teamMember"),
-      filterByUserId: role === OrganizationRoles.SELF_SERVICE, // SElf service can only assign themselves and base users cant assign at all
+      filterByUserId: custodyScope.mode === "self",
+      returnNone: custodyScope.mode === "none",
       userId,
     });
     /** End team members */
 
     /** Get locations  */
     let locationsData;
-    if (!isSelfServiceOrBase) {
+    if (canUpdateLocations) {
       const locationSelected = searchParams.get("location") ?? "";
       const getAllEntries = searchParams.getAll(
         "getAll"
@@ -125,6 +152,12 @@ export const meta: MetaFunction<typeof loader> = () => [
   { title: appendToMetaTitle("Qr code scanner") },
 ];
 
+/**
+ * Floor for the scanner pane, matching `CodeScanner`'s own `min-h-[400px]` so a
+ * mismeasurement can never collapse the viewfinder to nothing.
+ */
+const MIN_SCANNER_HEIGHT = 400;
+
 const QRScanner = () => {
   const navigate = useNavigate();
   const [paused, setPaused] = useState<boolean>(false);
@@ -133,8 +166,12 @@ const QRScanner = () => {
   );
   const [errorMessage, setErrorMessage] = useState<string | undefined>();
   const [errorTitle, setErrorTitle] = useState<string | undefined>(undefined);
-  const { vh, isMd } = useViewportHeight();
-  const height = isMd ? vh - 67 : vh - 102;
+  // The scanner fills everything below whatever chrome the layout puts above
+  // it — nothing here, a top bar below `md`, plus any account banner. Measuring
+  // that offset keeps the viewfinder flush with the bottom of the screen on
+  // every arrangement; a fixed subtraction only ever suits one of them.
+  const { ref: scannerContainerRef, height } =
+    useFillViewportHeight<HTMLDivElement>({ minHeight: MIN_SCANNER_HEIGHT });
   const isNavigating = useRef(false);
   const addItem = useSetAtom(addScannedItemAtom);
 
@@ -284,8 +321,9 @@ const QRScanner = () => {
     <>
       <Header title="QR code scanner" hidePageDescription hideBreadcrumbs />
       <div
+        ref={scannerContainerRef}
         className="-mx-4 flex flex-col overflow-hidden"
-        style={{ height: `${height}px` }}
+        style={height === undefined ? undefined : { height: `${height}px` }}
       >
         <CodeScanner
           onCodeDetectionSuccess={handleCodeDetectionSuccess}
@@ -295,9 +333,6 @@ const QRScanner = () => {
           errorMessage={errorMessage}
           errorTitle={errorTitle}
           actionSwitcher={<ActionSwitcher />}
-          scannerModeClassName={(mode) =>
-            tw(mode === "scanner" && "justify-start pt-[100px]")
-          }
           savedCameraId={savedCameraId}
         />
       </div>

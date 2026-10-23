@@ -68,6 +68,8 @@ const mockKits = [
           title: "Canon Camera",
           mainImage: "camera.jpg",
           mainImageExpiration: "2024-12-31T23:59:59Z",
+          thumbnailImage: null,
+          assetModel: null,
           category: {
             name: "Cameras",
           },
@@ -79,15 +81,14 @@ const mockKits = [
           title: "Tripod",
           mainImage: "tripod.jpg",
           mainImageExpiration: "2024-12-31T23:59:59Z",
+          thumbnailImage: null,
+          assetModel: null,
           category: {
             name: "Accessories",
           },
         },
       },
     ],
-    _count: {
-      assetKits: 2,
-    },
   },
   {
     id: "kit-2",
@@ -101,17 +102,40 @@ const mockKits = [
           title: "Video Camera",
           mainImage: "video-camera.jpg",
           mainImageExpiration: "2024-12-31T23:59:59Z",
+          thumbnailImage: null,
+          assetModel: null,
           category: {
             name: "Cameras",
           },
         },
       },
     ],
-    _count: {
-      assetKits: 1,
-    },
   },
 ];
+
+/**
+ * The shape `/api/kits` returns.
+ *
+ * The `AssetKit` pivot is flattened away into a plain `assets` array — that is
+ * the contract `KitsListComponent` reads, and `useApiQuery` casts the response
+ * to the component's type without validating it, so nothing but this assertion
+ * stands between a renamed field and a crash on the booking activity page.
+ * Each member asset also goes through `serializeAssetImage`, which drops the
+ * nested `assetModel` and emits the resolved image fields plus `imageSource`.
+ * These mocks each carry their own `mainImage` and no thumbnail, so the
+ * thumbnail falls back to the full-size URL within the "asset" tier.
+ */
+const serializedMockKits = mockKits.map(({ assetKits, ...kit }) => ({
+  ...kit,
+  assets: assetKits.map(({ asset }) => {
+    const { assetModel: _assetModel, ...rest } = asset;
+    return {
+      ...rest,
+      thumbnailImage: rest.mainImage,
+      imageSource: "asset",
+    };
+  }),
+}));
 
 describe("/api/kits", () => {
   beforeEach(() => {
@@ -162,6 +186,10 @@ describe("/api/kits", () => {
                   title: true,
                   mainImage: true,
                   mainImageExpiration: true,
+                  thumbnailImage: true,
+                  // Selected so the loader can resolve the member asset's
+                  // image cascade server-side (see `serializeAssetImage`).
+                  assetModel: { select: { image: true, thumbnailImage: true } },
                   category: {
                     select: {
                       name: true,
@@ -171,11 +199,6 @@ describe("/api/kits", () => {
               },
             },
             orderBy: { asset: { title: "asc" } },
-          },
-          _count: {
-            select: {
-              assetKits: true,
-            },
           },
         },
         orderBy: {
@@ -188,7 +211,7 @@ describe("/api/kits", () => {
       const responseData = await (result as unknown as Response).json();
       expect(responseData).toEqual({
         error: null,
-        kits: mockKits,
+        kits: serializedMockKits,
       });
     });
 
@@ -269,6 +292,10 @@ describe("/api/kits", () => {
                   title: true,
                   mainImage: true,
                   mainImageExpiration: true,
+                  thumbnailImage: true,
+                  // Selected so the loader can resolve the member asset's
+                  // image cascade server-side (see `serializeAssetImage`).
+                  assetModel: { select: { image: true, thumbnailImage: true } },
                   category: {
                     select: {
                       name: true,
@@ -278,11 +305,6 @@ describe("/api/kits", () => {
               },
             },
             orderBy: { asset: { title: "asc" } },
-          },
-          _count: {
-            select: {
-              assetKits: true,
-            },
           },
         },
         orderBy: {
@@ -325,6 +347,10 @@ describe("/api/kits", () => {
                   title: true,
                   mainImage: true,
                   mainImageExpiration: true,
+                  thumbnailImage: true,
+                  // Selected so the loader can resolve the member asset's
+                  // image cascade server-side (see `serializeAssetImage`).
+                  assetModel: { select: { image: true, thumbnailImage: true } },
                   category: {
                     select: {
                       name: true,
@@ -334,11 +360,6 @@ describe("/api/kits", () => {
               },
             },
             orderBy: { asset: { title: "asc" } },
-          },
-          _count: {
-            select: {
-              assetKits: true,
-            },
           },
         },
         orderBy: {
@@ -351,7 +372,7 @@ describe("/api/kits", () => {
       const responseData = await (result as unknown as Response).json();
       expect(responseData).toEqual({
         error: null,
-        kits: singleKit,
+        kits: [serializedMockKits[0]],
       });
     });
 
@@ -386,6 +407,10 @@ describe("/api/kits", () => {
                   title: true,
                   mainImage: true,
                   mainImageExpiration: true,
+                  thumbnailImage: true,
+                  // Selected so the loader can resolve the member asset's
+                  // image cascade server-side (see `serializeAssetImage`).
+                  assetModel: { select: { image: true, thumbnailImage: true } },
                   category: {
                     select: {
                       name: true,
@@ -395,11 +420,6 @@ describe("/api/kits", () => {
               },
             },
             orderBy: { asset: { title: "asc" } },
-          },
-          _count: {
-            select: {
-              assetKits: true,
-            },
           },
         },
         orderBy: {
@@ -523,7 +543,6 @@ describe("/api/kits", () => {
             image: true,
             imageExpiration: true,
             assetKits: expect.any(Object),
-            _count: expect.any(Object),
           },
         })
       );

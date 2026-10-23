@@ -8,6 +8,7 @@ import {
   Text,
 } from "@react-email/components";
 import { config } from "~/config/shelf.config";
+import { formatDate, type ResolvedFormatPrefs } from "~/utils/date-format";
 import { SERVER_URL, SUPPORT_EMAIL } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
@@ -21,6 +22,8 @@ interface TrialEndsSoonProps {
   hasPaymentMethod: boolean;
   planName: string;
   trialEndDate: Date;
+  /** Resolved formatting prefs of the billed (recipient) user. */
+  prefs: ResolvedFormatPrefs;
 }
 
 export const sendTrialEndsSoonEmail = async ({
@@ -29,6 +32,7 @@ export const sendTrialEndsSoonEmail = async ({
   hasPaymentMethod,
   planName,
   trialEndDate,
+  prefs,
 }: TrialEndsSoonProps) => {
   try {
     const subject = hasPaymentMethod
@@ -39,12 +43,14 @@ export const sendTrialEndsSoonEmail = async ({
       hasPaymentMethod,
       planName,
       trialEndDate,
+      prefs,
     });
     const text = trialEndsSoonEmailText({
       firstName,
       hasPaymentMethod,
       planName,
       trialEndDate,
+      prefs,
     });
 
     void sendEmail({
@@ -70,13 +76,15 @@ export const trialEndsSoonEmailText = ({
   hasPaymentMethod,
   planName,
   trialEndDate,
+  prefs,
 }: {
   firstName?: string | null;
   hasPaymentMethod: boolean;
   planName: string;
   trialEndDate: Date;
+  prefs: ResolvedFormatPrefs;
 }) => {
-  const dateStr = trialEndDate.toLocaleDateString("en-US", {
+  const dateStr = formatDate(trialEndDate, prefs, {
     month: "long",
     day: "numeric",
     year: "numeric",
@@ -114,15 +122,17 @@ function TrialEndsSoonEmailTemplate({
   hasPaymentMethod,
   planName,
   trialEndDate,
+  prefs,
 }: {
   firstName?: string | null;
   hasPaymentMethod: boolean;
   planName: string;
   trialEndDate: Date;
+  prefs: ResolvedFormatPrefs;
 }) {
   const { emailPrimaryColor } = config;
 
-  const dateStr = trialEndDate.toLocaleDateString("en-US", {
+  const dateStr = formatDate(trialEndDate, prefs, {
     month: "long",
     day: "numeric",
     year: "numeric",
@@ -234,11 +244,13 @@ export const trialEndsSoonEmailHtml = ({
   hasPaymentMethod,
   planName,
   trialEndDate,
+  prefs,
 }: {
   firstName?: string | null;
   hasPaymentMethod: boolean;
   planName: string;
   trialEndDate: Date;
+  prefs: ResolvedFormatPrefs;
 }) =>
   render(
     <TrialEndsSoonEmailTemplate
@@ -246,5 +258,6 @@ export const trialEndsSoonEmailHtml = ({
       hasPaymentMethod={hasPaymentMethod}
       planName={planName}
       trialEndDate={trialEndDate}
+      prefs={prefs}
     />
   );

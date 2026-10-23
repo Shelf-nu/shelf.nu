@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { X } from "lucide-react";
 import { useLoaderData } from "react-router";
@@ -39,9 +40,52 @@ type ListTitleProps = {
   itemsGetter?: (data: LoaderData) => ListItemData[];
 
   /**
+   * The rows on screen, when they are not the loader's `items` — a list
+   * rendering rows from another key (the asset index's model view) must pass
+   * them, or both the count and "Select all" describe a different set.
+   */
+  items?: ListItemData[];
+
+  /**
+   * Whether `countLabel` already states the list's total.
+   *
+   * A label that describes the rows on the page (the booking overview's
+   * "18 assets and 2 kits") still needs "out of N" to say more exist. A label
+   * that is itself the total (the model view's model count) must not get one,
+   * because the total appended counts RENDERED ROWS, which is a different
+   * unit: the model view renders a "No model" bucket that is not a model, so
+   * the suffix produced "3 asset models out of 4" above two rows.
+   */
+  countLabelIsTotal?: boolean;
+
+  /**
    * Optional class name for the title element
    */
   titleClassName?: string;
+
+  /**
+   * Describes the rendered rows in the surface's own words, replacing the
+   * default `"N items"`.
+   *
+   * The default noun comes from `modelName`, which is necessarily generic when
+   * a list holds more than one kind of row. The booking overview mixes assets
+   * and kits, so its header read "20 items" while the bookings index reported
+   * 25 assets for the same booking — the difference being the 7 assets folded
+   * inside 2 kit rows. Neither number was wrong; "items" just never said what
+   * it counted, leaving the reader to work it out.
+   *
+   * Takes no argument on purpose: a surface that can describe its rows knows
+   * the rows, and passing a count invited an implementation to ignore it and
+   * silently disagree with the number ListTitle thought it was labelling.
+   * Return a phrase, not a sentence — it renders inline and may be followed by
+   * "out of N".
+   *
+   * @returns e.g. `"18 assets and 2 kits"`.
+   */
+  countLabel?: () => ReactNode;
+
+  /** Rendered in place of the title text; see `List`'s `titleContent`. */
+  titleContent?: ReactNode;
 };
 
 export default function ListTitle({
@@ -49,7 +93,11 @@ export default function ListTitle({
   hasBulkActions,
   disableSelectAllItems = false,
   itemsGetter,
+  items: itemsProp,
   titleClassName,
+  countLabel,
+  countLabelIsTotal = false,
+  titleContent,
 }: ListTitleProps) {
   const loaderData = useLoaderData<LoaderData>();
   const {
@@ -58,10 +106,28 @@ export default function ListTitle({
     modelName: { singular, plural },
   } = loaderData as unknown as IndexResponse;
 
+  /**
+   * SELECTION list. When `itemsGetter` is supplied it flattens composite rows
+   * into their selectable entities — the booking overview expands each kit row
+   * into its member assets plus the kit itself. Right for "select all", wrong
+   * for any count shown to a human.
+   */
   const items =
-    typeof itemsGetter === "function"
+    itemsProp ??
+    (typeof itemsGetter === "function"
       ? itemsGetter(loaderData)
-      : loaderData.items;
+      : loaderData.items);
+
+  /**
+   * DISPLAY count: rows actually rendered on this page.
+   *
+   * Must not come from `items` above whenever an `itemsGetter` flattens
+   * composite rows: on the booking overview a 10-row page holding two kits of
+   * 4 and 3 members flattens to 17 selectable entities, and counting those
+   * gives a number matching neither the rows on screen nor the total.
+   * `itemsProp` needs no such care — it IS the rendered rows.
+   */
+  const rowCount = (itemsProp ?? loaderData.items)?.length ?? 0;
 
   const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
   const selectedBulkItemsCount = useAtomValue(selectedBulkItemsCountAtom);
@@ -87,7 +153,7 @@ export default function ListTitle({
           titleClassName
         )}
       >
-        {title || plural}
+        {titleContent ?? (title || plural)}
       </div>
       <div className="h-7">
         {hasBulkActions && hasSelectedItems ? (
@@ -116,14 +182,29 @@ export default function ListTitle({
           </div>
         ) : (
           <div>
-            {perPage < totalItems ? (
+            {/* Both branches pluralise on the count, not on `> 1`: an empty
+                list read "0 item". Only exactly one is singular. */}
+            {countLabel && countLabelIsTotal ? (
+              <p>{countLabel()}</p>
+            ) : perPage < totalItems ? (
               <p>
-                {items.length} {items.length > 1 ? plural : singular}{" "}
+                {countLabel
+                  ? countLabel()
+                  : `${rowCount} ${rowCount === 1 ? singular : plural}`}{" "}
                 <span className="text-gray-400">out of {totalItems}</span>
               </p>
             ) : (
               <span>
-                {totalItems} {items.length > 1 ? plural : singular}
+                {/* The noun agrees with the number actually PRINTED. This
+                    branch prints `totalItems` but pluralised on `rowCount`,
+                    which are different quantities — and a header that lies
+                    about its own count is the defect this whole change is
+                    about. Narrow in practice (the branch only runs when
+                    `perPage >= totalItems`), but both branches should derive
+                    the noun from the number beside it. */}
+                {countLabel
+                  ? countLabel()
+                  : `${totalItems} ${totalItems === 1 ? singular : plural}`}
               </span>
             )}
           </div>

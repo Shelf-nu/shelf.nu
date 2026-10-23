@@ -5,12 +5,17 @@
  */
 
 /**
- * Action path for the "switch current organization" fetcher submission.
+ * Action path for the "switch current organization" submission.
  *
- * Used by the org selector to POST a switch and by `_layout.tsx` to detect
- * in-flight workspace switches via `useFetchers()`. Keep both sides pointing
- * at this constant so renaming the route doesn't silently break the loading
- * state.
+ * Both call sites — the sidebar workspace selector and the 404 "wrong
+ * workspace" handler — post here as a **native document submission**
+ * (`reloadDocument`), never through a fetcher. Switching workspace swaps the
+ * whole tenant, so the document is rebuilt for the new workspace rather than
+ * patched by router revalidation, which can leave the app shell (sidebar nav,
+ * roles) on the previous workspace.
+ *
+ * @see {@link file://./../../components/layout/sidebar/organization-selector.tsx}
+ * @see {@link file://./../../components/errors/error-404-handler.tsx}
  */
 export const CHANGE_CURRENT_ORGANIZATION_ACTION =
   "/api/user/change-current-organization";

@@ -1,3 +1,19 @@
+/**
+ * Location Assets
+ *
+ * The asset list on a location's detail page: every asset with a placement at
+ * this location, with the per-location quantity, whether that placement came
+ * from a kit, and who holds the asset.
+ *
+ * Rows come from `getLocation`, which has no `Location.assets` relation to
+ * follow and instead runs a pivot-filtered query and returns the assets
+ * alongside the location. The row type here is written by hand and must be
+ * kept in step with that query's projection.
+ *
+ * @see {@link file://./../../modules/location/service.server.ts} getLocation
+ * @see {@link file://./locations.$locationId.overview.tsx}
+ */
+
 import type {
   Asset,
   BarcodeType,
@@ -12,6 +28,11 @@ import type {
 } from "react-router";
 import { data, useLoaderData, useParams } from "react-router";
 import z from "zod";
+import { archivedHiddenEmptyState } from "~/components/assets/archived-hidden-empty-state";
+import {
+  ArchivedViewMenu,
+  useArchivedView,
+} from "~/components/assets/archived-view-menu";
 import { AssetCodeBadge } from "~/components/assets/asset-code-badge";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
@@ -42,11 +63,22 @@ import {
 import { Td, Th } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import When from "~/components/when/when";
+import { db } from "~/database/db.server";
+import { useCanViewArchivedAssets } from "~/hooks/use-can-view-archived-assets";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { getCustodyFromLocationByPool } from "~/modules/asset/custody-source.server";
+import {
+  canViewArchivedAssets,
+  resolveArchivedViewForMember,
+} from "~/modules/asset/data.server";
 import { isQuantityTracked } from "~/modules/asset/utils";
+import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { resolveDisplayCode } from "~/modules/barcode/display";
+import { loadMultiPlacedPoolIds } from "~/modules/booking/checkout-source-location.server";
+import { countUnitsOnBookingsFromLocation } from "~/modules/booking/units-out-by-source.server";
+import { getPrimaryCustody } from "~/modules/custody/utils";
 import { resolveLocationAssetIds } from "~/modules/location/bulk-select.server";
 import {
   getLocation,
@@ -86,7 +118,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { locationId } = getParams(params, paramsSchema);
 
   try {
-    const { organizationId, userOrganizations, canSeeAllCustody } =
+    const { organizationId, userOrganizations, access } =
       await requirePermission({
         request,
         userId,
@@ -112,6 +144,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       // findMany and synthesizes the array here.
       { location, totalAssetsWithinLocation, assets },
       { teamMembers, totalTeamMembers },
+      archivedAssetCount,
     ] = await Promise.all([
       getLocation({
         organizationId,
@@ -124,6 +157,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         userOrganizations,
         request,
         teamMemberIds,
+        archivedFilter: resolveArchivedViewForMember({ access, searchParams }),
       }),
       getTeamMemberForCustodianFilter({
         organizationId,
@@ -132,8 +166,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           searchParams.has("getAll") &&
           hasGetAllValue(searchParams, "teamMember"),
         // When the user cannot see all custody, only return their own team member
-        filterByUserId: !canSeeAllCustody,
+        filterByUserId: !access.custody.seeAll,
         userId,
+      }),
+      // Archived assets the Active view hides, so its empty state can say
+      // where they went.
+      db.asset.count({
+        where: {
+          organizationId,
+          archivedAt: { not: null },
+          assetLocations: { some: { locationId } },
+        },
       }),
     ]);
 
@@ -145,6 +188,41 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const totalItems = totalAssetsWithinLocation;
     const totalPages = Math.ceil(totalAssetsWithinLocation / perPage);
 
+    /**
+     * For pools placed at two or more locations, how many of this location's
+     * units are out with people ("· 2 in custody"), and how many are out on a
+     * booking having left from here ("· 10 on a booking"). Counts only,
+     * never a name, and neither changes the location's placed count.
+     */
+    const pools = assets.filter((asset) => isQuantityTracked(asset));
+    const [custodyFromHere, onBookingByAssetId] = await Promise.all([
+      getCustodyFromLocationByPool({
+        locationId,
+        organizationId,
+        pools: pools.map((asset) => ({
+          id: asset.id,
+          total: asset.quantity ?? 0,
+        })),
+      }),
+      // Only pools at two or more placements say where booked units came
+      // from; a pool at one location shows nothing new.
+      loadMultiPlacedPoolIds({
+        organizationId,
+        assetIds: pools.map((asset) => asset.id),
+      }).then((multiPlaced) =>
+        countUnitsOnBookingsFromLocation({
+          organizationId,
+          locationId,
+          assetIds: [...multiPlaced],
+        })
+      ),
+    ]);
+    const items = assets.map((asset) => ({
+      ...asset,
+      inCustodyHere: custodyFromHere[asset.id] ?? 0,
+      onBookingFromHere: onBookingByAssetId.get(asset.id) ?? 0,
+    }));
+
     const header: HeaderData = {
       title: `${location.name} - Assets`,
       subHeading: location.id,
@@ -152,9 +230,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     return payload({
       location,
+      archivedAssetCount,
       header,
       modelName,
-      items: assets,
+      items,
       page,
       totalItems,
       perPage,
@@ -173,7 +252,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   const { locationId } = getParams(params, paramsSchema);
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       request,
       userId,
       entity: PermissionEntity.location,
@@ -210,18 +289,25 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
 
       case "bulk-remove-assets": {
-        const { assetIds } = parseData(
+        // `currentSearchParams` comes from the submitted form, not `request.url`
+        // — the dialog posts to a bare action URL, so the request carries no
+        // query string and "select all" would match every asset here.
+        const { assetIds, currentSearchParams } = parseData(
           formData,
-          z.object({
-            assetIds: z.array(z.string()).min(1),
-          })
+          z
+            .object({
+              assetIds: z.array(z.string()).min(1),
+            })
+            .and(CurrentSearchParamsSchema)
         );
 
         const resolvedAssetIds = await resolveLocationAssetIds({
           ids: assetIds,
           organizationId,
           locationId,
-          request,
+          currentSearchParams,
+          // Select all covers the view the list showed (Active by default).
+          honorArchivedView: canViewArchivedAssets(access),
         });
 
         if (resolvedAssetIds.length === 0) {
@@ -260,8 +346,19 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function LocationAssets() {
-  const { roles } = useUserRoleHelper();
-  const { location } = useLoaderData<typeof loader>();
+  const roles = useOrganizationRoles();
+  const canViewArchivedAssets = useCanViewArchivedAssets();
+  const archivedView = useArchivedView(canViewArchivedAssets);
+  const { location, archivedAssetCount } = useLoaderData<typeof loader>();
+  /** Set only on the Active view of a location whose assets are all archived. */
+  const archivedHiddenState =
+    archivedView === "active"
+      ? archivedHiddenEmptyState({
+          archivedCount: archivedAssetCount,
+          canViewArchivedAssets,
+          place: "location",
+        })
+      : null;
   const userRoleCanManageAssets = userHasPermission({
     roles,
     entity: PermissionEntity.location,
@@ -303,6 +400,8 @@ export default function LocationAssets() {
                       name: "teamMember",
                       queryKey: "name",
                       deletedAt: null,
+                      // A read FILTER — the workspace custody override governs.
+                      custodyPurpose: "custody-filter",
                     }}
                     label="Filter by custodian"
                     placeholder="Search team members"
@@ -377,12 +476,33 @@ export default function LocationAssets() {
               </When>
             </>
           }
-          customEmptyStateContent={{
-            title: "There are currently no assets at the location",
-            text: "Add assets in this location",
-            newButtonRoute: "manage-assets",
-            newButtonContent: "Add asset",
-          }}
+          titleContent={
+            canViewArchivedAssets ? (
+              <ArchivedViewMenu plural="assets" />
+            ) : undefined
+          }
+          customEmptyStateContent={
+            archivedView === "archived"
+              ? { title: "No archived assets at this location", text: "" }
+              : userRoleCanManageAssets
+              ? {
+                  title:
+                    archivedHiddenState?.title ??
+                    "There are currently no assets at the location",
+                  text:
+                    archivedHiddenState?.text ?? "Add assets in this location",
+                  newButtonRoute: "manage-assets",
+                  newButtonContent: "Add asset",
+                }
+              : {
+                  title:
+                    archivedHiddenState?.title ??
+                    "There are currently no assets at the location",
+                  text:
+                    archivedHiddenState?.text ??
+                    "Assets placed at this location will appear here.",
+                }
+          }
         />
       </div>
     </>
@@ -394,6 +514,9 @@ const ListAssetContent = ({
   extraProps,
 }: {
   item: Asset & {
+    /** Cover image of the asset's model, rendered when the asset has no
+     * image of its own. See `~/modules/asset/image-resolution`. */
+    assetModel: { image: string | null; thumbnailImage: string | null } | null;
     category: Pick<Category, "id" | "name" | "color"> | null;
     tags?: Tag[];
     location?: Location;
@@ -412,30 +535,62 @@ const ListAssetContent = ({
     }>;
     qrCodes: { id: string }[];
     barcodes: { id: string; type: BarcodeType; value: string }[];
-    custody: {
+    /**
+     * Units of this pool out on an ONGOING or OVERDUE booking that left from
+     * this location (see `countUnitsOnBookingsFromLocation`). 0 for
+     * individual assets and for pools with nothing out from here.
+     */
+    onBookingFromHere?: number;
+    /**
+     * Custody rows for this asset, one per holder — quantity-tracked stock can
+     * be held by several people at once. The list column shows one badge, so
+     * it renders the primary holder via `getPrimaryCustody`.
+     *
+     * Optionality mirrors the schema: a `TeamMember` need not be linked to a
+     * `User` (non-registered members exist), and a linked user's name fields
+     * and avatar are all optional. This projection is written by hand, so the
+     * compiler checks it against nothing — keep it in step with the `custody`
+     * select in `getLocation`.
+     */
+    /**
+     * Units in custody taken from THIS location, for pools with two or more
+     * sources; 0 otherwise. Set by the loader.
+     */
+    inCustodyHere?: number;
+    custody: Array<{
+      quantity: number;
       custodian: {
         id: string;
         name: string;
         user: {
           id: string;
-          firstName: string;
-          lastName: string;
-          profilePicture: string;
+          firstName: string | null;
+          lastName: string | null;
+          displayName: string | null;
+          profilePicture: string | null;
           email: string;
-        };
+        } | null;
       };
-    };
+    }>;
   };
   extraProps: { canReadCustody: boolean; userRoleCanManageAssets: boolean };
 }) => {
   const { category, tags, custody } = item;
+  // The list column shows one badge, so it shows the primary holder — the
+  // same choice `getPrimaryCustody` makes everywhere else custody is
+  // summarised in a single slot.
+  const primaryCustody = getPrimaryCustody(custody);
   // The location whose detail page we're on — used to pick this asset's
   // pivot row out of `item.assetLocations`. Mirrors the kit-page
   // `useParams<{ kitId }>` pattern at `kits.$kitId.assets.tsx:179`.
   const { locationId } = useParams<{ locationId: string }>();
   const currentOrganization = useCurrentOrganization();
   const displayCode = currentOrganization
-    ? resolveDisplayCode({ entity: item, organization: currentOrganization })
+    ? resolveDisplayCode({
+        entity: item,
+        organization: currentOrganization,
+        entityKind: "asset",
+      })
     : null;
   return (
     <>
@@ -449,6 +604,7 @@ const ListAssetContent = ({
                   mainImage: item.mainImage,
                   thumbnailImage: item.thumbnailImage,
                   mainImageExpiration: item.mainImageExpiration,
+                  assetModel: item.assetModel ?? null,
                 }}
                 alt={`Image of ${item.title}`}
                 className="size-full rounded-[4px] border object-cover"
@@ -516,6 +672,12 @@ const ListAssetContent = ({
                       return (
                         <span className="ml-2 inline-flex items-center gap-2 text-xs font-normal text-gray-500">
                           · {atLocation} {unit} at this location
+                          {item.inCustodyHere
+                            ? ` · ${item.inCustodyHere} in custody`
+                            : null}
+                          {item.onBookingFromHere
+                            ? ` · ${item.onBookingFromHere} on a booking`
+                            : null}
                           {kitEntries.length > 0 ? (
                             <TooltipProvider delayDuration={150}>
                               <Tooltip>
@@ -590,6 +752,7 @@ const ListAssetContent = ({
                   id={item.id}
                   status={item.status}
                   availableToBook={item.availableToBook}
+                  isArchived={!!item.archivedAt}
                   asset={item}
                 />
                 {displayCode ? <AssetCodeBadge {...displayCode} /> : null}
@@ -608,8 +771,8 @@ const ListAssetContent = ({
       {/* Custodian */}
       <When truthy={extraProps.canReadCustody}>
         <Td>
-          {custody?.custodian ? (
-            <TeamMemberBadge teamMember={custody.custodian} />
+          {primaryCustody?.custodian ? (
+            <TeamMemberBadge teamMember={primaryCustody.custodian} />
           ) : (
             <EmptyTableValue />
           )}

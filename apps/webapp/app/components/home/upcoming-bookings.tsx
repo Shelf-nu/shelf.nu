@@ -82,15 +82,8 @@ export default function UpcomingBookings() {
                               {" · "}
                             </>
                           )}
-                          <DateS
-                            date={booking.from}
-                            options={{ month: "short", day: "numeric" }}
-                          />{" "}
-                          →{" "}
-                          <DateS
-                            date={booking.to}
-                            options={{ month: "short", day: "numeric" }}
-                          />
+                          <DateS date={booking.from} /> →{" "}
+                          <DateS date={booking.to} />
                         </span>
                       </div>
                     </div>

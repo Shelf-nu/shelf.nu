@@ -111,6 +111,10 @@ export function AssetsListComponent({
                     thumbnailImage: asset.mainImage ?? null,
                     mainImage: asset.mainImage ?? null,
                     mainImageExpiration: null,
+                    // why: /api/assets resolves the model cascade
+                    // server-side into `mainImage`, so there is no
+                    // nested model to pass here.
+                    assetModel: null,
                   }}
                   alt={`${asset.title} main image`}
                 />

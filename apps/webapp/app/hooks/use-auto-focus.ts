@@ -40,13 +40,21 @@ export function useAutoFocus<T extends HTMLElement>(
   useEffect(() => {
     if (!when) return;
 
+    /**
+     * why: `preventScroll` — a bare `focus()` scrolls the element into view,
+     * which fights any scroll the page owes someone else. The case that bit us:
+     * arriving at a section anchor (`/settings/general#transfer-ownership`)
+     * scrolled to the section, then autofocus yanked the page back to the top.
+     * Focus is still moved — only the scroll side-effect is dropped — so every
+     * call site keeps its focus affordance.
+     */
     if (!deferToNextFrame) {
-      ref.current?.focus();
+      ref.current?.focus({ preventScroll: true });
       return;
     }
 
     const frame = window.requestAnimationFrame(() => {
-      ref.current?.focus();
+      ref.current?.focus({ preventScroll: true });
     });
     return () => window.cancelAnimationFrame(frame);
   }, [when, deferToNextFrame]);

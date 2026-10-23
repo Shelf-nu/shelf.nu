@@ -1,114 +1,156 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { DateTime } from "luxon";
 import { Form, useLoaderData, useLocation, useActionData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
+import { DateTimePicker } from "~/components/shared/date-time-picker";
 import { Separator } from "~/components/shared/separator";
 import { useSearchParams } from "~/hooks/search-params";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
+import { useFormatPrefs } from "~/hooks/use-format-prefs";
 import {
   REMINDER_REPEAT_VALUES,
   resolveRecurrenceZone,
   type ReminderRepeatValue,
 } from "~/modules/asset-reminder/recurrence";
-import { dateForDateTimeInputValue } from "~/utils/date-fns";
+import { DATE_TIME_FORMAT } from "~/utils/constants";
+import { toIsoDateTimeToUserTimezone } from "~/utils/date-fns";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
 import ReminderRecurrenceFields from "./reminder-recurrence-fields";
 import TeamMembersSelector from "./team-members-selector";
 import { Dialog, DialogPortal } from "../layout/dialog";
 
-const baseReminderSchema = z.object({
-  name: z.string().min(1, "Please enter name."),
-  message: z.string().min(1, "Please enter message."),
-  alertDateTime: z.coerce.date(),
-  teamMembers: z
-    .array(z.string())
-    .min(1, "Please select at least one team member"),
-  repeat: z.enum(REMINDER_REPEAT_VALUES).default("never"),
-  // why preprocess: an empty optional date input submits "" through the
-  // multipart form, and z.coerce.date() would turn "" into Invalid Date
-  endsAt: z.preprocess(
-    (value) => (value === "" || value == null ? undefined : value),
-    z.coerce.date().optional()
-  ),
-  redirectTo: z.string().optional(),
-});
+/** Options accepted by {@link createSetReminderSchema}. */
+type CreateSetReminderSchemaOptions = {
+  /**
+   * The acting user's resolved IANA timezone preference — the SAME zone the
+   * server parses submitted wall-clock times in and persists against. When
+   * provided, the submitted `alertDateTime` wall-clock ("yyyy-MM-ddTHH:mm") is
+   * interpreted in this zone (via Luxon) before the future-date check, so
+   * client-side validation matches persistence exactly even when the browser
+   * zone differs from the user's preference. When omitted (e.g. the shared
+   * constant that has no request context), the value is coerced in the
+   * runtime's local zone as a best-effort fallback.
+   */
+  timeZone?: string;
+};
 
 /**
- * CLIENT-ONLY endsAt ordering check, comparing CALENDAR DAYS rather than
- * instants. The two inputs coerce differently: a type="date" string parses
- * at UTC midnight while a datetime-local string parses in the browser's
- * local zone — comparing the raw instants wrongly rejected valid same-day
- * evening reminders for users west of UTC. The endsAt calendar day is the
- * UTC date of the coerced value; the reminder's calendar day is its LOCAL
- * date. The authoritative server check runs on the zone-resolved values in
- * resolveReminderPayloadDates.
+ * Builds the set/edit-reminder form schema, shared by the dialog and both
+ * server actions (create in `assets.$assetId.tsx`, edit in
+ * `asset-reminder/utils.server.ts`).
+ *
+ * - The future-date cutoff for `alertDateTime` is evaluated **per validation**
+ *   (a fresh `Date.now()` each run), and lives on the field rather than the
+ *   object so the return value stays a plain `ZodObject` that server callers
+ *   can `.extend(...)`.
+ * - When `timeZone` is supplied, the submitted wall-clock string is
+ *   interpreted in that timezone before the cutoff comparison, so "future" is
+ *   judged against the SAME instant that will be stored.
+ * - `repeat` defaults to `"never"` because a disabled (plan-locked) Repeat
+ *   select submits nothing at all.
+ * - `endsAt` carries no ordering check here: the browser-side calendar-day
+ *   check is added by {@link createSetReminderFormSchema}, and the
+ *   authoritative check runs on the zone-resolved instants in
+ *   `resolveReminderPayloadDates`.
+ *
+ * @param options - Optional resolved format prefs (currently the timezone).
+ * @returns A Zod object schema for the set/edit reminder form.
  */
-function clientEndsAtOrderingRefinement(
-  data: z.infer<typeof baseReminderSchema>,
-  ctx: z.RefinementCtx
+export function createSetReminderSchema(
+  options: CreateSetReminderSchemaOptions = {}
 ) {
-  if (data.repeat === "never" || !data.endsAt) return;
+  const { timeZone } = options;
 
-  const endsDay = data.endsAt.toISOString().slice(0, 10);
-  const alert = data.alertDateTime;
-  const alertDay = `${alert.getFullYear()}-${String(
-    alert.getMonth() + 1
-  ).padStart(2, "0")}-${String(alert.getDate()).padStart(2, "0")}`;
-
-  if (endsDay < alertDay) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["endsAt"],
-      message: "End date must be on or after the reminder date",
-    });
-  }
+  return z.object({
+    name: z.string().min(1, "Please enter name."),
+    message: z.string().min(1, "Please enter message."),
+    alertDateTime: z
+      .preprocess((value) => {
+        // Interpret the submitted wall-clock in the acting user's timezone so
+        // "future" is judged against the SAME instant that will be persisted.
+        // Fall back to native coercion when no timezone is known or the value
+        // doesn't match the expected format (Invalid Date then surfaces the
+        // standard "Invalid date" error).
+        if (typeof value === "string" && timeZone) {
+          const parsed = DateTime.fromFormat(value, DATE_TIME_FORMAT, {
+            zone: timeZone,
+          });
+          if (parsed.isValid) {
+            return parsed.toJSDate();
+          }
+        }
+        return value;
+      }, z.coerce.date())
+      // Fresh `Date.now()` on every validation — never a module-load snapshot.
+      .refine(
+        (date) => date.getTime() > Date.now(),
+        "Please select a date in the future"
+      ),
+    teamMembers: z
+      .array(z.string())
+      .min(1, "Please select at least one team member"),
+    repeat: z.enum(REMINDER_REPEAT_VALUES).default("never"),
+    // why preprocess: an empty optional date input submits "" through the
+    // multipart form, and z.coerce.date() would turn "" into Invalid Date
+    endsAt: z.preprocess(
+      (value) => (value === "" || value == null ? undefined : value),
+      z.coerce.date().optional()
+    ),
+    redirectTo: z.string().optional(),
+  });
 }
 
 /**
- * CLIENT-ONLY future check. In the browser, z.coerce.date() parses the
- * datetime-local string in the user's own zone, so comparing against
- * Date.now() is correct. On the SERVER the same coercion runs in the
- * process zone (UTC in prod) and would wrongly reject valid future times
- * for users west of UTC — the authoritative server check happens in
- * resolveReminderPayloadDates against the client-hint-resolved instant.
- * (Evaluated at parse time; the previous `.min(new Date())` snapshotted
- * boot time.)
+ * Timezone-agnostic reminder schema instance: the `typeof` anchor for
+ * `getValidationErrors<typeof setReminderSchema>` and the field types of the
+ * dialog's `reminder` prop. Request-backed parsing must go through
+ * {@link createSetReminderSchema} with the acting user's timezone instead.
  */
-function clientFutureRefinement(
-  data: z.infer<typeof baseReminderSchema>,
-  ctx: z.RefinementCtx
-) {
-  if (data.alertDateTime.getTime() <= Date.now()) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["alertDateTime"],
-      message: "Please select a date in the future",
-    });
-  }
-}
-
-/** Client-side schema (zorm): calendar-day ordering + zone-correct future check. */
-export const setReminderSchema = baseReminderSchema
-  .superRefine(clientEndsAtOrderingRefinement)
-  .superRefine(clientFutureRefinement);
+export const setReminderSchema = createSetReminderSchema();
 
 /**
- * Server-side parse schemas: NO date refinements — server-side coercion runs
- * in the process zone, not the user's, so both the future check and the
- * endsAt ordering check are enforced by resolveReminderPayloadDates on the
- * client-hint-resolved instants instead.
+ * The dialog's client-side schema: {@link createSetReminderSchema} plus an
+ * endsAt ordering check that compares CALENDAR DAYS rather than instants.
+ *
+ * The two inputs carry different shapes: a "yyyy-MM-dd" endsAt coerces at UTC
+ * midnight, while alertDateTime is an instant resolved in `timeZone`. So the
+ * endsAt day is the UTC date of the coerced value and the reminder's day is
+ * its date in `timeZone` (the runtime zone when none is given). Comparing raw
+ * instants would reject valid same-day evening reminders west of UTC.
+ *
+ * Client-only: the server enforces ordering on the zone-resolved values in
+ * `resolveReminderPayloadDates`, where endsAt means end-of-day.
+ *
+ * @param options - Optional resolved format prefs (currently the timezone).
+ * @returns The refined schema the dialog hands to `useZorm`.
  */
-export const setReminderServerSchema = baseReminderSchema;
+export function createSetReminderFormSchema(
+  options: CreateSetReminderSchemaOptions = {}
+) {
+  const { timeZone } = options;
 
-/** Edit adds the reminder id; consumed by resolveRemindersActions. */
-export const editReminderServerSchema = baseReminderSchema.extend({
-  id: z.string(),
-});
+  return createSetReminderSchema(options).superRefine((data, ctx) => {
+    if (data.repeat === "never" || !data.endsAt) return;
+
+    const endsDay = data.endsAt.toISOString().slice(0, 10);
+    const alertDay = DateTime.fromJSDate(data.alertDateTime, {
+      zone: timeZone ?? "local",
+    }).toISODate();
+
+    if (alertDay && endsDay < alertDay) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["endsAt"],
+        message: "End date must be on or after the reminder date",
+      });
+    }
+  });
+}
 
 type SetOrEditReminderDialogProps = {
   open: boolean;
@@ -143,6 +185,14 @@ export default function SetOrEditReminderDialog({
 }: SetOrEditReminderDialogProps) {
   const disabled = useDisabled();
 
+  /**
+   * The acting user's resolved timezone preference — the SAME zone the server
+   * parses submitted wall-clock times in and the UI displays dates in. Seeding
+   * the datetime input from this (not the browser/runtime zone) keeps the
+   * round-trip consistent when the two differ.
+   */
+  const { timeZone } = useFormatPrefs();
+
   const pathname = useLocation().pathname;
   const [searchParams, setSearchParams] = useSearchParams();
   const canUseRecurringReminders = useCanUseRecurringReminders();
@@ -153,7 +203,19 @@ export default function SetOrEditReminderDialog({
       : "?success=true"
   }`;
 
-  const zo = useZorm("SetOrEditReminder", setReminderSchema);
+  /**
+   * Client-side schema bound to the acting user's timezone so the future-date
+   * and endsAt checks judge the submitted wall-clock in the SAME zone the
+   * server persists it (see the reminder actions in
+   * `modules/asset-reminder/utils.server.ts`). Memoized on `timeZone` for a
+   * stable identity across re-renders.
+   */
+  const schema = useMemo(
+    () => createSetReminderFormSchema({ timeZone }),
+    [timeZone]
+  );
+
+  const zo = useZorm("SetOrEditReminder", schema);
 
   const actionData = useActionData<DataOrErrorResponse>();
   /** This handles server side errors in case client side validation fails */
@@ -187,18 +249,72 @@ export default function SetOrEditReminderDialog({
   /** Ref for the first field so we can focus it on open without autoFocus. */
   const nameInputRef = useAutoFocus<HTMLInputElement>({ when: open });
 
+  /**
+   * One-shot latch guarding {@link handleOnSuccess} against re-firing while
+   * the `success=true` param is still present but not yet stripped from the
+   * committed URL.
+   *
+   * Root cause of the production incident this guards against: the reminder
+   * form action redirects to `?...&success=true`. Handling that (closing the
+   * dialog + stripping the param) is *itself* a second navigation, and until
+   * that navigation commits, `searchParams` keeps reading `success=true` on
+   * every intermediate re-render. Both `onClose` (an inline arrow in some
+   * callers) and `setSearchParams` can also get a fresh identity every
+   * render. Without a latch, any one of those re-renders re-runs this effect,
+   * which calls `setSearchParams` again — aborting the in-flight strip
+   * navigation before it commits — so `success` never clears and the effect
+   * fires again on the next render: an infinite `reminders.data`
+   * revalidation loop. This latch makes the effect body idempotent
+   * regardless of dependency-identity churn (defense in depth on top of
+   * stabilizing `onClose`/`setSearchParams` at the call sites).
+   */
+  const successHandledRef = useRef(false);
+
   useEffect(
     function handleOnSuccess() {
-      if (searchParams.get("success") === "true") {
-        onClose && onClose();
+      const isSuccess = searchParams.get("success") === "true";
 
-        setSearchParams((prev) => {
+      if (!isSuccess) {
+        // Re-arm the latch once the param is gone (or was never set) so a
+        // *subsequent* success (e.g. creating another reminder) still closes
+        // the dialog and strips the param.
+        successHandledRef.current = false;
+        return;
+      }
+
+      // Gate on `open`: the reminders table mounts ONE create dialog plus,
+      // inside every row's `ActionsDropdown`, one (closed) edit dialog. All
+      // of those instances observe the same `?success=true` param, so
+      // without this gate every mounted instance — each with its own
+      // independently-false latch — would call `setSearchParams` once,
+      // producing N competing navigations/`.data` revalidations on an
+      // N-row page. Only the dialog that is actually `open` (the one whose
+      // submit produced this success) should react.
+      if (!open) return;
+
+      if (successHandledRef.current) {
+        // Already handled this success signal — the strip navigation may
+        // still be in flight; do not act again until `success` clears.
+        return;
+      }
+      successHandledRef.current = true;
+
+      onClose && onClose();
+
+      // TODO(follow-up): migrate this form to `useFetcher` so success is
+      // signalled via fetcher state instead of a `?success=true` redirect +
+      // param-strip navigation. That would remove this whole class of loop,
+      // but changing the form's action/redirect contract is out of scope for
+      // this hotfix — it's shared with the global reminders page.
+      setSearchParams(
+        (prev) => {
           prev.delete("success");
           return prev;
-        });
-      }
+        },
+        { replace: true, preventScrollReset: true }
+      );
     },
-    [onClose, searchParams, setSearchParams]
+    [open, onClose, searchParams, setSearchParams]
   );
 
   // why: recurrenceEndsAt is stored as end-of-day in the reminder's own
@@ -291,15 +407,16 @@ export default function SetOrEditReminderDialog({
             </div>
 
             <div className="mb-4">
-              <Input
+              <DateTimePicker
+                mode="datetime"
                 defaultValue={
                   reminder?.alertDateTime
-                    ? dateForDateTimeInputValue(
-                        new Date(reminder.alertDateTime)
-                      )
+                    ? toIsoDateTimeToUserTimezone(
+                        reminder.alertDateTime,
+                        timeZone
+                      ).slice(0, 16)
                     : undefined
                 }
-                type="datetime-local"
                 name={zo.fields.alertDateTime()}
                 error={
                   validationErrors?.alertDateTime?.message ||
@@ -308,7 +425,6 @@ export default function SetOrEditReminderDialog({
                 label="Reminder Date"
                 disabled={disabled}
                 required
-                placeholder="Enter description..."
                 className="mb-2"
               />
               <p className="text-gray-500">

@@ -39,15 +39,37 @@ export const Dialog = ({
       (document.activeElement as HTMLElement | null) ?? null;
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        onCloseRef.current?.();
-      }
+      if (event.key !== "Escape") return;
+
+      /**
+       * A floating layer owns Escape while the keystroke comes from inside it.
+       *
+       * Radix portals popover, select and combobox content into a
+       * `[data-radix-popper-content-wrapper]` on `body` and closes it from its
+       * own document-level handler. Because this listener runs first (see
+       * below), closing unconditionally would shut the whole dialog the moment
+       * someone dismissed a picker inside it, losing the form. Escape is
+       * expected to peel one layer at a time, so the innermost open layer
+       * takes it and this one only acts when nothing floats above.
+       *
+       * Keyed on where the keystroke came from rather than on whether any
+       * popper exists: an unrelated open layer elsewhere on the page, a
+       * tooltip for instance, must not stop this dialog closing.
+       */
+      const target = event.target as Element | null;
+      if (target?.closest?.("[data-radix-popper-content-wrapper]")) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      onCloseRef.current?.();
     };
 
-    // Attach to document to capture ESC even when Select or other components are focused
-    document.addEventListener("keydown", handleKeyDown, { capture: true });
+    // `window`, not `document`, and capture: the capture phase runs
+    // window -> document, so this fires before an enclosing Radix overlay's
+    // own document-level Escape handler and stopPropagation() keeps the key
+    // from reaching it. On `document` the outer layer wins the race and a
+    // dialog opened inside a Sheet closes the Sheet instead of itself.
+    window.addEventListener("keydown", handleKeyDown, { capture: true });
 
     const focusTarget =
       dialog.querySelector<HTMLElement>("[data-dialog-initial-focus]") ||
@@ -60,7 +82,7 @@ export const Dialog = ({
     focusTarget.focus();
 
     return () => {
-      document.removeEventListener("keydown", handleKeyDown, { capture: true });
+      window.removeEventListener("keydown", handleKeyDown, { capture: true });
       previouslyFocusedElement.current?.focus();
       previouslyFocusedElement.current = null;
     };
@@ -79,7 +101,28 @@ export const Dialog = ({
       onKeyDown={handleActivationKeyPress(() => onClose())}
     >
       <dialog ref={dialogRef} className={tw("dialog", className)} open={open}>
-        <div className="flex h-full cursor-default flex-col bg-white">
+        {/*
+         * md:max-h-[calc(100vh-4rem)]: on desktop the dialog is `md:h-auto` and
+         * the backdrop centers it without scrolling, so a tall body (e.g. the
+         * 450px QR relink scanner) overflowed the viewport top AND bottom on
+         * short windows and pushed the footer action off-screen with no way to
+         * reach it.
+         *
+         * The cap must sit on THIS flex panel, not on the `h-auto` dialog: a
+         * `h-full` child cannot resolve a percentage height against an
+         * auto-height parent, so a cap on the dialog is a no-op, whereas a cap
+         * on the flex column makes the `dialog-body` (grow overflow-auto)
+         * shrink and scroll.
+         *
+         * why calc(100vh-4rem) and not 90vh: 4rem is the dialog's own
+         * `md:py-8`, so the dialog lands at exactly 100vh instead of
+         * overflowing. It also matches the height the near-fullscreen dialogs
+         * already set for themselves (`md:h-[calc(100vh-4rem)] md:py-0` in the
+         * PDF and image previews); a 90vh cap would have silently shrunk those.
+         *
+         * Only applies at md+; mobile keeps its `h-[100dvh]` behavior.
+         */}
+        <div className="flex h-full cursor-default flex-col bg-white md:max-h-[calc(100vh-4rem)]">
           <div
             className={tw(
               "dialog-header flex items-start justify-between bg-white px-6 py-3",

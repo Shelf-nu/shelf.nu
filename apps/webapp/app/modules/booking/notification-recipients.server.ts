@@ -9,16 +9,22 @@
  * Resolution order (first-match wins for dedup):
  *   1. Custodian (always included)
  *   2. Booking creator (if org setting enabled)
- *   3. Organization admins (RESERVATION events only, if org setting enabled)
+ *   3. The workspace booking broadcast audience (RESERVATION events whose
+ *      maker's role triggers it, if org setting enabled)
  *   4. Always-notify team members (org-level setting)
  *   5. Per-booking notification recipients
  *
  * After resolution, the editor (user performing the action) is excluded
  * from non-scheduled notifications so they don't email themselves.
  */
+import type {
+  DateFormatPreference,
+  TimeFormatPreference,
+  WeekStartPreference,
+} from "@prisma/client";
 import type { BookingForEmail } from "~/emails/types";
 import { getBookingNotificationSettingsForOrg } from "~/modules/booking-settings/service.server";
-import { getOrganizationAdminsForNotification } from "~/modules/organization/service.server";
+import { getOrganizationNotificationAudience } from "~/modules/organization/service.server";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 
@@ -31,6 +37,7 @@ import { Logger } from "~/utils/logger";
  * - `CHECKIN` — booking assets have been checked in (completed)
  * - `OVERDUE` — booking has passed its end date without checkin
  * - `CANCEL` — booking was cancelled by a user
+ * - `REVERT_TO_DRAFT` — a reserved booking was sent back to draft
  * - `EXTEND` — booking end date was extended
  * - `DELETE` — booking was permanently deleted
  * - `UPDATE` — booking fields or assets were modified
@@ -42,6 +49,7 @@ export type BookingEventType =
   | "CHECKIN"
   | "OVERDUE"
   | "CANCEL"
+  | "REVERT_TO_DRAFT"
   | "EXTEND"
   | "DELETE"
   | "UPDATE";
@@ -53,6 +61,12 @@ export type BookingEventType =
  * @property firstName - Recipient's first name (nullable for team-member-only users)
  * @property lastName - Recipient's last name (nullable for team-member-only users)
  * @property userId - The user's database ID, used for editor exclusion matching
+ * @property dateFormat - Raw (nullable) date-format preference, carried so the
+ *   send loop resolves this recipient's prefs from the already-loaded row via
+ *   `resolveFormatPrefs` — avoids a per-recipient DB fetch (N+1)
+ * @property timeFormat - Raw (nullable) time-format preference (see `dateFormat`)
+ * @property weekStart - Raw (nullable) week-start preference (see `dateFormat`)
+ * @property timeZone - Raw (nullable) IANA time zone (see `dateFormat`)
  * @property reason - Why this person receives the notification; drives the
  *   personalized footer in the email template (see `NotificationReasonFooter`)
  */
@@ -61,6 +75,12 @@ export type NotificationRecipient = {
   firstName: string | null;
   lastName: string | null;
   userId: string;
+  // Raw (nullable) format prefs, carried so the send loop can resolve prefs
+  // from this already-loaded row via resolveFormatPrefs — avoids an N+1.
+  dateFormat: DateFormatPreference | null;
+  timeFormat: TimeFormatPreference | null;
+  weekStart: WeekStartPreference | null;
+  timeZone: string | null;
   reason:
     | "custodian"
     | "creator"
@@ -102,18 +122,19 @@ export async function getBookingNotificationRecipients({
   organizationId,
   editorUserId,
   isScheduledJob,
-  isSelfServiceOrBase,
+  alertsOrgOnReservation,
 }: {
   booking: BookingForEmail;
   eventType: BookingEventType;
   organizationId: string;
   editorUserId?: string;
   isScheduledJob?: boolean;
-  /** When true, the booking was created by a base/self-service user.
-   *  Admin broadcast only fires for reservations made by these roles
-   *  (preserving current behavior where admins are alerted to "pickup"
-   *  requests from lower-role users). */
-  isSelfServiceOrBase?: boolean;
+  /**
+   * The reserving member's role triggers the workspace booking broadcast
+   * (`notifications.reservationAlertsAdmins`): their reservation is a
+   * "pickup" request someone else must handle.
+   */
+  alertsOrgOnReservation?: boolean;
 }): Promise<NotificationRecipient[]> {
   try {
     const recipients = new Map<string, NotificationRecipient>();
@@ -126,6 +147,10 @@ export async function getBookingNotificationRecipients({
         firstName: booking.custodianUser.firstName ?? null,
         lastName: booking.custodianUser.lastName ?? null,
         userId: booking.custodianUser.id,
+        dateFormat: booking.custodianUser.dateFormat,
+        timeFormat: booking.custodianUser.timeFormat,
+        weekStart: booking.custodianUser.weekStart,
+        timeZone: booking.custodianUser.timeZone,
         reason: "custodian",
       });
     }
@@ -141,22 +166,26 @@ export async function getBookingNotificationRecipients({
           firstName: booking.creator.firstName ?? null,
           lastName: booking.creator.lastName ?? null,
           userId: booking.creator.id,
+          dateFormat: booking.creator.dateFormat,
+          timeFormat: booking.creator.timeFormat,
+          weekStart: booking.creator.weekStart,
+          timeZone: booking.creator.timeZone,
           reason: "creator",
         });
       }
     }
 
-    // 4. Notify admins only on reservation requests from base/self-service
-    //    users. This is the "pickup" broadcast — admins are alerted so someone
-    //    can handle the request. Admins reserving their own bookings don't
-    //    trigger this broadcast (preserving current behavior).
+    // 4. On a reservation whose maker's role triggers the broadcast, notify
+    //    the broadcast audience (`notifications.orgBookingBroadcasts`) so
+    //    someone can handle the pickup.
     if (
       settings.notifyAdminsOnNewBooking &&
       eventType === "RESERVATION" &&
-      isSelfServiceOrBase
+      alertsOrgOnReservation
     ) {
-      const admins = await getOrganizationAdminsForNotification({
+      const admins = await getOrganizationNotificationAudience({
         organizationId,
+        audience: "orgBookingBroadcasts",
       });
 
       for (const admin of admins) {
@@ -166,6 +195,10 @@ export async function getBookingNotificationRecipients({
             firstName: admin.firstName ?? null,
             lastName: admin.lastName ?? null,
             userId: admin.id,
+            dateFormat: admin.dateFormat,
+            timeFormat: admin.timeFormat,
+            weekStart: admin.weekStart,
+            timeZone: admin.timeZone,
             reason: "admin",
           });
         }
@@ -180,6 +213,10 @@ export async function getBookingNotificationRecipients({
           firstName: tm.user.firstName ?? null,
           lastName: tm.user.lastName ?? null,
           userId: tm.user.id,
+          dateFormat: tm.user.dateFormat,
+          timeFormat: tm.user.timeFormat,
+          weekStart: tm.user.weekStart,
+          timeZone: tm.user.timeZone,
           reason: "always_notify",
         });
       }
@@ -194,6 +231,10 @@ export async function getBookingNotificationRecipients({
             firstName: tm.user.firstName ?? null,
             lastName: tm.user.lastName ?? null,
             userId: tm.user.id,
+            dateFormat: tm.user.dateFormat,
+            timeFormat: tm.user.timeFormat,
+            weekStart: tm.user.weekStart,
+            timeZone: tm.user.timeZone,
             reason: "booking_recipient",
           });
         }

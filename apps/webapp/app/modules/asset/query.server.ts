@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import type { CustomFieldType } from "@prisma/client";
 
 import type { BarcodeType } from "@prisma/client";
+import { STOCK_STATUSES, STOCK_STATUS_SEVERITY } from "@shelf/quantity-control";
 
 import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
 import { normalizeBarcodeValue } from "~/modules/barcode/validation";
@@ -9,8 +10,13 @@ import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { isSafeSqlIdentifier } from "~/utils/sql";
 import { parseFilters } from "./filter-parsing";
+import { LAST_AUDIT_DATE_COLUMN } from "./last-audit-date-access";
+import { bookableListScopeSql } from "./list-scope.server";
+import type { BookableListScope } from "./list-scope.server";
 import { expandLocationHierarchyFilters } from "./location-filter.server";
-import type { CustomFieldSorting } from "./types";
+import { buildAssetSearchUnion } from "./search-union.server";
+import { splitAssetSearchTerms } from "./search.server";
+import type { ArchivedFilter, CustomFieldSorting } from "./types";
 import type { Column } from "../asset-index-settings/helpers";
 
 /**
@@ -20,14 +26,27 @@ import type { Column } from "../asset-index-settings/helpers";
  */
 const ASSET_IS_CHECKED_OUT = Prisma.sql`a.status = 'CHECKED_OUT'`;
 
-export const CUSTOM_FIELD_SEARCH_PATHS = [
-  "valueText",
-  "valueMultiLineText",
-  "valueOption",
-  "valueDate",
-  "valueBoolean",
-  "raw",
-] as const;
+/**
+ * SQL fragment: the name to show for the custodian of an ONGOING/OVERDUE
+ * booking, where the holder is `bu` (a registered user) or `btm` (an NRM).
+ *
+ * `displayName` wins over the legal name, matching `resolveUserDisplayName` —
+ * this projection is the ONLY name a checked-out row gets, so a bare
+ * first/last join here shows a user the name they asked us not to be called by.
+ *
+ * The `bu.id IS NOT NULL` guard is what distinguishes a user from an NRM, and
+ * it cannot be replaced by wrapping the whole thing in a COALESCE onto
+ * `btm.name`: `CONCAT` ignores NULLs and yields `''` rather than NULL for an
+ * NRM, so the fallback would never fire and the badge would render blank.
+ *
+ * Shared by the full projection and by {@link CUSTODY_SORT_CASE}, so the value
+ * sorted on is the same string the row displays.
+ */
+const BOOKING_CUSTODIAN_NAME = Prisma.sql`CASE
+                WHEN bu.id IS NOT NULL
+                  THEN COALESCE(NULLIF(TRIM(bu."displayName"), ''), TRIM(CONCAT(bu."firstName", ' ', bu."lastName")))
+                ELSE btm.name
+              END`;
 
 /**
  * Generates the SQL WHERE clause for asset filtering
@@ -35,6 +54,14 @@ export const CUSTOM_FIELD_SEARCH_PATHS = [
  * @param search - Optional search string
  * @param filters - Array of filter objects
  * @param assetIds - Optional array of specific asset IDs to include
+ * @param bookableScope - The caller's list scope: assets available to book plus
+ *   the ones they hold. `null` lists every asset (see {@link BookableListScope})
+ * @param timeZone - IANA timezone name the acting user displays dates in.
+ *   Used only by built-in date-column filters so their day truncation matches
+ *   what the user sees (see {@link addDateFilter}). Defaults to `"UTC"` to
+ *   preserve behavior for callers that don't supply it.
+ * @param lowStockOnly - Restrict to low-stock QUANTITY_TRACKED assets (see below)
+ * @param archivedFilter - Active/Archived/All view dimension (issue #382)
  * @returns Prisma.Sql WHERE clause
  */
 export function generateWhereClause(
@@ -42,12 +69,43 @@ export function generateWhereClause(
   search: string | null,
   filters: Filter[],
   assetIds?: string[],
-  availableToBookOnly = false
+  bookableScope: BookableListScope | null = null,
+  timeZone: string = "UTC",
+  lowStockOnly = false,
+  /**
+   * Active/Archived/All view dimension (orthogonal to the per-status filter).
+   * Defaults to "active" so the advanced (raw-SQL) index hides archived assets
+   * just like the simple index, unless the caller opts in. See issue #382.
+   */
+  archivedFilter: ArchivedFilter = "active"
 ): Prisma.Sql {
   let whereClause = Prisma.sql`WHERE a."organizationId" = ${organizationId}`;
 
-  if (availableToBookOnly) {
-    whereClause = Prisma.sql`${whereClause} AND a."availableToBook" = true`;
+  // Archived dimension. Kept here (not in `filters`) because it is a global
+  // view toggle, not a per-column advanced filter.
+  if (archivedFilter === "active") {
+    whereClause = Prisma.sql`${whereClause} AND a."archivedAt" IS NULL`;
+  } else if (archivedFilter === "archived") {
+    whereClause = Prisma.sql`${whereClause} AND a."archivedAt" IS NOT NULL`;
+  }
+
+  if (bookableScope) {
+    whereClause = Prisma.sql`${whereClause} AND ${bookableListScopeSql(
+      bookableScope
+    )}`;
+  }
+
+  if (lowStockOnly) {
+    // The "Low stock only" quick toggle. It compares Free now, not the total,
+    // with the threshold, so it finds exactly the rows the low-stock email is
+    // about: an asset with 6 total, 2 in custody and a threshold of 5 is low.
+    //
+    // Expressed as the alert's predicate (`isLowStock`: a threshold is set and
+    // Free now is at or below it), never as `verdict = 'LOW'`. The verdict is a
+    // priority ladder, so a pool that has run out entirely reads NONE_FREE (or
+    // SHORT), and the toggle must still find it: zero is at or below any
+    // threshold.
+    whereClause = Prisma.sql`${whereClause} AND a."type" = 'QUANTITY_TRACKED' AND a."minQuantity" IS NOT NULL AND ${POOL_AVAILABLE_EXPR} <= a."minQuantity"`;
   }
 
   // Add asset IDs filter if provided
@@ -56,66 +114,25 @@ export function generateWhereClause(
   }
 
   if (search) {
-    const words = search
-      .trim()
-      .split(",")
-      .map((term) => term.trim())
-      .filter(Boolean);
+    // Shared bounded parser (lowercasing matches buildAssetSearchUnion's
+    // precondition; ILIKE is case-insensitive anyway): caps the honored terms
+    // at MAX_ASSET_SEARCH_TERMS so a malformed comma paste cannot fan into
+    // unbounded UNION branches in the generated SQL.
+    const terms = splitAssetSearchTerms(search);
 
-    if (words.length > 0) {
-      // Create OR conditions for each search term, searching across multiple fields
-      const searchConditions = words.map(
-        (term) => Prisma.sql`(
-          a.title ILIKE ${`%${term}%`} OR
-          a.description ILIKE ${`%${term}%`} OR
-          a."sequentialId" ILIKE ${`%${term}%`} OR
-          c.name ILIKE ${`%${term}%`} OR
-          l.name ILIKE ${`%${term}%`} OR
-          t.name ILIKE ${`%${term}%`} OR
-          EXISTS (
-            -- Custodian search. Custody moved to the custody_agg LATERAL
-            -- (multi-custodian), so there is no top-level tm/u join to
-            -- reference here — match against ALL of the asset's
-            -- custodians via a per-asset scoped subquery instead.
-            SELECT 1 FROM public."Custody" cust
-            LEFT JOIN public."TeamMember" ctm ON cust."teamMemberId" = ctm.id
-            LEFT JOIN public."User" cusr ON ctm."userId" = cusr.id
-            WHERE cust."assetId" = a.id AND (
-              ctm.name ILIKE ${`%${term}%`} OR
-              cusr."firstName" ILIKE ${`%${term}%`} OR
-              cusr."lastName" ILIKE ${`%${term}%`}
-            )
-          ) OR
-          EXISTS (
-            SELECT 1 FROM public."Qr" q
-            WHERE q."assetId" = a.id AND q.id ILIKE ${`%${term}%`}
-          ) OR
-          EXISTS (
-            SELECT 1 FROM public."Barcode" b 
-            WHERE b."assetId" = a.id AND b.value ILIKE ${`%${term}%`}
-          ) OR
-          EXISTS (
-            SELECT 1 FROM public."AssetCustomFieldValue" acfv 
-            WHERE acfv."assetId" = a.id AND (
-              ${Prisma.join(
-                CUSTOM_FIELD_SEARCH_PATHS.map(
-                  (jsonPath) =>
-                    Prisma.sql`acfv.value#>>${Prisma.raw(
-                      `'{${jsonPath}}'`
-                    )} ILIKE ${`%${term}%`}`
-                ),
-                " OR "
-              )}
-            )
-          )
-        )`
-      );
-
-      // Combine all search terms with OR
-      whereClause = Prisma.sql`${whereClause} AND (${Prisma.join(
-        searchConditions,
-        " OR "
-      )})`;
+    if (terms.length > 0) {
+      // Search = "asset id is in the org-scoped UNION of matching ids". Each
+      // of the 11 sources is its own index-driven, org-scoped branch inside
+      // the UNION (see buildAssetSearchUnion), replacing the old multi-table
+      // OR that forced cross-org seq scans.
+      whereClause = Prisma.sql`${whereClause} AND a."id" IN ${buildAssetSearchUnion(
+        { organizationId, terms }
+      )}`;
+    } else {
+      // Typed input yielding zero terms (whitespace / bare commas) matches
+      // nothing — mirrors getAssets' fail-closed guard so the same search
+      // box behaves identically in simple and advanced mode.
+      whereClause = Prisma.sql`${whereClause} AND FALSE`;
     }
   }
 
@@ -142,7 +159,11 @@ export function generateWhereClause(
         whereClause = addBooleanFilter(whereClause, filter);
         break;
       case "date":
-        whereClause = addDateFilter(whereClause, filter);
+        // `lastAuditDate` is a computed subquery, not an `Asset` column.
+        whereClause =
+          filter.name === LAST_AUDIT_DATE_COLUMN
+            ? addDateFilter(whereClause, filter, timeZone, LAST_AUDIT_DATE_SQL)
+            : addDateFilter(whereClause, filter, timeZone);
         break;
       case "enum":
         whereClause = addEnumFilter(whereClause, filter);
@@ -295,12 +316,25 @@ function addCustomFieldOptionFilter(
         valuesArray = [];
       }
 
-      // Construct the PostgreSQL array literal
-      const arrayLiteral = `{${valuesArray
-        .map((val: string) => `"${val}"`)
-        .join(",")}}`;
+      // Nothing to match against. `Prisma.join` throws on an empty array, and
+      // a bare `ARRAY[]` has no inferable element type, so the empty case is
+      // spelled out: a typed empty array, which matches no row — the same
+      // answer the filter gave before.
+      if (valuesArray.length === 0) {
+        return Prisma.sql`${whereClause} AND ${subquery} = ANY(ARRAY[]::text[])`;
+      }
 
-      return Prisma.sql`${whereClause} AND ${subquery} = ANY(${arrayLiteral}::text[])`;
+      // Bind each value as its own parameter. An option's text is free-form —
+      // a quote, a backslash or a comma in it is ordinary — and assembling a
+      // `{"a","b"}` literal cannot carry those: the value's own quote closes
+      // the element and Postgres rejects the whole literal. Matches the
+      // `matchesAny` branch above.
+      const boundValues = Prisma.join(
+        valuesArray.map((val: string) => Prisma.sql`${val}`),
+        ", "
+      );
+
+      return Prisma.sql`${whereClause} AND ${subquery} = ANY(ARRAY[${boundValues}]::text[])`;
     }
     default:
       return whereClause;
@@ -341,20 +375,32 @@ function addCustomFieldNumberFilter(
   }
 }
 
+/**
+ * The unit of measure as the advanced index shows it. Only QUANTITY_TRACKED
+ * assets have a unit there; an individual asset can still carry a stored unit
+ * (a CSV import writes whatever the row says), which the cell hides. Sorting
+ * and filtering read this expression, never the raw column, so a unit nobody
+ * can see neither matches a filter nor moves a row in a sort.
+ */
+const VISIBLE_UNIT_OF_MEASURE = Prisma.raw(
+  `CASE WHEN a."type" = 'QUANTITY_TRACKED' THEN a."unitOfMeasure" ELSE NULL END`
+);
+
 function addStringFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
+  const column =
+    filter.name === "unitOfMeasure"
+      ? VISIBLE_UNIT_OF_MEASURE
+      : Prisma.sql`a."${Prisma.raw(filter.name)}"`;
+
   switch (filter.operator) {
     case "is":
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(filter.name)}" = ${
-        filter.value
-      }`;
+      return Prisma.sql`${whereClause} AND ${column} = ${filter.value}`;
     case "isNot":
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(filter.name)}" != ${
-        filter.value
-      }`;
+      // IS DISTINCT FROM, not `!=`: an empty column (no description, no unit
+      // of measure) is "not" any value, and `!=` never matches NULL.
+      return Prisma.sql`${whereClause} AND ${column} IS DISTINCT FROM ${filter.value}`;
     case "contains":
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(
-        filter.name
-      )}" ILIKE ${`%${filter.value}%`}`;
+      return Prisma.sql`${whereClause} AND ${column} ILIKE ${`%${filter.value}%`}`;
     case "matchesAny": {
       // Split comma-separated values and remove whitespace
       const values = (filter.value as string).split(",").map((v) => v.trim());
@@ -363,16 +409,13 @@ function addStringFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         values.map((v) => Prisma.sql`${v}`),
         ", "
       );
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(
-        filter.name
-      )}" = ANY(ARRAY[${valuesArray}]::text[])`;
+      return Prisma.sql`${whereClause} AND ${column} = ANY(ARRAY[${valuesArray}]::text[])`;
     }
     case "containsAny": {
       const values = (filter.value as string).split(",").map((v) => v.trim());
       // Build OR condition for ILIKE
       const likeConditions = values.map(
-        (value) =>
-          Prisma.sql`a."${Prisma.raw(filter.name)}" ILIKE ${`%${value}%`}`
+        (value) => Prisma.sql`${column} ILIKE ${`%${value}%`}`
       );
       return Prisma.sql`${whereClause} AND (${Prisma.join(
         likeConditions,
@@ -391,24 +434,33 @@ function addNumberFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
    * "operator does not exist: integer = text" error from Prisma's
    * parameterized queries sending values as text.
    */
-  const col = Prisma.raw(filter.name);
+  // Computed columns have no physical `Asset` column to point at. Map them to
+  // the SAME expressions the projection uses, so a filter can never disagree
+  // with the number it is filtering. Anything else falls through to `a."col"`.
+  const computed: Record<string, Prisma.Sql> = {
+    available: Prisma.sql`${POOL_AVAILABLE_EXPR}`,
+    reserved: Prisma.sql`${POOL_RESERVED_EXPR}`,
+  };
+  const target = computed[filter.name]
+    ? Prisma.sql`(${computed[filter.name]})::float`
+    : Prisma.sql`a."${Prisma.raw(filter.name)}"::float`;
   const val = Number(filter.value);
   switch (filter.operator) {
     case "is":
-      return Prisma.sql`${whereClause} AND a."${col}"::float = ${val}`;
+      return Prisma.sql`${whereClause} AND ${target} = ${val}`;
     case "isNot":
-      return Prisma.sql`${whereClause} AND a."${col}"::float != ${val}`;
+      return Prisma.sql`${whereClause} AND ${target} != ${val}`;
     case "gt":
-      return Prisma.sql`${whereClause} AND a."${col}"::float > ${val}`;
+      return Prisma.sql`${whereClause} AND ${target} > ${val}`;
     case "lt":
-      return Prisma.sql`${whereClause} AND a."${col}"::float < ${val}`;
+      return Prisma.sql`${whereClause} AND ${target} < ${val}`;
     case "gte":
-      return Prisma.sql`${whereClause} AND a."${col}"::float >= ${val}`;
+      return Prisma.sql`${whereClause} AND ${target} >= ${val}`;
     case "lte":
-      return Prisma.sql`${whereClause} AND a."${col}"::float <= ${val}`;
+      return Prisma.sql`${whereClause} AND ${target} <= ${val}`;
     case "between": {
       const [min, max] = filter.value as [number, number];
-      return Prisma.sql`${whereClause} AND a."${col}"::float BETWEEN ${Number(
+      return Prisma.sql`${whereClause} AND ${target} BETWEEN ${Number(
         min
       )} AND ${Number(max)}`;
     }
@@ -423,29 +475,72 @@ function addBooleanFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
   }`;
 }
 
-function addDateFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
+/**
+ * Adds a built-in date-column filter to the WHERE clause.
+ *
+ * Built-in date columns (`createdAt`, `updatedAt`, …) are Prisma's default
+ * `DateTime` → Postgres `timestamp` WITHOUT time zone, storing the UTC instant
+ * as a bare wall clock. A plain `::date` cast resolves the calendar day of that
+ * UTC wall clock, which disagrees with the day the row is *displayed* in for a
+ * non-UTC user — an off-by-one when they filter "on the day a row shows".
+ *
+ * To get the user-tz calendar day we must convert in TWO steps, because
+ * `AT TIME ZONE` behaves differently on a `timestamp` than on a `timestamptz`:
+ *   1. `AT TIME ZONE 'UTC'` — reinterpret the bare wall clock AS a UTC instant
+ *      (`timestamp` → `timestamptz`). A single `AT TIME ZONE ${timeZone}` here
+ *      would instead ASSUME the value is already in the user's zone, mis-shifting
+ *      it by the offset (verified: an asset at `2026-07-20 23:00Z`, which shows
+ *      as Jul 21 in Tokyo, truncated to Jul 20 under the single-cast bug).
+ *   2. `AT TIME ZONE ${timeZone}` — convert that instant to the user's wall
+ *      clock (`timestamptz` → `timestamp`), then `::date` is session-independent.
+ * The right-hand side stays a date-only string (`value::date`), unchanged.
+ *
+ * NOTE: this is intentionally NOT applied to custom-field DATE filters
+ * ({@link addCustomFieldDateFilter}) — those values are stored date-only, so
+ * there is no timezone to reconcile.
+ *
+ * @param whereClause - The existing WHERE clause to extend.
+ * @param filter - The date filter (operator + value).
+ * @param timeZone - IANA timezone name the day should be resolved in (the
+ *   acting user's resolved pref tz). Bound as a SQL parameter, never
+ *   string-interpolated, so it stays injection-safe.
+ * @param columnSql - Optional SQL expression replacing `a."<filter.name>"`,
+ *   for computed columns such as `lastAuditDate`.
+ * @returns The extended WHERE clause.
+ */
+function addDateFilter(
+  whereClause: Prisma.Sql,
+  filter: Filter,
+  timeZone: string,
+  columnSql?: Prisma.Sql
+): Prisma.Sql {
+  // Computed columns (e.g. `lastAuditDate`) pass their own SQL expression; the
+  // default is the `Asset` column named by the filter.
+  const column = columnSql ?? Prisma.sql`a."${Prisma.raw(filter.name)}"`;
+
+  // The UTC-stored `timestamp` column truncated to a calendar date in the
+  // user's tz. `AT TIME ZONE 'UTC'` reinterprets the bare wall clock as a UTC
+  // instant; the second `AT TIME ZONE ${timeZone}` converts it to the user's
+  // wall clock before `::date` (see the two-step rationale above). `'UTC'` is a
+  // fixed literal; `timeZone` is a bound parameter (`AT TIME ZONE $n`), not raw
+  // SQL, so it stays injection-safe.
+  const localDate = Prisma.sql`(${column} AT TIME ZONE 'UTC' AT TIME ZONE ${timeZone})::date`;
+
   switch (filter.operator) {
+    case "isEmpty":
+      // No value: matches rows where the column is NULL (e.g. never audited).
+      return Prisma.sql`${whereClause} AND ${column} IS NULL`;
     case "is":
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(
-        filter.name
-      )}"::date = ${filter.value}::date`;
+      return Prisma.sql`${whereClause} AND ${localDate} = ${filter.value}::date`;
     case "isNot":
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(
-        filter.name
-      )}"::date != ${filter.value}::date`;
+      return Prisma.sql`${whereClause} AND ${localDate} != ${filter.value}::date`;
     case "before":
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(filter.name)}" < ${
-        filter.value
-      }::date`;
+      return Prisma.sql`${whereClause} AND ${localDate} < ${filter.value}::date`;
     case "after":
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(filter.name)}" > ${
-        filter.value
-      }::date`;
+      return Prisma.sql`${whereClause} AND ${localDate} > ${filter.value}::date`;
     case "between": {
       const [start, end] = filter.value as [string, string];
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(
-        filter.name
-      )}" BETWEEN ${start}::date AND ${end}::date`;
+      return Prisma.sql`${whereClause} AND ${localDate} BETWEEN ${start}::date AND ${end}::date`;
     }
     case "inDates": {
       // Split comma-separated dates and remove whitespace
@@ -455,9 +550,7 @@ function addDateFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         dates.map((d) => Prisma.sql`${d}`),
         ", "
       );
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(
-        filter.name
-      )}"::date = ANY(ARRAY[${datesArray}]::date[])`;
+      return Prisma.sql`${whereClause} AND ${localDate} = ANY(ARRAY[${datesArray}]::date[])`;
     }
     default:
       return whereClause;
@@ -465,6 +558,40 @@ function addDateFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
 }
 
 function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
+  // Derived verdict, not a stored enum, compared as text against the same
+  // expression the column renders. This is the whole reason Stock status is one
+  // enum column rather than three more bespoke URL params like `lowStockOnly`:
+  // it arrives here through the ordinary filter path and gets is / isNot /
+  // containsAny for free.
+  if (filter.name === "stockStatus") {
+    switch (filter.operator) {
+      case "is":
+        return Prisma.sql`${whereClause} AND (${POOL_STOCK_STATUS_EXPR}) = ${String(
+          filter.value
+        ).trim()}`;
+      case "isNot":
+        // NULL (an individually-tracked asset) is not "some other status", it
+        // has no verdict at all, so `IS DISTINCT FROM` would wrongly include
+        // every individual asset in a "Stock status is not Enough" filter.
+        return Prisma.sql`${whereClause} AND (${POOL_STOCK_STATUS_EXPR}) IS NOT NULL AND (${POOL_STOCK_STATUS_EXPR}) != ${String(
+          filter.value
+        ).trim()}`;
+      case "containsAny": {
+        const values = String(filter.value)
+          .split(",")
+          .map((v) => v.trim())
+          .filter(Boolean);
+        if (values.length === 0) return whereClause;
+        return Prisma.sql`${whereClause} AND (${POOL_STOCK_STATUS_EXPR}) = ANY(ARRAY[${Prisma.join(
+          values.map((v) => Prisma.sql`${v}`),
+          ", "
+        )}])`;
+      }
+      default:
+        return whereClause;
+    }
+  }
+
   if (filter.name === "status") {
     switch (filter.operator) {
       case "is": {
@@ -1308,12 +1435,19 @@ function addArrayFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
       // Handle "untagged" special case
       if (filter.value === "untagged") {
         return Prisma.sql`${whereClause} AND NOT EXISTS (
-          SELECT 1 FROM "_AssetToTag" att
+          SELECT 1 FROM public."_AssetToTag" att
           WHERE att."A" = a.id
         )`;
       }
-      // Single tag filtering using the existing join
-      return Prisma.sql`${whereClause} AND t.id = ${filter.value}`;
+      // Single tag filtering via a per-asset EXISTS. Byte-identical to the
+      // previous `t.id = value` against the fanning tag join (the join was an
+      // inner semantic and GROUP BY deduped it) — but self-contained, so the
+      // slim pagination phase needs no outer `t`/`att` join.
+      return Prisma.sql`${whereClause} AND EXISTS (
+        SELECT 1 FROM public."_AssetToTag" att
+        JOIN public."Tag" t ON att."B" = t.id
+        WHERE att."A" = a.id AND t.id = ${filter.value}
+      )`;
     }
     case "containsAll": {
       // ALL tags must be present
@@ -1323,7 +1457,7 @@ function addArrayFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
       // (an asset can't be both untagged and have tags)
       if (values.includes("untagged")) {
         return Prisma.sql`${whereClause} AND NOT EXISTS (
-          SELECT 1 FROM "_AssetToTag" att
+          SELECT 1 FROM public."_AssetToTag" att
           WHERE att."A" = a.id
         )`;
       }
@@ -1336,8 +1470,8 @@ function addArrayFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         SELECT unnest(ARRAY[${valuesArray}]::text[]) AS required_tag
         EXCEPT
         SELECT t.id
-        FROM "_AssetToTag" att
-        JOIN "Tag" t ON t.id = att."B"
+        FROM public."_AssetToTag" att
+        JOIN public."Tag" t ON t.id = att."B"
         WHERE att."A" = a.id
       )`;
     }
@@ -1354,7 +1488,7 @@ function addArrayFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         if (tagIds.length === 0) {
           // Only "untagged" was selected - return assets with no tags
           return Prisma.sql`${whereClause} AND NOT EXISTS (
-            SELECT 1 FROM "_AssetToTag" att
+            SELECT 1 FROM public."_AssetToTag" att
             WHERE att."A" = a.id
           )`;
         }
@@ -1365,8 +1499,12 @@ function addArrayFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           ", "
         );
         return Prisma.sql`${whereClause} AND (
-          NOT EXISTS (SELECT 1 FROM "_AssetToTag" att WHERE att."A" = a.id)
-          OR t.id = ANY(ARRAY[${valuesArray}]::text[])
+          NOT EXISTS (SELECT 1 FROM public."_AssetToTag" att WHERE att."A" = a.id)
+          OR EXISTS (
+            SELECT 1 FROM public."_AssetToTag" att
+            JOIN public."Tag" t ON att."B" = t.id
+            WHERE att."A" = a.id AND t.id = ANY(ARRAY[${valuesArray}]::text[])
+          )
         )`;
       }
 
@@ -1374,7 +1512,13 @@ function addArrayFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         values.map((v) => Prisma.sql`${v}`),
         ", "
       );
-      return Prisma.sql`${whereClause} AND t.id = ANY(ARRAY[${valuesArray}]::text[])`;
+      // Any-tag EXISTS (see the `contains` branch) — keeps the slim phase free
+      // of the fanning tag join while preserving match semantics.
+      return Prisma.sql`${whereClause} AND EXISTS (
+        SELECT 1 FROM public."_AssetToTag" att
+        JOIN public."Tag" t ON att."B" = t.id
+        WHERE att."A" = a.id AND t.id = ANY(ARRAY[${valuesArray}]::text[])
+      )`;
     }
 
     case "excludeAny": {
@@ -1384,7 +1528,7 @@ function addArrayFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
       if (values.includes("untagged")) {
         // If "untagged" is included, we want to ensure assets have at least one tag
         return Prisma.sql`${whereClause} AND EXISTS (
-          SELECT 1 FROM "_AssetToTag" att2
+          SELECT 1 FROM public."_AssetToTag" att2
           WHERE att2."A" = a.id
         )`;
       }
@@ -1395,8 +1539,8 @@ function addArrayFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
       );
       return Prisma.sql`${whereClause} AND NOT EXISTS (
         SELECT 1
-        FROM "_AssetToTag" att2
-        JOIN "Tag" t2 ON t2.id = att2."B"
+        FROM public."_AssetToTag" att2
+        JOIN public."Tag" t2 ON t2.id = att2."B"
         WHERE att2."A" = a.id
         AND t2.id = ANY(ARRAY[${valuesArray}]::text[])
       )`;
@@ -1418,7 +1562,9 @@ type DirectAssetField =
   | "updatedAt"
   | "availableToBook"
   | "type"
-  | "quantity";
+  | "quantity"
+  | "unitOfMeasure"
+  | "minQuantity";
 
 const directAssetFields: Record<DirectAssetField, string> = {
   id: "assetId",
@@ -1432,6 +1578,8 @@ const directAssetFields: Record<DirectAssetField, string> = {
   availableToBook: "assetAvailableToBook",
   type: "assetType",
   quantity: "assetQuantity",
+  unitOfMeasure: "assetUnitOfMeasure",
+  minQuantity: "assetMinQuantity",
 };
 
 /**
@@ -1449,17 +1597,21 @@ const directAssetFields: Record<DirectAssetField, string> = {
  *
  * @param columnRef - The column or expression to sort. Caller-validated.
  * @param direction - Sort direction ('asc' or 'desc'). Caller-validated.
+ * @param options.nullsLast - Keep empty values last in both directions, for a
+ *   column most rows leave empty
  * @returns SQL string with normalized sorting expression
  */
 function getNormalizedSortExpression(
   columnRef: string,
-  direction: string
+  direction: string,
+  { nullsLast = false }: { nullsLast?: boolean } = {}
 ): string {
+  const order = nullsLast ? `${direction} NULLS LAST` : direction;
   return `
     LOWER(regexp_replace(${columnRef}, '([0-9]+)',
       lpad(regexp_replace(regexp_replace('\\1', '^0+', ''), '^$', '0'), 12, '0')
-    )) ${direction},
-    ${columnRef} ${direction}
+    )) ${order},
+    ${columnRef} ${order}
   `.trim();
 }
 
@@ -1547,10 +1699,13 @@ function normalizeDirection(raw: string | undefined): "asc" | "desc" {
  * warning — the caller falls back to the default sort. See GHSA-69xv-wmgg-3qp3.
  *
  * @param sortBy - Array of sort specifications in format: field:direction[:fieldType]
- * @returns Object containing SQL order by clause and custom field sorting info
+ * @returns Object containing the full SQL `ORDER BY` clause, the same clause
+ *   without the leading `ORDER BY ` token (`orderByInner`, for embedding in a
+ *   `ROW_NUMBER() OVER (ORDER BY ...)` window), and custom field sorting info.
  */
 export function parseSortingOptions(sortBy: string[]): {
   orderByClause: string;
+  orderByInner: string;
   customFieldSortings: CustomFieldSorting[];
 } {
   const fields = sortBy.map((s) => {
@@ -1579,9 +1734,13 @@ export function parseSortingOptions(sortBy: string[]): {
           getSequentialIdSortExpression(`"${columnName}"`, field.direction)
         );
       } else if (isTextColumn(field.name)) {
-        // Apply natural sort for other text columns
+        // Apply natural sort for other text columns. Individual assets have
+        // no unit of measure, so empty units stay last in both directions
+        // instead of filling the first pages of a descending sort.
         orderByParts.push(
-          getNormalizedSortExpression(`"${columnName}"`, field.direction)
+          getNormalizedSortExpression(`"${columnName}"`, field.direction, {
+            nullsLast: field.name === "unitOfMeasure",
+          })
         );
       } else if (field.name === "valuation") {
         // Quantity-aware: sort by TOTAL value (per-unit × quantity), matching
@@ -1597,6 +1756,37 @@ export function parseSortingOptions(sortBy: string[]): {
         // Use regular sorting for non-text columns
         orderByParts.push(`"${columnName}" ${field.direction}`);
       }
+    } else if (
+      field.name === "available" ||
+      field.name === "reserved" ||
+      field.name === "stockStatus"
+    ) {
+      // Computed columns. The cheap phase emits these aliases (gated on
+      // `detectPoolKeys`), so ORDER BY can reference them by name exactly like
+      // a stored column.
+      //
+      // Stock status sorts by SEVERITY, not alphabetically, "worst first" is
+      // the only ordering anyone wants from it, and `Enough` < `Low` < `None
+      // free` < `Short` alphabetically is meaningless. The ranks come from
+      // STOCK_STATUS_SEVERITY in @shelf/quantity-control. NULL (individually
+      // tracked) sorts last in both directions via NULLS LAST, so an ascending
+      // "worst first" never buries real problems under rows that have no
+      // verdict.
+      if (field.name === "stockStatus") {
+        orderByParts.push(
+          `CASE "assetStockStatus" ${STOCK_STATUS_SORT_RANKS} ELSE NULL END ${field.direction} NULLS LAST`
+        );
+      } else {
+        const alias =
+          field.name === "available"
+            ? "assetAvailable"
+            : "assetReservedDisplay";
+        orderByParts.push(`"${alias}" ${field.direction} NULLS LAST`);
+      }
+    } else if (field.name === LAST_AUDIT_DATE_COLUMN) {
+      // Never-audited assets have a NULL date; keep them last in both
+      // directions so they do not crowd the top of a descending sort.
+      orderByParts.push(`"lastAuditDate" ${field.direction} NULLS LAST`);
     } else if (field.name === "qrId") {
       orderByParts.push(getNormalizedSortExpression(`"qrId"`, field.direction));
     } else if (field.name === "kit") {
@@ -1616,8 +1806,18 @@ export function parseSortingOptions(sortBy: string[]): {
         getNormalizedSortExpression(`"locationName"`, field.direction)
       );
     } else if (field.name === "custody") {
+      // `custody` is a jsonb ARRAY (`Custody[]`) since the quantity-tracked
+      // multi-custodian refactor — see CUSTODY_SORT_CASE. `custody->>'name'`
+      // (object-key access) returns NULL on an array, which made this sort a
+      // silent no-op (asc == desc, only the id tiebreaker ordered the rows).
+      // Index the first custodian: `custody->0->>'name'`. Element 0 is the
+      // primary custodian shown in the badge (formatCustodyList picks
+      // custody[0]); the custody aggregations order their jsonb_agg by
+      // (createdAt, id) so element 0 is deterministic and the sort key agrees
+      // with the rendered badge. NULL custody (no custodian) stays NULL and
+      // sorts consistently.
       orderByParts.push(
-        getNormalizedSortExpression(`custody->>'name'`, field.direction)
+        getNormalizedSortExpression(`custody->0->>'name'`, field.direction)
       );
     } else if (field.name.startsWith("barcode_")) {
       // The suffix is interpolated into a SQL identifier (`barcode_<suffix>`),
@@ -1693,12 +1893,26 @@ export function parseSortingOptions(sortBy: string[]): {
       '"assetCreatedAt" DESC', // Primary: Newest assets first
       '"assetId" ASC' // Secondary: Stable sort for identical timestamps
     );
+  } else if (!orderByParts.some((part) => part.includes('"assetId"'))) {
+    // Explicit sorts have no unique tiebreaker of their own, so rows tied on the
+    // sort key (e.g. same category name, same total value, or a mostly-NULL
+    // column) land in an arbitrary physical order that can shift between page
+    // loads — a latent nondeterministic-pagination bug. Append a stable id
+    // tiebreaker (mirrors the default sort's secondary key) so the paged slice
+    // and the integer ROW_NUMBER rank are reproducible across requests.
+    //
+    // Skip it when the client already sorts by id (directAssetFields.id maps to
+    // "assetId"), otherwise we'd emit a duplicate ORDER BY key.
+    orderByParts.push('"assetId" ASC');
   }
 
+  // The inner clause (no leading "ORDER BY ") is what feeds the integer-rank
+  // window in the paginate-first rewrite: ROW_NUMBER() OVER (ORDER BY <inner>).
+  const orderByInner: string = orderByParts.join(", ");
   // Always generate an ORDER BY clause for predictable results
-  const orderByClause: string = `ORDER BY ${orderByParts.join(", ")}`;
+  const orderByClause: string = `ORDER BY ${orderByInner}`;
 
-  return { orderByClause, customFieldSortings };
+  return { orderByClause, orderByInner, customFieldSortings };
 }
 
 /**
@@ -1711,6 +1925,7 @@ function isTextColumn(fieldName: string): boolean {
     "sequentialId",
     "name",
     "description",
+    "unitOfMeasure",
   ];
   return textColumns.includes(fieldName as DirectAssetField);
 }
@@ -1775,6 +1990,12 @@ export type AssetQueryOptions = {
   withBookings?: boolean;
   withBarcodes?: boolean;
   /**
+   * Include the `lastAuditDate` scalar (latest completed audit that covered
+   * the asset). Off by default so callers that do not render the column pay
+   * nothing for it.
+   */
+  withLastAuditDate?: boolean;
+  /**
    * When true (default), includes full custom field definitions (helpText,
    * required, options, categories) in each custom field value — matching
    * the AdvancedIndexAsset type contract. Set to false for table views
@@ -1787,15 +2008,116 @@ export type AssetQueryOptions = {
 export type AssetReturnOptions = {
   withBookings?: boolean;
   withBarcodes?: boolean;
+  /**
+   * Include the `lastAuditDate` scalar (latest completed audit that covered
+   * the asset). Off by default so callers that do not render the column pay
+   * nothing for it.
+   */
+  withLastAuditDate?: boolean;
+  /**
+   * When provided, the emitted `json_agg` orders its elements by this SQL
+   * expression: `json_agg(jsonb_build_object(...) ORDER BY <orderBy>)`. The
+   * paginate-first rewrite passes the integer sort rank (`saq."__sortRank"`)
+   * so the output array matches the paginated `ORDER BY` order exactly, without
+   * re-evaluating the (possibly tiebreaker-less) sort expressions. Omit it and
+   * the array order is unspecified (legacy single-CTE behavior).
+   */
+  orderBy?: Prisma.Sql;
 };
+
+/**
+ * Serialises a `timestamp without time zone` column into an explicitly-UTC
+ * ISO-8601 string for embedding in `jsonb_build_object` / `json_agg`.
+ *
+ * **Why this exists.** Prisma maps `DateTime` to Postgres `TIMESTAMP(3)` —
+ * *without* time zone — and stores UTC instants in it. A top-level `$queryRaw`
+ * column is fine: the Prisma driver knows the column type and decodes it into a
+ * proper JS `Date`. But once a timestamp is nested inside JSON, Prisma sees only
+ * an opaque blob, and Postgres has already rendered the value with **no zone
+ * designator**:
+ *
+ * ```
+ * jsonb_build_object('createdAt', a."createdAt")
+ *   -> {"createdAt": "2026-07-27T19:42:46.459"}     <-- no "Z", no offset
+ * ```
+ *
+ * Per ECMA-262 a date-time string without an offset is parsed as **local** time,
+ * so `new Date(...)` in the browser reinterprets a UTC instant as the viewer's
+ * wall clock. A user in `America/Costa_Rica` (UTC-6) saw asset "Created at"
+ * rendered 6 hours ahead of the truth, while the asset's Activity tab — which
+ * goes through the normal Prisma path and serialises with a `Z` — showed it
+ * correctly. Late-evening UTC timestamps also rolled over to the wrong *day*.
+ *
+ * The symptom is a stable wrong time rather than a flicker: on desktop the
+ * advanced table is never server-rendered (`assets-list.tsx` renders
+ * `AdvancedModeMobileFallback` while `isMd` is still `false` during SSR), so the
+ * browser's misparse is the only value ever painted. Below the `md` breakpoint,
+ * where the table does render on the server, it additionally produced a silent
+ * text-content hydration mismatch.
+ *
+ * `to_char` is used deliberately instead of the terser `AT TIME ZONE 'UTC'`:
+ * that cast yields a `timestamptz`, which `to_jsonb` renders in the **session**
+ * TimeZone (`SET TIME ZONE 'America/Costa_Rica'` turns `+00:00` into `-06:00`).
+ * Both denote the same instant, but the payload shape would then depend on
+ * ambient server configuration. `to_char` on the bare `timestamp` formats the
+ * stored wall clock verbatim and is therefore session-independent. NULL input
+ * yields SQL NULL, which becomes JSON `null` — matching the previous behaviour.
+ *
+ * ⚠️ Only for `timestamp WITHOUT time zone` columns. Columns declared
+ * `@db.Timestamptz` (`Booking.from`/`to`, `Booking.createdAt`,
+ * `ActivityEvent.occurredAt`, …) are serialised by `jsonb_build_object` *with*
+ * an offset and are already correct — wrapping those here would re-introduce the
+ * session-TZ dependency this helper exists to avoid. Note their safety comes
+ * from the jsonb path specifically: a `::text` cast on a timestamptz emits a
+ * 2-digit offset (`…+00`) that `new Date()` rejects outright.
+ *
+ * `column` is a closed union rather than `string` on purpose: `Prisma.raw` does
+ * no escaping, so restricting the parameter to these four compile-time literals
+ * makes it impossible for a caller to route user input in here.
+ *
+ * @param column - Qualified name of a `timestamp without time zone` column
+ * @returns A `Prisma.Sql` fragment producing `YYYY-MM-DDTHH:MM:SS.mmmZ` or NULL
+ */
+const utcJsonTimestamp = (
+  column:
+    | 'aq."assetCreatedAt"'
+    | 'aq."assetUpdatedAt"'
+    | 'aq."assetMainImageExpiration"'
+    | 'ar."alertDateTime"'
+    | 'aq."lastAuditDate"'
+) => Prisma.raw(`to_char(${column}, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`);
+
+/**
+ * Scalar subquery returning the completion time of the latest finished audit
+ * that covered the outer asset (`a`). Only COMPLETED and ARCHIVED sessions
+ * count, and `completedAt IS NOT NULL` drops archived audits that were never
+ * completed. The `s."organizationId" = a."organizationId"` predicate keeps the
+ * lookup inside the asset's workspace. References only `a.id` and
+ * `a."organizationId"`, so it needs no GROUP BY additions.
+ */
+export const LAST_AUDIT_DATE_SQL = Prisma.sql`(
+  SELECT MAX(s."completedAt")
+  FROM public."AuditAsset" aa
+  JOIN public."AuditSession" s ON s.id = aa."auditSessionId"
+  WHERE aa."assetId" = a.id
+    AND s."organizationId" = a."organizationId"
+    AND s.status IN ('COMPLETED', 'ARCHIVED')
+    AND s."completedAt" IS NOT NULL
+)`;
 
 // Convert to functions that accept options
 export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
   const {
     withBookings = false,
     withBarcodes = false,
+    withLastAuditDate = false,
     withCustomFieldDefinitions = true,
   } = options;
+
+  // Hoisted out of the return template's interpolation on purpose — see the
+  // note on `rankOrderBy` in buildAdvancedAssetsQuery about esbuild dropping
+  // functions that build nested SQL fragments inline.
+  const alertDateTimeField = utcJsonTimestamp('ar."alertDateTime"');
 
   const bookingsSelect = withBookings
     ? Prisma.sql`,
@@ -1834,7 +2156,7 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
                         'id', ctmu.id,
                         'firstName', ctmu."firstName",
                         'lastName', ctmu."lastName",
-                        'email', ctmu.email,
+                        'displayName', ctmu."displayName",
                         'profilePicture', ctmu."profilePicture"
                       )
                     ELSE NULL
@@ -1848,21 +2170,31 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
                   'id', cu.id,
                   'firstName', cu."firstName",
                   'lastName', cu."lastName",
-                  'email', cu.email,
+                  'displayName', cu."displayName",
                   'profilePicture', cu."profilePicture"
                 )
               ELSE NULL
             END,
-            'creator', CASE 
+            'creator', CASE
               WHEN bk."creatorId" IS NOT NULL THEN
                 jsonb_build_object(
                   'id', cr.id,
                   'firstName', cr."firstName",
                   'lastName', cr."lastName",
+                  'displayName', cr."displayName",
                   'profilePicture', cr."profilePicture"
                 )
               ELSE NULL
-            END
+            END,
+            'assetKitId', atb."assetKitId",
+            'quantity', atb."quantity",
+            'kitName', bk_kit.name,
+            -- Slice markers the availability bar reads to end a returned
+            -- asset's bar at its check-in instead of the booking's end.
+            -- Unwrapped like from/to above: timestamptz serialises with its
+            -- offset and the hook parses it with new Date().
+            'checkedOutAt', atb."checkedOutAt",
+            'checkedInAt', atb."checkedInAt"
           )
         ),
         '[]'::jsonb
@@ -1873,15 +2205,42 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
       LEFT JOIN public."User" ctmu ON ctm."userId" = ctmu.id
       LEFT JOIN public."User" cu ON bk."custodianUserId" = cu.id
       LEFT JOIN public."User" cr ON bk."creatorId" = cr.id
-      WHERE 
+      -- Booking-slice kit attribution. Org-scoped (bk_ak."organizationId" =
+      -- a."organizationId") so a tampered / cross-org assetKitId resolves to
+      -- NULL instead of leaking another workspace's kit name — mirrors the
+      -- simple-mode helper. Distinct aliases (bk_ak/bk_kit) so this correlated
+      -- subquery does not shadow the outer query's ak/k (the asset's own kit).
+      LEFT JOIN public."AssetKit" bk_ak
+        ON atb."assetKitId" = bk_ak.id
+        AND bk_ak."organizationId" = a."organizationId"
+      LEFT JOIN public."Kit" bk_kit ON bk_ak."kitId" = bk_kit.id
+      WHERE
         atb."assetId" = a.id
         AND bk.status IN ('RESERVED', 'ONGOING', 'OVERDUE')
     ) AS bookings`
     : Prisma.sql``;
 
+  const lastAuditDateSelect = withLastAuditDate
+    ? Prisma.sql`,
+    ${LAST_AUDIT_DATE_SQL} AS "lastAuditDate"`
+    : Prisma.sql``;
+
+  // Everything between the backticks below is a template literal, so a stray
+  // backtick or dollar-brace anywhere in it (SQL comments included) ends the
+  // literal and reinterprets the rest of the query as JavaScript.
   const barcodesSelect = withBarcodes
     ? Prisma.sql`,
     (
+      -- The ORDER BY inside jsonb_agg is load-bearing, not cosmetic — same
+      -- reasoning as the custody aggregation below. BarcodeCell renders only
+      -- the first two elements as chips and collapses the rest into a "+N"
+      -- control that previews element 2, so the array's order decides which
+      -- codes a user actually sees. jsonb_agg without an explicit ORDER BY
+      -- has an undefined input order, so an asset with 3+ barcodes of one
+      -- type would otherwise show a different pair between page loads.
+      -- Oldest-first (createdAt, id) is the same key the per-type barcode
+      -- scalar columns below use, so element 0 of this array is the same
+      -- barcode those columns sort on.
       SELECT COALESCE(
         jsonb_agg(
           jsonb_build_object(
@@ -1889,6 +2248,7 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
             'type', b.type,
             'value', b.value
           )
+          ORDER BY b."createdAt" ASC, b.id ASC
         ),
         '[]'::jsonb
       )
@@ -1899,30 +2259,35 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
       SELECT b.value
       FROM public."Barcode" b
       WHERE b."assetId" = a.id AND b.type = 'Code128'
+      ORDER BY b."createdAt" ASC, b.id ASC
       LIMIT 1
     ) AS barcode_Code128,
     (
       SELECT b.value
       FROM public."Barcode" b
       WHERE b."assetId" = a.id AND b.type = 'Code39'
+      ORDER BY b."createdAt" ASC, b.id ASC
       LIMIT 1
     ) AS barcode_Code39,
     (
       SELECT b.value
       FROM public."Barcode" b
       WHERE b."assetId" = a.id AND b.type = 'DataMatrix'
+      ORDER BY b."createdAt" ASC, b.id ASC
       LIMIT 1
     ) AS barcode_DataMatrix,
     (
       SELECT b.value
       FROM public."Barcode" b
       WHERE b."assetId" = a.id AND b.type = 'ExternalQR'
+      ORDER BY b."createdAt" ASC, b.id ASC
       LIMIT 1
     ) AS barcode_ExternalQR,
     (
       SELECT b.value
       FROM public."Barcode" b
       WHERE b."assetId" = a.id AND b.type = 'EAN13'
+      ORDER BY b."createdAt" ASC, b.id ASC
       LIMIT 1
     ) AS barcode_EAN13`
     : Prisma.sql``;
@@ -1934,6 +2299,7 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
         SELECT q.id
         FROM public."Qr" q
         WHERE q."assetId" = a.id
+        ORDER BY q."createdAt" ASC, q.id ASC
         LIMIT 1
       ) AS "qrId",
       a.title AS "assetTitle",
@@ -1952,11 +2318,42 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
       a.value AS "assetValue",
       a.quantity AS "assetQuantity",
       a."unitOfMeasure" AS "assetUnitOfMeasure",
+      a."minQuantity" AS "assetMinQuantity",
+      a."consumptionType" AS "assetConsumptionType",
+      -- Quantity-pool figures, from the single "pool" LATERAL in
+      -- assetQueryJoins. They live in a join rather than inline subqueries so
+      -- the WHERE clause and ORDER BY can reference the SAME values by alias,
+      -- a filter cannot silently disagree with the column it filters.
+      pool.in_kits AS "assetInKits",
+      pool.peak_booked AS "assetPeakBooked",
+      pool.next_reserved_from AS "assetNextReservedFrom",
+      pool.top_booking_id AS "assetTopBookingId",
+      pool.top_booking_name AS "assetTopBookingName",
+      pool.top_booking_units AS "assetTopBookingUnits",
+      pool.checked_out AS "assetCheckedOut",
+      pool.checked_out_all AS "assetCheckedOutAll",
+      pool.in_custody AS "assetInCustodyUnits",
+      pool.in_custody_all AS "assetInCustodyAll",
+      pool.reserved_all AS "assetReservedAll",
+      -- Derived here, not in the outer projection, so there is exactly ONE
+      -- definition of each and the filter/sort reference the same expressions.
+      ${POOL_AVAILABLE_EXPR} AS "assetAvailable",
+      ${POOL_RESERVED_EXPR} AS "assetReservedDisplay",
+      ${POOL_STOCK_STATUS_EXPR} AS "assetStockStatus",
       a."availableToBook" AS "assetAvailableToBook",
+      a."archivedAt" AS "assetArchivedAt",
       k.id AS "assetKitId",
       a."categoryId" AS "assetCategoryId",
       a."assetModelId" AS "assetModelId",
       am.name AS "assetModelName",
+      -- Cover image of the asset's model. Rendered by any asset that has no
+      -- image of its own (see resolveAssetImage). The am alias is already
+      -- joined for the name above, and the query groups by am.id, so
+      -- Postgres's functional dependency on the primary key permits these
+      -- without adding them to GROUP BY. AssetModel declares no @map, so the
+      -- column names here match the Prisma field names.
+      am.image AS "assetModelImage",
+      am."thumbnailImage" AS "assetModelThumbnailImage",
       k.id AS "kitId",
       k.name AS "kitName",
       k.status AS "kitStatus",
@@ -2003,31 +2400,17 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
         WHEN b.id IS NOT NULL AND ${ASSET_IS_CHECKED_OUT} THEN
           jsonb_build_array(
             jsonb_build_object(
-              -- why: when the booking custodian is an NRM (team member with no
-              -- user account), bu.* is NULL. We must NOT CONCAT the user columns
-              -- here: Postgres CONCAT ignores NULLs and returns ' ' (a space),
-              -- which is non-NULL, so a COALESCE(CONCAT(...), btm.name) would
-              -- never fall back to the NRM name and the badge renders blank.
-              -- Guard on bu.id (mirrors the 'user' sub-object branch below).
-              'name', CASE
-                WHEN bu.id IS NOT NULL
-                  THEN CONCAT(bu."firstName", ' ', bu."lastName")
-                ELSE btm.name
-              END,
+              'name', ${BOOKING_CUSTODIAN_NAME},
               'custodian', jsonb_build_object(
-                'name', CASE
-                  WHEN bu.id IS NOT NULL
-                    THEN CONCAT(bu."firstName", ' ', bu."lastName")
-                  ELSE btm.name
-                END,
+                'name', ${BOOKING_CUSTODIAN_NAME},
                 'user', CASE
                   WHEN bu.id IS NOT NULL THEN
                     jsonb_build_object(
                       'id', bu.id,
                       'firstName', bu."firstName",
                       'lastName', bu."lastName",
-                      'profilePicture', bu."profilePicture",
-                      'email', bu.email
+                      'displayName', bu."displayName",
+                      'profilePicture', bu."profilePicture"
                     )
                   ELSE NULL
                 END
@@ -2074,7 +2457,7 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
           'id', ar.id,
           'name', ar.name,
           'message', ar.message,
-          'alertDateTime', ar."alertDateTime",
+          'alertDateTime', ${alertDateTimeField},
           'recurrenceUnit', ar."recurrenceUnit",
           'recurrenceInterval', ar."recurrenceInterval"
         )
@@ -2085,9 +2468,307 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
         ORDER BY 
           ar."alertDateTime" ASC
         LIMIT 1
-      ) AS upcomingReminder${bookingsSelect}${barcodesSelect}
+      ) AS upcomingReminder${bookingsSelect}${barcodesSelect}${lastAuditDateSelect}
   `;
 };
+
+/**
+ * Quantity-pool aggregates for one asset, as a LATERAL join aliased `pool`.
+ *
+ * Everything the `Free now` / `Reserved` / `Stock status` columns need, and
+ * everything filtering and sorting on them needs, computed once per asset.
+ *
+ * A LATERAL rather than inline scalar subqueries in the SELECT list, because a
+ * value in the SELECT list is invisible to the WHERE clause: SQL evaluates
+ * WHERE first. Putting them here means the projection, the filter and the sort
+ * all reference the same aliases, so a filter can never disagree with the
+ * column it filters. It also cannot fan the asset out into duplicate rows the
+ * way a plain join on AssetKit or BookingAsset would (an asset can sit in many
+ * kits and on many bookings), the same hazard the custody_agg LATERAL exists
+ * for.
+ *
+ * The figures are the SQL twin of `getAssetAvailabilityBatch`
+ * (`modules/asset/availability.server.ts`), the primitive the booking engine
+ * and the asset page consult. Change one, change the other. Four rules are
+ * load-bearing and easy to lose:
+ *
+ * - **Units inside a kit are counted once, as `in_kits`.** A kit in custody
+ *   writes `Custody` rows tagged `kitCustodyId` for its members, and a booked
+ *   kit writes `BookingAsset` rows tagged `assetKitId`. Both describe units
+ *   `in_kits` already holds, so custody counts `kitCustodyId IS NULL` rows only
+ *   and every booking figure counts `assetKitId IS NULL` slices only. The
+ *   `_all` variants exist for the status badge's LABEL ("In custody" is still
+ *   the right word for a member of a kit in custody); they never feed
+ *   arithmetic.
+ * - **What a booking still owes is booked minus logged.** `ConsumptionLog`
+ *   rows in the RETURN / CONSUME / LOSS / DAMAGE categories record units that
+ *   came back or were used up against a booking; `remaining` subtracts the
+ *   booking's total from each slice, as `getAssetAvailability` does.
+ * - **What is still out is what left minus what came back**, per slice, as
+ *   `computeUnitsStillOutBySlice` (`modules/booking/checkout-attribution.ts`)
+ *   computes it. What left: the larger of one trip's reading (the slice's
+ *   session claims capped at the booked quantity; with no claim, the whole
+ *   slice when its own `checkedOutAt` is set, which the all-at-once checkout
+ *   stamps; otherwise nothing) and its stored, cumulative `checkedOutQuantity`.
+ *   Never `Asset.status`: it is global, so an asset out on one booking would
+ *   read as out on every booking holding a slice of it.
+ *   Untagged claims and untagged returns both fill
+ *   standalone slices first, then by id in byte order, which is JavaScript's
+ *   string order for these ids.
+ * - **Bookings are intervals, and `peak_booked` is their peak.** The sweep is
+ *   `peakConcurrent` in SQL: +remaining at each booking's start, -remaining at
+ *   its end, running sum ordered by time with releases before claims at a tie,
+ *   maximum taken. Only the future matters, so starts are clamped to `now()`,
+ *   bookings already over are dropped, and an OVERDUE booking never ends.
+ *   `SHORT` compares custody + kits + this peak against the pool, so it fires
+ *   exactly when the booking engine would refuse one more reservation.
+ *
+ * All values are 0 for INDIVIDUAL assets, whose `quantity` is NULL; the
+ * renderers gate on `type` anyway.
+ */
+export const POOL_AGGREGATE_JOIN = Prisma.sql`
+  LEFT JOIN LATERAL (
+    WITH active AS (
+      SELECT
+        ba.id AS slice_id,
+        ba."bookingId",
+        bk.name,
+        bk.status,
+        bk."from" AS from_at,
+        CASE WHEN bk.status = 'OVERDUE' THEN 'infinity'::timestamptz ELSE bk."to" END AS end_at,
+        (ba."assetKitId" IS NULL) AS standalone,
+        ba.quantity,
+        ba."checkedOutAt" AS checked_out_at,
+        ba."checkedOutQuantity" AS counter
+      FROM public."BookingAsset" ba
+      -- One primary-key lookup per slice of THIS asset. OFFSET 0 keeps the
+      -- planner from flattening the lookup into a join that scans every
+      -- active booking in the database once per asset; the result is the
+      -- same and the per-asset cost drops about threefold.
+      CROSS JOIN LATERAL (
+        SELECT b.name, b.status, b."from", b."to"
+        FROM public."Booking" b
+        WHERE b.id = ba."bookingId"
+          AND b.status IN ('RESERVED', 'ONGOING', 'OVERDUE')
+        OFFSET 0
+      ) bk
+      WHERE ba."assetId" = a.id
+    ),
+    -- What came back or was used up, per booking and slice tag (NULL = untagged).
+    logs AS (
+      SELECT cl."bookingId", cl."bookingAssetId" AS tag, SUM(cl.quantity)::int AS q
+      FROM public."ConsumptionLog" cl
+      WHERE cl."assetId" = a.id
+        AND cl."bookingId" IN (SELECT "bookingId" FROM active)
+        AND cl.category IN ('RETURN', 'CONSUME', 'LOSS', 'DAMAGE')
+      GROUP BY cl."bookingId", cl."bookingAssetId"
+    ),
+    -- Check-out session claims for this asset, per booking and slice tag. The
+    -- three arrays are positional; a misaligned quantities array means one
+    -- unit per entry, and '' or a missing tag means untagged.
+    claims AS (
+      SELECT
+        p."bookingId",
+        NULLIF(u.tag, '') AS tag,
+        SUM(CASE
+          WHEN cardinality(p.quantities) = cardinality(p."assetIds") THEN COALESCE(u.q, 1)
+          ELSE 1
+        END)::int AS q
+      FROM public."PartialBookingCheckout" p
+      CROSS JOIN LATERAL unnest(p."assetIds", p.quantities, p."bookingAssetIds") AS u(aid, q, tag)
+      WHERE p."bookingId" IN (SELECT "bookingId" FROM active WHERE status IN ('ONGOING', 'OVERDUE'))
+        AND u.aid = a.id
+      GROUP BY p."bookingId", NULLIF(u.tag, '')
+    ),
+    out_base AS (
+      SELECT
+        act.slice_id,
+        act."bookingId",
+        act.standalone,
+        act.quantity,
+        act.checked_out_at,
+        act.counter,
+        COALESCE((SELECT c.q FROM claims c WHERE c."bookingId" = act."bookingId" AND c.tag = act.slice_id), 0) AS claim_tagged,
+        COALESCE((SELECT c.q FROM claims c WHERE c."bookingId" = act."bookingId" AND c.tag IS NULL), 0) AS claim_pool,
+        COALESCE((SELECT l.q FROM logs l WHERE l."bookingId" = act."bookingId" AND l.tag = act.slice_id), 0) AS disp_tagged,
+        COALESCE((SELECT l.q FROM logs l WHERE l."bookingId" = act."bookingId" AND l.tag IS NULL), 0) AS disp_pool
+      FROM active act
+      WHERE act.status IN ('ONGOING', 'OVERDUE')
+    ),
+    -- Untagged claims fill standalone slices first, then by id in byte order,
+    -- each up to its booked quantity less its tagged claims.
+    out_claimed AS (
+      SELECT
+        ob.*,
+        ob.claim_tagged + LEAST(
+          GREATEST(ob.quantity - ob.claim_tagged, 0),
+          GREATEST(ob.claim_pool - COALESCE(SUM(GREATEST(ob.quantity - ob.claim_tagged, 0)) OVER fill, 0), 0)
+        ) AS claimed
+      FROM out_base ob
+      WINDOW fill AS (
+        PARTITION BY ob."bookingId"
+        ORDER BY NOT ob.standalone, ob.slice_id COLLATE "C"
+        ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+      )
+    ),
+    out_departed AS (
+      SELECT
+        oc.*,
+        GREATEST(
+          CASE
+            WHEN oc.claimed > 0 THEN LEAST(oc.quantity, oc.claimed)
+            WHEN oc.checked_out_at IS NOT NULL THEN oc.quantity
+            ELSE 0
+          END,
+          oc.counter
+        ) AS departed
+      FROM out_claimed oc
+    ),
+    -- Untagged returns fill in the same order, each slice up to what it has out.
+    out_now AS (
+      SELECT
+        od.slice_id,
+        LEAST(od.quantity, GREATEST(od.departed - (
+          od.disp_tagged + LEAST(
+            GREATEST(od.departed - od.disp_tagged, 0),
+            GREATEST(od.disp_pool - COALESCE(SUM(GREATEST(od.departed - od.disp_tagged, 0)) OVER fill, 0), 0)
+          )
+        ), 0)) AS units
+      FROM out_departed od
+      WINDOW fill AS (
+        PARTITION BY od."bookingId"
+        ORDER BY NOT od.standalone, od.slice_id COLLATE "C"
+        ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+      )
+    ),
+    slices AS (
+      SELECT
+        act.*,
+        GREATEST(act.quantity - COALESCE(booked_logs.q, 0), 0) AS remaining,
+        COALESCE(out_now.units, 0) AS out_now,
+        COALESCE(act.end_at, 'infinity'::timestamptz) > now() AS ahead
+      FROM active act
+      LEFT JOIN (
+        SELECT "bookingId", SUM(q)::int AS q FROM logs GROUP BY "bookingId"
+      ) booked_logs ON booked_logs."bookingId" = act."bookingId"
+      LEFT JOIN out_now ON out_now.slice_id = act.slice_id
+    )
+    SELECT
+      COALESCE((
+        SELECT SUM(ak_q.quantity)::int
+        FROM public."AssetKit" ak_q
+        WHERE ak_q."assetId" = a.id
+      ), 0) AS in_kits,
+      COALESCE((
+        SELECT SUM(cu_q.quantity)::int
+        FROM public."Custody" cu_q
+        WHERE cu_q."assetId" = a.id AND cu_q."kitCustodyId" IS NULL
+      ), 0) AS in_custody,
+      COALESCE((
+        SELECT SUM(cu_a.quantity)::int
+        FROM public."Custody" cu_a
+        WHERE cu_a."assetId" = a.id
+      ), 0) AS in_custody_all,
+      COALESCE((SELECT SUM(remaining)::int FROM slices WHERE standalone AND status = 'RESERVED'), 0) AS reserved,
+      COALESCE((SELECT SUM(remaining)::int FROM slices WHERE status = 'RESERVED'), 0) AS reserved_all,
+      COALESCE((SELECT SUM(out_now)::int FROM slices WHERE standalone AND status IN ('ONGOING', 'OVERDUE')), 0) AS checked_out,
+      COALESCE((SELECT SUM(out_now)::int FROM slices WHERE status IN ('ONGOING', 'OVERDUE')), 0) AS checked_out_all,
+      COALESCE((
+        SELECT MAX(running)::int FROM (
+          SELECT SUM(delta) OVER (ORDER BY t, delta ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running
+          FROM (
+            SELECT GREATEST(COALESCE(from_at, now()), now()) AS t, remaining AS delta
+            FROM slices WHERE standalone AND ahead AND remaining > 0
+            UNION ALL
+            SELECT COALESCE(end_at, 'infinity'::timestamptz) AS t, -remaining AS delta
+            FROM slices WHERE standalone AND ahead AND remaining > 0
+          ) ev
+        ) sweep
+      ), 0) AS peak_booked,
+      top_booking.id AS top_booking_id,
+      top_booking.name AS top_booking_name,
+      COALESCE(top_booking.units, 0) AS top_booking_units,
+      (
+        SELECT MIN(from_at) FROM slices
+        WHERE standalone AND ahead AND status = 'RESERVED' AND remaining > 0
+      ) AS next_reserved_from
+    FROM (SELECT 1) AS anchor
+    LEFT JOIN LATERAL (
+      SELECT "bookingId" AS id, name, remaining AS units
+      FROM slices
+      WHERE standalone AND ahead AND status = 'RESERVED' AND remaining > 0
+      ORDER BY remaining DESC, "bookingId"
+      LIMIT 1
+    ) AS top_booking ON TRUE
+  ) pool ON TRUE`;
+
+/**
+ * Free now as a bare SQL expression over the `pool` LATERAL: total minus
+ * operator custody, kit units and units out, never below 0. Shared by
+ * {@link POOL_AVAILABLE_EXPR} and {@link POOL_STOCK_STATUS_EXPR} so the column
+ * and the verdict cannot use different arithmetic.
+ */
+const POOL_FREE_NOW_SQL = `GREATEST(COALESCE(a.quantity, 0) - pool.in_custody - pool.in_kits - pool.checked_out, 0)`;
+
+/**
+ * Units free to hand over right now. The ONE definition, referenced by the
+ * projection, the `available` filter and the `available` sort.
+ *
+ * Reserved units are deliberately not subtracted: they are still physically on
+ * the shelf, which is why `Reserved` ships as its own column.
+ *
+ * NULL for an individually-tracked asset, which has no pool: a number filter
+ * then leaves it out, the sort puts it last, and the projection matches the
+ * dash its cell shows.
+ */
+export const POOL_AVAILABLE_EXPR = Prisma.raw(
+  `CASE WHEN a."type" = 'QUANTITY_TRACKED' THEN ${POOL_FREE_NOW_SQL} END`
+);
+
+/**
+ * The stock verdict, the only place it is computed. Evaluated most urgent
+ * first, and the order is load-bearing:
+ *
+ * 1. `SHORT`: custody + kits + the booking peak exceed the total. Before
+ *    `NONE_FREE` because an over-committed pool is usually also empty, and
+ *    the over-commitment is the actionable half. Needs no threshold.
+ * 2. `NONE_FREE`: Free now is 0.
+ * 3. `LOW`: a threshold is set and Free now is at or below it.
+ * 4. `NO_THRESHOLD`: no threshold to judge against.
+ * 5. `ENOUGH`: above a threshold somebody set.
+ *
+ * NULL for individually-tracked assets. The values are `STOCK_STATUSES` from
+ * `@shelf/quantity-control`; pinned in `query.server.test.ts`.
+ */
+export const POOL_STOCK_STATUS_EXPR = Prisma.raw(`CASE
+    WHEN a.type <> 'QUANTITY_TRACKED' THEN NULL
+    WHEN (pool.in_custody + pool.in_kits + pool.peak_booked)
+         > COALESCE(a.quantity, 0) THEN 'SHORT'
+    WHEN ${POOL_FREE_NOW_SQL} <= 0 THEN 'NONE_FREE'
+    WHEN a."minQuantity" IS NOT NULL
+         AND ${POOL_FREE_NOW_SQL} <= a."minQuantity" THEN 'LOW'
+    WHEN a."minQuantity" IS NULL THEN 'NO_THRESHOLD'
+    ELSE 'ENOUGH'
+  END`);
+
+/**
+ * `WHEN 'SHORT' THEN 0 ...` for the Stock status sort, ranked by
+ * `STOCK_STATUS_SEVERITY` so "worst first" follows the shared order. The
+ * values are fixed constants, never user input.
+ */
+const STOCK_STATUS_SORT_RANKS = STOCK_STATUSES.map(
+  (status) => `WHEN '${status}' THEN ${STOCK_STATUS_SEVERITY[status]}`
+).join(" ");
+
+/**
+ * Units promised to upcoming bookings. A pool counts standalone slices only
+ * (kit slices are its `in_kits` units); an individually-tracked asset has no
+ * kit arithmetic to protect, so it counts every upcoming booking that claims
+ * it, which for a pool of one is simply how many bookings there are.
+ */
+const POOL_RESERVED_EXPR = Prisma.raw(
+  `CASE WHEN a.type = 'INDIVIDUAL' THEN pool.reserved_all ELSE pool.reserved END`
+);
 
 export const assetQueryJoins = Prisma.sql`
   FROM public."Asset" a
@@ -2103,7 +2784,7 @@ export const assetQueryJoins = Prisma.sql`
     FROM public."AssetKit" ak
     JOIN public."Kit" k ON ak."kitId" = k.id
     WHERE ak."assetId" = a.id
-    ORDER BY ak."createdAt" ASC
+    ORDER BY ak."createdAt" ASC, ak.id ASC
     LIMIT 1
   ) k ON TRUE
   -- Full kit membership aggregated as a jsonb array, so the asset-index
@@ -2115,7 +2796,7 @@ export const assetQueryJoins = Prisma.sql`
     SELECT COALESCE(
       jsonb_agg(
         jsonb_build_object('id', k2.id, 'name', k2.name, 'status', k2.status)
-        ORDER BY ak2."createdAt" ASC
+        ORDER BY ak2."createdAt" ASC, ak2.id ASC
       ),
       '[]'::jsonb
     ) AS kits
@@ -2133,7 +2814,7 @@ export const assetQueryJoins = Prisma.sql`
     FROM public."AssetLocation" al
     JOIN public."Location" l ON al."locationId" = l.id
     WHERE al."assetId" = a.id
-    ORDER BY al."createdAt" ASC
+    ORDER BY al."createdAt" ASC, al.id ASC
     LIMIT 1
   ) l ON TRUE
   -- Full placement list aggregated as a jsonb array, mirror of
@@ -2153,7 +2834,7 @@ export const assetQueryJoins = Prisma.sql`
             WHERE lc2."parentId" = l2.id
           )
         )
-        ORDER BY al2."createdAt" ASC
+        ORDER BY al2."createdAt" ASC, al2.id ASC
       ),
       '[]'::jsonb
     ) AS locations
@@ -2168,6 +2849,16 @@ export const assetQueryJoins = Prisma.sql`
     -- array. Replaces the previous direct LEFT JOINs on Custody +
     -- TeamMember + User which caused per-custody-row duplication for
     -- qty-tracked assets with multiple custodians (Issue A).
+    --
+    -- The ORDER BY inside jsonb_agg is load-bearing, not cosmetic:
+    -- element 0 is the "primary" custodian both for display
+    -- (formatCustodyList picks custody[0]) and for sorting (the custody
+    -- ORDER BY key indexes custody->0->>'name'). jsonb_agg without an
+    -- explicit ORDER BY has an undefined input order, so the primary
+    -- could differ between rows/plans and the sort key could disagree
+    -- with the rendered badge. Order by oldest custody first
+    -- (createdAt, id) — the same primary-pick convention the kit /
+    -- location LATERALs use. Must stay identical to CHEAP_CUSTODY_JOINS.
     SELECT COALESCE(
       jsonb_agg(
         jsonb_build_object(
@@ -2181,13 +2872,14 @@ export const assetQueryJoins = Prisma.sql`
                   'id', u.id,
                   'firstName', u."firstName",
                   'lastName', u."lastName",
-                  'profilePicture', u."profilePicture",
-                  'email', u.email
+                  'displayName', u."displayName",
+                  'profilePicture', u."profilePicture"
                 )
               ELSE NULL
             END
           )
         )
+        ORDER BY cu."createdAt" ASC, cu.id ASC
       ),
       '[]'::jsonb
     ) AS custody
@@ -2205,6 +2897,7 @@ export const assetQueryJoins = Prisma.sql`
   ) b ON TRUE
   LEFT JOIN public."User" bu ON b."custodianUserId" = bu.id
   LEFT JOIN public."TeamMember" btm ON b."custodianTeamMemberId" = btm.id
+  ${POOL_AGGREGATE_JOIN}
 `;
 
 /**
@@ -2214,17 +2907,43 @@ export const assetQueryJoins = Prisma.sql`
  * @returns Prisma.Sql fragment that safely handles no results
  */
 export const assetReturnFragment = (options: AssetReturnOptions = {}) => {
-  const { withBookings = false, withBarcodes = false } = options;
+  const {
+    withBookings = false,
+    withBarcodes = false,
+    withLastAuditDate = false,
+    orderBy,
+  } = options;
 
   const bookingsField = withBookings
     ? Prisma.sql`,
         'bookings', COALESCE(aq.bookings, '[]'::jsonb)`
     : Prisma.sql``;
 
+  const lastAuditDateField = withLastAuditDate
+    ? Prisma.sql`,
+        'lastAuditDate', ${utcJsonTimestamp('aq."lastAuditDate"')}`
+    : Prisma.sql``;
+
   const barcodesField = withBarcodes
     ? Prisma.sql`,
         'barcodes', COALESCE(aq.barcodes, '[]'::jsonb)`
     : Prisma.sql``;
+
+  // Optional deterministic array ordering. `json_agg(... ORDER BY <expr>)`
+  // sorts the aggregated elements; without it the array order is whatever the
+  // input relation yields. The rewrite passes the integer sort rank here.
+  const aggOrderBy = orderBy ? Prisma.sql` ORDER BY ${orderBy}` : Prisma.empty;
+
+  // Hoisted out of the return template's interpolation for the same reason as
+  // `rankOrderBy` in buildAdvancedAssetsQuery: constructing a nested SQL
+  // fragment inside a `${}` of the outer template has previously tripped
+  // esbuild into silently dropping the enclosing function from the production
+  // bundle. See {@link utcJsonTimestamp} for why these three need wrapping.
+  const createdAtField = utcJsonTimestamp('aq."assetCreatedAt"');
+  const updatedAtField = utcJsonTimestamp('aq."assetUpdatedAt"');
+  const mainImageExpirationField = utcJsonTimestamp(
+    'aq."assetMainImageExpiration"'
+  );
 
   return Prisma.sql`
     COALESCE(
@@ -2235,22 +2954,52 @@ export const assetReturnFragment = (options: AssetReturnOptions = {}) => {
           'qrId', aq."qrId",
           'title', aq."assetTitle",
           'description', aq."assetDescription",
-          'createdAt', aq."assetCreatedAt",
-          'updatedAt', aq."assetUpdatedAt",
+          'createdAt', ${createdAtField},
+          'updatedAt', ${updatedAtField},
           'userId', aq."assetUserId", 
           'mainImage', aq."assetMainImage",
           'thumbnailImage', aq."assetThumbnailImage",
-          'mainImageExpiration', aq."assetMainImageExpiration",
+          'mainImageExpiration', ${mainImageExpirationField},
           'categoryId', aq."assetCategoryId",
           'assetModelId', aq."assetModelId",
           'assetModelName', aq."assetModelName",
+          -- Shaped as the nested relation the Prisma selects return, so
+          -- resolveAssetImage takes the same input on both index modes.
+          'assetModel', CASE
+            WHEN aq."assetModelId" IS NULL THEN NULL
+            ELSE jsonb_build_object(
+              'image', aq."assetModelImage",
+              'thumbnailImage', aq."assetModelThumbnailImage"
+            )
+          END,
           'organizationId', aq."assetOrganizationId",
           'status', aq."assetStatus",
           'type', aq."assetType",
           'valuation', aq."assetValue",
           'quantity', aq."assetQuantity",
           'unitOfMeasure', aq."assetUnitOfMeasure",
+          'minQuantity', aq."assetMinQuantity"
+        ) || jsonb_build_object(
+          -- A second object: Postgres caps a function at 100 arguments, and
+          -- one jsonb_build_object with every key passes that limit once the
+          -- optional fields below are added. The two merge with ||.
+          'available', aq."assetAvailable",
+          'reserved', aq."assetReservedDisplay",
+          'stockStatus', aq."assetStockStatus",
+          'inCustody', aq."assetInCustodyUnits",
+          'inCustodyAll', aq."assetInCustodyAll",
+          'inKits', aq."assetInKits",
+          'checkedOut', aq."assetCheckedOut",
+          'checkedOutAll', aq."assetCheckedOutAll",
+          'reservedAll', aq."assetReservedAll",
+          'peakBooked', aq."assetPeakBooked",
+          'nextReservedFrom', aq."assetNextReservedFrom",
+          'topBookingId', aq."assetTopBookingId",
+          'topBookingName', aq."assetTopBookingName",
+          'topBookingUnits', aq."assetTopBookingUnits",
+          'consumptionType', aq."assetConsumptionType",
           'availableToBook', aq."assetAvailableToBook",
+          'archivedAt', aq."assetArchivedAt",
           'kitId', aq."assetKitId",
           'kit', CASE WHEN aq."kitId" IS NOT NULL THEN jsonb_build_object('id', aq."kitId", 'name', aq."kitName", 'status', aq."kitStatus") ELSE NULL END,
           'kits', COALESCE(aq.kits, '[]'::jsonb),
@@ -2268,13 +3017,499 @@ export const assetReturnFragment = (options: AssetReturnOptions = {}) => {
           'locations', COALESCE(aq.locations, '[]'::jsonb),
           'custody', aq.custody,
           'customFields', COALESCE(aq."customFields", '[]'::jsonb),
-          'upcomingReminder', aq.upcomingReminder${bookingsField}${barcodesField}
-        )
+          'upcomingReminder', aq.upcomingReminder${bookingsField}${barcodesField}${lastAuditDateField}
+        )${aggOrderBy}
       ) FILTER (WHERE aq."assetId" IS NOT NULL),
       '[]'
     ) AS assets
   `;
 };
+
+/**
+ * Sort-key building blocks for the slim (cheap) pagination phase.
+ *
+ * The paginate-first rewrite splits the advanced index into a cheap phase
+ * (id + sort keys only, no GROUP BY, one row per matching asset) and a heavy
+ * phase (the full projection, run once per page row via LEFT JOIN LATERAL).
+ * The heavy phase keeps its own inline copies of these expressions inside
+ * {@link assetQueryFragment} / {@link assetQueryJoins} — because ordering is
+ * frozen into an integer rank in the cheap phase, the two phases do NOT need
+ * to be byte-identical, so duplicating the SQL here is safe and keeps the
+ * heavy fragments untouched.
+ *
+ * @see {@link buildAdvancedAssetsQuery}
+ */
+
+/**
+ * qrId scalar subquery — the first QR id linked to the asset. Used as a sort
+ * key (`ORDER BY "qrId"`) only when a qrId sort is active.
+ */
+const QR_ID_SUBQUERY = Prisma.sql`(
+        SELECT q.id
+        FROM public."Qr" q
+        WHERE q."assetId" = a.id
+        ORDER BY q."createdAt" ASC, q.id ASC
+        LIMIT 1
+      )`;
+
+/**
+ * The five per-type barcode scalar subqueries, aliased as the identifiers the
+ * `barcode_<Type>` sort terms reference. Injected into the cheap phase only
+ * when a barcode sort is active. Never part of the output (sort-only).
+ */
+const BARCODE_SORT_KEY_SELECTS = Prisma.sql`(
+        SELECT b.value FROM public."Barcode" b
+        WHERE b."assetId" = a.id AND b.type = 'Code128' ORDER BY b."createdAt" ASC, b.id ASC LIMIT 1
+      ) AS barcode_Code128,
+      (
+        SELECT b.value FROM public."Barcode" b
+        WHERE b."assetId" = a.id AND b.type = 'Code39' ORDER BY b."createdAt" ASC, b.id ASC LIMIT 1
+      ) AS barcode_Code39,
+      (
+        SELECT b.value FROM public."Barcode" b
+        WHERE b."assetId" = a.id AND b.type = 'DataMatrix' ORDER BY b."createdAt" ASC, b.id ASC LIMIT 1
+      ) AS barcode_DataMatrix,
+      (
+        SELECT b.value FROM public."Barcode" b
+        WHERE b."assetId" = a.id AND b.type = 'ExternalQR' ORDER BY b."createdAt" ASC, b.id ASC LIMIT 1
+      ) AS barcode_ExternalQR,
+      (
+        SELECT b.value FROM public."Barcode" b
+        WHERE b."assetId" = a.id AND b.type = 'EAN13' ORDER BY b."createdAt" ASC, b.id ASC LIMIT 1
+      ) AS barcode_EAN13`;
+
+/**
+ * The custody CASE expression (direct custody wins; booking-derived synthetic
+ * custody for CHECKED_OUT assets otherwise; NULL). Verbatim copy of the heavy
+ * projection's custody CASE, sharing `BOOKING_CUSTODIAN_NAME` so the sorted
+ * value is exactly the string the row renders. Emitted `AS custody` in the cheap phase only
+ * when a custody sort is active — the `custody->0->>'name'` sort term needs it.
+ */
+const CUSTODY_SORT_CASE = Prisma.sql`CASE
+        WHEN jsonb_array_length(custody_agg.custody) > 0 THEN custody_agg.custody
+        WHEN b.id IS NOT NULL AND ${ASSET_IS_CHECKED_OUT} THEN
+          jsonb_build_array(
+            jsonb_build_object(
+              'name', ${BOOKING_CUSTODIAN_NAME},
+              'custodian', jsonb_build_object(
+                'name', ${BOOKING_CUSTODIAN_NAME},
+                'user', CASE
+                  WHEN bu.id IS NOT NULL THEN
+                    jsonb_build_object(
+                      'id', bu.id,
+                      'firstName', bu."firstName",
+                      'lastName', bu."lastName",
+                      'displayName', bu."displayName",
+                      'profilePicture', bu."profilePicture"
+                    )
+                  ELSE NULL
+                END
+              )
+            )
+          )
+        ELSE NULL
+      END`;
+
+/**
+ * Cheap-phase base joins, split per alias so the slim CTE only pays for the
+ * joins a given request actually needs. Each is a 1:1 join or LATERAL
+ * primary-pick (no fan-out), a verbatim mirror of the corresponding join in
+ * {@link assetQueryJoins}. Gated in {@link buildAdvancedAssetsQuery} on whether
+ * the active sort references the joined name (kit/category/assetModel/location).
+ * Search no longer needs Category/Location here — it narrows by
+ * `a."id" IN (<UNION>)` (see {@link generateWhereClause}), which never
+ * references `c.name` / `l.name` at this level. why: joining all four for
+ * every matching asset even under the default `createdAt` sort was the
+ * residual O(N) cost that kept the rewrite ~2× instead of ~10× faster.
+ */
+const CHEAP_KIT_JOIN = Prisma.sql`
+    LEFT JOIN LATERAL (
+      SELECT k.id, k.name, k.status
+      FROM public."AssetKit" ak
+      JOIN public."Kit" k ON ak."kitId" = k.id
+      WHERE ak."assetId" = a.id
+      ORDER BY ak."createdAt" ASC, ak.id ASC
+      LIMIT 1
+    ) k ON TRUE`;
+const CHEAP_CATEGORY_JOIN = Prisma.sql`
+    LEFT JOIN public."Category" c ON a."categoryId" = c.id`;
+const CHEAP_ASSET_MODEL_JOIN = Prisma.sql`
+    LEFT JOIN public."AssetModel" am ON a."assetModelId" = am.id`;
+const CHEAP_LOCATION_JOIN = Prisma.sql`
+    LEFT JOIN LATERAL (
+      SELECT l.id, l.name, l."parentId"
+      FROM public."AssetLocation" al
+      JOIN public."Location" l ON al."locationId" = l.id
+      WHERE al."assetId" = a.id
+      ORDER BY al."createdAt" ASC, al.id ASC
+      LIMIT 1
+    ) l ON TRUE`;
+
+/**
+ * The per-asset custody aggregation (`custody_agg`).
+ *
+ * Every custody WHERE predicate in {@link generateWhereClause} tests
+ * `jsonb_array_length(custody_agg.custody)`, so any query that splices in a
+ * custody filter must also carry this join or Postgres raises "missing
+ * FROM-clause entry for table custody_agg". Exported so surfaces that build
+ * their own FROM — the asset-model rollup — share this fragment rather than
+ * keeping a copy that can drift from the predicates it has to satisfy.
+ *
+ * The `ORDER BY cu."createdAt" ASC, cu.id ASC` inside `jsonb_agg` is
+ * load-bearing: it makes element 0 the primary custodian, which the custody
+ * sort key (`custody->0->>'name'`) and the rendered badge both read.
+ */
+export const CUSTODY_AGG_JOIN = Prisma.sql`
+    LEFT JOIN LATERAL (
+      SELECT COALESCE(
+        jsonb_agg(
+          jsonb_build_object(
+            'name', tm.name,
+            'quantity', cu.quantity,
+            'custodian', jsonb_build_object(
+              'name', tm.name,
+              'user', CASE
+                WHEN u.id IS NOT NULL THEN
+                  jsonb_build_object(
+                    'id', u.id,
+                    'firstName', u."firstName",
+                    'lastName', u."lastName",
+                    'displayName', u."displayName",
+                    'profilePicture', u."profilePicture"
+                  )
+                ELSE NULL
+              END
+            )
+          )
+          ORDER BY cu."createdAt" ASC, cu.id ASC
+        ),
+        '[]'::jsonb
+      ) AS custody
+      FROM public."Custody" cu
+      LEFT JOIN public."TeamMember" tm ON cu."teamMemberId" = tm.id
+      LEFT JOIN public."User" u ON tm."userId" = u.id
+      WHERE cu."assetId" = a.id
+    ) custody_agg ON TRUE`;
+
+/**
+ * Cheap-phase custody joins: {@link CUSTODY_AGG_JOIN} plus the active-booking
+ * LATERAL (`b`) and its custodian joins (`bu`/`btm`). Injected only when a
+ * custody FILTER or a custody SORT is active — the filter needs the
+ * aggregation, and the sort key's CASE additionally needs `b`/`bu`/`btm`.
+ */
+const CHEAP_CUSTODY_JOINS = Prisma.sql`
+    ${CUSTODY_AGG_JOIN}
+    LEFT JOIN LATERAL (
+      SELECT b.*
+      FROM public."Booking" b
+      JOIN public."BookingAsset" atb ON b.id = atb."bookingId" AND a.id = atb."assetId"
+      WHERE b.status IN ('ONGOING', 'OVERDUE')
+      LIMIT 1
+    ) b ON TRUE
+    LEFT JOIN public."User" bu ON b."custodianUserId" = bu.id
+    LEFT JOIN public."TeamMember" btm ON b."custodianTeamMemberId" = btm.id
+`;
+
+/** The three columns whose values come from the `pool` LATERAL. */
+export const POOL_COLUMN_NAMES = [
+  "available",
+  "reserved",
+  "stockStatus",
+] as const;
+
+/**
+ * Whether the cheap phase needs the `pool` LATERAL and its derived selects.
+ *
+ * The cheap phase runs on EVERY index load, so the pool join is gated rather
+ * than always-on: it is five correlated aggregates per asset and most page
+ * loads neither filter nor sort on them. Miss the gate and the query fails with
+ * `missing FROM-clause entry for table "pool"`, so over-inclusion is the safe
+ * direction, the same reasoning as `detectActiveSortKeys`.
+ *
+ * @param filters - Parsed filters for this request.
+ * @param sortBy - Raw sort specs (`field:direction[:fieldType]`).
+ * @returns `true` when a pool column is filtered or sorted on.
+ */
+export function detectPoolKeys(filters: Filter[], sortBy: string[]): boolean {
+  const names: string[] = [...POOL_COLUMN_NAMES];
+  return (
+    filters.some((f) => names.includes(f.name)) ||
+    sortBy.some((spec) => names.includes(spec.split(":")[0] ?? ""))
+  );
+}
+
+/**
+ * Detects which sort-only subquery selects the cheap phase must emit so that
+ * every alias the `ORDER BY` references also exists in the slim SELECT. Missing
+ * an active sort's alias is a `column does not exist` 500, so over-inclusion is
+ * the safe direction (an unused select never breaks the query).
+ *
+ * @param sortBy - Raw `sortBy` specs (`field:direction[:fieldType]`).
+ * @returns Flags for the qrId, custody, and barcode sort-key families.
+ */
+function detectActiveSortKeys(sortBy: string[]): {
+  qrId: boolean;
+  custody: boolean;
+  barcode: boolean;
+  kitName: boolean;
+  categoryName: boolean;
+  assetModelName: boolean;
+  locationName: boolean;
+  lastAuditDate: boolean;
+} {
+  let qrId = false;
+  let custody = false;
+  let barcode = false;
+  let kitName = false;
+  let categoryName = false;
+  let assetModelName = false;
+  let locationName = false;
+  let lastAuditDate = false;
+  for (const spec of sortBy) {
+    const name = spec.split(":")[0] ?? "";
+    if (name === "qrId") qrId = true;
+    else if (name === "custody") custody = true;
+    else if (name.startsWith("barcode_")) barcode = true;
+    // Joined-name sort keys (mirror the parseSortingOptions field-name branches):
+    // "kit" -> kitName, "category" -> categoryName, etc.
+    else if (name === "kit") kitName = true;
+    else if (name === "category") categoryName = true;
+    else if (name === "assetModel") assetModelName = true;
+    else if (name === "location") locationName = true;
+    else if (name === LAST_AUDIT_DATE_COLUMN) lastAuditDate = true;
+  }
+  return {
+    qrId,
+    custody,
+    barcode,
+    kitName,
+    categoryName,
+    assetModelName,
+    locationName,
+    lastAuditDate,
+  };
+}
+
+/** Parameters for {@link buildAdvancedAssetsQuery}. */
+export type BuildAdvancedAssetsQueryParams = {
+  /** WHERE clause from {@link generateWhereClause} (org scope + filters). */
+  whereClause: Prisma.Sql;
+  /** Inner `ORDER BY` body (no leading `ORDER BY `) from {@link parseSortingOptions}. */
+  orderByInner: string;
+  /** Validated custom-field sortings from {@link parseSortingOptions}. */
+  customFieldSortings: CustomFieldSorting[];
+  /** Raw `sortBy` specs, used to detect active qrId/custody/barcode sort keys. */
+  sortBy: string[];
+  /** Parsed filters, used to detect whether a custody filter is active. */
+  parsedFilters: Filter[];
+  /**
+   * Whether the "Low stock only" toggle is on. Its predicate resolves through
+   * the shared stock-status expression, so it needs the `pool` LATERAL exactly
+   * like a `stockStatus` filter does, without this the slim phase omits the
+   * join and Postgres reports a missing FROM-clause entry.
+   */
+  lowStockOnly?: boolean;
+  /** Include the bookings jsonb aggregation (availability calendar / column). */
+  withBookings: boolean;
+  /** Include the barcodes jsonb aggregation. */
+  withBarcodes: boolean;
+  /** Include the `lastAuditDate` scalar subquery. */
+  withLastAuditDate: boolean;
+  /** `LIMIT/OFFSET` fragment, or `Prisma.empty` for takeAll (full export). */
+  paginationClause: Prisma.Sql;
+};
+
+/**
+ * Assembles the advanced asset-index query using the paginate-first design.
+ *
+ * Shape (three CTEs + a lateral heavy phase):
+ * 1. `asset_query` — SLIM: `a.id` + sort keys only, one row per matching asset,
+ *    NO `GROUP BY` (the tag search/filter is EXISTS-ified in
+ *    {@link generateWhereClause}, so no fanning tag join remains).
+ * 2. `sorted_asset_query` — `ROW_NUMBER()` freezes the sort into an integer
+ *    `__sortRank`, then `LIMIT/OFFSET` slices the page.
+ * 3. `count_query` — `COUNT(*)` over the slim set (full filtered total).
+ * The final SELECT runs the ENTIRE heavy projection once per page row via
+ * `LEFT JOIN LATERAL`, and `json_agg` orders by the integer `__sortRank` — the
+ * sort expressions are never re-evaluated, so ties (no unique tiebreaker for
+ * explicit sorts) stay consistent between the paged slice and the array order.
+ *
+ * @param params - See {@link BuildAdvancedAssetsQueryParams}.
+ * @returns The complete `Prisma.Sql` query returning one row
+ *   `{ total_count: number, assets: AdvancedIndexAsset[] }`.
+ */
+export function buildAdvancedAssetsQuery({
+  whereClause,
+  orderByInner,
+  customFieldSortings,
+  sortBy,
+  parsedFilters,
+  lowStockOnly = false,
+  withBookings,
+  withBarcodes,
+  withLastAuditDate,
+  paginationClause,
+}: BuildAdvancedAssetsQueryParams): Prisma.Sql {
+  const customFieldSelect = generateCustomFieldSelect(customFieldSortings);
+
+  const {
+    qrId: qrIdSort,
+    custody: custodySort,
+    barcode: barcodeSort,
+    kitName: kitNameSort,
+    categoryName: categoryNameSort,
+    assetModelName: assetModelNameSort,
+    locationName: locationNameSort,
+    lastAuditDate: lastAuditDateSort,
+  } = detectActiveSortKeys(sortBy);
+
+  // Custody joins are needed when EITHER a custody filter (WHERE references
+  // custody_agg.custody) OR a custody sort (ORDER BY references the CASE) is
+  // active. The custody CASE select itself is only needed for the sort.
+  const custodyFilterActive = parsedFilters.some((f) => f.name === "custody");
+  const custodyJoinsActive = custodyFilterActive || custodySort;
+
+  // The pool LATERAL is needed when the WHERE references pool.* (a filter on
+  // available / reserved / stockStatus) or the ORDER BY references one of the
+  // derived aliases. Gated because it is five correlated aggregates per asset
+  // and the cheap phase runs on every index load.
+  const poolActive = lowStockOnly || detectPoolKeys(parsedFilters, sortBy);
+  const poolJoin = poolActive ? POOL_AGGREGATE_JOIN : Prisma.empty;
+  const poolSelects = poolActive
+    ? Prisma.sql`,
+      ${POOL_AVAILABLE_EXPR} AS "assetAvailable",
+      ${POOL_RESERVED_EXPR} AS "assetReservedDisplay",
+      ${POOL_STOCK_STATUS_EXPR} AS "assetStockStatus"`
+    : Prisma.empty;
+
+  // Base name-joins are gated so the slim phase stays O(1) joins under the
+  // common default sort. Search no longer references c.name / l.name at the
+  // top level (it goes through a.id IN (UNION)), so these joins are needed
+  // only when the matching name sort is active.
+  const needKitJoin = kitNameSort;
+  const needCategoryJoin = categoryNameSort;
+  const needAssetModelJoin = assetModelNameSort;
+  const needLocationJoin = locationNameSort;
+
+  const kitNameSelect = kitNameSort
+    ? Prisma.sql`,
+      k.name AS "kitName"`
+    : Prisma.empty;
+  const categoryNameSelect = categoryNameSort
+    ? Prisma.sql`,
+      c.name AS "categoryName"`
+    : Prisma.empty;
+  const assetModelNameSelect = assetModelNameSort
+    ? Prisma.sql`,
+      am.name AS "assetModelName"`
+    : Prisma.empty;
+  const locationNameSelect = locationNameSort
+    ? Prisma.sql`,
+      l.name AS "locationName"`
+    : Prisma.empty;
+
+  const qrIdSortSelect = qrIdSort
+    ? Prisma.sql`,
+      ${QR_ID_SUBQUERY} AS "qrId"`
+    : Prisma.empty;
+  const custodySortSelect = custodySort
+    ? Prisma.sql`,
+      ${CUSTODY_SORT_CASE} AS custody`
+    : Prisma.empty;
+  const barcodeSortSelects = barcodeSort
+    ? Prisma.sql`,
+      ${BARCODE_SORT_KEY_SELECTS}`
+    : Prisma.empty;
+  // The ORDER BY references the "lastAuditDate" alias, so the slim CTE must
+  // emit it whenever that sort is active.
+  const lastAuditDateSortSelect = lastAuditDateSort
+    ? Prisma.sql`,
+      ${LAST_AUDIT_DATE_SQL} AS "lastAuditDate"`
+    : Prisma.empty;
+  const custodyJoins = custodyJoinsActive ? CHEAP_CUSTODY_JOINS : Prisma.empty;
+
+  const kitJoin = needKitJoin ? CHEAP_KIT_JOIN : Prisma.empty;
+  const categoryJoin = needCategoryJoin ? CHEAP_CATEGORY_JOIN : Prisma.empty;
+  const assetModelJoin = needAssetModelJoin
+    ? CHEAP_ASSET_MODEL_JOIN
+    : Prisma.empty;
+  const locationJoin = needLocationJoin ? CHEAP_LOCATION_JOIN : Prisma.empty;
+  const baseJoins = Prisma.sql`
+    FROM public."Asset" a
+    ${kitJoin}
+    ${categoryJoin}
+    ${assetModelJoin}
+    ${locationJoin}`;
+
+  // Hoisted out of the return template's interpolation on purpose: a nested
+  // `Prisma.sql\`...\`` inside a `${}` inside the outer template tripped
+  // esbuild's transform into silently dropping this whole function from the
+  // bundle (tsc/vitest were fine, but the production build lost it).
+  const rankOrderBy = Prisma.sql`saq."__sortRank"`;
+
+  return Prisma.sql`
+      WITH asset_query AS (
+        -- SLIM cheap phase: id + sort keys, one row per matching asset, no
+        -- GROUP BY. Cost is O(N) rows of LIGHT columns, not the heavy
+        -- projection — that runs once per page row in the lateral below.
+        SELECT
+          a.id AS "assetId",
+          a."createdAt" AS "assetCreatedAt",
+          a."updatedAt" AS "assetUpdatedAt",
+          a.value AS "assetValue",
+          a.quantity AS "assetQuantity",
+          ${VISIBLE_UNIT_OF_MEASURE} AS "assetUnitOfMeasure",
+          a."minQuantity" AS "assetMinQuantity",
+          a.title AS "assetTitle",
+          a."sequentialId" AS "assetSequentialId",
+          a.status AS "assetStatus",
+          a.type AS "assetType",
+          a.description AS "assetDescription",
+          a."availableToBook" AS "assetAvailableToBook"${kitNameSelect}${categoryNameSelect}${assetModelNameSelect}${locationNameSelect}${qrIdSortSelect}${custodySortSelect}${barcodeSortSelects}${lastAuditDateSortSelect}${customFieldSelect}${poolSelects}
+        ${baseJoins}
+        ${custodyJoins}
+        ${poolJoin}
+        ${whereClause}
+      ),
+      sorted_asset_query AS (
+        -- Freeze the sort into a stable integer rank, then slice the page.
+        SELECT
+          "assetId",
+          ROW_NUMBER() OVER (ORDER BY ${Prisma.raw(
+            orderByInner
+          )}) AS "__sortRank"
+        FROM asset_query
+        ORDER BY "__sortRank"
+        ${paginationClause}
+      ),
+      count_query AS (
+        -- Full filtered total (pagination-independent) over the slim CTE.
+        SELECT COUNT(*)::integer AS total_count
+        FROM asset_query
+      )
+      SELECT
+        (SELECT total_count FROM count_query) AS total_count,
+        ${assetReturnFragment({
+          withBookings,
+          withBarcodes,
+          withLastAuditDate,
+          orderBy: rankOrderBy,
+        })}
+      FROM sorted_asset_query saq
+      LEFT JOIN LATERAL (
+        -- Heavy projection, run once per page row (WHERE a.id = the paged id).
+        ${assetQueryFragment({
+          withBookings,
+          withBarcodes,
+          withLastAuditDate,
+          withCustomFieldDefinitions: false,
+        })}
+        ${assetQueryJoins}
+        WHERE a.id = saq."assetId"
+        GROUP BY a.id, k.id, k.name, k.status, c.id, c.name, c.color, l.id, l."parentId", l.name, custody_agg.custody, kits_agg.kits, locations_agg.locations, b.id, bu.id, bu."firstName", bu."lastName", bu."displayName", bu."profilePicture", btm.id, btm.name, am.id, am.name, pool.in_kits, pool.in_custody, pool.in_custody_all, pool.reserved, pool.reserved_all, pool.checked_out, pool.checked_out_all, pool.peak_booked, pool.next_reserved_from, pool.top_booking_id, pool.top_booking_name, pool.top_booking_units
+      ) aq ON TRUE;
+    `;
+}
 
 export async function parseFiltersWithHierarchy(
   filtersString: string,

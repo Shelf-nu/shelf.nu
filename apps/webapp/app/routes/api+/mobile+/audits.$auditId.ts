@@ -1,16 +1,23 @@
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
+import { db } from "~/database/db.server";
 import {
   requireMobileAuth,
+  requireMobilePermission,
   requireOrganizationAccess,
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
 import {
   getAuditSessionDetails,
   getAuditScans,
+  requireAuditAssignee,
 } from "~/modules/audit/service.server";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
 
 /**
  * GET /api/mobile/audits/:auditId
@@ -25,7 +32,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
-    const { role, canUseAudits } = await getMobileUserContext(
+
+    await requireMobilePermission({
+      userId: user.id,
+      organizationId,
+      entity: PermissionEntity.audit,
+      action: PermissionAction.read,
+    });
+
+    const { access, canUseAudits } = await getMobileUserContext(
       user.id,
       organizationId
     );
@@ -46,24 +61,55 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       z.object({ auditId: z.string().min(1) })
     );
 
-    // Fetch session details and scans in parallel
-    const [{ session, expectedAssets }, scans] = await Promise.all([
-      getAuditSessionDetails({ id: auditId, organizationId }),
-      getAuditScans({ auditSessionId: auditId, organizationId }),
-    ]);
+    // Gate the READ, not merely the CTA below: without it a caller limited
+    // to assigned audits could fetch the full audit (its assets, scans, notes
+    // and progress) for any audit in the workspace. The web overview loader
+    // applies the same gate.
+    const canSeeAllAudits = access.audits.seeAll;
+    await requireAuditAssignee({
+      auditSessionId: auditId,
+      organizationId,
+      userId: user.id,
+      assignedOnly: !canSeeAllAudits,
+    });
+
+    // Session details, scans, and which of the audit's assets are archived
+    // (so the app can badge those rows), all in parallel. The archived read is
+    // scoped through the audit's own relations, so it needs no id list: an
+    // asset belongs to the audit when it is expected in it or was scanned in it.
+    const [{ session, expectedAssets }, scans, archivedAssets] =
+      await Promise.all([
+        getAuditSessionDetails({
+          id: auditId,
+          organizationId,
+          refreshExpectedAssetImages: true,
+        }),
+        getAuditScans({ auditSessionId: auditId, organizationId }),
+        db.asset.findMany({
+          where: {
+            organizationId,
+            archivedAt: { not: null },
+            OR: [
+              { auditEntries: { some: { auditSessionId: auditId } } },
+              { auditScans: { some: { auditSessionId: auditId } } },
+            ],
+          },
+          select: { id: true, archivedAt: true },
+        }),
+      ]);
+    const archivedAtById = new Map(
+      archivedAssets.map((a) => [a.id, a.archivedAt?.toISOString() ?? null])
+    );
 
     // why: completing is assignee-gated server-side (requireAuditAssignee in
-    // audits.complete.ts): only an assignee may complete, except admins/owners
-    // may complete an audit that has no assignees. Encode that eligibility in
+    // audits.complete.ts): callers who see every audit may complete any
+    // audit, everyone else only when assigned. Encode that eligibility in
     // `canComplete` so the client never shows a "Complete Audit" CTA that
-    // 403s after confirmation — e.g. an admin viewing another user's audit in
-    // the all-workspace list. Mirrors the endpoint's own rule exactly.
-    const isSelfServiceOrBase = role === "SELF_SERVICE" || role === "BASE";
-    const hasNoAssignees = session.assignments.length === 0;
+    // 403s after confirmation. Mirrors the endpoint's own rule exactly.
     const isAssignee = session.assignments.some((a) => a.user.id === user.id);
     const canCompleteAudit =
       (session.status === "ACTIVE" || session.status === "PENDING") &&
-      (isAssignee || (!isSelfServiceOrBase && hasNoAssignees));
+      (isAssignee || canSeeAllAudits);
 
     return data({
       audit: {
@@ -82,12 +128,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         createdBy: {
           firstName: session.createdBy?.firstName ?? null,
           lastName: session.createdBy?.lastName ?? null,
+          displayName: session.createdBy?.displayName ?? null,
           profilePicture: session.createdBy?.profilePicture ?? null,
         },
         assignments: session.assignments.map((a) => ({
           userId: a.user.id,
-          firstName: a.user.firstName,
-          lastName: a.user.lastName,
+          firstName: a.user.firstName ?? null,
+          lastName: a.user.lastName ?? null,
+          displayName: a.user.displayName,
           profilePicture: a.user.profilePicture,
           role: a.role,
         })),
@@ -96,6 +144,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         id: a.id,
         name: a.name,
         auditAssetId: a.auditAssetId,
+        // Evidence can exist WITHOUT a scan: an auditor photographs an empty
+        // shelf from the web scan screen, which attaches the note or photo to
+        // the expected `AuditAsset` directly. Serving these only on the scan
+        // shape below left those rows looking empty on the phone. The service
+        // already counts them per expected asset, so this costs no query.
+        auditNotesCount: a.auditNotesCount ?? 0,
+        auditImagesCount: a.auditImagesCount ?? 0,
         mainImage: a.mainImage ?? null,
         thumbnailImage: a.thumbnailImage ?? null,
         // why: surface where the asset should be, what category it
@@ -105,8 +160,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         locationName: a.locationName ?? null,
         categoryName: a.categoryName ?? null,
         custodianName: a.custodianName ?? null,
+        // The app shows an "Archived" badge on the row. Null while active.
+        archivedAt: archivedAtById.get(a.id) ?? null,
       })),
       existingScans: scans.map((s) => ({
+        id: s.id,
         code: s.code,
         assetId: s.assetId,
         assetTitle: s.assetTitle,
@@ -115,10 +173,18 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           s.scannedAt instanceof Date ? s.scannedAt.toISOString() : s.scannedAt,
         auditAssetId: s.auditAssetId,
         assetLocationName: s.assetLocationName,
+        // why: lets the app say "deleted" instead of inferring it from an
+        // empty title, which is also what a pre-snapshot row looks like.
+        assetDeleted: s.assetDeleted,
+        archivedAt: s.assetId ? archivedAtById.get(s.assetId) ?? null : null,
         auditNotesCount: s.auditNotesCount,
         auditImagesCount: s.auditImagesCount,
       })),
-      canScan: session.status === "PENDING" || session.status === "ACTIVE",
+      // why: same eligibility as record-scan's server-side gate, so the app
+      // never offers a scanner whose submissions are guaranteed to 403
+      canScan:
+        (session.status === "PENDING" || session.status === "ACTIVE") &&
+        (isAssignee || canSeeAllAudits),
       canComplete: canCompleteAudit,
     });
   } catch (cause) {

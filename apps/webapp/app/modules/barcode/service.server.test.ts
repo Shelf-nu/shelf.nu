@@ -14,6 +14,7 @@ import {
   replaceBarcodes,
   validateBarcodeUniqueness,
   parseBarcodesFromImportData,
+  importDataHasBarcodes,
 } from "./service.server";
 
 // @vitest-environment node
@@ -23,6 +24,14 @@ import {
 vitest.mock("~/database/db.server", () => ({
   db: {
     $transaction: vitest.fn().mockImplementation((callback) => callback(db)),
+    // The org guards look the target up by id + organizationId. Default:
+    // every requested id is found, i.e. it belongs to the caller's workspace.
+    asset: {
+      findMany: vitest.fn(),
+    },
+    kit: {
+      findMany: vitest.fn(),
+    },
     barcode: {
       create: vitest.fn().mockResolvedValue({}),
       createMany: vitest.fn().mockResolvedValue({}),
@@ -36,6 +45,18 @@ vitest.mock("~/database/db.server", () => ({
 }));
 
 const mockTransaction = db.$transaction as ReturnType<typeof vitest.fn>;
+
+/** Resolves every id the org guard asks about, as if all were in the workspace. */
+function findAllRequestedIds({ where }: { where: { id: { in: string[] } } }) {
+  return Promise.resolve(where.id.in.map((id) => ({ id })));
+}
+
+beforeEach(() => {
+  //@ts-expect-error missing vitest type
+  db.asset.findMany.mockImplementation(findAllRequestedIds);
+  //@ts-expect-error missing vitest type
+  db.kit.findMany.mockImplementation(findAllRequestedIds);
+});
 
 const mockBarcodeData = {
   id: "barcode-1",
@@ -59,6 +80,49 @@ const mockCreateParams = {
 describe("createBarcode", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
+  });
+
+  it("refuses to attach a barcode to an asset outside the caller's workspace", async () => {
+    expect.assertions(3);
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([]);
+
+    const error = await createBarcode(mockCreateParams).catch((e) => e);
+
+    expect(error).toBeInstanceOf(ShelfError);
+    expect(error.status).toBe(400);
+    expect(db.barcode.create).not.toHaveBeenCalled();
+  });
+
+  it("refuses to attach a barcode to a kit outside the caller's workspace", async () => {
+    expect.assertions(3);
+    //@ts-expect-error missing vitest type
+    db.kit.findMany.mockResolvedValue([]);
+
+    const error = await createBarcode({
+      type: BarcodeType.Code128,
+      value: "TEST123",
+      organizationId: "org-1",
+      userId: "user-1",
+      kitId: "kit-from-another-org",
+    }).catch((e) => e);
+
+    expect(error).toBeInstanceOf(ShelfError);
+    expect(error.status).toBe(400);
+    expect(db.barcode.create).not.toHaveBeenCalled();
+  });
+
+  it("checks the asset against the caller's workspace", async () => {
+    expect.assertions(1);
+    //@ts-expect-error missing vitest type
+    db.barcode.create.mockResolvedValue(mockBarcodeData);
+
+    await createBarcode(mockCreateParams);
+
+    expect(db.asset.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["asset-1"] }, organizationId: "org-1" },
+      select: { id: true },
+    });
   });
 
   it("should create a barcode successfully", async () => {
@@ -210,6 +274,23 @@ describe("createBarcode", () => {
 describe("createBarcodes", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
+  });
+
+  it("refuses to attach barcodes to an asset outside the caller's workspace", async () => {
+    expect.assertions(3);
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([]);
+
+    const error = await createBarcodes({
+      barcodes: [{ type: BarcodeType.Code128, value: "TEST123" }],
+      organizationId: "org-1",
+      userId: "user-1",
+      assetId: "asset-from-another-org",
+    }).catch((e) => e);
+
+    expect(error).toBeInstanceOf(ShelfError);
+    expect(error.status).toBe(400);
+    expect(db.barcode.createMany).not.toHaveBeenCalled();
   });
 
   it("should create multiple barcodes successfully", async () => {
@@ -1040,6 +1121,47 @@ describe("validateBarcodeUniqueness", () => {
   });
 });
 
+describe("importDataHasBarcodes", () => {
+  it("detects every barcode type, including ExternalQR and EAN13", () => {
+    // why: the import entitlement guard previously only checked
+    // Code128/Code39/DataMatrix, so files carrying only ExternalQR/EAN13
+    // slipped past and had those barcodes silently dropped when the
+    // destination workspace lacked the barcodes add-on.
+    expect(
+      importDataHasBarcodes([
+        { key: "a", title: "A", barcode_EAN13: "5901234123457" },
+      ])
+    ).toBe(true);
+    expect(
+      importDataHasBarcodes([
+        { key: "a", title: "A", barcode_ExternalQR: "abc123" },
+      ])
+    ).toBe(true);
+    expect(
+      importDataHasBarcodes([
+        { key: "a", title: "A", barcode_Code128: "ABCD1234" },
+      ])
+    ).toBe(true);
+  });
+
+  it("returns false when no row carries any barcode column", () => {
+    expect(
+      importDataHasBarcodes([
+        { key: "a", title: "A" },
+        { key: "b", title: "B", barcode_Code128: "" },
+      ])
+    ).toBe(false);
+  });
+
+  it("ignores whitespace-only barcode cells (matches the parser)", () => {
+    // why: the parser trims and skips " ", so the guard must too — otherwise an
+    // accidental space would 403 a workspace that has barcodes disabled.
+    expect(
+      importDataHasBarcodes([{ key: "a", title: "A", barcode_Code128: "   " }])
+    ).toBe(false);
+  });
+});
+
 describe("parseBarcodesFromImportData", () => {
   const mockImportData = [
     {
@@ -1321,6 +1443,39 @@ describe("parseBarcodesFromImportData", () => {
       { type: BarcodeType.Code128, value: "ABC123", existingId: undefined },
       { type: BarcodeType.Code128, value: "DEF456", existingId: undefined },
       { type: BarcodeType.Code128, value: "GHI789", existingId: undefined },
+    ]);
+  });
+
+  it("should keep a quoted barcode value that contains a comma as one barcode", async () => {
+    expect.assertions(2);
+    // why: the uniqueness lookup is a DB round trip; an empty result means no
+    // value in this cell is already linked, so the parse is what gets asserted.
+    //@ts-expect-error missing vitest type
+    db.barcode.findMany.mockResolvedValue([]);
+
+    const dataWithQuotedBarcode = [
+      {
+        key: "asset-1",
+        title: "Test Asset 1",
+        // How the export writes a value carrying the separator.
+        barcode_Code128: '"SN-2024,001",MBP002',
+      },
+    ];
+
+    const result = await parseBarcodesFromImportData({
+      data: dataWithQuotedBarcode,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(result).toHaveLength(1);
+    expect(result[0].barcodes).toEqual([
+      {
+        type: BarcodeType.Code128,
+        value: "SN-2024,001",
+        existingId: undefined,
+      },
+      { type: BarcodeType.Code128, value: "MBP002", existingId: undefined },
     ]);
   });
 

@@ -30,6 +30,14 @@ export const CLIENT_VIEW_PARAM_KEYS = [
  * True when navigating from `currentUrl` to `nextUrl` is a same-path navigation
  * whose only differing search params are client view params (search/sort/page).
  *
+ * A navigation to the **identical** URL is deliberately NOT a client view
+ * change: nothing about the view changed, so there is nothing for the page to
+ * satisfy client-side. Those navigations are re-navigations, either a redirect
+ * that lands back on the current URL or an explicit `router.revalidate()`, and
+ * they exist precisely to refetch. Treating them as view changes silently
+ * swallowed the refetch. A differing fragment does not count as identical:
+ * fragments are client-only, so a hash change stays a view change.
+ *
  * @param currentUrl - The URL being navigated away from
  * @param nextUrl - The URL being navigated to
  * @returns Whether the change is purely a client-handled view change
@@ -39,6 +47,12 @@ export function isClientViewOnlyNavigation(
   nextUrl: URL
 ): boolean {
   if (currentUrl.pathname !== nextUrl.pathname) {
+    return false;
+  }
+  if (
+    currentUrl.search === nextUrl.search &&
+    currentUrl.hash === nextUrl.hash
+  ) {
     return false;
   }
   const withoutViewParams = (url: URL): string => {

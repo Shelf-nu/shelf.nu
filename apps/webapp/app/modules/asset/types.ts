@@ -18,6 +18,7 @@ import type {
   TeamMember,
 } from "@prisma/client";
 import type { Return } from "@prisma/client/runtime/library";
+import type { StockStatus } from "@shelf/quantity-control";
 import type { assetIndexFields } from "./fields";
 
 export interface ICustomFieldValueJson {
@@ -82,6 +83,13 @@ export interface UpdateAssetPayload {
 export interface CreateAssetFromContentImportPayload
   extends Record<string, any> {
   key: string; // Unique identifier for the asset in the import (this is generated while parsing the csv file)
+  /**
+   * A row may carry an `id` cell (the import-ready export's row matcher for
+   * the UPDATE importer). Deliberately not declared as a typed field here:
+   * createAssetsFromContentImport must never read it — it always mints a
+   * fresh cuid via `id(LEGACY_CUID_LENGTH)`, so a caller-supplied id can
+   * never be used to set/connect/upsert onto another workspace's asset.
+   */
   title: string;
   description?: string;
   category?: string;
@@ -107,42 +115,6 @@ export interface CreateAssetFromContentImportPayload
   consumptionType?: "ONE_WAY" | "TWO_WAY";
 }
 
-export interface CreateAssetFromBackupImportPayload
-  extends Record<string, any> {
-  id: string;
-  title: string;
-  description?: string;
-  category:
-    | {
-        id: string;
-        name: string;
-        description: string;
-        color: string;
-        createdAt: string;
-        updatedAt: string;
-        userId: string;
-      }
-    | {};
-  tags: {
-    name: string;
-  }[];
-  location:
-    | {
-        name: string;
-        description?: string;
-        address?: string;
-        createdAt: string;
-        updatedAt: string;
-      }
-    | {};
-  customFields: AssetCustomFieldsValuesWithFields[];
-}
-
-export type AssetCustomFieldsValuesWithFields =
-  ShelfAssetCustomFieldValueType & {
-    customField: CustomField;
-  };
-
 /** Item returned by getAssetsFromView */
 export type AssetsFromViewItem = Prisma.AssetGetPayload<{
   include: Return<typeof assetIndexFields>;
@@ -159,9 +131,30 @@ export type AdvancedAssetBooking = Pick<
   custodianTeamMember?: Pick<TeamMember, "id" | "name">;
   custodianUser?: Pick<
     User,
-    "id" | "firstName" | "lastName" | "profilePicture"
+    "id" | "firstName" | "lastName" | "displayName" | "profilePicture"
   >;
-  creator?: Pick<User, "id" | "firstName" | "lastName" | "profilePicture">;
+  creator?: Pick<
+    User,
+    "id" | "firstName" | "lastName" | "displayName" | "profilePicture"
+  >;
+  /** BookingAsset.assetKitId of THIS slice: null = standalone (free pool),
+   * non-null = kit-driven (FK → AssetKit.id). Availability view only. */
+  assetKitId?: string | null;
+  /** BookingAsset.quantity — booked units for THIS slice. Never Asset.quantity
+   * (workspace stock). Availability view only. */
+  quantity?: number;
+  /** Kit name for THIS slice (null when standalone), resolved via
+   * AssetKit → Kit.name. Availability view only. */
+  kitName?: string | null;
+  /** BookingAsset.checkedOutAt of THIS slice: null until the slice goes out.
+   * Advanced mode delivers an ISO string (jsonb), simple mode a Date.
+   * Availability view only. */
+  checkedOutAt?: string | Date | null;
+  /** BookingAsset.checkedInAt of THIS slice: set once the slice is fully
+   * reconciled, cleared again by a second departure. The calendar reads it
+   * together with `checkedOutAt` to decide whether the bar reads as returned.
+   * Availability view only. */
+  checkedInAt?: string | Date | null;
 };
 
 /** Type for advanced index query. We cannot infer it because we do a raw query so we need to create it ourselves. */
@@ -184,11 +177,82 @@ export type AdvancedIndexAsset = Pick<
   | "valuation"
   | "quantity"
   | "unitOfMeasure"
+  | "minQuantity"
+  | "consumptionType"
   | "availableToBook"
+  | "archivedAt"
 > & {
   qrId: string; // QR code will always be available
+  /**
+   * Units free to hand over right now: `quantity` minus custody, kit
+   * allocations and checked-out units. Computed in the index SQL, not stored.
+   *
+   * Deliberately NOT reduced by future reservations, a reserved unit is still
+   * physically on the shelf, so read it alongside `reserved` rather than on
+   * its own. `null` for INDIVIDUAL assets, which have no pool.
+   */
+  available: number | null;
+  /** Units committed to RESERVED bookings. `null` for INDIVIDUAL assets. */
+  reserved: number | null;
+  /**
+   * Units held by custodians DIRECTLY. Kit-inherited custody is not here: those
+   * units live in `inKits`, and counting them twice is the double-deduction
+   * `getAssetAvailability` guards against. This is the arithmetic figure.
+   */
+  inCustody: number | null;
+  /**
+   * Every custody unit, kit-inherited included. For the status badge's LABEL
+   * only, a member of a kit in custody is still "In custody" to a reader,
+   * never for arithmetic.
+   */
+  inCustodyAll: number | null;
+  /** Units earmarked to kits, whatever the kit is doing. */
+  inKits: number | null;
+  /**
+   * Standalone units that have actually LEFT on ONGOING/OVERDUE bookings
+   * (dispatched minus ledgered returns). The arithmetic figure behind `Free now`.
+   */
+  checkedOut: number | null;
+  /** Every unit out, kit-driven included. Badge label only. */
+  checkedOutAll: number | null;
+  /** Units promised to RESERVED bookings including kit slices. Badge label only. */
+  reservedAll: number | null;
+  /**
+   * The most units owed to bookings at any single instant from now on, over
+   * standalone slices, `peakConcurrent` in SQL. This is the figure the `Short`
+   * verdict is computed from, so it is also the figure the badge's tooltip
+   * must quote.
+   */
+  peakBooked: number | null;
+  /**
+   * Start of the SOONEST upcoming (RESERVED) booking, or null when there is
+   * none. A single scalar on purpose: an asset may carry hundreds of future
+   * bookings, and the index must not ship a per-booking list just so a hover
+   * card can say "those units leave on the 2nd". Serialised as a string.
+   */
+  nextReservedFrom: string | null;
+  /**
+   * The single upcoming booking claiming the MOST units of this pool, the one
+   * the `SHORT` verdict is computed from. Null when there are no upcoming
+   * bookings. Carried so a `Short` row can NAME the booking instead of only
+   * announcing that a problem exists.
+   */
+  topBookingId: string | null;
+  topBookingName: string | null;
+  /** Units that booking asks for, so the hover can say so beside its name. */
+  topBookingUnits: number | null;
+  /**
+   * Derived pool verdict powering the `Stock status` column, computed in SQL
+   * by `POOL_STOCK_STATUS_EXPR` (`query.server.ts`), which is its only source.
+   * `null` for INDIVIDUAL assets.
+   */
+  stockStatus: StockStatus | null;
   assetModelId?: string | null;
   assetModelName?: string | null;
+  /** The model's cover image, used when the asset has none of its own.
+   * Shaped as the nested relation the Prisma selects return so
+   * `resolveAssetImage` takes the same input on both index modes. */
+  assetModel: { image: string | null; thumbnailImage: string | null } | null;
   /** Primary kit (oldest pivot row) — mirrors the LATERAL primary-pick
    * used by ORDER BY and filters. Kept alongside `kits` for back-compat
    * with consumers that only need the primary. */
@@ -231,6 +295,7 @@ export type AdvancedIndexAsset = Pick<
             id: string;
             firstName: string | null;
             lastName: string | null;
+            displayName: string | null;
             profilePicture: string | null;
             email: string;
           } | null;
@@ -256,6 +321,8 @@ export type AdvancedIndexAsset = Pick<
   >;
   bookings?: Array<AdvancedAssetBooking>;
   barcodes?: Array<Pick<Barcode, "id" | "type" | "value">>;
+  /** ISO UTC completion time of the latest finished audit covering the asset. */
+  lastAuditDate?: string | null;
 };
 // Type for the entire query result
 export type AdvancedIndexQueryResult = Array<{
@@ -269,3 +336,12 @@ export interface CustomFieldSorting {
   alias: string;
   fieldType?: CustomFieldType;
 }
+
+/**
+ * The "active vs archived" view dimension for asset lists. This is orthogonal
+ * to the per-status (AVAILABLE/IN_CUSTODY/CHECKED_OUT) filter — see issue #382.
+ * - `active`   → only non-archived assets (the default everywhere).
+ * - `archived` → only archived assets (the "Archived" view).
+ * - `all`      → both.
+ */
+export type ArchivedFilter = "active" | "archived" | "all";

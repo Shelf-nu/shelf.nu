@@ -2,6 +2,8 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { data } from "react-router";
 import { z } from "zod";
 import { AssetsList } from "~/components/assets/assets-index/assets-list";
+import { BulkDeleteAssetsSchema } from "~/components/assets/bulk-delete-dialog";
+import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
 import {
   bulkDeleteAssets,
   getPaginatedAndFilterableAssets,
@@ -56,6 +58,9 @@ export const loader = async ({
     } = await getPaginatedAndFilterableAssets({
       request,
       organizationId,
+      // Shelf staff route, gated by `requireAdmin` above — and it renders the
+      // custodian filter, so the seed must not be scoped to one person.
+      canSeeAllCustody: true,
     });
 
     // Synchronous — no DB call. Booking custodian data is already included
@@ -111,7 +116,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
       "bulk-delete": PermissionAction.delete,
     };
 
-    const { organizationId, canUseBarcodes, role } = await requirePermission({
+    const {
+      organizationId,
+      canUseBarcodes,
+      role,
+      access,
+      currentOrganization,
+    } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
@@ -128,11 +139,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     switch (intent) {
       case "bulk-delete": {
-        const { assetIds, currentSearchParams } = parseData(
+        const { assetIds, confirmation, currentSearchParams } = parseData(
           formData,
-          z
-            .object({ assetIds: z.array(z.string()).min(1) })
-            .and(CurrentSearchParamsSchema)
+          BulkDeleteAssetsSchema.and(CurrentSearchParamsSchema)
         );
 
         await bulkDeleteAssets({
@@ -141,6 +150,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
           userId,
           currentSearchParams,
           settings,
+          lastAuditDateAccess: lastAuditDateAccessFor(
+            access,
+            currentOrganization
+          ),
+          confirmation,
         });
 
         sendNotification({

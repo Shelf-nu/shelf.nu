@@ -11,7 +11,10 @@
  * first cursor enter via `/api/assets/:id/quantity-breakdown` so an
  * index of 100 rows pays zero per-row cost up-front. When the asset
  * detail page passes `bookingAssets` + `assetKits` inline through
- * `asset`, the hover-card is instant.
+ * `asset`, the hover-card is instant. The assets index passes its server
+ * figures as `quantityBreakdown` with `quantityListsDeferred`: the label
+ * and totals come from those figures, and the first hover fetches only
+ * the booking and kit lists.
  *
  * @see {@link file://./quantity-data.ts}
  * @see {@link file://./quantity-tooltip-content.tsx}
@@ -21,7 +24,6 @@
 import { useMemo, useState } from "react";
 import type { Booking } from "@prisma/client";
 import { AssetStatus } from "@prisma/client";
-import { HoverCardPortal } from "@radix-ui/react-hover-card";
 import useApiQuery from "~/hooks/use-api-query";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import type { ExtendedAssetStatus } from "~/utils/booking-assets";
@@ -29,6 +31,7 @@ import {
   getQuantityBadgeLabelAndColor,
   getQuantityData,
   type QuantityAwareAsset,
+  type QuantityBreakdown,
 } from "./quantity-data";
 import { QuantityTooltipContent } from "./quantity-tooltip-content";
 import { assetStatusColorMap, userFriendlyAssetStatus } from "./status-labels";
@@ -41,6 +44,7 @@ import {
 } from "../../shared/hover-card";
 import { UnavailableBadge } from "../../shared/unavailable-badge";
 import When from "../../when/when";
+import { ArchivedBadge } from "../archived-badge";
 
 export function AssetStatusBadge({
   id,
@@ -48,10 +52,20 @@ export function AssetStatusBadge({
   suppressQtyAware = false,
   availableToBook = true,
   asset,
+  quantityBreakdown,
+  quantityListsDeferred = false,
+  isArchived = false,
 }: {
   id: string;
   status: ExtendedAssetStatus;
   availableToBook: boolean;
+  /**
+   * When `true`, renders an "Archived" chip alongside the status badge. The
+   * asset's live status is still shown (archiving is orthogonal to status),
+   * so a historical/completed booking row reads e.g. "Available · Archived".
+   * Defaults to `false` so existing callers are unaffected.
+   */
+  isArchived?: boolean;
   /**
    * Booking-row escape hatch for the qty-aware treatment. When `true`
    * AND the asset is `QUANTITY_TRACKED`, the badge:
@@ -81,8 +95,34 @@ export function AssetStatusBadge({
    * Falls back to standard status if data is missing.
    */
   asset?: QuantityAwareAsset | null;
+  /**
+   * A breakdown the CALLER has already computed server-side. When supplied it
+   * wins over deriving one from `asset` and decides the label from first
+   * paint, and the badge does not fetch `/quantity-breakdown` unless
+   * `quantityListsDeferred` is set.
+   *
+   * Deriving from `asset` needs `custody` AND `bookingAssets` on the row. A
+   * list surface without booking slices (the assets index) would derive
+   * reserved/checkedOut = 0 and show the raw `Asset.status`, so it passes the
+   * server's numbers here instead. The badge then agrees with the `Available`
+   * and `Stock status` columns beside it, because it is the same arithmetic.
+   */
+  quantityBreakdown?: QuantityBreakdown | null;
+  /**
+   * Set when `quantityBreakdown` carries the figures but not the per-booking
+   * and per-kit lists (the assets index, which cannot ship every row's
+   * bookings). The label and totals still come from `quantityBreakdown`; the
+   * first hover lazily fetches `/api/assets/:id/quantity-breakdown` and only
+   * its `bookingAssets` and `assetKits` are merged in, so the hover card can
+   * list and link the bookings and kits holding units.
+   *
+   * Leave unset when `quantityBreakdown` already includes the lists (the
+   * asset page): the badge then never fetches.
+   */
+  quantityListsDeferred?: boolean;
 }) {
-  const inlineQuantityData = useMemo(() => getQuantityData(asset), [asset]);
+  const derivedQuantityData = useMemo(() => getQuantityData(asset), [asset]);
+  const inlineQuantityData = quantityBreakdown ?? derivedQuantityData;
 
   // Whether the asset is actually QT (by schema type). Used to gate the
   // qty-aware render branch AND the `ongoing-booking` fetch (the latter
@@ -101,8 +141,9 @@ export function AssetStatusBadge({
   // `suppressQtyAware` also disables the lazy fetch: when the caller has
   // told us they don't want the qty-aware breakdown, paying the network
   // cost would be wasted bandwidth (the data isn't rendered).
+  const listsDeferred = !!quantityBreakdown && quantityListsDeferred;
   const needsLazyBreakdown =
-    isQtyTracked && !inlineQuantityData && !suppressQtyAware;
+    isQtyTracked && !suppressQtyAware && (!inlineQuantityData || listsDeferred);
   const { data: lazyAsset } = useApiQuery<QuantityAwareAsset>({
     api: `/api/assets/${id}/quantity-breakdown`,
     enabled: needsLazyBreakdown && hasInteracted,
@@ -111,7 +152,23 @@ export function AssetStatusBadge({
     () => getQuantityData(lazyAsset ?? null),
     [lazyAsset]
   );
-  const quantityData = inlineQuantityData ?? lazyQuantityData;
+  /**
+   * With deferred lists the caller's figures stay authoritative (label,
+   * totals, `freeNow`) and the fetched breakdown contributes only its lists.
+   * Until the fetch lands the card shows totals alone.
+   */
+  const quantityData = useMemo(() => {
+    if (listsDeferred && quantityBreakdown) {
+      return lazyQuantityData
+        ? {
+            ...quantityBreakdown,
+            bookingAssets: lazyQuantityData.bookingAssets,
+            assetKits: lazyQuantityData.assetKits,
+          }
+        : quantityBreakdown;
+    }
+    return inlineQuantityData ?? lazyQuantityData;
+  }, [listsDeferred, quantityBreakdown, inlineQuantityData, lazyQuantityData]);
 
   // Fetch the ongoing booking from API when asset is CHECKED_OUT.
   // Skip for quantity-tracked assets — they handle multi-booking
@@ -133,6 +190,18 @@ export function AssetStatusBadge({
 
     return data;
   }, [data, status]);
+
+  /**
+   * Archived dominates the status display. When an asset is archived we show a
+   * single, calm "Archived" badge and suppress the live status + the
+   * "unavailable for bookings" indicator: the asset can't be booked or used
+   * while archived, so surfacing its underlying status (e.g. "Available")
+   * alongside would be misleading and force the reader to reconcile two states.
+   * One clear signal, everywhere the asset appears (issue #382).
+   */
+  if (isArchived) {
+    return <ArchivedBadge />;
+  }
 
   /**
    * For quantity-tracked assets, render the qty-aware branch even before
@@ -198,14 +267,12 @@ export function AssetStatusBadge({
               `suppressQtyAware`, or no data yet), the chip is plain and
               the breakdown popover would be misleading — hide it. */}
           {!useCallerStatus && (
-            <HoverCardPortal>
-              <HoverCardContent
-                side="bottom"
-                className="w-[26rem] max-w-[calc(100vw-2rem)]"
-              >
-                <QuantityTooltipContent data={quantityData} />
-              </HoverCardContent>
-            </HoverCardPortal>
+            <HoverCardContent
+              side="bottom"
+              className="w-[26rem] max-w-[calc(100vw-2rem)]"
+            >
+              <QuantityTooltipContent data={quantityData} />
+            </HoverCardContent>
           )}
         </HoverCard>
         {!availableToBook && (
@@ -232,17 +299,15 @@ export function AssetStatusBadge({
       </HoverCardTrigger>
 
       <When truthy={!!bookingToShow}>
-        <HoverCardPortal>
-          <HoverCardContent side="top" className="w-max min-w-36 max-w-72">
-            <Button
-              variant="link-gray"
-              to={`/bookings/${bookingToShow?.id}`}
-              target="_blank"
-            >
-              {bookingToShow?.name}
-            </Button>
-          </HoverCardContent>
-        </HoverCardPortal>
+        <HoverCardContent side="top" className="w-max min-w-36 max-w-72">
+          <Button
+            variant="link-gray"
+            to={`/bookings/${bookingToShow?.id}`}
+            target="_blank"
+          >
+            {bookingToShow?.name}
+          </Button>
+        </HoverCardContent>
       </When>
     </HoverCard>
   );

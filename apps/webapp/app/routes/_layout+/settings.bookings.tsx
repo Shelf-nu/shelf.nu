@@ -1,4 +1,5 @@
-import { OrganizationRoles, OrganizationType } from "@prisma/client";
+import { OrganizationType } from "@prisma/client";
+import { EXPLICIT_REQUIREMENT_LABELS } from "@shelf/labels";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -8,12 +9,17 @@ import { data, useLoaderData } from "react-router";
 import {
   AutoArchiveSettings,
   AutoArchiveDaysSchema,
+  AutoArchiveExpiredToggleSchema,
   AutoArchiveToggleSchema,
 } from "~/components/booking/auto-archive-settings";
 import {
   ExplicitCheckinSettings,
   ExplicitCheckinSettingsSchema,
 } from "~/components/booking/explicit-checkin-settings";
+import {
+  ExplicitCheckoutSettings,
+  ExplicitCheckoutSettingsSchema,
+} from "~/components/booking/explicit-checkout-settings";
 import { NotificationSettings } from "~/components/booking/notification-settings";
 import {
   ProgressiveCheckinSettings,
@@ -32,6 +38,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { Overrides } from "~/components/working-hours/overrides/overrides";
 import { EnableWorkingHoursForm } from "~/components/working-hours/toggle-working-hours-form";
 import { WeeklyScheduleForm } from "~/components/working-hours/weekly-schedule-form";
+import { scheduleExpiryArchiveForExistingReservations } from "~/modules/booking/service.server";
 import {
   getBookingSettingsForOrganization,
   updateAlwaysNotifyTeamMembers,
@@ -53,9 +60,11 @@ import {
   WorkingHoursToggleSchema,
 } from "~/modules/working-hours/zod-utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { getClientHint } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
+import { Logger } from "~/utils/logger";
 import {
   PermissionAction,
   PermissionEntity,
@@ -124,7 +133,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, role } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId: authSession.userId,
       request,
       entity: PermissionEntity.workingHours,
@@ -141,8 +150,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
         "updateTimeSettings",
         "updateTagsRequired",
         "updateAutoArchiveToggle",
+        "updateAutoArchiveExpiredToggle",
         "updateAutoArchiveDays",
         "updateExplicitCheckin",
+        "updateExplicitCheckout",
         "updateCountKitsAsSingleUnit",
         "updateNotifyBookingCreator",
         "updateNotifyAdminsOnNewBooking",
@@ -235,6 +246,62 @@ export async function action({ context, request }: ActionFunctionArgs) {
           organizationId,
           autoArchiveBookings,
         });
+
+        sendNotification({
+          title: "Settings updated",
+          message: "Auto-archive setting has been updated successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return data(payload({ success: true }), { status: 200 });
+      }
+      case "updateAutoArchiveExpiredToggle": {
+        const { autoArchiveExpiredReservations } = parseData(
+          formData,
+          AutoArchiveExpiredToggleSchema,
+          {
+            additionalData: {
+              intent,
+              organizationId,
+              formData: Object.fromEntries(formData),
+            },
+          }
+        );
+
+        await updateBookingSettings({
+          organizationId,
+          autoArchiveExpiredReservations,
+        });
+
+        // When turning the setting ON, schedule the archive job for every
+        // currently-reserved booking so the existing backlog of past-due
+        // reservations is cleaned up too — not just bookings reserved later.
+        // Best-effort: the toggle is already saved, so a scheduler hiccup must
+        // not fail the settings update. New reservations still schedule via the
+        // reserve path, and the backlog re-schedules if the org re-toggles.
+        if (autoArchiveExpiredReservations) {
+          try {
+            const settings =
+              await getBookingSettingsForOrganization(organizationId);
+            await scheduleExpiryArchiveForExistingReservations({
+              organizationId,
+              autoArchiveDays: settings.autoArchiveDays,
+              hints: getClientHint(request),
+            });
+          } catch (cause) {
+            Logger.error(
+              new ShelfError({
+                cause,
+                message:
+                  "Failed to schedule auto-archive for existing reservations",
+                additionalData: { organizationId },
+                label: "Booking Settings",
+                shouldBeCaptured: false,
+              })
+            );
+          }
+        }
 
         sendNotification({
           title: "Settings updated",
@@ -371,7 +438,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           });
         }
 
-        await deleteWorkingHoursOverride(overrideId);
+        await deleteWorkingHoursOverride(overrideId, organizationId);
 
         sendNotification({
           title: "Override deleted",
@@ -452,7 +519,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
       case "updateExplicitCheckin": {
         // Only workspace owners can change explicit check-in settings
-        if (role !== OrganizationRoles.OWNER) {
+        if (!access.ownsWorkspace) {
           throw new ShelfError({
             cause: null,
             title: "Not allowed",
@@ -460,6 +527,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
               "Only the workspace owner can change explicit check-in settings",
             status: 403,
             label: "Booking Settings",
+            shouldBeCaptured: false,
           });
         }
 
@@ -483,6 +551,47 @@ export async function action({ context, request }: ActionFunctionArgs) {
         sendNotification({
           title: "Settings updated",
           message: "Explicit check-in settings have been updated successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return data(payload({ success: true }), { status: 200 });
+      }
+
+      case "updateExplicitCheckout": {
+        // Only workspace owners can change explicit check-out settings
+        if (!access.ownsWorkspace) {
+          throw new ShelfError({
+            cause: null,
+            title: "Not allowed",
+            message:
+              "Only the workspace owner can change explicit check-out settings",
+            status: 403,
+            label: "Booking Settings",
+            shouldBeCaptured: false,
+          });
+        }
+
+        const {
+          requireExplicitCheckoutForAdmin,
+          requireExplicitCheckoutForSelfService,
+        } = parseData(formData, ExplicitCheckoutSettingsSchema, {
+          additionalData: {
+            intent,
+            organizationId,
+            formData: Object.fromEntries(formData),
+          },
+        });
+
+        await updateBookingSettings({
+          organizationId,
+          requireExplicitCheckoutForAdmin,
+          requireExplicitCheckoutForSelfService,
+        });
+
+        sendNotification({
+          title: "Settings updated",
+          message: "Explicit check-out settings have been updated successfully",
           icon: { name: "success", variant: "success" },
           senderId: authSession.userId,
         });
@@ -544,15 +653,30 @@ export default function GeneralPage() {
       {/* Explicit check-in settings form */}
       <ExplicitCheckinSettings
         header={{
-          title: "Explicit check-in requirement",
+          title: EXPLICIT_REQUIREMENT_LABELS.CHECKIN.TITLE,
           subHeading:
-            "Control whether specific roles must use the scanner-based explicit check-in flow instead of the one-click quick check-in. Only workspace owners can change this setting.",
+            "Switch on a role to remove its one-click check-in. That role checks items in by scanning them or by selecting them from the list, on the web and on the phone. Only the workspace owner can change this setting.",
         }}
         defaultValues={{
           requireExplicitCheckinForAdmin:
             bookingSettings.requireExplicitCheckinForAdmin,
           requireExplicitCheckinForSelfService:
             bookingSettings.requireExplicitCheckinForSelfService,
+        }}
+      />
+
+      {/* Explicit check-out settings form */}
+      <ExplicitCheckoutSettings
+        header={{
+          title: EXPLICIT_REQUIREMENT_LABELS.CHECKOUT.TITLE,
+          subHeading:
+            "Switch on a role to remove its one-click check-out. That role checks items out by scanning them or by selecting them from the list, on the web and on the phone. Only the workspace owner can change this setting.",
+        }}
+        defaultValues={{
+          requireExplicitCheckoutForAdmin:
+            bookingSettings.requireExplicitCheckoutForAdmin,
+          requireExplicitCheckoutForSelfService:
+            bookingSettings.requireExplicitCheckoutForSelfService,
         }}
       />
 
@@ -586,6 +710,9 @@ export default function GeneralPage() {
             "Configure automatic actions for completed bookings to keep your workspace clean.",
         }}
         defaultAutoArchiveBookings={bookingSettings.autoArchiveBookings}
+        defaultAutoArchiveExpiredReservations={
+          bookingSettings.autoArchiveExpiredReservations
+        }
         defaultAutoArchiveDays={bookingSettings.autoArchiveDays}
       />
 

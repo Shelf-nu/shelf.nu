@@ -1,16 +1,18 @@
-import { InviteStatuses } from "@prisma/client";
-import type { Prisma, Organization, OrganizationRoles } from "@prisma/client";
+import type {
+  InviteStatuses,
+  Prisma,
+  Organization,
+  OrganizationRoles,
+} from "@prisma/client";
 
 import type { LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
-import {
-  organizationRolesMap,
-  type UserFriendlyRoles,
-} from "~/routes/_layout+/settings.team";
+import { getNrmIndexWhere } from "~/modules/team-member/nrm-scope";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { ShelfError } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
+import { ROLE_LABELS, resolveRole } from "~/utils/permissions/role-access";
 
 const label = "Settings";
 
@@ -20,8 +22,12 @@ export interface TeamMembersWithUserOrInvite {
   img: string;
   email: string;
   status: InviteStatuses;
-  role: UserFriendlyRoles;
+  /** The member's effective role, as its human label. */
+  role: string;
+  /** The member's effective (highest-rank) role. */
   roleEnum: OrganizationRoles;
+  /** Every role the membership (or invite) holds, for the change-role preview. */
+  roles: OrganizationRoles[];
   userId: string | null;
   sso: boolean;
   custodies?: number;
@@ -94,26 +100,33 @@ export async function getPaginatedAndFilterableSettingUsers({
      * Create a structure for the users org members and merge it with invites
      */
     const teamMembersWithUserOrInvite: TeamMembersWithUserOrInvite[] =
-      userMembers.map((um) => ({
-        id: um.user.id,
-        name: (() => {
-          const baseName = `${um.user.firstName || ""} ${
-            um.user.lastName || ""
-          }`.trim();
-          if (!baseName && um.user.displayName) return um.user.displayName;
-          return (
-            baseName + (um.user.displayName ? ` (${um.user.displayName})` : "")
-          );
-        })(),
-        img: um.user.profilePicture ?? "/static/images/default_pfp.jpg",
-        email: um.user.email,
-        status: "ACCEPTED",
-        role: organizationRolesMap[um.roles[0]],
-        roleEnum: um.roles[0],
-        userId: um.user.id,
-        sso: um.user.sso,
-        custodies: um?.user?.teamMembers?.[0]?._count?.custodies || 0,
-      }));
+      userMembers.map((um) => {
+        // A membership can hold several roles; the row shows the one every
+        // policy decision reads, never whichever happens to be stored first.
+        const roleEnum = resolveRole(um.roles);
+        return {
+          id: um.user.id,
+          name: (() => {
+            const baseName = `${um.user.firstName || ""} ${
+              um.user.lastName || ""
+            }`.trim();
+            if (!baseName && um.user.displayName) return um.user.displayName;
+            return (
+              baseName +
+              (um.user.displayName ? ` (${um.user.displayName})` : "")
+            );
+          })(),
+          img: um.user.profilePicture ?? "/static/images/default_pfp.jpg",
+          email: um.user.email,
+          status: "ACCEPTED",
+          role: ROLE_LABELS[roleEnum],
+          roleEnum,
+          roles: um.roles,
+          userId: um.user.id,
+          sso: um.user.sso,
+          custodies: um?.user?.teamMembers?.[0]?._count?.custodies || 0,
+        };
+      });
 
     const totalPages = Math.ceil(totalItems / perPage);
 
@@ -155,25 +168,10 @@ export async function getPaginatedAndFilterableSettingTeamMembers({
     const take = perPage >= 1 && perPage <= 100 ? perPage : 200;
 
     /**
-     * 1. Don't have any invites(userId:null)
-     * 2. If they have invites, they should not be pending(userId!=null which mean invite is accepted so we only need to worry about pending ones)
+     * The NRM population is defined once in `getNrmIndexWhere` so the export
+     * and bulk-delete select-all paths cannot drift from what this index shows.
      */
-    const where: Prisma.TeamMemberWhereInput = {
-      deletedAt: null,
-      organizationId,
-      userId: null,
-      receivedInvites: {
-        none: { status: InviteStatuses.PENDING },
-      },
-    };
-
-    if (search) {
-      where.OR = [
-        { name: { contains: search, mode: "insensitive" } },
-        { user: { firstName: { contains: search, mode: "insensitive" } } },
-        { user: { lastName: { contains: search, mode: "insensitive" } } },
-      ];
-    }
+    const where = getNrmIndexWhere({ organizationId, search });
 
     const [teamMembers, totalTeamMembers] = await Promise.all([
       db.teamMember.findMany({
@@ -181,7 +179,10 @@ export async function getPaginatedAndFilterableSettingTeamMembers({
         take,
         skip,
         include: {
-          _count: { select: { custodies: true } },
+          // Both custody shapes: a kit custodian may hold no per-asset
+          // `Custody` rows at all (an empty kit inherits none), and the row
+          // and its delete dialog must still show them as encumbered.
+          _count: { select: { custodies: true, kitCustodies: true } },
         },
       }),
       db.teamMember.count({ where }),

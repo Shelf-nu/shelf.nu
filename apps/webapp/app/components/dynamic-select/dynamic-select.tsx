@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
 import {
@@ -55,6 +55,20 @@ type Props = ModelFilterProps & {
 
   /** Is this input required. Used to show a required star */
   required?: boolean;
+
+  /**
+   * Validation message for the current selection.
+   *
+   * Pass this instead of rendering your own paragraph next to the picker: a
+   * hand-rolled one is invisible to assistive tech, so a screen-reader user who
+   * submits an empty required picker gets nothing at all — the form just
+   * silently refuses to submit. Rendering it here lets the component announce
+   * the message (`role="alert"`) and point `aria-describedby` at it, which only
+   * the component can do because it owns the trigger element.
+   *
+   * Naming matches `~/components/forms/input.tsx`, which takes the same prop.
+   */
+  error?: string;
   searchIcon?: IconType;
   showSearch?: boolean;
   defaultValue?: string;
@@ -115,6 +129,7 @@ export default function DynamicSelect({
   label,
   hideLabel,
   required,
+  error,
   searchIcon = "search",
   showSearch = true,
   defaultValue,
@@ -139,6 +154,8 @@ export default function DynamicSelect({
   const [createdItems, setCreatedItems] = useState<ModelFilterItem[]>([]);
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const triggerRef = useRef<HTMLDivElement>(null);
+  /** Stable id linking the trigger to its error text via `aria-describedby`. */
+  const errorId = useId();
   /**
    * Focus the search input when the popover opens — replaces a bare
    * `autoFocus` prop which is flagged by jsx-a11y because it can surprise
@@ -361,6 +378,17 @@ export default function DynamicSelect({
                 "w-full",
                 disabled && "cursor-not-allowed opacity-60"
               )}
+              // Radix's `asChild` trigger injects aria-expanded/haspopup/controls
+              // onto this element but never this one, so there is no collision.
+              //
+              // No `aria-invalid`: ARIA only allows it on input widgets, and
+              // this trigger's implicit role is `button` (jsx-a11y flags it as
+              // an error). Re-roling it to `combobox` would satisfy the
+              // attribute but lie about the popup — Radix Popover advertises
+              // `aria-haspopup="dialog"`, not a listbox. The announcement comes
+              // from the message's `role="alert"` and the association from
+              // `aria-describedby`; the red border carries the visual half.
+              aria-describedby={error ? errorId : undefined}
             >
               {label && (
                 <InnerLabel hideLg={hideLabel} required={required}>
@@ -370,7 +398,11 @@ export default function DynamicSelect({
 
               <div
                 ref={triggerRef}
-                className="flex w-full items-center justify-between whitespace-nowrap rounded border border-gray-300 px-[14px] py-2 text-sm hover:cursor-pointer disabled:opacity-50"
+                className={tw(
+                  "flex w-full items-center justify-between whitespace-nowrap rounded border border-gray-300 px-[14px] py-2 text-sm hover:cursor-pointer disabled:opacity-50",
+                  // Same visual error signal as `Input`, so the two read alike.
+                  error && "border-error-300"
+                )}
               >
                 <span
                   className={tw(
@@ -397,6 +429,25 @@ export default function DynamicSelect({
               }}
               align="center"
               sideOffset={5}
+              // A modal Radix Dialog — every `Sheet`, so every route rendered
+              // through `ContextualSidebar` — mounts `react-remove-scroll`,
+              // which cancels any `wheel` whose target sits outside the dialog
+              // content. This popover is portalled to `document.body`, so the
+              // option list counts as outside and the wheel does nothing;
+              // dragging the scrollbar is a pointer interaction and still
+              // works, which is what makes the breakage look selective.
+              //
+              // React attaches portal listeners to the portal container, and
+              // `document.body` is a descendant of the `document` that
+              // remove-scroll listens on — so stopping here is what keeps the
+              // list scrollable. Removing these makes wheel scrolling dead
+              // inside every sheet.
+              onWheel={(event) => {
+                event.stopPropagation();
+              }}
+              onTouchMove={(event) => {
+                event.stopPropagation();
+              }}
             >
               <div className="flex items-center justify-between p-3">
                 <div className="text-xs font-semibold text-gray-700">
@@ -590,20 +641,40 @@ export default function DynamicSelect({
             </PopoverContent>
           </PopoverPortal>
         </Popover>
+
+        {/* Inserting a role="alert" node announces it, which is the whole point:
+            submit-time validation on a picker is otherwise silent. */}
+        {error ? (
+          <p id={errorId} role="alert" className="text-sm text-error-500">
+            {error}
+          </p>
+        ) : null}
       </div>
     </>
   );
 }
 
 /**
+ * Phone widths: every width below Tailwind's `sm` breakpoint (640px), written
+ * as the exact complement of `sm` like `SHEET_MEDIA_QUERY` is of `md`. From
+ * `sm` up, tablets included, the panel is a regular dropdown under its field.
+ */
+export const PICKER_PHONE_MEDIA_QUERY = "not all and (min-width: 640px)";
+
+/**
  * Mobile-specific CSS overrides for the Radix popper used by this select.
+ *
+ * Lifts the panel above the dim overlay `MobileStyles` renders and pins it to
+ * the top of the screen. The overlay shows below `sm` (`sm:hidden`) and sits
+ * above the panel's own z-index, so this rule must cover the same widths
+ * (`PICKER_PHONE_MEDIA_QUERY`): wherever the overlay shows without it, the
+ * overlay covers the options and a tap on one only closes the select.
  *
  * Uses React's native `<style>{css}</style>` child form (safe text child)
  * instead of an injected-HTML approach, so there is no XSS concern and the
  * `react/no-danger` rule stays clean.
- * PR history: https://github.com/Shelf-nu/shelf.nu/pull/304
  */
-const MOBILE_POPPER_CSS = `@media (max-width: 640px) {
+const MOBILE_POPPER_CSS = `@media ${PICKER_PHONE_MEDIA_QUERY} {
   body {
     overflow: hidden;
   }
@@ -620,13 +691,19 @@ const MOBILE_POPPER_CSS = `@media (max-width: 640px) {
   }
 }`;
 
+/**
+ * Dim overlay plus {@link MOBILE_POPPER_CSS}, rendered while a `DynamicSelect`
+ * or `DynamicDropdown` panel is open.
+ *
+ * @param props.open - Whether the panel is open; nothing renders while closed.
+ */
 export const MobileStyles = ({ open }: { open: boolean }) =>
   open && (
     <>
       <div
         // eslint-disable-next-line tailwindcss/migration-from-tailwind-2
         className={tw(
-          "extra-overlay fixed right-0 top-0 z-[999] h-screen w-screen cursor-pointer bg-black bg-opacity-50 backdrop-blur transition duration-300 ease-in-out md:hidden",
+          "extra-overlay fixed right-0 top-0 z-[999] h-screen w-screen cursor-pointer bg-black bg-opacity-50 backdrop-blur transition duration-300 ease-in-out sm:hidden",
           open ? "visible" : "invisible opacity-0"
         )}
       ></div>

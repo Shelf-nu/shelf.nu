@@ -13,10 +13,14 @@ Root-level convenience scripts follow the `<app>:<task>` pattern (e.g., `webapp:
 - `pnpm webapp:dev` - Start webapp dev server on port 3000
 - `pnpm webapp:build` - Build webapp for production
 - `pnpm webapp:test -- --run` - Run Vitest unit tests (always use `--run` flag)
-- `pnpm webapp:validate` - Run all tests, linting, and typecheck (use before commits)
+- `pnpm webapp:test:changed` - Run only the tests affected by your changes versus local `main` (seconds, not minutes)
+- `pnpm webapp:validate` - Run affected tests, linting, and typecheck (use before commits)
+- `pnpm webapp:validate:full` - Same, but with the full test suite (~3 min); CI always runs the full suite
 - `pnpm webapp:start` - Start webapp production server locally (loads `.env` from monorepo root)
 
 **IMPORTANT:** When running tests manually, ALWAYS use the `--run` flag to run tests once and exit. Without `--run`, Vitest runs in watch mode which consumes excessive memory. Never run multiple test processes in parallel as this can freeze the system.
+
+**Locally, run only the affected tests.** To verify a change, use `pnpm webapp:test:changed` (or a single file with `pnpm webapp:test -- --run <path>`). Do **not** run the full suite locally — no `pnpm webapp:validate:full`, no bare `pnpm webapp:test -- --run` — unless the user asks for it. CI runs the full suite on every PR, sharded across four runners, and that is the full-suite check.
 
 ### Companion App (Mobile)
 
@@ -59,6 +63,44 @@ Advisory by default — findings print, the commit proceeds. Opt in to blocking 
 
 📖 Full documentation: [apps/docs/security-review-agent.md](./apps/docs/security-review-agent.md).
 
+### PR Review
+
+`/pr-review` gives the first review of the PR for the current branch (or
+`/pr-review <number>`): intent vs. actual change, bugs, tests, conventions and
+reuse, security, consumers, performance and deploy safety. Every finding is
+verified, and the report is a plain-language verdict with numbered findings.
+Read-only during the review; afterwards it fixes only the findings you pick (or
+writes a throwaway "prove N" test), and it never posts unless you ask.
+
+- Skill: `.claude/skills/pr-review/SKILL.md`
+- Agents: `.claude/agents/shelf-pr-reviewer-{tests,conventions,impact,security}.md`,
+  `.claude/agents/shelf-pr-finding-validator.md` (read-only, no Bash or network).
+  Security runs on opus with `Skill` and loads skills only when the diff
+  touches their area. The bugs pass runs the built-in `/code-review`, which has Bash.
+- Setup script: `scripts/pr-review-context.mjs`
+- Tests: `pnpm test:tooling`
+
+📖 Full documentation: [apps/docs/pr-review.md](./apps/docs/pr-review.md).
+
+### Watchdog
+
+`/watchdog` automates the review-response cycle on a PR: it watches for
+CodeRabbit / Codex / Copilot / human feedback, verifies each finding against
+the current code and `.claude/rules/`, implements the valid ones, commits, and
+then replies to and resolves each thread once you have pushed.
+
+- Skill: `.claude/skills/watchdog/SKILL.md`
+- Triager subagent: `.claude/agents/shelf-pr-comment-triager.md` (read-only;
+  no Bash or network, because PR comments are untrusted input on a public repo)
+- Scripts: `scripts/pr-review-watch.sh`, `scripts/pr-review-respond.sh`
+- Tests: `pnpm test:tooling`
+
+**You always push** — the loop never runs `git push`. It never answers a human
+reviewer's comment either; those are surfaced for you. It runs until you say
+"stop the loop".
+
+📖 Full documentation: [apps/docs/watchdog.md](./apps/docs/watchdog.md).
+
 ### Database
 
 All database commands run via the `@shelf/database` package (`packages/database/`). This package owns the Prisma schema, migrations, and client generation. The webapp does **not** manage database concerns directly — it consumes `@shelf/database` as a workspace dependency.
@@ -89,9 +131,24 @@ This is a **pnpm workspaces + Turborepo** monorepo. All packages are defined in 
 
 ### Packages
 
-| Package           | Path                 | Description                                                                                                                                                                                                                                                                                                                 |
-| ----------------- | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@shelf/database` | `packages/database/` | **Owns all database concerns**: Prisma schema (`prisma/schema.prisma`), migrations (`prisma/migrations/`), and the `createDatabaseClient()` factory (`src/client.ts`). All `db:*` root scripts delegate to this package. The webapp imports from this package — it does **not** run Prisma commands directly in production. |
+| Package                   | Path                         | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@shelf/database`         | `packages/database/`         | **Owns all database concerns**: Prisma schema (`prisma/schema.prisma`), migrations (`prisma/migrations/`), and the `createDatabaseClient()` factory (`src/client.ts`). All `db:*` root scripts delegate to this package. The webapp imports from this package and does **not** run Prisma commands directly in production.                                                                                                                                                                                                    |
+| `@shelf/permissions`      | `packages/permissions/`      | **Owns authorization**: the `PermissionAction`/`PermissionEntity` vocabulary, the role → permission matrix and `roleHasPermission()` (with the ADMIN/OWNER allow-all short-circuit), **and** the role policy table `ROLE_POLICIES` with `resolveRoleAccess()`: how far each role reaches (booking/custody/audit scope, limits, notification audience, membership rules). Every authorization decision in both apps resolves here; the webapp imports it only through `~/utils/permissions/role-access` and `permission.data`. |
+| `@shelf/datetime`         | `packages/datetime/`         | Pure, preference-aware date/time formatting shared by both apps so their date rendering never drifts.                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `@shelf/quantity-control` | `packages/quantity-control/` | Pure quantity/availability domain for `QUANTITY_TRACKED` assets, shared by both apps so their availability math never drifts.                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `@shelf/labels`           | `packages/labels/`           | Canonical user-facing label strings shared by both apps so their terminology never drifts.                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+
+Except for `@shelf/database`, these are **pure, dependency-free, no-build**
+packages: their `exports` point straight at `src/index.ts` and consumers
+compile the TypeScript themselves (Vite via `ssr.noExternal`, Metro via Babel).
+Follow that shape for new shared packages — anything importing Prisma or Node
+APIs cannot be consumed by the companion app.
+
+**Adding a `packages/*` dependency requires everyone to re-run `pnpm install`** —
+workspace packages are consumed through symlinks that only `pnpm install`
+creates. Say so in the PR description; see
+`.claude/rules/run-pnpm-install-when-workspace-packages-change.md`.
 
 ### Tooling
 
@@ -231,6 +288,27 @@ const disabled = useDisabled(fetcher);
 ### Deprecated Components
 
 - **DropdownMenu** (`apps/webapp/app/components/shared/dropdown.tsx`): Do not use for new features. Instead, use `Popover` from `@radix-ui/react-popover` with custom select behavior. See `apps/webapp/app/components/assets/assets-index/advanced-filters/field-selector.tsx` for a good example implementation.
+
+### Authorization (roles and permissions)
+
+Two questions, both answered by `@shelf/permissions`:
+
+- **May this role do X on Y?** → the matrix: `requirePermission` / `requireMobilePermission` on the server, `userHasPermission({ roles, entity, action })` on the client (`roles` from `useOrganizationRoles()`).
+- **How far does this role reach?** (whose bookings, whose custody, which audits, limits, who is notified) → `access`: `requirePermission(...).access`, `getMobileUserContext(...).access`, `useRoleAccess()` in components and in the companion.
+- Owner-only → `isWorkspaceOwner(roles)` / `access.ownsWorkspace`. Prisma role audiences → `rolesWhere(policy => …)`.
+
+**Never compare roles directly** (`role === "ADMIN"`, `roles.includes(...)`, `roles[0]`): `local-rules/no-direct-role-checks` blocks it in the webapp and the companion. A new reach question gets a `RolePolicy` field with a value for every role. Webapp code imports the package only via `~/utils/permissions/role-access` (TS instantiation ceiling).
+
+📖 Full documentation: [apps/docs/roles-and-permissions.md](./apps/docs/roles-and-permissions.md). Rule: [.claude/rules/role-checks-go-through-permissions.md](./.claude/rules/role-checks-go-through-permissions.md)
+
+### Scanner Blockers
+
+Every blocker a scanner drawer can raise must be derived in a pure builder with
+a stable `id` and covered by a test, including a manifest assertion over the id
+list. A missing blocker silently reports success while nothing moves, and no
+other check in this repo can see it.
+
+- 📖 Full rule: [.claude/rules/scanner-blockers-need-a-test.md](./.claude/rules/scanner-blockers-need-a-test.md)
 
 ### Silencing react-doctor findings
 
@@ -379,6 +457,13 @@ All code must include inline documentation and JSDoc comments. This applies to e
 - Especially important: when a variable name could be confused (e.g., `userId` referring to different users in different contexts), add a clarifying comment
 - Explain "why" rather than "what" — the code shows what, comments explain why
 
+**Timeless, not historical:**
+
+- Write comments in the present tense, for a reader who never saw the PR that introduced them — describe what the thing is and how to use it, not the bug that prompted it
+- Phrase a reason as a standing constraint ("read `completedAt`, never `status`, because archiving rewrites the status"), never as an incident report ("this used to read `status`, which broke on archive")
+- When you edit a file, rewrite any JSDoc/inline comment there that narrates history or describes behaviour the code no longer has — in the same change
+- 📖 Full rule: [.claude/rules/comments-describe-code-not-history.md](./.claude/rules/comments-describe-code-not-history.md)
+
 **Example:**
 
 ```typescript
@@ -466,7 +551,16 @@ Always run `pnpm webapp:validate` before committing - this runs:
 2. ESLint with auto-fix
 3. Prettier formatting
 4. TypeScript checking
-5. Unit tests
+5. Unit tests affected by your changes versus local `main` (`vitest --changed main`)
+
+Use `pnpm webapp:validate:full` to run the whole suite locally. CI runs the full
+suite on every PR, split across four parallel runners (`--shard`).
+
+**Keep local `main` current.** `--changed main` diffs against your local `main`
+branch, so a stale `main` widens the diff and runs more tests than needed —
+never fewer. Changes to `package.json`, the Vite/Vitest config, a `[.csv]` route or an
+`api+/mobile+/` route re-run everything (`forceRerunTriggers` in `vitest.config.ts`): the
+contract tests guarding those routes read them from disk, so `--changed` cannot link them.
 
 ### Writing & Organizing Tests
 
@@ -490,6 +584,7 @@ Always run `pnpm webapp:validate` before committing - this runs:
 #### Organizing Mocks and Factories
 
 - **Test files**: Co-located with source files (e.g., `apps/webapp/app/modules/user/service.server.test.ts`)
+- **Route tests**: `apps/webapp/test/routes-tests/`, mirroring the route path — **never** inside `app/routes/`. Vite's dev-server warmup treats every file under `app/routes/` as a client module, so a co-located route test importing a `*.server` module breaks `pnpm webapp:dev` while `validate` and CI stay green. Import the route via `~/routes/...`, not a relative path. Enforced by the `local-rules/no-test-files-in-routes` ESLint rule (blocks the pre-commit hook).
 - **Shared mocks**: Place in `apps/webapp/test/mocks/` directory, organized by domain (remix.tsx, database.ts)
 - **Factories**: Place in `apps/webapp/test/factories/` directory for generating test data
 - **MSW handlers**: Keep in `apps/webapp/mocks/` directory for API mocking
@@ -582,6 +677,18 @@ The `.env` file lives at the **monorepo root** (not inside `apps/webapp/`). Copy
 4. **Testing**: Write unit tests for utilities  
    Follow the testing conventions outlined in the Writing & Organizing Tests section to ensure consistent, behavior-driven testing and minimal mocking.
 5. **Pre-commit**: Always run `pnpm webapp:validate` to ensure code quality
+
+## Right-Sizing Execution Effort
+
+Match the weight of the process to the size of the change. For a **trivial,
+fully-understood mechanical edit** — move a function to a `*.server` module, fix
+an import path, rename a symbol, a one-line guard swap — just make the edit
+directly with the file tools and run only the one relevant test if needed. Do
+**not** spin up a subagent, review loop, or `validate` for it: the
+orchestration overhead (re-reading files, running the whole suite, writing a
+report) can turn a 30-second edit into many minutes. Reserve subagent-driven
+execution and full review loops for **substantial** work — new modules,
+multi-file features, or anything genuinely needing an independent review.
 
 ## Git and Version control
 

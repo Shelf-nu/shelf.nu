@@ -20,13 +20,23 @@ export type AssetsSchedulerData = {
 };
 
 /**
+ * pg-boss send options for every reminder job. The worker rethrows handler
+ * failures so pg-boss retries them; the limit is small because the handler's
+ * email and note sends are not idempotent, so each retry can duplicate them.
+ * {@link scheduleAssetReminder} spreads the caller's options over these.
+ */
+const DEFAULT_REMINDER_JOB_OPTIONS: PgBoss.SendOptions = {
+  retryLimit: 2,
+  retryDelay: 60,
+};
+
+/**
  * pg-boss send options for jobs belonging to a RECURRING reminder.
  *
  * - retryLimit/retryBackoff: the worker rethrows failures of the critical
- *   advance step (see worker.server.ts), so recurring jobs must be sent with
- *   retries or a transient error kills the chain until the next deploy's
- *   reconciliation. One-shot jobs keep the historical `{}` (swallowed errors,
- *   no retries) byte-identical.
+ *   advance step (see worker.server.ts), so recurring jobs get a wider, backed
+ *   off retry budget than {@link DEFAULT_REMINDER_JOB_OPTIONS}: a lost
+ *   recurring job kills the chain until the next deploy's reconciliation.
  * - singletonKey: dedupes scheduling of the same occurrence when two actors
  *   race (worker advance vs boot reconciliation vs edit). pg-boss enforces a
  *   unique index on (name, singletonKey) for jobs in state < 'completed', so
@@ -64,10 +74,15 @@ export async function scheduleAssetReminder({
   options?: PgBoss.SendOptions;
 }) {
   try {
+    // why: bounded retry recovers transient failures (e.g. a momentary DB
+    // blip); a small limit + the reminder handler's non-idempotent
+    // email/note sends mean we cap duplicate exposure (paired with the
+    // query-level DB retry from the sibling task, most failures are already
+    // handled before the job throws).
     const reference = await scheduler.sendAfter(
       QueueNames.assetsQueue,
       data,
-      options,
+      { ...DEFAULT_REMINDER_JOB_OPTIONS, ...options },
       when
     );
 

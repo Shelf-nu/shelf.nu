@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { Prisma } from "@prisma/client";
-import { KitStatus, OrganizationRoles } from "@prisma/client";
+import { KitStatus } from "@prisma/client";
 import type {
   MetaFunction,
   LoaderFunctionArgs,
@@ -12,6 +12,7 @@ import { useKitAvailabilityData } from "~/components/assets/assets-index/use-kit
 import { AvailabilityViewToggle } from "~/components/assets/assets-index/view-toggle";
 import { CategoryBadge } from "~/components/assets/category-badge";
 import AvailabilityCalendar from "~/components/availability-calendar/availability-calendar";
+import { ResourceTitleLink } from "~/components/availability-calendar/resource-title-link";
 import { StatusFilter } from "~/components/booking/status-filter";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ChevronRight } from "~/components/icons/library";
@@ -33,11 +34,12 @@ import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { Td, Th } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import { db } from "~/database/db.server";
+import { useAssetIndexView } from "~/hooks/use-asset-index-view";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
-import { useIsAvailabilityView } from "~/hooks/use-is-availability-view";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { getLocationsForCreateAndEdit } from "~/modules/asset/service.server";
+import type { EntityForCodeResolution } from "~/modules/barcode/display";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import {
   getPaginatedAndFilterableKits,
@@ -47,6 +49,7 @@ import type { KITS_INCLUDE_FIELDS } from "~/modules/kit/types";
 import calendarStyles from "~/styles/layout/calendar.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getFiltersFromRequest, setCookie } from "~/utils/cookies.server";
+import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { computeHasActiveFilters } from "~/utils/filter-params";
 import { payload, error, getCurrentSearchParams } from "~/utils/http.server";
@@ -73,13 +76,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, canSeeAllCustody, role } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.kit,
       action: PermissionAction.read,
     });
-    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+    const assignsSelfOnly = access.custody.assign === "self";
 
     const searchParams = getCurrentSearchParams(request);
     const hasActiveFilters = computeHasActiveFilters(searchParams);
@@ -99,6 +102,17 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       return redirect(`/kits?${cookieParams.toString()}`);
     }
 
+    /**
+     * Custody scope for the custodian picker, shared by its rows AND its count
+     * so the two cannot disagree — the same rule `custody-filter` resolves on
+     * the search endpoint.
+     */
+    const custodianFilterWhere = {
+      deletedAt: null,
+      organizationId,
+      userId: !access.custody.seeAll ? userId : undefined,
+    };
+
     let [
       { kits, totalKits, perPage, page, totalPages, search },
       teamMembers,
@@ -108,9 +122,16 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       getPaginatedAndFilterableKits({
         request,
         organizationId,
+        // Governs `?teamMember=`: a viewer who may not see all custody may
+        // only ever filter this list by their own custody.
+        canSeeAllCustody: access.custody.seeAll,
+        userId,
         extraInclude: {
           qrCodes: { select: { id: true } },
+          // Active members only: an archived member is left out of the kit's
+          // bookings, so it must not mark the kit unavailable to book.
           assetKits: {
+            where: { asset: { archivedAt: null } },
             select: {
               // AssetKit.id surfaces the kit-slice discriminator. The
               // consumer filters `bookingAssets[].assetKitId === ak.id`
@@ -133,6 +154,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
                   // PrismaClientValidationError on every kit search with
                   // ?view=availability (Sentry SHELF-WEBAPP-1P1).
                   ...(view === "availability" && {
+                    // why: out of this rule — a kit bar means "every member
+                    // slice returned", which needs a per-kit fold this select
+                    // does not carry, so kit bars keep the booking's period.
                     bookingAssets: {
                       where: {
                         booking: {
@@ -153,16 +177,38 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
                             from: true,
                             to: true,
                             description: true,
-                            // FK columns the consumer reads directly
-                            // (bookingWithRelations.kitId at line 87,
-                            // .custodianUserId at line 117 of the
-                            // useKitAvailabilityData hook). Without
-                            // these, both fields were undefined at
-                            // runtime — CodeRabbit review #2676.
-                            kitId: true,
+                            // FK column the consumer reads directly
+                            // (bookingWithRelations.custodianUserId in the
+                            // useKitAvailabilityData hook). Without it the
+                            // field was undefined at runtime — CodeRabbit
+                            // review #2676.
+                            //
+                            // NOTE: do NOT select `kitId` here — `Booking`
+                            // has no `kitId` scalar (a booking spans kits via
+                            // BookingAsset, not a direct FK). Selecting it
+                            // throws PrismaClientValidationError and 500s the
+                            // whole kits index (Sentry SHELF-WEBAPP-1P1). The
+                            // hook derives the resource id from the kit it's
+                            // iterating (`kitId: kit.id`), so the DB never
+                            // needs to supply it.
                             custodianUserId: true,
-                            custodianTeamMember: true,
-                            custodianUser: true,
+                            // Narrowed from `true` on both: that shipped the
+                            // whole TeamMember row and the ENTIRE User row —
+                            // email, Stripe `customerId`, billing flags — to
+                            // render a name and an avatar on the availability
+                            // calendar.
+                            custodianTeamMember: {
+                              select: { id: true, name: true, userId: true },
+                            },
+                            custodianUser: {
+                              select: {
+                                id: true,
+                                firstName: true,
+                                lastName: true,
+                                displayName: true,
+                                profilePicture: true,
+                              },
+                            },
                           },
                         },
                       },
@@ -178,11 +224,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       }),
       db.teamMember
         .findMany({
-          where: {
-            deletedAt: null,
-            organizationId,
-            userId: !canSeeAllCustody ? userId : undefined,
-          },
+          where: custodianFilterWhere,
           include: { user: true },
           orderBy: { userId: "asc" },
           take: searchParams.get("getAll") === "teamMember" ? undefined : 12,
@@ -196,14 +238,18 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             label: "Assets",
           });
         }),
-      db.teamMember.count({ where: { deletedAt: null, organizationId } }),
+      // Same `where` as the rows above: counting unscoped while the rows are
+      // scoped puts the workspace's team-member total in a restricted user's
+      // loader payload, and makes the picker's "showing N out of M" disagree
+      // with what the search endpoint returns.
+      db.teamMember.count({ where: custodianFilterWhere }),
       getLocationsForCreateAndEdit({
         organizationId,
         request,
       }),
     ]);
 
-    const currentUserTeamMember = isSelfService
+    const currentUserTeamMember = assignsSelfOnly
       ? teamMembers.find((tm) => tm.userId === userId) ?? null
       : null;
 
@@ -225,7 +271,14 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     return data(
       payload({
         header,
-        items: kits,
+        // `TeamMemberBadge` only decides whether to DRAW the custodian; the
+        // name and `user.email` shipped in this payload regardless, so a
+        // restricted viewer read them straight out of `/kits.data` while the
+        // page showed "private". Redact server-side.
+        items: redactCustodianForViewer(kits, {
+          canSeeAllCustody: access.custody.seeAll,
+          userId,
+        }),
         page,
         totalItems: totalKits,
         totalPages,
@@ -264,14 +317,27 @@ export const handle = {
 
 export default function KitsIndexPage() {
   const { items } = useLoaderData<typeof loader>();
-  const { roles, isBase } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
+  /**
+   * The bulk menu holds custody, edit and delete actions; any one opens it.
+   * Each item inside stays gated on its own permission.
+   */
+  const canBulkAct = userHasPermission({
+    roles,
+    entity: PermissionEntity.kit,
+    action: [
+      PermissionAction.custody,
+      PermissionAction.update,
+      PermissionAction.delete,
+    ],
+  });
   const canCreateKit = userHasPermission({
     roles,
     entity: PermissionEntity.kit,
     action: PermissionAction.create,
   });
   const { isAvailabilityView, shouldShowAvailabilityView } =
-    useIsAvailabilityView();
+    useAssetIndexView();
   const { resources, events } = useKitAvailabilityData(items);
 
   const organization = useCurrentOrganization();
@@ -313,15 +379,27 @@ export default function KitsIndexPage() {
                   <ChevronRight className="hidden rotate-90 md:inline" />
                 </div>
               }
-              model={{ name: "teamMember", queryKey: "name", deletedAt: null }}
+              model={{
+                name: "teamMember",
+                queryKey: "name",
+                deletedAt: null,
+                // A read FILTER — the workspace custody override governs.
+                custodyPurpose: "custody-filter",
+              }}
               label="Filter by custodian"
               placeholder="Search team members"
               countKey="totalTeamMembers"
               initialDataKey="teamMembers"
-              transformItem={(item) => ({
-                ...item,
-                id: item.metadata?.userId ? item.metadata.userId : item.id,
-              })}
+              /*
+               * No `transformItem`: the value this filter submits must stay the
+               * TeamMember id, because `getPaginatedAndFilterableKits` applies it
+               * as `custody: { custodianId }` — a TeamMember FK. Rewriting it to
+               * `metadata.userId` only took effect once the user typed (the
+               * loader's records carry no `metadata`, the search endpoint's do),
+               * so picking from the list filtered correctly while searching first
+               * returned nothing. Matches the assets advanced filter, which
+               * passes the item through unchanged.
+               */
               renderItem={(item) => resolveTeamMemberName(item, true)}
             />
           )}
@@ -342,27 +420,24 @@ export default function KitsIndexPage() {
                       alt: resource.title,
                     }}
                     alt={resource.title}
-                    className="size-14 rounded border object-cover"
+                    className="size-14 shrink-0 rounded border object-cover"
                     withPreview
                   />
-                  <div className="flex flex-col gap-1">
-                    <div className="min-w-0 flex-1 truncate">
-                      <Button
-                        to={`/kits/${resource.id}/assets`}
-                        variant="link"
-                        className="text-left font-medium text-gray-900 hover:text-gray-700"
-                        target={"_blank"}
-                        onlyNewTabIconOnHover={true}
-                      >
-                        {resource.title}
-                      </Button>
-                    </div>
-                    <div className="flex items-center gap-2">
+                  <div className="flex min-w-0 flex-1 flex-col gap-1">
+                    <ResourceTitleLink
+                      to={`/kits/${resource.id}/assets`}
+                      title={resource.title}
+                    />
+                    <div className="flex flex-wrap items-center gap-2">
                       <KitStatusBadge
                         status={resource.extendedProps?.status}
                         availableToBook={
                           resource.extendedProps?.availableToBook
                         }
+                      />
+                      <KitCalendarCodeBadge
+                        qrCodes={resource.extendedProps?.qrCodes}
+                        barcodes={resource.extendedProps?.barcodes}
                       />
                     </div>
                   </div>
@@ -377,7 +452,7 @@ export default function KitsIndexPage() {
           <List
             className="overflow-x-visible md:overflow-x-auto"
             ItemComponent={ListContent}
-            bulkActions={isBase ? undefined : <BulkActionsDropdown />}
+            bulkActions={canBulkAct ? <BulkActionsDropdown /> : undefined}
             customEmptyStateContent={{
               title: "No kits yet",
               text: "Kits let you group related assets together. Create a kit to bundle equipment that's typically used as a set.",
@@ -418,6 +493,42 @@ export default function KitsIndexPage() {
   );
 }
 
+/**
+ * The code chip for one kit row in the availability CALENDAR view.
+ *
+ * The list and calendar views of this page render the same kits, so they must
+ * render the same chip through the same resolver — see
+ * `.claude/rules/code-bearing-entity-list-consistency.md`. The calendar builds
+ * its rows from `extendedProps` rather than the loader payload, hence the two
+ * explicit props instead of a whole entity.
+ *
+ * A component rather than an inline block because it needs
+ * `useCurrentOrganization`, and the calendar renders rows inside a callback
+ * where a hook cannot go.
+ *
+ * @param qrCodes - QR rows forwarded by `useKitAvailabilityData`
+ * @param barcodes - Barcode rows forwarded by `useKitAvailabilityData`
+ * @returns The shared chip, or `null` before the organization resolves
+ */
+function KitCalendarCodeBadge({
+  qrCodes,
+  barcodes,
+}: {
+  qrCodes?: EntityForCodeResolution["qrCodes"];
+  barcodes?: EntityForCodeResolution["barcodes"];
+}) {
+  const organization = useCurrentOrganization();
+  if (!organization) return null;
+
+  const code = resolveDisplayCode({
+    entity: { qrCodes, barcodes },
+    organization,
+    entityKind: "kit",
+  });
+
+  return code ? <AssetCodeBadge {...code} /> : null;
+}
+
 function ListContent({
   item,
   bulkActions,
@@ -450,7 +561,11 @@ function ListContent({
   // back to QR when the workspace prefers SAM.
   const currentOrganization = useCurrentOrganization();
   const displayCode = currentOrganization
-    ? resolveDisplayCode({ entity: item, organization: currentOrganization })
+    ? resolveDisplayCode({
+        entity: item,
+        organization: currentOrganization,
+        entityKind: "kit",
+      })
     : null;
 
   return (

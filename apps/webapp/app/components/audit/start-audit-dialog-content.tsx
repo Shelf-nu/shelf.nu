@@ -22,8 +22,10 @@ import { useNavigate } from "react-router";
 import AuditTeamMemberSelector from "~/components/audit/audit-team-member-selector";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
+import { DateTimePicker } from "~/components/shared/date-time-picker";
 import { Separator } from "~/components/shared/separator";
 import { useDisabled } from "~/hooks/use-disabled";
+import { AUDIT_ANY_PERFORMER_SENTENCE } from "~/utils/permissions/role-audience";
 
 /**
  * Maximum length (in characters) of the optional audit description field.
@@ -155,10 +157,10 @@ export function StartAuditDialogContent({
             {descriptionLength}/{AUDIT_DESCRIPTION_MAX_LENGTH}
           </div>
 
-          <Input
+          <DateTimePicker
+            mode="datetime"
             name={dueDateField}
             label="Due date"
-            type="datetime-local"
             error={dueDateError}
             disabled={formDisabled}
             className="mt-4"
@@ -170,8 +172,8 @@ export function StartAuditDialogContent({
           <Separator className="md:hidden" />
           <p className="p-3 pb-0 font-medium">Select assignee (optional).</p>
           <p className="border-b p-3 ">
-            If no assignee is selected, any admin user can perform the audit.
-            This can also be done by multiple users at different times.
+            {AUDIT_ANY_PERFORMER_SENTENCE} Choosing assignees also lets those
+            people perform it, including several at different times.
           </p>
           <AuditTeamMemberSelector error={assigneeError} />
         </div>

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:context="http://www.springframework.org/schema/context"
+       xmlns:util="http://www.springframework.org/schema/util"
+       xmlns:p="http://www.springframework.org/schema/p"
+       xmlns:c="http://www.springframework.org/schema/c"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+                           http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+                           http://www.springframework.org/schema/util http://www.springframework.org/schema/util/spring-util.xsd"
+                           
+       default-init-method="initialize"
+       default-destroy-method="destroy">
+
+    <!-- Default Attribute transcoding rules. -->
+    
+    <!--
+    Many if not most of these attributes are not suited or may even be actively discouraged
+    from use in federated protocols, but this is merely a set of well-known definitions, not
+    a recommended set to support or use.
+    -->
+    
+    <import resource="inetOrgPerson.xml" />
+    <import resource="eduPerson.xml" />
+    <import resource="eduCourse.xml" />
+    <import resource="schac.xml" />
+    <import resource="samlSubject.xml" />
+
+</beans>

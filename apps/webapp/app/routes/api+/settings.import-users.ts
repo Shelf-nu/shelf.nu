@@ -19,7 +19,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.teamMember,
@@ -37,6 +37,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         message: "CSV file is empty",
         additionalData: { userId },
         label: "Team Member",
+        status: 400,
         shouldBeCaptured: false,
       });
     }
@@ -46,11 +47,17 @@ export async function action({ context, request }: ActionFunctionArgs) {
       IMPORT_USERS_CSV_HEADERS
     );
 
+    /**
+     * The CSV is untrusted input. `bulkInviteUsers` validates every row (role,
+     * email, team member, SSO) before writing anything and refuses the file
+     * with a 400 listing each problem row, which the dialog renders.
+     */
     const response = await bulkInviteUsers({
       organizationId,
       userId,
       users,
       extraMessage: formData.get("message") as string,
+      actorOwnsWorkspace: access.ownsWorkspace,
     });
 
     if (!response) {

@@ -38,6 +38,19 @@ export function BookingAssetsFilters() {
             sortingOptions={BOOKING_ASSET_SORTING_OPTIONS}
             defaultSortingBy="status"
             defaultSortingDirection="desc"
+            hint={
+              <div className="text-xs">
+                <p>
+                  <strong>Status</strong> keeps items still to check out on top
+                  and moves checked-out items to the bottom, so you can focus on
+                  what's left.
+                </p>
+                <p className="mt-1">
+                  <strong>Item type</strong> groups kits first, then individual
+                  assets.
+                </p>
+              </div>
+            }
           />
         ),
       }}

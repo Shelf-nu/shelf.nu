@@ -1,15 +1,27 @@
+/**
+ * Tests for the note sanitizer (`~/utils/note-sanitizer.server`).
+ *
+ * The sanitizer turns a stored note into the plain text that CSV exports and
+ * generated PDFs carry, so these cases cover what a customer ends up reading:
+ * each Markdoc tag the note builders emit is reduced to its human-readable
+ * part, dates are formatted in the caller's preferences, and markdown
+ * decoration is stripped while line breaks survive. A tag the sanitizer fails
+ * to match leaks raw `{% … /%}` syntax into a downloaded file, which is the
+ * failure these assertions exist to catch.
+ *
+ * @see {@link file://./note-sanitizer.server.ts}
+ */
 import { describe, expect, it } from "vitest";
 
+import { formatDate, HARDCODED_DEFAULT_PREFS } from "./date-format";
 import { sanitizeNoteContent } from "./note-sanitizer.server";
 
-const formatter = new Intl.DateTimeFormat("en-US", {
-  dateStyle: "short",
-  timeStyle: "short",
-  timeZone: "UTC",
-});
+// why: HARDCODED_DEFAULT_PREFS is the concrete fallback prefs the formatter
+// consumes; using it keeps these assertions independent of any user row.
+const prefs = HARDCODED_DEFAULT_PREFS;
 
 describe("sanitizeNoteContent", () => {
-  const sanitize = (content: string) => sanitizeNoteContent(content, formatter);
+  const sanitize = (content: string) => sanitizeNoteContent(content, prefs);
 
   it("strips markdoc link tags and decodes entities", () => {
     const content =
@@ -18,12 +30,21 @@ describe("sanitizeNoteContent", () => {
     expect(sanitize(content)).toBe('Booking "A" updated.');
   });
 
-  it("formats markdoc date tags respecting includeTime", () => {
-    const content =
-      'Due {% date value="2023-12-25T10:30:00.000Z" includeTime=false /%} and scheduled {% date value="2023-12-25T10:30:00.000Z" /%}.';
+  it("formats markdoc date tags via formatDate, respecting includeTime", () => {
+    const iso = "2023-12-25T10:30:00.000Z";
+    const content = `Due {% date value="${iso}" includeTime=false /%} and scheduled {% date value="${iso}" /%}.`;
+
+    const expectedDate = formatDate(iso, prefs);
+    const expectedDateTime = formatDate(iso, prefs, { includeTime: true });
 
     expect(sanitize(content)).toBe(
-      "Due 12/25/23 and scheduled 12/25/23, 10:30 AM."
+      `Due ${expectedDate} and scheduled ${expectedDateTime}.`
+    );
+  });
+
+  it("returns the raw value for an unparseable date", () => {
+    expect(sanitizeNoteContent('{% date value="not-a-date" /%}', prefs)).toBe(
+      "not-a-date"
     );
   });
 
@@ -41,6 +62,17 @@ describe("sanitizeNoteContent", () => {
     expect(sanitize(content)).toBe("Description changed Old text -> New text.");
   });
 
+  it("reads through attribute values containing a percent sign", () => {
+    // `%` is ordinary text in a title or a description, and it must not leave
+    // raw tag syntax in the CSV/PDF a customer downloads.
+    const content =
+      '{% link to="/assets/1" text="Summer Sale 50% Off" /%} description set to {% description newText="Battery at 30% capacity" /%}.';
+
+    expect(sanitize(content)).toBe(
+      "Summer Sale 50% Off description set to Battery at 30% capacity."
+    );
+  });
+
   it("cleans markdown formatting while preserving line breaks", () => {
     const content = `# Heading
 
@@ -56,31 +88,5 @@ describe("sanitizeNoteContent", () => {
 - two
 
 Bold text with link and code const x = 1.`);
-  });
-
-  it("handles real-world activity note content", () => {
-    const content =
-      '{% link to="/settings/team/users/94a8f5d8" text="Nikolayz Bonevz" /%} created a new reminder {% link to="/assets/asset-1/reminders?s=kekeroo" text="kekeroo" /%}.';
-
-    expect(sanitize(content)).toBe(
-      "Nikolayz Bonevz created a new reminder kekeroo."
-    );
-  });
-
-  it("falls back when formatter lacks resolvedOptions", () => {
-    const fallbackFormatter = {
-      format: (date: Date) => `formatted-${date.toISOString()}`,
-    } as unknown as Intl.DateTimeFormat;
-
-    const dateOnly = new Intl.DateTimeFormat("en-US", {
-      dateStyle: "short",
-    }).format(new Date("2024-01-15T12:00:00.000Z"));
-
-    expect(
-      sanitizeNoteContent(
-        '{% date value="2024-01-15T12:00:00.000Z" includeTime=false /%}',
-        fallbackFormatter
-      )
-    ).toBe(dateOnly);
   });
 });

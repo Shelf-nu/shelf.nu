@@ -40,6 +40,7 @@ import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { labelForRequired } from "@/lib/a11y";
+import { useDateFormatter } from "@/lib/use-date-formatter";
 
 /**
  * Field metadata consumed by `CustomFieldInput`. `required` defaults to
@@ -201,11 +202,24 @@ export function CustomFieldInput({
 }
 
 /**
+ * Option lists longer than this get a search box.
+ *
+ * MIRROR of `ENUM_SEARCH_THRESHOLD` and its case-insensitive substring filter in
+ * `apps/webapp/app/components/assets/assets-index/advanced-filters/value-field.tsx`.
+ * Cosmetic only: it changes which options are listed, never which value is
+ * valid, and the server checks a submitted option against the field's options.
+ * Extraction target: a pure `packages/*` custom-field module (none yet).
+ */
+const OPTION_SEARCH_THRESHOLD = 8;
+
+/**
  * Dropdown picker for `OPTION` custom fields.
  *
  * Matches the look-and-feel of the Category / Location pickers in `new.tsx`:
  * a `TouchableOpacity` showing the current selection that expands inline
- * into a scrollable list. If `field.options` is missing or empty (server
+ * into a scrollable list, in the order the field's options are saved. A list
+ * longer than {@link OPTION_SEARCH_THRESHOLD} gets a search box styled like the
+ * location picker's. If `field.options` is missing or empty (server
  * misconfiguration or older data), gracefully degrades to a plain text
  * input so the user is never locked out of editing the field.
  */
@@ -225,8 +239,20 @@ function OptionDropdown({
   const { colors } = useTheme();
   const styles = useStyles();
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
 
   const options = field.options ?? [];
+  const hasSearch = options.length > OPTION_SEARCH_THRESHOLD;
+  const needle = query.trim().toLowerCase();
+  // Each entry keeps its position in `field.options`, which keys its row.
+  const visibleOptions = options
+    .map((opt, index) => ({ opt, index }))
+    .filter(({ opt }) => !needle || opt.toLowerCase().includes(needle));
+
+  const close = () => {
+    setOpen(false);
+    setQuery("");
+  };
 
   // Degraded fallback: if no options are configured, render a plain text
   // input so the screen is still usable.
@@ -248,7 +274,7 @@ function OptionDropdown({
     <View>
       <TouchableOpacity
         style={styles.pickerButton}
-        onPress={() => setOpen((o) => !o)}
+        onPress={() => (open ? close() : setOpen(true))}
         accessibilityRole="button"
         accessibilityLabel={
           value
@@ -271,9 +297,46 @@ function OptionDropdown({
       </TouchableOpacity>
 
       {open && (
-        <View style={styles.pickerDropdown}>
+        <View
+          style={[
+            styles.pickerDropdown,
+            hasSearch && styles.pickerDropdownWithSearch,
+          ]}
+        >
+          {hasSearch && (
+            <View style={styles.optionSearch}>
+              <Ionicons name="search" size={18} color={colors.mutedLight} />
+              <TextInput
+                style={styles.optionSearchInput}
+                value={query}
+                onChangeText={setQuery}
+                placeholder="Search options..."
+                placeholderTextColor={colors.placeholderText}
+                autoCorrect={false}
+                accessibilityLabel={`Search ${field.name} options`}
+              />
+              {query.length > 0 && (
+                <TouchableOpacity
+                  onPress={() => setQuery("")}
+                  accessibilityLabel="Clear search"
+                  accessibilityRole="button"
+                >
+                  <Ionicons
+                    name="close-circle"
+                    size={18}
+                    color={colors.mutedLight}
+                  />
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
           <ScrollView nestedScrollEnabled keyboardShouldPersistTaps="handled">
-            {options.map((opt, index) => {
+            {visibleOptions.length === 0 && (
+              <Text style={styles.optionSearchEmpty}>
+                No options match your search
+              </Text>
+            )}
+            {visibleOptions.map(({ opt, index }) => {
               const selected = opt === value;
               return (
                 <TouchableOpacity
@@ -288,7 +351,7 @@ function OptionDropdown({
                   ]}
                   onPress={() => {
                     onChange(selected ? "" : opt);
-                    setOpen(false);
+                    close();
                   }}
                   accessibilityRole="button"
                   accessibilityState={{ selected }}
@@ -310,7 +373,7 @@ function OptionDropdown({
               style={styles.pickerClear}
               onPress={() => {
                 onChange("");
-                setOpen(false);
+                close();
               }}
               accessibilityRole="button"
               accessibilityLabel={`Clear ${field.name}`}
@@ -339,6 +402,12 @@ function OptionDropdown({
  * server contract — see `lib/api/types.ts`). Parsing the existing value uses
  * local-time `Date` construction to avoid the UTC-shift footgun (e.g. a
  * stored "2026-01-15" rendering as Jan 14 in negative-UTC timezones).
+ *
+ * The closed-state button renders the stored value in the acting user's date
+ * format via `useDateFormatter`. This is an absolute calendar date, so the
+ * date-only formatter applies NO timezone shift — the day is preserved. Only
+ * the display changes; the stored/submitted value (`value` / `onChange`) stays
+ * raw `YYYY-MM-DD`.
  */
 function DateFieldInput({
   fieldId,
@@ -364,34 +433,41 @@ function DateFieldInput({
   accessibilityLabel: string;
   accessibilityHint: string | undefined;
 }) {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const styles = useStyles();
+  const { formatDate } = useDateFormatter();
   const [open, setOpen] = useState(false);
 
-  const dateValue = useMemo(() => {
-    if (!value) return new Date();
-    // Parse `YYYY-MM-DD` as a local date (NOT `new Date(value)`, which
-    // interprets the bare date as UTC midnight and shifts the day in
-    // negative-offset timezones).
+  // Validate the stored `YYYY-MM-DD` ONCE. The round-trip check catches overflow
+  // like "2026-02-30", which JS's Date silently rolls forward to "2026-03-02".
+  // Parsed as a LOCAL date (NOT `new Date(value)`, which reads a bare date as UTC
+  // midnight and shifts the day in negative-offset zones). Shared by the display
+  // label AND the picker's initial value so the two never disagree.
+  const parsedDate = useMemo<Date | null>(() => {
+    if (!value) return null;
     const [y, m, d] = value.split("-").map(Number);
-    if (!y || !m || !d) return new Date();
-    // why: the truthiness check above lets through nonsense like
-    // "2026-13-99" or "2026-02-30" — JS's Date constructor silently
-    // overflows (2026-02-30 → 2026-03-02), which would render a
-    // confusing date on the picker. Construct, then verify the
-    // round-trip matches the input. If a server bug ever ships a bad
-    // YYYY-MM-DD string, this falls back to "today" instead of a
-    // silently wrong date.
+    if (!y || !m || !d) return null;
     const parsed = new Date(y, m - 1, d);
     if (
       parsed.getFullYear() !== y ||
       parsed.getMonth() + 1 !== m ||
       parsed.getDate() !== d
     ) {
-      return new Date();
+      return null;
     }
     return parsed;
   }, [value]);
+
+  // The native picker needs a concrete Date; fall back to today when there's no
+  // valid stored value.
+  const dateValue = useMemo(() => parsedDate ?? new Date(), [parsedDate]);
+
+  // Render the stored calendar date in the user's format ONLY when it is valid —
+  // pass the bare `YYYY-MM-DD` string so the date-only path does NOT tz-shift
+  // (the day is preserved). An invalid value renders "" (→ "Select date…")
+  // rather than a silently-overflowed wrong date (CodeRabbit, #2798). The stored
+  // value (`value` / `onChange`) always stays raw.
+  const displayValue = parsedDate && value ? formatDate(value) : "";
 
   const handleChange = (
     event: DateTimePickerEvent,
@@ -424,17 +500,22 @@ function DateFieldInput({
         onPress={() => setOpen((o) => !o)}
         accessibilityRole="button"
         accessibilityLabel={
-          value
-            ? `${accessibilityLabel}: ${value}, tap to change`
+          // Key the "selected" state off the VALIDATED date, not the raw value:
+          // a present-but-invalid stored value has no displayValue, so it must
+          // read as "tap to choose", not "tap to change" with an empty label.
+          parsedDate
+            ? `${accessibilityLabel}: ${displayValue}, tap to change`
             : `${accessibilityLabel}, tap to choose`
         }
         accessibilityHint={accessibilityHint}
         accessibilityState={{ expanded: open }}
       >
         <Text
-          style={value ? styles.pickerSelectedText : styles.pickerPlaceholder}
+          style={
+            parsedDate ? styles.pickerSelectedText : styles.pickerPlaceholder
+          }
         >
-          {value || "Select date..."}
+          {displayValue || "Select date..."}
         </Text>
         <Ionicons name="calendar-outline" size={18} color={colors.mutedLight} />
       </TouchableOpacity>
@@ -448,6 +529,10 @@ function DateFieldInput({
             display={Platform.OS === "ios" ? "inline" : "default"}
             onChange={handleChange}
             accentColor={colors.primary}
+            // The inline iOS calendar draws on the form's card, so it follows
+            // the app's appearance rather than the phone's. Android's dialog
+            // paints its own background and ignores this prop.
+            themeVariant={isDark ? "dark" : "light"}
           />
         </View>
       )}
@@ -572,6 +657,35 @@ const useStyles = createStyles((colors, shadows) => ({
     fontSize: fontSize.sm,
     color: colors.error,
     fontWeight: "500",
+  },
+  // Room for the search box on top of about four rows.
+  pickerDropdownWithSearch: {
+    maxHeight: 280,
+  },
+  // Search box inside a long option list (mirrors the location picker's).
+  optionSearch: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.white,
+    margin: spacing.sm,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colors.gray300,
+    gap: spacing.sm,
+    ...shadows.sm,
+  },
+  optionSearchInput: {
+    flex: 1,
+    fontSize: fontSize.lg,
+    color: colors.foreground,
+  },
+  optionSearchEmpty: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: fontSize.base,
+    color: colors.muted,
   },
 
   // Inline DateTimePicker (iOS) wrapper — gives the calendar room to

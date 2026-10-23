@@ -1,6 +1,7 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { BulkDeleteLocationSchema } from "~/components/location/bulk-delete-dialog";
+import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { bulkDeleteLocations } from "~/modules/location/service.server";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -39,9 +40,17 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
     switch (intent) {
       case "bulk-delete": {
-        const { locationIds } = parseData(formData, BulkDeleteLocationSchema);
+        const { locationIds, confirmation, currentSearchParams } = parseData(
+          formData,
+          BulkDeleteLocationSchema.and(CurrentSearchParamsSchema)
+        );
 
-        await bulkDeleteLocations({ locationIds, organizationId });
+        await bulkDeleteLocations({
+          locationIds,
+          organizationId,
+          currentSearchParams,
+          confirmation,
+        });
 
         sendNotification({
           title: "Locations deleted",

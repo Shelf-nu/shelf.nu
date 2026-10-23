@@ -1,21 +1,27 @@
+import { AssetStatus } from "@prisma/client";
 import type {
   Asset,
-  AssetStatus,
   AssetType,
   Location,
   Prisma,
   CustomFieldType,
+  User,
 } from "@prisma/client";
 import _ from "lodash";
 import { z } from "zod";
 import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
 import { filterOperatorSchema } from "~/components/assets/assets-index/advanced-filters/schema";
+import { db } from "~/database/db.server";
+import { buildAssetStatusWhere } from "~/modules/asset/search.server";
 import { formatUnitCount } from "~/utils/asset-quantity";
+import { CUSTODY_FILTER_REFUSED } from "~/utils/custody-filter";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { getParamsValues } from "~/utils/list";
+import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import { wrapUserLinkForNote, wrapLinkForNote } from "~/utils/markdoc-wrappers";
+import { splitFilterParam } from "./filter-param";
 import { parseFiltersWithHierarchy } from "./query.server";
-import type { ICustomFieldValueJson } from "./types";
+import type { ArchivedFilter, ICustomFieldValueJson } from "./types";
 import type { Column } from "../asset-index-settings/helpers";
 
 /**
@@ -32,6 +38,10 @@ import type { Column } from "../asset-index-settings/helpers";
  * @param userId - Acting user id (for the actor link)
  * @param firstName - Acting user's first name
  * @param lastName - Acting user's last name
+ * @param displayName - Acting user's `User.displayName`, when the caller has
+ *   it. `wrapUserLinkForNote` prefers it over first+last, so a caller holding
+ *   the full user row should pass it or the note names the person differently
+ *   from every other surface that renders them.
  * @param isRemoving - When true, render the removal phrasing
  * @param type - Asset type; only QUANTITY_TRACKED gets a unit count
  * @param unitOfMeasure - Optional unit label ("boxes", defaults to "units")
@@ -44,7 +54,7 @@ export function getLocationUpdateNoteContent({
   userId,
   firstName,
   lastName,
-
+  displayName,
   isRemoving,
   type,
   unitOfMeasure,
@@ -55,6 +65,8 @@ export function getLocationUpdateNoteContent({
   userId: string;
   firstName: string;
   lastName: string;
+  /** Optional — see the `@param` note; callers that omit it keep first+last. */
+  displayName?: string | null;
   isRemoving?: boolean;
   /** Asset type — only QUANTITY_TRACKED triggers the unit-count phrasing. */
   type?: AssetType;
@@ -68,6 +80,7 @@ export function getLocationUpdateNoteContent({
 }) {
   const userLink = wrapUserLinkForNote({
     id: userId,
+    displayName: displayName ?? null,
     firstName,
     lastName,
   });
@@ -115,6 +128,54 @@ export function getLocationUpdateNoteContent({
 }
 
 /**
+ * Builds the system-note text for the single primary placement an asset is
+ * created with, or `null` when it was created without a location.
+ *
+ * Both asset-create routes (web `assets.new` and mobile `asset.create`) need
+ * exactly this, and each used to re-derive it: pick `assetLocations[0]`, guard
+ * on its location, then map eight arguments into
+ * {@link getLocationUpdateNoteContent}. Two copies of that mapping is how the
+ * actor naming drifts — the `displayName` argument is optional, so one route
+ * could silently fall back to first+last and start naming users differently
+ * from the other, with nothing to catch it. Deriving it once removes that.
+ *
+ * `createAsset` writes at most ONE `AssetLocation` row at creation time. A
+ * quantity-tracked asset can accumulate more later, but only this row is the
+ * primary, and its `quantity` (units placed here) — NOT `Asset.quantity` — is
+ * the multiplier the phrasing uses.
+ *
+ * The parameter is typed structurally rather than as
+ * `Awaited<ReturnType<typeof createAsset>>`: `service.server.ts` already
+ * imports from this module, so naming it here would close a module cycle.
+ *
+ * @param asset - The just-created asset, with its `user` row and placement pivot
+ * @returns Markdoc-formatted note content, or `null` when the asset is unplaced
+ */
+export function getInitialPlacementNoteContent(asset: {
+  user: Pick<User, "id" | "firstName" | "lastName" | "displayName">;
+  type: AssetType;
+  unitOfMeasure: string | null;
+  assetLocations?: {
+    quantity: number;
+    location: Pick<Location, "id" | "name"> | null;
+  }[];
+}): string | null {
+  const primaryPlacement = asset.assetLocations?.[0] ?? null;
+  if (!primaryPlacement?.location) return null;
+
+  return getLocationUpdateNoteContent({
+    newLocation: primaryPlacement.location,
+    userId: asset.user.id,
+    firstName: asset.user.firstName ?? "",
+    lastName: asset.user.lastName ?? "",
+    displayName: asset.user.displayName,
+    type: asset.type,
+    unitOfMeasure: asset.unitOfMeasure,
+    quantity: primaryPlacement.quantity,
+  });
+}
+
+/**
  * Generates a markdown-formatted note content for custom field changes.
  *
  * @param params - The parameters for generating the note content
@@ -123,6 +184,10 @@ export function getLocationUpdateNoteContent({
  * @param params.newValue - New value of the field (null if value was removed)
  * @param params.firstName - First name of the user making the change
  * @param params.lastName - Last name of the user making the change
+ * @param params.displayName - Acting user's `User.displayName`, when the caller
+ *   has it. `wrapUserLinkForNote` prefers it over first+last, so a caller
+ *   holding the full user row should pass it or the note names the person
+ *   differently from every other surface that renders them.
  * @param params.assetName - Name of the asset being updated
  * @param params.isFirstTimeSet - Whether this is the first time a value is being set
  * @returns Markdown-formatted note content string, or empty string if invalid scenario
@@ -157,6 +222,7 @@ export function getCustomFieldUpdateNoteContent({
   userId,
   firstName,
   lastName,
+  displayName,
   isFirstTimeSet,
 }: {
   customFieldName: string;
@@ -165,24 +231,32 @@ export function getCustomFieldUpdateNoteContent({
   userId: string;
   firstName: string;
   lastName: string;
+  /** Optional — see the `@param` note; callers that omit it keep first+last. */
+  displayName?: string | null;
   isFirstTimeSet: boolean;
 }) {
   const userLink = wrapUserLinkForNote({
     id: userId,
+    displayName: displayName ?? null,
     firstName,
     lastName,
   });
+  // Custom field NAMES and VALUES are both free-form user input and render
+  // as literal text in this Markdoc note.
+  const fieldName = stripMarkdocDelimiters(customFieldName);
+  const safeNew = stripMarkdocDelimiters(newValue);
+  const safePrevious = stripMarkdocDelimiters(previousValue);
   let message = "";
 
   if (isFirstTimeSet && newValue) {
     // First time setting a value
-    message = `${userLink} set **${customFieldName}** to **${newValue}**.`;
+    message = `${userLink} set **${fieldName}** to **${safeNew}**.`;
   } else if (previousValue && newValue) {
     // Changing from one value to another
-    message = `${userLink} updated **${customFieldName}** from **${previousValue}** to **${newValue}**.`;
+    message = `${userLink} updated **${fieldName}** from **${safePrevious}** to **${safeNew}**.`;
   } else if (previousValue && !newValue) {
     // Removing a value
-    message = `${userLink} removed **${customFieldName}** value **${previousValue}**.`;
+    message = `${userLink} removed **${fieldName}** value **${safePrevious}**.`;
   }
 
   return message;
@@ -510,29 +584,206 @@ export const CurrentSearchParamsSchema = z.object({
   currentSearchParams: z.string().optional().nullable(),
 });
 
+// Defined in `./types` so `query.server.ts` can share it without an import
+// cycle (this module already imports from there); re-exported for callers.
+export type { ArchivedFilter } from "./types";
+
+/**
+ * Reads the `archived` view dimension from URL search params. Defaults to
+ * `active` so every list hides archived assets unless explicitly asked.
+ *
+ * @param searchParams - The request's search params.
+ * @returns The resolved {@link ArchivedFilter}.
+ */
+export function getArchivedFilterFromParams(
+  searchParams: URLSearchParams
+): ArchivedFilter {
+  const value = searchParams.get("archived");
+  if (value === "archived" || value === "all") {
+    return value;
+  }
+  return "active";
+}
+
+/**
+ * Applies an {@link ArchivedFilter} to a Prisma asset `where` clause.
+ * Mutates and returns the passed `where` for chaining.
+ *
+ * @param where - The Prisma asset where clause to narrow.
+ * @param archivedFilter - The resolved view dimension.
+ */
+export function applyArchivedFilter(
+  where: Prisma.AssetWhereInput,
+  archivedFilter: ArchivedFilter
+): Prisma.AssetWhereInput {
+  if (archivedFilter === "active") {
+    where.archivedAt = null;
+  } else if (archivedFilter === "archived") {
+    where.archivedAt = { not: null };
+  }
+  // "all" → leave the archived dimension unconstrained.
+  return where;
+}
+
+/**
+ * Which custodian ids a caller may filter a "select all" query by.
+ *
+ * `"all"` means the caller has already been proven allowed to see everyone's
+ * custody — either by `canSeeAllCustody`, or because the surface is reachable
+ * only with a permission that restricted roles do not hold. Anything else is a
+ * concrete allow-list, normally from `scopeCustodianFilterIds`.
+ *
+ * @see {@link file://./../team-member/service.server.ts} — `scopeCustodianFilterIds`
+ */
+export type AllowedCustodianFilterIds = string[] | "all";
+
+/**
+ * Applies a custodian allow-list to ids taken from the query string.
+ *
+ * `"all"` passes them through. Otherwise only ids on the list survive, and a
+ * request that asked ONLY for others collapses to a single unmatchable id.
+ *
+ * That id alone is NOT sufficient: it lands in `where.OR`, where a sibling
+ * branch (`uncategorized` / `untagged` / `without-location`) can still match.
+ * `getAssetsWhereInput` therefore also AND-s an unsatisfiable predicate when it
+ * sees the sentinel — see the note at that call site. Dropping the filter
+ * instead of refusing it would widen the query to every row, which is the
+ * opposite of what a refusal should do.
+ */
+export function applyCustodianAllowList(
+  requestedIds: string[],
+  allowedTeamMemberIds: AllowedCustodianFilterIds
+): string[] {
+  /**
+   * A blank value is not a selection. `?teamMember=` arrives as `[""]`, from a
+   * cleared filter or a stale link, and it has to fall through to "no filter":
+   * carried forward it becomes an unmatchable id and answers "nothing found"
+   * where the caller asked for no restriction at all. Dropping it before the
+   * count below also keeps it out of the refusal branch, since asking for nobody
+   * is not asking after someone else's custody.
+   */
+  const requested = requestedIds.filter((id) => id.trim() !== "");
+
+  if (allowedTeamMemberIds === "all") {
+    return requested;
+  }
+
+  const allowed = new Set(allowedTeamMemberIds);
+  const kept = requested.filter((id) => allowed.has(id));
+
+  return requested.length > 0 && kept.length === 0
+    ? [CUSTODY_FILTER_REFUSED]
+    : kept;
+}
+
+/**
+ * Low-stock fragment for the simple list: QUANTITY_TRACKED assets whose TOTAL
+ * quantity is at or below their minimum.
+ *
+ * Deliberately not the advanced index's `lowStockOnly` rule, which compares
+ * Free now (total minus custody, kits and units out) and needs the SQL pool
+ * aggregate this Prisma query cannot express. The two lists can therefore
+ * disagree on an asset with units held or out; the low-stock email follows
+ * the advanced rule. A function, not a constant, because the field reference
+ * comes from the live client.
+ */
+export function buildLowStockWhere(): Prisma.AssetWhereInput {
+  return {
+    type: "QUANTITY_TRACKED",
+    minQuantity: { not: null },
+    quantity: { lte: db.asset.fields.minQuantity },
+  };
+}
+
+/**
+ * Prisma `where` clause for "select all" and bulk actions, built from a
+ * serialized list query string.
+ *
+ * It mirrors the simple-mode list filters (search, status, category, tag,
+ * location, custodian), always scoped to the organization, so a bulk action
+ * acts on the rows the list showed.
+ *
+ * @returns The clause; just `{ organizationId }` when there is no query string
+ */
 export function getAssetsWhereInput({
   organizationId,
   currentSearchParams,
+  allowedTeamMemberIds,
+  locationIdsOverride,
+  honorArchivedView = false,
 }: {
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
+  /**
+   * Location ids the clause matches, in place of the `location` values in
+   * `currentSearchParams`. Omitted, the URL's own values are matched exactly.
+   *
+   * For surfaces whose visible list widens the ticked locations (to include
+   * their child locations): pass the same resolved set the list used, so
+   * "select all" acts on exactly the rows the user was shown.
+   *
+   * @see {@link file://./../location/child-locations-filter.server.ts}
+   */
+  locationIdsOverride?: string[];
+  /**
+   * Required, with no default, so every call site states an answer.
+   *
+   * `?teamMember=` rides in on `currentSearchParams`, which is raw request
+   * input. A "select all" caller who may not see all custody could otherwise
+   * filter by a colleague's id and read back exactly which rows that person
+   * holds — verified live against `/api/assets/get-assets-for-bulk-qr-download`,
+   * which a BASE user can reach with `qr: read`.
+   */
+  allowedTeamMemberIds: AllowedCustodianFilterIds;
+  /**
+   * Apply the `?archived=` view (issue #382). Off by default: the param is raw
+   * URL input, so a "select all" caller gets active assets unless it opts in
+   * for a member allowed to see archived ones. See
+   * `resolveAssetIdsForBulkOperation`.
+   */
+  honorArchivedView?: boolean;
 }) {
   const where: Prisma.AssetWhereInput = { organizationId };
 
   if (!currentSearchParams) {
+    // No params at all means the default "active" view — hide archived assets.
+    applyArchivedFilter(where, "active");
     return where;
   }
 
   const searchParams = new URLSearchParams(currentSearchParams);
   const paramsValues = getParamsValues(searchParams);
 
-  const { categoriesIds, locationIds, tagsIds, search, teamMemberIds } =
-    paramsValues;
+  // Active/Archived/All dimension: active unless the caller opted in.
+  applyArchivedFilter(
+    where,
+    honorArchivedView ? getArchivedFilterFromParams(searchParams) : "active"
+  );
 
-  const status =
-    searchParams.get("status") === "ALL" // If the value is "ALL", we just remove the param
-      ? null
-      : (searchParams.get("status") as AssetStatus | null);
+  const { categoriesIds, tagsIds, search } = paramsValues;
+  const locationIds = locationIdsOverride ?? paramsValues.locationIds;
+
+  const teamMemberIds = applyCustodianAllowList(
+    paramsValues.teamMemberIds ?? [],
+    allowedTeamMemberIds
+  );
+
+  /**
+   * Only a real `AssetStatus` narrows the list. Anything else (`ALL`, or
+   * advanced-mode syntax such as `is:AVAILABLE` carried in a stale URL) is
+   * ignored: Prisma rejects an unknown enum value and the request would fail.
+   */
+  const statusParam = searchParams.get("status");
+  const status = (Object.values(AssetStatus) as string[]).includes(
+    statusParam ?? ""
+  )
+    ? (statusParam as AssetStatus)
+    : null;
+
+  // First writer of `where.AND`; every later writer spreads it.
+  if (searchParams.get("lowStockOnly") === "true") {
+    where.AND = [buildLowStockWhere()];
+  }
 
   if (search) {
     where.title = {
@@ -546,18 +797,15 @@ export function getAssetsWhereInput({
     // status flipped to IN_CUSTODY/CHECKED_OUT can still have available
     // units, so AVAILABLE filter must include them.
     if (status === "AVAILABLE") {
+      // QT-aware fragment shared with getAssets and the mobile assets
+      // endpoint — see buildAssetStatusWhere for the rationale.
       where.AND = [
         ...(Array.isArray(where.AND)
           ? where.AND
           : where.AND
           ? [where.AND]
           : []),
-        {
-          OR: [
-            { type: "INDIVIDUAL", status: "AVAILABLE" },
-            { type: "QUANTITY_TRACKED" },
-          ],
-        },
+        buildAssetStatusWhere(status),
       ];
     } else {
       where.status = status;
@@ -644,6 +892,33 @@ export function getAssetsWhereInput({
         ? [{ custody: { none: {} } }]
         : []),
     ];
+
+    /**
+     * A refusal has to survive a sibling OR branch.
+     *
+     * The custody clause is attached with `OR`, and three other filters write
+     * there too — `uncategorized`, `untagged`, `without-location`. Under OR
+     * semantics the refused branch matches nothing while the sibling still
+     * matches plenty, so `?teamMember=<colleague>&category=uncategorized`
+     * returned the sibling's rows rather than none. That leaked nothing (the
+     * result equals the same request with `teamMember` omitted, which anyone
+     * may issue) but it broke the invariant this function documents, and a
+     * future OR branch carrying custody signal would make it a real hole.
+     *
+     * Fixed by AND-ing a predicate nothing satisfies, NOT by moving the custody
+     * clause from OR to AND — that would intersect custody with category/tag/
+     * location for every caller and silently change existing filter results.
+     */
+    if (teamMemberIds.includes(CUSTODY_FILTER_REFUSED)) {
+      where.AND = [
+        ...(Array.isArray(where.AND)
+          ? where.AND
+          : where.AND
+          ? [where.AND]
+          : []),
+        { id: CUSTODY_FILTER_REFUSED },
+      ];
+    }
   }
 
   return where;
@@ -655,10 +930,14 @@ export function getAssetsWhereInput({
  */
 export const advancedFilterFormatSchema = z.string().refine(
   (value) => {
-    const parts = value.split(":");
-    if (parts.length !== 2) return false;
+    // Only the first colon separates; the rest belong to the value. Counting
+    // fields instead would reject any value containing a colon — legal in
+    // Code128, DataMatrix and ExternalQR, and unavoidable in a URL — and
+    // `validateAdvancedFilterParams` drops what fails here, so the filter
+    // would vanish from the URL rather than merely mismatch.
+    const [operator, filterValue] = splitFilterParam(value);
+    if (filterValue === undefined) return false;
 
-    const [operator] = parts;
     return filterOperatorSchema.safeParse(operator).success;
   },
   {
@@ -709,6 +988,12 @@ export function validateAdvancedFilterParams(
 }
 
 export const ASSET_CSV_HEADERS = [
+  // Row matcher for the update importer (`/assets/import-update`) — the
+  // asset's cuid. The create importer accepts this header (so a re-exported
+  // file round-trips) but never reads it: createAssetsFromContentImport
+  // always generates a fresh id, so a caller-supplied id can't be used to
+  // set/connect/upsert onto another workspace's asset.
+  "id",
   "title",
   "description",
   "category",

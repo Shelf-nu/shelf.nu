@@ -1,4 +1,6 @@
+import Markdoc from "@markdoc/markdoc";
 import {
+  appendUserTextToNote,
   wrapDateForNote,
   wrapKitsForNote,
   wrapAssetsWithDataForNote,
@@ -275,7 +277,12 @@ describe("markdoc-wrappers", () => {
 // User Link Wrapper Tests
 describe("wrapUserLinkForNote", () => {
   it("should wrap user with both first and last name", () => {
-    const user = { id: "123", firstName: "John", lastName: "Doe" };
+    const user = {
+      displayName: null,
+      id: "123",
+      firstName: "John",
+      lastName: "Doe",
+    };
     const result = wrapUserLinkForNote(user);
     expect(result).toBe(
       `{% link to="/settings/team/users/123" text="John Doe" /%}`
@@ -283,7 +290,12 @@ describe("wrapUserLinkForNote", () => {
   });
 
   it("should handle user with only first name", () => {
-    const user = { id: "456", firstName: "Jane", lastName: null };
+    const user = {
+      displayName: null,
+      id: "456",
+      firstName: "Jane",
+      lastName: null,
+    };
     const result = wrapUserLinkForNote(user);
     expect(result).toBe(
       `{% link to="/settings/team/users/456" text="Jane" /%}`
@@ -291,7 +303,12 @@ describe("wrapUserLinkForNote", () => {
   });
 
   it("should handle user with only last name", () => {
-    const user = { id: "789", firstName: null, lastName: "Smith" };
+    const user = {
+      displayName: null,
+      id: "789",
+      firstName: null,
+      lastName: "Smith",
+    };
     const result = wrapUserLinkForNote(user);
     expect(result).toBe(
       `{% link to="/settings/team/users/789" text="Smith" /%}`
@@ -299,7 +316,7 @@ describe("wrapUserLinkForNote", () => {
   });
 
   it("should handle user with empty names", () => {
-    const user = { id: "abc", firstName: "", lastName: "" };
+    const user = { displayName: null, id: "abc", firstName: "", lastName: "" };
     const result = wrapUserLinkForNote(user);
     expect(result).toBe(
       `{% link to="/settings/team/users/abc" text="Unknown User" /%}`
@@ -307,7 +324,12 @@ describe("wrapUserLinkForNote", () => {
   });
 
   it("should handle user with null names", () => {
-    const user = { id: "def", firstName: null, lastName: null };
+    const user = {
+      displayName: null,
+      id: "def",
+      firstName: null,
+      lastName: null,
+    };
     const result = wrapUserLinkForNote(user);
     expect(result).toBe(
       `{% link to="/settings/team/users/def" text="Unknown User" /%}`
@@ -315,7 +337,12 @@ describe("wrapUserLinkForNote", () => {
   });
 
   it("should trim whitespace from names", () => {
-    const user = { id: "ghi", firstName: "  John  ", lastName: "  Doe  " };
+    const user = {
+      displayName: null,
+      id: "ghi",
+      firstName: "  John  ",
+      lastName: "  Doe  ",
+    };
     const result = wrapUserLinkForNote(user);
     expect(result).toBe(
       `{% link to="/settings/team/users/ghi" text="John Doe" /%}`
@@ -323,7 +350,12 @@ describe("wrapUserLinkForNote", () => {
   });
 
   it("should handle special characters in names", () => {
-    const user = { id: "jkl", firstName: "José", lastName: "García-López" };
+    const user = {
+      displayName: null,
+      id: "jkl",
+      firstName: "José",
+      lastName: "García-López",
+    };
     const result = wrapUserLinkForNote(user);
     expect(result).toBe(
       `{% link to="/settings/team/users/jkl" text="José García-López" /%}`
@@ -332,6 +364,7 @@ describe("wrapUserLinkForNote", () => {
 
   it("should handle names with quotes by escaping them", () => {
     const user = {
+      displayName: null,
       id: "mno",
       firstName: 'John "Johnny"',
       lastName: "O'Malley",
@@ -384,6 +417,7 @@ describe("wrapCustodianForNote", () => {
       teamMember: {
         name: "John's Team Member",
         user: {
+          displayName: null,
           id: "user123",
           firstName: "John",
           lastName: "Doe",
@@ -412,6 +446,7 @@ describe("wrapCustodianForNote", () => {
       teamMember: {
         name: "Jane's Team Member",
         user: {
+          displayName: null,
           id: "user456",
           firstName: "Jane",
           lastName: null,
@@ -429,6 +464,7 @@ describe("wrapCustodianForNote", () => {
       teamMember: {
         name: "Anonymous Team Member",
         user: {
+          displayName: null,
           id: "user789",
           firstName: "",
           lastName: "",
@@ -524,5 +560,47 @@ describe("wrapDescriptionForNote", () => {
     expect(result).toBe(
       `{% description newText="Multi-line\ndescription with\n&quot;multiple&quot; &quot;quotes&quot;" /%}`
     );
+  });
+});
+
+/** Tag nodes Markdoc finds — what an injected payload must never produce. */
+const tagsIn = (content: string) =>
+  [...Markdoc.parse(content).walk()].filter((node) => node.type === "tag");
+
+describe("appendUserTextToNote", () => {
+  const baseLine = "**Jane** released **5** unit(s) from custody.";
+
+  it("appends a quoted remark", () => {
+    expect(appendUserTextToNote(baseLine, "shelf was full")).toBe(
+      `${baseLine} *"shelf was full"*`
+    );
+  });
+
+  it("returns the base line unchanged when there is no remark", () => {
+    expect(appendUserTextToNote(baseLine)).toBe(baseLine);
+    expect(appendUserTextToNote(baseLine, null)).toBe(baseLine);
+    expect(appendUserTextToNote(baseLine, "   ")).toBe(baseLine);
+  });
+
+  it("cannot be used to inject a Markdoc tag", () => {
+    // The remark is free-form user input on the quantity custody/adjustment
+    // endpoints and is persisted as an UPDATE note. A tag injected here would
+    // forge the note's presentation (status badges, asset popovers) even
+    // though the renderer now blocks link payloads.
+    const payload = '{% booking_status status="COMPLETE" /%}';
+
+    const result = appendUserTextToNote(baseLine, payload);
+
+    expect(tagsIn(result)).toHaveLength(0);
+    expect(result).not.toContain("{%");
+  });
+
+  it("resists the doubled-delimiter bypass", () => {
+    const result = appendUserTextToNote(
+      baseLine,
+      '{{%% link to="javascript:alert(1)" text="x" /%%}}'
+    );
+
+    expect(tagsIn(result)).toHaveLength(0);
   });
 });

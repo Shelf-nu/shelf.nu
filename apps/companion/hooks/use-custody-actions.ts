@@ -2,11 +2,18 @@ import { useState } from "react";
 import { Alert } from "react-native";
 import * as Haptics from "expo-haptics";
 import { api, type AssetDetail, type TeamMember } from "@/lib/api";
+import { useSheetSubmit } from "@/hooks/use-sheet-submit";
 
 interface UseCustodyActionsParams {
   asset: AssetDetail | null;
   currentOrg: { id: string } | null;
   fetchAsset: () => Promise<void>;
+  /**
+   * The member may only take custody for themselves
+   * (`access.custody.assign === "self"`), so the confirm says "Take" rather
+   * than naming a custodian to assign to.
+   */
+  isSelfService?: boolean;
 }
 
 interface UseCustodyActionsReturn {
@@ -14,12 +21,54 @@ interface UseCustodyActionsReturn {
   setIsActionLoading: React.Dispatch<React.SetStateAction<boolean>>;
   handleAssignCustody: (member: TeamMember) => void;
   handleReleaseCustody: () => void;
+  /**
+   * Assign `quantity` units of a QUANTITY_TRACKED asset to `member`.
+   * No Alert confirm step: the QuantityInputSheet's explicit submit IS the
+   * confirmation (a second Alert would be double-confirmation).
+   *
+   * The request runs with the sheet still open. `closeSheet` runs only once
+   * the server accepts the assignment, so a refusal leaves the entered
+   * quantity on screen.
+   */
+  performAssignQuantity: (
+    member: TeamMember,
+    quantity: number,
+    closeSheet: () => void,
+    /**
+     * Where the units come from, for a pool placed at two or more locations:
+     * a location id, or `null` for the unplaced units. Leave it out and the
+     * server records its own default.
+     */
+    locationId?: string | null
+  ) => Promise<void>;
+  /**
+   * Release `quantity` units of a QUANTITY_TRACKED asset from the custodian
+   * identified by `custodianId` (team-member id). Confirmed by the sheet, and
+   * closes it only once accepted, same as `performAssignQuantity`.
+   *
+   * `consumed` records how many of those units were used up rather than
+   * handed back. Pass `undefined` and the server derives the outcome from the
+   * asset's consumptionType.
+   */
+  performReleaseQuantity: (
+    custodianId: string,
+    quantity: number,
+    consumed: number | undefined,
+    closeSheet: () => void,
+    /**
+     * Release only the units taken from this source: a location id, `null`
+     * for the unplaced units, or `"unrecorded"`. Leave it out and the server
+     * draws the holder's rows in its fixed order.
+     */
+    locationId?: string | null
+  ) => Promise<void>;
 }
 
 export function useCustodyActions({
   asset,
   currentOrg,
   fetchAsset,
+  isSelfService = false,
 }: UseCustodyActionsParams): UseCustodyActionsReturn {
   const [isActionLoading, setIsActionLoading] = useState(false);
 
@@ -52,11 +101,16 @@ export function useCustodyActions({
       : member.name;
 
     Alert.alert(
-      "Assign Custody",
-      `Assign "${asset?.title}" to ${displayName}?`,
+      isSelfService ? "Take Custody" : "Assign Custody",
+      isSelfService
+        ? `Take custody of "${asset?.title}"?`
+        : `Assign "${asset?.title}" to ${displayName}?`,
       [
         { text: "Cancel", style: "cancel" },
-        { text: "Assign", onPress: () => performAssign(member.id) },
+        {
+          text: isSelfService ? "Take" : "Assign",
+          onPress: () => performAssign(member.id),
+        },
       ]
     );
   };
@@ -90,10 +144,66 @@ export function useCustodyActions({
     );
   };
 
+  // ── Quantity-custody actions (QUANTITY_TRACKED assets only) ──────────
+  // The QuantityInputSheet's explicit submit replaces the Alert confirm step
+  // (the sheet already shows amount + custodian + unit). The request runs with
+  // the sheet still open, and the sheet closes only once the server accepts;
+  // the detail refetch (fetchAsset) then refreshes quantityBreakdown,
+  // custodyList, and status in one shot.
+  const submitFromSheet = useSheetSubmit({
+    refresh: fetchAsset,
+    setSubmitting: setIsActionLoading,
+  });
+
+  const performAssignQuantity = async (
+    member: TeamMember,
+    quantity: number,
+    closeSheet: () => void,
+    locationId?: string | null
+  ) => {
+    if (!currentOrg || !asset) return;
+    const orgId = currentOrg.id;
+    const assetId = asset.id;
+    await submitFromSheet(
+      () =>
+        api.assignQuantityCustody(
+          orgId,
+          assetId,
+          member.id,
+          quantity,
+          undefined,
+          locationId
+        ),
+      closeSheet
+    );
+  };
+
+  const performReleaseQuantity = async (
+    custodianId: string,
+    quantity: number,
+    consumed: number | undefined,
+    closeSheet: () => void,
+    locationId?: string | null
+  ) => {
+    if (!currentOrg || !asset) return;
+    const orgId = currentOrg.id;
+    const assetId = asset.id;
+    await submitFromSheet(
+      () =>
+        api.releaseQuantityCustody(orgId, assetId, custodianId, quantity, {
+          consumed,
+          locationId,
+        }),
+      closeSheet
+    );
+  };
+
   return {
     isActionLoading,
     setIsActionLoading,
     handleAssignCustody,
     handleReleaseCustody,
+    performAssignQuantity,
+    performReleaseQuantity,
   };
 }

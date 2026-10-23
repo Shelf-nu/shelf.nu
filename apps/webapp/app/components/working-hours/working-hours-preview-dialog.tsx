@@ -13,6 +13,7 @@ import type { WorkingHoursData } from "~/modules/working-hours/types";
 import { getOverrideDateKey } from "~/modules/working-hours/utils";
 import { tw } from "~/utils/tw";
 import { Button } from "../shared/button";
+import { Spinner } from "../shared/spinner";
 
 // Overrides are absolute calendar dates, so compare them as YYYY-MM-DD strings
 // against today's local calendar day. `new Date("YYYY-MM-DD")` would parse as
@@ -150,14 +151,19 @@ const OverridesSection = ({ overrides }: OverridesSectionProps) => {
             <div className="mb-1 flex items-center justify-between">
               <h4 className="text-sm font-semibold text-gray-900">
                 <DateS
-                  date={override.date}
+                  // Overrides are absolute real-world calendar dates that must
+                  // never shift with the viewer's timezone. The stored value can
+                  // be a UTC-midnight instant; passing it straight to DateS reads
+                  // its browser-local components and lands a day west of UTC.
+                  // Collapse it to a bare "YYYY-MM-DD" first so formatDate takes
+                  // its no-shift path and renders the calendar date exactly.
+                  date={getOverrideDateKey(override.date)}
                   localeOnly
-                  options={{
-                    weekday: "long",
-                    month: "long",
-                    day: "numeric",
-                    year: "numeric",
-                  }}
+                  // Show the weekday, but let the DATE itself follow the user's
+                  // dateFormat pref (e.g. "Friday, 2026-07-31" for YYYY-MM-DD).
+                  // includeWeekday is additive; naming month/day/year here would
+                  // instead force those styles and ignore the numeric pref.
+                  options={{ includeWeekday: true }}
                 />
               </h4>
               <span
@@ -246,7 +252,7 @@ export const WorkingHoursPreviewDialog = ({
           <div className="p-6">
             {isLoading ? (
               <div className="py-12 text-center">
-                <div className="animate-spin mx-auto mb-4 size-8 rounded-full border-2 border-blue-600 border-t-transparent" />
+                <Spinner className="mx-auto mb-4 size-8" />
                 <p className="text-gray-600">Loading working hours...</p>
               </div>
             ) : !workingHours?.enabled ? (

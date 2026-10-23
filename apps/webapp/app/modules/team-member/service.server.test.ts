@@ -1,12 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createTeamMember } from "@factories";
 
-import { getTeamMember } from "~/modules/team-member/service.server";
+import {
+  fixTeamMembersNames,
+  getTeamMember,
+} from "~/modules/team-member/service.server";
 import { ShelfError } from "~/utils/error";
 
 const dbMocks = vi.hoisted(() => ({
   teamMember: {
     findUniqueOrThrow: vi.fn(),
+    update: vi.fn(),
   },
 }));
 
@@ -15,17 +19,21 @@ vi.mock("~/database/db.server", () => ({
   db: {
     teamMember: {
       findUniqueOrThrow: dbMocks.teamMember.findUniqueOrThrow,
+      update: dbMocks.teamMember.update,
     },
   },
 }));
 
 const mockTeamMemberFindUniqueOrThrow = dbMocks.teamMember.findUniqueOrThrow;
+const mockTeamMemberUpdate = dbMocks.teamMember.update;
 
 const mockTeamMember = createTeamMember();
 
 beforeEach(() => {
   vi.clearAllMocks();
   mockTeamMemberFindUniqueOrThrow.mockReset();
+  mockTeamMemberUpdate.mockReset();
+  mockTeamMemberUpdate.mockResolvedValue({});
 });
 
 describe("getTeamMember", () => {
@@ -270,5 +278,122 @@ describe("getTeamMember", () => {
         expect(shelfError.status).toBe(404);
       }
     });
+  });
+});
+
+describe("fixTeamMembersNames", () => {
+  /** Convenience alias for the (non-exported) element type of the argument. */
+  type Member = Parameters<typeof fixTeamMembersNames>[0][number];
+
+  /**
+   * Builds a team-member shaped for `fixTeamMembersNames` on top of the shared
+   * `createTeamMember` factory. The factory supplies the real (type-checked)
+   * TeamMember scalar fields — so a schema change surfaces here instead of
+   * silently drifting — and only the narrow `user` projection the function
+   * actually reads (`firstName`/`lastName`/`displayName`/`email`) is layered on.
+   */
+  const makeMember = (over: {
+    id: string;
+    name: string;
+    user: {
+      firstName: string | null;
+      lastName: string | null;
+      email: string;
+    } | null;
+  }): Member => ({
+    ...createTeamMember({
+      id: over.id,
+      name: over.name,
+      organizationId: "org-1",
+      userId: over.user ? "user-1" : null,
+    }),
+    user: over.user ? { ...over.user, displayName: null } : null,
+  });
+
+  it("updates only user-linked members whose name is blank", async () => {
+    const members: Member[] = [
+      makeMember({
+        id: "tm-blank-user",
+        name: "",
+        user: { firstName: "Jane", lastName: "Doe", email: "jane@example.com" },
+      }),
+      makeMember({
+        id: "tm-named-user",
+        name: "Already Named",
+        user: { firstName: "John", lastName: "Roe", email: "john@example.com" },
+      }),
+    ];
+
+    await fixTeamMembersNames(members);
+
+    // Only the blank-named, user-linked member is fixed.
+    expect(mockTeamMemberUpdate).toHaveBeenCalledTimes(1);
+    expect(mockTeamMemberUpdate).toHaveBeenCalledWith({
+      where: { id: "tm-blank-user", organizationId: "org-1" },
+      data: { name: "Jane Doe" },
+    });
+  });
+
+  it("ignores NRMs (user === null) even when blank-named", async () => {
+    const members: Member[] = [
+      makeMember({ id: "tm-nrm-blank", name: "", user: null }),
+      makeMember({ id: "tm-nrm-blank-2", name: "   ", user: null }),
+    ];
+
+    await fixTeamMembersNames(members);
+
+    // NRMs cannot be name-fixed; the early-return must not be defeated by them.
+    expect(mockTeamMemberUpdate).not.toHaveBeenCalled();
+  });
+
+  it("does nothing when no user-linked member is blank-named", async () => {
+    const members: Member[] = [
+      makeMember({
+        id: "tm-named",
+        name: "Has Name",
+        user: { firstName: "A", lastName: "B", email: "a@example.com" },
+      }),
+    ];
+
+    await fixTeamMembersNames(members);
+
+    expect(mockTeamMemberUpdate).not.toHaveBeenCalled();
+  });
+
+  it("derives a name from the email username when the user has no first/last name", async () => {
+    const members: Member[] = [
+      makeMember({
+        id: "tm-email-only",
+        name: "",
+        user: {
+          firstName: null,
+          lastName: null,
+          email: "john.doe@example.com",
+        },
+      }),
+    ];
+
+    await fixTeamMembersNames(members);
+
+    expect(mockTeamMemberUpdate).toHaveBeenCalledWith({
+      where: { id: "tm-email-only", organizationId: "org-1" },
+      data: { name: "John Doe" },
+    });
+  });
+
+  it("does not throw when a DB update fails (runs fire-and-forget)", async () => {
+    // why: the function runs in the background and its callers `void` it, so a
+    // failed update must be caught + logged internally, never rejected.
+    mockTeamMemberUpdate.mockRejectedValue(new Error("db down"));
+
+    const members: Member[] = [
+      makeMember({
+        id: "tm-blank-user",
+        name: "",
+        user: { firstName: "Jane", lastName: "Doe", email: "jane@example.com" },
+      }),
+    ];
+
+    await expect(fixTeamMembersNames(members)).resolves.toBeUndefined();
   });
 });

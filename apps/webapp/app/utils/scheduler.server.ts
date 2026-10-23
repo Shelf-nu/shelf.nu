@@ -1,4 +1,10 @@
 import PgBoss from "pg-boss";
+import { ShelfError } from "./error";
+import { Logger } from "./logger";
+import {
+  connectionSecretsFrom,
+  toSchedulerErrorCause,
+} from "./scheduler-error";
 import { DATABASE_URL, NODE_ENV } from "../utils/env";
 
 export enum QueueNames {
@@ -7,6 +13,7 @@ export enum QueueNames {
   auditQueue = "audit-queue",
   assetsQueue = "assets-queue",
   addonTrialQueue = "addon-trial-queue",
+  assetImportQueue = "asset-import-queue",
 }
 
 let pgBossInstance!: PgBoss;
@@ -40,6 +47,34 @@ export const init = async () => {
       }
       pgBossInstance = global.pgBossScheduler;
     }
+
+    // Register an error handler before starting. PgBoss extends EventEmitter and
+    // re-emits worker/maintenance failures (e.g. transient EAUTHTIMEOUT / 08006)
+    // as 'error' events. An 'error' event with no listener throws and crashes
+    // the Node process, so this listener must exist; logging keeps it alive.
+    //
+    // why the listenerCount guard: in dev the instance is a surviving `global`
+    // while the `!pgBossInstance` guard above is on a module-local that resets on
+    // every Vite hot reload, so init() re-runs against the same instance. Without
+    // this guard each reload attaches another listener (MaxListenersExceededWarning
+    // + duplicate logs). Attaching only when none exists is idempotent.
+    if (pgBossInstance.listenerCount("error") === 0) {
+      // The connection's own user, password and host, to scrub from error text
+      const connectionSecrets = connectionSecretsFrom(DATABASE_URL);
+      pgBossInstance.on("error", (cause: unknown) => {
+        Logger.error(
+          new ShelfError({
+            // The raw payload can carry the pg client and its connection
+            // parameters; only the failure itself may reach Sentry.
+            cause: toSchedulerErrorCause(cause, connectionSecrets),
+            message: "pg-boss worker error",
+            label: "Scheduler",
+            shouldBeCaptured: true,
+          })
+        );
+      });
+    }
+
     await pgBossInstance.start();
   }
   return;

@@ -44,10 +44,16 @@ import {
 } from "~/modules/onboarding/constants";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getOrganizationById } from "~/modules/organization/service.server";
+import {
+  clearSignupIntentHeaders,
+  readSignupIntent,
+  refreshSignupIntentHeaders,
+} from "~/modules/signup-intent/cookie.server";
+import { resolveOnboardingDestination } from "~/modules/signup-intent/schema";
 import { getUserByID, updateUser } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
-import { SMTP_FROM } from "~/utils/env";
+import { ENABLE_PREMIUM_FEATURES, SMTP_FROM } from "~/utils/env";
 import { isZodValidationError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
@@ -60,6 +66,8 @@ import {
 } from "~/utils/http.server";
 import { createStripeCustomer } from "~/utils/stripe.server";
 import { tw } from "~/utils/tw";
+import { resolveUserGreetingName } from "~/utils/user";
+import { passwordSchema } from "~/utils/zod";
 
 const trimString = (value: unknown) =>
   typeof value === "string" ? value.trim() : value;
@@ -106,12 +114,15 @@ function createOnboardingSchema({
         .min(4, { message: "Must be at least 4 characters long" }),
       firstName: z.string().min(1, { message: "First name is required" }),
       lastName: z.string().min(1, { message: "Last name is required" }),
+      // When the user already has a password (e.g. signed up via email/pass),
+      // the field is optional and unconstrained — they are not setting one here.
+      // Only the setter branch enforces the 8–72 char bounds.
       password: userSignedUpWithPassword
         ? z.string().optional()
-        : z.string().min(8, "Password is too short. Minimum 8 characters."),
+        : passwordSchema("Password is too short. Minimum 8 characters."),
       confirmPassword: userSignedUpWithPassword
         ? z.string().optional()
-        : z.string().min(8, "Password is too short. Minimum 8 characters."),
+        : passwordSchema("Password is too short. Minimum 8 characters."),
       referralSource: shouldCollectBusinessIntel
         ? z.string().min(5, "Field is required.")
         : z.string().optional().nullable(),
@@ -238,7 +249,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     /** If the user is already onboarded, we assume they finished the process so we send them to the index */
     if (user.onboarded) {
-      return redirect("/assets");
+      return redirect("/");
     }
 
     const authUser = await getAuthUserById(userId);
@@ -282,18 +293,25 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const subHeading =
       "You are almost ready to use Shelf. We just need some basic information to get you started.";
 
-    return payload({
-      title,
-      subHeading,
-      user,
-      userSignedUpWithPassword,
-      OnboardingFormSchema,
-      collectBusinessIntel: config.collectBusinessIntel,
-      createdWithInvite,
-      requireCompanyName,
-      organizationName,
-      organizationId: verifiedOrganizationId,
-    });
+    return data(
+      payload({
+        title,
+        subHeading,
+        user,
+        userSignedUpWithPassword,
+        OnboardingFormSchema,
+        collectBusinessIntel: config.collectBusinessIntel,
+        createdWithInvite,
+        requireCompanyName,
+        organizationName,
+        organizationId: verifiedOrganizationId,
+      }),
+      {
+        // Restart the signup intent's window while the form is open, so the
+        // time spent filling it in does not count against the intent.
+        headers: await refreshSignupIntentHeaders(request),
+      }
+    );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     throw data(error(reason), { status: reason.status });
@@ -394,6 +412,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
       ...accountFields
     } = payload;
 
+    // What the signup link asked for, carried here by cookie. This request
+    // consumes it: stored for attribution below, used to pick where the user
+    // lands, and cleared on the way out. A failed submission leaves it in
+    // place for the retry.
+    const signupIntent = await readSignupIntent(request);
+
     // Separate user account fields from business intel fields
     const userUpdatePayload: typeof accountFields & {
       id: string;
@@ -428,6 +452,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
         primaryUseCase,
         currentSolution,
         timeline,
+        signupPlan: signupIntent?.plan,
+        signupTrial: signupIntent?.trial,
+        utmSource: signupIntent?.utmSource,
+        utmMedium: signupIntent?.utmMedium,
+        utmCampaign: signupIntent?.utmCampaign,
+        utmContent: signupIntent?.utmContent,
       });
     }
 
@@ -463,7 +493,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         replyTo: "carlos@shelf.nu",
         to: user.email,
         subject: "🏷️ Welcome to Shelf - can I ask you a question?",
-        text: onboardingEmailText({ firstName: user.firstName as string }),
+        text: onboardingEmailText({ firstName: resolveUserGreetingName(user) }),
       });
     }
 
@@ -479,9 +509,18 @@ export async function action({ context, request }: ActionFunctionArgs) {
       );
     }
 
-    return redirect(redirectViaInvite ? `/assets` : `/welcome`, {
-      headers,
-    });
+    if (signupIntent) {
+      headers.push(...(await clearSignupIntentHeaders()));
+    }
+
+    return redirect(
+      resolveOnboardingDestination({
+        redirectViaInvite,
+        signupIntent,
+        premiumFeaturesEnabled: ENABLE_PREMIUM_FEATURES,
+      }),
+      { headers }
+    );
   } catch (cause) {
     const reason = makeShelfError(
       cause,
@@ -606,7 +645,11 @@ export default function Onboarding() {
               type="password"
               autoComplete="new-password"
               inputClassName="w-full"
-              error={zo.errors.password()?.message}
+              error={
+                getValidationErrors<typeof OnboardingFormSchema>(
+                  actionData?.error
+                )?.password?.message || zo.errors.password()?.message
+              }
             />
 
             <PasswordInput
@@ -617,7 +660,12 @@ export default function Onboarding() {
               name={zo.fields.confirmPassword()}
               type="password"
               autoComplete="new-password"
-              error={zo.errors.confirmPassword()?.message}
+              error={
+                getValidationErrors<typeof OnboardingFormSchema>(
+                  actionData?.error
+                )?.confirmPassword?.message ||
+                zo.errors.confirmPassword()?.message
+              }
             />
           </>
         )}

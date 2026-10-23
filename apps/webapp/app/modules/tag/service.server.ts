@@ -8,11 +8,16 @@ import type {
 import { TagUseFor } from "@prisma/client";
 import loadash from "lodash";
 import { db } from "~/database/db.server";
+import {
+  assertBulkDeleteConfirmed,
+  assertDeleteConfirmedFor,
+} from "~/utils/delete-confirmation.server";
 import type { ErrorLabel } from "~/utils/error";
 import {
   isNotFoundError,
   ShelfError,
   maybeUniqueConstraintViolation,
+  rethrowIfClientError,
 } from "~/utils/error";
 import { getRandomColor } from "~/utils/get-random-color";
 import { getCurrentSearchParams } from "~/utils/http.server";
@@ -20,6 +25,46 @@ import { ALL_SELECTED_KEY } from "~/utils/list";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
 const label: ErrorLabel = "Tag";
+
+/**
+ * Builds the Prisma filter for a tag list.
+ *
+ * Shared deliberately between {@link getTags}, which renders the list, and
+ * {@link bulkDeleteTags}, which acts on a "select all" over that same list. Two
+ * separate builders is how the equivalent locations helper drifted out of sync
+ * with its list query — the list matched on name, description and address while
+ * "select all" matched on name only, so a bulk action silently missed rows the
+ * user could see. Keeping one function means the two cannot disagree.
+ *
+ * @param args - Organization scope plus the raw filter values from the list
+ * @returns A where-clause always scoped to the organization
+ */
+function buildTagsWhereInput({
+  organizationId,
+  search,
+  useFor,
+}: {
+  organizationId: Organization["id"];
+  search?: string | null;
+  useFor?: string | null;
+}): Prisma.TagWhereInput {
+  /** Default value of where. Takes the items belonging to current user */
+  const where: Prisma.TagWhereInput = { organizationId };
+
+  /** If the search string exists, add it to the where object */
+  if (search) {
+    where.name = {
+      contains: search,
+      mode: "insensitive",
+    };
+  }
+
+  if (useFor) {
+    where.useFor = { has: useFor as TagUseFor };
+  }
+
+  return where;
+}
 
 export async function getTags(params: {
   organizationId: Organization["id"];
@@ -39,20 +84,7 @@ export async function getTags(params: {
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
 
-    /** Default value of where. Takes the items belonging to current user */
-    const where: Prisma.TagWhereInput = { organizationId };
-
-    /** If the search string exists, add it to the where object */
-    if (search) {
-      where.name = {
-        contains: search,
-        mode: "insensitive",
-      };
-    }
-
-    if (useFor) {
-      where.useFor = { has: useFor as TagUseFor };
-    }
+    const where = buildTagsWhereInput({ organizationId, search, useFor });
 
     const [tags, totalTags] = await Promise.all([
       /** Get the items */
@@ -116,6 +148,77 @@ export async function createTag({
       },
     });
   }
+}
+
+/** What carries a tag: everything a delete would change. */
+export type TagUsage = { assets: number; bookings: number };
+
+/**
+ * Reads a tag's name and what carries it, for the delete dialog and the delete
+ * action. Counted for the one tag being deleted, on demand, so the tags index
+ * never pays for it.
+ *
+ * @param params.id - The tag
+ * @param params.organizationId - The caller's organization
+ * @returns The name and usage counts, or null when the tag is not found
+ * @throws {ShelfError} If the lookup fails
+ */
+export async function getTagUsage({
+  id,
+  organizationId,
+}: Pick<Tag, "id"> & { organizationId: Organization["id"] }): Promise<{
+  name: string;
+  usage: TagUsage;
+} | null> {
+  try {
+    const tag = await db.tag.findFirst({
+      where: { id, organizationId },
+      select: {
+        name: true,
+        _count: { select: { assets: true, bookings: true } },
+      },
+    });
+
+    return tag ? { name: tag.name, usage: tag._count } : null;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while checking what uses the tag.",
+      additionalData: { id, organizationId },
+      label,
+    });
+  }
+}
+
+/**
+ * Refuses a single tag delete unless the user typed its name, when any asset
+ * or booking carries it. An unused tag deletes with one click, and one that is
+ * already gone passes so the delete itself reports it.
+ *
+ * @param params.id - The tag to delete
+ * @param params.organizationId - The caller's organization
+ * @param params.confirmation - What the user typed in the dialog
+ * @throws {ShelfError} 400 when the tag is in use and the confirmation does
+ *   not match
+ */
+export async function assertTagDeleteConfirmed({
+  id,
+  organizationId,
+  confirmation,
+}: Pick<Tag, "id"> & {
+  organizationId: Organization["id"];
+  confirmation: string | null | undefined;
+}) {
+  await assertDeleteConfirmedFor({
+    confirmation,
+    findName: async () => {
+      const found = await getTagUsage({ id, organizationId });
+      return found && Object.values(found.usage).some((n) => n > 0)
+        ? found.name
+        : null;
+    },
+    label,
+  });
 }
 
 export async function deleteTag({
@@ -274,20 +377,63 @@ export async function updateTag({
   }
 }
 
+/**
+ * Deletes tags in bulk, either by explicit ids or across a filtered list.
+ *
+ * When `tagIds` carries the `ALL_SELECTED_KEY` sentinel the user picked "select
+ * all" on a list they were looking at, so the delete reproduces that list's
+ * filters through {@link buildTagsWhereInput}, the builder the index uses.
+ * `currentSearchParams` carries those filters over. The ids are read first and
+ * the delete is scoped to them, so the count the user confirmed is the count
+ * removed.
+ *
+ * @param args - Ids (or the select-all sentinel), org scope, the list's
+ *   filters as a raw query string, and the typed confirmation
+ * @returns Prisma's batch payload, whose `count` is the number actually deleted
+ * @throws {ShelfError} 400 when the confirmation does not match, see
+ *   {@link assertBulkDeleteConfirmed}; 500 if the delete fails
+ */
 export async function bulkDeleteTags({
   tagIds,
   organizationId,
+  currentSearchParams,
+  confirmation,
 }: {
   tagIds: Tag["id"][];
   organizationId: Organization["id"];
+  currentSearchParams?: string | null;
+  confirmation: string | null | undefined;
 }) {
   try {
-    return await db.tag.deleteMany({
+    const searchParams = new URLSearchParams(currentSearchParams ?? "");
+
+    const tags = await db.tag.findMany({
       where: tagIds.includes(ALL_SELECTED_KEY)
-        ? { organizationId }
+        ? buildTagsWhereInput({
+            organizationId,
+            search: searchParams.get("s"),
+            useFor: searchParams.get("useFor"),
+          })
         : { id: { in: tagIds }, organizationId },
+      select: { id: true },
+    });
+
+    // Before any write: the typed count must be the number about to go.
+    assertBulkDeleteConfirmed({
+      selectedIds: tagIds,
+      confirmation,
+      matchedCount: tags.length,
+      noun: { one: "tag", many: "tags" },
+      label,
+    });
+
+    return await db.tag.deleteMany({
+      where: { id: { in: tags.map((tag) => tag.id) }, organizationId },
     });
   } catch (cause) {
+    // A refused confirmation carries the count to type in its additionalData.
+    rethrowIfClientError(cause);
+
     throw new ShelfError({
       cause,
       message: "Something went wrong while bulk deleting tags.",

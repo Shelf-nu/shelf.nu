@@ -1,12 +1,46 @@
-import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
+import { Component, lazy, Suspense, useEffect, useState } from "react";
 import * as Sentry from "@sentry/react-router";
-import { useLocation, useRouteError } from "react-router";
+import { isRouteErrorResponse, useLocation, useRouteError } from "react-router";
 
+import { useUserData } from "~/hooks/use-user-data";
 import { isRouteError } from "~/utils/http";
+import { isExpectedErrorBoundaryStatus } from "~/utils/sentry-filters";
 import { tw } from "~/utils/tw";
 import Error404Handler from "./error-404-handler";
 import { parse404ErrorData } from "./utils";
 import { Button } from "../shared/button";
+
+/* Lazy: root.tsx uses ErrorContent as the app-wide ErrorBoundary, so a
+ * static import would pull the feedback modal (crisp-sdk-web, react-zorm,
+ * the dialog) into the root chunk shipped to every visitor. The chunk only
+ * loads when someone actually clicks "Report this issue". */
+const FeedbackModal = lazy(() => import("../feedback/feedback-modal"));
+
+/**
+ * Catches a failed lazy-chunk load (or render crash) of the feedback modal.
+ * ErrorContent already IS the app-wide error boundary, so anything escaping
+ * from here would blank the whole error page; failing to load the report
+ * dialog should degrade to hiding the report UI instead.
+ */
+class ReportModalBoundary extends Component<
+  { onError: () => void; children: ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch() {
+    this.props.onError();
+  }
+
+  render() {
+    return this.state.failed ? null : this.props.children;
+  }
+}
 
 type ErrorContentProps = { className?: string };
 
@@ -25,48 +59,60 @@ function splitIntoStableLines(message: string) {
   });
 }
 
-export const ErrorContent = ({ className }: ErrorContentProps) => {
-  const loc = useLocation();
-  const response = useRouteError();
-
-  let title = "Oops, something went wrong";
-  let message =
-    "There was an unexpected error. Please refresh to try again. If the issues persists, please contact support.";
-  let traceId;
-
-  if (isRouteError(response)) {
-    message = response.data.error.message;
-    title = response.data.error.title || "Oops, something went wrong";
-    traceId = response.data.error.traceId;
+/**
+ * Renders the "(Trace id: …)" line shown under the error message on both
+ * the not-found and generic error screens. Renders nothing when no trace id
+ * is available (e.g. a client-side crash that never reached the server).
+ */
+function TraceIdLine({ traceId }: { traceId?: string }) {
+  if (!traceId) {
+    return null;
   }
+  return <p className="text-gray-400">(Trace id: {traceId})</p>;
+}
 
-  const error404 = parse404ErrorData(response);
+/**
+ * The "Back to home" action shared by the not-found and generic error
+ * screens — factored out so both screens render the identical button
+ * instead of duplicating its props.
+ */
+function BackHomeButton() {
+  return (
+    <Button to="/" variant="secondary" icon="home">
+      Back to home
+    </Button>
+  );
+}
 
-  // Only capture unhandled Error instances client-side.
-  // Route errors from ShelfError are already captured server-side via handleError.
-  const [sentryEventId, setSentryEventId] = useState<string | null>(null);
-  useEffect(() => {
-    if (
-      response instanceof Error &&
-      !error404.isError404 &&
-      window.env?.SENTRY_DSN
-    ) {
-      setSentryEventId(
-        Sentry.captureException(response, {
-          tags: { source: "error-boundary" },
-        })
-      );
-    }
-  }, [response, error404.isError404]);
-  if (error404.isError404) {
-    return (
-      <Error404Handler
-        className={className}
-        additionalData={error404.additionalData}
-      />
-    );
-  }
+type ErrorScreenLayoutProps = {
+  className?: string;
+  title: string;
+  message: string;
+  traceId?: string;
+  /** Extra content rendered between the trace id line and the action
+   * buttons — e.g. the Sentry event id line on the generic screen. */
+  extra?: ReactNode;
+  /** The screen's action buttons. Content differs per screen (the
+   * not-found screen only offers "Back to home"; the generic screen also
+   * offers Reload / Report), so the caller owns this slot. */
+  actions: ReactNode;
+};
 
+/**
+ * Shared centered "error screen" chrome — icon, heading, message body, and
+ * trace id line — used by both the not-found screen and the generic
+ * "something went wrong" screen so they don't duplicate this layout block.
+ * Screen-specific content (extra info line, action buttons) is supplied by
+ * the caller via `extra`/`actions`.
+ */
+function ErrorScreenLayout({
+  className,
+  title,
+  message,
+  traceId,
+  extra,
+  actions,
+}: ErrorScreenLayoutProps) {
   // Preserve newlines as <br/> without injecting HTML: split the message on
   // "\n" and interleave <br/> elements between segments. Keeps the same
   // visual output as the previous dangerouslySetInnerHTML approach while
@@ -94,20 +140,309 @@ export const ErrorContent = ({ className }: ErrorContentProps) => {
             </span>
           ))}
         </p>
-        {traceId && <p className="text-gray-400">(Trace id: {traceId})</p>}
-        {sentryEventId && (
-          <p className="text-gray-400">(Error ID: {sentryEventId})</p>
-        )}
-        <div className=" mt-8 flex gap-3">
-          <Button to="/" variant="secondary" icon="home">
-            Back to home
-          </Button>
-          <Button to={loc.pathname} reloadDocument>
-            Reload page
-          </Button>
-        </div>
+        <TraceIdLine traceId={traceId} />
+        {extra}
+        <div className="mt-8 flex gap-3">{actions}</div>
       </div>
     </div>
+  );
+}
+
+/**
+ * App-wide `ErrorBoundary` content, rendered by `root.tsx` and the
+ * authenticated `_layout` route for any error that reaches a route
+ * boundary. Branches into three screens:
+ * - The benign workspace-switcher case (`<Error404Handler/>`): the resource
+ *   exists but belongs to another of the user's organizations.
+ * - A genuine 404 that is NOT the workspace-switcher shape: a calm
+ *   "Not found" screen. This includes both Shelf-thrown 404s (`{ error }`
+ *   payload) and router-generated 404s for an unmatched/stale URL (a plain
+ *   `Error` payload) — see `isNotFound` below.
+ * - Everything else: the generic "Oops, something went wrong" screen.
+ *
+ * Also captures failures to Sentry: unhandled client-side `Error` instances
+ * (JS crashes), and route-error 4xx responses that aren't already captured
+ * server-side (5xx is captured server-side by `handleError`/`error()`; the
+ * workspace-switcher case is expected UX, not a bug, so it's never
+ * captured).
+ */
+export const ErrorContent = ({ className }: ErrorContentProps) => {
+  const loc = useLocation();
+  const response = useRouteError();
+
+  /* Present when the authenticated app layout rendered (child-route errors).
+   * That is also the only case where /api/feedback can accept a report, so
+   * the "Report this issue" button is gated on it. */
+  const user = useUserData();
+  const [reportOpen, setReportOpen] = useState(false);
+  /* Flipped when the modal chunk fails to load/render: the report UI hides
+   * instead of leaving a button that blanks the page when clicked */
+  const [reportBroken, setReportBroken] = useState(false);
+
+  // `rawTitle` is the error's own title, if any, BEFORE either screen's
+  // fallback is applied — the not-found screen falls back to "Not found",
+  // the generic screen falls back to "Oops, something went wrong".
+  let rawTitle: string | undefined;
+  let title = "Oops, something went wrong";
+  let message =
+    "There was an unexpected error. Please refresh to try again. If the issues persists, please contact support.";
+  let traceId: string | undefined;
+  let errorLabel: string | undefined;
+  let errorStatus: string | undefined;
+  let statusCode: number | undefined;
+
+  if (isRouteErrorResponse(response)) {
+    statusCode = response.status;
+    errorStatus = String(response.status);
+  }
+
+  if (isRouteError(response)) {
+    message = response.data.error.message;
+    rawTitle = response.data.error.title;
+    title = rawTitle || "Oops, something went wrong";
+    traceId = response.data.error.traceId;
+    errorLabel = response.data.error.label;
+  }
+
+  /* For client-side crashes the rendered message is a generic fallback, so
+   * attach the real error message to the report instead */
+  const reportErrorMessage =
+    response instanceof Error ? response.message : message;
+
+  const error404 = parse404ErrorData(response);
+
+  /**
+   * A genuine "resource not found": a route-error response with HTTP 404
+   * that is NOT the workspace-switcher shape (that shape renders
+   * `<Error404Handler/>` below with its own "switch workspace?" UX instead
+   * of this calmer not-found screen).
+   *
+   * Gated on `isRouteErrorResponse` (router shape + status), NOT
+   * `isRouteError` (Shelf payload shape): React Router itself throws a
+   * 404 `ErrorResponse` for an unmatched/stale URL whose `.data` is a plain
+   * `Error`, not Shelf's `{ error: {...} }` payload — `isRouteError` is
+   * `false` for that case even though it is a genuine 404. `error404` above
+   * already handles this safely (`parse404ErrorData` returns
+   * `isError404: false` when there's no Shelf payload to parse).
+   */
+  const isNotFound =
+    isRouteErrorResponse(response) &&
+    !error404.isError404 &&
+    statusCode === 404;
+
+  /**
+   * A rate-limit terminal state: the request tripped a server-side rate
+   * limiter (e.g. `appLoaderRateLimit`'s per-(user, path) cap on `.data`
+   * revalidations — see `server/rate-limit.ts`). This is a transient,
+   * EXPECTED condition, not a bug — the boundary shows a calm "try again in
+   * a moment" screen instead of the alarming generic one.
+   *
+   * Gated purely on `statusCode` (like `isNotFound`), NOT `isRouteError`:
+   * `appLoaderRateLimit` is Hono middleware that responds with a plain
+   * `c.json(...)` 429 BEFORE the request reaches Remix's single-fetch data
+   * handling, so the client can't decode it into the Shelf
+   * `{ error: { message, title, … } }` payload shape — `response.data` ends
+   * up as a bare `Error`, the same way a router-generated 404 does (see
+   * `isNotFound`'s doc comment). Relying on `isRouteError` here would miss
+   * exactly the case this fix exists for.
+   */
+  const isRateLimited = isRouteErrorResponse(response) && statusCode === 429;
+
+  /**
+   * Route-error responses in the 4xx range (bad input, permission denials,
+   * genuine not-found, …) that reach this boundary are NOT already captured
+   * server-side — `error()` in http.server.ts only routes 5xx (and
+   * uncaught errors) to Sentry via `Logger.error`; handled 4xx land on the
+   * low-severity log trail instead. Capture them here so they're findable
+   * by the same trace id shown to the user. 5xx is excluded (already
+   * captured server-side — capturing again here would double-report), and
+   * the benign workspace-switcher case is excluded entirely (expected
+   * cross-org UX, not a bug).
+   *
+   * EXPECTED terminal states (403 permission-denied / expired claim, 404
+   * not-found, 429 rate-limited — see `EXPECTED_ERROR_BOUNDARY_STATUSES`)
+   * are also excluded: they are normal UX, not bugs, so they must not open a
+   * Sentry issue. All other 4xx (400/409/422, …) stay captured. `beforeSend`
+   * re-checks the `status` tag as defense-in-depth, but this is the primary
+   * skip — the intent is clearest where the status is a number in hand.
+   *
+   * Gated on `isRouteErrorResponse` (see `isNotFound` above for why) so
+   * router-generated 4xx responses (e.g. an unmatched-route 404) are
+   * captured too, even though they carry no Shelf payload.
+   */
+  const shouldCaptureRouteError =
+    isRouteErrorResponse(response) &&
+    !error404.isError404 &&
+    statusCode !== undefined &&
+    statusCode >= 400 &&
+    statusCode < 500 &&
+    !isExpectedErrorBoundaryStatus(statusCode);
+
+  /**
+   * Body copy for the not-found screen. A Shelf-thrown 404 carries its own
+   * `message` (extracted above); a router-generated 404 (unmatched/stale
+   * URL) has no Shelf payload, so `message` is still at its generic
+   * "Oops, something went wrong" default — swap in copy appropriate for a
+   * calm not-found screen instead.
+   */
+  const notFoundMessage = isRouteError(response)
+    ? message
+    : "The page or item you're looking for doesn't exist.";
+
+  /**
+   * Body copy for the rate-limit screen. Same fallback pattern as
+   * `notFoundMessage`: a Shelf-shaped 429 payload (e.g. the mobile
+   * `enforceUserRateLimit` ShelfError) carries its own `message`; the
+   * `appLoaderRateLimit` Hono-middleware 429 (this issue's actual source)
+   * has no Shelf payload, so `message` is still at its generic default —
+   * swap in copy appropriate for a calm "you're going too fast" screen.
+   */
+  const rateLimitMessage = isRouteError(response)
+    ? message
+    : "You're doing that a bit too quickly. Please wait a moment, then refresh the page.";
+
+  // Capture unhandled Error instances (client-side crashes) client-side,
+  // and capturable 4xx route errors (see shouldCaptureRouteError above).
+  // Route errors that are 5xx are already captured server-side via
+  // handleError, so they're deliberately left uncaptured here.
+  const [sentryEventId, setSentryEventId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!window.env?.SENTRY_DSN) {
+      return;
+    }
+
+    if (response instanceof Error && !error404.isError404) {
+      setSentryEventId(
+        Sentry.captureException(response, {
+          tags: { source: "error-boundary" },
+        })
+      );
+      return;
+    }
+
+    if (shouldCaptureRouteError) {
+      // Synthetic Error (rather than `response`, which is a plain
+      // route-error data object here, not an Error instance) so Sentry
+      // groups the issue sensibly by message, like any other captured
+      // exception. Not stored in `sentryEventId`: the route-error path
+      // shows the shelf trace id to the user, not the Sentry event id.
+      //
+      // `shelf_trace_id`/`label` are only present on Shelf-thrown errors
+      // (see `isRouteError` above); a router-generated 404 has neither, so
+      // both are omitted entirely here rather than sent as the literal
+      // string "undefined".
+      Sentry.captureException(new Error(message), {
+        tags: {
+          source: "error-boundary",
+          status: errorStatus,
+          ...(traceId ? { shelf_trace_id: traceId } : {}),
+          ...(errorLabel ? { label: errorLabel } : {}),
+        },
+        contexts: { route: { pathname: loc.pathname } },
+      });
+    }
+  }, [
+    response,
+    error404.isError404,
+    shouldCaptureRouteError,
+    message,
+    traceId,
+    errorLabel,
+    errorStatus,
+    loc.pathname,
+  ]);
+
+  if (error404.isError404) {
+    return (
+      <Error404Handler
+        className={className}
+        additionalData={error404.additionalData}
+      />
+    );
+  }
+
+  if (isNotFound) {
+    return (
+      <ErrorScreenLayout
+        className={className}
+        title={rawTitle || "Not found"}
+        message={notFoundMessage}
+        traceId={traceId}
+        actions={<BackHomeButton />}
+      />
+    );
+  }
+
+  if (isRateLimited) {
+    return (
+      <ErrorScreenLayout
+        className={className}
+        title={rawTitle || "Too many requests"}
+        message={rateLimitMessage}
+        traceId={traceId}
+        actions={<BackHomeButton />}
+      />
+    );
+  }
+
+  return (
+    <>
+      <ErrorScreenLayout
+        className={className}
+        title={title}
+        message={message}
+        traceId={traceId}
+        extra={
+          sentryEventId ? (
+            <p className="text-gray-400">(Error ID: {sentryEventId})</p>
+          ) : null
+        }
+        actions={
+          <>
+            <BackHomeButton />
+            <Button to={loc.pathname} reloadDocument>
+              Reload page
+            </Button>
+            {user && !reportBroken ? (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setReportOpen(true)}
+              >
+                Report this issue
+              </Button>
+            ) : null}
+          </>
+        }
+      />
+
+      {/* Mounted only while open: keeps the modal's hooks/effects off
+      every error render and resets its state on each reopen. Rendered as
+      a Portal (see DialogPortal), so its position here relative to
+      ErrorScreenLayout has no visual effect. */}
+      {user && !reportBroken && reportOpen ? (
+        <ReportModalBoundary
+          onError={() => {
+            setReportBroken(true);
+            setReportOpen(false);
+          }}
+        >
+          <Suspense fallback={null}>
+            <FeedbackModal
+              open={reportOpen}
+              onClose={() => setReportOpen(false)}
+              errorContext={{
+                traceId,
+                sentryEventId: sentryEventId ?? undefined,
+                errorStatus,
+                errorTitle: title,
+                errorMessage: reportErrorMessage,
+              }}
+            />
+          </Suspense>
+        </ReportModalBoundary>
+      ) : null}
+    </>
   );
 };
 

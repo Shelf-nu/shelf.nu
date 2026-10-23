@@ -271,8 +271,12 @@ done
 
 if [[ "$VERBOSE" == "1" ]]; then
   echo "[shelf-security-reviewer] filter trace:"
-  for f in "${RELEVANT[@]}"; do echo "  ✓ $f"; done
-  for f in "${DROPPED[@]}"; do echo "  · $f"; done
+  # why the `+` guards: macOS ships bash 3.2, where `"${arr[@]}"` on an EMPTY
+  # array is an unbound-variable error under `set -u`. That made the debug flag
+  # abort exactly when it was most useful - when nothing matched the filter and
+  # you wanted to know why.
+  for f in ${RELEVANT[@]+"${RELEVANT[@]}"}; do echo "  ✓ $f"; done
+  for f in ${DROPPED[@]+"${DROPPED[@]}"}; do echo "  · $f"; done
 fi
 
 if [[ "$FORCE" == "1" && ${#RELEVANT[@]} -eq 0 ]]; then

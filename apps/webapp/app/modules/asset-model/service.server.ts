@@ -1,8 +1,30 @@
 import type { AssetModel, Organization, Prisma, User } from "@prisma/client";
 import { db } from "~/database/db.server";
+import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import type { RecordEventTxClient } from "~/modules/activity-event/service.server";
+import { recordEvents } from "~/modules/activity-event/service.server";
+import {
+  buildAssetModelChangeNote,
+  resolveUserLink,
+} from "~/modules/note/helpers.server";
+import { createLoadUserForNotes } from "~/modules/note/load-user-for-notes.server";
+import type { NotesTxClient } from "~/modules/note/service.server";
+import { createNotes } from "~/modules/note/service.server";
+import { ASSET_MAX_IMAGE_UPLOAD_SIZE, PUBLIC_BUCKET } from "~/utils/constants";
+import {
+  assertBulkDeleteConfirmed,
+  assertDeleteConfirmedFor,
+} from "~/utils/delete-confirmation.server";
 import type { ErrorLabel } from "~/utils/error";
-import { ShelfError, maybeUniqueConstraintViolation } from "~/utils/error";
+import {
+  ShelfError,
+  isLikeShelfError,
+  maybeUniqueConstraintViolation,
+  rethrowIfClientError,
+} from "~/utils/error";
 import { ALL_SELECTED_KEY } from "~/utils/list";
+import { assertCategoryBelongsToOrg } from "~/utils/org-validation.server";
+import { getFileUploadPath, parseFileFormData } from "~/utils/storage.server";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
 const label: ErrorLabel = "Asset Model";
@@ -24,6 +46,18 @@ export async function createAssetModel({
   defaultValuation?: number | null;
   userId: User["id"];
 }) {
+  // why: defaultCategoryId comes from form input and Prisma's foreign key
+  // only proves the row exists, not that it belongs to this workspace —
+  // without this the model would connect another tenant's category. Runs
+  // outside the try so its 400 reaches the form instead of being rewritten
+  // into the generic constraint-violation message.
+  if (defaultCategoryId) {
+    await assertCategoryBelongsToOrg({
+      categoryId: defaultCategoryId,
+      organizationId,
+    });
+  }
+
   try {
     return await db.assetModel.create({
       data: {
@@ -49,8 +83,44 @@ export async function createAssetModel({
 }
 
 /**
+ * Builds the asset models index where-clause for the active search.
+ *
+ * Shared by {@link getAssetModels}, which renders the list, and
+ * {@link bulkDeleteAssetModels}, which expands a "select all" over it. They
+ * must agree: the delete is permanent, so any difference removes models the
+ * user never saw.
+ *
+ * @param params.organizationId - The caller's organization
+ * @param params.search - The list's search term (the `s` param)
+ * @returns A `Prisma.AssetModelWhereInput` scoped to the org and search
+ */
+function getAssetModelsWhereInput({
+  organizationId,
+  search,
+}: {
+  organizationId: Organization["id"];
+  search?: string | null;
+}): Prisma.AssetModelWhereInput {
+  const where: Prisma.AssetModelWhereInput = { organizationId };
+
+  if (search) {
+    where.OR = [
+      { name: { contains: search, mode: "insensitive" } },
+      { description: { contains: search, mode: "insensitive" } },
+    ];
+  }
+
+  return where;
+}
+
+/**
  * Fetches a paginated list of asset models for the given organization.
- * Includes the count of assets associated with each model.
+ *
+ * Each model carries two counts. `_count.assets` is every asset linked to it,
+ * archived ones included: the delete dialog warns about all of them, since
+ * deleting the model unlinks archived assets too. `activeAssetCount` leaves
+ * archived assets out, as every inventory count does, and is what the list
+ * shows.
  */
 export async function getAssetModels(params: {
   organizationId: Organization["id"];
@@ -66,14 +136,7 @@ export async function getAssetModels(params: {
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 ? perPage : 8;
 
-    const where: Prisma.AssetModelWhereInput = { organizationId };
-
-    if (search) {
-      where.OR = [
-        { name: { contains: search, mode: "insensitive" } },
-        { description: { contains: search, mode: "insensitive" } },
-      ];
-    }
+    const where = getAssetModelsWhereInput({ organizationId, search });
 
     const [assetModels, totalAssetModels] = await Promise.all([
       db.assetModel.findMany({
@@ -94,7 +157,30 @@ export async function getAssetModels(params: {
       db.assetModel.count({ where }),
     ]);
 
-    return { assetModels, totalAssetModels };
+    const archivedCounts =
+      assetModels.length > 0
+        ? await db.asset.groupBy({
+            by: ["assetModelId"],
+            where: {
+              organizationId,
+              assetModelId: { in: assetModels.map((model) => model.id) },
+              archivedAt: { not: null },
+            },
+            _count: { _all: true },
+          })
+        : [];
+    const archivedByModelId = new Map(
+      archivedCounts.map((row) => [row.assetModelId, row._count._all])
+    );
+
+    return {
+      assetModels: assetModels.map((model) => ({
+        ...model,
+        activeAssetCount:
+          model._count.assets - (archivedByModelId.get(model.id) ?? 0),
+      })),
+      totalAssetModels,
+    };
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -119,6 +205,12 @@ export async function getAssetModel({
         defaultCategory: {
           select: { id: true, name: true, color: true },
         },
+        /**
+         * How many of this model's assets currently show its cover image —
+         * i.e. those with no image of their own. Surfaced on the edit form so
+         * the user knows the blast radius before replacing the picture.
+         */
+        _count: { select: { assets: { where: { mainImage: null } } } },
       },
     });
   } catch (cause) {
@@ -149,6 +241,18 @@ export async function updateAssetModel({
   defaultCategoryId?: string | null;
   defaultValuation?: number | null;
 }) {
+  // why: defaultCategoryId comes from form input and Prisma's foreign key
+  // only proves the row exists, not that it belongs to this workspace —
+  // without this the model would connect another tenant's category. Runs
+  // outside the try so its 400 reaches the form instead of being rewritten
+  // into the generic constraint-violation message.
+  if (defaultCategoryId) {
+    await assertCategoryBelongsToOrg({
+      categoryId: defaultCategoryId,
+      organizationId,
+    });
+  }
+
   try {
     return await db.assetModel.update({
       where: { id, organizationId },
@@ -171,29 +275,334 @@ export async function updateAssetModel({
 }
 
 /**
+ * Uploads (or replaces) an asset model's cover image.
+ *
+ * The image is written to the PUBLIC `files` bucket and stored as a permanent
+ * public URL — the same treatment `Location.imageUrl` gets. Nothing is copied
+ * onto the model's assets: they resolve this URL at render time via
+ * `resolveAssetImage`, so one upload serves every inheriting asset, the URL
+ * never expires and needs no re-signing, and the browser caches a single
+ * object for a whole page of same-model assets.
+ *
+ * No-ops when the submitted form carries no file, so a plain "Save" on the
+ * model form never clears an existing image.
+ *
+ * @param params.request - The raw (un-consumed) multipart request
+ * @param params.assetModelId - Model receiving the image
+ * @param params.organizationId - Org scope for the write
+ * @returns The stored public URL, or null when no file was submitted
+ * @throws {ShelfError} If parsing, uploading or persisting fails
+ * @see {@link file://./../asset/image-resolution.ts}
+ */
+export async function updateAssetModelImage({
+  request,
+  assetModelId,
+  organizationId,
+}: {
+  request: Request;
+  assetModelId: AssetModel["id"];
+  organizationId: Organization["id"];
+}): Promise<string | null> {
+  try {
+    const fileData = await parseFileFormData({
+      request,
+      bucketName: PUBLIC_BUCKET,
+      newFileName: getFileUploadPath({
+        organizationId,
+        type: "asset-models",
+        typeId: assetModelId,
+      }),
+      resizeOptions: {
+        width: 800,
+        withoutEnlargement: true,
+      },
+      /**
+       * Generate the 108px thumbnail up front so inheriting assets render at
+       * list sizes immediately, instead of every one of them shipping the
+       * full-size original into a 108px cell.
+       */
+      generateThumbnail: true,
+      thumbnailSize: 108,
+      maxFileSize: ASSET_MAX_IMAGE_UPLOAD_SIZE,
+    });
+
+    const uploaded = fileData.get("image") as string | null;
+    /** No file submitted — leave any existing image untouched. */
+    if (!uploaded) {
+      return null;
+    }
+
+    /**
+     * With `generateThumbnail`, the parser returns a JSON blob carrying both
+     * paths; without it, a bare path string. Handle both.
+     */
+    const { imagePath, thumbnailPath } = parseUploadedImagePaths(uploaded);
+
+    const {
+      data: { publicUrl: image },
+    } = getSupabaseAdmin().storage.from(PUBLIC_BUCKET).getPublicUrl(imagePath);
+
+    const thumbnailImage = thumbnailPath
+      ? getSupabaseAdmin()
+          .storage.from(PUBLIC_BUCKET)
+          .getPublicUrl(thumbnailPath).data.publicUrl
+      : null;
+
+    /**
+     * Org-scoped write: `organizationId` in the predicate means a model id
+     * belonging to another workspace matches zero rows instead of being
+     * overwritten.
+     */
+    await db.assetModel.update({
+      where: { id: assetModelId, organizationId },
+      data: { image, thumbnailImage },
+    });
+
+    return image;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while updating the image for this asset model.",
+      additionalData: { assetModelId, field: "image" },
+      label,
+    });
+  }
+}
+
+/**
+ * Unwraps what `parseFileFormData` returned for the uploaded image.
+ *
+ * With `generateThumbnail: true` the value is a JSON blob carrying both paths;
+ * otherwise it is a bare storage path. Mirrors the unwrap in
+ * `updateAssetMainImage` (`~/modules/asset/service.server`).
+ *
+ * @param uploaded - The raw value read off the parsed form data
+ * @returns The full-size image path and, when present, its thumbnail path
+ */
+function parseUploadedImagePaths(uploaded: string): {
+  imagePath: string;
+  thumbnailPath: string | null;
+} {
+  try {
+    const parsed = JSON.parse(uploaded) as {
+      originalPath?: string;
+      thumbnailPath?: string;
+    };
+
+    if (parsed.originalPath) {
+      return {
+        imagePath: parsed.originalPath,
+        thumbnailPath: parsed.thumbnailPath ?? null,
+      };
+    }
+  } catch {
+    // Not JSON — the parser returned a bare path.
+  }
+
+  return { imagePath: uploaded, thumbnailPath: null };
+}
+
+/**
+ * An asset about to be unlinked because the model it holds is being deleted.
+ */
+type AssetLosingItsModel = {
+  id: string;
+  assetModel: { id: string; name: string } | null;
+};
+
+/**
+ * Emit the activity trail for assets whose model link a delete is about to
+ * clear.
+ *
+ * `Asset.assetModelId` is `ON DELETE SET NULL`, so the unlink happens in the
+ * database with no application write to hang a history entry off. Without this
+ * the model disappears from every asset that held it and leaves nothing behind
+ * — the same gap a plain removal already avoids, which is what makes a reader
+ * distrust the whole log rather than one field. Emits the same
+ * `ASSET_MODEL_CHANGED` event a removal does, per
+ * `.claude/rules/bulk-event-parity.md`, which requires cascade side-effects to
+ * be recorded too.
+ *
+ * Runs inside the delete's own transaction: a note written after the commit can
+ * fail once the model is already gone, and the retry has nothing left to read.
+ *
+ * Notes are grouped by the model being left, since that is the only part of the
+ * sentence that varies — one statement per model rather than one per asset.
+ *
+ * @param params.assets - Rows read BEFORE the delete; after it the link is gone
+ * @param params.userLink - Rendered link to the acting user, resolved once
+ * @param tx - The transaction the delete itself runs in
+ */
+async function recordAssetModelDeletionUnlinks(
+  {
+    assets,
+    userId,
+    userLink,
+    organizationId,
+  }: {
+    assets: AssetLosingItsModel[];
+    userId: User["id"];
+    userLink: string;
+    organizationId: Organization["id"];
+  },
+  tx: NotesTxClient & RecordEventTxClient
+) {
+  if (assets.length === 0) {
+    return;
+  }
+
+  await recordEvents(
+    assets.map((asset) => ({
+      organizationId,
+      actorUserId: userId,
+      action: "ASSET_MODEL_CHANGED" as const,
+      entityType: "ASSET" as const,
+      entityId: asset.id,
+      assetId: asset.id,
+      field: "assetModelId",
+      fromValue: asset.assetModel?.id ?? null,
+      toValue: null,
+    })),
+    tx
+  );
+
+  const byModel = new Map<string, AssetLosingItsModel[]>();
+  for (const asset of assets) {
+    const key = asset.assetModel?.id ?? "";
+    const group = byModel.get(key);
+    if (group) {
+      group.push(asset);
+    } else {
+      byModel.set(key, [asset]);
+    }
+  }
+
+  for (const group of byModel.values()) {
+    const content = buildAssetModelChangeNote({
+      userLink,
+      previous: group[0].assetModel,
+      next: null,
+      // The model is gone workspace-wide, so the note names the deletion and
+      // renders the name unlinked — its page would 404.
+      previousDeleted: true,
+    });
+    if (!content) {
+      continue;
+    }
+    await createNotes(
+      {
+        content,
+        type: "UPDATE",
+        userId,
+        assetIds: group.map((asset) => asset.id),
+        organizationId,
+      },
+      tx
+    );
+  }
+}
+
+/**
+ * Refuses a single asset model delete unless the user typed its name, as the delete
+ * dialog asks. A asset model that is already gone passes, so the delete itself
+ * reports it.
+ *
+ * @param params.id - The asset model to delete
+ * @param params.organizationId - The caller's organization
+ * @param params.confirmation - What the user typed in the dialog
+ * @throws {ShelfError} 400 when the confirmation does not match
+ */
+export async function assertAssetModelDeleteConfirmed({
+  id,
+  organizationId,
+  confirmation,
+}: {
+  id: string;
+  organizationId: string;
+  confirmation: string | null | undefined;
+}) {
+  await assertDeleteConfirmedFor({
+    confirmation,
+    findName: () =>
+      db.assetModel
+        .findFirst({ where: { id, organizationId }, select: { name: true } })
+        .then((model) => model?.name ?? null),
+    label,
+  });
+}
+
+/**
  * Deletes an asset model by ID, scoped to the given organization.
- * Assets referencing this model will have their assetModelId set to null.
  */
 export async function deleteAssetModel({
   id,
   organizationId,
-}: Pick<AssetModel, "id"> & { organizationId: Organization["id"] }) {
+  userId,
+}: Pick<AssetModel, "id"> & {
+  organizationId: Organization["id"];
+  /** Actor for the unlink events and notes the delete cascades into */
+  userId: User["id"];
+}) {
   try {
-    const result = await db.assetModel.deleteMany({
-      where: { id, organizationId },
+    /**
+     * Read before the delete. `ON DELETE SET NULL` clears `assetModelId` on
+     * every asset this model holds, so once the row is gone nothing records
+     * which assets changed or what they left.
+     *
+     * No image cleanup is needed on those assets: they never stored a copy of
+     * the model's image, so `resolveAssetImage` falls through to the
+     * placeholder on its own.
+     */
+    const assetsLosingTheModel = await db.asset.findMany({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: ON DELETE SET NULL unlinks archived assets too, so their unlink history must be recorded
+      where: { assetModelId: id, organizationId },
+      select: { id: true, assetModel: { select: { id: true, name: true } } },
     });
 
-    if (result.count === 0) {
-      throw new ShelfError({
-        cause: null,
-        title: "Asset model not found",
-        message:
-          "The asset model you are trying to delete does not exist or you do not have permission to delete it.",
-        additionalData: { id, organizationId },
-        label,
-        status: 404,
-      });
-    }
+    // Resolved outside the transaction: it can hit the user table, and every
+    // note in this batch is written by the same person.
+    const userLink = await resolveUserLink({
+      userId,
+      loadUserForNotes: createLoadUserForNotes(userId),
+    });
+
+    const result = await db.$transaction(
+      async (tx) => {
+        await recordAssetModelDeletionUnlinks(
+          {
+            assets: assetsLosingTheModel,
+            userId,
+            userLink,
+            organizationId,
+          },
+          tx
+        );
+
+        const deleted = await tx.assetModel.deleteMany({
+          where: { id, organizationId },
+        });
+
+        if (deleted.count === 0) {
+          throw new ShelfError({
+            cause: null,
+            title: "Asset model not found",
+            message:
+              "The asset model you are trying to delete does not exist or you do not have permission to delete it.",
+            additionalData: { id, organizationId },
+            label,
+            status: 404,
+          });
+        }
+
+        return deleted;
+      },
+      // One event and one note per asset the model holds, all inside the
+      // delete. Prisma's 5s interactive default has aborted comparable asset
+      // writes with P2028; 15s matches the ceiling those took.
+      { timeout: 15000 }
+    );
 
     return result;
   } catch (cause) {
@@ -230,6 +639,39 @@ export async function deleteAssetModel({
  *   skipped — callers should null-coalesce when looking up.
  * @throws {ShelfError} Wrapped error if a create / read fails
  */
+/**
+ * The asset model one imported row refers to.
+ *
+ * Reads {@link createAssetModelsIfNotExists}'s result, which is keyed by the
+ * ORIGINAL cell, padding included, so the lookup uses the raw cell and only the
+ * reported name is trimmed. Trimming before the lookup misses every padded row,
+ * and the caller then raises "could not be resolved", which blames the CSV for
+ * something the pre-resolve handled correctly.
+ *
+ * @param args.cell - The row's `assetModel` cell, exactly as the CSV had it.
+ * @param args.models - The pre-resolved map from `createAssetModelsIfNotExists`.
+ * @returns `name` is the trimmed model name for messages, or `null` when the row
+ *   named no model. `id` is the resolved model id, or `undefined` when there is
+ *   none, which for a non-null `name` means the pre-resolve missed the row.
+ */
+export function resolveImportedAssetModel({
+  cell,
+  models,
+}: {
+  cell?: string | null;
+  models?: Record<string, string>;
+}): { name: string | null; id: string | undefined } {
+  const name = cell?.trim() || null;
+
+  if (!name) {
+    return { name: null, id: undefined };
+  }
+
+  // The raw cell is the key. A blank cell resolves to an empty id by design, and
+  // `|| undefined` keeps that out of the caller's "unresolved" branch.
+  return { name, id: (cell ? models?.[cell] : undefined) || undefined };
+}
+
 export async function createAssetModelsIfNotExists({
   data,
   userId,
@@ -308,35 +750,106 @@ export async function bulkDeleteAssetModels({
   assetModelIds,
   organizationId,
   currentSearchParams,
+  userId,
+  confirmation,
 }: {
   assetModelIds: AssetModel["id"][];
   organizationId: Organization["id"];
   currentSearchParams?: string | null;
+  /** Actor for the unlink events and notes the delete cascades into */
+  userId: User["id"];
+  /**
+   * The number the user typed in the delete dialog. Must equal the number of
+   * models this call removes, see {@link assertBulkDeleteConfirmed}.
+   */
+  confirmation: string | null | undefined;
 }) {
   try {
-    let where: Prisma.AssetModelWhereInput;
+    // A "select all" resolves through the index's own builder, so it removes
+    // exactly the models the list shows for the active search.
+    const where: Prisma.AssetModelWhereInput = assetModelIds.includes(
+      ALL_SELECTED_KEY
+    )
+      ? getAssetModelsWhereInput({
+          organizationId,
+          search: new URLSearchParams(currentSearchParams ?? "").get("s"),
+        })
+      : { id: { in: assetModelIds }, organizationId };
 
-    if (assetModelIds.includes(ALL_SELECTED_KEY)) {
-      where = { organizationId };
+    /**
+     * Resolved before the delete so the assets can be found by the models they
+     * hold — `where` may be a workspace-wide select-all, and after the delete
+     * `ON DELETE SET NULL` has already erased the links.
+     *
+     * No image cleanup is needed on those assets — they never stored a copy of
+     * their model's image. See {@link deleteAssetModel}.
+     */
+    const modelsToDelete = await db.assetModel.findMany({
+      where,
+      select: { id: true },
+    });
 
-      /** When there are active filters, scope the delete to matching models */
-      if (currentSearchParams) {
-        const params = new URLSearchParams(currentSearchParams);
-        const search = params.get("search");
+    // Before any write: the typed count must be the number about to go.
+    assertBulkDeleteConfirmed({
+      selectedIds: assetModelIds,
+      confirmation,
+      matchedCount: modelsToDelete.length,
+      noun: { one: "asset model", many: "asset models" },
+      label,
+    });
 
-        if (search) {
-          where.OR = [
-            { name: { contains: search, mode: "insensitive" } },
-            { description: { contains: search, mode: "insensitive" } },
-          ];
-        }
-      }
-    } else {
-      where = { id: { in: assetModelIds }, organizationId };
-    }
+    const assetsLosingTheirModel =
+      modelsToDelete.length > 0
+        ? await db.asset.findMany({
+            // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: ON DELETE SET NULL unlinks archived assets too, so their unlink history must be recorded
+            where: {
+              assetModelId: { in: modelsToDelete.map((model) => model.id) },
+              organizationId,
+            },
+            select: {
+              id: true,
+              assetModel: { select: { id: true, name: true } },
+            },
+          })
+        : [];
 
-    return await db.assetModel.deleteMany({ where });
+    // Resolved outside the transaction: it can hit the user table, and every
+    // note in this batch is written by the same person.
+    const userLink = await resolveUserLink({
+      userId,
+      loadUserForNotes: createLoadUserForNotes(userId),
+    });
+
+    return await db.$transaction(
+      async (tx) => {
+        await recordAssetModelDeletionUnlinks(
+          {
+            assets: assetsLosingTheirModel,
+            userId,
+            userLink,
+            organizationId,
+          },
+          tx
+        );
+
+        // Scoped to the ids read above, so the count confirmed is the count
+        // removed even if a model matching the search is added meanwhile.
+        return tx.assetModel.deleteMany({
+          where: {
+            id: { in: modelsToDelete.map((model) => model.id) },
+            organizationId,
+          },
+        });
+      },
+      // A select-all spans the whole workspace, so this writes one event and
+      // one note per asset in it. 15s matches the ceiling the comparable bulk
+      // asset writes took after hitting P2028 on Prisma's 5s default.
+      { timeout: 15000 }
+    );
   } catch (cause) {
+    // A refused confirmation carries the count to type in its additionalData.
+    rethrowIfClientError(cause);
+
     throw new ShelfError({
       cause,
       message: "Something went wrong while bulk deleting asset models.",

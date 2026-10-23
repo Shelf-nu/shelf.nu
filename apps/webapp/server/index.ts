@@ -3,10 +3,15 @@
 import "./instrument.server.js";
 
 import type { Context } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import type { AppLoadContext } from "react-router";
 import type { HonoServerOptions } from "react-router-hono-server/node";
 import { createHonoServer } from "react-router-hono-server/node";
 import { getSession, session } from "remix-hono/session";
+import {
+  SENTRY_TUNNEL_MAX_ENVELOPE_BYTES,
+  SENTRY_TUNNEL_PATH,
+} from "~/utils/constants";
 import { initEnv } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 import { runWithTabId } from "~/utils/tab-id.server";
@@ -18,7 +23,13 @@ import {
   refreshSession,
   urlShortener,
 } from "./middleware";
-import { appLoaderRateLimit, mobileIpRateLimit } from "./rate-limit";
+import { BUILD_ASSETS_PATH, missingBuildAsset } from "./missing-build-asset";
+import {
+  appLoaderRateLimit,
+  calendarFeedRateLimit,
+  mobileIpRateLimit,
+  sentryTunnelRateLimit,
+} from "./rate-limit";
 import { runWithRequestCache } from "./request-cache.server";
 import { securityHeaders } from "./security-headers";
 import { authSessionKey, createSessionStorage } from "./session";
@@ -127,11 +138,52 @@ export default createHonoServer<ServerEnv>({
     server.use("*", logger());
 
     /**
+     * Existing build files were already served before `configure`; whatever
+     * reaches here under the assets prefix is missing and must 404. After
+     * logger() so the miss is logged, before session()/protect() so it is not
+     * redirected to /login.
+     */
+    server.use(BUILD_ASSETS_PATH, missingBuildAsset());
+
+    /**
      * Mobile API rate limit. Path-scoped so webapp routes are unaffected.
      * Runs after logger() so 429s appear in logs, and before session() since
      * the mobile prefix is in publicPaths anyway — short-circuit early.
      */
     server.use("/api/mobile/*", mobileIpRateLimit());
+
+    /**
+     * Calendar iCal feed rate limit. Scoped to the feed route; the feed is
+     * public (secret-token auth, in publicPaths) and runs an unpaginated
+     * windowed query, so cap each feed (keyed by its token path) before the
+     * handler runs.
+     */
+    server.use("/api/calendar/feed/*", calendarFeedRateLimit());
+
+    /**
+     * Sentry tunnel bounds. The tunnel is public (below), so it is an anonymous
+     * POST relay into our own Sentry project, bounded two ways before the
+     * handler runs and before `session()` so an over-limit caller never costs a
+     * session lookup it will not use.
+     *
+     * Scoped to POST, the only method that carries an envelope. On `use` these
+     * would also count a GET, HEAD or CORS preflight against the bucket, so
+     * cheap requests could spend an address's budget and get real reports from
+     * that address refused.
+     *
+     * The body bound comes first: the route buffers the whole envelope, so the
+     * size has to be refused before anything reads it, not after.
+     */
+    server.on(
+      "POST",
+      SENTRY_TUNNEL_PATH,
+      bodyLimit({
+        maxSize: SENTRY_TUNNEL_MAX_ENVELOPE_BYTES,
+        onError: (c) =>
+          c.json({ error: { message: "Envelope too large." } }, 413),
+      }),
+      sentryTunnelRateLimit()
+    );
 
     /**
      * Add session middleware
@@ -222,11 +274,25 @@ export default createHonoServer<ServerEnv>({
           "/api/public-stats",
           "/api/oss-friends",
           "/api/stripe-webhook",
+          "/api/scim/v2/*path", // SCIM API (bearer-token auth, not cookie); *path is a named wildcard
           "/qr",
           "/qr/:qrId",
           "/qr/:qrId/not-logged-in",
           "/qr/:qrId/contact-owner",
           "/api/mobile/*path", // Mobile companion app API (JWT auth, not cookie)
+          // why: auth-bypassed. The iCal feed authenticates via a secret URL
+          // token (calendar clients can't send cookies). Scoped to the feed
+          // route only — cookie-authed routes like /api/calendar-subscription
+          // stay OUT of this prefix.
+          "/api/calendar/feed/*path",
+          // why: auth-bypassed. An error worth reporting often happens before
+          // anyone has signed in, and the auth redirect answers those reports
+          // with a 302 to /login that the browser silently discards, so they
+          // are lost rather than delayed. Safe to expose because the tunnel
+          // chooses nothing: its destination is pinned to the server's own
+          // configured Sentry project and it never follows redirects. Bounded
+          // per IP by `sentryTunnelRateLimit` above.
+          SENTRY_TUNNEL_PATH,
         ],
       })
     );

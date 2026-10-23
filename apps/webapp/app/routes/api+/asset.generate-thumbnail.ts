@@ -12,7 +12,11 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { createSignedUrl, uploadFile } from "~/utils/storage.server";
+import {
+  createSignedUrl,
+  getThumbnailStoragePath,
+  uploadFile,
+} from "~/utils/storage.server";
 
 const THUMBNAIL_SIZE = 108;
 
@@ -39,6 +43,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 
     // Use findUnique with organization scoping to prevent cross-tenant access
     const asset = await db.asset.findUnique({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: thumbnail for the asset's own pages, which stay visible for archived assets
       where: { id: assetId, organizationId },
       select: {
         id: true,
@@ -171,17 +176,8 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       yield new Uint8Array(buffer);
     };
 
-    // Generate thumbnail filename
-    let thumbnailPath: string;
-
-    // Check if the file has an extension
-    if (originalPath.includes(".")) {
-      // File has extension, replace before the extension
-      thumbnailPath = originalPath.replace(/(\.[^.]+)$/, "-thumbnail$1");
-    } else {
-      // File has no extension, just append -thumbnail
-      thumbnailPath = `${originalPath}-thumbnail`;
-    }
+    // Generate thumbnail filename — same convention the upload path writes to
+    const thumbnailPath = getThumbnailStoragePath(originalPath);
 
     // Create and upload thumbnail
     const uploadedPath = await uploadFile(createAsyncIterable(), {
@@ -208,6 +204,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 
     // Double-check the asset still exists before updating (in case it was deleted during processing)
     const existsCheck = await db.asset.findUnique({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: existence re-check for the thumbnail of a specific asset, archived or not
       where: { id: assetId, organizationId },
       select: { id: true },
     });
@@ -250,6 +247,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       const assetId = url.searchParams.get("assetId");
       if (assetId && organizationId) {
         const asset = await db.asset.findUnique({
+          // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: fallback read of a specific asset's current thumbnail, archived or not
           where: { id: assetId, organizationId },
           select: {
             id: true,

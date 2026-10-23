@@ -1,4 +1,5 @@
 import { Container, Head, Html, render, Text } from "@react-email/components";
+import type { UserNameFields } from "~/utils/user";
 import { resolveUserDisplayName } from "~/utils/user";
 import { styles } from "./styles";
 
@@ -10,12 +11,7 @@ export const changeEmailAddressTextEmail = ({
   user,
 }: {
   otp: string;
-  user: {
-    firstName?: string | null;
-    lastName?: string | null;
-    displayName?: string | null;
-    email: string;
-  };
+  user: UserNameFields & { email: string };
 }) => `Howdy ${resolveUserDisplayName(user) || "there"},
 
 Your verification code for email change is: ${otp}
@@ -31,12 +27,7 @@ function ChangeEmailAddressHtmlEmailTemplate({
   user,
 }: {
   otp: string;
-  user: {
-    firstName?: string | null;
-    lastName?: string | null;
-    displayName?: string | null;
-    email: string;
-  };
+  user: UserNameFields & { email: string };
 }) {
   return (
     <Html>
@@ -80,10 +71,5 @@ function ChangeEmailAddressHtmlEmailTemplate({
  */
 export const changeEmailAddressHtmlEmail = (
   otp: string,
-  user: {
-    firstName?: string | null;
-    lastName?: string | null;
-    displayName?: string | null;
-    email: string;
-  }
+  user: UserNameFields & { email: string }
 ) => render(<ChangeEmailAddressHtmlEmailTemplate otp={otp} user={user} />);

@@ -176,18 +176,14 @@ const overdueNotice = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
     audit.status !== AuditStatus.COMPLETED &&
     audit.status !== AuditStatus.CANCELLED
   ) {
-    // Build recipients list: creator + all assignees
+    // Recipients: creator + all assignees. Each row is the loaded user spread
+    // whole, so it carries both the name columns the greeting resolves from and
+    // the four raw preference columns AUDIT_INCLUDE_FOR_EMAIL selects. `userId`
+    // is what lets the email render each recipient's dates in THEIR OWN stored
+    // format/timezone prefs rather than the scheduler-captured creator hints.
     const recipients = [
-      {
-        email: audit.createdBy.email,
-        firstName: audit.createdBy.firstName,
-        lastName: audit.createdBy.lastName,
-      },
-      ...audit.assignments.map((a) => ({
-        email: a.user.email,
-        firstName: a.user.firstName,
-        lastName: a.user.lastName,
-      })),
+      { ...audit.createdBy, userId: audit.createdBy.id },
+      ...audit.assignments.map((a) => ({ ...a.user, userId: a.user.id })),
     ];
 
     // Remove duplicates (in case creator is also an assignee)

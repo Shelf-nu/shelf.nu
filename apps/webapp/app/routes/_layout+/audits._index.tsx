@@ -1,12 +1,18 @@
 import type { AuditStatus } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
+import {
+  AUDIT_ASSET_STATUS_LABELS,
+  AUDIT_STATUS_LABELS,
+  auditAssetStatusLabel,
+  isAuditCompleted,
+} from "@shelf/labels";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
-import { data, useLoaderData } from "react-router";
+import { data, Link, useLoaderData } from "react-router";
 import { DescriptionColumn } from "~/components/assets/assets-index/advanced-asset-columns";
 import AuditIndexBulkActionsDropdown from "~/components/audit/audit-index-bulk-actions-dropdown";
 import { AuditStatusBadgeWithOverdue } from "~/components/audit/audit-status-badge-with-overdue";
+import { AuditStatusFilter } from "~/components/audit/audit-status-filter";
 import { NewAuditInfoDialog } from "~/components/audit/new-audit-info-dialog";
-import { StatusFilter } from "~/components/booking/status-filter";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
@@ -17,8 +23,12 @@ import { SortBy } from "~/components/list/filters/sort-by";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
 import { EmptyTableValue } from "~/components/shared/empty-table-value";
+import { iconsMap } from "~/components/shared/icons-map";
+import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { UserBadge } from "~/components/shared/user-badge";
 import { Td, Th } from "~/components/table";
+import { db } from "~/database/db.server";
+import { useSearchParams } from "~/hooks/search-params";
 import type { AUDIT_LIST_INCLUDE } from "~/modules/audit/service.server";
 import { getAuditsForOrganization } from "~/modules/audit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -33,6 +43,7 @@ import { getParamsValues } from "~/utils/list";
 import {
   PermissionAction,
   PermissionEntity,
+  roleHasPermission,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { resolveUserDisplayName } from "~/utils/user";
@@ -48,12 +59,18 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, isSelfServiceOrBase } = await requirePermission({
-      userId: authSession.userId,
-      request,
-      entity: PermissionEntity.audit,
-      action: PermissionAction.read,
-    });
+    const { organizationId, access, userOrganizations } =
+      await requirePermission({
+        userId: authSession.userId,
+        request,
+        entity: PermissionEntity.audit,
+        action: PermissionAction.read,
+      });
+
+    /** Every role the caller holds in this workspace, for the matrix checks below. */
+    const roles =
+      userOrganizations.find((o) => o.organization.id === organizationId)
+        ?.roles ?? [];
 
     const searchParams = getCurrentSearchParams(request);
     const { page, perPageParam, search } = getParamsValues(searchParams);
@@ -72,16 +89,38 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const orderDirection = (searchParams.get("orderDirection") ??
       "desc") as SortingDirection;
 
+    // Optional asset scope, set by the "View all audits" link on an asset.
+    // An empty value is ignored, and so is an asset that is not in this
+    // workspace (deleted since the link was saved, or never ours): the list
+    // falls back to every audit and no chip shows. The title feeds the chip. Only callers who see every audit may
+    // scope by asset (the same rule as the last audit date column); for
+    // anyone else the parameter is ignored, so it cannot reveal an asset's
+    // name or existence outside their own asset scope.
+    const assetIdParam = access.audits.seeAll
+      ? searchParams.get("assetId")?.trim()
+      : undefined;
+    const assetFilter: { id: string; title: string } | null = assetIdParam
+      ? await db.asset.findFirst({
+          // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: audit history applies to archived assets too
+          where: { id: assetIdParam, organizationId },
+          select: { id: true, title: true },
+        })
+      : null;
+
     const { audits, totalAudits } = await getAuditsForOrganization({
       organizationId,
       userId,
-      isSelfServiceOrBase,
+      assignedOnly: !access.audits.seeAll,
       page,
       perPage,
       search,
       status,
       orderBy,
       orderDirection,
+      assetId: assetFilter?.id ?? null,
+      // An asset's history includes archived audits; an explicit status
+      // selection keeps its usual meaning.
+      includeArchived: Boolean(assetFilter) && !status,
     });
 
     const totalPages = Math.ceil(totalAudits / perPage);
@@ -105,7 +144,17 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         totalPages,
         perPage,
         modelName,
-        isSelfServiceOrBase,
+        assetFilter,
+        canCreateAudits: roleHasPermission({
+          roles,
+          entity: PermissionEntity.audit,
+          action: PermissionAction.create,
+        }),
+        canBulkActAudits: roleHasPermission({
+          roles,
+          entity: PermissionEntity.audit,
+          action: [PermissionAction.archive, PermissionAction.delete],
+        }),
         searchFieldTooltip: {
           title: "Search audits",
           text: "Search audits by name or description.",
@@ -129,36 +178,40 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 export type AuditsIndexLoaderData = typeof loader;
 
 export default function AuditsIndexPage() {
-  const { isSelfServiceOrBase } = useLoaderData<typeof loader>();
+  const { canCreateAudits, canBulkActAudits, assetFilter } =
+    useLoaderData<typeof loader>();
   return (
     <>
-      <Header>{!isSelfServiceOrBase && <NewAuditInfoDialog />}</Header>
+      <Header>{canCreateAudits && <NewAuditInfoDialog />}</Header>
       <ListContentWrapper>
         <Filters
           slots={{
             "left-of-search": (
-              <StatusFilter
-                statusItems={{
-                  PENDING: "PENDING",
-                  ACTIVE: "ACTIVE",
-                  COMPLETED: "COMPLETED",
-                  CANCELLED: "CANCELLED",
-                  ARCHIVED: "ARCHIVED",
-                }}
+              // why: AuditStatusFilter, not the booking StatusFilter. Its
+              // key->label contract lets the dropdown read the shared
+              // AUDIT_STATUS_LABELS while the URL keeps the enum names the
+              // loader parses; the booking component renders the raw values,
+              // which is why this list used to sentence-case "PENDING" by CSS.
+              <AuditStatusFilter
+                name="status"
+                statusOptions={AUDIT_STATUS_LABELS}
               />
             ),
             "right-of-search": (
-              <SortBy
-                sortingOptions={AUDIT_SORTING_OPTIONS}
-                defaultSortingBy="createdAt"
-                defaultSortingDirection="desc"
-              />
+              <>
+                <SortBy
+                  sortingOptions={AUDIT_SORTING_OPTIONS}
+                  defaultSortingBy="createdAt"
+                  defaultSortingDirection="desc"
+                />
+                <AssetFilterChip title={assetFilter?.title ?? null} />
+              </>
             ),
           }}
         />
         <List
           bulkActions={
-            isSelfServiceOrBase ? undefined : <AuditIndexBulkActionsDropdown />
+            canBulkActAudits ? <AuditIndexBulkActionsDropdown /> : undefined
           }
           ItemComponent={ListItemContent}
           headerChildren={
@@ -173,13 +226,71 @@ export default function AuditsIndexPage() {
               <Th>Completed</Th>
               <Th className="text-right">Expected</Th>
               <Th className="text-right">Found</Th>
-              <Th className="text-right">Missing</Th>
+              {/* why: one header spans audits in every state, so it uses the
+                  word that is true in both — "Not scanned". ("Missing" was
+                  not: missingAssetCount is seeded with the full expected count
+                  at creation, so it claimed a brand-new audit had already lost
+                  its assets.) The tooltip reconciles it with the audit detail
+                  page, which calls the same count "Missing" once the audit is
+                  completed; each CELL repeats that per-row in its title. */}
+              <Th className="text-right">
+                <span className="inline-flex items-center gap-1">
+                  {AUDIT_ASSET_STATUS_LABELS.PENDING}
+                  <InfoTooltip
+                    iconClassName="size-3.5"
+                    content={
+                      <p className="text-sm text-gray-600">
+                        Expected assets that have not been scanned. Once an
+                        audit is completed these are reported as &ldquo;
+                        {AUDIT_ASSET_STATUS_LABELS.MISSING}&rdquo; on its
+                        overview page.
+                      </p>
+                    }
+                  />
+                </span>
+              </Th>
               <Th className="text-right">Unexpected</Th>
             </>
           }
         />
       </ListContentWrapper>
     </>
+  );
+}
+
+/**
+ * Removable chip showing the asset the audits list is scoped to. The link
+ * keeps every other search param and drops `assetId` (and `page`, which no
+ * longer applies to the wider list).
+ *
+ * Sits in the filter row beside the sort control. Renders nothing when
+ * `title` is null.
+ *
+ * @param props.title - The filtered asset's title, or null when unscoped
+ */
+function AssetFilterChip({ title }: { title: string | null }) {
+  const [searchParams] = useSearchParams();
+  if (title === null) return null;
+  const next = new URLSearchParams(searchParams);
+  next.delete("assetId");
+  next.delete("page");
+  const query = next.toString();
+
+  return (
+    <div className="flex min-w-0">
+      <span className="inline-flex max-w-full items-center gap-1 rounded-full border border-gray-300 bg-gray-50 py-1.5 pl-3 pr-1.5 text-sm text-gray-700">
+        <span className="truncate">
+          <span className="text-gray-500">Asset:</span> {title}
+        </span>
+        <Link
+          to={query ? `?${query}` : "."}
+          aria-label="Remove asset filter"
+          className="inline-flex size-5 items-center justify-center rounded-full text-gray-500 hover:bg-gray-200 hover:text-gray-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+        >
+          {iconsMap.x}
+        </Link>
+      </span>
+    </div>
   );
 }
 
@@ -252,28 +363,19 @@ const ListItemContent = ({ item }: { item: AuditListItem }) => {
 
       <Td>
         {item.dueDate ? (
-          <DateS
-            date={item.dueDate}
-            options={{ dateStyle: "short", timeStyle: "short" }}
-          />
+          <DateS date={item.dueDate} includeTime />
         ) : (
           <EmptyTableValue />
         )}
       </Td>
 
       <Td>
-        <DateS
-          date={item.createdAt}
-          options={{ dateStyle: "short", timeStyle: "short" }}
-        />
+        <DateS date={item.createdAt} includeTime />
       </Td>
 
       <Td>
         {item.startedAt ? (
-          <DateS
-            date={item.startedAt}
-            options={{ dateStyle: "short", timeStyle: "short" }}
-          />
+          <DateS date={item.startedAt} includeTime />
         ) : (
           <EmptyTableValue />
         )}
@@ -281,10 +383,7 @@ const ListItemContent = ({ item }: { item: AuditListItem }) => {
 
       <Td>
         {item.completedAt ? (
-          <DateS
-            date={item.completedAt}
-            options={{ dateStyle: "short", timeStyle: "short" }}
-          />
+          <DateS date={item.completedAt} includeTime />
         ) : (
           <EmptyTableValue />
         )}
@@ -296,7 +395,16 @@ const ListItemContent = ({ item }: { item: AuditListItem }) => {
         {item.foundAssetCount ?? <EmptyTableValue />}
       </Td>
 
-      <Td className="text-right">
+      {/* why: the header is necessarily state-neutral, but this row is not —
+          `item.completedAt` tells us exactly which word the audit's own
+          overview page uses for this number. Surfacing it here keeps the list
+          and the detail page from naming the same count differently. */}
+      <Td
+        className="text-right"
+        title={`${auditAssetStatusLabel("PENDING", isAuditCompleted(item))}: ${
+          item.missingAssetCount ?? 0
+        }`}
+      >
         {item.missingAssetCount ?? <EmptyTableValue />}
       </Td>
 

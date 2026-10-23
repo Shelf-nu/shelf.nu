@@ -1,0 +1,16 @@
+# Generated at runtime — re-fetch/re-export instead of committing.
+idp-home/idp-metadata-out.xml
+idp-home/conf/supabase-sp-metadata.xml
+
+# Byproducts of the image's startup.sh rebuilding the war from mounted conf/
+# on every boot (conf/ is mounted read-write) — harmless, safe to ignore.
+idp-home/conf/logback.xml.dist
+idp-home/conf/logback.xml.tmp*
+
+# Never commit credentials/keys, even if something copies them in locally.
+*.key
+*.crt
+*.p12
+*.jks
+*.kver
+credentials/

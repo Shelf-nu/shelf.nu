@@ -1,8 +1,7 @@
-import type { ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import type { RenderableTreeNode } from "@markdoc/markdoc";
-import type { AssetStatus, QrIdDisplayPreference } from "@prisma/client";
+import type { AssetStatus } from "@prisma/client";
 import { CustomFieldType } from "@prisma/client";
-import { HoverCardPortal } from "@radix-ui/react-hover-card";
 import {
   Popover,
   PopoverTrigger,
@@ -11,6 +10,7 @@ import {
 } from "@radix-ui/react-popover";
 import { RepeatIcon } from "lucide-react";
 import { Link, useLoaderData } from "react-router";
+import { StockStatusBadge } from "~/components/assets/stock-status-badge";
 import { EventCardContent } from "~/components/calendar/event-card";
 import LineBreakText from "~/components/layout/line-break-text";
 import { LocationBadge } from "~/components/location/location-badge";
@@ -37,22 +37,21 @@ import { useAssetIndexShowImage } from "~/hooks/use-asset-index-show-image";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useDateFormatter } from "~/hooks/use-date-formatter";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import type {
   AdvancedIndexAsset,
   ShelfAssetCustomFieldValueType,
 } from "~/modules/asset/types";
 import { isQuantityTracked } from "~/modules/asset/utils";
-import type {
-  ColumnLabelKey,
-  BarcodeField,
-} from "~/modules/asset-index-settings/helpers";
+import type { ColumnLabelKey } from "~/modules/asset-index-settings/helpers";
 import { describeRecurrence } from "~/modules/asset-reminder/recurrence";
 import { formatCustodyList } from "~/modules/custody/utils";
 import { type AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { formatAssetValueWithBreakdown } from "~/utils/asset-value";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { formatCurrency } from "~/utils/currency";
+import { buildCustomFieldLinkHref } from "~/utils/custom-field-link";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { cleanMarkdownFormatting } from "~/utils/markdown-cleaner";
 import { isLink } from "~/utils/misc";
@@ -63,16 +62,19 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
+import { truncateText } from "~/utils/truncate-text";
 import { tw } from "~/utils/tw";
 import { resolveUserDisplayName } from "~/utils/user";
-import { AssetCodeBadge } from "../asset-code-badge";
+import { BarcodeCell } from "./advanced-columns/barcode-cell";
 import { QrIdCell } from "./advanced-columns/qr-id-cell";
 import { SamIdCell } from "./advanced-columns/sam-id-cell";
 import { Td } from "./advanced-columns/td";
 import AssetQuickActions from "./asset-quick-actions";
+import { resolveFreeNowText } from "./free-now-display";
 import { freezeColumnClassNames } from "./freeze-column-classes";
+import { LastAuditDateCell } from "./last-audit-date-cell";
 import { ListItemTagsColumn } from "./list-item-tags-column";
-import { CodePreviewDialog } from "../../code-preview/code-preview-dialog";
+import { resolveReservedDisplay } from "./reserved-display";
 import { AssetImage } from "../asset-image/component";
 import { AssetStatusBadge } from "../asset-status-badge";
 import { CategoryBadge } from "../category-badge";
@@ -84,8 +86,9 @@ export function AdvancedIndexColumn({
   column: ColumnLabelKey;
   item: AdvancedIndexAsset;
 }) {
-  const { locale, currentOrganization, timeZone } =
+  const { locale, currentOrganization, lastAuditDateAccess } =
     useLoaderData<AssetIndexLoaderData>();
+  const { prefs } = useDateFormatter();
   const showAssetImage = useAssetIndexShowImage();
   const freezeColumn = useAssetIndexFreezeColumn();
   const { modeIsAdvanced } = useAssetIndexViewState();
@@ -108,10 +111,10 @@ export function AdvancedIndexColumn({
       );
     }
 
-    const customFieldDisplayValue = getCustomFieldDisplayValue(fieldValue, {
-      locale,
-      timeZone,
-    });
+    const customFieldDisplayValue = getCustomFieldDisplayValue(
+      fieldValue,
+      prefs
+    );
 
     return (
       <Td>
@@ -127,8 +130,12 @@ export function AdvancedIndexColumn({
                   "z-[999999] mt-1 min-w-[300px] rounded-md border border-gray-300 bg-white p-4"
                 )}
               >
+                {/* Custom field values are authored in `MarkdownEditor`,
+                    whose link control makes external links a deliberate
+                    feature — same treatment as comments and announcements. */}
                 <MarkdownViewer
                   content={customFieldDisplayValue as RenderableTreeNode}
+                  allowExternalLinks
                 />
               </PopoverContent>
             </PopoverPortal>
@@ -139,7 +146,7 @@ export function AdvancedIndexColumn({
             variant="link"
             className="text-gray text-end font-normal underline hover:text-gray-600"
             target="_blank"
-            to={`${customFieldDisplayValue}?ref=shelf-webapp`}
+            to={buildCustomFieldLinkHref(customFieldDisplayValue as string)}
           >
             {customFieldDisplayValue as string}
           </Button>
@@ -172,6 +179,7 @@ export function AdvancedIndexColumn({
                     mainImage: item.mainImage,
                     thumbnailImage: item.thumbnailImage,
                     mainImageExpiration: item.mainImageExpiration,
+                    assetModel: item.assetModel ?? null,
                   }}
                   alt={`Image of ${item.title}`}
                   className="size-10 shrink-0 rounded-[4px] border object-cover"
@@ -228,6 +236,7 @@ export function AdvancedIndexColumn({
           status={item.status}
           availableToBook={item.availableToBook}
           asset={item}
+          isArchived={!!item.archivedAt}
         />
       );
 
@@ -290,13 +299,33 @@ export function AdvancedIndexColumn({
       return <CustodyColumn custody={item.custody} />;
 
     case "availableToBook":
-      return <TextColumn value={item.availableToBook ? "Yes" : "No"} />;
+      // An archived asset can't be booked, whatever its stored setting.
+      return (
+        <TextColumn
+          value={
+            item.archivedAt
+              ? "No (archived)"
+              : item.availableToBook
+              ? "Yes"
+              : "No"
+          }
+        />
+      );
 
     case "upcomingReminder":
       return (
         <UpcomingReminderColumn
           assetId={item.id}
           upcomingReminder={item.upcomingReminder}
+        />
+      );
+
+    case "lastAuditDate":
+      return (
+        <LastAuditDateCell
+          assetId={item.id}
+          lastAuditDate={item.lastAuditDate}
+          access={lastAuditDateAccess ?? "hidden"}
         />
       );
 
@@ -313,7 +342,7 @@ export function AdvancedIndexColumn({
     case "barcode_ExternalQR":
     case "barcode_EAN13":
       return (
-        <BarcodeColumn
+        <BarcodeCell
           column={column}
           item={item}
           workspacePreference={currentOrganization.qrIdDisplayPreference}
@@ -341,15 +370,103 @@ export function AdvancedIndexColumn({
       );
 
     case "quantity":
+      return <QuantityColumn item={item} />;
+
+    case "unitOfMeasure":
+      return <UnitOfMeasureColumn item={item} />;
+
+    case "minQuantity":
+      // Low-stock reorder threshold, only meaningful for QUANTITY_TRACKED
+      // assets. Plain number, mirroring the "quantity" cell above.
       return (
         <Td className="w-full max-w-none whitespace-nowrap">
-          {isQuantityTracked(item) && item.quantity != null ? (
-            `${item.quantity}${
-              item.unitOfMeasure ? ` ${item.unitOfMeasure}` : ""
-            }`
+          {isQuantityTracked(item) && item.minQuantity != null ? (
+            item.minQuantity
           ) : (
             <EmptyTableValue />
           )}
+        </Td>
+      );
+
+    case "available":
+      // Units free to hand over right now: total minus custody, kits and
+      // checked-out. Deliberately NOT reduced by future reservations: those
+      // units are still physically on the shelf.
+      //
+      // Reads "14 of 20 pcs", see `resolveFreeNowText`.
+      return (
+        <Td className="w-full max-w-none whitespace-nowrap">
+          {isQuantityTracked(item) && item.available != null ? (
+            <span className="tabular-nums">
+              {resolveFreeNowText({
+                available: item.available,
+                total: item.quantity,
+                unitOfMeasure: item.unitOfMeasure,
+              })}
+            </span>
+          ) : (
+            <EmptyTableValue />
+          )}
+        </Td>
+      );
+
+    case "reserved":
+      // Units promised to future RESERVED bookings.
+      //
+      // NOT gated on quantity-tracking, unlike the two columns either side of
+      // it. An individually-tracked asset is a pool of one, and it can be
+      // reserved exactly like a pool can, so a booked camera reads 1 here.
+      // Gating it produced the worst outcome in the whole change: a user booked
+      // an asset, looked at a column headed "Reserved", and saw a dash. The
+      // number was already in the query; the cell was throwing it away.
+      //
+      // It is also the only one of the three new columns that says anything to
+      // a workspace with no quantity assets at all, and it says something the
+      // row could not say before: `AssetStatus` has no RESERVED member, so a
+      // booked-but-not-yet-collected asset reads "Available" in the Status
+      // badge and only confesses in "Upcoming Bookings", eighteen columns to
+      // the right.
+      return <ReservedCell item={item} />;
+
+    case "stockStatus":
+      // Derived verdict. The badge owns the "no reorder point renders blank"
+      // and "INDIVIDUAL renders blank" rules, so this cell stays a pass-through
+      // and every surface showing the verdict agrees.
+      //
+      // The breakdown makes the badge hoverable with THIS row's figures, so
+      // "how bad is it" no longer means opening the asset page. Passed only for
+      // quantity assets: an individual asset has no pool, and the values would
+      // all be null.
+      return (
+        <Td className="w-full max-w-none whitespace-nowrap">
+          <StockStatusBadge
+            status={item.stockStatus}
+            breakdown={
+              isQuantityTracked(item) && item.available != null
+                ? {
+                    total: item.quantity ?? 0,
+                    available: item.available,
+                    inCustody: item.inCustody ?? 0,
+                    inKits: item.inKits ?? 0,
+                    checkedOut: item.checkedOut ?? 0,
+                    peakBooked: item.peakBooked ?? 0,
+                    minQuantity: item.minQuantity,
+                    unitOfMeasure: item.unitOfMeasure,
+                    // The biggest booking in the peak, so a SHORT hover can
+                    // link somewhere instead of leaving the reader to search.
+                    topBooking:
+                      item.topBookingId && item.topBookingName
+                        ? {
+                            id: item.topBookingId,
+                            name: item.topBookingName,
+                            units: item.topBookingUnits ?? 0,
+                          }
+                        : null,
+                    assetId: item.id,
+                  }
+                : null
+            }
+          />
         </Td>
       );
 
@@ -363,6 +480,71 @@ export function AdvancedIndexColumn({
         </Td>
       );
   }
+}
+
+/**
+ * The `Reserved` cell.
+ *
+ * Split out of the switch because it is the only new cell that has to render a
+ * state the rest of the row cannot express: **more units promised than the
+ * workspace owns**.
+ *
+ * That state is why this component exists. A row reading `Free now 10 pcs ·
+ * Total quantity 10 pcs · Reserved 12 · Short` is self-contradicting on its
+ * face, three cells look healthy and only the pill objects. The cause is that
+ * `Free now` answers "on the shelf today" while `Short` answers "when that
+ * booking starts", and nothing marked the two apart. The cell that actually
+ * holds the contradiction, `Reserved 12` against a total of 10, was rendered in
+ * the same grey as a harmless `0`.
+ *
+ * So when the claim exceeds the pool it is drawn in the SAME violet as the
+ * `Short` badge and names the shortfall: `12 pcs · 2 short`.
+ *
+ * **Never "12 of 10".** That was the first attempt and it is unreadable: "of"
+ * asks to be read as part-of-whole, which has no meaning once the first number
+ * exceeds the second. The gap is also the number somebody can act on, nobody
+ * orders "12 of 10", they order 2. Reserve "X of Y" for surfaces where X is
+ * genuinely capped by Y, like the booking quantity dialogs.
+ *
+ * @param props.item - The row.
+ * @returns The table cell.
+ */
+function ReservedCell({ item }: { item: AdvancedIndexAsset }) {
+  if (item.reserved == null) {
+    return (
+      <Td className="w-full max-w-none whitespace-nowrap">
+        <EmptyTableValue />
+      </Td>
+    );
+  }
+
+  // The rule itself lives in `resolveReservedDisplay`, pure and unit-tested,
+  // the sum-vs-pool trap it guards against is invisible to both the compiler
+  // and a glance at this file.
+  const { text, isOversold, title } = resolveReservedDisplay({
+    reserved: item.reserved,
+    quantity: isQuantityTracked(item) ? item.quantity ?? null : null,
+    stockStatus: item.stockStatus ?? null,
+    peakBooked: item.peakBooked ?? 0,
+    inCustody: item.inCustody ?? 0,
+    inKits: item.inKits ?? 0,
+    unitOfMeasure: item.unitOfMeasure,
+  });
+
+  return (
+    <Td className="w-full max-w-none whitespace-nowrap">
+      {/* Tailwind class, not an inline hex. `BADGE_COLORS` is the palette for
+          Badge components (see the repo rule); reaching into it for the colour
+          of a bare table cell was borrowing a token for something it does not
+          govern, and it hard-codes a value the design system cannot restyle. */}
+      <span
+        className={tw(isOversold && "font-medium text-violet-700")}
+        title={title ?? undefined}
+      >
+        {text}
+      </span>
+    </Td>
+  );
 }
 
 function TextColumn({
@@ -406,12 +588,82 @@ function StatusColumn({
   status,
   availableToBook,
   asset,
+  isArchived = false,
 }: {
   id: string;
   status: AssetStatus;
   availableToBook?: boolean;
   asset?: AdvancedIndexAsset;
+  isArchived?: boolean;
 }) {
+  /**
+   * The index query already computed every claim on the pool, so hand the badge
+   * those numbers rather than letting it re-derive from row relations it does
+   * not carry. Deriving locally produced reserved/checkedOut = 0, which made
+   * the badge render the raw status and then silently rewrite itself on hover
+   * once the lazy per-row fetch landed.
+   *
+   * `available` is the server's figure, so this badge, the `Available` column
+   * and the `Stock status` column are three renderings of ONE calculation.
+   * Null for INDIVIDUAL assets, which fall through to the plain status shell.
+   */
+  const quantityBreakdown = useMemo(() => {
+    if (!asset || !isQuantityTracked(asset) || asset.available == null) {
+      return null;
+    }
+    /**
+     * The `_all` figures on purpose. The badge picks a WORD, and for a member
+     * of a kit that is in custody or out on a booking the right word is still
+     * "In custody" / "Checked out", those units left with the kit. The
+     * arithmetic figures (`inCustody`, `checkedOut`) exclude kit-driven units
+     * so `Free now` counts them once; using them here would label such a row
+     * "Available" beside a `Free now` of 0. This mirrors what the asset page
+     * feeds `getQuantityData`, which reads every custody and booking row.
+     */
+    return {
+      total: asset.quantity ?? 0,
+      inCustody: asset.inCustodyAll ?? asset.inCustody ?? 0,
+      inKits: asset.inKits ?? 0,
+      reserved: asset.reservedAll ?? asset.reserved ?? 0,
+      checkedOut: asset.checkedOutAll ?? asset.checkedOut ?? 0,
+      /**
+       * **Not the `Free now` figure.** `available` feeds only the label choice
+       * in `getQuantityBadgeLabelAndColor` ("Reserved" vs "Partially
+       * reserved"), which asks *is there anything left to PROMISE*, so it has
+       * to subtract reservations, and it is allowed to go negative.
+       *
+       * Passing the server's free-now number here instead made the index badge
+       * read "Partially reserved" while the asset page, which derives the same
+       * label through `getQuantityData`, read "Reserved", the same asset
+       * described two different ways at the same moment. So this reproduces
+       * `getQuantityData`'s formula exactly, field for field, rather than
+       * substituting a number that merely looks similar.
+       */
+      available:
+        (asset.quantity ?? 0) -
+        (asset.inCustodyAll ?? asset.inCustody ?? 0) -
+        (asset.reservedAll ?? asset.reserved ?? 0) -
+        (asset.checkedOutAll ?? asset.checkedOut ?? 0),
+      /**
+       * The DISPLAY figure, and the server's own, so the tooltip footer, the
+       * `Free now` column and the `Stock status` pill are three renderings of
+       * ONE calculation and cannot drift apart.
+       */
+      freeNow: asset.available,
+      /**
+       * The index row carries no per-booking or per-kit lists: an asset can
+       * hold hundreds of future bookings, too many to ship for every row. The
+       * badge is told so through `quantityListsDeferred` and fetches the lists
+       * on first hover; until then the card shows totals plus the
+       * `nextReservedFrom` scalar below, which reconciles "12 reserved" with
+       * "10 free right now".
+       */
+      bookingAssets: [],
+      assetKits: [],
+      nextReservedFrom: asset.nextReservedFrom ?? null,
+    };
+  }, [asset]);
+
   return (
     <Td className="w-full max-w-none whitespace-nowrap">
       <AssetStatusBadge
@@ -419,20 +671,74 @@ function StatusColumn({
         status={status}
         availableToBook={availableToBook ?? true}
         asset={asset}
+        quantityBreakdown={quantityBreakdown}
+        quantityListsDeferred
+        isArchived={isArchived}
       />
     </Td>
   );
 }
 
+/** The asset fields the Quantity and Unit of measure cells read. */
+type QuantityCellAsset = Pick<
+  AdvancedIndexAsset,
+  "type" | "quantity" | "unitOfMeasure"
+>;
+
+/**
+ * Quantity cell of the advanced index: the bare stock number of a
+ * QUANTITY_TRACKED asset, so the column reads and sorts as a number. The unit
+ * has its own {@link UnitOfMeasureColumn}. Individual assets show the
+ * empty-value dash.
+ *
+ * @param props.item - The asset row
+ */
+export function QuantityColumn({ item }: { item: QuantityCellAsset }) {
+  return (
+    <Td className="w-full max-w-none whitespace-nowrap">
+      {isQuantityTracked(item) && item.quantity != null ? (
+        item.quantity
+      ) : (
+        <EmptyTableValue />
+      )}
+    </Td>
+  );
+}
+
+/**
+ * Unit of measure cell of the advanced index: the free-text unit ("pcs",
+ * "kg") of a QUANTITY_TRACKED asset. Individual assets, and quantity-tracked
+ * assets without a unit, show the empty-value dash.
+ *
+ * @param props.item - The asset row
+ */
+export function UnitOfMeasureColumn({ item }: { item: QuantityCellAsset }) {
+  return (
+    <Td className="w-full max-w-none whitespace-nowrap">
+      {isQuantityTracked(item) && item.unitOfMeasure ? (
+        item.unitOfMeasure
+      ) : (
+        <EmptyTableValue />
+      )}
+    </Td>
+  );
+}
+
+/** The most description characters the index tooltip shows. */
+const DESCRIPTION_TOOLTIP_MAX_LENGTH = 600;
+
 /**
  * Displays a truncated plain-text preview of the asset description and shows
- * the full markdown-rendered content inside a tooltip on hover.
+ * the markdown-rendered content inside a tooltip on hover. The tooltip shows
+ * at most {@link DESCRIPTION_TOOLTIP_MAX_LENGTH} characters and points to the
+ * asset page for the rest.
  * Description column component - exported for reuse in other index pages
  */
 export function DescriptionColumn({ value }: { value: string }) {
   const plainPreview = cleanMarkdownFormatting(value ?? "");
   const hasContent = Boolean(value && value.trim().length > 0);
   const previewText = plainPreview.length > 0 ? plainPreview : value.trim();
+  const isTooltipTruncated = value.length > DESCRIPTION_TOOLTIP_MAX_LENGTH;
 
   return (
     <Td className="max-w-62 min-w-60 whitespace-pre-wrap">
@@ -447,7 +753,19 @@ export function DescriptionColumn({ value }: { value: string }) {
 
             <TooltipContent side="top" className="max-w-[400px]">
               <h5>Asset description</h5>
-              <MarkdownViewer content={value} className="mt-2 text-sm" />
+              {/* No `allowExternalLinks`: descriptions are authored in a plain
+                  textarea and rendered as plain text on the asset page, so
+                  they are not a markdown surface. Links here would also be
+                  unreachable — Radix tooltip content is not interactive. */}
+              <MarkdownViewer
+                content={truncateText(value, DESCRIPTION_TOOLTIP_MAX_LENGTH)}
+                className="mt-2 text-sm"
+              />
+              {isTooltipTruncated ? (
+                <p className="mt-2 text-xs text-gray-500">
+                  Open the asset to read the full description
+                </p>
+              ) : null}
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
@@ -503,7 +821,7 @@ function TagsColumn({ tags }: { tags: AdvancedIndexAsset["tags"] }) {
  * INDIVIDUAL assets to keep the row clean).
  *
  * Multiple custodians: renders the primary custodian's badge plus a
- * `+N more` chip; hovering the chip reveals a tooltip listing every
+ * `+N` chip; hovering the chip reveals a tooltip listing every
  * custodian on its own line so the full custody breakdown stays one
  * hover away without inflating row height.
  */
@@ -512,7 +830,7 @@ export function CustodyColumn({
 }: {
   custody: AdvancedIndexAsset["custody"];
 }) {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const { primary, others, total } = formatCustodyList(custody ?? []);
 
   return (
@@ -542,7 +860,7 @@ function CustodyQuantitySuffix({ quantity }: { quantity?: number }) {
   return <span className="ml-1 text-gray-500">({quantity})</span>;
 }
 
-/** Renders the badge + optional `+N more` chip. Split out so the empty
+/** Renders the badge + optional `+N` chip. Split out so the empty
  * state can short-circuit before the tooltip provider mounts. */
 function CustodyColumnContent({
   primary,
@@ -570,12 +888,16 @@ function CustodyColumnContent({
       <TooltipProvider>
         <Tooltip>
           <TooltipTrigger asChild>
-            <span
-              className="shrink-0 cursor-help whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"
+            <button
+              type="button"
+              className="shrink-0 cursor-help whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-1"
               data-testid="custody-more-chip"
+              aria-label={`+${others.length} more custodian${
+                others.length === 1 ? "" : "s"
+              }`}
             >
-              +{others.length} more
-            </span>
+              +{others.length}
+            </button>
           </TooltipTrigger>
           <TooltipContent
             className="max-w-xs"
@@ -609,7 +931,7 @@ function CustodyColumnContent({
  *
  * Single kit: renders the primary kit name as a link to the kit page.
  * Multiple kits (qty-tracked split across kits): renders the primary
- * kit link plus a "+N more" chip; hovering the chip reveals a tooltip
+ * kit link plus a "+N" chip; hovering the chip reveals a tooltip
  * listing every kit name on its own line. Mirrors `CustodyColumn` so
  * the asset-index never silently hides kit membership 2..N.
  */
@@ -656,12 +978,16 @@ function KitColumnContent({
       <TooltipProvider>
         <Tooltip>
           <TooltipTrigger asChild>
-            <span
-              className="shrink-0 cursor-help whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"
+            <button
+              type="button"
+              className="shrink-0 cursor-help whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-1"
               data-testid="kit-more-chip"
+              aria-label={`+${others.length} more kit${
+                others.length === 1 ? "" : "s"
+              }`}
             >
-              +{others.length} more
-            </span>
+              +{others.length}
+            </button>
           </TooltipTrigger>
           <TooltipContent className="max-w-xs" data-testid="kit-more-tooltip">
             <ul className="flex flex-col gap-1 text-sm">
@@ -682,7 +1008,7 @@ function KitColumnContent({
  * Single location: renders the primary placement as a LocationBadge
  * wrapped in a link to the location page.
  * Multiple locations (qty-tracked split across locations): renders the
- * primary location plus a "+N more" chip with a hover tooltip listing
+ * primary location plus a "+N" chip with a hover tooltip listing
  * every location. Mirror of `KitColumn` / `CustodyColumn`.
  */
 export function LocationColumn({
@@ -739,12 +1065,16 @@ function LocationColumnContent({
       <TooltipProvider>
         <Tooltip>
           <TooltipTrigger asChild>
-            <span
-              className="shrink-0 cursor-help whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"
+            <button
+              type="button"
+              className="shrink-0 cursor-help whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-1"
               data-testid="location-more-chip"
+              aria-label={`+${others.length} more location${
+                others.length === 1 ? "" : "s"
+              }`}
             >
-              +{others.length} more
-            </span>
+              +{others.length}
+            </button>
           </TooltipTrigger>
           <TooltipContent
             className="max-w-xs"
@@ -804,128 +1134,12 @@ function UpcomingReminderColumn({
   );
 }
 
-function BarcodeColumn({
-  column,
-  item,
-  workspacePreference,
-}: {
-  column: BarcodeField;
-  item: AdvancedIndexAsset;
-  workspacePreference: QrIdDisplayPreference;
-}) {
-  // Map column names to actual enum values
-  const typeMapping: Record<string, string> = {
-    Code128: "Code128",
-    Code39: "Code39",
-    DataMatrix: "DataMatrix",
-    ExternalQR: "ExternalQR",
-    EAN13: "EAN13",
-  };
-
-  const columnType = column.split("_")[1];
-  const actualBarcodeType = typeMapping[columnType] || columnType;
-
-  const barcodes =
-    item.barcodes?.filter((b) => b.type === actualBarcodeType) || [];
-
-  if (barcodes.length === 0) {
-    return (
-      <Td>
-        <EmptyTableValue />
-      </Td>
-    );
-  }
-
-  // If only one barcode, show as a single clickable chip — same visual
-  // language as the qrId column: AssetCodeBadge inside a button so the
-  // CodePreviewDialog still opens on click, with hover/focus affordances
-  // and the trailing "expand" glyph (`interactive`) signaling clickability.
-  if (barcodes.length === 1) {
-    const barcode = barcodes[0];
-    return (
-      <CodePreviewDialog
-        item={{
-          id: item.id,
-          title: item.title,
-          qrId: item.qrId,
-          type: "asset",
-          sequentialId: item.sequentialId,
-        }}
-        selectedBarcodeId={barcode.id}
-        trigger={
-          <Td className="w-full max-w-none !overflow-visible whitespace-nowrap">
-            <button
-              type="button"
-              aria-label={`Show code preview for ${item.title}`}
-              className="rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-1"
-            >
-              <AssetCodeBadge
-                value={barcode.value}
-                type={barcode.type}
-                isFallback={false}
-                workspacePreference={workspacePreference}
-                interactive
-                // Explicit column: barcode column shows literal barcode values,
-                // not the workspace-preferred one. Tooltip simplifies to
-                // "<Type>: <value>".
-                explicit
-                className="cursor-pointer transition-colors hover:bg-gray-200"
-              />
-            </button>
-          </Td>
-        }
-      />
-    );
-  }
-
-  // If multiple barcodes of this type, show each as its own clickable chip in
-  // a flex row. Replaces the previous comma-separated link list — chips have
-  // their own padding so commas would be redundant visual noise.
-  return (
-    <Td className="w-full max-w-none !overflow-visible whitespace-nowrap">
-      <div className="flex flex-wrap items-center gap-1.5">
-        {barcodes.map((barcode) => (
-          <CodePreviewDialog
-            key={barcode.id}
-            item={{
-              id: item.id,
-              title: item.title,
-              sequentialId: item.sequentialId,
-              qrId: item.qrId,
-              type: "asset",
-            }}
-            selectedBarcodeId={barcode.id}
-            trigger={
-              <button
-                type="button"
-                aria-label={`Show code preview for ${item.title} (${barcode.value})`}
-                className="rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-1"
-              >
-                <AssetCodeBadge
-                  value={barcode.value}
-                  type={barcode.type}
-                  isFallback={false}
-                  workspacePreference={workspacePreference}
-                  interactive
-                  // Explicit column: see single-barcode case above.
-                  explicit
-                  className="cursor-pointer transition-colors hover:bg-gray-200"
-                />
-              </button>
-            }
-          />
-        ))}
-      </div>
-    </Td>
-  );
-}
-
 function UpcomingBookingsColumn({
   bookings,
 }: {
   bookings: AdvancedIndexAsset["bookings"];
 }) {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const organization = useCurrentOrganization();
   const canSeeAllCustody = userHasCustodyViewPermission({
     roles,
@@ -981,47 +1195,29 @@ function UpcomingBookingsColumn({
                     | {title}
                   </HoverCardTrigger>
 
-                  <HoverCardPortal>
-                    <HoverCardContent className="!mt-0 w-full rounded-md border bg-white px-4 py-2">
-                      <EventCardContent
-                        booking={{
-                          id: booking.id,
-                          name: booking.name,
-                          description: booking.description,
-                          status: booking.status,
-                          tags: booking.tags,
-                          start: booking.from,
-                          end: booking.to,
-                          custodian: {
-                            name: custodianName ?? "",
-                            user: booking.custodianUser
-                              ? {
-                                  id: booking.custodianUser.id,
-                                  firstName: booking.custodianUser.firstName,
-                                  lastName: booking.custodianUser.lastName,
-                                  profilePicture:
-                                    booking.custodianUser.profilePicture,
-                                }
-                              : null,
-                          },
-                          creator: {
-                            name: booking.creator
-                              ? resolveUserDisplayName(booking.creator)
-                              : "Unknown",
-                            user: booking.creator
-                              ? {
-                                  id: booking.creator.id,
-                                  firstName: booking.creator.firstName,
-                                  lastName: booking.creator.lastName,
-                                  profilePicture:
-                                    booking.creator.profilePicture,
-                                }
-                              : null,
-                          },
-                        }}
-                      />
-                    </HoverCardContent>
-                  </HoverCardPortal>
+                  <HoverCardContent className="!mt-0 w-full rounded-md border bg-white px-4 py-2">
+                    <EventCardContent
+                      booking={{
+                        id: booking.id,
+                        name: booking.name,
+                        description: booking.description,
+                        status: booking.status,
+                        tags: booking.tags,
+                        start: booking.from,
+                        end: booking.to,
+                        custodian: {
+                          name: custodianName ?? "",
+                          user: booking.custodianUser ?? null,
+                        },
+                        creator: {
+                          name: booking.creator
+                            ? resolveUserDisplayName(booking.creator)
+                            : "Unknown",
+                          user: booking.creator ?? null,
+                        },
+                      }}
+                    />
+                  </HoverCardContent>
                 </HoverCard>
               );
             })}

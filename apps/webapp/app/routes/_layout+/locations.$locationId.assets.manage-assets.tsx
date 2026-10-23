@@ -19,7 +19,7 @@ import {
   selectedBulkItemsAtom,
   selectedBulkItemsCountAtom,
   setSelectedBulkItemAtom,
-  setSelectedBulkItemsAtom,
+  seedFormSelectionAtom,
 } from "~/atoms/list";
 import { AssetImage } from "~/components/assets/asset-image/component";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
@@ -58,6 +58,7 @@ import { ShelfError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { payload, error, getParams, parseData } from "~/utils/http.server";
 import { isSelectingAllItems } from "~/utils/list";
+import { numberInputWheelGuard } from "~/utils/number-input-wheel-guard";
 import {
   PermissionAction,
   PermissionEntity,
@@ -120,6 +121,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       getPaginatedAndFilterableAssets({
         request,
         organizationId,
+        // Ignores the custodian-filter seed — scope it rather than fetch a
+        // roster nobody renders.
+        canSeeAllCustody: false,
       }),
     ]);
 
@@ -260,7 +264,7 @@ export default function AddAssetsToLocation() {
 
   const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
   const updateItem = useSetAtom(setSelectedBulkItemAtom);
-  const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
+  const seedFormSelection = useSetAtom(seedFormSelectionAtom);
   const selectedBulkItemsCount = useAtomValue(selectedBulkItemsCountAtom);
   const hasSelectedAllItems = isSelectingAllItems(selectedBulkItems);
 
@@ -340,7 +344,7 @@ export default function AddAssetsToLocation() {
   const didInitializeSelectedItemsRef = useRef(false);
   if (!didInitializeSelectedItemsRef.current) {
     didInitializeSelectedItemsRef.current = true;
-    setSelectedBulkItems(locationAssets);
+    seedFormSelection(locationAssets);
   }
 
   return (
@@ -561,6 +565,9 @@ type LocationRowItem = Prisma.AssetGetPayload<{
     };
     category: true;
     tags: true;
+    // Model cover image for assets with no image of their own. Type literal,
+    // so it mirrors ASSET_MODEL_IMAGE_SELECT by hand.
+    assetModel: { select: { image: true; thumbnailImage: true } };
   };
 }> & {
   /** Attached by the loader. Null for INDIVIDUAL rows or when the
@@ -625,6 +632,7 @@ const RowComponent = ({
                   mainImage: item.mainImage,
                   thumbnailImage: item.thumbnailImage,
                   mainImageExpiration: item.mainImageExpiration,
+                  assetModel: item.assetModel ?? null,
                 }}
                 alt={`Image of ${item.title}`}
                 className="size-full rounded-[4px] border object-cover"
@@ -703,6 +711,7 @@ const RowComponent = ({
                 <input
                   id={`location-qty-${item.id}`}
                   type="number"
+                  {...numberInputWheelGuard}
                   min={1}
                   max={Number.isFinite(max) ? max : undefined}
                   value={currentValue}
