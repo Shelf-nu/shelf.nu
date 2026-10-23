@@ -1,13 +1,14 @@
 /**
  * Booking email helpers: the actor line in the plain-text body, the lookup
- * that names the acting user, and the "Updated by" line on booking update
- * emails.
+ * that names the acting user, the "Updated by" line on booking update
+ * emails, and the pushes the update and check-in reminder send.
  *
  * @see {@link file://./email-helpers.ts}
  */
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import type { BookingEmailActor } from "~/emails/types";
+import { sendPush } from "~/modules/push/service.server";
 import type { ResolvedFormatPrefs } from "~/utils/date-format";
 import { BOOKING_INCLUDE_FOR_EMAIL } from "./constants";
 import {
@@ -15,6 +16,7 @@ import {
   completedBookingEmailContent,
   resolveBookingEmailActor,
   sendBookingUpdatedEmail,
+  sendCheckinReminder,
 } from "./email-helpers";
 import { getBookingNotificationRecipients } from "./notification-recipients.server";
 
@@ -31,6 +33,12 @@ vitest.mock("~/database/db.server", () => ({
 // why: sending mail is a network call; the test reads what would be sent
 vitest.mock("~/emails/mail.server", () => ({
   sendEmail: vitest.fn(),
+}));
+
+// why: sendPush queues a pg-boss job; the queue and delivery are the push
+// module's concern and have their own tests
+vitest.mock("~/modules/push/service.server", () => ({
+  sendPush: vitest.fn().mockResolvedValue(undefined),
 }));
 
 // why: recipient resolution has its own suite
@@ -166,46 +174,81 @@ describe("resolveBookingEmailActor", () => {
   });
 });
 
-describe("sendBookingUpdatedEmail", () => {
-  const booking = {
-    id: "booking-1",
-    name: "Field kit",
-    status: "RESERVED",
-    from: new Date("2026-10-01T08:00:00Z"),
-    to: new Date("2026-10-03T17:00:00Z"),
-    organizationId: "org-1",
-    custodianUser: {
-      id: "custodian-2",
-      email: "new-custodian@example.com",
-      firstName: "Nia",
-      lastName: "New",
-      displayName: null,
-    },
-    custodianTeamMember: null,
-    organization: {
-      name: "Test Org",
-      customEmailFooter: null,
-      owner: { email: "owner@example.com" },
-    },
-    _count: { bookingAssets: 2 },
-  };
+/** A reserved booking, as the email include loads it. */
+const booking = {
+  id: "booking-1",
+  name: "Field kit",
+  status: "RESERVED",
+  from: new Date("2026-10-01T08:00:00Z"),
+  to: new Date("2026-10-03T17:00:00Z"),
+  organizationId: "org-1",
+  custodianUser: {
+    id: "custodian-2",
+    email: "new-custodian@example.com",
+    firstName: "Nia",
+    lastName: "New",
+    displayName: null,
+  },
+  custodianTeamMember: null,
+  organization: {
+    name: "Test Org",
+    customEmailFooter: null,
+    owner: { email: "owner@example.com" },
+  },
+  _count: { bookingAssets: 2 },
+};
 
+/** The update push to the new custodian. */
+const updatePush = {
+  userIds: ["custodian-2"],
+  organizationId: "org-1",
+  category: "bookings",
+  title: "📝 Booking updated (Field kit)",
+  body: "Details changed. Tap to review.",
+  url: "/bookings/booking-1?orgId=org-1",
+};
+
+/** The removal push to the custodian the update replaced. */
+const removedPush = {
+  userIds: ["custodian-1"],
+  organizationId: "org-1",
+  category: "bookings",
+  title: "You were removed from a booking",
+  body: "Field kit",
+  url: "/bookings?orgId=org-1",
+};
+
+/** The new custodian, as the recipient resolver returns them. */
+const newCustodianRecipient = {
+  email: "new-custodian@example.com",
+  firstName: "Nia",
+  lastName: "New",
+  userId: "custodian-2",
+  dateFormat: "DD_MM_YYYY",
+  timeFormat: "H24",
+  weekStart: "MONDAY",
+  timeZone: "Europe/Berlin",
+  reason: "custodian",
+} as const;
+
+/** The replaced custodian, still a recipient because they created the booking. */
+const oldCustodianAsCreator = {
+  email: "old-custodian@example.com",
+  firstName: "Casey",
+  lastName: "Custodian",
+  userId: "custodian-1",
+  dateFormat: null,
+  timeFormat: null,
+  weekStart: null,
+  timeZone: null,
+  reason: "creator",
+} as const;
+
+describe("sendBookingUpdatedEmail", () => {
   beforeEach(() => {
     // @ts-expect-error partial booking row for the email include
     mockedFindBooking.mockResolvedValue(booking);
-    mockedRecipients.mockResolvedValue([
-      {
-        email: "new-custodian@example.com",
-        firstName: "Nia",
-        lastName: "New",
-        userId: "custodian-2",
-        dateFormat: "DD_MM_YYYY",
-        timeFormat: "H24",
-        weekStart: "MONDAY",
-        timeZone: "Europe/Berlin",
-        reason: "custodian",
-      },
-    ]);
+    mockedRecipients.mockResolvedValue([newCustodianRecipient]);
     mockedFindUser.mockImplementation(
       // @ts-expect-error partial user rows for the selected fields
       ({ where }: { where: { id?: string; email?: string } }) =>
@@ -258,5 +301,190 @@ describe("sendBookingUpdatedEmail", () => {
       "Updated by: Jo Display on 09/30/2026, 10:15 AM"
     );
     expect(toOld.html).toContain("Jo Display on 09/30/2026, 10:15 AM");
+  });
+
+  it("pushes the update to the new custodian and the removal to the one they replaced", async () => {
+    await sendBookingUpdatedEmail({
+      bookingId: "booking-1",
+      organizationId: "org-1",
+      userId: "editor-1",
+      changes: ["Custodian changed from Casey Custodian to Nia New"],
+      hints: { timeZone: "UTC", locale: "en-US" },
+      oldCustodianEmail: "old-custodian@example.com",
+    });
+
+    expect(vitest.mocked(sendPush).mock.calls).toEqual([
+      [updatePush],
+      [removedPush],
+    ]);
+  });
+
+  it("leaves a replaced custodian who made the change out of the push", async () => {
+    await sendBookingUpdatedEmail({
+      bookingId: "booking-1",
+      organizationId: "org-1",
+      userId: "custodian-1",
+      changes: ["Custodian changed from Casey Custodian to Nia New"],
+      hints: { timeZone: "UTC", locale: "en-US" },
+      oldCustodianEmail: "old-custodian@example.com",
+    });
+
+    expect(mockedSendEmail).toHaveBeenCalledOnce();
+    expect(vitest.mocked(sendPush).mock.calls).toEqual([[updatePush]]);
+  });
+
+  it("custodian is the editor: email sent, no push", async () => {
+    await sendBookingUpdatedEmail({
+      bookingId: "booking-1",
+      organizationId: "org-1",
+      userId: "custodian-2",
+      changes: ["Description changed"],
+      hints: { timeZone: "UTC", locale: "en-US" },
+    });
+
+    expect(mockedSendEmail.mock.calls.map(([payload]) => payload.to)).toEqual([
+      "new-custodian@example.com",
+    ]);
+    expect(sendPush).not.toHaveBeenCalled();
+  });
+
+  it("an admin who makes themself custodian gets the email and no push; the replaced custodian is pushed", async () => {
+    await sendBookingUpdatedEmail({
+      bookingId: "booking-1",
+      organizationId: "org-1",
+      userId: "custodian-2",
+      changes: ["Custodian changed from Casey Custodian to Nia New"],
+      hints: { timeZone: "UTC", locale: "en-US" },
+      oldCustodianEmail: "old-custodian@example.com",
+    });
+
+    expect(mockedSendEmail.mock.calls.map(([payload]) => payload.to)).toEqual([
+      "new-custodian@example.com",
+      "old-custodian@example.com",
+    ]);
+    expect(vitest.mocked(sendPush).mock.calls).toEqual([[removedPush]]);
+  });
+
+  describe("when the replaced custodian is still a recipient, as the creator", () => {
+    beforeEach(() => {
+      mockedRecipients.mockResolvedValue([
+        newCustodianRecipient,
+        oldCustodianAsCreator,
+      ]);
+    });
+
+    it("emails them once and pushes them the removal", async () => {
+      await sendBookingUpdatedEmail({
+        bookingId: "booking-1",
+        organizationId: "org-1",
+        userId: "editor-1",
+        changes: ["Custodian changed from Casey Custodian to Nia New"],
+        hints: { timeZone: "UTC", locale: "en-US" },
+        oldCustodianEmail: "old-custodian@example.com",
+      });
+
+      expect(mockedSendEmail.mock.calls.map(([payload]) => payload.to)).toEqual(
+        ["new-custodian@example.com", "old-custodian@example.com"]
+      );
+      // The recipient row already identifies them; no lookup by email
+      expect(mockedFindUser).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { email: "old-custodian@example.com" },
+        })
+      );
+      expect(vitest.mocked(sendPush).mock.calls).toEqual([
+        [updatePush],
+        [removedPush],
+      ]);
+    });
+
+    it("emails them once and pushes them nothing when they made the change", async () => {
+      await sendBookingUpdatedEmail({
+        bookingId: "booking-1",
+        organizationId: "org-1",
+        userId: "custodian-1",
+        changes: ["Custodian changed from Casey Custodian to Nia New"],
+        hints: { timeZone: "UTC", locale: "en-US" },
+        oldCustodianEmail: "old-custodian@example.com",
+      });
+
+      expect(mockedSendEmail.mock.calls.map(([payload]) => payload.to)).toEqual(
+        ["new-custodian@example.com", "old-custodian@example.com"]
+      );
+      expect(vitest.mocked(sendPush).mock.calls).toEqual([[updatePush]]);
+    });
+  });
+});
+
+describe("sendCheckinReminder", () => {
+  it("emails every recipient and pushes once, to the custodian", async () => {
+    mockedRecipients.mockResolvedValue([
+      {
+        email: "new-custodian@example.com",
+        firstName: "Nia",
+        lastName: "New",
+        userId: "custodian-2",
+        dateFormat: "DD_MM_YYYY",
+        timeFormat: "H24",
+        weekStart: "MONDAY",
+        timeZone: "Europe/Berlin",
+        reason: "custodian",
+      },
+      {
+        email: "creator@example.com",
+        firstName: "Cora",
+        lastName: "Creator",
+        userId: "creator-1",
+        dateFormat: null,
+        timeFormat: null,
+        weekStart: null,
+        timeZone: null,
+        reason: "creator",
+      },
+    ]);
+
+    await sendCheckinReminder(
+      // @ts-expect-error partial booking row for the email include
+      booking,
+      2,
+      { timeZone: "UTC", locale: "en-US" },
+      "org-1"
+    );
+
+    expect(mockedSendEmail.mock.calls.map(([payload]) => payload.to)).toEqual([
+      "new-custodian@example.com",
+      "creator@example.com",
+    ]);
+    expect(mockedSendEmail.mock.calls[0][0].subject).toBe(
+      "🔔 Checkin reminder (Field kit) - shelf.nu"
+    );
+    expect(vitest.mocked(sendPush).mock.calls).toEqual([
+      [
+        {
+          userIds: ["custodian-2"],
+          organizationId: "org-1",
+          category: "bookings",
+          title: "🔔 Checkin reminder (Field kit)",
+          body: "Checkin on 03/10/2026, 19:00",
+          url: "/bookings/booking-1?orgId=org-1",
+        },
+      ],
+    ]);
+  });
+
+  it("emails without a push when the caller already pushed about the booking", async () => {
+    mockedRecipients.mockResolvedValue([newCustodianRecipient]);
+
+    await sendCheckinReminder(
+      // @ts-expect-error partial booking row for the email include
+      booking,
+      2,
+      { timeZone: "UTC", locale: "en-US" },
+      "org-1",
+      { push: false }
+    );
+
+    expect(mockedSendEmail).toHaveBeenCalledOnce();
+    expect(sendPush).not.toHaveBeenCalled();
   });
 });

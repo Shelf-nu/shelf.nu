@@ -109,6 +109,7 @@ import {
   type DestroyedKitUnitsResult,
   type EmptiedKitMembership,
 } from "~/modules/kit/service.server";
+import { bookingEmailSubject } from "~/modules/push/messages";
 import { assetQtyMeta, formatUnitCount } from "~/utils/asset-quantity";
 import {
   bookingAddableStatusClause,
@@ -251,7 +252,11 @@ import {
 } from "./kit-conflicts.server";
 import { assertScannedUnitsAreNotKitMembers } from "./kit-member-scan-guard.server";
 import { getBookingNotificationRecipients } from "./notification-recipients.server";
-import type { NotificationRecipient } from "./notification-recipients.server";
+import type {
+  BookingEventType,
+  NotificationRecipient,
+} from "./notification-recipients.server";
+import { sendBookingPushToCustodian } from "./push.server";
 import { resolveSliceKitIds } from "./slice-kit-attribution";
 import {
   isSliceOutByMarker,
@@ -286,48 +291,48 @@ import { getUserByID } from "../user/service.server";
 const label: ErrorLabel = "Booking";
 
 /**
- * Sends a booking email to all resolved notification recipients.
- * Each recipient gets an individual email with personalized footer.
- */
-/**
- * Sends an individual personalized email to each resolved notification
- * recipient. Each email includes a per-recipient footer that explains
- * why the person received the notification (e.g., "you are the custodian",
- * "you manage bookings in the workspace"), driven by `recipient.reason`.
+ * Sends a booking event's notifications: an individual email to each resolved
+ * recipient, and one push to the custodian among them.
  *
- * Emails are fired concurrently (non-awaited `sendEmail` calls) to avoid
- * blocking the booking flow on slow SMTP delivery.
+ * Each email carries a footer that explains why the person received it (e.g.
+ * "you are the custodian", "you manage bookings in the workspace"), driven by
+ * `recipient.reason`. Emails are fired concurrently (non-awaited `sendEmail`
+ * calls) so slow SMTP delivery never blocks the booking flow, and the push is
+ * queued the same way.
  *
  * Each recipient's date/time formatting is resolved from their already-loaded
  * row (the four raw pref fields on `NotificationRecipient`) via the pure
- * `resolveFormatPrefs` — no per-recipient DB fetch (avoids an N+1). The
+ * `resolveFormatPrefs`, so the fan-out makes no per-recipient DB fetch. The
  * `buildText`/`buildHeading` callbacks receive those resolved prefs so the
  * plain-text body and heading dates honor each recipient.
  *
+ * @param eventType - The booking event; picks the email subject and the push
+ *   wording
  * @param recipients - Pre-resolved list from `getBookingNotificationRecipients()`
  * @param booking - The booking data used to render the email template
- * @param subject - Email subject line
  * @param buildText - Builds the plain-text body from a recipient's resolved prefs
  *   and the actor, passed together so the text and HTML lines always agree
  * @param buildHeading - Builds the HTML heading from a recipient's resolved prefs
  * @param hints - Acting user's hints, only the null-field fallback for recipients
  * @param actor - Who acted and when, shown under the heading and handed to
  *   `buildText` for the plain-text body
+ * @param actorUserId - The user who acted, left out of the push
  * @param templateProps - Additional props forwarded to the email template
  */
 async function sendBookingEmailToAllRecipients({
+  eventType,
   recipients,
   booking,
-  subject,
   buildText,
   buildHeading,
   hints,
   actor,
+  actorUserId,
   templateProps,
 }: {
+  eventType: BookingEventType;
   recipients: NotificationRecipient[];
   booking: BookingForEmail;
-  subject: string;
   /** From `resolveBookingEmailActor`; `undefined` leaves the line out. */
   actor: BookingEmailActor | undefined;
   /**
@@ -343,6 +348,7 @@ async function sendBookingEmailToAllRecipients({
   buildHeading: (prefs: ResolvedFormatPrefs) => string;
   /** Acting user's hints — only the null-field fallback for recipients. */
   hints: ClientHint;
+  actorUserId: string | undefined;
   templateProps?: {
     hideViewButton?: boolean;
     cancellationReason?: string;
@@ -351,6 +357,8 @@ async function sendBookingEmailToAllRecipients({
     modelRequests?: ReservationEmailModelRequest[];
   };
 }) {
+  const subject = bookingEmailSubject(eventType, booking.name);
+
   for (const recipient of recipients) {
     // Recipient prefs resolved from the ALREADY-LOADED row (raw pref fields on
     // NotificationRecipient); hints is the null-field fallback only. Pure —
@@ -375,6 +383,14 @@ async function sendBookingEmailToAllRecipients({
       html,
     });
   }
+
+  sendBookingPushToCustodian({
+    eventType,
+    booking,
+    recipients,
+    hints,
+    actorUserId,
+  });
 }
 
 async function cancelScheduler(
@@ -2735,9 +2751,9 @@ export async function reserveBooking({
       });
 
       await sendBookingEmailToAllRecipients({
+        eventType: "RESERVATION",
         recipients,
         booking: bookingFound,
-        subject: `✅ Booking reserved (${bookingFound.name}) - shelf.nu`,
         buildText: (textArgs) =>
           assetReservedEmailContent({
             ...textArgs,
@@ -2753,6 +2769,7 @@ export async function reserveBooking({
         buildHeading: () => `Booking reservation for ${custodian}`,
         hints,
         actor,
+        actorUserId: userId,
         templateProps: {
           assets: bookingFound.bookingAssets,
           // Forward any outstanding `BookingModelRequest` rows so the
@@ -6999,9 +7016,9 @@ export async function checkinBooking({
       });
 
       await sendBookingEmailToAllRecipients({
+        eventType: "CHECKIN",
         recipients,
         booking: updatedBooking,
-        subject: `🎉 Booking complete (${updatedBooking.name}) - shelf.nu`,
         buildText: (textArgs) =>
           completedBookingEmailContent({
             ...textArgs,
@@ -7017,6 +7034,7 @@ export async function checkinBooking({
           `Your booking has been completed: "${updatedBooking.name}"`,
         hints,
         actor,
+        actorUserId: userId,
       });
     }
 
@@ -12422,9 +12440,9 @@ export async function cancelBooking({
       });
 
       await sendBookingEmailToAllRecipients({
+        eventType: "CANCEL",
         recipients,
         booking,
-        subject: `❌ Booking cancelled (${booking.name}) - shelf.nu`,
         buildText: (textArgs) =>
           cancelledBookingEmailContent({
             ...textArgs,
@@ -12441,6 +12459,7 @@ export async function cancelBooking({
           `Your booking has been cancelled: "${booking.name}"`,
         hints,
         actor,
+        actorUserId: userId,
         templateProps: {
           cancellationReason: cancellationReason || undefined,
         },
@@ -12585,9 +12604,9 @@ export async function revertBookingToDraft({
         });
 
         await sendBookingEmailToAllRecipients({
+          eventType: "REVERT_TO_DRAFT",
           recipients,
           booking: draftBooking,
-          subject: `↩️ Booking reverted to draft (${draftBooking.name}) - shelf.nu`,
           buildText: (textArgs) =>
             revertedToDraftEmailContent({
               ...textArgs,
@@ -12603,6 +12622,7 @@ export async function revertBookingToDraft({
             `Your booking has been reverted to draft: "${draftBooking.name}"`,
           hints,
           actor,
+          actorUserId: userId,
         });
       }
     } catch (cause) {
@@ -12983,9 +13003,9 @@ export async function extendBooking({
       });
 
       await sendBookingEmailToAllRecipients({
+        eventType: "EXTEND",
         recipients,
         booking: updatedBooking,
-        subject: `Booking extended (${updatedBooking.name}) - shelf.nu`,
         buildText: (textArgs) =>
           extendBookingEmailContent({
             ...textArgs,
@@ -13004,6 +13024,7 @@ export async function extendBooking({
           })} to ${formatDate(newEndDate, prefs, { includeTime: true })}`,
         hints,
         actor,
+        actorUserId: userId,
       });
     }
 
@@ -13039,11 +13060,13 @@ export async function extendBooking({
      * reminder and we schedule the overdue handler.
      */
     if (hours < 1) {
+      // The extension is this booking event's push; the reminder only emails
       await sendCheckinReminder(
         updatedBooking,
         updatedBooking._count.bookingAssets,
         hints,
-        updatedBooking.organizationId
+        updatedBooking.organizationId,
+        { push: false }
       );
 
       await scheduleNextBookingJob({
@@ -14734,9 +14757,9 @@ export async function deleteBooking(
       });
 
       await sendBookingEmailToAllRecipients({
+        eventType: "DELETE",
         recipients,
         booking: b,
-        subject: `🗑️ Booking deleted (${b.name}) - shelf.nu`,
         buildText: (textArgs) =>
           deletedBookingEmailContent({
             ...textArgs,
@@ -14751,6 +14774,7 @@ export async function deleteBooking(
         buildHeading: () => `Your booking has been deleted: "${b.name}"`,
         hints,
         actor,
+        actorUserId: userId,
         templateProps: {
           hideViewButton: true,
         },
@@ -16304,9 +16328,9 @@ export async function bulkDeleteBookings({
           "";
 
         await sendBookingEmailToAllRecipients({
+          eventType: "DELETE",
           recipients,
           booking: b,
-          subject: `🗑️ Booking deleted (${b.name}) - shelf.nu`,
           buildText: (textArgs) =>
             deletedBookingEmailContent({
               ...textArgs,
@@ -16320,6 +16344,7 @@ export async function bulkDeleteBookings({
           buildHeading: () => `Your booking has been deleted: "${b.name}"`,
           hints,
           actor,
+          actorUserId: userId,
           templateProps: {
             hideViewButton: true,
           },
@@ -16826,9 +16851,9 @@ export async function bulkCancelBookings({
           "";
 
         await sendBookingEmailToAllRecipients({
+          eventType: "CANCEL",
           recipients,
           booking: b,
-          subject: `❌ Booking cancelled (${b.name}) - shelf.nu`,
           buildText: (textArgs) =>
             cancelledBookingEmailContent({
               ...textArgs,
@@ -16843,6 +16868,7 @@ export async function bulkCancelBookings({
           buildHeading: () => `Your booking has been cancelled: "${b.name}"`,
           hints,
           actor,
+          actorUserId: userId,
         });
       }
     }

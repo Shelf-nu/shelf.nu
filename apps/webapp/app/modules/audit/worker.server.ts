@@ -15,7 +15,8 @@ import type { AuditSchedulerData } from "./types";
 
 /**
  * 24-hour reminder handler
- * Sends reminder email to assignees and schedules the next reminder (4h)
+ * Sends the reminder email and push to assignees and schedules the next
+ * reminder (4h)
  */
 const reminder24h = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
   const audit = await db.auditSession
@@ -43,8 +44,7 @@ const reminder24h = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
       audit,
       assignees: audit.assignments,
       hints: data.hints,
-      timeframe: "24 hours",
-      heading: "🔔 Audit due in 24 hours",
+      reminder: "REMINDER_24H",
     });
 
     // Schedule 4h reminder
@@ -61,7 +61,8 @@ const reminder24h = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
 
 /**
  * 4-hour reminder handler
- * Sends reminder email to assignees and schedules the next reminder (1h)
+ * Sends the reminder email and push to assignees and schedules the next
+ * reminder (1h)
  */
 const reminder4h = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
   const audit = await db.auditSession
@@ -89,8 +90,7 @@ const reminder4h = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
       audit,
       assignees: audit.assignments,
       hints: data.hints,
-      timeframe: "4 hours",
-      heading: "🔔 Audit due in 4 hours",
+      reminder: "REMINDER_4H",
     });
 
     // Schedule 1h reminder
@@ -107,7 +107,8 @@ const reminder4h = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
 
 /**
  * 1-hour reminder handler
- * Sends reminder email to assignees and schedules the overdue notice
+ * Sends the reminder email and push to assignees and schedules the overdue
+ * notice
  */
 const reminder1h = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
   const audit = await db.auditSession
@@ -135,8 +136,7 @@ const reminder1h = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
       audit,
       assignees: audit.assignments,
       hints: data.hints,
-      timeframe: "1 hour",
-      heading: "🔔 Audit due in 1 hour",
+      reminder: "REMINDER_1H",
     });
 
     // Schedule overdue notice at due date time
@@ -152,7 +152,7 @@ const reminder1h = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
 
 /**
  * Overdue notice handler
- * Sends overdue email to both creator and assignees
+ * Sends the overdue email and push to the creator and assignees
  * Does NOT change audit status (handled on frontend)
  */
 const overdueNotice = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
