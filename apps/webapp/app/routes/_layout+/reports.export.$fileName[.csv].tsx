@@ -546,8 +546,8 @@ function buildCsv(headers: string[], rows: string[][]): string {
  * Escape a field for CSV format.
  */
 function escapeCsvField(field: string): string {
-  // Neutralize spreadsheet formula injection (CWE-1236). Applied here in the
-  // shared helper so every report export is protected.
+  // Neutralize spreadsheet formula injection (CWE-1236) with the guard every
+  // Shelf CSV export uses. Applied here so every report export is protected.
   const safeField = neutralizeCsvFormula(field);
   // `\r` is quoted alongside `\n`: a bare carriage return terminates a record in
   // consumers that accept CR as a line ending, so an unquoted one lets a

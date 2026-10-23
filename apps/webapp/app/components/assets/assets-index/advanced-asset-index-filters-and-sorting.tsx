@@ -4,24 +4,30 @@ import type {
   Dispatch,
   SetStateAction,
 } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   Popover,
   PopoverTrigger,
   PopoverPortal,
   PopoverContent,
 } from "@radix-ui/react-popover";
-import { Reorder } from "framer-motion";
+import { Reorder, useDragControls } from "framer-motion";
 import { Search } from "lucide-react";
 import { useLoaderData } from "react-router";
 import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import { Switch } from "~/components/forms/switch";
-import { ChevronRight, HandleIcon, PlusIcon } from "~/components/icons/library";
+import { ChevronRight, PlusIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
+import {
+  ReorderHandle,
+  ReorderHint,
+  reorderItemProps,
+} from "~/components/shared/reorder-handle";
 import { useSearchParams } from "~/hooks/search-params";
 import { useAssetIndexView } from "~/hooks/use-asset-index-view";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
+import { useKeyboardReorder } from "~/hooks/use-keyboard-reorder";
 import { filterQueryableColumns } from "~/modules/asset/last-audit-date-access";
 import {
   parseColumnName,
@@ -559,7 +565,12 @@ function AdvancedFilter() {
   );
 }
 
-function AdvancedSorting() {
+/**
+ * Sort popover of the advanced asset index. Rules are edited locally, reordered
+ * by drag or Alt+Arrow on their handles, and written to the URL as repeated
+ * `sortBy=name:direction[:cfType]` params on Apply.
+ */
+export function AdvancedSorting() {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const [sorts, setSorts] = useState<Sort[]>([]);
   const [searchParams, setSearchParams] = useSearchParams();
@@ -568,6 +579,13 @@ function AdvancedSorting() {
   const sortAccess = lastAuditDateAccess ?? "hidden";
 
   const disabled = useDisabled();
+
+  const { handleKeyDown, announcement, itemRefs } = useKeyboardReorder({
+    items: sorts,
+    onReorder: setSorts,
+    getItemName: (s) => parseColumnName(s.name),
+  });
+  const instructionsId = useId();
 
   // Track if we're applying sorts internally to avoid resetting state
   const isApplyingInternally = useRef(false);
@@ -624,6 +642,16 @@ function AdvancedSorting() {
 
   function removeSort(columnName: Sort["name"]) {
     setSorts((prev) => prev.filter((s) => s.name !== columnName));
+  }
+
+  function toggleSortDirection(index: number) {
+    setSorts((prev) =>
+      prev.map((sort, i) =>
+        i === index
+          ? { ...sort, direction: sort.direction === "asc" ? "desc" : "asc" }
+          : sort
+      )
+    );
   }
 
   function applySorting() {
@@ -685,69 +713,43 @@ function AdvancedSorting() {
           )}
         >
           <div className="border-b p-4 pb-5">
+            <div
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+              className="sr-only"
+            >
+              {announcement}
+            </div>
             {sorts.length === 0 ? (
               <div>
                 <h5>No sorting applied to this view</h5>
                 <p>Add a column below to sort by</p>
               </div>
             ) : (
-              <Reorder.Group values={sorts} onReorder={setSorts}>
-                {sorts.map((s, index) => (
-                  <Reorder.Item key={s.name} value={s}>
-                    <div className="flex items-center justify-between">
-                      <div className="flex h-full items-center gap-2 py-[6px]">
-                        <div className="inline-block h-auto w-[10px] text-gray-500 hover:text-gray-600">
-                          <HandleIcon />
-                        </div>
-                        <div className="mt-[-2px]">
-                          <span className="text-gray-500 ">
-                            {index === 0 ? "sort" : "then"} by
-                          </span>{" "}
-                          {parseColumnName(s.name)}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-2">
-                          <label
-                            htmlFor={`sort-${s.name}`}
-                            className="text-[12px] text-gray-500"
-                          >
-                            ascending:{" "}
-                          </label>
-                          <Switch
-                            id={`sort-${s.name}`}
-                            checked={s.direction === "asc"}
-                            onCheckedChange={() => {
-                              setSorts((prev) => {
-                                const newSorts = prev.map((sort, i) => {
-                                  if (i === index) {
-                                    return {
-                                      ...sort,
-                                      direction: (sort.direction === "asc"
-                                        ? "desc"
-                                        : "asc") as "asc" | "desc",
-                                    };
-                                  }
-                                  return sort;
-                                });
-                                return newSorts;
-                              });
-                            }}
-                            className="h-[18px] w-[33px] [&_span]:size-[16px]"
-                          />
-                        </div>
-                        <Button
-                          type="button"
-                          variant="block-link-gray"
-                          className="mt-[2px] text-[10px] font-normal text-gray-600"
-                          icon="x"
-                          onClick={() => removeSort(s.name)}
-                        />
-                      </div>
-                    </div>
-                  </Reorder.Item>
-                ))}
-              </Reorder.Group>
+              <div>
+                <div className="sr-only" id={instructionsId}>
+                  Press Alt plus Arrow Up or Arrow Down on a drag handle to move
+                  the sort rule.
+                </div>
+                <Reorder.Group values={sorts} onReorder={setSorts}>
+                  {sorts.map((s, index) => (
+                    <SortRuleItem
+                      key={s.name}
+                      sort={s}
+                      index={index}
+                      instructionsId={instructionsId}
+                      handleRef={(el) => {
+                        itemRefs.current[index] = el;
+                      }}
+                      onHandleKeyDown={(e) => handleKeyDown(e, index)}
+                      onToggleDirection={() => toggleSortDirection(index)}
+                      onRemove={() => removeSort(s.name)}
+                    />
+                  ))}
+                </Reorder.Group>
+                {sorts.length > 1 ? <ReorderHint className="mt-2" /> : null}
+              </div>
             )}
           </div>
 
@@ -783,6 +785,86 @@ function AdvancedSorting() {
         </PopoverContent>
       </PopoverPortal>
     </Popover>
+  );
+}
+
+function SortRuleItem({
+  sort,
+  index,
+  instructionsId,
+  handleRef,
+  onHandleKeyDown,
+  onToggleDirection,
+  onRemove,
+}: {
+  sort: Sort;
+  /** Position in the list; the first rule reads "sort by", the rest "then by". */
+  index: number;
+  /** Id of the sr-only keyboard instructions the handle points at. */
+  instructionsId: string;
+  /** Stores the handle in `useKeyboardReorder`'s `itemRefs` at `index`. */
+  handleRef: (element: HTMLButtonElement | null) => void;
+  /** Alt+Arrow handler from `useKeyboardReorder`, bound to `index`. */
+  onHandleKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void;
+  /** Flips the rule between ascending and descending. */
+  onToggleDirection: () => void;
+  /** Removes the rule from the list. */
+  onRemove: () => void;
+}) {
+  const dragControls = useDragControls();
+  const name = parseColumnName(sort.name);
+
+  return (
+    <Reorder.Item
+      value={sort}
+      dragListener={false}
+      dragControls={dragControls}
+      {...reorderItemProps}
+      // Bleeds into the popover padding so the lifted row has room around its
+      // text without shifting it.
+      className={tw(reorderItemProps.className, "-mx-2 px-2")}
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex h-full items-center gap-2 py-[6px]">
+          <ReorderHandle
+            ref={handleRef}
+            dragControls={dragControls}
+            label={name}
+            onKeyDown={onHandleKeyDown}
+            describedById={instructionsId}
+          />
+          <div className="mt-[-2px]">
+            <span className="text-gray-500 ">
+              {index === 0 ? "sort" : "then"} by
+            </span>{" "}
+            {name}
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <label
+              htmlFor={`sort-${sort.name}`}
+              className="text-[12px] text-gray-500"
+            >
+              ascending:{" "}
+            </label>
+            <Switch
+              id={`sort-${sort.name}`}
+              checked={sort.direction === "asc"}
+              onCheckedChange={onToggleDirection}
+              className="h-[18px] w-[33px] [&_span]:size-[16px]"
+            />
+          </div>
+          <Button
+            type="button"
+            variant="block-link-gray"
+            className="mt-[2px] text-[10px] font-normal text-gray-600"
+            icon="x"
+            onClick={onRemove}
+          />
+        </div>
+      </div>
+    </Reorder.Item>
   );
 }
 

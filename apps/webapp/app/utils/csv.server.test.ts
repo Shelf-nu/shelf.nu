@@ -53,6 +53,16 @@ vi.mock("~/utils/env", async (importActual) => ({
 const parseFormDataMock = vi.mocked(parseFormData);
 
 describe("parseCsv", () => {
+  it("drops one apostrophe before a formula trigger and leaves others alone", async () => {
+    const bytes = new TextEncoder().encode(
+      ["title", "'=x", "''=x", "it's", "'note"].join("\n")
+    );
+
+    const result = await parseCsv(bytes.buffer as ArrayBuffer);
+
+    expect(result).toEqual([["title"], ["=x"], ["'=x"], ["it's"], ["'note"]]);
+  });
+
   it("parses CSV data with detected delimiters and escaped quotes", async () => {
     const csvContent =
       'name;description\n"MacBook ""Pro"" 16";"16-inch laptop"';
@@ -278,9 +288,25 @@ describe("formatValueForCsv", () => {
 
     expect(formatValueForCsv("**Bold** text", true)).toBe('"Bold text"');
   });
+
+  it("writes a formula-leading value as text, after markdown cleanup", () => {
+    expect(formatValueForCsv("=1+1")).toBe('"\'=1+1"');
+    expect(formatValueForCsv("  @SUM(A1)")).toBe('"\'@SUM(A1)"');
+    expect(formatValueForCsv("**=1+1**", true)).toBe('"\'=1+1"');
+    expect(formatValueForCsv('=A1&"x"')).toBe('"\'=A1&""x"""');
+  });
+
+  it("leaves negative numbers numeric", () => {
+    expect(formatValueForCsv(-5)).toBe('"-5"');
+    expect(formatValueForCsv("-$1,234.50")).toBe('"-$1,234.50"');
+    expect(formatValueForCsv(-0.0000001)).toBe('"-1e-7"');
+  });
 });
 
 describe("buildCsvExportDataFromAssets", () => {
+  /** The builder's argument shape, for typing partial test fixtures. */
+  type BuildArgs = Parameters<typeof buildCsvExportDataFromAssets>[0];
+
   it("builds ordered CSV rows with fixed and custom field values", () => {
     const assets = [
       {
@@ -512,7 +538,6 @@ describe("buildCsvExportDataFromAssets", () => {
       { id: "asset-1", title: "Camera", qrId: "cm4abc123" },
       { id: "asset-2", title: "Tripod", qrId: null },
     ];
-    type BuildArgs = Parameters<typeof buildCsvExportDataFromAssets>[0];
 
     /** Builds the export over `columns` for a workspace with these fields. */
     const exportWith = (
@@ -609,6 +634,118 @@ describe("buildCsvExportDataFromAssets", () => {
 
         expect(headers).toEqual(['"Name"', '"QR ID"']);
       });
+    });
+  });
+
+  describe("spreadsheet formula injection (CWE-1236)", () => {
+    const assets = [
+      {
+        id: "asset-evil",
+        title: '=HYPERLINK("http://evil.example","x")',
+        valuation: -5,
+        tags: [{ name: "+cmd" }],
+        custody: [],
+        customFields: [
+          { customField: { name: "=cf" }, value: { raw: "@SUM(A1)" } },
+          { customField: { name: "refund" }, value: { raw: -5 } },
+          {
+            customField: { name: "dde" },
+            value: { raw: "-2+3+cmd|' /C calc'!A0" },
+          },
+          { customField: { name: "quoted" }, value: { raw: "'=already" } },
+        ],
+      },
+    ];
+    const columns: BuildArgs["columns"] = [
+      { name: "name", visible: true, position: 0 },
+      { name: "valuation", visible: true, position: 1 },
+      { name: "tags", visible: true, position: 2 },
+      {
+        name: "cf_=cf",
+        visible: true,
+        position: 3,
+        cfType: CustomFieldType.TEXT,
+      },
+      {
+        name: "cf_refund",
+        visible: true,
+        position: 4,
+        cfType: CustomFieldType.AMOUNT,
+      },
+      {
+        name: "cf_dde",
+        visible: true,
+        position: 5,
+        cfType: CustomFieldType.TEXT,
+      },
+      {
+        name: "cf_quoted",
+        visible: true,
+        position: 6,
+        cfType: CustomFieldType.TEXT,
+      },
+    ];
+    const build = () =>
+      buildCsvExportDataFromAssets({
+        assets: assets as unknown as BuildArgs["assets"],
+        columns,
+        currentOrganization: {
+          id: "org-1",
+          barcodesEnabled: false,
+          currency: "USD",
+        },
+        prefs: HARDCODED_DEFAULT_PREFS,
+        workspaceCustomFieldNames: [],
+      });
+
+    it("prefixes formula-leading cells with an apostrophe and leaves negative amounts numeric", () => {
+      const [headers, row] = build();
+
+      expect(headers).toEqual([
+        '"Name"',
+        '"Value"',
+        '"Tags"',
+        '"\'=cf"',
+        '"refund"',
+        '"dde"',
+        '"quoted"',
+      ]);
+      expect(row).toEqual([
+        '"\'=HYPERLINK(""http://evil.example"",""x"")"',
+        '"-$5.00"',
+        '"\'+cmd"',
+        '"\'@SUM(A1)"',
+        '"-$5.00"',
+        "\"'-2+3+cmd|' /C calc'!A0\"",
+        "\"''=already\"",
+      ]);
+    });
+
+    it("round-trips through the importer's parser to the original values", async () => {
+      const csv = build()
+        .map((r) => r.join(","))
+        .join("\n");
+      const bytes = new TextEncoder().encode(csv);
+
+      const parsed = await parseCsv(
+        bytes.buffer.slice(
+          bytes.byteOffset,
+          bytes.byteOffset + bytes.byteLength
+        )
+      );
+
+      expect(parsed).toEqual([
+        ["Name", "Value", "Tags", "=cf", "refund", "dde", "quoted"],
+        [
+          '=HYPERLINK("http://evil.example","x")',
+          "-$5.00",
+          "+cmd",
+          "@SUM(A1)",
+          "-$5.00",
+          "-2+3+cmd|' /C calc'!A0",
+          "'=already",
+        ],
+      ]);
     });
   });
 });
