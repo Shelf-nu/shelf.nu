@@ -21,6 +21,8 @@ export {
   getActiveServer,
   getServerVersion,
   hydrateActiveServer,
+  onBeforeSessionEnd,
+  runBeforeSessionEnd,
   subscribeToServerChange,
 } from "./active-server";
 export {

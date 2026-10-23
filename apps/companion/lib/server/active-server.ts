@@ -17,6 +17,7 @@
  * @see ./discovery.ts — decides WHICH server to switch to
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { settleWithin } from "../settle-within";
 import { getSupabase, rebuildSupabase } from "../supabase";
 import {
   ACTIVE_SERVER_STORAGE_KEY,
@@ -204,8 +205,56 @@ async function clearServerScopedState(): Promise<void> {
   }
 }
 
+/** Work that must run while the outgoing session is still valid. */
+const beforeSessionEndTasks = new Set<() => Promise<void>>();
+
+/**
+ * The longest a sign-out waits for the {@link onBeforeSessionEnd} tasks, all
+ * of them together.
+ */
+const BEFORE_SESSION_END_CAP_MS = 3_000;
+
+/**
+ * Registers work to run just before any session ends: a sign-out from the
+ * app, or the sign-out a server switch performs.
+ *
+ * A task runs while the session's token still works, so it can tell the
+ * server something on the person's behalf (forgetting this device for push).
+ * Tasks run in parallel. Sign-out waits for them for at most
+ * {@link BEFORE_SESSION_END_CAP_MS}, and a task that throws or rejects is
+ * ignored.
+ *
+ * Registered from the composition root (`app/_layout.tsx`) rather than called
+ * from here, because this module must not import `lib/api/*`.
+ *
+ * @param task - Async work; its result and errors are ignored
+ * @returns An unregister function
+ */
+export function onBeforeSessionEnd(task: () => Promise<void>): () => void {
+  beforeSessionEndTasks.add(task);
+  return () => {
+    beforeSessionEndTasks.delete(task);
+  };
+}
+
+/**
+ * Runs every task registered with {@link onBeforeSessionEnd}.
+ *
+ * Call it immediately before `auth.signOut()`, on every path that ends a
+ * session.
+ *
+ * @returns Resolves once every task has settled, or after
+ *   {@link BEFORE_SESSION_END_CAP_MS}. Never rejects.
+ */
+export function runBeforeSessionEnd(): Promise<void> {
+  return settleWithin(beforeSessionEndTasks, BEFORE_SESSION_END_CAP_MS);
+}
+
 /**
  * Ends the current session on the outgoing client.
+ *
+ * The {@link onBeforeSessionEnd} tasks run first, while the session is still
+ * live.
  *
  * A network failure does NOT throw — supabase-js returns the error and, for a
  * non-4xx failure, skips removing the local session. Left at that, the previous
@@ -217,6 +266,8 @@ async function clearServerScopedState(): Promise<void> {
  * @returns Resolves once the session is gone locally, whatever the server said.
  */
 async function endSessionOnOutgoingClient(): Promise<void> {
+  await runBeforeSessionEnd();
+
   try {
     const { error } = await getSupabase().auth.signOut();
     if (!error) return;
