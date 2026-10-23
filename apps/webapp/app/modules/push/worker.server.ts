@@ -36,9 +36,9 @@ const PUSH_WORKER_OPTIONS = {
 function runPushJob(job: PushJob): Promise<void> {
   switch (job.kind) {
     case "send":
-      return deliverPush(job.message);
+      return deliverPush(job);
     case "receipts":
-      return checkPushReceipts(job.tickets, new Date(job.sentAt));
+      return checkPushReceipts(job);
     default:
       checkExhaustiveSwitch(job);
       throw new ShelfError({

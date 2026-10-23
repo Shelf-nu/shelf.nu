@@ -2,9 +2,9 @@
  * Tests for the push queue worker.
  *
  * Exercises the callback registered with `scheduler.work`, as pg-boss would
- * call it: a `receipts` job disables the devices Expo reports as gone, and a
- * failing job is logged only on its last attempt and always rethrown so
- * pg-boss retries it.
+ * call it: a `receipts` job disables the devices Expo reports as gone and
+ * checks again for receipts Expo has not produced yet, and a failing job is
+ * logged only on its last attempt and always rethrown so pg-boss retries it.
  *
  * @see {@link file://./worker.server.ts}
  */
@@ -189,6 +189,68 @@ describe("registerPushWorkers", () => {
     expect(pushStore.pushTokens.every((row) => row.disabledAt === null)).toBe(
       true
     );
+  });
+
+  it("checks again in 15 minutes, with the same sentAt, for the tickets Expo has no receipt for yet", async () => {
+    const tickets = Array.from({ length: 5 }, (_, index) => ({
+      ticketId: `ticket-${index}`,
+      token: `ExponentPushToken[device-${index}]`,
+    }));
+    expoReceipts.mockResolvedValue({
+      "ticket-0": { status: "ok" },
+      "ticket-2": { status: "ok" },
+      "ticket-4": { status: "ok" },
+    });
+
+    await handler(
+      buildJob({ kind: "receipts", tickets, sentAt: SENT_AT.toISOString() })
+    );
+
+    expect(vi.mocked(scheduler.sendAfter).mock.calls).toEqual([
+      [
+        "push-queue",
+        {
+          kind: "receipts",
+          tickets: [tickets[1], tickets[3]],
+          sentAt: SENT_AT.toISOString(),
+          recheck: 1,
+        },
+        { retryLimit: 2, retryDelay: 60, expireInMinutes: 2 },
+        new Date(NOW.getTime() + 15 * 60_000),
+      ],
+    ]);
+  });
+
+  it("stops checking once the send is 23 hours old, and logs the tickets left without a receipt", async () => {
+    vi.setSystemTime(new Date(SENT_AT.getTime() + 23 * 60 * 60_000));
+    expoReceipts.mockResolvedValue({ "ticket-2": { status: "ok" } });
+
+    await handler(buildJob(receiptsJob));
+
+    expect(scheduler.sendAfter).not.toHaveBeenCalled();
+    expect(vi.mocked(Logger.warn).mock.calls).toEqual([
+      [
+        expect.objectContaining({
+          label: "Push",
+          additionalData: expect.objectContaining({ count: 1 }),
+        }),
+      ],
+    ]);
+  });
+
+  it("stops checking after the third re-check", async () => {
+    expoReceipts.mockResolvedValue({});
+
+    await handler(buildJob({ ...receiptsJob, recheck: 3 }));
+
+    expect(scheduler.sendAfter).not.toHaveBeenCalled();
+    expect(vi.mocked(Logger.warn).mock.calls).toEqual([
+      [
+        expect.objectContaining({
+          additionalData: expect.objectContaining({ count: 2, checks: 4 }),
+        }),
+      ],
+    ]);
   });
 
   it("runs a send job through the push service", async () => {

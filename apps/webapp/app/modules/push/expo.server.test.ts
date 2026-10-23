@@ -115,6 +115,7 @@ describe("sendPushMessages", () => {
     expect(result.failedChunks).toEqual([
       {
         index: 1,
+        firstIndex: 100,
         messageCount: 50,
         statusCode: 500,
         code: undefined,

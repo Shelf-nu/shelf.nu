@@ -7,9 +7,10 @@
  * its caller, the same contract as `sendEmail`. The push worker then runs
  * `deliverPush`, which checks the workspace tier, drops recipients who switched
  * the category off, sends one message per live device through Expo, disables
- * devices Expo reports as gone, and queues `checkPushReceipts` for 15 minutes
- * later to catch devices that fail after Expo hands the message to Apple or
- * Google.
+ * devices Expo reports as gone, queues another try for batches Expo refused
+ * with an error that can clear by itself, and queues `checkPushReceipts` for
+ * 15 minutes later to catch devices that fail after Expo hands the message to
+ * Apple or Google.
  *
  * Devices are user-scoped, not workspace-scoped: a token belongs to whoever
  * last signed in on that phone, and the workspace on the event decides only
@@ -29,7 +30,15 @@ import { filterOrganizationsWithPush } from "~/utils/subscription.server";
 import { getPushReceipts, sendPushMessages } from "./expo.server";
 import type { DeviceMessage, FailedPushChunk } from "./expo.server";
 import { filterRecipientsByPreference } from "./preferences.server";
-import type { PushJob, PushMessage, PushTicketRef } from "./types";
+import { isSafePushUrl } from "./types";
+import type {
+  PushFollowUp,
+  PushJob,
+  PushMessage,
+  PushReceiptsJob,
+  PushSendJob,
+  PushTicketRef,
+} from "./types";
 
 /**
  * A push is worth delivering only while it is fresh. Three numbers bound how
@@ -42,15 +51,17 @@ import type { PushJob, PushMessage, PushTicketRef } from "./types";
  * - `MESSAGE_TTL_SECONDS`, four hours: Apple and Google drop a message a phone
  *   has not collected within four hours of Expo accepting it.
  *
- * `deliverPush` asks for a retry by throwing only when Expo issued no ticket
- * and at least one refusal can clear by itself, so a retry resends only
- * batches Expo never acknowledged. Delivery is still at least once, not
- * exactly once: a request that timed out may have reached Expo anyway, and a
- * job killed after Expo accepted a batch but before pg-boss marked it
- * complete expires and runs again, resending that batch. Each Expo request
- * fails after 30 seconds without an answer (see `expo.server.ts`), so a send
- * of a few batches ends well inside the five minutes instead of expiring
- * while it still runs.
+ * `deliverPush` never throws over an Expo refusal. A batch refused with an
+ * error that can clear by itself is tried again by a follow-up send job for
+ * just that batch's devices (see {@link MAX_FOLLOW_UPS}), so a batch Expo
+ * took is not sent again. pg-boss's own retries cover a run that fails
+ * before sending, while loading the tier, the preferences or the devices.
+ * Delivery is still at least once, not exactly once: a request that timed
+ * out may have reached Expo anyway, and a job killed after Expo accepted a
+ * batch but before pg-boss marked it complete expires and runs again,
+ * resending that batch. Each Expo request fails after 30 seconds without an
+ * answer (see `expo.server.ts`), so a send of a few batches ends well inside
+ * the five minutes instead of expiring while it still runs.
  */
 const SEND_JOB_OPTIONS = {
   retryLimit: 2,
@@ -61,6 +72,14 @@ const SEND_JOB_OPTIONS = {
 
 /** See {@link SEND_JOB_OPTIONS}. */
 const MESSAGE_TTL_SECONDS = 4 * 60 * 60;
+
+/**
+ * How many follow-up sends a push gets for batches Expo refused with an error
+ * that can clear by itself (a rate limit, a server error, no answer), and how
+ * long each waits. A batch still refused on the last follow-up is logged.
+ */
+const MAX_FOLLOW_UPS = 2;
+const FOLLOW_UP_DELAY_MS = 60_000;
 
 /**
  * A receipts check makes one Expo request per 300 tickets, each failing after
@@ -74,8 +93,16 @@ const RECEIPTS_JOB_OPTIONS = {
   expireInMinutes: 2,
 };
 
-/** Expo publishes receipts within about 15 minutes and keeps them for a day. */
+/**
+ * Expo publishes receipts within about 15 minutes and keeps them for a day.
+ * A check that finds some receipts not ready yet checks again for those after
+ * another {@link RECEIPTS_DELAY_MS}, at most {@link MAX_RECEIPT_RECHECKS}
+ * times, and only while the send is under {@link RECEIPT_RECHECK_WINDOW_MS}
+ * old so the next check still lands inside Expo's day.
+ */
 const RECEIPTS_DELAY_MS = 15 * 60_000;
+const MAX_RECEIPT_RECHECKS = 3;
+const RECEIPT_RECHECK_WINDOW_MS = 23 * 60 * 60_000;
 
 /**
  * Longest title and body sent, in code points. Asset and booking names can be
@@ -124,10 +151,13 @@ const OUTCOME_BY_CODE = new Map<string, DeliveryErrorOutcome>(
 /** A message Expo did not deliver, and the device it was for. */
 type DeliveryFailure = { token: string; error: ExpoPushErrorReceipt };
 
+/** A batch Expo refused, with the devices its messages were for. */
+type RefusedBatch = FailedPushChunk & { tokens: string[] };
+
 /** Tickets paired with the device each is for, and the batches Expo refused. */
 type DeviceSendOutcome = {
   tickets: Array<{ token: string; ticket: ExpoPushTicket }>;
-  failedChunks: FailedPushChunk[];
+  failedChunks: RefusedBatch[];
 };
 
 /** Context attached to every log line of one send. */
@@ -136,12 +166,30 @@ type SendLogContext = { organizationId: string; category: string };
 /**
  * Queues a push for the given people. Returns once the job is queued; the
  * tier check, the preference filter and the sending all happen in the worker.
- * Never rejects: a queue failure is logged and the caller carries on, so a
- * push can never break the action that triggered it.
+ * Never rejects: a queue failure, or a url that fails {@link isSafePushUrl},
+ * is logged and the push dropped while the caller carries on, so a push can
+ * never break the action that triggered it.
  *
  * @param message - Who to notify, about what, and where a tap should lead
  */
 export async function sendPush(message: PushMessage): Promise<void> {
+  if (!isSafePushUrl(message.url)) {
+    Logger.error(
+      new ShelfError({
+        cause: null,
+        message:
+          "Dropped a push notification whose url is not a path on the app.",
+        additionalData: {
+          organizationId: message.organizationId,
+          category: message.category,
+          url: message.url,
+        },
+        label: "Push",
+      })
+    );
+    return;
+  }
+
   const userIds = [...new Set(message.userIds)];
   if (userIds.length === 0) return;
 
@@ -169,19 +217,27 @@ export async function sendPush(message: PushMessage): Promise<void> {
  * Runs a queued push: the body of a `send` job.
  *
  * Every ticket Expo issues is kept, even when other batches are refused. The
- * job throws, so pg-boss retries it, only when Expo issued no ticket at all
- * and at least one refusal can clear by itself (a rate limit, a server error,
- * no answer). Anything else is logged and the job completes, because a retry
- * would resend what Expo already took or fail the same way again.
+ * devices of batches refused with an error that can clear by itself (a rate
+ * limit, a server error, no answer) get a follow-up send job a minute later,
+ * up to {@link MAX_FOLLOW_UPS} times. Any other refusal, and one still refused
+ * on the last follow-up, is logged and the job completes, because trying
+ * again would fail the same way.
  *
- * @param message - The push as `sendPush` queued it
- * @throws {ShelfError} When loading recipients fails, or when Expo issued no
- *   ticket and at least one refusal can clear by itself; the cause is that
- *   refusal
+ * A follow-up runs the same tier, preference and device checks, narrowed to
+ * its listed devices, so a device signed out, disabled or taken over by
+ * someone else since the first try is skipped.
+ *
+ * @param job - The send job, as `sendPush` or an earlier run queued it
+ * @throws {ShelfError} When loading the tier, the preferences or the devices
+ *   fails, so pg-boss retries
  */
-export async function deliverPush(message: PushMessage): Promise<void> {
+export async function deliverPush({
+  message,
+  followUp,
+}: PushSendJob): Promise<void> {
   const { organizationId, category } = message;
   const logContext: SendLogContext = { organizationId, category };
+  const attempt = followUp?.attempt ?? 0;
 
   const [organizationWithPush] = await filterOrganizationsWithPush([
     organizationId,
@@ -207,7 +263,11 @@ export async function deliverPush(message: PushMessage): Promise<void> {
   }
 
   const devices = await db.pushToken.findMany({
-    where: { userId: { in: recipients }, disabledAt: null },
+    where: {
+      userId: { in: recipients },
+      disabledAt: null,
+      ...(followUp && { token: { in: followUp.tokens } }),
+    },
     select: { token: true },
   });
   if (devices.length === 0) {
@@ -229,22 +289,6 @@ export async function deliverPush(message: PushMessage): Promise<void> {
     logContext
   );
 
-  const retryableRefusal = outcome.failedChunks.find(
-    ({ retryable }) => retryable
-  );
-  if (outcome.tickets.length === 0 && retryableRefusal) {
-    throw new ShelfError({
-      cause: retryableRefusal.error,
-      message: "The Expo push service refused every push notification request.",
-      additionalData: {
-        ...logContext,
-        devices: devices.length,
-        statusCodes: outcome.failedChunks.map(({ statusCode }) => statusCode),
-      },
-      label: "Push",
-    });
-  }
-
   const accepted: PushTicketRef[] = [];
   const failures: DeliveryFailure[] = [];
   for (const { token, ticket } of outcome.tickets) {
@@ -257,6 +301,7 @@ export async function deliverPush(message: PushMessage): Promise<void> {
 
   Logger.info("push.send dispatched", {
     ...logContext,
+    attempt,
     devices: devices.length,
     accepted: accepted.length,
     failed: failures.length,
@@ -306,31 +351,89 @@ export async function deliverPush(message: PushMessage): Promise<void> {
     );
   }
 
-  logRefusedChunks(outcome.failedChunks, logContext);
+  const retryableBatches = outcome.failedChunks.filter(
+    (batch) => batch.retryable
+  );
+  const followUpQueued =
+    retryableBatches.length > 0 &&
+    attempt < MAX_FOLLOW_UPS &&
+    (await queueFollowUp(
+      message,
+      {
+        tokens: retryableBatches.flatMap(({ tokens }) => tokens),
+        attempt: attempt + 1,
+      },
+      logContext
+    ));
+  logRefusedChunks(
+    followUpQueued
+      ? outcome.failedChunks.filter((batch) => !batch.retryable)
+      : outcome.failedChunks,
+    logContext
+  );
 }
 
 /**
  * Reads the delivery receipts for tickets a `send` job collected and disables
  * every device a receipt reports as unregistered: the body of a `receipts` job.
  * A device seen after `sentAt` has registered again since, so it is left
- * alone. Safe to repeat.
+ * alone. Tickets Expo has no receipt for yet are checked again later (see
+ * {@link MAX_RECEIPT_RECHECKS}); once the re-checks run out, how many are
+ * left is logged. Safe to repeat.
  *
- * @param tickets - The accepted tickets and the device each was for
- * @param sentAt - When the send that produced the tickets started
+ * @param job - The receipts job `deliverPush` or an earlier check queued
  * @throws {ShelfError} When Expo rejects the request, so pg-boss retries
+ * @throws When queueing the next check fails, so pg-boss retries
  */
-export async function checkPushReceipts(
-  tickets: PushTicketRef[],
-  sentAt: Date
-): Promise<void> {
+export async function checkPushReceipts({
+  tickets,
+  sentAt,
+  recheck = 0,
+}: PushReceiptsJob): Promise<void> {
+  const sendStart = new Date(sentAt);
   const receipts = await getPushReceipts(
     tickets.map(({ ticketId }) => ticketId)
   );
-  const failures = tickets.flatMap(({ ticketId, token }) => {
-    const receipt = receipts[ticketId];
-    return receipt?.status === "error" ? [{ token, error: receipt }] : [];
-  });
-  await handleDeliveryFailures(failures, "receipt", sentAt);
+
+  const failures: DeliveryFailure[] = [];
+  const pending: PushTicketRef[] = [];
+  for (const ticket of tickets) {
+    const receipt = receipts[ticket.ticketId];
+    if (!receipt) {
+      pending.push(ticket);
+    } else if (receipt.status === "error") {
+      failures.push({ token: ticket.token, error: receipt });
+    }
+  }
+  await handleDeliveryFailures(failures, "receipt", sendStart);
+  if (pending.length === 0) return;
+
+  const age = Date.now() - sendStart.getTime();
+  if (recheck >= MAX_RECEIPT_RECHECKS || age >= RECEIPT_RECHECK_WINDOW_MS) {
+    Logger.warn(
+      new ShelfError({
+        cause: null,
+        message: `Expo produced no receipt for ${pending.length} push notification(s).`,
+        additionalData: { count: pending.length, checks: recheck + 1 },
+        label: "Push",
+        shouldBeCaptured: false,
+      })
+    );
+    return;
+  }
+
+  const nextCheck: PushJob = {
+    kind: "receipts",
+    tickets: pending,
+    sentAt,
+    recheck: recheck + 1,
+  };
+  await scheduler.sendAfter(
+    QueueNames.pushQueue,
+    nextCheck,
+    RECEIPTS_JOB_OPTIONS,
+    new Date(Date.now() + RECEIPTS_DELAY_MS)
+  );
 }
 
 /** A device registration as the companion app sends it. */
@@ -458,7 +561,10 @@ export async function disablePushTokens(
   });
 }
 
-/** Sends `message` to each token and pairs every ticket with its token. */
+/**
+ * Sends `message` to each token and pairs every ticket, and every refused
+ * batch, with its tokens.
+ */
 async function sendToDevices(
   tokens: string[],
   message: PushMessage
@@ -471,8 +577,57 @@ async function sendToDevices(
       token: tokens[index],
       ticket,
     })),
-    failedChunks,
+    failedChunks: failedChunks.map((chunk) => ({
+      ...chunk,
+      tokens: tokens.slice(
+        chunk.firstIndex,
+        chunk.firstIndex + chunk.messageCount
+      ),
+    })),
   };
+}
+
+/**
+ * Queues a follow-up send of `message` to the given devices, a minute from
+ * now. A queue failure is logged, not thrown: pg-boss would then run the
+ * whole send again and resend the batches Expo already took.
+ *
+ * @returns Whether the follow-up was queued
+ */
+async function queueFollowUp(
+  message: PushMessage,
+  followUp: PushFollowUp,
+  logContext: SendLogContext
+): Promise<boolean> {
+  const job: PushJob = { kind: "send", message, followUp };
+  try {
+    await scheduler.sendAfter(
+      QueueNames.pushQueue,
+      job,
+      SEND_JOB_OPTIONS,
+      new Date(Date.now() + FOLLOW_UP_DELAY_MS)
+    );
+    Logger.info("push.send follow-up queued", {
+      ...logContext,
+      attempt: followUp.attempt,
+      devices: followUp.tokens.length,
+    });
+    return true;
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Queueing another try for refused push notifications failed.",
+        additionalData: {
+          ...logContext,
+          attempt: followUp.attempt,
+          devices: followUp.tokens.length,
+        },
+        label: "Push",
+      })
+    );
+    return false;
+  }
 }
 
 /**
@@ -560,7 +715,7 @@ function toExpoMessage(token: string, message: PushMessage): DeviceMessage {
 
 /**
  * Logs the batches Expo refused, once per HTTP status, with how many batches
- * and messages each status covered.
+ * and messages each status covered. The first batch's error is the cause.
  */
 function logRefusedChunks(
   failedChunks: FailedPushChunk[],
@@ -577,7 +732,7 @@ function logRefusedChunks(
   for (const [statusCode, chunks] of byStatus) {
     Logger.error(
       new ShelfError({
-        cause: null,
+        cause: chunks[0].error,
         message: "The Expo push service refused push notification requests.",
         additionalData: {
           ...logContext,

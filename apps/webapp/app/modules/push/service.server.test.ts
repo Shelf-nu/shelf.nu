@@ -27,7 +27,8 @@ import {
   sendPush,
   unregisterPushToken,
 } from "./service.server";
-import type { PushJob, PushMessage } from "./types";
+import { isSafePushUrl } from "./types";
+import type { PushJob, PushMessage, PushSendJob } from "./types";
 
 // @vitest-environment node
 
@@ -74,7 +75,7 @@ async function sendAndDeliver(overrides: Partial<PushMessage> = {}) {
   await sendPush(message(overrides));
   const job = vi.mocked(scheduler.send).mock.calls[0][1] as PushJob;
   if (job.kind !== "send") throw new Error("expected a send job");
-  await deliverPush(job.message);
+  await deliverPush(job);
 }
 
 /** Every message handed to Expo, across all requests, in send order. */
@@ -96,16 +97,6 @@ function expoError(fields: {
   details?: unknown;
 }) {
   return Object.assign(new Error("Expo refused the request"), fields);
-}
-
-/** The rejection `promise` settles with; fails when it resolves instead. */
-async function rejectionOf(promise: Promise<unknown>): Promise<unknown> {
-  try {
-    await promise;
-  } catch (error) {
-    return error;
-  }
-  throw new Error("expected a rejection");
 }
 
 /**
@@ -131,13 +122,39 @@ function disabledTokens(): string[] {
 
 /** Gives user-1 `count` live devices, `ExponentPushToken[device-<i>]`. */
 function seedDevices(count: number) {
-  for (let index = 0; index < count; index++) {
-    seedPushToken({
-      token: `ExponentPushToken[device-${index}]`,
-      userId: "user-1",
-    });
+  for (const token of deviceTokens(0, count)) {
+    seedPushToken({ token, userId: "user-1" });
   }
 }
+
+/** The tokens of devices `from` up to, not including, `to`, as seeded. */
+function deviceTokens(from: number, to: number): string[] {
+  return Array.from(
+    { length: to - from },
+    (_, offset) => `ExponentPushToken[device-${from + offset}]`
+  );
+}
+
+/** The tokens of each request handed to Expo, in send order. */
+function requestTokens(): string[][] {
+  return expoSend.mock.calls.map(([chunk]) => chunk.flatMap(({ to }) => to));
+}
+
+/** Every send job queued to run later, in the order queued. */
+function queuedFollowUps(): PushSendJob[] {
+  return vi.mocked(scheduler.sendAfter).mock.calls.flatMap(([, data]) => {
+    const job = data as PushJob;
+    return job.kind === "send" ? [job] : [];
+  });
+}
+
+/** The send job options every push send is queued with. */
+const SEND_JOB_OPTIONS = {
+  retryLimit: 2,
+  retryDelay: 60,
+  expireInMinutes: 5,
+  retentionMinutes: 60,
+};
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -315,13 +332,28 @@ describe("sendPush", () => {
     expect(scheduler.send).toHaveBeenCalledWith(
       "push-queue",
       { kind: "send", message: message({ userIds: ["user-1", "user-2"] }) },
-      {
-        retryLimit: 2,
-        retryDelay: 60,
-        expireInMinutes: 5,
-        retentionMinutes: 60,
-      }
+      SEND_JOB_OPTIONS
     );
+  });
+
+  it("drops and logs a push whose url leaves the app, and still resolves", async () => {
+    await expect(
+      sendPush(message({ url: "https://evil.example/bookings" }))
+    ).resolves.toBeUndefined();
+
+    expect(scheduler.send).not.toHaveBeenCalled();
+    expect(vi.mocked(Logger.error).mock.calls).toEqual([
+      [
+        expect.objectContaining({
+          label: "Push",
+          additionalData: expect.objectContaining({
+            url: "https://evil.example/bookings",
+            organizationId: "org-paid",
+            category: "bookings",
+          }),
+        }),
+      ],
+    ]);
   });
 
   it("queues nothing when there is no one to notify", async () => {
@@ -336,6 +368,22 @@ describe("sendPush", () => {
     await expect(sendPush(message())).resolves.toBeUndefined();
 
     expect(Logger.error).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("isSafePushUrl", () => {
+  it.each([
+    ["/bookings/abc?orgId=x", true],
+    ["/audits/audit-1/overview?orgId=org-paid", true],
+    ["https://evil.example", false],
+    ["//evil.example", false],
+    ["/\\evil", false],
+    ["/\t/evil.example", false],
+    ["javascript:alert(1)", false],
+    ["bookings/abc", false],
+    ["", false],
+  ])("judges %j safe: %s", (url, safe) => {
+    expect(isSafePushUrl(url)).toBe(safe);
   });
 });
 
@@ -502,34 +550,123 @@ describe("deliverPush", () => {
     );
   });
 
-  it("keeps the first chunk's tickets when Expo answers the second with a 500, and completes", async () => {
+  it("keeps the first chunk's tickets and tries again a minute later for only the second chunk when Expo answers it with a 503", async () => {
     seedDevices(150);
     expoSend
       .mockImplementationOnce(acceptChunk)
-      .mockRejectedValueOnce(expoError({ statusCode: 500 }));
+      .mockRejectedValueOnce(expoError({ statusCode: 503 }));
 
     await expect(sendAndDeliver()).resolves.toBeUndefined();
 
-    const [, receiptsJob, , runAt] = vi.mocked(scheduler.sendAfter).mock
-      .calls[0];
-    expect(runAt).toEqual(new Date(NOW.getTime() + 15 * 60_000));
-    expect(receiptsJob).toEqual({
-      kind: "receipts",
-      tickets: Array.from({ length: 100 }, (_, index) => ({
-        ticketId: `ticket-ExponentPushToken[device-${index}]`,
-        token: `ExponentPushToken[device-${index}]`,
-      })),
-      sentAt: NOW.toISOString(),
-    });
+    expect(vi.mocked(scheduler.sendAfter).mock.calls).toEqual([
+      [
+        "push-queue",
+        {
+          kind: "receipts",
+          tickets: deviceTokens(0, 100).map((token) => ({
+            ticketId: `ticket-${token}`,
+            token,
+          })),
+          sentAt: NOW.toISOString(),
+        },
+        { retryLimit: 2, retryDelay: 60, expireInMinutes: 2 },
+        new Date(NOW.getTime() + 15 * 60_000),
+      ],
+      [
+        "push-queue",
+        {
+          kind: "send",
+          message: message(),
+          followUp: { tokens: deviceTokens(100, 150), attempt: 1 },
+        },
+        SEND_JOB_OPTIONS,
+        new Date(NOW.getTime() + 60_000),
+      ],
+    ]);
+    expect(Logger.error).not.toHaveBeenCalled();
+
+    expoSend.mockClear();
+    await deliverPush(queuedFollowUps()[0]);
+
+    expect(requestTokens()).toEqual([deviceTokens(100, 150)]);
+  });
+
+  it("tries a refused chunk again at most twice, then logs the refusal once per status code", async () => {
+    seedDevices(150);
+    expoSend
+      .mockImplementationOnce(acceptChunk)
+      .mockRejectedValue(expoError({ statusCode: 503 }));
+
+    await sendAndDeliver();
+    await deliverPush(queuedFollowUps()[0]);
+    await expect(deliverPush(queuedFollowUps()[1])).resolves.toBeUndefined();
+
+    expect(queuedFollowUps().map(({ followUp }) => followUp)).toEqual([
+      { tokens: deviceTokens(100, 150), attempt: 1 },
+      { tokens: deviceTokens(100, 150), attempt: 2 },
+    ]);
+    expect(requestTokens()).toEqual([
+      deviceTokens(0, 100),
+      deviceTokens(100, 150),
+      deviceTokens(100, 150),
+      deviceTokens(100, 150),
+    ]);
     expect(vi.mocked(Logger.error).mock.calls).toEqual([
       [
         expect.objectContaining({
           label: "Push",
           additionalData: expect.objectContaining({
-            statusCode: 500,
+            statusCode: 503,
             chunkCount: 1,
             messageCount: 50,
           }),
+        }),
+      ],
+    ]);
+  });
+
+  it("sends a follow-up only to listed devices that are still live and still belong to a recipient", async () => {
+    const disabledToken = "ExponentPushToken[disabled]";
+    seedPushToken({ token: LIVE_TOKEN, userId: "user-1" });
+    seedPushToken({ token: OTHER_TOKEN, userId: "user-9" });
+    seedPushToken({
+      token: disabledToken,
+      userId: "user-1",
+      disabledAt: new Date("2026-10-21T11:59:30.000Z"),
+    });
+    seedPushToken({ token: "ExponentPushToken[unlisted]", userId: "user-1" });
+
+    await deliverPush({
+      kind: "send",
+      message: message(),
+      followUp: {
+        tokens: [LIVE_TOKEN, OTHER_TOKEN, disabledToken],
+        attempt: 1,
+      },
+    });
+
+    expect(requestTokens()).toEqual([[LIVE_TOKEN]]);
+  });
+
+  it("logs the refusal when queueing another try fails, and still resolves", async () => {
+    seedPushToken({ token: LIVE_TOKEN, userId: "user-1" });
+    expoSend.mockRejectedValueOnce(expoError({ statusCode: 503 }));
+    vi.mocked(scheduler.sendAfter).mockRejectedValueOnce(
+      new Error("queue down")
+    );
+
+    await expect(sendAndDeliver()).resolves.toBeUndefined();
+
+    expect(vi.mocked(Logger.error).mock.calls).toEqual([
+      [
+        expect.objectContaining({
+          message:
+            "Queueing another try for refused push notifications failed.",
+        }),
+      ],
+      [
+        expect.objectContaining({
+          additionalData: expect.objectContaining({ statusCode: 503 }),
         }),
       ],
     ]);
@@ -569,51 +706,68 @@ describe("deliverPush", () => {
     expect(disabledTokens()).toEqual(["ExponentPushToken[device-120]"]);
   });
 
-  it("rejects so the job retries when Expo answers every chunk with a 500", async () => {
+  it("tries every device again, and completes, when Expo answers every chunk with a 500", async () => {
     seedDevices(150);
     expoSend.mockRejectedValue(expoError({ statusCode: 500 }));
 
-    await expect(sendAndDeliver()).rejects.toThrow(
-      "The Expo push service refused every push notification request."
-    );
-    expect(scheduler.sendAfter).not.toHaveBeenCalled();
+    await expect(sendAndDeliver()).resolves.toBeUndefined();
+
+    expect(
+      vi.mocked(scheduler.sendAfter).mock.calls.map(([, job]) => job)
+    ).toEqual([
+      {
+        kind: "send",
+        message: message(),
+        followUp: { tokens: deviceTokens(0, 150), attempt: 1 },
+      },
+    ]);
   });
 
-  it("rejects with the refusal worth retrying as its cause when Expo refuses every chunk", async () => {
+  it("never tries again for a chunk Expo refused with a 400", async () => {
     seedDevices(150);
     expoSend
       .mockRejectedValueOnce(expoError({ statusCode: 400 }))
       .mockRejectedValueOnce(expoError({ statusCode: 503 }));
 
-    const thrown = await rejectionOf(sendAndDeliver());
+    await expect(sendAndDeliver()).resolves.toBeUndefined();
 
-    expect(thrown).toMatchObject({
-      message: "The Expo push service refused every push notification request.",
-      cause: {
-        additionalData: expect.objectContaining({
-          statusCode: 503,
-          chunkIndex: 1,
-        }),
+    expect(queuedFollowUps()).toEqual([
+      {
+        kind: "send",
+        message: message(),
+        followUp: { tokens: deviceTokens(100, 150), attempt: 1 },
       },
-    });
+    ]);
+    expect(vi.mocked(Logger.error).mock.calls).toEqual([
+      [
+        expect.objectContaining({
+          additionalData: expect.objectContaining({
+            statusCode: 400,
+            chunkCount: 1,
+            messageCount: 100,
+          }),
+        }),
+      ],
+    ]);
   });
 
-  it("rejects with a cause chain that names no device token", async () => {
+  it("logs a refusal with a cause chain that names no device token", async () => {
     seedPushToken({ token: LIVE_TOKEN, userId: "user-1" });
     expoSend.mockRejectedValueOnce(
       expoError({
-        statusCode: 500,
-        code: "INTERNAL_SERVER_ERROR",
+        statusCode: 400,
+        code: "VALIDATION_ERROR",
         details: { "@shelfassetmanagement/shelf-companion": [LIVE_TOKEN] },
       })
     );
 
-    const chain = causeChain(await rejectionOf(sendAndDeliver()));
+    await sendAndDeliver();
 
+    const chain = causeChain(vi.mocked(Logger.error).mock.calls[0][0]);
     expect(chain.at(-1)).toMatchObject({
       message: "Expo refused the request",
-      statusCode: 500,
-      code: "INTERNAL_SERVER_ERROR",
+      statusCode: 400,
+      code: "VALIDATION_ERROR",
     });
     expect(JSON.stringify(chain)).not.toContain(LIVE_TOKEN);
   });
@@ -624,6 +778,7 @@ describe("deliverPush", () => {
 
     await expect(sendAndDeliver()).resolves.toBeUndefined();
 
+    expect(scheduler.sendAfter).not.toHaveBeenCalled();
     expect(vi.mocked(Logger.error).mock.calls).toEqual([
       [
         expect.objectContaining({

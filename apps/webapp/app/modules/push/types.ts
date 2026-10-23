@@ -7,7 +7,8 @@
  * Adding a category means adding it here, adding the column, and the type
  * checker then points at every switch that needs a row for it.
  *
- * No server imports, so client components can read the category list.
+ * No server imports, so client code can read the category list and check a
+ * push url with {@link isSafePushUrl}.
  *
  * @see {@link file://./service.server.ts} sendPush and the send pipeline
  * @see {@link file://./preferences.server.ts} reading and writing the switches
@@ -62,9 +63,35 @@ export type PushMessage = {
   category: PushCategory;
   title: string;
   body: string;
-  /** The web path the companion opens on tap, e.g. `/bookings/abc?orgId=xyz`. */
+  /**
+   * The web path the companion opens on tap, e.g. `/bookings/abc?orgId=xyz`.
+   * `sendPush` drops a message whose url fails {@link isSafePushUrl}.
+   */
   url: string;
 };
+
+/** The origin relative push urls are resolved against to check them. */
+const PUSH_URL_BASE = "https://push-url.invalid";
+
+/**
+ * Whether `url` is a path on the app, safe to hand the companion as a tap
+ * target. It must start with a single `/` and hold no backslash, whitespace
+ * or control character: URL parsers read `\` as `/` and drop tabs and
+ * newlines, which turns `/\evil` or `/<tab>/evil` into the protocol-relative
+ * `//evil`. Resolving it must also stay on the origin it is resolved against,
+ * which rules out every absolute and protocol-relative form.
+ *
+ * @param url - The url of a {@link PushMessage}
+ * @returns Whether `sendPush` may send a message with this url
+ */
+export function isSafePushUrl(url: string): boolean {
+  if (!url.startsWith("/") || /[\\\s\p{Cc}]/u.test(url)) return false;
+  try {
+    return new URL(url, PUSH_URL_BASE).origin === PUSH_URL_BASE;
+  } catch {
+    return false;
+  }
+}
 
 /** A ticket Expo accepted, kept so its receipt can be matched to its device. */
 export type PushTicketRef = {
@@ -73,12 +100,38 @@ export type PushTicketRef = {
 };
 
 /**
- * A job on the push queue. `send` delivers one {@link PushMessage}; `receipts`
- * checks, later, how Expo's delivery to the platforms went for the tickets a
- * send produced. `sentAt` is when that send started, as an ISO timestamp
- * because job data travels as JSON: a device seen after it has registered
- * again, so a receipt about the earlier message must not disable it.
+ * Another try at a send, for the devices whose batches Expo refused with an
+ * error that can clear by itself. `attempt` counts tries after the first,
+ * from 1.
  */
-export type PushJob =
-  | { kind: "send"; message: PushMessage }
-  | { kind: "receipts"; tickets: PushTicketRef[]; sentAt: string };
+export type PushFollowUp = { tokens: string[]; attempt: number };
+
+/**
+ * A job that delivers one {@link PushMessage}. With `followUp`, it sends only
+ * to the listed devices.
+ */
+export type PushSendJob = {
+  kind: "send";
+  message: PushMessage;
+  followUp?: PushFollowUp;
+};
+
+/**
+ * A job that checks, later, how Expo's delivery to the platforms went for the
+ * tickets a send produced. `sentAt` is when that send started, as an ISO
+ * timestamp because job data travels as JSON: a device seen after it has
+ * registered again, so a receipt about the earlier message must not disable it.
+ */
+export type PushReceiptsJob = {
+  kind: "receipts";
+  tickets: PushTicketRef[];
+  sentAt: string;
+  /**
+   * Which re-check this is, from 1, for tickets an earlier check found no
+   * receipt for yet. Absent on the first check.
+   */
+  recheck?: number;
+};
+
+/** A job on the push queue. */
+export type PushJob = PushSendJob | PushReceiptsJob;

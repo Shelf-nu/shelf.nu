@@ -62,6 +62,8 @@ export type IndexedPushTicket = { index: number; ticket: ExpoPushTicket };
 export type FailedPushChunk = {
   /** Position of the batch in send order. */
   index: number;
+  /** Index of the batch's first message in the messages sent. */
+  firstIndex: number;
   messageCount: number;
   /**
    * The HTTP status of the refusal; `undefined` when no response arrived, or
@@ -207,6 +209,7 @@ export async function sendPushMessages(
       const code = codeOf(cause);
       result.failedChunks.push({
         index: chunkIndex,
+        firstIndex,
         messageCount: chunk.length,
         statusCode,
         code,
