@@ -103,25 +103,31 @@ account JSON there too if it ever lands in the tree.
 
 ## 3. `google-services.json`
 
-The Android app registers with FCM through this file. It is committed at
-`apps/companion/google-services.json` and `app.json` points
-`expo.android.googleServicesFile` at it.
+The Android app registers with FCM through this file, downloaded from the
+Firebase project `shelf-companion` (Project settings, Your apps, the Android
+app). It carries a Firebase client API key. Firebase treats that key as public
+(it ships inside every Android build), but the repository is public and
+GitHub's secret scanner flags any Google key it sees, so the file is not
+committed:
 
-The file carries the Firebase project id and number, the package name, and a
-Firebase client API key. That key is not a secret in the usual sense: it ships
-inside every Android build and only identifies the project to Google; Expo's
-own guidance is to commit the file. What protects the project is the key's
-restrictions and the absence of other Firebase products, so keep both true:
+- `app.config.js` reads `GOOGLE_SERVICES_JSON`, an EAS **file** environment
+  variable, and falls back to `apps/companion/google-services.json`, which
+  `.gitignore` excludes.
+- Upload or replace the EAS copy with
+  `eas env:create --scope project --name GOOGLE_SERVICES_JSON --type file --visibility sensitive --environment production --value ./google-services.json`
+  (repeat for `preview` and `development`), or on expo.dev under Environment
+  variables.
+- For a local `expo run:android`, download the file into `apps/companion/`.
 
-- In Google Cloud, APIs and Services, Credentials, the key is restricted to
-  the Android app `com.shelf.companion` and to the Firebase Installations and
-  Firebase Cloud Messaging APIs. Nothing else can be called with it.
-- The `shelf-companion` Firebase project runs only Cloud Messaging. Do not
-  enable Storage, Firestore or Realtime Database on it; a separate project
-  with its own rules is the place for those.
-
-If the Firebase project is ever recreated, download the new file from Project
-settings, Your apps, the Android app, replace it, and restrict the new key.
+Keep the key restricted in Google Cloud (APIs and Services, Credentials, the
+Android key): Android apps only, package `com.shelf.companion` with the upload
+and Play signing SHA-1 fingerprints, and exactly two APIs, the Firebase
+Installations API (`firebaseinstallations.googleapis.com`) and the FCM
+Registration API (`fcmregistrations.googleapis.com`). Those are the only
+calls the app makes with this key; the server sends through the service
+account, not this key. The `shelf-companion` project runs Cloud
+Messaging alone; do not enable Storage, Firestore or Realtime Database on it.
+If the key is ever exposed, regenerate it there and re-download the file.
 
 ## 4. Enhanced push security
 
