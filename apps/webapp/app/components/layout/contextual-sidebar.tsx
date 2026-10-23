@@ -35,8 +35,11 @@ export default function ContextualSidebar({
   const handleOpenChange = useCallback(
     (nextOpen: boolean) => {
       if (nextOpen) return;
-      // Check if there's a nested dialog open before closing
-      const dialogBackdrops = document.querySelectorAll(".dialog-backdrop");
+      // Check if there's a nested dialog (or a full-size image preview) open
+      // before closing
+      const dialogBackdrops = document.querySelectorAll(
+        ".dialog-backdrop, [data-image-preview-backdrop]"
+      );
       // Check for Radix AlertDialog overlays that are actually visible
       const radixOverlays = document.querySelectorAll(
         '[data-radix-alert-dialog-overlay][data-state="open"]'

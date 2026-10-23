@@ -17,7 +17,6 @@ import {
   Modal,
 } from "react-native";
 import * as Haptics from "expo-haptics";
-import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter, Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { releaseCategory, isLowStock } from "@shelf/quantity-control";
@@ -68,6 +67,7 @@ import { ManagePlacementsSheet } from "@/components/manage-placements-sheet";
 import ConfirmDeleteSheet from "@/components/confirm-delete-sheet";
 import { AssetDetailSkeleton } from "@/components/skeleton-loader";
 import { AssetHeader } from "@/components/asset-detail/asset-header";
+import { FullScreenImageViewer } from "@/components/full-screen-image-viewer";
 import { QuickActions } from "@/components/asset-detail/quick-actions";
 import { NotesSection } from "@/components/asset-detail/notes-section";
 import { CodeSection } from "@/components/shared/code-section";
@@ -1215,31 +1215,12 @@ export default function AssetDetailScreen() {
         </TouchableOpacity>
       </Modal>
 
-      {/* ── Image Zoom Modal ──────────────────────────── */}
-      {asset.mainImage && (
-        <Modal
-          visible={showImageZoom}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setShowImageZoom(false)}
-        >
-          <View style={styles.zoomOverlay} accessibilityViewIsModal={true}>
-            <TouchableOpacity
-              style={styles.zoomCloseBtn}
-              onPress={() => setShowImageZoom(false)}
-              accessibilityLabel="Close image viewer"
-              accessibilityRole="button"
-            >
-              <Ionicons name="close" size={28} color="#fff" />
-            </TouchableOpacity>
-            <Image
-              source={{ uri: asset.mainImage }}
-              style={styles.zoomImage}
-              contentFit="contain"
-            />
-          </View>
-        </Modal>
-      )}
+      {/* ── Image Zoom ─────────────────────────────────── */}
+      <FullScreenImageViewer
+        uri={showImageZoom ? asset.mainImage ?? null : null}
+        onClose={() => setShowImageZoom(false)}
+        accessibilityLabel={`Image of ${asset.title}`}
+      />
 
       {/* ── Modals ────────────────────────────────────── */}
       {currentOrg && (
@@ -1701,30 +1682,4 @@ const useStyles = createStyles((colors, shadows) => ({
     borderColor: colors.border,
   },
   tagText: { fontSize: fontSize.sm, color: colors.gray700 },
-
-  // Image zoom modal
-  zoomOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.95)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  zoomCloseBtn: {
-    position: "absolute",
-    top: Platform.OS === "ios" ? 60 : 40,
-    right: 20,
-    zIndex: 10,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "rgba(255,255,255,0.2)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  // Sized against the full-screen overlay rather than a window size read when
-  // the styles are built, so the image follows a rotation or a window resize.
-  zoomImage: {
-    width: "100%",
-    height: "70%",
-  },
 }));

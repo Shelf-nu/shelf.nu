@@ -14,11 +14,18 @@ import {
 } from "~/utils/constants";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
+import type { TransformImage } from "~/utils/storage.server";
 import {
   getFileUploadPath,
   parseFileFormData,
   removePublicFile,
 } from "~/utils/storage.server";
+import {
+  isFreshCapture,
+  resolveCaptureStampLines,
+  stampCaptureTime,
+} from "./photo-stamp.server";
 
 const label: ErrorLabel = "Audit Image";
 
@@ -38,6 +45,10 @@ const MAX_GENERAL_IMAGES_PER_AUDIT = 5;
  * @param uploadedById - ID of the user uploading the image
  * @param auditAssetId - Optional ID of the audit asset this image is tied to
  * @param description - Optional description for the image
+ * @param capturedAt - When the client says the photo was taken (ISO string).
+ *   Sent only for a photo just taken with a camera. Within ten minutes of the
+ *   server's clock, the stored photo gets a capture stamp; otherwise, or when
+ *   absent, it is stored exactly as uploaded. See `photo-stamp.server.ts`.
  * @param returnParsedFormData - When `false` (default), returns only the
  *   created `AuditImage`. When `true`, returns `{ image, formData }` where
  *   `formData` is the already-bounded `FormData` produced by
@@ -55,6 +66,7 @@ export async function uploadAuditImage(args: {
   uploadedById: User["id"];
   auditAssetId?: AuditAsset["id"];
   description?: string;
+  capturedAt?: string | null;
   returnParsedFormData?: false;
 }): Promise<AuditImage>;
 export async function uploadAuditImage(args: {
@@ -64,6 +76,7 @@ export async function uploadAuditImage(args: {
   uploadedById: User["id"];
   auditAssetId?: AuditAsset["id"];
   description?: string;
+  capturedAt?: string | null;
   returnParsedFormData: true;
 }): Promise<{ image: AuditImage; formData: FormData }>;
 export async function uploadAuditImage({
@@ -73,6 +86,7 @@ export async function uploadAuditImage({
   uploadedById,
   auditAssetId,
   description,
+  capturedAt,
   returnParsedFormData = false,
 }: {
   request: Request;
@@ -81,8 +95,12 @@ export async function uploadAuditImage({
   uploadedById: User["id"];
   auditAssetId?: AuditAsset["id"];
   description?: string;
+  capturedAt?: string | null;
   returnParsedFormData?: boolean;
 }): Promise<AuditImage | { image: AuditImage; formData: FormData }> {
+  // The moment the stamp shows: the server's clock, never the client's.
+  const receivedAt = new Date();
+
   try {
     // Check image count limits before uploading
     await validateImageLimits({
@@ -90,6 +108,16 @@ export async function uploadAuditImage({
       auditAssetId,
       organizationId,
     });
+
+    const transformImage = isFreshCapture(capturedAt, receivedAt)
+      ? await captureStampTransform({
+          receivedAt,
+          auditSessionId,
+          auditAssetId,
+          organizationId,
+          uploadedById,
+        })
+      : undefined;
 
     // Parse and upload the file to Supabase storage
     const fileData = await parseFileFormData({
@@ -107,6 +135,7 @@ export async function uploadAuditImage({
       generateThumbnail: true,
       thumbnailSize: 108,
       maxFileSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
+      transformImage,
     });
 
     const image = fileData.get("image") as string | null;
@@ -175,6 +204,50 @@ export async function uploadAuditImage({
       label,
     });
   }
+}
+
+/**
+ * Builds the step that burns the capture stamp into a just-taken photo.
+ *
+ * A stamp is an addition to the evidence, never a condition for keeping it: if
+ * its lines cannot be built or the image cannot be stamped, the failure is
+ * reported and the photo is stored without a stamp.
+ *
+ * @returns The transform for `parseFileFormData`, or undefined when the stamp
+ *   lines could not be built
+ */
+async function captureStampTransform(
+  args: Parameters<typeof resolveCaptureStampLines>[0]
+): Promise<TransformImage | undefined> {
+  const reportStampFailure = (cause: unknown) =>
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Audit photo stored without its capture stamp",
+        additionalData: {
+          auditSessionId: args.auditSessionId,
+          auditAssetId: args.auditAssetId,
+        },
+        label,
+      })
+    );
+
+  let lines: string[];
+  try {
+    lines = await resolveCaptureStampLines(args);
+  } catch (cause) {
+    reportStampFailure(cause);
+    return undefined;
+  }
+
+  return async (image) => {
+    try {
+      return await stampCaptureTime(image, lines);
+    } catch (cause) {
+      reportStampFailure(cause);
+      return image;
+    }
+  };
 }
 
 /**
