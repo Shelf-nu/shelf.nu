@@ -353,6 +353,7 @@ export async function editAssetReminder({
         message: "Edit is not allowed for this reminder.",
         label: "Asset Reminder",
         additionalData: { id },
+        status: 400,
         shouldBeCaptured: false,
       });
     }

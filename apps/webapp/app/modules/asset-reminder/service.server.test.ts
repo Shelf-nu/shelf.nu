@@ -273,6 +273,22 @@ describe("editAssetReminder tier gate", () => {
     expect(scheduleAssetReminder).not.toHaveBeenCalled();
   }
 
+  it("refuses to edit a one-shot reminder that already fired, as a client error", async () => {
+    givenStoredRow({
+      ...ONE_SHOT_ROW,
+      alertDateTime: new Date("2020-01-01T09:00:00Z"),
+    });
+
+    const error = await editAssetReminder({
+      ...EDIT_ARGS,
+      recurrence: null,
+    }).catch((e) => e);
+
+    expect(error).toBeInstanceOf(ShelfError);
+    expect(error.status).toBe(400);
+    expect(db.assetReminder.update).not.toHaveBeenCalled();
+  });
+
   it("refuses to add recurrence to a one-shot reminder", async () => {
     givenStoredRow(ONE_SHOT_ROW);
 
