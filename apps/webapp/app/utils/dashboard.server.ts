@@ -6,6 +6,8 @@ import {
 import { db } from "~/database/db.server";
 import { defaultUserCategories } from "~/modules/user/service.server";
 import { ShelfError } from "./error";
+import type { ImportEligibilityArgs } from "./subscription.server";
+import { resolveCanImportAssetsOrFalse } from "./subscription.server";
 import type { UserNameFields } from "./user";
 
 // ---------------------------------------------------------------------------
@@ -276,4 +278,38 @@ export async function checklistOptions({
       label: "Dashboard",
     });
   }
+}
+
+/**
+ * Decides what the home page's onboarding checklist shows.
+ *
+ * The checklist is on screen until the member skips it or every item is done.
+ * It offers the spreadsheet import only while the workspace has no assets: once
+ * one exists, the member has already started, so the item is dropped rather
+ * than ticked. The import eligibility lookup runs only when the item could
+ * appear, and a failed lookup reads as "cannot import".
+ *
+ * @param args.checklistOptions - Every checklist item, `true` when done
+ * @param args.skipOnboardingChecklist - Whether the member skipped the checklist
+ * @param args.importEligibility - What `resolveCanImportAssetsOrFalse` needs
+ * @returns Whether the checklist shows, and whether it offers the import
+ */
+export async function resolveOnboardingChecklist({
+  checklistOptions,
+  skipOnboardingChecklist,
+  importEligibility,
+}: {
+  checklistOptions: Record<string, boolean> & { hasAssets: boolean };
+  skipOnboardingChecklist: boolean;
+  importEligibility: ImportEligibilityArgs;
+}): Promise<{ showsChecklist: boolean; canImportAssets: boolean }> {
+  const showsChecklist =
+    !skipOnboardingChecklist && !Object.values(checklistOptions).every(Boolean);
+
+  const offersImport = showsChecklist && !checklistOptions.hasAssets;
+  const canImportAssets = offersImport
+    ? await resolveCanImportAssetsOrFalse(importEligibility)
+    : false;
+
+  return { showsChecklist, canImportAssets };
 }

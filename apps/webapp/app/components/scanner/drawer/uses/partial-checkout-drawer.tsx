@@ -1477,6 +1477,10 @@ const CustomForm = ({
             }
             portalContainer={formElement || undefined}
             formId={PARTIAL_CHECKOUT_FORM_ID}
+            // The drawer lists what goes out, so it is the confirmation step.
+            // It renders CheckoutDialog only for early check-outs, so this
+            // guards a plain one from asking a second time.
+            confirm={false}
             // CheckoutDialog's trigger defaults to `grow` (designed for the
             // full-width booking-header bar). Inside this drawer footer the
             // sibling Cancel is `w-auto`, so the default grow makes the
