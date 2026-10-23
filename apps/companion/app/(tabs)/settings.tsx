@@ -5,6 +5,7 @@ import {
   TouchableOpacity,
   Alert,
   ScrollView,
+  Share,
   Switch,
 } from "react-native";
 import * as Haptics from "expo-haptics";
@@ -35,6 +36,7 @@ import {
 } from "@/lib/server";
 import ConnectServerSheet from "@/components/connect-server-sheet";
 import { getApiBaseUrl } from "@/lib/api";
+import { getExpoPushToken } from "@/lib/push/token";
 
 const appVersion =
   Constants.expoConfig?.version ??
@@ -85,6 +87,23 @@ export default function SettingsScreen() {
    * Both of them end the current session — `setActiveServer` signs out and
    * clears server-scoped state — so each is confirmed before anything happens.
    */
+  /**
+   * Development-only. Hands this device's Expo push token to the share sheet
+   * so it can be pasted into the Expo push tool for an end-to-end delivery
+   * check before the in-app notification settings exist.
+   */
+  const handleShowPushToken = async () => {
+    try {
+      const token = await getExpoPushToken();
+      await Share.share({ message: token });
+    } catch (cause) {
+      Alert.alert(
+        "Push token unavailable",
+        cause instanceof Error ? cause.message : String(cause)
+      );
+    }
+  };
+
   const handleServerPress = () => {
     if (isSwitchingServer) return;
     const connectLabel = server.isCloud
@@ -417,6 +436,30 @@ export default function SettingsScreen() {
               />
             </View>
           </TouchableOpacity>
+          {__DEV__ ? (
+            <TouchableOpacity
+              testID="push-token-row"
+              style={styles.settingRow}
+              onPress={handleShowPushToken}
+              activeOpacity={0.7}
+              accessibilityLabel="Share this device's Expo push token"
+              accessibilityRole="button"
+            >
+              <View style={styles.settingLeft}>
+                <Ionicons
+                  name="notifications-outline"
+                  size={20}
+                  color={colors.foreground}
+                />
+                <Text style={styles.settingLabel}>Push token (dev)</Text>
+              </View>
+              <Ionicons
+                name="chevron-forward"
+                size={18}
+                color={colors.mutedLight}
+              />
+            </TouchableOpacity>
+          ) : null}
         </View>
       </View>
 
