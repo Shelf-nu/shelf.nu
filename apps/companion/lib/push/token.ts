@@ -2,7 +2,8 @@
  * Expo push token for this device.
  *
  * Thin wrapper around expo-notifications that yields the `ExponentPushToken[...]`
- * string the server stores and the Expo push service addresses. It owns the two
+ * string the Expo push service addresses. Nothing registers it with a server
+ * yet; the development-only Settings row shares it for an end-to-end check. It owns the two
  * preconditions of the token call: a notification channel on Android (Android 13
  * shows the permission prompt only once a channel exists, and
  * `getExpoPushTokenAsync` refuses to run without one) and a granted permission.

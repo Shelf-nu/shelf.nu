@@ -44,7 +44,9 @@ The iOS card for `com.shelf.companion` must list a Push Key.
 If the Apple login in the CLI keeps rejecting two-factor codes (an old
 `eas-cli` does), create the key by hand instead: developer.apple.com,
 Certificates, Identifiers and Profiles, Keys, +, tick Apple Push Notifications
-service, set the environment to Sandbox and Production, Register, Download.
+service, press Configure next to it and set the environment to Sandbox and
+Production (it cannot be changed after the key exists), Save, Continue,
+Register, then Download at once: Apple keeps no copy of the file.
 Then run `eas credentials --platform ios`, answer **n** to the Apple login,
 pick Push Notifications, "Add a new push key", **n** to generating one, and
 give the `.p8` path, the Key ID and the team id. Keep the `.p8` outside the
@@ -177,15 +179,27 @@ Xcode and EAS switch the value to `production` when archiving. The rules:
 
 2. In a development build, Settings, About, "Push token (dev)" shares the
    `ExponentPushToken[...]` string.
-3. Paste it into `https://expo.dev/notifications`, send, and watch the lock
-   screen with the app in the background.
+3. Send a test message to it. The Expo web tool at
+   `https://expo.dev/notifications` works for a quick look, but it does not show
+   the ticket id, so for the receipt check send with the API and read the id
+   from the response (`data.id`):
+
+   ```bash
+   curl -sS https://exp.host/--/api/v2/push/send \
+     -H "content-type: application/json" \
+     -d '{"to":"<ExponentPushToken>","title":"Shelf push test","body":"Hello"}'
+   ```
+
+   Watch the lock screen with the app in the background.
+
 4. Fetch the receipt about 15 minutes later to confirm APNs accepted it:
 
    ```bash
    curl -sS https://exp.host/--/api/v2/push/getReceipts \
      -H "content-type: application/json" \
-     -d '{"ids":["<ticket id from the tool>"]}'
+     -d '{"ids":["<ticket id from the send response>"]}'
    ```
 
-A `DeviceNotRegistered` receipt means the app was deleted or the token
-expired; the server disables such tokens on its own.
+A `DeviceNotRegistered` receipt means the device is no longer registered, for
+example after the app is uninstalled; the server disables such tokens on its
+own.

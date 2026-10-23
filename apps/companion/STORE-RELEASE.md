@@ -12,6 +12,9 @@ instead — this document is the binary.
 - Push credentials are in place on EAS (APNs key, FCM V1 service account) and
   `ios/Shelf/Shelf.entitlements` still carries `aps-environment`. See
   [PUSH-NOTIFICATIONS.md](./PUSH-NOTIFICATIONS.md).
+- `apps/companion/google-services.json` exists and `app.json` points
+  `expo.android.googleServicesFile` at it, or Android installs never register
+  for push.
 - Everything intended for this release is merged to `main`.
 - App Store Connect has screenshots for 13-inch iPad displays. The iOS build
   targets iPad as well as iPhone (`supportsTablet` in `app.json`), so App Store
