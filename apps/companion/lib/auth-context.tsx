@@ -8,7 +8,11 @@ import {
   type ReactNode,
 } from "react";
 import type { Session, User } from "@supabase/supabase-js";
-import { getServerVersion, subscribeToServerChange } from "./server";
+import {
+  getServerVersion,
+  runBeforeSessionEnd,
+  subscribeToServerChange,
+} from "./server";
 import { getSupabase } from "./supabase";
 
 type AuthState = {
@@ -93,9 +97,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Signing out deliberately KEEPS the active server: the user almost always
   // signs back into the same instance, and re-entering the domain every time
-  // would be busywork. Returning to Shelf Cloud is an explicit action —
+  // would be busywork. Returning to Shelf Cloud is an explicit action,
   // `disconnectFromServer`, surfaced on the login screen and in Settings.
+  //
+  // The before-session-end tasks run first, while the token still works: they
+  // forget this device for push, so a shared phone stops receiving the
+  // previous person's notifications.
   const signOut = useCallback(async () => {
+    await runBeforeSessionEnd();
     await getSupabase().auth.signOut();
   }, []);
 
