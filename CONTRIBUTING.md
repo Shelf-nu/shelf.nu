@@ -3,7 +3,7 @@
 We really appreciate your interest to contribute to Shelf! Any kind of contribution is highly appreciated, not only coding ☺️.
 Wondering what is up for grabs? Check out those issues: https://github.com/Shelf-nu/shelf.nu/labels/Open%20for%20contibutions
 
-**Prerequisites:** Node 22.20.0 (or newer) and pnpm installed on your computer.
+**Prerequisites:** Node 24.22.1 (or newer) and pnpm installed on your computer.
 
 1. Fork this [repository](https://github.com/Shelf-nu/shelf.nu) and clone your fork.
 2. Follow the [Get started guide](https://docs.shelf.nu/local-development) to setup your local repository.
