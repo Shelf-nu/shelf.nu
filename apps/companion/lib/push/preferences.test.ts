@@ -11,11 +11,14 @@ import { test } from "node:test";
 
 import {
   derivePushScreenState,
+  flipPreference,
   INITIAL_PUSH_SETTINGS,
   notificationsRowValue,
   pushSettingsReducer,
+  settlePreferenceSave,
   toPushPermission,
   type NotificationPreferences,
+  type PreferenceSaveStep,
   type PushDeviceState,
   type PushSettingsAction,
   type PushSettingsModel,
@@ -64,6 +67,19 @@ const loaded = (
   preferences: overrides.preferences ?? ALL_ON,
   pushAvailable: overrides.pushAvailable ?? true,
 });
+
+/** The switches a step sends; fails the test when it sends none. */
+function sent(step: PreferenceSaveStep): Partial<NotificationPreferences> {
+  assert.ok(step.send, "the step sends a PUT");
+  return step.send;
+}
+
+/** The switches the Notifications screen shows for a model. */
+function shown(model: PushSettingsModel): NotificationPreferences {
+  const state = derivePushScreenState(model);
+  assert.equal(state.kind, "ready");
+  return state.preferences;
+}
 
 test("the screen loads until both the phone and the server have answered", () => {
   assert.deepEqual(derivePushScreenState(after()), { kind: "loading" });
@@ -190,64 +206,150 @@ test("an older read that answers after a newer one is dropped", () => {
 });
 
 test("a read that started before a switch flipped does not flip it back", () => {
-  const model = after(
-    requested(1),
-    loaded(1),
-    device(),
-    requested(2),
-    { type: "preference-set", request: 3, key: "audits", value: false },
-    loaded(2)
-  );
-  assert.deepEqual(derivePushScreenState(model), {
-    kind: "ready",
-    preferences: { ...ALL_ON, audits: false },
-    registration: "registered",
+  const reading = after(requested(1), loaded(1), device(), requested(2));
+  const { model } = flipPreference(reading, {
+    request: 3,
+    key: "audits",
+    value: false,
   });
+  assert.deepEqual(shown(pushSettingsReducer(model, loaded(2))), {
+    ...ALL_ON,
+    audits: false,
+  });
+});
+
+test("a flip shows at once and its PUT carries only that switch", () => {
+  const step = flipPreference(after(requested(1), loaded(1), device()), {
+    request: 2,
+    key: "audits",
+    value: false,
+  });
+  assert.deepEqual(step.send, { audits: false });
+  assert.deepEqual(shown(step.model), { ...ALL_ON, audits: false });
 });
 
 test("a saved switch takes the server's answer for every switch", () => {
-  const model = after(
-    requested(1),
-    loaded(1),
-    device(),
-    { type: "preference-set", request: 2, key: "audits", value: false },
-    {
-      type: "server-loaded",
-      request: 2,
-      preferences: { ...ALL_ON, audits: false, bookings: false },
-      pushAvailable: null,
-    }
-  );
-  assert.deepEqual(derivePushScreenState(model), {
-    kind: "ready",
-    preferences: { ...ALL_ON, audits: false, bookings: false },
-    registration: "registered",
+  const flipped = flipPreference(after(requested(1), loaded(1), device()), {
+    request: 2,
+    key: "audits",
+    value: false,
+  });
+  const saved = settlePreferenceSave(flipped.model, {
+    ...ALL_ON,
+    audits: false,
+    bookings: false,
+  });
+  assert.equal(saved.send, null);
+  assert.deepEqual(shown(saved.model), {
+    ...ALL_ON,
+    audits: false,
+    bookings: false,
   });
 });
 
-test("a failed save puts back the value the switch had before", () => {
-  const model = after(
-    requested(1),
-    loaded(1, { preferences: { ...ALL_ON, audits: false } }),
-    device(),
-    { type: "preference-set", request: 2, key: "audits", value: true },
-    { type: "preference-save-failed", key: "audits", previous: false }
-  );
-  assert.deepEqual(derivePushScreenState(model), {
-    kind: "ready",
-    preferences: { ...ALL_ON, audits: false },
-    registration: "registered",
+test("three quick flips send two PUTs, one at a time, and the last flip is the last write", () => {
+  // The server applies each PUT it receives and answers with every switch.
+  let server: NotificationPreferences = { ...ALL_ON };
+  const puts: Partial<NotificationPreferences>[] = [];
+  const serve = (changes: Partial<NotificationPreferences>) => {
+    puts.push(changes);
+    server = { ...server, ...changes };
+    return server;
+  };
+
+  const first = flipPreference(after(requested(1), loaded(1), device()), {
+    request: 2,
+    key: "audits",
+    value: false,
   });
+  const second = flipPreference(first.model, {
+    request: 3,
+    key: "audits",
+    value: true,
+  });
+  const third = flipPreference(second.model, {
+    request: 4,
+    key: "audits",
+    value: false,
+  });
+  assert.equal(second.send, null, "no second PUT while the first is out");
+  assert.equal(third.send, null, "no second PUT while the first is out");
+
+  const firstSaved = settlePreferenceSave(third.model, serve(sent(first)));
+  const secondSaved = settlePreferenceSave(
+    firstSaved.model,
+    serve(sent(firstSaved))
+  );
+
+  assert.equal(secondSaved.send, null);
+  assert.deepEqual(puts, [{ audits: false }, { audits: false }]);
+  assert.equal(server.audits, false);
+  assert.deepEqual(shown(secondSaved.model), { ...ALL_ON, audits: false });
+});
+
+test("an earlier PUT's answer never overwrites a later flip", () => {
+  const first = flipPreference(after(requested(1), loaded(1), device()), {
+    request: 2,
+    key: "audits",
+    value: false,
+  });
+  const second = flipPreference(first.model, {
+    request: 3,
+    key: "bookings",
+    value: false,
+  });
+  const third = flipPreference(second.model, {
+    request: 4,
+    key: "audits",
+    value: true,
+  });
+
+  const firstSaved = settlePreferenceSave(third.model, {
+    ...ALL_ON,
+    audits: false,
+  });
+  assert.deepEqual(shown(firstSaved.model), { ...ALL_ON, bookings: false });
+  assert.deepEqual(firstSaved.send, { bookings: false, audits: true });
+});
+
+test("a failed save shows the server's value again", () => {
+  const flipped = flipPreference(
+    after(
+      requested(1),
+      loaded(1, { preferences: { ...ALL_ON, audits: false } }),
+      device()
+    ),
+    { request: 2, key: "audits", value: true }
+  );
+  const failed = settlePreferenceSave(flipped.model, null);
+  assert.equal(failed.send, null);
+  assert.deepEqual(shown(failed.model), { ...ALL_ON, audits: false });
+});
+
+test("a failed save keeps a flip made after it, and sends that flip next", () => {
+  const first = flipPreference(after(requested(1), loaded(1), device()), {
+    request: 2,
+    key: "audits",
+    value: false,
+  });
+  const second = flipPreference(first.model, {
+    request: 3,
+    key: "bookings",
+    value: false,
+  });
+  const failed = settlePreferenceSave(second.model, null);
+  assert.deepEqual(failed.send, { bookings: false });
+  assert.deepEqual(shown(failed.model), { ...ALL_ON, bookings: false });
 });
 
 test("flipping a switch before the server answers changes nothing", () => {
-  const model = after({
-    type: "preference-set",
+  const step = flipPreference(INITIAL_PUSH_SETTINGS, {
     request: 1,
     key: "bookings",
     value: false,
   });
-  assert.deepEqual(model, INITIAL_PUSH_SETTINGS);
+  assert.equal(step.send, null);
+  assert.deepEqual(step.model, INITIAL_PUSH_SETTINGS);
 });
 
 test("the Settings row says On only for a phone registered for this person and server", () => {

@@ -9,13 +9,15 @@
  * a failure waits out a growing interval first. Background runs happen only
  * once the person opted in on this phone. Runs queue behind each other.
  *
- * Sign-out never waits for that queue. It aborts the run in flight, so a run
- * that has not sent its POST never will, and sends the DELETE at once with
- * the session that is about to end. Only a POST already on the wire is waited
- * for, so the DELETE cannot overtake it. The record is removed once the
- * server acknowledges the DELETE; a failed DELETE keeps it, so the stored
- * registration still says which token the server holds. The session that
- * signed out is never registered again.
+ * Sign-out never waits for that queue. It aborts the run in flight, its POST
+ * included, so no POST outlives sign-out, and sends the DELETE with the
+ * session that is about to end. The DELETE names the stored token and the
+ * token the aborted POST carried, since the server may have applied that POST
+ * before the abort reached it, and leaves once the POST has settled, which the
+ * abort makes immediate. The record is removed once the server acknowledges
+ * the DELETE; a failed DELETE keeps it, so the stored registration still says
+ * which token the server holds. The session that signed out is never
+ * registered again.
  *
  * The registrar is one explicit state, `idle`, `registering` or
  * `unregistering`, rather than a chain of promises, so each decision reads
@@ -88,8 +90,11 @@ export type RegistrarEffects<Reported> = {
     reported: Reported | undefined,
     signal: AbortSignal
   ) => Promise<{ token: string; deviceToken: string }>;
-  /** `POST /api/mobile/push-token`. Never throws. */
-  postToken: (token: string) => Promise<PushApiAnswer>;
+  /**
+   * `POST /api/mobile/push-token`. Never throws, and answers `aborted` once
+   * the signal aborts.
+   */
+  postToken: (token: string, signal: AbortSignal) => Promise<PushApiAnswer>;
   /** `DELETE /api/mobile/push-token`. Never throws. */
   deleteToken: (token: string, signal: AbortSignal) => Promise<PushApiAnswer>;
   /** Reports a failure to Sentry. */
@@ -286,10 +291,11 @@ export function createPushRegistrar<Reported>(
     if (!tokens.ok) return fail("token", tokens.message);
 
     const { token, deviceToken } = tokens.value;
-    const answer = effects.postToken(token);
+    const answer = effects.postToken(token, signal);
     run.post = { token, answer };
     const result = await answer;
-    // Sign-out owns the server state from here: it forgets this token.
+    // Sign-out owns the server state from here: it forgets this token, which
+    // the server may hold even when the abort cut the answer off.
     if (signal.aborted) return "aborted";
 
     switch (result.kind) {
@@ -347,7 +353,8 @@ export function createPushRegistrar<Reported>(
     if (!session) return "no-session";
     endedSession = session.accessToken;
 
-    // A POST on the wire is waited for, so the DELETE lands after it.
+    // The abort settles the POST at once; waiting for it keeps the DELETE
+    // from leaving while the POST is still on the wire.
     const post = interrupted?.post ?? null;
     if (post) await Promise.race([post.answer, onAbort(deadline, null)]);
     if (deadline.aborted) return { failed: "No answer before sign-out." };

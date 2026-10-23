@@ -299,14 +299,17 @@ const registrar = createPushRegistrar<Notifications.DevicePushToken>({
   readPermission: getPushPermissionState,
   deviceTokenOf,
   fetchTokens,
-  postToken: (token) =>
+  postToken: (token, signal) =>
     answerOf(() =>
-      api.registerPushToken({
-        token,
-        platform: Platform.OS === "ios" ? "IOS" : "ANDROID",
-        deviceName: Device.modelName?.slice(0, 120) ?? null,
-        appVersion: getAppVersion().slice(0, 20) || null,
-      })
+      api.registerPushToken(
+        {
+          token,
+          platform: Platform.OS === "ios" ? "IOS" : "ANDROID",
+          deviceName: Device.modelName?.slice(0, 120) ?? null,
+          appVersion: getAppVersion().slice(0, 20) || null,
+        },
+        signal
+      )
     ),
   deleteToken: (token, signal) =>
     answerOf(() => api.unregisterPushToken(token, signal)),

@@ -24,8 +24,8 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useReducer,
   useRef,
+  useState,
   type ReactNode,
 } from "react";
 import { Alert, AppState } from "react-native";
@@ -33,10 +33,15 @@ import { useFocusEffect, useIsFocused } from "@react-navigation/native";
 import { api } from "@/lib/api";
 import {
   derivePushScreenState,
+  flipPreference,
   INITIAL_PUSH_SETTINGS,
   pushSettingsReducer,
+  settlePreferenceSave,
   type NotificationPreferenceKey,
+  type NotificationPreferences,
   type PushScreenState,
+  type PushSettingsAction,
+  type PushSettingsModel,
 } from "@/lib/push/preferences";
 import {
   readPushDeviceState,
@@ -61,8 +66,9 @@ export type PushSettings = {
    */
   retryRegistration: () => Promise<void>;
   /**
-   * Flips one switch at once and saves it. A failed save puts back the value
-   * it had before and says why.
+   * Flips one switch at once and saves it. Saves go out one at a time, so the
+   * last flip is the last write; a failed save shows the server's value again
+   * and says why.
    */
   setPreference: (key: NotificationPreferenceKey, value: boolean) => void;
   /** Reads the phone and the switches again. */
@@ -78,14 +84,23 @@ const PushSettingsContext = createContext<PushSettings | null>(null);
  * @returns The derived screen state and the actions the screens offer
  */
 function usePushSettingsState(): PushSettings {
-  const [model, dispatch] = useReducer(
-    pushSettingsReducer,
-    INITIAL_PUSH_SETTINGS
+  // The latest model, which the save steps build on: a flip can come before
+  // React renders the change ahead of it.
+  const modelRef = useRef(INITIAL_PUSH_SETTINGS);
+  const [model, setModel] = useState(INITIAL_PUSH_SETTINGS);
+  const commit = useCallback((next: PushSettingsModel) => {
+    modelRef.current = next;
+    setModel(next);
+  }, []);
+  const dispatch = useCallback(
+    (action: PushSettingsAction) =>
+      commit(pushSettingsReducer(modelRef.current, action)),
+    [commit]
   );
   const isFocused = useIsFocused();
 
-  // Numbers each request touching the switches, reads and saves alike; the
-  // reducer applies only the newest one's answer.
+  // Numbers each read of the switches and each flip; the model applies a
+  // read's answer only while it is the newest.
   const requestCount = useRef(0);
   // Only the newest phone read may answer: a focus and a foreground event can
   // start two that return out of order.
@@ -97,7 +112,7 @@ function usePushSettingsState(): PushSettings {
     if (read === deviceReadCount.current) {
       dispatch({ type: "device-read", device });
     }
-  }, []);
+  }, [dispatch]);
 
   const reload = useCallback(() => {
     void readDevice();
@@ -116,7 +131,7 @@ function usePushSettingsState(): PushSettings {
         dispatch({ type: "server-failed", request, message: error });
       }
     });
-  }, [readDevice]);
+  }, [dispatch, readDevice]);
 
   useFocusEffect(reload);
 
@@ -143,30 +158,32 @@ function usePushSettingsState(): PushSettings {
     await readDevice();
   }, [readDevice]);
 
-  const { server } = model;
-  const setPreference = useCallback(
-    (key: NotificationPreferenceKey, value: boolean) => {
-      if (server.status !== "loaded") return;
-      const previous = server.preferences[key];
-      const request = ++requestCount.current;
-      dispatch({ type: "preference-set", request, key, value });
+  // Sends one PUT; its answer sends the flips that waited for it.
+  const save = useCallback(
+    function send(changes: Partial<NotificationPreferences>) {
       void api
-        .updateNotificationPreferences({ [key]: value })
+        .updateNotificationPreferences(changes)
         .then(({ data, error }) => {
-          if (data) {
-            dispatch({
-              type: "server-loaded",
-              request,
-              preferences: data.preferences,
-              pushAvailable: null,
-            });
-          } else if (error) {
-            dispatch({ type: "preference-save-failed", key, previous });
-            Alert.alert("Couldn't save the change", error);
-          }
+          if (error) Alert.alert("Couldn't save the change", error);
+          const step = settlePreferenceSave(
+            modelRef.current,
+            data?.preferences ?? null
+          );
+          commit(step.model);
+          if (step.send) send(step.send);
         });
     },
-    [server]
+    [commit]
+  );
+
+  const setPreference = useCallback(
+    (key: NotificationPreferenceKey, value: boolean) => {
+      const request = ++requestCount.current;
+      const step = flipPreference(modelRef.current, { request, key, value });
+      commit(step.model);
+      if (step.send) save(step.send);
+    },
+    [commit, save]
   );
 
   const state = useMemo(() => derivePushScreenState(model), [model]);

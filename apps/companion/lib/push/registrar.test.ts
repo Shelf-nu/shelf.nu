@@ -68,7 +68,7 @@ type Phone = {
     token: string;
     deviceToken: string;
   }>;
-  postAnswer: () => Promise<PushApiAnswer>;
+  postAnswer: (token: string, signal: AbortSignal) => Promise<PushApiAnswer>;
   deleteAnswer: (signal: AbortSignal) => Promise<PushApiAnswer>;
   posts: string[];
   deletes: string[];
@@ -112,10 +112,10 @@ function fakePhone(overrides: Partial<Phone> = {}) {
       phone.calls.push("fetch-tokens");
       return phone.fetchTokens(signal);
     },
-    postToken: (token) => {
+    postToken: (token, signal) => {
       phone.calls.push("post");
       phone.posts.push(token);
-      return phone.postAnswer();
+      return phone.postAnswer(token, signal);
     },
     deleteToken: (token, signal) => {
       phone.calls.push("delete");
@@ -139,6 +139,34 @@ function tokenStepUntilAborted(phone: Phone) {
       signal.addEventListener("abort", () => reject(new Error("aborted")));
     });
   return started.promise;
+}
+
+/**
+ * A POST that honours its abort signal the way `fetch` does: once aborted it
+ * answers `aborted` and never reaches the server. `apply` makes the server
+ * apply it, and `answer` delivers the server's answer.
+ */
+function postOnTheWire(phone: Phone) {
+  const applied: string[] = [];
+  const answered = deferred<void>();
+  const sent: { token: string; signal: AbortSignal | null } = {
+    token: "",
+    signal: null,
+  };
+  phone.postAnswer = (token, signal) =>
+    new Promise((resolve) => {
+      sent.token = token;
+      sent.signal = signal;
+      signal.addEventListener("abort", () => resolve({ kind: "aborted" }));
+      void answered.promise.then(() => resolve({ kind: "ok" }));
+    });
+  return {
+    applied,
+    apply: () => {
+      if (!sent.signal?.aborted) applied.push(sent.token);
+    },
+    answer: () => answered.resolve(),
+  };
 }
 
 test("an opted-in phone registers and remembers what it sent", async () => {
@@ -240,6 +268,51 @@ test("signing out while the POST is in flight waits for it, then forgets that to
     "remove-record",
   ]);
   assert.equal(phone.record, null);
+});
+
+test("signing out aborts the POST in flight, so it cannot land after sign-out", async () => {
+  const { phone, effects } = fakePhone();
+  const wire = postOnTheWire(phone);
+  const registrar = createPushRegistrar(effects, { unregisterTimeoutMs: 20 });
+
+  const run = registrar.register();
+  await flush();
+  assert.deepEqual(phone.posts, [TOKEN]);
+
+  await registrar.unregister();
+  wire.apply();
+  wire.answer();
+
+  assert.equal(await run, "aborted");
+  assert.deepEqual(
+    wire.applied,
+    [],
+    "the aborted POST never reaches the server"
+  );
+  assert.deepEqual(phone.deletes, [TOKEN]);
+  assert.equal(phone.record, null);
+  assert.deepEqual(phone.reports, []);
+});
+
+test("a POST the server applied before sign-out cut it off is still forgotten", async () => {
+  const { phone, effects } = fakePhone();
+  const wire = postOnTheWire(phone);
+  const registrar = createPushRegistrar(effects, { unregisterTimeoutMs: 20 });
+
+  const run = registrar.register();
+  await flush();
+  wire.apply();
+  await registrar.unregister();
+
+  assert.deepEqual(wire.applied, [TOKEN]);
+  assert.deepEqual(
+    phone.calls,
+    ["fetch-tokens", "post", "delete", "remove-record"],
+    "the DELETE follows the applied POST"
+  );
+  assert.deepEqual(phone.deletes, [TOKEN]);
+  assert.equal(phone.record, null);
+  assert.equal(await run, "aborted");
 });
 
 test("a DELETE the server answers 404 to counts as forgotten", async () => {

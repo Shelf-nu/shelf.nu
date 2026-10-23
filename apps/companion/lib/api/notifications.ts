@@ -24,11 +24,19 @@ export const notificationsApi = {
   /**
    * Registers this device for the signed-in person. Idempotent on the server,
    * so the default retry is safe.
+   *
+   * @param payload - The token and what the server shows about this device
+   * @param signal - Aborts the request, retry included; sign-out aborts a
+   *   registration in flight so it cannot land after the session ends
    */
-  registerPushToken: (payload: RegisterPushTokenPayload) =>
+  registerPushToken: (
+    payload: RegisterPushTokenPayload,
+    signal?: AbortSignal
+  ) =>
     apiFetch<PushTokenResponse>("/api/mobile/push-token", {
       method: "POST",
       body: JSON.stringify(payload),
+      signal,
     }),
 
   /**
