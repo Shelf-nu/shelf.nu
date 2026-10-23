@@ -24,9 +24,9 @@ import { requirePermission } from "~/utils/roles.server";
  * The ids arrive from note content, which is user-authored: a caller can ask
  * for any id at all. Access therefore has to be re-derived here rather than
  * inherited from whichever note did the asking — the same audit-scoped rule
- * the audit pages enforce. ADMIN/OWNER see every image in the workspace;
- * BASE and SELF_SERVICE see only images belonging to audits they are
- * assigned to.
+ * the audit pages enforce. Callers who see every audit (`audits.seeAll`) see
+ * every image in the workspace; everyone else sees only images belonging to
+ * audits they are assigned to.
  *
  * Ids the caller may not see are dropped from the result instead of failing
  * the request, so one unreachable image cannot blank out a note that also
@@ -36,7 +36,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const { userId } = context.getSession();
 
   try {
-    const { organizationId, isSelfServiceOrBase } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       request,
       userId,
       entity: PermissionEntity.audit,
@@ -60,7 +60,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       where: {
         id: { in: imageIds },
         organizationId,
-        ...(isSelfServiceOrBase
+        ...(!access.audits.seeAll
           ? {
               auditSession: { assignments: { some: { userId } } },
             }

@@ -16,7 +16,9 @@
 
 import type React from "react";
 import type { ConsumptionType } from "@prisma/client";
+import { ASSET_QUANTITY_FIGURE_LABELS } from "@shelf/labels";
 import { TriangleAlertIcon } from "lucide-react";
+import { Link } from "react-router";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
@@ -26,6 +28,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "~/components/shared/tooltip";
+import type { CustodySourceSummary } from "~/modules/asset/custody-source";
 import { tw } from "~/utils/tw";
 import { QuickAdjustDialog } from "./quick-adjust-dialog";
 
@@ -106,6 +109,16 @@ export interface QuantityOverviewCardProps {
    */
   reservedQuantity?: number;
   /**
+   * Set when the pool is promised beyond its size. The card states the
+   * shortfall itself, because this page is where someone lands to fix it.
+   */
+  overCommitment?: {
+    shortBy: number;
+    peak: number;
+    held: number;
+    booking: { id: string; name: string; units: number } | null;
+  } | null;
+  /**
    * Count of distinct upcoming bookings contributing to `reservedQuantity`.
    * Used only by the explanatory tooltip next to the "Reserved (bookings)"
    * row — see {@link QuantityOverviewCardProps.reservedQuantity}.
@@ -122,6 +135,11 @@ export interface QuantityOverviewCardProps {
   canUpdate?: boolean;
   /** Optional additional CSS class names */
   className?: string;
+  /**
+   * The pool's sources, handed to the Adjust dialog so it can ask "At
+   * location" for a pool placed at two or more locations.
+   */
+  custodySources?: CustodySourceSummary | null;
 }
 
 /**
@@ -220,10 +238,12 @@ export function QuantityOverviewCard({
   inLocationsQuantity,
   inLocationsManualQuantity,
   reservedQuantity,
+  overCommitment,
   reservingBookingCount,
   checkedOutQuantity,
   canUpdate = false,
   className,
+  custodySources,
 }: QuantityOverviewCardProps) {
   const qty = quantity ?? 0;
   const unit = unitOfMeasure || null;
@@ -297,6 +317,7 @@ export function QuantityOverviewCard({
             assetId={assetId}
             unitOfMeasure={unitOfMeasure}
             availableQuantity={custodyAvailableQuantity ?? available}
+            sources={custodySources}
             trigger={
               <Button type="button" variant="secondary" size="sm">
                 Adjust
@@ -306,10 +327,61 @@ export function QuantityOverviewCard({
         ) : null}
       </div>
 
+      {/*
+        The problem, stated, in the same shape the page already uses for
+        "here is a fact about this asset, here is what to do about it", the
+        unplaced-units card a few sections down. Gray body text, the number in
+        semibold, the action as an ordinary link. An invented coloured alert
+        panel would shout louder than anything else on the page and match
+        nothing else in the product.
+      */}
+      {overCommitment ? (
+        <div className="border-b border-gray-100 px-4 py-3">
+          <p className="text-[14px] text-gray-600">
+            At the busiest point ahead, bookings need{" "}
+            <span className="font-medium text-gray-900">
+              {formatWithUnit(overCommitment.peak, unit)}
+            </span>
+            {overCommitment.held > 0
+              ? ` on top of ${formatWithUnit(
+                  overCommitment.held,
+                  unit
+                )} in custody or kits,`
+              : ""}{" "}
+            and you own {formatWithUnit(qty, unit)}: promised{" "}
+            <span className="font-medium text-gray-900">
+              {formatWithUnit(overCommitment.shortBy, unit)}
+            </span>{" "}
+            more than you have.
+            {overCommitment.booking ? (
+              <>
+                {" "}
+                The biggest upcoming booking,{" "}
+                <span className="font-medium text-gray-900">
+                  {overCommitment.booking.name}
+                </span>
+                , asks for {formatWithUnit(overCommitment.booking.units, unit)}.
+              </>
+            ) : null}
+          </p>
+          {overCommitment.booking ? (
+            <Link
+              to={`/bookings/${overCommitment.booking.id}`}
+              className="mt-1 inline-block text-[14px] text-gray-700 underline decoration-gray-300 underline-offset-2 hover:text-gray-900 hover:decoration-gray-500"
+            >
+              Open booking
+            </Link>
+          ) : null}
+        </div>
+      ) : null}
+
       {/* Detail rows */}
-      <OverviewRow label="Total quantity" value={formatWithUnit(qty, unit)} />
       <OverviewRow
-        label="Available"
+        label={ASSET_QUANTITY_FIGURE_LABELS.TOTAL}
+        value={formatWithUnit(qty, unit)}
+      />
+      <OverviewRow
+        label={ASSET_QUANTITY_FIGURE_LABELS.FREE_NOW}
         value={formatWithUnit(available, unit)}
         warning={isLowStock}
       />

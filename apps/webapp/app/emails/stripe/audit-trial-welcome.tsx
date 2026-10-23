@@ -12,26 +12,25 @@ import { config } from "~/config/shelf.config";
 import { SERVER_URL, SUPPORT_EMAIL } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
+import type { UserNameFields } from "~/utils/user";
+import { resolveUserGreetingName } from "~/utils/user";
 import { LogoForEmail } from "../logo";
 import { sendEmail } from "../mail.server";
 import { styles } from "../styles";
 
-interface AuditTrialWelcomeProps {
-  firstName?: string | null;
-  displayName?: string | null;
+interface AuditTrialWelcomeProps extends UserNameFields {
   email: string;
   hasPaymentMethod?: boolean;
 }
 
 export const sendAuditTrialWelcomeEmail = async ({
-  firstName,
-  displayName,
   email,
   hasPaymentMethod,
+  ...user
 }: AuditTrialWelcomeProps) => {
   try {
     const subject = "Your 7-day Audits trial is now active!";
-    const greeting = displayName || firstName;
+    const greeting = resolveUserGreetingName(user);
     const html = await auditTrialWelcomeEmailHtml({
       firstName: greeting,
       hasPaymentMethod,

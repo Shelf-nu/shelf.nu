@@ -1,7 +1,9 @@
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
+import { db } from "~/database/db.server";
 import {
   requireMobileAuth,
+  requireMobilePermission,
   requireOrganizationAccess,
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
@@ -10,9 +12,12 @@ import {
   getAuditScans,
   requireAuditAssignee,
 } from "~/modules/audit/service.server";
-import { resolveMostPrivilegedRole } from "~/utils/booking-authorization.server";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
 
 /**
  * GET /api/mobile/audits/:auditId
@@ -27,7 +32,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
-    const { roles, canUseAudits } = await getMobileUserContext(
+
+    await requireMobilePermission({
+      userId: user.id,
+      organizationId,
+      entity: PermissionEntity.audit,
+      action: PermissionAction.read,
+    });
+
+    const { access, canUseAudits } = await getMobileUserContext(
       user.id,
       organizationId
     );
@@ -48,41 +61,55 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       z.object({ auditId: z.string().min(1) })
     );
 
-    // Gate the READ, not merely the CTA below. `isAssignee` was computed only
-    // to decide whether to show a "Complete Audit" button, so an unassigned
-    // BASE or SELF_SERVICE user could still fetch the full audit — its assets,
-    // scans, notes and progress — for any audit in the workspace. The web
-    // overview loader already gates this; mobile did not. (detail.dev D054)
-    // Resolved from ALL roles, not from `role`. `getMobileUserContext` sets
-    // `role = roles[0]`, and its own JSDoc warns that this is wrong for any
-    // authorization decision: a membership ordered `[SELF_SERVICE, ADMIN]`
-    // resolves to SELF_SERVICE, so a real admin who is not assigned to this
-    // audit would be refused by the guard below.
-    const effectiveRole = resolveMostPrivilegedRole(roles);
-    const isSelfServiceOrBase =
-      effectiveRole === "SELF_SERVICE" || effectiveRole === "BASE";
+    // Gate the READ, not merely the CTA below: without it a caller limited
+    // to assigned audits could fetch the full audit (its assets, scans, notes
+    // and progress) for any audit in the workspace. The web overview loader
+    // applies the same gate.
+    const canSeeAllAudits = access.audits.seeAll;
     await requireAuditAssignee({
       auditSessionId: auditId,
       organizationId,
       userId: user.id,
-      isSelfServiceOrBase,
+      assignedOnly: !canSeeAllAudits,
     });
 
-    // Fetch session details and scans in parallel
-    const [{ session, expectedAssets }, scans] = await Promise.all([
-      getAuditSessionDetails({ id: auditId, organizationId }),
-      getAuditScans({ auditSessionId: auditId, organizationId }),
-    ]);
+    // Session details, scans, and which of the audit's assets are archived
+    // (so the app can badge those rows), all in parallel. The archived read is
+    // scoped through the audit's own relations, so it needs no id list: an
+    // asset belongs to the audit when it is expected in it or was scanned in it.
+    const [{ session, expectedAssets }, scans, archivedAssets] =
+      await Promise.all([
+        getAuditSessionDetails({
+          id: auditId,
+          organizationId,
+          refreshExpectedAssetImages: true,
+        }),
+        getAuditScans({ auditSessionId: auditId, organizationId }),
+        db.asset.findMany({
+          where: {
+            organizationId,
+            archivedAt: { not: null },
+            OR: [
+              { auditEntries: { some: { auditSessionId: auditId } } },
+              { auditScans: { some: { auditSessionId: auditId } } },
+            ],
+          },
+          select: { id: true, archivedAt: true },
+        }),
+      ]);
+    const archivedAtById = new Map(
+      archivedAssets.map((a) => [a.id, a.archivedAt?.toISOString() ?? null])
+    );
 
     // why: completing is assignee-gated server-side (requireAuditAssignee in
-    // audits.complete.ts): ADMIN/OWNER may complete any audit, BASE and
-    // SELF_SERVICE only when assigned. Encode that eligibility in
+    // audits.complete.ts): callers who see every audit may complete any
+    // audit, everyone else only when assigned. Encode that eligibility in
     // `canComplete` so the client never shows a "Complete Audit" CTA that
     // 403s after confirmation. Mirrors the endpoint's own rule exactly.
     const isAssignee = session.assignments.some((a) => a.user.id === user.id);
     const canCompleteAudit =
       (session.status === "ACTIVE" || session.status === "PENDING") &&
-      (isAssignee || !isSelfServiceOrBase);
+      (isAssignee || canSeeAllAudits);
 
     return data({
       audit: {
@@ -101,12 +128,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         createdBy: {
           firstName: session.createdBy?.firstName ?? null,
           lastName: session.createdBy?.lastName ?? null,
+          displayName: session.createdBy?.displayName ?? null,
           profilePicture: session.createdBy?.profilePicture ?? null,
         },
         assignments: session.assignments.map((a) => ({
           userId: a.user.id,
-          firstName: a.user.firstName,
-          lastName: a.user.lastName,
+          firstName: a.user.firstName ?? null,
+          lastName: a.user.lastName ?? null,
+          displayName: a.user.displayName,
           profilePicture: a.user.profilePicture,
           role: a.role,
         })),
@@ -131,8 +160,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         locationName: a.locationName ?? null,
         categoryName: a.categoryName ?? null,
         custodianName: a.custodianName ?? null,
+        // The app shows an "Archived" badge on the row. Null while active.
+        archivedAt: archivedAtById.get(a.id) ?? null,
       })),
       existingScans: scans.map((s) => ({
+        id: s.id,
         code: s.code,
         assetId: s.assetId,
         assetTitle: s.assetTitle,
@@ -141,6 +173,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           s.scannedAt instanceof Date ? s.scannedAt.toISOString() : s.scannedAt,
         auditAssetId: s.auditAssetId,
         assetLocationName: s.assetLocationName,
+        // why: lets the app say "deleted" instead of inferring it from an
+        // empty title, which is also what a pre-snapshot row looks like.
+        assetDeleted: s.assetDeleted,
+        archivedAt: s.assetId ? archivedAtById.get(s.assetId) ?? null : null,
         auditNotesCount: s.auditNotesCount,
         auditImagesCount: s.auditImagesCount,
       })),
@@ -148,7 +184,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       // never offers a scanner whose submissions are guaranteed to 403
       canScan:
         (session.status === "PENDING" || session.status === "ACTIVE") &&
-        (isAssignee || !isSelfServiceOrBase),
+        (isAssignee || canSeeAllAudits),
       canComplete: canCompleteAudit,
     });
   } catch (cause) {

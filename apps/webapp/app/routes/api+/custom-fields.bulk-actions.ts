@@ -57,10 +57,19 @@ export async function action({ request, context }: ActionFunctionArgs) {
           BulkActivateCustomFieldSchema
         );
 
+        // Only fields whose state will actually change. The limit below is
+        // "currently active + these", so anything already active must stay out
+        // of this set — it is counted by the first term and consumes no further
+        // capacity.
         const newActivatingFields = await db.customField.findMany({
           where: customFieldIds.includes(ALL_SELECTED_KEY)
-            ? { organizationId, deletedAt: null }
-            : { id: { in: customFieldIds }, organizationId, deletedAt: null },
+            ? { organizationId, deletedAt: null, active: false }
+            : {
+                id: { in: customFieldIds },
+                organizationId,
+                deletedAt: null,
+                active: false,
+              },
         });
 
         await assertWillExceedCustomFieldLimit({

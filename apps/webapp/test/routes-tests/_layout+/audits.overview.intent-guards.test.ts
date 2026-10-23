@@ -18,6 +18,7 @@
  */
 
 import { OrganizationRoles } from "@prisma/client";
+import { accessFor } from "@helpers/role-access";
 
 // why: React Router v7 single fetch — `data()`/`redirect()` must return real
 // Responses so the action's paths can be exercised without a router.
@@ -60,7 +61,7 @@ vi.mock("~/modules/audit/service.server", () => ({
   ...mocks,
   getAuditSessionDetails: vi.fn(),
   getAssetsForAuditSession: vi.fn(),
-  requireAuditAssigneeForBaseSelfService: vi.fn(),
+  requireAuditAssigneeForScopedViewer: vi.fn(),
 }));
 vi.mock("~/modules/audit/complete-audit-with-images.server", () => ({
   completeAuditWithImages: vi.fn().mockResolvedValue({}),
@@ -104,8 +105,8 @@ describe("audit overview intent guards", () => {
     mocks.removeAssetsFromAudit.mockResolvedValue({ removedCount: 1 });
     mockRequirePermission.mockResolvedValue({
       organizationId: "org-1",
-      isSelfServiceOrBase: true,
       role: OrganizationRoles.BASE,
+      access: accessFor([OrganizationRoles.BASE]),
     });
   });
 
@@ -145,13 +146,13 @@ describe("audit overview intent guards", () => {
       expect(mocks.requireAuditAssignee).not.toHaveBeenCalled();
     });
 
-    it("forwards isAdminOrOwner so the service can apply its own rule", async () => {
+    it("forwards canManageOthers so the service can apply its own rule", async () => {
       mocks.requireAuditAssignee.mockResolvedValue(undefined);
 
       await post({ intent: "cancel-audit" });
 
       expect(mocks.cancelAuditSession).toHaveBeenCalledWith(
-        expect.objectContaining({ userId: "user-1", isAdminOrOwner: false })
+        expect.objectContaining({ userId: "user-1", canManageOthers: false })
       );
     });
   });

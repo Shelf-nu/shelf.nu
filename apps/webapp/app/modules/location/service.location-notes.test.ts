@@ -47,6 +47,12 @@ const dbMocks = vi.hoisted(() => ({
   assetKit: {
     findMany: vi.fn().mockResolvedValue([]),
   },
+  // why: updateLocationAssets reads each quantity-tracked asset's operator
+  // custody before and after its placement writes, to re-home custody taken
+  // from a placement it shrinks or removes; no custody is out in these tests.
+  custody: {
+    findMany: vi.fn().mockResolvedValue([]),
+  },
   // why: user model stubs for resolving actor info in activity events
   user: {
     findUniqueOrThrow: vi.fn(),
@@ -63,6 +69,7 @@ const dbMocks = vi.hoisted(() => ({
       assetKit: dbMocks.assetKit,
       kit: dbMocks.kit,
       user: dbMocks.user,
+      custody: dbMocks.custody,
     };
     return cb(txClient);
   }),
@@ -72,8 +79,30 @@ const geolocateMock = vi.hoisted(() => vi.fn());
 const createNoteMock = vi.hoisted(() => vi.fn());
 const getUserByIDMock = vi.hoisted(() => vi.fn());
 
+// why: the stock ledger's rows come from real placement reads and have their
+// own tests (`consumption-log/stock-ledger.test.ts`, the in-memory
+// `asset/service.custody-source.test.ts`); this suite is about placements,
+// events and notes.
+vi.mock("~/modules/consumption-log/stock-ledger.server", () => ({
+  readStockState: vi.fn().mockResolvedValue(null),
+  readStockStates: vi.fn().mockResolvedValue(new Map()),
+  recordStockChanges: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("~/database/db.server", () => ({
   db: dbMocks,
+}));
+
+// why: updateLocationAssets row-locks every quantity-tracked asset it touches
+// with a raw `SELECT ... FOR UPDATE`, which a mocked tx cannot run.
+vi.mock("~/modules/consumption-log/quantity-lock.server", () => ({
+  lockAssetsForQuantityUpdate: vi
+    .fn()
+    .mockImplementation((_tx: unknown, ids: string[]) =>
+      Promise.resolve(
+        ids.map((id) => ({ id, type: "QUANTITY_TRACKED", quantity: 80 }))
+      )
+    ),
 }));
 
 vi.mock("~/utils/geolocate.server", () => ({
@@ -157,6 +186,9 @@ const {
   updateLocationKits,
   createLocationChangeNote,
 } = await import("./service.server");
+const { readStockStates, recordStockChanges } = await import(
+  "~/modules/consumption-log/stock-ledger.server"
+);
 
 describe("location service activity logging", () => {
   beforeEach(() => {
@@ -181,16 +213,20 @@ describe("location service activity logging", () => {
     dbMocks.user.findFirstOrThrow.mockResolvedValue({
       firstName: "Jane",
       lastName: "Doe",
+      displayName: null,
     });
     dbMocks.user.findFirst.mockResolvedValue({
       firstName: "Jane",
       lastName: "Doe",
+      displayName: null,
     });
     dbMocks.kit.findMany.mockResolvedValue([]);
     // why: assertion helpers count submitted IDs; default to "all authorized"
     // so happy-path tests don't have to wire it up explicitly
+    // The archived guard (issue #382) counts ARCHIVED rows among the ids —
+    // none here — so a query naming `archivedAt` answers 0, not the echo.
     dbMocks.asset.count.mockImplementation(({ where }: any) =>
-      Promise.resolve(where?.id?.in?.length ?? 0)
+      Promise.resolve(where?.archivedAt ? 0 : where?.id?.in?.length ?? 0)
     );
     dbMocks.kit.count.mockImplementation(({ where }: any) =>
       Promise.resolve(where?.id?.in?.length ?? 0)
@@ -238,6 +274,7 @@ describe("location service activity logging", () => {
         newLocation: { id: "loc-2", name: "New" },
         firstName: "Ada",
         lastName: "Lovelace",
+        displayName: null,
         assetId: "asset-1",
         userId: "user-1",
         organizationId: "org-1",
@@ -284,6 +321,29 @@ describe("location service activity logging", () => {
           content: expect.stringContaining("Camera"),
         })
       );
+    });
+  });
+
+  describe("updateLocationAssets archived guard (issue #382)", () => {
+    it("refuses to move an archived asset into the location", async () => {
+      // why: the org check counts both ids (in the org); the archived check
+      // then finds one of them archived.
+      dbMocks.asset.count.mockImplementation(({ where }: any) =>
+        Promise.resolve(where?.archivedAt ? 1 : where?.id?.in?.length ?? 0)
+      );
+
+      await expect(
+        updateLocationAssets({
+          assetIds: ["asset-active", "asset-archived"],
+          organizationId: "org-1",
+          locationId: "loc-1",
+          userId: "user-1",
+          request: new Request("https://example.com"),
+          removedAssetIds: [],
+        })
+      ).rejects.toMatchObject({ title: "Asset is archived", status: 400 });
+
+      expect(dbMocks.location.update).not.toHaveBeenCalled();
     });
   });
 
@@ -418,6 +478,14 @@ describe("location service activity logging", () => {
           quantity: 80,
         }),
       ]);
+      const stockBefore = {
+        total: 80,
+        placed: new Map<string, number>(),
+        ledgerStartedAt: new Date("2026-10-01T00:00:00.000Z"),
+      };
+      vi.mocked(readStockStates).mockResolvedValueOnce(
+        new Map([["pens", stockBefore]])
+      );
 
       await updateLocationAssets({
         assetIds: ["pens"],
@@ -434,6 +502,19 @@ describe("location service activity logging", () => {
           data: [expect.objectContaining({ assetId: "pens", quantity: 30 })],
         })
       );
+      // The 30 units placed here are a MOVE out of the unplaced units: the
+      // ledger diffs the stock read before the placement write against the
+      // stock after it, with no event.
+      expect(
+        vi.mocked(readStockStates).mock.invocationCallOrder[0]
+      ).toBeLessThan(
+        dbMocks.assetLocation.createMany.mock.invocationCallOrder[0]
+      );
+      expect(recordStockChanges).toHaveBeenCalledWith(expect.anything(), {
+        organizationId: "org-1",
+        userId: "user-1",
+        changes: [{ assetId: "pens", before: stockBefore }],
+      });
     });
 
     it("forces INDIVIDUAL qty to 1 even when assetQuantities tries to set it higher", async () => {
@@ -650,6 +731,50 @@ describe("location service activity logging", () => {
           content: expect.stringContaining("Shoot Kit"),
         })
       );
+    });
+  });
+
+  describe("updateLocationKits with archived kit members", () => {
+    it("moves and notes only active members, leaving archived ones where they are", async () => {
+      dbMocks.location.findUniqueOrThrow.mockResolvedValueOnce({
+        id: "loc-1",
+        organizationId: "org-1",
+        kits: [],
+      });
+      dbMocks.location.update.mockResolvedValueOnce({ id: "loc-1" });
+      dbMocks.kit.findMany.mockResolvedValue([
+        { id: "kit-1", name: "Shoot Kit", assetKits: [] },
+      ]);
+
+      await updateLocationKits({
+        locationId: "loc-1",
+        kitIds: ["kit-1"],
+        removedKitIds: [],
+        organizationId: "org-1",
+        userId: "user-1",
+        request: new Request("https://example.com"),
+      });
+
+      // The members read (for notes) and the pivot writes both skip archived.
+      expect(dbMocks.kit.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          select: expect.objectContaining({
+            assetKits: expect.objectContaining({
+              where: { asset: { archivedAt: null } },
+            }),
+          }),
+        })
+      );
+      expect(dbMocks.assetKit.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { kitId: { in: ["kit-1"] }, asset: { archivedAt: null } },
+        })
+      );
+      expect(dbMocks.assetLocation.deleteMany).toHaveBeenCalledWith({
+        where: {
+          assetKit: { kitId: { in: ["kit-1"] }, asset: { archivedAt: null } },
+        },
+      });
     });
   });
 

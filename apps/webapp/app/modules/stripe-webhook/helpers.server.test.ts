@@ -90,8 +90,10 @@ vi.mock("stripe", () => ({
 }));
 
 import {
+  highestPlanTier,
   isAddonSubscription,
   isHigherTier,
+  isTierId,
   isHigherOrEqualTier,
   sendAdminInvoiceEmail,
   constructVerifiedWebhookEvent,
@@ -133,6 +135,48 @@ describe("isAddonSubscription", () => {
   });
 });
 
+describe("isTierId", () => {
+  it("accepts every tier id", () => {
+    for (const tier of ["free", "tier_1", "tier_2", "custom"]) {
+      expect(isTierId(tier)).toBe(true);
+    }
+  });
+
+  it("rejects keys inherited from Object.prototype and anything else", () => {
+    for (const value of ["constructor", "toString", "tier_3", "", undefined]) {
+      expect(isTierId(value)).toBe(false);
+    }
+  });
+});
+
+describe("highestPlanTier", () => {
+  it("returns the highest plan, skipping add-ons, deleted and unexpanded products", () => {
+    expect(
+      highestPlanTier([
+        "prod_unexpanded",
+        null,
+        { id: "p_del", deleted: true } as Stripe.DeletedProduct,
+        {
+          id: "p_addon",
+          metadata: { product_type: "addon", shelf_tier: "custom" },
+        } as unknown as Stripe.Product,
+        {
+          id: "p_plus",
+          metadata: { shelf_tier: "tier_1" },
+        } as unknown as Stripe.Product,
+        {
+          id: "p_bad",
+          metadata: { shelf_tier: "constructor" },
+        } as unknown as Stripe.Product,
+      ])
+    ).toBe("tier_1");
+  });
+
+  it("returns undefined when no product is a plan", () => {
+    expect(highestPlanTier([])).toBeUndefined();
+  });
+});
+
 describe("isHigherTier", () => {
   it("returns true when new tier is higher", () => {
     expect(isHigherTier("tier_2", "tier_1")).toBe(true);
@@ -168,6 +212,7 @@ describe("sendAdminInvoiceEmail", () => {
       email: "user@test.com",
       firstName: "Jane",
       lastName: "Doe",
+      displayName: null,
     },
     eventType: "invoice.payment_failed",
     invoiceId: "inv_123",
@@ -203,6 +248,7 @@ describe("constructVerifiedWebhookEvent", () => {
     email: "user@test.com",
     firstName: "Jane",
     lastName: "Doe",
+    displayName: null,
     tierId: "tier_1",
     warnForNoPaymentMethod: false,
   };

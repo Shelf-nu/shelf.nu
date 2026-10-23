@@ -12,6 +12,7 @@
 
 import { renderHook } from "@testing-library/react";
 import Cookies from "js-cookie";
+import { createCookie } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // why: renderHook re-invokes the hook body on every render, so instead of a
@@ -53,7 +54,12 @@ vi.mock("react-router", async () => {
   };
 });
 
-import { useSearchParams } from "./index";
+import {
+  cleanParamsForCookie,
+  cleanParamsForFilterCookie,
+  destroyCookieValues,
+  useSearchParams,
+} from "./index";
 
 describe("useSearchParams", () => {
   beforeEach(() => {
@@ -137,3 +143,87 @@ describe("useSearchParams", () => {
     expect(Cookies.get("org-1_assetFilter_v2")).toBeUndefined();
   });
 });
+
+describe("destroyCookieValues", () => {
+  beforeEach(() => {
+    Cookies.remove("org-1_bookingFilter_v2", { path: "/" });
+  });
+
+  it("rewrites the cookie without the typed search", async () => {
+    // The page's current filters include a search; removing one column
+    // filter rewrites the cookie from them, and the search must not ride
+    // along into the remembered copy.
+    destroyCookieValues(
+      "org-1_bookingFilter_v2",
+      ["custodian"],
+      new URLSearchParams("s=ZZ+Test&status=ONGOING&custodian=tm-1&page=2"),
+      "/"
+    );
+
+    expect(await rememberedByServer("org-1_bookingFilter_v2")).toBe(
+      "status=ONGOING"
+    );
+  });
+
+  it("deletes the cookie when only a search would be left", () => {
+    Cookies.set("org-1_bookingFilter_v2", "status=ONGOING", { path: "/" });
+
+    destroyCookieValues(
+      "org-1_bookingFilter_v2",
+      ["status"],
+      new URLSearchParams("s=ZZ+Test&status=ONGOING"),
+      "/"
+    );
+
+    expect(Cookies.get("org-1_bookingFilter_v2")).toBeUndefined();
+  });
+});
+
+describe("a filter cookie the browser rewrites", () => {
+  beforeEach(() => {
+    Cookies.remove("org-1_assetFilter_v2", { path: "/" });
+  });
+
+  it("is read back by the server with every remaining filter", async () => {
+    destroyCookieValues(
+      "org-1_assetFilter_v2",
+      ["category"],
+      new URLSearchParams("status=AVAILABLE&tag=caf%C3%A9&category=c-1"),
+      "/"
+    );
+
+    expect(await rememberedByServer("org-1_assetFilter_v2")).toBe(
+      "status=AVAILABLE&tag=caf%C3%A9"
+    );
+  });
+});
+
+describe("what a list remembers", () => {
+  const params = "s=ZZ+Test&status=ONGOING&page=2";
+
+  it("a saved preset keeps the typed search", () => {
+    expect(cleanParamsForCookie(params)).toBe("s=ZZ+Test&status=ONGOING");
+  });
+
+  it("a filter cookie drops the typed search", () => {
+    expect(cleanParamsForFilterCookie(params)).toBe("status=ONGOING");
+  });
+
+  it("does not change the params it is given", () => {
+    const current = new URLSearchParams(params);
+
+    cleanParamsForFilterCookie(current);
+
+    expect(current.toString()).toBe(params);
+  });
+});
+
+/**
+ * Reads a filter cookie the way the list loaders do: the raw Cookie header,
+ * parsed by react-router's `createCookie`.
+ *
+ * @param name - The filter cookie name
+ */
+function rememberedByServer(name: string) {
+  return createCookie(name).parse(document.cookie);
+}

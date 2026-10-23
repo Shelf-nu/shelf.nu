@@ -22,6 +22,7 @@ describe("getNrmIndexWhere", () => {
       { name: { contains: "john", mode: "insensitive" } },
       { user: { firstName: { contains: "john", mode: "insensitive" } } },
       { user: { lastName: { contains: "john", mode: "insensitive" } } },
+      { user: { displayName: { contains: "john", mode: "insensitive" } } },
     ]);
   });
 
@@ -60,7 +61,13 @@ describe("getNrmSelectionWhere", () => {
       search: "john",
     });
 
-    expect(where.OR).toHaveLength(3);
+    // Select-all means "every row matching the filters I currently have
+    // applied", so the search branches must be exactly the index's — asserting
+    // equality rather than a count keeps this pinned when a name column is
+    // added to the search.
+    expect(where.OR).toEqual(
+      getNrmIndexWhere({ organizationId: ORG, search: "john" }).OR
+    );
   });
 
   it("scopes explicit ids to non-deleted NRMs so untrusted ids can't widen the set", () => {

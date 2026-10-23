@@ -5,7 +5,7 @@ import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import type { Item } from "~/components/layout/horizontal-tabs/types";
 import { Button } from "~/components/shared/button";
 import { UserSubheading } from "~/components/user/user-subheading";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { getUserWithContact } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
@@ -45,7 +45,7 @@ export function meta({ data }: MetaArgs<typeof loader>) {
 
 export default function Me() {
   const { user } = useLoaderData<typeof loader>();
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
 
   /* Notes tab is only visible to ADMIN/OWNER roles.
    * Allows admins to see notes other admins have placed on their profile. */

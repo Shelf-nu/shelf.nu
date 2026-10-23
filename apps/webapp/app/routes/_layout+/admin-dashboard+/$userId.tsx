@@ -5,7 +5,6 @@ import {
   type Qr,
   type User,
   type CustomTierLimit,
-  OrganizationRoles,
   type UserBusinessIntel,
   type Prisma,
 } from "@prisma/client";
@@ -30,6 +29,8 @@ import { resetPersonalWorkspaceBranding } from "~/modules/organization/service.s
 import { updateUserTierId } from "~/modules/tier/service.server";
 import { softDeleteUser, getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { DeleteConfirmationSchema } from "~/utils/delete-confirmation";
+import { assertDeleteConfirmed } from "~/utils/delete-confirmation.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
@@ -39,6 +40,7 @@ import {
   isDelete,
   parseData,
 } from "~/utils/http.server";
+import { isWorkspaceOwner } from "~/utils/permissions/role-access";
 import { requireAdmin } from "~/utils/roles.server";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 import {
@@ -49,6 +51,7 @@ import {
   getCustomerSubscriptionsWithProducts,
 } from "~/utils/stripe.server";
 import { resolveUserDisplayName } from "~/utils/user";
+import { requiredNumberFromString } from "~/utils/zod-numeric";
 
 export const meta = () => [{ title: appendToMetaTitle("User details") }];
 
@@ -166,7 +169,7 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
       (uo) =>
         uo.organization.enabledSso &&
         uo.organization.ssoDetails &&
-        uo.roles.some((role) => role === OrganizationRoles.OWNER)
+        isWorkspaceOwner(uo.roles)
     );
 
     /** Process the data you already have - no second query needed! */
@@ -296,7 +299,9 @@ export const action = async ({
         const { maxOrganizations, isEnterprise } = parseData(
           await request.formData(),
           z.object({
-            maxOrganizations: z.string().transform((val) => +val),
+            maxOrganizations: requiredNumberFromString({
+              fieldName: "Max organizations",
+            }),
             isEnterprise: z
               .string()
               .optional()
@@ -321,6 +326,21 @@ export const action = async ({
       }
       case "deleteUser":
         if (isDelete(request)) {
+          // The dialog asks for the account's email; refuse a request that
+          // skipped it.
+          const { confirmation } = parseData(
+            await request.clone().formData(),
+            DeleteConfirmationSchema
+          );
+          const toDelete = await getUserByID(shelfUserId, {
+            select: { email: true } satisfies Prisma.UserSelect,
+          });
+          assertDeleteConfirmed({
+            confirmation,
+            expected: toDelete.email,
+            label: "User",
+          });
+
           await softDeleteUser(shelfUserId);
 
           sendNotification({
@@ -531,7 +551,7 @@ export default function Area51UserPage() {
       <div>
         <div className="flex justify-between">
           <h1>User: {user?.email}</h1>
-          <DeleteUser />
+          <DeleteUser email={user.email} />
         </div>
         <div className="flex gap-4">
           <div className="w-[400px]">

@@ -1,3 +1,4 @@
+import { BOOKING_RESERVE_BLOCKED_LABELS } from "@shelf/labels";
 import { addHours, addDays, subDays, addMinutes } from "date-fns";
 import { describe, it, expect, afterAll, beforeAll, vi } from "vitest";
 import { toIsoDateTimeToUserTimezone } from "~/utils/date-fns";
@@ -7,6 +8,8 @@ import {
   BookingFormSchema,
   DuplicateBookingSchema,
   ExtendBookingSchema,
+  getReserveStartBlockedReason,
+  getReserveStartBoundary,
 } from "./forms-schema";
 
 /**
@@ -58,7 +61,7 @@ describe("BookingFormSchema - time restrictions", () => {
         action: "new",
         workingHours: disabledWorkingHours,
         bookingSettings: baseBookingSettings,
-        isAdminOrOwner: false, // BASE/SELF_SERVICE user
+        bypassTimeLimits: false, // role without the bypass
       });
 
       // Try to book starting in 1 hour (less than 24 hour buffer)
@@ -91,7 +94,7 @@ describe("BookingFormSchema - time restrictions", () => {
         action: "new",
         workingHours: disabledWorkingHours,
         bookingSettings: baseBookingSettings,
-        isAdminOrOwner: true, // ADMIN/OWNER user
+        bypassTimeLimits: true, // role with the bypass
       });
 
       // Try to book starting in 1 hour (less than 24 hour buffer) - should be allowed for admin
@@ -120,7 +123,7 @@ describe("BookingFormSchema - time restrictions", () => {
         action: "new",
         workingHours: disabledWorkingHours,
         bookingSettings: baseBookingSettings,
-        isAdminOrOwner: false, // BASE/SELF_SERVICE user
+        bypassTimeLimits: false, // role without the bypass
       });
 
       // Try to create a 72-hour booking (exceeds 48 hour max)
@@ -155,7 +158,7 @@ describe("BookingFormSchema - time restrictions", () => {
         action: "new",
         workingHours: disabledWorkingHours,
         bookingSettings: baseBookingSettings,
-        isAdminOrOwner: true, // ADMIN/OWNER user
+        bypassTimeLimits: true, // role with the bypass
       });
 
       // Try to create a 72-hour booking (exceeds 48 hour max) - should be allowed for admin
@@ -185,7 +188,7 @@ describe("BookingFormSchema - time restrictions", () => {
         action: "new",
         workingHours: disabledWorkingHours,
         bookingSettings: baseBookingSettings,
-        isAdminOrOwner: true, // Even admins should respect this
+        bypassTimeLimits: true, // The bypass still respects this
       });
 
       const startDate = addDays(new Date(), 1);
@@ -214,14 +217,14 @@ describe("BookingFormSchema - time restrictions", () => {
     });
   });
 
-  describe("default isAdminOrOwner behavior", () => {
-    it("should default to false (enforce restrictions) when isAdminOrOwner is not provided", () => {
+  describe("default bypassTimeLimits behavior", () => {
+    it("should default to false (enforce restrictions) when bypassTimeLimits is not provided", () => {
       const schema = BookingFormSchema({
         prefs: RUNTIME_ZONE_PREFS,
         action: "new",
         workingHours: disabledWorkingHours,
         bookingSettings: baseBookingSettings,
-        // isAdminOrOwner not provided - should default to false
+        // bypassTimeLimits not provided - should default to false
       });
 
       // Try to book starting in 1 hour (less than 24 hour buffer)
@@ -264,7 +267,7 @@ describe("ExtendBookingSchema - time restrictions", () => {
         prefs: RUNTIME_ZONE_PREFS,
         workingHours: disabledWorkingHours,
         bookingSettings: baseBookingSettings,
-        isAdminOrOwner: false, // BASE/SELF_SERVICE user
+        bypassTimeLimits: false, // role without the bypass
       });
 
       // Original booking start date
@@ -293,7 +296,7 @@ describe("ExtendBookingSchema - time restrictions", () => {
         prefs: RUNTIME_ZONE_PREFS,
         workingHours: disabledWorkingHours,
         bookingSettings: baseBookingSettings,
-        isAdminOrOwner: true, // ADMIN/OWNER user
+        bypassTimeLimits: true, // role with the bypass
       });
 
       // Original booking start date
@@ -310,13 +313,13 @@ describe("ExtendBookingSchema - time restrictions", () => {
     });
   });
 
-  describe("default isAdminOrOwner behavior", () => {
-    it("should default to false (enforce restrictions) when isAdminOrOwner is not provided", () => {
+  describe("default bypassTimeLimits behavior", () => {
+    it("should default to false (enforce restrictions) when bypassTimeLimits is not provided", () => {
       const schema = ExtendBookingSchema({
         prefs: RUNTIME_ZONE_PREFS,
         workingHours: disabledWorkingHours,
         bookingSettings: baseBookingSettings,
-        // isAdminOrOwner not provided - should default to false
+        // bypassTimeLimits not provided - should default to false
       });
 
       // Original booking start date
@@ -407,7 +410,7 @@ describe("BookingFormSchema - override timezone handling", () => {
       action: "new",
       workingHours: workingHoursWith424Closed,
       bookingSettings: baseBookingSettings,
-      isAdminOrOwner: true, // Bypass buffer check so we isolate the override logic
+      bypassTimeLimits: true, // Bypass buffer check so we isolate the override logic
     });
 
     // Booking on 4/23 in the user's local time.
@@ -425,7 +428,7 @@ describe("BookingFormSchema - override timezone handling", () => {
       }),
     });
 
-    // With isAdminOrOwner=true + 24/7 schedule + no matching override, the
+    // With bypassTimeLimits=true + 24/7 schedule + no matching override, the
     // booking must parse cleanly. Asserting .success directly guards against
     // unrelated validation regressions beyond the "closed" message.
     expect(result.success).toBe(true);
@@ -437,7 +440,7 @@ describe("BookingFormSchema - override timezone handling", () => {
       action: "new",
       workingHours: workingHoursWith424Closed,
       bookingSettings: baseBookingSettings,
-      isAdminOrOwner: true,
+      bypassTimeLimits: true,
     });
 
     const startDate = new Date("2099-04-24T10:00:00-05:00");
@@ -524,7 +527,7 @@ describe("BookingFormSchema - datetime-local wire string (1HC regression)", () =
       action: "new",
       workingHours: disabledWorkingHours,
       bookingSettings: baseBookingSettings,
-      isAdminOrOwner: true,
+      bypassTimeLimits: true,
     });
 
     const startDate = buildLocalWireString("America/New_York", 3);
@@ -556,7 +559,7 @@ describe("BookingFormSchema - datetime-local wire string (1HC regression)", () =
       action: "new",
       workingHours: disabledWorkingHours,
       bookingSettings: baseBookingSettings,
-      isAdminOrOwner: true,
+      bypassTimeLimits: true,
     });
 
     const startDate = buildLocalWireString("America/New_York", -3);
@@ -591,7 +594,7 @@ describe("BookingFormSchema - datetime-local wire string (1HC regression)", () =
       action: "new",
       workingHours: disabledWorkingHours,
       bookingSettings: baseBookingSettings,
-      isAdminOrOwner: true,
+      bypassTimeLimits: true,
     });
 
     const result = schema.safeParse({
@@ -645,7 +648,7 @@ describe("BookingFormSchema - datetime-local wire string (1HC regression)", () =
       action: "new",
       workingHours: enabledWorkingHours,
       bookingSettings: baseBookingSettings,
-      isAdminOrOwner: true,
+      bypassTimeLimits: true,
     });
 
     // Fixed wire strings well inside the 9–17 window in LA local. Avoiding
@@ -690,7 +693,7 @@ describe("BookingFormSchema - datetime-local wire string (1HC regression)", () =
       action: "new",
       workingHours: enabledWorkingHours,
       bookingSettings: baseBookingSettings,
-      isAdminOrOwner: true,
+      bypassTimeLimits: true,
     });
 
     // 22:00 LA local is outside 09–17. The same wire string parsed in UTC
@@ -796,7 +799,7 @@ describe("DuplicateBookingSchema - date validation", () => {
         prefs: RUNTIME_ZONE_PREFS,
         workingHours: disabledWorkingHours,
         bookingSettings: baseBookingSettings,
-        isAdminOrOwner: false, // BASE/SELF_SERVICE user
+        bypassTimeLimits: false, // role without the bypass
       });
 
       // Start in 1 hour — well inside the 24 hour buffer.
@@ -819,7 +822,7 @@ describe("DuplicateBookingSchema - date validation", () => {
         prefs: RUNTIME_ZONE_PREFS,
         workingHours: disabledWorkingHours,
         bookingSettings: baseBookingSettings,
-        isAdminOrOwner: true, // ADMIN/OWNER user
+        bypassTimeLimits: true, // role with the bypass
       });
 
       // 30 minutes from now — inside the buffer, but admins bypass it.
@@ -842,7 +845,7 @@ describe("DuplicateBookingSchema - date validation", () => {
           bufferStartTime: 0,
           maxBookingLength: null,
         },
-        isAdminOrOwner: true, // Bypass buffer so we isolate the override logic
+        bypassTimeLimits: true, // Bypass buffer so we isolate the override logic
       });
 
       // Booking squarely on the closed 4/24 in the user's local time.
@@ -869,7 +872,7 @@ describe("DuplicateBookingSchema - date validation", () => {
           bufferStartTime: 0,
           maxBookingLength: null,
         },
-        isAdminOrOwner: true, // Isolate the weekday rule from the buffer
+        bypassTimeLimits: true, // Isolate the weekday rule from the buffer
       });
 
       // 2099-04-25 is a Saturday in America/Chicago — a closed weekday.
@@ -896,7 +899,7 @@ describe("DuplicateBookingSchema - date validation", () => {
           bufferStartTime: 0,
           maxBookingLength: null,
         },
-        isAdminOrOwner: false, // Even a BASE user is unrestricted by hours here
+        bypassTimeLimits: false, // Unrestricted by hours even without the bypass
       });
 
       // A weekend, late-night future date that any enabled schedule would
@@ -920,7 +923,7 @@ describe("DuplicateBookingSchema - date validation", () => {
           bufferStartTime: 0,
           maxBookingLength: null,
         },
-        isAdminOrOwner: true,
+        bypassTimeLimits: true,
       });
 
       const startDate = addDays(new Date(), 1);
@@ -946,7 +949,7 @@ describe("DuplicateBookingSchema - date validation", () => {
         prefs: RUNTIME_ZONE_PREFS,
         workingHours: disabledWorkingHours,
         bookingSettings: baseBookingSettings,
-        isAdminOrOwner: false,
+        bypassTimeLimits: false,
       });
 
       // Start in 2 days to clear the 24h buffer, then run 72h (over the 48h max).
@@ -970,7 +973,7 @@ describe("DuplicateBookingSchema - date validation", () => {
         prefs: RUNTIME_ZONE_PREFS,
         workingHours: disabledWorkingHours,
         bookingSettings: baseBookingSettings,
-        isAdminOrOwner: true,
+        bypassTimeLimits: true,
       });
       const adminStart = addHours(new Date(), 1);
       const adminEnd = addHours(adminStart, 72);
@@ -996,14 +999,14 @@ describe("DuplicateBookingSchema - date validation", () => {
       prefs: RUNTIME_ZONE_PREFS,
       workingHours: disabledWorkingHours,
       bookingSettings: sharedSettings,
-      isAdminOrOwner: true,
+      bypassTimeLimits: true,
     });
     const formSchema = BookingFormSchema({
       prefs: RUNTIME_ZONE_PREFS,
       action: "new",
       workingHours: disabledWorkingHours,
       bookingSettings: sharedSettings,
-      isAdminOrOwner: true,
+      bypassTimeLimits: true,
     });
 
     // BookingFormSchema validates more than dates (name/custodian), so supply
@@ -1101,7 +1104,7 @@ describe("BookingFormSchema - pref timezone drives the stored UTC (config date f
       action: "new",
       workingHours: disabledWorkingHours,
       bookingSettings: baseBookingSettings,
-      isAdminOrOwner: true,
+      bypassTimeLimits: true,
     });
     const result = schema.safeParse({
       name: "TZ Booking",
@@ -1154,7 +1157,7 @@ describe("BookingFormSchema - pref timezone drives the stored UTC (config date f
       action: "new",
       workingHours: disabledWorkingHours,
       bookingSettings: baseBookingSettings,
-      isAdminOrOwner: true,
+      bypassTimeLimits: true,
     });
     const result = schema.safeParse({
       name: "TZ Booking",
@@ -1230,7 +1233,7 @@ describe("BookingFormSchema - near-future start, user west of UTC", () => {
       action: "new",
       workingHours: disabledWorkingHours,
       bookingSettings: noBufferSettings,
-      isAdminOrOwner: false,
+      bypassTimeLimits: false,
     }).safeParse({
       name: "Book a printer this afternoon",
       startDate,
@@ -1332,9 +1335,222 @@ describe("BookingFormSchema - prefs param rejects a browser-hints object", () =>
         action: "new",
         workingHours: disabledWorkingHours,
         bookingSettings: baseBookingSettings,
-        isAdminOrOwner: true,
+        bypassTimeLimits: true,
       });
 
     expect(build).toBeTypeOf("function");
+  });
+});
+
+describe("BookingFormSchema - custodian field", () => {
+  /**
+   * The custodian arrives as the picker's selection serialised to JSON. What
+   * matters is that a value the form cannot use is a validation issue on the
+   * field — never an exception out of `safeParse`, which the action would turn
+   * into a 500.
+   */
+  const schema = () =>
+    BookingFormSchema({
+      prefs: RUNTIME_ZONE_PREFS,
+      action: "new",
+      workingHours: { enabled: false, weeklySchedule: {}, overrides: [] },
+      bookingSettings: {
+        bufferStartTime: 0,
+        tagsRequired: false,
+        maxBookingLength: null,
+        maxBookingLengthSkipClosedDays: false,
+      },
+      bypassTimeLimits: true,
+    });
+
+  it.each([
+    { label: "unreadable JSON", custodian: "{not json" },
+    { label: "an empty value", custodian: "" },
+  ])("reports $label as a custodian issue", ({ custodian }) => {
+    const result = schema().safeParse({ name: "Test Booking", custodian });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(
+        result.error.issues.find((issue) => issue.path[0] === "custodian")
+          ?.message
+      ).toBe("Please select a custodian");
+    }
+  });
+
+  it("accepts a readable selection", () => {
+    const result = schema().safeParse({
+      name: "Test Booking",
+      custodian: JSON.stringify({ id: "tm-1", name: "Test User" }),
+    });
+
+    expect(
+      result.success ||
+        !result.error.issues.some((issue) => issue.path[0] === "custodian")
+    ).toBe(true);
+  });
+});
+
+describe("getReserveStartBlockedReason", () => {
+  const NOW = new Date("2026-10-20T12:00:00Z");
+
+  beforeAll(() => {
+    // why: the rule compares against the current time, so pin it
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+  });
+
+  afterAll(() => {
+    vi.useRealTimers();
+  });
+
+  it("blocks a start that has already passed with the shared wording", () => {
+    expect(
+      getReserveStartBlockedReason({
+        startDate: addHours(NOW, -1),
+        bufferStartTime: 0,
+      })
+    ).toBe(BOOKING_RESERVE_BLOCKED_LABELS.START_PASSED);
+  });
+
+  it("blocks a passed start even when time limits are bypassed", () => {
+    expect(
+      getReserveStartBlockedReason({
+        startDate: addMinutes(NOW, -5),
+        bufferStartTime: 4,
+        bypassTimeLimits: true,
+      })
+    ).toBe(BOOKING_RESERVE_BLOCKED_LABELS.START_PASSED);
+  });
+
+  it("allows a future start", () => {
+    expect(
+      getReserveStartBlockedReason({
+        startDate: addHours(NOW, 1),
+        bufferStartTime: 0,
+      })
+    ).toBeNull();
+  });
+
+  it("blocks a future start inside the buffer with the buffer message", () => {
+    expect(
+      getReserveStartBlockedReason({
+        startDate: addHours(NOW, 1),
+        bufferStartTime: 2,
+      })
+    ).toBe(
+      "Start date must be at least 2 hours from now. Move it later to reserve."
+    );
+  });
+
+  it("ignores the buffer when time limits are bypassed", () => {
+    expect(
+      getReserveStartBlockedReason({
+        startDate: addHours(NOW, 1),
+        bufferStartTime: 2,
+        bypassTimeLimits: true,
+      })
+    ).toBeNull();
+  });
+
+  it("agrees with the form schema the server reserves with", () => {
+    const settings = {
+      bufferStartTime: 0,
+      tagsRequired: false,
+      maxBookingLength: null,
+      maxBookingLengthSkipClosedDays: false,
+    };
+    const startDate = addMinutes(NOW, -30);
+    const result = BookingFormSchema({
+      prefs: prefsFor("UTC"),
+      action: "reserve",
+      workingHours: null,
+      bookingSettings: settings,
+    }).safeParse({
+      name: "Camera kit",
+      custodian: JSON.stringify({ id: "tm-1", name: "Sam" }),
+      startDate: toIsoDateTimeToUserTimezone(startDate, "UTC").slice(0, 16),
+      endDate: toIsoDateTimeToUserTimezone(addDays(NOW, 1), "UTC").slice(0, 16),
+    });
+
+    expect(
+      !result.success &&
+        result.error.issues.some((issue) => issue.path[0] === "startDate")
+    ).toBe(true);
+    expect(
+      getReserveStartBlockedReason({ startDate, bufferStartTime: 0 })
+    ).not.toBeNull();
+  });
+
+  it("leaves an unparseable date to the field's own error", () => {
+    expect(
+      getReserveStartBlockedReason({
+        startDate: new Date("not a date"),
+        bufferStartTime: 0,
+      })
+    ).toBeNull();
+  });
+});
+
+describe("getReserveStartBoundary", () => {
+  const NOW = new Date("2026-10-20T12:00:00Z");
+
+  beforeAll(() => {
+    // why: the boundary is relative to the current time, so pin it
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+  });
+
+  afterAll(() => {
+    vi.useRealTimers();
+  });
+
+  it("is the buffer edge while the start is still clear of the buffer", () => {
+    expect(
+      getReserveStartBoundary({
+        startDate: addHours(NOW, 5),
+        bufferStartTime: 2,
+      })
+    ).toEqual(addHours(NOW, 3));
+  });
+
+  it("is the start itself once inside the buffer", () => {
+    expect(
+      getReserveStartBoundary({
+        startDate: addHours(NOW, 1),
+        bufferStartTime: 2,
+      })
+    ).toEqual(addHours(NOW, 1));
+  });
+
+  it("is the start itself without a buffer or when limits are bypassed", () => {
+    expect(
+      getReserveStartBoundary({
+        startDate: addHours(NOW, 5),
+        bufferStartTime: 0,
+      })
+    ).toEqual(addHours(NOW, 5));
+    expect(
+      getReserveStartBoundary({
+        startDate: addHours(NOW, 5),
+        bufferStartTime: 2,
+        bypassTimeLimits: true,
+      })
+    ).toEqual(addHours(NOW, 5));
+  });
+
+  it("is null once the start has passed or cannot be read", () => {
+    expect(
+      getReserveStartBoundary({
+        startDate: addMinutes(NOW, -1),
+        bufferStartTime: 0,
+      })
+    ).toBeNull();
+    expect(
+      getReserveStartBoundary({
+        startDate: new Date("not a date"),
+        bufferStartTime: 0,
+      })
+    ).toBeNull();
   });
 });

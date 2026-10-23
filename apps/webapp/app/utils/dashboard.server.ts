@@ -6,6 +6,9 @@ import {
 import { db } from "~/database/db.server";
 import { defaultUserCategories } from "~/modules/user/service.server";
 import { ShelfError } from "./error";
+import type { ImportEligibilityArgs } from "./subscription.server";
+import { resolveCanImportAssetsOrFalse } from "./subscription.server";
+import type { UserNameFields } from "./user";
 
 // ---------------------------------------------------------------------------
 // buildAssetsByStatusChart — converts Prisma groupBy result to chart shape
@@ -90,12 +93,9 @@ interface DirectCustodian {
   id: string;
   name: string;
   userId: string | null;
-  user: {
-    firstName: string | null;
-    lastName: string | null;
-    profilePicture: string | null;
-    email: string;
-  } | null;
+  user:
+    | (UserNameFields & { profilePicture: string | null; email: string })
+    | null;
   _count: { custodies: number };
 }
 
@@ -107,12 +107,9 @@ interface BookingForCustodians {
     name: string;
     userId: string | null;
   } | null;
-  custodianUser: {
-    firstName: string | null;
-    lastName: string | null;
-    profilePicture: string | null;
-    email: string;
-  } | null;
+  custodianUser:
+    | (UserNameFields & { profilePicture: string | null; email: string })
+    | null;
   /**
    * Count of assets on this booking via the explicit `BookingAsset` pivot.
    * Pre-Phase-3a this field was `_count.assets` (from the implicit M2M);
@@ -139,11 +136,7 @@ export function getCustodiansOrderedByTotalCustodies({
         id: string;
         name: string;
         userId: string | null;
-        user: {
-          firstName: string | null;
-          lastName: string | null;
-          profilePicture: string | null;
-        } | null;
+        user: (UserNameFields & { profilePicture: string | null }) | null;
       };
     }
   >();
@@ -161,13 +154,7 @@ export function getCustodiansOrderedByTotalCustodies({
           id: tm.id,
           name: tm.name,
           userId: tm.userId,
-          user: tm.user
-            ? {
-                firstName: tm.user.firstName,
-                lastName: tm.user.lastName,
-                profilePicture: tm.user.profilePicture,
-              }
-            : null,
+          user: tm.user,
         },
       });
     }
@@ -207,11 +194,7 @@ export function getCustodiansOrderedByTotalCustodies({
             id: booking.custodianUserId,
             name: "",
             userId: booking.custodianUserId,
-            user: {
-              firstName: booking.custodianUser.firstName,
-              lastName: booking.custodianUser.lastName,
-              profilePicture: booking.custodianUser.profilePicture,
-            },
+            user: booking.custodianUser,
           },
         });
       }
@@ -236,59 +219,54 @@ export function getCustodiansOrderedByTotalCustodies({
 // checklistOptions
 // ---------------------------------------------------------------------------
 
+/**
+ * Computes the count-backed onboarding checklist booleans.
+ *
+ * `hasAssets` and `hasCustodies` are composed at the call site (the home
+ * loader) from queries it already runs, so they are deliberately not
+ * re-counted here — see the `checklistOptions` object it builds.
+ *
+ * @param args.organizationId - The workspace to compute the checklist for
+ * @returns Checklist booleans keyed by onboarding step
+ * @throws {ShelfError} If any count query fails
+ */
 export async function checklistOptions({
-  hasAssets,
   organizationId,
 }: {
-  hasAssets: boolean;
   organizationId: string;
 }) {
   try {
-    const [
-      categoriesCount,
-      tagsCount,
-      teamMembersCount,
-      custodiesCount,
-      customFieldsCount,
-    ] = await Promise.all([
-      db.category.count({
-        where: {
-          organizationId,
-          name: {
-            notIn: defaultUserCategories.map((uc) => uc.name),
+    const [categoriesCount, tagsCount, teamMembersCount, customFieldsCount] =
+      await Promise.all([
+        db.category.count({
+          where: {
+            organizationId,
+            name: {
+              notIn: defaultUserCategories.map((uc) => uc.name),
+            },
           },
-        },
-      }),
+        }),
 
-      db.tag.count({
-        where: { organizationId },
-      }),
+        db.tag.count({
+          where: { organizationId },
+        }),
 
-      db.teamMember.count({
-        where: { organizationId },
-      }),
+        db.teamMember.count({
+          where: { organizationId },
+        }),
 
-      db.teamMember.count({
-        where: {
-          organizationId,
-          custodies: { some: {} },
-        },
-      }),
-
-      db.customField.count({
-        where: {
-          organizationId,
-          deletedAt: null,
-        },
-      }),
-    ]);
+        db.customField.count({
+          where: {
+            organizationId,
+            deletedAt: null,
+          },
+        }),
+      ]);
 
     return {
-      hasAssets,
       hasCategories: categoriesCount > 0,
       hasTags: tagsCount > 0,
       hasTeamMembers: teamMembersCount > 0,
-      hasCustodies: custodiesCount > 0,
       hasCustomFields: customFieldsCount > 0,
     };
   } catch (cause) {
@@ -300,4 +278,38 @@ export async function checklistOptions({
       label: "Dashboard",
     });
   }
+}
+
+/**
+ * Decides what the home page's onboarding checklist shows.
+ *
+ * The checklist is on screen until the member skips it or every item is done.
+ * It offers the spreadsheet import only while the workspace has no assets: once
+ * one exists, the member has already started, so the item is dropped rather
+ * than ticked. The import eligibility lookup runs only when the item could
+ * appear, and a failed lookup reads as "cannot import".
+ *
+ * @param args.checklistOptions - Every checklist item, `true` when done
+ * @param args.skipOnboardingChecklist - Whether the member skipped the checklist
+ * @param args.importEligibility - What `resolveCanImportAssetsOrFalse` needs
+ * @returns Whether the checklist shows, and whether it offers the import
+ */
+export async function resolveOnboardingChecklist({
+  checklistOptions,
+  skipOnboardingChecklist,
+  importEligibility,
+}: {
+  checklistOptions: Record<string, boolean> & { hasAssets: boolean };
+  skipOnboardingChecklist: boolean;
+  importEligibility: ImportEligibilityArgs;
+}): Promise<{ showsChecklist: boolean; canImportAssets: boolean }> {
+  const showsChecklist =
+    !skipOnboardingChecklist && !Object.values(checklistOptions).every(Boolean);
+
+  const offersImport = showsChecklist && !checklistOptions.hasAssets;
+  const canImportAssets = offersImport
+    ? await resolveCanImportAssetsOrFalse(importEligibility)
+    : false;
+
+  return { showsChecklist, canImportAssets };
 }

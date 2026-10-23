@@ -1,4 +1,4 @@
-import type { MouseEvent } from "react";
+import type { ComponentProps, MouseEvent } from "react";
 import { useFetcher, useParams } from "react-router";
 import { useClientNotification } from "~/hooks/use-client-notification";
 import type { action } from "~/routes/api+/asset.scan";
@@ -13,8 +13,11 @@ interface Coordinates {
 
 export const UpdateGpsCoordinatesForm = ({
   callback,
+  disabled,
 }: {
   callback: () => void;
+  /** When set, the trigger is disabled (e.g. the asset is archived). */
+  disabled?: ComponentProps<typeof Button>["disabled"];
 }) => {
   const fetcher = useFetcher<typeof action>();
   const { assetId } = useParams();
@@ -87,6 +90,7 @@ export const UpdateGpsCoordinatesForm = ({
         "justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
       )}
       width="full"
+      disabled={disabled}
       onClick={handleSubmit}
     >
       <span className="flex items-center gap-2">

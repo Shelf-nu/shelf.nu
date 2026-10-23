@@ -5,6 +5,7 @@ import {
   wrapAssetsWithDataForNote,
   wrapUserLinkForNote,
 } from "~/utils/markdoc-wrappers";
+import type { UserNameFields } from "~/utils/user";
 import { buildAuditImagesNoteContent } from "./note-content.server";
 
 /**
@@ -42,9 +43,7 @@ export async function createAuditCreationNote({
       userId: creator.id,
       type: "UPDATE",
       content: `${wrapUserLinkForNote({
-        id: creator.id,
-        firstName: creator.firstName,
-        lastName: creator.lastName,
+        ...creator,
       })} created audit with **${expectedAssetCount}** expected asset${
         expectedAssetCount === 1 ? "" : "s"
       }.`,
@@ -72,11 +71,7 @@ export async function createAssetScanNote({
   userId: string;
   isExpected: boolean;
   tx: any; // Prisma transaction client
-  prefetchedUser?: {
-    id: string;
-    firstName: string | null;
-    lastName: string | null;
-  } | null;
+  prefetchedUser?: (UserNameFields & { id: string }) | null;
 }) {
   // why: the asset is ALWAYS fetched org-scoped here (no prefetch shortcut) so
   // a caller that prefetched an asset without org scoping cannot feed a
@@ -84,6 +79,7 @@ export async function createAssetScanNote({
   // org-scoped data for this note, so prefetchedUser remains a safe shortcut.
   const [asset, scanner] = await Promise.all([
     tx.asset.findFirst({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: title lookup for an audit note; an archived asset in the audit must still be named
       where: { id: assetId, organizationId },
       select: { id: true, title: true },
     }),
@@ -112,9 +108,7 @@ export async function createAssetScanNote({
       userId: scanner.id,
       type: "UPDATE",
       content: `${wrapUserLinkForNote({
-        id: scanner.id,
-        firstName: scanner.firstName,
-        lastName: scanner.lastName,
+        ...scanner,
       })} scanned ${assetStatus} asset ${assetLink}.`,
     },
   });
@@ -139,6 +133,7 @@ export async function createAssetScanRemovedNote({
 }) {
   const [asset, remover] = await Promise.all([
     tx.asset.findFirst({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: title lookup for an audit note; an archived asset in the audit must still be named
       where: { id: assetId, organizationId },
       select: { id: true, title: true },
     }),
@@ -165,20 +160,14 @@ export async function createAssetScanRemovedNote({
       userId: remover.id,
       type: "UPDATE",
       content: `${wrapUserLinkForNote({
-        id: remover.id,
-        firstName: remover.firstName,
-        lastName: remover.lastName,
+        ...remover,
       })} removed scanned asset ${assetLink}.`,
     },
   });
 }
 
 /** The actor fields a lifecycle note needs, when fetched outside the transaction. */
-type PrefetchedNoteActor = {
-  id: string;
-  firstName: string | null;
-  lastName: string | null;
-} | null;
+type PrefetchedNoteActor = (UserNameFields & { id: string }) | null;
 
 /**
  * Writes one audit-lifecycle UPDATE note attributed to the acting user.
@@ -233,9 +222,7 @@ async function createAuditLifecycleNote({
       userId: actor.id,
       type: "UPDATE",
       content: `${wrapUserLinkForNote({
-        id: actor.id,
-        firstName: actor.firstName,
-        lastName: actor.lastName,
+        ...actor,
       })} ${sentence}`,
     },
   });
@@ -422,9 +409,7 @@ export async function createAuditUpdateNote({
   });
 
   const content = `${wrapUserLinkForNote({
-    id: updater.id,
-    firstName: updater.firstName,
-    lastName: updater.lastName,
+    ...updater,
   })} updated audit details:\n\n${changeDescriptions.join("\n\n")}`;
 
   await tx.auditNote.create({
@@ -490,9 +475,7 @@ export async function createAuditAssetImagesAddedNote({
 
   // Build content with image preview
   let content = `${wrapUserLinkForNote({
-    id: uploader.id,
-    firstName: uploader.firstName,
-    lastName: uploader.lastName,
+    ...uploader,
   })} added ${imageCount} ${imageWord} to ${wrapAssetsWithDataForNote(
     asset.asset
   )}.`;
@@ -603,9 +586,7 @@ export async function createDueDateChangedNote({
   if (!oldDate && newDate) {
     // Due date was set for the first time
     content = `${wrapUserLinkForNote({
-      id: updater.id,
-      firstName: updater.firstName,
-      lastName: updater.lastName,
+      ...updater,
     })} set due date to **${newDate.toLocaleDateString("en-US", {
       year: "numeric",
       month: "short",
@@ -616,16 +597,12 @@ export async function createDueDateChangedNote({
   } else if (oldDate && !newDate) {
     // Due date was cleared
     content = `${wrapUserLinkForNote({
-      id: updater.id,
-      firstName: updater.firstName,
-      lastName: updater.lastName,
+      ...updater,
     })} cleared the due date.`;
   } else if (oldDate && newDate) {
     // Due date was changed
     content = `${wrapUserLinkForNote({
-      id: updater.id,
-      firstName: updater.firstName,
-      lastName: updater.lastName,
+      ...updater,
     })} changed due date from **${oldDate.toLocaleDateString("en-US", {
       year: "numeric",
       month: "short",
@@ -693,13 +670,9 @@ export async function createAssigneeAddedNote({
   }
 
   const content = `${wrapUserLinkForNote({
-    id: updater.id,
-    firstName: updater.firstName,
-    lastName: updater.lastName,
+    ...updater,
   })} added assignee: ${wrapUserLinkForNote({
-    id: assignee.id,
-    firstName: assignee.firstName,
-    lastName: assignee.lastName,
+    ...assignee,
   })}.`;
 
   await tx.auditNote.create({
@@ -752,13 +725,9 @@ export async function createAssigneeRemovedNote({
   }
 
   const content = `${wrapUserLinkForNote({
-    id: updater.id,
-    firstName: updater.firstName,
-    lastName: updater.lastName,
+    ...updater,
   })} removed assignee: ${wrapUserLinkForNote({
-    id: assignee.id,
-    firstName: assignee.firstName,
-    lastName: assignee.lastName,
+    ...assignee,
   })}.`;
 
   await tx.auditNote.create({
@@ -802,6 +771,7 @@ export async function createAssetsAddedToAuditNote({
       },
     }),
     tx.asset.findMany({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: title lookup for an audit note; archived assets in the audit must still be named
       where: { id: { in: addedAssetIds }, organizationId },
       select: { id: true, title: true },
       orderBy: { title: "asc" },
@@ -816,9 +786,7 @@ export async function createAssetsAddedToAuditNote({
   const assetsMarkdoc = wrapAssetsWithDataForNote(addedAssets, "added");
 
   let content = `${wrapUserLinkForNote({
-    id: adder.id,
-    firstName: adder.firstName,
-    lastName: adder.lastName,
+    ...adder,
   })} added ${assetsMarkdoc} to audit.`;
 
   if (skippedCount > 0) {
@@ -866,6 +834,7 @@ export async function createAssetRemovedFromAuditNote({
       },
     }),
     tx.asset.findFirst({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: title lookup for an audit note; an archived asset in the audit must still be named
       where: { id: assetId, organizationId },
       select: { id: true, title: true },
     }),
@@ -878,9 +847,7 @@ export async function createAssetRemovedFromAuditNote({
   const assetMarkdoc = wrapAssetsWithDataForNote(asset, "removed");
 
   const content = `${wrapUserLinkForNote({
-    id: remover.id,
-    firstName: remover.firstName,
-    lastName: remover.lastName,
+    ...remover,
   })} removed ${assetMarkdoc} from audit.`;
 
   await tx.auditNote.create({
@@ -922,6 +889,7 @@ export async function createAssetsRemovedFromAuditNote({
       },
     }),
     tx.asset.findMany({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: title lookup for an audit note; archived assets in the audit must still be named
       where: { id: { in: assetIds }, organizationId },
       select: { id: true, title: true },
       orderBy: { title: "asc" },
@@ -935,9 +903,7 @@ export async function createAssetsRemovedFromAuditNote({
   const assetsMarkdoc = wrapAssetsWithDataForNote(assets, "removed");
 
   const content = `${wrapUserLinkForNote({
-    id: remover.id,
-    firstName: remover.firstName,
-    lastName: remover.lastName,
+    ...remover,
   })} removed ${assetsMarkdoc} from audit.`;
 
   await tx.auditNote.create({

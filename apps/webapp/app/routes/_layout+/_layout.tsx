@@ -18,9 +18,11 @@ import {
 import { useHydrated } from "remix-utils/use-hydrated";
 import { AtomsResetHandler } from "~/atoms/atoms-reset-handler";
 import { feedbackModalOpenAtom } from "~/atoms/feedback";
+import { AssetImportNotice } from "~/components/assets/assets-index/asset-import-notice";
 import { ErrorContent } from "~/components/errors";
 
 import FeedbackModal from "~/components/feedback/feedback-modal";
+import { AssetImportCard } from "~/components/layout/asset-import-card";
 import {
   CommandPaletteButton,
   CommandPaletteRoot,
@@ -41,11 +43,23 @@ import { MissingPaymentMethodBanner } from "~/components/subscription/missing-pa
 import { NoSubscription } from "~/components/subscription/no-subscription";
 import { UnpaidInvoiceBanner } from "~/components/subscription/unpaid-invoice-banner";
 import { config } from "~/config/shelf.config";
+import { getActiveAssetImport } from "~/modules/asset-import/service.server";
+import type {
+  AssetImportNoticePayload,
+  AssetImportStatusPayload,
+} from "~/modules/asset-import/types";
+import {
+  isFullImportPayload,
+  shapeActiveImportForViewer,
+} from "~/modules/asset-import/viewer-payload";
+import { revokeAllSessions } from "~/modules/auth/service.server";
+import { getLegacyLoginDecisionForUser } from "~/modules/auth/sso-enforcement.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import {
   getSelectedOrganization,
   setSelectedOrganizationIdCookie,
 } from "~/modules/organization/context.server";
+import { announcementRole } from "~/modules/update/audience";
 import { getUnreadCountForUser } from "~/modules/update/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
@@ -61,6 +75,13 @@ import { isLikeShelfError, makeShelfError, ShelfError } from "~/utils/error";
 import { isRouteError } from "~/utils/http";
 import { payload, error } from "~/utils/http.server";
 import { skipRevalidationOnClientViewChange } from "~/utils/list-view-params";
+import { Logger } from "~/utils/logger";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { hasPermission } from "~/utils/permissions/permission.validator.server";
+import { resolveRoleAccess } from "~/utils/permissions/role-access";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 
 import {
@@ -86,6 +107,31 @@ export type LayoutLoaderResponse = typeof loader;
  */
 export const shouldRevalidate = skipRevalidationOnClientViewChange;
 
+/**
+ * Gate for every authenticated route beneath this layout, and the source of the
+ * data its chrome renders.
+ *
+ * The gates run in a fixed order and the order is load-bearing: the SSO
+ * sign-in policy, then subscription validity, then onboarding, then
+ * organization resolution. Onboarding has to clear before org resolution
+ * because `getSelectedOrganization` throws for a user with no membership,
+ * which is exactly the state a non-onboarded user is in: resolving first turns
+ * "finish signing up" into an error page.
+ *
+ * Because the gate covers routes at every depth, its redirects are absolute. A
+ * relative target resolves against the URL the user arrived at, so anyone
+ * following a QR or email link into a nested route would be sent somewhere
+ * that does not exist.
+ *
+ * @param args.context - Carries the auth session the gates run against
+ * @param args.request - Read for the per-page cookie and the current URL
+ * @returns The user, their organizations, subscription state and layout prefs
+ * @throws {Response} A redirect to `/onboarding` for a user who has not
+ *   finished signing up, or an error response when a gate refuses. A user
+ *   whose address must now sign in with SSO has every session revoked, is
+ *   signed out and redirected to `/login?sso_required=true` (returned, not
+ *   thrown).
+ */
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -130,6 +176,26 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       initializePerPageCookieOnLayout(request),
     ]);
 
+    // A session opened through a legacy path (password, OTP) outlives the
+    // decision that now refuses that path, e.g. once the user's domain is
+    // configured for SSO. End it, so the refusal applies to sessions already
+    // open and not only to new sign-ins. SSO users are never refused here: their
+    // session came from SSO.
+    // Every session of the account is revoked server-side, not only this
+    // cookie: the refresh-token row is the auth boundary, so a session left
+    // open in another browser would otherwise keep refreshing.
+    if (!user.sso) {
+      const decision = await getLegacyLoginDecisionForUser({
+        userId: user.id,
+        email: user.email,
+      });
+      if (!decision.allowed) {
+        await revokeAllSessions(authSession.accessToken);
+        context.destroySession();
+        return redirect("/login?sso_required=true");
+      }
+    }
+
     let subscription = null;
 
     if (user.customerId && stripe) {
@@ -137,11 +203,14 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         user.customerId
       )) as CustomerWithSubscriptions;
       subscription = getCustomerActiveSubscription({ customer });
-      await validateSubscriptionIsActive({ user, subscription });
+      await validateSubscriptionIsActive({ user, customer });
     }
 
     if (!user.onboarded) {
-      return redirect("onboarding");
+      // Absolute: a relative target resolves against the URL the user arrived
+      // at, so anyone landing deeper than the root — a QR link, a link from an
+      // email — is sent to `<their/path>/onboarding`, which does not exist.
+      return redirect("/onboarding");
     }
 
     // Org resolution runs after the onboarding guard — safe now since
@@ -169,14 +238,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       (userOrg) => userOrg.organization.id === organizationId
     )?.roles;
 
-    // Check if current user has OWNER or ADMIN role in the organization
-    const isOwner = currentOrganizationUserRoles?.includes("OWNER");
-    const isOrgAdmin = currentOrganizationUserRoles?.includes("ADMIN");
-
-    // Check if sequential ID migration is needed
-    const needsSequentialIdMigration =
-      (isOwner || isOrgAdmin) && !currentOrganization.hasSequentialIdsMigrated;
-
     if (!organizations.length || !currentOrganization) {
       throw new ShelfError({
         cause: null,
@@ -188,19 +249,78 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       });
     }
 
+    // The migration prompt is for members who may edit assets.
+    const needsSequentialIdMigration =
+      !currentOrganization.hasSequentialIdsMigrated &&
+      (await hasPermission({
+        organizationId,
+        userId,
+        roles: currentOrganizationUserRoles ?? [],
+        entity: PermissionEntity.asset,
+        action: PermissionAction.update,
+      }));
+
+    // The caller's reach in the current organization: the one object every
+    // client component reads (via useRoleAccess), instead of re-deriving a
+    // role decision the server already resolved.
+    const roleAccess = resolveRoleAccess({
+      roles: currentOrganizationUserRoles,
+      workspace: currentOrganization,
+    });
+
     // Run booking settings, working hours, and unread count in parallel —
     // all only depend on organizationId/userId which are available now.
-    const [bookingSettings, workingHours, unreadUpdatesCount] =
-      await Promise.all([
-        getBookingSettingsForOrganization(currentOrganization.id),
-        getWorkingHoursForOrganization(currentOrganization.id),
-        currentOrganizationUserRoles?.[0]
-          ? getUnreadCountForUser({
-              userId: authSession.userId,
-              userRole: currentOrganizationUserRoles[0],
-            })
-          : Promise.resolve(0),
-      ]);
+    // A failure here (e.g. the AssetImport table not migrated yet) must not
+    // take every page down: log it and show no import.
+    const activeAssetImportPromise: Promise<
+      AssetImportStatusPayload | AssetImportNoticePayload | null
+    > = hasPermission({
+      organizationId,
+      userId,
+      roles: currentOrganizationUserRoles ?? [],
+      entity: PermissionEntity.asset,
+      action: PermissionAction.import,
+    })
+      .then(async (canImport) =>
+        shapeActiveImportForViewer(
+          await getActiveAssetImport({
+            userId: authSession.userId,
+            organizationId: currentOrganization.id,
+          }),
+          canImport
+        )
+      )
+      .catch((cause: unknown) => {
+        Logger.error(
+          new ShelfError({
+            cause,
+            message: "Could not load the active asset import.",
+            label: "Asset Import",
+            shouldBeCaptured: true,
+          })
+        );
+        return null;
+      });
+    const [
+      bookingSettings,
+      workingHours,
+      unreadUpdatesCount,
+      activeAssetImport,
+    ] = await Promise.all([
+      getBookingSettingsForOrganization(currentOrganization.id),
+      getWorkingHoursForOrganization(currentOrganization.id),
+      (() => {
+        // Same audience rule as the updates page (announcementRole), so the
+        // badge counts exactly what the list shows.
+        const userRole = announcementRole(currentOrganizationUserRoles);
+        return userRole
+          ? getUnreadCountForUser({ userId: authSession.userId, userRole })
+          : Promise.resolve(0);
+      })(),
+      // The import in flight (or just finished for the starter), shown by
+      // the floating card and the assets index notice.
+      activeAssetImportPromise,
+    ]);
 
     return data(
       payload({
@@ -211,6 +331,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         workingHours,
         currentOrganization,
         currentOrganizationUserRoles,
+        roleAccess,
         subscription,
         enablePremium: config.enablePremiumFeatures,
         hideNoticeCard: userPrefsCookie.hideNoticeCard,
@@ -220,6 +341,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         canUseBookings: canUseBookings(currentOrganization),
         canUseAudits: canUseAudits(currentOrganization),
         unreadUpdatesCount,
+        // Explicit annotation keeps the loader's inferred type small.
+        activeAssetImport: activeAssetImport as
+          | AssetImportStatusPayload
+          | AssetImportNoticePayload
+          | null,
         hasUnpaidInvoice: user.hasUnpaidInvoice,
         warnForNoPaymentMethod: user.warnForNoPaymentMethod,
         needsSequentialIdMigration,
@@ -279,6 +405,7 @@ export default function App() {
     minimizedSidebar,
     needsSequentialIdMigration,
     currentOrganizationId,
+    activeAssetImport,
   } = useLoaderData<typeof loader>();
   const isHydrated = useHydrated();
   // Several authenticated routes (assets._index, kits._index, locations.*, …)
@@ -340,10 +467,17 @@ export default function App() {
                   <SidebarTrigger />
                 </div>
               </header>
+              <AssetImportNotice activeAssetImport={activeAssetImport} />
               <Outlet />
             </>
           )}
           <Toaster />
+          {isFullImportPayload(activeAssetImport) ? (
+            <AssetImportCard
+              key={activeAssetImport.id}
+              initial={activeAssetImport}
+            />
+          ) : null}
 
           {/* Sequential ID Migration Modal */}
           {needsSequentialIdMigration ? (

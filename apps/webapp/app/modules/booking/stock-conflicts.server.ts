@@ -193,6 +193,7 @@ export async function flagBookingStockConflicts({
     const [assetRows, reservedRows, custodyGroups, inKitsGroups] =
       await Promise.all([
         client.asset.findMany({
+          // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: by-id quantity read for pools already on the bookings being checked
           where: { id: { in: assetIds }, organizationId },
           select: { id: true, quantity: true },
         }),

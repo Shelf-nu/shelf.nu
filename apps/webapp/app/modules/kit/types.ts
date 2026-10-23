@@ -1,5 +1,6 @@
 import type { Kit, Prisma, Barcode } from "@prisma/client";
 import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
+import { KIT_ACTIVE_MEMBER_COUNT } from "./fields";
 import { LOCATION_WITH_HIERARCHY } from "../asset/fields";
 import { ASSET_MODEL_IMAGE_SELECT } from "../asset/image-select";
 
@@ -52,9 +53,10 @@ export const GET_KIT_STATIC_INCLUDES = {
 };
 
 export const KITS_INCLUDE_FIELDS = {
-  // The count semantics are identical (rows per kit) since today's
-  // unique constraint on `AssetKit.assetId` keeps it 1:1.
-  _count: { select: { assetKits: true } },
+  // Members per kit (`AssetKit` is unique per asset and kit). Archived members
+  // are out of service and left out of kit custody and bookings, so they are
+  // not counted either.
+  _count: KIT_ACTIVE_MEMBER_COUNT,
   // Code-resolution relations for the AssetCodeBadge / resolveDisplayCode.
   // Kits are code-bearing entities too (Qr.kitId, Barcode.kitId exist), so
   // every kit-listing surface needs these included to render the chip.
@@ -94,6 +96,9 @@ export const KIT_SELECT_FIELDS_FOR_LIST_ITEMS = {
   ...ASSET_MODEL_IMAGE_SELECT,
   status: true,
   availableToBook: true,
+  // Archived assets keep showing in the kit they belong to, flagged with the
+  // "Archived" badge (issue #382).
+  archivedAt: true,
   type: true,
   quantity: true,
   unitOfMeasure: true,

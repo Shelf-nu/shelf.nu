@@ -3,15 +3,13 @@
  *
  * Rendered wherever a booking is summarised, whenever it still holds
  * outstanding `BookingModelRequest` units. Model reservations are a commitment
- * to supply N of some model without yet naming which physical assets, so a
- * booking carrying them is **not ready to leave** — somebody still has to walk
- * to a shelf and scan those units in.
+ * to supply N of some model without yet naming which physical assets, so
+ * somebody still has to walk to a shelf and scan those units in. The booking
+ * can go out without them; they stay open until scanned or released.
  *
- * Before this pill existed, the bookings index showed only the concrete asset
- * count, which made a half-assigned booking look identical to a finished one.
- * A customer read "7 assets" on a job that actually needed 7 assets *plus* 4
- * unassigned units and reported it as a counting bug — the count was correct,
- * the missing signal was the problem.
+ * The bookings index otherwise shows only the concrete asset count, which
+ * makes "7 assets" on a job that also needs 4 unassigned units look identical
+ * to a finished one. This pill is that missing signal.
  *
  * Deliberately the same amber as the reservation rows inside the booking
  * (`booking-model-reservations-section.tsx`), so the summary and the detail
@@ -84,7 +82,7 @@ export function UnassignedModelUnitsPill({
               in `list-bookings-content.tsx`. */}
           <span
             role="img"
-            aria-label={`${label}. This booking reserves asset models that have not been matched to physical assets yet. Scan them in before check-out.`}
+            aria-label={`${label}. This booking reserves asset models that have not been matched to physical assets yet. Scan them in to assign them.`}
             className="cursor-help"
           >
             <Badge
@@ -98,7 +96,7 @@ export function UnassignedModelUnitsPill({
         </TooltipTrigger>
         <TooltipContent side="top" align="center" className="max-w-xs">
           Reserved models that have not been matched to physical assets yet.
-          Scan them in before check-out.
+          Scan them in to assign them.
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>

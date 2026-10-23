@@ -1,8 +1,12 @@
+import type { Prisma } from "@prisma/client";
 import { AssetType, type CustomFieldType } from "@prisma/client";
 import {
+  applyArchivedFilter,
   compareCustomFieldValues,
   detectPotentialChanges,
   detectCustomFieldChanges,
+  getArchivedFilterFromParams,
+  getAssetsWhereInput,
   getCustomFieldUpdateNoteContent,
   getInitialPlacementNoteContent,
   getKitLocationUpdateNoteContent,
@@ -841,6 +845,120 @@ describe("getKitLocationUpdateNoteContent", () => {
   });
 });
 
+/**
+ * Regression guard for the archived-asset default (issue #382).
+ *
+ * Archived visibility is enforced by an EXPLICIT per-query filter that defaults
+ * to "active" (hide archived) at the list/index chokepoints — deliberately NOT
+ * a global Prisma extension. These tests lock that default so a future refactor
+ * can't silently flip the chokepoints to leak archived assets into active lists.
+ */
+describe("getArchivedFilterFromParams", () => {
+  it("defaults to 'active' when the archived param is absent", () => {
+    expect(getArchivedFilterFromParams(new URLSearchParams())).toBe("active");
+  });
+
+  it("defaults to 'active' for an unrecognized archived value", () => {
+    expect(
+      getArchivedFilterFromParams(new URLSearchParams("archived=bogus"))
+    ).toBe("active");
+  });
+
+  it("returns 'archived' / 'all' only when explicitly requested", () => {
+    expect(
+      getArchivedFilterFromParams(new URLSearchParams("archived=archived"))
+    ).toBe("archived");
+    expect(
+      getArchivedFilterFromParams(new URLSearchParams("archived=all"))
+    ).toBe("all");
+  });
+});
+
+describe("applyArchivedFilter", () => {
+  it("hides archived assets for the 'active' default (archivedAt: null)", () => {
+    const where: Prisma.AssetWhereInput = {};
+    applyArchivedFilter(where, "active");
+    expect(where.archivedAt).toBeNull();
+  });
+
+  it("shows only archived assets for 'archived' (archivedAt: { not: null })", () => {
+    const where: Prisma.AssetWhereInput = {};
+    applyArchivedFilter(where, "archived");
+    expect(where.archivedAt).toEqual({ not: null });
+  });
+
+  it("leaves the archived dimension unconstrained for 'all'", () => {
+    const where: Prisma.AssetWhereInput = {};
+    applyArchivedFilter(where, "all");
+    expect(where.archivedAt).toBeUndefined();
+  });
+});
+
+describe("getAssetsWhereInput archived default", () => {
+  it("hides archived assets when there are no search params at all", () => {
+    const where = getAssetsWhereInput({
+      organizationId: "org-1",
+      allowedTeamMemberIds: "all",
+    });
+    expect(where.archivedAt).toBeNull();
+  });
+
+  it("hides archived assets when params exist but 'archived' is unset", () => {
+    const where = getAssetsWhereInput({
+      organizationId: "org-1",
+      currentSearchParams: "category=cat-1",
+      allowedTeamMemberIds: "all",
+    });
+    expect(where.archivedAt).toBeNull();
+  });
+
+  it("includes archived assets only when explicitly asked (archived=all)", () => {
+    const where = getAssetsWhereInput({
+      organizationId: "org-1",
+      currentSearchParams: "archived=all",
+      allowedTeamMemberIds: "all",
+      honorArchivedView: true,
+    });
+    expect(where.archivedAt).toBeUndefined();
+  });
+
+  it("ignores the archived param unless the caller opts in", () => {
+    // `?archived=` is raw URL input. A select-all caller that has not proven
+    // the member may see archived assets must act on active ones only, or it
+    // would touch rows the member was never shown.
+    for (const view of ["archived", "all"]) {
+      const where = getAssetsWhereInput({
+        organizationId: "org-1",
+        currentSearchParams: `archived=${view}`,
+        allowedTeamMemberIds: "all",
+      });
+      expect(where.archivedAt).toBeNull();
+    }
+  });
+});
+
+describe("getAssetsWhereInput status filter", () => {
+  it("filters by a real asset status", () => {
+    const where = getAssetsWhereInput({
+      organizationId: "org-1",
+      currentSearchParams: "status=IN_CUSTODY",
+      allowedTeamMemberIds: "all",
+    });
+    expect(where.status).toBe("IN_CUSTODY");
+  });
+
+  it("ignores advanced-mode syntax instead of handing it to Prisma", () => {
+    // A stale advanced-mode URL reaching a simple-mode select-all.
+    const where = getAssetsWhereInput({
+      organizationId: "org-1",
+      currentSearchParams: "status=is:AVAILABLE",
+      allowedTeamMemberIds: "all",
+    });
+    expect(where.status).toBeUndefined();
+    expect(JSON.stringify(where)).not.toContain("is:AVAILABLE");
+  });
+});
+
 describe("getInitialPlacementNoteContent", () => {
   /** The name-bearing subset both create routes pass through from `asset.user`. */
   const user = {
@@ -919,5 +1037,48 @@ describe("getInitialPlacementNoteContent", () => {
 
     expect(result).toContain('text="Dr. Smith"');
     expect(result).not.toContain("Alex Doe");
+  });
+});
+
+describe("getAssetsWhereInput: lowStockOnly", () => {
+  it("narrows simple-mode select-all to assets at or below their minimum, beside other filters", () => {
+    const where = getAssetsWhereInput({
+      organizationId: "org-1",
+      currentSearchParams: "lowStockOnly=true&status=AVAILABLE",
+      allowedTeamMemberIds: "all",
+    });
+
+    expect(where.organizationId).toBe("org-1");
+    expect(where.AND).toEqual([
+      {
+        type: "QUANTITY_TRACKED",
+        minQuantity: { not: null },
+        quantity: { lte: expect.anything() },
+      },
+      // The status filter still applies alongside it.
+      {
+        OR: [
+          { type: "INDIVIDUAL", status: "AVAILABLE" },
+          { type: "QUANTITY_TRACKED" },
+        ],
+      },
+    ]);
+  });
+
+  it("adds nothing without the param", () => {
+    const where = getAssetsWhereInput({
+      organizationId: "org-1",
+      currentSearchParams: "status=AVAILABLE",
+      allowedTeamMemberIds: "all",
+    });
+
+    expect(where.AND).toEqual([
+      {
+        OR: [
+          { type: "INDIVIDUAL", status: "AVAILABLE" },
+          { type: "QUANTITY_TRACKED" },
+        ],
+      },
+    ]);
   });
 });

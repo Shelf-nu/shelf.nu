@@ -5,6 +5,7 @@ import type {
 } from "~/components/assets/assets-index/advanced-filters/schema";
 import { isSafeSqlIdentifier } from "~/utils/sql";
 import { getQueryFieldType } from "./field-type-mapping";
+import { splitFilterParam } from "./filter-param";
 import type { Column } from "../asset-index-settings/helpers";
 
 /**
@@ -36,7 +37,26 @@ export function parseFilters(
   searchParams.forEach((value, key) => {
     const column = columns.find((c) => c.name === key);
     if (column) {
-      const [operator, filterValue] = value.split(":");
+      const [operator, filterValue] = splitFilterParam(value);
+
+      // No separator means no value, which is not a filter. `parseFilterValue`
+      // takes a string and would read straight off `undefined`; the server's
+      // own `validateAdvancedFilterParams` drops these for the same reason.
+      if (filterValue === undefined) {
+        return;
+      }
+
+      // A numeric filter with no readable number is not a filter either. The
+      // query casts the column and compares against the value, and an empty or
+      // unreadable one becomes `NaN` — or, through `Number("")`, a comparison
+      // against zero that looks like a real filter.
+      if (
+        isNumericFilter(key, column) &&
+        !hasReadableNumbers(operator as FilterOperator, filterValue)
+      ) {
+        return;
+      }
+
       const dbKey = API_TO_DB_FIELD_MAP[key] || key;
 
       // Non-custom-field names are used in Prisma.raw() as SQL identifiers,
@@ -62,6 +82,42 @@ export function parseFilters(
   });
 
   return filters;
+}
+
+/**
+ * Whether a filter compares a number: a standard numeric column, or an AMOUNT or
+ * NUMBER custom field.
+ *
+ * @param key - The filter's field name as it appears in the URL
+ * @param column - The column definition for that field
+ * @returns `true` when the filter's value must be a number
+ */
+function isNumericFilter(key: string, column: Column): boolean {
+  if (key.startsWith("cf_")) {
+    return (
+      column.cfType === CustomFieldType.AMOUNT ||
+      column.cfType === CustomFieldType.NUMBER
+    );
+  }
+  return getQueryFieldType(key) === "number";
+}
+
+/**
+ * Whether a numeric filter's value holds the numbers its operator needs: one,
+ * or exactly two for `between`.
+ *
+ * @param operator - The filter operator
+ * @param value - The raw value after the operator separator
+ * @returns `true` when every number is present and finite
+ */
+function hasReadableNumbers(operator: FilterOperator, value: string): boolean {
+  const parts = operator === "between" ? value.split(",") : [value];
+  if (operator === "between" && parts.length !== 2) {
+    return false;
+  }
+  return parts.every(
+    (part) => part.trim() !== "" && Number.isFinite(Number(part))
+  );
 }
 
 /**

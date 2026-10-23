@@ -11,6 +11,10 @@ import {
 } from "./client-hints";
 import { ShelfError, isLikeShelfError } from "./error";
 import { parseMarkdownToReact } from "./md";
+import {
+  optionalNumberFromString,
+  requiredNumberFromString,
+} from "./zod-numeric";
 /** Returns the schema depending on the field type.
  * Also handles the required field error message.
  * This was greatly inspired and done with the help of @rphlmr (https://github.com/rphlmr)
@@ -65,12 +69,16 @@ const getSchema = ({
       }
       return v;
     }),
+    // Blank must stay blank rather than coerce to 0: `z.coerce.number()` reads
+    // `""` as zero, which stored a real zero for every optional numeric field the
+    // operator left empty (the downstream blank guard cannot catch it, because by
+    // then the value is the number 0, not an empty string).
     amount: required
-      ? z.coerce.number().refine((value) => value !== 0, "Please enter a value")
-      : z.coerce.number(params).optional().nullable(),
+      ? requiredNumberFromString({ fieldName: field_name })
+      : optionalNumberFromString({ blank: null, fieldName: field_name }),
     number: required
-      ? z.coerce.number().refine((value) => value !== 0, "Please enter a value")
-      : z.coerce.number(params).optional().nullable(),
+      ? requiredNumberFromString({ fieldName: field_name })
+      : optionalNumberFromString({ blank: null, fieldName: field_name }),
   } as Record<CustomFieldZodSchema["type"], z.ZodTypeAny>;
 };
 
@@ -190,6 +198,22 @@ function formatInvalidNumericMessage(
 }
 
 /**
+ * The subset of a custom-field definition needed to turn a raw cell into a
+ * stored value.
+ *
+ * Narrow on purpose: a definition parsed from a CSV column header
+ * (`getDefinitionFromCsvHeader`) has no database row behind it, so it carries
+ * no `id`. A persisted `CustomField` satisfies this shape too, and its `id`
+ * travels to Sentry when a numeric value is rejected.
+ */
+export type CustomFieldDefinitionForValue = Pick<
+  CustomField,
+  "name" | "type"
+> & {
+  id?: string;
+};
+
+/**
  * Sanitizes and validates numeric input for AMOUNT and NUMBER custom fields.
  *
  * Accepted formats:
@@ -213,7 +237,7 @@ function formatInvalidNumericMessage(
  */
 function sanitizeNumericInput(
   raw: unknown,
-  def: CustomField
+  def: CustomFieldDefinitionForValue
 ): { numericValue: number; normalizedText: string } {
   const throwInvalid = (reason?: string): never => {
     const baseMessage = formatInvalidNumericMessage(def.name, raw);
@@ -331,9 +355,64 @@ function sanitizeNumericInput(
   return throwInvalid();
 }
 
+/** The only date format a custom field import accepts: YYYY-MM-DD. */
+export const CUSTOM_FIELD_DATE_FORMAT = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/**
+ * UTC midnight of a calendar day, so the date stays the same in every time
+ * zone.
+ *
+ * @param year - Full year
+ * @param month - Month, 1 to 12
+ * @param day - Day of the month
+ * @returns The date, or `null` when the parts are not a real day: `Date`
+ *   rolls 2026-02-31 over to 2026-03-03, which must never be stored
+ */
+export function utcCalendarDate(
+  year: number,
+  month: number,
+  day: number
+): Date | null {
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+    ? date
+    : null;
+}
+
+/**
+ * Whether a value is a date a custom field import accepts: YYYY-MM-DD and a
+ * real calendar day. The caller decides whether to trim first.
+ *
+ * @param value - A CSV cell
+ * @returns `true` when the importer would store it
+ */
+export function isImportableCustomFieldDate(value: string): boolean {
+  const match = CUSTOM_FIELD_DATE_FORMAT.exec(value);
+  return (
+    match !== null &&
+    utcCalendarDate(Number(match[1]), Number(match[2]), Number(match[3])) !==
+      null
+  );
+}
+
+/**
+ * Reads a yes/no cell the way imports do. Case-insensitive, trims whitespace.
+ *
+ * @param value - Raw string from a CSV cell
+ * @returns `true` for "yes", `false` for "no", `undefined` for anything else
+ */
+export function parseYesNo(value: string): boolean | undefined {
+  const lower = value.trim().toLowerCase();
+  if (lower === "yes") return true;
+  if (lower === "no") return false;
+  return undefined;
+}
+
 export const buildCustomFieldValue = (
   value: ShelfAssetCustomFieldValueType["value"],
-  def: CustomField
+  def: CustomFieldDefinitionForValue
 ): ShelfAssetCustomFieldValueType["value"] | undefined => {
   try {
     const { raw } = value;
@@ -351,15 +430,10 @@ export const buildCustomFieldValue = (
       case "BOOLEAN": {
         let finalValue: boolean;
         if (typeof raw === "string") {
-          const normalized = raw.trim().toLowerCase();
-          if (normalized === "yes") {
-            finalValue = true;
-          } else if (normalized === "no") {
-            finalValue = false;
-          } else {
-            // Unrecognized boolean string — skip instead of coercing
-            return undefined;
-          }
+          const parsed = parseYesNo(raw);
+          // An unrecognized string is skipped instead of coerced.
+          if (parsed === undefined) return undefined;
+          finalValue = parsed;
         } else {
           finalValue = Boolean(raw);
         }
@@ -371,14 +445,13 @@ export const buildCustomFieldValue = (
         // while ensuring the date remains the same in all timezones.
         const dateOnly = (raw as string).trim(); // expected: YYYY-MM-DD
 
-        // why: without a strict format guard, the positional split below silently
-        // mis-parses non-ISO input. e.g. "03-04-2026" → split → [3, 4, 2026] →
-        // Date.UTC(3, 3, 2026) rolls over to ~Oct 1908 — a VALID Date, so it is
-        // stored with no error while the UI keeps showing the raw string, poisoning
-        // the queryable valueDate (sort/filter/reports/reminders) invisibly.
-        // This mirrors the strict guard already used on the bulk-update import path
-        // (see compareCustomField's DATE case in ~/utils/import-update-diff).
-        const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateOnly);
+        // why: a stored date must be a real YYYY-MM-DD day. Any other shape is
+        // refused, because Date.UTC turns "03-04-2026" into a valid but wrong
+        // date that would then drive sorting, filters, reports and reminders;
+        // utcCalendarDate refuses a day Date.UTC would roll over (2026-02-31).
+        // The bulk-update diff applies the same rule via
+        // isImportableCustomFieldDate.
+        const match = CUSTOM_FIELD_DATE_FORMAT.exec(dateOnly);
         if (!match) {
           throw new ShelfError({
             cause: null,
@@ -389,21 +462,12 @@ export const buildCustomFieldValue = (
           });
         }
 
-        const year = Number(match[1]);
-        const month = Number(match[2]);
-        const day = Number(match[3]);
-
-        // Create date at UTC midnight to preserve the date across all timezones.
-        const utcDate = new Date(Date.UTC(year, month - 1, day));
-
-        // why: new Date normalizes overflow (e.g. 2026-02-31 → 2026-03-03), so we
-        // must confirm the components round-trip — otherwise impossible calendar
-        // dates would be silently stored as a different (shifted) date.
-        if (
-          utcDate.getUTCFullYear() !== year ||
-          utcDate.getUTCMonth() !== month - 1 ||
-          utcDate.getUTCDate() !== day
-        ) {
+        const utcDate = utcCalendarDate(
+          Number(match[1]),
+          Number(match[2]),
+          Number(match[3])
+        );
+        if (!utcDate) {
           throw new ShelfError({
             cause: null,
             title: "Invalid date",

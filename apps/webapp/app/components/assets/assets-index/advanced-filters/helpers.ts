@@ -1,5 +1,6 @@
 import type { CustomField } from "@prisma/client";
 import { useSearchParams } from "~/hooks/search-params";
+import { splitFilterParam } from "~/modules/asset/filter-param";
 import type {
   Column,
   ColumnLabelKey,
@@ -39,6 +40,14 @@ const uiFieldTypeNames: Record<UIFieldType, string> = {
  * Determines how a field should be presented and interacted with in the UI
  * Used for generating appropriate form controls and filter interfaces
  *
+ * `stockStatus`, `available` and `reserved` are DERIVED, no such column exists
+ * on `Asset`. They are typed here like stored fields so the filter UI offers the
+ * right operators; the SQL layer maps them to computed expressions. This map
+ * MUST stay in step with `getQueryFieldType` in
+ * `modules/asset/field-type-mapping.ts`, which decides which SQL builder runs:
+ * updating only one is silent, and produced a 500 (`column a.stockStatus does
+ * not exist`) the first time.
+ *
  * @param column - Column configuration object
  * @param friendlyName - Whether to return a user-friendly name instead of the technical type
  * @returns The UI field type or its friendly name
@@ -56,6 +65,7 @@ export function getUIFieldType({
   switch (column.name) {
     case "id":
     case "name":
+    case "unitOfMeasure":
       fieldType = "string";
       break;
     case "custody":
@@ -66,6 +76,7 @@ export function getUIFieldType({
     case "type":
     case "upcomingBookings":
     case "assetModel":
+    case "stockStatus":
       fieldType = "enum";
       break;
     case "description":
@@ -74,6 +85,8 @@ export function getUIFieldType({
     case "valuation":
     case "quantity":
     case "minQuantity":
+    case "available":
+    case "reserved":
       fieldType = "number";
       break;
     case "availableToBook":
@@ -81,6 +94,7 @@ export function getUIFieldType({
       break;
     case "createdAt":
     case "updatedAt":
+    case "lastAuditDate":
       fieldType = "date";
       break;
     case "tags":
@@ -131,7 +145,13 @@ export function useInitialFilters(columns: Column[]) {
   searchParams.forEach((value, key) => {
     const column = columns.find((c) => c.name === key);
     if (column) {
-      const [operator, filterValue] = value.split(":");
+      const [operator, filterValue] = splitFilterParam(value);
+
+      // No separator means no value; there is no filter row to rebuild, and
+      // the `between` branch below would read `.split` off `undefined`.
+      if (filterValue === undefined) {
+        return;
+      }
 
       initialFilters.push({
         name: key,
@@ -204,6 +224,44 @@ export const COLUMNS_WITHOUT_FILTER: ColumnLabelKey[] = [
   "actions",
   "upcomingReminder",
 ];
+
+/**
+ * The value a filter keeps when its operator changes.
+ *
+ * `isEmpty` takes no value, so switching to it clears the value. Leaving it
+ * re-seeds the column's default, since "" is not a valid value for the other
+ * operators. Any other switch keeps the current value.
+ *
+ * @param args.filter - The filter before the change
+ * @param args.operator - The operator being switched to
+ * @param args.columns - Every column the caller may filter on. Pass the full
+ *   filterable list, not the picker's remaining columns: the filter's own
+ *   column is already in use, so the picker list leaves it out.
+ * @param args.customFields - Custom field definitions, for custom date defaults
+ * @param args.timeZone - The user's time zone, for date defaults
+ * @returns The value for the filter after the operator change
+ */
+export function valueForOperatorChange({
+  filter,
+  operator,
+  columns,
+  customFields,
+  timeZone,
+}: {
+  filter: Filter;
+  operator: FilterOperator;
+  columns: Column[];
+  customFields: CustomField[] | null;
+  timeZone: string;
+}): Filter["value"] {
+  if (operator === "isEmpty") return "";
+  if (filter.operator !== "isEmpty") return filter.value;
+
+  const column = columns.find((c) => c.name === filter.name);
+  return column
+    ? getDefaultValueForFieldType(column, customFields, timeZone)
+    : filter.value;
+}
 
 /**
  * Determines what columns are available based on already used columns and operation type

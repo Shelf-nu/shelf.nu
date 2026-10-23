@@ -152,6 +152,8 @@ function BookingsListContent() {
   const router = useRouter();
   const {
     currentOrg,
+    organizations,
+    setCurrentOrg,
     isLoading: orgLoading,
     error: orgError,
     refresh: refreshOrg,
@@ -239,7 +241,9 @@ function BookingsListContent() {
 
   const fetchBookings = useCallback(
     async (pageNum: number, reset: boolean): Promise<boolean> => {
-      if (!currentOrg) return false;
+      // Personal workspaces have no bookings surface; the screen shows the
+      // switch-workspace state instead of firing a request that cannot succeed.
+      if (!currentOrg || currentOrg.type === "PERSONAL") return false;
       const { data, error: fetchErr } = await api.bookings(currentOrg.id, {
         status: STATUS_FILTERS[activeFilter].value,
         search: debouncedSearch || undefined,
@@ -507,20 +511,21 @@ function BookingsListContent() {
 
           {isActive && (
             <View style={styles.actionHint}>
-              {/* A RESERVED booking is only "ready to check out" when it has
-                  concrete assets AND no outstanding book-by-model reservations
-                  (the server hard-blocks checkout until every reserved unit is
-                  assigned). Otherwise the honest next step is to assign/add
-                  assets, so the hint points there instead of promising a
-                  checkout that isn't possible yet. */}
+              {/* A RESERVED booking is "ready to check out" as soon as it holds
+                  a concrete asset: check-out needs one item to go out, and
+                  reserved units still unassigned stay open on the booking
+                  (the card's "N reserved" already shows them). With no asset
+                  yet, the honest next step is to assign reserved units or
+                  add assets, so the hint points there instead of promising
+                  a check-out that has nothing to send out. */}
               <Ionicons
                 name={
                   item.status !== "RESERVED"
                     ? "log-in-outline"
-                    : (item.outstandingModelCount ?? 0) > 0
-                    ? "cube-outline"
                     : item.assetCount > 0
                     ? "log-out-outline"
+                    : (item.outstandingModelCount ?? 0) > 0
+                    ? "cube-outline"
                     : "add-outline"
                 }
                 size={14}
@@ -529,10 +534,10 @@ function BookingsListContent() {
               <Text style={styles.actionHintText}>
                 {item.status !== "RESERVED"
                   ? "Tap to check in"
-                  : (item.outstandingModelCount ?? 0) > 0
-                  ? "Assign assets to check out"
                   : item.assetCount > 0
                   ? "Ready to check out"
+                  : (item.outstandingModelCount ?? 0) > 0
+                  ? "Assign assets to check out"
                   : "Add assets to check out"}
               </Text>
             </View>
@@ -577,6 +582,52 @@ function BookingsListContent() {
           <Ionicons name="refresh" size={16} color={colors.primaryForeground} />
           <Text style={styles.retryText}>Retry</Text>
         </TouchableOpacity>
+      </View>
+    );
+  }
+
+  // Bookings belong to team workspaces. In a personal workspace, explain that
+  // and hand the user the shortest path to one instead of an empty list.
+  if (currentOrg?.type === "PERSONAL") {
+    const teamOrgs = organizations.filter((org) => org.type === "TEAM");
+    const onlyTeam = teamOrgs.length === 1 ? teamOrgs[0] : null;
+    return (
+      <View style={styles.centered}>
+        <Ionicons name="calendar-outline" size={48} color={colors.border} />
+        <Text style={styles.emptyTitle}>Bookings live in team workspaces</Text>
+        <Text style={styles.emptyText}>
+          {teamOrgs.length > 0
+            ? "Your personal workspace tracks your own gear. Switch to a team workspace to plan and reserve equipment."
+            : "Your personal workspace tracks your own gear. Create a team workspace on the web to plan and reserve equipment."}
+        </Text>
+        {teamOrgs.length > 0 ? (
+          <TouchableOpacity
+            style={styles.retryButton}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              if (onlyTeam) {
+                setCurrentOrg(onlyTeam);
+              } else {
+                // Several teams: the workspace picker lives in Settings.
+                router.push("/(tabs)/settings");
+              }
+            }}
+            activeOpacity={0.7}
+            accessibilityLabel={
+              onlyTeam ? `Switch to ${onlyTeam.name}` : "Switch workspace"
+            }
+            accessibilityRole="button"
+          >
+            <Ionicons
+              name="swap-horizontal"
+              size={16}
+              color={colors.primaryForeground}
+            />
+            <Text style={styles.retryText}>
+              {onlyTeam ? `Switch to ${onlyTeam.name}` : "Switch workspace"}
+            </Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
     );
   }

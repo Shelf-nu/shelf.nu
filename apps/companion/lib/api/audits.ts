@@ -7,6 +7,7 @@ import type {
   CompleteAuditResponse,
   CreateAuditNoteResponse,
   UploadAuditImageResponse,
+  RemoveScanResponse,
 } from "./types";
 
 export const auditsApi = {
@@ -23,9 +24,10 @@ export const auditsApi = {
    *   - `page` / `perPage` — pagination knobs.
    *   - `search` — free-text search over name / description.
    *   - `assignedToMe` — when `true`, restricts the result to audits
-   *     the caller is assigned to. For BASE/SELF_SERVICE users this is
-   *     already implicit server-side; for admins/owners it's the
-   *     companion's "Assigned to me" toggle.
+   *     the caller is assigned to. For roles limited to assigned audits
+   *     (`access.audits.seeAll` false) this is already implicit
+   *     server-side; for the others it is the companion's "Assigned to
+   *     me" toggle.
    * @param signal AbortSignal for in-flight cancellation on rapid
    *   filter toggling (the list re-fires on every chip tap; aborting
    *   the previous request stops a slow earlier response from
@@ -118,6 +120,32 @@ export const auditsApi = {
       }
     ),
 
+  /**
+   * Remove a recorded scan from a live audit — the undo for a mis-scan.
+   *
+   * Idempotent: removing a scan that is already gone answers `removed: false`
+   * rather than failing. The response carries the recomputed session counts,
+   * which the caller should adopt wholesale.
+   *
+   * @param orgId Active organization ID
+   * @param payload.auditSessionId The audit the scan belongs to
+   * @param payload.assetId The asset whose scan is being undone
+   */
+  removeAuditScan: (
+    orgId: string,
+    payload: {
+      auditSessionId: string;
+      assetId: string;
+    }
+  ) =>
+    apiFetch<RemoveScanResponse>(
+      `/api/mobile/audits/remove-scan?orgId=${orgId}`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }
+    ),
+
   /** Complete an audit session */
   completeAudit: (
     orgId: string,
@@ -160,6 +188,10 @@ export const auditsApi = {
       {
         method: "POST",
         body: JSON.stringify(payload),
+        // why: not retried. Each call records a new note, so a request that
+        // timed out after the server had already written it would leave two
+        // on the audit, and the PDF report shows both.
+        retry: false,
       }
     ),
 

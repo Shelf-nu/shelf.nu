@@ -1,6 +1,7 @@
 import { BookingStatus, type Prisma } from "@prisma/client";
 import { ASSET_MODEL_IMAGE_SELECT } from "../asset/image-select";
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
+import { USER_NAME_SELECT } from "../user/fields";
 
 /**
  * Booking statuses an asset or kit can still be added to.
@@ -74,8 +75,7 @@ export const BOOKING_INCLUDE_FOR_EMAIL = {
     select: {
       id: true,
       email: true,
-      firstName: true,
-      lastName: true,
+      ...USER_NAME_SELECT,
       dateFormat: true,
       timeFormat: true,
       weekStart: true,
@@ -93,8 +93,7 @@ export const BOOKING_INCLUDE_FOR_EMAIL = {
         select: {
           id: true,
           email: true,
-          firstName: true,
-          lastName: true,
+          ...USER_NAME_SELECT,
           dateFormat: true,
           timeFormat: true,
           weekStart: true,
@@ -180,12 +179,118 @@ export type ReservationEmailModelRequest =
 /** Max number of assets to display in booking email notifications */
 export const BOOKING_EMAIL_ASSETS_DISPLAY_LIMIT = 10;
 
+/**
+ * Toast body after a booking is created. Every create path leaves a DRAFT,
+ * which claims no assets or model capacity until it is reserved, and the next
+ * step is worded for both kinds of member: one whose reservation is a request
+ * for review and one who reserves directly.
+ */
+export const DRAFT_CREATED_MESSAGE =
+  "Your booking is saved as a draft and holds nothing yet. Reserve it, or request a reservation, from the booking page when you are ready.";
+
 /** Common relations to include in a booking */
 export const BOOKING_COMMON_INCLUDE = {
   custodianTeamMember: true,
   custodianUser: true,
   tags: TAG_WITH_COLOR_SELECT,
 } as Prisma.BookingInclude;
+
+/**
+ * Per-booking `bookingAssets` payload for the bookings LIST surfaces.
+ *
+ * Single source of truth for the row shape the bookings-list assets drawer
+ * (`BookingAssetsSidebar`) renders, shared by:
+ * - `getBookings` (service.server.ts) — attached when `includeAssets` is true,
+ *   which today means the bookings CSV select-all export;
+ * - the `/api/bookings/:bookingId/assets-sidebar` resource route — the five
+ *   bookings-list loaders no longer ship assets (the drawer fetches this exact
+ *   shape when a row is expanded).
+ *
+ * Keeping both callers on one constant is what guarantees the drawer renders
+ * identically no matter which path supplied the data.
+ */
+export const BOOKINGS_LIST_ASSETS_INCLUDE = {
+  bookingAssets: {
+    // Explicit `select` (instead of `include`) so the inferred
+    // type surfaces `assetKitId` on each row — the bookings list
+    // sidebar (`BookingAssetsSidebar`) groups by it. Without an
+    // explicit select, Prisma's type inference for
+    // `include + nested include` doesn't expose the parent
+    // scalars in a form the local component types accept.
+    select: {
+      id: true,
+      quantity: true,
+      assetKitId: true,
+      asset: {
+        select: {
+          title: true,
+          id: true,
+          type: true,
+          quantity: true,
+          custody: true,
+          availableToBook: true,
+          status: true,
+          // Drives the calm "Archived" signal in the assets sidebar
+          // (issue #382) — the sidebar's BookingWithAssets type requires it.
+          archivedAt: true,
+          mainImage: true,
+          thumbnailImage: true,
+          // Model cover image for assets with no image of their own
+          ...ASSET_MODEL_IMAGE_SELECT,
+          mainImageExpiration: true,
+          // Asset-code resolution fields — see `app/modules/barcode/display.ts`.
+          // Surfaced by the BookingAssetsSidebar so the chip matches the
+          // simple-mode booking overview list and every other code-bearing
+          // surface (see .claude/rules/code-bearing-entity-list-consistency.md).
+          sequentialId: true,
+          preferredBarcodeId: true,
+          qrCodes: { take: 1, select: { id: true } },
+          barcodes: { select: { id: true, type: true, value: true } },
+          category: {
+            select: {
+              id: true,
+              name: true,
+              color: true,
+            },
+          },
+          // NOTE: deliberately NO `bookingAssets` here. A previous
+          // version selected each asset's entire lifetime
+          // `bookingAssets: { bookingId }` pivot history, which grows
+          // without bound and had zero consumers (every reader of
+          // `asset.bookingAssets` needs `ba.booking.{id,status}` from
+          // asset-centric queries, which this shape cannot provide).
+          // If a surface ever needs conflict info here, scope it with
+          // a `where` on active statuses + date overlap like
+          // getBookingFlags does.
+          assetKits: {
+            select: {
+              // See the comment in `bookings.$bookingId.overview.tsx`
+              // for why both `id` (the AssetKit row id) and `kitId`
+              // are needed for kit-source grouping.
+              id: true,
+              kitId: true,
+              kit: {
+                select: {
+                  id: true,
+                  name: true,
+                  image: true,
+                  imageExpiration: true,
+                  category: {
+                    select: {
+                      id: true,
+                      name: true,
+                      color: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+} satisfies Prisma.BookingInclude;
 
 export const BOOKING_WITH_ASSETS_INCLUDE = {
   ...BOOKING_COMMON_INCLUDE,
@@ -207,6 +312,9 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
           unitOfMeasure: true,
           availableToBook: true,
           status: true,
+          // Archived assets keep showing in bookings they're already part of,
+          // flagged with the "Archived" badge (issue #382).
+          archivedAt: true,
           valuation: true,
           // `Asset.quantity` is the workspace stock pool — surfaced for QT
           // availability/headroom math, NOT for booking-value totals.

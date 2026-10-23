@@ -126,9 +126,20 @@ describe("POST /api/mobile/tags/create", () => {
     expect(createTag).not.toHaveBeenCalled();
   });
 
-  it("rejects names shorter than 3 chars as a 400 (web NewTagFormSchema parity)", async () => {
+  it("accepts short names like the web tag forms do", async () => {
     const response = (await action(
-      createActionArgs({ request: makeRequest({ name: "ab" }) })
+      createActionArgs({ request: makeRequest({ name: "IT" }) })
+    )) as unknown as Response;
+
+    expect(response.status).toBe(200);
+    expect(createTag).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "IT" })
+    );
+  });
+
+  it("rejects a blank name as a 400", async () => {
+    const response = (await action(
+      createActionArgs({ request: makeRequest({ name: "   " }) })
     )) as unknown as Response;
 
     // parseData maps validation failures to a 400 client error, not a 500.

@@ -18,7 +18,9 @@ describe("resolveAssetIdFromSamId", () => {
       resolveAssetIdFromSamId({ samId: "SAM-0001", fetcher })
     ).resolves.toBe("asset-123");
 
-    expect(fetcher).toHaveBeenCalledWith("/api/get-scanned-item/SAM-0001");
+    expect(fetcher).toHaveBeenCalledWith(
+      "/api/get-scanned-item/SAM-0001?source=scanner"
+    );
   });
 
   it("throws a shelf error when the server returns an error response", async () => {

@@ -7,7 +7,10 @@ import {
   PopoverPortal,
   PopoverTrigger,
 } from "@radix-ui/react-popover";
+import { STOCK_STATUS_LABELS } from "@shelf/labels";
+import { STOCK_STATUSES } from "@shelf/quantity-control";
 import { parseISO } from "date-fns";
+import { Search } from "lucide-react";
 import { useLoaderData } from "react-router";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
@@ -42,6 +45,7 @@ import {
   adjustDateToUTC,
   isDateString,
 } from "~/utils/date-fns";
+import { generateClientId } from "~/utils/id/client-id";
 import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
@@ -59,23 +63,6 @@ function ErrorDisplay({ error }: { error?: string }) {
   return error ? (
     <div className="mt-1 text-sm text-red-500">{error}</div>
   ) : null;
-}
-
-/**
- * Generates a stable unique ID for a MultiDateInput row so React can use
- * it as a map key. `crypto.randomUUID` is preferred when available (modern
- * browsers and node), with a fallback to avoid SSR crashes.
- */
-let dateEntryCounter = 0;
-function createDateEntryId(): string {
-  if (
-    typeof globalThis.crypto !== "undefined" &&
-    typeof globalThis.crypto.randomUUID === "function"
-  ) {
-    return globalThis.crypto.randomUUID();
-  }
-  dateEntryCounter += 1;
-  return `date-entry-${dateEntryCounter}-${Date.now()}`;
 }
 
 /**
@@ -146,6 +133,9 @@ function resolveFilterDefault(
   if (filter.type === "enum") {
     if (filter.name === "type") return "INDIVIDUAL";
     if (filter.name === "status") return Object.values(AssetStatus)[0];
+    // The picker shows its first option when empty, so the filter starts on
+    // it too, or the row would read SHORT while filtering on nothing.
+    if (filter.name === "stockStatus") return STOCK_STATUSES[0];
     if (filter.name.startsWith("cf_")) {
       const options =
         customFields.find((f) => f?.name === filter.name.slice(3))?.options ??
@@ -301,6 +291,11 @@ export function ValueField({
     )
       ? "Enter comma-separated values"
       : "Enter value";
+  }
+
+  // `isEmpty` ("Never audited") takes no value, so no input is rendered.
+  if (filter.operator === "isEmpty") {
+    return null;
   }
 
   switch (filter.type) {
@@ -703,6 +698,12 @@ interface EnumOption {
   label: string;
 }
 
+/**
+ * Option lists longer than this get a search box. The companion's custom field
+ * option picker uses the same threshold.
+ */
+const ENUM_SEARCH_THRESHOLD = 8;
+
 interface EnumFieldProps {
   value: string;
   options: EnumOption[];
@@ -725,9 +726,21 @@ function EnumField({
 }: EnumFieldProps) {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
+  const [searchQuery, setSearchQuery] = useState("");
 
   // Convert the value into an array for multi-select mode
   const selectedValues = multiSelect ? value.split(", ") : [value];
+
+  const hasSearch = options.length > ENUM_SEARCH_THRESHOLD;
+  const query = searchQuery.trim().toLowerCase();
+  const visibleOptions = query
+    ? options.filter((option) => option.label.toLowerCase().includes(query))
+    : options;
+
+  function closePopover() {
+    setIsPopoverOpen(false);
+    setSearchQuery("");
+  }
 
   /**
    * Popover open/close handler. Seeds the keyboard highlight on open as
@@ -737,14 +750,16 @@ function EnumField({
    */
   function handleOpenChange(open: boolean) {
     if (disabled) return;
-    setIsPopoverOpen(open);
-    if (open) {
-      if (!multiSelect) {
-        const currentIndex = options.findIndex((opt) => opt.id === value);
-        setSelectedIndex(currentIndex >= 0 ? currentIndex : 0);
-      } else {
-        setSelectedIndex(0);
-      }
+    if (!open) {
+      closePopover();
+      return;
+    }
+    setIsPopoverOpen(true);
+    if (!multiSelect) {
+      const currentIndex = options.findIndex((opt) => opt.id === value);
+      setSelectedIndex(currentIndex >= 0 ? currentIndex : 0);
+    } else {
+      setSelectedIndex(0);
     }
   }
 
@@ -771,7 +786,7 @@ function EnumField({
     }
     handleChange(newValue);
     if (!multiSelect) {
-      setIsPopoverOpen(false);
+      closePopover();
     }
   }
 
@@ -790,7 +805,7 @@ function EnumField({
       case "ArrowDown": {
         event.preventDefault();
         const next =
-          selectedIndex < options.length - 1
+          selectedIndex < visibleOptions.length - 1
             ? selectedIndex + 1
             : selectedIndex;
         setSelectedIndex(next);
@@ -804,16 +819,26 @@ function EnumField({
         scrollOptionIntoView(next);
         break;
       }
+      case " ": // Space key, unless it is typing into the search box
+        if (event.target instanceof HTMLInputElement) break;
+      // falls through
       case "Enter":
-      case " ": // Space key
+        // A focused option row selects itself; acting here too would pick a
+        // second option.
+        if (
+          event.target !== event.currentTarget &&
+          !(event.target instanceof HTMLInputElement)
+        ) {
+          break;
+        }
         event.preventDefault();
-        if (options[selectedIndex]) {
-          handleOptionClick(options[selectedIndex].id);
+        if (visibleOptions[selectedIndex]) {
+          handleOptionClick(visibleOptions[selectedIndex].id);
         }
         break;
       case "Escape":
         event.preventDefault();
-        setIsPopoverOpen(false);
+        closePopover();
         break;
     }
   };
@@ -848,18 +873,36 @@ function EnumField({
             )}
             onKeyDown={handleKeyDown}
           >
+            {hasSearch ? (
+              <div className="flex items-center border-b">
+                <Search className="ml-4 size-4 text-gray-500" />
+                <input
+                  placeholder="Search options..."
+                  aria-label="Search options"
+                  className="border-0 px-4 py-2 pl-2 text-[14px] focus:border-0 focus:ring-0"
+                  value={searchQuery}
+                  onChange={(event) => {
+                    setSearchQuery(event.target.value);
+                    setSelectedIndex(0);
+                  }}
+                />
+              </div>
+            ) : null}
             {options.length === 0 ? (
               <div className="max-w-[400px] p-4">
                 No options available. Please contact support if you believe this
                 is an error.
               </div>
+            ) : visibleOptions.length === 0 ? (
+              <div className="max-w-[400px] p-4">No options found</div>
             ) : (
-              options.map((option, index) => {
+              visibleOptions.map((option, index) => {
                 const isSelected = selectedValues.includes(option.id);
                 return (
                   <div
                     id={`enum-option-${index}`}
-                    key={option.id}
+                    // Custom field options can repeat, so the label is not unique.
+                    key={`${index}-${option.id}`}
                     className={tw(
                       "flex items-center justify-between px-4 py-3 text-[14px] text-gray-600 hover:cursor-pointer hover:bg-gray-50",
                       selectedIndex === index && "bg-gray-50"
@@ -901,6 +944,38 @@ function StatusEnumField({
   const options: EnumOption[] = Object.values(AssetStatus).map((status) => ({
     id: status,
     label: userFriendlyAssetStatus(status),
+  }));
+
+  return (
+    <EnumField
+      value={value}
+      options={options}
+      handleChange={handleChange}
+      multiSelect={multiSelect}
+      name={name}
+      disabled={disabled}
+    />
+  );
+}
+
+/**
+ * The Stock status verdicts, worst first, named as the column's badge names
+ * them. The column shows a dash when no min quantity is set; the picker needs
+ * a word for it.
+ */
+function StockStatusEnumField({
+  value,
+  handleChange,
+  multiSelect,
+  name,
+  disabled = false,
+}: Omit<EnumFieldProps, "options">) {
+  const options: EnumOption[] = STOCK_STATUSES.map((status) => ({
+    id: status,
+    label:
+      status === "NO_THRESHOLD"
+        ? "No min quantity set"
+        : STOCK_STATUS_LABELS[status],
   }));
 
   return (
@@ -2003,6 +2078,21 @@ function ValueEnumField({
     );
   }
 
+  if (fieldName === "stockStatus") {
+    return (
+      <>
+        <StockStatusEnumField
+          value={value}
+          handleChange={handleChange}
+          multiSelect={multiSelect}
+          name={name}
+          disabled={disabled}
+        />
+        {error && <div className="mt-1 text-[12px] text-red-500">{error}</div>}
+      </>
+    );
+  }
+
   // Apply the same pattern to all other enum fields
   if (fieldName === "location") {
     return (
@@ -2327,9 +2417,9 @@ function MultiDateInput({
   type DateEntry = { id: string; value: string };
 
   const [dates, setDates] = useState<DateEntry[]>(() => {
-    if (!value) return [{ id: createDateEntryId(), value: "" }];
+    if (!value) return [{ id: generateClientId(), value: "" }];
     return value.split(",").map((d) => ({
-      id: createDateEntryId(),
+      id: generateClientId(),
       value: d.trim(),
     }));
   });
@@ -2353,7 +2443,7 @@ function MultiDateInput({
 
   // Add new date field
   const addDateField = () => {
-    setDates([...dates, { id: createDateEntryId(), value: "" }]);
+    setDates([...dates, { id: generateClientId(), value: "" }]);
   };
   // Remove date field at index
   const removeDateField = (indexToRemove: number) => {

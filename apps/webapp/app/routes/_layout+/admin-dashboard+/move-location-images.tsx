@@ -54,6 +54,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
  * 1. Get all the locations from the database which have images
  * 2. Move the images from the database to the supabase storage
  * 3. Update the url of image in the database in Location table
+ * 4. Delete the Image row, so its blob stops occupying the database
  *
  * Images are going to be stored in following format:
  * files/organizationId/locations/locationId/imageId
@@ -504,17 +505,37 @@ export async function action({ context, request }: ActionFunctionArgs) {
       }
     }
 
-    /** Disconnecting all the images from locations */
+    /**
+     * Deleting the Image rows the locations were moved off, which clears
+     * `Location.imageId` along the way.
+     *
+     * The row has to go, not just the link: `Location.imageId` is the only
+     * reference to it, so a disconnected Image is unreachable and its blob stays
+     * in the database for good. Nothing else deletes these rows.
+     *
+     * Settled rather than all: a row that refuses to delete costs its own blob,
+     * and must not take the rest of the batch with it. The location itself has
+     * already moved at this point, so the failure is reported and the migration
+     * still counts it as moved.
+     */
     if (movedLocationIds.length > 0) {
-      await Promise.all(
+      const deletions = await Promise.allSettled(
         movedLocationIds.map((id) =>
           db.location.update({
             // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: Shelf super-admin cross-org image-migration tool; gated by requireAdmin(userId), ids collected from the cross-org locationWithImages loop above
             where: { id },
-            data: { image: { disconnect: true } },
+            data: { image: { delete: true } },
           })
         )
       );
+
+      deletions.forEach((deletion, index) => {
+        if (deletion.status === "rejected") {
+          const leftoverMsg = `Image blob left behind for ${movedLocationIds[index]}: ${deletion.reason}`;
+          console.error(leftoverMsg);
+          errorLog.push(leftoverMsg);
+        }
+      });
     }
 
     const successMsg = `${movedLocationIds.length} location images processed successfully`;

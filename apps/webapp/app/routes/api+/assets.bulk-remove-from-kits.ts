@@ -1,5 +1,6 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { BulkRemoveFromKitsSchema } from "~/components/assets/bulk-remove-from-kits";
+import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { bulkRemoveAssetsFromKits } from "~/modules/kit/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -17,7 +18,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId, canUseBarcodes, role } = await requirePermission({
+    const {
+      organizationId,
+      canUseBarcodes,
+      role,
+      access,
+      currentOrganization,
+    } = await requirePermission({
       request,
       userId,
       entity: PermissionEntity.asset,
@@ -40,19 +47,26 @@ export async function action({ context, request }: ActionFunctionArgs) {
       }
     );
 
-    await bulkRemoveAssetsFromKits({
+    const { removedFromKitCount } = await bulkRemoveAssetsFromKits({
       assetIds,
       userId,
       organizationId,
       request,
       settings,
+      lastAuditDateAccess: lastAuditDateAccessFor(access, currentOrganization),
     });
 
     sendNotification({
       icon: { name: "success", variant: "success" },
       senderId: userId,
       title: "Bulk assets removed from kits",
-      message: `Successfully removed ${assetIds.length} assets from kits.`,
+      // What was actually detached. `assetIds` is what was ASKED for: it
+      // counts assets that turned out not to be in a kit, and under
+      // select-all it is the single `ALL_SELECTED_KEY` sentinel, so it would
+      // report "1 assets" however many were removed.
+      message: `Successfully removed ${removedFromKitCount} ${
+        removedFromKitCount === 1 ? "asset" : "assets"
+      } from kits.`,
     });
 
     return data(payload({ success: true }));
