@@ -18,12 +18,9 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-// why: `picker-meta.server.ts` imports the real db client at module level,
-// but this file tests only the pure `computeKitClaimablePool`. Without the
-// mock, the imported Prisma client attempts a connection against the
-// placeholder DATABASE_URL from `test/setup-test-env.ts` and its async
-// rejection lands after the tests finish — vitest counts it as a run-level
-// error and the whole suite exits red on a clean checkout.
+// why: `picker-meta.server.ts` imports the db client at module level, but
+// this file tests only the pure `computeKitClaimablePool`, so it needs no
+// database and must never reach one.
 vi.mock("~/database/db.server", () => ({ db: {} }));
 
 import { computeKitClaimablePool } from "./picker-meta.server";
