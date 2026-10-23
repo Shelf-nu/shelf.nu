@@ -66,8 +66,12 @@ export function ensureHostHeaders() {
  *
  * The proxy reports the original scheme in `X-Forwarded-Proto`. Only the scheme
  * is taken from it: the host is untouched, so a submission from another site
- * still fails the origin check. Must run before React Router handles the
- * request, in every environment.
+ * still fails the origin check, and a client that sends its own value can only
+ * make its own request fail. Read `X-Forwarded-Proto`, not `Fly-Forwarded-Proto`:
+ * behind Cloudflare, Fly's header describes the Cloudflare-to-Fly hop rather
+ * than the browser's scheme, and `isHttpsRequest` in `security-headers.ts`
+ * reads the same header. Must run before React Router handles the request, in
+ * every environment.
  */
 export function applyForwardedProto() {
   return createMiddleware(async (c, next) => {
