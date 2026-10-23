@@ -103,23 +103,25 @@ account JSON there too if it ever lands in the tree.
 
 ## 3. `google-services.json`
 
-The Android app registers with FCM through this file. Download it from the
-Firebase project (Project settings, Your apps, the Android app) and save it as
-`apps/companion/google-services.json`, then point `app.json` at it:
+The Android app registers with FCM through this file. It is committed at
+`apps/companion/google-services.json` and `app.json` points
+`expo.android.googleServicesFile` at it.
 
-```json
-{
-  "expo": {
-    "android": {
-      "googleServicesFile": "./google-services.json"
-    }
-  }
-}
-```
+The file carries the Firebase project id and number, the package name, and a
+Firebase client API key. That key is not a secret in the usual sense: it ships
+inside every Android build and only identifies the project to Google; Expo's
+own guidance is to commit the file. What protects the project is the key's
+restrictions and the absence of other Firebase products, so keep both true:
 
-It holds public identifiers only, so it can be committed. Without it an
-Android build throws on `getExpoPushTokenAsync` and no Android device ever
-registers.
+- In Google Cloud, APIs and Services, Credentials, the key is restricted to
+  the Android app `com.shelf.companion` and to the Firebase Installations and
+  Firebase Cloud Messaging APIs. Nothing else can be called with it.
+- The `shelf-companion` Firebase project runs only Cloud Messaging. Do not
+  enable Storage, Firestore or Realtime Database on it; a separate project
+  with its own rules is the place for those.
+
+If the Firebase project is ever recreated, download the new file from Project
+settings, Your apps, the Android app, replace it, and restrict the new key.
 
 ## 4. Enhanced push security
 
