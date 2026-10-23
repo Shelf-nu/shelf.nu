@@ -1,5 +1,7 @@
 import type { CSSProperties } from "react";
+import { RepeatIcon } from "lucide-react";
 import { useLoaderData } from "react-router";
+import { describeRecurrence } from "~/modules/asset-reminder/recurrence";
 import { type loader } from "~/routes/_layout+/assets.$assetId.overview";
 import { tw } from "~/utils/tw";
 import ReminderTeamMembers from "../asset-reminder/reminder-team-members";
@@ -40,6 +42,7 @@ export function AssetReminderCards({
         const remainingTeamMembers =
           reminder.teamMembers.length - slicedTeamMembers.length;
         const isAlreadySent = new Date() > new Date(reminder.alertDateTime);
+        const recurrenceLabel = describeRecurrence(reminder);
 
         return (
           <div key={reminder.id} className="border-b px-4 py-3">
@@ -53,6 +56,12 @@ export function AssetReminderCards({
             <p className="mb-2">
               <DateS date={reminder.alertDateTime} includeTime />
             </p>
+            {recurrenceLabel ? (
+              <p className="mb-2 flex items-center gap-1 text-xs text-gray-500">
+                <RepeatIcon className="size-3" aria-hidden="true" />
+                {recurrenceLabel}
+              </p>
+            ) : null}
 
             <p className="mb-2 text-sm text-gray-600">
               {reminder.message.substring(0, 1000)}

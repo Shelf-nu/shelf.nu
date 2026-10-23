@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { DateTime } from "luxon";
-import { Form, useNavigation, useLocation, useActionData } from "react-router";
+import { Form, useLoaderData, useLocation, useActionData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
@@ -9,12 +9,18 @@ import { DateTimePicker } from "~/components/shared/date-time-picker";
 import { Separator } from "~/components/shared/separator";
 import { useSearchParams } from "~/hooks/search-params";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
+import { useDisabled } from "~/hooks/use-disabled";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
+import {
+  REMINDER_REPEAT_VALUES,
+  resolveRecurrenceZone,
+  type ReminderRepeatValue,
+} from "~/modules/asset-reminder/recurrence";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { toIsoDateTimeToUserTimezone } from "~/utils/date-fns";
-import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
+import ReminderRecurrenceFields from "./reminder-recurrence-fields";
 import TeamMembersSelector from "./team-members-selector";
 import { Dialog, DialogPortal } from "../layout/dialog";
 
@@ -27,27 +33,30 @@ type CreateSetReminderSchemaOptions = {
    * interpreted in this zone (via Luxon) before the future-date check, so
    * client-side validation matches persistence exactly even when the browser
    * zone differs from the user's preference. When omitted (e.g. the shared
-   * server constant that has no request context), the value is coerced in the
+   * constant that has no request context), the value is coerced in the
    * runtime's local zone as a best-effort fallback.
    */
   timeZone?: string;
 };
 
 /**
- * Builds the set/edit-reminder form schema.
+ * Builds the set/edit-reminder form schema, shared by the dialog and both
+ * server actions (create in `assets.$assetId.tsx`, edit in
+ * `asset-reminder/utils.server.ts`).
  *
- * Two behaviours matter here:
- *
- * 1. The future-date cutoff for `alertDateTime` is evaluated **per validation**
- *    — the refinement reads a fresh `Date.now()` each time the schema runs — so
- *    a long-lived process never validates against a "now" frozen at module
- *    load. Because the refinement lives on the field (not the object), the
- *    return value stays a plain `ZodObject`, keeping `.extend(...)` usable by
- *    server callers.
- * 2. When `timeZone` is supplied, the submitted wall-clock string is
- *    interpreted in that timezone before the cutoff comparison, mirroring how
- *    the server persists it — so "future" is judged against the SAME instant
- *    that will be stored.
+ * - The future-date cutoff for `alertDateTime` is evaluated **per validation**
+ *   (a fresh `Date.now()` each run), and lives on the field rather than the
+ *   object so the return value stays a plain `ZodObject` that server callers
+ *   can `.extend(...)`.
+ * - When `timeZone` is supplied, the submitted wall-clock string is
+ *   interpreted in that timezone before the cutoff comparison, so "future" is
+ *   judged against the SAME instant that will be stored.
+ * - `repeat` defaults to `"never"` because a disabled (plan-locked) Repeat
+ *   select submits nothing at all.
+ * - `endsAt` carries no ordering check here: the browser-side calendar-day
+ *   check is added by {@link createSetReminderFormSchema}, and the
+ *   authoritative check runs on the zone-resolved instants in
+ *   `resolveReminderPayloadDates`.
  *
  * @param options - Optional resolved format prefs (currently the timezone).
  * @returns A Zod object schema for the set/edit reminder form.
@@ -66,7 +75,7 @@ export function createSetReminderSchema(
         // "future" is judged against the SAME instant that will be persisted.
         // Fall back to native coercion when no timezone is known or the value
         // doesn't match the expected format (Invalid Date then surfaces the
-        // standard "Invalid date" error, preserving the existing UX).
+        // standard "Invalid date" error).
         if (typeof value === "string" && timeZone) {
           const parsed = DateTime.fromFormat(value, DATE_TIME_FORMAT, {
             zone: timeZone,
@@ -85,30 +94,88 @@ export function createSetReminderSchema(
     teamMembers: z
       .array(z.string())
       .min(1, "Please select at least one team member"),
+    repeat: z.enum(REMINDER_REPEAT_VALUES).default("never"),
+    // why preprocess: an empty optional date input submits "" through the
+    // multipart form, and z.coerce.date() would turn "" into Invalid Date
+    endsAt: z.preprocess(
+      (value) => (value === "" || value == null ? undefined : value),
+      z.coerce.date().optional()
+    ),
     redirectTo: z.string().optional(),
   });
 }
 
 /**
- * Timezone-agnostic reminder schema instance, kept for the shared `typeof`
- * anchor used by `getValidationErrors<typeof setReminderSchema>` and any caller
- * without request context. Built via {@link createSetReminderSchema} so it
- * inherits the per-validation future-date cutoff.
- *
- * NOTE: both server actions (create in `assets.$assetId.tsx`, edit in
- * `asset-reminder/utils.server.ts`) now resolve the acting user's timezone and
- * validate with `createSetReminderSchema({ timeZone })` so the "future" cutoff
- * is judged against the SAME instant that persistence stores — do not route
- * request-backed parsing through this timezone-less instance.
+ * Timezone-agnostic reminder schema instance: the `typeof` anchor for
+ * `getValidationErrors<typeof setReminderSchema>` and the field types of the
+ * dialog's `reminder` prop. Request-backed parsing must go through
+ * {@link createSetReminderSchema} with the acting user's timezone instead.
  */
 export const setReminderSchema = createSetReminderSchema();
+
+/**
+ * The dialog's client-side schema: {@link createSetReminderSchema} plus an
+ * endsAt ordering check that compares CALENDAR DAYS rather than instants.
+ *
+ * The two inputs carry different shapes: a "yyyy-MM-dd" endsAt coerces at UTC
+ * midnight, while alertDateTime is an instant resolved in `timeZone`. So the
+ * endsAt day is the UTC date of the coerced value and the reminder's day is
+ * its date in `timeZone` (the runtime zone when none is given). Comparing raw
+ * instants would reject valid same-day evening reminders west of UTC.
+ *
+ * Client-only: the server enforces ordering on the zone-resolved values in
+ * `resolveReminderPayloadDates`, where endsAt means end-of-day.
+ *
+ * @param options - Optional resolved format prefs (currently the timezone).
+ * @returns The refined schema the dialog hands to `useZorm`.
+ */
+export function createSetReminderFormSchema(
+  options: CreateSetReminderSchemaOptions = {}
+) {
+  const { timeZone } = options;
+
+  return createSetReminderSchema(options).superRefine((data, ctx) => {
+    if (data.repeat === "never" || !data.endsAt) return;
+
+    const endsDay = data.endsAt.toISOString().slice(0, 10);
+    const alertDay = DateTime.fromJSDate(data.alertDateTime, {
+      zone: timeZone ?? "local",
+    }).toISODate();
+
+    if (alertDay && endsDay < alertDay) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["endsAt"],
+        message: "End date must be on or after the reminder date",
+      });
+    }
+  });
+}
 
 type SetOrEditReminderDialogProps = {
   open: boolean;
   onClose: () => void;
-  reminder?: z.infer<typeof setReminderSchema> & { id: string };
+  reminder?: Omit<z.infer<typeof setReminderSchema>, "repeat" | "endsAt"> & {
+    id: string;
+    repeat?: ReminderRepeatValue;
+    endsAt?: Date | string | null;
+    recurrenceTimezone?: string | null;
+  };
   action?: string;
 };
+
+/**
+ * Reads the tier capability exposed by every route that renders this dialog
+ * (asset detail, global reminders index, asset reminders tab). Fails CLOSED
+ * (locked UI) if a future surface forgets to expose it; the server asserts
+ * independently either way.
+ */
+function useCanUseRecurringReminders(): boolean {
+  const data = useLoaderData() as
+    | { canUseRecurringReminders?: boolean }
+    | undefined;
+  return data?.canUseRecurringReminders ?? false;
+}
 
 export default function SetOrEditReminderDialog({
   open,
@@ -116,8 +183,7 @@ export default function SetOrEditReminderDialog({
   reminder,
   action,
 }: SetOrEditReminderDialogProps) {
-  const navigation = useNavigation();
-  const disabled = isFormProcessing(navigation.state);
+  const disabled = useDisabled();
 
   /**
    * The acting user's resolved timezone preference — the SAME zone the server
@@ -129,6 +195,7 @@ export default function SetOrEditReminderDialog({
 
   const pathname = useLocation().pathname;
   const [searchParams, setSearchParams] = useSearchParams();
+  const canUseRecurringReminders = useCanUseRecurringReminders();
 
   const redirectTo = `${pathname}${
     searchParams.size > 0
@@ -138,12 +205,13 @@ export default function SetOrEditReminderDialog({
 
   /**
    * Client-side schema bound to the acting user's timezone so the future-date
-   * check judges the submitted wall-clock in the SAME zone the server persists
-   * it (see the reminder actions in `modules/asset-reminder/utils.server.ts`).
-   * Memoized on `timeZone` for a stable identity across re-renders.
+   * and endsAt checks judge the submitted wall-clock in the SAME zone the
+   * server persists it (see the reminder actions in
+   * `modules/asset-reminder/utils.server.ts`). Memoized on `timeZone` for a
+   * stable identity across re-renders.
    */
   const schema = useMemo(
-    () => createSetReminderSchema({ timeZone }),
+    () => createSetReminderFormSchema({ timeZone }),
     [timeZone]
   );
 
@@ -156,6 +224,27 @@ export default function SetOrEditReminderDialog({
   );
 
   const isEdit = !!reminder;
+  const initialRepeat: ReminderRepeatValue = reminder?.repeat ?? "never";
+  const [repeat, setRepeat] = useState<ReminderRepeatValue>(initialRepeat);
+
+  /**
+   * Reset the Repeat selection whenever the dialog (re)opens: useState only
+   * seeds once, so without this a changed-then-cancelled cadence would leak
+   * into the next open and could be submitted unintentionally. Uses the
+   * adjust-state-during-render pattern (not an effect) so the reset applies
+   * in the same render pass with no stale flash.
+   */
+  // why: react-doctor flags prop-seeded useState (no-derived-useState), but
+  // this is the React-docs "adjust state during render" pattern: `repeat`
+  // is user-editable state that must RESET on open, not derived state that
+  // could be computed inline. Accepted residual per CLAUDE.md.
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (open !== prevOpen) {
+    setPrevOpen(open);
+    if (open) {
+      setRepeat(initialRepeat);
+    }
+  }
 
   /** Ref for the first field so we can focus it on open without autoFocus. */
   const nameInputRef = useAutoFocus<HTMLInputElement>({ when: open });
@@ -227,6 +316,16 @@ export default function SetOrEditReminderDialog({
     },
     [open, onClose, searchParams, setSearchParams]
   );
+
+  // why: recurrenceEndsAt is stored as end-of-day in the reminder's own
+  // timezone. Render the calendar date back in THAT zone (not UTC via
+  // toISOString) so the date shown matches what was picked and does not drift
+  // +1 day per save for west-of-UTC workspaces.
+  const endsAtDefault = reminder?.endsAt
+    ? DateTime.fromJSDate(new Date(reminder.endsAt))
+        .setZone(resolveRecurrenceZone(reminder.recurrenceTimezone ?? null))
+        .toFormat("yyyy-MM-dd")
+    : undefined;
 
   return (
     <DialogPortal>
@@ -307,7 +406,7 @@ export default function SetOrEditReminderDialog({
               </p>
             </div>
 
-            <div>
+            <div className="mb-4">
               <DateTimePicker
                 mode="datetime"
                 defaultValue={
@@ -332,6 +431,20 @@ export default function SetOrEditReminderDialog({
                 We will send the reminder at this date/time.
               </p>
             </div>
+
+            <ReminderRecurrenceFields
+              canUseRecurringReminders={canUseRecurringReminders}
+              disabled={disabled}
+              repeat={repeat}
+              onRepeatChange={setRepeat}
+              initialRepeat={initialRepeat}
+              endsAtDefault={endsAtDefault}
+              repeatFieldName={zo.fields.repeat()}
+              endsAtFieldName={zo.fields.endsAt()}
+              endsAtError={
+                validationErrors?.endsAt?.message || zo.errors.endsAt()?.message
+              }
+            />
           </div>
           <div>
             <Separator className="md:hidden" />
