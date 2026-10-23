@@ -19,6 +19,8 @@ import { applyForwardedProto } from "@server/middleware";
 // @vitest-environment node
 
 /** The action under test; records that React Router let the request through. */
+// why: a spy is the only way to observe whether React Router's CSRF check let
+// the request reach the route action; the fixture build has no real action.
 const action = vi.fn(() => ({ ok: true }));
 
 /**
