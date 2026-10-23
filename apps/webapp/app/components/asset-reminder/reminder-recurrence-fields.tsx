@@ -31,7 +31,7 @@ type ReminderRecurrenceFieldsProps = {
   /** Controlled Repeat selection. */
   repeat: ReminderRepeatValue;
   onRepeatChange: (value: ReminderRepeatValue) => void;
-  /** The stored cadence, round-tripped via hidden inputs when locked. */
+  /** The stored cadence: the only repeating option offered when locked. */
   initialRepeat: ReminderRepeatValue;
   /** Stored end date (yyyy-MM-dd in the series' own timezone), if any. */
   endsAtDefault?: string;
@@ -59,8 +59,9 @@ function RepeatOptions() {
 /**
  * Renders the Repeat select and the optional "Ends on" date input for the
  * set/edit reminder dialog. When the workspace tier lacks recurring
- * reminders, the controls render locked with an upgrade nudge and the
- * stored cadence round-trips via hidden inputs.
+ * reminders, the select offers only "Never" and the stored cadence, with an
+ * upgrade nudge, so a downgraded workspace can keep or stop a series but not
+ * start or change one.
  *
  * @param props - See {@link ReminderRecurrenceFieldsProps}.
  * @returns The recurrence form-fields fragment.
@@ -101,20 +102,47 @@ export default function ReminderRecurrenceFields({
             </SelectTrigger>
             <RepeatOptions />
           </Select>
-        ) : (
+        ) : initialRepeat === "never" ? (
           <>
-            {/* why hidden inputs: a disabled control submits nothing —
-                carry the STORED cadence through so plain edits by
-                downgraded workspaces neither throw nor strip it */}
-            <input type="hidden" name="repeat" value={initialRepeat} />
-            {endsAtDefault ? (
-              <input type="hidden" name="endsAt" value={endsAtDefault} />
-            ) : null}
-            <Select value={initialRepeat} disabled>
+            {/* why hidden input: a disabled control submits nothing */}
+            <input type="hidden" name={repeatFieldName} value="never" />
+            <Select value="never" disabled>
               <SelectTrigger id="reminder-repeat-trigger">
                 <SelectValue placeholder="Never" />
               </SelectTrigger>
               <RepeatOptions />
+            </Select>
+          </>
+        ) : (
+          <>
+            {/* A locked plan can keep the stored cadence or turn it off, never
+                pick a new one. The stored end date rides along in a hidden
+                input while the cadence is kept, so a plain edit leaves the
+                series unchanged. */}
+            {repeat !== "never" && endsAtDefault ? (
+              <input
+                type="hidden"
+                name={endsAtFieldName}
+                value={endsAtDefault}
+              />
+            ) : null}
+            <Select
+              name={repeatFieldName}
+              value={repeat}
+              onValueChange={(value) =>
+                onRepeatChange(value as ReminderRepeatValue)
+              }
+              disabled={disabled}
+            >
+              <SelectTrigger id="reminder-repeat-trigger">
+                <SelectValue placeholder="Never" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="never">Never</SelectItem>
+                <SelectItem value={initialRepeat}>
+                  {REMINDER_REPEAT_PRESETS[initialRepeat].label}
+                </SelectItem>
+              </SelectContent>
             </Select>
           </>
         )}
@@ -138,7 +166,7 @@ export default function ReminderRecurrenceFields({
             {/* why: the Ends-on input doesn't render in the locked state,
                 but its stored value still round-trips through hidden inputs
                 and can fail validation (e.g. moving the reminder date past
-                the series' end date) — surface that error here or the
+                the series' end date), surface that error here or the
                 submit blocks with no visible cause. role="alert" because
                 there is no associated rendered input for screen readers. */}
             {endsAtError ? (

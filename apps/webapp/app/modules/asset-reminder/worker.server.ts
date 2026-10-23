@@ -1,4 +1,4 @@
-import type { Prisma, User } from "@prisma/client";
+import type { AssetReminder, Prisma, User } from "@prisma/client";
 import type PgBoss from "pg-boss";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
@@ -10,6 +10,7 @@ import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import {
   ADVANCE_CLOCK_EPSILON_MS,
   advanceRecurringReminder,
+  orgCanUseRecurringReminders,
 } from "./chain.server";
 import { assetAlertEmailHtmlString, assetAlertEmailText } from "./emails";
 import { formatOccurrenceInZone, isRecurringReminder } from "./recurrence";
@@ -68,9 +69,32 @@ type UserToEmail = Pick<
   isOwner?: boolean;
 };
 
+/**
+ * A reminder job as the worker receives it. `retrycount` is present because
+ * the worker registers with `includeMetadata: true`.
+ */
+type ReminderJob = PgBoss.Job<AssetsSchedulerData> & { retrycount?: number };
+
+/**
+ * Re-queues the row's current (future) occurrence. The singletonKey makes it
+ * a no-op when that job already exists.
+ */
+async function rearmCurrentOccurrence(
+  reminder: Pick<AssetReminder, "id" | "alertDateTime">
+) {
+  await scheduleAssetReminder({
+    data: {
+      reminderId: reminder.id,
+      eventType: ASSETS_EVENT_TYPE_MAP.REMINDER,
+    },
+    when: reminder.alertDateTime,
+    options: recurringReminderJobOptions(reminder.id, reminder.alertDateTime),
+  });
+}
+
 const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
   AssetsEventType,
-  (job: PgBoss.Job<AssetsSchedulerData>) => Promise<void>
+  (job: ReminderJob) => Promise<void>
 > = {
   REMINDER: async (job) => {
     const reminder = await db.assetReminder.findFirst({
@@ -92,16 +116,35 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
       return;
     }
 
+    const now = new Date();
+    const isRecurring = isRecurringReminder(reminder);
+    /** Whether a recurring row still holds the occurrence this job fires. */
+    const dueNow =
+      !isRecurring ||
+      reminder.alertDateTime.getTime() <=
+        now.getTime() + ADVANCE_CLOCK_EPSILON_MS;
+
+    /**
+     * A retry of a recurring job whose row already points at a later
+     * occurrence: an earlier attempt advanced the series (and so swapped the
+     * reference to the next job) and then failed before notifying. It still
+     * owes this occurrence's notification. An edit cancels the job, so a
+     * superseded job never reaches a retry.
+     */
+    const isRetryAfterAdvance =
+      isRecurring && !dueNow && (job.retrycount ?? 0) > 0;
+
     /**
      * Stale-job guard: when the row tracks a DIFFERENT live job than the one
      * firing, this job was superseded (an edit whose cancel silently failed,
-     * or a reconciliation re-arm) — firing it would double-notify or corrupt
-     * the chain. A null reference is permissive (unknown state: fire).
+     * or a reconciliation re-arm), and firing it would double-notify or
+     * corrupt the chain. A null reference is permissive (unknown state: fire).
      */
     if (
       reminder.activeSchedulerReference &&
       job.id &&
-      reminder.activeSchedulerReference !== job.id
+      reminder.activeSchedulerReference !== job.id &&
+      !isRetryAfterAdvance
     ) {
       Logger.warn(
         new ShelfError({
@@ -134,12 +177,18 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
      * A recurring series instead advances silently to its next occurrence, so
      * it keeps running while the asset is archived and resumes notifying once
      * the asset is reinstated. Skipping without advancing would leave a dead
-     * chain that boot reconciliation keeps re-arming.
+     * chain that boot reconciliation keeps re-arming. A row already pointing
+     * at a future occurrence was advanced by an earlier attempt, so only its
+     * job is re-armed.
      */
     if (reminder.asset.archivedAt) {
-      if (isRecurringReminder(reminder)) {
+      if (isRecurring) {
         try {
-          await advanceRecurringReminder({ reminder, now: new Date() });
+          if (dueNow) {
+            await advanceRecurringReminder({ reminder, now });
+          } else if (!isRetryAfterAdvance) {
+            await rearmCurrentOccurrence(reminder);
+          }
         } catch (cause) {
           throw new RecurringAdvanceError(cause, reminder.id);
         }
@@ -167,54 +216,67 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
      * Recurring series: advance the row to the next occurrence and schedule
      * the next job BEFORE notifying. If this critical step fails the error
      * escapes the wrapper as RecurringAdvanceError so pg-boss retries the
-     * job — no email has gone out yet, so a retry cannot double-send.
+     * job; no email has gone out yet, so a retry cannot double-send.
      */
-    const now = new Date();
     let nextOccurrence: Date | null = null;
     let seriesPaused = false;
     let seriesEnded = false;
 
-    if (isRecurringReminder(reminder)) {
-      const dueNow =
-        reminder.alertDateTime.getTime() <=
-        now.getTime() + ADVANCE_CLOCK_EPSILON_MS;
-
+    if (isRecurring) {
       try {
         if (dueNow) {
-          // Normal fire: advance the row and schedule the next occurrence.
-          const { next, paused, ended } = await advanceRecurringReminder({
-            reminder,
-            now,
-          });
+          const { next, advanced, paused, ended } =
+            await advanceRecurringReminder({ reminder, now });
+
+          /**
+           * The CAS lost: the row's date changed after this job read it. Only
+           * an edit does that while the job runs (boot reconciliation leaves
+           * rows whose job is still live alone), so the occurrence this job
+           * was about to announce no longer exists.
+           */
+          if (!advanced && !ended) {
+            Logger.info(
+              `Asset reminder ${reminder.id} changed while its job ran. Skipping the superseded occurrence.`
+            );
+            return;
+          }
+
           nextOccurrence = next;
           seriesPaused = paused;
           seriesEnded = ended;
         } else {
-          // The row already points at a FUTURE occurrence while this job is
-          // firing. The stale-job guard above proved this job is still the
-          // row's active job (or the reference is null), so we are NOT looking
-          // at a concurrent edit — the advance committed on a prior attempt
-          // but scheduling the next job did not durably succeed (transient
-          // sendAfter failure). Re-arm it idempotently (the singletonKey
-          // dedupes if the job already exists) so the series is not orphaned
-          // until boot reconciliation.
-          await scheduleAssetReminder({
-            data: {
-              reminderId: reminder.id,
-              eventType: ASSETS_EVENT_TYPE_MAP.REMINDER,
-            },
-            when: reminder.alertDateTime,
-            options: recurringReminderJobOptions(
-              reminder.id,
-              reminder.alertDateTime
-            ),
-          });
+          /**
+           * The row already points at a FUTURE occurrence: an earlier attempt
+           * of this job advanced it. When the row still tracks this job (or
+           * nothing), scheduling the next job did not durably succeed, so it
+           * is re-armed here instead of waiting for boot reconciliation. On a
+           * retry after a full advance the row tracks the next job already.
+           */
+          if (!isRetryAfterAdvance) {
+            await rearmCurrentOccurrence(reminder);
+          }
           nextOccurrence = reminder.alertDateTime;
+          seriesPaused = !(await orgCanUseRecurringReminders(
+            reminder.organizationId
+          ));
         }
       } catch (cause) {
         throw new RecurringAdvanceError(cause, reminder.id);
       }
     }
+
+    /**
+     * A plan without recurring reminders silences the series: the first
+     * occurrence after the downgrade still notifies and says so, every later
+     * one (its job was scheduled with `pausedByPlan`) only advances.
+     */
+    if (seriesPaused && job.data.pausedByPlan) {
+      Logger.info(
+        `Asset reminder ${reminder.id} occurrence skipped: the workspace plan does not include recurring reminders.`
+      );
+      return;
+    }
+    if (seriesPaused) nextOccurrence = null;
 
     const usersToSendEmail = reminder.teamMembers
       .filter((tm) => !!tm.user)
@@ -279,7 +341,7 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
     } else if (seriesEnded) {
       noteContent += ` This was the last occurrence of this recurring reminder (end date reached).`;
     } else if (seriesPaused) {
-      noteContent += ` This recurring reminder was paused because the workspace plan no longer includes recurring reminders.`;
+      noteContent += ` Later occurrences of this recurring reminder will not be sent until the workspace plan includes recurring reminders again.`;
     }
 
     /** Sending alert mails to all associated users. */

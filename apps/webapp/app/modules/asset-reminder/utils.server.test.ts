@@ -226,7 +226,7 @@ describe("resolveReminderPayloadDates end-date round-trip", () => {
 
   it("accepts a same-day end date with a late-evening reminder for west-of-UTC users", () => {
     // 23:30 New York on July 15 = 03:30Z July 16; end-of-day NY July 15 =
-    // 03:59:59.999Z July 16 — same-day is valid and must not be rejected.
+    // 03:59:59.999Z July 16: same-day is valid and must not be rejected.
     const { recurrence } = resolveReminderPayloadDates({
       timeZone: "America/New_York",
       formData: formData({

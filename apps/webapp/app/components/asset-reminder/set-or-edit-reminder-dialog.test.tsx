@@ -105,7 +105,7 @@ vi.mock("~/hooks/search-params", () => ({
 // which is unnecessary ceremony for this effect-focused test; stub them.
 // useLocation, useLoaderData (the route's recurring-reminder tier flag) and
 // the plain <Form> are overridden too so no data-router context is needed at
-// all — only `MemoryRouter` (for the real `Link` inside
+// all: only `MemoryRouter` (for the real `Link` inside
 // the "See a sample" Button) is required.
 vi.mock("react-router", async () => {
   const actual = await vi.importActual<Record<string, unknown>>("react-router");

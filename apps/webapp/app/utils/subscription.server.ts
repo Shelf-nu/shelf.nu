@@ -603,7 +603,7 @@ export const canUseRecurringReminders = (
 
 /**
  * Throws when the organization's tier does not include recurring reminders.
- * Call this only when a mutation actually requests recurrence — creating or
+ * Call this only when a mutation actually requests recurrence: creating or
  * editing one-shot reminders must stay free.
  *
  * @param organizationId - The current organization id.

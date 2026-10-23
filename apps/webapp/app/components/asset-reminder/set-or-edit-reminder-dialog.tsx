@@ -167,7 +167,7 @@ type SetOrEditReminderDialogProps = {
 /**
  * Reads the tier capability exposed by every route that renders this dialog
  * (asset detail, global reminders index, asset reminders tab). Fails CLOSED
- * (locked UI) if a future surface forgets to expose it — the server asserts
+ * (locked UI) if a future surface forgets to expose it; the server asserts
  * independently either way.
  */
 function useCanUseRecurringReminders(): boolean {
@@ -228,14 +228,14 @@ export default function SetOrEditReminderDialog({
   const [repeat, setRepeat] = useState<ReminderRepeatValue>(initialRepeat);
 
   /**
-   * Reset the Repeat selection whenever the dialog (re)opens — useState only
+   * Reset the Repeat selection whenever the dialog (re)opens: useState only
    * seeds once, so without this a changed-then-cancelled cadence would leak
    * into the next open and could be submitted unintentionally. Uses the
    * adjust-state-during-render pattern (not an effect) so the reset applies
    * in the same render pass with no stale flash.
    */
   // why: react-doctor flags prop-seeded useState (no-derived-useState), but
-  // this is the React-docs "adjust state during render" pattern — `repeat`
+  // this is the React-docs "adjust state during render" pattern: `repeat`
   // is user-editable state that must RESET on open, not derived state that
   // could be computed inline. Accepted residual per CLAUDE.md.
   const [prevOpen, setPrevOpen] = useState(open);

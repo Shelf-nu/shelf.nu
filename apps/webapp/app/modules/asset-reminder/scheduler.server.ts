@@ -17,6 +17,11 @@ export type AssetsEventType =
 export type AssetsSchedulerData = {
   reminderId: string;
   eventType: AssetsEventType;
+  /**
+   * Set on a recurring job scheduled while the workspace plan lacks recurring
+   * reminders. The worker advances such a series without notifying.
+   */
+  pausedByPlan?: boolean;
 };
 
 /**
@@ -118,7 +123,7 @@ export async function cancelAssetReminderScheduler(
      * A one-shot reminder whose alertDateTime passed has already fired, so
      * there is nothing to cancel. Recurring reminders can hold a QUEUED job
      * while alertDateTime is briefly in the past (poll latency between fire
-     * time and fetch), so for them we always attempt the cancel — pg-boss
+     * time and fetch), so for them we always attempt the cancel: pg-boss
      * cancel is a no-op on completed/missing jobs.
      */
     if (

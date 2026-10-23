@@ -1,6 +1,14 @@
 // @vitest-environment node
+/**
+ * Tests for the recurring-reminder chain: the compare-and-swap advance, the
+ * plan pause, and boot reconciliation of dead chains.
+ *
+ * @see {@link file://./chain.server.ts}
+ */
 import { ReminderRecurrenceUnit } from "@prisma/client";
+import type { Mock } from "vitest";
 import { db } from "~/database/db.server";
+import { scheduler } from "~/utils/scheduler.server";
 import {
   advanceRecurringReminder,
   reconcileRecurringReminders,
@@ -32,6 +40,12 @@ vitest.mock("./scheduler.server", async (importOriginal) => {
   };
 });
 
+// why: reconciliation asks pg-boss whether a row's job is still live
+vitest.mock("~/utils/scheduler.server", () => ({
+  scheduler: { getJobById: vitest.fn().mockResolvedValue(null) },
+  QueueNames: { assetsQueue: "assets-queue" },
+}));
+
 // why: tier resolution hits the database; the capability flag is the input
 // under test
 vitest.mock("../tier/service.server", () => ({
@@ -55,10 +69,22 @@ vitest.mock("~/utils/logger", () => ({
 
 const { getUserTierLimit } = await import("../tier/service.server");
 
+/**
+ * The mocked modules are `vitest.fn()` stubs fed partial rows, so they are
+ * driven through the untyped `Mock` interface.
+ */
+const asMock = (fn: unknown) => fn as Mock;
+
 const NOW = new Date("2026-07-02T12:00:00.000Z");
 
-function buildReminder(overrides: Record<string, unknown> = {}) {
+/** The reminder shape advanceRecurringReminder reads. */
+type ChainReminder = Parameters<typeof advanceRecurringReminder>[0]["reminder"];
+
+function buildReminder(
+  overrides: Partial<ChainReminder> & { activeSchedulerReference?: string } = {}
+): ChainReminder & { activeSchedulerReference: string | null } {
   return {
+    activeSchedulerReference: null,
     id: "reminder-1",
     organizationId: "org-1",
     alertDateTime: new Date("2026-07-02T11:59:00.000Z"),
@@ -72,12 +98,15 @@ function buildReminder(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vitest.clearAllMocks();
-  (db.assetReminder.updateMany as any).mockResolvedValue({ count: 1 });
-  (db.assetReminder.findUnique as any).mockResolvedValue(null);
-  (db.organization.findUnique as any).mockResolvedValue({ userId: "owner-1" });
-  (getUserTierLimit as any).mockResolvedValue({
+  asMock(db.assetReminder.updateMany).mockResolvedValue({ count: 1 });
+  asMock(db.assetReminder.findUnique).mockResolvedValue(null);
+  asMock(db.organization.findUnique).mockResolvedValue({ userId: "owner-1" });
+  asMock(getUserTierLimit).mockResolvedValue({
     canUseRecurringReminders: true,
   });
+  asMock(scheduler.getJobById).mockResolvedValue(null);
+  // why: a test above leaves a persistent rejection on the schedule stub
+  asMock(scheduleAssetReminder).mockResolvedValue(undefined);
 });
 
 describe("advanceRecurringReminder", () => {
@@ -86,7 +115,7 @@ describe("advanceRecurringReminder", () => {
       reminder: buildReminder({
         recurrenceUnit: null,
         recurrenceInterval: null,
-      }) as any,
+      }),
       now: NOW,
     });
 
@@ -102,7 +131,7 @@ describe("advanceRecurringReminder", () => {
 
   it("advances the row via CAS and schedules the next job with retry + singleton options", async () => {
     const result = await advanceRecurringReminder({
-      reminder: buildReminder() as any,
+      reminder: buildReminder(),
       now: NOW,
     });
 
@@ -132,10 +161,10 @@ describe("advanceRecurringReminder", () => {
   });
 
   it("stops without scheduling when a concurrent actor wins the CAS", async () => {
-    (db.assetReminder.updateMany as any).mockResolvedValue({ count: 0 });
+    asMock(db.assetReminder.updateMany).mockResolvedValue({ count: 0 });
 
     const result = await advanceRecurringReminder({
-      reminder: buildReminder() as any,
+      reminder: buildReminder(),
       now: NOW,
     });
 
@@ -147,7 +176,7 @@ describe("advanceRecurringReminder", () => {
     const result = await advanceRecurringReminder({
       reminder: buildReminder({
         recurrenceEndsAt: new Date("2026-07-15T00:00:00.000Z"),
-      }) as any,
+      }),
       now: NOW,
     });
 
@@ -161,27 +190,38 @@ describe("advanceRecurringReminder", () => {
     expect(scheduleAssetReminder).not.toHaveBeenCalled();
   });
 
-  it("pauses (no reschedule) when the org tier lost the capability", async () => {
-    (getUserTierLimit as any).mockResolvedValue({
+  it("keeps a series moving when the plan lost the capability, marking the next job paused", async () => {
+    asMock(getUserTierLimit).mockResolvedValue({
       canUseRecurringReminders: false,
     });
 
     const result = await advanceRecurringReminder({
-      reminder: buildReminder() as any,
+      reminder: buildReminder(),
       now: NOW,
     });
 
-    expect(result.paused).toBe(true);
-    expect(result.advanced).toBe(false);
-    expect(db.assetReminder.updateMany).not.toHaveBeenCalled();
-    expect(scheduleAssetReminder).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ advanced: true, paused: true });
+    expect(db.assetReminder.updateMany).toHaveBeenCalledTimes(1);
+    expect(scheduleAssetReminder).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ pausedByPlan: true }),
+      })
+    );
+  });
+
+  it("schedules an unmarked job when the plan includes recurrence", async () => {
+    await advanceRecurringReminder({ reminder: buildReminder(), now: NOW });
+
+    expect(
+      asMock(scheduleAssetReminder).mock.calls[0][0].data.pausedByPlan
+    ).toBeUndefined();
   });
 
   it("fails OPEN when the tier lookup errors (never kills a series on a transient)", async () => {
-    (getUserTierLimit as any).mockRejectedValue(new Error("db down"));
+    asMock(getUserTierLimit).mockRejectedValue(new Error("db down"));
 
     const result = await advanceRecurringReminder({
-      reminder: buildReminder() as any,
+      reminder: buildReminder(),
       now: NOW,
     });
 
@@ -190,10 +230,10 @@ describe("advanceRecurringReminder", () => {
   });
 
   it("propagates scheduling failures (caller must retry/reconcile)", async () => {
-    (scheduleAssetReminder as any).mockRejectedValue(new Error("pg-boss down"));
+    asMock(scheduleAssetReminder).mockRejectedValue(new Error("pg-boss down"));
 
     await expect(
-      advanceRecurringReminder({ reminder: buildReminder() as any, now: NOW })
+      advanceRecurringReminder({ reminder: buildReminder(), now: NOW })
     ).rejects.toThrow("pg-boss down");
   });
 });
@@ -223,9 +263,9 @@ describe("reconcileRecurringReminders", () => {
       id: "bad-1",
       alertDateTime: new Date("2026-07-02T08:00:00.000Z"),
     });
-    (db.assetReminder.findMany as any).mockResolvedValue([badRow, deadRow]);
-    // why: first row's schedule blows up — the loop must continue to row 2
-    (scheduleAssetReminder as any)
+    asMock(db.assetReminder.findMany).mockResolvedValue([badRow, deadRow]);
+    // why: first row's schedule blows up: the loop must continue to row 2
+    asMock(scheduleAssetReminder)
       .mockRejectedValueOnce(new Error("boom"))
       .mockResolvedValueOnce(undefined);
 
@@ -243,13 +283,13 @@ describe("reconcileRecurringReminders", () => {
       id: "orphan-1",
       alertDateTime: new Date("2026-07-02T09:00:00.000Z"),
     });
-    (db.assetReminder.findMany as any).mockResolvedValue([row]);
+    asMock(db.assetReminder.findMany).mockResolvedValue([row]);
     // why: advance CAS commits, then the schedule for the NEXT occurrence
     // throws; the refetched row now points at that future occurrence
-    (scheduleAssetReminder as any)
+    asMock(scheduleAssetReminder)
       .mockRejectedValueOnce(new Error("pg-boss hiccup"))
       .mockResolvedValueOnce(undefined);
-    (db.assetReminder.findUnique as any).mockResolvedValue({
+    asMock(db.assetReminder.findUnique).mockResolvedValue({
       alertDateTime: new Date("2026-08-02T09:00:00.000Z"),
     });
 
@@ -257,10 +297,58 @@ describe("reconcileRecurringReminders", () => {
 
     expect(rearmed).toBe(1);
     expect(scheduleAssetReminder).toHaveBeenCalledTimes(2);
-    expect((scheduleAssetReminder as any).mock.calls[1][0]).toMatchObject({
+    expect(asMock(scheduleAssetReminder).mock.calls[1][0]).toMatchObject({
       when: new Date("2026-08-02T09:00:00.000Z"),
       options: expect.objectContaining({ retryLimit: 3 }),
     });
+  });
+
+  it("leaves a series alone while its job is still queued or running", async () => {
+    asMock(db.assetReminder.findMany).mockResolvedValue([
+      buildReminder({
+        alertDateTime: new Date("2026-07-02T09:00:00.000Z"),
+        activeSchedulerReference: "job-queued",
+      }),
+    ]);
+    asMock(scheduler.getJobById).mockResolvedValue({ state: "created" });
+
+    const { rearmed } = await reconcileRecurringReminders({ now: NOW });
+
+    expect(rearmed).toBe(0);
+    expect(db.assetReminder.updateMany).not.toHaveBeenCalled();
+    expect(scheduleAssetReminder).not.toHaveBeenCalled();
+  });
+
+  it("re-arms a series whose job has finished without advancing it", async () => {
+    asMock(db.assetReminder.findMany).mockResolvedValue([
+      buildReminder({
+        alertDateTime: new Date("2026-07-02T09:00:00.000Z"),
+        activeSchedulerReference: "job-failed",
+      }),
+    ]);
+    asMock(scheduler.getJobById).mockResolvedValue({ state: "failed" });
+
+    const { rearmed } = await reconcileRecurringReminders({ now: NOW });
+
+    expect(rearmed).toBe(1);
+    expect(scheduleAssetReminder).toHaveBeenCalledTimes(1);
+  });
+
+  it("looks the plan up once per organization", async () => {
+    asMock(db.assetReminder.findMany).mockResolvedValue([
+      buildReminder({
+        id: "a",
+        alertDateTime: new Date("2026-07-02T09:00:00.000Z"),
+      }),
+      buildReminder({
+        id: "b",
+        alertDateTime: new Date("2026-07-02T08:00:00.000Z"),
+      }),
+    ]);
+
+    await reconcileRecurringReminders({ now: NOW });
+
+    expect(getUserTierLimit).toHaveBeenCalledTimes(1);
   });
 
   it("skips ended-but-not-yet-expired series quietly", async () => {
@@ -271,7 +359,7 @@ describe("reconcileRecurringReminders", () => {
       alertDateTime: new Date("2026-07-01T09:00:00.000Z"),
       recurrenceEndsAt: new Date("2026-07-20T00:00:00.000Z"),
     });
-    (db.assetReminder.findMany as any).mockResolvedValue([endedRow]);
+    asMock(db.assetReminder.findMany).mockResolvedValue([endedRow]);
 
     const { scanned, rearmed } = await reconcileRecurringReminders({
       now: NOW,

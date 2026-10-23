@@ -20,7 +20,6 @@ import { getUserByID } from "../user/service.server";
 const label = "Asset Reminder";
 
 /**
-/**
  * Cadence payload for a recurring reminder. `null` = one-shot.
  * Callers derive (unit, interval) from the dialog's Repeat preset and pass the
  * acting user's resolved timezone; the tier gate is enforced by the caller for
@@ -327,7 +326,7 @@ export async function editAssetReminder({
   recurrence?: ReminderRecurrenceInput;
   /**
    * Whether the org's tier allows recurring reminders. The gate only fires
-   * when this edit ADDS or CHANGES recurrence relative to the stored row —
+   * when this edit ADDS or CHANGES recurrence relative to the stored row:
    * downgraded orgs can still edit other fields, turn recurrence off, or
    * delete the reminder.
    */
@@ -346,7 +345,7 @@ export async function editAssetReminder({
      * One-shot reminders become immutable after they fire (historical
      * events). A RECURRING reminder stays editable even when its stored
      * alertDateTime is briefly in the past (fire-to-fetch poll window) or
-     * the series ended — editing re-arms it with a new future date.
+     * the series ended, editing re-arms it with a new future date.
      */
     if (now > reminder.alertDateTime && !isRecurringReminder(reminder)) {
       throw new ShelfError({
@@ -386,7 +385,7 @@ export async function editAssetReminder({
         reminder.recurrenceInterval !== effectiveRecurrence.interval ||
         (reminder.recurrenceEndsAt?.getTime() ?? null) !==
           (effectiveRecurrence.endsAt?.getTime() ?? null) ||
-        // why: moving the next fire date re-anchors the whole series — that
+        // why: moving the next fire date re-anchors the whole series, that
         // is recurring behavior too, so it's gated. Message/recipient edits
         // round-trip the prefilled date unchanged and still pass.
         reminder.alertDateTime.getTime() !== alertDateTime.getTime();
@@ -544,8 +543,8 @@ export async function getRemindersForOverviewPage({
       },
       take: 2,
       include: ASSET_REMINDER_INCLUDE_FIELDS,
-      // why: asc = the NEXT two upcoming reminders (desc showed the two
-      // furthest-future ones; the home widget already uses asc)
+      // why: asc yields the NEXT two upcoming reminders, matching the home
+      // widget
       orderBy: { alertDateTime: "asc" },
     });
 

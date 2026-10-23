@@ -122,6 +122,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         action: PermissionAction.read,
       });
 
+    /**
+     * Drives the Repeat control in the set-reminder dialog. Started now so it
+     * runs alongside the asset reads, and a failed lookup only locks that
+     * control: the server re-checks the plan on every recurring write.
+     */
+    const tierLimitPromise = getOrganizationTierLimit({
+      organizationId,
+      organizations,
+    }).catch(() => null);
+
     const asset = await getAsset({
       id,
       organizationId,
@@ -259,11 +269,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       title: asset.title,
     };
 
-    /** Drives the Repeat control in the set-reminder dialog. */
-    const tierLimit = await getOrganizationTierLimit({
-      organizationId,
-      organizations,
-    });
+    const tierLimit = await tierLimitPromise;
 
     /**
      * `custody: { include: { custodian: true } }` selects the whole TeamMember
@@ -493,7 +499,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         /**
          * One-shot reminders stay free; only an actual recurrence request is
-         * tier-gated (server-side — the disabled UI control is not a gate).
+         * tier-gated (server-side, the disabled UI control is not a gate).
          */
         if (recurrence) {
           await assertUserCanUseRecurringReminders({

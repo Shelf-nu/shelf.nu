@@ -2,7 +2,7 @@
  * Recurring-reminder chain: the advance step shared by the worker and boot
  * reconciliation.
  *
- * Design (no cron — pg-boss runs with noScheduling: true):
+ * Design (no cron: pg-boss runs with noScheduling: true):
  * - A recurring reminder is ONE AssetReminder row whose alertDateTime is
  *   advanced in place to the next occurrence each time it fires
  *   (advance-before-notify, see worker.server.ts).
@@ -12,6 +12,10 @@
  *   the CAS and stops. Scheduling itself is deduped by a pg-boss singletonKey
  *   keyed on (reminderId, occurrence), so even a double-schedule of the same
  *   next occurrence collapses to one job.
+ * - A series whose workspace plan no longer includes recurring reminders
+ *   keeps advancing, but its jobs are marked `pausedByPlan` and the worker
+ *   sends nothing for them. Notifications resume on their own once the plan
+ *   includes the feature again, with no re-arm step.
  * - Chains can still die (handler crash after retries, jobs archived while
  *   workers are down for >14 days past fire time). reconcileRecurringReminders
  *   runs at every boot/deploy and re-arms provably-dead chains.
@@ -23,6 +27,7 @@ import type { AssetReminder } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
+import { scheduler } from "~/utils/scheduler.server";
 import { canUseRecurringReminders } from "~/utils/subscription.server";
 import { getNextOccurrence, isRecurringReminder } from "./recurrence";
 import {
@@ -49,16 +54,22 @@ export const RECONCILE_GRACE_MS = 60 * 60 * 1000; // 1 hour
  */
 export const ADVANCE_CLOCK_EPSILON_MS = 60 * 1000; // 1 minute
 
+/** pg-boss job states in which a job will still run. */
+const LIVE_JOB_STATES = new Set(["created", "retry", "active"]);
+
 type AdvanceResult = {
   /** The next occurrence now scheduled, when the advance happened. */
   next: Date | null;
-  /** False when the series ended, the CAS lost, or the tier paused it. */
+  /** False when the series ended or the CAS lost. */
   advanced: boolean;
-  /** True when the org's tier no longer includes recurrence (series pauses). */
+  /**
+   * True when the org's plan no longer includes recurrence. The series still
+   * advances, and the next job is scheduled with `pausedByPlan` set.
+   */
   paused: boolean;
   /**
    * True when the series ended naturally (the next occurrence would exceed
-   * recurrenceEndsAt) — lets the worker call out the final fire explicitly.
+   * recurrenceEndsAt), lets the worker call out the final fire explicitly.
    */
   ended: boolean;
 };
@@ -69,7 +80,7 @@ type AdvanceResult = {
  * never kills a paying customer's series; an explicit `false` tier flag is
  * the only thing that pauses it.
  */
-async function orgCanUseRecurringReminders(
+export async function orgCanUseRecurringReminders(
   organizationId: AssetReminder["organizationId"]
 ): Promise<boolean> {
   try {
@@ -108,12 +119,13 @@ async function orgCanUseRecurringReminders(
  * pg-boss writes through its own pool, so sendAfter can never be part of a
  * Prisma transaction.
  *
- * @throws When the CAS succeeded but scheduling failed — callers must treat
+ * @throws When the CAS succeeded but scheduling failed: callers must treat
  *         this as critical (retry / reconcile), not swallow it.
  */
 export async function advanceRecurringReminder({
   reminder,
   now = new Date(),
+  planAllowsRecurrence = orgCanUseRecurringReminders,
 }: {
   reminder: Pick<
     AssetReminder,
@@ -126,6 +138,10 @@ export async function advanceRecurringReminder({
     | "recurrenceEndsAt"
   >;
   now?: Date;
+  /** Plan lookup; reconciliation passes a per-organization memo. */
+  planAllowsRecurrence?: (
+    organizationId: AssetReminder["organizationId"]
+  ) => Promise<boolean>;
 }): Promise<AdvanceResult> {
   if (!isRecurringReminder(reminder)) {
     return { next: null, advanced: false, paused: false, ended: false };
@@ -145,9 +161,7 @@ export async function advanceRecurringReminder({
     return { next: null, advanced: false, paused: false, ended: true };
   }
 
-  if (!(await orgCanUseRecurringReminders(reminder.organizationId))) {
-    return { next: null, advanced: false, paused: true, ended: false };
-  }
+  const paused = !(await planAllowsRecurrence(reminder.organizationId));
 
   /**
    * Compare-and-swap: only the actor that still sees the fired occurrence
@@ -171,12 +185,13 @@ export async function advanceRecurringReminder({
     data: {
       reminderId: reminder.id,
       eventType: ASSETS_EVENT_TYPE_MAP.REMINDER,
+      ...(paused ? { pausedByPlan: true } : {}),
     },
     when: next,
     options: recurringReminderJobOptions(reminder.id, next),
   });
 
-  return { next, advanced: true, paused: false, ended: false };
+  return { next, advanced: true, paused, ended: false };
 }
 
 /**
@@ -184,10 +199,12 @@ export async function advanceRecurringReminder({
  * (worker crash after retries, jobs archived during long downtime, crash
  * between sendAfter and the reference write).
  *
- * Runs once per boot from entry.server.tsx — Shelf deploys frequently, so
+ * Runs once per boot from entry.server.tsx, Shelf deploys frequently, so
  * this is the no-cron sweep. Only claims PROVABLY dead chains: the stored
  * occurrence must be more than RECONCILE_GRACE_MS in the past, far beyond
- * the poll + retry horizon of a healthy in-flight fire.
+ * the poll + retry horizon of a healthy in-flight fire, and the job the row
+ * tracks must no longer be waiting or running in pg-boss. A job still queued
+ * after downtime delivers its overdue occurrence itself.
  *
  * Each row is fault-isolated: one bad row (e.g. a timezone the zone database
  * dropped) must never abort resurrection for the remaining tenants.
@@ -206,6 +223,7 @@ export async function reconcileRecurringReminders({
     select: {
       id: true,
       alertDateTime: true,
+      activeSchedulerReference: true,
       organizationId: true,
       recurrenceUnit: true,
       recurrenceInterval: true,
@@ -216,20 +234,42 @@ export async function reconcileRecurringReminders({
 
   let rearmed = 0;
 
+  /** One plan lookup per organization for the whole sweep. */
+  const planByOrganization = new Map<string, Promise<boolean>>();
+  const planAllowsRecurrence = (organizationId: string) => {
+    let plan = planByOrganization.get(organizationId);
+    if (!plan) {
+      plan = orgCanUseRecurringReminders(organizationId);
+      planByOrganization.set(organizationId, plan);
+    }
+    return plan;
+  };
+
   for (const reminder of candidates) {
     try {
-      const { advanced } = await advanceRecurringReminder({ reminder, now });
+      if (reminder.activeSchedulerReference) {
+        const job = await scheduler.getJobById(
+          reminder.activeSchedulerReference
+        );
+        if (job && LIVE_JOB_STATES.has(job.state)) continue;
+      }
+
+      const { advanced } = await advanceRecurringReminder({
+        reminder,
+        now,
+        planAllowsRecurrence,
+      });
       if (advanced) {
         rearmed += 1;
         Logger.info(
           `Re-armed dead recurring reminder chain ${reminder.id} (org ${reminder.organizationId}).`
         );
       }
-      // advanced === false covers: series actually ended (next beyond
-      // endsAt — quietly skipped every boot until endsAt passes), tier
-      // paused, or a concurrent actor won the CAS. All are no-ops here.
+      // advanced === false covers a series that ended (its next occurrence is
+      // past endsAt; skipped without any lookup until endsAt passes) and a
+      // concurrent actor winning the CAS. Both are no-ops here.
     } catch (cause) {
-      // why: per-row isolation — reconciliation is the only recovery
+      // why: per-row isolation: reconciliation is the only recovery
       // mechanism in a no-cron design, so one bad row must not abort the rest
       Logger.error(
         new ShelfError({
@@ -242,7 +282,7 @@ export async function reconcileRecurringReminders({
 
       /**
        * The CAS may have committed before scheduling failed, leaving the row
-       * pointing at a future occurrence with no queued job — a state this
+       * pointing at a future occurrence with no queued job: a state this
        * sweep would no longer match. Best-effort re-arm of the row's CURRENT
        * occurrence (singletonKey makes it idempotent); if this also fails,
        * the worker's orphan-recovery branch or the sweep after that

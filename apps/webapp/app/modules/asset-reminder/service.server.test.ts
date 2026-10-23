@@ -1,18 +1,27 @@
 /**
- * Tests for creating asset reminders.
+ * Tests for creating and editing asset reminders.
  *
  * A reminder names an asset, and the reminder's email shows that asset's
  * title and image to the workspace that owns the reminder. The asset must
  * therefore be proven to belong to the caller's workspace before anything is
  * written or scheduled.
  *
+ * Recurring reminders are a tier capability. Create persists the cadence and
+ * schedules the job with retry options; edit enforces the tier gate only when
+ * the edit adds or changes recurrence relative to the stored row, so a
+ * downgraded workspace can still edit other fields or turn repeat off.
+ *
  * @see {@link file://./service.server.ts}
  */
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
-import { scheduleAssetReminder } from "./scheduler.server";
+import {
+  recurringReminderJobOptions,
+  scheduleAssetReminder,
+} from "./scheduler.server";
 import {
   createAssetReminder,
+  editAssetReminder,
   getUpcomingRemindersForHomePage,
 } from "./service.server";
 
@@ -24,7 +33,12 @@ vi.mock("~/database/db.server", () => ({
     $transaction: vi.fn(),
     asset: { findMany: vi.fn() },
     teamMember: { count: vi.fn() },
-    assetReminder: { create: vi.fn(), findMany: vi.fn() },
+    assetReminder: {
+      create: vi.fn(),
+      findMany: vi.fn(),
+      findFirstOrThrow: vi.fn(),
+      update: vi.fn(),
+    },
     note: { create: vi.fn() },
   },
 }));
@@ -34,6 +48,11 @@ vi.mock("./scheduler.server", () => ({
   ASSETS_EVENT_TYPE_MAP: { REMINDER: "REMINDER" },
   scheduleAssetReminder: vi.fn().mockResolvedValue(undefined),
   cancelAssetReminderScheduler: vi.fn(),
+  // why: the real helper lives beside pg-boss wiring; a stand-in that echoes
+  // its inputs lets the tests prove which options reached the scheduler
+  recurringReminderJobOptions: vi.fn((reminderId: string, when: Date) => ({
+    singletonKey: `asset-reminder-${reminderId}-${when.toISOString()}`,
+  })),
 }));
 
 // why: the user lookup pulls in the whole user service; only the name is used here
@@ -124,6 +143,225 @@ describe("createAssetReminder", () => {
       ShelfError
     );
     expect(scheduleAssetReminder).not.toHaveBeenCalled();
+  });
+
+  it("persists the cadence and schedules a recurring reminder with retry options", async () => {
+    const endsAt = new Date("2099-12-31T23:59:59.999Z");
+
+    await createAssetReminder({
+      ...REMINDER_ARGS,
+      recurrence: {
+        unit: "MONTH",
+        interval: 1,
+        timezone: "Europe/Sofia",
+        endsAt,
+      },
+    });
+
+    expect(db.assetReminder.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        recurrenceUnit: "MONTH",
+        recurrenceInterval: 1,
+        recurrenceTimezone: "Europe/Sofia",
+        recurrenceEndsAt: endsAt,
+      }),
+    });
+    expect(recurringReminderJobOptions).toHaveBeenCalledWith(
+      "reminder-1",
+      REMINDER_ARGS.alertDateTime
+    );
+    expect(scheduleAssetReminder).toHaveBeenCalledWith({
+      data: { reminderId: "reminder-1", eventType: "REMINDER" },
+      when: REMINDER_ARGS.alertDateTime,
+      options: recurringReminderJobOptions(
+        "reminder-1",
+        REMINDER_ARGS.alertDateTime
+      ),
+    });
+  });
+
+  it.each([
+    ["null", null],
+    ["absent", undefined],
+  ])(
+    "writes empty cadence fields and plain options when recurrence is %s",
+    async (_label, recurrence) => {
+      await createAssetReminder({ ...REMINDER_ARGS, recurrence });
+
+      expect(db.assetReminder.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          recurrenceUnit: null,
+          recurrenceInterval: null,
+          recurrenceTimezone: null,
+          recurrenceEndsAt: null,
+        }),
+      });
+      expect(recurringReminderJobOptions).not.toHaveBeenCalled();
+      expect(scheduleAssetReminder).toHaveBeenCalledWith(
+        expect.objectContaining({ options: {} })
+      );
+    }
+  );
+});
+
+/** The next fire date of the stored row, which an edit round-trips unchanged. */
+const STORED_ALERT = new Date("2099-01-01T09:00:00Z");
+
+/** A stored one-shot reminder row in the caller's workspace. */
+const ONE_SHOT_ROW = {
+  id: "reminder-1",
+  name: "Return the camera",
+  message: "Please bring it back",
+  alertDateTime: STORED_ALERT,
+  organizationId: "org-1",
+  assetId: "asset-1",
+  recurrenceUnit: null,
+  recurrenceInterval: null,
+  recurrenceTimezone: null,
+  recurrenceEndsAt: null,
+  activeSchedulerReference: null,
+};
+
+/** A stored monthly series with no end date, anchored in UTC. */
+const MONTHLY_ROW = {
+  ...ONE_SHOT_ROW,
+  recurrenceUnit: "MONTH",
+  recurrenceInterval: 1,
+  recurrenceTimezone: "UTC",
+};
+
+/** Edit arguments that round-trip the stored monthly series unchanged. */
+const EDIT_ARGS = {
+  id: "reminder-1",
+  name: "Return the camera",
+  message: "Please bring it back",
+  alertDateTime: STORED_ALERT,
+  organizationId: "org-1",
+  teamMembers: ["tm-1"],
+  recurrence: {
+    unit: "MONTH" as const,
+    interval: 1,
+    timezone: "UTC",
+    endsAt: null,
+  },
+  canUseRecurringReminders: false,
+};
+
+describe("editAssetReminder tier gate", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(db.teamMember.count).mockResolvedValue(1);
+    vi.mocked(db.assetReminder.update).mockResolvedValue({
+      id: "reminder-1",
+    } as never);
+  });
+
+  /** Makes the org-scoped lookup return the given stored row. */
+  function givenStoredRow(row: typeof ONE_SHOT_ROW | typeof MONTHLY_ROW) {
+    vi.mocked(db.assetReminder.findFirstOrThrow).mockResolvedValue(
+      row as never
+    );
+  }
+
+  /** Asserts the edit was refused with a 403 and nothing was written. */
+  async function expectRefused(args: Parameters<typeof editAssetReminder>[0]) {
+    const error = await editAssetReminder(args).catch((e) => e);
+
+    expect(error).toBeInstanceOf(ShelfError);
+    expect(error.status).toBe(403);
+    expect(db.assetReminder.update).not.toHaveBeenCalled();
+    expect(scheduleAssetReminder).not.toHaveBeenCalled();
+  }
+
+  it("refuses to add recurrence to a one-shot reminder", async () => {
+    givenStoredRow(ONE_SHOT_ROW);
+
+    await expectRefused(EDIT_ARGS);
+  });
+
+  it("refuses to change the interval of a stored series", async () => {
+    givenStoredRow(MONTHLY_ROW);
+
+    await expectRefused({
+      ...EDIT_ARGS,
+      recurrence: { ...EDIT_ARGS.recurrence, interval: 3 },
+    });
+  });
+
+  it("refuses to change the end date of a stored series", async () => {
+    givenStoredRow(MONTHLY_ROW);
+
+    await expectRefused({
+      ...EDIT_ARGS,
+      recurrence: {
+        ...EDIT_ARGS.recurrence,
+        endsAt: new Date("2099-06-30T23:59:59.999Z"),
+      },
+    });
+  });
+
+  it("refuses to move the next fire date of a stored series", async () => {
+    givenStoredRow(MONTHLY_ROW);
+
+    await expectRefused({
+      ...EDIT_ARGS,
+      alertDateTime: new Date("2099-01-15T09:00:00Z"),
+    });
+  });
+
+  it("allows a message-only edit that keeps the stored cadence", async () => {
+    givenStoredRow(MONTHLY_ROW);
+
+    await editAssetReminder({ ...EDIT_ARGS, message: "New wording" });
+
+    expect(db.assetReminder.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          message: "New wording",
+          recurrenceUnit: "MONTH",
+          recurrenceInterval: 1,
+          recurrenceTimezone: "UTC",
+          recurrenceEndsAt: null,
+        }),
+      })
+    );
+    expect(scheduleAssetReminder).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows turning repeat off and clears the cadence fields", async () => {
+    givenStoredRow(MONTHLY_ROW);
+
+    await editAssetReminder({ ...EDIT_ARGS, recurrence: null });
+
+    expect(db.assetReminder.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          recurrenceUnit: null,
+          recurrenceInterval: null,
+          recurrenceTimezone: null,
+          recurrenceEndsAt: null,
+        }),
+      })
+    );
+    expect(scheduleAssetReminder).toHaveBeenCalledWith(
+      expect.objectContaining({ options: {} })
+    );
+  });
+
+  it("lets a tier with the capability change the cadence", async () => {
+    givenStoredRow(MONTHLY_ROW);
+
+    await editAssetReminder({
+      ...EDIT_ARGS,
+      canUseRecurringReminders: true,
+      recurrence: { ...EDIT_ARGS.recurrence, interval: 3 },
+    });
+
+    expect(db.assetReminder.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ recurrenceInterval: 3 }),
+      })
+    );
   });
 });
 

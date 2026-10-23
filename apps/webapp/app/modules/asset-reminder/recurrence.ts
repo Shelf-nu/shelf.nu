@@ -1,5 +1,5 @@
 /**
- * Reminder recurrence — presets and next-occurrence math.
+ * Reminder recurrence: presets and next-occurrence math.
  *
  * A recurring reminder stores a cadence as (recurrenceUnit, recurrenceInterval)
  * plus the IANA timezone it was configured in. The worker advances
@@ -215,7 +215,7 @@ const MAX_CATCH_UP_ITERATIONS = 10_000;
  *
  * - Wall-clock stable in the stored timezone (a 09:00 reminder stays 09:00
  *   across DST). Month-end clamps per luxon calendar math: a series anchored
- *   Jan 31 becomes Feb 28 and stays on the 28th thereafter — intended v1
+ *   Jan 31 becomes Feb 28 and stays on the 28th thereafter, intended v1
  *   behavior (the advanced date is the new anchor).
  * - Catch-up policy: occurrences missed while the app was down are SKIPPED
  *   (the late-fired job still notifies once); we never send a burst.

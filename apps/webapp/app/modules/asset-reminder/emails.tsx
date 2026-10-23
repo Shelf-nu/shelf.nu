@@ -31,7 +31,7 @@ type AssetAlertEmailProps = {
 /**
  * "Repeats every 3 months. Next reminder: 15 Oct 2026, 09:00 (Europe/Berlin)."
  * Rendered in the timezone the series was configured in (the worker has no
- * request context, so the recipient's own zone is unknown) — the zone label
+ * request context, so the recipient's own zone is unknown), the zone label
  * keeps it unambiguous for recipients elsewhere.
  */
 function recurrenceLine(

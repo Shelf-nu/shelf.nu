@@ -33,7 +33,7 @@ describe("getNextOccurrence", () => {
       timezone: "Europe/Berlin",
       now: new Date("2026-03-28T08:00:01.000Z"),
     });
-    // 09:00 wall-clock in CEST = 07:00Z — the UTC instant shifts, the
+    // 09:00 wall-clock in CEST = 07:00Z: the UTC instant shifts, the
     // local time does not
     expect(next?.toISOString()).toBe("2026-03-29T07:00:00.000Z");
   });
@@ -62,7 +62,7 @@ describe("getNextOccurrence", () => {
     });
     expect(feb?.toISOString()).toBe("2026-02-28T10:00:00.000Z");
 
-    // The advanced date is the new anchor — intended v1 behavior
+    // The advanced date is the new anchor, intended v1 behavior
     const mar = getNextOccurrence({
       base: feb!,
       unit: ReminderRecurrenceUnit.MONTH,

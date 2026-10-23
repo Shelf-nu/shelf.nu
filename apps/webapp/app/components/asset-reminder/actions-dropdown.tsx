@@ -32,7 +32,7 @@ export default function ActionsDropdown({ reminder }: ActionsDropdownProps) {
   /**
    * One-shot reminders are immutable once sent. Recurring reminders stay
    * editable even when the stored date briefly sits in the past (fire-to-
-   * fetch window) or the series ended — editing re-arms the series.
+   * fetch window) or the series ended, editing re-arms the series.
    */
   const isPending =
     now < new Date(reminder.alertDateTime) || isRecurringReminder(reminder);

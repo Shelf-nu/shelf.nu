@@ -1,18 +1,23 @@
 // @vitest-environment node
 /**
  * Tests for the REMINDER handler's recurring-series behavior: the stale-job
- * guard, advancing a due series before notifying, orphan recovery, the
- * end/pause notes, archived assets, and advance failures reaching pg-boss.
+ * guard, advancing a due series before notifying, orphan recovery, retries
+ * after an advance, a lost advance race, the end note, plan pauses, archived
+ * assets, and advance failures reaching pg-boss.
  * The wrapper's catch/log/rethrow contract lives in `worker.server.test.ts`.
  *
  * @see {@link file://./worker.server.ts}
  */
 import { ReminderRecurrenceUnit } from "@prisma/client";
+import type { Mock } from "vitest";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import { Logger } from "~/utils/logger";
 import { scheduler } from "~/utils/scheduler.server";
-import { advanceRecurringReminder } from "./chain.server";
+import {
+  advanceRecurringReminder,
+  orgCanUseRecurringReminders,
+} from "./chain.server";
 import {
   scheduleAssetReminder,
   type AssetsSchedulerData,
@@ -50,6 +55,7 @@ vitest.mock("~/utils/scheduler.server", () => ({
 // verify the worker calls it at the right time and handles its outcomes
 vitest.mock("./chain.server", () => ({
   ADVANCE_CLOCK_EPSILON_MS: 60 * 1000,
+  orgCanUseRecurringReminders: vitest.fn().mockResolvedValue(true),
   advanceRecurringReminder: vitest.fn().mockResolvedValue({
     next: null,
     advanced: false,
@@ -89,7 +95,33 @@ vitest.mock("~/utils/logger", () => ({
   Logger: { warn: vitest.fn(), info: vitest.fn(), error: vitest.fn() },
 }));
 
-type WorkerJob = { id?: string; data: AssetsSchedulerData };
+type WorkerJob = {
+  id?: string;
+  retrycount?: number;
+  data: AssetsSchedulerData;
+};
+
+/**
+ * The mocked modules are `vitest.fn()` stubs fed partial rows, so they are
+ * driven through the untyped `Mock` interface.
+ */
+const asMock = (fn: unknown) => fn as Mock;
+
+/** Cadence fields of a monthly series in UTC. */
+const MONTHLY = {
+  recurrenceUnit: ReminderRecurrenceUnit.MONTH,
+  recurrenceInterval: 1,
+  recurrenceTimezone: "UTC",
+};
+
+/** An archived asset, for the archived-asset branch. */
+const ARCHIVED_ASSET = {
+  id: "asset-1",
+  title: "Flow meter",
+  mainImage: null,
+  mainImageExpiration: null,
+  archivedAt: new Date(),
+};
 
 /**
  * Extracts the internal REMINDER handler by registering the worker and
@@ -151,17 +183,18 @@ beforeAll(async () => {
 
 beforeEach(() => {
   vitest.clearAllMocks();
-  (advanceRecurringReminder as any).mockResolvedValue({
+  asMock(advanceRecurringReminder).mockResolvedValue({
     next: null,
     advanced: false,
     paused: false,
     ended: false,
   });
+  asMock(orgCanUseRecurringReminders).mockResolvedValue(true);
 });
 
 describe("REMINDER worker handler", () => {
   it("fires a one-shot reminder: emails + note, no advance", async () => {
-    (db.assetReminder.findFirst as any).mockResolvedValue(buildReminderRow());
+    asMock(db.assetReminder.findFirst).mockResolvedValue(buildReminderRow());
 
     await handler(JOB);
 
@@ -175,7 +208,7 @@ describe("REMINDER worker handler", () => {
   });
 
   it("skips silently when the reminder row is gone (deleted asset/reminder)", async () => {
-    (db.assetReminder.findFirst as any).mockResolvedValue(null);
+    asMock(db.assetReminder.findFirst).mockResolvedValue(null);
 
     await handler(JOB);
 
@@ -185,7 +218,7 @@ describe("REMINDER worker handler", () => {
   });
 
   it("skips a stale job (row tracks a different live job) without notifying or advancing", async () => {
-    (db.assetReminder.findFirst as any).mockResolvedValue(
+    asMock(db.assetReminder.findFirst).mockResolvedValue(
       buildReminderRow({ activeSchedulerReference: "job-NEWER" })
     );
 
@@ -197,7 +230,7 @@ describe("REMINDER worker handler", () => {
   });
 
   it("fires permissively when the stored reference is null (unknown state)", async () => {
-    (db.assetReminder.findFirst as any).mockResolvedValue(
+    asMock(db.assetReminder.findFirst).mockResolvedValue(
       buildReminderRow({ activeSchedulerReference: null })
     );
 
@@ -209,7 +242,7 @@ describe("REMINDER worker handler", () => {
   it("advances a due recurring series BEFORE notifying and mentions the next date in the note", async () => {
     const next = new Date("2026-08-02T09:00:00.000Z");
     const callOrder: string[] = [];
-    (advanceRecurringReminder as any).mockImplementation(() => {
+    asMock(advanceRecurringReminder).mockImplementation(() => {
       callOrder.push("advance");
       return Promise.resolve({
         next,
@@ -218,10 +251,10 @@ describe("REMINDER worker handler", () => {
         ended: false,
       });
     });
-    (sendEmail as any).mockImplementation(() => {
+    asMock(sendEmail).mockImplementation(() => {
       callOrder.push("email");
     });
-    (db.assetReminder.findFirst as any).mockResolvedValue(
+    asMock(db.assetReminder.findFirst).mockResolvedValue(
       buildReminderRow({
         recurrenceUnit: ReminderRecurrenceUnit.MONTH,
         recurrenceInterval: 1,
@@ -242,10 +275,10 @@ describe("REMINDER worker handler", () => {
 
   it("re-arms an orphaned occurrence on retry (row advanced but next job never scheduled)", async () => {
     // The row already points at a future occurrence, and THIS job is still the
-    // row's active reference (self-match) — the sendAfter failed on a prior
+    // row's active reference (self-match): the sendAfter failed on a prior
     // attempt. The worker must re-schedule that occurrence, not advance again.
     const future = new Date(Date.now() + 10 * 60_000);
-    (db.assetReminder.findFirst as any).mockResolvedValue(
+    asMock(db.assetReminder.findFirst).mockResolvedValue(
       buildReminderRow({
         recurrenceUnit: ReminderRecurrenceUnit.MONTH,
         recurrenceInterval: 1,
@@ -268,13 +301,13 @@ describe("REMINDER worker handler", () => {
   });
 
   it("notes the final occurrence when the series ends (end date reached)", async () => {
-    (advanceRecurringReminder as any).mockResolvedValue({
+    asMock(advanceRecurringReminder).mockResolvedValue({
       next: null,
       advanced: false,
       paused: false,
       ended: true,
     });
-    (db.assetReminder.findFirst as any).mockResolvedValue(
+    asMock(db.assetReminder.findFirst).mockResolvedValue(
       buildReminderRow({
         recurrenceUnit: ReminderRecurrenceUnit.MONTH,
         recurrenceInterval: 1,
@@ -290,32 +323,111 @@ describe("REMINDER worker handler", () => {
     );
   });
 
-  it("notes the pause when the workspace tier lost recurrence", async () => {
-    (advanceRecurringReminder as any).mockResolvedValue({
-      next: null,
-      advanced: false,
+  it("sends the first occurrence after a downgrade and says later ones will not be sent", async () => {
+    asMock(advanceRecurringReminder).mockResolvedValue({
+      next: new Date("2099-08-02T09:00:00.000Z"),
+      advanced: true,
       paused: true,
       ended: false,
     });
-    (db.assetReminder.findFirst as any).mockResolvedValue(
+    asMock(db.assetReminder.findFirst).mockResolvedValue(
+      buildReminderRow(MONTHLY)
+    );
+
+    await handler(JOB);
+
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+    const note = asMock(createNote).mock.calls[0][0].content;
+    expect(note).toContain("will not be sent");
+    expect(note).not.toContain("Next reminder scheduled");
+  });
+
+  it("advances silently for a job scheduled while the plan lacked recurrence", async () => {
+    asMock(advanceRecurringReminder).mockResolvedValue({
+      next: new Date("2099-08-02T09:00:00.000Z"),
+      advanced: true,
+      paused: true,
+      ended: false,
+    });
+    asMock(db.assetReminder.findFirst).mockResolvedValue(
+      buildReminderRow(MONTHLY)
+    );
+
+    await handler({ ...JOB, data: { ...JOB.data, pausedByPlan: true } });
+
+    expect(advanceRecurringReminder).toHaveBeenCalledTimes(1);
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(createNote).not.toHaveBeenCalled();
+  });
+
+  it("notifies again once the plan includes recurrence, even for a job marked paused", async () => {
+    asMock(advanceRecurringReminder).mockResolvedValue({
+      next: new Date("2099-08-02T09:00:00.000Z"),
+      advanced: true,
+      paused: false,
+      ended: false,
+    });
+    asMock(db.assetReminder.findFirst).mockResolvedValue(
+      buildReminderRow(MONTHLY)
+    );
+
+    await handler({ ...JOB, data: { ...JOB.data, pausedByPlan: true } });
+
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not notify when an edit moved the row while the job ran (lost advance)", async () => {
+    asMock(db.assetReminder.findFirst).mockResolvedValue(
+      buildReminderRow(MONTHLY)
+    );
+
+    await handler(JOB);
+
+    expect(advanceRecurringReminder).toHaveBeenCalledTimes(1);
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(createNote).not.toHaveBeenCalled();
+  });
+
+  it("still notifies on a retry that follows a completed advance", async () => {
+    // An earlier attempt advanced the row (so it now tracks the next job)
+    // and then failed before notifying.
+    const next = new Date(Date.now() + 30 * 24 * 3600_000);
+    asMock(db.assetReminder.findFirst).mockResolvedValue(
       buildReminderRow({
-        recurrenceUnit: ReminderRecurrenceUnit.MONTH,
-        recurrenceInterval: 1,
+        ...MONTHLY,
+        alertDateTime: next,
+        activeSchedulerReference: "job-2",
+      })
+    );
+
+    await handler({ ...JOB, retrycount: 1 });
+
+    expect(advanceRecurringReminder).not.toHaveBeenCalled();
+    expect(scheduleAssetReminder).not.toHaveBeenCalled();
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+    expect(asMock(createNote).mock.calls[0][0].content).toContain(
+      "Next reminder scheduled for"
+    );
+  });
+
+  it("skips a first attempt whose row tracks a newer job, even for a future occurrence", async () => {
+    asMock(db.assetReminder.findFirst).mockResolvedValue(
+      buildReminderRow({
+        ...MONTHLY,
+        alertDateTime: new Date(Date.now() + 3600_000),
+        activeSchedulerReference: "job-2",
       })
     );
 
     await handler(JOB);
 
-    expect(createNote).toHaveBeenCalledWith(
-      expect.objectContaining({
-        content: expect.stringContaining("paused"),
-      })
-    );
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(scheduleAssetReminder).not.toHaveBeenCalled();
   });
 
   it("rethrows advance failures as RecurringAdvanceError so pg-boss retries (no email sent first)", async () => {
-    (advanceRecurringReminder as any).mockRejectedValue(new Error("boom"));
-    (db.assetReminder.findFirst as any).mockResolvedValue(
+    asMock(advanceRecurringReminder).mockRejectedValue(new Error("boom"));
+    asMock(db.assetReminder.findFirst).mockResolvedValue(
       buildReminderRow({
         recurrenceUnit: ReminderRecurrenceUnit.MONTH,
         recurrenceInterval: 1,
@@ -328,7 +440,7 @@ describe("REMINDER worker handler", () => {
   });
 
   it("advances a recurring series on an archived asset without notifying", async () => {
-    (db.assetReminder.findFirst as any).mockResolvedValue(
+    asMock(db.assetReminder.findFirst).mockResolvedValue(
       buildReminderRow({
         recurrenceUnit: ReminderRecurrenceUnit.MONTH,
         recurrenceInterval: 1,
@@ -351,8 +463,27 @@ describe("REMINDER worker handler", () => {
     expect(db.assetReminder.updateMany).not.toHaveBeenCalled();
   });
 
+  it("re-arms instead of advancing when an archived series already holds a future occurrence", async () => {
+    const future = new Date(Date.now() + 3600_000);
+    asMock(db.assetReminder.findFirst).mockResolvedValue(
+      buildReminderRow({
+        ...MONTHLY,
+        alertDateTime: future,
+        asset: ARCHIVED_ASSET,
+      })
+    );
+
+    await handler(JOB);
+
+    expect(advanceRecurringReminder).not.toHaveBeenCalled();
+    expect(scheduleAssetReminder).toHaveBeenCalledWith(
+      expect.objectContaining({ when: future })
+    );
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
   it("does not run the archived-asset skip for a stale job", async () => {
-    (db.assetReminder.findFirst as any).mockResolvedValue(
+    asMock(db.assetReminder.findFirst).mockResolvedValue(
       buildReminderRow({
         activeSchedulerReference: "job-2",
         recurrenceUnit: ReminderRecurrenceUnit.MONTH,
