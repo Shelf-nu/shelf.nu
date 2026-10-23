@@ -4,6 +4,7 @@ import type PgBoss from "pg-boss";
 import { db } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { sendEmail } from "~/emails/mail.server";
+import { bookingEmailSubject } from "~/modules/push/messages";
 import { getTimeRemainingMessage } from "~/utils/date-fns";
 import { resolveFormatPrefs } from "~/utils/date-format";
 import { isNotFoundError, ShelfError } from "~/utils/error";
@@ -21,6 +22,7 @@ import {
   sendCheckinReminder,
 } from "./email-helpers";
 import { getBookingNotificationRecipients } from "./notification-recipients.server";
+import { sendBookingPushToCustodian } from "./push.server";
 import {
   createStatusTransitionNote,
   scheduleExpiryArchiveJob,
@@ -62,7 +64,7 @@ const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
         resolveUserDisplayName(booking.custodianUser) ||
         (booking.custodianTeamMember?.name as string);
 
-      const subject = `🔔 Checkout reminder (${booking.name}) - shelf.nu`;
+      const subject = bookingEmailSubject("CHECKOUT_REMINDER", booking.name);
 
       for (const recipient of recipients) {
         // Pure resolve from the loaded recipient row; hints as null-field
@@ -99,6 +101,14 @@ const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
           html,
         });
       }
+
+      sendBookingPushToCustodian({
+        eventType: "CHECKOUT_REMINDER",
+        booking,
+        recipients,
+        hints: data.hints,
+        actorUserId: undefined,
+      });
     }
   }
 };
@@ -203,7 +213,7 @@ const overdueHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
       resolveUserDisplayName(booking.custodianUser) ||
       (booking.custodianTeamMember?.name as string);
 
-    const subject = `⚠️ Overdue booking (${booking.name}) - shelf.nu`;
+    const subject = bookingEmailSubject("OVERDUE", booking.name);
 
     for (const recipient of recipients) {
       // Pure resolve from the loaded recipient row; hints as null-field
@@ -237,6 +247,14 @@ const overdueHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
         html,
       });
     }
+
+    sendBookingPushToCustodian({
+      eventType: "OVERDUE",
+      booking,
+      recipients,
+      hints: data.hints,
+      actorUserId: undefined,
+    });
   }
 };
 

@@ -2,6 +2,8 @@ import type { Prisma, User } from "@prisma/client";
 import type PgBoss from "pg-boss";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
+import { PUSH_MESSAGES } from "~/modules/push/messages";
+import { sendPush } from "~/modules/push/service.server";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
@@ -16,6 +18,7 @@ const ASSET_REMINDER_INCLUDES_FOR_EMAIL = {
     select: {
       user: {
         select: {
+          id: true,
           email: true,
           firstName: true,
           lastName: true,
@@ -38,7 +41,7 @@ const ASSET_REMINDER_INCLUDES_FOR_EMAIL = {
 
 type UserToEmail = Pick<
   User,
-  "email" | "firstName" | "lastName" | "displayName"
+  "id" | "email" | "firstName" | "lastName" | "displayName"
 > & {
   isOwner?: boolean;
 };
@@ -119,6 +122,7 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
           },
         },
         select: {
+          id: true,
           email: true,
           firstName: true,
           lastName: true,
@@ -180,6 +184,18 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
         )}** reminder.`,
       }),
     ]);
+
+    // After the emails and the note, so a job that fails and is retried
+    // pushes only once
+    void sendPush({
+      userIds: usersToSendEmail.map(({ id }) => id),
+      ...PUSH_MESSAGES.ASSET_REMINDER({
+        assetId: reminder.asset.id,
+        organizationId: reminder.organizationId,
+        reminderName: reminder.name,
+        assetTitle: reminder.asset.title,
+      }),
+    });
   },
 };
 
@@ -190,9 +206,9 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
  * On handler failure we log (last-retry only, mirroring the email worker's
  * noise control in `emails/email.worker.server.ts`) and **rethrow** so
  * pg-boss marks the job failed and retries it per the bounded `retryLimit`
- * set on enqueue in `scheduler.server.ts`. Previously the catch swallowed the
- * error and returned, so pg-boss marked the job COMPLETED even on failure —
- * silently losing the reminder with no retry.
+ * set on enqueue in `scheduler.server.ts`. Swallowing the error instead would
+ * let pg-boss mark a failed job COMPLETED and lose the reminder without a
+ * retry.
  *
  * @throws {ShelfError} Rethrows the wrapped cause after logging, so pg-boss
  * treats the job as failed and retries it.
