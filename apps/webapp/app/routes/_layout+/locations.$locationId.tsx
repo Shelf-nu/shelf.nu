@@ -15,6 +15,7 @@ import type {
 import { z } from "zod";
 import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 import Header from "~/components/layout/header";
+import { RecordNavigation } from "~/components/layout/header/record-navigation";
 import type { HeaderData } from "~/components/layout/header/types";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { ActionsDropdown } from "~/components/location/actions-dropdown";
@@ -25,6 +26,7 @@ import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import TextualDivider from "~/components/shared/textual-divider";
 import { db } from "~/database/db.server";
+import { useRecordNavigation } from "~/hooks/use-list-context";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import {
   assertLocationDeleteConfirmed,
@@ -232,7 +234,15 @@ export default function LocationPage() {
   /**
    * When we are on the location.scan-assets route, we render an outlet on the whole layout.
    */
-  if (currentRoute?.handle?.name === "location.scan-assets-kits") {
+  const isScanRoute =
+    currentRoute?.handle?.name === "location.scan-assets-kits";
+  const recordNavigation = useRecordNavigation({
+    entity: "location",
+    id: location.id,
+    enabled: !isScanRoute,
+  });
+
+  if (isScanRoute) {
     return <Outlet />;
   }
 
@@ -260,6 +270,7 @@ export default function LocationPage() {
           location={{ ...location, childCount: childLocations?.length }}
           assetCount={totalAssetsWithinLocation}
         />
+        <RecordNavigation navigation={recordNavigation} />
       </Header>
 
       <HorizontalTabs items={items} />

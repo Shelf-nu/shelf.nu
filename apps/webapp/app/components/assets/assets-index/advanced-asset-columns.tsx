@@ -37,6 +37,7 @@ import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useDateFormatter } from "~/hooks/use-date-formatter";
+import type { ListContextLinkState } from "~/hooks/use-list-context";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import type {
   AdvancedIndexAsset,
@@ -45,6 +46,7 @@ import type {
 import { isQuantityTracked } from "~/modules/asset/utils";
 import type { ColumnLabelKey } from "~/modules/asset-index-settings/helpers";
 import { formatCustodyList } from "~/modules/custody/utils";
+import { LIST_DETAIL_PATH } from "~/modules/list-navigation/list-context";
 import { type AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { formatAssetValueWithBreakdown } from "~/utils/asset-value";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
@@ -80,9 +82,12 @@ import { CategoryBadge } from "../category-badge";
 export function AdvancedIndexColumn({
   column,
   item,
+  linkState,
 }: {
   column: ColumnLabelKey;
   item: AdvancedIndexAsset;
+  /** History state for the name link; with it, the link opens the overview tab directly. */
+  linkState?: ListContextLinkState;
 }) {
   const { locale, currentOrganization, lastAuditDateAccess } =
     useLoaderData<AssetIndexLoaderData>();
@@ -188,7 +193,8 @@ export function AdvancedIndexColumn({
               <div className="min-w-0 flex-1 truncate">
                 <div className="flex items-center gap-1.5">
                   <Link
-                    to={item.id}
+                    to={linkState ? LIST_DETAIL_PATH.asset(item.id) : item.id}
+                    state={linkState}
                     className="truncate font-medium underline hover:text-gray-600"
                     title={item.title}
                   >

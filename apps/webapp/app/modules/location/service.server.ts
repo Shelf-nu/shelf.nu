@@ -742,7 +742,9 @@ export async function getLocations(params: {
         skip,
         take,
         where,
-        orderBy: orderByClause,
+        // `id` breaks ties between rows with the same sort key, so a page
+        // boundary never moves between requests.
+        orderBy: [orderByClause, { id: "asc" }],
         include: LOCATION_LIST_INCLUDE,
       }),
 

@@ -2722,7 +2722,9 @@ export async function getPaginatedAndFilterableKits<
         take,
         where,
         include,
-        orderBy: { createdAt: "desc" },
+        // `id` breaks ties between kits created in the same instant, so a
+        // page boundary never moves between requests.
+        orderBy: [{ createdAt: "desc" }, { id: "asc" }],
       }),
       db.kit.count({ where }),
       // rows.

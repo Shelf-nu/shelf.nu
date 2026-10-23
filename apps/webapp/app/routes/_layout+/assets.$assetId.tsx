@@ -15,11 +15,13 @@ import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import BookingActionsDropdown from "~/components/assets/booking-actions-dropdown";
 
 import Header from "~/components/layout/header";
+import { RecordNavigation } from "~/components/layout/header/record-navigation";
 import type { HeaderData } from "~/components/layout/header/types";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { DateS } from "~/components/shared/date";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
+import { useRecordNavigation } from "~/hooks/use-list-context";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { draftBookingsNote } from "~/modules/asset/archive-messages";
 import {
@@ -615,6 +617,11 @@ export default function AssetDetailsPage() {
       : []),
   ];
 
+  const recordNavigation = useRecordNavigation({
+    entity: "asset",
+    id: asset.id,
+  });
+
   return (
     <div className="relative">
       <Header
@@ -665,6 +672,7 @@ export default function AssetDetailsPage() {
           <ActionsDropdown />
         </When>
         <BookingActionsDropdown />
+        <RecordNavigation navigation={recordNavigation} />
       </Header>
       <HorizontalTabs items={items} />
       <div>
