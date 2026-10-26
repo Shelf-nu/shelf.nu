@@ -1417,6 +1417,31 @@ describe("manage-assets loader — Models tab payload", () => {
     });
   });
 
+  it("hides unavailable assets by the booking's own dates when the link has none", async () => {
+    // why: a picker URL can arrive with `hideUnavailable=true` and no dates (a
+    // bookmark, an older link). The list must still measure availability
+    // against this booking instead of failing the whole page.
+    await loader(
+      createLoaderArgs({
+        context: mockContext,
+        params: mockParams,
+        request: new Request(
+          "http://localhost/bookings/booking123/overview/manage-assets?hideUnavailable=true&per_page=50"
+        ),
+      })
+    );
+
+    const [{ request }] = vi.mocked(
+      assetService.getPaginatedAndFilterableAssets
+    ).mock.calls[0];
+    expect(Object.fromEntries(new URL(request.url).searchParams)).toEqual({
+      hideUnavailable: "true",
+      per_page: "50",
+      bookingFrom: mockLoaderBooking.from.toISOString(),
+      bookingTo: mockLoaderBooking.to.toISOString(),
+    });
+  });
+
   it("hides the Models tab when the helper reports no asset models", async () => {
     vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue({
       showModelsTab: false,

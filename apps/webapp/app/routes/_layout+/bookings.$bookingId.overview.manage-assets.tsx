@@ -90,6 +90,7 @@ import { getAssetsWhereInput } from "~/modules/asset/utils.server";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import { sendBookingUpdatedEmail } from "~/modules/booking/email-helpers";
 import { buildAddToActiveBookingBlockerWhere } from "~/modules/booking/helpers";
+import { pinBookingAvailabilityWindow } from "~/modules/booking/picker-availability-window.server";
 import {
   getBooking,
   getDetailedPartialCheckinData,
@@ -318,9 +319,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const searchParams = getCurrentSearchParams(request);
 
-    // The asset list, the booking and the checkbox flag only need
-    // `organizationId` (from requirePermission above) and the URL, so they
-    // run in parallel.
+    const bookingPromise = getBooking({
+      id,
+      organizationId,
+      userOrganizations,
+      request,
+    });
+
+    // The booking and the checkbox flag only need `organizationId` (from
+    // requirePermission above) and the URL, so they run in parallel with the
+    // asset list. The list waits for the booking: "hide unavailable" is
+    // measured against the booking's own dates.
     const [
       {
         search,
@@ -346,28 +355,25 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
        * locations exactly. The action's select-all resolves the same URL
        * through the same function, so it acts on the set this list shows.
        */
-      resolveLocationFilterIds({ organizationId, searchParams }).then(
-        (locationIdsOverride) =>
-          getPaginatedAndFilterableAssets({
-            request,
-            organizationId,
-            // Ignores the custodian-filter seed: scope it rather than fetch a
-            // roster nobody renders.
-            canSeeAllCustody: false,
-            locationIdsOverride,
-            extraInclude: {
-              assetLocations: {
-                select: { quantity: true, location: LOCATION_WITH_HIERARCHY },
-              },
+      Promise.all([
+        resolveLocationFilterIds({ organizationId, searchParams }),
+        bookingPromise,
+      ]).then(([locationIdsOverride, bookingForWindow]) =>
+        getPaginatedAndFilterableAssets({
+          request: pinBookingAvailabilityWindow(request, bookingForWindow),
+          organizationId,
+          // Ignores the custodian-filter seed: scope it rather than fetch a
+          // roster nobody renders.
+          canSeeAllCustody: false,
+          locationIdsOverride,
+          extraInclude: {
+            assetLocations: {
+              select: { quantity: true, location: LOCATION_WITH_HIERARCHY },
             },
-          })
+          },
+        })
       ),
-      getBooking({
-        id,
-        organizationId,
-        userOrganizations,
-        request,
-      }),
+      bookingPromise,
       // Decides whether the checkbox is offered: it can only change the list
       // when a ticked location has child locations.
       hasTickedLocationWithChildren({ organizationId, searchParams }),
