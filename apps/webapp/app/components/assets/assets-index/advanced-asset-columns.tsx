@@ -800,7 +800,7 @@ function CategoryColumn({
 }) {
   return (
     <Td className="w-full max-w-none whitespace-nowrap">
-      <CategoryBadge category={category} />
+      <CategoryBadge category={category} linkToAssets />
     </Td>
   );
 }
@@ -808,7 +808,7 @@ function CategoryColumn({
 function TagsColumn({ tags }: { tags: AdvancedIndexAsset["tags"] }) {
   return (
     <Td className="text-left">
-      <ListItemTagsColumn tags={tags} />
+      <ListItemTagsColumn tags={tags} linkToAssets />
     </Td>
   );
 }
@@ -1206,10 +1206,12 @@ function UpcomingBookingsColumn({
                         start: booking.from,
                         end: booking.to,
                         custodian: {
+                          id: booking.custodianTeamMember?.id ?? null,
                           name: custodianName ?? "",
                           user: booking.custodianUser ?? null,
                         },
                         creator: {
+                          id: null,
                           name: booking.creator
                             ? resolveUserDisplayName(booking.creator)
                             : "Unknown",

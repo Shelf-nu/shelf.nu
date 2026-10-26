@@ -342,10 +342,7 @@ const ConditionalActionsDropdown = () => {
               </When>
 
               <When truthy={canUpdateAsset}>
-                <div
-                  className="px-0 py-1 md:p-0"
-                  aria-disabled={assetIsCheckedOut}
-                >
+                <div className="px-0 py-1 md:p-0">
                   {/*
                     QUANTITY_TRACKED assets route to the multi-row
                     "Manage placements" dialog instead of the single-
@@ -354,6 +351,8 @@ const ConditionalActionsDropdown = () => {
                     slices are possible. INDIVIDUAL assets keep the
                     original single-location dialog since they're
                     capped at one placement by the BEFORE trigger.
+                    A checked-out asset can still move. Its booking owns
+                    status and custody, not where the item is.
                   */}
                   <Button
                     to={
@@ -369,8 +368,6 @@ const ConditionalActionsDropdown = () => {
                     disabled={
                       archivedActionDisabled
                         ? archivedActionDisabled
-                        : assetIsCheckedOut
-                        ? true
                         : assetIsPartOfKit
                         ? {
                             reason: (

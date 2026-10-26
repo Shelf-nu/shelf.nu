@@ -689,7 +689,10 @@ function AuditScannerContent() {
 
           const { data: barcodeData, error: barcodeError } = await api.barcode(
             data,
-            currentOrg.id
+            currentOrg.id,
+            // why: records an AUDIT scan with no Activity note; the audit
+            // keeps its own trail (the normal scanner omits this).
+            "audit"
           );
 
           if (barcodeError || !barcodeData?.barcode?.asset) {
