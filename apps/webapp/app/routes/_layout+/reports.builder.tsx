@@ -16,7 +16,7 @@
  */
 
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
-import { data, useLoaderData, useNavigation } from "react-router";
+import { data, redirect, useLoaderData, useNavigation } from "react-router";
 
 import Header from "~/components/layout/header";
 import { ReportFilterBar, ReportFooter } from "~/components/reports";
@@ -52,7 +52,10 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { isOrganizationOwner, requirePermission } from "~/utils/roles.server";
-import { canUseAdvancedReports } from "~/utils/subscription.server";
+import {
+  canUseAdvancedReports,
+  workspaceCanUseReports,
+} from "~/utils/subscription.server";
 import { tw } from "~/utils/tw";
 
 /** Browser tab title for the builder page. */
@@ -74,22 +77,36 @@ const HEADER = {
 /**
  * Runs the custom report described by the query string.
  *
- * @returns The locked marker when the workspace lacks the add-on; otherwise
- *   the result plus everything the builder bar and filter bar render from
- * @throws {ShelfError} 403 when the caller lacks `reports: read`
+ * @returns A redirect to the reports index when the workspace's plan does not
+ *   include reports, the locked marker when it has the plan but not the
+ *   add-on, otherwise the result plus everything the bars render from
+ * @throws A route error response carrying the failure's status: 403 when the
+ *   caller lacks `reports: read`
  */
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
   try {
-    const { organizationId, currentOrganization, userOrganizations } =
-      await requirePermission({
-        userId,
-        request,
-        entity: PermissionEntity.reports,
-        action: PermissionAction.read,
-      });
+    const {
+      organizationId,
+      organizations,
+      currentOrganization,
+      userOrganizations,
+    } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.reports,
+      action: PermissionAction.read,
+    });
+
+    // Reports are part of the Plus and Team plans, and the builder is one. The
+    // plan is answered before the add-on: a workspace without reports at all
+    // belongs on the unlock page the index shows, not in front of a card
+    // telling it to switch on an add-on it cannot reach.
+    if (!(await workspaceCanUseReports({ organizationId, organizations }))) {
+      return redirect("/reports");
+    }
 
     // Only the workspace owner can buy the add-on, so only the owner is offered
     // the way to switch it on.
