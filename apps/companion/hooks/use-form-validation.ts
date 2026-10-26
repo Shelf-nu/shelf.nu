@@ -16,9 +16,9 @@ type FormValidationArgs = {
   originalAsset: AssetDetail | null;
   isSubmitting: boolean;
   /**
-   * True once the server accepted the edit. The form still differs from
-   * `originalAsset` (the baseline is never reloaded), so without this the
-   * guard would offer to discard changes that are already saved.
+   * True once the server accepted the edit; the guard stands down from then
+   * on. The form keeps differing from `originalAsset`, which is the asset as
+   * loaded and is not reloaded after a save.
    */
   didSave: boolean;
 };

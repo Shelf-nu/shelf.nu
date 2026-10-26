@@ -504,9 +504,16 @@ export default function EditAssetScreen() {
         {/* ── Bottom action bar ──────────────────────── */}
         <View style={styles.bottomBar}>
           <TouchableOpacity
-            style={styles.cancelButton}
+            style={[
+              styles.cancelButton,
+              form.isSubmitting && styles.submitButtonDisabled,
+            ]}
             accessibilityLabel="Cancel editing"
             accessibilityRole="button"
+            accessibilityState={{ disabled: form.isSubmitting }}
+            // The guard stands down while a save is in flight, so leaving
+            // then would drop the screen with the request still running.
+            disabled={form.isSubmitting}
             // The unsaved-changes guard in useFormValidation asks before
             // leaving a dirty form; prompting here too would ask twice.
             onPress={() => router.back()}
