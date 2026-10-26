@@ -108,6 +108,7 @@ function serviceResult(
     moved: 0,
     skippedQuantityTracked: 0,
     modelName: "Panasonic PT-VZ580",
+    filled: 0,
     ...overrides,
   };
 }
@@ -198,6 +199,7 @@ describe("api/assets/bulk-update-asset-model", () => {
         currentSearchParams: "category=cat-1&status=AVAILABLE",
         settings: { mode: "SIMPLE" },
         lastAuditDateAccess: "available",
+        locale: expect.any(String),
       });
     });
 
@@ -261,6 +263,18 @@ describe("api/assets/bulk-update-asset-model", () => {
 
       expect(sentNotification().message).toBe(
         "3 asset(s) were grouped into Panasonic PT-VZ580. 1 of them were moved from another asset model."
+      );
+    });
+
+    it("says how many assets the model's defaults filled", async () => {
+      // Filling changes asset data the user did not type, so the toast has to
+      // say it happened.
+      bulkUpdateAssetModelMock.mockResolvedValue(serviceResult({ filled: 2 }));
+
+      await callAction();
+
+      expect(sentNotification().message).toBe(
+        "3 asset(s) were grouped into Panasonic PT-VZ580. The model's defaults filled empty fields on 2 of them."
       );
     });
 

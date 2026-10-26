@@ -2,8 +2,13 @@
  * Route: Edit Asset Model
  *
  * Full-page form for editing an existing asset model. Loads the asset model,
- * categories for the DynamicSelect, and the organisation currency for the
- * valuation prefix.
+ * categories for the DynamicSelect, the organisation currency for the
+ * valuation prefix, the model's custom field defaults, and how many linked
+ * assets have empty fields those defaults would fill.
+ *
+ * The action handles two submissions: the model form itself, and the
+ * `fillLinkedAssets` intent from the card above it, which fills the empty
+ * fields of the assets already linked to the model.
  *
  * @see {@link file://./../../components/asset-model/form.tsx}
  */
@@ -13,15 +18,25 @@ import { z } from "zod";
 import AssetModelForm, {
   AssetModelFormSchema,
 } from "~/components/asset-model/form";
+import { LinkedAssetsFillCard } from "~/components/asset-model/linked-assets-fill-card";
 import { getCategoriesForCreateAndEdit } from "~/modules/asset/service.server";
+import {
+  fillLinkedAssetsFromModel,
+  getAssetModelDefaults,
+  getLinkedAssetsFillSummary,
+  getModelDefaultFieldOptions,
+  parseModelDefaultsFromFormData,
+  saveAssetModelCustomFieldDefaults,
+} from "~/modules/asset-model/defaults.server";
 import {
   getAssetModel,
   updateAssetModel,
   updateAssetModelImage,
 } from "~/modules/asset-model/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { getLocale } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import { error, getParams, payload, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
@@ -49,14 +64,25 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const [assetModel, { categories, totalCategories }] = await Promise.all([
+    const [
+      assetModel,
+      { categories, totalCategories },
+      modelDefaultFields,
+      defaults,
+    ] = await Promise.all([
       getAssetModel({ id, organizationId }),
       getCategoriesForCreateAndEdit({
         organizationId,
         request,
         defaultCategory: undefined,
       }),
+      getModelDefaultFieldOptions({ organizationId }),
+      getAssetModelDefaults({ assetModelId: id, organizationId }),
     ]);
+
+    const fillSummary = defaults
+      ? await getLinkedAssetsFillSummary({ model: defaults, organizationId })
+      : { assetCount: 0, fields: [] };
 
     const header = { title };
 
@@ -66,6 +92,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       categories,
       totalCategories,
       currency: currentOrganization?.currency,
+      modelDefaultFields,
+      modelDefaultValues: Object.fromEntries(
+        (defaults?.customFieldDefaults ?? []).map((fieldDefault) => [
+          fieldDefault.customFieldId,
+          fieldDefault.value,
+        ])
+      ),
+      fillSummary,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
@@ -87,7 +121,7 @@ export async function action({ context, request, params }: LoaderFunctionArgs) {
   );
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, currentOrganization } = await requirePermission({
       userId: authSession.userId,
       request,
       entity: PermissionEntity.assetModel,
@@ -95,21 +129,71 @@ export async function action({ context, request, params }: LoaderFunctionArgs) {
     });
 
     /**
-     * Multipart form (optional cover image) — clone so the text fields and the
+     * Multipart form (optional cover image), so clone: the text fields and the
      * streaming file parser each get their own read of the body.
      */
     const clonedRequest = request.clone();
+    const formData = await clonedRequest.formData();
 
-    const parsedPayload = parseData(
-      await clonedRequest.formData(),
-      AssetModelFormSchema,
-      { additionalData: { userId, id, organizationId } }
-    );
+    if (formData.get("intent") === "fillLinkedAssets") {
+      // Filling writes to assets, so it also needs the asset write permission.
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.asset,
+        action: PermissionAction.update,
+      });
+
+      const { assetsFilled } = await fillLinkedAssetsFromModel({
+        assetModelId: id,
+        organizationId,
+        userId,
+        currency: currentOrganization.currency,
+        locale: getLocale(request),
+      });
+
+      sendNotification({
+        title: "Empty fields filled",
+        message:
+          assetsFilled === 1
+            ? "1 asset was filled from this model's defaults."
+            : `${assetsFilled} assets were filled from this model's defaults.`,
+        icon: { name: "success", variant: "success" },
+        senderId: userId,
+      });
+
+      return redirect(`/settings/asset-models/${id}/edit`);
+    }
+
+    if (formData.has("intent")) {
+      throw new ShelfError({
+        cause: null,
+        message: "Unknown action.",
+        additionalData: { userId, id },
+        label: "Asset Model",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
+    const parsedPayload = parseData(formData, AssetModelFormSchema, {
+      additionalData: { userId, id, organizationId },
+    });
+    const customFieldDefaults = parseModelDefaultsFromFormData({
+      formData,
+      fields: await getModelDefaultFieldOptions({ organizationId }),
+    });
 
     await updateAssetModel({
       ...parsedPayload,
       id,
       organizationId,
+    });
+
+    await saveAssetModelCustomFieldDefaults({
+      assetModelId: id,
+      organizationId,
+      defaults: customFieldDefaults,
     });
 
     /**
@@ -130,7 +214,24 @@ export async function action({ context, request, params }: LoaderFunctionArgs) {
       senderId: authSession.userId,
     });
 
-    return redirect("/settings/asset-models");
+    /**
+     * Saving defaults changes nothing on assets already in the model. When
+     * some of them have empty fields the defaults would fill, stay on this
+     * page so the user sees the card that offers to fill them.
+     */
+    const defaults = await getAssetModelDefaults({
+      assetModelId: id,
+      organizationId,
+    });
+    const { assetCount } = defaults
+      ? await getLinkedAssetsFillSummary({ model: defaults, organizationId })
+      : { assetCount: 0 };
+
+    return redirect(
+      assetCount > 0
+        ? `/settings/asset-models/${id}/edit`
+        : "/settings/asset-models"
+    );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
     return data(error(reason), { status: reason.status });
@@ -138,7 +239,12 @@ export async function action({ context, request, params }: LoaderFunctionArgs) {
 }
 
 export default function EditAssetModel() {
-  const { assetModel } = useLoaderData<typeof loader>();
+  const { assetModel, fillSummary } = useLoaderData<typeof loader>();
 
-  return <AssetModelForm assetModel={assetModel} />;
+  return (
+    <div className="flex flex-col gap-4">
+      <LinkedAssetsFillCard summary={fillSummary} />
+      <AssetModelForm assetModel={assetModel} />
+    </div>
+  );
 }

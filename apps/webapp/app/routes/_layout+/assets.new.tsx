@@ -19,6 +19,10 @@ import {
 } from "~/modules/asset/service.server";
 import { getInitialPlacementNoteContent } from "~/modules/asset/utils.server";
 import {
+  fillAssetFormDataFromModel,
+  getAssetModelDefaults,
+} from "~/modules/asset-model/defaults.server";
+import {
   getAssetModel,
   getAssetModels,
 } from "~/modules/asset-model/service.server";
@@ -152,6 +156,22 @@ export async function action({ context, request }: LoaderFunctionArgs) {
     const clonedRequest = request.clone();
 
     const formData = await clonedRequest.formData();
+
+    /**
+     * An asset joining a model gets the model's defaults in its empty fields.
+     * Filled before validation, so the category decides which custom fields
+     * load and a required field the model fills passes.
+     */
+    const joiningModelId = formData.get("assetModelId");
+    if (typeof joiningModelId === "string" && joiningModelId) {
+      const model = await getAssetModelDefaults({
+        assetModelId: joiningModelId,
+        organizationId,
+      });
+      if (model) {
+        fillAssetFormDataFromModel({ formData, model });
+      }
+    }
 
     const customFields = await getActiveCustomFields({
       organizationId,

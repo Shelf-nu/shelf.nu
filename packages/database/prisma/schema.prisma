@@ -478,6 +478,11 @@ model AssetModel {
   defaultCategory   Category? @relation(fields: [defaultCategoryId], references: [id])
   defaultValuation  Float?
 
+  /// Default custom field values. Like the category and valuation defaults,
+  /// each one fills the matching field only when it is empty, at the moment
+  /// an asset joins this model. Nothing stays linked afterwards.
+  customFieldDefaults AssetModelCustomFieldDefault[]
+
   // Relationships
   assets         Asset[]
   modelRequests  BookingModelRequest[]
@@ -1394,6 +1399,32 @@ model AssetCustomFieldValue {
 
   @@index([assetId, customFieldId], name: "AssetCustomFieldValue_lookup_idx")
   // Index for foreign key
+  @@index([customFieldId])
+}
+
+/// A custom field value an AssetModel gives the assets that join it.
+///
+/// `value` has the exact shape of `AssetCustomFieldValue.value`, so filling an
+/// asset is a plain copy. Rows cascade away with their model or field.
+model AssetModelCustomFieldDefault {
+  id String @id @default(cuid())
+
+  value Json
+
+  assetModel   AssetModel @relation(fields: [assetModelId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  assetModelId String
+
+  // Deliberately a plain column without a Prisma `@relation`: the migration
+  // creates the FK to `CustomField("id")` with `ON DELETE CASCADE`, but a
+  // back-relation on `CustomField` pushes the extended client's generics past
+  // TS's recursion limit (TS2321) in `organization/service.server`. Services
+  // read the field rows with a second query keyed on these ids.
+  customFieldId String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([assetModelId, customFieldId])
   @@index([customFieldId])
 }
 

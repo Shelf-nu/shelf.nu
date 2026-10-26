@@ -392,6 +392,11 @@ export async function updateCustomField(payload: {
           const rewritten = await tx.$queryRaw<RewrittenOptionValue[]>(
             buildOptionRenameStatement(id, renames)
           );
+          // Asset model defaults hold the same spellings and move with them,
+          // so a model never fills an option that no longer exists.
+          await tx.$executeRaw(
+            buildModelDefaultOptionRenameStatement(id, renames)
+          );
 
           // One event per asset whose stored value changed, shaped like the
           // event a single-asset edit of the same field records.
@@ -515,6 +520,33 @@ function buildOptionRenameStatement(
     WHERE v."customFieldId" = ${customFieldId}
       AND v."value"->>'valueOption' = m."from"
     RETURNING v."assetId" AS "assetId", m."from" AS "from", m."to" AS "to"
+  `;
+}
+
+/**
+ * The same rewrite as {@link buildOptionRenameStatement}, for the default
+ * values asset models hold for the field. No events: a model default is not
+ * an asset change.
+ */
+function buildModelDefaultOptionRenameStatement(
+  customFieldId: CustomField["id"],
+  renames: OptionRename[]
+) {
+  const pairs = Prisma.join(
+    renames.map(({ from, to }) => Prisma.sql`(${from}::text, ${to}::text)`)
+  );
+
+  return Prisma.sql`
+    UPDATE "AssetModelCustomFieldDefault" AS d
+    SET "value" = jsonb_set(
+          jsonb_set(d."value"::jsonb, '{raw}', to_jsonb(m."to")),
+          '{valueOption}',
+          to_jsonb(m."to")
+        ),
+        "updatedAt" = now()
+    FROM (VALUES ${pairs}) AS m("from", "to")
+    WHERE d."customFieldId" = ${customFieldId}
+      AND d."value"->>'valueOption' = m."from"
   `;
 }
 

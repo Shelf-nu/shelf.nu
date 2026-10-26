@@ -616,10 +616,13 @@ const AssetFormInner = ({
     : null;
 
   /**
-   * When a model is selected, apply its default category by updating
-   * the search params. When cleared, remove the category param.
-   * This triggers a revalidation so the Category DynamicSelect
-   * picks up the new default.
+   * When a model is selected and the asset has no category yet, show the
+   * model's default category by updating the search params, which
+   * revalidates so the Category selector and the category's custom fields
+   * follow. A category the asset already has, or one the user picked, is
+   * never replaced. Clearing the model takes back only the category it put
+   * there. The server fills every empty field the same way on save (see
+   * `fillAssetFormDataFromModel`).
    */
   const handleAssetModelChange = (modelId: string | undefined) => {
     // Mirror the DynamicSelect's current selection so the row's error
@@ -631,15 +634,22 @@ const AssetFormInner = ({
     setHasPickedAssetModel(Boolean(modelId));
     setSelectedAssetModelId(modelId);
     const params = new URLSearchParams(location.search);
-
-    if (!modelId) {
-      // Model was cleared — remove the category param
+    const previousModel = assetModelsData?.find(
+      (m) => m.id === selectedAssetModelId
+    );
+    if (
+      previousModel?.defaultCategoryId &&
+      params.get("category") === previousModel.defaultCategoryId
+    ) {
       params.delete("category");
-    } else if (assetModelsData) {
-      const model = assetModelsData.find((m) => m.id === modelId);
-      if (model?.defaultCategoryId) {
-        params.set("category", model.defaultCategoryId);
-      }
+    }
+
+    const model = modelId
+      ? assetModelsData?.find((m) => m.id === modelId)
+      : undefined;
+    const formHasCategory = Boolean(params.get("category") ?? categoryId);
+    if (model?.defaultCategoryId && !formHasCategory) {
+      params.set("category", model.defaultCategoryId);
     }
 
     void navigate(`${location.pathname}?${params.toString()}`, {
