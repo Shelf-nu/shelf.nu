@@ -1,10 +1,10 @@
 import { describe, expect, it, beforeEach, vi } from "vitest";
 
 // why: testing location valuation aggregation logic without database
-// dependency. QT-aware totals require SUM(value × quantity) which Prisma's
-// `aggregate({_sum})` cannot express, so the implementation now uses
-// `$queryRaw` — the mock surface mirrors that. (Column is `value`, not
-// `valuation`: `Asset.valuation` is `@map("value")` in schema.prisma.)
+// dependency. The total is SUM(value × units placed here), which Prisma's
+// `aggregate({_sum})` cannot express, so the implementation uses `$queryRaw`
+// and the mock surface mirrors that. (Column is `value`, not `valuation`:
+// `Asset.valuation` is `@map("value")` in schema.prisma.)
 vi.mock("~/database/db.server", () => ({
   db: {
     $queryRaw: vi.fn(),
@@ -61,6 +61,20 @@ describe("getLocationTotalValuation", () => {
       queryRawMock.mock.calls[0][0] as { strings: string[] }
     ).strings.join("?");
     expect(sql).toContain('a."archivedAt" IS NULL');
+  });
+
+  it("values only the units placed at this location, not the whole stock", async () => {
+    queryRawMock.mockResolvedValue([{ total: 490 }]);
+
+    await getLocationTotalValuation({ locationId: "loc-123" });
+
+    const sql = (
+      queryRawMock.mock.calls[0][0] as { strings: string[] }
+    ).strings.join("?");
+    // A pool of 14 with 10 here and 4 elsewhere is worth 10 units here.
+    expect(sql).toContain('al."quantity"');
+    expect(sql).not.toContain("a.quantity");
+    expect(sql).toMatch(/WHERE al\."locationId" = \?/);
   });
 
   it("returns 0 when the raw query returns no rows", async () => {

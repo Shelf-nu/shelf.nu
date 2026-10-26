@@ -766,22 +766,23 @@ export async function getLocationTotalValuation({
 }: {
   locationId: Location["id"];
 }) {
-  // QT-aware: multiplies value × quantity so qty-tracked assets are not silently underreported.
-  // Filter via the `AssetLocation` pivot — there is no `Asset.locationId`.
-  // Prisma's `aggregate({_sum})` cannot express the multiplication, so we drop
-  // to `$queryRaw` and keep the same scope (assets joined to the pivot).
-  // Column is `value` (Asset.valuation is `@map("value")`). COALESCE
-  // mirrors `getAssetTotalValue`. No `::bigint` cast, it truncates floats.
+  // Each row is one `AssetLocation` placement. Multiplier = `al.quantity`,
+  // the units placed HERE: a pool of 14 with 10 here and 4 elsewhere is worth
+  // 10 units at this location, never the whole `Asset.quantity` stock. An
+  // INDIVIDUAL asset has one row with quantity 1. Summing every row at this
+  // location (manual and kit-driven) matches the "N units at this location"
+  // line on the location's asset list.
+  // Prisma's `aggregate({_sum})` cannot multiply across the join, hence
+  // `$queryRaw`. Column is `value` (Asset.valuation is `@map("value")`).
+  // No `::bigint` cast, it truncates floats.
   // Archived assets are out of service, so they add nothing to the value
   // stored here, matching the dashboard and the inventory reports.
   const rows = await db.$queryRaw<{ total: number | null }[]>(
     Prisma.sql`
-      SELECT COALESCE(SUM(COALESCE(a.value, 0) * COALESCE(a.quantity, 1)), 0) AS total
-      FROM "Asset" a
-      WHERE a.id IN (
-        SELECT al."assetId" FROM "AssetLocation" al
-        WHERE al."locationId" = ${locationId}
-      )
+      SELECT COALESCE(SUM(COALESCE(a.value, 0) * al."quantity"), 0) AS total
+      FROM "AssetLocation" al
+      JOIN "Asset" a ON a.id = al."assetId"
+      WHERE al."locationId" = ${locationId}
       AND a."archivedAt" IS NULL
     `
   );
