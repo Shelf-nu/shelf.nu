@@ -34,7 +34,7 @@ import { createStyles } from "@/lib/create-styles";
 import { labelForRequired } from "@/lib/a11y";
 import { useEditAssetForm } from "@/hooks/use-edit-asset-form";
 import { useFormValidation } from "@/hooks/use-form-validation";
-import { markAssetDirty } from "@/lib/asset-refresh";
+import { markAssetChanged } from "@/lib/asset-refresh";
 import { PickerField } from "@/components/asset-edit/picker-field";
 import { TagPickerField } from "@/components/asset-edit/tag-picker-field";
 import { CustomFieldInput } from "@/components/asset-edit/custom-field-input";
@@ -243,9 +243,9 @@ export default function EditAssetScreen() {
     }
 
     setDidSave(true);
-    // The detail screen loads its asset on mount only; this makes it refetch
-    // when the user lands back on it.
-    markAssetDirty(assetId);
+    // The asset detail and the assets list keep data they loaded earlier;
+    // this makes them refetch when the user lands back on them.
+    markAssetChanged(assetId);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     Alert.alert("Updated", `"${data.asset.title}" has been updated.`, [
       {

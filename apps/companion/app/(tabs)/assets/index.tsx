@@ -36,6 +36,7 @@ import { announce } from "@/lib/a11y";
 import { InventorySegment } from "@/components/kits/inventory-segment";
 import { isQuantityTracked, formatQuantity } from "@/lib/quantity-format";
 import { createLatestRequest } from "@/lib/latest-request";
+import { assetChangeVersion } from "@/lib/asset-refresh";
 
 const PAGE_SIZE = 20;
 const keyExtractor = (item: AssetListItem) => item.id;
@@ -207,12 +208,20 @@ function AssetsListContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedSearch, activeFilter]);
 
-  // Refresh on tab focus — skip if data is fresh (< 60s old) to avoid double-fetches
+  // The asset-change version the list reflects (see lib/asset-refresh.ts):
+  // an asset edited elsewhere bypasses the 60s freshness gate below.
+  const seenChangeVersion = useRef(assetChangeVersion());
+
+  // Refresh on tab focus. Skip if data is fresh (< 60s old) to avoid double-fetches
   useFocusEffect(
     useCallback(() => {
       if (!currentOrg) return;
+      const changeVersion = assetChangeVersion();
+      const assetChanged = changeVersion !== seenChangeVersion.current;
+      seenChangeVersion.current = changeVersion;
       // Skip if data was fetched recently (avoids double-fetch with search/filter effect)
       if (
+        !assetChanged &&
         hasFetchedAssets.current &&
         Date.now() - lastFetchedAt.current < 60_000
       )

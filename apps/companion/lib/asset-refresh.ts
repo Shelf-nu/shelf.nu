@@ -1,32 +1,46 @@
 /**
  * Cross-screen "this asset changed" signal.
  *
- * The edit screen marks the asset dirty after a successful save and then
- * navigates back; the asset detail's focus effect consumes the flag and
- * refetches. The detail screen otherwise loads its asset only on mount, so
- * without this it keeps showing the pre-edit title, description and fields.
+ * The edit screen marks an asset changed after a successful save. Screens
+ * that show asset data loaded earlier (the asset detail, which loads on mount
+ * only, and the assets list, which skips refetches for 60s) compare the
+ * version they last saw with the current one when they regain focus, and
+ * refetch when it moved.
  *
- * Same shape as `booking-refresh.ts` (see there for why a router param does
+ * Versions rather than a consume-once flag: the same asset can be open in
+ * more than one stack (Assets tab and Audits tab both host the detail
+ * screen), and each of them, plus the list, must see the change.
+ *
+ * Same purpose as `booking-refresh.ts` (see there for why a router param does
  * not work for this).
  *
- * @see {@link file://./../app/(tabs)/assets/[id].tsx} consumer
+ * @see {@link file://./../app/(tabs)/assets/[id].tsx} consumer (one asset)
+ * @see {@link file://./../app/(tabs)/assets/index.tsx} consumer (any asset)
  * @see {@link file://./../app/(tabs)/assets/edit.tsx} producer
  */
 
-// A set (not a single slot) so two assets marked dirty before either is
-// consumed don't clobber each other.
-const dirtyAssetIds = new Set<string>();
+let latestVersion = 0;
+const versionByAsset = new Map<string, number>();
 
-/** Mark an asset as mutated by another screen. */
-export function markAssetDirty(id: string) {
-  dirtyAssetIds.add(id);
+/**
+ * Records that an asset was changed by another screen.
+ *
+ * @param id - The asset that changed
+ */
+export function markAssetChanged(id: string) {
+  latestVersion += 1;
+  versionByAsset.set(id, latestVersion);
 }
 
 /**
- * Returns true (once) if the given asset was marked dirty; clears the flag
- * so later focuses do not refetch again.
+ * The change version for one asset, or for all assets when `id` is omitted.
+ * A screen stores the value it last rendered and refetches when the current
+ * value differs. `0` means nothing has been marked.
+ *
+ * @param id - The asset to ask about; omit to ask "has any asset changed?"
+ * @returns A number that increases with every change it covers
  */
-export function consumeAssetDirty(id: string): boolean {
-  // Set.delete returns true iff the id was present (and removes it).
-  return dirtyAssetIds.delete(id);
+export function assetChangeVersion(id?: string): number {
+  if (id === undefined) return latestVersion;
+  return versionByAsset.get(id) ?? 0;
 }

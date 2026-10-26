@@ -9,21 +9,29 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { consumeAssetDirty, markAssetDirty } from "./asset-refresh";
+import { assetChangeVersion, markAssetChanged } from "./asset-refresh";
 
-test("a marked asset is reported once, then cleared", () => {
-  markAssetDirty("a1");
-  assert.equal(consumeAssetDirty("a1"), true);
-  assert.equal(consumeAssetDirty("a1"), false);
+test("an asset that was never marked has version 0", () => {
+  assert.equal(assetChangeVersion("never-marked"), 0);
 });
 
-test("an asset that was never marked is not reported", () => {
-  assert.equal(consumeAssetDirty("never-marked"), false);
+test("marking an asset moves its version and the any-asset version", () => {
+  const seenOne = assetChangeVersion("a1");
+  const seenAny = assetChangeVersion();
+  markAssetChanged("a1");
+  assert.notEqual(assetChangeVersion("a1"), seenOne);
+  assert.notEqual(assetChangeVersion(), seenAny);
 });
 
-test("two marked assets are kept apart", () => {
-  markAssetDirty("a2");
-  markAssetDirty("a3");
-  assert.equal(consumeAssetDirty("a3"), true);
-  assert.equal(consumeAssetDirty("a2"), true);
+test("reading a version does not clear it, so every screen sees the change", () => {
+  markAssetChanged("a2");
+  const first = assetChangeVersion("a2");
+  assert.equal(assetChangeVersion("a2"), first);
+});
+
+test("marking one asset leaves another asset's version alone", () => {
+  markAssetChanged("a3");
+  const other = assetChangeVersion("a3");
+  markAssetChanged("a4");
+  assert.equal(assetChangeVersion("a3"), other);
 });

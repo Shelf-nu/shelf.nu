@@ -9,7 +9,10 @@ tags:
 #      "Discard Changes?" prompt, showing the saved title.
 #   2. Cancel after an edit: exactly one "Discard Changes?" prompt.
 #   3. Save again to remove the marker, leaving the asset as it was.
-# Uses SHELF_TEST_ASSET_ID and appends " e2e" to its title for the run.
+# Uses SHELF_TEST_ASSET_ID and appends " e2e" to its title for the run. That
+# asset must be savable from the phone as it stands: every required custom
+# field filled and a title of at most 96 characters (the field caps at 100).
+# Otherwise Save stops on a validation alert and the flow fails at "Updated".
 #
 # Every title tap lands at the right edge of the field (point 97%,50%): a tap
 # in the middle of the text puts the cursor at the nearest word, and the erase

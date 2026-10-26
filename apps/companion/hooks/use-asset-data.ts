@@ -1,6 +1,8 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { useFocusEffect } from "@react-navigation/native";
 import { api, type AssetDetail } from "@/lib/api";
 import { announce } from "@/lib/a11y";
+import { assetChangeVersion } from "@/lib/asset-refresh";
 
 interface UseAssetDataReturn {
   asset: AssetDetail | null;
@@ -56,6 +58,11 @@ export function useAssetData(
     }
   }, [assetId, orgId]);
 
+  // The asset-change version this screen's data reflects (see
+  // lib/asset-refresh.ts). Read before each fetch starts, so a change saved
+  // while a request is in flight still triggers the next focus refetch.
+  const seenChangeVersion = useRef(assetChangeVersion(assetId));
+
   useEffect(() => {
     // why: when orgId is briefly undefined (org context still hydrating)
     // we deliberately do nothing — `isLoading` stays at its initial / last
@@ -63,9 +70,27 @@ export function useAssetData(
     // an "Asset not found" error state. The effect re-runs automatically
     // when orgId resolves because `fetchAsset` closes over it.
     if (!orgId) return;
+    seenChangeVersion.current = assetChangeVersion(assetId);
     setIsLoading(true);
     fetchAsset().finally(() => setIsLoading(false));
-  }, [fetchAsset, orgId]);
+  }, [assetId, fetchAsset, orgId]);
+
+  // Returning to the screen after another screen changed this asset (the
+  // edit form) refetches it in place. Quiet on failure: the asset on screen
+  // stays rather than being swapped for the error state, and the version is
+  // left unseen so the next focus tries again.
+  useFocusEffect(
+    useCallback(() => {
+      if (!orgId) return;
+      const version = assetChangeVersion(assetId);
+      if (version === seenChangeVersion.current) return;
+      void api.asset(assetId, orgId).then(({ data }) => {
+        if (!data) return;
+        seenChangeVersion.current = version;
+        setAsset(data.asset);
+      });
+    }, [assetId, orgId])
+  );
 
   const onRefresh = async () => {
     setIsRefreshing(true);

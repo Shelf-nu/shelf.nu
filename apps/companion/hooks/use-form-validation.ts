@@ -29,7 +29,9 @@ type FormValidationArgs = {
  *
  * This guard is the only "Discard Changes?" prompt on the screen: every way
  * out (header back, swipe back, the Cancel button) navigates and lets the
- * guard decide, so the user is asked at most once.
+ * guard decide, so the user is asked at most once. It returns nothing on
+ * purpose: a caller that reads the dirty state to prompt on its own would
+ * ask twice.
  */
 export function useFormValidation({
   title,
@@ -42,7 +44,7 @@ export function useFormValidation({
   originalAsset,
   isSubmitting,
   didSave,
-}: FormValidationArgs): { isDirty: boolean } {
+}: FormValidationArgs): void {
   const navigation = useNavigation();
 
   const isDirty = useMemo(() => {
@@ -91,6 +93,4 @@ export function useFormValidation({
       ]
     );
   });
-
-  return { isDirty };
 }

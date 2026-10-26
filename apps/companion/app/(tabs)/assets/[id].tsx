@@ -4,8 +4,7 @@ import {
   ASSET_QUANTITY_FIGURE_LABELS,
   DELETE_CONSEQUENCE_LABELS,
 } from "@shelf/labels";
-import { useCallback, useMemo, useState } from "react";
-import { useFocusEffect } from "@react-navigation/native";
+import { useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -79,7 +78,6 @@ import { ArchivedNotice } from "@/components/shared/archived-notice";
 import { assetBadgeStatus, isArchivedAsset } from "@/lib/archived-assets";
 import { isQuantityTracked, formatQuantity } from "@/lib/quantity-format";
 import { useAssetData } from "@/hooks/use-asset-data";
-import { consumeAssetDirty } from "@/lib/asset-refresh";
 import { useCustodyActions } from "@/hooks/use-custody-actions";
 import { useRoleAccess } from "@/hooks/use-role-access";
 import { mayReleaseAssetCustody } from "@/lib/role-access";
@@ -150,14 +148,6 @@ export default function AssetDetailScreen() {
     fetchAsset,
     onRefresh,
   } = useAssetData(id, currentOrg?.id);
-
-  // The asset loads on mount only. A screen that changed it elsewhere (the
-  // edit form) marks it dirty, and returning here refetches it in place.
-  useFocusEffect(
-    useCallback(() => {
-      if (consumeAssetDirty(id)) void fetchAsset();
-    }, [fetchAsset, id])
-  );
 
   // Custody actions
   const {
