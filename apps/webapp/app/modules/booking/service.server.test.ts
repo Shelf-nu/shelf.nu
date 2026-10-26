@@ -26,6 +26,7 @@ import { onTestFinished } from "vitest";
 import { accessFor } from "@helpers/role-access";
 
 import { db } from "~/database/db.server";
+import { LONG_TRANSACTION_OPTIONS } from "~/database/transaction-options.server";
 import { sendEmail } from "~/emails/mail.server";
 import * as activityEventService from "~/modules/activity-event/service.server";
 import { lockAssetsForArchiveGuard } from "~/modules/asset/archive-lock.server";
@@ -4253,6 +4254,34 @@ describe("reserveBooking", () => {
       })
     );
     expect(result).toEqual(reservedBooking);
+  });
+
+  it("gives the reservation the long transaction budget", async () => {
+    // why: the reserve transaction locks and measures every quantity-tracked
+    // asset and every model on the booking, so a large booking outgrows
+    // Prisma's five-second default and the reservation rolls back.
+    expect.assertions(1);
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...mockBookingData,
+      status: BookingStatus.DRAFT,
+      from: mockReserveParams.from,
+      to: mockReserveParams.to,
+      bookingAssets: [],
+    });
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...mockBookingData,
+      status: BookingStatus.RESERVED,
+    });
+
+    await reserveBooking(mockReserveParams);
+
+    expect(db.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      LONG_TRANSACTION_OPTIONS
+    );
   });
 
   it("rejects a booking conflict as a handled 400, not a captured 500", async () => {
