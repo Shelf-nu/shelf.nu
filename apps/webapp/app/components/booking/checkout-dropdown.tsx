@@ -28,6 +28,7 @@
 import type { Booking } from "@prisma/client";
 import { ChevronRightIcon, ScanLine } from "lucide-react";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
+import type { CheckoutSourceQuestion } from "~/modules/booking/checkout-source-location";
 import { tw } from "~/utils/tw";
 import CheckoutDialog from "./checkout-dialog";
 import type { ButtonProps } from "../shared/button";
@@ -72,6 +73,12 @@ type CheckoutDropdownProps = {
    * out" is offered, and nothing at all when there is nothing left to scan.
    */
   requireExplicitCheckout?: boolean;
+  /**
+   * Pools at two or more locations that the quick option would send out for
+   * the first time. Non-empty turns the quick option into a confirm dialog
+   * with a "From location" select per pool; see `CheckoutDialog`.
+   */
+  sourceQuestions?: CheckoutSourceQuestion[];
 };
 
 /**
@@ -95,10 +102,11 @@ export default function CheckoutDropdown({
   canCheckOutRemaining,
   canScanCheckOut,
   requireExplicitCheckout,
+  sourceQuestions,
 }: CheckoutDropdownProps) {
   const {
     ref: dropdownRef,
-    defaultApplied,
+    onOpenChange,
     open,
     defaultOpen,
     setOpen,
@@ -200,6 +208,7 @@ export default function CheckoutDropdown({
         intent={quickCheckoutIntent}
         label={quickCheckoutLabel}
         suppressEarlyCheckoutPrompt={canCheckOutRemaining}
+        sourceQuestions={sourceQuestions}
       />
     );
   }
@@ -214,14 +223,10 @@ export default function CheckoutDropdown({
         modal={false}
         open={open}
         defaultOpen={defaultOpen}
-        onOpenChange={(openValue) => {
-          if (defaultApplied && window.innerWidth <= 640) {
-            setOpen(openValue);
-          }
-        }}
+        onOpenChange={onOpenChange}
       >
         <DropdownMenuTrigger
-          className="hidden sm:flex"
+          className="hidden md:flex"
           onClick={() => {
             setOpen(!open);
           }}
@@ -244,7 +249,7 @@ export default function CheckoutDropdown({
         <Button
           type="button"
           variant={triggerVariant}
-          className="flex-1 sm:hidden"
+          className="flex-1 md:hidden"
           onClick={() => setOpen(true)}
           disabled={disabled}
           size="sm"
@@ -257,6 +262,7 @@ export default function CheckoutDropdown({
         <MobileDropdownStyles open={open} />
 
         <DropdownMenuContent
+          data-mobile-sheet
           ref={dropdownRef}
           asChild
           className="order actions-dropdown w-screen rounded-b-none rounded-t bg-white p-0 text-right md:static md:w-56"
@@ -264,7 +270,12 @@ export default function CheckoutDropdown({
           portalContainer={portalContainer}
         >
           <div className="fixed bottom-0 left-0">
-            <DropdownMenuItem className="py-1 lg:p-0">
+            {/* The row opens a dialog that lives inside this menu, so selecting
+                it must not close the menu: closing unmounts the dialog. */}
+            <DropdownMenuItem
+              className="py-1 lg:p-0"
+              onSelect={(event) => event.preventDefault()}
+            >
               <CheckoutDialog
                 booking={booking}
                 disabled={quickCheckoutDisabled}
@@ -274,6 +285,7 @@ export default function CheckoutDropdown({
                 label={quickCheckoutLabel}
                 variant="dropdown"
                 suppressEarlyCheckoutPrompt={canCheckOutRemaining}
+                sourceQuestions={sourceQuestions}
               />
             </DropdownMenuItem>
             <DropdownMenuItem className="py-1 lg:p-0">

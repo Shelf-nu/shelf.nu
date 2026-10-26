@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { ChevronLeft } from "lucide-react";
 import {
   data,
@@ -12,7 +13,7 @@ import {
   useNavigation,
 } from "react-router";
 import { z } from "zod";
-import { FileForm } from "~/components/assets/import-content";
+import { FileForm } from "~/components/assets/import-content-file-form";
 import { Form } from "~/components/custom-form";
 import FormRow from "~/components/forms/form-row";
 import Input from "~/components/forms/input";
@@ -29,6 +30,7 @@ import {
   toggleBarcodeEnabled,
   toggleAuditEnabled,
   toggleAdvancedReportsEnabled,
+  setRequireSsoLogin,
 } from "~/modules/organization/service.server";
 import { createDefaultWorkingHours } from "~/modules/working-hours/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -39,7 +41,9 @@ import { isFormProcessing } from "~/utils/form";
 import { getParams, payload, error, parseData } from "~/utils/http.server";
 import { extractCSVDataFromContentImport } from "~/utils/import.server";
 import { requireAdmin } from "~/utils/roles.server";
+import { hasSsoGroupMappings } from "~/utils/sso-group-roles";
 import { validateDomains } from "~/utils/sso.server";
+import { canUseBarcodes } from "~/utils/subscription.server";
 import { resolveUserDisplayName } from "~/utils/user";
 
 export const meta = () => [
@@ -119,6 +123,7 @@ export const action = async ({
           "toggleBarcodes",
           "toggleAudits",
           "toggleAdvancedReports",
+          "toggleRequireSsoLogin",
         ]),
       })
     );
@@ -208,30 +213,72 @@ export const action = async ({
           }`,
         });
       }
-      case "updateSsoDetails": {
-        const { adminGroupId, selfServiceGroupId, domain } = parseData(
+      case "toggleRequireSsoLogin": {
+        const { requireSsoLogin } = parseData(
           await request.formData(),
           z.object({
-            adminGroupId: z.string(),
-            selfServiceGroupId: z.string(),
-            domain: z
+            requireSsoLogin: z
               .string()
-              .transform((domains) => domains.toLowerCase())
-              .transform((domains, ctx) => {
-                try {
-                  return validateDomains(domains).join(", ");
-                } catch (error) {
-                  ctx.addIssue({
-                    code: z.ZodIssueCode.custom,
-                    message:
-                      error instanceof Error
-                        ? error.message
-                        : "Invalid domains",
-                  });
-                  return z.NEVER;
-                }
-              }),
+              .transform((val) => val === "on")
+              .default("false"),
           })
+        );
+        await setRequireSsoLogin({
+          organizationId,
+          requireSsoLogin,
+          actorUserId: userId,
+        });
+
+        return payload({
+          message: `Require SSO login ${requireSsoLogin ? "on" : "off"}`,
+        });
+      }
+      case "updateSsoDetails": {
+        /** A blank group field stores `null`: that role is not mapped. */
+        const optionalGroupId = z
+          .string()
+          .optional()
+          .transform((value) => value?.trim() || null);
+
+        const {
+          adminGroupId,
+          managerGroupId,
+          selfServiceGroupId,
+          baseUserGroupId,
+          domain,
+        } = parseData(
+          await request.formData(),
+          z
+            .object({
+              adminGroupId: optionalGroupId,
+              managerGroupId: optionalGroupId,
+              selfServiceGroupId: optionalGroupId,
+              baseUserGroupId: optionalGroupId,
+              domain: z
+                .string()
+                .transform((domains) => domains.toLowerCase())
+                .transform((domains, ctx) => {
+                  try {
+                    return validateDomains(domains).join(", ");
+                  } catch (error) {
+                    ctx.addIssue({
+                      code: z.ZodIssueCode.custom,
+                      message:
+                        error instanceof Error
+                          ? error.message
+                          : "Invalid domains",
+                    });
+                    return z.NEVER;
+                  }
+                }),
+            })
+            // Any one mapped role is enough for SSO to assign access; a setup
+            // with none gives SSO no role to assign.
+            .refine((groups) => hasSsoGroupMappings(groups), {
+              message:
+                "Map at least one group to a role. Only the roles you use need a group.",
+              path: ["adminGroupId"],
+            })
         );
 
         await db.organization.update({
@@ -242,12 +289,16 @@ export const action = async ({
                 create: {
                   domain,
                   adminGroupId,
+                  managerGroupId,
                   selfServiceGroupId,
+                  baseUserGroupId,
                 },
                 update: {
                   domain,
                   adminGroupId,
+                  managerGroupId,
                   selfServiceGroupId,
+                  baseUserGroupId,
                 },
               },
             },
@@ -271,10 +322,15 @@ export const action = async ({
           csvData,
           ASSET_CSV_HEADERS
         );
+        const organization = await db.organization.findUniqueOrThrow({
+          where: { id: organizationId },
+          select: { barcodesEnabled: true },
+        });
         await createAssetsFromContentImport({
           data: contentData,
           userId,
           organizationId,
+          canUseBarcodes: canUseBarcodes(organization),
         });
         return payload(null);
       }
@@ -299,12 +355,21 @@ export default function OrgPage() {
   // The add-on switch has its own fetcher so its failure message never shows
   // under another toggle, and the switch can fall back to the saved value.
   const advancedReportsFetcher = useFetcher<typeof action>();
+  // Bumped when an update is refused, to put the switch back on the saved
+  // value: the switch is uncontrolled, and a refusal leaves that value
+  // unchanged, so nothing else would move it off the position the admin set.
+  const [advancedReportsResets, setAdvancedReportsResets] = useState(0);
   const advancedReportsError =
     advancedReportsFetcher.data &&
     "error" in advancedReportsFetcher.data &&
     advancedReportsFetcher.data.error
       ? advancedReportsFetcher.data.error.message
       : null;
+  // A refusal is the only outcome the saved value cannot report, so the reset
+  // is driven off the error itself.
+  useEffect(() => {
+    if (advancedReportsError) setAdvancedReportsResets((count) => count + 1);
+  }, [advancedReportsError]);
   const actionData = useActionData<typeof action>();
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
@@ -333,6 +398,12 @@ export default function OrgPage() {
           {actionData.message}
         </div>
       )}
+      {/* A refused save (for example SSO details with no group mapped) */}
+      {actionData?.error?.message ? (
+        <div role="alert" className="my-4 bg-red-100 p-4 text-red-700">
+          {actionData.error.message}
+        </div>
+      ) : null}
       <div className="my-5 flex gap-3">
         <div className="flex w-[400px] flex-col gap-2 bg-gray-200 p-4">
           <h4>Organization details</h4>
@@ -436,10 +507,10 @@ export default function OrgPage() {
                   Enable Advanced Reports
                 </p>
               </div>
-              {/* Keyed on the saved value: after a failed update the loader
-                  revalidates and the uncontrolled switch remounts on it. */}
+              {/* Remounted whenever the saved value changes or an update is
+                  refused, so the switch always shows what the workspace has. */}
               <Switch
-                key={`advanced-reports-${organization.advancedReportsEnabled}`}
+                key={`advanced-reports-${organization.advancedReportsEnabled}-${advancedReportsResets}`}
                 name={"advancedReportsEnabled"}
                 disabled={isFormProcessing(advancedReportsFetcher.state)}
                 defaultChecked={organization.advancedReportsEnabled}
@@ -518,11 +589,11 @@ export default function OrgPage() {
                       <div>
                         Place the Id of the group that should be mapped to the{" "}
                         <b>Administrator</b> role. Accepts one or more group
-                        IDs, separated by commas.
+                        IDs, separated by commas. Leave blank if the role is not
+                        mapped.
                       </div>
                     }
                     className="block border-b-0 pb-0 [&>div]:lg:basis-auto"
-                    required
                   >
                     <Input
                       label={"Administrator role group id"}
@@ -532,7 +603,29 @@ export default function OrgPage() {
                       defaultValue={
                         organization?.ssoDetails?.adminGroupId || undefined
                       }
-                      required
+                    />
+                  </FormRow>
+
+                  <FormRow
+                    rowLabel={`Manager role group id`}
+                    subHeading={
+                      <div>
+                        Place the Id of the group that should be mapped to the{" "}
+                        <b>Manager</b> role. Accepts one or more group IDs,
+                        separated by commas. Leave blank if the role is not
+                        mapped.
+                      </div>
+                    }
+                    className="block border-b-0 pb-0 [&>div]:lg:basis-auto"
+                  >
+                    <Input
+                      label={"Manager role group id"}
+                      hideLabel
+                      name={"managerGroupId"}
+                      defaultValue={
+                        organization?.ssoDetails?.managerGroupId || undefined
+                      }
+                      className="w-full"
                     />
                   </FormRow>
 
@@ -542,20 +635,42 @@ export default function OrgPage() {
                       <div>
                         Place the Id of the group that should be mapped to the{" "}
                         <b>Self service</b> role. Accepts one or more group IDs,
-                        separated by commas.
+                        separated by commas. Leave blank if the role is not
+                        mapped.
                       </div>
                     }
                     className="block border-b-0 pb-0 [&>div]:lg:basis-auto"
-                    required
                   >
                     <Input
                       label={"Self service role group id"}
                       hideLabel
                       name={"selfServiceGroupId"}
-                      required
                       defaultValue={
                         organization?.ssoDetails?.selfServiceGroupId ||
                         undefined
+                      }
+                      className="w-full"
+                    />
+                  </FormRow>
+
+                  <FormRow
+                    rowLabel={`Base user role group id`}
+                    subHeading={
+                      <div>
+                        Place the Id of the group that should be mapped to the{" "}
+                        <b>Base</b> role. Accepts one or more group IDs,
+                        separated by commas. Leave blank if the role is not
+                        mapped.
+                      </div>
+                    }
+                    className="block border-b-0 pb-0 [&>div]:lg:basis-auto"
+                  >
+                    <Input
+                      label={"Base user role group id"}
+                      hideLabel
+                      name={"baseUserGroupId"}
+                      defaultValue={
+                        organization?.ssoDetails?.baseUserGroupId || undefined
                       }
                       className="w-full"
                     />
@@ -573,31 +688,46 @@ export default function OrgPage() {
                 </div>
               </div>
             </Form>
+            {organization.ssoDetails ? (
+              <>
+                <hr className="border-1 my-4 border-gray-700" />
+                <h4>Require SSO login</h4>
+                <p id="require-sso-login-description">
+                  When on, everyone on this workspace's SSO domain must sign in
+                  with SSO, except the workspace owner until converted. Turn off
+                  only while setting up and testing SSO.
+                </p>
+                <fetcher.Form
+                  method="post"
+                  onChange={(e) => fetcher.submit(e.currentTarget)}
+                >
+                  <div className="flex justify-between gap-3">
+                    <div>
+                      <p className="text-[14px] font-medium text-gray-700">
+                        Require SSO login
+                      </p>
+                    </div>
+                    <Switch
+                      name={"requireSsoLogin"}
+                      disabled={isFormProcessing(fetcher.state)}
+                      defaultChecked={organization.ssoDetails.requireSsoLogin}
+                      title={"Toggle Require SSO login"}
+                      aria-label="Require SSO login"
+                      aria-describedby="require-sso-login-description"
+                    />
+                    <input
+                      type="hidden"
+                      value="toggleRequireSsoLogin"
+                      name="intent"
+                    />
+                  </div>
+                </fetcher.Form>
+              </>
+            ) : null}
           </div>
         ) : null}
         <div className="w-[400px] bg-gray-200 p-4">
           <div className="flex flex-col gap-8">
-            <div>
-              <h3>Export assets backup</h3>
-              <Button
-                type="submit"
-                to={`/api/admin/export-org-assets/${
-                  organization.id
-                }/assets-${new Date().toISOString().slice(0, 10)}.csv`}
-                download={true}
-                reloadDocument={true}
-              >
-                Export assets backup
-              </Button>
-            </div>
-            <div>
-              <h3>Import assets backup</h3>
-              <FileForm
-                intent="backup"
-                url={`/api/admin/import-org-assets/${organization.id}`}
-              />
-            </div>
-
             <div>
               <h3>Import content</h3>
               <FileForm intent={"content"} />

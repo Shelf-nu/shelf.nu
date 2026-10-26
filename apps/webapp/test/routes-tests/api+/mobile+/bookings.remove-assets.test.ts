@@ -173,15 +173,19 @@ function serviceCall() {
 }
 
 describe("POST /api/mobile/bookings/remove-assets — removal provenance", () => {
-  it("reads every named id as its own row when the field is absent", async () => {
+  it("leaves the scope whole when the field is absent", async () => {
     // An older app sends no `standaloneAssetIds` at all. Its removals must keep
-    // behaving exactly as they did before the field existed.
+    // behaving exactly as they did before the field existed, which means every
+    // slice of every named asset. The field has to stay undefined to get that:
+    // naming the ids instead would scope the delete to their free-pool rows and
+    // quietly spare the kit-driven ones.
     world({ inOrg: ["a1", "a2"], onBooking: ["a1", "a2"] });
 
     const response = await post({ assetIds: ["a1", "a2"] });
 
     assertIsDataWithResponseInit(response);
-    expect(serviceCall().standaloneAssetIds).toEqual(["a1", "a2"]);
+    expect(serviceCall().standaloneAssetIds).toBeUndefined();
+    expect(serviceCall().booking.assetIds).toEqual(["a1", "a2"]);
   });
 
   it("narrows the delete to the rows the caller says it ticked", async () => {
@@ -206,12 +210,14 @@ describe("POST /api/mobile/bookings/remove-assets — removal provenance", () =>
 
   it("keeps ids the booking does not hold out of the delete scope", async () => {
     // A caller may name any org asset; only rows actually on this booking may
-    // be removed, or the count and the note both overstate what happened.
+    // be removed, or the count and the note both overstate what happened. The
+    // guarantee lives in `booking.assetIds`, which bounds the delete whether or
+    // not the narrowing field is given.
     world({ inOrg: ["a1", "a2"], onBooking: ["a1"] });
 
     await post({ assetIds: ["a1", "a2"] });
 
-    expect(serviceCall().standaloneAssetIds).toEqual(["a1"]);
+    expect(serviceCall().booking.assetIds).toEqual(["a1"]);
   });
 
   it("cannot smuggle an id past the org guard through the narrowing field", async () => {
@@ -260,6 +266,24 @@ describe("POST /api/mobile/bookings/remove-assets — the note", () => {
 
     assertIsDataWithResponseInit(response);
     expect((response.data as { removedCount: number }).removedCount).toBe(3);
+  });
+
+  it("still names the bucket when the field is absent but kits are not", async () => {
+    // With kits named, silence cannot be left to the service: its fallback
+    // infers the bucket from kit membership, which would read an asset the
+    // caller ticked in its own right as having come along with its kit, and
+    // spare the free-pool row the caller meant to remove.
+    world({
+      inOrg: ["a1"],
+      onBooking: ["a1", "m1"],
+      kitMembers: ["m1"],
+    });
+
+    await post({ assetIds: ["a1"], kitIds: ["kit-1"] });
+
+    // Only the ids the caller named: `m1` came along with the kit, so it is the
+    // kit clause's business, not the standalone bucket's.
+    expect(serviceCall().standaloneAssetIds).toEqual(["a1"]);
   });
 
   it("leaves kit members out of the note, which the kit half already covers", async () => {

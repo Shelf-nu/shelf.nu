@@ -291,6 +291,29 @@ PODS:
     - Yoga
   - ExpoQuickActions (6.0.1):
     - ExpoModulesCore
+  - ExpoScreenOrientation (9.0.9):
+    - ExpoModulesCore
+    - hermes-engine
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Yoga
   - ExpoSecureStore (15.0.8):
     - ExpoModulesCore
   - ExpoSplashScreen (31.0.13):
@@ -2237,6 +2260,7 @@ DEPENDENCIES:
   - "ExpoLocation (from `../../../node_modules/.pnpm/expo-location@19.0.8_expo@54.0.33/node_modules/expo-location/ios`)"
   - "ExpoModulesCore (from `../../../node_modules/.pnpm/expo-modules-core@3.0.29_react-native@0.81.5_@babel+core@7.29.0_@types+react@19.2.14_react@19.1.0__react@19.1.0/node_modules/expo-modules-core`)"
   - "ExpoQuickActions (from `../../../node_modules/.pnpm/expo-quick-actions@6.0.1_expo@54.0.33/node_modules/expo-quick-actions/ios`)"
+  - "ExpoScreenOrientation (from `../../../node_modules/.pnpm/expo-screen-orientation@9.0.9_expo@54.0.33_react-native@0.81.5_@babel+core@7.29.0_@types+react@19.2.14_react@19.1.0_/node_modules/expo-screen-orientation/ios`)"
   - "ExpoSecureStore (from `../../../node_modules/.pnpm/expo-secure-store@15.0.8_expo@54.0.33/node_modules/expo-secure-store/ios`)"
   - "ExpoSplashScreen (from `../../../node_modules/.pnpm/expo-splash-screen@31.0.13_expo@54.0.33/node_modules/expo-splash-screen/ios`)"
   - "ExpoStoreReview (from `../../../node_modules/.pnpm/expo-store-review@9.0.9_expo@54.0.33_react-native@0.81.5_@babel+core@7.29.0_@types+react@19.2.14_react@19.1.0_/node_modules/expo-store-review/ios`)"
@@ -2387,6 +2411,8 @@ EXTERNAL SOURCES:
     :path: "../../../node_modules/.pnpm/expo-modules-core@3.0.29_react-native@0.81.5_@babel+core@7.29.0_@types+react@19.2.14_react@19.1.0__react@19.1.0/node_modules/expo-modules-core"
   ExpoQuickActions:
     :path: "../../../node_modules/.pnpm/expo-quick-actions@6.0.1_expo@54.0.33/node_modules/expo-quick-actions/ios"
+  ExpoScreenOrientation:
+    :path: "../../../node_modules/.pnpm/expo-screen-orientation@9.0.9_expo@54.0.33_react-native@0.81.5_@babel+core@7.29.0_@types+react@19.2.14_react@19.1.0_/node_modules/expo-screen-orientation/ios"
   ExpoSecureStore:
     :path: "../../../node_modules/.pnpm/expo-secure-store@15.0.8_expo@54.0.33/node_modules/expo-secure-store/ios"
   ExpoSplashScreen:
@@ -2577,6 +2603,7 @@ SPEC CHECKSUMS:
   ExpoLocation: d5b61cb4970fa982e39ca94246a206a0c3b812ca
   ExpoModulesCore: f3da4f1ab5a8375d0beafab763739dbee8446583
   ExpoQuickActions: 61e27ec458e4e06b854ddc6967c2b57aa6a772d5
+  ExpoScreenOrientation: 4a7d3cead7465ba6520ef80df919cda595554594
   ExpoSecureStore: d32f751874a2ceb5aaeebeb3578e165c1ba2b24a
   ExpoSplashScreen: bc3cffefca2716e5f22350ca109badd7e50ec14d
   ExpoStoreReview: 32bb43b6fae9c8db3e33cad69996dff3785eef5f

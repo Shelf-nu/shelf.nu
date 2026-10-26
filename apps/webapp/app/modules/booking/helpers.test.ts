@@ -5,12 +5,14 @@ import {
   buildPdfAssetRows,
   buildPdfBookingAssetSlices,
   countRemainingCheckoutAssets,
+  describeCheckoutDisabled,
   filterBookingAssets,
   groupAndSortAssetsByKit,
   hasAssetBookingConflicts,
   hasKitBookingConflicts,
   isAssetCheckoutEligible,
   isBookingArchivable,
+  makeCheckoutEligibility,
   shouldPromptEarlyCheckout,
   type PdfBookingAssetSlice,
   type SearchableBookingAsset,
@@ -450,12 +452,47 @@ describe("isAssetCheckoutEligible", () => {
     ).toBe(false);
   });
 
-  it("is not eligible when in custody", () => {
+  it("is not eligible when an individual asset is in custody", () => {
     expect(
       isAssetCheckoutEligible(
         { id: "a1", status: AssetStatus.IN_CUSTODY },
         noneCheckedOut,
         noneReturned
+      )
+    ).toBe(false);
+  });
+
+  // why: custody is a whole-unit fact only for INDIVIDUAL assets. A
+  // QUANTITY_TRACKED asset reads IN_CUSTODY once some of its units are held,
+  // while the rest may still be booked and bookable — the server judges it by
+  // its per-slice cap, not its status (`partialCheckoutBooking`). Hiding it
+  // here offers the user less than the server would accept.
+  it("stays eligible when a quantity asset in custody still has units to check out", () => {
+    expect(
+      isAssetCheckoutEligible(
+        {
+          id: "a1",
+          status: AssetStatus.IN_CUSTODY,
+          type: AssetType.QUANTITY_TRACKED,
+        },
+        noneCheckedOut,
+        noneReturned,
+        { a1: 3 }
+      )
+    ).toBe(true);
+  });
+
+  it("is not eligible when a quantity asset in custody has no units left", () => {
+    expect(
+      isAssetCheckoutEligible(
+        {
+          id: "a1",
+          status: AssetStatus.IN_CUSTODY,
+          type: AssetType.QUANTITY_TRACKED,
+        },
+        noneCheckedOut,
+        noneReturned,
+        { a1: 0 }
       )
     ).toBe(false);
   });
@@ -478,6 +515,180 @@ describe("isAssetCheckoutEligible", () => {
         new Set(["a1"])
       )
     ).toBe(false);
+  });
+
+  // why: the qty-aware top-off hinges on `remainingByAssetId` taking
+  // precedence over the binary "already checked out?" signal for
+  // QUANTITY_TRACKED rows. The booking list's bulk actions and the scan drawer
+  // both decide through this helper, so dropping one of these branches makes
+  // them disagree about what can still go out.
+  describe("with remainingByAssetId (qty-aware top-off)", () => {
+    it("is eligible for a quantity asset with units remaining even when recorded as checked out", () => {
+      // The row is partially checked out — its id is in the booking's
+      // checked-out set — but units remain, so the rest can still go out.
+      expect(
+        isAssetCheckoutEligible(
+          {
+            id: "a1",
+            status: AssetStatus.CHECKED_OUT,
+            type: AssetType.QUANTITY_TRACKED,
+          },
+          new Set(["a1"]),
+          noneReturned,
+          { a1: 5 }
+        )
+      ).toBe(true);
+    });
+
+    it("is not eligible for a quantity asset with no units remaining", () => {
+      // The map is authoritative: zero remaining means every booked unit is
+      // dispositioned, whatever the binary fallback would say.
+      expect(
+        isAssetCheckoutEligible(
+          {
+            id: "a1",
+            status: AssetStatus.AVAILABLE,
+            type: AssetType.QUANTITY_TRACKED,
+          },
+          noneCheckedOut,
+          noneReturned,
+          { a1: 0 }
+        )
+      ).toBe(false);
+    });
+
+    it("falls back to the binary check for a quantity asset when no map is given", () => {
+      // A caller that does not plumb the remaining map through keeps the
+      // binary behaviour — the quantity branch is opt-in via the map.
+      expect(
+        isAssetCheckoutEligible(
+          {
+            id: "a1",
+            status: AssetStatus.CHECKED_OUT,
+            type: AssetType.QUANTITY_TRACKED,
+          },
+          noneCheckedOut,
+          noneReturned
+        )
+      ).toBe(false);
+    });
+
+    it("ignores the map for an individual asset", () => {
+      // The quantity branch is gated on type. An individual asset whose id
+      // happens to appear in the map must still resolve by the binary check,
+      // or a top-off bug would leak into single-unit assets.
+      expect(
+        isAssetCheckoutEligible(
+          {
+            id: "a1",
+            status: AssetStatus.CHECKED_OUT,
+            type: AssetType.INDIVIDUAL,
+          },
+          noneCheckedOut,
+          noneReturned,
+          { a1: 5 }
+        )
+      ).toBe(false);
+    });
+  });
+});
+
+describe("makeCheckoutEligibility", () => {
+  /**
+   * The state behind the booking list's bulk check-out: the booking went out
+   * with the Check out button, which writes no check-out session, so no item
+   * is named in `checkedOutAssetIds`; one item then came back through a
+   * partial check-in, which is what `partialCheckinDetails` is keyed by.
+   */
+  const afterButtonCheckoutAndOneReturn = makeCheckoutEligibility({
+    checkedOutAssetIds: [],
+    partialCheckinDetails: { returned: { checkinDate: "2026-01-01" } },
+    remainingToCheckOutByAsset: {},
+  });
+
+  it("refuses an item checked back in, although it reads AVAILABLE and no session sent it out", () => {
+    const returned = { id: "returned", status: AssetStatus.AVAILABLE };
+
+    expect(afterButtonCheckoutAndOneReturn.isEligible(returned)).toBe(false);
+    expect(afterButtonCheckoutAndOneReturn.isReturned(returned)).toBe(true);
+  });
+
+  it("offers an item that never left", () => {
+    const neverLeft = { id: "never-left", status: AssetStatus.AVAILABLE };
+
+    expect(afterButtonCheckoutAndOneReturn.isEligible(neverLeft)).toBe(true);
+    expect(afterButtonCheckoutAndOneReturn.isReturned(neverLeft)).toBe(false);
+  });
+
+  it("accepts a row whose status and type arrive as plain strings", () => {
+    // why: booking list rows are loosely typed (`AssetWithStatus`), so the
+    // enum comparison has to hold for string values.
+    const eligibility = makeCheckoutEligibility({
+      checkedOutAssetIds: [],
+      partialCheckinDetails: {},
+      remainingToCheckOutByAsset: { pens: 4 },
+    });
+
+    expect(
+      eligibility.isEligible({
+        id: "pens",
+        status: "IN_CUSTODY",
+        type: "QUANTITY_TRACKED",
+      })
+    ).toBe(true);
+  });
+});
+
+describe("describeCheckoutDisabled", () => {
+  const eligibility = makeCheckoutEligibility({
+    checkedOutAssetIds: ["scanned-out"],
+    partialCheckinDetails: { returned: {} },
+    remainingToCheckOutByAsset: {},
+  });
+  const returned = { id: "returned", status: AssetStatus.AVAILABLE };
+  const scannedOut = { id: "scanned-out", status: AssetStatus.CHECKED_OUT };
+  const neverLeft = { id: "never-left", status: AssetStatus.AVAILABLE };
+  const inCustody = { id: "held", status: AssetStatus.IN_CUSTODY };
+
+  it("asks for a selection when nothing is selected", () => {
+    expect(describeCheckoutDisabled([], eligibility)).toEqual({
+      reason: "Select one or more assets to check out.",
+    });
+  });
+
+  it("enables check-out when any selected item can go out", () => {
+    expect(describeCheckoutDisabled([returned, neverLeft], eligibility)).toBe(
+      false
+    );
+  });
+
+  it("names a returned selection as checked in, not as checked out", () => {
+    // why: an item back on the shelf is not "already checked out". Telling the
+    // user it is sends them looking for an item they are holding.
+    expect(describeCheckoutDisabled([returned], eligibility)).toEqual({
+      reason:
+        "All selected items were already checked in for this booking and can't be checked out again.",
+    });
+  });
+
+  it("keeps the checked-out reason when every selected item is out", () => {
+    expect(describeCheckoutDisabled([scannedOut], eligibility)).toEqual({
+      reason:
+        "All selected items are already checked out. Select items that are still booked.",
+    });
+  });
+
+  it("gives a reason that is true for any other selection", () => {
+    // In custody, or a mix of returned and out: neither specific sentence
+    // holds, so the reason must not claim either.
+    expect(describeCheckoutDisabled([inCustody], eligibility)).toEqual({
+      reason: "None of the selected items can be checked out right now.",
+    });
+    expect(
+      describeCheckoutDisabled([returned, scannedOut], eligibility)
+    ).toEqual({
+      reason: "None of the selected items can be checked out right now.",
+    });
   });
 });
 

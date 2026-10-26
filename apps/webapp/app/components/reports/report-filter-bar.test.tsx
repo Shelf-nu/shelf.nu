@@ -33,8 +33,10 @@ describe("report filter bar ↔ registry", () => {
   });
 
   it("offers the custom-field and asset-model filters on every asset-based report", () => {
+    // Kits and audit sessions are not asset rows, so their reports carry no
+    // asset filters.
     const assetBased = REPORTS.filter(
-      (r) => r.id !== "top-booked-kits" && r.enabled
+      (r) => r.id !== "top-booked-kits" && r.category !== "audits" && r.enabled
     );
 
     for (const report of assetBased) {

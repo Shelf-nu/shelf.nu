@@ -102,6 +102,7 @@ export default {
           { text: "Error Handling", link: "/handling-errors" },
           { text: "Select All Pattern", link: "/select-all-pattern" },
           { text: "Utility Hooks", link: "/hooks" },
+          { text: "Roles & Permissions", link: "/roles-and-permissions" },
           {
             text: "Scanner Drawer Development",
             link: "/scanner-drawer-development",
@@ -119,8 +120,12 @@ export default {
             link: "/security-review-agent",
           },
           {
-            text: "PR Review Loop",
-            link: "/pr-review-loop",
+            text: "Watchdog",
+            link: "/watchdog",
+          },
+          {
+            text: "PR Review",
+            link: "/pr-review",
           },
         ],
       },
@@ -131,6 +136,10 @@ export default {
           {
             text: "Asset Import (CSV)",
             link: "/asset-import",
+          },
+          {
+            text: "Import Column Mapping",
+            link: "/import-column-mapping",
           },
           {
             text: "Advanced Asset Index",
@@ -173,6 +182,10 @@ export default {
           {
             text: "Shibboleth",
             link: "/sso/providers/shibboleth",
+          },
+          {
+            text: "Okta",
+            link: "/sso/providers/okta",
           },
         ],
       },

@@ -29,7 +29,7 @@ import { assertAssetSearchIdCeiling } from "./search.server";
 /**
  * Resolves already-normalized search terms to the set of matching asset ids via
  * the shared org-scoped UNION ({@link buildAssetSearchUnion}) — index-driven,
- * org-scoped branches across all 10 search sources.
+ * org-scoped branches across all 11 search sources.
  *
  * Wrapped in `withPrismaRetry({ operationIsRead: true })` to declare what the
  * client extension cannot work out on its own: this raw statement is a pure

@@ -53,9 +53,13 @@ type Props = {
 
 /** Duration measures render as days with one decimal. */
 function DaysCell({ value }: { value: number }) {
+  // The viewer's locale, not the runtime's: a German reader is served "12,3"
+  // by the browser, so the server has to render the same string or React
+  // rejects the markup it is handed.
+  const { locale } = useHints();
   return (
     <span className="tabular-nums">
-      {(Math.round(value * 10) / 10).toLocaleString()} days
+      {(Math.round(value * 10) / 10).toLocaleString(locale)} days
     </span>
   );
 }
@@ -214,7 +218,7 @@ export function BuilderResults({
             By {groupLabel.toLowerCase()}
           </h3>
           <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
-            {totalGroups.toLocaleString()}
+            {totalGroups.toLocaleString(locale)}
           </span>
         </div>
         <ReportTable
@@ -224,8 +228,9 @@ export function BuilderResults({
         />
         {truncated ? (
           <p className="border-t border-gray-100 px-4 py-2 text-xs text-gray-500 md:px-6">
-            Showing the {BUILDER_MAX_GROUPS.toLocaleString()} largest groups of{" "}
-            {totalGroups.toLocaleString()}. Add a filter to narrow the result.
+            Showing the {BUILDER_MAX_GROUPS.toLocaleString(locale)} largest
+            groups of {totalGroups.toLocaleString(locale)}. Add a filter to
+            narrow the result.
           </p>
         ) : null}
       </div>

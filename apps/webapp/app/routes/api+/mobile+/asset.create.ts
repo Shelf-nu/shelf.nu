@@ -32,6 +32,7 @@ import { getInitialPlacementNoteContent } from "~/modules/asset/utils.server";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { createNote } from "~/modules/note/service.server";
 import { buildTagsSet } from "~/modules/tag/service.server";
+import { assetDescriptionSchema } from "~/utils/asset-description";
 import { extractCustomFieldValuesFromPayload } from "~/utils/custom-fields";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
@@ -92,7 +93,7 @@ export async function action({ request }: ActionFunctionArgs) {
     } = await parseMobileBody(
       z.object({
         title: z.string().min(2, "Title must be at least 2 characters"),
-        description: z.string().optional(),
+        description: assetDescriptionSchema.optional(),
         categoryId: z.string().optional(),
         locationId: z.string().optional(),
         // Tag ids to assign to the new asset. Validated below against the

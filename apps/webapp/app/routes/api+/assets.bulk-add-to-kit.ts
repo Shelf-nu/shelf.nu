@@ -79,6 +79,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
      * (asset/service.server.ts).
      */
     const selectedAssets = await db.asset.findMany({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: type split only; archived ids must reach updateKitAssets so its archive guard refuses them instead of silently dropping them here
       where: { id: { in: assetIds }, organizationId },
       select: { id: true, type: true },
     });

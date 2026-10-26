@@ -132,15 +132,17 @@ export function SavedReportsMenu({ savedReports, disabled }: Props) {
   }, [renameSucceeded]);
 
   const currentQuery = sanitizeSavedReportQuery(location.search);
-  // The page opened from a saved report carries its id, which settles the
-  // case of two saved reports with the same query. A page reached any other
-  // way (a pasted link, the builder bar) is matched on its query.
+  // What the page shows decides which saved report is open, so the match is
+  // always on the query. The id in the URL only breaks a tie between two
+  // saved reports that hold the same query: changing the data set in the bar
+  // leaves that id behind, and it must not keep claiming the page.
   const openedId = searchParams.get(SAVED_REPORT_ID_PARAM);
+  const matchesCurrentQuery = (report: SavedReportListItem) =>
+    savedReportQueryEquals(report.query, currentQuery);
   const activeReport =
-    savedReports.find((report) => report.id === openedId) ??
-    savedReports.find((report) =>
-      savedReportQueryEquals(report.query, currentQuery)
-    );
+    savedReports.find(
+      (report) => report.id === openedId && matchesCurrentQuery(report)
+    ) ?? savedReports.find(matchesCurrentQuery);
 
   const openReport = (report: SavedReportListItem) => {
     dispatch({ type: "setOpen", open: false });
@@ -293,7 +295,7 @@ function SavedReportRow({
         </div>
       </button>
 
-      <div className="mt-0.5 flex gap-1 opacity-0 focus-within:opacity-100 group-hover:opacity-100">
+      <div className="group-hover:opacity-100 mt-0.5 flex gap-1 opacity-0 focus-within:opacity-100">
         <button
           type="button"
           onClick={() => onRename(report)}

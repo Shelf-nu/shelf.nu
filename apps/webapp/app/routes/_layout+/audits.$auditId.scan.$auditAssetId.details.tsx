@@ -45,7 +45,7 @@ import {
   assertAuditAcceptsCommentsOnLockedRow,
   createWhileAuditAcceptsComments,
   requireAuditAssignee,
-  requireAuditAssigneeForBaseSelfService,
+  requireAuditAssigneeForScopedViewer,
 } from "~/modules/audit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -79,7 +79,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const { organizationId, isSelfServiceOrBase } = permissionResult;
+    const { organizationId, access } = permissionResult;
 
     // Fetch audit asset with notes and images
     const auditAsset = await db.auditAsset.findFirst({
@@ -123,10 +123,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
     }
 
-    requireAuditAssigneeForBaseSelfService({
+    requireAuditAssigneeForScopedViewer({
       audit: auditAsset.auditSession,
       userId,
-      isSelfServiceOrBase,
+      assignedOnly: !access.audits.seeAll,
       auditId,
     });
 
@@ -212,14 +212,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   );
 
   try {
-    const { organizationId, isSelfServiceOrBase } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.audit,
       action: PermissionAction.update,
     });
 
-    // The loader gates the read with `requireAuditAssigneeForBaseSelfService`;
+    // The loader gates the read with `requireAuditAssigneeForScopedViewer`;
     // this action did not gate the writes. Every intent below mutates the
     // audit — notes, condition, evidence deletion — so the guard is hoisted
     // here rather than repeated per intent, and a new intent inherits it.
@@ -227,7 +227,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       auditSessionId: auditId,
       organizationId,
       userId,
-      isSelfServiceOrBase,
+      assignedOnly: !access.audits.seeAll,
     });
 
     // …and prove the audit asset actually belongs to that audit. Both ids come

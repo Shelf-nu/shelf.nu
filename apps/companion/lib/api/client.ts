@@ -6,6 +6,11 @@ import {
 import { getSupabase, getSupabaseClientUrl } from "../supabase";
 import { isSessionServerMismatched } from "../server/contract";
 import { reportServerMismatch } from "../sentry";
+import { CLIENT_USER_AGENT } from "./user-agent";
+import { chainAbort } from "../latest-request";
+import { extractErrorDetails, type ApiErrorDetails } from "./error-details";
+
+export type { ApiErrorDetails };
 
 /**
  * Base URL of the Shelf server the app is currently connected to.
@@ -210,47 +215,6 @@ async function resolveRequestTarget(): Promise<
 export type ApiFetchOptions = RequestInit & { retry?: boolean };
 
 /**
- * Structured error payload from the mobile API's `{ error: { … } }` envelope.
- * `message` mirrors the flat `error` string consumers already display.
- * `reason` is an additive machine-readable discriminator some endpoints emit
- * (today: `"unclaimed"` on the QR RESOLVE routes only — the link route claims
- * unclaimed codes inline and no longer emits it), with `qrId` echoing
- * the scanned code id whenever `reason` is present. Branch on `reason`, never
- * on `message` text — messages are human copy and can change; the reason
- * field is the wire contract.
- */
-export type ApiErrorDetails = {
-  message: string;
-  reason?: string;
-  qrId?: string;
-};
-
-/**
- * Extracts the structured error payload from a parsed non-OK response body.
- *
- * @param json - The parsed response body (unknown: may be an HTML error page
- *   coerced to null, an empty body, or a proxy's own JSON).
- * @returns The typed error payload, or `null` when the body doesn't match the
- *   mobile API's `{ error: { message } }` envelope.
- */
-function extractErrorDetails(json: unknown): ApiErrorDetails | null {
-  if (typeof json !== "object" || json === null) return null;
-  const err = (json as { error?: unknown }).error;
-  if (typeof err !== "object" || err === null) return null;
-  const { message, reason, qrId } = err as {
-    message?: unknown;
-    reason?: unknown;
-    qrId?: unknown;
-  };
-  if (typeof message !== "string") return null;
-  return {
-    message,
-    ...(typeof reason === "string" ? { reason } : {}),
-    ...(typeof qrId === "string" ? { qrId } : {}),
-  };
-}
-
-/**
  * Makes an authenticated API call to the Shelf webapp.
  * Automatically attaches the current Supabase session JWT.
  * - Returns structured { data, error } -- never throws.
@@ -275,6 +239,16 @@ export async function apiFetch<T>(
   let timedOut = false;
 
   try {
+    // Abort controller for timeout. Tagged via `timedOut` so the catch can
+    // tell a timeout from a caller abandoning the request.
+    const controller = new AbortController();
+
+    // Chained before the first await. Resolving the target can refresh a
+    // token, and an abort arriving during that wait would be missed by a
+    // listener attached afterwards, leaving the request to finish and answer
+    // with data the caller has already moved past.
+    chainAbort(controller, options.signal);
+
     const target = await resolveRequestTarget();
     if (!target.ok) return target.result;
     const { accessToken } = target;
@@ -287,18 +261,10 @@ export async function apiFetch<T>(
         _retryCount > 0 ? `(retry ${_retryCount})` : ""
       );
 
-    // Abort controller for timeout — tag it so we can distinguish
-    // timeout aborts from user/navigation aborts
-    const controller = new AbortController();
     const timeoutId = setTimeout(() => {
       timedOut = true;
       controller.abort();
     }, REQUEST_TIMEOUT_MS);
-
-    // If caller provided a signal (e.g. from useEffect cleanup), chain it
-    if (options.signal) {
-      options.signal.addEventListener("abort", () => controller.abort());
-    }
 
     const response = await fetch(url, {
       ...options,
@@ -306,6 +272,10 @@ export async function apiFetch<T>(
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${accessToken}`,
+        // why: scan records and server logs attribute requests to the app
+        // ("Shelf app on iPhone") instead of an unparseable default UA.
+        // Null on web builds, where User-Agent is browser-controlled.
+        ...(CLIENT_USER_AGENT ? { "User-Agent": CLIENT_USER_AGENT } : {}),
         ...options.headers,
       },
     });
@@ -423,6 +393,7 @@ export async function apiUpload<T>(
       headers: {
         Authorization: `Bearer ${accessToken}`,
         // Do NOT set Content-Type — fetch auto-sets it with the multipart boundary
+        ...(CLIENT_USER_AGENT ? { "User-Agent": CLIENT_USER_AGENT } : {}),
       },
       body: formData,
     });

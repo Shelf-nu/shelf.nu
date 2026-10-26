@@ -24,6 +24,7 @@ import {
   buildCheckinReceipt,
   formatLatenessNote,
   resolveSentUnits,
+  summariseCheckinMethods,
 } from "./checkin-receipt";
 
 const CHECKED_OUT_AT = new Date("2026-09-01T09:00:00.000Z");
@@ -847,5 +848,48 @@ describe("resolveSentUnits", () => {
         checkedOutQuantity: 6,
       })
     ).toBe(6);
+  });
+});
+
+describe("summariseCheckinMethods", () => {
+  it("gives one line when every returned row came back the same way", () => {
+    expect(
+      summariseCheckinMethods([
+        { checkedInHow: "Scanned on the phone", checkedInAt: CHECKED_IN_AT },
+        { checkedInHow: "Scanned on the phone", checkedInAt: CHECKED_IN_AT },
+        // A row that never came back has no method and does not break the
+        // agreement.
+        { checkedInHow: null, checkedInAt: null },
+      ])
+    ).toBe("Scanned on the phone");
+  });
+
+  it("gives nothing when the returned rows disagree, so each prints its own", () => {
+    expect(
+      summariseCheckinMethods([
+        { checkedInHow: "Scanned on the phone", checkedInAt: CHECKED_IN_AT },
+        { checkedInHow: "Selected on the web", checkedInAt: CHECKED_IN_AT },
+      ])
+    ).toBeNull();
+  });
+
+  it("gives nothing when a returned row recorded no method", () => {
+    // why: a return made before methods were recorded, next to one that was.
+    // A header line would claim the unrecorded row came back the same way.
+    expect(
+      summariseCheckinMethods([
+        { checkedInHow: "Scanned on the phone", checkedInAt: CHECKED_IN_AT },
+        { checkedInHow: null, checkedInAt: CHECKED_IN_AT },
+      ])
+    ).toBeNull();
+  });
+
+  it("gives nothing when no row recorded a method", () => {
+    expect(
+      summariseCheckinMethods([
+        { checkedInHow: null, checkedInAt: CHECKED_IN_AT },
+      ])
+    ).toBeNull();
+    expect(summariseCheckinMethods([])).toBeNull();
   });
 });

@@ -1,11 +1,9 @@
 ---
 description: User-supplied entity IDs must be org-validated before connect/read/mutate (multi-tenant IDOR guard)
-globs:
-  [
-    "apps/webapp/app/modules/**/*.ts",
-    "apps/webapp/app/routes/**/*.ts",
-    "apps/webapp/app/routes/**/*.tsx",
-  ]
+paths:
+  - "apps/webapp/app/modules/**/*.ts"
+  - "apps/webapp/app/routes/**/*.ts"
+  - "apps/webapp/app/routes/**/*.tsx"
 ---
 
 # Org-Scope User-Supplied IDs

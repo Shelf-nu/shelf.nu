@@ -4,8 +4,11 @@
  * Two steps inside one popover: choose a field, then choose one of the
  * values that field holds in this workspace. Picking a value appends a
  * `cf=<fieldId>:<value>` query parameter and closes the popover; several
- * fields can be active at once and combine with AND. A TEXT field with more
- * distinct values than the loader fetched also offers an exact-text input.
+ * fields can be active at once and combine with AND. OPTION and BOOLEAN
+ * values arrive with the page; a TEXT field's values are read from
+ * `/api/reports/custom-field-values` when the field is opened, and a field
+ * with more distinct values than that returns also offers an exact-text
+ * input.
  *
  * Uses the Popover-with-list pattern of the advanced filters' field
  * selector rather than the deprecated `DropdownMenu`.
@@ -27,11 +30,15 @@ import { ChevronLeft, Search } from "lucide-react";
 import { ChevronRight } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { useSearchParams } from "~/hooks/search-params";
+import useApiQuery from "~/hooks/use-api-query";
 import {
   encodeCustomFieldParam,
   REPORT_FILTER_PARAM,
 } from "~/modules/reports/filter-params";
-import type { ReportCustomFieldOption } from "~/modules/reports/types";
+import type {
+  ReportCustomFieldOption,
+  ReportCustomFieldValuesPayload,
+} from "~/modules/reports/types";
 import { tw } from "~/utils/tw";
 import { appendSearchParamValue } from "./search-param-utils";
 
@@ -47,6 +54,59 @@ type Props = {
 function valueLabel(field: ReportCustomFieldOption, value: string): string {
   if (field.type !== "BOOLEAN") return value;
   return value === "yes" ? "Yes" : "No";
+}
+
+/** The values a field offers once any on-demand read has answered. */
+type FieldValues = {
+  values: string[];
+  hasMore: boolean;
+  isLoading: boolean;
+  /** Set when an on-demand read failed or answered without values. */
+  failed: boolean;
+};
+
+/**
+ * The values to offer for `field`: its own for OPTION and BOOLEAN, the
+ * on-demand read's for TEXT.
+ *
+ * A failure is read from `failedFieldId`, never from the query's `error`:
+ * `useApiQuery` keeps its last error through later requests, so trusting it
+ * would show one field's failure on every field opened after it.
+ *
+ * @param failedFieldId - The field whose last read failed, if any
+ */
+function resolveFieldValues(
+  field: ReportCustomFieldOption | null,
+  query: {
+    data: ReportCustomFieldValuesPayload | undefined;
+    isLoading: boolean;
+  },
+  failedFieldId: string | null
+): FieldValues {
+  if (!field) {
+    return { values: [], hasMore: false, isLoading: false, failed: false };
+  }
+  if (!field.valuesOnDemand) {
+    return {
+      values: field.values,
+      hasMore: field.hasMoreValues,
+      isLoading: false,
+      failed: false,
+    };
+  }
+  if (failedFieldId === field.id) {
+    return { values: [], hasMore: false, isLoading: false, failed: true };
+  }
+  // The previous field's answer stays in `data` until this field's lands.
+  if (query.isLoading || !query.data || query.data.customFieldId !== field.id) {
+    return { values: [], hasMore: false, isLoading: true, failed: false };
+  }
+  return {
+    values: query.data.values,
+    hasMore: query.data.hasMore,
+    isLoading: false,
+    failed: false,
+  };
 }
 
 /** Human label for the field type, shown beside the field name. */
@@ -72,6 +132,9 @@ export function CustomFieldFilter({ customFields, disabled }: Props) {
   const [field, setField] = useState<ReportCustomFieldOption | null>(null);
   const [query, setQuery] = useState("");
   const [exactValue, setExactValue] = useState("");
+  // The field whose last values read failed. Tied to a field so a failure
+  // never outlives it: opening the field again reads it again.
+  const [failedFieldId, setFailedFieldId] = useState<string | null>(null);
 
   const activeCount = searchParams.getAll(
     REPORT_FILTER_PARAM.customField
@@ -85,14 +148,30 @@ export function CustomFieldFilter({ customFields, disabled }: Props) {
     );
   }, [customFields, query]);
 
+  const valuesQuery = useApiQuery<ReportCustomFieldValuesPayload>({
+    api: "/api/reports/custom-field-values",
+    searchParams: useMemo(
+      () => new URLSearchParams(field ? { customFieldId: field.id } : {}),
+      [field]
+    ),
+    enabled: !!field?.valuesOnDemand,
+    // A refused request answers with an error body, not with values.
+    onSuccess: (payload) =>
+      setFailedFieldId(
+        Array.isArray(payload?.values) ? null : field?.id ?? null
+      ),
+    onError: () => setFailedFieldId(field?.id ?? null),
+  });
+  const fieldValues = resolveFieldValues(field, valuesQuery, failedFieldId);
+
   const visibleValues = useMemo(() => {
     if (!field) return [];
     const normalized = query.trim().toLowerCase();
-    if (!normalized) return field.values;
-    return field.values.filter((v) =>
+    if (!normalized) return fieldValues.values;
+    return fieldValues.values.filter((v) =>
       valueLabel(field, v).toLowerCase().includes(normalized)
     );
-  }, [field, query]);
+  }, [field, fieldValues.values, query]);
 
   if (customFields.length === 0) return null;
 
@@ -100,6 +179,7 @@ export function CustomFieldFilter({ customFields, disabled }: Props) {
     setField(null);
     setQuery("");
     setExactValue("");
+    setFailedFieldId(null);
   };
 
   const handleOpenChange = (next: boolean) => {
@@ -217,14 +297,28 @@ export function CustomFieldFilter({ customFields, disabled }: Props) {
                 No fields found
               </div>
             ) : null}
-            {field && visibleValues.length === 0 && !field.hasMoreValues ? (
+            {field && fieldValues.isLoading ? (
+              <div className="px-3 py-2 text-sm text-gray-500" role="status">
+                Loading values...
+              </div>
+            ) : null}
+            {field && fieldValues.failed ? (
+              <div className="px-3 py-2 text-sm text-gray-500" role="alert">
+                Could not load the values for this field.
+              </div>
+            ) : null}
+            {field &&
+            !fieldValues.isLoading &&
+            !fieldValues.failed &&
+            visibleValues.length === 0 &&
+            !fieldValues.hasMore ? (
               <div className="px-3 py-2 text-sm text-gray-500">
                 No values found
               </div>
             ) : null}
           </div>
 
-          {field?.hasMoreValues ? (
+          {field && fieldValues.hasMore ? (
             <form
               onSubmit={handleExactSubmit}
               className={tw(

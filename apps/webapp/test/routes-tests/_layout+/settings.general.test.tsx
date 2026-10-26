@@ -1,5 +1,6 @@
 import { Currency, OrganizationRoles, OrganizationType } from "@prisma/client";
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { accessFor } from "@helpers/role-access";
 import { createLoaderArgs, createActionArgs } from "@mocks/remix";
 
 import { db } from "~/database/db.server";
@@ -15,10 +16,7 @@ import {
   getOwnerSubscriptionInfo,
   userHasActiveSubscription,
 } from "~/utils/stripe.server";
-import {
-  canExportAssets,
-  canHideShelfBranding,
-} from "~/utils/subscription.server";
+import { canHideShelfBranding } from "~/utils/subscription.server";
 
 // why: mock parseFormData to avoid actual file upload in tests
 vi.mock("@remix-run/form-data-parser", () => ({
@@ -59,7 +57,6 @@ vi.mock("~/utils/roles.server", () => ({
 }));
 
 vi.mock("~/utils/subscription.server", () => ({
-  canExportAssets: vi.fn(),
   canHideShelfBranding: vi.fn(),
 }));
 
@@ -79,7 +76,6 @@ const getOrganizationTierLimitMock = vi.mocked(getOrganizationTierLimit);
 const getOrganizationAdminsMock = vi.mocked(getOrganizationAdmins);
 const updateOrganizationMock = vi.mocked(updateOrganization);
 const requirePermissionMock = vi.mocked(requirePermission);
-const canExportAssetsMock = vi.mocked(canExportAssets);
 const canHideShelfBrandingMock = vi.mocked(canHideShelfBranding);
 const getOwnerSubscriptionInfoMock = vi.mocked(getOwnerSubscriptionInfo);
 const userHasActiveSubscriptionMock = vi.mocked(userHasActiveSubscription);
@@ -126,10 +122,8 @@ describe("settings.general loader", () => {
       organizations: [baseOrganization()],
       currentOrganization: baseOrganization(),
       role: OrganizationRoles.OWNER,
-      isSelfServiceOrBase: false,
+      access: accessFor([OrganizationRoles.OWNER]),
       userOrganizations: [],
-      canSeeAllBookings: true,
-      canSeeAllCustody: true,
       canUseBarcodes: false,
     } as any);
 
@@ -147,12 +141,12 @@ describe("settings.general loader", () => {
       canExportAssets: true,
       canImportNRM: true,
       canHideShelfBranding: true,
+      canUseReports: true,
       maxCustomFields: 0,
       maxOrganizations: 1,
     } as any);
 
     getOrganizationAdminsMock.mockResolvedValue([]);
-    canExportAssetsMock.mockReturnValue(true);
     canHideShelfBrandingMock.mockReturnValue(true);
     // why: mock Stripe subscription functions to return default values
     getOwnerSubscriptionInfoMock.mockResolvedValue({
@@ -196,10 +190,8 @@ describe("settings.general loader", () => {
       organizations: [personalOrg],
       currentOrganization: personalOrg,
       role: OrganizationRoles.OWNER,
-      isSelfServiceOrBase: false,
+      access: accessFor([OrganizationRoles.OWNER]),
       userOrganizations: [],
-      canSeeAllBookings: true,
-      canSeeAllCustody: true,
       canUseBarcodes: false,
     } as any);
 
@@ -236,10 +228,8 @@ describe("settings.general loader", () => {
       organizations: [personalOrg],
       currentOrganization: personalOrg,
       role: OrganizationRoles.OWNER,
-      isSelfServiceOrBase: false,
+      access: accessFor([OrganizationRoles.OWNER]),
       userOrganizations: [],
-      canSeeAllBookings: true,
-      canSeeAllCustody: true,
       canUseBarcodes: false,
     } as any);
 
@@ -298,11 +288,9 @@ describe("settings.general action", () => {
       organizationId: "org-1",
       currentOrganization: baseOrganization(),
       role: OrganizationRoles.OWNER,
+      access: accessFor([OrganizationRoles.OWNER]),
       organizations: [baseOrganization()],
-      isSelfServiceOrBase: false,
       userOrganizations: [],
-      canSeeAllBookings: true,
-      canSeeAllCustody: true,
       canUseBarcodes: false,
     } as any);
 
@@ -318,6 +306,7 @@ describe("settings.general action", () => {
       canExportAssets: true,
       canImportNRM: true,
       canHideShelfBranding: false,
+      canUseReports: true,
       maxCustomFields: 0,
       maxOrganizations: 1,
     } as any);
@@ -363,6 +352,7 @@ describe("settings.general action", () => {
       canExportAssets: true,
       canImportNRM: true,
       canHideShelfBranding: true, // ✅ Tier allows hiding
+      canUseReports: true,
       maxCustomFields: 0,
       maxOrganizations: 1,
     } as any);
@@ -409,11 +399,9 @@ describe("settings.general action", () => {
       organizationId: "org-1",
       currentOrganization: orgWithBrandingOff,
       role: OrganizationRoles.OWNER,
+      access: accessFor([OrganizationRoles.OWNER]),
       organizations: [orgWithBrandingOff],
-      isSelfServiceOrBase: false,
       userOrganizations: [],
-      canSeeAllBookings: true,
-      canSeeAllCustody: true,
       canUseBarcodes: false,
     } as any);
 
@@ -425,6 +413,7 @@ describe("settings.general action", () => {
       canExportAssets: true,
       canImportNRM: true,
       canHideShelfBranding: true,
+      canUseReports: true,
       maxCustomFields: 0,
       maxOrganizations: 1,
     } as any);
@@ -464,11 +453,9 @@ describe("settings.general action", () => {
       organizationId: "org-1",
       currentOrganization: personalOrg,
       role: OrganizationRoles.OWNER,
+      access: accessFor([OrganizationRoles.OWNER]),
       organizations: [personalOrg],
-      isSelfServiceOrBase: false,
       userOrganizations: [],
-      canSeeAllBookings: true,
-      canSeeAllCustody: true,
       canUseBarcodes: false,
     } as any);
 
@@ -484,6 +471,7 @@ describe("settings.general action", () => {
       canExportAssets: true,
       canImportNRM: true,
       canHideShelfBranding: true, // Tier allows it
+      canUseReports: true,
       maxCustomFields: 0,
       maxOrganizations: 1,
     } as any);
@@ -522,11 +510,9 @@ describe("settings.general action", () => {
       organizationId: "org-1",
       currentOrganization: personalOrg,
       role: OrganizationRoles.OWNER,
+      access: accessFor([OrganizationRoles.OWNER]),
       organizations: [personalOrg],
-      isSelfServiceOrBase: false,
       userOrganizations: [],
-      canSeeAllBookings: true,
-      canSeeAllCustody: true,
       canUseBarcodes: false,
     } as any);
 
@@ -542,6 +528,7 @@ describe("settings.general action", () => {
       canExportAssets: true,
       canImportNRM: true,
       canHideShelfBranding: true,
+      canUseReports: true,
       maxCustomFields: 0,
       maxOrganizations: 1,
     } as any);
@@ -583,6 +570,7 @@ describe("settings.general transfer-ownership authorization", () => {
       canExportAssets: true,
       canImportNRM: true,
       canHideShelfBranding: true,
+      canUseReports: true,
       maxCustomFields: 0,
       maxOrganizations: 1,
     } as any);
@@ -609,11 +597,9 @@ describe("settings.general transfer-ownership authorization", () => {
       organizationId: "org-1",
       currentOrganization: baseOrganization(),
       role,
+      access: accessFor([role]),
       organizations: [baseOrganization()],
-      isSelfServiceOrBase: false,
       userOrganizations: [],
-      canSeeAllBookings: true,
-      canSeeAllCustody: true,
       canUseBarcodes: false,
     } as any);
   }
@@ -653,6 +639,109 @@ describe("settings.general transfer-ownership authorization", () => {
 
     expect(transferOwnership).toHaveBeenCalledWith(
       expect.objectContaining({ newOwnerId: "user-2" })
+    );
+  });
+});
+
+describe("settings.general SSO settings refusals", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    dbMock.user.findUniqueOrThrow.mockResolvedValue({ tierId: "tier_2" });
+  });
+
+  /** Posts the SSO group-mapping form as the given role. */
+  async function postSso(role: OrganizationRoles) {
+    requirePermissionMock.mockResolvedValue({
+      organizationId: "org-1",
+      currentOrganization: baseOrganization(),
+      role,
+      access: accessFor([role]),
+      organizations: [baseOrganization()],
+      userOrganizations: [],
+      canUseBarcodes: false,
+    } as any);
+
+    const body = new URLSearchParams({
+      intent: "sso",
+      id: "sso-1",
+      adminGroupId: "grp-admin",
+    });
+
+    return (await action(
+      createActionArgs({
+        context: mockContext,
+        request: new Request("http://localhost/settings/general", {
+          method: "POST",
+          body,
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        }),
+        params: {},
+      })
+    )) as { init?: { status?: number } };
+  }
+
+  it("answers an ADMIN with 403: only the owner edits SSO settings", async () => {
+    const response = await postSso(OrganizationRoles.ADMIN);
+
+    expect(response.init?.status).toBe(403);
+  });
+
+  it("answers the OWNER of a workspace without SSO with 400", async () => {
+    const response = await postSso(OrganizationRoles.OWNER);
+
+    expect(response.init?.status).toBe(400);
+  });
+});
+
+describe("settings.general SSO settings write", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    dbMock.user.findUniqueOrThrow.mockResolvedValue({ tierId: "tier_2" });
+  });
+
+  it("writes every group mapping, the Manager group included", async () => {
+    const ssoOrganization = { ...baseOrganization(), enabledSso: true };
+    requirePermissionMock.mockResolvedValue({
+      organizationId: "org-1",
+      currentOrganization: ssoOrganization,
+      role: OrganizationRoles.OWNER,
+      access: accessFor([OrganizationRoles.OWNER]),
+      organizations: [ssoOrganization],
+      userOrganizations: [],
+      canUseBarcodes: false,
+    } as any);
+
+    const body = new URLSearchParams({
+      intent: "sso",
+      id: "org-1",
+      adminGroupId: "grp-admin",
+      managerGroupId: "grp-manager",
+      selfServiceGroupId: "grp-self-service",
+      baseUserGroupId: "grp-base",
+    });
+
+    await action(
+      createActionArgs({
+        context: mockContext,
+        request: new Request("http://localhost/settings/general", {
+          method: "POST",
+          body,
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        }),
+        params: {},
+      })
+    );
+
+    expect(updateOrganizationMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "org-1",
+        ssoDetails: {
+          adminGroupId: "grp-admin",
+          managerGroupId: "grp-manager",
+          selfServiceGroupId: "grp-self-service",
+          baseUserGroupId: "grp-base",
+        },
+      })
     );
   });
 });

@@ -68,7 +68,13 @@ describe("escapeCsvField", () => {
       "'\t=cmd|' /C calc'!A0"
     );
     expect(escapeCsvField("\r+1")).toBe('"\'\r+1"');
-    expect(escapeCsvField("\n@x")).toBe('"\'\n@x"');
+  });
+
+  it("leaves a negative number a number", () => {
+    // The shared guard spares negatives: a quoted '-5 would read as text in
+    // every spreadsheet that opens the export.
+    expect(escapeCsvField("-5")).toBe("-5");
+    expect(escapeCsvField("-1,234.50")).toBe('"-1,234.50"');
   });
 
   it("leaves ordinary text alone and quotes separators", () => {

@@ -256,17 +256,22 @@ type CheckoutEligibilityAsset = {
  *   live `CHECKED_OUT` status (the all-at-once flow leaves no record);
  * - already returned via partial check-in (`returnedIds`) — those are AVAILABLE
  *   again but DONE for this booking;
- * - in custody (must be released before it can be checked out).
+ * - an INDIVIDUAL asset in custody (must be released before it can go out).
  *
  * QUANTITY_TRACKED assets are partial top-off aware: when a per-asset
  * `remainingByAssetId` map is supplied, eligibility is "remaining > 0" (a QT
  * asset with 2 of 5 units already out is still eligible for the other 3).
- * Without the map the helper preserves the legacy binary gate so existing
- * callers behave unchanged.
+ * Without the map the helper keeps the binary gate. Custody does not exclude a
+ * QT asset: its status reads IN_CUSTODY once SOME units are held, while the
+ * rest may still be bookable, and `partialCheckoutBooking` judges it by its
+ * per-slice cap rather than its status. Excluding it here would offer less
+ * than the server accepts.
  *
- * Shared by the scanner drawer's eligibility filter and its "remaining to check
- * out" denominator so the numerator and denominator always describe the SAME
- * set (the progress bar can reach 100%).
+ * The one check-out eligibility rule on the web: the scan drawer, its
+ * "remaining to check out" denominator, and the booking list's bulk check-out
+ * dropdown and dialog all decide through it. Keep them on this helper — a
+ * surface deciding eligibility on its own offers the user an action the server
+ * refuses.
  *
  * @param asset - The asset (id + live status + optional type)
  * @param checkedOutIds - Set of asset ids already checked out for this booking
@@ -282,27 +287,132 @@ export function isAssetCheckoutEligible(
   remainingByAssetId?: Record<string, number>
 ): boolean {
   if (returnedIds.has(asset.id)) return false;
-  if (asset.status === AssetStatus.IN_CUSTODY) return false;
   // QUANTITY_TRACKED: eligibility is per-unit when the loader supplies a
   // value for the asset (top-off-aware path). The asset has remaining
   // units exactly when remaining > 0. Status CHECKED_OUT for QT implies
   // remaining === 0 (status flips when every slice is claimed), so the
   // remaining gate is sufficient. When the map is absent OR the asset has
-  // no entry (legacy callsites, older tests), fall back to the binary
-  // gate so behaviour is unchanged.
+  // no entry, fall back to the binary gate. Custody is not consulted — see
+  // the JSDoc.
   if (asset.type === AssetType.QUANTITY_TRACKED) {
     if (remainingByAssetId && asset.id in remainingByAssetId) {
       return (remainingByAssetId[asset.id] ?? 0) > 0;
     }
-    // Legacy / unmapped: preserve current behaviour (binary).
     return (
       !checkedOutIds.has(asset.id) && asset.status !== AssetStatus.CHECKED_OUT
     );
   }
-  // INDIVIDUAL: unchanged binary gate.
+  // INDIVIDUAL: custody holds the whole unit, so it cannot go out.
+  if (asset.status === AssetStatus.IN_CUSTODY) return false;
   return (
     !checkedOutIds.has(asset.id) && asset.status !== AssetStatus.CHECKED_OUT
   );
+}
+
+/**
+ * A booking row as the booking page's list components hold it: status and type
+ * arrive as plain strings on loosely typed rows.
+ */
+export type CheckoutCandidate = {
+  id: string;
+  status: string;
+  type?: string | null;
+};
+
+/** The check-out decisions a booking page's selection needs. */
+export type CheckoutEligibility = {
+  /** True when the row can still be checked out on this booking. */
+  isEligible: (asset: CheckoutCandidate) => boolean;
+  /** True when the row came back through a partial check-in. */
+  isReturned: (asset: { id: string }) => boolean;
+};
+
+/**
+ * Builds the check-out decisions for one booking page from its loader data.
+ *
+ * The booking list's bulk dropdown and dialog both read eligibility through
+ * this, so they cannot build the returned set two different ways. Every
+ * decision goes through {@link isAssetCheckoutEligible}.
+ *
+ * `checkedOutAssetIds` names only assets a check-out SESSION sent out; the
+ * Check out button writes none. So an item sent out by the button and checked
+ * back in appears in neither that list nor as `CHECKED_OUT`, and only the
+ * returned set keeps it from being offered again — an offer the server refuses.
+ *
+ * @param args.checkedOutAssetIds - Assets named by this booking's check-out sessions
+ * @param args.partialCheckinDetails - This booking's check-in details, keyed by
+ *   the returned asset's id; only the keys are read
+ * @param args.remainingToCheckOutByAsset - Units still to check out per
+ *   quantity-tracked asset
+ * @returns The eligibility and returned predicates for this booking
+ */
+export function makeCheckoutEligibility({
+  checkedOutAssetIds,
+  partialCheckinDetails,
+  remainingToCheckOutByAsset,
+}: {
+  checkedOutAssetIds: string[];
+  partialCheckinDetails: Record<string, unknown>;
+  remainingToCheckOutByAsset?: Record<string, number>;
+}): CheckoutEligibility {
+  const checkedOutIds = new Set(checkedOutAssetIds);
+  const returnedIds = new Set(Object.keys(partialCheckinDetails));
+
+  return {
+    isEligible: (asset) =>
+      isAssetCheckoutEligible(
+        // Status and type values are the Prisma enum strings; the list rows
+        // carry them untyped.
+        asset as CheckoutEligibilityAsset,
+        checkedOutIds,
+        returnedIds,
+        remainingToCheckOutByAsset
+      ),
+    isReturned: (asset) => returnedIds.has(asset.id),
+  };
+}
+
+/**
+ * Why the booking list's bulk check-out is unavailable for a selection, or
+ * `false` when it is available.
+ *
+ * Each sentence has to be true of the whole selection. An item back on the
+ * shelf is not "already checked out", and naming it that way sends the user
+ * looking for something they are holding; a selection that mixes the two, or
+ * holds an item in custody, gets a reason that claims neither.
+ *
+ * @param selectedAssets - The selected rows, kits excluded
+ * @param eligibility - This booking's decisions, from {@link makeCheckoutEligibility}
+ * @returns A reason to show on the disabled action, or `false`
+ */
+export function describeCheckoutDisabled(
+  selectedAssets: CheckoutCandidate[],
+  eligibility: CheckoutEligibility
+): { reason: string } | false {
+  if (selectedAssets.length === 0) {
+    return { reason: "Select one or more assets to check out." };
+  }
+  if (selectedAssets.some(eligibility.isEligible)) return false;
+
+  if (selectedAssets.every(eligibility.isReturned)) {
+    return {
+      reason:
+        "All selected items were already checked in for this booking and can't be checked out again.",
+    };
+  }
+  if (
+    selectedAssets.every(
+      (asset) =>
+        !eligibility.isReturned(asset) &&
+        asset.status === AssetStatus.CHECKED_OUT
+    )
+  ) {
+    return {
+      reason:
+        "All selected items are already checked out. Select items that are still booked.",
+    };
+  }
+  return { reason: "None of the selected items can be checked out right now." };
 }
 
 /**

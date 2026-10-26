@@ -43,6 +43,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 
     // Use findUnique with organization scoping to prevent cross-tenant access
     const asset = await db.asset.findUnique({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: thumbnail for the asset's own pages, which stay visible for archived assets
       where: { id: assetId, organizationId },
       select: {
         id: true,
@@ -203,6 +204,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 
     // Double-check the asset still exists before updating (in case it was deleted during processing)
     const existsCheck = await db.asset.findUnique({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: existence re-check for the thumbnail of a specific asset, archived or not
       where: { id: assetId, organizationId },
       select: { id: true },
     });
@@ -245,6 +247,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       const assetId = url.searchParams.get("assetId");
       if (assetId && organizationId) {
         const asset = await db.asset.findUnique({
+          // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: fallback read of a specific asset's current thumbnail, archived or not
           where: { id: assetId, organizationId },
           select: {
             id: true,

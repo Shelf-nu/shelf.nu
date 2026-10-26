@@ -199,7 +199,7 @@ export default function ImageWithPreview({
               "z-10 transition-opacity"
             )}
           >
-            <Spinner className="[&_.spinner]:before:border-t-gray-400" />
+            <Spinner />
           </div>
         ) : null}
 
