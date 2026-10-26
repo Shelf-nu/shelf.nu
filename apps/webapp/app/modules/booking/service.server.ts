@@ -182,6 +182,7 @@ import type { RoleAccess } from "~/utils/permissions/role-access";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import { resolveUserDisplayName } from "~/utils/user";
 import type { MergeInclude } from "~/utils/utils";
+import { buildCalendarCustodian } from "./calendar-custodian";
 import {
   attributeDispositionsByBookingAsset,
   attributeSessionCheckoutToSlices,
@@ -221,6 +222,7 @@ import type {
   ReservationEmailAsset,
   ReservationEmailModelRequest,
 } from "./constants";
+import { bookingDraftVisibilityClause } from "./draft-visibility";
 import {
   assetReservedEmailContent,
   cancelledBookingEmailContent,
@@ -13248,27 +13250,6 @@ export function custodianScopeClause(scope: {
 }
 
 /**
- * DRAFT-visibility rule shared by every booking-list query: bookings that are
- * not DRAFT are visible to everyone in the org, while DRAFT bookings are only
- * visible to their creator. Extracted so heavy ({@link getBookings}) and slim
- * ({@link getMinimalBookings}) list queries cannot drift apart on this
- * permission-sensitive predicate.
- *
- * @param userId - The viewer, matched against `Booking.creatorId` for drafts.
- * @returns A `Prisma.BookingWhereInput` OR-clause to push into `where.AND`.
- */
-export function bookingDraftVisibilityClause(
-  userId: Booking["creatorId"]
-): Prisma.BookingWhereInput {
-  return {
-    OR: [
-      { status: { not: "DRAFT" } },
-      { AND: [{ status: "DRAFT" }, { creatorId: userId }] },
-    ],
-  };
-}
-
-/**
  * Slim booking list for pickers that render only a name + date range and
  * filter client-side (e.g. the bulk "add to existing booking" dialog). Unlike
  * {@link getBookings} it selects a handful of scalar columns instead of the
@@ -15120,23 +15101,14 @@ export async function getBookingsForCalendar(params: {
             description: booking.description,
             start: (booking.from as Date).toISOString(),
             end: (booking.to as Date).toISOString(),
-            custodian: {
-              name: custodianName,
-              // Named field by field rather than spread: the loaded row is a
-              // full `User`, and this payload is serialized to the calendar
-              // client. `displayName` belongs on the list — it outranks the
-              // legal-name halves wherever this custodian is rendered.
-              user: booking.custodianUser
-                ? {
-                    id: booking.custodianUserId,
-                    firstName: booking.custodianUser?.firstName,
-                    lastName: booking.custodianUser?.lastName,
-                    displayName: booking.custodianUser?.displayName,
-                    profilePicture: booking.custodianUser?.profilePicture,
-                  }
-                : undefined,
-            },
+            custodian: buildCalendarCustodian({
+              booking,
+              custodianName,
+              viewerUserId: userId,
+              canSeeAllCustody,
+            }),
             creator: {
+              id: null,
               name: booking.creator
                 ? resolveUserDisplayName(booking.creator)
                 : "Unknown",
@@ -20103,3 +20075,5 @@ export async function updateBookingNotificationRecipients({
     });
   }
 }
+
+export { bookingDraftVisibilityClause };
