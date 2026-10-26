@@ -300,6 +300,21 @@ Shelf requires email for authentication. Here are recommended providers:
 2. **Get SMTP credentials** from your domain dashboard
 3. **Configure secrets** with your Mailgun SMTP details
 
+### Groundmail
+
+Until you verify a sending domain and add a payment method, Groundmail only sends from `noreply@mail.groundmail.dev` to your own account email; other recipients are rejected.
+
+1. **Sign up** at [Groundmail](https://groundmail.dev/) and verify your sending domain
+2. **Create an SMTP credential** in the dashboard under SMTP (it starts with `gmsmtp_`)
+3. **Configure SMTP** (use port 2525 if 587 is blocked):
+   ```bash
+   fly secrets set SMTP_HOST="smtp.groundmail.dev"
+   fly secrets set SMTP_PORT=587
+   fly secrets set SMTP_USER="groundmail"
+   fly secrets set SMTP_PWD="your-groundmail-smtp-credential"
+   fly secrets set SMTP_FROM="Shelf.nu <noreply@yourdomain.com>"
+   ```
+
 ### Gmail (Development Only)
 
 ⚠️ **Not recommended for production**
