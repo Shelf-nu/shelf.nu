@@ -1841,22 +1841,24 @@ export function parseSortingOptions(sortBy: string[]): {
       );
     } else if (field.name.startsWith("cf_")) {
       const customFieldName = field.name.slice(3);
-      const alias = `cf_${customFieldName.replace(/\s+/g, "_")}`;
-      // The alias is interpolated into raw SQL both here (ORDER BY) and in
-      // generateCustomFieldSelect (SELECT ... AS <alias>). Reject any alias
-      // that isn't a safe identifier.
-      if (!isSafeSqlIdentifier(alias)) {
+      if (!customFieldName) {
         Logger.warn(
           new ShelfError({
             cause: null,
-            message: "Skipping sort term: unsafe custom field name",
-            additionalData: { fieldName: field.name, alias },
+            message: "Skipping sort term: empty custom field name",
+            additionalData: { fieldName: field.name },
             label: "Assets",
             shouldBeCaptured: false,
           })
         );
         continue;
       }
+      // The alias is interpolated into raw SQL both here (ORDER BY) and in
+      // generateCustomFieldSelect (SELECT ... AS <alias>), so it is built from
+      // the sort position only, never from the field name. Field names are
+      // free text ("Weight (kg)", "S/N") and reach SQL only as a bound
+      // parameter in generateCustomFieldSelect.
+      const alias = `cf_sort_${customFieldSortings.length}`;
       customFieldSortings.push({
         name: customFieldName,
         valueKey: "raw",
@@ -1864,15 +1866,25 @@ export function parseSortingOptions(sortBy: string[]): {
         fieldType: field.fieldType,
       });
 
-      // Apply sort based on custom field type
+      // Apply sort based on custom field type. Most assets leave a custom
+      // field empty, so empty values stay last in both directions; otherwise
+      // a descending sort opens on a page of blanks.
       if (field.fieldType === "DATE" || field.fieldType === "BOOLEAN") {
         // Direct sort for dates and booleans
-        orderByParts.push(`${alias} ${field.direction}`);
-      } else if (field.fieldType === "AMOUNT") {
-        orderByParts.push(`${alias}::numeric ${field.direction}`);
+        orderByParts.push(`${alias} ${field.direction} NULLS LAST`);
+      } else if (field.fieldType === "AMOUNT" || field.fieldType === "NUMBER") {
+        // Numeric order (3 before 12.5). A stored value that is not a plain
+        // number sorts with the empty ones instead of failing the cast.
+        orderByParts.push(
+          `(CASE WHEN ${alias} ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN ${alias}::numeric END) ${field.direction} NULLS LAST`
+        );
       } else {
         // Natural sort for text-based custom fields
-        orderByParts.push(getNormalizedSortExpression(alias, field.direction));
+        orderByParts.push(
+          getNormalizedSortExpression(alias, field.direction, {
+            nullsLast: true,
+          })
+        );
       }
     } else {
       Logger.warn(
@@ -1936,9 +1948,10 @@ function isTextColumn(fieldName: string): boolean {
  *
  * SECURITY: each alias is interpolated as a raw SQL identifier
  * (`AS ${Prisma.raw(cf.alias)}`). This is a defense-in-depth guard: the
- * parser already validates aliases via {@link isSafeSqlIdentifier}, so this
+ * parser builds aliases from the sort position (`cf_sort_<n>`), so this
  * check should never throw in practice. It exists to keep the function
- * safe under future refactors or alternate callers.
+ * safe under future refactors or alternate callers. The field name itself
+ * is always a bound parameter.
  *
  * @throws {ShelfError} If any alias fails identifier validation.
  */
