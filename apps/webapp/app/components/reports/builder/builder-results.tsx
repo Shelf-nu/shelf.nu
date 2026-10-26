@@ -118,16 +118,18 @@ export function BuilderResults({
       ? customFieldName
       : GROUP_BY_LABELS[spec.groupBy];
 
-  // The chart shows the largest groups. For summed measures the compiler
-  // appends one synthetic "Other" point holding the rest; an average cannot
-  // be pooled that way, so those charts simply stop at the last shown group.
+  // The chart shows the largest groups. The compiler appends one synthetic
+  // "Other" point holding the rest, except where it cannot stand for them: an
+  // average cannot be pooled, and beyond the row cap the result holds only the
+  // largest groups, so there is nothing to total the remainder from.
   const chartPoints = chartSeries[0]?.data.length ?? 0;
-  const hasOtherBucket = !AVERAGE_MEASURES.includes(spec.measure);
+  const hasOtherBucket = !AVERAGE_MEASURES.includes(spec.measure) && !truncated;
+  const shownGroups = hasOtherBucket ? chartPoints - 1 : chartPoints;
   const chartSubtitle =
     rows.length > chartPoints
       ? hasOtherBucket
-        ? `Largest ${chartPoints - 1} groups; the rest are "Other"`
-        : `Largest ${chartPoints} groups shown`
+        ? `Largest ${shownGroups} groups; the rest are "Other"`
+        : `Largest ${shownGroups} groups shown`
       : undefined;
 
   const measureFormat = MEASURE_FORMAT[spec.measure];
