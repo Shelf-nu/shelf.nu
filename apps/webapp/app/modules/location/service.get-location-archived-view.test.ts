@@ -66,6 +66,26 @@ describe("getLocation archived view", () => {
     }
   );
 
+  it("counts only the assets the search and custodian filters keep", async () => {
+    await getLocation({
+      id: "loc-1",
+      organizationId: "org-1",
+      search: "Sony",
+      teamMemberIds: ["tm-1"],
+      archivedFilter: "active",
+    });
+
+    const listWhere = findManyMock.mock.calls[0]?.[0]?.where;
+    const countWhere = countMock.mock.calls[0]?.[0]?.where;
+    expect(countWhere?.title).toEqual({
+      contains: "Sony",
+      mode: "insensitive",
+    });
+    expect(countWhere?.OR).toBeDefined();
+    // The pager reads this count, so it must describe exactly the listed rows.
+    expect(countWhere).toEqual(listWhere);
+  });
+
   it("lists every asset when the caller names no view", async () => {
     await getLocation({ id: "loc-1", organizationId: "org-1" });
 

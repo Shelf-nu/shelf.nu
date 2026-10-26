@@ -328,11 +328,6 @@ export async function getLocation(
       ...assetsWhere,
     };
 
-    const assetsCountWhere: Prisma.AssetWhereInput = applyArchivedFilter(
-      { assetLocations: { some: { locationId: id } } },
-      archivedFilter
-    );
-
     const [location, totalAssetsWithinLocation, assets] = await Promise.all([
       /** Get the items */
       db.location.findFirstOrThrow({
@@ -349,8 +344,9 @@ export async function getLocation(
 
       /** Count them */
       db.asset.count({
-        // Follows the archived view so the count matches the list it heads.
-        where: assetsCountWhere,
+        // Same where as the list (archived view, search, custodians), so the
+        // count and the pager built on it describe exactly the listed rows.
+        where: assetsWhereForLocation,
       }),
 
       /**
