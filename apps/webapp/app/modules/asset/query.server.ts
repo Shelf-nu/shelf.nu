@@ -1687,6 +1687,35 @@ function normalizeDirection(raw: string | undefined): "asc" | "desc" {
 }
 
 /**
+ * Splits one `sortBy` spec, `name:direction[:fieldType]`, into its parts.
+ *
+ * Direction and type are read from the END: a custom field name is free
+ * text and may itself contain ":" ("Ratio: target"), so splitting from the
+ * start would read part of the name as the direction.
+ *
+ * @param spec - One `sortBy` value from the URL.
+ * @returns The field name, normalized direction and optional field type.
+ * @throws {ShelfError} 400 when the direction is not "asc" or "desc".
+ */
+function splitSortSpec(spec: string): {
+  name: string;
+  direction: "asc" | "desc";
+  fieldType: CustomFieldType;
+} {
+  const parts = spec.split(":");
+  const last = parts[parts.length - 1]?.toLowerCase();
+  const hasType =
+    parts.length >= 3 && !VALID_DIRECTIONS.has(last as "asc" | "desc");
+  const fieldType = hasType ? parts.pop() : undefined;
+  const direction = parts.length >= 2 ? parts.pop() : undefined;
+  return {
+    name: parts.join(":"),
+    direction: normalizeDirection(direction),
+    fieldType: fieldType as CustomFieldType,
+  };
+}
+
+/**
  * Enhanced sorting options parser with natural sort support.
  * Handles case-insensitive sorting with natural number ordering.
  *
@@ -1708,14 +1737,7 @@ export function parseSortingOptions(sortBy: string[]): {
   orderByInner: string;
   customFieldSortings: CustomFieldSorting[];
 } {
-  const fields = sortBy.map((s) => {
-    const [name, direction, fieldType] = s.split(":");
-    return {
-      name: name ?? "",
-      direction: normalizeDirection(direction),
-      fieldType: fieldType as CustomFieldType,
-    };
-  });
+  const fields = sortBy.map(splitSortSpec);
 
   const orderByParts: string[] = [];
   const customFieldSortings: CustomFieldSorting[] = [];

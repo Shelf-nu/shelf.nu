@@ -207,6 +207,20 @@ describe("parseSortingOptions", () => {
       expect(orderByClause).not.toContain("DROP");
     });
 
+    it.each([
+      ["cf_Ratio: target:asc:NUMBER", "Ratio: target", "NUMBER"],
+      ["cf_Ratio: target:desc", "Ratio: target", undefined],
+      ["cf_a:b:c:asc:TEXT", "a:b:c", "TEXT"],
+    ])(
+      "keeps the colons of a custom field name in %s",
+      (spec, name, fieldType) => {
+        const { customFieldSortings } = parseSortingOptions([spec]);
+        expect(customFieldSortings).toEqual([
+          { name, valueKey: "raw", alias: "cf_sort_0", fieldType },
+        ]);
+      }
+    );
+
     it("gives each custom field sort its own alias", () => {
       const { orderByClause, customFieldSortings } = parseSortingOptions([
         "cf_S/N:asc:TEXT",
