@@ -70,6 +70,31 @@ describe("ListItemTagsColumn", () => {
     );
   });
 
+  it("lets a keyboard user open the overflow and focus its tag links", async () => {
+    const tags = [1, 2, 3].map(createTag);
+
+    render(
+      <MemoryRouter>
+        <ListItemTagsColumn tags={tags} linkToAssets />
+      </MemoryRouter>
+    );
+
+    const user = userEvent.setup();
+    await user.tab(); // Tag 1
+    await user.tab(); // Tag 2
+    await user.tab(); // "+1"
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "Show 1 more" })
+    );
+
+    await user.keyboard("{Enter}");
+    const overflowLink = await screen.findByRole("link", { name: /Tag 3/ });
+    await user.tab();
+
+    expect(document.activeElement).toBe(overflowLink);
+    expect(overflowLink.getAttribute("href")).toBe("/assets?tag=tag-3");
+  });
+
   it("renders plain tags for a viewer who may not read assets", () => {
     viewer.roles = [];
 

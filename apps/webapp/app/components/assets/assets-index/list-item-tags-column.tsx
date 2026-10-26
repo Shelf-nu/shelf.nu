@@ -8,8 +8,8 @@ import { AssetsFilterLink } from "../assets-filter-link";
  * Tags of an asset in a list row: the first two, then a "+N" chip listing the
  * rest on hover.
  *
- * With `linkToAssets`, each tag (in the row and in the "+N" list) opens the
- * asset index filtered to that tag. Leave it off in pickers whose rows toggle
+ * With `linkToAssets`, each tag (in the row and in the "+N" popover) opens
+ * the asset index filtered to that tag. Leave it off in pickers whose rows toggle
  * a selection.
  */
 export const ListItemTagsColumn = ({
@@ -29,6 +29,7 @@ export const ListItemTagsColumn = ({
       items={tags}
       showCount={2}
       className="justify-start text-left"
+      interactive={linkToAssets}
       renderItem={(tag) =>
         linkToAssets ? (
           <AssetsFilterLink

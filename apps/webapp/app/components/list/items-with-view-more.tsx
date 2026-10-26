@@ -1,4 +1,20 @@
+/**
+ * Items With View More
+ *
+ * Shows the first few items of a list inline and folds the rest behind a
+ * "+N" chip. Plain items fold into a tooltip; items that are links fold into a
+ * popover, which keyboard users can open and move through.
+ *
+ * @see {@link file://./../assets/assets-index/list-item-tags-column.tsx}
+ */
+import { useState } from "react";
 import type { ReactNode } from "react";
+import {
+  Popover,
+  PopoverContent,
+  PopoverPortal,
+  PopoverTrigger,
+} from "@radix-ui/react-popover";
 import get from "lodash/get";
 import { tw } from "~/utils/tw";
 import { GrayBadge } from "../shared/gray-badge";
@@ -36,6 +52,12 @@ type ItemsWithViewMoreProps<T> = MergedProps<T> & {
   showCount?: number;
   className?: string;
   emptyMessage?: string | ReactNode;
+  /**
+   * The items are links or controls. The hidden ones then open in a popover
+   * (hover, click or Enter) that stays open while focus moves through it; a
+   * tooltip closes as soon as focus leaves the "+N" chip.
+   */
+  interactive?: boolean;
 };
 
 export default function ItemsWithViewMore<T>({
@@ -43,6 +65,7 @@ export default function ItemsWithViewMore<T>({
   items,
   showCount = 2,
   emptyMessage = "No items",
+  interactive = false,
   ...restProps
 }: ItemsWithViewMoreProps<T>) {
   // Filter out any null/undefined items first
@@ -72,7 +95,11 @@ export default function ItemsWithViewMore<T>({
     <div className={tw("flex items-center gap-2 text-right", className)}>
       {visibleItems.map((item) => itemRenderer(item))}
 
-      {remainingItems.length > 0 ? (
+      {remainingItems.length > 0 && interactive ? (
+        <MoreItemsPopover label={`+${filteredItems.length - showCount}`}>
+          {remainingItems.map((item) => itemRenderer(item))}
+        </MoreItemsPopover>
+      ) : remainingItems.length > 0 ? (
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger>
@@ -89,5 +116,44 @@ export default function ItemsWithViewMore<T>({
         </TooltipProvider>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * The "+N" chip for interactive items: a popover that opens on hover like the
+ * tooltip it replaces, and also on click or Enter so keyboard users can reach
+ * the links inside. Focus moves into the content and back to the chip on close.
+ */
+function MoreItemsPopover({
+  label,
+  children,
+}: {
+  /** The chip text, e.g. "+3" */
+  label: string;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        type="button"
+        aria-label={`Show ${label.slice(1)} more`}
+        onMouseEnter={() => setOpen(true)}
+        className="rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
+      >
+        <GrayBadge>{label}</GrayBadge>
+      </PopoverTrigger>
+      <PopoverPortal>
+        <PopoverContent
+          side="top"
+          sideOffset={6}
+          onMouseLeave={() => setOpen(false)}
+          className="z-50 flex max-w-72 flex-wrap items-center gap-2 rounded-md border bg-white p-3 text-sm font-medium shadow-lg"
+        >
+          {children}
+        </PopoverContent>
+      </PopoverPortal>
+    </Popover>
   );
 }
