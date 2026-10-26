@@ -50,26 +50,41 @@ export function useAssetData(
   // never replaces a newer one.
   const latestRequest = useRef(0);
 
-  const fetchAsset = useCallback(async () => {
-    if (!orgId) return;
-    const request = ++latestRequest.current;
-    const { data, error: fetchErr } = await api.asset(assetId, orgId);
-    if (request !== latestRequest.current) return;
-    // Request cancelled (navigation): ignore
-    if (!data && !fetchErr) return;
-    if (fetchErr || !data) {
-      setError(fetchErr || "Failed to load asset details");
-      setAsset(null);
-    } else {
-      setAsset(data.asset);
-      setError(null);
-    }
-  }, [assetId, orgId]);
-
   // The asset-change version this screen's data reflects (see
   // lib/asset-refresh.ts). Read before each fetch starts, so a change saved
   // while a request is in flight still triggers the next focus refetch.
   const seenChangeVersion = useRef(assetChangeVersion(assetId));
+
+  /**
+   * Loads the asset and applies the answer if it is still the newest request.
+   * Every successful load marks the change version it started at as seen.
+   *
+   * @param quiet - On failure, keep the asset on screen instead of switching
+   *   to the error state
+   */
+  const loadAsset = useCallback(
+    async (quiet: boolean) => {
+      if (!orgId) return;
+      const request = ++latestRequest.current;
+      const version = assetChangeVersion(assetId);
+      const { data, error: fetchErr } = await api.asset(assetId, orgId);
+      if (request !== latestRequest.current) return;
+      // Request cancelled (navigation): ignore
+      if (!data && !fetchErr) return;
+      if (fetchErr || !data) {
+        if (quiet) return;
+        setError(fetchErr || "Failed to load asset details");
+        setAsset(null);
+      } else {
+        seenChangeVersion.current = version;
+        setAsset(data.asset);
+        setError(null);
+      }
+    },
+    [assetId, orgId]
+  );
+
+  const fetchAsset = useCallback(() => loadAsset(false), [loadAsset]);
 
   useEffect(() => {
     // why: when orgId is briefly undefined (org context still hydrating)
@@ -90,21 +105,17 @@ export function useAssetData(
   useFocusEffect(
     useCallback(() => {
       if (!orgId) return;
-      const version = assetChangeVersion(assetId);
-      if (version === seenChangeVersion.current) return;
-      const request = ++latestRequest.current;
-      void api.asset(assetId, orgId).then(({ data }) => {
-        if (request !== latestRequest.current || !data) return;
-        seenChangeVersion.current = version;
-        setAsset(data.asset);
-        setError(null);
-      });
+      if (assetChangeVersion(assetId) === seenChangeVersion.current) return;
+      void loadAsset(true);
+      // loadAsset claims its request number before its first await, so this
+      // is the number of the refetch just started.
+      const request = latestRequest.current;
       // Leaving the screen, or a workspace switch, drops this refetch if it
       // is still the newest request; the version stays unseen for next time.
       return () => {
         if (latestRequest.current === request) latestRequest.current += 1;
       };
-    }, [assetId, orgId])
+    }, [assetId, orgId, loadAsset])
   );
 
   const onRefresh = async () => {

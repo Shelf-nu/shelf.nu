@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { Alert } from "react-native";
 import { useNavigation, usePreventRemove } from "@react-navigation/native";
 import { valuationFromInput } from "@/lib/asset-valuation";
+import { editLeaveGuard } from "@/lib/edit-leave-guard";
 import type { AssetDetail, Category, Location, Tag } from "@/lib/api";
 import type { CustomFieldState } from "./use-edit-asset-form";
 
@@ -78,12 +79,11 @@ export function useFormValidation({
     originalAsset,
   ]);
 
-  // Warn on back navigation if there are unsaved changes
-  usePreventRemove(isDirty && !didSave, ({ data }) => {
-    // While the save request runs, leaving (header back, swipe back) is held
-    // off without a prompt: the save's own success alert navigates once it
-    // answers, and an error keeps the user on the form.
-    if (isSubmitting) return;
+  // Rules (held while saving, released after a save) in lib/edit-leave-guard.ts
+  const guard = editLeaveGuard({ isDirty, didSave, isSubmitting });
+
+  usePreventRemove(guard.hold, ({ data }) => {
+    if (!guard.prompt) return;
     Alert.alert(
       "Discard Changes?",
       "You have unsaved changes. Are you sure you want to go back?",
