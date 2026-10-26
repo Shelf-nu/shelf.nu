@@ -38,6 +38,7 @@ import {
   createNote,
 } from "~/modules/note/service.server";
 import { getQr } from "~/modules/qr/service.server";
+import { CUSTODY_FILTER_REFUSED } from "~/utils/custody-filter";
 import { ShelfError } from "~/utils/error";
 import { createSignedUrl } from "~/utils/storage.server";
 import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
@@ -6168,15 +6169,16 @@ describe("getAssets search via UNION", () => {
     // no-args call); this suite always calls it with args, so the mock
     // is asserted non-null rather than widening the type in every test.
     const where = findManyMock.mock.calls[0][0]!.where!;
-    expect(where.OR).toEqual([{ id: { in: ["a1", "a2"] } }]);
-    // exactly one fetch — no fallback re-query
+    expect(where.AND).toEqual([{ id: { in: ["a1", "a2"] } }]);
+    expect(where.OR).toBeUndefined();
+    // exactly one fetch, no fallback re-query
     expect(findManyMock).toHaveBeenCalledTimes(1);
   });
 
   it("does not run the UNION when there is no search term", async () => {
     await getAssets({ ...base, search: null });
     expect(queryRawMock).not.toHaveBeenCalled();
-    expect(findManyMock.mock.calls[0][0]!.where!.OR).toBeUndefined();
+    expect(findManyMock.mock.calls[0][0]!.where!.AND).toBeUndefined();
   });
 
   it("fail-closed: whitespace-only search matches nothing, no UNION", async () => {
@@ -6185,24 +6187,73 @@ describe("getAssets search via UNION", () => {
     expect(findManyMock.mock.calls[0][0]!.where!.id).toEqual({ in: [] });
   });
 
-  it("preserves filter OR-entanglement: uncategorized appends after the search id set", async () => {
+  it("narrows the search with uncategorized instead of adding to it", async () => {
     await getAssets({
       ...base,
       search: "chair",
       categoriesIds: ["uncategorized"],
     });
     const where = findManyMock.mock.calls[0][0]!.where!;
-    expect(where.OR).toEqual([
+    expect(where.OR).toBeUndefined();
+    expect(where.AND).toEqual([
       { id: { in: ["a1", "a2"] } },
-      { categoryId: { in: ["uncategorized"] } },
-      { categoryId: null },
+      {
+        OR: [{ categoryId: { in: ["uncategorized"] } }, { categoryId: null }],
+      },
     ]);
+  });
+
+  it("narrows the search with a tag filter instead of adding to it", async () => {
+    await getAssets({ ...base, search: "chair", tagsIds: ["tag-1"] });
+    const where = findManyMock.mock.calls[0][0]!.where!;
+    expect(where.OR).toBeUndefined();
+    expect(where.AND).toEqual([
+      { id: { in: ["a1", "a2"] } },
+      { OR: [{ tags: { some: { id: { in: ["tag-1"] } } } }] },
+    ]);
+  });
+
+  it("keeps 'untagged' and picked tags in one group, ANDed with the search", async () => {
+    await getAssets({
+      ...base,
+      search: "chair",
+      tagsIds: ["untagged", "tag-1"],
+    });
+    const where = findManyMock.mock.calls[0][0]!.where!;
+    expect(where.AND).toEqual([
+      { id: { in: ["a1", "a2"] } },
+      {
+        OR: [
+          { tags: { none: {} } },
+          { tags: { some: { id: { in: ["tag-1"] } } } },
+        ],
+      },
+    ]);
+  });
+
+  it("ANDs the custodian and without-location groups with the search", async () => {
+    await getAssets({
+      ...base,
+      search: "chair",
+      teamMemberIds: ["tm-1"],
+      locationIds: ["without-location"],
+    });
+    const where = findManyMock.mock.calls[0][0]!.where!;
+    expect(where.OR).toBeUndefined();
+    const groups = where.AND as Prisma.AssetWhereInput[];
+    expect(groups[0]).toEqual({ id: { in: ["a1", "a2"] } });
+    // One group per filter: location first, then custodian.
+    expect(groups).toHaveLength(3);
+    expect(groups[1].OR).toContainEqual({ assetLocations: { none: {} } });
+    expect(groups[2].OR).toContainEqual({
+      custody: { some: { teamMemberId: { in: ["tm-1"] } } },
+    });
   });
 
   it("empty search-id set yields an empty id filter (matches nothing on its own)", async () => {
     queryRawMock.mockResolvedValue([]);
     await getAssets({ ...base, search: "zzz-no-match" });
-    expect(findManyMock.mock.calls[0][0]!.where!.OR).toEqual([
+    expect(findManyMock.mock.calls[0][0]!.where!.AND).toEqual([
       { id: { in: [] } },
     ]);
   });
@@ -6231,6 +6282,68 @@ describe("getAssets search via UNION", () => {
     // short-circuited before the asset fetch (both findMany and count)
     expect(findManyMock).not.toHaveBeenCalled();
     expect(countMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("getAssets filter groups without a search", () => {
+  const findManyMock = vi.mocked(db.asset.findMany);
+  const countMock = vi.mocked(db.asset.count);
+
+  beforeEach(() => {
+    findManyMock.mockReset().mockResolvedValue([]);
+    countMock.mockReset().mockResolvedValue(0);
+  });
+
+  const base = {
+    organizationId: "org_1",
+    page: 1,
+    perPage: 20,
+    orderBy: "createdAt" as const,
+    orderDirection: "desc" as const,
+  };
+
+  it("ANDs uncategorized, untagged and without-location as separate groups", async () => {
+    await getAssets({
+      ...base,
+      categoriesIds: ["uncategorized"],
+      tagsIds: ["untagged", "tag-1"],
+      locationIds: ["without-location"],
+    });
+    // why: findMany's args are typed optional; this path always passes them.
+    const where = findManyMock.mock.calls[0][0]!.where!;
+
+    expect(where.OR).toBeUndefined();
+    expect(where.AND).toEqual([
+      {
+        OR: [{ categoryId: { in: ["uncategorized"] } }, { categoryId: null }],
+      },
+      {
+        OR: [
+          { tags: { none: {} } },
+          { tags: { some: { id: { in: ["tag-1"] } } } },
+        ],
+      },
+      {
+        OR: [
+          {
+            assetLocations: {
+              some: { locationId: { in: ["without-location"] } },
+            },
+          },
+          { assetLocations: { none: {} } },
+        ],
+      },
+    ]);
+  });
+
+  it("matches nothing for a refused custodian filter, even with 'without custody' beside it", async () => {
+    await getAssets({
+      ...base,
+      teamMemberIds: [CUSTODY_FILTER_REFUSED, "without-custody"],
+    });
+    const where = findManyMock.mock.calls[0][0]!.where!;
+
+    expect(where.AND).toContainEqual({ id: CUSTODY_FILTER_REFUSED });
   });
 });
 
