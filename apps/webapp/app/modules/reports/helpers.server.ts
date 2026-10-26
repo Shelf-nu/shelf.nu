@@ -1702,10 +1702,51 @@ export async function idleAssetsReport(
 }
 
 /**
- * Fetch idle asset rows with last booking date.
+ * The assets the Idle Assets report lists: the caller's asset predicate,
+ * not out on a booking right now, and with no returned booking that ended on
+ * or after the cutoff (never-booked assets qualify).
  *
- * An asset is considered idle if it hasn't been part of any booking
- * that was checked out since the cutoff date.
+ * The rows, the count and the KPIs all query with this one predicate, in the
+ * database, so `skip`/`take` page through idle assets only and every page
+ * holds as many rows as the pager says.
+ *
+ * @param organizationId - Workspace scope, enforced here as well as in `assetWhere`
+ * @param assetWhere - Active inventory plus the filter bar's predicate
+ * @param cutoffDate - A returned booking ending on or after this is a recent use
+ */
+function idleAssetWhere(
+  organizationId: string,
+  assetWhere: Prisma.AssetWhereInput,
+  cutoffDate: Date
+): Prisma.AssetWhereInput {
+  return {
+    AND: [
+      assetWhere,
+      { organizationId },
+      {
+        NOT: {
+          bookingAssets: {
+            some: { booking: { status: { in: ["ONGOING", "OVERDUE"] } } },
+          },
+        },
+      },
+      {
+        NOT: {
+          bookingAssets: {
+            some: {
+              booking: {
+                AND: [RETURNED_BOOKING_WHERE, { to: { gte: cutoffDate } }],
+              },
+            },
+          },
+        },
+      },
+    ],
+  };
+}
+
+/**
+ * Fetch one page of idle asset rows with their last booking date.
  */
 async function fetchIdleAssetRows(
   organizationId: string,
@@ -1716,27 +1757,12 @@ async function fetchIdleAssetRows(
 ): Promise<IdleAssetRow[]> {
   const now = new Date();
 
-  // Get assets with their last booking checkout. Phase 3a: walk the
-  // `BookingAsset` pivot for both the exclusion filter and the
-  // most-recent-completed sub-query. `organizationId` is enforced
-  // explicitly here for defense-in-depth alongside the caller's
-  // `assetWhere`. `mainImage`, `mainImageExpiration`, `organizationId`
-  // are selected so we can pipe the assets through
-  // `refreshExpiredAssetImages` below without an extra round-trip.
+  // One page of idle assets (see `idleAssetWhere`), each with its most
+  // recent returned booking for the Last Used column. `mainImage`,
+  // `mainImageExpiration` and `organizationId` are selected so the assets
+  // can go through `refreshExpiredAssetImages` without an extra round-trip.
   const assets = await db.asset.findMany({
-    where: {
-      ...assetWhere,
-      organizationId,
-      NOT: {
-        bookingAssets: {
-          some: {
-            booking: {
-              status: { in: ["ONGOING", "OVERDUE"] },
-            },
-          },
-        },
-      },
-    },
+    where: idleAssetWhere(organizationId, assetWhere, cutoffDate),
     // Least recently updated first; `id` tiebreaker keeps skip/take paging
     // deterministic for assets sharing an `updatedAt` (bulk operations).
     orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
@@ -1788,16 +1814,9 @@ async function fetchIdleAssetRows(
     },
   });
 
-  // Filter to only include assets that are actually idle (no recent booking)
-  const idleAssets = assets.filter((asset) => {
-    const lastBookingEnd = asset.bookingAssets[0]?.booking.to;
-    if (!lastBookingEnd) return true; // Never booked = idle
-    return lastBookingEnd < cutoffDate;
-  });
-
   // Re-sign expired thumbnail signed URLs in place. No-op when URLs are
   // still fresh (the helper checks `mainImageExpiration > now` first).
-  const refreshedAssets = await refreshExpiredAssetImages(idleAssets);
+  const refreshedAssets = await refreshExpiredAssetImages(assets);
 
   return refreshedAssets.map((asset) => {
     const lastBookedAt = asset.bookingAssets[0]?.booking.to || null;
@@ -1837,45 +1856,9 @@ async function countIdleAssets(
   assetWhere: Prisma.AssetWhereInput,
   cutoffDate: Date
 ): Promise<number> {
-  // Get all potentially idle assets — Phase 3a: walk the BookingAsset
-  // pivot for both the exclusion filter and the most-recent-completed
-  // sub-query. `organizationId` is enforced explicitly as a
-  // defense-in-depth guard alongside the caller-supplied `assetWhere`.
-  const assets = await db.asset.findMany({
-    where: {
-      ...assetWhere,
-      organizationId,
-      NOT: {
-        bookingAssets: {
-          some: {
-            booking: {
-              status: { in: ["ONGOING", "OVERDUE"] },
-            },
-          },
-        },
-      },
-    },
-    select: {
-      id: true,
-      bookingAssets: {
-        where: {
-          booking: RETURNED_BOOKING_WHERE,
-        },
-        orderBy: { booking: { to: "desc" } },
-        take: 1,
-        select: {
-          booking: { select: { to: true } },
-        },
-      },
-    },
+  return db.asset.count({
+    where: idleAssetWhere(organizationId, assetWhere, cutoffDate),
   });
-
-  // Filter to only truly idle assets
-  return assets.filter((asset) => {
-    const lastBookingEnd = asset.bookingAssets[0]?.booking.to;
-    if (!lastBookingEnd) return true;
-    return lastBookingEnd < cutoffDate;
-  }).length;
 }
 
 async function computeIdleAssetsKpis(
@@ -1897,24 +1880,10 @@ async function computeIdleAssetsKpis(
     },
   });
 
-  // Get idle assets with details — Phase 3a: walk the BookingAsset
-  // pivot for both the exclusion filter and the most-recent-completed
-  // sub-query. Org scoping is enforced explicitly here so the helper is
-  // safe even if `assetWhere` ever loses its organizationId clause.
-  const idleAssets = await db.asset.findMany({
-    where: {
-      ...assetWhere,
-      organizationId,
-      NOT: {
-        bookingAssets: {
-          some: {
-            booking: {
-              status: { in: ["ONGOING", "OVERDUE"] },
-            },
-          },
-        },
-      },
-    },
+  // Every idle asset (see `idleAssetWhere`) with its most recent returned
+  // booking, for the value and average-days KPIs.
+  const trulyIdle = await db.asset.findMany({
+    where: idleAssetWhere(organizationId, assetWhere, cutoffDate),
     select: {
       id: true,
       valuation: true,
@@ -1933,13 +1902,6 @@ async function computeIdleAssetsKpis(
         },
       },
     },
-  });
-
-  // Filter to truly idle and calculate metrics
-  const trulyIdle = idleAssets.filter((asset) => {
-    const lastBookingEnd = asset.bookingAssets[0]?.booking.to;
-    if (!lastBookingEnd) return true;
-    return lastBookingEnd < cutoffDate;
   });
 
   const totalIdle = trulyIdle.length;

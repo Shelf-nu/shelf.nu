@@ -1,12 +1,13 @@
 /**
- * Idle Assets Report — Last-Use Predicate Tests
+ * Idle Assets Report: Idle Predicate Tests
  *
- * Covers the public `idleAssetsReport` function: that every helper (rows,
- * count, KPIs) finds an asset's last use with the archive-aware predicate —
- * archiving rewrites a COMPLETE booking's status to ARCHIVED, so matching
- * COMPLETE alone would make assets look idle the moment their last booking
- * ages into the archive — and that the recency filter itself keeps recently
- * used assets out while including stale and never-booked ones.
+ * Covers the public `idleAssetsReport` function: that the rows, the count and
+ * the KPIs all select idle assets with one database predicate (so a page holds
+ * as many rows as the pager says), that the predicate reads a "use" as an
+ * archive-aware returned booking (archiving rewrites a COMPLETE booking's
+ * status to ARCHIVED, so matching COMPLETE alone would make assets look idle
+ * the moment their last booking ages into the archive), and that a recent use
+ * is one ending on or after the cutoff.
  *
  * @see {@link file://./helpers.server.ts}
  */
@@ -14,10 +15,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // why: Mock the Prisma client so the unit tests never touch a real database.
-// Matches the pattern in `top-booked-kits.server.test.ts`. The report's three
-// helpers all read assets via `db.asset.findMany`; the KPI helper also takes
-// a whole-org `db.asset.count`. Fixtures carry no image URLs, so
-// `refreshExpiredAssetImages` never needs further db methods.
+// Matches the pattern in `top-booked-kits.server.test.ts`. The rows and the
+// KPIs read assets via `db.asset.findMany`; the idle count and the KPIs'
+// whole-org denominator use `db.asset.count`. Fixtures carry no image URLs,
+// so `refreshExpiredAssetImages` never needs further db methods.
 vi.mock("~/database/db.server", () => ({
   db: {
     asset: {
@@ -68,52 +69,111 @@ describe("idleAssetsReport", () => {
     vi.useRealTimers();
   });
 
-  it("finds the last use with the archive-aware predicate in all three helpers", async () => {
+  /** The archive-aware "returned booking" predicate a use is matched with. */
+  const RETURNED = {
+    OR: [
+      { status: "COMPLETE" },
+      { status: "ARCHIVED", archivedWithoutCheckin: false },
+    ],
+  };
+
+  /** The `where` of the idle count (the count call that is not org-wide). */
+  function idleCountWhere() {
+    const call = vi
+      .mocked(db.asset.count)
+      .mock.calls.find(([args]) => "AND" in ((args as any).where ?? {}));
+    return (call?.[0] as any)?.where;
+  }
+
+  it("finds the last use with the archive-aware predicate", async () => {
     // `currency` formats the Idle Value KPI string, which these assertions do
-    // not read — supplied because the report requires it, not as a variable.
+    // not read. Supplied because the report requires it.
     await idleAssetsReport({ organizationId: "org-1", currency: "USD" });
 
-    // Rows fetch, idle count, and KPI computation each scan assets once.
+    // The rows and the KPIs each read the last use for display.
     const calls = vi.mocked(db.asset.findMany).mock.calls;
-    expect(calls).toHaveLength(3);
+    expect(calls).toHaveLength(2);
     for (const [args] of calls) {
-      const lastUseWhere = (args as any).select.bookingAssets.where.booking;
-      // Archiving rewrites status (COMPLETE → ARCHIVED), so last use must
-      // match checked-in archives too; never-checked-out archives
-      // (`archivedWithoutCheckin: true`) are not uses.
-      expect(lastUseWhere).toEqual({
-        OR: [
-          { status: "COMPLETE" },
-          { status: "ARCHIVED", archivedWithoutCheckin: false },
-        ],
-      });
+      expect((args as any).select.bookingAssets.where.booking).toEqual(
+        RETURNED
+      );
     }
   });
 
-  it("keeps recently used assets out and includes stale and never-booked ones", async () => {
-    // why: The idle cutoff derives from the wall clock (`now − threshold`);
-    // pinning `now` makes the recency assertions exact.
+  it("leaves out assets returned from a booking on or after the cutoff", async () => {
+    // why: The idle cutoff derives from the wall clock (`now - threshold`);
+    // pinning `now` makes the cutoff exact.
     vi.useFakeTimers().setSystemTime(new Date("2026-08-26T12:00:00Z"));
 
-    // Threshold 30d → cutoff 2026-07-27T12:00:00Z.
-    vi.mocked(db.asset.findMany).mockResolvedValue([
-      idleAsset("asset-recent", "2026-08-20T00:00:00Z"), // used after cutoff
-      idleAsset("asset-stale", "2026-05-01T00:00:00Z"), // last use before cutoff
-      idleAsset("asset-never", null), // never booked
-    ] as any);
-    vi.mocked(db.asset.count).mockResolvedValue(3 as any);
+    await idleAssetsReport({
+      organizationId: "org-1",
+      currency: "USD",
+      idleThresholdDays: 30,
+    });
+
+    // Threshold 30d puts the cutoff at 2026-07-27T12:00:00Z.
+    const where = idleCountWhere();
+    expect(where.AND).toContainEqual({
+      NOT: {
+        bookingAssets: {
+          some: {
+            booking: {
+              AND: [
+                RETURNED,
+                { to: { gte: new Date("2026-07-27T12:00:00Z") } },
+              ],
+            },
+          },
+        },
+      },
+    });
+    // Assets out on a booking right now are not idle either.
+    expect(where.AND).toContainEqual({
+      NOT: {
+        bookingAssets: {
+          some: { booking: { status: { in: ["ONGOING", "OVERDUE"] } } },
+        },
+      },
+    });
+    expect(where.AND).toContainEqual({ organizationId: "org-1" });
+  });
+
+  it("pages, counts and totals the same idle assets", async () => {
+    vi.mocked(db.asset.count).mockResolvedValue(12 as any);
 
     const result = await idleAssetsReport({
       organizationId: "org-1",
       currency: "USD",
-      idleThresholdDays: 30,
+      page: 3,
+      pageSize: 5,
+    });
+
+    const [rowsCall, kpiCall] = vi.mocked(db.asset.findMany).mock.calls;
+    const rowsArgs = rowsCall[0] as any;
+    // The page is cut from idle assets only, so it is full whenever the
+    // count says more idle assets follow.
+    expect(rowsArgs.where).toEqual(idleCountWhere());
+    expect(rowsArgs.skip).toBe(10);
+    expect(rowsArgs.take).toBe(5);
+    expect((kpiCall[0] as any).where).toEqual(idleCountWhere());
+    expect(result.totalRows).toBe(12);
+  });
+
+  it("returns every asset of the page the database answers", async () => {
+    vi.mocked(db.asset.findMany).mockResolvedValue([
+      idleAsset("asset-stale", "2026-05-01T00:00:00Z"),
+      idleAsset("asset-never", null),
+    ] as any);
+
+    const result = await idleAssetsReport({
+      organizationId: "org-1",
+      currency: "USD",
     });
 
     expect(result.rows.map((r) => r.assetId)).toEqual([
       "asset-stale",
       "asset-never",
     ]);
-    expect(result.totalRows).toBe(2);
     const totalIdle = result.kpis.find((k) => k.id === "total_idle");
     expect(totalIdle?.rawValue).toBe(2);
   });
