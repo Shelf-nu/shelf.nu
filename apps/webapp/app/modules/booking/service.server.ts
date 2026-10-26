@@ -183,6 +183,7 @@ import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import { resolveUserDisplayName } from "~/utils/user";
 import type { MergeInclude } from "~/utils/utils";
 import { buildCalendarCustodian } from "./calendar-custodian";
+import { resolveSentUnits } from "./checkin-receipt";
 import {
   attributeDispositionsByBookingAsset,
   attributeSessionCheckoutToSlices,
@@ -4492,32 +4493,6 @@ const CATEGORY_FIELD = {
 >;
 
 /**
- * Units a slice actually sent out on its booking.
- *
- * Whether a slice left is answered by its own `checkedOutAt` and nothing else:
- * {@link computeBookingAssetsSliceRemainingToCheckOut} reports a slice with no
- * session claims as fully dispatched whenever the booking is live and the
- * ASSET reads CHECKED_OUT, and that status is global, so a sibling slice being
- * out is enough to trigger it. A slice that never left sent nothing.
- *
- * A slice marked out that the sessions cannot size falls back to its booked
- * quantity, the direction that keeps its kit held while the two disagree.
- *
- * @param slice - The slice's booked quantity and its check-out marker
- * @param remainingToCheckOut - What the slice can still check out, from
- *   {@link computeBookingAssetsSliceRemainingToCheckOut}
- * @returns Units the slice sent out, at most its booked quantity
- */
-export function unitsSentOutOnSlice(
-  slice: { quantity: number; checkedOutAt: Date | null },
-  remainingToCheckOut: number
-): number {
-  if (!slice.checkedOutAt) return 0;
-  const dispatched = slice.quantity - remainingToCheckOut;
-  return dispatched > 0 ? dispatched : slice.quantity;
-}
-
-/**
  * Returns how many units of a QUANTITY_TRACKED asset still need to be
  * accounted for in a booking.
  *
@@ -5823,9 +5798,10 @@ export async function checkinBooking({
               // `getKitIdsToAcquire`, so dropping either is a type error.
               assetKitId: true,
               sourceKitId: true,
-              // Whether the slice left, which bounds what the auto-default may
-              // consume on it.
+              // Whether the slice left and how many of its units did, which
+              // bounds what the auto-default may return or consume on it.
               checkedOutAt: true,
+              checkedOutQuantity: true,
               // Whether the slice already came back, so its check-in event does
               // not claim the method of this check-in.
               checkedInAt: true,
@@ -6097,13 +6073,14 @@ export async function checkinBooking({
         title: ba.asset.title,
         quantity: ba.quantity,
         checkedOutAt: ba.checkedOutAt ?? null,
+        checkedOutQuantity: ba.checkedOutQuantity ?? 0,
       }))
       // The relation carries no ORDER BY, so the order is fixed here. By asset
       // first: the loop locks each asset as it reaches it, and two check-ins
       // must lock shared assets in the same order or they can deadlock. Then,
       // within an asset, standalone before kit-driven, the order every untagged
       // claim uses, because an asset-level disposition applies to the FIRST
-      // slice of its asset.
+      // slice of its asset that has units still out.
       .sort((a, b) =>
         a.assetId !== b.assetId
           ? a.assetId < b.assetId
@@ -6159,33 +6136,8 @@ export async function checkinBooking({
         /**
          * Per-qty-tracked-asset disposition work. Runs FIRST so the
          * pool-drain guard can read the current `Asset.quantity` before
-         * downstream status flips. Uses the Phase 2 row-lock pattern.
+         * downstream status flips, locking each asset row before it writes.
          */
-        /**
-         * ConsumptionLog rows require an attributed user. `checkinBooking`
-         * permits `userId === undefined` (legacy signature), but we can't
-         * write logs without one. If the booking has qty-tracked assets
-         * with remaining units, userId must be provided.
-         */
-        if (qtyTrackedAssetIds.length > 0 && !userId) {
-          // Check if any qty-tracked asset actually has work to do.
-          for (const assetId of qtyTrackedAssetIds) {
-            const remaining = await computeBookingAssetRemaining(
-              tx,
-              id,
-              assetId
-            );
-            if (remaining > 0) {
-              throw new ShelfError({
-                cause: null,
-                status: 400,
-                label,
-                message:
-                  "Internal error: userId is required to check in a booking with quantity-tracked assets.",
-              });
-            }
-          }
-        }
 
         /**
          * Per-asset running pool of remaining units, seeded once from the
@@ -6243,20 +6195,6 @@ export async function checkinBooking({
         const stockChangesByAssetId = new Map<string, StockChangeInput>();
 
         /**
-         * What each slice can still check out, to size the units it sent out.
-         * Only read for slices that left: one that never did sent nothing, and
-         * no read is needed to say so.
-         */
-        const remainingToCheckOutBySlice =
-          await computeBookingAssetsSliceRemainingToCheckOut(
-            tx,
-            id,
-            qtyTrackedSlices
-              .filter((slice) => slice.checkedOutAt)
-              .map((slice) => slice.id)
-          );
-
-        /**
          * Units already accounted for on each slice, from every disposition
          * this booking has logged for the asset. An earlier mobile check-in
          * names no slice, so its logs are untagged; they are spread over the
@@ -6296,10 +6234,7 @@ export async function checkinBooking({
                   id: slice.id,
                   assetKitId: slice.assetKitId,
                   booked: slice.quantity,
-                  owed: unitsSentOutOnSlice(
-                    slice,
-                    remainingToCheckOutBySlice.get(slice.id) ?? 0
-                  ),
+                  owed: resolveSentUnits(slice),
                 })),
               priorLogs: [],
               sessionLogs: loggedDispositions.filter(
@@ -6318,6 +6253,32 @@ export async function checkinBooking({
           }
         }
 
+        /**
+         * Units of a slice that left and are not accounted for yet. Its
+         * auto-default consumes (ONE_WAY) or returns (TWO_WAY) these and no
+         * more. Units that never left the shelf were neither used up nor
+         * brought back: consuming them would destroy stock (and, on a kit
+         * slice, take them out of the kit), and returning them would log a
+         * return for units that never went out.
+         */
+        const unitsStillOutOn = (slice: (typeof qtyTrackedSlices)[number]) =>
+          Math.max(
+            0,
+            resolveSentUnits(slice) - (accountedBySliceId.get(slice.id) ?? 0)
+          );
+
+        /**
+         * Assets with at least one slice that has units still out. An
+         * asset-level explicit disposition names no slice, so it goes to the
+         * first slice of its asset that has units out, and only falls back to
+         * the first slice when none has.
+         */
+        const assetIdsWithUnitsStillOut = new Set(
+          qtyTrackedSlices
+            .filter((slice) => unitsStillOutOn(slice) > 0)
+            .map((slice) => slice.assetId)
+        );
+
         for (const slice of qtyTrackedSlices) {
           const sliceRemaining = await computeBookingAssetSliceRemaining(
             tx,
@@ -6335,36 +6296,25 @@ export async function checkinBooking({
           const cap = Math.min(sliceRemaining, assetCap);
           if (cap <= 0) continue;
 
+          const unitsStillOut = unitsStillOutOn(slice);
+
           // Resolve the effective disposition: explicit-by-slice wins;
-          // else an asset-level explicit applied to ONE slice only; else
-          // the auto-default based on consumptionType (capped to `cap`).
+          // else an asset-level explicit applied to ONE slice only (the
+          // first with units still out); else the auto-default based on
+          // consumptionType (capped to `cap`).
           let explicit = explicitByBookingAssetId.get(slice.id);
           if (!explicit) {
             const assetExplicit = explicitByAssetId.get(slice.assetId);
             if (
               assetExplicit &&
-              !consumedAssetLevelExplicit.has(slice.assetId)
+              !consumedAssetLevelExplicit.has(slice.assetId) &&
+              (unitsStillOut > 0 ||
+                !assetIdsWithUnitsStillOut.has(slice.assetId))
             ) {
               explicit = assetExplicit;
               consumedAssetLevelExplicit.add(slice.assetId);
             }
           }
-
-          /**
-           * Units of a slice that left and are not accounted for yet. Its
-           * auto-default consumes (ONE_WAY) or returns (TWO_WAY) these and no
-           * more. Units that never left the shelf were neither used up nor
-           * brought back: consuming them would destroy stock (and, on a kit
-           * slice, take them out of the kit), and returning them would log a
-           * return for units that never went out.
-           */
-          const unitsStillOut = Math.max(
-            0,
-            unitsSentOutOnSlice(
-              slice,
-              remainingToCheckOutBySlice.get(slice.id) ?? 0
-            ) - (accountedBySliceId.get(slice.id) ?? 0)
-          );
 
           const disposition: CheckinDispositionInput = explicit ?? {
             assetId: slice.assetId,
@@ -6380,6 +6330,19 @@ export async function checkinBooking({
             // An explicit disposition with no quantities ("leave pending"), or
             // a slice with nothing still out.
             continue;
+          }
+
+          // ConsumptionLog rows require an attributed user, so a check-in
+          // that has units to log needs one. A check-in with nothing to log
+          // on its quantity lines completes without it.
+          if (!userId) {
+            throw new ShelfError({
+              cause: null,
+              status: 400,
+              label,
+              message:
+                "Internal error: userId is required to check in a booking with quantity-tracked assets.",
+            });
           }
 
           // Explicit dispositions that over-claim are a hard error (the
@@ -7936,24 +7899,6 @@ export async function partialCheckinBooking({
         await lockAssetForQuantityUpdate(tx, assetId, organizationId);
       }
 
-      /**
-       * What each bare-scanned asset's slices that went out can still check
-       * out, to size the units they sent. A bare scan of a consumable is
-       * defaulted below to the units still out, never to units that stayed on
-       * the shelf. Read once for the session, under the locks above.
-       */
-      const bareScanRemainingToCheckOutBySlice =
-        await computeBookingAssetsSliceRemainingToCheckOut(
-          tx,
-          id,
-          bookingFound.bookingAssets
-            .filter(
-              (slice) =>
-                bareCheckinAssetIds.has(slice.assetId) && slice.checkedOutAt
-            )
-            .map((slice) => slice.id)
-        );
-
       for (const disp of dispositions) {
         if (assetTypeById.get(disp.assetId) !== AssetType.QUANTITY_TRACKED) {
           continue;
@@ -8015,8 +7960,8 @@ export async function partialCheckinBooking({
         }
 
         // Bare scan of a QUANTITY_TRACKED asset (no explicit disposition):
-        // default to "all remaining" — return all for a returnable (TWO_WAY)
-        // asset, consume all for a consumable (ONE_WAY) one. Mirrors
+        // default to the units still out: return them for a returnable
+        // (TWO_WAY) asset, consume them for a consumable (ONE_WAY) one. Mirrors
         // checkinBooking's big-button default. Only bare ids reach here with a
         // zero disposition (the guard above rejects an explicit zero), so this
         // never overrides an operator's explicit returned/consumed split.
@@ -8036,42 +7981,37 @@ export async function partialCheckinBooking({
               shouldBeCaptured: false,
             });
           }
+          /**
+           * Units of the asset that left and are not accounted for yet. Only
+           * these can come back or have been used up: consuming units that
+           * never left the shelf would destroy stock (and on a kit slice leave
+           * the kit holding units the stock no longer has), and returning them
+           * would log a return for units that never went out. Mirrors the
+           * auto-default in `checkinBooking`.
+           */
+          const slices = bookingFound.bookingAssets.filter(
+            (slice) => slice.assetId === disp.assetId
+          );
+          const sentOut = slices.reduce(
+            (sum, slice) => sum + resolveSentUnits(slice),
+            0
+          );
+          const logged =
+            slices.reduce((sum, slice) => sum + slice.quantity, 0) - remaining;
+          const unitsStillOut = Math.max(0, sentOut - logged);
+          if (unitsStillOut === 0) {
+            throw new ShelfError({
+              cause: null,
+              status: 400,
+              label,
+              message: `Cannot check in "${lockedAsset.title}": none of its units are out on this booking.`,
+              shouldBeCaptured: false,
+            });
+          }
           if (lockedAsset.consumptionType === "ONE_WAY") {
-            /**
-             * Units of the asset that left and are not accounted for yet. Only
-             * these can have been used up: consuming units that never left
-             * the shelf would destroy stock, and on a kit slice leave the kit
-             * holding units the stock no longer has. Mirrors the ONE_WAY
-             * auto-default in `checkinBooking`.
-             */
-            const slices = bookingFound.bookingAssets.filter(
-              (slice) => slice.assetId === disp.assetId
-            );
-            const sentOut = slices.reduce(
-              (sum, slice) =>
-                sum +
-                unitsSentOutOnSlice(
-                  slice,
-                  bareScanRemainingToCheckOutBySlice.get(slice.id) ?? 0
-                ),
-              0
-            );
-            const logged =
-              slices.reduce((sum, slice) => sum + slice.quantity, 0) -
-              remaining;
-            const unitsStillOut = Math.max(0, sentOut - logged);
-            if (unitsStillOut === 0) {
-              throw new ShelfError({
-                cause: null,
-                status: 400,
-                label,
-                message: `Cannot check in "${lockedAsset.title}": none of its units are out on this booking.`,
-                shouldBeCaptured: false,
-              });
-            }
             disp.consumed = Math.min(cap, unitsStillOut);
           } else {
-            disp.returned = cap;
+            disp.returned = Math.min(cap, unitsStillOut);
           }
         }
 
@@ -8438,22 +8378,6 @@ export async function partialCheckinBooking({
         ...new Set(qtySummaries.map((s) => s.assetId)),
       ];
       if (qtyAssetIdsTouched.length > 0) {
-        /**
-         * Units dispatched per slice = booked minus what is still checkoutable.
-         * {@link computeBookingAssetsSliceRemainingToCheckOut} is the reader
-         * every checkout surface already uses, including its all-at-once
-         * fallback, so a slice sent out by the button reports its whole
-         * quantity dispatched and settles exactly as it always has.
-         */
-        const remainingToCheckOutBySlice =
-          await computeBookingAssetsSliceRemainingToCheckOut(
-            tx,
-            id,
-            qtyAssetIdsTouched.flatMap((assetId) =>
-              (bookingSlicesByAssetId.get(assetId) ?? []).map((s) => s.id)
-            )
-          );
-
         const dispositionLogs = await tx.consumptionLog.findMany({
           where: {
             bookingId: id,
@@ -8496,17 +8420,12 @@ export async function partialCheckinBooking({
            * it booked. Sizing the two differently strands a kit either way.
            *
            * How a slice is sized, including a slice that never left, is
-           * {@link unitsSentOutOnSlice}.
+           * {@link resolveSentUnits}, the same reading the check-in receipt
+           * prints.
            */
           const owedBySlice = new Map<string, number>();
           for (const slice of slices) {
-            owedBySlice.set(
-              slice.id,
-              unitsSentOutOnSlice(
-                slice,
-                remainingToCheckOutBySlice.get(slice.id) ?? 0
-              )
-            );
+            owedBySlice.set(slice.id, resolveSentUnits(slice));
           }
 
           // Units this session destroyed out of each kit slice of the asset,

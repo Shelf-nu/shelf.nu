@@ -14810,6 +14810,10 @@ describe("checkinBooking — qty-tracked auto-default", () => {
     (db.consumptionLog.aggregate as ReturnType<typeof vitest.fn>)
       .mockReset()
       .mockResolvedValue({ _sum: { quantity: 0 } });
+    // why: the dispositions this booking already logged, none by default.
+    (db.consumptionLog.findMany as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue([]);
     (db.partialBookingCheckin.findMany as ReturnType<typeof vitest.fn>)
       .mockReset()
       .mockResolvedValue([]);
@@ -15104,6 +15108,117 @@ describe("checkinBooking — qty-tracked auto-default", () => {
     expect(db.asset.update).not.toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ quantity: expect.anything() }),
+      })
+    );
+  });
+
+  it.each([
+    ["untagged", null],
+    ["tagged", "ba-pens-standalone"],
+  ])(
+    "returns only what is still out after an earlier %s return",
+    async (_label, bookingAssetId) => {
+      // why: 4 of the 10 pens went out and a phone check-in already brought 2
+      // back. The button must return the other 2, not the 4 that left, and
+      // not the 8 still booked.
+      expect.assertions(1);
+
+      setupCheckinMocks(ConsumptionType.TWO_WAY);
+      const booking = makeBooking(ConsumptionType.TWO_WAY);
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue({
+        ...booking,
+        bookingAssets: [{ ...booking.bookingAssets[0], checkedOutQuantity: 4 }],
+      });
+      (
+        db.consumptionLog.findMany as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue([
+        {
+          assetId: mockQtyAssetId,
+          bookingAssetId,
+          category: "RETURN",
+          quantity: 2,
+        },
+      ]);
+      // why: the remaining reads count the slice-tagged logs per slice and
+      // every log per asset.
+      (
+        db.consumptionLog.aggregate as ReturnType<typeof vitest.fn>
+      ).mockImplementation(
+        ({ where }: { where: { bookingAssetId?: string } }) =>
+          Promise.resolve({
+            _sum: {
+              quantity:
+                where.bookingAssetId === undefined || bookingAssetId ? 2 : 0,
+            },
+          })
+      );
+
+      await checkinBooking(baseParams);
+
+      expect(
+        vitest
+          .mocked(consumptionLogService.createConsumptionLog)
+          .mock.calls.map(([log]) => [log.category, log.quantity])
+      ).toEqual([["RETURN", 2]]);
+    }
+  );
+
+  it("puts an asset-level disposition on the slice that went out", async () => {
+    // why: an explicit disposition that names no slice lands on one slice of
+    // its asset. The loose slice comes first but never left, so the 5 pens
+    // returned belong to the kit slice that did.
+    expect.assertions(1);
+
+    setupCheckinMocks(ConsumptionType.TWO_WAY);
+    const booking = makeBooking(ConsumptionType.TWO_WAY);
+    const [pens] = booking.bookingAssets;
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...booking,
+      bookingAssets: [
+        { ...pens, id: "ba-pens-loose", checkedOutAt: null },
+        { ...pens, id: "ba-pens-kit", assetKitId: "ak-1" },
+      ],
+    });
+    // why: both slices book 10 pens and nothing is logged yet.
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findMany.mockResolvedValue([
+      { quantity: 10 },
+      { quantity: 10 },
+    ]);
+
+    await checkinBooking({
+      ...baseParams,
+      checkins: [{ assetId: mockQtyAssetId, returned: 5 }],
+    });
+
+    expect(
+      vitest
+        .mocked(consumptionLogService.createConsumptionLog)
+        .mock.calls.map(([log]) => [log.bookingAssetId, log.quantity])
+    ).toEqual([["ba-pens-kit", 5]]);
+  });
+
+  it("completes without a user when no quantity line has units to log", async () => {
+    // why: a log needs an attributed user, but a line that never left logs
+    // nothing, so there is nothing to attribute.
+    expect.assertions(2);
+
+    setupCheckinMocks(ConsumptionType.TWO_WAY);
+    const booking = makeBooking(ConsumptionType.TWO_WAY);
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...booking,
+      bookingAssets: [{ ...booking.bookingAssets[0], checkedOutAt: null }],
+    });
+
+    await checkinBooking({ ...baseParams, userId: undefined });
+
+    expect(consumptionLogService.createConsumptionLog).not.toHaveBeenCalled();
+    expect(db.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: BookingStatus.COMPLETE }),
       })
     );
   });
@@ -19014,15 +19129,13 @@ describe("partialCheckinBooking — slice-grained kit release", () => {
   it("releases a kit once every unit its slice actually sent out is back", async () => {
     expect.assertions(1);
 
-    const slices = [tapeSlice("ba-kit-a", "kit-a", 10), fillerSlice];
+    // Only 3 of the booked 10 ever left.
+    const slices = [
+      { ...tapeSlice("ba-kit-a", "kit-a", 10), checkedOutQuantity: 3 },
+      fillerSlice,
+    ];
     arrangeBooking(slices);
     mockSliceReads({ slices, stillOutNow: [] });
-    // Only 3 of the booked 10 ever left.
-    (
-      db.partialBookingCheckout.findMany as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue([
-      { assetIds: ["asset-x"], quantities: [3], bookingAssetIds: ["ba-kit-a"] },
-    ]);
     (
       db.consumptionLog.findMany as ReturnType<typeof vitest.fn>
     ).mockResolvedValue([
@@ -19043,14 +19156,12 @@ describe("partialCheckinBooking — slice-grained kit release", () => {
   it("holds the kit while a unit its slice sent out is still in the field", async () => {
     expect.assertions(1);
 
-    const slices = [tapeSlice("ba-kit-a", "kit-a", 10), fillerSlice];
+    const slices = [
+      { ...tapeSlice("ba-kit-a", "kit-a", 10), checkedOutQuantity: 3 },
+      fillerSlice,
+    ];
     arrangeBooking(slices);
     mockSliceReads({ slices, stillOutNow: [] });
-    (
-      db.partialBookingCheckout.findMany as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue([
-      { assetIds: ["asset-x"], quantities: [3], bookingAssetIds: ["ba-kit-a"] },
-    ]);
     // 3 went out, 2 came back.
     (
       db.consumptionLog.findMany as ReturnType<typeof vitest.fn>
@@ -19095,15 +19206,14 @@ describe("partialCheckinBooking — slice-grained kit release", () => {
         assetKits: [{ kitId: "kit-a" }, { kitId: "kit-b" }],
       },
     };
-    const slices = [looseSlice, tapeSlice("ba-kit-a", "kit-a", 5), fillerSlice];
+    // All 5 units that left did so on the kit's slice.
+    const slices = [
+      looseSlice,
+      { ...tapeSlice("ba-kit-a", "kit-a", 5), checkedOutQuantity: 5 },
+      fillerSlice,
+    ];
     arrangeBooking(slices);
     mockSliceReads({ slices, stillOutNow: [] });
-    // All 5 units that left did so on the kit's slice.
-    (
-      db.partialBookingCheckout.findMany as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue([
-      { assetIds: ["asset-x"], quantities: [5], bookingAssetIds: ["ba-kit-a"] },
-    ]);
     // The mobile payload names no slice.
     (
       db.consumptionLog.findMany as ReturnType<typeof vitest.fn>
@@ -19873,8 +19983,7 @@ describe("checkinBooking: units destroyed out of a kit slice leave the kit", () 
     (db.assetLocation.findMany as ReturnType<typeof vitest.fn>)
       .mockReset()
       .mockResolvedValue([]);
-    // why: what each slice can still check out sizes the units it sent out.
-    // No sessions by default, so a slice marked out sent its whole quantity.
+    // why: reset mocks mutated by earlier describe blocks.
     (db.partialBookingCheckout.findMany as ReturnType<typeof vitest.fn>)
       .mockReset()
       .mockResolvedValue([]);
@@ -19898,12 +20007,14 @@ describe("checkinBooking: units destroyed out of a kit slice leave the kit", () 
 
   /**
    * A booking holding 10 pens on ONE slice, drawn from a kit unless
-   * `assetKitId` is null. The slice went out unless `checkedOutAt` is null.
+   * `assetKitId` is null. The slice went out unless `checkedOutAt` is null,
+   * and `checkedOutQuantity` is how many of its pens left (0 reads as all).
    */
   function arrangeBooking(
     consumptionType: ConsumptionType,
     assetKitId: string | null = ASSET_KIT_ID,
-    checkedOutAt: Date | null = new Date("2026-01-01T10:00:00.000Z")
+    checkedOutAt: Date | null = new Date("2026-01-01T10:00:00.000Z"),
+    checkedOutQuantity = 0
   ) {
     const booking = {
       id: BOOKING_ID,
@@ -19919,6 +20030,7 @@ describe("checkinBooking: units destroyed out of a kit slice leave the kit", () 
         {
           id: "ba-pens",
           checkedOutAt,
+          checkedOutQuantity,
           checkedInAt: null,
           assetId: ASSET_ID,
           assetKitId,
@@ -19992,25 +20104,13 @@ describe("checkinBooking: units destroyed out of a kit slice leave the kit", () 
   it("consumes only the units a one-way kit slice sent out", async () => {
     expect.assertions(4);
 
-    arrangeBooking(ConsumptionType.ONE_WAY);
-    // why: the sizing reads the slice and the booking's sessions. 4 of the
-    // slice's 10 pens went out in a progressive check-out.
-    (
-      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue([
-      {
-        id: "ba-pens",
-        assetId: ASSET_ID,
-        quantity: 10,
-        assetKitId: ASSET_KIT_ID,
-        asset: { status: AssetStatus.CHECKED_OUT },
-      },
-    ]);
-    (
-      db.partialBookingCheckout.findMany as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue([
-      { assetIds: [ASSET_ID], quantities: [4], bookingAssetIds: ["ba-pens"] },
-    ]);
+    // 4 of the slice's 10 pens went out in a progressive check-out.
+    arrangeBooking(
+      ConsumptionType.ONE_WAY,
+      ASSET_KIT_ID,
+      new Date("2026-01-01T10:00:00.000Z"),
+      4
+    );
 
     await checkinBooking(params);
 
@@ -20662,6 +20762,75 @@ describe("partialCheckinBooking: units destroyed out of a kit slice leave the ki
       })
     ).rejects.toThrow("none of its units are out on this booking");
     expect(db.asset.update).not.toHaveBeenCalled();
+  });
+
+  it("returns only the units still out on a bare scan of a returnable", async () => {
+    // why: a bare scan names no amount. 4 of the 10 pens left, so only those
+    // 4 can come back; the other 6 never left the shelf.
+    expect.assertions(1);
+
+    arrange([
+      { ...poolSlice("ba-loose", null, 10), checkedOutQuantity: 4 },
+      fillerSlice,
+    ]);
+    (
+      quantityLock.lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-pool",
+      title: "Pens",
+      quantity: 20,
+      type: AssetType.QUANTITY_TRACKED,
+      unitOfMeasure: null,
+      consumptionType: ConsumptionType.TWO_WAY,
+    });
+
+    await partialCheckinBooking({
+      ...params([]),
+      checkins: undefined,
+      assetIds: ["asset-pool"],
+    });
+
+    expect(
+      vitest
+        .mocked(consumptionLogService.createConsumptionLog)
+        .mock.calls.map(([log]) => [log.category, log.quantity])
+    ).toEqual([["RETURN", 4]]);
+  });
+
+  it("refuses a bare scan of a returnable once every unit that left is back", async () => {
+    // why: the loose slice's 3 units already came back, and the kit slice
+    // never left. Units remain booked, but none are out, so a return would
+    // log units that never went out.
+    expect.assertions(2);
+
+    arrange([
+      poolSlice("ba-loose", null, 3),
+      poolSlice("ba-kit", "kit-a", 5, null),
+      fillerSlice,
+    ]);
+    // why: 3 units already dispositioned on this booking.
+    (
+      db.consumptionLog.aggregate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ _sum: { quantity: 3 } });
+    (
+      quantityLock.lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-pool",
+      title: "Pens",
+      quantity: 20,
+      type: AssetType.QUANTITY_TRACKED,
+      unitOfMeasure: null,
+      consumptionType: ConsumptionType.TWO_WAY,
+    });
+
+    await expect(
+      partialCheckinBooking({
+        ...params([]),
+        checkins: undefined,
+        assetIds: ["asset-pool"],
+      })
+    ).rejects.toThrow("none of its units are out on this booking");
+    expect(consumptionLogService.createConsumptionLog).not.toHaveBeenCalled();
   });
 
   it("leaves the kit alone when the units come back", async () => {
