@@ -60,6 +60,7 @@ import type { SortingDirection } from "~/components/list/filters/sort-by";
 import { partialCheckinAssetsSchema } from "~/components/scanner/drawer/uses/partial-checkin-drawer";
 import { partialCheckoutAssetsSchema } from "~/components/scanner/drawer/uses/partial-checkout-drawer";
 import { db, type ExtendedPrismaClient } from "~/database/db.server";
+import { LONG_TRANSACTION_OPTIONS } from "~/database/transaction-options.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { sendEmail } from "~/emails/mail.server";
 import type { BookingEmailActor, BookingForEmail } from "~/emails/types";
@@ -2482,6 +2483,10 @@ export async function reserveBooking({
       new Set(qtyTrackedBookingAssets.map((ba) => ba.asset.id))
     );
 
+    // The guards below lock and measure every quantity-tracked asset and
+    // every model on the booking, so the body grows with the booking. They
+    // must stay inside the transaction that flips the status, which needs
+    // the long budget rather than Prisma's five-second default.
     const updatedBooking = await db.$transaction(async (tx) => {
       /**
        * Eligibility, re-read through `tx` immediately before the status write.
@@ -2640,7 +2645,7 @@ export async function reserveBooking({
         where: { id: bookingFound.id },
         data: dataToUpdate,
       });
-    });
+    }, LONG_TRANSACTION_OPTIONS);
 
     /** Calculate the time difference between the booking.to and the current time */
     const { hours } = calcTimeDifference(updatedBooking.from!, new Date());
