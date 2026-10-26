@@ -38,6 +38,12 @@ tags:
 - extendedWaitUntil:
     visible: "Cancel editing"
     timeout: 15000
+# Save stays disabled until the custom fields load; wait for it before editing.
+- extendedWaitUntil:
+    visible:
+      text: "Save changes"
+      enabled: true
+    timeout: 15000
 - copyTextFrom: "Title, required"
 - evalScript: ${output.originalTitle = maestro.copiedText}
 # A run that stopped before step 3 leaves the marker on the title. Fail here,
@@ -89,6 +95,12 @@ tags:
 - tapOn: "Edit asset"
 - extendedWaitUntil:
     visible: "Cancel editing"
+    timeout: 15000
+# Save stays disabled until the custom fields load; wait for it before editing.
+- extendedWaitUntil:
+    visible:
+      text: "Save changes"
+      enabled: true
     timeout: 15000
 - tapOn:
     text: "Title, required"

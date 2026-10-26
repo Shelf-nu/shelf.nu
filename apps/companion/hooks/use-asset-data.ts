@@ -97,6 +97,7 @@ export function useAssetData(
         if (request !== latestRequest.current || !data) return;
         seenChangeVersion.current = version;
         setAsset(data.asset);
+        setError(null);
       });
       // Leaving the screen, or a workspace switch, drops this refetch if it
       // is still the newest request; the version stays unseen for next time.
