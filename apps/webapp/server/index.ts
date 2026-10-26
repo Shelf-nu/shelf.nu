@@ -18,6 +18,7 @@ import { runWithTabId } from "~/utils/tab-id.server";
 
 import { logger } from "./logger";
 import {
+  applyForwardedProto,
   ensureHostHeaders,
   protect,
   refreshSession,
@@ -102,6 +103,13 @@ export default createHonoServer<ServerEnv>({
     // Measure total request duration (dev/staging only, skipped in production).
     // Registered first so it captures time spent in all downstream middleware.
     server.use("*", serverTiming());
+
+    /**
+     * Give the request URL the scheme the browser used (X-Forwarded-Proto), so
+     * React Router's action CSRF check matches the browser's https Origin
+     * behind the TLS-terminating proxy. Must run before React Router.
+     */
+    server.use("*", applyForwardedProto());
 
     /**
      * Ensure host headers are present for React Router CSRF protection
