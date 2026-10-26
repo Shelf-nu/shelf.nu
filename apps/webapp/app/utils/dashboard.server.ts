@@ -18,6 +18,8 @@ export function buildAssetsByStatusChart(
   statusGroups: { status: string; _count: { _all: number } }[]
 ) {
   const chartData = statusGroups.map((g) => ({
+    /** The `AssetStatus` value, for the asset index `status` filter */
+    id: g.status as AssetStatus,
     status: userFriendlyAssetStatus(g.status as AssetStatus),
     assets: g._count._all,
     color: assetStatusColorMap(g.status as AssetStatus).text,
