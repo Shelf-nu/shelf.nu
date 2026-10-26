@@ -511,8 +511,8 @@ export default function EditAssetScreen() {
             accessibilityLabel="Cancel editing"
             accessibilityRole="button"
             accessibilityState={{ disabled: form.isSubmitting }}
-            // The guard stands down while a save is in flight, so leaving
-            // then would drop the screen with the request still running.
+            // Leaving is held off while a save is in flight; a disabled
+            // button says so instead of a tap that silently does nothing.
             disabled={form.isSubmitting}
             // The unsaved-changes guard in useFormValidation asks before
             // leaving a dirty form; prompting here too would ask twice.

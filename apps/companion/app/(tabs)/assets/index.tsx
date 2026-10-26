@@ -562,7 +562,9 @@ function AssetsListContent() {
       {/* Swipeable content area — swipe left/right to cycle filter pills */}
       <View style={styles.flexFill} {...swipePanHandlers}>
         <Animated.View style={[styles.flexFill, swipeAnimatedStyle]}>
-          {error ? (
+          {/* A failed refresh keeps rows already on screen; the error view
+              is for a list that has nothing to show. */}
+          {error && assets.length === 0 ? (
             <View style={styles.centered}>
               <Ionicons
                 name="alert-circle-outline"

@@ -6,7 +6,8 @@ tags:
 ---
 # Test: the asset edit form's exits.
 #   1. Save, then OK on "Updated": back on the detail screen with no
-#      "Discard Changes?" prompt, showing the saved title.
+#      "Discard Changes?" prompt, showing the saved title; the assets list
+#      shows it too.
 #   2. Cancel after an edit: exactly one "Discard Changes?" prompt.
 #   3. Save again to remove the marker, leaving the asset as it was.
 # Uses SHELF_TEST_ASSET_ID and appends " e2e" to its title for the run. That
@@ -27,6 +28,14 @@ tags:
 # Use tapOn to force a11y tree refresh after runFlow
 - tapOn:
     text: "Quick Actions"
+
+# Load the assets list first, so step 1 can check it refreshes after the save.
+- tapOn:
+    text: "Assets"
+    index: 1
+- extendedWaitUntil:
+    visible: "Filter: All.*"
+    timeout: 8000
 
 - openLink: "shelf://assets/${SHELF_TEST_ASSET_ID}"
 - extendedWaitUntil:
@@ -68,6 +77,16 @@ tags:
 # The detail screen shows the saved title, not the one it loaded first.
 - assertVisible: ${output.savedTitlePattern}
 - takeScreenshot: assets-edit-saved-detail-refreshed
+# The assets list, loaded before the edit, shows the saved title too.
+- tapOn: "Assets"
+- extendedWaitUntil:
+    visible: ${'.*' + output.savedTitlePattern + '.*'}
+    timeout: 8000
+- takeScreenshot: assets-edit-saved-list-refreshed
+- openLink: "shelf://assets/${SHELF_TEST_ASSET_ID}"
+- extendedWaitUntil:
+    visible: "Edit asset"
+    timeout: 20000
 
 # ── 2. Cancel after an edit asks once ──
 - tapOn: "Edit asset"

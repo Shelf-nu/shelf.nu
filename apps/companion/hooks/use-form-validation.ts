@@ -79,7 +79,11 @@ export function useFormValidation({
   ]);
 
   // Warn on back navigation if there are unsaved changes
-  usePreventRemove(isDirty && !isSubmitting && !didSave, ({ data }) => {
+  usePreventRemove(isDirty && !didSave, ({ data }) => {
+    // While the save request runs, leaving (header back, swipe back) is held
+    // off without a prompt: the save's own success alert navigates once it
+    // answers, and an error keeps the user on the form.
+    if (isSubmitting) return;
     Alert.alert(
       "Discard Changes?",
       "You have unsaved changes. Are you sure you want to go back?",
