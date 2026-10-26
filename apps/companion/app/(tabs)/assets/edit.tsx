@@ -34,6 +34,7 @@ import { createStyles } from "@/lib/create-styles";
 import { labelForRequired } from "@/lib/a11y";
 import { useEditAssetForm } from "@/hooks/use-edit-asset-form";
 import { useFormValidation } from "@/hooks/use-form-validation";
+import { markAssetDirty } from "@/lib/asset-refresh";
 import { PickerField } from "@/components/asset-edit/picker-field";
 import { TagPickerField } from "@/components/asset-edit/tag-picker-field";
 import { CustomFieldInput } from "@/components/asset-edit/custom-field-input";
@@ -92,7 +93,11 @@ export default function EditAssetScreen() {
   // screen can coordinate it with the category / location dropdowns).
   const [showTagsPicker, setShowTagsPicker] = useState(false);
 
-  const { isDirty } = useFormValidation({
+  // Set once the server accepts the edit, so leaving afterwards is not
+  // treated as abandoning unsaved changes.
+  const [didSave, setDidSave] = useState(false);
+
+  useFormValidation({
     title: form.title,
     description: form.description,
     selectedCategory: form.selectedCategory,
@@ -102,6 +107,7 @@ export default function EditAssetScreen() {
     customFields: form.customFields,
     originalAsset: form.originalAsset,
     isSubmitting: form.isSubmitting,
+    didSave,
   });
 
   const descriptionChanged =
@@ -236,6 +242,10 @@ export default function EditAssetScreen() {
       return;
     }
 
+    setDidSave(true);
+    // The detail screen loads its asset on mount only; this makes it refetch
+    // when the user lands back on it.
+    markAssetDirty(assetId);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     Alert.alert("Updated", `"${data.asset.title}" has been updated.`, [
       {
@@ -497,24 +507,9 @@ export default function EditAssetScreen() {
             style={styles.cancelButton}
             accessibilityLabel="Cancel editing"
             accessibilityRole="button"
-            onPress={() => {
-              if (isDirty) {
-                Alert.alert(
-                  "Discard Changes?",
-                  "You have unsaved changes. Are you sure you want to go back?",
-                  [
-                    { text: "Keep Editing", style: "cancel" },
-                    {
-                      text: "Discard",
-                      style: "destructive",
-                      onPress: () => router.back(),
-                    },
-                  ]
-                );
-              } else {
-                router.back();
-              }
-            }}
+            // The unsaved-changes guard in useFormValidation asks before
+            // leaving a dirty form; prompting here too would ask twice.
+            onPress={() => router.back()}
           >
             <Text style={styles.cancelButtonText}>Cancel</Text>
           </TouchableOpacity>

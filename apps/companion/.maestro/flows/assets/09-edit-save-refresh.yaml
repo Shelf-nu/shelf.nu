@@ -1,0 +1,101 @@
+appId: com.shelf.companion.carlos
+name: "Assets - Edit, Save, Cancel"
+tags:
+  - assets
+
+---
+# Test: the asset edit form's exits.
+#   1. Save, then OK on "Updated": back on the detail screen with no
+#      "Discard Changes?" prompt, showing the saved title.
+#   2. Cancel after an edit: exactly one "Discard Changes?" prompt.
+#   3. Save again to remove the marker, leaving the asset as it was.
+# Uses SHELF_TEST_ASSET_ID and appends " e2e" to its title for the run.
+#
+# Every title tap lands at the right edge of the field (point 97%,50%): a tap
+# in the middle of the text puts the cursor at the nearest word, and the erase
+# in step 3 would then remove the wrong characters. The field's text is read
+# back before each save (screen-wide text checks also see the header and the
+# back button, which still carry the saved title), so a misplaced cursor
+# fails the run instead of saving a damaged title. The marker is typed with
+# no trailing space so iOS autocorrect never rewrites it.
+
+- runFlow: ../../shared/login.yaml
+
+# Use tapOn to force a11y tree refresh after runFlow
+- tapOn:
+    text: "Quick Actions"
+
+- openLink: "shelf://assets/${SHELF_TEST_ASSET_ID}"
+- extendedWaitUntil:
+    visible: "Edit asset"
+    timeout: 20000
+
+# ── 1. Save, then leave ──
+- tapOn: "Edit asset"
+- extendedWaitUntil:
+    visible: "Cancel editing"
+    timeout: 15000
+- copyTextFrom: "Title, required"
+- evalScript: ${output.originalTitle = maestro.copiedText}
+- tapOn:
+    text: "Title, required"
+    point: "97%,50%"
+- inputText: " e2e"
+- copyTextFrom: "Title, required"
+- assertTrue: ${maestro.copiedText == output.originalTitle + ' e2e'}
+- tapOn: "Save changes"
+- extendedWaitUntil:
+    visible: "Updated"
+    timeout: 20000
+- tapOn: "OK"
+- extendedWaitUntil:
+    visible: "Edit asset"
+    timeout: 15000
+- assertNotVisible: "Discard Changes?"
+# The detail screen shows the saved title, not the one it loaded first.
+- assertVisible: ".* e2e"
+- takeScreenshot: assets-edit-saved-detail-refreshed
+
+# ── 2. Cancel after an edit asks once ──
+- tapOn: "Edit asset"
+- extendedWaitUntil:
+    visible: "Cancel editing"
+    timeout: 15000
+- tapOn:
+    text: "Title, required"
+    point: "97%,50%"
+- inputText: "x"
+- tapOn: "Cancel editing"
+- extendedWaitUntil:
+    visible: "Discard Changes?"
+    timeout: 5000
+- tapOn: "Discard"
+- extendedWaitUntil:
+    visible: "Edit asset"
+    timeout: 15000
+- assertNotVisible: "Discard Changes?"
+- assertNotVisible: ".* e2ex"
+- takeScreenshot: assets-edit-cancel-single-prompt
+
+# ── 3. Remove the marker ──
+- tapOn: "Edit asset"
+- extendedWaitUntil:
+    visible: "Cancel editing"
+    timeout: 15000
+- tapOn:
+    text: "Title, required"
+    point: "97%,50%"
+- eraseText: 4
+- copyTextFrom: "Title, required"
+- assertTrue: ${maestro.copiedText == output.originalTitle}
+- tapOn: "Save changes"
+- extendedWaitUntil:
+    visible: "Updated"
+    timeout: 20000
+- tapOn: "OK"
+- extendedWaitUntil:
+    visible: "Edit asset"
+    timeout: 15000
+- assertNotVisible: "Discard Changes?"
+- assertNotVisible: ".*e2e.*"
+- takeScreenshot: assets-edit-marker-removed

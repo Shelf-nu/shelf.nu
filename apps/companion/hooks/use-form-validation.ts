@@ -1,7 +1,6 @@
 import { useMemo } from "react";
 import { Alert } from "react-native";
-import { useNavigation } from "@react-navigation/native";
-import { usePreventRemove } from "@react-navigation/native";
+import { useNavigation, usePreventRemove } from "@react-navigation/native";
 import { valuationFromInput } from "@/lib/asset-valuation";
 import type { AssetDetail, Category, Location, Tag } from "@/lib/api";
 import type { CustomFieldState } from "./use-edit-asset-form";
@@ -16,11 +15,21 @@ type FormValidationArgs = {
   customFields: CustomFieldState[];
   originalAsset: AssetDetail | null;
   isSubmitting: boolean;
+  /**
+   * True once the server accepted the edit. The form still differs from
+   * `originalAsset` (the baseline is never reloaded), so without this the
+   * guard would offer to discard changes that are already saved.
+   */
+  didSave: boolean;
 };
 
 /**
  * Tracks dirty state for the edit asset form and warns on navigation
  * if there are unsaved changes.
+ *
+ * This guard is the only "Discard Changes?" prompt on the screen: every way
+ * out (header back, swipe back, the Cancel button) navigates and lets the
+ * guard decide, so the user is asked at most once.
  */
 export function useFormValidation({
   title,
@@ -32,6 +41,7 @@ export function useFormValidation({
   customFields,
   originalAsset,
   isSubmitting,
+  didSave,
 }: FormValidationArgs): { isDirty: boolean } {
   const navigation = useNavigation();
 
@@ -67,7 +77,7 @@ export function useFormValidation({
   ]);
 
   // Warn on back navigation if there are unsaved changes
-  usePreventRemove(isDirty && !isSubmitting, ({ data }) => {
+  usePreventRemove(isDirty && !isSubmitting && !didSave, ({ data }) => {
     Alert.alert(
       "Discard Changes?",
       "You have unsaved changes. Are you sure you want to go back?",
