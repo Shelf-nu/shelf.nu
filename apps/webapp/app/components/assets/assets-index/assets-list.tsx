@@ -514,6 +514,7 @@ export const AssetsList = ({
                           />
                           <CategoryBadge
                             category={resource.extendedProps?.category}
+                            linkToAssets
                           />
                           {displayCode ? (
                             <AssetCodeBadge {...displayCode} />
@@ -654,12 +655,12 @@ export const ListAssetContent = ({
 
       {/* Category */}
       <Td>
-        <CategoryBadge category={category} />
+        <CategoryBadge category={category} linkToAssets />
       </Td>
 
       {/* Tags */}
       <Td className="text-left">
-        <ListItemTagsColumn tags={tags} />
+        <ListItemTagsColumn tags={tags} linkToAssets />
       </Td>
 
       {/* Custodian */}
