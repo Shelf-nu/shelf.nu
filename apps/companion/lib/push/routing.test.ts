@@ -263,6 +263,15 @@ test("a tap for a workspace the person left is dropped", () => {
     nextTapStep({ ...READY, organizations: [{ id: "org_a" }] }),
     { kind: "drop" }
   );
+  // The current workspace itself can be the one the person was removed from.
+  assert.deepEqual(
+    nextTapStep({
+      ...READY,
+      currentOrgId: "org_b",
+      organizations: [{ id: "org_a" }],
+    }),
+    { kind: "drop" }
+  );
 });
 
 test("a tap naming no workspace opens the screen as is", () => {

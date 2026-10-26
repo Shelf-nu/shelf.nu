@@ -211,11 +211,15 @@ export function nextTapStep<Org extends { id: string }>(
   if (!context.hasSession) return { kind: "drop" };
   if (context.orgsLoading || !context.inTabs) return { kind: "wait" };
 
+  // Membership is checked before the current-workspace comparison: the current
+  // workspace can be one the person was just removed from.
   const target = pending.organizationId;
-  if (target && target !== context.currentOrgId) {
+  if (target) {
     const organization = context.organizations.find(({ id }) => id === target);
     if (!organization) return { kind: "drop" };
-    return { kind: "switch-org", organization };
+    if (target !== context.currentOrgId) {
+      return { kind: "switch-org", organization };
+    }
   }
 
   const { organizationId: _organizationId, ...destination } = pending;
