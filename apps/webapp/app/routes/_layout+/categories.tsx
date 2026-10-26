@@ -256,7 +256,7 @@ const CategoryItem = ({
             key: "category",
             value: item.id,
           })}
-          variant="link"
+          variant="link-gray"
           aria-label={`View ${assetCount} ${
             assetCount === 1 ? "asset" : "assets"
           } in ${item.name}`}

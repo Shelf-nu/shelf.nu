@@ -238,7 +238,7 @@ const AssetModelItem = ({
               key: "assetModel",
               value: item.id,
             })}
-            variant="link"
+            variant="link-gray"
             aria-label={`View ${assetCount} ${
               assetCount === 1 ? "asset" : "assets"
             } of ${item.name}`}
