@@ -20,11 +20,12 @@ export type LeaveGuard = {
 /**
  * Decides how the edit form treats an attempt to leave.
  *
+ * - A save in flight: hold without asking, dirty or not. The save's success
+ *   alert navigates once it answers, and an error keeps the user on the form;
+ *   letting the screen go first would make that alert pop a second screen.
  * - Clean form, or a save the server accepted: leave freely. After a save the
  *   form still differs from the asset as first loaded, so dirtiness alone
  *   cannot release the guard.
- * - Dirty form with a save in flight: hold without asking. The save's success
- *   alert navigates once it answers, and an error keeps the user on the form.
  * - Dirty form otherwise: ask before discarding.
  *
  * @param args.isDirty - The form differs from the asset as loaded
@@ -41,6 +42,6 @@ export function editLeaveGuard({
   didSave: boolean;
   isSubmitting: boolean;
 }): LeaveGuard {
-  const hold = isDirty && !didSave;
-  return { hold, prompt: hold && !isSubmitting };
+  const unsaved = isDirty && !didSave;
+  return { hold: isSubmitting || unsaved, prompt: unsaved && !isSubmitting };
 }

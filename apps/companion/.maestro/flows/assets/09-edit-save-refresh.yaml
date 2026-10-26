@@ -12,8 +12,10 @@ tags:
 #   3. Save again to remove the marker, leaving the asset as it was.
 # Uses SHELF_TEST_ASSET_ID and appends " e2e" to its title for the run. That
 # asset must be savable from the phone as it stands: every required custom
-# field filled and a title of at most 96 characters (the field caps at 100).
-# Otherwise Save stops on a validation alert and the flow fails at "Updated".
+# field filled and a title of at most 95 characters: the field caps at 100,
+# the run appends " e2e", and step 2 types one more character on top of it.
+# Otherwise Save stops on a validation alert and the flow fails at "Updated",
+# or the step 2 keystroke is dropped and no "Discard Changes?" prompt appears.
 #
 # Every title tap lands at the right edge of the field (point 97%,50%): a tap
 # in the middle of the text puts the cursor at the nearest word, and the erase
@@ -58,6 +60,8 @@ tags:
 # A run that stopped before step 3 leaves the marker on the title. Fail here,
 # so the asset gets cleaned by hand instead of collecting a second marker.
 - assertTrue: ${!output.originalTitle.endsWith(' e2e')}
+# Room for the marker and step 2's extra character (see the header).
+- assertTrue: ${output.originalTitle.length <= 95}
 - runScript: 09-edit-title-patterns.js
 - tapOn:
     text: "Title, required"

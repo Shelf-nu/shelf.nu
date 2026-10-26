@@ -21,6 +21,7 @@ import {
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
+  Keyboard,
   Platform,
 } from "react-native";
 import { useRouter, useLocalSearchParams, Stack } from "expo-router";
@@ -167,6 +168,9 @@ export default function EditAssetScreen() {
     }
 
     form.setIsSubmitting(true);
+    // The payload below is a snapshot of the form; the form stays locked
+    // until the request answers, so no edit can land outside it.
+    Keyboard.dismiss();
 
     // Build payload with only changed fields
     const payload: Record<string, any> = { assetId };
@@ -312,6 +316,9 @@ export default function EditAssetScreen() {
           style={styles.scroll}
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
+          // Every field (inputs, pickers, tags, custom fields) is locked
+          // while a save is in flight.
+          pointerEvents={form.isSubmitting ? "none" : "auto"}
         >
           {/* ── Title (required) ─────────────────────── */}
           <View style={styles.field}>
@@ -326,6 +333,7 @@ export default function EditAssetScreen() {
               placeholderTextColor={colors.placeholderText}
               returnKeyType="next"
               maxLength={100}
+              editable={!form.isSubmitting}
               accessibilityLabel={labelForRequired("Title")}
             />
             {form.title.length > 0 && form.title.trim().length < 2 && (
@@ -351,6 +359,7 @@ export default function EditAssetScreen() {
               multiline
               numberOfLines={3}
               textAlignVertical="top"
+              editable={!form.isSubmitting}
               accessibilityLabel="Description"
             />
             <CharacterCount

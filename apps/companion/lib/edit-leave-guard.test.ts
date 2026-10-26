@@ -32,6 +32,20 @@ test("a dirty form with a save in flight holds without asking", () => {
   );
 });
 
+test("a save in flight holds even after the edits are put back", () => {
+  assert.deepEqual(
+    editLeaveGuard({ isDirty: false, didSave: false, isSubmitting: true }),
+    { hold: true, prompt: false }
+  );
+});
+
+test("a second save after a successful one still holds", () => {
+  assert.deepEqual(
+    editLeaveGuard({ isDirty: true, didSave: true, isSubmitting: true }),
+    { hold: true, prompt: false }
+  );
+});
+
 test("after a save the form leaves freely although it still differs", () => {
   assert.deepEqual(
     editLeaveGuard({ isDirty: true, didSave: true, isSubmitting: false }),
