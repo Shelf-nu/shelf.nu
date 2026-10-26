@@ -19,6 +19,7 @@ import {
   isHandledClientError,
   isLikeShelfError,
 } from "~/utils/error";
+import { redactSensitive } from "~/utils/redact";
 import { maskEmailsInSentryPayload } from "~/utils/sentry-email-mask";
 
 /**
@@ -213,13 +214,17 @@ function redactSecrets(data: unknown): Record<string, unknown> {
 /**
  * Build a Sentry overlay (user / tags / extras) from a ShelfError.
  *
+ * Every value in `extra` also goes through `redactSensitive`, the same pass the
+ * log line gets: it strips credentials embedded in URLs and caps each string,
+ * so a field as large as the client chose to send cannot reach Sentry whole.
+ *
  * Returns `undefined` for anything that isn't a ShelfError so the caller
  * can fall through to the scope-derived event without overlaying noisy
  * fallback tags ("Unknown" / "?"). Plain Errors that bubble up still get
  * captured — they just don't gain Shelf-specific tagging they can't
  * provide meaningful values for.
  */
-function makeSentryContext(exception: unknown) {
+export function makeSentryContext(exception: unknown) {
   if (!isLikeShelfError(exception)) {
     return;
   }
@@ -233,16 +238,22 @@ function makeSentryContext(exception: unknown) {
       shelf_trace_id: exception.traceId || "Unknown",
     },
     extra: {
-      ...redactSecrets(exception.additionalData),
+      // redactSecrets first: its walk is cycle-safe, so redactSensitive only
+      // ever sees an acyclic tree.
+      ...redactSensitive(redactSecrets(exception.additionalData)),
       traceId: exception.traceId,
-      message: exception.message,
+      message: redactSensitive(exception.message),
       cause: {
-        message: (exception.cause as Error | null)?.message,
+        message: redactSensitive((exception.cause as Error | null)?.message),
         // Redact the raw cause chain too; otherwise it bypasses redactSecrets
         // and the "no secret can reach Sentry (at any depth)" guarantee would
-        // not actually hold.
-        raw: JSON.stringify(
-          redactValue(exception.cause, new WeakSet<object>())
+        // not actually hold. The object is redacted before it is stringified,
+        // because URL credentials are only found in a string that is a URL,
+        // and the JSON is capped as a whole.
+        raw: redactSensitive(
+          JSON.stringify(
+            redactSensitive(redactValue(exception.cause, new WeakSet<object>()))
+          )
         ),
       },
     },
