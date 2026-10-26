@@ -45,12 +45,13 @@ capability and the APNs key must be uploaded to Expo credentials, or
 
 **Android needs the Firebase file.** Push on Android requires
 `apps/companion/google-services.json` from the Firebase project and the FCM V1
-service account key uploaded to Expo credentials. `app.json` does not reference
-the file yet: when it arrives, add `"googleServicesFile": "./google-services.json"`
-under `android` in `app.json`. Without the file, the key and that entry, the
-Android build installs and runs, but registration fails and no Android phone
-receives a push. Check all three before `eas build --profile production`. The
-steps are in `PUSH-NOTIFICATIONS.md`, which lands with PUSH-1.
+service account key uploaded to Expo credentials. EAS builds take the file
+from the `GOOGLE_SERVICES_JSON` file variable in the `production` environment;
+`app.config.js` maps it to `expo.android.googleServicesFile`, and a local build
+falls back to a gitignored `./google-services.json`. Without the file and the
+key, the Android build installs and runs, but registration fails and no Android
+phone receives a push. Check both before `eas build --profile production`. The
+steps are in `PUSH-NOTIFICATIONS.md`.
 
 **Who gets pushes in this version.** Only the "about you" events: the custodian
 of a booking, the assignees of an audit, and the people an asset reminder

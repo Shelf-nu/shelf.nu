@@ -6,9 +6,7 @@
  * workspace's plan at send time.
  *
  * @see {@link file://../../../webapp/app/routes/api+/mobile+/push-token.ts}
- *   (lands with PUSH-2)
  * @see {@link file://../../../webapp/app/routes/api+/mobile+/notification-preferences.ts}
- *   (lands with PUSH-2)
  * @see {@link file://../push/registration.ts} the only caller of the token calls
  */
 import { apiFetch } from "./client";

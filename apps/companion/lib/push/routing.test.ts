@@ -258,21 +258,23 @@ test("once the workspace matches, the tap opens its screen", () => {
   });
 });
 
-test("a tap for a workspace the person left, or naming none, opens the screen as is", () => {
-  const expected = {
-    kind: "open",
-    tabRoot: "/(tabs)/bookings",
-    href: "/(tabs)/bookings/bk_1",
-  };
+test("a tap for a workspace the person left is dropped", () => {
   assert.deepEqual(
     nextTapStep({ ...READY, organizations: [{ id: "org_a" }] }),
-    expected
+    { kind: "drop" }
   );
+});
+
+test("a tap naming no workspace opens the screen as is", () => {
   assert.deepEqual(
     nextTapStep({
       ...READY,
       pending: { ...BOOKING_IN_B, organizationId: null },
     }),
-    expected
+    {
+      kind: "open",
+      tabRoot: "/(tabs)/bookings",
+      href: "/(tabs)/bookings/bk_1",
+    }
   );
 });

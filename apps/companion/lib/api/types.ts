@@ -2056,7 +2056,6 @@ export type AssetBookingsResponse = {
  * another person registered moves to the caller.
  *
  * @see {@link file://../../../webapp/app/routes/api+/mobile+/push-token.ts}
- *   (lands with PUSH-2)
  */
 export type RegisterPushTokenPayload = {
   /** The `ExponentPushToken[...]` string from `getExpoPushTokenAsync`. */
@@ -2075,7 +2074,6 @@ export type PushTokenResponse = { ok: true };
  * Answer of `GET /api/mobile/notification-preferences`.
  *
  * @see {@link file://../../../webapp/app/routes/api+/mobile+/notification-preferences.ts}
- *   (lands with PUSH-2)
  */
 export type NotificationPreferencesResponse = {
   /** The four switches; all on for someone who never changed them. */

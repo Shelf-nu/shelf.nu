@@ -14,7 +14,7 @@
  * were made.
  *
  * `NotificationPreferences` MIRRORS the server type in
- * `apps/webapp/app/modules/push/types.ts` (lands with PUSH-2). The server
+ * `apps/webapp/app/modules/push/types.ts`. The server
  * stores the switches and applies them at send time; this copy only renders
  * them. Extraction target: a pure `packages/*` push module (none yet).
  *

@@ -14,8 +14,8 @@
  *
  * `PUSH_CATEGORIES` and `PushPayload` MIRROR the server's push contract in
  * `apps/webapp/app/modules/push/types.ts` and its message builder
- * (`toExpoMessage` in `modules/push/service.server.ts`); each lands with
- * PUSH-2. The server decides who is notified and applies every switch; this
+ * (`toExpoMessage` in `modules/push/service.server.ts`). The server decides
+ * who is notified and applies every switch; this
  * copy only names the Android channels and the settings rows. Extraction
  * target: a pure `packages/*` push module (none yet).
  *
@@ -168,7 +168,7 @@ export type TapStep<Org> =
   | { kind: "none" }
   /** Not ready yet: the session, the workspaces or the tabs are still loading. */
   | { kind: "wait" }
-  /** Nobody is signed in, so the tap is let go. */
+  /** Nobody is signed in, or the push names a workspace the person left; the tap is let go. */
   | { kind: "drop" }
   /** The tap is for another of the person's workspaces; switch first. */
   | { kind: "switch-org"; organization: Org }
@@ -195,8 +195,9 @@ export type TapContext<Org extends { id: string }> = {
  * tabs are on screen. A tap for another of the person's workspaces switches
  * to it first, and the caller asks again once the switch lands, so the screen
  * loads that workspace's data. A tap for a workspace the person no longer
- * belongs to, or naming none, opens the screen as it is, which then shows its
- * own error.
+ * belongs to is dropped: opening the screen in the current workspace would
+ * show a different workspace's list as if it were the one the push named. A
+ * tap naming no workspace opens the screen as it is.
  *
  * @param context - The pending route and the app state it depends on
  * @returns The step to take
@@ -213,7 +214,8 @@ export function nextTapStep<Org extends { id: string }>(
   const target = pending.organizationId;
   if (target && target !== context.currentOrgId) {
     const organization = context.organizations.find(({ id }) => id === target);
-    if (organization) return { kind: "switch-org", organization };
+    if (!organization) return { kind: "drop" };
+    return { kind: "switch-org", organization };
   }
 
   const { organizationId: _organizationId, ...destination } = pending;
