@@ -27,7 +27,10 @@ describe("getLocationTotalValuation", () => {
     // (the cast truncated fractional valuations).
     queryRawMock.mockResolvedValue([{ total: 1234 }]);
 
-    const total = await getLocationTotalValuation({ locationId: "loc-123" });
+    const total = await getLocationTotalValuation({
+      locationId: "loc-123",
+      organizationId: "org-1",
+    });
 
     expect(queryRawMock).toHaveBeenCalledTimes(1);
     expect(total).toBe(1234);
@@ -37,7 +40,10 @@ describe("getLocationTotalValuation", () => {
     // Prior bigint cast lost the .50; verifies we kept the float through.
     queryRawMock.mockResolvedValue([{ total: 99.5 }]);
 
-    const total = await getLocationTotalValuation({ locationId: "loc-123" });
+    const total = await getLocationTotalValuation({
+      locationId: "loc-123",
+      organizationId: "org-1",
+    });
 
     expect(total).toBe(99.5);
   });
@@ -46,7 +52,10 @@ describe("getLocationTotalValuation", () => {
     // COALESCE in the SQL yields 0 for empty/all-null sums.
     queryRawMock.mockResolvedValue([{ total: 0 }]);
 
-    const total = await getLocationTotalValuation({ locationId: "loc-123" });
+    const total = await getLocationTotalValuation({
+      locationId: "loc-123",
+      organizationId: "org-1",
+    });
 
     expect(total).toBe(0);
   });
@@ -54,7 +63,10 @@ describe("getLocationTotalValuation", () => {
   it("leaves archived assets out of the value stored at the location", async () => {
     queryRawMock.mockResolvedValue([{ total: 10 }]);
 
-    await getLocationTotalValuation({ locationId: "loc-123" });
+    await getLocationTotalValuation({
+      locationId: "loc-123",
+      organizationId: "org-1",
+    });
 
     // `Prisma.sql` is a template object; its joined strings are the SQL text.
     const sql = (
@@ -63,24 +75,48 @@ describe("getLocationTotalValuation", () => {
     expect(sql).toContain('a."archivedAt" IS NULL');
   });
 
-  it("values only the units placed at this location, not the whole stock", async () => {
+  it("values only the units placed at this location, capped at the stock", async () => {
     queryRawMock.mockResolvedValue([{ total: 490 }]);
 
-    await getLocationTotalValuation({ locationId: "loc-123" });
+    await getLocationTotalValuation({
+      locationId: "loc-123",
+      organizationId: "org-1",
+    });
 
     const sql = (
       queryRawMock.mock.calls[0][0] as { strings: string[] }
     ).strings.join("?");
-    // A pool of 14 with 10 here and 4 elsewhere is worth 10 units here.
-    expect(sql).toContain('al."quantity"');
-    expect(sql).not.toContain("a.quantity");
+    // A pool of 14 with 10 here and 4 elsewhere is worth 10 units here, and
+    // a manual row plus a kit slice at this location never exceed the stock.
+    expect(sql).toContain('SUM(al."quantity")');
+    expect(sql).toContain('GROUP BY al."assetId"');
+    expect(sql).toContain("LEAST(COALESCE(a.quantity, 1), placed.units)");
     expect(sql).toMatch(/WHERE al\."locationId" = \?/);
+  });
+
+  it("scopes the placements to the caller's workspace", async () => {
+    queryRawMock.mockResolvedValue([{ total: 0 }]);
+
+    await getLocationTotalValuation({
+      locationId: "loc-123",
+      organizationId: "org-1",
+    });
+
+    const query = queryRawMock.mock.calls[0][0] as {
+      strings: string[];
+      values: unknown[];
+    };
+    expect(query.strings.join("?")).toContain('al."organizationId" = ?');
+    expect(query.values).toEqual(["loc-123", "org-1"]);
   });
 
   it("returns 0 when the raw query returns no rows", async () => {
     queryRawMock.mockResolvedValue([]);
 
-    const total = await getLocationTotalValuation({ locationId: "loc-123" });
+    const total = await getLocationTotalValuation({
+      locationId: "loc-123",
+      organizationId: "org-1",
+    });
 
     expect(total).toBe(0);
   });

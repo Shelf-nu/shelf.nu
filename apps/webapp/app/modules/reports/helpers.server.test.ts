@@ -595,6 +595,36 @@ describe("assetDistributionReport — quantity-aware bucket values", () => {
     expect(noLocation?.assetCount).toBe(1);
   });
 
+  it("counts a manual row and a kit slice at one location once, capped at the stock", async () => {
+    // 100 pens at $1.50: all 100 placed by hand at Warehouse, and a 50-unit
+    // kit slice that also sits at Warehouse. Both rows describe the same
+    // physical units, so Warehouse holds 100 pens (one asset), not 150.
+    vi.mocked(db.asset.findMany).mockResolvedValue([
+      {
+        id: "a-pens",
+        categoryId: null,
+        status: "AVAILABLE",
+        valuation: 1.5,
+        quantity: 100,
+        assetLocations: [
+          { quantity: 100, location: { id: "loc-1", name: "Warehouse" } },
+          { quantity: 50, location: { id: "loc-1", name: "Warehouse" } },
+        ],
+      },
+    ] as any);
+
+    const result = await assetDistributionReport({
+      organizationId: "org-1",
+      currency: "USD",
+    });
+
+    const warehouse = result.distributionBreakdown!.byLocation.find(
+      (b) => b.id === "loc-1"
+    );
+    expect(warehouse?.totalValue).toBe(150);
+    expect(warehouse?.assetCount).toBe(1);
+  });
+
   it("reads the asset table once for all four breakdowns", async () => {
     vi.mocked(db.asset.findMany).mockResolvedValue([] as any);
 

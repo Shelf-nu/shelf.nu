@@ -761,17 +761,28 @@ export async function getLocations(params: {
   }
 }
 
+/**
+ * Total value of the assets stored at one location.
+ *
+ * Each asset is valued at the units it has HERE, not its whole stock: a pool
+ * of 14 with 10 here and 4 elsewhere is worth 10 units at this location.
+ * Units here follow `getUnitsAtLocation` (`./utils`): every `AssetLocation`
+ * row of the asset at this location (manual and kit-driven) is summed, then
+ * capped at `Asset.quantity`, because a kit slice and a manual placement
+ * describe the same physical units. An INDIVIDUAL asset has one row and
+ * counts as 1.
+ *
+ * @param locationId - The location to value
+ * @param organizationId - The workspace that owns the location; rows outside it are ignored
+ * @returns The total value, 0 when nothing is placed here
+ */
 export async function getLocationTotalValuation({
   locationId,
+  organizationId,
 }: {
   locationId: Location["id"];
+  organizationId: Location["organizationId"];
 }) {
-  // Each row is one `AssetLocation` placement. Multiplier = `al.quantity`,
-  // the units placed HERE: a pool of 14 with 10 here and 4 elsewhere is worth
-  // 10 units at this location, never the whole `Asset.quantity` stock. An
-  // INDIVIDUAL asset has one row with quantity 1. Summing every row at this
-  // location (manual and kit-driven) matches the "N units at this location"
-  // line on the location's asset list.
   // Prisma's `aggregate({_sum})` cannot multiply across the join, hence
   // `$queryRaw`. Column is `value` (Asset.valuation is `@map("value")`).
   // No `::bigint` cast, it truncates floats.
@@ -779,11 +790,18 @@ export async function getLocationTotalValuation({
   // stored here, matching the dashboard and the inventory reports.
   const rows = await db.$queryRaw<{ total: number | null }[]>(
     Prisma.sql`
-      SELECT COALESCE(SUM(COALESCE(a.value, 0) * al."quantity"), 0) AS total
-      FROM "AssetLocation" al
-      JOIN "Asset" a ON a.id = al."assetId"
-      WHERE al."locationId" = ${locationId}
-      AND a."archivedAt" IS NULL
+      SELECT COALESCE(SUM(
+        COALESCE(a.value, 0) * LEAST(COALESCE(a.quantity, 1), placed.units)
+      ), 0) AS total
+      FROM (
+        SELECT al."assetId", SUM(al."quantity") AS units
+        FROM "AssetLocation" al
+        WHERE al."locationId" = ${locationId}
+        AND al."organizationId" = ${organizationId}
+        GROUP BY al."assetId"
+      ) placed
+      JOIN "Asset" a ON a.id = placed."assetId"
+      WHERE a."archivedAt" IS NULL
     `
   );
 

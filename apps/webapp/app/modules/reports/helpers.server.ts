@@ -63,6 +63,7 @@ import { ASSET_MODEL_IMAGE_SELECT } from "../asset/image-select";
 import { refreshExpiredAssetImages } from "../asset/service.server";
 import { getPrimaryLocation } from "../asset/utils";
 import { refreshExpiredKitImages } from "../kit/service.server";
+import { getUnitsAtLocation } from "../location/utils";
 import { USER_NAME_SELECT } from "../user/fields";
 
 // Re-export timeframe utilities for server use
@@ -3280,7 +3281,8 @@ function computeDistributionByLocation(
 ): AssetDistributionRow[] {
   // A QUANTITY_TRACKED asset can span multiple locations, so it may
   // contribute to several buckets; value weighs the per-unit valuation by
-  // the UNITS AT THAT LOCATION (`AssetLocation.quantity`).
+  // the UNITS AT THAT LOCATION (`getUnitsAtLocation`), counted once per
+  // location even when a manual row and kit slices share it.
   //
   // "No Location" holds only assets with no placement rows at all: the
   // donut slice drills down to `/assets?location=without-location`, whose
@@ -3316,11 +3318,30 @@ function computeDistributionByLocation(
       );
       continue;
     }
+    // One bucket entry per location, not per row: a manual row and a kit
+    // slice at the same location are the same physical units, so they are
+    // combined by `getUnitsAtLocation` rather than added up.
+    const rowsByLocation = new Map<
+      string,
+      { name: string; quantities: number[] }
+    >();
     for (const pivot of asset.assetLocations) {
+      const entry = rowsByLocation.get(pivot.location.id) ?? {
+        name: pivot.location.name,
+        quantities: [],
+      };
+      entry.quantities.push(pivot.quantity);
+      rowsByLocation.set(pivot.location.id, entry);
+    }
+    for (const [locationId, { name, quantities }] of rowsByLocation) {
+      const units = getUnitsAtLocation({
+        stock: asset.quantity,
+        placedQuantities: quantities,
+      });
       addToBucket(
-        pivot.location.id,
-        pivot.location.name,
-        asset.valuation === null ? null : asset.valuation * pivot.quantity
+        locationId,
+        name,
+        asset.valuation === null ? null : asset.valuation * units
       );
     }
   }
