@@ -881,9 +881,15 @@ function EnumField({
             onOpenAutoFocus={(event) => {
               // Without a search box, open on the highlighted option rather
               // than the first focusable row, so focus and highlight agree.
+              // With no option to focus (an empty list), Radix keeps its
+              // default and focuses the popover itself.
               if (hasSearch) return;
+              const option = document.getElementById(
+                `enum-option-${selectedIndex}`
+              );
+              if (!option) return;
               event.preventDefault();
-              document.getElementById(`enum-option-${selectedIndex}`)?.focus();
+              option.focus();
             }}
           >
             {hasSearch ? (

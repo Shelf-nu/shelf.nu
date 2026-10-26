@@ -127,6 +127,18 @@ describe("ValueField for a custom field dropdown", () => {
     expect(setFilter).toHaveBeenCalledWith("Panasonic");
   });
 
+  it("moves focus into the popover when the field has no options", async () => {
+    const user = userEvent.setup();
+    renderPicker([], "");
+
+    await user.click(await screen.findByRole("button"));
+
+    const message = await screen.findByText(/No options available/);
+    const popover = message.closest("[data-radix-popper-content-wrapper]");
+    expect(popover).not.toBeNull();
+    expect(popover?.contains(document.activeElement)).toBe(true);
+  });
+
   it("picks only the focused option when Enter is pressed on it", async () => {
     const user = userEvent.setup();
     const setFilter = renderPicker(BRANDS);
