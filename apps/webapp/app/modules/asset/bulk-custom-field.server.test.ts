@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vitest } from "vitest";
 import { db } from "~/database/db.server";
 import { recordEvents } from "~/modules/activity-event/service.server";
 import { createNotes } from "~/modules/note/service.server";
+import { lockAssetsForArchiveGuard } from "./archive-lock.server";
 import {
   bulkCustomFieldMessage,
   bulkSetAssetCustomField,
@@ -39,6 +40,11 @@ vitest.mock("./bulk-operations-helper.server", () => ({
   resolveAssetIdsForBulkOperation: vitest.fn(
     ({ assetIds }: { assetIds: string[] }) => Promise.resolve(assetIds)
   ),
+}));
+
+// why: the archive lock is a raw SQL row lock with its own suite.
+vitest.mock("./archive-lock.server", () => ({
+  lockAssetsForArchiveGuard: vitest.fn(),
 }));
 
 // why: the archive guard has its own suite and reads tables this stub lacks.
@@ -151,7 +157,7 @@ describe("bulkSetAssetCustomField", () => {
 
     expect(result.changed).toBe(1);
     expect(db.assetCustomFieldValue.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["v-a1"] }, customFieldId: "cf-brand" },
+      where: { assetId: { in: ["a1"] }, customFieldId: "cf-brand" },
       data: { value: { raw: "Westermo", valueOption: "Westermo" } },
     });
   });
@@ -217,6 +223,22 @@ describe("bulkSetAssetCustomField", () => {
         "updated **Brand** from **Siemens** to **Westermo**"
       ),
     ]);
+  });
+
+  it("reads the assets inside the transaction, under the archive lock", async () => {
+    vitest.mocked(db.asset.findMany).mockResolvedValue([asset("a1")] as never);
+
+    await bulkSetAssetCustomField({
+      ...args,
+      assetIds: ["a1"],
+      mode: "EMPTY_ONLY",
+    });
+
+    const lock = vitest.mocked(lockAssetsForArchiveGuard).mock
+      .invocationCallOrder[0];
+    const read = vitest.mocked(db.asset.findMany).mock.invocationCallOrder[0];
+    expect(db.$transaction).toHaveBeenCalled();
+    expect(lock).toBeLessThan(read);
   });
 
   it("refuses a value that is not one of the field's options", async () => {

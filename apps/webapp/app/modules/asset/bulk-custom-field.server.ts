@@ -33,7 +33,7 @@ import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { parseData } from "~/utils/http.server";
 import { assertAssetsAreNotArchived } from "~/utils/org-validation.server";
-import { slugify } from "~/utils/slugify";
+import { lockAssetsForArchiveGuard } from "./archive-lock.server";
 import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
 import type { LastAuditDateAccess } from "./last-audit-date-access";
 import type { ICustomFieldValueJson } from "./types";
@@ -104,12 +104,14 @@ function buildValueForField(
   field: Pick<CustomField, "id" | "name" | "type" | "options" | "helpText">,
   raw: string
 ): ICustomFieldValueJson {
+  const key = `cf-${field.id}`;
   const schema = mergedSchema({
     baseSchema: z.object({}),
     customFields: [
       {
         id: field.id,
-        name: slugify(field.name),
+        // Shown in the error message ("Brand is required"), so the real name.
+        name: field.name,
         helpText: field.helpText || "",
         // A yes/no field always has an answer, so it is never "required".
         required: field.type !== "BOOLEAN",
@@ -119,11 +121,12 @@ function buildValueForField(
     ],
   });
 
-  const formData = new FormData();
-  formData.set(`cf-${field.id}`, raw);
-  const payload = parseData(formData, schema) as Record<string, unknown>;
+  // A value that does not fit is the user's typo, not an incident to report.
+  const payload = parseData({ [key]: raw }, schema, {
+    shouldBeCaptured: false,
+  }) as Record<string, unknown>;
   const built = buildCustomFieldValue(
-    { raw: payload[`cf-${field.id}`] as string },
+    { raw: payload[key] as string },
     field as CustomField
   );
 
@@ -235,154 +238,158 @@ export async function bulkSetAssetCustomField({
       return empty;
     }
 
-    // Archived assets are frozen (issue #382): their fields cannot change.
-    await assertAssetsAreNotArchived({
-      assetIds: resolvedIds,
-      organizationId,
-      actorUserId: userId,
-    });
-
-    // Org-scoped read: every id below is proven to belong here.
-    const assets = await db.asset.findMany({
-      where: { id: { in: resolvedIds }, organizationId, archivedAt: null },
-      select: {
-        id: true,
-        categoryId: true,
-        customFields: {
-          where: { customFieldId: field.id },
-          select: { id: true, customFieldId: true, value: true },
-        },
-      },
+    const user = await db.user.findFirst({
+      where: { id: userId },
+      select: USER_NAME_SELECT,
     });
 
     const fieldCategoryIds = new Set(field.categories.map((c) => c.id));
     const applies = (categoryId: string | null) =>
       fieldCategoryIds.size === 0 ||
       (categoryId !== null && fieldCategoryIds.has(categoryId));
-
     const fieldInfo = { id: field.id, name: field.name, type: field.type };
-    let skippedWithValue = 0;
-    let skippedCategory = 0;
 
-    /** Assets that change, with the note-ready description of the change. */
-    const changing = assets.flatMap((asset) => {
-      if (!applies(asset.categoryId)) {
-        skippedCategory += 1;
-        return [];
-      }
-      const existing = asset.customFields[0];
-      if (existing && mode === "EMPTY_ONLY") {
-        skippedWithValue += 1;
-        return [];
-      }
-      // Same comparison the single edit uses, so an identical value is a no-op.
-      const [change] = detectCustomFieldChanges(
-        existing
-          ? [
-              {
-                id: existing.id,
-                customFieldId: field.id,
-                value: existing.value as unknown as ICustomFieldValueJson,
-                customField: fieldInfo,
-              },
-            ]
-          : [],
-        [{ id: field.id, value }],
-        [fieldInfo]
-      );
-      return change ? [{ asset, existing, change }] : [];
-    });
+    // The read, the decision and the writes share one transaction, under the
+    // lock archiving takes, so a value saved or an asset archived meanwhile
+    // is seen before anything is written.
+    return await db.$transaction(
+      async (tx) => {
+        await lockAssetsForArchiveGuard(tx, resolvedIds, organizationId);
+        // Archived assets are frozen (issue #382): their fields cannot change.
+        await assertAssetsAreNotArchived(
+          { assetIds: resolvedIds, organizationId, actorUserId: userId },
+          tx
+        );
 
-    if (changing.length > 0) {
-      const user = await db.user.findFirst({
-        where: { id: userId },
-        select: USER_NAME_SELECT,
-      });
+        // Org-scoped read: every id below is proven to belong here.
+        const assets = await tx.asset.findMany({
+          where: { id: { in: resolvedIds }, organizationId, archivedAt: null },
+          select: {
+            id: true,
+            categoryId: true,
+            customFields: {
+              where: { customFieldId: field.id },
+              select: { id: true, customFieldId: true, value: true },
+            },
+          },
+        });
 
-      await db.$transaction(
-        async (tx) => {
-          const toCreate = changing.filter(({ existing }) => !existing);
-          const toUpdate = changing.filter(({ existing }) => existing);
+        let skippedWithValue = 0;
+        let skippedCategory = 0;
 
-          if (toCreate.length > 0) {
-            await tx.assetCustomFieldValue.createMany({
-              data: toCreate.map(({ asset }) => ({
-                assetId: asset.id,
-                customFieldId: field.id,
-                value: value as unknown as object,
-              })),
-            });
+        /** Assets that change, with the note-ready description of the change. */
+        const changing = assets.flatMap((asset) => {
+          if (!applies(asset.categoryId)) {
+            skippedCategory += 1;
+            return [];
           }
-          if (toUpdate.length > 0) {
-            await tx.assetCustomFieldValue.updateMany({
-              where: {
-                id: { in: toUpdate.map(({ existing }) => existing!.id) },
-                customFieldId: field.id,
-              },
-              data: { value: value as unknown as object },
-            });
+          const existing = asset.customFields[0];
+          if (existing && mode === "EMPTY_ONLY") {
+            skippedWithValue += 1;
+            return [];
           }
+          // Same comparison the single edit uses, so an identical value is a
+          // no-op.
+          const [change] = detectCustomFieldChanges(
+            existing
+              ? [
+                  {
+                    id: existing.id,
+                    customFieldId: field.id,
+                    value: existing.value as unknown as ICustomFieldValueJson,
+                    customField: fieldInfo,
+                  },
+                ]
+              : [],
+            [{ id: field.id, value }],
+            [fieldInfo]
+          );
+          return change ? [{ asset, existing, change }] : [];
+        });
 
-          // One event per asset, shaped like the single edit's event.
-          await recordEvents(
-            changing.map(({ asset, change }) => ({
-              organizationId,
-              actorUserId: userId,
-              action: "ASSET_CUSTOM_FIELD_CHANGED" as const,
-              entityType: "ASSET" as const,
-              entityId: asset.id,
+        const toCreate = changing.filter(({ existing }) => !existing);
+        const toUpdate = changing.filter(({ existing }) => existing);
+
+        if (toCreate.length > 0) {
+          await tx.assetCustomFieldValue.createMany({
+            data: toCreate.map(({ asset }) => ({
               assetId: asset.id,
-              field: field.name,
-              fromValue: change.previousValue ?? null,
-              toValue: change.newValue ?? null,
-              meta: { isFirstTimeSet: change.isFirstTimeSet, viaBulk: true },
+              customFieldId: field.id,
+              value: value as unknown as object,
             })),
+          });
+        }
+        if (toUpdate.length > 0) {
+          // By asset and field, so every stored row for the field gets the
+          // value, not just the first.
+          await tx.assetCustomFieldValue.updateMany({
+            where: {
+              assetId: { in: toUpdate.map(({ asset }) => asset.id) },
+              customFieldId: field.id,
+            },
+            data: { value: value as unknown as object },
+          });
+        }
+
+        // One event per asset, shaped like the single edit's event.
+        await recordEvents(
+          changing.map(({ asset, change }) => ({
+            organizationId,
+            actorUserId: userId,
+            action: "ASSET_CUSTOM_FIELD_CHANGED" as const,
+            entityType: "ASSET" as const,
+            entityId: asset.id,
+            assetId: asset.id,
+            field: field.name,
+            fromValue: change.previousValue ?? null,
+            toValue: change.newValue ?? null,
+            meta: { isFirstTimeSet: change.isFirstTimeSet, viaBulk: true },
+          })),
+          tx
+        );
+
+        // The single edit's note text. Assets with the same previous value
+        // share the sentence, so each distinct sentence is one statement.
+        const assetIdsByNote = new Map<string, string[]>();
+        for (const { asset, change } of changing) {
+          const content = getCustomFieldUpdateNoteContent({
+            customFieldName: change.customFieldName,
+            previousValue: change.previousValue,
+            newValue: change.newValue,
+            userId,
+            firstName: user?.firstName ?? "",
+            lastName: user?.lastName ?? "",
+            displayName: user?.displayName,
+            isFirstTimeSet: change.isFirstTimeSet,
+          });
+          if (!content) continue;
+          const group = assetIdsByNote.get(content) ?? [];
+          group.push(asset.id);
+          assetIdsByNote.set(content, group);
+        }
+        for (const [content, noteAssetIds] of assetIdsByNote) {
+          await createNotes(
+            {
+              content,
+              type: "UPDATE",
+              userId,
+              assetIds: noteAssetIds,
+              organizationId,
+            },
             tx
           );
+        }
 
-          // The single edit's note text. Assets with the same previous value
-          // share the sentence, so each distinct sentence is one statement.
-          const assetIdsByNote = new Map<string, string[]>();
-          for (const { asset, change } of changing) {
-            const content = getCustomFieldUpdateNoteContent({
-              customFieldName: change.customFieldName,
-              previousValue: change.previousValue,
-              newValue: change.newValue,
-              userId,
-              firstName: user?.firstName ?? "",
-              lastName: user?.lastName ?? "",
-              displayName: user?.displayName,
-              isFirstTimeSet: change.isFirstTimeSet,
-            });
-            if (!content) continue;
-            const group = assetIdsByNote.get(content) ?? [];
-            group.push(asset.id);
-            assetIdsByNote.set(content, group);
-          }
-          for (const [content, noteAssetIds] of assetIdsByNote) {
-            await createNotes(
-              {
-                content,
-                type: "UPDATE",
-                userId,
-                assetIds: noteAssetIds,
-                organizationId,
-              },
-              tx
-            );
-          }
-        },
-        // A select-all can span the workspace, like the other bulk writes.
-        { timeout: 15000 }
-      );
-    }
-
-    return {
-      resolved: assets.length,
-      changed: changing.length,
-      skippedWithValue,
-      skippedCategory,
-    };
+        return {
+          resolved: assets.length,
+          changed: changing.length,
+          skippedWithValue,
+          skippedCategory,
+        };
+      },
+      // A select-all can span the workspace, like the other bulk writes.
+      { timeout: 15000 }
+    );
   } catch (cause) {
     // Keep a deliberate refusal's status and message (bad value, archived
     // assets, a field from another workspace).
