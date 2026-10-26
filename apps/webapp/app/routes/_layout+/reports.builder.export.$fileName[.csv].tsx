@@ -43,6 +43,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { assertUserCanUseReports } from "~/utils/subscription.server";
 
 /**
  * Builds the custom report described by the query string as a CSV download.
@@ -58,12 +59,16 @@ export const loader = async ({
   const { userId } = authSession;
 
   try {
-    const { organizationId, currentOrganization } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.reports,
-      action: PermissionAction.export,
-    });
+    const { organizationId, organizations, currentOrganization } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.reports,
+        action: PermissionAction.export,
+      });
+    // Reports are part of the Plus and Team plans. This is a download URL, so
+    // a workspace without them gets the 403 as JSON rather than a page.
+    await assertUserCanUseReports({ organizationId, organizations });
     validateAdvancedReportsEnabled(currentOrganization, { userId });
 
     const searchParams = getCurrentSearchParams(request);
