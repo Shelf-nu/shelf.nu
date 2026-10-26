@@ -6647,9 +6647,8 @@ export async function checkinBooking({
          * every read of this booking's slices above, because emptying a
          * membership can merge its slice into a standalone sibling.
          *
-         * `userId` only narrows the type: without one, the guard at the top
-         * of this transaction refuses any check-in with units left to
-         * disposition, so nothing can have been destroyed.
+         * `userId` only narrows the type: the slice loop above refuses to log
+         * a disposition without one, so no units can have been destroyed.
          */
         if (userId && destroyedUnitsByAssetKitId.size > 0) {
           destroyedKitUnitsRef.value = await removeDestroyedUnitsFromKits(tx, {
