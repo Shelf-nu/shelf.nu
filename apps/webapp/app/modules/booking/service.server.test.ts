@@ -2749,6 +2749,28 @@ describe("updateBookingAssets", () => {
     vitest.clearAllMocks();
   });
 
+  it("gives the save the long transaction budget", async () => {
+    // why: the pool guards lock and measure every added unit's asset and model
+    // inside the transaction, so a large selection outgrows Prisma's five-second
+    // default. Only the budget is asserted; the closed status ends the body early.
+    (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+      { status: BookingStatus.COMPLETE },
+    ]);
+
+    await updateBookingAssets({
+      id: "booking-1",
+      organizationId: "org-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
+      assetIds: ["asset-1"],
+      userId: "user-1",
+    }).catch(() => undefined);
+
+    expect(db.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      LONG_TRANSACTION_OPTIONS
+    );
+  });
+
   it.each([
     BookingStatus.COMPLETE,
     BookingStatus.ARCHIVED,
@@ -9848,7 +9870,7 @@ describe("extendBooking", () => {
   });
 
   it("should extend booking successfully", async () => {
-    expect.assertions(3);
+    expect.assertions(4);
 
     const mockBooking = {
       ...extendableBookingData,
@@ -9913,6 +9935,12 @@ describe("extendBooking", () => {
         bookingId: "booking-1",
         field: "to",
       })
+    );
+    // The model guard measures every named unit over the new window, so the
+    // write gets the long transaction budget.
+    expect(db.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      LONG_TRANSACTION_OPTIONS
     );
   });
 

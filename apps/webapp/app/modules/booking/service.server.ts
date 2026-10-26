@@ -11402,6 +11402,9 @@ export async function updateBookingAssets({
   skipBookingNote?: boolean;
 }) {
   try {
+    // The pool guards inside lock and measure the asset and model of every added
+    // unit, so the body grows with the selection and needs the long budget rather
+    // than Prisma's five-second default.
     const { booking, addedAssetIds } = await db.$transaction(async (tx) => {
       // Verify booking exists before inserting into the join table,
       // so a stale/deleted booking returns a proper 404 (P2025)
@@ -12028,7 +12031,7 @@ export async function updateBookingAssets({
       }
 
       return { booking: b, addedAssetIds };
-    });
+    }, LONG_TRANSACTION_OPTIONS);
 
     // BOOKING ACTIVITY LOG: Log asset addition activity
     // Creates user-attributed note when assets are added to a booking
@@ -12773,7 +12776,12 @@ export async function extendBooking({
       });
     }
 
-    /** Wrap conflict detection and update in a transaction to prevent race conditions */
+    /**
+     * Conflict detection and the update share one transaction so they cannot
+     * race. The model guard inside measures every named unit on the booking
+     * over the new window, so the body grows with the booking and needs the
+     * long budget rather than Prisma's five-second default.
+     */
     const updatedBooking = await db.$transaction(async (tx) => {
       /**
        * Every membership of the kits still out. A reservation holds a kit
@@ -12904,7 +12912,7 @@ export async function extendBooking({
           }
           throw cause;
         });
-    });
+    }, LONG_TRANSACTION_OPTIONS);
 
     // Add activity log for booking extension
     const user = await getUserByID(userId, {
