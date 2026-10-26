@@ -18,8 +18,12 @@ import {
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { Button } from "../shared/button";
 
-/** Simple-mode asset index filters a chip can link to. */
-type AssetsFilter = { category: string } | { tag: string };
+/** Simple-mode asset index filters a link can apply. */
+export type AssetsFilter =
+  | { category: string }
+  | { tag: string }
+  | { status: string }
+  | { teamMember: string };
 
 /**
  * Builds the `/assets` URL for one simple-mode filter.

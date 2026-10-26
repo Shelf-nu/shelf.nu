@@ -236,7 +236,7 @@ const ListItemContent = ({
       <CountLink
         count={item._count.children}
         to={`/locations/${item.id}`}
-        label={`View the child locations of ${item.name}`}
+        label={`Open ${item.name} and its child locations`}
       />
     </Td>
     <Td>

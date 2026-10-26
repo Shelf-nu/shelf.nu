@@ -6,6 +6,7 @@ import type {
 } from "react-router";
 import { data, Link, Outlet } from "react-router";
 import { z } from "zod";
+import { buildAssetsFilterHref } from "~/components/assets/assets-filter-link";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -77,6 +78,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       perPage,
       search,
       request,
+      userId,
     });
     const totalPages = Math.ceil(totalTags / perPage);
 
@@ -254,7 +256,7 @@ const TagItem = ({
     <Td>
       <CountLink
         count={item._count.assets}
-        to={`/assets?${new URLSearchParams({ tag: item.id })}`}
+        to={buildAssetsFilterHref({ tag: item.id })}
         label={`View the assets tagged ${item.name}`}
       />
     </Td>

@@ -268,6 +268,7 @@ export default function ListBookingsContent({
               : resolveUserDisplayName(item.custodianUser),
             user: item?.custodianUser ?? null,
           }}
+          linkTo="bookings"
         />
       </Td>
 

@@ -5,6 +5,7 @@ import type { loader } from "~/routes/_layout+/home";
 import { DashboardEmptyState } from "./empty-state";
 import FallbackLoading from "./fallback-loading";
 
+import { buildAssetsFilterHref } from "../assets/assets-filter-link";
 import { Badge } from "../shared/badge";
 import { Button } from "../shared/button";
 
@@ -55,7 +56,7 @@ export default function AssetsByStatusChart() {
                     return (
                       <li key={status}>
                         <Button
-                          to={`/assets?${new URLSearchParams({ status: id })}`}
+                          to={buildAssetsFilterHref({ status: id })}
                           variant="inherit"
                           className="hover:no-underline"
                           title={`View ${status.toLowerCase()} assets`}

@@ -174,5 +174,33 @@ describe("TeamMemberBadge", () => {
       expect(screen.queryByRole("link")).toBeNull();
       expect(screen.getByText("Kim Mohnacs")).toBeTruthy();
     });
+
+    it("opens the member's bookings page when linking to bookings", () => {
+      render(<TeamMemberBadge teamMember={registered} linkTo="bookings" />);
+
+      expect(screen.getByRole("link").getAttribute("href")).toBe(
+        "/settings/team/users/u1/bookings"
+      );
+    });
+
+    it("opens the custodian-filtered bookings list for a non-registered member", () => {
+      render(
+        <TeamMemberBadge
+          teamMember={{ id: "tm-2", name: "External Contractor", user: null }}
+          linkTo="bookings"
+        />
+      );
+
+      expect(screen.getByRole("link").getAttribute("href")).toBe(
+        "/bookings?teamMember=tm-2"
+      );
+    });
+
+    it("stays plain where it cannot be clicked", () => {
+      render(<TeamMemberBadge teamMember={registered} linkTo="none" />);
+
+      expect(screen.queryByRole("link")).toBeNull();
+      expect(screen.getByText("Kim Mohnacs")).toBeTruthy();
+    });
   });
 });

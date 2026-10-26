@@ -12,6 +12,7 @@ import { userHasPermission } from "~/utils/permissions/permission.validator.clie
 import { tw } from "~/utils/tw";
 import type { TeamMemberNameFields } from "~/utils/user";
 import { resolveTeamMemberName } from "~/utils/user";
+import { buildAssetsFilterHref } from "../assets/assets-filter-link";
 import { Button } from "../shared/button";
 import { GrayBadge } from "../shared/gray-badge";
 
@@ -45,10 +46,11 @@ export interface TeamMemberForBadge extends TeamMemberNameFields {
  * and, because a resolved user name outranks the stored `TeamMember.name`,
  * would override a correct name supplied by the caller.
  *
- * A visible badge links to what the person holds, choosing the first target
- * the viewer may open:
+ * A visible badge links to the person's assets (or, with `linkTo="bookings"`,
+ * their bookings), choosing the first target the viewer may open:
  * 1. their team member page (`teamMemberProfile: read`, registered users only)
- * 2. the asset index filtered to their custody (`asset: read`, needs `id`)
+ * 2. the asset or bookings index filtered to them (`asset: read` or
+ *    `booking: read`, needs `id`)
  *
  * The custody filter is narrowed to the viewer's own custody unless they may
  * see everyone's, the same rule that decides whether the badge shows the name,
@@ -57,14 +59,19 @@ export interface TeamMemberForBadge extends TeamMemberNameFields {
  * @param props.teamMember - The custodian to name; renders nothing when absent
  * @param props.hidePrivate - Hide the badge entirely, rather than showing
  *   "private", when the viewer may not see this custodian
+ * @param props.linkTo - What the badge opens: the person's assets (default),
+ *   their bookings, or nothing (for places that cannot be clicked, such as a
+ *   hover card)
  */
 export function TeamMemberBadge({
   teamMember,
   /** Hide the "private" badge in case the user cannot see custodian */
   hidePrivate = false,
+  linkTo = "assets",
 }: {
   teamMember: TeamMemberForBadge | undefined | null;
   hidePrivate?: boolean;
+  linkTo?: "assets" | "bookings" | "none";
 }) {
   const roles = useOrganizationRoles();
   const organization = useCurrentOrganization();
@@ -82,20 +89,25 @@ export function TeamMemberBadge({
     entity: PermissionEntity.teamMemberProfile,
     action: PermissionAction.read,
   });
-  const canReadAssets = userHasPermission({
+  /** May the viewer open the list this badge links to */
+  const canReadList = userHasPermission({
     roles,
-    entity: PermissionEntity.asset,
+    entity:
+      linkTo === "bookings" ? PermissionEntity.booking : PermissionEntity.asset,
     action: PermissionAction.read,
   });
 
   /** Where the badge links, or `null` to render it plain */
-  const href = !userCanViewBadge
-    ? null
-    : canViewTeamMemberProfile && teamMember?.user?.id
-    ? `/settings/team/users/${teamMember.user.id}/assets`
-    : canReadAssets && teamMember?.id
-    ? `/assets?${new URLSearchParams({ teamMember: teamMember.id })}`
-    : null;
+  const href =
+    !userCanViewBadge || linkTo === "none"
+      ? null
+      : canViewTeamMemberProfile && teamMember?.user?.id
+      ? `/settings/team/users/${teamMember.user.id}/${linkTo}`
+      : !canReadList || !teamMember?.id
+      ? null
+      : linkTo === "bookings"
+      ? `/bookings?${new URLSearchParams({ teamMember: teamMember.id })}`
+      : buildAssetsFilterHref({ teamMember: teamMember.id });
 
   if (!teamMember) {
     return null;
@@ -128,7 +140,11 @@ export function TeamMemberBadge({
       to={href}
       variant="inherit"
       className="hover:no-underline"
-      title={`View assets held by ${resolveTeamMemberName(teamMember)}`}
+      title={
+        linkTo === "bookings"
+          ? `View bookings of ${resolveTeamMemberName(teamMember)}`
+          : `View assets held by ${resolveTeamMemberName(teamMember)}`
+      }
     >
       {badge}
     </Button>
