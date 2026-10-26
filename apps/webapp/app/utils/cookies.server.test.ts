@@ -29,10 +29,26 @@ vi.mock("./env", async () => {
 });
 
 // why: cookies.server transitively imports asset/utils.server, which
-// initializes Prisma at import time.
-vi.mock("~/modules/asset/utils.server", () => ({
-  advancedFilterFormatSchema: {},
-}));
+// initializes Prisma at import time. The stand-in validates the
+// `operator:value` grammar from the same operator list and splitter.
+vi.mock("~/modules/asset/utils.server", async () => {
+  const { filterOperatorSchema } = await import(
+    "~/components/assets/assets-index/advanced-filters/schema"
+  );
+  const { splitFilterParam } = await import("~/modules/asset/filter-param");
+  return {
+    advancedFilterFormatSchema: {
+      safeParse: (value: string) => {
+        const [operator, filterValue] = splitFilterParam(value);
+        return {
+          success:
+            filterValue !== undefined &&
+            filterOperatorSchema.safeParse(operator).success,
+        };
+      },
+    },
+  };
+});
 
 const { expireHostOnlyUserPrefsCookie } = await import("./cookies.server");
 const { isLastAuditDateParam } = await import(
@@ -284,6 +300,78 @@ describe("filter cookies never keep a typed search", () => {
 
     expect(serializedCookie).toMatch(
       /^org-1_advancedAssetFilter_v2=;.*Max-Age=0/
+    );
+  });
+});
+
+describe("the Advanced assets index reads simple-mode filter links", () => {
+  const settings = {
+    columns: [{ name: "category" }, { name: "tags" }, { name: "custody" }],
+  } as never;
+
+  /** Normalizes a URL query and returns the params the redirect lands on. */
+  async function normalized(query: string) {
+    const { filters, redirectNeeded } = await getAdvancedFiltersFromRequest(
+      listRequest(`http://localhost/assets?${query}`),
+      "org-1",
+      settings
+    );
+    return { params: new URLSearchParams(filters), redirectNeeded };
+  }
+
+  it("promotes a bare column value to `is`", async () => {
+    const { params, redirectNeeded } = await normalized("category=cat-1");
+
+    expect(redirectNeeded).toBe(true);
+    expect(params).toEqual(new URLSearchParams("category=is:cat-1"));
+  });
+
+  it("translates `tag` to the tags column", async () => {
+    const { params } = await normalized("tag=tag-1");
+
+    expect(params).toEqual(new URLSearchParams("tags=contains:tag-1"));
+  });
+
+  it("translates `teamMember` to the custody column", async () => {
+    const { params } = await normalized("teamMember=tm-1");
+
+    expect(params).toEqual(new URLSearchParams("custody=is:tm-1"));
+  });
+
+  it("matches any of several values, like the simple index", async () => {
+    const { params } = await normalized(
+      "tag=tag-1&tag=tag-2&teamMember=tm-1&teamMember=tm-2"
+    );
+
+    expect(params).toEqual(
+      new URLSearchParams(
+        "tags=containsAny:tag-1,tag-2&custody=containsAny:tm-1,tm-2"
+      )
+    );
+  });
+
+  it("keeps other filters alongside the translated ones", async () => {
+    const { params } = await normalized("tag=tag-1&status=is:AVAILABLE&page=2");
+
+    expect(params.get("tags")).toBe("contains:tag-1");
+    expect(params.get("status")).toBe("is:AVAILABLE");
+    expect(params.get("page")).toBe("2");
+  });
+
+  it("drops blank and operator-form values of a simple-only key", async () => {
+    const { params } = await normalized("tag=&teamMember=is:tm-1");
+
+    expect(params.toString()).toBe("");
+  });
+
+  it("leaves an already-Advanced URL untouched", async () => {
+    const { params, redirectNeeded } = await normalized(
+      "tags=contains:tag-1&custody=is:tm-1"
+    );
+
+    expect(redirectNeeded).toBe(false);
+    expect(params).toEqual(
+      new URLSearchParams("tags=contains:tag-1&custody=is:tm-1")
     );
   });
 });
