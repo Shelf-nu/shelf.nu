@@ -245,6 +245,20 @@ describe("parseSortingOptions", () => {
       expect(orderByInner).toBe('"assetQuantity" desc, "assetId" ASC');
     });
 
+    it.each(["asc", "desc"])(
+      "sorts valuation %s by total value, individual assets' NULL quantity as 1, no value last",
+      (direction) => {
+        const { orderByInner } = parseSortingOptions([
+          `valuation:${direction}`,
+        ]);
+        // Without the COALESCE, value × NULL is NULL and every individual
+        // asset ties on the sort key.
+        expect(orderByInner).toBe(
+          `("assetValue" * COALESCE("assetQuantity", 1)) ${direction} NULLS LAST, "assetId" ASC`
+        );
+      }
+    );
+
     it("sorts unit of measure with the natural text sort", () => {
       const { orderByInner } = parseSortingOptions(["unitOfMeasure:asc"]);
       expect(orderByInner).toContain(

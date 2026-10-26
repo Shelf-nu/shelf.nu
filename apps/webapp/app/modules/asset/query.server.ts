@@ -1744,13 +1744,17 @@ export function parseSortingOptions(sortBy: string[]): {
         );
       } else if (field.name === "valuation") {
         // Quantity-aware: sort by TOTAL value (per-unit × quantity), matching
-        // what the "Value" cell displays. INDIVIDUAL assets are quantity=1 so
-        // this is identical to sorting on `assetValue` for them; QT assets
-        // are now ordered by total worth (the number users actually compare),
-        // not per-unit price. `assetValue` and `assetQuantity` are aliases on
-        // the outer SELECT — safe to multiply without quoting concerns.
+        // what the "Value" cell displays. INDIVIDUAL assets store a NULL
+        // quantity (see the Asset model), so it is COALESCEd to 1: otherwise
+        // the product is NULL for every individual asset and they all tie.
+        // For them this is identical to sorting on `assetValue`; QT assets
+        // are ordered by total worth (the number users actually compare),
+        // not per-unit price. Assets with no value sort last in both
+        // directions (Postgres would put them first on desc). `assetValue`
+        // and `assetQuantity` are aliases on the outer SELECT — safe to
+        // multiply without quoting concerns.
         orderByParts.push(
-          `("assetValue" * "assetQuantity") ${field.direction}`
+          `("assetValue" * COALESCE("assetQuantity", 1)) ${field.direction} NULLS LAST`
         );
       } else {
         // Use regular sorting for non-text columns
