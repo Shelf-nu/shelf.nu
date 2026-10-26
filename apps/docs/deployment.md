@@ -302,7 +302,7 @@ Shelf requires email for authentication. Here are recommended providers:
 
 ### Groundmail
 
-Until you verify a sending domain and add a payment method, Groundmail only sends from `noreply@mail.groundmail.dev` to your own account email; other recipients are rejected.
+Until you add a payment method, Groundmail only sends to your own account email: from `noreply@mail.groundmail.dev`, or from your domain once it's verified. Sending to other recipients needs a verified domain and a payment method on file.
 
 1. **Sign up** at [Groundmail](https://groundmail.dev/) and verify your sending domain
 2. **Create an SMTP credential** in the dashboard under SMTP (it starts with `gmsmtp_`)
