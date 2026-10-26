@@ -248,8 +248,11 @@ export default function OtpPage() {
           type: "error",
         });
       } else {
+        // A resend answers the same for every address (see `sendOTP`), so the
+        // message cannot claim the email went out.
         setMessage({
-          message: "Email sent successfully. Please check your inbox.",
+          message:
+            "If this address can receive a code, a new one is on its way. Please check your inbox.",
           type: "success",
         });
       }

@@ -16,11 +16,12 @@ export const OTP_PAGE_MAP: OtpPageData = {
   login: {
     title: "Fill your code",
     // The send answers the same for every address, so this cannot claim a
-    // code went out: an address with no account here is sent nothing.
+    // code went out: an address with no account here, or one that must use
+    // SSO, is sent nothing.
     SubHeading: ({ email }) => (
       <SubHeading className="-mt-4 text-center">
-        If <span className="font-bold text-gray-900">{email}</span> has an
-        account, we have sent it a code. Fill the code below to log in.
+        If <span className="font-bold text-gray-900">{email}</span> can sign in
+        with a code, we have sent one to it. Fill the code below to log in.
       </SubHeading>
     ),
     buttonTitle: "Log In",
