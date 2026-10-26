@@ -773,6 +773,8 @@ describe("manage-assets route validation", () => {
         access: expect.objectContaining({
           bookings: expect.objectContaining({ writeAll: true }),
         }),
+        // The pool refusal names its day in the acting user's time zone.
+        hints: expect.objectContaining({ timeZone: expect.any(String) }),
       });
 
       // Verify per-asset note creation. The route now uses markdoc link
@@ -1590,6 +1592,7 @@ describe("manage-assets loader — units reserved by model elsewhere", () => {
       reservedViaRequest: 3 - 1 - available,
       reserved: 3 - 1 - available,
       available,
+      peak: { at: null, requestedBy: [] },
     });
   }
 

@@ -1009,6 +1009,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         skipBookingNote: true,
         // Re-checks the add rule against the locked booking status.
         access,
+        hints: getClientHint(request),
       });
 
       /**
@@ -1187,6 +1188,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         skipBookingNote: true,
         // Re-checks the add rule against the locked booking status.
         access,
+        hints: getClientHint(request),
       });
 
       /**

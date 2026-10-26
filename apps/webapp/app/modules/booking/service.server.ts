@@ -2615,6 +2615,7 @@ export async function reserveBooking({
           .map((asset) => asset.assetModelId)
           .filter((assetModelId): assetModelId is string => !!assetModelId),
         tx,
+        hints,
       });
 
       /**
@@ -2631,6 +2632,7 @@ export async function reserveBooking({
         from,
         to,
         tx,
+        hints,
       });
 
       return tx.booking.update({
@@ -3067,9 +3069,12 @@ async function checkoutBookingWritesWithinTx(
     to,
     checkedOutById,
     sourceLocations,
+    hints,
   }: {
     bookingId: Booking["id"];
     organizationId: Booking["organizationId"];
+    /** Acting user's locale and time zone, for the day a pool refusal names. */
+    hints?: ClientHint;
     /**
      * The booking's status as this transaction holds it, before the flip below.
      * Read under the booking's row lock, because it decides whether the
@@ -3280,6 +3285,7 @@ async function checkoutBookingWritesWithinTx(
       to,
       action: "check out booking",
       tx,
+      hints,
     });
   }
 
@@ -3880,6 +3886,7 @@ export async function checkoutBooking({
           to: bookingFound.to,
           checkedOutById: userId ?? null,
           sourceLocations,
+          hints,
         });
 
         // Activity events — one BOOKING_CHECKED_OUT per asset on the
@@ -4333,6 +4340,7 @@ export async function fulfilModelRequestsAndCheckout({
           to: bookingFound.to,
           checkedOutById: userId ?? null,
           sourceLocations,
+          hints,
         });
 
         /**
@@ -11339,6 +11347,7 @@ export async function updateBookingAssets({
   kitSlices,
   skipBookingNote,
   access,
+  hints,
 }: Pick<Booking, "id" | "organizationId"> & {
   /**
    * The adding caller's access. Its add-items rule is checked against the
@@ -11346,6 +11355,8 @@ export async function updateBookingAssets({
    * the caller's add statuses after the route's own check still refuses.
    */
   access: RoleAccess;
+  /** Acting user's locale and time zone, for the day a pool refusal names. */
+  hints?: ClientHint;
   /**
    * Standalone assets to add (no kit attribution). Kit-driven rows are
    * supplied separately via `kitSlices` so the same asset can be both
@@ -11830,6 +11841,7 @@ export async function updateBookingAssets({
         from: b.from,
         to: b.to,
         tx,
+        hints,
       });
 
       await Promise.all([
@@ -12838,9 +12850,14 @@ export async function extendBooking({
        * The days being added may overlap model reservations that other
        * bookings hold, which the clash check above cannot see: a
        * `BookingModelRequest` names no asset. Every INDIVIDUAL unit the
-       * booking holds by name is measured again against the pool for the new
-       * dates, kit-driven rows included — the extension takes the unit off
-       * that pool for the added days however it got onto the booking.
+       * booking holds by name is measured again against the pool for the
+       * ADDED days only, `(booking.to, newEndDate]`, the same span the clash
+       * check above looks at. The days the booking already covers were
+       * measured when it was reserved and an extension takes nothing more
+       * from them, so claims that lie entirely inside them are not this
+       * extension's business. Kit-driven rows are included: the extension
+       * takes the unit off the pool for the added days however it got onto
+       * the booking.
        */
       await assertModelUnitsNotReservedElsewhere({
         assets: booking.bookingAssets
@@ -12850,9 +12867,10 @@ export async function extendBooking({
         bookingStatus: booking.status,
         windowChanged: true,
         organizationId,
-        from: booking.from,
+        from: booking.to,
         to: newEndDate,
         tx,
+        hints,
       });
 
       // The row must still be exactly as read when the lock is taken: an

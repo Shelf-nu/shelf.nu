@@ -10187,14 +10187,18 @@ describe("extendBooking", () => {
       roles: [OrganizationRoles.ADMIN],
     });
 
-    // Every INDIVIDUAL unit the booking holds is handed over, under the new
-    // end date, with the whole footprint re-measured.
+    // Every INDIVIDUAL unit the booking holds is handed over, with the whole
+    // footprint re-measured over the ADDED days only: from the current end to
+    // the new one, the same span the clash check looks at. Measuring from the
+    // booking's start again refused extensions over claims in its past.
     expect(assertModelUnitsNotReservedElsewhere).toHaveBeenCalledWith(
       expect.objectContaining({
         bookingId: "booking-1",
         bookingStatus: BookingStatus.ONGOING,
         windowChanged: true,
+        from: extendableBookingData.to,
         to: newEndDate,
+        hints: mockClientHints,
         assets: [
           expect.objectContaining({ id: "asset-1" }),
           expect.objectContaining({ id: "asset-2" }),
