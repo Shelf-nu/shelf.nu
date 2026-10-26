@@ -84,9 +84,11 @@ import {
   getPrimaryLocation,
   isQuantityTracked,
 } from "~/modules/asset/utils";
+import { planModelDefaultFill } from "~/modules/asset-model/defaults";
 import {
   applyAssetModelDefaultsToAssets,
   getAssetModelDefaults,
+  getAssetModelsDefaults,
 } from "~/modules/asset-model/defaults.server";
 import {
   updateBarcodes,
@@ -6337,6 +6339,16 @@ export async function createAssetsFromContentImport({
       }),
     ]);
 
+    /**
+     * Defaults of every model the file names, read once. A row joining a
+     * model gets them in its empty cells, the same rule as every other way an
+     * asset joins a model.
+     */
+    const modelDefaults = await getAssetModelsDefaults({
+      assetModelIds: [...new Set(Object.values(assetModels ?? {}))],
+      organizationId,
+    });
+
     // Process assets sequentially to handle image uploads
     for (const asset of data) {
       // Generate asset ID upfront
@@ -6564,6 +6576,32 @@ export async function createAssetsFromContentImport({
       // so neither can fail here. `createAsset` keeps its own guards for the
       // callers that do not come through the importer.
 
+      let categoryId = asset.category ? categories?.[asset.category] : null;
+      let valuation: number | null = asset.valuation ? +asset.valuation : null;
+      const joinedModel = assetModelId
+        ? modelDefaults.get(assetModelId)
+        : undefined;
+      if (joinedModel) {
+        const fill = planModelDefaultFill({
+          model: joinedModel,
+          current: {
+            categoryId: categoryId ?? null,
+            valuation,
+            customFieldIdsWithValue: new Set(
+              customFieldsValues.map((value) => value.id)
+            ),
+          },
+        });
+        categoryId = fill.categoryId ?? categoryId;
+        valuation = fill.valuation ?? valuation;
+        for (const fieldDefault of fill.customFields) {
+          customFieldsValues.push({
+            id: fieldDefault.customFieldId,
+            value: fieldDefault.value,
+          } as ShelfAssetCustomFieldValueType);
+        }
+      }
+
       await createAsset({
         id: assetId, // Pass the pre-generated ID
         qrId: qrCodesPerAsset.find((item) => item?.key === asset.key)?.qrId,
@@ -6572,7 +6610,7 @@ export async function createAssetsFromContentImport({
         description: asset.description || "",
         userId,
         kitId,
-        categoryId: asset.category ? categories?.[asset.category] : null,
+        categoryId,
         locationId: asset.location ? locations?.[asset.location] : undefined,
         // Kit rows: custody belongs to the kit (assigned + inherited to members
         // in setKitCustodyAfterAssetImport). Don't also create a direct operator
@@ -6587,7 +6625,7 @@ export async function createAssetsFromContentImport({
                   .map((t) => ({ id: tags[t] })),
               }
             : undefined,
-        valuation: asset.valuation ? +asset.valuation : null,
+        valuation,
         customFieldsValues,
         availableToBook: asset?.bookable !== "no",
         mainImage: mainImage || null,

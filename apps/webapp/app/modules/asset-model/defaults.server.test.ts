@@ -48,6 +48,7 @@ function model(
           type: "OPTION",
           active: true,
           deletedAt: null,
+          options: ["Westermo", "Siemens"],
           categories: [],
         },
       },

@@ -60,8 +60,8 @@ export function AssetModelFormRow({
       required={required}
       subHeading={
         <p>
-          Assign a model to group similar assets together. When you save, the
-          model's defaults fill this asset's empty fields.{" "}
+          Assign a model to group similar assets together. When an asset joins a
+          model, the model's defaults fill its empty fields.{" "}
           <Button
             to="/settings/asset-models/new"
             variant="link-gray"

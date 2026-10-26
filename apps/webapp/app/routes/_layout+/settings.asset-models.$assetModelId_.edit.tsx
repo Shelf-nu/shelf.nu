@@ -19,6 +19,7 @@ import AssetModelForm, {
   AssetModelFormSchema,
 } from "~/components/asset-model/form";
 import { LinkedAssetsFillCard } from "~/components/asset-model/linked-assets-fill-card";
+import { db } from "~/database/db.server";
 import { getCategoriesForCreateAndEdit } from "~/modules/asset/service.server";
 import {
   fillLinkedAssetsFromModel,
@@ -184,16 +185,17 @@ export async function action({ context, request, params }: LoaderFunctionArgs) {
       fields: await getModelDefaultFieldOptions({ organizationId }),
     });
 
-    await updateAssetModel({
-      ...parsedPayload,
-      id,
-      organizationId,
-    });
+    /** What the defaults would fill before this save, to compare after it. */
+    const fillBefore = await summariseLinkedFill(id, organizationId);
 
-    await saveAssetModelCustomFieldDefaults({
-      assetModelId: id,
-      organizationId,
-      defaults: customFieldDefaults,
+    // The model and its defaults are one change: either both are saved or
+    // neither is.
+    await db.$transaction(async (tx) => {
+      await updateAssetModel({ ...parsedPayload, id, organizationId }, tx);
+      await saveAssetModelCustomFieldDefaults(
+        { assetModelId: id, organizationId, defaults: customFieldDefaults },
+        tx
+      );
     });
 
     /**
@@ -216,26 +218,41 @@ export async function action({ context, request, params }: LoaderFunctionArgs) {
 
     /**
      * Saving defaults changes nothing on assets already in the model. When
-     * some of them have empty fields the defaults would fill, stay on this
-     * page so the user sees the card that offers to fill them.
+     * this save gave the defaults something new to fill on them, stay on this
+     * page so the user sees the card that offers it. Otherwise go back to the
+     * list as usual, so a user who chose not to fill is not held here.
      */
-    const defaults = await getAssetModelDefaults({
-      assetModelId: id,
-      organizationId,
-    });
-    const { assetCount } = defaults
-      ? await getLinkedAssetsFillSummary({ model: defaults, organizationId })
-      : { assetCount: 0 };
+    const fillAfter = await summariseLinkedFill(id, organizationId);
+    const newFill =
+      fillAfter.assetCount > 0 &&
+      JSON.stringify(fillAfter) !== JSON.stringify(fillBefore);
 
     return redirect(
-      assetCount > 0
-        ? `/settings/asset-models/${id}/edit`
-        : "/settings/asset-models"
+      newFill ? `/settings/asset-models/${id}/edit` : "/settings/asset-models"
     );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
     return data(error(reason), { status: reason.status });
   }
+}
+
+/**
+ * What filling a model's linked assets would change right now.
+ *
+ * @param assetModelId - The model
+ * @param organizationId - Caller's organization
+ */
+async function summariseLinkedFill(
+  assetModelId: string,
+  organizationId: string
+) {
+  const defaults = await getAssetModelDefaults({
+    assetModelId,
+    organizationId,
+  });
+  return defaults
+    ? getLinkedAssetsFillSummary({ model: defaults, organizationId })
+    : { assetCount: 0, fields: [] };
 }
 
 export default function EditAssetModel() {

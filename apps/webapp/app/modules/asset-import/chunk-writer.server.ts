@@ -36,9 +36,8 @@ import { recordEvents } from "~/modules/activity-event/service.server";
 import { validateQtyTrackedFields } from "~/modules/asset/qty-validation.server";
 import { getNextSequentialIds } from "~/modules/asset/sequential-id.server";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
-import type { AssetModelDefaults } from "~/modules/asset-model/defaults";
 import { planModelDefaultFill } from "~/modules/asset-model/defaults";
-import { getAssetModelDefaults } from "~/modules/asset-model/defaults.server";
+import { getAssetModelsDefaults } from "~/modules/asset-model/defaults.server";
 import { resolveImportedAssetModel } from "~/modules/asset-model/service.server";
 import { BARCODE_IMPORT_COLUMNS } from "~/modules/barcode/service.server";
 import { normalizeBarcodeValue } from "~/modules/barcode/validation";
@@ -382,14 +381,10 @@ async function fillRowsFromModelDefaults(
   const modelIds = distinct(prepared.map((p) => p.assetModelId));
   if (modelIds.length === 0) return;
 
-  const models = new Map<string, AssetModelDefaults>();
-  for (const assetModelId of modelIds) {
-    const model = await getAssetModelDefaults(
-      { assetModelId, organizationId },
-      tx
-    );
-    if (model) models.set(model.id, model);
-  }
+  const models = await getAssetModelsDefaults(
+    { assetModelIds: modelIds, organizationId },
+    tx
+  );
 
   const fieldIdsByAsset = new Map<string, Set<string>>();
   for (const value of customFieldValues) {

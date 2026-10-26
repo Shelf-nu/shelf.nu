@@ -33,7 +33,7 @@ export const MODEL_DEFAULT_FIELD_TYPES: readonly CustomFieldType[] = [
 /** The parts of a custom field definition the fill rule reads. */
 export type ModelDefaultField = Pick<
   CustomField,
-  "id" | "name" | "type" | "active" | "deletedAt"
+  "id" | "name" | "type" | "active" | "deletedAt" | "options"
 > & {
   /** Categories the field is limited to. Empty means every category. */
   categories: { id: string }[];
@@ -89,14 +89,18 @@ export function fieldAppliesToCategory(
 
 /**
  * Whether a stored default can still be used: its field is active, not
- * deleted, and of a type a model can default.
+ * deleted, of a type a model can default, and for a dropdown field the value
+ * is still one of its options. A removed option is never filled, because the
+ * asset form would refuse it on a field the user did not touch.
  */
 export function isUsableFieldDefault(fieldDefault: ModelCustomFieldDefault) {
-  const { customField } = fieldDefault;
+  const { customField, value } = fieldDefault;
   return (
     customField.active &&
     customField.deletedAt === null &&
-    MODEL_DEFAULT_FIELD_TYPES.includes(customField.type)
+    MODEL_DEFAULT_FIELD_TYPES.includes(customField.type) &&
+    (customField.type !== "OPTION" ||
+      customField.options.includes(String(value.raw)))
   );
 }
 

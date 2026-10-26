@@ -41,11 +41,7 @@ import { parseData } from "~/utils/http.server";
 import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import { wrapCategoryForNote, wrapLinkForNote } from "~/utils/markdoc-wrappers";
 import { slugify } from "~/utils/slugify";
-import type {
-  AssetModelDefaults,
-  ModelCustomFieldDefault,
-  ModelDefaultFill,
-} from "./defaults";
+import type { AssetModelDefaults, ModelDefaultFill } from "./defaults";
 import {
   MODEL_DEFAULT_FIELD_TYPES,
   defaultValueToFormString,
@@ -66,10 +62,95 @@ export type ModelDefaultsTxClient = Omit<
 >;
 
 /**
- * Reads a model's defaults, scoped to the organization.
+ * Reads the defaults of several models, scoped to the organization, in two
+ * queries.
  *
- * The field definitions are a second query: `customFieldId` has no Prisma
+ * The field definitions are the second query: `customFieldId` has no Prisma
  * relation (see the schema). A default whose field is deleted is dropped.
+ *
+ * @param params.assetModelIds - The models, usually from form or file input
+ * @param params.organizationId - Caller's organization; models from another
+ *   organization are left out
+ * @param tx - Optional transaction client
+ * @returns The defaults of each model found, by model id
+ */
+export async function getAssetModelsDefaults(
+  {
+    assetModelIds,
+    organizationId,
+  }: { assetModelIds: string[]; organizationId: Organization["id"] },
+  tx: ModelDefaultsTxClient = db
+): Promise<Map<string, AssetModelDefaults>> {
+  if (assetModelIds.length === 0) {
+    return new Map();
+  }
+
+  const models = await tx.assetModel.findMany({
+    where: { id: { in: assetModelIds }, organizationId },
+    select: {
+      id: true,
+      name: true,
+      defaultCategoryId: true,
+      defaultValuation: true,
+      customFieldDefaults: { select: { customFieldId: true, value: true } },
+    },
+  });
+
+  const fieldIds = [
+    ...new Set(
+      models.flatMap((model) =>
+        model.customFieldDefaults.map((d) => d.customFieldId)
+      )
+    ),
+  ];
+  const fields = fieldIds.length
+    ? await tx.customField.findMany({
+        where: {
+          id: { in: fieldIds },
+          organizationId,
+          // A deleted field's default is never used, so it is not read.
+          deletedAt: null,
+        },
+        select: {
+          id: true,
+          name: true,
+          type: true,
+          active: true,
+          deletedAt: true,
+          options: true,
+          categories: { select: { id: true } },
+        },
+      })
+    : [];
+  const fieldsById = new Map(fields.map((field) => [field.id, field]));
+
+  return new Map(
+    models.map((model) => [
+      model.id,
+      {
+        ...model,
+        customFieldDefaults: model.customFieldDefaults.flatMap(
+          (fieldDefault) => {
+            const customField = fieldsById.get(fieldDefault.customFieldId);
+            return customField
+              ? [
+                  {
+                    customFieldId: fieldDefault.customFieldId,
+                    value:
+                      fieldDefault.value as unknown as ICustomFieldValueJson,
+                    customField,
+                  },
+                ]
+              : [];
+          }
+        ),
+      },
+    ])
+  );
+}
+
+/**
+ * Reads one model's defaults, scoped to the organization.
  *
  * @param params.assetModelId - The model, usually from form input
  * @param params.organizationId - Caller's organization; a model from another
@@ -84,58 +165,11 @@ export async function getAssetModelDefaults(
   }: { assetModelId: string; organizationId: Organization["id"] },
   tx: ModelDefaultsTxClient = db
 ): Promise<AssetModelDefaults | null> {
-  const model = await tx.assetModel.findFirst({
-    where: { id: assetModelId, organizationId },
-    select: {
-      id: true,
-      name: true,
-      defaultCategoryId: true,
-      defaultValuation: true,
-      customFieldDefaults: { select: { customFieldId: true, value: true } },
-    },
-  });
-
-  if (!model) {
-    return null;
-  }
-
-  const fields = model.customFieldDefaults.length
-    ? await tx.customField.findMany({
-        where: {
-          id: {
-            in: model.customFieldDefaults.map((d) => d.customFieldId),
-          },
-          organizationId,
-          // A deleted field's default is never used, so it is not read.
-          deletedAt: null,
-        },
-        select: {
-          id: true,
-          name: true,
-          type: true,
-          active: true,
-          deletedAt: true,
-          categories: { select: { id: true } },
-        },
-      })
-    : [];
-  const fieldsById = new Map(fields.map((field) => [field.id, field]));
-
-  return {
-    ...model,
-    customFieldDefaults: model.customFieldDefaults.flatMap((fieldDefault) => {
-      const customField = fieldsById.get(fieldDefault.customFieldId);
-      return customField
-        ? [
-            {
-              customFieldId: fieldDefault.customFieldId,
-              value: fieldDefault.value as unknown as ICustomFieldValueJson,
-              customField,
-            },
-          ]
-        : [];
-    }),
-  };
+  const models = await getAssetModelsDefaults(
+    { assetModelIds: [assetModelId], organizationId },
+    tx
+  );
+  return models.get(assetModelId) ?? null;
 }
 
 /** What a saved asset already holds, for the edit form's fill decision. */
@@ -798,5 +832,3 @@ export async function fillLinkedAssetsFromModel({
     { timeout: 15000 }
   );
 }
-
-export type { ModelCustomFieldDefault };

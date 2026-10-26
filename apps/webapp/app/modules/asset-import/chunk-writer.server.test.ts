@@ -9,7 +9,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { db } from "~/database/db.server";
 import { recordEvents } from "~/modules/activity-event/service.server";
-import { getAssetModelDefaults } from "~/modules/asset-model/defaults.server";
+import { getAssetModelsDefaults } from "~/modules/asset-model/defaults.server";
 import { ShelfError } from "~/utils/error";
 import { assertCategoriesBelongToOrg } from "~/utils/org-validation.server";
 import type { WriteImportChunkArgs } from "./chunk-writer.server";
@@ -51,7 +51,7 @@ vi.mock("~/modules/activity-event/service.server", () => ({
 // why: reading a model's defaults has its own suite; here only how the writer
 // applies them to rows matters.
 vi.mock("~/modules/asset-model/defaults.server", () => ({
-  getAssetModelDefaults: vi.fn(),
+  getAssetModelsDefaults: vi.fn().mockResolvedValue(new Map()),
 }));
 
 // why: the org guards have their own tests; here they must not need extra
@@ -130,6 +130,7 @@ describe("writeImportChunk", () => {
     tx.barcode.findMany.mockResolvedValue([]);
     tx.barcode.updateMany.mockResolvedValue({ count: 1 });
     tx.qr.updateMany.mockResolvedValue({ count: 1 });
+    vi.mocked(getAssetModelsDefaults).mockResolvedValue(new Map());
   });
 
   it("writes one createMany per table for a plain chunk", async () => {
@@ -512,26 +513,34 @@ describe("writeImportChunk", () => {
 
   it("fills empty cells of a row that names a model from its defaults, and keeps the file's values", async () => {
     tx.assetImport.updateMany.mockResolvedValue({ count: 1 });
-    vi.mocked(getAssetModelDefaults).mockResolvedValue({
-      id: "model-1",
-      name: "Westermo L210",
-      defaultCategoryId: "cat-network",
-      defaultValuation: 450,
-      customFieldDefaults: [
-        {
-          customFieldId: "cf-brand",
-          value: { raw: "Westermo", valueOption: "Westermo" },
-          customField: {
-            id: "cf-brand",
-            name: "Brand",
-            type: "OPTION",
-            active: true,
-            deletedAt: null,
-            categories: [],
+    vi.mocked(getAssetModelsDefaults).mockResolvedValue(
+      new Map([
+        [
+          "model-1",
+          {
+            id: "model-1",
+            name: "Westermo L210",
+            defaultCategoryId: "cat-network",
+            defaultValuation: 450,
+            customFieldDefaults: [
+              {
+                customFieldId: "cf-brand",
+                value: { raw: "Westermo", valueOption: "Westermo" },
+                customField: {
+                  id: "cf-brand",
+                  name: "Brand",
+                  type: "OPTION",
+                  active: true,
+                  deletedAt: null,
+                  options: ["Westermo", "Siemens"],
+                  categories: [],
+                },
+              },
+            ],
           },
-        },
-      ],
-    });
+        ],
+      ])
+    );
 
     await writeImportChunk(
       args({

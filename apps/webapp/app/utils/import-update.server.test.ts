@@ -18,6 +18,7 @@ import { AssetType, ConsumptionType } from "@prisma/client";
 import { describe, expect, it, vi, vitest, beforeEach } from "vitest";
 import { db } from "~/database/db.server";
 import { updateAsset } from "~/modules/asset/service.server";
+import { getAssetModelsDefaults } from "~/modules/asset-model/defaults.server";
 import {
   applyBulkUpdatesFromImport,
   buildUpdatePreview,
@@ -57,6 +58,12 @@ vitest.mock("~/database/db.server", () => ({
 vitest.mock("~/modules/asset/service.server", () => ({
   updateAsset: vitest.fn().mockResolvedValue({ id: "uuid" }),
   updateAssetBookingAvailability: vitest.fn().mockResolvedValue({ id: "uuid" }),
+}));
+
+// why: reading a model's defaults has its own suite; here only how the apply
+// path folds them into the update payload matters.
+vitest.mock("~/modules/asset-model/defaults.server", () => ({
+  getAssetModelsDefaults: vitest.fn().mockResolvedValue(new Map()),
 }));
 
 // why: `getPrimaryLocation` is used by `fetchAssetsForUpdate` to synthesize
@@ -107,6 +114,7 @@ beforeEach(() => {
   vi.mocked(db.category.findMany).mockResolvedValue([]);
   vi.mocked(db.location.findMany).mockResolvedValue([]);
   vi.mocked(db.assetModel.findMany).mockResolvedValue([]);
+  vi.mocked(getAssetModelsDefaults).mockResolvedValue(new Map());
   vi.mocked(updateAsset).mockResolvedValue({ id: "uuid-1" } as Awaited<
     ReturnType<typeof updateAsset>
   >);
@@ -178,6 +186,73 @@ describe("applyBulkUpdatesFromImport — qty-tracked + AssetModel", () => {
       expect.objectContaining({
         id: "uuid-i",
         assetModelId: "model-existing",
+      })
+    );
+  });
+
+  it("fills the empty fields of an asset the file moves onto a model, and keeps the file's own values", async () => {
+    vi.mocked(db.asset.findMany).mockResolvedValueOnce([
+      makeDbAsset({
+        id: "uuid-i",
+        sequentialId: "SAM-I1",
+        type: AssetType.INDIVIDUAL,
+        categoryId: null,
+      }),
+    ] as unknown as Awaited<ReturnType<typeof db.asset.findMany>>);
+    vi.mocked(db.assetModel.findMany).mockResolvedValueOnce([
+      { id: "model-existing", name: "Dell Latitude" },
+    ] as unknown as Awaited<ReturnType<typeof db.assetModel.findMany>>);
+    vi.mocked(getAssetModelsDefaults).mockResolvedValue(
+      new Map([
+        [
+          "model-existing",
+          {
+            id: "model-existing",
+            name: "Dell Latitude",
+            defaultCategoryId: "cat-laptops",
+            defaultValuation: 900,
+            customFieldDefaults: [
+              {
+                customFieldId: "cf-brand",
+                value: { raw: "Dell", valueText: "Dell" },
+                customField: {
+                  id: "cf-brand",
+                  name: "Brand",
+                  type: "TEXT",
+                  active: true,
+                  deletedAt: null,
+                  options: [],
+                  categories: [],
+                },
+              },
+            ],
+          },
+        ],
+      ])
+    );
+
+    const csvData = [
+      // The file sets its own value, which must win over the model's 900.
+      ["Asset ID", "Asset model", "Value"],
+      ["SAM-I1", "Dell Latitude", "750"],
+    ];
+
+    await applyBulkUpdatesFromImport({
+      csvData,
+      organizationId,
+      userId,
+      request,
+    });
+
+    expect(updateAsset).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "uuid-i",
+        assetModelId: "model-existing",
+        categoryId: "cat-laptops",
+        valuation: 750,
+        customFieldsValues: [
+          { id: "cf-brand", value: { raw: "Dell", valueText: "Dell" } },
+        ],
       })
     );
   });

@@ -494,27 +494,43 @@ function assertRenamesMatchOptions({
 type RewrittenOptionValue = { assetId: string; from: string; to: string };
 
 /**
+ * The `FROM (VALUES ...)` rename pairs and the `SET "value"` expression that
+ * moves a stored OPTION value from `m."from"` to `m."to"`. `raw` and
+ * `valueOption` hold the same string for OPTION values and change together.
+ * Shared by the asset values and the asset model defaults so both stay in the
+ * same shape.
+ *
+ * @param alias - The alias of the table being updated
+ * @param renames - The renames to apply
+ */
+function optionRenameParts(alias: string, renames: OptionRename[]) {
+  const pairs = Prisma.join(
+    renames.map(({ from, to }) => Prisma.sql`(${from}::text, ${to}::text)`)
+  );
+  const column = Prisma.raw(`${alias}."value"`);
+  const setValue = Prisma.sql`jsonb_set(
+      jsonb_set(${column}::jsonb, '{raw}', to_jsonb(m."to")),
+      '{valueOption}',
+      to_jsonb(m."to")
+    )`;
+  return { pairs, setValue };
+}
+
+/**
  * One statement that rewrites every renamed option value of a field and
  * returns each changed row as a {@link RewrittenOptionValue}. Each row is
  * matched against the value it held before the statement ran, so swapping two
- * spellings in the same save moves each set of assets exactly once. `raw` and
- * `valueOption` hold the same string for OPTION values and change together.
+ * spellings in the same save moves each set of assets exactly once.
  */
 function buildOptionRenameStatement(
   customFieldId: CustomField["id"],
   renames: OptionRename[]
 ) {
-  const pairs = Prisma.join(
-    renames.map(({ from, to }) => Prisma.sql`(${from}::text, ${to}::text)`)
-  );
+  const { pairs, setValue } = optionRenameParts("v", renames);
 
   return Prisma.sql`
     UPDATE "AssetCustomFieldValue" AS v
-    SET "value" = jsonb_set(
-          jsonb_set(v."value"::jsonb, '{raw}', to_jsonb(m."to")),
-          '{valueOption}',
-          to_jsonb(m."to")
-        ),
+    SET "value" = ${setValue},
         "updatedAt" = now()
     FROM (VALUES ${pairs}) AS m("from", "to")
     WHERE v."customFieldId" = ${customFieldId}
@@ -532,17 +548,11 @@ function buildModelDefaultOptionRenameStatement(
   customFieldId: CustomField["id"],
   renames: OptionRename[]
 ) {
-  const pairs = Prisma.join(
-    renames.map(({ from, to }) => Prisma.sql`(${from}::text, ${to}::text)`)
-  );
+  const { pairs, setValue } = optionRenameParts("d", renames);
 
   return Prisma.sql`
     UPDATE "AssetModelCustomFieldDefault" AS d
-    SET "value" = jsonb_set(
-          jsonb_set(d."value"::jsonb, '{raw}', to_jsonb(m."to")),
-          '{valueOption}',
-          to_jsonb(m."to")
-        ),
+    SET "value" = ${setValue},
         "updatedAt" = now()
     FROM (VALUES ${pairs}) AS m("from", "to")
     WHERE d."customFieldId" = ${customFieldId}

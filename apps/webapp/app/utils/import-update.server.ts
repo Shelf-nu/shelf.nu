@@ -23,6 +23,8 @@ import type {
   ICustomFieldValueJson,
   UpdateAssetPayload,
 } from "~/modules/asset/types";
+import { planModelDefaultFill } from "~/modules/asset-model/defaults";
+import { getAssetModelsDefaults } from "~/modules/asset-model/defaults.server";
 import { decodeCsvListCell } from "~/utils/csv-cells";
 import { buildCustomFieldValue, parseYesNo } from "~/utils/custom-fields";
 import { ShelfError, isLikeShelfError } from "~/utils/error";
@@ -598,6 +600,16 @@ export async function applyBulkUpdatesFromImport({
         )
       : new Map<string, string>();
 
+  /**
+   * Defaults of every model the file moves assets onto, read once. Joining a
+   * model fills the asset's empty fields from them, the same rule as every
+   * other way an asset joins a model.
+   */
+  const modelDefaults = await getAssetModelsDefaults({
+    assetModelIds: [...new Set(assetModelNameToId.values())],
+    organizationId,
+  });
+
   for (const assetPreview of diffs.assetsToUpdate) {
     const { id: matchId, assetDbId, title: assetTitle, changes } = assetPreview;
     // Look up in primary map first, then fallback (matches computeAssetDiffs logic)
@@ -852,6 +864,43 @@ export async function applyBulkUpdatesFromImport({
       if (consumptionTypePatch !== undefined) changesApplied++;
       if (assetModelIdPatch !== undefined) changesApplied++;
       changesApplied += customFieldsValues.length;
+
+      const joinedModel = assetModelIdPatch
+        ? modelDefaults.get(assetModelIdPatch)
+        : undefined;
+      if (joinedModel) {
+        const fill = planModelDefaultFill({
+          model: joinedModel,
+          current: {
+            // The file's own cells win; the saved asset decides the rest.
+            categoryId:
+              categoryId === undefined
+                ? existingAsset.categoryId
+                : categoryId === "uncategorized"
+                ? null
+                : categoryId,
+            valuation:
+              valuation === undefined ? existingAsset.valuation : valuation,
+            // A cell the file clears is an answer too, so it is not filled.
+            customFieldIdsWithValue: new Set([
+              ...existingAsset.customFields.map(
+                (value) => value.customField.id
+              ),
+              ...customFieldsValues.map((v) => v.id),
+            ]),
+          },
+        });
+        if (fill.categoryId !== undefined && categoryId !== "uncategorized") {
+          categoryId = fill.categoryId;
+        }
+        if (fill.valuation !== undefined) valuation = fill.valuation;
+        for (const fieldDefault of fill.customFields) {
+          customFieldsValues.push({
+            id: fieldDefault.customFieldId,
+            value: fieldDefault.value,
+          });
+        }
+      }
 
       const hasMainChanges =
         title !== undefined ||

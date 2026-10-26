@@ -9,7 +9,7 @@
  * @see {@link file://./../../routes/_layout+/settings.asset-models.$assetModelId_.edit.tsx}
  * @see {@link file://./../../modules/asset-model/defaults.server.ts}
  */
-import { Form } from "react-router";
+import { useFetcher } from "react-router";
 import { useDisabled } from "~/hooks/use-disabled";
 import type { LinkedAssetsFillSummary } from "~/modules/asset-model/defaults.server";
 import { Button } from "../shared/button";
@@ -25,7 +25,10 @@ export function LinkedAssetsFillCard({
 }: {
   summary: LinkedAssetsFillSummary;
 }) {
-  const disabled = useDisabled();
+  // Its own fetcher, so saving the model form below never shows this button
+  // as busy. The action redirects back here, which reloads the summary.
+  const fetcher = useFetcher();
+  const disabled = useDisabled(fetcher);
 
   if (summary.assetCount === 0) {
     return null;
@@ -36,7 +39,7 @@ export function LinkedAssetsFillCard({
 
   return (
     <Card className="m-0 w-full lg:max-w-[880px]">
-      <Form method="post" className="flex flex-col gap-3">
+      <fetcher.Form method="post" className="flex flex-col gap-3">
         <input type="hidden" name="intent" value="fillLinkedAssets" />
         <div>
           <h3 className="text-[16px] font-semibold">
@@ -62,7 +65,7 @@ export function LinkedAssetsFillCard({
             {disabled ? "Filling..." : `Fill empty fields on ${assetsLabel}`}
           </Button>
         </div>
-      </Form>
+      </fetcher.Form>
     </Card>
   );
 }

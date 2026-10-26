@@ -647,7 +647,16 @@ const AssetFormInner = ({
     const model = modelId
       ? assetModelsData?.find((m) => m.id === modelId)
       : undefined;
-    const formHasCategory = Boolean(params.get("category") ?? categoryId);
+    // The Category select keeps its pick in a hidden input, not in the URL.
+    // A value the previous model put there does not count as the user's pick.
+    const categoryInput = formRef.current?.elements.namedItem("category");
+    const pickedCategory =
+      categoryInput instanceof HTMLInputElement ? categoryInput.value : "";
+    const userPickedCategory =
+      pickedCategory !== "" &&
+      pickedCategory !== previousModel?.defaultCategoryId;
+    const formHasCategory =
+      userPickedCategory || Boolean(params.get("category") ?? categoryId);
     if (model?.defaultCategoryId && !formHasCategory) {
       params.set("category", model.defaultCategoryId);
     }

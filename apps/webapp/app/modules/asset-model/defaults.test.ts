@@ -20,6 +20,7 @@ function fieldDefault(
       type: "TEXT",
       active: true,
       deletedAt: null,
+      options: [],
       categories: [],
       ...overrides,
     },
@@ -105,6 +106,24 @@ describe("planModelDefaultFill", () => {
 
     expect(fill.categoryId).toBe("cat-network");
     expect(fill.customFields.map((d) => d.customFieldId)).toEqual(["cf-ports"]);
+  });
+
+  it("ignores a dropdown default whose option was removed from the field", () => {
+    const fill = planModelDefaultFill({
+      model: model({
+        defaultCategoryId: null,
+        defaultValuation: null,
+        customFieldDefaults: [
+          fieldDefault(
+            { id: "cf-brand", type: "OPTION", options: ["Siemens"] },
+            "Westermo"
+          ),
+        ],
+      }),
+      current: emptyAsset,
+    });
+
+    expect(isEmptyFill(fill)).toBe(true);
   });
 
   it("ignores defaults whose field is inactive, deleted or a yes/no field", () => {
