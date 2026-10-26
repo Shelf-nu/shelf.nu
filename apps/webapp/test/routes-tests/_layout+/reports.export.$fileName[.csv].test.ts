@@ -236,6 +236,31 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
     expect(rows[2]).toBe("Location,مستودع الرياض,8,40.0%,16000");
   });
 
+  it("writes a formula-leading group as text and leaves a negative total as a number", async () => {
+    assetDistributionReportMock.mockResolvedValue({
+      distributionBreakdown: {
+        ...arabicBreakdown,
+        byCategory: [
+          {
+            id: "cat-evil",
+            groupName: "=HYPERLINK(1)",
+            assetCount: 1,
+            percentage: 100,
+            totalValue: -500,
+          },
+        ],
+      },
+    } as any);
+
+    const response = (await runLoader()) as unknown as Response;
+    const rows = (await response.text())
+      .replace(/^\uFEFF/, "")
+      .trim()
+      .split("\n");
+
+    expect(rows[1]).toBe("Category,'=HYPERLINK(1),1,100.0%,-500");
+  });
+
   /**
    * Every report case must hand the params its page-loader counterpart honors
    * to the same query function, or a filtered page silently exports the whole

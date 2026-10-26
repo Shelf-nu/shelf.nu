@@ -1,0 +1,22 @@
+# Dependabot version updates.
+#
+# Security alerts for npm packages work without this file. It only opens
+# version-bump PRs for the Node.js base image in the webapp Dockerfiles, which
+# pin an exact patch (node:24.x.y-bookworm-slim) and therefore do not pick up
+# Node security releases on their own.
+#
+# A bump PR changes only the FROM lines. Update `.nvmrc` and `engines.node` in
+# the root and apps/webapp package.json to the same version in that PR, so CI
+# tests the version that ships.
+version: 2
+updates:
+  - package-ecosystem: docker
+    directory: /apps/webapp
+    schedule:
+      interval: weekly
+    ignore:
+      # Stay on the current LTS line; a Node major is a deliberate upgrade.
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
+    labels:
+      - dependencies
