@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { ChevronLeft } from "lucide-react";
 import {
   data,
@@ -354,12 +355,21 @@ export default function OrgPage() {
   // The add-on switch has its own fetcher so its failure message never shows
   // under another toggle, and the switch can fall back to the saved value.
   const advancedReportsFetcher = useFetcher<typeof action>();
+  // Bumped when an update is refused, to put the switch back on the saved
+  // value: the switch is uncontrolled, and a refusal leaves that value
+  // unchanged, so nothing else would move it off the position the admin set.
+  const [advancedReportsResets, setAdvancedReportsResets] = useState(0);
   const advancedReportsError =
     advancedReportsFetcher.data &&
     "error" in advancedReportsFetcher.data &&
     advancedReportsFetcher.data.error
       ? advancedReportsFetcher.data.error.message
       : null;
+  // A refusal is the only outcome the saved value cannot report, so the reset
+  // is driven off the error itself.
+  useEffect(() => {
+    if (advancedReportsError) setAdvancedReportsResets((count) => count + 1);
+  }, [advancedReportsError]);
   const actionData = useActionData<typeof action>();
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
@@ -497,10 +507,10 @@ export default function OrgPage() {
                   Enable Advanced Reports
                 </p>
               </div>
-              {/* Keyed on the saved value: after a failed update the loader
-                  revalidates and the uncontrolled switch remounts on it. */}
+              {/* Remounted whenever the saved value changes or an update is
+                  refused, so the switch always shows what the workspace has. */}
               <Switch
-                key={`advanced-reports-${organization.advancedReportsEnabled}`}
+                key={`advanced-reports-${organization.advancedReportsEnabled}-${advancedReportsResets}`}
                 name={"advancedReportsEnabled"}
                 disabled={isFormProcessing(advancedReportsFetcher.state)}
                 defaultChecked={organization.advancedReportsEnabled}

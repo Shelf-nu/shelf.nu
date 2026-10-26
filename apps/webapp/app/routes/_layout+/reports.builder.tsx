@@ -49,7 +49,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
-import { requirePermission } from "~/utils/roles.server";
+import { isOrganizationOwner, requirePermission } from "~/utils/roles.server";
 import { canUseAdvancedReports } from "~/utils/subscription.server";
 import { tw } from "~/utils/tw";
 
@@ -80,19 +80,22 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
-  const { organizationId, currentOrganization, role } = await requirePermission(
-    {
+  const { organizationId, currentOrganization, userOrganizations } =
+    await requirePermission({
       userId,
       request,
       entity: PermissionEntity.reports,
       action: PermissionAction.read,
-    }
-  );
+    });
+
+  // Only the workspace owner can buy the add-on, so only the owner is offered
+  // the way to switch it on.
+  const isOwner = isOrganizationOwner({ userOrganizations, organizationId });
 
   if (!canUseAdvancedReports(currentOrganization)) {
     return data({
       locked: true as const,
-      isOwner: role === "OWNER",
+      isOwner,
       header: HEADER,
       supportEmail: SUPPORT_EMAIL,
     });
@@ -149,7 +152,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
   return data({
     locked: false as const,
-    isOwner: role === "OWNER",
+    isOwner,
     header: HEADER,
     spec: result.spec,
     customFieldName: customField?.name ?? null,
@@ -167,6 +170,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     filterOptions,
     filterConfigs: BUILDER_REPORT_DEF.filters,
     activeFilters: reportFilters.active,
+    // Filters the URL asked for that this data set cannot apply; the bar says
+    // so rather than showing numbers narrowed by something invisible.
+    ignoredFilterCount: reportFilters.ignoredCount,
   });
 }
 
@@ -211,6 +217,7 @@ export default function ReportBuilderPage() {
     filterOptions,
     filterConfigs,
     activeFilters,
+    ignoredFilterCount,
   } = loaderData;
 
   const clearFilters = () =>
@@ -243,6 +250,7 @@ export default function ReportBuilderPage() {
           filterConfigs={filterConfigs}
           activeFilters={activeFilters}
           filterOptions={filterOptions}
+          ignoredFilterCount={ignoredFilterCount}
           timeframeVisible={datasetUsesTimeframe(spec.dataset)}
         />
 
