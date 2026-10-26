@@ -7,7 +7,7 @@
  * @see {@link file://./saved-reports-menu.tsx}
  */
 
-import type { ChangeEvent } from "react";
+import { useState, type ChangeEvent } from "react";
 import type { FetcherWithComponents } from "react-router";
 import { useZorm } from "react-zorm";
 import Input from "~/components/forms/input";
@@ -50,9 +50,15 @@ export function RenameReportDialog({
   const zo = useZorm("rename-report", RenameSavedReportFormSchema);
   const nameInputRef = useAutoFocus<HTMLInputElement>({ when: open });
   const disabled = useDisabled(fetcher);
+  // The name each submission carried. A refusal speaks about that name ("this
+  // workspace already has a saved report named X"), so it stops applying as
+  // soon as the reader edits the field.
+  const [submittedName, setSubmittedName] = useState<string | null>(null);
+  const answersThisName =
+    submittedName !== null && submittedName.trim() === name.trim();
 
   const validationErrors =
-    outcome.status === "rejected"
+    outcome.status === "rejected" && answersThisName
       ? getValidationErrors<typeof RenameSavedReportFormSchema>(
           fetcher.data?.error
         )
@@ -60,8 +66,7 @@ export function RenameReportDialog({
   const nameError =
     validationErrors?.name?.message ??
     zo.errors.name()?.message ??
-    outcome.message ??
-    undefined;
+    (answersThisName ? outcome.message ?? undefined : undefined);
 
   return (
     <DialogPortal>
@@ -76,7 +81,11 @@ export function RenameReportDialog({
         }
       >
         <div className="px-6 pb-5">
-          <fetcher.Form method="post" ref={zo.ref}>
+          <fetcher.Form
+            method="post"
+            ref={zo.ref}
+            onSubmit={() => setSubmittedName(name)}
+          >
             <input type="hidden" name="intent" value="rename-report" />
             <input type="hidden" name="reportId" value={reportId} />
             <Input
