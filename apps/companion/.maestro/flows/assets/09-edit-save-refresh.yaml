@@ -40,6 +40,9 @@ tags:
     timeout: 15000
 - copyTextFrom: "Title, required"
 - evalScript: ${output.originalTitle = maestro.copiedText}
+# A run that stopped before step 3 leaves the marker on the title. Fail here,
+# so the asset gets cleaned by hand instead of collecting a second marker.
+- assertTrue: ${!output.originalTitle.endsWith(' e2e')}
 - runScript: 09-edit-title-patterns.js
 - tapOn:
     text: "Title, required"

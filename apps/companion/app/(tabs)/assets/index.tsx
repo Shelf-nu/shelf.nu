@@ -128,9 +128,19 @@ function AssetsListContent() {
     return () => clearTimeout(timer);
   }, [searchInput]);
 
+  /**
+   * Loads one page of assets for the current query.
+   *
+   * @returns true when the rows were applied; false when the request failed,
+   *   was aborted, or was superseded by a newer query.
+   */
   const fetchAssets = useCallback(
-    async (pageNum: number, reset: boolean, signal: AbortSignal) => {
-      if (!currentOrg) return;
+    async (
+      pageNum: number,
+      reset: boolean,
+      signal: AbortSignal
+    ): Promise<boolean> => {
+      if (!currentOrg) return false;
       const filter = FILTERS[activeFilter];
       const { data, error: fetchErr } = await api.assets(
         currentOrg.id,
@@ -146,10 +156,10 @@ function AssetsListContent() {
       // Refused two ways. An abort answers with neither data nor error, and a
       // response that landed before the abort but after this request was
       // superseded still carries rows for a query the operator has moved past.
-      if (signal.aborted || (!data && !fetchErr)) return;
+      if (signal.aborted || (!data && !fetchErr)) return false;
       if (fetchErr || !data) {
         setError(fetchErr || "Failed to load assets");
-        return;
+        return false;
       }
       setError(null);
       setTotalPages(data.totalPages);
@@ -161,6 +171,7 @@ function AssetsListContent() {
           const newItems = data.assets.filter((a) => !existingIds.has(a.id));
           return [...prev, ...newItems];
         });
+      return true;
     },
     [currentOrg, debouncedSearch, activeFilter]
   );
@@ -216,9 +227,10 @@ function AssetsListContent() {
   useFocusEffect(
     useCallback(() => {
       if (!currentOrg) return;
+      // Recorded as seen only once fresh rows land, so a failed refetch
+      // after an edit is retried on the next focus.
       const changeVersion = assetChangeVersion();
       const assetChanged = changeVersion !== seenChangeVersion.current;
-      seenChangeVersion.current = changeVersion;
       // Skip if data was fetched recently (avoids double-fetch with search/filter effect)
       if (
         !assetChanged &&
@@ -232,26 +244,35 @@ function AssetsListContent() {
       nextPage.current = 1;
       const isFirstLoad = !hasFetchedAssets.current;
       const signal = latestRequest.beginReset();
-      fetchAssets(1, true, signal).finally(() => {
-        latestRequest.endReset(signal);
-        // The signal identifies this request. An abandoned one must not stamp
-        // freshness or clear the spinner: the request that replaced it is still
-        // running and will do both when it answers.
-        if (signal.aborted) return;
-        setIsLoading(false);
-        lastFetchedAt.current = Date.now();
-        if (isFirstLoad) {
-          hasFetchedAssets.current = true;
-          setAssets((current) => {
-            announce(
-              current.length === 0
-                ? "No assets found"
-                : current.length + " assets loaded"
-            );
-            return current;
-          });
-        }
-      });
+      let applied = false;
+      fetchAssets(1, true, signal)
+        .then((ok) => {
+          applied = ok;
+        })
+        .finally(() => {
+          latestRequest.endReset(signal);
+          // The signal identifies this request. An abandoned one must not stamp
+          // freshness or clear the spinner: the request that replaced it is still
+          // running and will do both when it answers.
+          if (signal.aborted) return;
+          setIsLoading(false);
+          // A failed load leaves the list unfresh, so the next focus retries.
+          if (applied) {
+            lastFetchedAt.current = Date.now();
+            seenChangeVersion.current = changeVersion;
+          }
+          if (isFirstLoad) {
+            hasFetchedAssets.current = true;
+            setAssets((current) => {
+              announce(
+                current.length === 0
+                  ? "No assets found"
+                  : current.length + " assets loaded"
+              );
+              return current;
+            });
+          }
+        });
       // why: depend on org id (not full object) to avoid re-runs on identity-only changes
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [currentOrg?.id, fetchAssets, latestRequest])

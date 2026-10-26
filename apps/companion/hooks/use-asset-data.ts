@@ -44,10 +44,18 @@ export function useAssetData(
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Identity of the newest asset request. Every load (mount, pull-to-refresh,
+  // an action's reload, the focus refetch below) takes the next number, and
+  // only the newest may write state, so an older answer that lands late
+  // never replaces a newer one.
+  const latestRequest = useRef(0);
+
   const fetchAsset = useCallback(async () => {
     if (!orgId) return;
+    const request = ++latestRequest.current;
     const { data, error: fetchErr } = await api.asset(assetId, orgId);
-    // Request cancelled (navigation) — ignore
+    if (request !== latestRequest.current) return;
+    // Request cancelled (navigation): ignore
     if (!data && !fetchErr) return;
     if (fetchErr || !data) {
       setError(fetchErr || "Failed to load asset details");
@@ -84,11 +92,17 @@ export function useAssetData(
       if (!orgId) return;
       const version = assetChangeVersion(assetId);
       if (version === seenChangeVersion.current) return;
+      const request = ++latestRequest.current;
       void api.asset(assetId, orgId).then(({ data }) => {
-        if (!data) return;
+        if (request !== latestRequest.current || !data) return;
         seenChangeVersion.current = version;
         setAsset(data.asset);
       });
+      // Leaving the screen, or a workspace switch, drops this refetch if it
+      // is still the newest request; the version stays unseen for next time.
+      return () => {
+        if (latestRequest.current === request) latestRequest.current += 1;
+      };
     }, [assetId, orgId])
   );
 
