@@ -69,6 +69,31 @@ function compile(spec: BuilderSpec, filter = EMPTY_FILTER) {
 }
 
 describe("compileBuilderQueries", () => {
+  it("counts archived assets only where the data set measures a period", () => {
+    // "Assets" and "Custody" answer what the workspace holds now, so an
+    // archived asset is out of the answer. "Bookings" measures a window, and
+    // a booking inside it happened whatever became of the asset since.
+    for (const dataset of ["assets", "custody"] as const) {
+      const { grouped, totals } = compile({
+        dataset,
+        groupBy: "category",
+        customFieldId: null,
+        measure: dataset === "assets" ? "assetCount" : "custodyCount",
+      });
+      expect(grouped).toContain('"archivedAt" IS NULL');
+      expect(totals).toContain('"archivedAt" IS NULL');
+    }
+
+    const bookings = compile({
+      dataset: "bookings",
+      groupBy: "month",
+      customFieldId: null,
+      measure: "bookingCount",
+    });
+    expect(bookings.grouped).not.toContain('"archivedAt" IS NULL');
+    expect(bookings.totals).not.toContain('"archivedAt" IS NULL');
+  });
+
   it("keeps the grouping's joins out of the headline totals", () => {
     for (const [groupBy, join] of [
       ["location", 'LEFT JOIN "AssetLocation"'],

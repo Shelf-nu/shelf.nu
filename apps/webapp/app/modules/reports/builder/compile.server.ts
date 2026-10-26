@@ -223,11 +223,21 @@ function groupSql(
 
 /** The workspace-scoped, filter-applied asset set every dataset starts from. */
 function filteredAssetsCte(
+  dataset: BuilderDataset,
   organizationId: string,
   assetFilter: ReportAssetFilter
 ): Prisma.Sql {
   const where = Prisma.join(
-    [Prisma.sql`"organizationId" = ${organizationId}`, ...assetFilter.sql],
+    [
+      Prisma.sql`"organizationId" = ${organizationId}`,
+      // The raw-SQL twin of ACTIVE_INVENTORY_ASSET_FILTER. "Assets" and
+      // "Custody" answer what the workspace holds now, and an archived asset
+      // is out of service, so it is not part of that answer. "Bookings"
+      // measures a period instead: a booking inside the window happened, and
+      // archiving the asset afterwards does not unmake it.
+      ...(dataset === "bookings" ? [] : [Prisma.sql`"archivedAt" IS NULL`]),
+      ...assetFilter.sql,
+    ],
     " AND "
   );
   return Prisma.sql`filtered_assets AS (
@@ -343,7 +353,11 @@ export function compileBuilderQueries(args: {
     organizationId
   );
   const ctesFor = (g: GroupSql) =>
-    Prisma.sql`WITH ${filteredAssetsCte(organizationId, assetFilter)},
+    Prisma.sql`WITH ${filteredAssetsCte(
+      spec.dataset,
+      organizationId,
+      assetFilter
+    )},
     ${keyedCte(spec.dataset, g, organizationId, timeframe)}`;
   const columns = measureColumns(spec.dataset);
 
