@@ -182,6 +182,7 @@ import type { RoleAccess } from "~/utils/permissions/role-access";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import { resolveUserDisplayName } from "~/utils/user";
 import type { MergeInclude } from "~/utils/utils";
+import { buildCalendarCustodian } from "./calendar-custodian";
 import {
   attributeDispositionsByBookingAsset,
   attributeSessionCheckoutToSlices,
@@ -15108,23 +15109,12 @@ export async function getBookingsForCalendar(params: {
             description: booking.description,
             start: (booking.from as Date).toISOString(),
             end: (booking.to as Date).toISOString(),
-            custodian: {
-              id: booking.custodianTeamMemberId,
-              name: custodianName,
-              // Named field by field rather than spread: the loaded row is a
-              // full `User`, and this payload is serialized to the calendar
-              // client. `displayName` belongs on the list — it outranks the
-              // legal-name halves wherever this custodian is rendered.
-              user: booking.custodianUser
-                ? {
-                    id: booking.custodianUserId,
-                    firstName: booking.custodianUser?.firstName,
-                    lastName: booking.custodianUser?.lastName,
-                    displayName: booking.custodianUser?.displayName,
-                    profilePicture: booking.custodianUser?.profilePicture,
-                  }
-                : undefined,
-            },
+            custodian: buildCalendarCustodian({
+              booking,
+              custodianName,
+              viewerUserId: userId,
+              canSeeAllCustody,
+            }),
             creator: {
               id: null,
               name: booking.creator
