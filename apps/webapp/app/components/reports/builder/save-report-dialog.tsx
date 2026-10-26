@@ -18,6 +18,7 @@ import { Dialog, DialogPortal } from "~/components/layout/dialog";
 import { Button } from "~/components/shared/button";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
+import type { FetcherOutcomeSinceOpen } from "~/hooks/use-fetcher-error-since-open";
 import { SAVED_REPORT_NAME_MAX_LENGTH } from "~/modules/reports/saved/constants";
 import { describeSavedReportQuery } from "~/modules/reports/saved/describe";
 import { SaveReportFormSchema } from "~/modules/reports/saved/schemas";
@@ -34,12 +35,11 @@ type Props = {
   onNameChange: (event: ChangeEvent<HTMLInputElement>) => void;
   fetcher: FetcherWithComponents<DataOrErrorResponse>;
   /**
-   * The answer to a submission made since this dialog opened, or `undefined`
-   * when nothing has been submitted yet. A fetcher keeps its last response, so
-   * reading it directly would show an earlier failure the moment the dialog
-   * opens again.
+   * The server's answer to THIS opening of the dialog, from
+   * {@link useFetcherOutcomeSinceOpen}. A fetcher keeps its last response, so
+   * reading it directly would show an earlier failure as the dialog opens.
    */
-  outcome: DataOrErrorResponse | undefined;
+  outcome: FetcherOutcomeSinceOpen;
 };
 
 /** Renders the save dialog. */
@@ -56,13 +56,15 @@ export function SaveReportDialog({
   const nameInputRef = useAutoFocus<HTMLInputElement>({ when: open });
   const disabled = useDisabled(fetcher);
 
-  const validationErrors = getValidationErrors<typeof SaveReportFormSchema>(
-    outcome?.error
-  );
+  const validationErrors =
+    outcome.status === "rejected"
+      ? getValidationErrors<typeof SaveReportFormSchema>(fetcher.data?.error)
+      : undefined;
   const nameError =
     validationErrors?.name?.message ??
     zo.errors.name()?.message ??
-    outcome?.error?.message;
+    outcome.message ??
+    undefined;
 
   return (
     <DialogPortal>
