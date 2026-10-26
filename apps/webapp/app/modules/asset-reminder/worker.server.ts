@@ -2,9 +2,11 @@ import type { AssetReminder, Prisma, User } from "@prisma/client";
 import type PgBoss from "pg-boss";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
+import { wrapDateForNote } from "~/utils/markdoc-wrappers";
 import { rolesWhere } from "~/utils/permissions/role-access";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import {
@@ -13,7 +15,7 @@ import {
   orgCanUseRecurringReminders,
 } from "./chain.server";
 import { assetAlertEmailHtmlString, assetAlertEmailText } from "./emails";
-import { formatOccurrenceInZone, isRecurringReminder } from "./recurrence";
+import { isRecurringReminder } from "./recurrence";
 import {
   ASSETS_EVENT_TYPE_MAP,
   recurringReminderJobOptions,
@@ -42,6 +44,7 @@ const ASSET_REMINDER_INCLUDES_FOR_EMAIL = {
     select: {
       user: {
         select: {
+          id: true,
           email: true,
           firstName: true,
           lastName: true,
@@ -64,7 +67,7 @@ const ASSET_REMINDER_INCLUDES_FOR_EMAIL = {
 
 type UserToEmail = Pick<
   User,
-  "email" | "firstName" | "lastName" | "displayName"
+  "id" | "email" | "firstName" | "lastName" | "displayName"
 > & {
   isOwner?: boolean;
 };
@@ -135,6 +138,17 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
       isRecurring && !dueNow && (job.retrycount ?? 0) > 0;
 
     /**
+     * The row still tracks this job (or no job). For a row already holding a
+     * future occurrence this means the advance committed but scheduling the
+     * next job did not land, so that occurrence must be re-armed. After a full
+     * advance the row tracks the next job instead.
+     */
+    const rowTracksThisJob =
+      !reminder.activeSchedulerReference ||
+      !job.id ||
+      reminder.activeSchedulerReference === job.id;
+
+    /**
      * Stale-job guard: when the row tracks a DIFFERENT live job than the one
      * firing, this job was superseded (an edit whose cancel silently failed,
      * or a reconciliation re-arm), and firing it would double-notify or
@@ -186,7 +200,7 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
         try {
           if (dueNow) {
             await advanceRecurringReminder({ reminder, now });
-          } else if (!isRetryAfterAdvance) {
+          } else if (rowTracksThisJob) {
             await rearmCurrentOccurrence(reminder);
           }
         } catch (cause) {
@@ -252,7 +266,7 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
            * is re-armed here instead of waiting for boot reconciliation. On a
            * retry after a full advance the row tracks the next job already.
            */
-          if (!isRetryAfterAdvance) {
+          if (rowTracksThisJob) {
             await rearmCurrentOccurrence(reminder);
           }
           nextOccurrence = reminder.alertDateTime;
@@ -304,6 +318,7 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
           },
         },
         select: {
+          id: true,
           email: true,
           firstName: true,
           lastName: true,
@@ -334,9 +349,9 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
       reminder.name
     )}** reminder.`;
     if (nextOccurrence) {
-      noteContent += ` Next reminder scheduled for ${formatOccurrenceInZone(
-        nextOccurrence,
-        reminder.recurrenceTimezone
+      // The date tag renders in each viewer's own date format and timezone.
+      noteContent += ` Next reminder scheduled for ${wrapDateForNote(
+        nextOccurrence
       )}.`;
     } else if (seriesEnded) {
       noteContent += ` This was the last occurrence of this recurring reminder (end date reached).`;
@@ -347,6 +362,17 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
     /** Sending alert mails to all associated users. */
     await Promise.all([
       ...usersToSendEmail.map(async (user) => {
+        /**
+         * The recipient's own date format and timezone for the next-reminder
+         * line. A failed lookup falls back to the series' timezone rather than
+         * failing the send, which would retry and duplicate other emails.
+         */
+        const prefs = nextOccurrence
+          ? await resolveUserFormatPrefsById(user.id, null).catch(
+              () => undefined
+            )
+          : undefined;
+
         const html = await assetAlertEmailHtmlString({
           asset: reminder.asset,
           user,
@@ -355,6 +381,7 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
           isOwner: user.isOwner,
           customEmailFooter: reminder.organization.customEmailFooter,
           nextOccurrence,
+          prefs,
         });
 
         sendEmail({
@@ -368,6 +395,7 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
             isOwner: user.isOwner,
             customEmailFooter: reminder.organization.customEmailFooter,
             nextOccurrence,
+            prefs,
           }),
           html,
         });

@@ -90,6 +90,12 @@ vitest.mock("../note/service.server", () => ({
   createNote: vitest.fn().mockResolvedValue({}),
 }));
 
+// why: the recipient's format prefs are a DB read; the email wording is
+// covered in emails.test.ts
+vitest.mock("~/utils/date-format.server", () => ({
+  resolveUserFormatPrefsById: vitest.fn().mockResolvedValue(undefined),
+}));
+
 // why: spying on Logger to verify warn/skip behavior without side effects
 vitest.mock("~/utils/logger", () => ({
   Logger: { warn: vitest.fn(), info: vitest.fn(), error: vitest.fn() },
@@ -407,6 +413,65 @@ describe("REMINDER worker handler", () => {
     expect(sendEmail).toHaveBeenCalledTimes(1);
     expect(asMock(createNote).mock.calls[0][0].content).toContain(
       "Next reminder scheduled for"
+    );
+  });
+
+  it("re-arms the next occurrence on a retry whose earlier attempt failed to schedule it", async () => {
+    // The advance committed, then sendAfter threw, so the row holds the next
+    // occurrence but still tracks this job.
+    const next = new Date(Date.now() + 24 * 3600_000);
+    asMock(db.assetReminder.findFirst).mockResolvedValue(
+      buildReminderRow({
+        ...MONTHLY,
+        alertDateTime: next,
+        activeSchedulerReference: JOB.id,
+      })
+    );
+
+    await handler({ ...JOB, retrycount: 1 });
+
+    expect(advanceRecurringReminder).not.toHaveBeenCalled();
+    expect(scheduleAssetReminder).toHaveBeenCalledWith(
+      expect.objectContaining({ when: next })
+    );
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-arms an archived series on a retry whose earlier attempt failed to schedule it", async () => {
+    const next = new Date(Date.now() + 24 * 3600_000);
+    asMock(db.assetReminder.findFirst).mockResolvedValue(
+      buildReminderRow({
+        ...MONTHLY,
+        alertDateTime: next,
+        activeSchedulerReference: JOB.id,
+        asset: ARCHIVED_ASSET,
+      })
+    );
+
+    await handler({ ...JOB, retrycount: 1 });
+
+    expect(scheduleAssetReminder).toHaveBeenCalledWith(
+      expect.objectContaining({ when: next })
+    );
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("writes the next date as a date tag so each viewer sees their own format", async () => {
+    const next = new Date("2099-08-02T09:00:00.000Z");
+    asMock(advanceRecurringReminder).mockResolvedValue({
+      next,
+      advanced: true,
+      paused: false,
+      ended: false,
+    });
+    asMock(db.assetReminder.findFirst).mockResolvedValue(
+      buildReminderRow(MONTHLY)
+    );
+
+    await handler(JOB);
+
+    expect(asMock(createNote).mock.calls[0][0].content).toContain(
+      `Next reminder scheduled for {% date value="${next.toISOString()}" /%}.`
     );
   });
 

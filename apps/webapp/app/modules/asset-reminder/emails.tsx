@@ -13,6 +13,7 @@ import colors from "tailwindcss/colors";
 import { CustomEmailFooter } from "~/emails/components/custom-footer";
 import { LogoForEmail } from "~/emails/logo";
 import { styles } from "~/emails/styles";
+import { formatDate, type ResolvedFormatPrefs } from "~/utils/date-format";
 import { SERVER_URL } from "~/utils/env";
 import { resolveUserDisplayName } from "~/utils/user";
 import { describeRecurrence, formatOccurrenceInZone } from "./recurrence";
@@ -26,25 +27,42 @@ type AssetAlertEmailProps = {
   customEmailFooter?: string | null;
   /** Next occurrence of a recurring series, when one was scheduled. */
   nextOccurrence?: Date | null;
+  /** The recipient's date format and timezone, when they could be resolved. */
+  prefs?: ResolvedFormatPrefs;
 };
 
 /**
- * "Repeats every 3 months. Next reminder: 15 Oct 2026, 09:00 (Europe/Berlin)."
- * Rendered in the timezone the series was configured in (the worker has no
- * request context, so the recipient's own zone is unknown), the zone label
- * keeps it unambiguous for recipients elsewhere.
+ * "Repeats every 3 months. Next reminder: Oct 15, 2026, 09:00 (Europe/Berlin)."
+ * The date follows the recipient's own date format and timezone; without
+ * resolved prefs it falls back to the series' timezone. The zone label keeps
+ * the time unambiguous either way.
+ *
+ * @param reminder - The reminder, for its cadence and series timezone.
+ * @param nextOccurrence - The next scheduled occurrence, if any.
+ * @param prefs - The recipient's resolved date format and timezone.
+ * @returns The line, or null for a one-time reminder or an ended series.
  */
-function recurrenceLine(
-  reminder: AssetReminder,
-  nextOccurrence?: Date | null
+export function recurrenceLine(
+  reminder: Pick<
+    AssetReminder,
+    "recurrenceUnit" | "recurrenceInterval" | "recurrenceTimezone"
+  >,
+  nextOccurrence?: Date | null,
+  prefs?: ResolvedFormatPrefs
 ): string | null {
   const cadence = describeRecurrence(reminder);
   if (!cadence || !nextOccurrence) return null;
 
-  return `${cadence} reminder. Next reminder: ${formatOccurrenceInZone(
-    nextOccurrence,
-    reminder.recurrenceTimezone
-  )}.`;
+  // Preset labels mix adjectives ("Monthly") and phrases ("Every 3 months");
+  // lowercasing the first letter makes both read after "Repeats".
+  const repeats = cadence.charAt(0).toLowerCase() + cadence.slice(1);
+  const when = prefs
+    ? `${formatDate(nextOccurrence, prefs, { includeTime: true })} (${
+        prefs.timeZone
+      })`
+    : formatOccurrenceInZone(nextOccurrence, reminder.recurrenceTimezone);
+
+  return `Repeats ${repeats}. Next reminder: ${when}.`;
 }
 
 export function assetAlertEmailText({
@@ -55,6 +73,7 @@ export function assetAlertEmailText({
   isOwner,
   customEmailFooter,
   nextOccurrence,
+  prefs,
 }: AssetAlertEmailProps) {
   const userName = resolveUserDisplayName(user);
 
@@ -63,7 +82,7 @@ export function assetAlertEmailText({
     : `This email was sent to ${user.email} because it is part of the Shelf workspace ${workspaceName}.
 If you think you weren't supposed to have received this email please contact the owner of the workspace.`;
 
-  const recurrence = recurrenceLine(reminder, nextOccurrence);
+  const recurrence = recurrenceLine(reminder, nextOccurrence, prefs);
 
   return `Asset reminder notice
 
@@ -105,12 +124,13 @@ function AssetAlertEmailTemplate({
   isOwner,
   customEmailFooter,
   nextOccurrence,
+  prefs,
 }: AssetAlertEmailProps) {
   const userName = resolveUserDisplayName(user);
 
   const isEmailExpired = isAssetImageExpired(asset.mainImageExpiration);
 
-  const recurrence = recurrenceLine(reminder, nextOccurrence);
+  const recurrence = recurrenceLine(reminder, nextOccurrence, prefs);
 
   return (
     <Html>
