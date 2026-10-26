@@ -58,6 +58,7 @@ import {
   bookingComplianceReport,
   overdueItemsReport,
 } from "./helpers.server";
+import type { DistributionAsset } from "./helpers.server";
 import type { ResolvedTimeframe } from "./types";
 
 const TIMEFRAME: ResolvedTimeframe = {
@@ -599,10 +600,11 @@ describe("assetDistributionReport — quantity-aware bucket values", () => {
     // 100 pens at $1.50: all 100 placed by hand at Warehouse, and a 50-unit
     // kit slice that also sits at Warehouse. Both rows describe the same
     // physical units, so Warehouse holds 100 pens (one asset), not 150.
-    vi.mocked(db.asset.findMany).mockResolvedValue([
+    const assets: DistributionAsset[] = [
       {
         id: "a-pens",
         categoryId: null,
+        assetModelId: null,
         status: "AVAILABLE",
         valuation: 1.5,
         quantity: 100,
@@ -611,7 +613,12 @@ describe("assetDistributionReport — quantity-aware bucket values", () => {
           { quantity: 50, location: { id: "loc-1", name: "Warehouse" } },
         ],
       },
-    ] as any);
+    ];
+    // The fixture is the narrow select the report reads; findMany's declared
+    // type is the full Asset row, so it is widened only at the mock boundary.
+    vi.mocked(db.asset.findMany).mockResolvedValue(
+      assets as unknown as Awaited<ReturnType<typeof db.asset.findMany>>
+    );
 
     const result = await assetDistributionReport({
       organizationId: "org-1",

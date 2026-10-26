@@ -3185,7 +3185,7 @@ export async function assetDistributionReport(
 }
 
 /** The shared asset row every distribution breakdown reduces over. */
-type DistributionAsset = {
+export type DistributionAsset = {
   id: string;
   categoryId: string | null;
   assetModelId: string | null;
