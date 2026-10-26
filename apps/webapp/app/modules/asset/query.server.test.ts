@@ -982,6 +982,12 @@ describe("assetQueryFragment", () => {
     return sql.strings.join("?");
   }
 
+  it("includes a booking custodian's team member id, which the badge links to", () => {
+    const sql = getFragmentSqlString(assetQueryFragment());
+
+    expect(sql).toContain("'id', btm.id");
+  });
+
   describe("asset model cover image", () => {
     // why: raw SQL is opaque to typecheck — Prisma.sql is just a string, and the
     // row type is a user-supplied cast. Asserting the column names is the only
@@ -1108,6 +1114,12 @@ describe("assetQueryFragment", () => {
       expect(outerOnly).not.toMatch(
         /LEFT JOIN public\."User" u ON tm\."userId" = u\.id/
       );
+    });
+
+    it("includes each custodian's team member id, which the badge links to", () => {
+      const sql = getJoinsSqlString(assetQueryJoins);
+
+      expect(sql).toContain("'id', tm.id");
     });
 
     it("includes per-custody quantity in the aggregated jsonb objects", () => {
