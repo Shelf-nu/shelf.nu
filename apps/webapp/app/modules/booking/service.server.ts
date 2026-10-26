@@ -6052,10 +6052,10 @@ export async function checkinBooking({
 
     /**
      * Build the lookups of explicit dispositions. Qty-tracked slices
-     * without an explicit entry will auto-fill their remaining quantity
-     * inside the transaction (default: RETURN all for TWO_WAY, CONSUME
-     * all for ONE_WAY). This is the "big Check-in button" happy path —
-     * everything's back.
+     * without an explicit entry auto-fill the units they still have out
+     * inside the transaction (default: RETURN them for TWO_WAY, CONSUME them
+     * for ONE_WAY). This is the "big Check-in button" happy path: everything
+     * that left is back, and a slice that never left logs nothing.
      *
      * Two maps because a caller can target a disposition either:
      *   - at a specific slice (`bookingAssetId` set) — exact attribution,
@@ -6241,45 +6241,35 @@ export async function checkinBooking({
         const stockChangesByAssetId = new Map<string, StockChangeInput>();
 
         /**
-         * What each ONE_WAY slice can still check out, to size the units it
-         * sent out. Only read for slices that left: one that never did sent
-         * nothing, and no read is needed to say so.
+         * What each slice can still check out, to size the units it sent out.
+         * Only read for slices that left: one that never did sent nothing, and
+         * no read is needed to say so.
          */
         const remainingToCheckOutBySlice =
           await computeBookingAssetsSliceRemainingToCheckOut(
             tx,
             id,
             qtyTrackedSlices
-              .filter(
-                (slice) =>
-                  slice.consumptionType === "ONE_WAY" && slice.checkedOutAt
-              )
+              .filter((slice) => slice.checkedOutAt)
               .map((slice) => slice.id)
           );
 
         /**
-         * Units already accounted for on each ONE_WAY slice, from every
-         * disposition this booking has logged for the asset. An earlier
-         * mobile check-in names no slice, so its logs are untagged; they are
-         * spread over the slices with {@link spreadSessionDispositionsOverSlices},
-         * the attribution the partial check-in used when it took that
-         * session's units out of the kit. Counting tagged logs alone would
-         * credit those units to no slice, consume a slice's units a second
-         * time and leave the kit holding units that are gone.
+         * Units already accounted for on each slice, from every disposition
+         * this booking has logged for the asset. An earlier mobile check-in
+         * names no slice, so its logs are untagged; they are spread over the
+         * slices with {@link spreadSessionDispositionsOverSlices}, the
+         * attribution the partial check-in used when it took that session's
+         * units out of the kit. Counting tagged logs alone would credit those
+         * units to no slice, so a slice's units would be consumed or returned
+         * a second time and a kit would keep holding units that are gone.
          */
-        const oneWayAssetIds = [
-          ...new Set(
-            qtyTrackedSlices
-              .filter((slice) => slice.consumptionType === "ONE_WAY")
-              .map((slice) => slice.assetId)
-          ),
-        ];
         const accountedBySliceId = new Map<string, number>();
-        if (oneWayAssetIds.length > 0) {
+        if (qtyTrackedAssetIds.length > 0) {
           const loggedRows = await tx.consumptionLog.findMany({
             where: {
               bookingId: id,
-              assetId: { in: oneWayAssetIds },
+              assetId: { in: qtyTrackedAssetIds },
               category: { in: [...CHECKIN_DISPOSITION_CATEGORIES] },
             },
             select: {
@@ -6296,7 +6286,7 @@ export async function checkinBooking({
               ? [{ ...row, category: row.category }]
               : []
           );
-          for (const assetId of oneWayAssetIds) {
+          for (const assetId of qtyTrackedAssetIds) {
             const spread = spreadSessionDispositionsOverSlices({
               slices: qtyTrackedSlices
                 .filter((slice) => slice.assetId === assetId)
@@ -6359,10 +6349,12 @@ export async function checkinBooking({
           }
 
           /**
-           * Units of a ONE_WAY slice that left and are not accounted for yet.
-           * Its auto-default consumes these and no more: units that never left
-           * the shelf were not used up, and consuming them would destroy stock
-           * (and, on a kit slice, take them out of the kit).
+           * Units of a slice that left and are not accounted for yet. Its
+           * auto-default consumes (ONE_WAY) or returns (TWO_WAY) these and no
+           * more. Units that never left the shelf were neither used up nor
+           * brought back: consuming them would destroy stock (and, on a kit
+           * slice, take them out of the kit), and returning them would log a
+           * return for units that never went out.
            */
           const unitsStillOut = Math.max(
             0,
@@ -6378,13 +6370,13 @@ export async function checkinBooking({
             // cover, so it can't throw on legacy-NULL-reduced pools.
             ...(slice.consumptionType === "ONE_WAY"
               ? { consumed: Math.min(cap, unitsStillOut) }
-              : { returned: cap }),
+              : { returned: Math.min(cap, unitsStillOut) }),
           };
 
           const claimed = sumDisposition(disposition);
           if (claimed === 0) {
             // An explicit disposition with no quantities ("leave pending"), or
-            // a ONE_WAY slice with nothing still out.
+            // a slice with nothing still out.
             continue;
           }
 

@@ -15051,6 +15051,63 @@ describe("checkinBooking — qty-tracked auto-default", () => {
     );
   });
 
+  it("logs and uses up nothing for quantity lines that never left", async () => {
+    // why: a booking is often checked out by scanning only some of its items
+    // and then closed with the big Check-in button. Only the line that went
+    // out may be returned; the consumable and the returnable that stayed on
+    // the shelf keep their stock and get no log.
+    expect.assertions(3);
+
+    setupCheckinMocks(ConsumptionType.TWO_WAY);
+    const booking = makeBooking(ConsumptionType.TWO_WAY);
+    const [pensOut] = booking.bookingAssets;
+    const neverLeft = (
+      id: string,
+      assetId: string,
+      title: string,
+      consumptionType: ConsumptionType
+    ) => ({
+      ...pensOut,
+      id,
+      assetId,
+      checkedOutAt: null,
+      asset: { ...pensOut.asset, id: assetId, title, consumptionType },
+    });
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...booking,
+      bookingAssets: [
+        pensOut,
+        neverLeft(
+          "ba-ties-never-out",
+          "asset-ties",
+          "Cable ties",
+          ConsumptionType.ONE_WAY
+        ),
+        neverLeft(
+          "ba-tape-never-out",
+          "asset-tape",
+          "Tape",
+          ConsumptionType.TWO_WAY
+        ),
+      ],
+    });
+
+    await checkinBooking(baseParams);
+
+    expect(
+      vitest
+        .mocked(consumptionLogService.createConsumptionLog)
+        .mock.calls.map(([log]) => [log.bookingAssetId, log.category])
+    ).toEqual([["ba-pens-standalone", "RETURN"]]);
+    expect(recordedStockEvents()).toEqual([]);
+    expect(db.asset.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ quantity: expect.anything() }),
+      })
+    );
+  });
+
   it("uses an explicit disposition when provided, overriding the auto-default", async () => {
     expect.assertions(3);
 
@@ -15105,6 +15162,8 @@ describe("checkinBooking — qty-tracked auto-default", () => {
       bookingAssets: [
         {
           id: standaloneSliceId,
+          // Both slices went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
           assetId: camAssetId,
           assetKitId: null,
           quantity: 33,
@@ -15122,6 +15181,8 @@ describe("checkinBooking — qty-tracked auto-default", () => {
         },
         {
           id: kitSliceId,
+          // Both slices went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
           assetId: camAssetId,
           assetKitId: "ak-1",
           quantity: 22,
