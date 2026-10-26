@@ -281,6 +281,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         reportData = await topBookedKitsReport({
           organizationId,
           timeframe,
+          kitFilter: {
+            categoryIds: reportFilters.params.categoryIds,
+            locationIds: reportFilters.params.locationIds,
+          },
           page: getIntParam(url.searchParams, "page", 1),
           pageSize: getIntParam(url.searchParams, "pageSize", 50),
         });
