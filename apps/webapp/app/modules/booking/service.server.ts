@@ -5771,10 +5771,11 @@ export async function checkinBooking({
   provenance?: BookingMethodProvenance;
   specificAssetIds?: string[];
   /**
-   * Optional per-asset dispositions. When omitted, qty-tracked assets
-   * on the booking default to "return all remaining" (TWO_WAY) or
-   * "consume all remaining" (ONE_WAY) — the happy-path when the user hits
-   * the big Check-in button without opening the scanner drawer.
+   * Optional per-asset dispositions. When omitted, each qty-tracked slice
+   * returns (TWO_WAY) or consumes (ONE_WAY) the units it still has out,
+   * capped by what the booking has left to account for; a slice that never
+   * left gets no disposition. This is the happy path when the user hits the
+   * big Check-in button without opening the scanner drawer.
    */
   checkins?: CheckinDispositionInput[];
 }) {
