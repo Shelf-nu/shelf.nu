@@ -81,8 +81,16 @@ describe("idleAssetsReport", () => {
   function idleCountWhere() {
     const call = vi
       .mocked(db.asset.count)
-      .mock.calls.find(([args]) => "AND" in ((args as any).where ?? {}));
-    return (call?.[0] as any)?.where;
+      .mock.calls.find(([args]) => "AND" in (args?.where ?? {}));
+    return call?.[0]?.where;
+  }
+
+  /** The booking predicate a query uses to find each asset's last use. */
+  function lastUseWhere(args: { select?: unknown } | undefined) {
+    const select = args?.select as
+      | { bookingAssets?: { where?: { booking?: unknown } } }
+      | undefined;
+    return select?.bookingAssets?.where?.booking;
   }
 
   it("finds the last use with the archive-aware predicate", async () => {
@@ -94,9 +102,7 @@ describe("idleAssetsReport", () => {
     const calls = vi.mocked(db.asset.findMany).mock.calls;
     expect(calls).toHaveLength(2);
     for (const [args] of calls) {
-      expect((args as any).select.bookingAssets.where.booking).toEqual(
-        RETURNED
-      );
+      expect(lastUseWhere(args)).toEqual(RETURNED);
     }
   });
 
@@ -113,7 +119,7 @@ describe("idleAssetsReport", () => {
 
     // Threshold 30d puts the cutoff at 2026-07-27T12:00:00Z.
     const where = idleCountWhere();
-    expect(where.AND).toContainEqual({
+    expect(where?.AND).toContainEqual({
       NOT: {
         bookingAssets: {
           some: {
@@ -128,18 +134,18 @@ describe("idleAssetsReport", () => {
       },
     });
     // Assets out on a booking right now are not idle either.
-    expect(where.AND).toContainEqual({
+    expect(where?.AND).toContainEqual({
       NOT: {
         bookingAssets: {
           some: { booking: { status: { in: ["ONGOING", "OVERDUE"] } } },
         },
       },
     });
-    expect(where.AND).toContainEqual({ organizationId: "org-1" });
+    expect(where?.AND).toContainEqual({ organizationId: "org-1" });
   });
 
   it("pages, counts and totals the same idle assets", async () => {
-    vi.mocked(db.asset.count).mockResolvedValue(12 as any);
+    vi.mocked(db.asset.count).mockResolvedValue(12);
 
     const result = await idleAssetsReport({
       organizationId: "org-1",
@@ -149,13 +155,13 @@ describe("idleAssetsReport", () => {
     });
 
     const [rowsCall, kpiCall] = vi.mocked(db.asset.findMany).mock.calls;
-    const rowsArgs = rowsCall[0] as any;
+    const rowsArgs = rowsCall[0];
     // The page is cut from idle assets only, so it is full whenever the
     // count says more idle assets follow.
-    expect(rowsArgs.where).toEqual(idleCountWhere());
-    expect(rowsArgs.skip).toBe(10);
-    expect(rowsArgs.take).toBe(5);
-    expect((kpiCall[0] as any).where).toEqual(idleCountWhere());
+    expect(rowsArgs?.where).toEqual(idleCountWhere());
+    expect(rowsArgs?.skip).toBe(10);
+    expect(rowsArgs?.take).toBe(5);
+    expect(kpiCall[0]?.where).toEqual(idleCountWhere());
     expect(result.totalRows).toBe(12);
   });
 
