@@ -111,6 +111,7 @@ export const loader = async ({
       timeZone: formatPrefs.timeZone,
       assetFilter: reportFilters.assetFilter,
       currency: currentOrganization.currency,
+      locale: getClientHint(request).locale,
       customField: customField
         ? { id: customField.id, name: customField.name }
         : null,

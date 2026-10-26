@@ -9,6 +9,7 @@
  * @see {@link file://../../routes/_layout+/reports.builder.export.$fileName[.csv].tsx}
  */
 
+import { neutralizeCsvFormula } from "~/utils/csv-cells";
 import { formatDate, type ResolvedFormatPrefs } from "~/utils/date-format";
 
 /**
@@ -47,17 +48,18 @@ export function buildCsv(headers: string[], rows: string[][]): string {
 /**
  * Escapes one field for CSV.
  *
- * Neutralizes spreadsheet formula injection (CWE-1236): a value starting with
- * `=`, `+`, `-` or `@` can execute as a formula in Excel or Google Sheets, so
- * such values get a leading single quote and read as literal text. Quotes a
- * field holding a comma, a quote, a newline or a carriage return; a bare
- * carriage return would end the record in consumers that accept CR as a line
- * ending and let a user-controlled value forge a row.
+ * Neutralizes spreadsheet formula injection (CWE-1236) through the shared
+ * guard every Shelf export uses, so a value a spreadsheet would run as a
+ * formula reads as literal text while a negative number stays a number.
+ * Quotes a field holding a comma, a quote, a newline or a carriage return; a
+ * bare carriage return would end the record in consumers that accept CR as a
+ * line ending and let a user-controlled value forge a row.
+ *
+ * @param field - The raw cell value
+ * @returns The cell as it belongs in the document
  */
 export function escapeCsvField(field: string): string {
-  // Excel also treats a formula marker after a leading tab, CR or LF as a
-  // formula once the cell is imported, so those prefixes count too.
-  const safeField = /^[=+\-@\t\r\n]/.test(field) ? `'${field}` : field;
+  const safeField = neutralizeCsvFormula(field);
   if (
     safeField.includes(",") ||
     safeField.includes('"') ||

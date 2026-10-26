@@ -365,11 +365,18 @@ export default function OrgPage() {
     advancedReportsFetcher.data.error
       ? advancedReportsFetcher.data.error.message
       : null;
-  // A refusal is the only outcome the saved value cannot report, so the reset
-  // is driven off the error itself.
+  // Driven off each finished submission, not off the message: two refusals in
+  // a row carry the same text, and the second one still has to put the switch
+  // back. `fetcher.data` survives a resubmission, so the transition out of a
+  // submit is the only reliable signal that an answer just arrived.
+  const advancedReportsSettling = advancedReportsFetcher.state !== "idle";
   useEffect(() => {
+    if (advancedReportsSettling) return;
     if (advancedReportsError) setAdvancedReportsResets((count) => count + 1);
-  }, [advancedReportsError]);
+    // `advancedReportsError` is read when a submission finishes, which is what
+    // the dependency on `advancedReportsSettling` marks.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [advancedReportsSettling]);
   const actionData = useActionData<typeof action>();
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
