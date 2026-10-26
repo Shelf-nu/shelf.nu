@@ -1234,6 +1234,9 @@ export async function getAdvancedPaginatedAndFilterableAssets({
       cookie,
     };
   } catch (cause) {
+    // A deliberate client error (an unknown filter value, the search
+    // bind-param ceiling) keeps its own status and message.
+    rethrowIfClientError(cause);
     throw new ShelfError({
       cause,
       message: "Failed to fetch paginated and filterable assets",
