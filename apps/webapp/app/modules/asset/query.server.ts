@@ -1901,9 +1901,10 @@ export function parseSortingOptions(sortBy: string[]): {
           `(CASE WHEN ${alias} ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN ${alias}::numeric END) ${field.direction} NULLS LAST`
         );
       } else {
-        // Natural sort for text-based custom fields
+        // Natural sort for text-based custom fields. An empty string is an
+        // empty value too, so it sorts with the NULLs.
         orderByParts.push(
-          getNormalizedSortExpression(alias, field.direction, {
+          getNormalizedSortExpression(`NULLIF(${alias}, '')`, field.direction, {
             nullsLast: true,
           })
         );

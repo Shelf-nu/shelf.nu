@@ -263,8 +263,10 @@ describe("parseSortingOptions", () => {
 
     it("falls through to natural sort for unknown fieldType", () => {
       const { orderByClause } = parseSortingOptions(["cf_x:asc:bogusType"]);
-      expect(orderByClause).toContain("LOWER(regexp_replace(cf_sort_0");
-      expect(orderByClause).toContain("asc NULLS LAST");
+      expect(orderByClause).toContain(
+        "LOWER(regexp_replace(NULLIF(cf_sort_0, '')"
+      );
+      expect(orderByClause).toContain("NULLIF(cf_sort_0, '') asc NULLS LAST");
     });
   });
 
