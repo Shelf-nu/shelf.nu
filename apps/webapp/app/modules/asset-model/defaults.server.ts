@@ -323,8 +323,15 @@ export async function applyAssetModelDefaultsToAssets(
     (fieldDefault) => fieldDefault.customFieldId
   );
 
+  // Membership is re-checked here: an asset moved off the model since the
+  // caller collected the ids is not filled from it.
   const assets = await tx.asset.findMany({
-    where: { id: { in: assetIds }, organizationId, archivedAt: null },
+    where: {
+      id: { in: assetIds },
+      organizationId,
+      archivedAt: null,
+      assetModelId: model.id,
+    },
     select: {
       id: true,
       categoryId: true,

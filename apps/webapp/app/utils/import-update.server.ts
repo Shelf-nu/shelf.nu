@@ -850,21 +850,6 @@ export async function applyBulkUpdatesFromImport({
         }
       }
 
-      // Count actual payload fields (not otherChanges.length, which may include
-      // fields that were silently skipped like invalid numbers)
-      let changesApplied = 0;
-      if (title !== undefined) changesApplied++;
-      if (description !== undefined) changesApplied++;
-      if (categoryId !== undefined) changesApplied++;
-      if (tags !== undefined) changesApplied++;
-      if (valuation !== undefined) changesApplied++;
-      if (quantityPatch !== undefined) changesApplied++;
-      if (minQuantityPatch !== undefined) changesApplied++;
-      if (unitOfMeasurePatch !== undefined) changesApplied++;
-      if (consumptionTypePatch !== undefined) changesApplied++;
-      if (assetModelIdPatch !== undefined) changesApplied++;
-      changesApplied += customFieldsValues.length;
-
       const joinedModel = assetModelIdPatch
         ? modelDefaults.get(assetModelIdPatch)
         : undefined;
@@ -901,6 +886,22 @@ export async function applyBulkUpdatesFromImport({
           });
         }
       }
+
+      // Count actual payload fields (not otherChanges.length, which may include
+      // fields that were silently skipped like invalid numbers). Counted after
+      // the model fill, so fields the model filled are reported too.
+      let changesApplied = 0;
+      if (title !== undefined) changesApplied++;
+      if (description !== undefined) changesApplied++;
+      if (categoryId !== undefined) changesApplied++;
+      if (tags !== undefined) changesApplied++;
+      if (valuation !== undefined) changesApplied++;
+      if (quantityPatch !== undefined) changesApplied++;
+      if (minQuantityPatch !== undefined) changesApplied++;
+      if (unitOfMeasurePatch !== undefined) changesApplied++;
+      if (consumptionTypePatch !== undefined) changesApplied++;
+      if (assetModelIdPatch !== undefined) changesApplied++;
+      changesApplied += customFieldsValues.length;
 
       const hasMainChanges =
         title !== undefined ||

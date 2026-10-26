@@ -259,6 +259,13 @@ describe("applyAssetModelDefaultsToAssets", () => {
     );
 
     expect(result).toEqual({ assetsFilled: 1, fieldsFilled: 3 });
+    // Only assets still on the model are read, so one moved off it meanwhile
+    // is not filled from it.
+    expect(tx.asset.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ assetModelId: "model-1" }),
+      })
+    );
     expect(tx.asset.updateMany).toHaveBeenCalledWith({
       where: { id: { in: ["a-empty"] }, organizationId: "org-1" },
       data: { categoryId: "cat-network" },

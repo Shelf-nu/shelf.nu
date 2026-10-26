@@ -1418,7 +1418,10 @@ model AssetModelCustomFieldDefault {
   // creates the FK to `CustomField("id")` with `ON DELETE CASCADE`, but a
   // back-relation on `CustomField` pushes the extended client's generics past
   // TS's recursion limit (TS2321) in `organization/service.server`. Services
-  // read the field rows with a second query keyed on these ids.
+  // read the field rows with a second query keyed on these ids. Because the
+  // schema does not describe the FK, `prisma migrate dev` reports it as drift
+  // and proposes dropping it: remove that statement from any generated
+  // migration, or the cascade on field delete is lost.
   customFieldId String
 
   createdAt DateTime @default(now())

@@ -655,8 +655,12 @@ const AssetFormInner = ({
     const userPickedCategory =
       pickedCategory !== "" &&
       pickedCategory !== previousModel?.defaultCategoryId;
+    // On the edit form `categoryId` is the asset's saved category, which is
+    // never replaced. On the create form it only mirrors the URL, which the
+    // lines above already account for.
+    const savedCategory = id ? categoryId : null;
     const formHasCategory =
-      userPickedCategory || Boolean(params.get("category") ?? categoryId);
+      userPickedCategory || Boolean(params.get("category") ?? savedCategory);
     if (model?.defaultCategoryId && !formHasCategory) {
       params.set("category", model.defaultCategoryId);
     }
