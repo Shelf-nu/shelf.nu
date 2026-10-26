@@ -17,8 +17,9 @@ import { Button } from "../shared/button";
  *
  * @param props.count - The number to show
  * @param props.to - The page listing the counted records
- * @param props.label - Accessible name of the link, e.g. "View the assets in
- *   Warehouse"
+ * @param props.label - What the link opens, e.g. "View the assets in
+ *   Warehouse". Read to assistive tech after the count, so the link's name
+ *   still starts with the number sighted users see (WCAG 2.5.3).
  */
 export function CountLink({
   count,
@@ -34,8 +35,9 @@ export function CountLink({
   }
 
   return (
-    <Button to={to} variant="link-gray" aria-label={label}>
+    <Button to={to} variant="link-gray">
       {count}
+      <span className="sr-only">, {label}</span>
     </Button>
   );
 }

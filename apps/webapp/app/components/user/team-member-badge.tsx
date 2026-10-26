@@ -13,6 +13,7 @@ import { tw } from "~/utils/tw";
 import type { TeamMemberNameFields } from "~/utils/user";
 import { resolveTeamMemberName } from "~/utils/user";
 import { buildAssetsFilterHref } from "../assets/assets-filter-link";
+import { buildBookingsFilterHref } from "../booking/bookings-filter-href";
 import { Button } from "../shared/button";
 import { GrayBadge } from "../shared/gray-badge";
 
@@ -106,7 +107,7 @@ export function TeamMemberBadge({
       : !canReadList || !teamMember?.id
       ? null
       : linkTo === "bookings"
-      ? `/bookings?${new URLSearchParams({ teamMember: teamMember.id })}`
+      ? buildBookingsFilterHref({ teamMember: teamMember.id })
       : buildAssetsFilterHref({ teamMember: teamMember.id });
 
   if (!teamMember) {

@@ -17,6 +17,7 @@ import {
 } from "~/components/assets/asset-last-audit-card";
 import { AssetReminderCards } from "~/components/assets/asset-reminder-cards";
 import { AssetsFilterLink } from "~/components/assets/assets-filter-link";
+import { CategoryBadge } from "~/components/assets/category-badge";
 import { MoveUnitsDialog } from "~/components/assets/move-units-dialog";
 import { QuantityCustodyList } from "~/components/assets/quantity-custody-list";
 import { QuantityOverviewCard } from "~/components/assets/quantity-overview-card";
@@ -33,7 +34,6 @@ import { LocationBadge } from "~/components/location/location-badge";
 import { LocationSelect } from "~/components/location/location-select";
 import { ScanDetails } from "~/components/location/scan-details";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
-import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { DateS } from "~/components/shared/date";
@@ -1068,21 +1068,7 @@ export default function AssetOverview() {
                 label="Category"
                 canEdit={canEditAsset}
                 renderDisplay={() => (
-                  <AssetsFilterLink
-                    filter={{ category: asset.category?.id ?? "uncategorized" }}
-                    title={
-                      asset.category
-                        ? `View assets in ${asset.category.name}`
-                        : "View assets without a category"
-                    }
-                  >
-                    <Badge
-                      color={asset.category?.color ?? "#808080"}
-                      withDot={false}
-                    >
-                      {asset.category?.name ?? "Uncategorized"}
-                    </Badge>
-                  </AssetsFilterLink>
+                  <CategoryBadge category={asset.category} linkToAssets />
                 )}
                 renderEditor={() => (
                   <DynamicSelect

@@ -364,6 +364,22 @@ describe("the Advanced assets index reads simple-mode filter links", () => {
     expect(params.toString()).toBe("");
   });
 
+  it("translates a simple-mode key restored from the saved filters", async () => {
+    const saved = storedValue(
+      await createAdvancedAssetFilterCookie("org-1").serialize("tag=tag-1")
+    );
+
+    const { filters } = await getAdvancedFiltersFromRequest(
+      listRequest("http://localhost/assets", [saved]),
+      "org-1",
+      settings
+    );
+
+    expect(new URLSearchParams(filters)).toEqual(
+      new URLSearchParams("tags=contains:tag-1")
+    );
+  });
+
   it("leaves an already-Advanced URL untouched", async () => {
     const { params, redirectNeeded } = await normalized(
       "tags=contains:tag-1&custody=is:tm-1"

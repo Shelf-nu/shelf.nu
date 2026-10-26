@@ -28,6 +28,11 @@ export type AssetsFilter =
 /**
  * Builds the `/assets` URL for one simple-mode filter.
  *
+ * Needs no lookup of the viewer's index mode: the advanced index promotes a
+ * bare value to `is:` and translates `tag` / `teamMember` to its own columns.
+ * `buildAssetIndexFilterHref` (`modules/asset-index-settings/filter-href.ts`)
+ * writes the mode-specific grammar instead; prefer this one for new links.
+ *
  * @param filter - The filter key and its value, e.g. `{ tag: "<id>" }`
  * @returns A relative URL such as `/assets?tag=<id>`
  */

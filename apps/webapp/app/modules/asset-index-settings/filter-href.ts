@@ -5,11 +5,14 @@
  * pages that drill into it (a category's asset count, for example).
  *
  * The two index modes read filters in different grammars: the simple index
- * takes `category=<id>`, the advanced index takes `category=is:<id>` and drops
- * any parameter without an operator. A link has to be written for the mode the
- * viewer will land in, or it opens the full, unfiltered list.
+ * takes `category=<id>`, the advanced index takes `category=is:<id>`. This
+ * helper writes the grammar of the mode the viewer will land in.
  *
  * Dependency-free so route components can import it.
+ *
+ * `buildAssetsFilterHref` (`components/assets/assets-filter-link.tsx`) builds
+ * the same links in the simple grammar alone: the advanced index promotes a
+ * bare value to `is:` (`normalizeAdvancedFilterParams`), so both modes read it.
  *
  * @see {@link file://./../asset/filter-param.ts} the advanced `operator:value` grammar
  * @see {@link file://./service.server.ts} `getAssetIndexModeForUser`

@@ -7,6 +7,7 @@ import type {
 import { data, Link, Outlet } from "react-router";
 import { z } from "zod";
 import { buildAssetsFilterHref } from "~/components/assets/assets-filter-link";
+import { buildBookingsFilterHref } from "~/components/booking/bookings-filter-href";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -263,7 +264,7 @@ const TagItem = ({
     <Td>
       <CountLink
         count={item._count.bookings}
-        to={`/bookings?${new URLSearchParams({ tag: item.id })}`}
+        to={buildBookingsFilterHref({ tag: item.id })}
         label={`View the bookings tagged ${item.name}`}
       />
     </Td>

@@ -7,7 +7,7 @@
  *
  * @see {@link file://./../assets/assets-index/list-item-tags-column.tsx}
  */
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   Popover,
@@ -150,6 +150,14 @@ function MoreItemsPopover({
     closeTimer.current = null;
   }
 
+  // A pending close must not fire after the chip unmounts.
+  useEffect(() => {
+    const timer = closeTimer;
+    return () => {
+      if (timer.current) clearTimeout(timer.current);
+    };
+  }, []);
+
   function focusFirstItem() {
     contentRef.current?.querySelector<HTMLElement>("a, button")?.focus();
   }
@@ -161,6 +169,8 @@ function MoreItemsPopover({
     // shut; treat the press as "let me in" instead.
     if (!next && pressed && openedByHover.current) {
       openedByHover.current = false;
+      // A close scheduled by the pointer leaving would shut it again.
+      cancelClose();
       focusFirstItem();
       return;
     }
