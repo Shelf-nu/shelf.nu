@@ -606,6 +606,29 @@ export function getArchivedFilterFromParams(
 }
 
 /**
+ * Adds one filter group to a Prisma asset `where` clause with AND semantics.
+ * Mutates the passed `where`.
+ *
+ * Every list filter (search, category, tag, location, custodian) is one group.
+ * The options inside a group combine with OR ("untagged" or tag X), and groups
+ * combine with AND, so adding a filter can only narrow the list. Writing a
+ * group to the shared `where.OR` instead would merge its options with every
+ * other group's, and a tag would then widen a search rather than narrow it.
+ *
+ * @param where - The Prisma asset where clause to narrow.
+ * @param clause - The filter group to require.
+ */
+export function andAssetWhere(
+  where: Prisma.AssetWhereInput,
+  clause: Prisma.AssetWhereInput
+): void {
+  where.AND = [
+    ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+    clause,
+  ];
+}
+
+/**
  * Applies an {@link ArchivedFilter} to a Prisma asset `where` clause.
  * Mutates and returns the passed `where` for chaining.
  *
@@ -643,10 +666,9 @@ export type AllowedCustodianFilterIds = string[] | "all";
  * `"all"` passes them through. Otherwise only ids on the list survive, and a
  * request that asked ONLY for others collapses to a single unmatchable id.
  *
- * That id alone is NOT sufficient: it lands in `where.OR`, where a sibling
- * branch (`uncategorized` / `untagged` / `without-location`) can still match.
- * `getAssetsWhereInput` therefore also AND-s an unsatisfiable predicate when it
- * sees the sentinel — see the note at that call site. Dropping the filter
+ * `getAssetsWhereInput` also AND-s a predicate nothing satisfies when it sees
+ * that id, so the refusal holds regardless of how the custodian group is
+ * built (see the note at that call site). Dropping the filter
  * instead of refusing it would widen the query to every row, which is the
  * opposite of what a refusal should do.
  */
@@ -798,15 +820,8 @@ export function getAssetsWhereInput({
     // units, so AVAILABLE filter must include them.
     if (status === "AVAILABLE") {
       // QT-aware fragment shared with getAssets and the mobile assets
-      // endpoint — see buildAssetStatusWhere for the rationale.
-      where.AND = [
-        ...(Array.isArray(where.AND)
-          ? where.AND
-          : where.AND
-          ? [where.AND]
-          : []),
-        buildAssetStatusWhere(status),
-      ];
+      // endpoint. See buildAssetStatusWhere for the rationale.
+      andAssetWhere(where, buildAssetStatusWhere(status));
     } else {
       where.status = status;
     }
@@ -814,16 +829,9 @@ export function getAssetsWhereInput({
 
   if (categoriesIds && categoriesIds.length > 0) {
     if (categoriesIds.includes("uncategorized")) {
-      where.OR = [
-        {
-          categoryId: {
-            in: categoriesIds,
-          },
-        },
-        {
-          categoryId: null,
-        },
-      ];
+      andAssetWhere(where, {
+        OR: [{ categoryId: { in: categoriesIds } }, { categoryId: null }],
+      });
     } else {
       where.categoryId = {
         in: categoriesIds,
@@ -833,11 +841,12 @@ export function getAssetsWhereInput({
 
   if (tagsIds && tagsIds.length > 0) {
     if (tagsIds.includes("untagged")) {
-      where.OR = [
-        ...(where.OR ?? []),
-        { tags: { some: { id: { in: tagsIds } } } },
-        { tags: { none: {} } },
-      ];
+      andAssetWhere(where, {
+        OR: [
+          { tags: { some: { id: { in: tagsIds } } } },
+          { tags: { none: {} } },
+        ],
+      });
     } else {
       where.tags = {
         some: {
@@ -853,11 +862,12 @@ export function getAssetsWhereInput({
     if (locationIds.includes("without-location")) {
       // "in these locations" → at least one pivot row matches; "without
       // location" → no pivot rows at all.
-      where.OR = [
-        ...(where.OR ?? []),
-        { assetLocations: { some: { locationId: { in: locationIds } } } },
-        { assetLocations: { none: {} } },
-      ];
+      andAssetWhere(where, {
+        OR: [
+          { assetLocations: { some: { locationId: { in: locationIds } } } },
+          { assetLocations: { none: {} } },
+        ],
+      });
     } else {
       where.assetLocations = {
         some: { locationId: { in: locationIds } },
@@ -866,58 +876,42 @@ export function getAssetsWhereInput({
   }
 
   if (teamMemberIds && teamMemberIds.length) {
-    where.OR = [
-      ...(where.OR ?? []),
-      {
-        custody: { some: { teamMemberId: { in: teamMemberIds } } },
-      },
-      {
-        custody: {
-          some: { custodian: { userId: { in: teamMemberIds } } },
+    andAssetWhere(where, {
+      OR: [
+        {
+          custody: { some: { teamMemberId: { in: teamMemberIds } } },
         },
-      },
-      {
-        bookingAssets: {
-          some: {
-            booking: { custodianTeamMemberId: { in: teamMemberIds } },
+        {
+          custody: {
+            some: { custodian: { userId: { in: teamMemberIds } } },
           },
         },
-      },
-      {
-        bookingAssets: {
-          some: { booking: { custodianUserId: { in: teamMemberIds } } },
+        {
+          bookingAssets: {
+            some: {
+              booking: { custodianTeamMemberId: { in: teamMemberIds } },
+            },
+          },
         },
-      },
-      ...(teamMemberIds.includes("without-custody")
-        ? [{ custody: { none: {} } }]
-        : []),
-    ];
+        {
+          bookingAssets: {
+            some: { booking: { custodianUserId: { in: teamMemberIds } } },
+          },
+        },
+        ...(teamMemberIds.includes("without-custody")
+          ? [{ custody: { none: {} } }]
+          : []),
+      ],
+    });
 
     /**
-     * A refusal has to survive a sibling OR branch.
-     *
-     * The custody clause is attached with `OR`, and three other filters write
-     * there too — `uncategorized`, `untagged`, `without-location`. Under OR
-     * semantics the refused branch matches nothing while the sibling still
-     * matches plenty, so `?teamMember=<colleague>&category=uncategorized`
-     * returned the sibling's rows rather than none. That leaked nothing (the
-     * result equals the same request with `teamMember` omitted, which anyone
-     * may issue) but it broke the invariant this function documents, and a
-     * future OR branch carrying custody signal would make it a real hole.
-     *
-     * Fixed by AND-ing a predicate nothing satisfies, NOT by moving the custody
-     * clause from OR to AND — that would intersect custody with category/tag/
-     * location for every caller and silently change existing filter results.
+     * A refused custodian filter matches nothing, whatever else it is
+     * combined with. The custodian group above already matches no row for
+     * the sentinel id; this predicate keeps the refusal true even if a
+     * branch is ever added to that group that does not test the id.
      */
     if (teamMemberIds.includes(CUSTODY_FILTER_REFUSED)) {
-      where.AND = [
-        ...(Array.isArray(where.AND)
-          ? where.AND
-          : where.AND
-          ? [where.AND]
-          : []),
-        { id: CUSTODY_FILTER_REFUSED },
-      ];
+      andAssetWhere(where, { id: CUSTODY_FILTER_REFUSED });
     }
   }
 

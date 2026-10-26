@@ -38,8 +38,15 @@ function custodianIdsInAssetWhere(
   where: ReturnType<typeof getAssetsWhereInput>
 ): string[] {
   const ids = new Set<string>();
+  const groups = Array.isArray(where.AND)
+    ? where.AND
+    : where.AND
+    ? [where.AND]
+    : [];
+  // The custodian filter is one AND group whose options sit in its own OR.
+  const clauses = groups.flatMap((group) => group.OR ?? []);
 
-  for (const clause of where.OR ?? []) {
+  for (const clause of clauses) {
     const custodyIds = clause.custody?.some?.teamMemberId;
     if (custodyIds && typeof custodyIds === "object" && "in" in custodyIds) {
       (custodyIds.in as string[]).forEach((id) => ids.add(id));
@@ -163,10 +170,8 @@ describe("getAssetsWhereInput — a refusal survives sibling OR filters", () => 
     );
   }
 
-  // The three other filters that write to `where.OR`. Each one used to rescue
-  // a refused custodian filter: under OR semantics the refused branch matched
-  // nothing while the sibling matched plenty, so the query returned the
-  // sibling's rows instead of none.
+  // The three other filters that carry an OR group of their own. A refused
+  // custodian filter must still match nothing when combined with any of them.
   const siblingOrFilters = [
     ["uncategorized", `category=uncategorized`],
     ["untagged", `tag=untagged`],

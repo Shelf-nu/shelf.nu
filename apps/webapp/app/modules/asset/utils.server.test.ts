@@ -959,6 +959,56 @@ describe("getAssetsWhereInput status filter", () => {
   });
 });
 
+describe("getAssetsWhereInput filter groups", () => {
+  it("ANDs uncategorized, untagged and without-location instead of ORing them", () => {
+    const where = getAssetsWhereInput({
+      organizationId: "org-1",
+      currentSearchParams:
+        "category=uncategorized&tag=untagged&location=without-location",
+      allowedTeamMemberIds: "all",
+    });
+
+    // One group per filter, each holding its own options.
+    expect(where.OR).toBeUndefined();
+    expect(where.AND).toEqual([
+      {
+        OR: [{ categoryId: { in: ["uncategorized"] } }, { categoryId: null }],
+      },
+      {
+        OR: [
+          { tags: { some: { id: { in: ["untagged"] } } } },
+          { tags: { none: {} } },
+        ],
+      },
+      {
+        OR: [
+          {
+            assetLocations: {
+              some: { locationId: { in: ["without-location"] } },
+            },
+          },
+          { assetLocations: { none: {} } },
+        ],
+      },
+    ]);
+  });
+
+  it("keeps the custodian filter a group of its own next to the tag filter", () => {
+    const where = getAssetsWhereInput({
+      organizationId: "org-1",
+      currentSearchParams: "tag=untagged&teamMember=tm-1",
+      allowedTeamMemberIds: "all",
+    });
+
+    expect(where.OR).toBeUndefined();
+    const groups = where.AND as Prisma.AssetWhereInput[];
+    expect(groups).toHaveLength(2);
+    expect(groups[1].OR).toContainEqual({
+      custody: { some: { teamMemberId: { in: ["tm-1"] } } },
+    });
+  });
+});
+
 describe("getInitialPlacementNoteContent", () => {
   /** The name-bearing subset both create routes pass through from `asset.user`. */
   const user = {

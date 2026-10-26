@@ -6168,15 +6168,16 @@ describe("getAssets search via UNION", () => {
     // no-args call); this suite always calls it with args, so the mock
     // is asserted non-null rather than widening the type in every test.
     const where = findManyMock.mock.calls[0][0]!.where!;
-    expect(where.OR).toEqual([{ id: { in: ["a1", "a2"] } }]);
-    // exactly one fetch — no fallback re-query
+    expect(where.AND).toEqual([{ id: { in: ["a1", "a2"] } }]);
+    expect(where.OR).toBeUndefined();
+    // exactly one fetch, no fallback re-query
     expect(findManyMock).toHaveBeenCalledTimes(1);
   });
 
   it("does not run the UNION when there is no search term", async () => {
     await getAssets({ ...base, search: null });
     expect(queryRawMock).not.toHaveBeenCalled();
-    expect(findManyMock.mock.calls[0][0]!.where!.OR).toBeUndefined();
+    expect(findManyMock.mock.calls[0][0]!.where!.AND).toBeUndefined();
   });
 
   it("fail-closed: whitespace-only search matches nothing, no UNION", async () => {
@@ -6185,24 +6186,73 @@ describe("getAssets search via UNION", () => {
     expect(findManyMock.mock.calls[0][0]!.where!.id).toEqual({ in: [] });
   });
 
-  it("preserves filter OR-entanglement: uncategorized appends after the search id set", async () => {
+  it("narrows the search with uncategorized instead of adding to it", async () => {
     await getAssets({
       ...base,
       search: "chair",
       categoriesIds: ["uncategorized"],
     });
     const where = findManyMock.mock.calls[0][0]!.where!;
-    expect(where.OR).toEqual([
+    expect(where.OR).toBeUndefined();
+    expect(where.AND).toEqual([
       { id: { in: ["a1", "a2"] } },
-      { categoryId: { in: ["uncategorized"] } },
-      { categoryId: null },
+      {
+        OR: [{ categoryId: { in: ["uncategorized"] } }, { categoryId: null }],
+      },
     ]);
+  });
+
+  it("narrows the search with a tag filter instead of adding to it", async () => {
+    await getAssets({ ...base, search: "chair", tagsIds: ["tag-1"] });
+    const where = findManyMock.mock.calls[0][0]!.where!;
+    expect(where.OR).toBeUndefined();
+    expect(where.AND).toEqual([
+      { id: { in: ["a1", "a2"] } },
+      { OR: [{ tags: { some: { id: { in: ["tag-1"] } } } }] },
+    ]);
+  });
+
+  it("keeps 'untagged' and picked tags in one group, ANDed with the search", async () => {
+    await getAssets({
+      ...base,
+      search: "chair",
+      tagsIds: ["untagged", "tag-1"],
+    });
+    const where = findManyMock.mock.calls[0][0]!.where!;
+    expect(where.AND).toEqual([
+      { id: { in: ["a1", "a2"] } },
+      {
+        OR: [
+          { tags: { none: {} } },
+          { tags: { some: { id: { in: ["tag-1"] } } } },
+        ],
+      },
+    ]);
+  });
+
+  it("ANDs the custodian and without-location groups with the search", async () => {
+    await getAssets({
+      ...base,
+      search: "chair",
+      teamMemberIds: ["tm-1"],
+      locationIds: ["without-location"],
+    });
+    const where = findManyMock.mock.calls[0][0]!.where!;
+    expect(where.OR).toBeUndefined();
+    const groups = where.AND as Prisma.AssetWhereInput[];
+    expect(groups[0]).toEqual({ id: { in: ["a1", "a2"] } });
+    // One group per filter: location first, then custodian.
+    expect(groups).toHaveLength(3);
+    expect(groups[1].OR).toContainEqual({ assetLocations: { none: {} } });
+    expect(groups[2].OR).toContainEqual({
+      custody: { some: { teamMemberId: { in: ["tm-1"] } } },
+    });
   });
 
   it("empty search-id set yields an empty id filter (matches nothing on its own)", async () => {
     queryRawMock.mockResolvedValue([]);
     await getAssets({ ...base, search: "zzz-no-match" });
-    expect(findManyMock.mock.calls[0][0]!.where!.OR).toEqual([
+    expect(findManyMock.mock.calls[0][0]!.where!.AND).toEqual([
       { id: { in: [] } },
     ]);
   });
