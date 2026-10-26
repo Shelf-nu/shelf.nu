@@ -214,9 +214,11 @@ function redactSecrets(data: unknown): Record<string, unknown> {
 /**
  * Build a Sentry overlay (user / tags / extras) from a ShelfError.
  *
- * Every value in `extra` also goes through `redactSensitive`, the same pass the
- * log line gets: it strips credentials embedded in URLs and caps each string,
- * so a field as large as the client chose to send cannot reach Sentry whole.
+ * Everything in `extra` taken from the error (its `additionalData`, `message`
+ * and `cause`) also goes through `redactSensitive`, the same pass the log line
+ * gets: it strips credentials embedded in URLs and caps each string, so a field
+ * as large as the client chose to send cannot reach Sentry whole. `traceId` is
+ * a short id the server generates, so it is included as is.
  *
  * Returns `undefined` for anything that isn't a ShelfError so the caller
  * can fall through to the scope-derived event without overlaying noisy
