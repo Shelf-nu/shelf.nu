@@ -24,13 +24,13 @@ const BRANDS = [
   "Fujifilm",
 ];
 
-function renderPicker(options: string[]) {
+function renderPicker(options: string[], value: string = options[0]) {
   const setFilter = vi.fn();
   const filter: Filter = {
     name: "cf_Brand",
     type: "enum",
     operator: "is",
-    value: options[0],
+    value,
   };
   const Stub = createRoutesStub([
     {
@@ -87,6 +87,44 @@ describe("ValueField for a custom field dropdown", () => {
 
     await user.keyboard("{ArrowDown}{Enter}");
     expect(setFilter).toHaveBeenLastCalledWith("Canon EOS");
+  });
+
+  it("picks the option highlighted with the arrow keys when Enter is pressed", async () => {
+    const user = userEvent.setup();
+    const setFilter = renderPicker(BRANDS);
+
+    await user.click(await screen.findByRole("button", { name: "Sony" }));
+    await user.keyboard("{ArrowDown}{ArrowDown}");
+
+    // Focus follows the highlight, so Enter acts on what the user sees.
+    expect(document.activeElement?.textContent).toBe("ARRI");
+
+    await user.keyboard("{Enter}");
+    expect(setFilter).toHaveBeenCalledTimes(1);
+    expect(setFilter).toHaveBeenCalledWith("ARRI");
+  });
+
+  it("picks the highlighted option with Space as well", async () => {
+    const user = userEvent.setup();
+    const setFilter = renderPicker(BRANDS);
+
+    await user.click(await screen.findByRole("button", { name: "Sony" }));
+    await user.keyboard("{ArrowDown}{ArrowDown}{ArrowDown}{ArrowUp}");
+    await user.keyboard(" ");
+
+    expect(setFilter).toHaveBeenCalledTimes(1);
+    expect(setFilter).toHaveBeenCalledWith("ARRI");
+  });
+
+  it("opens with the current value highlighted and focused", async () => {
+    const user = userEvent.setup();
+    const setFilter = renderPicker(BRANDS, "RED");
+
+    await user.click(await screen.findByRole("button", { name: "RED" }));
+    expect(document.activeElement?.textContent).toBe("RED");
+
+    await user.keyboard("{ArrowDown}{Enter}");
+    expect(setFilter).toHaveBeenCalledWith("Panasonic");
   });
 
   it("picks only the focused option when Enter is pressed on it", async () => {
