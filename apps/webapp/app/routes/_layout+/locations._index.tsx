@@ -7,6 +7,7 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
+import { CountLink } from "~/components/list/count-link";
 import { Filters } from "~/components/list/filters";
 import { SortBy } from "~/components/list/filters/sort-by";
 import BulkActionsDropdown from "~/components/location/bulk-actions-dropdown";
@@ -231,9 +232,27 @@ const ListItemContent = ({
         "-"
       )}
     </Td>
-    <Td>{item._count.children}</Td>
-    <Td>{item._count.assetLocations}</Td>
-    <Td>{item._count.kits}</Td>
+    <Td>
+      <CountLink
+        count={item._count.children}
+        to={`/locations/${item.id}`}
+        label={`View the child locations of ${item.name}`}
+      />
+    </Td>
+    <Td>
+      <CountLink
+        count={item._count.assetLocations}
+        to={`/locations/${item.id}/assets`}
+        label={`View the assets in ${item.name}`}
+      />
+    </Td>
+    <Td>
+      <CountLink
+        count={item._count.kits}
+        to={`/locations/${item.id}/kits`}
+        label={`View the kits in ${item.name}`}
+      />
+    </Td>
     {extraProps.showRowActions ? (
       <Td>
         <LocationQuickActions

@@ -15129,6 +15129,7 @@ export async function getBookingsForCalendar(params: {
             start: (booking.from as Date).toISOString(),
             end: (booking.to as Date).toISOString(),
             custodian: {
+              id: booking.custodianTeamMemberId,
               name: custodianName,
               // Named field by field rather than spread: the loaded row is a
               // full `User`, and this payload is serialized to the calendar
@@ -15145,6 +15146,7 @@ export async function getBookingsForCalendar(params: {
                 : undefined,
             },
             creator: {
+              id: null,
               name: booking.creator
                 ? resolveUserDisplayName(booking.creator)
                 : "Unknown",

@@ -16,6 +16,7 @@ import {
   LAST_AUDIT_CARD_RECENT_LIMIT,
 } from "~/components/assets/asset-last-audit-card";
 import { AssetReminderCards } from "~/components/assets/asset-reminder-cards";
+import { AssetsFilterLink } from "~/components/assets/assets-filter-link";
 import { MoveUnitsDialog } from "~/components/assets/move-units-dialog";
 import { QuantityCustodyList } from "~/components/assets/quantity-custody-list";
 import { QuantityOverviewCard } from "~/components/assets/quantity-overview-card";
@@ -1067,12 +1068,21 @@ export default function AssetOverview() {
                 label="Category"
                 canEdit={canEditAsset}
                 renderDisplay={() => (
-                  <Badge
-                    color={asset.category?.color ?? "#808080"}
-                    withDot={false}
+                  <AssetsFilterLink
+                    filter={{ category: asset.category?.id ?? "uncategorized" }}
+                    title={
+                      asset.category
+                        ? `View assets in ${asset.category.name}`
+                        : "View assets without a category"
+                    }
                   >
-                    {asset.category?.name ?? "Uncategorized"}
-                  </Badge>
+                    <Badge
+                      color={asset.category?.color ?? "#808080"}
+                      withDot={false}
+                    >
+                      {asset.category?.name ?? "Uncategorized"}
+                    </Badge>
+                  </AssetsFilterLink>
                 )}
                 renderEditor={() => (
                   <DynamicSelect
@@ -1182,7 +1192,7 @@ export default function AssetOverview() {
                         variant="link"
                         aria-label="Manage placements"
                         title="Manage placements"
-                        className="hidden shrink-0 rounded p-1 text-gray-500 transition-opacity hover:bg-gray-100 hover:text-gray-700 md:inline-flex md:opacity-0 md:group-hover/field:opacity-100 md:focus-visible:opacity-100"
+                        className="md:group-hover/field:opacity-100 hidden shrink-0 rounded p-1 text-gray-500 transition-opacity hover:bg-gray-100 hover:text-gray-700 md:inline-flex md:opacity-0 md:focus-visible:opacity-100"
                       >
                         <Icon icon="pen" />
                       </Button>
@@ -1260,14 +1270,19 @@ export default function AssetOverview() {
                   {asset.tags?.length > 0 ? (
                     <div className="-ml-2">
                       {asset.tags.map((tag) => (
-                        <Tag
+                        <AssetsFilterLink
                           key={tag.id}
-                          className="ml-2"
-                          color={tag.color ?? undefined}
-                          withDot={false}
+                          filter={{ tag: tag.id }}
+                          title={`View assets tagged ${tag.name}`}
                         >
-                          {tag.name}
-                        </Tag>
+                          <Tag
+                            className="ml-2"
+                            color={tag.color ?? undefined}
+                            withDot={false}
+                          >
+                            {tag.name}
+                          </Tag>
+                        </AssetsFilterLink>
                       ))}
                     </div>
                   ) : (

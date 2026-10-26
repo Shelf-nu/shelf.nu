@@ -5,7 +5,7 @@ import type {
   TeamMember,
   User,
 } from "@prisma/client";
-import { TagUseFor } from "@prisma/client";
+import { BookingStatus, TagUseFor } from "@prisma/client";
 import loadash from "lodash";
 import { db } from "~/database/db.server";
 import {
@@ -93,6 +93,25 @@ export async function getTags(params: {
         take,
         where,
         orderBy: { updatedAt: "desc" },
+        include: {
+          /**
+           * What the tags list links each count to, counted the way those
+           * lists show by default: the asset index hides archived assets, the
+           * bookings index hides archived and cancelled bookings.
+           */
+          _count: {
+            select: {
+              assets: { where: { archivedAt: null } },
+              bookings: {
+                where: {
+                  status: {
+                    notIn: [BookingStatus.ARCHIVED, BookingStatus.CANCELLED],
+                  },
+                },
+              },
+            },
+          },
+        },
       }),
 
       /** Count them */

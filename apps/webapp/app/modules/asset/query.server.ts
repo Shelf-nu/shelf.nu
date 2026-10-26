@@ -2402,6 +2402,7 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
             jsonb_build_object(
               'name', ${BOOKING_CUSTODIAN_NAME},
               'custodian', jsonb_build_object(
+                'id', btm.id,
                 'name', ${BOOKING_CUSTODIAN_NAME},
                 'user', CASE
                   WHEN bu.id IS NOT NULL THEN
@@ -2863,6 +2864,7 @@ export const assetQueryJoins = Prisma.sql`
           'name', tm.name,
           'quantity', cu.quantity,
           'custodian', jsonb_build_object(
+            'id', tm.id,
             'name', tm.name,
             'user', CASE
               WHEN u.id IS NOT NULL THEN
@@ -3090,6 +3092,7 @@ const CUSTODY_SORT_CASE = Prisma.sql`CASE
             jsonb_build_object(
               'name', ${BOOKING_CUSTODIAN_NAME},
               'custodian', jsonb_build_object(
+                'id', btm.id,
                 'name', ${BOOKING_CUSTODIAN_NAME},
                 'user', CASE
                   WHEN bu.id IS NOT NULL THEN
@@ -3165,6 +3168,7 @@ export const CUSTODY_AGG_JOIN = Prisma.sql`
             'name', tm.name,
             'quantity', cu.quantity,
             'custodian', jsonb_build_object(
+              'id', tm.id,
               'name', tm.name,
               'user', CASE
                 WHEN u.id IS NOT NULL THEN

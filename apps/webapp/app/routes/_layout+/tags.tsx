@@ -12,6 +12,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import LineBreakText from "~/components/layout/line-break-text";
 import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
+import { CountLink } from "~/components/list/count-link";
 import { Filters } from "~/components/list/filters";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
@@ -205,6 +206,8 @@ export default function CategoriesPage() {
             <>
               <Th>Description</Th>
               <Th>Use for</Th>
+              <Th>Assets</Th>
+              <Th>Bookings</Th>
               <Th>Actions</Th>
             </>
           }
@@ -217,7 +220,9 @@ export default function CategoriesPage() {
 const TagItem = ({
   item,
 }: {
-  item: Pick<Tag, "id" | "description" | "name" | "useFor" | "color">;
+  item: Pick<Tag, "id" | "description" | "name" | "useFor" | "color"> & {
+    _count: { assets: number; bookings: number };
+  };
 }) => (
   <>
     <Td className="w-1/4 text-left" title={`Tag: ${item.name}`}>
@@ -245,6 +250,20 @@ const TagItem = ({
           <GrayBadge>All</GrayBadge>
         )}
       </div>
+    </Td>
+    <Td>
+      <CountLink
+        count={item._count.assets}
+        to={`/assets?${new URLSearchParams({ tag: item.id })}`}
+        label={`View the assets tagged ${item.name}`}
+      />
+    </Td>
+    <Td>
+      <CountLink
+        count={item._count.bookings}
+        to={`/bookings?${new URLSearchParams({ tag: item.id })}`}
+        label={`View the bookings tagged ${item.name}`}
+      />
     </Td>
     <Td className="text-left">
       <TagQuickActions tag={item} />
