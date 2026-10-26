@@ -117,13 +117,20 @@ function isLinkProps(props: object): props is LinkButtonProps {
 }
 
 /**
+ * Turns a nested `<Spinner />` white. The loader defaults to brand orange,
+ * which disappears on a filled background, so every filled variant needs this.
+ */
+const WHITE_LOADER = "[&_.diamond-loader]:text-white";
+
+/**
  * Style mappings for button variants
  */
 const variants: Record<ButtonVariant, string> = {
   primary: tw(
     `border-primary-400 bg-primary-500 text-white focus:ring-2`,
     "disabled:border-primary-300 disabled:bg-primary-300",
-    "enabled:hover:bg-primary-400"
+    "enabled:hover:bg-primary-400",
+    WHITE_LOADER
   ),
   secondary: tw(
     `border-gray-300 bg-white text-gray-700`,
@@ -150,9 +157,13 @@ const variants: Record<ButtonVariant, string> = {
   danger: tw(
     `border-error-600 bg-error-600 text-white focus:ring-2`,
     "disabled:border-error-300 disabled:bg-error-300",
-    "enabled:hover:bg-error-800"
+    "enabled:hover:bg-error-800",
+    WHITE_LOADER
   ),
-  info: "bg-blue-500 text-white hover:bg-blue-400 focus:ring-2 disabled:bg-blue-300",
+  info: tw(
+    "bg-blue-500 text-white hover:bg-blue-400 focus:ring-2 disabled:bg-blue-300",
+    WHITE_LOADER
+  ),
   inherit: tw(
     "font-inherit m-0 inline border-none bg-transparent p-0 text-inherit hover:underline"
   ),
@@ -289,11 +300,14 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
               newTab && onlyNewTabIconOnHover ? "hover-parent " : ""
             )}
           >
-            <style>{`
-              .hover-parent:hover .external-link-icon {
-                display: inline-flex !important;
-              }
-            `}</style>
+            {/* Only a new-tab link that reveals its icon on hover needs this */}
+            {newTab && onlyNewTabIconOnHover ? (
+              <style>{`
+                .hover-parent:hover .external-link-icon {
+                  display: inline-flex !important;
+                }
+              `}</style>
+            ) : null}
 
             <span>{children}</span>
             {newTab && (

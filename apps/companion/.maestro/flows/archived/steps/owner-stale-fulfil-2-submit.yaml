@@ -1,0 +1,29 @@
+appId: com.shelf.companion.carlos
+---
+# Steps, part 2 of 2: submit the fulfil tray after unit A was archived on the
+# server. The server refuses before anything is assigned or checked out and
+# names the archived unit, so only that row is marked and re-flagged; the
+# other unit waits, unmarked.
+
+- tapOn:
+    id: "batch-drawer-submit"
+- extendedWaitUntil:
+    visible: "Assign & check out"
+    timeout: 10000
+# Two-word native alert buttons do not take a text tap reliably; the confirm
+# is the right-hand button.
+- tapOn:
+    point: "68%,57%"
+- extendedWaitUntil:
+    visible: "Couldn't check out"
+    timeout: 30000
+- takeScreenshot: archived-stale-fulfil-alert
+- tapOn: "OK"
+- extendedWaitUntil:
+    visible: "Archived. Remove it from the list."
+    timeout: 10000
+- assertVisible: "1 asset is archived and can't be booked."
+- assertVisible:
+    id: "batch-drawer-submit"
+    enabled: false
+- takeScreenshot: archived-stale-fulfil-tray

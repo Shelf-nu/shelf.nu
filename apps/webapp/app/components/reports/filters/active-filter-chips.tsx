@@ -4,7 +4,10 @@
  * Labels arrive resolved from the loader ("Category: Cameras"), so this
  * component never has to know what an id means. Removing a chip deletes
  * exactly its `param=value` pair; "Clear all" removes every filter key and
- * keeps the timeframe and sorting.
+ * keeps the timeframe and sorting. When the link named filters that no longer
+ * exist (a deleted category, a removed custom field), a short notice says
+ * they were left out, so an unfiltered result is never mistaken for a
+ * filtered one.
  *
  * @see {@link file://../report-filter-bar.tsx}
  * @see {@link file://../../../modules/reports/filters.server.ts} builds the labels
@@ -22,17 +25,35 @@ import {
 /** Props for {@link ActiveFilterChips}. */
 type Props = {
   filters: ActiveReportFilter[];
+  /** How many filters in the link were left out because they no longer exist. */
+  ignoredCount?: number;
   disabled?: boolean;
 };
 
-/** Renders the chips; `null` when nothing is applied. */
-export function ActiveFilterChips({ filters, disabled }: Props) {
+/** The notice for filters the link named but the report could not apply. */
+export function ignoredFiltersNotice(count: number): string {
+  return count === 1
+    ? "1 filter in this link no longer exists and was left out."
+    : `${count} filters in this link no longer exist and were left out.`;
+}
+
+/** Renders the chips and the left-out notice; `null` when there is neither. */
+export function ActiveFilterChips({
+  filters,
+  ignoredCount = 0,
+  disabled,
+}: Props) {
   const [searchParams, setSearchParams] = useSearchParams();
 
-  if (filters.length === 0) return null;
+  if (filters.length === 0 && ignoredCount === 0) return null;
 
   return (
     <div className="flex flex-wrap items-center gap-2">
+      {ignoredCount > 0 ? (
+        <span className="text-xs text-gray-500" role="status">
+          {ignoredFiltersNotice(ignoredCount)}
+        </span>
+      ) : null}
       {filters.map((filter) => (
         <span
           key={`${filter.param}=${filter.value}`}
@@ -59,19 +80,21 @@ export function ActiveFilterChips({ filters, disabled }: Props) {
           </button>
         </span>
       ))}
-      <Button
-        type="button"
-        variant="link"
-        className="text-xs font-normal text-gray-500 hover:text-gray-700"
-        disabled={disabled}
-        onClick={() =>
-          setSearchParams(clearReportFilterParams(searchParams), {
-            replace: true,
-          })
-        }
-      >
-        Clear all filters
-      </Button>
+      {filters.length > 0 ? (
+        <Button
+          type="button"
+          variant="link"
+          className="text-xs font-normal text-gray-500 hover:text-gray-700"
+          disabled={disabled}
+          onClick={() =>
+            setSearchParams(clearReportFilterParams(searchParams), {
+              replace: true,
+            })
+          }
+        >
+          Clear all filters
+        </Button>
+      ) : null}
     </div>
   );
 }

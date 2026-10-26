@@ -60,6 +60,35 @@ export const TRUNCATED = "[TRUNCATED]";
 const MAX_DEPTH = 4;
 
 /**
+ * Longest string written to a log line or Sentry `extra`, in characters.
+ *
+ * `parseData` logs the whole submitted payload, so a field is as large as the
+ * client chose to send. An unbounded value makes an equally unbounded log
+ * line, which log pipelines handle badly: the GitHub Actions runner spends
+ * minutes processing a single line of several hundred KB. A few thousand
+ * characters is still enough to debug from, and comfortably holds a stack.
+ */
+export const MAX_LOGGED_STRING_LENGTH = 10_000;
+
+/**
+ * Cuts a string to {@link MAX_LOGGED_STRING_LENGTH}, noting how much was cut.
+ *
+ * @param value - An already-redacted string
+ * @returns The string unchanged when within the limit, otherwise its head
+ *   followed by a `[TRUNCATED <n> chars]` marker
+ */
+function capLength(value: string): string {
+  if (value.length <= MAX_LOGGED_STRING_LENGTH) {
+    return value;
+  }
+  const dropped = value.length - MAX_LOGGED_STRING_LENGTH;
+  return `${value.slice(
+    0,
+    MAX_LOGGED_STRING_LENGTH
+  )}... [TRUNCATED ${dropped} chars]`;
+}
+
+/**
  * Query parameters that carry a credential in a URL.
  *
  * {@link SENSITIVE_KEY} already covers the obvious names (`token`, `api_key`,
@@ -70,6 +99,17 @@ const MAX_DEPTH = 4;
  */
 const SENSITIVE_URL_PARAM =
   /^(?:sig|signature|x-(?:amz|goog)-(?:signature|credential|security-token)|access[._-]?token|auth)$/i;
+
+/**
+ * Whether a URL query or fragment parameter carries a credential and so must
+ * have its value redacted before the URL is logged.
+ *
+ * @param name - The parameter name, e.g. `token` or `X-Amz-Signature`
+ * @returns `true` when the parameter's value must not be logged
+ */
+export function isSensitiveUrlParam(name: string): boolean {
+  return SENSITIVE_KEY.test(name) || SENSITIVE_URL_PARAM.test(name);
+}
 
 /**
  * Removes credentials embedded in a URL string.
@@ -130,7 +170,7 @@ export function redactUrlCredentials(value: string): string {
   }
 
   for (const param of Array.from(url.searchParams.keys())) {
-    if (SENSITIVE_KEY.test(param) || SENSITIVE_URL_PARAM.test(param)) {
+    if (isSensitiveUrlParam(param)) {
       url.searchParams.set(param, REDACTED_URL_PART);
       redacted = true;
     }
@@ -145,7 +185,7 @@ export function redactUrlCredentials(value: string): string {
     let fragmentRedacted = false;
 
     for (const param of Array.from(fragment.keys())) {
-      if (SENSITIVE_KEY.test(param) || SENSITIVE_URL_PARAM.test(param)) {
+      if (isSensitiveUrlParam(param)) {
         fragment.set(param, REDACTED_URL_PART);
         fragmentRedacted = true;
       }
@@ -171,7 +211,7 @@ export function redactUrlCredentials(value: string): string {
 
 /**
  * Returns a copy of `value` with any sensitively-named field replaced by
- * {@link REDACTED}.
+ * {@link REDACTED} and every string capped at {@link MAX_LOGGED_STRING_LENGTH}.
  *
  * Never mutates the input — the caller usually still needs the real values (a
  * validation failure still has to tell the user which field was wrong).
@@ -184,13 +224,16 @@ export function redactUrlCredentials(value: string): string {
  *
  * @param value - Any value destined for `additionalData` or a log line
  * @param depth - Internal recursion counter; callers should omit it
- * @returns A redacted copy, or the original for primitives
+ * @returns A redacted copy with long strings capped, or the original for
+ *   other primitives
  */
 export function redactSensitive<T>(value: T, depth = 0): T {
   // Strings are inspected, not waved through: a secret does not have to sit
-  // under a sensitive KEY to reach a log line — it can be inside the value.
+  // under a sensitive KEY to reach a log line, it can be inside the value.
+  // Redact before capping, so the cut can never land inside a credential and
+  // leave part of it behind.
   if (typeof value === "string") {
-    return redactUrlCredentials(value) as unknown as T;
+    return capLength(redactUrlCredentials(value)) as unknown as T;
   }
 
   if (value === null || typeof value !== "object") {

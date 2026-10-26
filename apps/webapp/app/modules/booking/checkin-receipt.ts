@@ -259,7 +259,40 @@ export type CheckinReceiptRowAsset = {
    * Never substituted with the custodian or the printing user.
    */
   checkedInByName: string;
+  /**
+   * How this row was checked in, as the activity event recorded it:
+   * "Scanned on the phone", "Selected on the web", "In one click on the web".
+   * `null` when nothing recorded a method, which is every return made before
+   * the method was recorded. Never guessed from the surface alone.
+   */
+  checkedInHow: string | null;
 };
+
+/**
+ * The one method line the sheet's header prints when every row the sheet
+ * dates as returned recorded the same method. Rows then do not repeat it.
+ *
+ * `null` otherwise: when the returned rows disagree, when none recorded a
+ * method, and also when one returned row recorded nothing (a return made
+ * before methods were recorded, or by a phone bundle that declared none). In
+ * every one of those cases the rows carry their own phrase instead, so the
+ * header never claims a way of returning for an item whose way was not
+ * recorded. Rows that never came back have no method to agree on and are
+ * ignored.
+ *
+ * @param rows - The printed rows, with their recorded method phrase and
+ *   whether the sheet dates them as returned
+ * @returns The shared phrase, or `null`
+ */
+export function summariseCheckinMethods(
+  rows: ReadonlyArray<{ checkedInHow: string | null; checkedInAt: Date | null }>
+): string | null {
+  const returned = rows.filter((row) => row.checkedInAt !== null);
+  if (returned.length === 0) return null;
+  if (returned.some((row) => row.checkedInHow === null)) return null;
+  const phrases = new Set(returned.map((row) => row.checkedInHow));
+  return phrases.size === 1 ? [...phrases][0] : null;
+}
 
 /**
  * A printed row on the wire: the check-in moment is already a formatted date,
@@ -329,6 +362,12 @@ export type CheckinReceiptView = {
   latenessNote: CheckinLatenessNote | null;
   /** Distinct receiving users, ordered by their first check-in. */
   checkedInByNames: string[];
+  /**
+   * How the items were checked in, when every row with a recorded method
+   * agrees ({@link summariseCheckinMethods}); otherwise `null` and each row
+   * prints its own.
+   */
+  checkedInHow: string | null;
 };
 
 /** Arguments for {@link buildCheckinReceipt}. */

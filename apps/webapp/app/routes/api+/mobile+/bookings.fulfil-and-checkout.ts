@@ -1,6 +1,8 @@
+import { BOOKING_METHOD } from "@shelf/labels";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
+import { findMobileArchivedRefusal } from "~/modules/api/mobile-archived.server";
 import {
   requireMobileAuth,
   requireMobilePermission,
@@ -9,19 +11,20 @@ import {
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
 import { parseMobileBody } from "~/modules/api/mobile-body.server";
-import { fulfilAndCheckOut } from "~/modules/booking/fulfil-and-checkout.server";
-import { isExplicitCheckoutRequired } from "~/modules/booking-settings/explicit-checkout";
-import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import {
-  resolveMostPrivilegedRole,
-  validateBookingOwnership,
-} from "~/utils/booking-authorization.server";
+  mobileSourceLocationsSchema,
+  sourceSubmissionFromRecord,
+} from "~/modules/booking/checkout-source-location";
+import { fulfilAndCheckOut } from "~/modules/booking/fulfil-and-checkout.server";
+import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
+import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { isExplicitScanRequired } from "~/utils/permissions/role-access";
 
 /**
  * POST /api/mobile/bookings/fulfil-and-checkout
@@ -30,27 +33,26 @@ import {
  * (`_layout+/bookings.$bookingId.overview.fulfil-and-checkout.tsx`).
  *
  * A book-by-model booking reserves N units of an `AssetModel` up front as
- * intent (`BookingModelRequest`), with no concrete assets behind them yet.
- * The server hard-blocks a plain checkout (RESERVED → ONGOING) while any of
- * those requests are unfulfilled, so on mobile the operator scans the actual
- * units they're taking and this endpoint delegates to `fulfilAndCheckOut`,
- * which:
+ * intent (`BookingModelRequest`), with no concrete assets behind them yet. The
+ * operator scans the actual units they're taking and this endpoint delegates
+ * to `fulfilAndCheckOut`, which:
  *   1. matches each scanned asset against the outstanding model requests
  *      (materialising them into real `BookingAsset` rows), and
  *   2. checks the booking out — the whole booking, or, under the
  *      workspace's explicit check-out requirement, only the scanned units.
  *
- * This is the "scan to assign + check out" flow — the whole point of
- * book-by-model — done in a single motion, mirroring web. Off-model scans
- * that don't match a reservation land as direct `BookingAsset`s (same as web);
- * the server rejects the submit if any request is still outstanding afterwards.
- * Under the explicit check-out requirement only the scanned units are checked
- * out; `remainingCount` says how many booked assets are still to check out.
+ * This is the "scan to assign + check out" flow, done in a single motion and
+ * mirroring web. Off-model scans that don't match a reservation land as direct
+ * `BookingAsset`s (same as web). Reserved units no scan covered stay open on
+ * the ongoing booking: a check-out needs at least one item to go out, and under
+ * the explicit check-out requirement that item has to be scanned.
+ * `remainingCount` says how many booked assets are still to check out.
  *
  * Body: {
  *   bookingId: string,
  *   assetIds: string[],   // concrete assets the operator scanned
- *   kitIds?: string[],    // scanned kits (no model requests); 400 under the explicit check-out requirement
+ *   kitIds?: string[],    // scanned kits; the server resolves their members, whose INDIVIDUAL units answer reservations
+ *   method?: "scanned",   // the fulfil scanner's declaration; absent or anything else = recorded as null
  *   timeZone?: string,    // device tz for scheduler/email timestamps
  * }
  *
@@ -75,16 +77,25 @@ export async function action({ request }: ActionFunctionArgs) {
 
     await assertMobileCanUseBookings(organizationId);
 
-    const { bookingId, assetIds, kitIds, timeZone } = await parseMobileBody(
-      z.object({
-        bookingId: z.string().min(1),
-        assetIds: z.array(z.string()).default([]),
-        kitIds: z.array(z.string()).optional().default([]),
-        timeZone: z.string().optional(),
-      }),
-      request,
-      "Booking"
-    );
+    const { bookingId, assetIds, kitIds, method, timeZone, sourceLocations } =
+      await parseMobileBody(
+        z.object({
+          bookingId: z.string().min(1),
+          assetIds: z.array(z.string()).default([]),
+          kitIds: z.array(z.string()).optional().default([]),
+          // The fulfil scanner only ever declares `"scanned"`. Anything else,
+          // or nothing (an older bundle), is recorded as null rather than
+          // guessed, and never refuses the hand-over.
+          method: z.literal(BOOKING_METHOD.scanned).optional().catch(undefined),
+          timeZone: z.string().optional(),
+          // Where each scanned pool's units leave from, keyed by `assetId`
+          // (the slice may be created by this request) or `bookingAssetId`;
+          // `null` = Unplaced. Omitted by older apps: the default applies.
+          sourceLocations: mobileSourceLocationsSchema,
+        }),
+        request,
+        "Booking"
+      );
 
     // Load the booking's reservation window so the full check-out can run its
     // asset-conflict guard (gated on `from && to`, exactly as the plain
@@ -109,32 +120,40 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // Cross-user IDOR guard: SELF_SERVICE/BASE hold `booking:checkout` in the
     // permission map, so the role gate above passes for ANY booking id they
-    // send — they may only fulfil + check out bookings they created or are
-    // custodian of. No-op for ADMIN/OWNER. Web enforces the equivalent via
-    // `canUserManageBookingAssets` in the fulfil-and-checkout loader, and
-    // `fulfilAndCheckOut` does NOT check ownership itself (unlike the scan-add
-    // path, whose guard lives in `processBooking`), so without this the mobile
-    // route would be more permissive than web.
-    const { roles, effectiveRole } = await getMobileUserContext(
-      user.id,
-      organizationId
-    );
+    // send. They may only fulfil + check out bookings they created or are
+    // custodian of. No-op when `access.bookings.writeAll`. Web enforces the
+    // equivalent via `validateBookingOwnership` in the fulfil-and-checkout
+    // loader and action, and `fulfilAndCheckOut` does NOT check ownership
+    // itself (unlike the scan-add path, whose guard lives in `processBooking`),
+    // so without this the mobile route would be more permissive than web.
+    const { access } = await getMobileUserContext(user.id, organizationId);
     validateBookingOwnership({
       booking: existingBooking,
       userId: user.id,
-      role: resolveMostPrivilegedRole(roles),
+      access,
       action: "check out",
     });
 
-    // Decided after the booking and ownership checks, so a missing or foreign
-    // booking answers 404. Judged by the most privileged role, like
-    // the loader's `canQuickCheckout`. Under the requirement only the scanned
-    // units are checked out.
+    // Answer an archived scan by naming the archived rows, so the app marks
+    // only those (see mobile-archived.server.ts). After the booking and
+    // ownership checks, so a missing or foreign booking still answers 404.
+    const archivedRefusal = await findMobileArchivedRefusal({
+      assetIds,
+      organizationId,
+    });
+    if (archivedRefusal) {
+      return data({ error: archivedRefusal }, { status: 400 });
+    }
+
+    // Judged by the caller's access (its effective role), like the loader's
+    // `canQuickCheckout`. Under the requirement only the scanned units are
+    // checked out.
     const bookingSettings =
       await getBookingSettingsForOrganization(organizationId);
-    const requireExplicitCheckout = isExplicitCheckoutRequired({
-      role: effectiveRole,
-      bookingSettings,
+    const requireExplicitCheckout = isExplicitScanRequired({
+      access,
+      settings: bookingSettings,
+      direction: "checkout",
     });
 
     // Same hint derivation as the plain checkout endpoint: native clients can't
@@ -158,6 +177,8 @@ export async function action({ request }: ActionFunctionArgs) {
       // "without-adjusted-date" checkout).
       from: existingBooking.from,
       to: existingBooking.to,
+      provenance: { surface: "phone", method: method ?? null },
+      sourceLocations: sourceSubmissionFromRecord(sourceLocations),
     });
 
     return data({

@@ -13,6 +13,7 @@ import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
 import ImportUsersDialog from "~/components/settings/import-users-dialog/import-users-dialog";
 import InviteUserDialog from "~/components/settings/invite-user-dialog";
+import { ROLES_HELP_URL } from "~/components/settings/roles-help-link";
 import TransferOwnershipButton from "~/components/settings/transfer-ownership-button";
 import { Button } from "~/components/shared/button";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
@@ -20,6 +21,7 @@ import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { Td, Th } from "~/components/table";
 import { SSOUserBadge } from "~/components/user/sso-user-badge";
 import { TeamUsersActionsDropdown } from "~/components/workspace/users-actions-dropdown";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import type { TeamMembersWithUserOrInvite } from "~/modules/settings/service.server";
 import { getPaginatedAndFilterableSettingUsers } from "~/modules/settings/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
@@ -32,6 +34,8 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
+import { ROLE_POLICIES } from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 
@@ -111,14 +115,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, role } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.teamMember,
       action: PermissionAction.update,
     });
 
-    return await resolveUserAction(request, organizationId, userId, role);
+    return await resolveUserAction(request, organizationId, userId, access);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });
@@ -147,6 +151,14 @@ export default function UserTeamSetting() {
 
   const shouldRenderIndex = allowedRoutes.includes(currentRoute?.handle?.name);
 
+  const roles = useOrganizationRoles();
+  /* Importing users sends invites too, so both buttons need the invite grant. */
+  const canInviteUsers = userHasPermission({
+    roles,
+    entity: PermissionEntity.teamMember,
+    action: PermissionAction.create,
+  });
+
   return shouldRenderIndex ? (
     <div>
       <ContextualModal />
@@ -154,11 +166,7 @@ export default function UserTeamSetting() {
       <p className="mb-6 text-xs text-gray-600">
         Users by default have a mail registered in shelf and can get reminders,
         log in or perform other actions. Read more about our{" "}
-        <Link
-          to="https://www.shelf.nu/knowledge-base/user-roles-and-their-permissions"
-          target="_blank"
-          className="underline"
-        >
+        <Link to={ROLES_HELP_URL} target="_blank" className="underline">
           permissions here
         </Link>
         .
@@ -175,14 +183,18 @@ export default function UserTeamSetting() {
           or `w-full`, or the gaps stop being uniform. */}
           <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row md:flex-wrap md:items-center md:justify-end">
             <TransferOwnershipButton />
-            <ImportUsersDialog />
-            <InviteUserDialog
-              trigger={
-                <Button type="button" variant="primary">
-                  <span className="whitespace-nowrap">Invite a user</span>
-                </Button>
-              }
-            />
+            {canInviteUsers ? (
+              <>
+                <ImportUsersDialog />
+                <InviteUserDialog
+                  trigger={
+                    <Button type="button" variant="primary">
+                      <span className="whitespace-nowrap">Invite a user</span>
+                    </Button>
+                  }
+                />
+              </>
+            ) : null}
           </div>
         </Filters>
 
@@ -215,6 +227,14 @@ export default function UserTeamSetting() {
 }
 
 function UserRow({ item }: { item: TeamMembersWithUserOrInvite }) {
+  const roles = useOrganizationRoles();
+  /* Row actions (change role, revoke, resend) are team-member updates. */
+  const canUpdateTeamMembers = userHasPermission({
+    roles,
+    entity: PermissionEntity.teamMember,
+    action: PermissionAction.update,
+  });
+
   return (
     <>
       <Td className="w-full whitespace-normal p-0 md:p-0">
@@ -232,7 +252,8 @@ function UserRow({ item }: { item: TeamMembersWithUserOrInvite }) {
         <InviteStatusBadge status={item.status} />
       </Td>
       <Td className="text-right">
-        {item.role !== "Owner" ? (
+        {canUpdateTeamMembers &&
+        !ROLE_POLICIES[item.roleEnum].membership.ownsWorkspace ? (
           <TeamUsersActionsDropdown
             inviteStatus={item.status}
             userId={item.userId}
@@ -241,6 +262,7 @@ function UserRow({ item }: { item: TeamMembersWithUserOrInvite }) {
             isSSO={item.sso || false}
             role={item.role}
             roleEnum={item.roleEnum}
+            roles={item.roles}
           />
         ) : null}
       </Td>

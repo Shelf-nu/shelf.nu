@@ -7,14 +7,17 @@ import { TagsAutocomplete } from "~/components/tag/tags-autocomplete";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { useReservationIsRequest } from "~/hooks/use-reservation-is-request";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { useWorkingHours } from "~/hooks/use-working-hours";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getBookingDefaultStartEndTimes } from "~/modules/working-hours/utils";
 import type {
   NewBookingActionReturnType,
   NewBookingLoaderReturnType,
 } from "~/routes/_layout+/bookings.new";
 
+import { bookingCustodianIsSelf } from "~/utils/bookings";
 import { getValidationErrors } from "~/utils/http";
 import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { tw } from "~/utils/tw";
@@ -71,14 +74,15 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
   const { workingHours } = workingHoursData;
   const bookingSettings = useBookingSettings();
 
-  const { roles, isBaseOrSelfService, isAdministratorOrOwner } =
-    useUserRoleHelper();
+  const roles = useOrganizationRoles();
+  const roleAccess = useRoleAccess();
+  const reservationIsRequest = useReservationIsRequest();
 
   const { startDate: defaultStartDate, endDate: defaultEndDate } =
     getBookingDefaultStartEndTimes(
       workingHours,
       bookingSettings.bufferStartTime,
-      isAdministratorOrOwner,
+      roleAccess.policy.bookings.bypassTimeLimits,
       prefs
     );
 
@@ -92,7 +96,7 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
       action: "new",
       workingHours: workingHours,
       bookingSettings,
-      isAdminOrOwner: isAdministratorOrOwner,
+      bypassTimeLimits: roleAccess.policy.bookings.bypassTimeLimits,
     })
   );
 
@@ -166,7 +170,7 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
               <Card className="field-card m-0">
                 <CustodianField
                   defaultTeamMember={defaultTeamMember}
-                  disabled={disabled || isBaseOrSelfService}
+                  disabled={disabled || bookingCustodianIsSelf(roleAccess)}
                   userCanSeeCustodian={userCanSeeCustodian}
                   isNewBooking={true}
                   error={
@@ -199,7 +203,6 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
               <Card className="field-card m-0 overflow-visible">
                 <NotificationRecipientsField
                   disabled={disabled}
-                  isAdminOrOwner={isAdministratorOrOwner}
                   creatorName="You"
                 />
               </Card>
@@ -219,7 +222,18 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
           {/* Submitted only when creating a booking FROM a kit, so the action
               can resolve the kit's memberships into kit-driven slices. */}
           {kitId ? <input type="hidden" name="kitId" value={kitId} /> : null}
-          <div className={tw("actions-wrapper flex flex-col gap-2")}>
+          {/* Every submit below creates a draft, which holds nothing until
+              it is reserved from the booking page. Kept outside the actions
+              row, which lays the buttons out side by side on the route page. */}
+          <p
+            id="new-booking-draft-hint"
+            className="mt-1 text-left text-sm text-gray-600"
+          >
+            This creates a draft. You can{" "}
+            {reservationIsRequest ? "request a reservation" : "reserve it"} from
+            the booking page.
+          </p>
+          <div className={tw("actions-wrapper mt-2 flex flex-col gap-2")}>
             {!assetIds ? (
               <Button
                 icon="scan"
@@ -241,8 +255,9 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
               name="intent"
               disabled={disabled}
               width={"full"}
+              aria-describedby="new-booking-draft-hint"
             >
-              {assetIds ? "Create Booking" : "View assets list"}
+              {assetIds ? "Create draft" : "View assets list"}
             </Button>
             <hr />
             <Button

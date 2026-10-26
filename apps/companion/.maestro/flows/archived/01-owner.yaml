@@ -1,0 +1,44 @@
+appId: com.shelf.companion.carlos
+name: "Archived assets - owner"
+tags:
+  - archived
+  - fixture
+
+---
+# Test: archived assets, as the workspace owner.
+#
+# Needs the archived-assets fixture:
+#   ./scripts/seed-e2e.sh archived-up
+#   maestro test --env-file env/test.env --env-file env/e2e-archived.env flows/archived/01-owner.yaml
+#
+# Covers the asset screen (badge, notice, disabled actions, Reinstate), the
+# Scan tab's archived blocker in Assign and Location modes, a draft booking
+# that holds an archived asset (Reserve disabled, duplicate note), a kit with
+# an archived member and an audit expecting one, a kit holding only archived
+# assets (kit page and Scan tab), a kit scanned into a booking with its
+# archived member left out, a model reservation the dates can no longer fill,
+# and finally Reinstate, which leaves the asset active (re-run `archived-up`
+# to archive it again).
+#
+# The refused-scan cases are two steps around a database change, so they run
+# on their own:
+# - Assign custody: steps/owner-stale-1-scan.yaml, then
+#   `seed-e2e.sh archived-stale`, then steps/owner-stale-2-submit.yaml with
+#   SHELF_TEST_CUSTODIAN set.
+# - Fulfil and check out (fixture `seed-e2e.sh up`, env/e2e.env):
+#   steps/owner-stale-fulfil-1-scan.yaml, then archive the asset behind
+#   SHELF_TEST_MODEL_UNIT_QR_A in the QA database, then
+#   steps/owner-stale-fulfil-2-submit.yaml. Reinstate it and run
+#   `seed-e2e.sh down` afterwards.
+
+- runFlow: ../../shared/login.yaml
+- tapOn:
+    text: "Quick Actions"
+- runFlow: ../../shared/switch-to-team-ws.yaml
+
+- runFlow: steps/owner-asset.yaml
+- runFlow: steps/owner-scanner.yaml
+- runFlow: steps/owner-booking.yaml
+- runFlow: steps/owner-kit-audit.yaml
+- runFlow: steps/owner-kits-and-shortfall.yaml
+- runFlow: steps/owner-reinstate.yaml

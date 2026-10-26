@@ -33,16 +33,32 @@ const ORG = "org-1";
 const MINE = "tm-mine";
 const COLLEAGUE = "tm-colleague";
 
-/** Every id the asset custody clause ended up matching on. */
+/**
+ * Every id the asset custodian clause ended up matching on, across all four
+ * ways an asset can be held (custody by team member or by user, a booking
+ * custodian by team member or by user), wherever the clause sits in `where`.
+ */
 function custodianIdsInAssetWhere(
   where: ReturnType<typeof getAssetsWhereInput>
 ): string[] {
   const ids = new Set<string>();
+  const groups = [where.AND ?? []].flat();
+  const clauses = groups.flatMap((group) => [
+    group,
+    ...[group.OR ?? []].flat(),
+  ]);
 
-  for (const clause of where.OR ?? []) {
-    const custodyIds = clause.custody?.some?.teamMemberId;
-    if (custodyIds && typeof custodyIds === "object" && "in" in custodyIds) {
-      (custodyIds.in as string[]).forEach((id) => ids.add(id));
+  for (const clause of clauses) {
+    const booking = clause.bookingAssets?.some?.booking;
+    for (const filter of [
+      clause.custody?.some?.teamMemberId,
+      clause.custody?.some?.custodian?.userId,
+      booking?.custodianTeamMemberId,
+      booking?.custodianUserId,
+    ]) {
+      if (filter && typeof filter === "object" && "in" in filter) {
+        (filter.in as string[]).forEach((id) => ids.add(id));
+      }
     }
   }
 
@@ -95,6 +111,12 @@ describe("getAssetsWhereInput custodian scoping", () => {
   });
 });
 
+/**
+ * The clause is `custodianId: { in: [...] }` rather than a bare id because the
+ * custodian control is a multi-select. The SCOPING answers here are unchanged: an
+ * id the viewer may not filter by is refused with an unmatchable one rather than
+ * dropped, which would widen the query to every kit.
+ */
 describe("getKitsWhereInput custodian scoping", () => {
   it("keeps the requested custodian when the caller may see all custody", () => {
     const where = getKitsWhereInput({
@@ -103,7 +125,7 @@ describe("getKitsWhereInput custodian scoping", () => {
       allowedTeamMemberIds: "all",
     });
 
-    expect(where.custody).toEqual({ custodianId: COLLEAGUE });
+    expect(where.custody).toEqual({ custodianId: { in: [COLLEAGUE] } });
   });
 
   it("refuses a colleague's id rather than dropping the filter", () => {
@@ -113,7 +135,9 @@ describe("getKitsWhereInput custodian scoping", () => {
       allowedTeamMemberIds: [MINE],
     });
 
-    expect(where.custody).toEqual({ custodianId: CUSTODY_FILTER_REFUSED });
+    expect(where.custody).toEqual({
+      custodianId: { in: [CUSTODY_FILTER_REFUSED] },
+    });
   });
 
   it("keeps the caller's own id", () => {
@@ -123,7 +147,7 @@ describe("getKitsWhereInput custodian scoping", () => {
       allowedTeamMemberIds: [MINE],
     });
 
-    expect(where.custody).toEqual({ custodianId: MINE });
+    expect(where.custody).toEqual({ custodianId: { in: [MINE] } });
   });
 
   it("adds no custody clause when no custodian was requested", () => {
@@ -155,10 +179,8 @@ describe("getAssetsWhereInput — a refusal survives sibling OR filters", () => 
     );
   }
 
-  // The three other filters that write to `where.OR`. Each one used to rescue
-  // a refused custodian filter: under OR semantics the refused branch matched
-  // nothing while the sibling matched plenty, so the query returned the
-  // sibling's rows instead of none.
+  // The three other filters that carry an OR group of their own. A refused
+  // custodian filter must still match nothing when combined with any of them.
   const siblingOrFilters = [
     ["uncategorized", `category=uncategorized`],
     ["untagged", `tag=untagged`],

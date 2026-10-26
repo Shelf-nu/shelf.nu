@@ -1,12 +1,10 @@
 ---
 description: A typed cast at an I/O boundary is a claim, not a contract — pin producer and consumer with tests
-globs:
-  [
-    "apps/webapp/app/routes/api+/**/*.ts",
-    "apps/webapp/app/routes/api+/**/*.tsx",
-    "apps/webapp/app/components/**/*.tsx",
-    "apps/webapp/app/hooks/**/*.ts",
-  ]
+paths:
+  - "apps/webapp/app/routes/api+/**/*.ts"
+  - "apps/webapp/app/routes/api+/**/*.tsx"
+  - "apps/webapp/app/components/**/*.tsx"
+  - "apps/webapp/app/hooks/**/*.ts"
 ---
 
 # An API Payload Type Is A Claim, Not A Contract

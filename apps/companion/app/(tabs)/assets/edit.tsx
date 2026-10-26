@@ -21,6 +21,7 @@ import {
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
+  Keyboard,
   Platform,
 } from "react-native";
 import { useRouter, useLocalSearchParams, Stack } from "expo-router";
@@ -34,10 +35,19 @@ import { createStyles } from "@/lib/create-styles";
 import { labelForRequired } from "@/lib/a11y";
 import { useEditAssetForm } from "@/hooks/use-edit-asset-form";
 import { useFormValidation } from "@/hooks/use-form-validation";
+import { markAssetChanged } from "@/lib/asset-refresh";
 import { PickerField } from "@/components/asset-edit/picker-field";
 import { TagPickerField } from "@/components/asset-edit/tag-picker-field";
 import { CustomFieldInput } from "@/components/asset-edit/custom-field-input";
 import { ValuationField } from "@/components/asset-edit/valuation-field";
+import { CharacterCount } from "@/components/shared/character-count";
+import { valuationFromInput } from "@/lib/asset-valuation";
+import {
+  ASSET_DESCRIPTION_MAX_LENGTH,
+  ASSET_DESCRIPTION_TOO_LONG_MESSAGE,
+  countCharacters,
+  isAssetDescriptionTooLong,
+} from "@/lib/asset-description";
 
 /**
  * Build the JSON value payload for a single custom field update.
@@ -48,9 +58,7 @@ import { ValuationField } from "@/components/asset-edit/valuation-field";
  * single source of truth for BOOLEAN string → boolean normalization,
  * and the downstream `buildCustomFieldValue` handles number / date
  * parsing. Replicating coercion client-side here would duplicate that
- * logic and drift over time (which is what the previous `{ raw: ... }`
- * wrapper was trying to do — and got it wrong, the wrapped shape was
- * rejected by Zod).
+ * logic and drift over time.
  *
  * @param value The string value from the form input.
  * @returns     The raw string when present, or `null` to clear the
@@ -86,7 +94,11 @@ export default function EditAssetScreen() {
   // screen can coordinate it with the category / location dropdowns).
   const [showTagsPicker, setShowTagsPicker] = useState(false);
 
-  const { isDirty } = useFormValidation({
+  // Set once the server accepts the edit, so leaving afterwards is not
+  // treated as abandoning unsaved changes.
+  const [didSave, setDidSave] = useState(false);
+
+  useFormValidation({
     title: form.title,
     description: form.description,
     selectedCategory: form.selectedCategory,
@@ -96,13 +108,26 @@ export default function EditAssetScreen() {
     customFields: form.customFields,
     originalAsset: form.originalAsset,
     isSubmitting: form.isSubmitting,
+    didSave,
   });
+
+  const descriptionChanged =
+    form.description.trim() !== (form.originalAsset?.description ?? "").trim();
+  // why: the payload carries the description only when it changed, and the
+  // server checks only a description it receives. A stored description that is
+  // already over the limit and left untouched must not block saving the rest.
+  const descriptionTooLong =
+    descriptionChanged && isAssetDescriptionTooLong(form.description);
 
   // ── Submit ──────────────────────────────────────
   const handleSubmit = async () => {
     const trimmedTitle = form.title.trim();
     if (trimmedTitle.length < 2) {
       Alert.alert("Validation", "Title must be at least 2 characters.");
+      return;
+    }
+    if (descriptionTooLong) {
+      Alert.alert("Validation", ASSET_DESCRIPTION_TOO_LONG_MESSAGE);
       return;
     }
     if (!currentOrg || !assetId) return;
@@ -143,6 +168,9 @@ export default function EditAssetScreen() {
     }
 
     form.setIsSubmitting(true);
+    // The payload below is a snapshot of the form; the form stays locked
+    // until the request answers, so no edit can land outside it.
+    Keyboard.dismiss();
 
     // Build payload with only changed fields
     const payload: Record<string, any> = { assetId };
@@ -150,7 +178,7 @@ export default function EditAssetScreen() {
     if (trimmedTitle !== form.originalAsset?.title) {
       payload.title = trimmedTitle;
     }
-    if (form.description.trim() !== (form.originalAsset?.description || "")) {
+    if (descriptionChanged) {
       payload.description = form.description.trim();
     }
 
@@ -182,9 +210,7 @@ export default function EditAssetScreen() {
     }
 
     // Valuation
-    const numVal = form.valuation.trim()
-      ? parseFloat(form.valuation.trim())
-      : null;
+    const numVal = valuationFromInput(form.valuation);
     const origVal = form.originalAsset?.valuation ?? null;
     if (numVal !== origVal) {
       payload.valuation = numVal;
@@ -220,6 +246,10 @@ export default function EditAssetScreen() {
       return;
     }
 
+    setDidSave(true);
+    // The asset detail and the assets list keep data they loaded earlier;
+    // this makes them refetch when the user lands back on them.
+    markAssetChanged(assetId);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     Alert.alert("Updated", `"${data.asset.title}" has been updated.`, [
       {
@@ -231,6 +261,7 @@ export default function EditAssetScreen() {
 
   const canSubmit =
     form.title.trim().length >= 2 &&
+    !descriptionTooLong &&
     !form.isSubmitting &&
     !form.isCustomFieldsLoading &&
     !form.customFieldsError;
@@ -285,6 +316,9 @@ export default function EditAssetScreen() {
           style={styles.scroll}
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
+          // Every field (inputs, pickers, tags, custom fields) is locked
+          // while a save is in flight.
+          pointerEvents={form.isSubmitting ? "none" : "auto"}
         >
           {/* ── Title (required) ─────────────────────── */}
           <View style={styles.field}>
@@ -299,6 +333,7 @@ export default function EditAssetScreen() {
               placeholderTextColor={colors.placeholderText}
               returnKeyType="next"
               maxLength={100}
+              editable={!form.isSubmitting}
               accessibilityLabel={labelForRequired("Title")}
             />
             {form.title.length > 0 && form.title.trim().length < 2 && (
@@ -324,9 +359,22 @@ export default function EditAssetScreen() {
               multiline
               numberOfLines={3}
               textAlignVertical="top"
-              maxLength={1000}
+              editable={!form.isSubmitting}
               accessibilityLabel="Description"
             />
+            <CharacterCount
+              count={countCharacters(form.description)}
+              max={ASSET_DESCRIPTION_MAX_LENGTH}
+            />
+            {descriptionTooLong && (
+              <Text
+                style={styles.errorHint}
+                accessibilityRole="alert"
+                accessibilityLiveRegion="polite"
+              >
+                {ASSET_DESCRIPTION_TOO_LONG_MESSAGE}
+              </Text>
+            )}
           </View>
 
           {/* ── Category Picker ──────────────────────── */}
@@ -465,27 +513,19 @@ export default function EditAssetScreen() {
         {/* ── Bottom action bar ──────────────────────── */}
         <View style={styles.bottomBar}>
           <TouchableOpacity
-            style={styles.cancelButton}
+            style={[
+              styles.cancelButton,
+              form.isSubmitting && styles.submitButtonDisabled,
+            ]}
             accessibilityLabel="Cancel editing"
             accessibilityRole="button"
-            onPress={() => {
-              if (isDirty) {
-                Alert.alert(
-                  "Discard Changes?",
-                  "You have unsaved changes. Are you sure you want to go back?",
-                  [
-                    { text: "Keep Editing", style: "cancel" },
-                    {
-                      text: "Discard",
-                      style: "destructive",
-                      onPress: () => router.back(),
-                    },
-                  ]
-                );
-              } else {
-                router.back();
-              }
-            }}
+            accessibilityState={{ disabled: form.isSubmitting }}
+            // Leaving is held off while a save is in flight; a disabled
+            // button says so instead of a tap that silently does nothing.
+            disabled={form.isSubmitting}
+            // The unsaved-changes guard in useFormValidation asks before
+            // leaving a dirty form; prompting here too would ask twice.
+            onPress={() => router.back()}
           >
             <Text style={styles.cancelButtonText}>Cancel</Text>
           </TouchableOpacity>

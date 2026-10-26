@@ -30,6 +30,7 @@ import { createBlockers } from "../blockers-factory";
 import ConfigurableDrawer from "../configurable-drawer";
 import { GenericItemRow, DefaultLoadingState } from "../generic-item-row";
 import { ScannedAssetQuantityInput } from "../scanned-asset-quantity-input";
+import { buildAddToKitBlockers } from "./kit-scan-blockers";
 
 // Export the schema so it can be reused
 export const addScannedAssetsToKitSchema = z.object({
@@ -70,8 +71,10 @@ export default function AddAssetsToKitDrawer({
   defaultExpanded?: boolean;
 }) {
   const { kit } = useLoaderData<typeof loader>();
+  // The kit's members as this page loaded. Used only for the "already in this
+  // kit" blocker: it may be slightly behind, and the write does not depend on
+  // it.
   const kitAssets = kit.assetKits?.map((ak) => ak.asset) ?? [];
-  const kitAssetsIds = kitAssets.map((a) => a.id);
   // Get the scanned items from jotai
   const items = useAtomValue(scannedItemsAtom);
   const clearList = useSetAtom(clearScannedItemsAtom);
@@ -82,19 +85,12 @@ export default function AddAssetsToKitDrawer({
   // Get asset IDs efficiently using the atom
   const { assetIds } = useAtomValue(scannedItemIdsAtom);
 
-  // Filter and prepare data for component rendering
-  const assets = Object.values(items)
-    .filter((item) => !!item && item.data && item.type === "asset")
-    .map((item) => item?.data as AssetFromQr);
-
   // List of asset IDs for the form
   const assetIdsForKit = Array.from(new Set([...assetIds]));
 
-  // Per-asset qty for QUANTITY_TRACKED scans. The kit's existing
-  // assets are sent too (so updateKitAssets doesn't treat them as
-  // removed), but we DON'T include them in `assetQuantities` — that
-  // keeps their current `AssetKit.quantity` intact. Only newly-scanned
-  // ids are emitted.
+  // Per-asset qty for QUANTITY_TRACKED scans, restricted to the ids actually
+  // submitted. An existing member's `AssetKit.quantity` is left alone because
+  // nothing about it is sent.
   const assetQuantities = useAtomValue(scannedAssetQuantitiesAtom);
   const assetQuantitiesJson = JSON.stringify(
     Object.fromEntries(
@@ -104,110 +100,17 @@ export default function AddAssetsToKitDrawer({
     )
   );
 
-  // Setup blockers
-  const errors = Object.entries(items).filter(([, item]) => !!item?.error);
-
-  // Asset blockers
-  const assetsAlreadyAddedIds = assets
-    .filter((asset) => !!asset)
-    .filter((asset) => kitAssets.some((a) => a?.id === asset.id))
-    .map((a) => !!a && a.id);
-
-  // Asset has custody (unavailable for kit assignment) - matches server logic
-  const assetsWithCustodyIds = assets
-    .filter(
-      (asset) =>
-        !!asset &&
-        hasCustody(asset.custody) &&
-        asset.assetKits[0]?.kitId !== kit.id
-    )
-    .map((asset) => asset.id);
-
-  // Asset is checked out
-  const assetsCheckedOutIds = assets
-    .filter((asset) => !!asset && asset.status === AssetStatus.CHECKED_OUT)
-    .map((asset) => asset.id);
-
-  // Get QR IDs for kits to block them from being added to other kits
-  const kitQrIds = Object.entries(items)
-    .filter(([, item]) => !!item && item.type === "kit")
-    .map(([qrId]) => qrId);
-
-  // Create blockers configuration
-  const blockerConfigs = [
-    {
-      condition: assetsAlreadyAddedIds.length > 0,
-      count: assetsAlreadyAddedIds.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} asset${count > 1 ? "s are" : " is"}`}</strong>{" "}
-          already added to this kit.
-        </>
-      ),
-      onResolve: () => removeAssetsFromList(assetsAlreadyAddedIds),
-    },
-    {
-      condition: assetsWithCustodyIds.length > 0,
-      count: assetsWithCustodyIds.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} asset${count > 1 ? "s are" : " is"}`}</strong>{" "}
-          unavailable for kit assignment.
-        </>
-      ),
-      description:
-        "Assets with custody cannot be added to kits. Please release custody first.",
-      onResolve: () => removeAssetsFromList(assetsWithCustodyIds),
-    },
-    {
-      condition: assetsCheckedOutIds.length > 0,
-      count: assetsCheckedOutIds.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} asset${count > 1 ? "s are" : " is"}`}</strong>{" "}
-          checked out.
-        </>
-      ),
-      description:
-        "Checked out assets cannot be added to kits. Please check them in first.",
-      onResolve: () => removeAssetsFromList(assetsCheckedOutIds),
-    },
-    {
-      condition: kitQrIds.length > 0,
-      count: kitQrIds.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} kit${count > 1 ? "s" : ""}`}</strong> detected.
-          Kits cannot be added to other kits.
-        </>
-      ),
-      description: "Note: Only individual assets can be added to kits.",
-      onResolve: () => removeItemsFromList(kitQrIds),
-    },
-    {
-      condition: errors.length > 0,
-      count: errors.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} QR code${count > 1 ? "s" : ""}`}</strong>{" "}
-          {count > 1 ? "are" : "is"} invalid.
-        </>
-      ),
-      onResolve: () => removeItemsFromList(errors.map(([qrId]) => qrId)),
-    },
-  ];
+  const { blockerConfigs } = buildAddToKitBlockers({
+    items,
+    kitId: kit.id,
+    kitAssetIds: new Set(kitAssets.map((asset) => asset.id)),
+    removeAssetsFromList,
+    removeItemsFromList,
+  });
 
   // Create blockers component
   const [hasBlockers, Blockers] = createBlockers({
     blockerConfigs,
-    onResolveAll: () => {
-      removeAssetsFromList([
-        ...assetsAlreadyAddedIds,
-        ...assetsWithCustodyIds,
-        ...assetsCheckedOutIds,
-      ]);
-      removeItemsFromList([...errors.map(([qrId]) => qrId), ...kitQrIds]);
-    },
   });
 
   // Render item row
@@ -254,10 +157,13 @@ export default function AddAssetsToKitDrawer({
     <ConfigurableDrawer
       schema={addScannedAssetsToKitSchema}
       /**
-       * We merge the existing assetIds(kitAssetsIds) with the ids of the scanned assets(assetIdsForKit).
-       * We have to do this because the manageAssets action expects both of them to be present in the formData sent */
+       * Only the scanned assets. The route adds them to whatever the kit holds
+       * at write time, so sending the membership this page loaded with would
+       * describe a kit that may no longer exist — and anything a colleague added
+       * meanwhile would be missing from it.
+       */
       formData={{
-        assetIds: [...kitAssetsIds, ...assetIdsForKit],
+        assetIds: assetIdsForKit,
         assetQuantities: assetQuantitiesJson,
       }}
       items={items}
@@ -289,6 +195,7 @@ export function AssetRow({
 
   // Use a combination of standard presets and custom configurations
   const availabilityConfigs = [
+    assetLabelPresets.archived(!!asset.archivedAt),
     assetLabelPresets.inCustody(asset.status === AssetStatus.IN_CUSTODY),
     assetLabelPresets.checkedOut(asset.status === AssetStatus.CHECKED_OUT),
     // Custom preset for assets with custody (unavailable for kits)

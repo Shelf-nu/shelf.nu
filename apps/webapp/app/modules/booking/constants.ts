@@ -179,6 +179,15 @@ export type ReservationEmailModelRequest =
 /** Max number of assets to display in booking email notifications */
 export const BOOKING_EMAIL_ASSETS_DISPLAY_LIMIT = 10;
 
+/**
+ * Toast body after a booking is created. Every create path leaves a DRAFT,
+ * which claims no assets or model capacity until it is reserved, and the next
+ * step is worded for both kinds of member: one whose reservation is a request
+ * for review and one who reserves directly.
+ */
+export const DRAFT_CREATED_MESSAGE =
+  "Your booking is saved as a draft and holds nothing yet. Reserve it, or request a reservation, from the booking page when you are ready.";
+
 /** Common relations to include in a booking */
 export const BOOKING_COMMON_INCLUDE = {
   custodianTeamMember: true,
@@ -221,6 +230,9 @@ export const BOOKINGS_LIST_ASSETS_INCLUDE = {
           custody: true,
           availableToBook: true,
           status: true,
+          // Drives the calm "Archived" signal in the assets sidebar
+          // (issue #382) — the sidebar's BookingWithAssets type requires it.
+          archivedAt: true,
           mainImage: true,
           thumbnailImage: true,
           // Model cover image for assets with no image of their own
@@ -300,6 +312,9 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
           unitOfMeasure: true,
           availableToBook: true,
           status: true,
+          // Archived assets keep showing in bookings they're already part of,
+          // flagged with the "Archived" badge (issue #382).
+          archivedAt: true,
           valuation: true,
           // `Asset.quantity` is the workspace stock pool — surfaced for QT
           // availability/headroom math, NOT for booking-value totals.

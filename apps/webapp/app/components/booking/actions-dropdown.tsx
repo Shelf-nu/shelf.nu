@@ -10,7 +10,8 @@ import {
 } from "~/components/shared/dropdown";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { isBookingArchivable } from "~/modules/booking/helpers";
 import type { loader } from "~/routes/_layout+/bookings.$bookingId.overview";
 import { dateForDateTimeInputValue } from "~/utils/date-fns";
@@ -53,7 +54,8 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
   } = useBookingStatusHelpers(booking.status);
 
   const submit = useSubmit();
-  const { isBaseOrSelfService, roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
+  const roleAccess = useRoleAccess();
 
   const canArchiveBooking = userHasPermission({
     roles,
@@ -155,7 +157,7 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
 
           <When
             truthy={
-              !isBaseOrSelfService &&
+              roleAccess.policy.notifications.manageBookingRecipients &&
               !isCompleted &&
               !isArchived &&
               !isCancelled
@@ -164,10 +166,10 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
             <ManageNotificationsDialog />
           </When>
 
-          {/* Because SELF_SERVICE and BASE can only delete bookings they own and are in draft, we need to handle it like this, rather than with userHasPermission */}
-
+          {/* Members whose policy limits delete to drafts see Delete only on a
+              draft; the server applies the same rule (`assertCanDeleteBooking`). */}
           <When
-            truthy={(isBaseOrSelfService && isDraft) || !isBaseOrSelfService}
+            truthy={!roleAccess.policy.bookings.deleteOnlyDrafts || isDraft}
           >
             <DeleteBooking booking={booking} />
           </When>

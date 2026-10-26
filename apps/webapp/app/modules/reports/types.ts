@@ -12,6 +12,7 @@
 
 import type {
   AssetType,
+  AuditStatus,
   BookingStatus,
   Currency,
   CustomFieldType,
@@ -129,11 +130,31 @@ export interface ReportCustomFieldOption {
   id: string;
   name: string;
   type: CustomFieldType;
-  /** Values to pick from; OPTION lists its options, BOOLEAN yes/no. */
+  /**
+   * Values to pick from; OPTION lists its options, BOOLEAN yes/no. Empty
+   * when {@link valuesOnDemand} is set.
+   */
   values: string[];
   /** True when a TEXT field holds more distinct values than were loaded. */
   hasMoreValues: boolean;
+  /**
+   * True for TEXT fields: the picker loads their values from
+   * `/api/reports/custom-field-values` when the field is opened.
+   */
+  valuesOnDemand: boolean;
 }
+
+/**
+ * What `/api/reports/custom-field-values` answers: one TEXT field's distinct
+ * values, most frequent first.
+ */
+export type ReportCustomFieldValuesPayload = {
+  /** The field the values belong to, so a late answer cannot label another. */
+  customFieldId: string;
+  values: string[];
+  /** True when the field holds more values than were returned. */
+  hasMore: boolean;
+};
 
 /** One selectable status for the status dropdown. */
 export interface ReportStatusOption {
@@ -743,6 +764,61 @@ export type AssetActivityKpiId =
   | "custody_changes"
   | "booking_activities"
   | "most_active_asset";
+
+// -----------------------------------------------------------------------------
+// Audit Completion Report Types
+// -----------------------------------------------------------------------------
+
+/**
+ * Row type for the Audit Completion report: one audit session.
+ *
+ * `status` is the raw enum for badge rendering; whether the session is
+ * *finished* is answered by `completedAt`, never by the status column,
+ * because archiving rewrites `status` while leaving the timestamps intact.
+ */
+export interface AuditCompletionRow {
+  /** The audit session id. Row clicks navigate to `/audits/{id}`. */
+  id: string;
+  /** Session name as entered by the creator. */
+  name: string;
+  /** Raw status enum, rendered as a badge. Not a completion signal: see
+   * the interface doc, archiving rewrites this column. */
+  status: AuditStatus;
+  /** Assets the session expected to find. */
+  expectedAssetCount: number;
+  /** Expected assets actually scanned. */
+  foundAssetCount: number;
+  /** Expected assets never scanned. Null until the session completes: the
+   * counter counts down while scanning, so before completion it means "not
+   * yet scanned", not "lost". */
+  missingAssetCount: number | null;
+  /** Scanned assets that were not expected. */
+  unexpectedAssetCount: number;
+  /** Whether the session was cancelled (`cancelledAt` set). Stays true after
+   * archiving, which rewrites `status`. */
+  isCancelled: boolean;
+  /** found/expected as a whole percentage (0-100). Null until the session
+   * completes, and when it expected 0 assets (nothing to be accurate
+   * against). Null renders as an empty cell, never 0%. */
+  accuracy: number | null;
+  /** Display name of the user who created the session. */
+  createdByName: string;
+  /** When scanning began; null while the session is still pending. */
+  startedAt: Date | null;
+  /** Deadline for the session; null when none was set. */
+  dueDate: Date | null;
+  /** When the session finished; null while unfinished. The authoritative
+   * completion signal for this report. */
+  completedAt: Date | null;
+}
+
+/** KPI IDs for the Audit Completion report */
+export type AuditCompletionKpiId =
+  | "total_audits"
+  | "completed_audits"
+  | "completion_rate"
+  | "overdue_audits"
+  | "assets_missing";
 
 // -----------------------------------------------------------------------------
 // PDF Export Types

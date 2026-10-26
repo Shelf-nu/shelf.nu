@@ -2,6 +2,7 @@ import { View, Text, TextInput } from "react-native";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
+import { sanitizeValuationInput } from "@/lib/asset-valuation";
 
 type ValuationFieldProps = {
   value: string;
@@ -26,11 +27,8 @@ export function ValuationField({
           style={[styles.input, styles.valuationInput]}
           value={value}
           onChangeText={(text) => {
-            // Allow only numbers and one decimal point
-            const cleaned = text.replace(/[^0-9.]/g, "");
-            const parts = cleaned.split(".");
-            if (parts.length > 2) return;
-            onChange(cleaned);
+            const cleaned = sanitizeValuationInput(text);
+            if (cleaned !== null) onChange(cleaned);
           }}
           placeholder="0.00"
           placeholderTextColor={colors.placeholderText}

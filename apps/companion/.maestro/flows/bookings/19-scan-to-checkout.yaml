@@ -10,15 +10,22 @@ tags:
 # Progressive check-out driven by the scanner: the twin of "Scan to Check In".
 # Takes a reserved booking's assets out one scan at a time, asserting that a
 # scanned kit contributes its members, an off-booking asset is refused, a
-# re-scanned kit reports it is already covered, and the counts shown come from
-# the server rather than from the scan list.
+# re-scanned kit reports it is already covered, and the success message names
+# the batch as the drawer does while leaving what remains uncounted: whether
+# anything is left is the server's answer.
 #
 # Also covers the ONGOING entry rule: once the first batch flips the booking to
 # ONGOING, "Check Out All Assets" disappears while both progressive check-out
 # affordances stay, so the operator can keep taking the rest.
 #
-# Fixture, set up via psql before the run and removed after, in GRANULAR
-# WORKSPACE (cmn8vu17y001rooi1l2etdpzf):
+# Fixture: `scripts/seed-e2e.sh scan-checkout-up` seeds it in GRANULAR
+# WORKSPACE and writes the QR ids below to env/e2e-scan-checkout.env; pass that
+# file alongside test.env:
+#   maestro test --env-file env/test.env --env-file env/e2e-scan-checkout.env \
+#     flows/bookings/19-scan-to-checkout.yaml
+# Re-run it before every run: a run leaves the assets CHECKED_OUT, and the
+# scanner then correctly refuses them as already out. `scan-checkout-down`
+# removes it. It holds:
 #   - Four AVAILABLE, bookable, uncustodied INDIVIDUAL assets: "E2E Checkout
 #     Alpha" and "Bravo" as the two members of kit "E2E Scan Checkout Kit",
 #     "Charlie" scanned on its own, "Delta" never added to the booking.
@@ -29,17 +36,9 @@ tags:
 #     case here: the scanner must recognise them from the scanned kit's own
 #     payload rather than from a kit link on the rows.
 #
-#   Seed the booking rather than building it through the picker: the picker
+#   The booking is seeded rather than built through the picker: the picker
 #   hides kit members, so a kit can only be added through the add-scanner, and
 #   that setup path is not what this flow is testing.
-#
-#   Give every asset a cuid-shaped id (leading "c"): the partial-checkout
-#   endpoint validates assetIds with zod .cuid(), so any other id shape is
-#   refused with 400 before the booking is touched.
-#
-#   Re-seeding between runs must also reset the assets to AVAILABLE. A previous
-#   run leaves them CHECKED_OUT, and the scanner then correctly refuses them as
-#   already out.
 #
 # Env: SHELF_TEST_EMAIL / SHELF_TEST_PASSWORD
 #      SHELF_TEST_CHECKOUT_KIT_QR_ID     kit QR                 (e2eskchkqr01)
@@ -162,7 +161,7 @@ tags:
 - takeScreenshot: checkout-error-already-covered
 - tapOn: ".*Tap to dismiss.*"
 
-# ── Submit the first batch: the server's own numbers come back ──
+# ── Submit the first batch: the batch is named, the rest is not counted ──
 - tapOn:
     id: "batch-drawer-submit"
 - extendedWaitUntil:
@@ -173,7 +172,8 @@ tags:
 - extendedWaitUntil:
     visible: ".*Checked Out.*"
     timeout: 30000
-- assertVisible: ".*2 checked out, 1 remaining.*"
+# The members are standalone rows on this booking, so they count as assets.
+- assertVisible: ".*2 assets checked out. The rest is still reserved.*"
 - takeScreenshot: checkout-alert-checked-out
 - tapOn: "OK"
 
@@ -229,7 +229,7 @@ tags:
 - extendedWaitUntil:
     visible: ".*Checked Out.*"
     timeout: 30000
-- assertVisible: ".*1 checked out, 0 remaining.*"
+- assertVisible: ".*All assets are now checked out for.*"
 - takeScreenshot: checkout-alert-complete
 - tapOn: "OK"
 

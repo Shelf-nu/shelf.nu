@@ -35,6 +35,9 @@ import { useSwipeFilters } from "@/lib/use-swipe-filters";
 import { announce } from "@/lib/a11y";
 import { InventorySegment } from "@/components/kits/inventory-segment";
 import { isQuantityTracked, formatQuantity } from "@/lib/quantity-format";
+import { createLatestRequest } from "@/lib/latest-request";
+import { assetChangeVersion } from "@/lib/asset-refresh";
+import { listErrorView, planFocusRefresh } from "@/lib/asset-list-refresh";
 
 const PAGE_SIZE = 20;
 const keyExtractor = (item: AssetListItem) => item.id;
@@ -96,6 +99,7 @@ function AssetsListContent() {
   );
   const [totalPages, setTotalPages] = useState(0);
   const nextPage = useRef(1);
+  const latestRequest = useRef(createLatestRequest()).current;
   const listRef = useRef<FlatList>(null);
   useScrollToTop(listRef);
 
@@ -125,21 +129,50 @@ function AssetsListContent() {
     return () => clearTimeout(timer);
   }, [searchInput]);
 
-  const fetchAssets = useCallback(
-    async (pageNum: number, reset: boolean) => {
-      if (!currentOrg) return;
+  /** Requests one page of assets for the current search and filter. */
+  const requestPage = useCallback(
+    (orgId: string, pageNum: number, signal: AbortSignal) => {
       const filter = FILTERS[activeFilter];
-      const { data, error: fetchErr } = await api.assets(currentOrg.id, {
-        search: debouncedSearch || undefined,
-        page: pageNum,
-        perPage: PAGE_SIZE,
-        status: filter.status || undefined,
-        myCustody: filter.myCustody || undefined,
-      });
-      if (!data && !fetchErr) return; // Request cancelled (navigation) — ignore
+      return api.assets(
+        orgId,
+        {
+          search: debouncedSearch || undefined,
+          page: pageNum,
+          perPage: PAGE_SIZE,
+          status: filter.status || undefined,
+          myCustody: filter.myCustody || undefined,
+        },
+        { signal }
+      );
+    },
+    [debouncedSearch, activeFilter]
+  );
+
+  /**
+   * Loads one page of assets for the current query.
+   *
+   * @returns true when the rows were applied; false when the request failed,
+   *   was aborted, or was superseded by a newer query.
+   */
+  const fetchAssets = useCallback(
+    async (
+      pageNum: number,
+      reset: boolean,
+      signal: AbortSignal
+    ): Promise<boolean> => {
+      if (!currentOrg) return false;
+      const { data, error: fetchErr } = await requestPage(
+        currentOrg.id,
+        pageNum,
+        signal
+      );
+      // Refused two ways. An abort answers with neither data nor error, and a
+      // response that landed before the abort but after this request was
+      // superseded still carries rows for a query the operator has moved past.
+      if (signal.aborted || (!data && !fetchErr)) return false;
       if (fetchErr || !data) {
         setError(fetchErr || "Failed to load assets");
-        return;
+        return false;
       }
       setError(null);
       setTotalPages(data.totalPages);
@@ -151,8 +184,52 @@ function AssetsListContent() {
           const newItems = data.assets.filter((a) => !existingIds.has(a.id));
           return [...prev, ...newItems];
         });
+      return true;
     },
-    [currentOrg, debouncedSearch, activeFilter]
+    [currentOrg, requestPage]
+  );
+
+  /**
+   * Reloads pages 1 to `pageCount` together and replaces the rows only when
+   * every page answers, so the list keeps its depth and never mixes old and
+   * new pages.
+   *
+   * @returns true when the rows were applied; false when any page failed,
+   *   or the request was aborted or superseded.
+   */
+  const reloadLoadedPages = useCallback(
+    async (pageCount: number, signal: AbortSignal): Promise<boolean> => {
+      if (!currentOrg) return false;
+      const orgId = currentOrg.id;
+      const answers = await Promise.all(
+        Array.from({ length: pageCount }, (_, i) =>
+          requestPage(orgId, i + 1, signal)
+        )
+      );
+      if (signal.aborted) return false;
+      const failed = answers.find((answer) => !answer.data);
+      if (failed) {
+        // An answer with neither data nor error was aborted mid-flight.
+        if (failed.error) setError(failed.error);
+        return false;
+      }
+      const seen = new Set<string>();
+      const rows: AssetListItem[] = [];
+      for (const answer of answers) {
+        for (const row of answer.data?.assets ?? []) {
+          // Rows can shift between pages while they load; keep the first.
+          if (seen.has(row.id)) continue;
+          seen.add(row.id);
+          rows.push(row);
+        }
+      }
+      setError(null);
+      setTotalPages(answers[answers.length - 1].data?.totalPages ?? 0);
+      nextPage.current = pageCount + 1;
+      setAssets(rows);
+      return true;
+    },
+    [currentOrg, requestPage]
   );
 
   // Track whether we've done the initial load so we can skip the skeleton
@@ -162,12 +239,15 @@ function AssetsListContent() {
 
   // Reset cache when org changes so useFocusEffect refetches
   useEffect(() => {
+    // An answer about the workspace being left must not land afterwards and
+    // refill the list with another workspace's assets.
+    latestRequest.cancel();
     lastFetchedAt.current = 0;
     hasFetchedAssets.current = false;
     setAssets([]);
     setError(null);
     nextPage.current = 1;
-  }, [currentOrg?.id]);
+  }, [currentOrg?.id, latestRequest]);
 
   // Refresh on search/filter change — resets the stale timer so useFocusEffect picks it up
   const isFirstRender = useRef(true);
@@ -180,64 +260,128 @@ function AssetsListContent() {
     setIsLoading(true);
     nextPage.current = 1;
     lastFetchedAt.current = 0; // force fresh fetch
-    fetchAssets(1, true).finally(() => {
-      setIsLoading(false);
-      lastFetchedAt.current = Date.now();
-    });
+    const signal = latestRequest.beginReset();
+    let applied = false;
+    fetchAssets(1, true, signal)
+      .then((ok) => {
+        applied = ok;
+      })
+      .finally(() => {
+        latestRequest.endReset(signal);
+        // The signal identifies this request. An abandoned one must not stamp
+        // freshness or clear the spinner: the request that replaced it is still
+        // running and will do both when it answers.
+        if (signal.aborted) return;
+        setIsLoading(false);
+        if (applied) {
+          lastFetchedAt.current = Date.now();
+          return;
+        }
+        // The rows on screen answer the previous search or filter. Clearing
+        // them shows the error view instead of passing them off as results
+        // for the new query; the list stays unfresh, so the next focus retries.
+        setAssets([]);
+        nextPage.current = 1;
+      });
     // why: search/filter changes intentionally re-fetch; fetchAssets and currentOrg are
     // captured stably via useOrg context so we do not want them in deps (would cause loops)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedSearch, activeFilter]);
 
-  // Refresh on tab focus — skip if data is fresh (< 60s old) to avoid double-fetches
+  // The asset-change version the list reflects (see lib/asset-refresh.ts):
+  // an asset edited elsewhere bypasses the freshness gate below.
+  const seenChangeVersion = useRef(assetChangeVersion());
+
+  // Refresh on tab focus. The rules (skip fresh rows, keep the scroll depth
+  // after an edit elsewhere) live in lib/asset-list-refresh.ts.
   useFocusEffect(
     useCallback(() => {
       if (!currentOrg) return;
-      // Skip if data was fetched recently (avoids double-fetch with search/filter effect)
-      if (
-        hasFetchedAssets.current &&
-        Date.now() - lastFetchedAt.current < 60_000
-      )
-        return;
+      // Recorded as seen only once fresh rows land, so a failed refetch
+      // after an edit is retried on the next focus.
+      const changeVersion = assetChangeVersion();
+      const loadedPages = nextPage.current - 1;
+      const plan = planFocusRefresh({
+        hasFetched: hasFetchedAssets.current,
+        ageMs: Date.now() - lastFetchedAt.current,
+        assetChanged: changeVersion !== seenChangeVersion.current,
+        loadedPages,
+      });
+      if (plan === "skip") return;
       if (!hasFetchedAssets.current) {
         setIsLoading(true);
       }
-      nextPage.current = 1;
+      if (plan === "reset") nextPage.current = 1;
       const isFirstLoad = !hasFetchedAssets.current;
-      fetchAssets(1, true).finally(() => {
-        setIsLoading(false);
-        lastFetchedAt.current = Date.now();
-        if (isFirstLoad) {
-          hasFetchedAssets.current = true;
-          setAssets((current) => {
-            announce(
-              current.length === 0
-                ? "No assets found"
-                : current.length + " assets loaded"
-            );
-            return current;
-          });
-        }
-      });
+      const signal = latestRequest.beginReset();
+      let applied = false;
+      const load =
+        plan === "reload-loaded"
+          ? reloadLoadedPages(loadedPages, signal)
+          : fetchAssets(1, true, signal);
+      load
+        .then((ok) => {
+          applied = ok;
+        })
+        .finally(() => {
+          latestRequest.endReset(signal);
+          // The signal identifies this request. An abandoned one must not stamp
+          // freshness or clear the spinner: the request that replaced it is still
+          // running and will do both when it answers.
+          if (signal.aborted) return;
+          setIsLoading(false);
+          // A failed load leaves the list unfresh, so the next focus retries.
+          if (applied) {
+            lastFetchedAt.current = Date.now();
+            seenChangeVersion.current = changeVersion;
+          }
+          if (isFirstLoad) {
+            hasFetchedAssets.current = true;
+            setAssets((current) => {
+              announce(
+                current.length === 0
+                  ? "No assets found"
+                  : current.length + " assets loaded"
+              );
+              return current;
+            });
+          }
+        });
       // why: depend on org id (not full object) to avoid re-runs on identity-only changes
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [currentOrg?.id, fetchAssets])
+    }, [currentOrg?.id, fetchAssets, reloadLoadedPages, latestRequest])
   );
 
   const onRefresh = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setIsRefreshing(true);
     nextPage.current = 1;
-    await fetchAssets(1, true);
+    const signal = latestRequest.beginReset();
+    await fetchAssets(1, true, signal);
+    latestRequest.endReset(signal);
+    // The operator pulled this spinner, so it stops either way.
     setIsRefreshing(false);
-    announce("Content refreshed");
+    // The shared skeleton belongs to whichever request is still current. A
+    // newer one is mid-flight and will clear it when it answers; clearing it
+    // here would show the empty state until then. Nothing supersedes the
+    // newest request, so it is always the one that gets here unaborted.
+    if (!signal.aborted) {
+      setIsLoading(false);
+      announce("Content refreshed");
+    }
   };
 
   const onEndReached = async () => {
     if (isLoadingMore || nextPage.current > totalPages) return;
+    // The rows on screen are about to be replaced, so there is nothing
+    // meaningful to add a page to. Claiming the slot here would also abandon
+    // that reset and leave both queries' rows on screen together.
+    if (latestRequest.isResetPending()) return;
     setIsLoadingMore(true);
-    await fetchAssets(nextPage.current, false);
+    const signal = latestRequest.begin();
+    await fetchAssets(nextPage.current, false, signal);
     setIsLoadingMore(false);
+    if (!signal.aborted) setIsLoading(false);
   };
 
   const renderAsset = useCallback(
@@ -269,6 +413,13 @@ function AssetsListContent() {
       const kitAccessibilityLabel = item.kit
         ? `, kit ${item.kit.name}${kitSuffix}`
         : "";
+      // The server resolves WHICH identifier this workspace shows; the SAM id
+      // is the fallback for servers that predate that.
+      const rowCode = item.displayCode?.value
+        ? item.displayCode
+        : item.sequentialId
+        ? { value: item.sequentialId, label: "SAM ID" }
+        : null;
 
       return (
         <TouchableOpacity
@@ -276,7 +427,7 @@ function AssetsListContent() {
           onPress={() => router.push(`/(tabs)/assets/${item.id}`)}
           activeOpacity={0.6}
           accessibilityLabel={`${item.title}, ${formatStatus(item.status)}${
-            item.sequentialId ? `, ${item.sequentialId}` : ""
+            rowCode ? `, ${rowCode.label} ${rowCode.value}` : ""
           }${quantityLabel ? `, quantity ${quantityLabel}` : ""}${
             item.category ? `, ${item.category.name}` : ""
           }${
@@ -301,13 +452,13 @@ function AssetsListContent() {
               {item.title}
             </Text>
             <View style={styles.assetMeta}>
-              {/* Search accepts a SAM ID, so a hit has to be able to show WHICH
-                  id it is — otherwise the row identifies itself by title only
-                  and the user has to open it to find out. Absent on older
-                  servers, where the row renders exactly as before. */}
-              {item.sequentialId ? (
+              {/* The identifier the workspace labels its assets with, so a row
+                  can be matched against a physical label without opening it.
+                  Falls back to the SAM ID on older servers that send no
+                  resolved code. */}
+              {rowCode ? (
                 <Text style={styles.assetSequentialId} numberOfLines={1}>
-                  {item.sequentialId}
+                  {rowCode.value}
                 </Text>
               ) : null}
               {item.category && (
@@ -412,6 +563,8 @@ function AssetsListContent() {
     );
   }
 
+  const errorView = listErrorView(error, assets.length);
+
   return (
     <View style={styles.container}>
       {/* Assets | Kits switcher */}
@@ -485,7 +638,10 @@ function AssetsListContent() {
       {/* Swipeable content area — swipe left/right to cycle filter pills */}
       <View style={styles.flexFill} {...swipePanHandlers}>
         <Animated.View style={[styles.flexFill, swipeAnimatedStyle]}>
-          {error ? (
+          {/* A failed refresh or load-more keeps rows already on screen and
+              shows the error as a banner above them; the error view is for a
+              list that has nothing to show. */}
+          {errorView === "screen" ? (
             <View style={styles.centered}>
               <Ionicons
                 name="alert-circle-outline"
@@ -562,6 +718,30 @@ function AssetsListContent() {
               }
               onEndReached={onEndReached}
               onEndReachedThreshold={0.5}
+              ListHeaderComponent={
+                errorView === "banner" ? (
+                  <View
+                    style={styles.errorBanner}
+                    accessibilityRole="alert"
+                    accessibilityLiveRegion="polite"
+                  >
+                    <Ionicons
+                      name="alert-circle-outline"
+                      size={18}
+                      color={colors.error}
+                    />
+                    <Text style={styles.errorBannerText}>{error}</Text>
+                    <TouchableOpacity
+                      onPress={onRefresh}
+                      hitSlop={hitSlop.md}
+                      accessibilityLabel="Retry loading assets"
+                      accessibilityRole="button"
+                    >
+                      <Text style={styles.errorBannerRetry}>Retry</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : null
+              }
               ListFooterComponent={
                 isLoadingMore ? (
                   <ActivityIndicator
@@ -795,6 +975,28 @@ const useStyles = createStyles((colors, shadows) => ({
   },
   footer: {
     paddingVertical: spacing.lg,
+  },
+  errorBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colors.error,
+    backgroundColor: colors.white,
+  },
+  errorBannerText: {
+    flex: 1,
+    fontSize: fontSize.sm,
+    color: colors.foreground,
+  },
+  errorBannerRetry: {
+    fontSize: fontSize.sm,
+    fontWeight: "600",
+    color: colors.primary,
   },
 
   // FAB

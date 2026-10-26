@@ -35,7 +35,7 @@ export function SummaryPill({
     <span
       className={`rounded-full px-3 py-1 font-medium ${colorClasses[color]}`}
     >
-      {count} {label}
+      {count.toLocaleString("en-US")} {label}
     </span>
   );
 }

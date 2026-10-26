@@ -9,11 +9,46 @@ import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { payload, parseData, safeRedirect } from "~/utils/http.server";
+import { PermissionAction } from "~/utils/permissions/permission.data";
 import { deleteAssetReminder, editAssetReminder } from "./service.server";
 
+/** The reminder intents the reminder tables submit. */
+const ReminderIntentSchema = z.enum(["edit-reminder", "delete-reminder"]);
+
+/** A reminder-table intent. */
+export type ReminderIntent = z.infer<typeof ReminderIntentSchema>;
+
+/** The `assetReminders` permission each reminder intent needs. */
+export const REMINDER_INTENT_PERMISSION: Record<
+  ReminderIntent,
+  PermissionAction
+> = {
+  "edit-reminder": PermissionAction.update,
+  "delete-reminder": PermissionAction.delete,
+};
+
 /**
- * This function handles the editing and deleting of reminders..
- * It is currently used in the assets/$assetId/reminders & reminders index.
+ * Reads the intent of a reminder-table submission without consuming the body,
+ * so the route can gate on it before `resolveRemindersActions` parses the form.
+ *
+ * @param request - The action request
+ * @returns The intent
+ * @throws {ShelfError} 400 for a missing or unknown intent
+ */
+export async function readReminderIntent(
+  request: Request
+): Promise<ReminderIntent> {
+  const { intent } = parseData(
+    await request.clone().formData(),
+    z.object({ intent: ReminderIntentSchema })
+  );
+  return intent;
+}
+
+/**
+ * Handles the editing and deleting of reminders from the reminder tables on
+ * the asset reminders page and the reminders index. The route gates the
+ * intent with `REMINDER_INTENT_PERMISSION` before calling this.
  */
 export async function resolveRemindersActions({
   request,
@@ -28,7 +63,7 @@ export async function resolveRemindersActions({
 
   const { intent } = parseData(
     formData,
-    z.object({ intent: z.enum(["edit-reminder", "delete-reminder"]) })
+    z.object({ intent: ReminderIntentSchema })
   );
 
   switch (intent) {

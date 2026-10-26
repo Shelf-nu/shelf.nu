@@ -57,8 +57,10 @@ describe("buildReportAssetFilter", () => {
       locationIds: [WITHOUT_LOCATION_ID],
     });
     expect(alone.where).toEqual({ assetLocations: { none: {} } });
-    expect(sqlText(alone.sql)).toContain(
-      'NOT IN (SELECT "assetId" FROM "AssetLocation")'
+    // Correlated on the asset, so it reads only that asset's placement rows
+    // through the `assetId` index, never every workspace's placements.
+    expect(sqlText(alone.sql)).toBe(
+      'NOT EXISTS (SELECT 1 FROM "AssetLocation" al WHERE al."assetId" = "Asset".id)'
     );
 
     const mixed = buildReportAssetFilter({
@@ -70,7 +72,19 @@ describe("buildReportAssetFilter", () => {
         { assetLocations: { none: {} } },
       ],
     });
-    expect(sqlText(mixed.sql)).toContain(" OR id NOT IN");
+    const mixedText = sqlText(mixed.sql);
+    expect(mixedText).toContain(
+      'EXISTS (SELECT 1 FROM "AssetLocation" al WHERE al."assetId" = "Asset".id AND al."locationId" IN'
+    );
+    expect(mixedText).toContain(" OR NOT EXISTS (");
+    expect(mixedText).not.toContain("NOT IN");
+  });
+
+  it("reads a concrete location as a placement row of that asset", () => {
+    const placed = buildReportAssetFilter({ locationIds: ["l1"] });
+    expect(sqlText(placed.sql)).toBe(
+      'EXISTS (SELECT 1 FROM "AssetLocation" al WHERE al."assetId" = "Asset".id AND al."locationId" IN (?))'
+    );
   });
 
   it("compares TEXT and OPTION custom fields on the stored raw text", () => {

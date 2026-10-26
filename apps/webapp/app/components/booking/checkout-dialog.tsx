@@ -1,7 +1,13 @@
+import { useRef, useState, type MouseEvent } from "react";
 import type { Booking } from "@prisma/client";
 import { Zap } from "lucide-react";
+import { useDisabled } from "~/hooks/use-disabled";
+import type { CheckoutSourceQuestion } from "~/modules/booking/checkout-source-location";
 import { isBookingEarlyCheckout } from "~/modules/booking/helpers";
+import type { UnassignedModelUnits } from "~/utils/booking-model-requests";
+import { summarizeUnassignedUnits } from "~/utils/booking-model-requests";
 import { tw } from "~/utils/tw";
+import { CheckoutSourceSelect } from "./checkout-source-select";
 import type { ButtonProps } from "../shared/button";
 import { Button } from "../shared/button";
 import { DateS } from "../shared/date";
@@ -64,7 +70,82 @@ type CheckoutDialogProps = {
   suppressEarlyCheckoutPrompt?: boolean;
   /** Render the trigger button full-width to match a sibling full-width button. */
   fullWidth?: boolean;
+  /**
+   * Reserved model units no asset has been assigned to yet. When any are
+   * listed, the trigger opens a confirmation naming them before the check-out
+   * submits: they stay open on the booking, and the operator should know that
+   * before the booking goes out without them.
+   */
+  unassignedUnits?: UnassignedModelUnits[];
+  /**
+   * Pools on the booking that sit at two or more locations and are about to
+   * go out for the first time. When any are listed, the trigger opens a
+   * confirmation with one "From location" select per pool; otherwise the
+   * check-out needs no extra question.
+   */
+  sourceQuestions?: CheckoutSourceQuestion[];
+  /**
+   * Whether a plain check-out (not early, nothing unassigned, no source
+   * question) asks once before it submits. Defaults to `true`, so a quick
+   * check-out from the booking header opens a "Check out booking" dialog.
+   * Pass `false` from a drawer or dialog that is itself the confirmation
+   * step, so the operator is not asked twice; the trigger then submits
+   * directly. Early check-outs, unassigned units and source questions open
+   * the dialog either way.
+   */
+  confirm?: boolean;
 };
+
+/**
+ * Stable empty lists for the defaults below: a fresh `[]` per render would be
+ * a new prop value every time for a caller that passes nothing.
+ */
+const NO_UNASSIGNED_UNITS: UnassignedModelUnits[] = [];
+const NO_SOURCE_QUESTIONS: CheckoutSourceQuestion[] = [];
+
+/**
+ * The confirm dialog's title: the most pressing reason it opened.
+ *
+ * @returns One short line
+ */
+function checkoutDialogTitle({
+  hasUnassigned,
+  isEarlyCheckout,
+  asksSource,
+}: {
+  hasUnassigned: boolean;
+  isEarlyCheckout: boolean;
+  asksSource: boolean;
+}): string {
+  if (hasUnassigned) return "Some reserved units aren't assigned";
+  if (isEarlyCheckout) return "Early Check-Out Warning";
+  if (asksSource) return "Where do the units come from?";
+  return "Check out booking";
+}
+
+/**
+ * What a plain check-out does, for the confirmation's body. Only the
+ * whole-booking `checkOut` starts the booking and takes every asset; any other
+ * intent gets wording that claims neither.
+ *
+ * @param intent - The form `intent` the confirm button submits
+ * @returns The sentence before and after the booking name
+ */
+function plainCheckoutSentence(intent: string): {
+  lead: string;
+  tail: string;
+} {
+  if (intent === "checkOut") {
+    return {
+      lead: "This checks out every asset of",
+      tail: " and starts the booking.",
+    };
+  }
+  if (intent === "checkOutRemaining") {
+    return { lead: "This checks out the remaining assets of", tail: "." };
+  }
+  return { lead: "This checks out the selected assets of", tail: "." };
+}
 
 export default function CheckoutDialog({
   disabled,
@@ -77,9 +158,19 @@ export default function CheckoutDialog({
   variant = "default",
   suppressEarlyCheckoutPrompt = false,
   fullWidth = false,
+  unassignedUnits = NO_UNASSIGNED_UNITS,
+  sourceQuestions = NO_SOURCE_QUESTIONS,
+  confirm = true,
 }: CheckoutDialogProps) {
+  const isNavigating = useDisabled();
+  const isDisabled = disabled || isNavigating;
   const isEarlyCheckout =
     !suppressEarlyCheckoutPrompt && isBookingEarlyCheckout(booking.from);
+  const unassignedSummary = summarizeUnassignedUnits(unassignedUnits);
+  const unassignedUnitCount = unassignedUnits.reduce(
+    (sum, unit) => sum + Math.max(0, unit.count),
+    0
+  );
 
   /** Shared trigger styling so the dropdown row matches the check-in dropdown */
   const isDropdown = variant === "dropdown";
@@ -104,10 +195,48 @@ export default function CheckoutDialog({
     label
   );
 
-  if (!isEarlyCheckout) {
+  const asksSource = sourceQuestions.length > 0;
+  /** No early, unassigned or source reason applies: only the plain confirmation. */
+  const isPlainCheckout = !isEarlyCheckout && !unassignedSummary && !asksSource;
+  const plainSentence = plainCheckoutSentence(intent);
+  /**
+   * The dialog is controlled so a submit closes it: a refused check-out then
+   * shows its error on the page instead of behind the still-open dialog.
+   *
+   * Close on the next task, never synchronously in `onClick`. The submitter,
+   * the hidden `intent` and the source selects all live in this dialog, and
+   * React commits a click's state update before the browser runs the
+   * button's submission. Unmounting them first drops them from the form, so
+   * the check-out sends nothing or sends it without its fields.
+   *
+   * When the form fails constraint validation (a cleared booking name, an
+   * out-of-range quantity) the browser does not submit. The modal would hide
+   * its message, so the dialog still closes and the form reports the field
+   * that blocked the check-out from `onCloseAutoFocus`: by then the dialog
+   * is gone, and cancelling Radix's focus restore keeps focus on that field
+   * rather than pulling it back to the trigger.
+   */
+  const [open, setOpen] = useState(false);
+  /** The form a blocked submit belongs to, reported once the dialog closes. */
+  const blockedFormRef = useRef<HTMLFormElement | null>(null);
+  const closeOnSubmit = (event: MouseEvent<HTMLButtonElement>) => {
+    /** `button.form` resolves `form={formId}` even from inside the portal. */
+    const form = event.currentTarget.form;
+    blockedFormRef.current = form && !form.checkValidity() ? form : null;
+    setTimeout(() => setOpen(false), 0);
+  };
+  const reportBlockedForm = (event: Event) => {
+    const form = blockedFormRef.current;
+    if (!form) return;
+    blockedFormRef.current = null;
+    event.preventDefault();
+    form.reportValidity();
+  };
+
+  if (isPlainCheckout && !confirm) {
     return (
       <Button
-        disabled={disabled}
+        disabled={isDisabled}
         className={resolvedTriggerClassName}
         size={isDropdown ? undefined : "sm"}
         type="submit"
@@ -123,10 +252,10 @@ export default function CheckoutDialog({
   }
 
   return (
-    <AlertDialog>
+    <AlertDialog open={open} onOpenChange={setOpen}>
       <AlertDialogTrigger asChild>
         <Button
-          disabled={disabled}
+          disabled={isDisabled}
           className={resolvedTriggerClassName}
           size={isDropdown ? undefined : "sm"}
           type="button"
@@ -137,52 +266,126 @@ export default function CheckoutDialog({
         </Button>
       </AlertDialogTrigger>
 
-      <AlertDialogContent portalProps={{ container: portalContainer }}>
+      <AlertDialogContent
+        portalProps={{ container: portalContainer }}
+        onCloseAutoFocus={reportBlockedForm}
+      >
         <AlertDialogHeader>
-          <AlertDialogTitle>Early Check-Out Warning</AlertDialogTitle>
-          <AlertDialogDescription>
-            You are checking out the booking more than 15 minutes before the
-            start date. If you proceed, the start date will be adjusted to now:{" "}
-            <span className="font-bold text-gray-700">
-              <DateS date={new Date()} includeTime />
-            </span>
-            .
-            <br />
-            <br />
-            Do you want to adjust the start date or keep the original date?
+          <AlertDialogTitle>
+            {checkoutDialogTitle({
+              hasUnassigned: Boolean(unassignedSummary),
+              isEarlyCheckout,
+              asksSource,
+            })}
+          </AlertDialogTitle>
+          <AlertDialogDescription asChild>
+            <div className="flex flex-col gap-3">
+              {isPlainCheckout ? (
+                <p>
+                  {plainSentence.lead}{" "}
+                  <span className="font-bold text-gray-700">
+                    {booking.name}
+                  </span>
+                  {plainSentence.tail}
+                </p>
+              ) : null}
+              {unassignedSummary ? (
+                <p>
+                  <span className="font-bold text-gray-700">
+                    {unassignedSummary}
+                  </span>{" "}
+                  {unassignedUnitCount === 1
+                    ? "is not assigned yet. It stays on the booking so you can scan it later or release it."
+                    : "are not assigned yet. They stay on the booking so you can scan them later or release them."}
+                </p>
+              ) : null}
+              {isEarlyCheckout ? (
+                <p>
+                  You are checking out the booking more than 15 minutes before
+                  the start date. If you proceed, the start date will be
+                  adjusted to now:{" "}
+                  <span className="font-bold text-gray-700">
+                    <DateS date={new Date()} includeTime />
+                  </span>
+                  . Do you want to adjust the start date or keep the original
+                  date?
+                </p>
+              ) : null}
+              {asksSource ? (
+                <p>
+                  {sourceQuestions.length === 1
+                    ? "This item is kept at more than one location."
+                    : "These items are kept at more than one location."}{" "}
+                  Pick where the units leave from. Units used up on this booking
+                  come off that location at check-in.
+                </p>
+              ) : null}
+            </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
 
+        {asksSource ? (
+          <div className="flex max-h-72 flex-col gap-3 overflow-y-auto">
+            {sourceQuestions.map((question) => (
+              <CheckoutSourceSelect
+                key={question.sliceId}
+                question={question}
+                fieldKey={question.sliceId}
+                formId={formId}
+                disabled={Boolean(isDisabled)}
+              />
+            ))}
+          </div>
+        ) : null}
+
         <AlertDialogFooter>
           <AlertDialogCancel asChild>
-            <Button type="button" disabled={disabled} variant="secondary">
+            <Button type="button" disabled={isDisabled} variant="secondary">
               Cancel
             </Button>
           </AlertDialogCancel>
 
-          <input type="hidden" name="intent" value={intent} form={formId} />
-          <Button
-            disabled={disabled}
-            className="flex-1"
-            type="submit"
-            variant="secondary"
-            name="checkoutIntentChoice"
-            value={CheckoutIntentEnum["without-adjusted-date"]}
-            form={formId}
-          >
-            Don't Adjust Date
-          </Button>
+          {isEarlyCheckout ? (
+            <>
+              <input type="hidden" name="intent" value={intent} form={formId} />
+              <Button
+                disabled={isDisabled}
+                className="flex-1"
+                type="submit"
+                variant="secondary"
+                name="checkoutIntentChoice"
+                value={CheckoutIntentEnum["without-adjusted-date"]}
+                form={formId}
+                onClick={closeOnSubmit}
+              >
+                Don't Adjust Date
+              </Button>
 
-          <Button
-            disabled={disabled}
-            className="flex-1"
-            type="submit"
-            name="checkoutIntentChoice"
-            value={CheckoutIntentEnum["with-adjusted-date"]}
-            form={formId}
-          >
-            Adjust Date
-          </Button>
+              <Button
+                disabled={isDisabled}
+                className="flex-1"
+                type="submit"
+                name="checkoutIntentChoice"
+                value={CheckoutIntentEnum["with-adjusted-date"]}
+                form={formId}
+                onClick={closeOnSubmit}
+              >
+                Adjust Date
+              </Button>
+            </>
+          ) : (
+            <Button
+              disabled={isDisabled}
+              className="flex-1"
+              type="submit"
+              name="intent"
+              value={intent}
+              form={formId}
+              onClick={closeOnSubmit}
+            >
+              {unassignedSummary ? "Check out anyway" : "Check out"}
+            </Button>
+          )}
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

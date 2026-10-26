@@ -5,7 +5,11 @@
  * enforcing organization membership. A SAM-shaped value the workspace has no
  * asset for falls back to its barcode table, so labels printed with a
  * SAM-shaped barcode value still resolve. It deliberately does NOT record scan
- * provenance: recording is the *caller's* (the endpoint's) decision.
+ * provenance: recording is the *caller's* (the endpoint's) decision. It
+ * returns what a recording caller should record (`scanToRecord`).
+ *
+ * A resolved asset carries only the custody the caller may see, by the same
+ * rules as the asset detail (see {@link shapeScannedAssetForViewer}).
  *
  * This is the seam that keeps the recording vs non-recording behaviour an
  * endpoint-level choice instead of a client-supplied flag, mirroring the web,
@@ -21,17 +25,23 @@
  * @see {@link file://./../../routes/api+/mobile+/get-scanned-item.$qrId.ts}
  */
 
+import { ScanCodeType } from "@prisma/client";
 import type { LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
 import {
+  getMobileUserContext,
   requireOrganizationAccess,
+  resignAndShapeMobileAsset,
   MOBILE_ASSET_SELECT,
   MOBILE_KIT_SELECT,
-  shapeMobileAssetResponse,
   shapeMobileKitResponse,
+  type MobileAssetForViewer,
+  type MobileAssetSelectRow,
 } from "~/modules/api/mobile-auth.server";
+import { scopeMobileAssetCustodyToViewer } from "~/modules/api/mobile-custody-visibility.server";
 import { getBarcodeByValue } from "~/modules/barcode/service.server";
+import type { RecordScanArgs } from "~/modules/scan/service.server";
 import { getParams } from "~/utils/http.server";
 import { parseSequentialId } from "~/utils/sequential-id";
 import { canUseBarcodes } from "~/utils/subscription.server";
@@ -43,7 +53,7 @@ type ResolvedCode = {
   assetId: string | null;
   kitId: string | null;
   organizationId: string;
-  asset: unknown;
+  asset: MobileAssetForViewer | null;
   kit: unknown;
 };
 
@@ -64,11 +74,19 @@ type ResolvedCode = {
 type ResolveMobileCodeFailureReason = "unclaimed";
 
 /**
+ * What a recording caller writes for a successful resolve: the kind of code
+ * that matched and what it resolved to, in the workspace it resolved in.
+ */
+export type ResolvedScanToRecord = Pick<
+  RecordScanArgs,
+  "codeType" | "qrId" | "barcodeId" | "assetId" | "kitId"
+> & { organizationId: string };
+
+/**
  * Discriminated result of {@link resolveMobileScannedCode}.
  *
- * On success, `recordableQrId` is the QR id a recording caller may attribute a
- * scan to, or `null` for a SAM resolve (no backing QR record, so nothing to
- * record, matching the web).
+ * On success, `scanToRecord` describes the scan a recording caller writes:
+ * a QR, a SAM ID, or a SAM-shaped barcode, whichever matched.
  *
  * On failure, `reason`/`qrId` are only present for actionable cases (see
  * {@link ResolveMobileCodeFailureReason}); plain not-found / wrong-org
@@ -84,7 +102,7 @@ export type ResolveMobileCodeResult =
       /** The scanned QR id, echoed back when `reason` is set. */
       qrId?: string;
     }
-  | { ok: true; qr: ResolvedCode; recordableQrId: string | null };
+  | { ok: true; qr: ResolvedCode; scanToRecord: ResolvedScanToRecord };
 
 /**
  * A barcode row carrying just what a mobile resolve needs.
@@ -95,12 +113,52 @@ export type ResolveMobileCodeResult =
  * returns `any`, so annotating the call site is what keeps the payload typed.
  */
 type MobileBarcodeMatch = {
+  id: string;
   value: string;
   assetId: string | null;
   kitId: string | null;
-  asset: Parameters<typeof shapeMobileAssetResponse>[0] | null;
+  asset: MobileAssetSelectRow | null;
   kit: Parameters<typeof shapeMobileKitResponse>[0];
 };
+
+/**
+ * Shapes a scanned asset for the caller: re-signs a lapsed photo, flattens the
+ * row, then scopes its custody to what the caller may see.
+ *
+ * The visibility rules are the asset detail's (`scopeMobileAssetCustodyToViewer`):
+ * a caller without custody visibility gets only their own `custodyList`
+ * entries, a `custodyListOthersCount` for the holders left out, and a null
+ * single `custody` unless it is theirs. Visibility is read in the workspace
+ * that OWNS the asset, because the caller's role and that workspace's
+ * settings are what apply there.
+ *
+ * @param args.asset - A row selected with `MOBILE_ASSET_SELECT`.
+ * @param args.organizationId - The workspace that owns the asset. May differ
+ *   from the caller's current one: a QR id is global, and the barcode route
+ *   searches sibling workspaces. The caller must be a member of it.
+ * @param args.viewerUserId - The authenticated caller's user id.
+ * @returns The asset as the companion receives it.
+ * @see {@link file://./../../routes/api+/mobile+/barcode.$value.ts}
+ */
+export async function shapeScannedAssetForViewer({
+  asset,
+  organizationId,
+  viewerUserId,
+}: {
+  asset: MobileAssetSelectRow;
+  organizationId: string;
+  viewerUserId: string;
+}): Promise<MobileAssetForViewer> {
+  const [shaped, { access }] = await Promise.all([
+    resignAndShapeMobileAsset(asset, organizationId),
+    getMobileUserContext(viewerUserId, organizationId),
+  ]);
+
+  return scopeMobileAssetCustodyToViewer(shaped, {
+    viewerUserId,
+    canSeeAllCustody: access.custody.seeAll,
+  });
+}
 
 /**
  * Resolve a SAM-shaped scan against the workspace's barcode table.
@@ -122,6 +180,7 @@ type MobileBarcodeMatch = {
  *
  * @param args.value - The raw scanned string, exactly as the route received it.
  * @param args.organizationId - The caller's current workspace.
+ * @param args.viewerUserId - The authenticated caller's user id.
  * @returns An ok result when the value is a barcode LINKED to an asset or kit,
  *   otherwise `null` so the caller can fall through to its own not-found. An
  *   unlinked barcode returns `null` too: the response must not reveal that a
@@ -131,9 +190,11 @@ type MobileBarcodeMatch = {
 async function resolveSamShapedBarcode({
   value,
   organizationId,
+  viewerUserId,
 }: {
   value: string;
   organizationId: string;
+  viewerUserId: string;
 }): Promise<ResolveMobileCodeResult | null> {
   const organization = await db.organization.findUnique({
     where: { id: organizationId },
@@ -159,9 +220,13 @@ async function resolveSamShapedBarcode({
 
   return {
     ok: true,
-    // A barcode has no QR record, so there is nothing to record a scan
-    // against — same as a SAM resolve.
-    recordableQrId: null,
+    scanToRecord: {
+      codeType: ScanCodeType.BARCODE,
+      barcodeId: barcode.id,
+      assetId: barcode.assetId,
+      kitId: barcode.kitId,
+      organizationId,
+    },
     qr: {
       // The stored barcode value, which may differ in case from what was
       // scanned; the companion echoes this id back on follow-up calls.
@@ -171,7 +236,13 @@ async function resolveSamShapedBarcode({
       organizationId,
       // Flatten the pivot shape (assetKits/assetLocations/custody) into the
       // legacy flat shape the companion expects, exactly as the QR path does.
-      asset: barcode.asset ? shapeMobileAssetResponse(barcode.asset) : null,
+      asset: barcode.asset
+        ? await shapeScannedAssetForViewer({
+            asset: barcode.asset,
+            organizationId,
+            viewerUserId,
+          })
+        : null,
       kit: shapeMobileKitResponse(barcode.kit),
     },
   };
@@ -206,6 +277,7 @@ export async function resolveMobileScannedCode({
   if (sequentialId) {
     const organizationId = await requireOrganizationAccess(request, user.id);
     const asset = await db.asset.findFirst({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: a scanned SAM id must still resolve to an archived asset, which the app shows with a badge
       where: { organizationId, sequentialId },
       select: MOBILE_ASSET_SELECT,
     });
@@ -221,6 +293,7 @@ export async function resolveMobileScannedCode({
         // are matched original-case first, then uppercased.
         value: qrId,
         organizationId,
+        viewerUserId: user.id,
       });
 
       if (fromBarcode) {
@@ -237,8 +310,11 @@ export async function resolveMobileScannedCode({
 
     return {
       ok: true,
-      // No backing QR record, so nothing to record a scan against.
-      recordableQrId: null,
+      scanToRecord: {
+        codeType: ScanCodeType.SAM_ID,
+        assetId: asset.id,
+        organizationId,
+      },
       qr: {
         id: sequentialId,
         assetId: asset.id,
@@ -246,7 +322,11 @@ export async function resolveMobileScannedCode({
         organizationId,
         // Flatten the new pivot shape (assetKits/assetLocations/custody) into
         // the legacy flat shape the companion expects (quantities restructure).
-        asset: shapeMobileAssetResponse(asset),
+        asset: await shapeScannedAssetForViewer({
+          asset,
+          organizationId,
+          viewerUserId: user.id,
+        }),
         kit: null,
       },
     };
@@ -305,6 +385,7 @@ export async function resolveMobileScannedCode({
   // Use ternaries so Prisma's result type flows to the shape helpers.
   const asset = qr.assetId
     ? await db.asset.findFirst({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: a scanned QR must still resolve to an archived asset, which the app shows with a badge
         where: { id: qr.assetId, organizationId: qr.organizationId },
         select: MOBILE_ASSET_SELECT,
       })
@@ -322,7 +403,13 @@ export async function resolveMobileScannedCode({
 
   return {
     ok: true,
-    recordableQrId: qr.id,
+    scanToRecord: {
+      codeType: ScanCodeType.QR,
+      qrId: qr.id,
+      assetId: qr.assetId,
+      kitId: qr.kitId,
+      organizationId: qr.organizationId,
+    },
     qr: {
       id: qr.id,
       assetId: qr.assetId,
@@ -330,7 +417,14 @@ export async function resolveMobileScannedCode({
       organizationId: qr.organizationId,
       // Flatten the new pivot shape (assetKits/assetLocations/custody) into the
       // legacy flat shape the companion expects (quantities restructure).
-      asset: asset ? shapeMobileAssetResponse(asset) : null,
+      // Re-signed, and custody scoped, in the workspace that owns the code.
+      asset: asset
+        ? await shapeScannedAssetForViewer({
+            asset,
+            organizationId: qr.organizationId,
+            viewerUserId: user.id,
+          })
+        : null,
       kit: shapeMobileKitResponse(kit),
     },
   };
