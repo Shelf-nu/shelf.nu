@@ -308,13 +308,10 @@ export async function getLocation(
     } satisfies Prisma.LocationInclude["parent"];
 
     /**
-     * Assets at a location are queried via the `AssetLocation` pivot —
-     * there is no `Location.assets` relation. We run a separate
-     * `db.asset.findMany` filtered by
-     * `assetLocations: { some: { locationId: id } }` and synthesize the
-     * `assets` array onto the wrapper return below. Consumers that read
-     * `location.assets` from the old shape must read `assets` from the
-     * wrapper return value (e.g.
+     * Placement lives on the `AssetLocation` pivot; `Location` has no
+     * `assets` relation. The location's assets come from a separate
+     * `db.asset.findMany` scoped by `assetLocations` and are returned as
+     * `assets` beside `location` (see
      * `app/routes/_layout+/locations.$locationId.assets.tsx`).
      */
     const locationInclude: Prisma.LocationInclude = include
@@ -350,11 +347,8 @@ export async function getLocation(
       }),
 
       /**
-       * Paginated assets placed at this location. Returned alongside
-       * the location so consumers can keep using the existing
-       * `{ location, assets, totalAssetsWithinLocation }` contract
-       * without depending on a `Location.assets` relation (which no
-       * longer exists — placement lives on the `AssetLocation` pivot).
+       * One page of the assets placed at this location, returned as
+       * `assets` in `{ location, assets, totalAssetsWithinLocation }`.
        */
       include
         ? Promise.resolve([] as Awaited<ReturnType<typeof db.asset.findMany>>)
