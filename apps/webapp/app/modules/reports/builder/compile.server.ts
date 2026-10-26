@@ -388,7 +388,8 @@ export function compileBuilderQueries(args: {
 async function resolveGroupNames(
   groupBy: BuilderGroupBy,
   keys: string[],
-  organizationId: string
+  organizationId: string,
+  locale: string
 ): Promise<Map<string, string>> {
   const names = new Map<string, string>();
   if (keys.length === 0) return names;
@@ -410,7 +411,7 @@ async function resolveGroupNames(
       return names;
     case "month":
       keys.forEach((k) => {
-        const parsed = DateTime.fromFormat(k, "yyyy-MM");
+        const parsed = DateTime.fromFormat(k, "yyyy-MM").setLocale(locale);
         names.set(k, parsed.isValid ? parsed.toFormat("LLL yyyy") : k);
       });
       return names;
@@ -525,16 +526,27 @@ export async function runBuilderReport(
     args;
   const startTime = performance.now();
 
-  // A custom-field grouping without a verified field falls back to the
-  // dataset's first grouping instead of grouping on nothing.
-  const spec: BuilderSpec =
-    args.spec.groupBy === "customField" && !args.customField
-      ? {
-          ...args.spec,
-          groupBy: DATASET_GROUP_BYS[args.spec.dataset][0],
-          customFieldId: null,
-        }
-      : { ...args.spec, customFieldId: args.customField?.id ?? null };
+  // Two groupings cannot be answered as asked, and both fall back to the data
+  // set's first one rather than reaching the SQL:
+  //
+  // - one the data set does not offer. `BuilderSpec` allows every grouping
+  //   with every data set, and this compiler is exported, so the URL parser is
+  //   not the only way in. Grouping assets by month would read a booking alias
+  //   the asset query never defines, and Postgres would reject the statement.
+  // - a custom field that could not be verified, which would group on nothing.
+  //
+  // The returned spec carries the grouping that actually ran, so the bar and
+  // the results agree with the numbers.
+  const allowedGroupBys = DATASET_GROUP_BYS[args.spec.dataset];
+  const groupByAsked = allowedGroupBys.includes(args.spec.groupBy)
+    ? args.spec.groupBy
+    : allowedGroupBys[0];
+  const fallsBack = groupByAsked === "customField" && !args.customField;
+  const spec: BuilderSpec = {
+    ...args.spec,
+    groupBy: fallsBack ? allowedGroupBys[0] : groupByAsked,
+    customFieldId: fallsBack ? null : args.customField?.id ?? null,
+  };
 
   try {
     const { grouped, totals } = compileBuilderQueries({
@@ -557,7 +569,12 @@ export async function runBuilderReport(
       : groupedRows;
 
     const keys = kept.map((r) => r.key).filter((k): k is string => k !== null);
-    const names = await resolveGroupNames(spec.groupBy, keys, organizationId);
+    const names = await resolveGroupNames(
+      spec.groupBy,
+      keys,
+      organizationId,
+      locale
+    );
 
     const measures = DATASET_MEASURES[spec.dataset];
     const total = Number(totalsRow[spec.measure] ?? 0);
@@ -645,7 +662,12 @@ export async function runBuilderReport(
                   date: r.groupName,
                   value: Math.round(r.value * 100) / 100,
                 })),
-                ...(rows.length > BUILDER_CHART_GROUPS && !isAverage
+                ...(rows.length > BUILDER_CHART_GROUPS &&
+                !isAverage &&
+                // Beyond the row cap the result holds only the largest groups,
+                // so the rest cannot be totalled: the bar would report less
+                // than the groups it stands for.
+                !truncated
                   ? [
                       {
                         date: "Other",

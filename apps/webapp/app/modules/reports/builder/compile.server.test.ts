@@ -246,6 +246,41 @@ describe("compileBuilderQueries", () => {
 });
 
 describe("runBuilderReport", () => {
+  it("refuses a grouping the data set cannot answer", async () => {
+    // `BuilderSpec` allows every grouping with every data set and this
+    // compiler is exported, so a caller can ask assets to group by month.
+    // That grouping reads a booking alias the asset query never defines, and
+    // Postgres would reject the statement.
+    vi.mocked(db.$queryRaw)
+      .mockResolvedValueOnce([
+        { key: "cat-1", groupCount: 1, assetCount: 2, units: 2, totalValue: 0 },
+      ] satisfies GroupedRow[])
+      .mockResolvedValueOnce([
+        { assetCount: 2, units: 2, totalValue: 0 },
+      ] satisfies TotalsRow[]);
+
+    const result = await runBuilderReport({
+      organizationId: "org-1",
+      spec: {
+        dataset: "assets",
+        groupBy: "month",
+        customFieldId: null,
+        measure: "assetCount",
+      },
+      timeframe: TIMEFRAME,
+      timeZone: "Europe/Amsterdam",
+      assetFilter: EMPTY_FILTER,
+      currency: "USD",
+      locale: "en-US",
+      customField: null,
+    });
+
+    // The spec it reports is the one that ran.
+    expect(result.spec.groupBy).toBe("category");
+    const sql = vi.mocked(db.$queryRaw).mock.calls[0][0] as { sql: string };
+    expect(sql.sql).not.toContain("booking_from");
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(db.category.findMany).mockResolvedValue(
