@@ -15200,6 +15200,57 @@ describe("checkinBooking — qty-tracked auto-default", () => {
     ).toEqual([["ba-pens-kit", 5]]);
   });
 
+  it("refuses an explicit disposition on an asset with no units out", async () => {
+    // why: the pens never left, so there is nothing to return, use up or
+    // lose. Writing the operator's numbers anyway would log units that never
+    // went out; dropping them would report a check-in that ignored them.
+    expect.assertions(2);
+
+    setupCheckinMocks(ConsumptionType.TWO_WAY);
+    const booking = makeBooking(ConsumptionType.TWO_WAY);
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...booking,
+      bookingAssets: [{ ...booking.bookingAssets[0], checkedOutAt: null }],
+    });
+
+    await expect(
+      checkinBooking({
+        ...baseParams,
+        checkins: [{ assetId: mockQtyAssetId, lost: 5 }],
+      })
+    ).rejects.toThrow("none of its units are out on this booking");
+    expect(consumptionLogService.createConsumptionLog).not.toHaveBeenCalled();
+  });
+
+  it("refuses an explicit disposition for more units than the slice sent out", async () => {
+    // why: 4 of the 10 pens left. The other 6 are still booked, but a return
+    // of 6 would log 2 pens that never went out.
+    expect.assertions(2);
+
+    setupCheckinMocks(ConsumptionType.TWO_WAY);
+    const booking = makeBooking(ConsumptionType.TWO_WAY);
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...booking,
+      bookingAssets: [{ ...booking.bookingAssets[0], checkedOutQuantity: 4 }],
+    });
+
+    await expect(
+      checkinBooking({
+        ...baseParams,
+        checkins: [
+          {
+            assetId: mockQtyAssetId,
+            bookingAssetId: "ba-pens-standalone",
+            returned: 6,
+          },
+        ],
+      })
+    ).rejects.toThrow("Only 4 are out on this booking");
+    expect(consumptionLogService.createConsumptionLog).not.toHaveBeenCalled();
+  });
+
   it("completes without a user when no quantity line has units to log", async () => {
     // why: a log needs an attributed user, but a line that never left logs
     // nothing, so there is nothing to attribute.

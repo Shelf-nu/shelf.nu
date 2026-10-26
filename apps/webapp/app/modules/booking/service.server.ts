@@ -6271,8 +6271,9 @@ export async function checkinBooking({
         /**
          * Assets with at least one slice that has units still out. An
          * asset-level explicit disposition names no slice, so it goes to the
-         * first slice of its asset that has units out, and only falls back to
-         * the first slice when none has.
+         * first slice of its asset that has units out. When none has, it falls
+         * back to the first slice, where the over-claim guard below refuses it
+         * rather than letting the operator's numbers drop silently.
          */
         const assetIdsWithUnitsStillOut = new Set(
           qtyTrackedSlices
@@ -6298,11 +6299,14 @@ export async function checkinBooking({
           if (cap <= 0) continue;
 
           const unitsStillOut = unitsStillOutOn(slice);
+          // The most any disposition may account for on this slice: what the
+          // pool can cover AND what actually left and is not back yet.
+          const claimable = Math.min(cap, unitsStillOut);
 
           // Resolve the effective disposition: explicit-by-slice wins;
           // else an asset-level explicit applied to ONE slice only (the
           // first with units still out); else the auto-default based on
-          // consumptionType (capped to `cap`).
+          // consumptionType (capped to `claimable`).
           let explicit = explicitByBookingAssetId.get(slice.id);
           if (!explicit) {
             const assetExplicit = explicitByAssetId.get(slice.assetId);
@@ -6319,11 +6323,11 @@ export async function checkinBooking({
 
           const disposition: CheckinDispositionInput = explicit ?? {
             assetId: slice.assetId,
-            // Auto-default never claims more than `cap`, the most the pool can
-            // cover, so it can't throw on legacy-NULL-reduced pools.
+            // Auto-default never claims more than `claimable`, so it never
+            // trips the over-claim guard below.
             ...(slice.consumptionType === "ONE_WAY"
-              ? { consumed: Math.min(cap, unitsStillOut) }
-              : { returned: Math.min(cap, unitsStillOut) }),
+              ? { consumed: claimable }
+              : { returned: claimable }),
           };
 
           const claimed = sumDisposition(disposition);
@@ -6331,6 +6335,23 @@ export async function checkinBooking({
             // An explicit disposition with no quantities ("leave pending"), or
             // a slice with nothing still out.
             continue;
+          }
+
+          // An explicit disposition that over-claims is a hard error: the
+          // caller asked for more than the pool covers, or for units that
+          // never left (returning them would log a return that never
+          // happened; using them up would destroy stock still on the shelf).
+          if (claimed > claimable) {
+            throw new ShelfError({
+              cause: null,
+              status: 400,
+              label,
+              message:
+                unitsStillOut === 0
+                  ? `Cannot check in "${slice.title}": none of its units are out on this booking.`
+                  : `Cannot check in ${claimed} units for "${slice.title}". Only ${claimable} are out on this booking.`,
+              shouldBeCaptured: false,
+            });
           }
 
           // ConsumptionLog rows require an attributed user, so a check-in
@@ -6343,19 +6364,6 @@ export async function checkinBooking({
               label,
               message:
                 "Internal error: userId is required to check in a booking with quantity-tracked assets.",
-            });
-          }
-
-          // Explicit dispositions that over-claim are a hard error (the
-          // caller asked for more than is available). The auto-default
-          // path is pre-clamped to `cap` above, so it never trips this.
-          if (claimed > cap) {
-            throw new ShelfError({
-              cause: null,
-              status: 400,
-              label,
-              message: `Cannot check in ${claimed} units for "${slice.title}". Only ${cap} remaining on this booking.`,
-              shouldBeCaptured: false,
             });
           }
 
