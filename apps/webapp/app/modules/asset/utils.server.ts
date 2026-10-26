@@ -1,4 +1,4 @@
-import { AssetStatus } from "@prisma/client";
+import { AssetStatus, BookingStatus } from "@prisma/client";
 import type {
   Asset,
   AssetType,
@@ -802,9 +802,8 @@ export function getAssetsWhereInput({
     ? (statusParam as AssetStatus)
     : null;
 
-  // First writer of `where.AND`; every later writer spreads it.
   if (searchParams.get("lowStockOnly") === "true") {
-    where.AND = [buildLowStockWhere()];
+    andAssetWhere(where, buildLowStockWhere());
   }
 
   if (search) {
@@ -886,16 +885,26 @@ export function getAssetsWhereInput({
             some: { custodian: { userId: { in: teamMemberIds } } },
           },
         },
+        // A booking custodian holds the asset only while the booking is out,
+        // the same rule the lists apply.
         {
           bookingAssets: {
             some: {
-              booking: { custodianTeamMemberId: { in: teamMemberIds } },
+              booking: {
+                custodianTeamMemberId: { in: teamMemberIds },
+                status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
+              },
             },
           },
         },
         {
           bookingAssets: {
-            some: { booking: { custodianUserId: { in: teamMemberIds } } },
+            some: {
+              booking: {
+                custodianUserId: { in: teamMemberIds },
+                status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
+              },
+            },
           },
         },
         ...(teamMemberIds.includes("without-custody")

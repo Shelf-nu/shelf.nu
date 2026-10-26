@@ -132,6 +132,7 @@ import {
   updateCookieWithPerPage,
   userPrefs,
 } from "~/utils/cookies.server";
+import { CUSTODY_FILTER_REFUSED } from "~/utils/custody-filter";
 import {
   buildCustomFieldValue,
   extractCustomFieldValuesFromPayload,
@@ -820,62 +821,55 @@ export async function getAssets(params: {
          * as long as total reserved doesn't exceed available quantity.
          * Availability is validated at booking time, not at filter time.
          */
-        where.AND = [
-          ...(Array.isArray(where.AND)
-            ? where.AND
-            : where.AND
-            ? [where.AND]
-            : []),
-          // Rule 1: Exclude INDIVIDUAL assets from RESERVED bookings
-          {
-            OR: [
-              { type: "QUANTITY_TRACKED" },
-              {
-                bookingAssets: {
-                  none: {
-                    booking: {
-                      ...(unhideAssetsBookigIds?.length && {
-                        id: { notIn: unhideAssetsBookigIds },
-                      }),
-                      status: BookingStatus.RESERVED,
-                      OR: [
-                        { from: { lte: bookingTo }, to: { gte: bookingFrom } },
-                        { from: { gte: bookingFrom }, to: { lte: bookingTo } },
-                      ],
-                    },
+        // Rule 1: Exclude INDIVIDUAL assets from RESERVED bookings
+        andAssetWhere(where, {
+          OR: [
+            { type: "QUANTITY_TRACKED" },
+            {
+              bookingAssets: {
+                none: {
+                  booking: {
+                    ...(unhideAssetsBookigIds?.length && {
+                      id: { notIn: unhideAssetsBookigIds },
+                    }),
+                    status: BookingStatus.RESERVED,
+                    OR: [
+                      { from: { lte: bookingTo }, to: { gte: bookingFrom } },
+                      { from: { gte: bookingFrom }, to: { lte: bookingTo } },
+                    ],
                   },
                 },
               },
-            ],
-          },
-          // Rule 2: For ONGOING/OVERDUE bookings, only exclude CHECKED_OUT INDIVIDUAL assets
-          {
-            OR: [
-              { type: "QUANTITY_TRACKED" },
-              // Either asset is AVAILABLE (checked in from partial check-in)
-              { status: AssetStatus.AVAILABLE },
-              // Or asset has no conflicting ONGOING/OVERDUE bookings
-              {
-                bookingAssets: {
-                  none: {
-                    booking: {
-                      ...(unhideAssetsBookigIds?.length && {
-                        id: { notIn: unhideAssetsBookigIds },
-                      }),
-                      status: {
-                        in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
-                      },
-                      OR: [
-                        { from: { lte: bookingTo }, to: { gte: bookingFrom } },
-                        { from: { gte: bookingFrom }, to: { lte: bookingTo } },
-                      ],
+            },
+          ],
+        });
+        // Rule 2: For ONGOING/OVERDUE bookings, only exclude CHECKED_OUT INDIVIDUAL assets
+        andAssetWhere(where, {
+          OR: [
+            { type: "QUANTITY_TRACKED" },
+            // Either asset is AVAILABLE (checked in from partial check-in)
+            { status: AssetStatus.AVAILABLE },
+            // Or asset has no conflicting ONGOING/OVERDUE bookings
+            {
+              bookingAssets: {
+                none: {
+                  booking: {
+                    ...(unhideAssetsBookigIds?.length && {
+                      id: { notIn: unhideAssetsBookigIds },
+                    }),
+                    status: {
+                      in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
                     },
+                    OR: [
+                      { from: { lte: bookingTo }, to: { gte: bookingFrom } },
+                      { from: { gte: bookingFrom }, to: { lte: bookingTo } },
+                    ],
                   },
                 },
               },
-            ],
-          },
-        ];
+            },
+          ],
+        });
       }
     }
     if (hideUnavailable === true && (!bookingFrom || !bookingTo)) {
@@ -980,6 +974,12 @@ export async function getAssets(params: {
             : []),
         ],
       });
+
+      // A refused custodian filter matches nothing, whatever else the group
+      // holds. Same guard as getAssetsWhereInput.
+      if (teamMemberIds.includes(CUSTODY_FILTER_REFUSED)) {
+        andAssetWhere(where, { id: CUSTODY_FILTER_REFUSED });
+      }
     }
 
     if (assetKitFilter === "NOT_IN_KIT") {
@@ -990,9 +990,7 @@ export async function getAssets(params: {
 
     /**
      * Runs the paginated asset query and its total count for a given `where`
-     * clause. Extracted so the ID-shaped-search fallback can re-run the same
-     * query shape with a different `where.OR` without duplicating the include
-     * and ordering config.
+     * clause, with the list's include and ordering config.
      *
      * @param assetWhere - The Prisma where clause to fetch and count against
      * @returns A tuple of `[assets, totalAssets]`

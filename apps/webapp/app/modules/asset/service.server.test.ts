@@ -38,6 +38,7 @@ import {
   createNote,
 } from "~/modules/note/service.server";
 import { getQr } from "~/modules/qr/service.server";
+import { CUSTODY_FILTER_REFUSED } from "~/utils/custody-filter";
 import { ShelfError } from "~/utils/error";
 import { createSignedUrl } from "~/utils/storage.server";
 import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
@@ -6281,6 +6282,68 @@ describe("getAssets search via UNION", () => {
     // short-circuited before the asset fetch (both findMany and count)
     expect(findManyMock).not.toHaveBeenCalled();
     expect(countMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("getAssets filter groups without a search", () => {
+  const findManyMock = vi.mocked(db.asset.findMany);
+  const countMock = vi.mocked(db.asset.count);
+
+  beforeEach(() => {
+    findManyMock.mockReset().mockResolvedValue([]);
+    countMock.mockReset().mockResolvedValue(0);
+  });
+
+  const base = {
+    organizationId: "org_1",
+    page: 1,
+    perPage: 20,
+    orderBy: "createdAt" as const,
+    orderDirection: "desc" as const,
+  };
+
+  it("ANDs uncategorized, untagged and without-location as separate groups", async () => {
+    await getAssets({
+      ...base,
+      categoriesIds: ["uncategorized"],
+      tagsIds: ["untagged", "tag-1"],
+      locationIds: ["without-location"],
+    });
+    // why: findMany's args are typed optional; this path always passes them.
+    const where = findManyMock.mock.calls[0][0]!.where!;
+
+    expect(where.OR).toBeUndefined();
+    expect(where.AND).toEqual([
+      {
+        OR: [{ categoryId: { in: ["uncategorized"] } }, { categoryId: null }],
+      },
+      {
+        OR: [
+          { tags: { none: {} } },
+          { tags: { some: { id: { in: ["tag-1"] } } } },
+        ],
+      },
+      {
+        OR: [
+          {
+            assetLocations: {
+              some: { locationId: { in: ["without-location"] } },
+            },
+          },
+          { assetLocations: { none: {} } },
+        ],
+      },
+    ]);
+  });
+
+  it("matches nothing for a refused custodian filter, even with 'without custody' beside it", async () => {
+    await getAssets({
+      ...base,
+      teamMemberIds: [CUSTODY_FILTER_REFUSED, "without-custody"],
+    });
+    const where = findManyMock.mock.calls[0][0]!.where!;
+
+    expect(where.AND).toContainEqual({ id: CUSTODY_FILTER_REFUSED });
   });
 });
 

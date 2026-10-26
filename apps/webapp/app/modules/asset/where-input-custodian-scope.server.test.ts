@@ -33,23 +33,32 @@ const ORG = "org-1";
 const MINE = "tm-mine";
 const COLLEAGUE = "tm-colleague";
 
-/** Every id the asset custody clause ended up matching on. */
+/**
+ * Every id the asset custodian clause ended up matching on, across all four
+ * ways an asset can be held (custody by team member or by user, a booking
+ * custodian by team member or by user), wherever the clause sits in `where`.
+ */
 function custodianIdsInAssetWhere(
   where: ReturnType<typeof getAssetsWhereInput>
 ): string[] {
   const ids = new Set<string>();
-  const groups = Array.isArray(where.AND)
-    ? where.AND
-    : where.AND
-    ? [where.AND]
-    : [];
-  // The custodian filter is one AND group whose options sit in its own OR.
-  const clauses = groups.flatMap((group) => group.OR ?? []);
+  const groups = [where.AND ?? []].flat();
+  const clauses = groups.flatMap((group) => [
+    group,
+    ...[group.OR ?? []].flat(),
+  ]);
 
   for (const clause of clauses) {
-    const custodyIds = clause.custody?.some?.teamMemberId;
-    if (custodyIds && typeof custodyIds === "object" && "in" in custodyIds) {
-      (custodyIds.in as string[]).forEach((id) => ids.add(id));
+    const booking = clause.bookingAssets?.some?.booking;
+    for (const filter of [
+      clause.custody?.some?.teamMemberId,
+      clause.custody?.some?.custodian?.userId,
+      booking?.custodianTeamMemberId,
+      booking?.custodianUserId,
+    ]) {
+      if (filter && typeof filter === "object" && "in" in filter) {
+        (filter.in as string[]).forEach((id) => ids.add(id));
+      }
     }
   }
 

@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { AssetType, type CustomFieldType } from "@prisma/client";
 import {
+  andAssetWhere,
   applyArchivedFilter,
   compareCustomFieldValues,
   detectPotentialChanges,
@@ -1006,6 +1007,49 @@ describe("getAssetsWhereInput filter groups", () => {
     expect(groups[1].OR).toContainEqual({
       custody: { some: { teamMemberId: { in: ["tm-1"] } } },
     });
+  });
+
+  it("counts a booking custodian only while the booking is out", () => {
+    const where = getAssetsWhereInput({
+      organizationId: "org-1",
+      currentSearchParams: "teamMember=tm-1",
+      allowedTeamMemberIds: "all",
+    });
+
+    const [custodianGroup] = where.AND as Prisma.AssetWhereInput[];
+    const bookingBranches = (custodianGroup.OR ?? []).filter(
+      (clause) => clause.bookingAssets
+    );
+    expect(bookingBranches).toHaveLength(2);
+    for (const branch of bookingBranches) {
+      expect(branch.bookingAssets?.some?.booking?.status).toEqual({
+        in: ["ONGOING", "OVERDUE"],
+      });
+    }
+  });
+});
+
+describe("andAssetWhere", () => {
+  const clause: Prisma.AssetWhereInput = { categoryId: null };
+
+  it("starts an AND list when there is none", () => {
+    const where: Prisma.AssetWhereInput = { organizationId: "org-1" };
+    andAssetWhere(where, clause);
+    expect(where).toEqual({ organizationId: "org-1", AND: [clause] });
+  });
+
+  it("appends to an existing AND list", () => {
+    const first: Prisma.AssetWhereInput = { tags: { none: {} } };
+    const where: Prisma.AssetWhereInput = { AND: [first] };
+    andAssetWhere(where, clause);
+    expect(where.AND).toEqual([first, clause]);
+  });
+
+  it("keeps a single AND object when it adds to it", () => {
+    const first: Prisma.AssetWhereInput = { tags: { none: {} } };
+    const where: Prisma.AssetWhereInput = { AND: first };
+    andAssetWhere(where, clause);
+    expect(where.AND).toEqual([first, clause]);
   });
 });
 
