@@ -5,6 +5,7 @@ import { pinBookingAvailabilityWindow } from "./picker-availability-window.serve
 
 const PICKER = "http://localhost/bookings/b1/overview/manage-assets";
 const booking = {
+  id: "b1",
   from: new Date("2026-11-02T09:00:00.000Z"),
   to: new Date("2026-11-04T17:00:00.000Z"),
 };
@@ -23,6 +24,7 @@ describe("pinBookingAvailabilityWindow", () => {
       per_page: "50",
       bookingFrom: "2026-11-02T09:00:00.000Z",
       bookingTo: "2026-11-04T17:00:00.000Z",
+      unhideAssetsBookigIds: "b1",
     });
   });
 
@@ -35,6 +37,7 @@ describe("pinBookingAvailabilityWindow", () => {
       hideUnavailable: "true",
       bookingFrom: "2026-11-02T09:00:00.000Z",
       bookingTo: "2026-11-04T17:00:00.000Z",
+      unhideAssetsBookigIds: "b1",
     });
   });
 
@@ -42,7 +45,13 @@ describe("pinBookingAvailabilityWindow", () => {
     const request = new Request(`${PICKER}?hideUnavailable=true&per_page=50`);
 
     expect(
-      paramsOf(pinBookingAvailabilityWindow(request, { from: null, to: null }))
+      paramsOf(
+        pinBookingAvailabilityWindow(request, {
+          id: "b1",
+          from: null,
+          to: null,
+        })
+      )
     ).toEqual({ per_page: "50" });
   });
 

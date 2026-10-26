@@ -1439,6 +1439,8 @@ describe("manage-assets loader — Models tab payload", () => {
       per_page: "50",
       bookingFrom: mockLoaderBooking.from.toISOString(),
       bookingTo: mockLoaderBooking.to.toISOString(),
+      // The booking's own items stay listed rather than conflicting with it.
+      unhideAssetsBookigIds: "booking123",
     });
   });
 

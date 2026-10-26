@@ -5,12 +5,15 @@
  * means unavailable during THIS booking, so the window comes from the booking,
  * never from the URL: a link without `bookingFrom` / `bookingTo`, or with dates
  * the booking has since moved away from, still measures against the booking.
+ * The booking's own items are exempt from the conflict check, so they stay
+ * listed (and can be deselected) however the link was built.
  *
  * @see {@link file://./../../routes/_layout+/bookings.$bookingId.overview.manage-assets.tsx}
  */
 
-/** The booking dates the window is pinned to; a draft may have neither yet. */
+/** The booking the window is pinned to; a draft may have no dates yet. */
 type BookingWindow = {
+  id: string;
   from: Date | string | null;
   to: Date | string | null;
 };
@@ -38,6 +41,9 @@ export function pinBookingAvailabilityWindow(
   if (booking.from && booking.to) {
     url.searchParams.set("bookingFrom", new Date(booking.from).toISOString());
     url.searchParams.set("bookingTo", new Date(booking.to).toISOString());
+    // Without this, the booking's own reserved or checked-out items read as
+    // conflicting with the booking itself and drop out of the list.
+    url.searchParams.set("unhideAssetsBookigIds", booking.id);
   } else {
     url.searchParams.delete("hideUnavailable");
     url.searchParams.delete("bookingFrom");
