@@ -606,7 +606,7 @@ export async function runBuilderReport(
       {
         id: "groups",
         label: `${groupLabel} groups`,
-        value: groupCount.toLocaleString("en-US"),
+        value: groupCount.toLocaleString(locale),
         rawValue: groupCount,
         format: "number",
         delta: null,
