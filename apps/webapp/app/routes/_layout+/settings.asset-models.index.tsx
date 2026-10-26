@@ -7,7 +7,7 @@
  */
 import type { AssetModel, Category } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
-import { data } from "react-router";
+import { data, useLoaderData } from "react-router";
 import AssetModelQuickActions from "~/components/asset-model/asset-model-quick-actions";
 import AssetModelBulkActionsDropdown from "~/components/asset-model/bulk-actions-dropdown";
 import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
@@ -18,6 +18,8 @@ import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Th, Td } from "~/components/table";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { buildAssetIndexFilterHref } from "~/modules/asset-index-settings/filter-href";
+import { getAssetIndexModeForUser } from "~/modules/asset-index-settings/service.server";
 import { getAssetModels } from "~/modules/asset-model/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
@@ -40,7 +42,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId: authSession.userId,
       request,
       entity: PermissionEntity.assetModel,
@@ -54,12 +56,21 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const cookie = await updateCookieWithPerPage(request, perPageParam);
     const { perPage } = cookie;
 
-    const { assetModels, totalAssetModels } = await getAssetModels({
-      organizationId,
-      page,
-      perPage,
-      search,
-    });
+    const [{ assetModels, totalAssetModels }, assetIndexMode] =
+      await Promise.all([
+        getAssetModels({
+          organizationId,
+          page,
+          perPage,
+          search,
+        }),
+        // Decides whether each row's asset count can link into the asset index
+        getAssetIndexModeForUser({
+          userId,
+          organizationId,
+          ui: access.policy.ui,
+        }),
+      ]);
     const totalPages = Math.ceil(totalAssetModels / perPage);
 
     const header: HeaderData = {
@@ -82,6 +93,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         totalPages,
         perPage,
         modelName,
+        assetIndexMode,
       }),
       {
         headers: [setCookie(await userPrefs.serialize(cookie))],
@@ -150,7 +162,13 @@ export default function AssetModelsIndexPage() {
   );
 }
 
-/** Renders a single row in the asset models list table. */
+/**
+ * Renders a single row in the asset models list table.
+ *
+ * The asset count links to the asset index filtered to this model. Only the
+ * advanced index can filter by model, so a viewer in simple mode sees the
+ * count as plain text instead of a link to the unfiltered list.
+ */
 const AssetModelItem = ({
   item,
 }: {
@@ -166,51 +184,74 @@ const AssetModelItem = ({
     activeAssetCount: number;
     defaultCategory?: Pick<Category, "id" | "name" | "color"> | null;
   };
-}) => (
-  <>
-    <Td title={`Asset model: ${item.name}`} className="w-1/4">
-      {/*
+}) => {
+  const { assetIndexMode } = useLoaderData<typeof loader>();
+  const assetCount = item.activeAssetCount;
+
+  return (
+    <>
+      <Td title={`Asset model: ${item.name}`} className="w-1/4">
+        {/*
         Image + name in one cell, matching the kit and asset list rows: the
         picture is the fastest way to confirm you're looking at the right
         model, and it's the same picture its assets now show.
       */}
-      <div className="flex items-center gap-3">
-        {item.image ? (
-          // `imageUrl` is required alongside `withPreview` — see the note at the
-          // matching call site in components/asset-model/form.tsx.
-          <ImageWithPreview
-            imageUrl={item.image}
-            thumbnailUrl={item.thumbnailImage ?? item.image}
-            alt={`${item.name} image`}
-            className="size-10 shrink-0 rounded border object-cover"
-            withPreview
+        <div className="flex items-center gap-3">
+          {item.image ? (
+            // `imageUrl` is required alongside `withPreview` — see the note at the
+            // matching call site in components/asset-model/form.tsx.
+            <ImageWithPreview
+              imageUrl={item.image}
+              thumbnailUrl={item.thumbnailImage ?? item.image}
+              alt={`${item.name} image`}
+              className="size-10 shrink-0 rounded border object-cover"
+              withPreview
+            />
+          ) : null}
+          <span className="word-break">{item.name}</span>
+        </div>
+      </Td>
+      <Td className="max-w-62 md:w-2/4">
+        {item.description ? (
+          <LineBreakText
+            className="md:w-3/4"
+            text={item.description}
+            numberOfLines={3}
+            charactersPerLine={60}
           />
         ) : null}
-        <span className="word-break">{item.name}</span>
-      </div>
-    </Td>
-    <Td className="max-w-62 md:w-2/4">
-      {item.description ? (
-        <LineBreakText
-          className="md:w-3/4"
-          text={item.description}
-          numberOfLines={3}
-          charactersPerLine={60}
-        />
-      ) : null}
-    </Td>
-    <Td>
-      {item.defaultCategory ? (
-        <Badge color={item.defaultCategory.color} withDot={false}>
-          {item.defaultCategory.name}
-        </Badge>
-      ) : (
-        <span className="text-gray-400">—</span>
-      )}
-    </Td>
-    <Td>{item.activeAssetCount}</Td>
-    <Td>
-      <AssetModelQuickActions assetModel={item} />
-    </Td>
-  </>
-);
+      </Td>
+      <Td>
+        {item.defaultCategory ? (
+          <Badge color={item.defaultCategory.color} withDot={false}>
+            {item.defaultCategory.name}
+          </Badge>
+        ) : (
+          <span className="text-gray-400">—</span>
+        )}
+      </Td>
+      <Td>
+        {assetIndexMode === "ADVANCED" ? (
+          <Button
+            to={buildAssetIndexFilterHref({
+              mode: assetIndexMode,
+              key: "assetModel",
+              value: item.id,
+            })}
+            variant="link"
+            aria-label={`View ${assetCount} ${
+              assetCount === 1 ? "asset" : "assets"
+            } of ${item.name}`}
+          >
+            {assetCount}
+          </Button>
+        ) : (
+          assetCount
+        )}
+      </Td>
+      <Td>
+        <AssetModelQuickActions assetModel={item} />
+      </Td>
+    </>
+  );
+};
