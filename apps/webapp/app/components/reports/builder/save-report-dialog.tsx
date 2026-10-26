@@ -33,6 +33,13 @@ type Props = {
   name: string;
   onNameChange: (event: ChangeEvent<HTMLInputElement>) => void;
   fetcher: FetcherWithComponents<DataOrErrorResponse>;
+  /**
+   * The answer to a submission made since this dialog opened, or `undefined`
+   * when nothing has been submitted yet. A fetcher keeps its last response, so
+   * reading it directly would show an earlier failure the moment the dialog
+   * opens again.
+   */
+  outcome: DataOrErrorResponse | undefined;
 };
 
 /** Renders the save dialog. */
@@ -43,18 +50,19 @@ export function SaveReportDialog({
   name,
   onNameChange,
   fetcher,
+  outcome,
 }: Props) {
   const zo = useZorm("save-report", SaveReportFormSchema);
   const nameInputRef = useAutoFocus<HTMLInputElement>({ when: open });
   const disabled = useDisabled(fetcher);
 
   const validationErrors = getValidationErrors<typeof SaveReportFormSchema>(
-    fetcher.data?.error
+    outcome?.error
   );
   const nameError =
     validationErrors?.name?.message ??
     zo.errors.name()?.message ??
-    fetcher.data?.error?.message;
+    outcome?.error?.message;
 
   return (
     <DialogPortal>

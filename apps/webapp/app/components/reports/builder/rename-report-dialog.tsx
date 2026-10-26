@@ -28,6 +28,13 @@ type Props = {
   name: string;
   onNameChange: (event: ChangeEvent<HTMLInputElement>) => void;
   fetcher: FetcherWithComponents<DataOrErrorResponse>;
+  /**
+   * The answer to a submission made since this dialog opened, or `undefined`
+   * when nothing has been submitted yet. A fetcher keeps its last response, so
+   * reading it directly would show an earlier failure the moment the dialog
+   * opens again.
+   */
+  outcome: DataOrErrorResponse | undefined;
 };
 
 /** Renders the rename dialog. */
@@ -38,6 +45,7 @@ export function RenameReportDialog({
   name,
   onNameChange,
   fetcher,
+  outcome,
 }: Props) {
   const zo = useZorm("rename-report", RenameSavedReportFormSchema);
   const nameInputRef = useAutoFocus<HTMLInputElement>({ when: open });
@@ -45,11 +53,11 @@ export function RenameReportDialog({
 
   const validationErrors = getValidationErrors<
     typeof RenameSavedReportFormSchema
-  >(fetcher.data?.error);
+  >(outcome?.error);
   const nameError =
     validationErrors?.name?.message ??
     zo.errors.name()?.message ??
-    fetcher.data?.error?.message;
+    outcome?.error?.message;
 
   return (
     <DialogPortal>

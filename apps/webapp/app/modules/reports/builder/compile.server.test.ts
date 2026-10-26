@@ -283,6 +283,7 @@ describe("runBuilderReport", () => {
       timeZone: "UTC",
       assetFilter: EMPTY_FILTER,
       currency: "USD",
+      locale: "en-US",
       customField: null,
     });
 
@@ -338,6 +339,7 @@ describe("runBuilderReport", () => {
       timeZone: "UTC",
       assetFilter: EMPTY_FILTER,
       currency: "USD",
+      locale: "en-US",
       customField: null,
     });
 
@@ -380,6 +382,7 @@ describe("runBuilderReport", () => {
       timeZone: "UTC",
       assetFilter: EMPTY_FILTER,
       currency: "USD",
+      locale: "en-US",
       customField: null,
     });
 
@@ -444,6 +447,7 @@ describe("runBuilderReport", () => {
       timeZone: "UTC",
       assetFilter: EMPTY_FILTER,
       currency: "USD",
+      locale: "en-US",
       customField: null,
     });
 

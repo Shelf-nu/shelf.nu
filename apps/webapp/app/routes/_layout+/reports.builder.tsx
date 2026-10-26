@@ -101,110 +101,118 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
-  const { organizationId, currentOrganization, userOrganizations } =
-    await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.reports,
-      action: PermissionAction.read,
+  try {
+    const { organizationId, currentOrganization, userOrganizations } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.reports,
+        action: PermissionAction.read,
+      });
+
+    // Only the workspace owner can buy the add-on, so only the owner is offered
+    // the way to switch it on.
+    const isOwner = isOrganizationOwner({ userOrganizations, organizationId });
+
+    if (!canUseAdvancedReports(currentOrganization)) {
+      return data({
+        locked: true as const,
+        isOwner,
+        header: HEADER,
+        supportEmail: SUPPORT_EMAIL,
+      });
+    }
+
+    const url = new URL(request.url);
+    const requestedSpec = parseBuilderSpec(url.searchParams);
+
+    // An unknown preset falls back to the default *with* the user's format
+    // preferences; the resolver's own fallback would use UTC boundaries.
+    const rawPreset = url.searchParams.get("timeframe");
+    const timeframePreset = isTimeframePreset(rawPreset)
+      ? rawPreset
+      : "last_30d";
+    const customFrom = url.searchParams.get("from");
+    const customTo = url.searchParams.get("to");
+
+    const [formatPrefs, reportFilters, filterOptions, savedReports] =
+      await Promise.all([
+        resolveUserFormatPrefsById(userId, getClientHint(request)),
+        resolveReportFilters({
+          organizationId,
+          searchParams: url.searchParams,
+          reportDef: BUILDER_REPORT_DEF,
+        }),
+        loadReportFilterOptions({
+          organizationId,
+          reportDef: BUILDER_REPORT_DEF,
+        }),
+        listSavedReports({ organizationId }),
+      ]);
+
+    const timeframe = resolveTimeframe(
+      timeframePreset,
+      customFrom ? new Date(customFrom) : undefined,
+      customTo ? new Date(customTo) : undefined,
+      formatPrefs
+    );
+
+    // The pick-list already holds the workspace's filterable custom fields, so
+    // a grouping field is verified against it: an id from elsewhere resolves to
+    // nothing and the run falls back to the data set's first grouping.
+    const customField =
+      requestedSpec.groupBy === "customField" && requestedSpec.customFieldId
+        ? filterOptions.customFields.find(
+            (f) => f.id === requestedSpec.customFieldId
+          ) ?? null
+        : null;
+
+    const result = await runBuilderReport({
+      organizationId,
+      spec: requestedSpec,
+      timeframe,
+      timeZone: formatPrefs.timeZone,
+      assetFilter: reportFilters.assetFilter,
+      currency: currentOrganization.currency,
+      locale: getClientHint(request).locale,
+      customField: customField
+        ? { id: customField.id, name: customField.name }
+        : null,
     });
 
-  // Only the workspace owner can buy the add-on, so only the owner is offered
-  // the way to switch it on.
-  const isOwner = isOrganizationOwner({ userOrganizations, organizationId });
-
-  if (!canUseAdvancedReports(currentOrganization)) {
     return data({
-      locked: true as const,
+      locked: false as const,
       isOwner,
       header: HEADER,
-      supportEmail: SUPPORT_EMAIL,
+      spec: result.spec,
+      customFieldName: customField?.name ?? null,
+      rows: result.rows,
+      kpis: result.kpis,
+      chartSeries: result.chartSeries,
+      totalGroups: result.totalGroups,
+      truncated: result.truncated,
+      computedMs: result.computedMs,
+      timeframe,
+      currency: currentOrganization.currency,
+      savedReports: savedReports.map(({ id, name, query }) => ({
+        id,
+        name,
+        query,
+      })),
+      // Filter bar inputs; the paged pick-lists are spread onto the top level
+      // because the shared `DynamicDropdown` reads them from loader data by key.
+      ...filterOptions,
+      filterOptions,
+      filterConfigs: BUILDER_REPORT_DEF.filters,
+      activeFilters: reportFilters.active,
+      // Filters the URL asked for that this data set cannot apply; the bar says
+      // so rather than showing numbers narrowed by something invisible.
+      ignoredFilterCount: reportFilters.ignoredCount,
     });
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    throw data(error(reason), { status: reason.status });
   }
-
-  const url = new URL(request.url);
-  const requestedSpec = parseBuilderSpec(url.searchParams);
-
-  // An unknown preset falls back to the default *with* the user's format
-  // preferences; the resolver's own fallback would use UTC boundaries.
-  const rawPreset = url.searchParams.get("timeframe");
-  const timeframePreset = isTimeframePreset(rawPreset) ? rawPreset : "last_30d";
-  const customFrom = url.searchParams.get("from");
-  const customTo = url.searchParams.get("to");
-
-  const [formatPrefs, reportFilters, filterOptions, savedReports] =
-    await Promise.all([
-      resolveUserFormatPrefsById(userId, getClientHint(request)),
-      resolveReportFilters({
-        organizationId,
-        searchParams: url.searchParams,
-        reportDef: BUILDER_REPORT_DEF,
-      }),
-      loadReportFilterOptions({
-        organizationId,
-        reportDef: BUILDER_REPORT_DEF,
-      }),
-      listSavedReports({ organizationId }),
-    ]);
-
-  const timeframe = resolveTimeframe(
-    timeframePreset,
-    customFrom ? new Date(customFrom) : undefined,
-    customTo ? new Date(customTo) : undefined,
-    formatPrefs
-  );
-
-  // The pick-list already holds the workspace's filterable custom fields, so
-  // a grouping field is verified against it: an id from elsewhere resolves to
-  // nothing and the run falls back to the data set's first grouping.
-  const customField =
-    requestedSpec.groupBy === "customField" && requestedSpec.customFieldId
-      ? filterOptions.customFields.find(
-          (f) => f.id === requestedSpec.customFieldId
-        ) ?? null
-      : null;
-
-  const result = await runBuilderReport({
-    organizationId,
-    spec: requestedSpec,
-    timeframe,
-    timeZone: formatPrefs.timeZone,
-    assetFilter: reportFilters.assetFilter,
-    currency: currentOrganization.currency,
-    customField: customField
-      ? { id: customField.id, name: customField.name }
-      : null,
-  });
-
-  return data({
-    locked: false as const,
-    isOwner,
-    header: HEADER,
-    spec: result.spec,
-    customFieldName: customField?.name ?? null,
-    rows: result.rows,
-    kpis: result.kpis,
-    chartSeries: result.chartSeries,
-    totalGroups: result.totalGroups,
-    truncated: result.truncated,
-    computedMs: result.computedMs,
-    timeframe,
-    currency: currentOrganization.currency,
-    savedReports: savedReports.map(({ id, name, query }) => ({
-      id,
-      name,
-      query,
-    })),
-    // Filter bar inputs; the paged pick-lists are spread onto the top level
-    // because the shared `DynamicDropdown` reads them from loader data by key.
-    ...filterOptions,
-    filterOptions,
-    filterConfigs: BUILDER_REPORT_DEF.filters,
-    activeFilters: reportFilters.active,
-    // Filters the URL asked for that this data set cannot apply; the bar says
-    // so rather than showing numbers narrowed by something invisible.
-    ignoredFilterCount: reportFilters.ignoredCount,
-  });
 }
 
 const IntentSchema = z.enum(["save-report", "rename-report", "delete-report"]);

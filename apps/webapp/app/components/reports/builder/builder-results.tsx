@@ -221,7 +221,11 @@ export function BuilderResults({
             {totalGroups.toLocaleString(locale)}
           </span>
         </div>
+        {/* Keyed on the question asked: the table reads `initialSorting` when
+            it mounts, so a new data set or measure needs a new table rather
+            than one still sorted by a column the report no longer leads on. */}
         <ReportTable
+          key={`${spec.dataset}-${spec.measure}`}
           data={rows}
           columns={columns}
           initialSorting={[{ id: spec.measure, desc: true }]}

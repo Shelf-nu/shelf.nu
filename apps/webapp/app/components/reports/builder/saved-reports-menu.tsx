@@ -58,14 +58,26 @@ type UiState = {
   saveName: string;
   renaming: SavedReportListItem | null;
   renameValue: string;
+  /**
+   * The answer each fetcher already held when its dialog was opened. A fetcher
+   * keeps its last response, and the rename fetcher is shared by every row, so
+   * without this the dialog would open showing the outcome of something the
+   * reader did earlier, to a different report.
+   */
+  saveSeen: DataOrErrorResponse | undefined;
+  renameSeen: DataOrErrorResponse | undefined;
 };
 
 type UiAction =
   | { type: "setOpen"; open: boolean }
-  | { type: "openSave" }
+  | { type: "openSave"; seen: DataOrErrorResponse | undefined }
   | { type: "closeSave" }
   | { type: "setSaveName"; value: string }
-  | { type: "openRename"; report: SavedReportListItem }
+  | {
+      type: "openRename";
+      report: SavedReportListItem;
+      seen: DataOrErrorResponse | undefined;
+    }
   | { type: "closeRename" }
   | { type: "setRenameValue"; value: string };
 
@@ -75,6 +87,8 @@ const INITIAL_UI: UiState = {
   saveName: "",
   renaming: null,
   renameValue: "",
+  saveSeen: undefined,
+  renameSeen: undefined,
 };
 
 function uiReducer(state: UiState, action: UiAction): UiState {
@@ -82,7 +96,13 @@ function uiReducer(state: UiState, action: UiAction): UiState {
     case "setOpen":
       return { ...state, open: action.open };
     case "openSave":
-      return { ...state, open: false, saveOpen: true, saveName: "" };
+      return {
+        ...state,
+        open: false,
+        saveOpen: true,
+        saveName: "",
+        saveSeen: action.seen,
+      };
     case "closeSave":
       return { ...state, saveOpen: false, saveName: "" };
     case "setSaveName":
@@ -93,6 +113,7 @@ function uiReducer(state: UiState, action: UiAction): UiState {
         open: false,
         renaming: action.report,
         renameValue: action.report.name,
+        renameSeen: action.seen,
       };
     case "closeRename":
       return { ...state, renaming: null, renameValue: "" };
@@ -113,20 +134,27 @@ export function SavedReportsMenu({ savedReports, disabled }: Props) {
     key: "rename-report",
   });
 
+  // Only an answer that arrived since the dialog opened belongs to it; see
+  // `saveSeen`. Everything below reads these rather than the fetcher's data.
+  const saveOutcome =
+    saveFetcher.data === ui.saveSeen ? undefined : saveFetcher.data;
+  const renameOutcome =
+    renameFetcher.data === ui.renameSeen ? undefined : renameFetcher.data;
+
   // A finished, error-free submission closes its dialog. The action data is
   // the only signal of success the fetcher exposes.
   const saveSucceeded =
     saveFetcher.state === "idle" &&
-    saveFetcher.data !== undefined &&
-    !saveFetcher.data.error;
+    saveOutcome !== undefined &&
+    !saveOutcome.error;
   useEffect(() => {
     if (saveSucceeded) dispatch({ type: "closeSave" });
   }, [saveSucceeded]);
 
   const renameSucceeded =
     renameFetcher.state === "idle" &&
-    renameFetcher.data !== undefined &&
-    !renameFetcher.data.error;
+    renameOutcome !== undefined &&
+    !renameOutcome.error;
   useEffect(() => {
     if (renameSucceeded) dispatch({ type: "closeRename" });
   }, [renameSucceeded]);
@@ -198,7 +226,11 @@ export function SavedReportsMenu({ savedReports, disabled }: Props) {
                     isActive={activeReport?.id === report.id}
                     onOpen={openReport}
                     onRename={(r) =>
-                      dispatch({ type: "openRename", report: r })
+                      dispatch({
+                        type: "openRename",
+                        report: r,
+                        seen: renameFetcher.data,
+                      })
                     }
                   />
                 ))}
@@ -210,7 +242,9 @@ export function SavedReportsMenu({ savedReports, disabled }: Props) {
                 type="button"
                 variant="secondary"
                 width="full"
-                onClick={() => dispatch({ type: "openSave" })}
+                onClick={() =>
+                  dispatch({ type: "openSave", seen: saveFetcher.data })
+                }
               >
                 <span className="inline-flex items-center gap-1.5">
                   <Save className="size-4" />
@@ -231,6 +265,7 @@ export function SavedReportsMenu({ savedReports, disabled }: Props) {
           dispatch({ type: "setSaveName", value: e.target.value })
         }
         fetcher={saveFetcher}
+        outcome={saveOutcome}
       />
 
       <RenameReportDialog
@@ -242,6 +277,7 @@ export function SavedReportsMenu({ savedReports, disabled }: Props) {
           dispatch({ type: "setRenameValue", value: e.target.value })
         }
         fetcher={renameFetcher}
+        outcome={renameOutcome}
       />
     </>
   );

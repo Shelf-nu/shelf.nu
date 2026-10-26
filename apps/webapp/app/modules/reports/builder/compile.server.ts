@@ -62,6 +62,12 @@ export interface RunBuilderReportArgs {
   /** Workspace currency for the money KPI string. */
   currency: Currency;
   /**
+   * The viewer's locale. The KPI strings are built here while the table and
+   * chart are formatted in the browser, so both read the same locale or one
+   * card disagrees with the column beneath it.
+   */
+  locale: string;
+  /**
    * The verified custom field when `spec.groupBy` is `customField`; `null`
    * makes the run fall back to the dataset's first grouping.
    */
@@ -492,15 +498,16 @@ async function resolveGroupNames(
 function formatMeasureValue(
   measure: BuilderMeasure,
   value: number,
-  currency: Currency
+  currency: Currency,
+  locale: string
 ): string {
   switch (MEASURE_FORMAT[measure]) {
     case "currency":
-      return value > 0 ? formatKpiCurrency(value, currency) : "—";
+      return value > 0 ? formatKpiCurrency(value, currency, locale) : "—";
     case "duration":
-      return `${(Math.round(value * 10) / 10).toLocaleString("en-US")} days`;
+      return `${(Math.round(value * 10) / 10).toLocaleString(locale)} days`;
     default:
-      return Math.round(value).toLocaleString("en-US");
+      return Math.round(value).toLocaleString(locale);
   }
 }
 
@@ -514,7 +521,8 @@ function formatMeasureValue(
 export async function runBuilderReport(
   args: RunBuilderReportArgs
 ): Promise<BuilderReportResult> {
-  const { organizationId, timeframe, timeZone, assetFilter, currency } = args;
+  const { organizationId, timeframe, timeZone, assetFilter, currency, locale } =
+    args;
   const startTime = performance.now();
 
   // A custom-field grouping without a verified field falls back to the
@@ -585,7 +593,7 @@ export async function runBuilderReport(
       {
         id: `total_${spec.measure}`,
         label: MEASURE_LABELS[spec.measure],
-        value: formatMeasureValue(spec.measure, total, currency),
+        value: formatMeasureValue(spec.measure, total, currency, locale),
         rawValue: total,
         format:
           MEASURE_FORMAT[spec.measure] === "currency" ? "currency" : "number",
@@ -620,7 +628,7 @@ export async function runBuilderReport(
             : null,
         deltaType: "neutral",
         description: top
-          ? `${formatMeasureValue(spec.measure, top.value, currency)}`
+          ? `${formatMeasureValue(spec.measure, top.value, currency, locale)}`
           : undefined,
       },
     ];

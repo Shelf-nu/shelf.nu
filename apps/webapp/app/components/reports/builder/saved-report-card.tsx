@@ -44,7 +44,7 @@ export function SavedReportCard({ report }: Props) {
           Saved by {report.savedBy || "a teammate"} ·{" "}
           <DateS date={report.updatedAt} />
         </p>
-        <div className="absolute right-4 top-1/2 -translate-y-1/2 opacity-0 transition-opacity group-hover:opacity-100">
+        <div className="group-hover:opacity-100 absolute right-4 top-1/2 -translate-y-1/2 opacity-0 transition-opacity">
           <ArrowRight className="size-4 text-gray-400" />
         </div>
       </div>
