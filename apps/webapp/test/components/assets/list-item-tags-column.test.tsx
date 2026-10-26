@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -89,10 +89,29 @@ describe("ListItemTagsColumn", () => {
 
     await user.keyboard("{Enter}");
     const overflowLink = await screen.findByRole("link", { name: /Tag 3/ });
-    await user.tab();
 
-    expect(document.activeElement).toBe(overflowLink);
+    // Enter lands on the first hidden tag, so a second Enter follows it.
+    await waitFor(() => expect(document.activeElement).toBe(overflowLink));
     expect(overflowLink.getAttribute("href")).toBe("/assets?tag=tag-3");
+  });
+
+  it("opens the overflow on hover without taking keyboard focus", async () => {
+    const tags = [1, 2, 3].map(createTag);
+
+    render(
+      <MemoryRouter>
+        <ListItemTagsColumn tags={tags} linkToAssets />
+      </MemoryRouter>
+    );
+
+    const user = userEvent.setup();
+    await user.tab(); // Tag 1
+    const focusedBefore = document.activeElement;
+
+    await user.hover(screen.getByRole("button", { name: "Show 1 more" }));
+    await screen.findByRole("link", { name: /Tag 3/ });
+
+    expect(document.activeElement).toBe(focusedBefore);
   });
 
   it("renders plain tags for a viewer who may not read assets", () => {

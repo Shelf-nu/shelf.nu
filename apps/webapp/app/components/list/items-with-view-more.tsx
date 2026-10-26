@@ -7,7 +7,7 @@
  *
  * @see {@link file://./../assets/assets-index/list-item-tags-column.tsx}
  */
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   Popover,
@@ -122,7 +122,11 @@ export default function ItemsWithViewMore<T>({
 /**
  * The "+N" chip for interactive items: a popover that opens on hover like the
  * tooltip it replaces, and also on click or Enter so keyboard users can reach
- * the links inside. Focus moves into the content and back to the chip on close.
+ * the links inside.
+ *
+ * Opened by a press, focus moves to the first link so Enter follows it right
+ * away. Opened by hover, focus stays where it was: pointing at a chip must not
+ * pull keyboard focus away from what the user was doing.
  */
 function MoreItemsPopover({
   label,
@@ -133,13 +137,63 @@ function MoreItemsPopover({
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
+  /** Whether the current opening came from hovering the chip */
+  const openedByHover = useRef(false);
+  /** Set while the chip itself is being clicked or pressed with Enter/Space */
+  const pressingChip = useRef(false);
+  const contentRef = useRef<HTMLDivElement>(null);
+  /** Pending close after the pointer leaves the chip, cancelled on reaching the content */
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function cancelClose() {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    closeTimer.current = null;
+  }
+
+  function focusFirstItem() {
+    contentRef.current?.querySelector<HTMLElement>("a, button")?.focus();
+  }
+
+  function handleOpenChange(next: boolean) {
+    const pressed = pressingChip.current;
+    pressingChip.current = false;
+    // Pressing the chip while hover holds the popover open would toggle it
+    // shut; treat the press as "let me in" instead.
+    if (!next && pressed && openedByHover.current) {
+      openedByHover.current = false;
+      focusFirstItem();
+      return;
+    }
+    if (next) openedByHover.current = false;
+    setOpen(next);
+  }
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger
         type="button"
         aria-label={`Show ${label.slice(1)} more`}
-        onMouseEnter={() => setOpen(true)}
+        onPointerDown={() => {
+          pressingChip.current = true;
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            pressingChip.current = true;
+          }
+        }}
+        onMouseEnter={() => {
+          cancelClose();
+          if (open) return;
+          openedByHover.current = true;
+          setOpen(true);
+        }}
+        onMouseLeave={() => {
+          // Only a hover opening closes on leave; a pressed one stays until
+          // Escape or a click outside. The delay lets the pointer cross the
+          // gap into the content.
+          if (!openedByHover.current) return;
+          closeTimer.current = setTimeout(() => setOpen(false), 150);
+        }}
         className="rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
       >
         <GrayBadge>{label}</GrayBadge>
@@ -148,7 +202,15 @@ function MoreItemsPopover({
         <PopoverContent
           side="top"
           sideOffset={6}
-          onMouseLeave={() => setOpen(false)}
+          onMouseEnter={cancelClose}
+          onMouseLeave={() => {
+            if (openedByHover.current) setOpen(false);
+          }}
+          ref={contentRef}
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            if (!openedByHover.current) focusFirstItem();
+          }}
           className="z-50 flex max-w-72 flex-wrap items-center gap-2 rounded-md border bg-white p-3 text-sm font-medium shadow-lg"
         >
           {children}
