@@ -3,19 +3,24 @@ import { useAtomValue } from "jotai";
 import { useNavigation } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
+import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { useRoleAccess } from "~/hooks/use-role-access";
 import { isBookingArchivable } from "~/modules/booking/helpers";
 import { isFormProcessing } from "~/utils/form";
+import { ALL_SELECTED_KEY } from "~/utils/list";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
+import { isExplicitScanRequired } from "~/utils/permissions/role-access";
 import { tw } from "~/utils/tw";
 import BulkArchiveDialog from "./bulk-archive-dialog";
 import BulkCancelDialog from "./bulk-cancel-dialog";
+import BulkCheckinDialog from "./bulk-checkin-dialog";
+import BulkCheckoutDialog from "./bulk-checkout-dialog";
 import BulkDeleteDialog from "./bulk-delete-dialog";
 import { BulkUpdateDialogTrigger } from "../bulk-update-dialog/bulk-update-dialog";
 import { ChevronRight } from "../icons/library";
@@ -77,6 +82,65 @@ function ConditionalDropdown() {
 
   const roles = useOrganizationRoles();
   const roleAccess = useRoleAccess();
+  const bookingSettings = useBookingSettings();
+
+  /**
+   * Bulk check-out takes a selection of RESERVED bookings only; bulk check-in
+   * a selection of ONGOING or OVERDUE ones. Both are the list twins of the
+   * booking page's one-click buttons, so they ask for the same grant and are
+   * refused under the same explicit-mode switch. The server re-checks all of
+   * it; this is the matching UI gate, with the reason the operator sees.
+   */
+  // "Select all N entries" adds a sentinel row with no status. The rows it
+  // stands for are not in the browser, so the status rule is left to the
+  // server, which refuses the whole batch by name.
+  const selectedRows = selectedBookings.filter(
+    (b) => b.id !== ALL_SELECTED_KEY
+  );
+  const everyBookingReserved =
+    selectedBookings.length > 0 &&
+    selectedRows.every((b) => b.status === BookingStatus.RESERVED);
+  const everyBookingInProgress =
+    selectedBookings.length > 0 &&
+    selectedRows.every(
+      (b) =>
+        b.status === BookingStatus.ONGOING || b.status === BookingStatus.OVERDUE
+    );
+  const canCheckOutBooking = userHasPermission({
+    roles,
+    entity: PermissionEntity.booking,
+    action: PermissionAction.checkout,
+  });
+  const canCheckInBooking = userHasPermission({
+    roles,
+    entity: PermissionEntity.booking,
+    action: PermissionAction.checkin,
+  });
+  const explicitCheckoutRequired = isExplicitScanRequired({
+    access: roleAccess,
+    settings: bookingSettings,
+    direction: "checkout",
+  });
+  const explicitCheckinRequired = isExplicitScanRequired({
+    access: roleAccess,
+    settings: bookingSettings,
+    direction: "checkin",
+  });
+
+  const checkoutDisabledReason = !canCheckOutBooking
+    ? "You don't have permission to check out bookings."
+    : explicitCheckoutRequired
+    ? "This workspace requires explicit check-out for your role. Open each booking and scan or select its assets."
+    : !everyBookingReserved
+    ? "Some of the selected bookings are not reserved. You can only check out reserved bookings."
+    : null;
+  const checkinDisabledReason = !canCheckInBooking
+    ? "You don't have permission to check in bookings."
+    : explicitCheckinRequired
+    ? "This workspace requires explicit check-in for your role. Open each booking and scan or select its assets."
+    : !everyBookingInProgress
+    ? "Some of the selected bookings are not in progress. You can only check in ongoing or overdue bookings."
+    : null;
 
   const navigation = useNavigation();
   const isLoading = isFormProcessing(navigation.state);
@@ -122,6 +186,8 @@ function ConditionalDropdown() {
       <BulkDeleteDialog />
       <BulkArchiveDialog />
       <BulkCancelDialog />
+      <BulkCheckoutDialog />
+      <BulkCheckinDialog />
 
       <DropdownMenu
         modal={false}
@@ -161,6 +227,42 @@ function ConditionalDropdown() {
           ref={dropdownRef}
         >
           <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[180px] md:rounded-t-[4px]">
+            <DropdownMenuItem
+              className="px-4 py-1 md:p-0"
+              onSelect={(e) => {
+                e.preventDefault();
+              }}
+            >
+              <BulkUpdateDialogTrigger
+                type="checkout"
+                label="Check out"
+                onClick={closeMenu}
+                disabled={
+                  checkoutDisabledReason
+                    ? { reason: checkoutDisabledReason }
+                    : isLoading
+                }
+              />
+            </DropdownMenuItem>
+
+            <DropdownMenuItem
+              className="px-4 py-1 md:p-0"
+              onSelect={(e) => {
+                e.preventDefault();
+              }}
+            >
+              <BulkUpdateDialogTrigger
+                type="checkin"
+                label="Check in"
+                onClick={closeMenu}
+                disabled={
+                  checkinDisabledReason
+                    ? { reason: checkinDisabledReason }
+                    : isLoading
+                }
+              />
+            </DropdownMenuItem>
+
             <DropdownMenuItem
               className="px-4 py-1 md:p-0"
               onSelect={(e) => {

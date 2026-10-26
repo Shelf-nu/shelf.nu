@@ -123,18 +123,111 @@ export async function getBookingIdsWithUnavailableAssets({
 }
 
 /**
- * Loader helper: decorates a bookings-list page's rows with both pill flags.
+ * Statuses where the row offers a check-out, so "items still to check out"
+ * is worth asking. A draft has nothing out yet and a settled booking nothing
+ * left to send, and neither row shows a check-out button.
+ */
+const LIVE_BOOKING_STATUSES: BookingStatus[] = [
+  BookingStatus.RESERVED,
+  BookingStatus.ONGOING,
+  BookingStatus.OVERDUE,
+];
+
+/**
+ * Returns the subset of `bookingIds` that still hold at least one slice in the
+ * Booked bucket: a `BookingAsset` row with no `checkedOutAt` stamp.
  *
- * Runs the two lookups concurrently — they are independent, and serialising
- * them would put a second round trip on the critical path of every bookings
- * list. Replaces the direct {@link decorateBookingsWithStockConflicts} call
- * the five loaders used to make.
+ * The row's "Check out remaining" button is offered on an ONGOING or OVERDUE
+ * booking only while such a slice exists, the same rule the booking header
+ * applies through its lifecycle progress. One bounded query per page.
+ *
+ * @param args.bookingIds - Booking ids on the current page
+ * @param args.organizationId - Caller's organization, which scopes the query
+ * @param args.db - Prisma client or active transaction; defaults to `db`
+ * @returns The ids that still have items to check out
+ * @throws {ShelfError} If the query fails
+ */
+export async function getBookingIdsWithItemsToCheckOut({
+  bookingIds,
+  organizationId,
+  db: dbOrTx = db,
+}: {
+  bookingIds: string[];
+  organizationId: string;
+  db?: Pick<typeof db, "booking">;
+}): Promise<Set<string>> {
+  if (bookingIds.length === 0) {
+    return new Set();
+  }
+
+  try {
+    const rows = await dbOrTx.booking.findMany({
+      where: {
+        id: { in: bookingIds },
+        // The ids come from an already org-scoped list query, but this helper
+        // is exported and must be safe on its own terms.
+        organizationId,
+        status: { in: LIVE_BOOKING_STATUSES },
+        bookingAssets: { some: { checkedOutAt: null } },
+      },
+      select: { id: true },
+    });
+
+    return new Set(rows.map((row) => row.id));
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while checking the bookings for items still to check out.",
+      additionalData: { organizationId, bookingCount: bookingIds.length },
+      label,
+    });
+  }
+}
+
+/**
+ * Runs one decorative lookup, degrading to "no booking flagged" on failure.
+ *
+ * Each flag is cosmetic, so a failing lookup logs and the list renders
+ * without that flag rather than failing with a 500.
+ *
+ * @param lookup - The lookup, resolving to the flagged booking ids
+ * @param failureMessage - What to log when it fails
+ * @param context - Extra data for the log line
+ * @returns The flagged ids, or an empty set when the lookup failed
+ */
+function flagOrNone(
+  lookup: Promise<Set<string>>,
+  failureMessage: string,
+  context: { organizationId: string; bookingCount: number }
+): Promise<Set<string>> {
+  return lookup.catch((cause) => {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: failureMessage,
+        additionalData: context,
+        label,
+      })
+    );
+    return new Set<string>();
+  });
+}
+
+/**
+ * Loader helper: decorates a bookings-list page's rows with the two pill flags
+ * and the "items still to check out" flag the row's check-out button reads.
+ *
+ * Runs the lookups concurrently: they are independent, and serialising them
+ * would put more round trips on the critical path of every bookings list.
+ * Replaces the direct {@link decorateBookingsWithStockConflicts} call the
+ * five loaders used to make.
  *
  * @param args.bookings - The loader's booking rows (each needs at least
  *   `{ id, status, from, to }`; extra fields are preserved)
- * @param args.organizationId - Caller's organization — scopes every query
- * @returns The same rows, each extended with `hasStockConflict` and
- *   `hasUnavailableAssets`
+ * @param args.organizationId - Caller's organization, which scopes every query
+ * @returns The same rows, each extended with `hasStockConflict`,
+ *   `hasUnavailableAssets` and `hasItemsToCheckOut`
  */
 export async function decorateBookingsForList<
   B extends BookingForStockConflictLookup,
@@ -145,31 +238,37 @@ export async function decorateBookingsForList<
   bookings: B[];
   organizationId: string;
 }): Promise<
-  Array<B & { hasStockConflict: boolean; hasUnavailableAssets: boolean }>
+  Array<
+    B & {
+      hasStockConflict: boolean;
+      hasUnavailableAssets: boolean;
+      hasItemsToCheckOut: boolean;
+    }
+  >
 > {
-  const [withStockConflicts, unavailableIds] = await Promise.all([
-    decorateBookingsWithStockConflicts({ bookings, organizationId }),
-    // The stock decorator swallows its own failures; this one has to swallow
-    // its own too, or a decorative badge takes the whole list down with a 500.
-    getBookingIdsWithUnavailableAssets({
-      bookingIds: bookings.map((booking) => booking.id),
-      organizationId,
-    }).catch((cause) => {
-      Logger.error(
-        new ShelfError({
-          cause,
-          message:
-            "Failed to check the bookings for unavailable assets; rendering the bookings list without that badge.",
-          additionalData: { organizationId, bookingCount: bookings.length },
-          label,
-        })
-      );
-      return new Set<string>();
-    }),
-  ]);
+  const bookingIds = bookings.map((booking) => booking.id);
+  const context = { organizationId, bookingCount: bookings.length };
+
+  const [withStockConflicts, unavailableIds, itemsToCheckOutIds] =
+    await Promise.all([
+      // The stock decorator swallows its own failures; the other two have to
+      // swallow theirs too, or a decorative flag takes the list down.
+      decorateBookingsWithStockConflicts({ bookings, organizationId }),
+      flagOrNone(
+        getBookingIdsWithUnavailableAssets({ bookingIds, organizationId }),
+        "Failed to check the bookings for unavailable assets; rendering the bookings list without that badge.",
+        context
+      ),
+      flagOrNone(
+        getBookingIdsWithItemsToCheckOut({ bookingIds, organizationId }),
+        "Failed to check the bookings for items still to check out; rendering the bookings list without the row's Check out remaining button.",
+        context
+      ),
+    ]);
 
   return withStockConflicts.map((booking) => ({
     ...booking,
     hasUnavailableAssets: unavailableIds.has(booking.id),
+    hasItemsToCheckOut: itemsToCheckOutIds.has(booking.id),
   }));
 }

@@ -1,11 +1,16 @@
 /**
- * BulkActionsDropdown: loading must not borrow the drafts-only reason.
+ * BulkActionsDropdown: which items a selection enables, and why not.
  *
  * Delete is disabled for two unrelated causes: a request already in flight
  * (`isLoading`), or the caller's role being held to drafts-only deletion
  * (`roleAccess.policy.bookings.deleteOnlyDrafts`) on a selection that is not
  * all drafts. Only the second has a reason worth showing; a plain loading
  * state must disable the control without claiming the selection is invalid.
+ *
+ * Check out takes a selection of RESERVED bookings only and Check in a
+ * selection of ONGOING or OVERDUE ones; both are disabled with a reason
+ * otherwise, without the grant, and under the workspace's explicit scan
+ * requirement for that direction.
  *
  * @see {@link file://./bulk-actions-dropdown.tsx}
  */
@@ -14,6 +19,8 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { accessFor } from "@helpers/role-access";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { ALL_SELECTED_KEY } from "~/utils/list";
+import type { ExplicitScanSettings } from "~/utils/permissions/role-access";
 import BulkActionsDropdown from "./bulk-actions-dropdown";
 
 // why: the component reads navigation state to know a request is in flight;
@@ -40,6 +47,20 @@ let mockRoles: OrganizationRoles[] = [];
 // the `_layout` loader in real code; drive it from the same roles instead.
 vi.mock("~/hooks/use-role-access", () => ({
   useRoleAccess: () => accessFor(mockRoles),
+}));
+
+/** The workspace's explicit scan switches, all off unless a test flips one. */
+const NO_EXPLICIT_SCAN: ExplicitScanSettings = {
+  requireExplicitCheckoutForAdmin: false,
+  requireExplicitCheckoutForSelfService: false,
+  requireExplicitCheckinForAdmin: false,
+  requireExplicitCheckinForSelfService: false,
+};
+let mockBookingSettings: ExplicitScanSettings = NO_EXPLICIT_SCAN;
+
+// why: the explicit scan switches come off the `_layout` loader too.
+vi.mock("~/hooks/use-booking-settings", () => ({
+  useBookingSettings: () => mockBookingSettings,
 }));
 
 /** The selection the mocked `useAtomValue` returns. */
@@ -74,24 +95,35 @@ vi.mock("remix-utils/use-hydrated", () => ({ useHydrated: () => true }));
 vi.mock("./bulk-delete-dialog", () => ({ default: () => null }));
 vi.mock("./bulk-archive-dialog", () => ({ default: () => null }));
 vi.mock("./bulk-cancel-dialog", () => ({ default: () => null }));
+vi.mock("./bulk-checkout-dialog", () => ({ default: () => null }));
+vi.mock("./bulk-checkin-dialog", () => ({ default: () => null }));
 
 const mockedUseOrganizationRoles = vi.mocked(useOrganizationRoles);
 
 function setup({
   roles,
   bookings,
-  isLoading,
+  isLoading = false,
+  settings = NO_EXPLICIT_SCAN,
 }: {
   roles: OrganizationRoles[];
   bookings: { id: string; status: BookingStatus }[];
-  isLoading: boolean;
+  isLoading?: boolean;
+  settings?: ExplicitScanSettings;
 }) {
   mockedUseOrganizationRoles.mockReturnValue(roles);
   mockRoles = roles;
   mockSelectedBookings = bookings;
   mockNavigationState = isLoading ? "submitting" : "idle";
+  mockBookingSettings = settings;
 
   render(<BulkActionsDropdown />);
+}
+
+/** The trigger for one menu item; the dropdown renders each once. */
+function item(name: RegExp) {
+  const [button] = screen.getAllByRole("button", { name });
+  return button;
 }
 
 const draftsOnlyReason = /not in draft or you have self user permissions/i;
@@ -119,5 +151,112 @@ describe("BulkActionsDropdown: Delete while a request is in flight", () => {
     const [deleteButton] = screen.getAllByRole("button", { name: /delete/i });
     expect(deleteButton).toHaveAttribute("aria-disabled", "true");
     expect(screen.getByText(draftsOnlyReason)).toBeTruthy();
+  });
+});
+
+describe("BulkActionsDropdown: bulk Check out", () => {
+  const notReservedReason = /only check out reserved bookings/i;
+
+  it("enables Check out for an ADMIN with an all-RESERVED selection", () => {
+    setup({
+      roles: [OrganizationRoles.ADMIN],
+      bookings: [
+        { id: "b1", status: BookingStatus.RESERVED },
+        { id: "b2", status: BookingStatus.RESERVED },
+      ],
+    });
+
+    expect(item(/^check out$/i)).toBeEnabled();
+    expect(screen.queryByText(notReservedReason)).toBeNull();
+  });
+
+  it("leaves Check out to the server on a select-all, whose rows are not in the browser", () => {
+    setup({
+      roles: [OrganizationRoles.ADMIN],
+      bookings: [
+        { id: "b1", status: BookingStatus.RESERVED },
+        { id: ALL_SELECTED_KEY, status: undefined as unknown as BookingStatus },
+      ],
+    });
+
+    expect(item(/^check out$/i)).toBeEnabled();
+  });
+
+  it("disables Check out with the status reason when a draft is in the selection", () => {
+    setup({
+      roles: [OrganizationRoles.ADMIN],
+      bookings: [
+        { id: "b1", status: BookingStatus.RESERVED },
+        { id: "b2", status: BookingStatus.DRAFT },
+      ],
+    });
+
+    expect(item(/^check out$/i)).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByText(notReservedReason)).toBeTruthy();
+  });
+
+  it("disables Check out with the explicit-mode reason when the workspace requires it for the viewer", () => {
+    setup({
+      roles: [OrganizationRoles.ADMIN],
+      bookings: [{ id: "b1", status: BookingStatus.RESERVED }],
+      settings: { ...NO_EXPLICIT_SCAN, requireExplicitCheckoutForAdmin: true },
+    });
+
+    expect(item(/^check out$/i)).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByText(/requires explicit check-out/i)).toBeTruthy();
+  });
+
+  it("disables Check out with the permission reason for a BASE viewer", () => {
+    setup({
+      roles: [OrganizationRoles.BASE],
+      bookings: [{ id: "b1", status: BookingStatus.RESERVED }],
+    });
+
+    expect(item(/^check out$/i)).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByText(/permission to check out bookings/i)).toBeTruthy();
+  });
+});
+
+describe("BulkActionsDropdown: bulk Check in", () => {
+  const notInProgressReason = /only check in ongoing or overdue bookings/i;
+
+  it("enables Check in for an ONGOING and OVERDUE selection", () => {
+    setup({
+      roles: [OrganizationRoles.ADMIN],
+      bookings: [
+        { id: "b1", status: BookingStatus.ONGOING },
+        { id: "b2", status: BookingStatus.OVERDUE },
+      ],
+    });
+
+    expect(item(/^check in$/i)).toBeEnabled();
+    expect(screen.queryByText(notInProgressReason)).toBeNull();
+  });
+
+  it("disables Check in with the status reason when a draft is in the selection", () => {
+    setup({
+      roles: [OrganizationRoles.ADMIN],
+      bookings: [
+        { id: "b1", status: BookingStatus.ONGOING },
+        { id: "b2", status: BookingStatus.DRAFT },
+      ],
+    });
+
+    expect(item(/^check in$/i)).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByText(notInProgressReason)).toBeTruthy();
+  });
+
+  it("disables Check in with the explicit-mode reason when the workspace requires it for the viewer", () => {
+    setup({
+      roles: [OrganizationRoles.SELF_SERVICE],
+      bookings: [{ id: "b1", status: BookingStatus.ONGOING }],
+      settings: {
+        ...NO_EXPLICIT_SCAN,
+        requireExplicitCheckinForSelfService: true,
+      },
+    });
+
+    expect(item(/^check in$/i)).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByText(/requires explicit check-in/i)).toBeTruthy();
   });
 });

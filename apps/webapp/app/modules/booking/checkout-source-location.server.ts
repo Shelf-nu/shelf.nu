@@ -401,6 +401,57 @@ export async function getCheckoutSourceQuestions({
   return questions.sort((a, b) => a.title.localeCompare(b.title));
 }
 
+/**
+ * What a quick check-out that asked no "From location" question says when the
+ * booking has one to ask. The bookings list and the bulk check-out both send
+ * the operator to the booking page, where the dialog asks it.
+ */
+export const CHECKOUT_NEEDS_SOURCE_CHOICE_MESSAGE =
+  "This booking needs a from-location choice. Open the booking to check it out.";
+
+/**
+ * Refuses a check-out made from a surface that cannot ask the "From location"
+ * question when the booking has one to ask.
+ *
+ * The booking page's dialog renders one select per question, so a check-out
+ * from there has always had the chance to answer. A row on the bookings list
+ * has not: letting it through would send every multi-placed pool out from the
+ * default location without anyone choosing, so the row is refused instead and
+ * the operator opens the booking.
+ *
+ * @param args.organizationId - Scopes the read
+ * @param args.bookingId - The booking being checked out
+ * @throws {ShelfError} 400 when at least one pool still to go out sits at two
+ *   or more placements
+ */
+export async function assertNoCheckoutSourceQuestions({
+  organizationId,
+  bookingId,
+}: {
+  organizationId: string;
+  bookingId: string;
+}): Promise<void> {
+  const questions = await getCheckoutSourceQuestions({
+    organizationId,
+    bookingId,
+  });
+  if (questions.length === 0) return;
+
+  throw new ShelfError({
+    cause: null,
+    title: "Open the booking to check it out",
+    message: CHECKOUT_NEEDS_SOURCE_CHOICE_MESSAGE,
+    additionalData: {
+      organizationId,
+      bookingId,
+      sliceIds: questions.map((question) => question.sliceId),
+    },
+    label,
+    status: 400,
+    shouldBeCaptured: false,
+  });
+}
+
 /** A slice's recorded source, as the booking surfaces print it. */
 export type SliceSourceLocation = { id: string; name: string };
 

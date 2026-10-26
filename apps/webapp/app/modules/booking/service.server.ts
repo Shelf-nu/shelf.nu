@@ -15885,7 +15885,7 @@ async function getBookingsListWhere({
  * @param params.action - Verb for the refusal message ("delete", "archive", ...)
  * @throws {ShelfError} 403 when the list holds bookings outside the caller's ownership scope
  */
-async function assertSelectAllWithinOwnership({
+export async function assertSelectAllWithinOwnership({
   bookingIds,
   matchedCount,
   organizationId,

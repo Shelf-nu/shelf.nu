@@ -372,6 +372,8 @@ export default function BookingsIndexPage({
               <Th>Tags</Th>
               <Th>Custodian</Th>
               <Th>Created by</Th>
+              {/* Row check-out / check-in buttons, see ListRowCheckInOut */}
+              <Th />
             </>
           }
           headerExtraContent={

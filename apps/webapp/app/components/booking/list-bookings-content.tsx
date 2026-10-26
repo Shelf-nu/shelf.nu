@@ -24,6 +24,7 @@ import { resolveUserDisplayName } from "~/utils/user";
 import { AvailabilityBadge } from "./availability-label";
 import { BookingAssetsSidebar } from "./booking-assets-sidebar";
 import { BookingStatusBadge } from "./booking-status-badge";
+import { ListRowCheckInOut } from "./list-row-check-in-out";
 import { UnassignedModelUnitsPill } from "./unassigned-model-units-pill";
 import LineBreakText from "../layout/line-break-text";
 import ItemsWithViewMore from "../list/items-with-view-more";
@@ -137,6 +138,12 @@ type ListBookingsContentProps = {
      * `~/modules/booking/list-flags.server`.
      */
     hasUnavailableAssets?: boolean;
+    /**
+     * Set by the same decorator: true while a slice of this booking is still
+     * in the Booked bucket (no `checkedOutAt`). Decides whether an ONGOING or
+     * OVERDUE row offers "Check out remaining".
+     */
+    hasItemsToCheckOut?: boolean;
   };
 };
 
@@ -275,6 +282,11 @@ export default function ListBookingsContent({
       {/* Created by */}
       <Td>
         <UserBadge user={item?.creator} />
+      </Td>
+
+      {/* Check out / Check in, by status and the viewer's reach */}
+      <Td className="text-right">
+        <ListRowCheckInOut booking={item} />
       </Td>
     </>
   );

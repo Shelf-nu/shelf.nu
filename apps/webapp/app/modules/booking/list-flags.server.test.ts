@@ -19,6 +19,7 @@ import type { Prisma } from "@prisma/client";
 
 import { db } from "~/database/db.server";
 import {
+  getBookingIdsWithItemsToCheckOut,
   decorateBookingsForList,
   getBookingIdsWithUnavailableAssets,
 } from "./list-flags.server";
@@ -246,14 +247,76 @@ describe("getBookingIdsWithUnavailableAssets — scoping", () => {
   });
 });
 
+/**
+ * The row's "Check out remaining" button is offered only while a slice is
+ * still in the Booked bucket. The rule is a Prisma `where`, so the test reads
+ * the argument the module hands the client.
+ */
+describe("getBookingIdsWithItemsToCheckOut", () => {
+  it("asks for live bookings with a slice that has no checkedOutAt stamp", async () => {
+    findManyMock.mockResolvedValue([{ id: "booking-1" }]);
+
+    const flagged = await getBookingIdsWithItemsToCheckOut({
+      bookingIds: ["booking-1", "booking-2"],
+      organizationId: ORG_ID,
+    });
+
+    expect(flagged).toEqual(new Set(["booking-1"]));
+    const [{ where }] = findManyMock.mock.calls[0] as [
+      { where: Record<string, unknown> },
+    ];
+    expect(where).toMatchObject({
+      id: { in: ["booking-1", "booking-2"] },
+      organizationId: ORG_ID,
+      status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
+      bookingAssets: { some: { checkedOutAt: null } },
+    });
+  });
+
+  it("skips the query for an empty page", async () => {
+    const flagged = await getBookingIdsWithItemsToCheckOut({
+      bookingIds: [],
+      organizationId: ORG_ID,
+    });
+
+    expect(flagged.size).toBe(0);
+    expect(findManyMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("decorateBookingsForList", () => {
   const BOOKINGS = [
     { id: "booking-1", status: "RESERVED", from: null, to: null },
     { id: "booking-2", status: "RESERVED", from: null, to: null },
   ] as unknown as Parameters<typeof decorateBookingsForList>[0]["bookings"];
 
-  it("attaches both flags, preserving the row's own fields", async () => {
-    findManyMock.mockResolvedValue([{ id: "booking-2" }]);
+  /**
+   * The two lookups share `db.booking.findMany`; tell them apart by the
+   * predicate each one sends.
+   */
+  function answerLookups({
+    unavailable,
+    itemsToCheckOut,
+  }: {
+    unavailable: string[];
+    itemsToCheckOut: string[];
+  }) {
+    findManyMock.mockImplementation(
+      ({ where }: { where: { bookingAssets: { some: unknown } } }) => {
+        const asksForBooked =
+          "checkedOutAt" in (where.bookingAssets.some as object);
+        return Promise.resolve(
+          (asksForBooked ? itemsToCheckOut : unavailable).map((id) => ({ id }))
+        );
+      }
+    );
+  }
+
+  it("attaches all three flags, preserving the row's own fields", async () => {
+    answerLookups({
+      unavailable: ["booking-2"],
+      itemsToCheckOut: ["booking-1"],
+    });
 
     const rows = await decorateBookingsForList({
       bookings: BOOKINGS,
@@ -266,17 +329,19 @@ describe("decorateBookingsForList", () => {
         status: "RESERVED",
         hasStockConflict: false,
         hasUnavailableAssets: false,
+        hasItemsToCheckOut: true,
       }),
       expect.objectContaining({
         id: "booking-2",
         hasStockConflict: false,
         hasUnavailableAssets: true,
+        hasItemsToCheckOut: false,
       }),
     ]);
   });
 
-  it("renders the list unflagged rather than throwing when the lookup fails", async () => {
-    // A decorative badge must never 500 a bookings list.
+  it("renders the list unflagged rather than throwing when a lookup fails", async () => {
+    // A decorative flag must never 500 a bookings list.
     findManyMock.mockRejectedValue(new Error("connection lost"));
 
     const rows = await decorateBookingsForList({
@@ -285,5 +350,6 @@ describe("decorateBookingsForList", () => {
     });
 
     expect(rows.map((row) => row.hasUnavailableAssets)).toEqual([false, false]);
+    expect(rows.map((row) => row.hasItemsToCheckOut)).toEqual([false, false]);
   });
 });
