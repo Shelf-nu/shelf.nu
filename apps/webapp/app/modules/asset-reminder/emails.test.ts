@@ -82,7 +82,7 @@ describe("recurrenceLine", () => {
         "ended"
       )
     ).toBe(
-      "This was the last occurrence of this recurring reminder (end date reached)."
+      "This was the last occurrence of this recurring reminder: the next one would fall after its end date."
     );
   });
 

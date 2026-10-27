@@ -49,10 +49,12 @@ const REPEAT_DESCRIPTIONS: Record<ReminderRepeatValue, string> = {
   daily: "Every day at the reminder's time",
   weekly: "Every week on the same weekday",
   biweekly: "Every other week on the same weekday",
-  monthly: "Every month on the same day",
-  quarterly: "Every 3 months on the same day",
-  semiannually: "Every 6 months on the same day",
-  yearly: "Every year on the same date",
+  monthly: "Every month on the same day (the 29th to 31st can move earlier)",
+  quarterly:
+    "Every 3 months on the same day (the 29th to 31st can move earlier)",
+  semiannually:
+    "Every 6 months on the same day (the 29th to 31st can move earlier)",
+  yearly: "Every year on the same date (Feb 29 moves to Feb 28)",
 };
 
 /** Builds the Repeat option for one cadence. */

@@ -308,7 +308,7 @@ describe("REMINDER worker handler", () => {
     expect(sendEmail).toHaveBeenCalledTimes(1);
   });
 
-  it("notes the final occurrence when the series ends (end date reached)", async () => {
+  it("notes the final occurrence when the next one would fall after the end date", async () => {
     asMock(advanceRecurringReminder).mockResolvedValue({
       next: null,
       advanced: false,

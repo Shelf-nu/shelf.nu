@@ -42,7 +42,7 @@ export type SeriesStopReason = "ended" | "paused";
  */
 export const SERIES_STOP_MESSAGES: Record<SeriesStopReason, string> = {
   ended:
-    "This was the last occurrence of this recurring reminder (end date reached).",
+    "This was the last occurrence of this recurring reminder: the next one would fall after its end date.",
   paused:
     "Later occurrences of this recurring reminder will not be sent until the workspace plan includes recurring reminders again.",
 };
