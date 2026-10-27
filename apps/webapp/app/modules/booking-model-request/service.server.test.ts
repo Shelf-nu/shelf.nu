@@ -4052,6 +4052,23 @@ describe("assertModelUnitsNotReservedElsewhere", () => {
     );
   });
 
+  it("keeps other bookings' ids and names out of the error payload", async () => {
+    expect.assertions(3);
+    // The HTTP layer serialises `additionalData` for any role. A user who may
+    // only see their own bookings reads the name in the message, never a
+    // structured list of other people's booking ids.
+    stagePool({ total: 3, inCustody: 1, requestedElsewhere: 2 });
+
+    const error = await guard([NEW_UNIT]).catch((cause) => cause);
+
+    const shortfall = error.additionalData.shortfalls[0];
+    expect(JSON.stringify(error.additionalData)).not.toContain(
+      OTHER_BOOKING.id
+    );
+    expect(shortfall.availability.peak).toBeUndefined();
+    expect(shortfall.availability.peakAt).toEqual(from);
+  });
+
   it("names custody and units booked by name elsewhere when they shrink the pool", async () => {
     expect.assertions(2);
     // Three units: one in custody, one booked by name on another booking,

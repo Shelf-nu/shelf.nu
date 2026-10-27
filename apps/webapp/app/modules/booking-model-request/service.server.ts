@@ -736,6 +736,18 @@ function describePoolDeductions(availability: AssetModelAvailability): string {
     .join(", ");
 }
 
+/**
+ * The pool numbers a refusal may carry in its `additionalData`, which the
+ * HTTP layer serialises into the response body for any role. The bookings
+ * holding reservations at the peak are named in the message for the operator
+ * to act on; their ids never leave the server, because a user who may only
+ * see their own bookings must not be able to enumerate other people's.
+ */
+function availabilityForErrorData(availability: AssetModelAvailability) {
+  const { peak, ...numbers } = availability;
+  return { ...numbers, peakAt: peak.at };
+}
+
 /* -------------------------------------------------------------------------- */
 /*                    assertModelUnitsNotReservedElsewhere                    */
 /* -------------------------------------------------------------------------- */
@@ -1220,7 +1232,13 @@ export async function assertModelUnitsNotReservedElsewhere({
     message: `Some assets cannot be booked for these dates:\n${lines.join(
       "\n"
     )}\nChange the dates, or free a unit of that model: assign a specific unit to the reservation named above, or remove a unit from one of those bookings.`,
-    additionalData: { bookingId, shortfalls },
+    additionalData: {
+      bookingId,
+      shortfalls: shortfalls.map(({ availability, ...claim }) => ({
+        ...claim,
+        availability: availabilityForErrorData(availability),
+      })),
+    },
   });
 }
 
@@ -1721,7 +1739,13 @@ export async function assertOutstandingModelRequestsFit({
     message: `Cannot ${action}. Some model reservations no longer fit:\n${lines.join(
       "\n"
     )}\nReduce them, or change the dates.`,
-    additionalData: { bookingId, shortfalls },
+    additionalData: {
+      bookingId,
+      shortfalls: shortfalls.map(({ availability, ...fit }) => ({
+        ...fit,
+        availability: availabilityForErrorData(availability),
+      })),
+    },
   });
 }
 
