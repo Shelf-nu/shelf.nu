@@ -13,8 +13,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { loader } from "~/routes/_layout+/locations.$locationId";
 
-// why: the loader reaches Prisma and the permission resolver; stubbing at the
-// module boundary keeps this a unit test of what the loader asks getLocation for.
+// why: the location service runs Prisma queries; stubbing it keeps this a unit
+// test of what the loader asks getLocation for.
 vi.mock("~/modules/location/service.server", () => ({
   assertLocationDeleteConfirmed: vi.fn(),
   deleteLocation: vi.fn(),
@@ -22,6 +22,7 @@ vi.mock("~/modules/location/service.server", () => ({
   getLocationDescendantsTree: vi.fn(),
   getLocationHierarchy: vi.fn(),
 }));
+// why: the permission resolver needs a session and a database.
 vi.mock("~/utils/roles.server", () => ({
   requirePermission: vi.fn(),
 }));
