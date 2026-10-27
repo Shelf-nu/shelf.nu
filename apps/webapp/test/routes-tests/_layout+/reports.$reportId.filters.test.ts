@@ -20,6 +20,7 @@ import {
   bookingComplianceReport,
   custodySnapshotReport,
   overdueItemsReport,
+  topBookedKitsReport,
 } from "~/modules/reports/helpers.server";
 import { loader } from "~/routes/_layout+/reports.$reportId";
 
@@ -84,6 +85,7 @@ vi.mock("~/modules/reports/helpers.server", async () => {
     overdueItemsReport: vi.fn(),
     custodySnapshotReport: vi.fn(),
     assetActivityReport: vi.fn(),
+    topBookedKitsReport: vi.fn(),
   };
 });
 
@@ -146,6 +148,7 @@ beforeEach(() => {
     overdueItemsReport,
     custodySnapshotReport,
     assetActivityReport,
+    topBookedKitsReport,
   ]) {
     vi.mocked(report).mockResolvedValue(EMPTY_REPORT as never);
   }
@@ -187,6 +190,21 @@ describe("report page loader: resolved filters", () => {
 
     expect(assetActivityReport).toHaveBeenCalledWith(
       expect.objectContaining({ assetId: "asset-1", assetFilter: ASSET_FILTER })
+    );
+  });
+
+  it("hands Top Booked Kits the category and location as a kit filter", async () => {
+    vi.mocked(resolveReportFilters).mockResolvedValue({
+      ...RESOLVED,
+      params: { ...RESOLVED.params, locationIds: ["loc-1"] },
+    });
+
+    await load("top-booked-kits");
+
+    expect(topBookedKitsReport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kitFilter: { categoryIds: ["cat-1"], locationIds: ["loc-1"] },
+      })
     );
   });
 
