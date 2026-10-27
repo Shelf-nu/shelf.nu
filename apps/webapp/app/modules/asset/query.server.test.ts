@@ -89,8 +89,8 @@ describe("parseSortingOptions", () => {
     });
 
     // Regression test using the exact PoC shape from the GHSA-69xv-wmgg-3qp3
-    // report. The split(":") only takes the first colon, so the entire
-    // "asc,(SELECT ...)" string lands in `direction` and must be rejected.
+    // report. The spec has one colon, so the entire "asc,(SELECT ...)"
+    // string lands in `direction` and must be rejected.
     it("rejects the reporter's exact PoC subquery payload", () => {
       expect(() =>
         parseSortingOptions([
@@ -157,53 +157,136 @@ describe("parseSortingOptions", () => {
   });
 
   describe("custom field (cf_*) validation", () => {
-    it("permits a simple custom field name", () => {
+    it("sorts by a simple custom field name", () => {
       const { orderByClause, customFieldSortings } = parseSortingOptions([
         "cf_Manufacturer:asc:TEXT",
       ]);
-      expect(customFieldSortings).toHaveLength(1);
-      expect(customFieldSortings[0].alias).toBe("cf_Manufacturer");
-      expect(orderByClause).toContain("cf_Manufacturer");
-    });
-
-    it("normalizes whitespace in custom field name to underscores", () => {
-      const { customFieldSortings } = parseSortingOptions([
-        "cf_legit name:asc:TEXT",
+      expect(customFieldSortings).toEqual([
+        {
+          name: "Manufacturer",
+          valueKey: "raw",
+          alias: "cf_sort_0",
+          fieldType: "TEXT",
+        },
       ]);
-      expect(customFieldSortings).toHaveLength(1);
-      expect(customFieldSortings[0].alias).toBe("cf_legit_name");
+      expect(orderByClause).toContain("cf_sort_0");
     });
 
-    it("drops a custom field name containing injection chars", () => {
+    it.each([
+      ["Weight (kg)", "NUMBER"],
+      ["S/N", "TEXT"],
+      ["Cost (USD)", "AMOUNT"],
+      ["Kaufdatum", "DATE"],
+      ["legit name", "TEXT"],
+    ])(
+      "sorts by the custom field %s whatever characters its name holds",
+      (name, type) => {
+        const { orderByClause, customFieldSortings } = parseSortingOptions([
+          `cf_${name}:desc:${type}`,
+        ]);
+        expect(customFieldSortings).toHaveLength(1);
+        // The name travels as data for the bound parameter, unchanged.
+        expect(customFieldSortings[0].name).toBe(name);
+        expect(customFieldSortings[0].alias).toBe("cf_sort_0");
+        expect(orderByClause).not.toBe(DEFAULT_FALLBACK_ORDER_BY);
+        expect(orderByClause).toContain("cf_sort_0");
+        expect(orderByClause).not.toContain(name);
+      }
+    );
+
+    it("keeps an injection attempt out of the SQL text", () => {
       const { orderByClause, customFieldSortings } = parseSortingOptions([
         "cf_x;DROP TABLE:asc:TEXT",
       ]);
-      expect(customFieldSortings).toHaveLength(0);
-      expect(orderByClause).toBe(DEFAULT_FALLBACK_ORDER_BY);
+      // Sorting on a field with that literal name is harmless: the name is
+      // only ever a bound parameter, and the alias is fixed.
+      expect(customFieldSortings[0]).toMatchObject({
+        name: "x;DROP TABLE",
+        alias: "cf_sort_0",
+      });
       expect(orderByClause).not.toContain("DROP");
     });
 
-    it("drops a custom field name containing parentheses", () => {
+    it.each([
+      ["cf_Ratio: target:asc:NUMBER", "Ratio: target", "NUMBER"],
+      ["cf_Ratio: target:desc", "Ratio: target", undefined],
+      ["cf_a:b:c:asc:TEXT", "a:b:c", "TEXT"],
+    ])(
+      "keeps the colons of a custom field name in %s",
+      (spec, name, fieldType) => {
+        const { customFieldSortings } = parseSortingOptions([spec]);
+        expect(customFieldSortings).toEqual([
+          { name, valueKey: "raw", alias: "cf_sort_0", fieldType },
+        ]);
+      }
+    );
+
+    it("gives each custom field sort its own alias", () => {
       const { orderByClause, customFieldSortings } = parseSortingOptions([
-        "cf_Cost (USD):asc:AMOUNT",
+        "cf_S/N:asc:TEXT",
+        "name:asc",
+        "cf_Weight (kg):desc:NUMBER",
+      ]);
+      expect(customFieldSortings.map((cf) => cf.alias)).toEqual([
+        "cf_sort_0",
+        "cf_sort_1",
+      ]);
+      expect(orderByClause.indexOf("cf_sort_0")).toBeLessThan(
+        orderByClause.indexOf("cf_sort_1")
+      );
+    });
+
+    it("skips a custom field sort with no name", () => {
+      const { orderByClause, customFieldSortings } = parseSortingOptions([
+        "cf_:asc:TEXT",
       ]);
       expect(customFieldSortings).toHaveLength(0);
       expect(orderByClause).toBe(DEFAULT_FALLBACK_ORDER_BY);
     });
 
-    it("uses direct sort for DATE fields", () => {
+    it("uses direct sort for DATE fields, empty values last", () => {
       const { orderByClause } = parseSortingOptions(["cf_x:asc:DATE"]);
-      expect(orderByClause).toBe('ORDER BY cf_x asc, "assetId" ASC');
+      expect(orderByClause).toBe(
+        'ORDER BY cf_sort_0 asc NULLS LAST, "assetId" ASC'
+      );
     });
 
-    it("uses ::numeric cast for AMOUNT fields", () => {
-      const { orderByClause } = parseSortingOptions(["cf_x:asc:AMOUNT"]);
-      expect(orderByClause).toBe('ORDER BY cf_x::numeric asc, "assetId" ASC');
+    it.each(["AMOUNT", "NUMBER"])(
+      "sorts %s fields as numbers through a guarded cast",
+      (type) => {
+        const { orderByClause } = parseSortingOptions([`cf_x:desc:${type}`]);
+        expect(orderByClause).toBe(
+          `ORDER BY (CASE WHEN cf_sort_0 ~ '^\\s*[-+]?([0-9]+(\\.[0-9]*)?|\\.[0-9]+)\\s*$' THEN cf_sort_0::numeric END) desc NULLS LAST, "assetId" ASC`
+        );
+      }
+    );
+
+    it.each([
+      ["name:asc:TEXT", "assetTitle"],
+      ["cf_a:b:asc", "cf_sort_0"],
+    ])("reads direction and type from the end of %s", (spec, column) => {
+      const { orderByClause } = parseSortingOptions([spec]);
+      expect(orderByClause).toContain(column);
+    });
+
+    it("keeps a trailing colon segment in the name when there is no type", () => {
+      const { customFieldSortings } = parseSortingOptions(["cf_a:b:asc"]);
+      expect(customFieldSortings[0]).toMatchObject({
+        name: "a:b",
+        fieldType: undefined,
+      });
+    });
+
+    it("rejects an invalid direction after a custom field name", () => {
+      expect(() => parseSortingOptions(["cf_x:bogus"])).toThrow(ShelfError);
     });
 
     it("falls through to natural sort for unknown fieldType", () => {
       const { orderByClause } = parseSortingOptions(["cf_x:asc:bogusType"]);
-      expect(orderByClause).toContain("LOWER(regexp_replace(cf_x");
+      expect(orderByClause).toContain(
+        "LOWER(regexp_replace(NULLIF(cf_sort_0, '')"
+      );
+      expect(orderByClause).toContain("NULLIF(cf_sort_0, '') asc NULLS LAST");
     });
   });
 
@@ -211,7 +294,7 @@ describe("parseSortingOptions", () => {
     it("emits valid terms while skipping invalid ones in the same array", () => {
       const { orderByClause, customFieldSortings } = parseSortingOptions([
         "updatedAt:desc",
-        "cf_x;DROP:asc:TEXT",
+        "barcode_x;DROP:asc",
         "name:asc",
       ]);
       expect(customFieldSortings).toHaveLength(0);
@@ -311,10 +394,30 @@ describe("generateCustomFieldSelect", () => {
 
   it("emits a SELECT subquery for a safe alias", () => {
     const result = generateCustomFieldSelect([
-      { name: "Manufacturer", valueKey: "raw", alias: "cf_Manufacturer" },
+      { name: "Manufacturer", valueKey: "raw", alias: "cf_sort_0" },
     ]);
     expect(result.strings.join("?")).toContain("AS ");
-    expect(result.strings.join("?")).toContain("cf_Manufacturer");
+    expect(result.strings.join("?")).toContain("cf_sort_0");
+  });
+
+  it("selects under the alias the ORDER BY sorts on, with the name bound", () => {
+    const { orderByClause, customFieldSortings } = parseSortingOptions([
+      "cf_Weight (kg):desc:NUMBER",
+    ]);
+    const result = generateCustomFieldSelect(customFieldSortings);
+    const sqlText = result.strings.join("?");
+
+    expect(sqlText).toContain("AS cf_sort_0");
+    expect(orderByClause).toContain("cf_sort_0");
+    expect(sqlText).not.toContain("Weight (kg)");
+    expect(result.values).toContain("Weight (kg)");
+  });
+
+  it("reads values only from custom fields that are not deleted", () => {
+    const result = generateCustomFieldSelect([
+      { name: "S/N", valueKey: "raw", alias: "cf_sort_0" },
+    ]);
+    expect(result.strings.join("?")).toContain('cf."deletedAt" IS NULL');
   });
 
   // Defense-in-depth: even though parseSortingOptions already validates
