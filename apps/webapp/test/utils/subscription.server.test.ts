@@ -266,3 +266,100 @@ describe("workspaceCanUseReports and assertUserCanUseReports", () => {
     expect(getOrganizationTierLimitMock).not.toHaveBeenCalled();
   });
 });
+
+describe("canUseRecurringReminders", () => {
+  it("returns true when premium features are disabled, whatever the tier says", async () => {
+    const { canUseRecurringReminders } = await loadSubscriptionModule(false);
+
+    expect(canUseRecurringReminders({ canUseRecurringReminders: false })).toBe(
+      true
+    );
+    expect(canUseRecurringReminders(null)).toBe(true);
+  });
+
+  it("returns false when premium is enabled but the tier limit is missing", async () => {
+    const { canUseRecurringReminders } = await loadSubscriptionModule(true);
+
+    expect(canUseRecurringReminders(null)).toBe(false);
+    expect(canUseRecurringReminders(undefined)).toBe(false);
+  });
+
+  it("follows the tier flag when premium is enabled", async () => {
+    const { canUseRecurringReminders } = await loadSubscriptionModule(true);
+
+    expect(canUseRecurringReminders({ canUseRecurringReminders: false })).toBe(
+      false
+    );
+    expect(canUseRecurringReminders({ canUseRecurringReminders: true })).toBe(
+      true
+    );
+  });
+});
+
+describe("assertUserCanUseRecurringReminders", () => {
+  const args = {
+    organizationId: "org-1",
+    organizations: [
+      {
+        id: "org-1",
+        type: "TEAM" as const,
+        name: "Team",
+        imageId: null,
+        userId: "owner-1",
+      },
+    ],
+  };
+
+  it("reads the workspace's plan through the owner's tier lookup", async () => {
+    const { assertUserCanUseRecurringReminders } =
+      await loadSubscriptionModule(true);
+    getOrganizationTierLimitMock.mockResolvedValue({
+      canUseRecurringReminders: true,
+    });
+
+    await expect(
+      assertUserCanUseRecurringReminders(args)
+    ).resolves.toBeUndefined();
+    expect(getOrganizationTierLimitMock).toHaveBeenCalledWith(args);
+  });
+
+  it("refuses a plan without recurring reminders with an uncaptured 403", async () => {
+    const { assertUserCanUseRecurringReminders } =
+      await loadSubscriptionModule(true);
+    getOrganizationTierLimitMock.mockResolvedValue({
+      canUseRecurringReminders: false,
+    });
+
+    const refusal = await assertUserCanUseRecurringReminders(args).catch(
+      (cause: unknown) => cause
+    );
+
+    expect(refusal).toMatchObject({
+      status: 403,
+      title: "Not allowed",
+      shouldBeCaptured: false,
+    });
+  });
+
+  it("refuses when the tier limit cannot be resolved", async () => {
+    const { assertUserCanUseRecurringReminders } =
+      await loadSubscriptionModule(true);
+    getOrganizationTierLimitMock.mockResolvedValue(null);
+
+    await expect(
+      assertUserCanUseRecurringReminders(args)
+    ).rejects.toMatchObject({ status: 403 });
+  });
+
+  it("lets every workspace through when premium features are disabled", async () => {
+    const { assertUserCanUseRecurringReminders } =
+      await loadSubscriptionModule(false);
+    getOrganizationTierLimitMock.mockResolvedValue({
+      canUseRecurringReminders: false,
+    });
+
+    await expect(
+      assertUserCanUseRecurringReminders(args)
+    ).resolves.toBeUndefined();
+  });
+});

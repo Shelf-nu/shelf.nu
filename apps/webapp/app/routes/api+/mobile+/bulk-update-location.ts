@@ -9,6 +9,7 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { mobileBulkIdsSchema } from "~/modules/api/mobile-bulk-ids.server";
 import { resolveLastAuditDateAccess } from "~/modules/asset/last-audit-date-access";
+import { resolveBookableListScope } from "~/modules/asset/list-scope.server";
 import { bulkUpdateAssetLocation } from "~/modules/asset/service.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -96,6 +97,7 @@ export async function action({ request }: ActionFunctionArgs) {
         seeAllAudits: access.audits.seeAll,
         auditsUsable: canUseAudits,
       }),
+      bookableScope: resolveBookableListScope({ access, userId: user.id }),
     });
 
     return data({ success: true });

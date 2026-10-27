@@ -145,6 +145,18 @@ describe("bulk release custody as SELF_SERVICE", () => {
     expect(bulkCheckInAssets).toHaveBeenCalledOnce();
   });
 
+  it("resolves a select-all within the caller's own list scope", async () => {
+    await submit(["asset-individual"]);
+
+    // A bookable-only list shows the caller's own holdings plus bookable
+    // assets, so select-all must carry the caller as the holder.
+    expect(bulkCheckInAssets).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookableScope: { holderUserId: "user-self" },
+      })
+    );
+  });
+
   it("does not judge quantity-tracked custody, which the release skips", async () => {
     await submit(["asset-individual", "asset-qt"]);
 

@@ -22,6 +22,7 @@ import {
   buildKitSlicesForBooking,
   countArchivedKitMembers,
 } from "~/modules/booking/service.server";
+import { getClientHint } from "~/utils/client-hints";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertAssetsBelongToOrg } from "~/utils/org-validation.server";
 import {
@@ -411,6 +412,9 @@ export async function action({ request }: ActionFunctionArgs) {
       quantities,
       // Re-checks the add rule against the locked status inside the write.
       access,
+      // Locale from Accept-Language; the guard reads the user's own date
+      // preferences (by `userId`) for the day a pool refusal names.
+      hints: getClientHint(request),
       inSameTransaction: async (tx) => {
         appliedResizes = await setStandaloneBookedQuantitiesWithinTx(tx, {
           bookingId,

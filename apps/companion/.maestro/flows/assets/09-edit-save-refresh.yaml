@@ -1,0 +1,145 @@
+appId: com.shelf.companion.carlos
+name: "Assets - Edit, Save, Cancel"
+tags:
+  - assets
+
+---
+# Test: the asset edit form's exits.
+#   1. Save, then OK on "Updated": back on the detail screen with no
+#      "Discard Changes?" prompt, showing the saved title; the assets list
+#      shows it too.
+#   2. Cancel after an edit: exactly one "Discard Changes?" prompt.
+#   3. Save again to remove the marker, leaving the asset as it was.
+# Uses SHELF_TEST_ASSET_ID and appends " e2e" to its title for the run. That
+# asset must be savable from the phone as it stands: every required custom
+# field filled and a title of at most 95 characters: the field caps at 100,
+# the run appends " e2e", and step 2 types one more character on top of it.
+# Otherwise Save stops on a validation alert and the flow fails at "Updated",
+# or the step 2 keystroke is dropped and no "Discard Changes?" prompt appears.
+#
+# Every title tap lands at the right edge of the field (point 97%,50%): a tap
+# in the middle of the text puts the cursor at the nearest word, and the erase
+# in step 3 would then remove the wrong characters. The field's text is read
+# back before each save (screen-wide text checks also see the header and the
+# back button, which still carry the saved title), so a misplaced cursor
+# fails the run instead of saving a damaged title. The marker is typed with
+# no trailing space so iOS autocorrect never rewrites it.
+
+- runFlow: ../../shared/login.yaml
+
+# Use tapOn to force a11y tree refresh after runFlow
+- tapOn:
+    text: "Quick Actions"
+
+# Load the assets list first, so step 1 can check it refreshes after the save.
+- tapOn:
+    text: "Assets"
+    index: 1
+- extendedWaitUntil:
+    visible: "Filter: All.*"
+    timeout: 8000
+
+- openLink: "shelf://assets/${SHELF_TEST_ASSET_ID}"
+- extendedWaitUntil:
+    visible: "Edit asset"
+    timeout: 20000
+
+# ── 1. Save, then leave ──
+- tapOn: "Edit asset"
+- extendedWaitUntil:
+    visible: "Cancel editing"
+    timeout: 15000
+# Save stays disabled until the custom fields load; wait for it before editing.
+- extendedWaitUntil:
+    visible:
+      text: "Save changes"
+      enabled: true
+    timeout: 15000
+- copyTextFrom: "Title, required"
+- evalScript: ${output.originalTitle = maestro.copiedText}
+# A run that stopped before step 3 leaves the marker on the title. Fail here,
+# so the asset gets cleaned by hand instead of collecting a second marker.
+- assertTrue: ${!output.originalTitle.endsWith(' e2e')}
+# Room for the marker and step 2's extra character (see the header).
+- assertTrue: ${output.originalTitle.length <= 95}
+- runScript: 09-edit-title-patterns.js
+- tapOn:
+    text: "Title, required"
+    point: "97%,50%"
+- inputText: " e2e"
+- copyTextFrom: "Title, required"
+- assertTrue: ${maestro.copiedText == output.originalTitle + ' e2e'}
+- tapOn: "Save changes"
+- extendedWaitUntil:
+    visible: "Updated"
+    timeout: 20000
+- tapOn: "OK"
+- extendedWaitUntil:
+    visible: "Edit asset"
+    timeout: 15000
+- assertNotVisible: "Discard Changes?"
+# The detail screen shows the saved title, not the one it loaded first.
+- assertVisible: ${output.savedTitlePattern}
+- takeScreenshot: assets-edit-saved-detail-refreshed
+# The assets list, loaded before the edit, shows the saved title too.
+- tapOn: "Assets"
+- extendedWaitUntil:
+    visible: ${'.*' + output.savedTitlePattern + '.*'}
+    timeout: 8000
+- takeScreenshot: assets-edit-saved-list-refreshed
+- openLink: "shelf://assets/${SHELF_TEST_ASSET_ID}"
+- extendedWaitUntil:
+    visible: "Edit asset"
+    timeout: 20000
+
+# ── 2. Cancel after an edit asks once ──
+- tapOn: "Edit asset"
+- extendedWaitUntil:
+    visible: "Cancel editing"
+    timeout: 15000
+- tapOn:
+    text: "Title, required"
+    point: "97%,50%"
+- inputText: "x"
+- tapOn: "Cancel editing"
+- extendedWaitUntil:
+    visible: "Discard Changes?"
+    timeout: 5000
+- tapOn: "Discard"
+- extendedWaitUntil:
+    visible: "Edit asset"
+    timeout: 15000
+- assertNotVisible: "Discard Changes?"
+# The discarded "x" never reached the server.
+- assertVisible: ${output.savedTitlePattern}
+- takeScreenshot: assets-edit-cancel-single-prompt
+
+# ── 3. Remove the marker ──
+- tapOn: "Edit asset"
+- extendedWaitUntil:
+    visible: "Cancel editing"
+    timeout: 15000
+# Save stays disabled until the custom fields load; wait for it before editing.
+- extendedWaitUntil:
+    visible:
+      text: "Save changes"
+      enabled: true
+    timeout: 15000
+- tapOn:
+    text: "Title, required"
+    point: "97%,50%"
+- eraseText: 4
+- copyTextFrom: "Title, required"
+- assertTrue: ${maestro.copiedText == output.originalTitle}
+- tapOn: "Save changes"
+- extendedWaitUntil:
+    visible: "Updated"
+    timeout: 20000
+- tapOn: "OK"
+- extendedWaitUntil:
+    visible: "Edit asset"
+    timeout: 15000
+- assertNotVisible: "Discard Changes?"
+- assertVisible: ${output.originalTitlePattern}
+- assertNotVisible: ${output.savedTitlePattern}
+- takeScreenshot: assets-edit-marker-removed

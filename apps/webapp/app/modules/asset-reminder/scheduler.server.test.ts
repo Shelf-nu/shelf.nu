@@ -10,7 +10,10 @@
  */
 import { db } from "~/database/db.server";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
-import { scheduleAssetReminder } from "./scheduler.server";
+import {
+  findUndeliveredReminderJobIds,
+  scheduleAssetReminder,
+} from "./scheduler.server";
 
 // @vitest-environment node
 
@@ -20,6 +23,7 @@ vi.mock("~/database/db.server", () => ({
     assetReminder: {
       update: vi.fn().mockResolvedValue({}),
     },
+    $queryRaw: vi.fn(),
   },
 }));
 
@@ -87,5 +91,36 @@ describe("scheduleAssetReminder", () => {
     ).rejects.toMatchObject({
       message: "Something went wrong while schedulng asset alert",
     });
+  });
+});
+
+describe("findUndeliveredReminderJobIds", () => {
+  const JOB = "c4d70d00-74c1-4251-99c1-c2ec46614023";
+
+  beforeEach(() => {
+    vi.mocked(db.$queryRaw).mockReset();
+  });
+
+  it("asks pg-boss's job table for live states only", async () => {
+    vi.mocked(db.$queryRaw).mockResolvedValue([{ id: JOB }] as never);
+
+    const live = await findUndeliveredReminderJobIds([JOB]);
+
+    expect(live).toEqual(new Set([JOB]));
+    const [strings, ids, states] = vi.mocked(db.$queryRaw).mock.calls[0] as [
+      TemplateStringsArray,
+      string[],
+      string[],
+    ];
+    expect(strings.join("?")).toContain("FROM pgboss.job");
+    expect(ids).toEqual([JOB]);
+    expect(states).toEqual(["created", "retry", "active"]);
+  });
+
+  it("skips the query when no id can be a pg-boss job", async () => {
+    expect(await findUndeliveredReminderJobIds(["not-a-uuid"])).toEqual(
+      new Set()
+    );
+    expect(db.$queryRaw).not.toHaveBeenCalled();
   });
 });
