@@ -16,9 +16,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // why: Mock the Prisma client so the unit tests never touch a real database.
 // Matches the pattern in `top-booked-kits.server.test.ts`. The rows and the
-// KPIs read assets via `db.asset.findMany`; the idle count and the KPIs'
-// whole-org denominator use `db.asset.count`. Fixtures carry no image URLs,
-// so `refreshExpiredAssetImages` never needs further db methods.
+// KPIs (whose total is also the row count) read assets via
+// `db.asset.findMany`; the KPIs' whole-org denominator uses `db.asset.count`.
+// Fixtures carry no image URLs, so `refreshExpiredAssetImages` never needs
+// further db methods.
 vi.mock("~/database/db.server", () => ({
   db: {
     asset: {
@@ -77,12 +78,10 @@ describe("idleAssetsReport", () => {
     ],
   };
 
-  /** The `where` of the idle count (the count call that is not org-wide). */
-  function idleCountWhere() {
-    const call = vi
-      .mocked(db.asset.count)
-      .mock.calls.find(([args]) => "AND" in (args?.where ?? {}));
-    return call?.[0]?.where;
+  /** The `where` of the rows read and of the KPI read, in that order. */
+  function idleReadWheres() {
+    const [rowsCall, kpiCall] = vi.mocked(db.asset.findMany).mock.calls;
+    return [rowsCall?.[0]?.where, kpiCall?.[0]?.where];
   }
 
   /** The booking predicate a query uses to find each asset's last use. */
@@ -118,7 +117,7 @@ describe("idleAssetsReport", () => {
     });
 
     // Threshold 30d puts the cutoff at 2026-07-27T12:00:00Z.
-    const where = idleCountWhere();
+    const [where] = idleReadWheres();
     expect(where?.AND).toContainEqual({
       NOT: {
         bookingAssets: {
@@ -145,7 +144,15 @@ describe("idleAssetsReport", () => {
   });
 
   it("pages, counts and totals the same idle assets", async () => {
-    vi.mocked(db.asset.count).mockResolvedValue(12);
+    // The KPI read answers every idle asset; its length is the row count.
+    vi.mocked(db.asset.findMany).mockImplementation(((args: {
+      take?: number;
+    }) =>
+      Promise.resolve(
+        args?.take === undefined
+          ? Array.from({ length: 12 }, (_, i) => idleAsset(`asset-${i}`, null))
+          : []
+      )) as any);
 
     const result = await idleAssetsReport({
       organizationId: "org-1",
@@ -154,33 +161,39 @@ describe("idleAssetsReport", () => {
       pageSize: 5,
     });
 
-    const [rowsCall, kpiCall] = vi.mocked(db.asset.findMany).mock.calls;
-    const rowsArgs = rowsCall[0];
+    const [rowsWhere, kpiWhere] = idleReadWheres();
+    const rowsArgs = vi.mocked(db.asset.findMany).mock.calls[0][0];
     // The page is cut from idle assets only, so it is full whenever the
     // count says more idle assets follow.
-    expect(rowsArgs?.where).toEqual(idleCountWhere());
+    expect(rowsWhere).toEqual(kpiWhere);
     expect(rowsArgs?.skip).toBe(10);
     expect(rowsArgs?.take).toBe(5);
-    expect(kpiCall[0]?.where).toEqual(idleCountWhere());
     expect(result.totalRows).toBe(12);
+    const totalIdle = result.kpis.find((k) => k.id === "total_idle");
+    expect(totalIdle?.rawValue).toBe(12);
   });
 
   it("returns every asset of the page the database answers", async () => {
+    // why: pinning `now` places the recent use after the 30-day cutoff.
+    vi.useFakeTimers().setSystemTime(new Date("2026-08-26T12:00:00Z"));
     vi.mocked(db.asset.findMany).mockResolvedValue([
       idleAsset("asset-stale", "2026-05-01T00:00:00Z"),
       idleAsset("asset-never", null),
+      // A use after the cutoff: the database predicate decides idleness, so
+      // the report keeps whatever rows the query answers.
+      idleAsset("asset-recent", "2026-08-20T00:00:00Z"),
     ] as any);
 
     const result = await idleAssetsReport({
       organizationId: "org-1",
       currency: "USD",
+      idleThresholdDays: 30,
     });
 
     expect(result.rows.map((r) => r.assetId)).toEqual([
       "asset-stale",
       "asset-never",
+      "asset-recent",
     ]);
-    const totalIdle = result.kpis.find((k) => k.id === "total_idle");
-    expect(totalIdle?.rawValue).toBe(2);
   });
 });

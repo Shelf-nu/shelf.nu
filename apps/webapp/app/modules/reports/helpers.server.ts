@@ -1651,7 +1651,9 @@ export async function idleAssetsReport(
 
     // Fetch data — `fetchIdleAssetRows` re-signs any expired thumbnail URLs
     // inline (see its body) so we don't need a separate refresh round-trip.
-    const [rows, totalCount, kpis] = await Promise.all([
+    // The KPI read already loads every idle asset, so its total doubles as
+    // the pager's row count.
+    const [rows, { kpis, totalIdle }] = await Promise.all([
       fetchIdleAssetRows(
         organizationId,
         assetWhere,
@@ -1659,7 +1661,6 @@ export async function idleAssetsReport(
         page,
         pageSize
       ),
-      countIdleAssets(organizationId, assetWhere, cutoffDate),
       computeIdleAssetsKpis(organizationId, assetWhere, cutoffDate, currency),
     ]);
 
@@ -1688,7 +1689,7 @@ export async function idleAssetsReport(
       kpis,
       rows,
       computedMs,
-      totalRows: totalCount,
+      totalRows: totalIdle,
       page,
       pageSize,
     };
@@ -1850,24 +1851,17 @@ async function fetchIdleAssetRows(
 }
 
 /**
- * Count total idle assets matching the criteria.
+ * Compute the Idle Assets KPIs over every idle asset (see `idleAssetWhere`).
+ *
+ * @returns The KPI cards, and `totalIdle`, the number of idle assets, which
+ *   the report also uses as its row count
  */
-async function countIdleAssets(
-  organizationId: string,
-  assetWhere: Prisma.AssetWhereInput,
-  cutoffDate: Date
-): Promise<number> {
-  return db.asset.count({
-    where: idleAssetWhere(organizationId, assetWhere, cutoffDate),
-  });
-}
-
 async function computeIdleAssetsKpis(
   organizationId: string,
   assetWhere: Prisma.AssetWhereInput,
   cutoffDate: Date,
   currency: Currency
-): Promise<ReportKpi[]> {
+): Promise<{ kpis: ReportKpi[]; totalIdle: number }> {
   const now = new Date();
 
   // Get total asset count for percentage.
@@ -1935,7 +1929,7 @@ async function computeIdleAssetsKpis(
         )
       : 0;
 
-  return [
+  const kpis: ReportKpi[] = [
     {
       id: "total_idle",
       label: "Idle Assets",
@@ -1990,6 +1984,8 @@ async function computeIdleAssetsKpis(
           : "positive",
     },
   ];
+
+  return { kpis, totalIdle };
 }
 
 // -----------------------------------------------------------------------------
