@@ -37,6 +37,7 @@ import {
 import { assertScannedUnitsAreNotKitMembers } from "~/modules/booking/kit-member-scan-guard.server";
 import {
   assertModelUnitsNotReservedElsewhere,
+  assertOutstandingModelRequestsFit,
   claimUnstampedBookingRows,
   fulfilModelRequestsForAssets,
   lockModelsForOutstandingRequests,
@@ -481,14 +482,16 @@ vitest.mock("~/modules/user/service.server", () => ({
 }));
 
 // why: quantity-lock relies on $queryRaw (FOR UPDATE) which the db mock
-// can't express cleanly — stub the helper to return a minimal asset
-// stub. Tests override the return per-asset as needed.
+// can't express cleanly. The single-asset lock resolves a minimal asset stub
+// (tests override the return per-asset as needed); the batch lock returns
+// nothing, so it resolves once every asset is locked.
 vitest.mock("~/modules/consumption-log/quantity-lock.server", () => ({
   lockAssetForQuantityUpdate: vitest.fn().mockResolvedValue({
     id: "asset-qty-default",
     title: "Default Asset",
     quantity: 0,
   }),
+  lockEveryAssetForQuantityUpdate: vitest.fn().mockResolvedValue(undefined),
 }));
 
 // why: partial-mock so real helpers (computeBookingAvailableQuantity and
@@ -4834,6 +4837,47 @@ describe("reserveBooking", () => {
       );
     });
 
+    it("locks every QT asset on the booking with one statement", async () => {
+      expect.assertions(3);
+
+      // Three distinct QT assets, each well inside the 10-unit pool, so the
+      // reservation goes through and the lock count is the only variable.
+      const base = draftBookingWithQtyAsset(1);
+      const assetIds = ["asset-qty-c", "asset-qty-a", "asset-qty-b"];
+      const mockBooking = {
+        ...base,
+        bookingAssets: assetIds.map((assetId, index) => ({
+          ...base.bookingAssets[0],
+          asset: { ...base.bookingAssets[0].asset, id: assetId },
+          assetId,
+          id: `ba-qty-${index}`,
+        })),
+      };
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+      //@ts-expect-error missing vitest type
+      db.booking.update.mockResolvedValue({
+        ...mockBooking,
+        status: BookingStatus.RESERVED,
+      });
+
+      await reserveBooking(mockReserveParams);
+
+      expect(
+        quantityLock.lockEveryAssetForQuantityUpdate
+      ).toHaveBeenCalledTimes(1);
+      expect(
+        new Set(
+          (
+            quantityLock.lockEveryAssetForQuantityUpdate as ReturnType<
+              typeof vitest.fn
+            >
+          ).mock.calls[0][1]
+        )
+      ).toEqual(new Set(assetIds));
+      expect(quantityLock.lockAssetForQuantityUpdate).not.toHaveBeenCalled();
+    });
+
     it("reserves successfully at exactly the remaining bookable amount (no increase beyond the pool)", async () => {
       expect.assertions(1);
 
@@ -6286,6 +6330,85 @@ describe("fulfilModelRequestsAndCheckout", () => {
         }),
       ]),
       expect.anything()
+    );
+  });
+
+  /**
+   * Queues the reads one scan of a single INDIVIDUAL unit makes on a RESERVED
+   * booking, in the order the flow makes them.
+   */
+  function queueSingleUnitScan() {
+    const mockBooking = buildPreTxBooking();
+    // why: no database in unit tests; the pre-tx load, then the post-tx
+    // hydrate. The in-tx status lock reads through the stubbed `$queryRaw`.
+    (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce(mockBooking)
+      .mockResolvedValueOnce({ ...mockBooking, status: BookingStatus.ONGOING });
+    // why: every read of the scanned unit (the org guard, the metadata read
+    // inside the transaction, the title for the booking note after it) gets
+    // the full row, whatever order the flow issues them in.
+    const scannedUnit = {
+      id: "dell-1",
+      title: "Dell #1",
+      type: AssetType.INDIVIDUAL,
+      assetModelId: "am-dell",
+      unitOfMeasure: null,
+    };
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+      (args?: { where?: { archivedAt?: { not?: null } } }) =>
+        Promise.resolve(
+          args?.where?.archivedAt?.not === null ? [] : [scannedUnit]
+        )
+    );
+    // why: first the rows the scan already holds (none), then the post-scan
+    // snapshot the check-out reads.
+    (db.bookingAsset.findMany as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          quantity: 1,
+          asset: { id: "dell-1", title: "Dell #1", type: AssetType.INDIVIDUAL },
+        },
+      ]);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ id: "booking-1" });
+  }
+
+  it("formats a pool refusal for the caller and keeps other bookings unnamed by default", async () => {
+    expect.assertions(1);
+    queueSingleUnitScan();
+
+    await fulfilModelRequestsAndCheckout({
+      ...mockFulfilParams,
+      assetIds: ["dell-1"],
+    });
+
+    expect(assertModelUnitsNotReservedElsewhere).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingId: "booking-1",
+        hints: mockClientHints,
+        userId: "user-1",
+        revealOtherBookings: false,
+      })
+    );
+  });
+
+  it("names other bookings in a pool refusal for a caller who sees every booking", async () => {
+    expect.assertions(1);
+    queueSingleUnitScan();
+
+    await fulfilModelRequestsAndCheckout({
+      ...mockFulfilParams,
+      assetIds: ["dell-1"],
+      seesAllBookings: true,
+    });
+
+    expect(assertModelUnitsNotReservedElsewhere).toHaveBeenCalledWith(
+      expect.objectContaining({
+        hints: mockClientHints,
+        userId: "user-1",
+        revealOtherBookings: true,
+      })
     );
   });
 
@@ -10216,14 +10339,21 @@ describe("extendBooking", () => {
       roles: [OrganizationRoles.ADMIN],
     });
 
-    // Every INDIVIDUAL unit the booking holds is handed over, under the new
-    // end date, with the whole footprint re-measured.
+    // Every INDIVIDUAL unit the booking holds is handed over, with the whole
+    // footprint re-measured over the ADDED days only: from the current end to
+    // the new one. Claims lying entirely in the days already covered are not
+    // the extension's business. The refusal is formatted for the caller, who
+    // as an admin may see other members' bookings named.
     expect(assertModelUnitsNotReservedElsewhere).toHaveBeenCalledWith(
       expect.objectContaining({
         bookingId: "booking-1",
         bookingStatus: BookingStatus.ONGOING,
         windowChanged: true,
+        from: extendableBookingData.to,
         to: newEndDate,
+        hints: mockClientHints,
+        userId: "user-1",
+        revealOtherBookings: true,
         assets: [
           expect.objectContaining({ id: "asset-1" }),
           expect.objectContaining({ id: "asset-2" }),
@@ -16582,8 +16712,17 @@ describe("addScannedAssetsToBooking", () => {
 
     beforeEach(() => {
       sequence = [];
-      // why: the lock is a module mock, so it records its own turn in the
-      // sequence and still resolves the minimal asset stub its callers expect.
+      // why: the locks are module mocks, so each records its own turn in the
+      // sequence and still resolves what its callers expect (the scan path
+      // takes the batch lock; the single-asset stub keeps its return shape).
+      (
+        quantityLock.lockEveryAssetForQuantityUpdate as ReturnType<
+          typeof vitest.fn
+        >
+      ).mockImplementation(() => {
+        sequence.push("lock");
+        return Promise.resolve();
+      });
       (
         quantityLock.lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
       ).mockImplementation(() => {
@@ -16639,9 +16778,9 @@ describe("addScannedAssetsToBooking", () => {
 
       // Measuring an unclaimed pool is the race: a plain SELECT takes no lock
       // under READ COMMITTED, so two scans read the same free count.
-      expect(quantityLock.lockAssetForQuantityUpdate).toHaveBeenCalledWith(
+      expect(quantityLock.lockEveryAssetForQuantityUpdate).toHaveBeenCalledWith(
         expect.anything(),
-        QT_ID,
+        [QT_ID],
         "org-1"
       );
 
@@ -16664,6 +16803,9 @@ describe("addScannedAssetsToBooking", () => {
 
       // An INDIVIDUAL asset has no pool to draw on — locking it here would
       // serialize scans that never compete.
+      expect(
+        quantityLock.lockEveryAssetForQuantityUpdate
+      ).not.toHaveBeenCalled();
       expect(quantityLock.lockAssetForQuantityUpdate).not.toHaveBeenCalled();
     });
   });
@@ -19495,6 +19637,45 @@ describe("model reservation guard — write paths", () => {
       );
     });
 
+    it("formats a pool refusal for the caller, naming other bookings only for one who sees them all", async () => {
+      expect.assertions(2);
+
+      await updateBookingAssets({
+        id: "booking-1",
+        organizationId: "org-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
+        assetIds: ["asset-ind"],
+        userId: "user-1",
+        hints: mockClientHints,
+      });
+      // The same reach for writing, but not for seeing every booking: the
+      // workspace leaves other members' bookings hidden from this caller.
+      const admin = accessFor([OrganizationRoles.ADMIN]);
+      await updateBookingAssets({
+        id: "booking-1",
+        organizationId: "org-1",
+        access: { ...admin, bookings: { ...admin.bookings, seeAll: false } },
+        assetIds: ["asset-ind"],
+        userId: "user-1",
+        hints: mockClientHints,
+      });
+
+      expect(guard.mock.calls[0][0]).toEqual(
+        expect.objectContaining({
+          hints: mockClientHints,
+          userId: "user-1",
+          revealOtherBookings: true,
+        })
+      );
+      expect(guard.mock.calls[1][0]).toEqual(
+        expect.objectContaining({
+          hints: mockClientHints,
+          userId: "user-1",
+          revealOtherBookings: false,
+        })
+      );
+    });
+
     it("offers fulfilment the kit arrival as well as the new standalone row", async () => {
       expect.assertions(2);
 
@@ -19630,6 +19811,59 @@ describe("model reservation guard — write paths", () => {
         (fulfilModelRequestsForAssets as ReturnType<typeof vitest.fn>).mock
           .invocationCallOrder[0]
       );
+    });
+
+    it("formats a pool refusal for the caller, keeping other bookings unnamed without an access to ask", async () => {
+      expect.assertions(3);
+
+      await addScannedAssetsToBooking({
+        assetIds: ["asset-ind"],
+        bookingId: "booking-1",
+        organizationId: "org-1",
+        userId: "user-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
+        hints: mockClientHints,
+      });
+      // The fulfil flow authorizes under the check-out rule and passes no
+      // access; it states the caller's reach explicitly instead.
+      await addScannedAssetsToBooking({
+        assetIds: ["asset-ind"],
+        bookingId: "booking-1",
+        organizationId: "org-1",
+        userId: "user-1",
+        access: null,
+        hints: mockClientHints,
+      });
+      await addScannedAssetsToBooking({
+        assetIds: ["asset-ind"],
+        bookingId: "booking-1",
+        organizationId: "org-1",
+        userId: "user-1",
+        access: null,
+        seesAllBookings: true,
+        hints: mockClientHints,
+      });
+
+      const handed = guard.mock.calls.map(([args]) => ({
+        hints: args.hints,
+        userId: args.userId,
+        revealOtherBookings: args.revealOtherBookings,
+      }));
+      expect(handed[0]).toEqual({
+        hints: mockClientHints,
+        userId: "user-1",
+        revealOtherBookings: true,
+      });
+      expect(handed[1]).toEqual({
+        hints: mockClientHints,
+        userId: "user-1",
+        revealOtherBookings: false,
+      });
+      expect(handed[2]).toEqual({
+        hints: mockClientHints,
+        userId: "user-1",
+        revealOtherBookings: true,
+      });
     });
 
     it("lets a scanned kit's member discharge a reservation, and stamps its row", async () => {
@@ -19911,6 +20145,38 @@ describe("model reservation guard — write paths", () => {
           data: expect.objectContaining({ status: BookingStatus.RESERVED }),
         })
       );
+    });
+
+    it("formats a pool refusal for the caller and keeps other bookings unnamed by default", async () => {
+      expect.assertions(2);
+
+      await reserveBooking({ ...reserveParams, userId: "user-2" });
+
+      const expected = expect.objectContaining({
+        hints: mockClientHints,
+        userId: "user-2",
+        revealOtherBookings: false,
+      });
+      expect(guard).toHaveBeenCalledWith(expected);
+      expect(assertOutstandingModelRequestsFit).toHaveBeenCalledWith(expected);
+    });
+
+    it("names other bookings in a pool refusal for a caller who sees every booking", async () => {
+      expect.assertions(2);
+
+      await reserveBooking({
+        ...reserveParams,
+        userId: "user-2",
+        seesAllBookings: true,
+      });
+
+      const expected = expect.objectContaining({
+        hints: mockClientHints,
+        userId: "user-2",
+        revealOtherBookings: true,
+      });
+      expect(guard).toHaveBeenCalledWith(expected);
+      expect(assertOutstandingModelRequestsFit).toHaveBeenCalledWith(expected);
     });
 
     it("keeps the draft a draft when the guard refuses", async () => {

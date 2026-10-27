@@ -1,5 +1,4 @@
 import { BarcodeType } from "@prisma/client";
-import { DateTime } from "luxon";
 import type {
   ActionFunctionArgs,
   LinksFunction,
@@ -40,6 +39,7 @@ import {
 } from "~/modules/asset/service.server";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { createAssetReminder } from "~/modules/asset-reminder/service.server";
+import { resolveReminderPayloadDates } from "~/modules/asset-reminder/utils.server";
 import { createBarcode } from "~/modules/barcode/service.server";
 import {
   validateBarcodeValue,
@@ -47,12 +47,12 @@ import {
 } from "~/modules/barcode/validation";
 import { computeCheckedOutByBookingForAsset } from "~/modules/booking/checked-out.server";
 import { getTeamMembersForQuantityCustody } from "~/modules/team-member/service.server";
+import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import assetCss from "~/styles/asset.css?url";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint } from "~/utils/client-hints";
-import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { DeleteConfirmationSchema } from "~/utils/delete-confirmation";
@@ -72,6 +72,10 @@ import {
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
+import {
+  assertUserCanUseRecurringReminders,
+  canUseRecurringReminders,
+} from "~/utils/subscription.server";
 import { tw } from "~/utils/tw";
 
 export const AvailabilityForBookingFormSchema = z.object({
@@ -110,13 +114,23 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, userOrganizations, access } =
+    const { organizationId, userOrganizations, organizations, access } =
       await requirePermission({
         userId,
         request,
         entity: PermissionEntity.asset,
         action: PermissionAction.read,
       });
+
+    /**
+     * Drives the Repeat control in the set-reminder dialog. Started now so it
+     * runs alongside the asset reads, and a failed lookup only locks that
+     * control: the server re-checks the plan on every recurring write.
+     */
+    const tierLimitPromise = getOrganizationTierLimit({
+      organizationId,
+      organizations,
+    }).catch(() => null);
 
     const asset = await getAsset({
       id,
@@ -255,6 +269,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       title: asset.title,
     };
 
+    const tierLimit = await tierLimitPromise;
+
     /**
      * `custody: { include: { custodian: true } }` selects the whole TeamMember
      * row, and this route is gated on `asset: read` — held by BASE and
@@ -273,6 +289,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       teamMembers,
       totalTeamMembers,
       custodySources,
+      canUseRecurringReminders: canUseRecurringReminders(tierLimit),
     });
   } catch (cause) {
     const reason = makeShelfError(cause);
@@ -347,7 +364,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       },
     };
 
-    const { organizationId } = await requirePermission({
+    const { organizationId, organizations } = await requirePermission({
       userId,
       request,
       ...intent2Permission[intent],
@@ -457,35 +474,45 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       case "set-reminder": {
         // Resolve the acting user's timezone BEFORE validating so the schema's
         // "must be in the future" check runs in the SAME zone the value is later
-        // stored in (below) and the SAME zone the client validated in. Validating
-        // with the default server-zone schema first, then storing in the pref
-        // zone, lets the two disagree for a wall-clock time near "now".
+        // stored in and the SAME zone the client validated in.
         const { timeZone } = await resolveUserFormatPrefsById(
           userId,
           getClientHint(request)
         );
 
-        const { redirectTo, ...payload } = parseData(
-          formData,
-          createSetReminderSchema({ timeZone }),
-          { shouldBeCaptured: false }
-        );
+        const {
+          redirectTo,
+          repeat,
+          endsAt: _endsAt,
+          ...payload
+        } = parseData(formData, createSetReminderSchema({ timeZone }), {
+          shouldBeCaptured: false,
+        });
 
-        // Parse the submitted wall-clock time in that same resolved timezone —
-        // not the browser hint. When the two differ the browser zone would
-        // offset the stored UTC instant wrong.
-        const alertDateTime = DateTime.fromFormat(
-          formData.get("alertDateTime")!.toString()!,
-          DATE_TIME_FORMAT,
-          {
-            zone: timeZone,
-          }
-        ).toJSDate();
+        // Parse the submitted wall-clock time (and the optional end date) in
+        // that same resolved timezone, which also becomes the series' zone.
+        const { alertDateTime, recurrence } = resolveReminderPayloadDates({
+          timeZone,
+          formData,
+          repeat,
+        });
+
+        /**
+         * One-shot reminders stay free; only an actual recurrence request is
+         * tier-gated (server-side, the disabled UI control is not a gate).
+         */
+        if (recurrence) {
+          await assertUserCanUseRecurringReminders({
+            organizationId,
+            organizations,
+          });
+        }
 
         await createAssetReminder({
           ...payload,
           assetId: id,
           alertDateTime,
+          recurrence,
           organizationId,
           createdById: userId,
         });
