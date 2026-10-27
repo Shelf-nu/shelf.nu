@@ -33,6 +33,7 @@ import { resolveUserDisplayName } from "~/utils/user";
 
 import { mergeAssetWhere, type ReportAssetFilter } from "./asset-filter";
 import { resolveCheckInTimes } from "./check-in-time.server";
+import { WITHOUT_LOCATION_ID } from "./filter-params";
 
 import type {
   AssetActivityRow,
@@ -2700,11 +2701,55 @@ async function computeTopBookedKpis(
 // Top Booked Kits Report
 // -----------------------------------------------------------------------------
 
+/**
+ * The filter bar's Category and Location choices for a kit report. They match
+ * the kit's own category and location, not its members'. Ids must already be
+ * verified against the workspace (see `resolveReportFilters`).
+ */
+export interface ReportKitFilter {
+  categoryIds: string[];
+  /** Location ids; {@link WITHOUT_LOCATION_ID} selects kits with no location. */
+  locationIds: string[];
+}
+
 interface TopBookedKitsArgs {
   organizationId: string;
   timeframe: ResolvedTimeframe;
+  /** Category and Location from the filter bar. */
+  kitFilter?: ReportKitFilter;
   page?: number;
   pageSize?: number;
+}
+
+/**
+ * Builds the kit `where` for a {@link ReportKitFilter}. Several categories (or
+ * locations) match any of them; category and location together must both
+ * match. Returns an empty object when nothing is chosen.
+ */
+function buildReportKitWhere(
+  filter: ReportKitFilter | undefined
+): Prisma.KitWhereInput {
+  const and: Prisma.KitWhereInput[] = [];
+
+  if (filter?.categoryIds.length) {
+    and.push({ categoryId: { in: filter.categoryIds } });
+  }
+
+  if (filter?.locationIds.length) {
+    const realLocationIds = filter.locationIds.filter(
+      (id) => id !== WITHOUT_LOCATION_ID
+    );
+    const or: Prisma.KitWhereInput[] = [];
+    if (realLocationIds.length > 0) {
+      or.push({ locationId: { in: realLocationIds } });
+    }
+    if (filter.locationIds.includes(WITHOUT_LOCATION_ID)) {
+      or.push({ locationId: null });
+    }
+    and.push(or.length === 1 ? or[0] : { OR: or });
+  }
+
+  return and.length > 0 ? { AND: and } : {};
 }
 
 /**
@@ -2726,7 +2771,13 @@ interface TopBookedKitsArgs {
 export async function topBookedKitsReport(
   args: TopBookedKitsArgs
 ): Promise<ReportPayload<TopBookedKitRow>> {
-  const { organizationId, timeframe, page = 1, pageSize = 50 } = args;
+  const {
+    organizationId,
+    timeframe,
+    kitFilter,
+    page = 1,
+    pageSize = 50,
+  } = args;
 
   const startTime = performance.now();
 
@@ -2737,6 +2788,7 @@ export async function topBookedKitsReport(
     const data = await fetchTopBookedKitData(
       organizationId,
       timeframe,
+      buildReportKitWhere(kitFilter),
       page,
       pageSize
     );
@@ -2784,12 +2836,16 @@ export async function topBookedKitsReport(
  * metadata in a single org-scoped query, and re-signs expired kit image URLs
  * server-side.
  *
+ * @param kitWhere - The filter bar's Category and Location as a kit `where`,
+ *   applied to the kit lookup so it decides which kits are listed.
  * @returns Paginated rows, total unique-kit count, the #1 kit, and the total
- *   kit-booking incidences (sum of every kit's booking count) for the KPIs.
+ *   kit-booking incidences (sum of the listed kits' booking counts) for the
+ *   KPIs.
  */
 async function fetchTopBookedKitData(
   organizationId: string,
   timeframe: ResolvedTimeframe,
+  kitWhere: Prisma.KitWhereInput,
   page: number,
   pageSize: number
 ): Promise<{
@@ -2907,17 +2963,18 @@ async function fetchTopBookedKitData(
     return { rows: [], totalCount: 0, topKit: null, totalKitBookings: 0 };
   }
 
-  const totalKitBookings = Array.from(kitAgg.values()).reduce(
-    (sum, entry) => sum + entry.bookingCount,
-    0
-  );
-
-  // Step 2 — hydrate kit metadata in one org-scoped query. Explicit
+  // Step 2: hydrate kit metadata in one org-scoped query, which also applies
+  // the filter bar's Category and Location (`kitWhere`). Explicit
   // `organizationId` even though kitIds derive from this org's bookings
-  // (defence-in-depth per the org-scope rule). Kits deleted between the two
-  // queries simply drop out — `results` is built from the rows we got back.
+  // (defence-in-depth per the org-scope rule). Kits the filter leaves out, or
+  // deleted between the two queries, drop out: `results` and every total
+  // below are built from the rows we got back.
   const kits = await db.kit.findMany({
-    where: { id: { in: Array.from(kitAgg.keys()) }, organizationId },
+    where: {
+      id: { in: Array.from(kitAgg.keys()) },
+      organizationId,
+      ...kitWhere,
+    },
     select: {
       id: true,
       organizationId: true,
@@ -2958,8 +3015,14 @@ async function fetchTopBookedKitData(
     })
     .sort((a, b) => b.bookingCount - a.bookingCount);
 
-  // The #1 most booked kit (before pagination) — always the first sorted result.
+  // The #1 most booked kit (before pagination), always the first sorted result.
   const topKit = results[0] || null;
+
+  // Sum over the listed kits only, so the KPI reconciles with the table.
+  const totalKitBookings = results.reduce(
+    (sum, row) => sum + row.bookingCount,
+    0
+  );
 
   const paginatedRows = results.slice((page - 1) * pageSize, page * pageSize);
 
@@ -2975,7 +3038,7 @@ async function fetchTopBookedKitData(
  * Builds the KPI cards for the Top Booked Kits report from pre-computed
  * aggregates (pure — no DB access).
  *
- * `total_kit_bookings` is the sum of every kit's booking count, so it
+ * `total_kit_bookings` is the sum of the listed kits' booking counts, so it
  * reconciles exactly with the table's Bookings column (deliberately defined
  * differently from the asset report's raw booking count, which would be
  * inflated here by bookings that contain no kits).
