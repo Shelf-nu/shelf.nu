@@ -101,6 +101,8 @@ import {
   setCustodyDrivenAssetStatus,
 } from "../asset/custody-status.server";
 import type { LastAuditDateAccess } from "../asset/last-audit-date-access";
+import type { BookableListScope } from "../asset/list-scope.server";
+import { getAssetListWhereForSelectAll } from "../asset/list-where.server";
 import type {
   MoveAssetKitUnitsArgs,
   MoveUnitsResult,
@@ -109,7 +111,6 @@ import type { CreateAssetFromContentImportPayload } from "../asset/types";
 import { getPrimaryLocation } from "../asset/utils";
 import {
   applyArchivedFilter,
-  getAssetsWhereInput,
   getKitLocationUpdateNoteContent,
 } from "../asset/utils.server";
 import type {
@@ -6118,12 +6119,22 @@ export async function updateKitAssets({
     const hasSelectedAll = assetIds.includes(ALL_SELECTED_KEY);
     if (hasSelectedAll) {
       const searchParams = getCurrentSearchParams(request);
-      const assetsWhere = getAssetsWhereInput({
+      /**
+       * Re-runs the picker list's own query, with the options its loader
+       * (`kits.$kitId.assets.manage-assets.tsx`) passes to
+       * `getPaginatedAndFilterableAssets`, so select-all adds exactly the
+       * assets the picker showed. That list refuses every custodian filter
+       * (`canSeeAllCustody: false` with no user), hence `[]`; it is not
+       * scoped to a role and shows active assets, ignoring low stock.
+       */
+      const assetsWhere = await getAssetListWhereForSelectAll({
         organizationId,
         currentSearchParams: searchParams.toString(),
-        // Reached from `updateKitAssets`, gated on kit write permissions
-        // (ADMIN/OWNER only), so no restricted viewer can supply this filter.
-        allowedTeamMemberIds: "all",
+        allowedTeamMemberIds: [],
+        bookableScope: null,
+        locationIdsOverride: undefined,
+        honorArchivedView: false,
+        honorLowStockFilter: false,
       });
 
       const allAssets = await db.asset.findMany({
@@ -7714,18 +7725,33 @@ export async function updateKitAssets({
   }
 }
 
+/**
+ * Removes the selected assets from whatever kit holds them, releasing the
+ * custody each one inherited from its kit.
+ *
+ * @param args.assetIds - Asset ids, or `ALL_SELECTED_KEY` to act on every
+ *   asset the caller's list matches for `currentSearchParams`
+ * @param args.currentSearchParams - The asset list's query string, submitted
+ *   with the bulk action. The action posts to its own URL, so the request URL
+ *   does not carry the list's filters.
+ * @returns How many assets were detached from a kit
+ * @throws {ShelfError} When resolving the selection or the update fails
+ */
 export async function bulkRemoveAssetsFromKits({
   assetIds,
   organizationId,
   userId,
   request,
+  currentSearchParams,
   settings,
   lastAuditDateAccess,
+  bookableScope,
 }: {
   assetIds: Asset["id"][];
   organizationId: Organization["id"];
   userId: User["id"];
   request: Request;
+  currentSearchParams: string | null | undefined;
   settings: AssetIndexSettings;
   /**
    * How the caller may use the last audit date, from `lastAuditDateAccessFor`.
@@ -7733,6 +7759,12 @@ export async function bulkRemoveAssetsFromKits({
    * whole selection.
    */
   lastAuditDateAccess: LastAuditDateAccess;
+  /**
+   * The caller's asset list scope, from `resolveBookableListScope`. Select-all
+   * resolves to the assets the caller's list shows, so a bookable-only role
+   * never acts on assets outside it. `null` for a role that sees every asset.
+   */
+  bookableScope: BookableListScope | null;
 }) {
   try {
     const user = await getUserByID(userId, {
@@ -7749,7 +7781,6 @@ export async function bulkRemoveAssetsFromKits({
     // Acting user's timezone: when "select all" is active the affected set is
     // resolved from the current date filters, which must truncate the day in
     // the user's tz (avoids an off-by-one for non-UTC users).
-    const searchParams = getCurrentSearchParams(request);
     const { timeZone } = await resolveUserFormatPrefsById(
       userId,
       getClientHint(request)
@@ -7757,13 +7788,14 @@ export async function bulkRemoveAssetsFromKits({
     const resolvedIds = await resolveAssetIdsForBulkOperation({
       assetIds,
       organizationId,
-      currentSearchParams: searchParams.toString(),
+      currentSearchParams,
       settings,
       timeZone,
       // Kit write permissions are ADMIN/OWNER-only, so the custodian filter
       // here can never come from a restricted viewer.
       allowedTeamMemberIds: "all",
       lastAuditDateAccess,
+      bookableScope,
     });
 
     // We pull the parent kit (today: ≤1 pivot row per asset) through
@@ -8099,6 +8131,7 @@ export async function bulkRemoveAssetsFromKits({
 
     return { removedFromKitCount };
   } catch (cause) {
+    rethrowIfClientError(cause);
     throw new ShelfError({
       cause,
       message: "Failed to bulk remove assets from kits",

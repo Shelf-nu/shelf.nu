@@ -1,6 +1,8 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { BulkRemoveFromKitsSchema } from "~/components/assets/bulk-remove-from-kits";
 import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
+import { resolveBookableListScope } from "~/modules/asset/list-scope.server";
+import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { bulkRemoveAssetsFromKits } from "~/modules/kit/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -39,9 +41,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
       role,
     });
 
-    const { assetIds } = parseData(
+    const { assetIds, currentSearchParams } = parseData(
       await request.formData(),
-      BulkRemoveFromKitsSchema,
+      BulkRemoveFromKitsSchema.and(CurrentSearchParamsSchema),
       {
         additionalData: { userId, organizationId },
       }
@@ -52,8 +54,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
       userId,
       organizationId,
       request,
+      currentSearchParams,
       settings,
       lastAuditDateAccess: lastAuditDateAccessFor(access, currentOrganization),
+      // Select-all acts on the assets the caller's list shows.
+      bookableScope: resolveBookableListScope({ access, userId }),
     });
 
     sendNotification({

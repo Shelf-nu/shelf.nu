@@ -75,7 +75,7 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
     });
 
     const searchParams = getCurrentSearchParams(request);
-    const { page, perPageParam, search, orderBy, orderDirection } =
+    const { page, perPageParam, orderBy, orderDirection } =
       getParamsValues(searchParams);
     const cookie = await updateCookieWithPerPage(request, perPageParam);
     const { perPage } = cookie;
@@ -87,7 +87,8 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
           id: locationId,
           page,
           perPage,
-          search,
+          // No search: the header's asset count (the start-audit dialog reads
+          // it) is the location's total, whatever the Assets tab is searching.
           orderBy,
           orderDirection,
           userOrganizations,

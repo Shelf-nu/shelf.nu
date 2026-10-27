@@ -2270,6 +2270,7 @@ describe("bulkDeleteAssets — activity events", () => {
 
     await bulkDeleteAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       assetIds: ["asset-1", "asset-2"],
       confirmation: "2",
       organizationId: "org-1",
@@ -2334,6 +2335,7 @@ describe("bulkUpdateAssetCategory — activity events", () => {
 
     await bulkUpdateAssetCategory({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1", "asset-2", "asset-3"],
       organizationId: "org-1",
@@ -2373,6 +2375,7 @@ describe("bulkUpdateAssetCategory — activity events", () => {
 
     await bulkUpdateAssetCategory({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1"],
       organizationId: "org-1",
@@ -2428,6 +2431,7 @@ describe("bulkAssignAssetTags — activity events", () => {
 
     await bulkAssignAssetTags({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1", "asset-2"],
       organizationId: "org-1",
@@ -3967,6 +3971,7 @@ describe("bulk custody — refusals of the selection answer 400", () => {
   const checkOut = () =>
     bulkCheckOutAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       allowedTeamMemberIds: "all" as const,
       userId: "user-1",
       assetIds: ["asset-1"],
@@ -3980,6 +3985,7 @@ describe("bulk custody — refusals of the selection answer 400", () => {
   const checkIn = () =>
     bulkCheckInAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       allowedTeamMemberIds: "all" as const,
       userId: "user-1",
       assetIds: ["asset-1"],
@@ -4293,6 +4299,7 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
     try {
       await bulkCheckOutAssets({
         lastAuditDateAccess: "hidden",
+        bookableScope: null,
         allowedTeamMemberIds: "all" as const,
         userId: "user-current",
         assetIds: ["asset-1"],
@@ -4341,6 +4348,7 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
     await expect(
       bulkCheckOutAssets({
         lastAuditDateAccess: "hidden",
+        bookableScope: null,
         allowedTeamMemberIds: "all" as const,
         userId: "user-current",
         assetIds: ["asset-1"],
@@ -4385,6 +4393,7 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
     try {
       await bulkCheckOutAssets({
         lastAuditDateAccess: "hidden",
+        bookableScope: null,
         allowedTeamMemberIds: "all" as const,
         userId: "user-current",
         assetIds: ["asset-1"],
@@ -4425,6 +4434,7 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
     try {
       await bulkCheckOutAssets({
         lastAuditDateAccess: "hidden",
+        bookableScope: null,
         allowedTeamMemberIds: "all" as const,
         userId: "user-current",
         assetIds: ["asset-1"],
@@ -4465,6 +4475,7 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
     try {
       await bulkCheckOutAssets({
         lastAuditDateAccess: "hidden",
+        bookableScope: null,
         allowedTeamMemberIds: "all" as const,
         userId: "user-current",
         // why: `role` was optional pre-main; main made it required so every
@@ -4628,6 +4639,7 @@ describe("bulkUpdateAssetCategory", () => {
 
     await bulkUpdateAssetCategory({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1", "asset-2", "asset-3"],
       organizationId: "org-1",
@@ -4667,6 +4679,7 @@ describe("bulkUpdateAssetCategory", () => {
 
     await bulkUpdateAssetCategory({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1"],
       organizationId: "org-1",
@@ -4689,6 +4702,7 @@ describe("bulkUpdateAssetCategory", () => {
     await expect(
       bulkUpdateAssetCategory({
         lastAuditDateAccess: "hidden",
+        bookableScope: null,
         userId: "user-1",
         assetIds: ["asset-1"],
         organizationId: "org-1",
@@ -4696,7 +4710,11 @@ describe("bulkUpdateAssetCategory", () => {
         // @ts-expect-error settings not relevant for this test
         settings: {},
       })
-    ).rejects.toThrow(ShelfError);
+    ).rejects.toMatchObject({
+      status: 404,
+      title: "Category not found",
+      message: expect.stringContaining("does not exist"),
+    });
   });
 });
 
@@ -4744,6 +4762,7 @@ describe("bulkUpdateAssetModel", () => {
 
     await bulkUpdateAssetModel({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1", "asset-2"],
       organizationId: "org-1",
@@ -4793,6 +4812,7 @@ describe("bulkUpdateAssetModel", () => {
 
     const result = await bulkUpdateAssetModel({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1"],
       organizationId: "org-1",
@@ -4832,6 +4852,7 @@ describe("bulkUpdateAssetModel", () => {
 
     await bulkUpdateAssetModel({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1"],
       organizationId: "org-1",
@@ -4880,6 +4901,7 @@ describe("bulkUpdateAssetModel", () => {
 
     await bulkUpdateAssetModel({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1", "asset-2", "asset-3"],
       organizationId: "org-1",
@@ -4918,6 +4940,7 @@ describe("bulkUpdateAssetModel", () => {
 
     await bulkUpdateAssetModel({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1"],
       organizationId: "org-1",
@@ -4942,6 +4965,7 @@ describe("bulkUpdateAssetModel", () => {
 
     const result = await bulkUpdateAssetModel({
       lastAuditDateAccess: "available",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1", "asset-2", "asset-3"],
       organizationId: "org-1",
@@ -4977,6 +5001,8 @@ describe("bulkUpdateAssetModel", () => {
       // The caller's access reaches the resolver unchanged, so a select-all
       // over a last audit date filter works for those allowed to see it.
       lastAuditDateAccess: "available",
+      // The caller's list scope reaches the resolver unchanged too.
+      bookableScope: null,
     });
     expect(db.asset.updateMany).toHaveBeenCalledWith({
       where: { id: { in: ["asset-1", "asset-3"] }, organizationId: "org-1" },
@@ -5001,6 +5027,7 @@ describe("bulkUpdateAssetModel", () => {
 
     const result = await bulkUpdateAssetModel({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1", "asset-2", "asset-3"],
       organizationId: "org-1",
@@ -5023,6 +5050,7 @@ describe("bulkUpdateAssetModel", () => {
 
     const result = await bulkUpdateAssetModel({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1", "asset-2"],
       organizationId: "org-1",
@@ -5057,6 +5085,7 @@ describe("bulkUpdateAssetModel", () => {
     // not a rule violation. Only the LINK direction rejects.
     const result = await bulkUpdateAssetModel({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1"],
       organizationId: "org-1",
@@ -5083,6 +5112,7 @@ describe("bulkUpdateAssetModel", () => {
     await expect(
       bulkUpdateAssetModel({
         lastAuditDateAccess: "hidden",
+        bookableScope: null,
         userId: "user-1",
         assetIds: ["asset-1"],
         organizationId: "org-1",
@@ -5109,6 +5139,7 @@ describe("bulkUpdateAssetModel", () => {
     await expect(
       bulkUpdateAssetModel({
         lastAuditDateAccess: "hidden",
+        bookableScope: null,
         userId: "user-1",
         assetIds: ["asset-1"],
         organizationId: "org-1",
@@ -5137,6 +5168,7 @@ describe("bulkUpdateAssetModel", () => {
 
     const result = await bulkUpdateAssetModel({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["foreign-asset-1", "foreign-asset-2"],
       organizationId: "org-1",
@@ -5154,6 +5186,7 @@ describe("bulkUpdateAssetModel", () => {
 
     const result = await bulkUpdateAssetModel({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: [],
       organizationId: "org-1",
@@ -5205,6 +5238,7 @@ describe("bulkAssignAssetTags", () => {
 
     await bulkAssignAssetTags({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1", "asset-2"],
       organizationId: "org-1",
@@ -5242,6 +5276,7 @@ describe("bulkAssignAssetTags", () => {
     await expect(
       bulkAssignAssetTags({
         lastAuditDateAccess: "hidden",
+        bookableScope: null,
         userId: "user-1",
         assetIds: ["asset-1"],
         organizationId: "org-1",
@@ -5268,6 +5303,7 @@ describe("bulkAssignAssetTags", () => {
 
     await bulkAssignAssetTags({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-1"],
       organizationId: "org-1",
@@ -5298,6 +5334,7 @@ describe("bulkDeleteAssets", () => {
 
     await bulkDeleteAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       assetIds: ["asset-1", "asset-2"],
       confirmation: "2",
       organizationId: "org-1",
@@ -5333,6 +5370,7 @@ describe("bulkDeleteAssets", () => {
 
     await bulkDeleteAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       assetIds: [],
       confirmation: "0",
       organizationId: "org-1",
@@ -5353,6 +5391,7 @@ describe("bulkDeleteAssets", () => {
 
     await bulkDeleteAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       assetIds: ["asset-1"],
       confirmation: "1",
       organizationId: "org-1",
@@ -5384,6 +5423,7 @@ describe("custody SELF_SERVICE self-restriction (bulk services)", () => {
     await expect(
       bulkCheckOutAssets({
         lastAuditDateAccess: "hidden",
+        bookableScope: null,
         allowedTeamMemberIds: "all" as const,
         userId: "me",
         custodyAssign: "self",
@@ -5465,6 +5505,7 @@ describe("bulkCheckOutAssets — status guard gates the batch", () => {
     await expect(
       bulkCheckOutAssets({
         lastAuditDateAccess: "hidden",
+        bookableScope: null,
         allowedTeamMemberIds: "all" as const,
         userId: "user-current",
         assetIds: ["asset-1", "asset-2"],
@@ -5485,6 +5526,7 @@ describe("bulkCheckOutAssets — status guard gates the batch", () => {
     // is false for the same reason — this must not page anyone.
     const caught = await bulkCheckOutAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       allowedTeamMemberIds: "all" as const,
       userId: "user-current",
       assetIds: ["asset-1", "asset-2"],
@@ -5508,6 +5550,7 @@ describe("bulkCheckOutAssets — status guard gates the batch", () => {
     // the gate itself did not fire and custody insertion was reached.
     await bulkCheckOutAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       allowedTeamMemberIds: "all" as const,
       userId: "user-current",
       assetIds: ["asset-1", "asset-2"],
@@ -6843,6 +6886,7 @@ describe("bulkArchiveAssets", () => {
 
     const result = await bulkArchiveAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       organizationId: "org-1",
       assetIds: ["a1", "a2", "a3"],
       settings: {} as never,
@@ -6891,6 +6935,7 @@ describe("bulkArchiveAssets", () => {
 
     const result = await bulkArchiveAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       organizationId: "org-1",
       assetIds: ["a1", "a2"],
       settings: {} as never,
@@ -6918,6 +6963,7 @@ describe("bulkArchiveAssets", () => {
 
     const result = await bulkArchiveAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       organizationId: "org-1",
       assetIds: ["a1"],
       settings: {} as never,
@@ -6938,6 +6984,7 @@ describe("bulkArchiveAssets", () => {
 
     const result = await bulkArchiveAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       organizationId: "org-1",
       assetIds: ["a1", "a2"],
       settings: {} as never,
@@ -6968,6 +7015,7 @@ describe("bulkUnarchiveAssets", () => {
 
     const result = await bulkUnarchiveAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       organizationId: "org-1",
       assetIds: ["a1", "a2"],
       settings: {} as never,
@@ -6993,6 +7041,7 @@ describe("bulkUnarchiveAssets", () => {
 
     const result = await bulkUnarchiveAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       organizationId: "org-1",
       assetIds: ["a1", "a2"],
       settings: {} as never,
@@ -7020,6 +7069,7 @@ describe("bulkUnarchiveAssets", () => {
 
     await bulkUnarchiveAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       organizationId: "org-1",
       assetIds: ["a1"],
       settings: {} as never,
@@ -7045,6 +7095,7 @@ describe("bulkUnarchiveAssets", () => {
 
     const result = await bulkUnarchiveAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       organizationId: "org-1",
       assetIds: ["a1"],
       settings: {} as never,
@@ -7125,6 +7176,7 @@ describe("availability writes on archived assets (issue #382)", () => {
   it("skips assets archived after the bulk check", async () => {
     await bulkMarkAvailability({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       organizationId: "org-1",
       assetIds: ["a1", "a2"],
       type: "unavailable",
@@ -7169,6 +7221,7 @@ describe("bulk archive / reinstate — upstream errors", () => {
           assetIds: ["a1"],
           settings: {} as never,
           lastAuditDateAccess: "hidden",
+          bookableScope: null,
         })
       ).rejects.toMatchObject({
         message: "That filter can't be applied.",
@@ -7532,6 +7585,7 @@ describe("bulk custody paths — kit-derived custody guard", () => {
     // downstream can tell the two cases apart.
     await bulkCheckInAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       custodyAssign: "anyone",
       assetIds: ["asset-1", "asset-2"],
@@ -7553,6 +7607,7 @@ describe("bulk custody paths — kit-derived custody guard", () => {
     await expect(
       bulkCheckInAssets({
         lastAuditDateAccess: "hidden",
+        bookableScope: null,
         userId: "user-1",
         custodyAssign: "anyone",
         assetIds: ["asset-1", "asset-2"],
@@ -7593,6 +7648,7 @@ describe("bulk custody paths — kit-derived custody guard", () => {
 
     await bulkCheckOutAssets({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       allowedTeamMemberIds: "all" as const,
       userId: "user-1",
       assetIds: ["asset-1"],
@@ -7671,6 +7727,7 @@ describe("bulkUpdateAssetLocation — location activity notes", () => {
 
     await bulkUpdateAssetLocation({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       userId: "user-1",
       assetIds: ["asset-individual", "asset-qty"],
       organizationId: "org-1",
@@ -7710,6 +7767,7 @@ describe("bulkUpdateAssetMinQuantity", () => {
     userId: "user-1",
     settings: {} as never,
     lastAuditDateAccess: "hidden" as const,
+    bookableScope: null,
   };
 
   it("only asks the database for QUANTITY_TRACKED assets in the caller's org", async () => {
@@ -7867,6 +7925,7 @@ describe("bulkUpdateAssetMinQuantity", () => {
         userId: "user-1",
         settings: {} as never,
         lastAuditDateAccess: "hidden",
+        bookableScope: null,
         assetIds: ["asset-1"],
         minQuantity: 5,
       })
