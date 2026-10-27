@@ -114,27 +114,29 @@ export function OperatorSelector({
 
   const operators = getOperatorsForFilter(filter);
 
-  /** Scroll an option index into view inside the popover list. */
-  const scrollIndexIntoView = (index: number) => {
-    const selectedElement = document.getElementById(`operator-option-${index}`);
-    if (selectedElement) {
-      selectedElement.scrollIntoView({ block: "nearest" });
-    }
+  /**
+   * Moves the keyboard highlight to the option at `index`, focuses it and
+   * scrolls it into view. A focused row selects itself on Enter or Space, so
+   * focus follows the highlight for those keys to act on the row the user
+   * sees highlighted.
+   */
+  const highlightOption = (index: number) => {
+    setSelectedIndex(index);
+    const optionElement = document.getElementById(`operator-option-${index}`);
+    optionElement?.focus();
+    optionElement?.scrollIntoView({ block: "nearest" });
   };
 
   /**
    * Handle popover open/close. When opening, seed the highlighted index to the
-   * currently-selected operator. Previously this was a useEffect firing on
-   * `isPopoverOpen` — now it's colocated with the event that triggers it.
+   * currently-selected operator, in the event handler rather than an effect so
+   * it is tied to the user action. `onOpenAutoFocus` then focuses that row.
    */
   const handleOpenChange = (open: boolean) => {
     setIsPopoverOpen(open);
     if (open) {
       const currentIndex = operators.findIndex((op) => op === operator);
-      const nextIndex = currentIndex >= 0 ? currentIndex : 0;
-      setSelectedIndex(nextIndex);
-      // Scroll after the popover has rendered its content.
-      setTimeout(() => scrollIndexIntoView(nextIndex), 0);
+      setSelectedIndex(currentIndex >= 0 ? currentIndex : 0);
     }
   };
 
@@ -147,22 +149,20 @@ export function OperatorSelector({
     switch (event.key) {
       case "ArrowDown":
         event.preventDefault();
-        setSelectedIndex((prev) => {
-          const next = prev < operators.length - 1 ? prev + 1 : prev;
-          scrollIndexIntoView(next);
-          return next;
-        });
+        highlightOption(
+          selectedIndex < operators.length - 1
+            ? selectedIndex + 1
+            : selectedIndex
+        );
         break;
       case "ArrowUp":
         event.preventDefault();
-        setSelectedIndex((prev) => {
-          const next = prev > 0 ? prev - 1 : prev;
-          scrollIndexIntoView(next);
-          return next;
-        });
+        highlightOption(selectedIndex > 0 ? selectedIndex - 1 : selectedIndex);
         break;
       case "Enter":
       case " ": // Space key
+        // A focused row selects itself; acting here too would pick twice.
+        if (event.target !== event.currentTarget) break;
         event.preventDefault();
         handleSelect(operators[selectedIndex] as FilterOperator);
         break;
@@ -196,6 +196,17 @@ export function OperatorSelector({
             "z-[999999]  mt-2  rounded-md border border-gray-200 bg-white"
           )}
           onKeyDown={handleKeyDown}
+          onOpenAutoFocus={(event) => {
+            // Open on the current operator rather than the first row, so
+            // focus and highlight agree.
+            const option = document.getElementById(
+              `operator-option-${selectedIndex}`
+            );
+            if (!option) return;
+            event.preventDefault();
+            option.focus();
+            option.scrollIntoView({ block: "nearest" });
+          }}
         >
           {operators.map((operator, index) => {
             const k = operator as FilterOperator;
@@ -212,6 +223,9 @@ export function OperatorSelector({
                 aria-selected={selectedIndex === index}
                 tabIndex={0}
                 onClick={() => handleSelect(k as FilterOperator)}
+                // Tab moves focus between rows too; keep the highlight on
+                // the focused row.
+                onFocus={() => setSelectedIndex(index)}
                 onKeyDown={handleActivationKeyPress(() =>
                   handleSelect(k as FilterOperator)
                 )}

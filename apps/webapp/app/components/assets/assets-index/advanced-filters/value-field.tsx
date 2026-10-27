@@ -1,5 +1,5 @@
 import type { ChangeEvent, KeyboardEvent } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AssetStatus } from "@prisma/client";
 import {
   Popover,
@@ -590,6 +590,8 @@ function BooleanField({
 }) {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
+  /** The "Yes" (0) and "No" (1) rows, so focus can follow the highlight. */
+  const optionRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   const boolValue = value === "" ? true : value === "true" || value === true;
 
@@ -612,18 +614,30 @@ function BooleanField({
     setIsPopoverOpen(false);
   };
 
+  /**
+   * Moves the keyboard highlight to the row at `index` and focuses it. A
+   * focused row selects itself on Enter or Space, so focus follows the
+   * highlight for those keys to act on the row the user sees highlighted.
+   */
+  function highlightOption(index: number) {
+    setSelectedIndex(index);
+    optionRefs.current[index]?.focus();
+  }
+
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     switch (event.key) {
       case "ArrowDown":
         event.preventDefault();
-        setSelectedIndex((prev) => (prev < 1 ? prev + 1 : prev));
+        highlightOption(selectedIndex < 1 ? selectedIndex + 1 : selectedIndex);
         break;
       case "ArrowUp":
         event.preventDefault();
-        setSelectedIndex((prev) => (prev > 0 ? prev - 1 : prev));
+        highlightOption(selectedIndex > 0 ? selectedIndex - 1 : selectedIndex);
         break;
       case "Enter":
       case " ": // Space key
+        // A focused row selects itself; acting here too would pick twice.
+        if (event.target !== event.currentTarget) break;
         event.preventDefault();
         handleSelect(selectedIndex === 0 ? "true" : "false");
         break;
@@ -661,15 +675,29 @@ function BooleanField({
               "z-[999999] mt-2 max-h-[400px] min-w-[100px] overflow-scroll rounded-md border border-gray-200 bg-white"
             )}
             onKeyDown={handleKeyDown}
+            onOpenAutoFocus={(event) => {
+              // Open on the current value rather than the first row, so
+              // focus and highlight agree.
+              const option = optionRefs.current[selectedIndex];
+              if (!option) return;
+              event.preventDefault();
+              option.focus();
+            }}
           >
             <div
               className={tw(
                 "px-4 py-2 text-[14px] font-medium text-gray-600 hover:cursor-pointer hover:bg-gray-50",
                 selectedIndex === 0 && "bg-gray-50"
               )}
+              ref={(element) => {
+                optionRefs.current[0] = element;
+              }}
               role="button"
               tabIndex={0}
               onClick={() => handleSelect("true")}
+              // Tab moves focus between rows too; keep the highlight on the
+              // focused row.
+              onFocus={() => setSelectedIndex(0)}
               onKeyDown={handleActivationKeyPress(() => handleSelect("true"))}
             >
               <span>Yes</span>
@@ -679,9 +707,15 @@ function BooleanField({
                 "px-4 py-2 text-[14px] font-medium text-gray-600 hover:cursor-pointer hover:bg-gray-50",
                 selectedIndex === 1 && "bg-gray-50"
               )}
+              ref={(element) => {
+                optionRefs.current[1] = element;
+              }}
               role="button"
               tabIndex={0}
               onClick={() => handleSelect("false")}
+              // Tab moves focus between rows too; keep the highlight on the
+              // focused row.
+              onFocus={() => setSelectedIndex(1)}
               onKeyDown={handleActivationKeyPress(() => handleSelect("false"))}
             >
               <span>No</span>
@@ -1906,6 +1940,8 @@ function TrackingTypeEnumField({
 }) {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
+  /** The option rows by index, so focus can follow the highlight. */
+  const optionRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   const options = [
     { id: "INDIVIDUAL", label: "Individual" },
@@ -1934,20 +1970,32 @@ function TrackingTypeEnumField({
     setIsPopoverOpen(false);
   };
 
+  /**
+   * Moves the keyboard highlight to the row at `index` and focuses it. A
+   * focused row selects itself on Enter or Space, so focus follows the
+   * highlight for those keys to act on the row the user sees highlighted.
+   */
+  function highlightOption(index: number) {
+    setSelectedIndex(index);
+    optionRefs.current[index]?.focus();
+  }
+
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     switch (event.key) {
       case "ArrowDown":
         event.preventDefault();
-        setSelectedIndex((prev) =>
-          prev < options.length - 1 ? prev + 1 : prev
+        highlightOption(
+          selectedIndex < options.length - 1 ? selectedIndex + 1 : selectedIndex
         );
         break;
       case "ArrowUp":
         event.preventDefault();
-        setSelectedIndex((prev) => (prev > 0 ? prev - 1 : prev));
+        highlightOption(selectedIndex > 0 ? selectedIndex - 1 : selectedIndex);
         break;
       case "Enter":
       case " ":
+        // A focused row selects itself; acting here too would pick twice.
+        if (event.target !== event.currentTarget) break;
         event.preventDefault();
         handleSelect(options[selectedIndex].id);
         break;
@@ -1985,10 +2033,21 @@ function TrackingTypeEnumField({
               "z-[999999] mt-2 max-h-[400px] min-w-[100px] overflow-scroll rounded-md border border-gray-200 bg-white"
             )}
             onKeyDown={handleKeyDown}
+            onOpenAutoFocus={(event) => {
+              // Open on the current value rather than the first row, so
+              // focus and highlight agree.
+              const option = optionRefs.current[selectedIndex];
+              if (!option) return;
+              event.preventDefault();
+              option.focus();
+            }}
           >
             {options.map((option, index) => (
               <div
                 key={option.id}
+                ref={(element) => {
+                  optionRefs.current[index] = element;
+                }}
                 className={tw(
                   "flex items-center justify-between px-4 py-2 text-[14px] font-medium text-gray-600 hover:cursor-pointer hover:bg-gray-50",
                   selectedIndex === index && "bg-gray-50"
@@ -1996,6 +2055,9 @@ function TrackingTypeEnumField({
                 role="button"
                 tabIndex={0}
                 onClick={() => handleSelect(option.id)}
+                // Tab moves focus between rows too; keep the highlight on
+                // the focused row.
+                onFocus={() => setSelectedIndex(index)}
                 onKeyDown={handleActivationKeyPress(() =>
                   handleSelect(option.id)
                 )}

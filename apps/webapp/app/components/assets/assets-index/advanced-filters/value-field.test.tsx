@@ -3,6 +3,8 @@
  *
  * Options keep the field's saved order. A list longer than eight gets a search
  * box that narrows by text, and the keyboard keeps working on what is left.
+ * The fixed two-option pickers (Yes/No for a boolean field, the asset tracking
+ * type) pick exactly one value per key press, the one highlighted.
  *
  * @see {@link file://./value-field.tsx}
  */
@@ -102,5 +104,113 @@ describe("ValueField for a custom field dropdown", () => {
 
     expect(setFilter).toHaveBeenCalledTimes(1);
     expect(setFilter).toHaveBeenCalledWith("ARRI");
+  });
+});
+
+/** Renders the value picker for a built-in (non custom field) filter. */
+function renderFixedPicker(filter: Filter) {
+  const setFilter = vi.fn();
+  const Stub = createRoutesStub([
+    {
+      path: "/",
+      Component: () => (
+        <ValueField
+          filter={filter}
+          setFilter={setFilter}
+          applyFilters={vi.fn()}
+          fieldName="value"
+        />
+      ),
+      loader: () => ({ customFields: [] }),
+    },
+  ]);
+  render(<Stub />);
+  return setFilter;
+}
+
+function renderBooleanPicker(value: boolean) {
+  return renderFixedPicker({
+    name: "availableToBook",
+    type: "boolean",
+    operator: "is",
+    value,
+  });
+}
+
+describe("ValueField for a boolean field", () => {
+  it("picks the option highlighted with the arrow keys, once", async () => {
+    const user = userEvent.setup();
+    const setFilter = renderBooleanPicker(true);
+
+    await user.click(await screen.findByRole("button", { name: "Yes" }));
+    await user.keyboard("{ArrowDown}");
+
+    // Focus follows the highlight, so Enter acts on what the user sees.
+    expect(document.activeElement?.textContent).toBe("No");
+
+    await user.keyboard("{Enter}");
+    expect(setFilter).toHaveBeenCalledTimes(1);
+    expect(setFilter).toHaveBeenCalledWith(false);
+  });
+
+  it("picks only the focused option when Enter is pressed on it", async () => {
+    const user = userEvent.setup();
+    const setFilter = renderBooleanPicker(true);
+
+    await user.click(await screen.findByRole("button", { name: "Yes" }));
+    await user.tab();
+    expect(document.activeElement?.textContent).toBe("No");
+
+    await user.keyboard("{Enter}");
+    expect(setFilter).toHaveBeenCalledTimes(1);
+    expect(setFilter).toHaveBeenCalledWith(false);
+  });
+
+  it("opens focused on the current value", async () => {
+    const user = userEvent.setup();
+    const setFilter = renderBooleanPicker(false);
+
+    await user.click(await screen.findByRole("button", { name: "No" }));
+    expect(document.activeElement?.textContent).toBe("No");
+
+    await user.keyboard(" ");
+    expect(setFilter).toHaveBeenCalledTimes(1);
+    expect(setFilter).toHaveBeenCalledWith(false);
+  });
+});
+
+describe("ValueField for the asset tracking type", () => {
+  function renderTrackingTypePicker() {
+    return renderFixedPicker({
+      name: "type",
+      type: "enum",
+      operator: "is",
+      value: "INDIVIDUAL",
+    });
+  }
+
+  it("picks the option highlighted with the arrow keys, once", async () => {
+    const user = userEvent.setup();
+    const setFilter = renderTrackingTypePicker();
+
+    await user.click(await screen.findByRole("button", { name: "Individual" }));
+    await user.keyboard("{ArrowDown}");
+    expect(document.activeElement?.textContent).toBe("Tracked by quantity");
+
+    await user.keyboard("{Enter}");
+    expect(setFilter).toHaveBeenCalledTimes(1);
+    expect(setFilter).toHaveBeenCalledWith("QUANTITY_TRACKED");
+  });
+
+  it("picks only the focused option when Enter is pressed on it", async () => {
+    const user = userEvent.setup();
+    const setFilter = renderTrackingTypePicker();
+
+    await user.click(await screen.findByRole("button", { name: "Individual" }));
+    await user.tab();
+    await user.keyboard("{Enter}");
+
+    expect(setFilter).toHaveBeenCalledTimes(1);
+    expect(setFilter).toHaveBeenCalledWith("QUANTITY_TRACKED");
   });
 });
