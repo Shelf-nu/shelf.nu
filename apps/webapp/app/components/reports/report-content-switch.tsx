@@ -13,6 +13,7 @@
  * @see {@link file://./../../routes/_layout+/reports.$reportId.tsx}
  */
 
+import { useLocation } from "react-router";
 import type {
   AssetActivityRow,
   AssetInventoryRow,
@@ -96,6 +97,8 @@ export function ReportContentSwitch({
   handlers,
   hasActiveFilters = false,
 }: Props) {
+  const { search } = useLocation();
+
   // Distribution is the one report with no row table — it's purely
   // donut-driven, so `hasData` is meaningless there. Always render it
   // and let `AssetDistributionContent` handle its own empty state.
@@ -109,8 +112,27 @@ export function ReportContentSwitch({
   }
 
   // Every other report falls back to a shared empty state when no
-  // rows came back. With filters on, the filters are the likely cause, so
-  // say so instead of the report's "nothing happened yet" copy.
+  // rows came back. Rows can be empty while `totalRows` is not: the URL's
+  // `page` is past the last page (filter dropdowns keep `page`), so offer
+  // the way back to page 1 instead of claiming nothing matches.
+  if (rows.length === 0 && totalRows > 0) {
+    const firstPage = new URLSearchParams(search);
+    firstPage.delete("page");
+    return (
+      <div className="rounded border border-gray-200 bg-white">
+        <ReportEmptyState
+          reason="no_results"
+          title="No results on this page"
+          description={`This page is past the end of the ${totalRows.toLocaleString()} matching results.`}
+          ctaTo={`?${firstPage.toString()}`}
+          ctaLabel="Go to page 1"
+        />
+      </div>
+    );
+  }
+
+  // With filters on, the filters are the likely cause of an empty report,
+  // so say so instead of the report's "nothing happened yet" copy.
   if (rows.length === 0 && hasActiveFilters) {
     return (
       <div className="rounded border border-gray-200 bg-white">

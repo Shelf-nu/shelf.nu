@@ -1,12 +1,14 @@
 /**
- * Empty state of {@link ReportContentSwitch}.
+ * Empty states of {@link ReportContentSwitch}.
  *
- * When the filter bar narrows a report to nothing, the page must say that
- * nothing matches the filters, not that nothing happened in the timeframe.
+ * An empty table has three different causes, and each gets its own message:
+ * the filters match nothing, the URL's page is past the last page, or the
+ * report has no data at all.
  *
  * @see {@link file://./report-content-switch.tsx}
  */
 import { render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
 
 import type { ResolvedTimeframe } from "~/modules/reports/types";
@@ -23,20 +25,53 @@ const TIMEFRAME = {
 
 const HANDLERS = {} as ReportRowHandlers;
 
-describe("ReportContentSwitch empty state", () => {
-  it("says nothing matches the filters when filters are active", () => {
-    render(
+/** Renders an empty page of the kits report at `url`. */
+function renderEmpty({
+  url,
+  totalRows,
+  hasActiveFilters,
+}: {
+  url: string;
+  totalRows: number;
+  hasActiveFilters: boolean;
+}) {
+  render(
+    <MemoryRouter initialEntries={[url]}>
       <ReportContentSwitch
         reportId="top-booked-kits"
         rows={[]}
         kpis={[]}
-        totalRows={0}
+        totalRows={totalRows}
         timeframe={TIMEFRAME}
         handlers={HANDLERS}
-        hasActiveFilters
+        hasActiveFilters={hasActiveFilters}
       />
-    );
+    </MemoryRouter>
+  );
+}
+
+describe("ReportContentSwitch empty state", () => {
+  it("says nothing matches the filters when filters are active", () => {
+    renderEmpty({
+      url: "/reports/top-booked-kits?location=loc-1",
+      totalRows: 0,
+      hasActiveFilters: true,
+    });
 
     expect(screen.getByText("No matching results")).toBeInTheDocument();
+  });
+
+  it("links back to page 1 when the page is past the last one", () => {
+    renderEmpty({
+      url: "/reports/top-booked-kits?location=loc-1&page=2",
+      totalRows: 3,
+      hasActiveFilters: true,
+    });
+
+    expect(screen.queryByText("No matching results")).not.toBeInTheDocument();
+    expect(screen.getByText("No results on this page")).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Go to page 1" }).getAttribute("href")
+    ).toBe("/reports/top-booked-kits?location=loc-1");
   });
 });
