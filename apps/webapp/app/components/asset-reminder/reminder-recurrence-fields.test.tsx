@@ -6,13 +6,18 @@
  * @see {@link file://./reminder-recurrence-fields.tsx}
  */
 import type { ComponentProps } from "react";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
 
 import ReminderRecurrenceFields from "./reminder-recurrence-fields";
 
 type Props = ComponentProps<typeof ReminderRecurrenceFields>;
+
+/** The Repeat dropdown's trigger button. */
+function repeatTrigger() {
+  return document.getElementById("reminder-repeat-trigger");
+}
 
 /** Renders the fields locked (plan without recurrence) inside a form. */
 function renderLocked(overrides: Partial<Props> = {}) {
@@ -48,13 +53,26 @@ describe("ReminderRecurrenceFields on a plan without recurrence", () => {
   it("leaves the Repeat control usable so the series can be turned off", () => {
     renderLocked();
 
-    expect(screen.getByRole("combobox")).not.toBeDisabled();
+    expect(repeatTrigger()).not.toBeDisabled();
+  });
+
+  it("offers only Never and the stored cadence", () => {
+    renderLocked();
+
+    fireEvent.click(repeatTrigger()!);
+
+    expect(
+      screen.getAllByRole("option").map((option) => option.textContent)
+    ).toEqual([
+      expect.stringContaining("Never"),
+      expect.stringContaining("Monthly"),
+    ]);
   });
 
   it("locks the Repeat control for a one-time reminder", () => {
     renderLocked({ repeat: "never", initialRepeat: "never" });
 
-    expect(screen.getByRole("combobox")).toBeDisabled();
+    expect(repeatTrigger()).toBeDisabled();
   });
 
   it("submits Never without the stored end date once repeat is turned off", () => {

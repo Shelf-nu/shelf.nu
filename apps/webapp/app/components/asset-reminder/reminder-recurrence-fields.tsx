@@ -1,6 +1,6 @@
 /**
- * Recurrence controls for the set/edit reminder dialog: the Repeat select
- * (locked with an upgrade nudge when the workspace tier lacks recurrence)
+ * Recurrence controls for the set/edit reminder dialog: the Repeat dropdown
+ * (limited, with an upgrade nudge, when the workspace tier lacks recurrence)
  * and the optional "Ends on" date input.
  *
  * Extracted from SetOrEditReminderDialog to keep the dialog component lean;
@@ -8,15 +8,9 @@
  *
  * @see {@link file://./set-or-edit-reminder-dialog.tsx}
  */
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "~/components/forms/select";
 import { Button } from "~/components/shared/button";
 import { DateTimePicker } from "~/components/shared/date-time-picker";
+import { EnumPreferenceSelect } from "~/components/user/language-region/enum-preference-select";
 import {
   REMINDER_REPEAT_PRESETS,
   type ReminderRepeatValue,
@@ -42,19 +36,41 @@ type ReminderRecurrenceFieldsProps = {
   endsAtError?: string;
 };
 
-/** The shared option list (Never + the repeating presets) for both select states. */
-function RepeatOptions() {
-  return (
-    <SelectContent>
-      <SelectItem value="never">Never</SelectItem>
-      {Object.entries(REMINDER_REPEAT_PRESETS).map(([value, preset]) => (
-        <SelectItem key={value} value={value}>
-          {preset.label}
-        </SelectItem>
-      ))}
-    </SelectContent>
-  );
+/** One Repeat option: the preset label plus a line on when it sends. */
+type RepeatOption = {
+  value: ReminderRepeatValue;
+  label: string;
+  description: string;
+};
+
+/** Says when each cadence sends, under its label in the Repeat list. */
+const REPEAT_DESCRIPTIONS: Record<ReminderRepeatValue, string> = {
+  never: "Send this reminder once",
+  daily: "Every day at the reminder's time",
+  weekly: "Every week on the same weekday",
+  biweekly: "Every other week on the same weekday",
+  monthly: "Every month on the same day",
+  quarterly: "Every 3 months on the same day",
+  semiannually: "Every 6 months on the same day",
+  yearly: "Every year on the same date",
+};
+
+/** Builds the Repeat option for one cadence. */
+function repeatOption(value: ReminderRepeatValue): RepeatOption {
+  return {
+    value,
+    label: value === "never" ? "Never" : REMINDER_REPEAT_PRESETS[value].label,
+    description: REPEAT_DESCRIPTIONS[value],
+  };
 }
+
+/** Never plus every preset, in the order they are offered. */
+const ALL_REPEAT_OPTIONS: RepeatOption[] = [
+  repeatOption("never"),
+  ...(Object.keys(REMINDER_REPEAT_PRESETS) as ReminderRepeatValue[]).map(
+    repeatOption
+  ),
+];
 
 /**
  * Renders the Repeat select and the optional "Ends on" date input for the
@@ -77,6 +93,17 @@ export default function ReminderRecurrenceFields({
   endsAtFieldName,
   endsAtError,
 }: ReminderRecurrenceFieldsProps) {
+  /**
+   * Without the plan, only "Never" and the stored cadence are offered; a
+   * one-time reminder has nothing to choose, so the control locks.
+   */
+  const repeatOptions = canUseRecurringReminders
+    ? ALL_REPEAT_OPTIONS
+    : initialRepeat === "never"
+    ? [repeatOption("never")]
+    : [repeatOption("never"), repeatOption(initialRepeat)];
+  const isLocked = !canUseRecurringReminders && initialRepeat === "never";
+
   return (
     <>
       <div className="mb-4">
@@ -88,64 +115,22 @@ export default function ReminderRecurrenceFields({
         >
           Repeat
         </label>
-        {canUseRecurringReminders ? (
-          <Select
-            name={repeatFieldName}
-            value={repeat}
-            onValueChange={(value) =>
-              onRepeatChange(value as ReminderRepeatValue)
-            }
-            disabled={disabled}
-          >
-            <SelectTrigger id="reminder-repeat-trigger">
-              <SelectValue placeholder="Never" />
-            </SelectTrigger>
-            <RepeatOptions />
-          </Select>
-        ) : initialRepeat === "never" ? (
-          <>
-            {/* why hidden input: a disabled control submits nothing */}
-            <input type="hidden" name={repeatFieldName} value="never" />
-            <Select value="never" disabled>
-              <SelectTrigger id="reminder-repeat-trigger">
-                <SelectValue placeholder="Never" />
-              </SelectTrigger>
-              <RepeatOptions />
-            </Select>
-          </>
-        ) : (
-          <>
-            {/* A locked plan can keep the stored cadence or turn it off, never
-                pick a new one. The stored end date rides along in a hidden
-                input while the cadence is kept, so a plain edit leaves the
-                series unchanged. */}
-            {repeat !== "never" && endsAtDefault ? (
-              <input
-                type="hidden"
-                name={endsAtFieldName}
-                value={endsAtDefault}
-              />
-            ) : null}
-            <Select
-              name={repeatFieldName}
-              value={repeat}
-              onValueChange={(value) =>
-                onRepeatChange(value as ReminderRepeatValue)
-              }
-              disabled={disabled}
-            >
-              <SelectTrigger id="reminder-repeat-trigger">
-                <SelectValue placeholder="Never" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="never">Never</SelectItem>
-                <SelectItem value={initialRepeat}>
-                  {REMINDER_REPEAT_PRESETS[initialRepeat].label}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </>
-        )}
+        <EnumPreferenceSelect
+          id="reminder-repeat-trigger"
+          name={repeatFieldName}
+          value={repeat}
+          onChange={onRepeatChange}
+          options={repeatOptions}
+          ariaLabel="Repeat"
+          disabled={disabled || isLocked}
+        />
+        {/* A locked plan can keep the stored cadence or turn it off, never
+            pick a new one. The stored end date rides along in a hidden input
+            while the cadence is kept, so a plain edit leaves the series
+            unchanged. */}
+        {!canUseRecurringReminders && repeat !== "never" && endsAtDefault ? (
+          <input type="hidden" name={endsAtFieldName} value={endsAtDefault} />
+        ) : null}
         {canUseRecurringReminders ? (
           <p className="mt-1 text-gray-500">
             Automatically send this reminder again on a schedule.
