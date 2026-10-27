@@ -2458,7 +2458,9 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
           'id', ar.id,
           'name', ar.name,
           'message', ar.message,
-          'alertDateTime', ${alertDateTimeField}
+          'alertDateTime', ${alertDateTimeField},
+          'recurrenceUnit', ar."recurrenceUnit",
+          'recurrenceInterval', ar."recurrenceInterval"
         )
         FROM public."AssetReminder" ar
         WHERE 

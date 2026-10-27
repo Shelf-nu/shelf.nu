@@ -22,6 +22,7 @@ const {
   getTeamMembersForQuantityCustody,
   getCustodySourceSummary,
   getAssetAvailability,
+  getOrganizationTierLimit,
   db,
 } = vi.hoisted(() => ({
   getAsset: vi.fn(),
@@ -29,6 +30,7 @@ const {
   getTeamMembersForQuantityCustody: vi.fn(),
   getCustodySourceSummary: vi.fn(),
   getAssetAvailability: vi.fn(),
+  getOrganizationTierLimit: vi.fn(),
   db: {
     bookingAsset: { findMany: vi.fn() },
     partialBookingCheckout: { findMany: vi.fn() },
@@ -60,6 +62,12 @@ vi.mock("~/modules/asset/custody-source.server", () => ({
 vi.mock("~/modules/asset/availability.server", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   getAssetAvailability,
+}));
+
+// why: the workspace tier (for the reminder dialog's Repeat control) is a
+// separate DB read, unrelated to the badge rows.
+vi.mock("~/modules/tier/service.server", () => ({
+  getOrganizationTierLimit,
 }));
 
 // why: the still-out accounting reads through `db`. An in-memory client keeps
@@ -118,8 +126,12 @@ describe("asset page loader: header badge booking rows", () => {
     requirePermission.mockResolvedValue({
       organizationId: "org-1",
       userOrganizations: [],
+      organizations: [],
       // why: the slice of the role policy this loader reads (custody redaction).
       access: { custody: { seeAll: true } },
+    });
+    getOrganizationTierLimit.mockResolvedValue({
+      canUseRecurringReminders: false,
     });
     getTeamMembersForQuantityCustody.mockResolvedValue({
       teamMembers: [],
