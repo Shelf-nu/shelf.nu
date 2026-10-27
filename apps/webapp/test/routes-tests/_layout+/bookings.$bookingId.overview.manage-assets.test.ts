@@ -4,12 +4,13 @@ import {
   BookingStatus,
   OrganizationRoles,
 } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createActionArgs, createLoaderArgs } from "@mocks/remix";
 
 import { db } from "~/database/db.server";
+import { getAssetListWhereForSelectAll } from "~/modules/asset/list-where.server";
 import * as assetService from "~/modules/asset/service.server";
-import * as assetUtils from "~/modules/asset/utils.server";
 import * as bookingService from "~/modules/booking/service.server";
 import * as modelRequestService from "~/modules/booking-model-request/service.server";
 import * as noteService from "~/modules/note/service.server";
@@ -17,6 +18,7 @@ import * as userService from "~/modules/user/service.server";
 import { getDescendantIdsOfLocations } from "~/modules/location/descendants.server";
 import * as bookingAssets from "~/utils/booking-assets";
 import * as httpServer from "~/utils/http.server";
+import { CUSTODY_FILTER_REFUSED } from "~/utils/custody-filter";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import * as rolesServer from "~/utils/roles.server";
 
@@ -145,9 +147,17 @@ vi.mock("~/utils/http.server", async (importOriginal) => {
   };
 });
 
-vi.mock("~/modules/asset/utils.server", () => ({
-  getAssetsWhereInput: vi.fn(),
-}));
+// why: a spy over the REAL builder. Select-all must hand findMany the where
+// the list's own query builds, so the tests read both the options the action
+// passed and the where it produced.
+vi.mock("~/modules/asset/list-where.server", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("~/modules/asset/list-where.server")>();
+  return {
+    ...actual,
+    getAssetListWhereForSelectAll: vi.fn(actual.getAssetListWhereForSelectAll),
+  };
+});
 
 // Mock request and context objects
 const mockContext = {
@@ -2074,10 +2084,6 @@ describe("manage-assets: include assets from child locations", () => {
       modelRequests: [],
     });
 
-    // Action: select-all resolves its asset ids through the where-builder.
-    vi.mocked(assetUtils.getAssetsWhereInput).mockReturnValue({
-      organizationId: "org123",
-    });
     vi.mocked(db.asset.findMany).mockResolvedValue([]);
     vi.mocked(db.bookingAsset.findMany).mockResolvedValue([]);
     vi.mocked(db.booking.findUniqueOrThrow).mockResolvedValue({
@@ -2114,33 +2120,46 @@ describe("manage-assets: include assets from child locations", () => {
       .lastCall?.[0].locationIdsOverride;
   }
 
-  /** The location ids "select all" matched for `query`. */
-  async function selectAllLocationIds(query: string) {
+  /** Submits a select-all for `query`, as the picker does. */
+  async function submitSelectAll(query: string) {
     openUrl(query);
     vi.mocked(httpServer.parseData).mockReturnValue({
       assetIds: [ALL_SELECTED_KEY],
       removedAssetIds: [],
       redirectTo: null,
     });
-    await action(createActionArgs({ context, request: mockRequest, params }));
-    return vi.mocked(assetUtils.getAssetsWhereInput).mock.lastCall?.[0]
+    return action(createActionArgs({ context, request: mockRequest, params }));
+  }
+
+  /** The location ids "select all" asked the list builder to match for `query`. */
+  async function selectAllLocationIds(query: string) {
+    await submitSelectAll(query);
+    return vi.mocked(getAssetListWhereForSelectAll).mock.lastCall?.[0]
       .locationIdsOverride;
   }
 
-  /** The location ids the REAL where-builder puts in the select-all clause. */
-  async function clauseLocationIds(query: string, override?: string[]) {
-    const { getAssetsWhereInput } = await vi.importActual<
-      typeof import("~/modules/asset/utils.server")
-    >("~/modules/asset/utils.server");
-    const where = getAssetsWhereInput({
-      organizationId: "org123",
-      currentSearchParams: query,
-      allowedTeamMemberIds: "all",
-      locationIdsOverride: override,
-    });
-    const inLocations = (where.assetLocations?.some?.locationId ??
-      where.OR?.find((clause) => clause.assetLocations?.some)?.assetLocations
-        ?.some?.locationId) as { in: string[] } | undefined;
+  /** The where select-all handed `db.asset.findMany` to expand the selection. */
+  function selectAllWhere(): Prisma.AssetWhereInput | undefined {
+    const call = vi
+      .mocked(db.asset.findMany)
+      .mock.calls.find(
+        ([args]) =>
+          JSON.stringify(args?.select) === JSON.stringify({ id: true })
+      );
+    return call?.[0]?.where as Prisma.AssetWhereInput | undefined;
+  }
+
+  /** The location ids in the where select-all ran. */
+  function clauseLocationIds() {
+    const where = selectAllWhere();
+    // Plain locations sit on `where.assetLocations`; with "without location"
+    // picked they share an OR group in `where.AND` with `assetLocations: none`.
+    const inLocations = (where?.assetLocations?.some?.locationId ??
+      [where?.AND ?? []]
+        .flat()
+        .flatMap((group) => [group.OR ?? []].flat())
+        .find((clause) => clause.assetLocations?.some)?.assetLocations?.some
+        ?.locationId) as { in: string[] } | undefined;
     return inLocations?.in;
   }
 
@@ -2152,7 +2171,7 @@ describe("manage-assets: include assets from child locations", () => {
     expect(getDescendantIdsOfLocations).not.toHaveBeenCalled();
     // No override: the builder matches the URL's own value, as for every
     // other caller.
-    expect(await clauseLocationIds(query, undefined)).toEqual(["campus"]);
+    expect(clauseLocationIds()).toEqual(["campus"]);
   });
 
   it("widens both to the parent plus sub-locations two levels deep when on", async () => {
@@ -2164,15 +2183,9 @@ describe("manage-assets: include assets from child locations", () => {
 
     expect([...(listIds ?? [])].sort()).toEqual(widened);
     expect(selectAllIds).toEqual(listIds);
-    // Select-all hands that set to the builder, which matches on it.
-    expect(
-      [...((await clauseLocationIds(query, selectAllIds)) ?? [])].sort()
-    ).toEqual(widened);
-    // ...and the ids select-all finds are what the booking receives.
-    expect(db.asset.findMany).toHaveBeenCalledWith({
-      where: { organizationId: "org123" },
-      select: { id: true },
-    });
+    // Select-all hands that set to the builder, and the where it runs
+    // matches on it.
+    expect([...(clauseLocationIds() ?? [])].sort()).toEqual(widened);
   });
 
   it("keeps without-location in both sets with the checkbox on", async () => {
@@ -2188,6 +2201,71 @@ describe("manage-assets: include assets from child locations", () => {
       "without-location",
     ]);
     expect(selectAllIds).toEqual(listIds);
+    expect([...(clauseLocationIds() ?? [])].sort()).toEqual(
+      listIds?.slice().sort()
+    );
+  });
+
+  it("passes the loader's list options to select-all", async () => {
+    await submitSelectAll("location=campus");
+
+    expect(getAssetListWhereForSelectAll).toHaveBeenCalledWith({
+      organizationId: "org123",
+      currentSearchParams: "location=campus",
+      locationIdsOverride: undefined,
+      // The picker list refuses every custodian filter.
+      allowedTeamMemberIds: [],
+      bookableScope: null,
+      honorArchivedView: false,
+      honorLowStockFilter: false,
+    });
+  });
+
+  it("keeps the picker's hide-unavailable rules on select-all", async () => {
+    const query =
+      "hideUnavailable=true&bookingFrom=2026-01-01T09:00:00.000Z&bookingTo=2026-01-02T17:00:00.000Z&unhideAssetsBookigIds=booking123";
+
+    await submitSelectAll(query);
+    const where = selectAllWhere();
+    const groups = [where?.AND ?? []].flat();
+
+    expect(where).toMatchObject({
+      organizationId: "org123",
+      archivedAt: null,
+      availableToBook: true,
+    });
+    // INDIVIDUAL assets in custody stay out of the selection.
+    expect(groups).toContainEqual({
+      OR: [{ type: "QUANTITY_TRACKED" }, { custody: { none: {} } }],
+    });
+    // INDIVIDUAL assets held by a kit stay out too.
+    expect(groups).toContainEqual({
+      OR: [{ type: "QUANTITY_TRACKED" }, { assetKits: { none: {} } }],
+    });
+    // The booking-window conflict rule, which ignores this booking itself.
+    expect(groups).toContainEqual({
+      OR: [
+        { type: "QUANTITY_TRACKED" },
+        {
+          bookingAssets: {
+            none: {
+              booking: expect.objectContaining({
+                id: { notIn: ["booking123"] },
+                status: BookingStatus.RESERVED,
+              }),
+            },
+          },
+        },
+      ],
+    });
+  });
+
+  it("refuses a custodian filter on select-all, as the picker list does", async () => {
+    await submitSelectAll("teamMember=tm-colleague");
+
+    expect([selectAllWhere()?.AND ?? []].flat()).toContainEqual({
+      id: CUSTODY_FILTER_REFUSED,
+    });
   });
 
   it("offers the checkbox only when a ticked location has child locations", async () => {

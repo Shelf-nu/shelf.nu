@@ -56,6 +56,58 @@ export function ensureHostHeaders() {
 }
 
 /**
+ * Make the request URL carry the scheme the browser used.
+ *
+ * Fly and most self-hosted setups terminate HTTPS at a proxy and forward plain
+ * HTTP to Node, so the request URL is `http://` while the browser's `Origin`
+ * header is `https://`. React Router's action CSRF check compares the full
+ * origin, scheme included, so without this every form submission (login,
+ * logout, every action) is rejected with a 400.
+ *
+ * The proxy reports the original scheme in `X-Forwarded-Proto`. Only the scheme
+ * is taken from it: the host is untouched, so a submission from another site
+ * still fails the origin check, and a client that sends its own value can only
+ * make its own request fail. Read `X-Forwarded-Proto`, not `Fly-Forwarded-Proto`:
+ * behind Cloudflare, Fly's header describes the Cloudflare-to-Fly hop rather
+ * than the browser's scheme, and `isHttpsRequest` in `security-headers.ts`
+ * reads the same header. Must run before React Router handles the request, in
+ * every environment.
+ */
+export function applyForwardedProto() {
+  return createMiddleware(async (c, next) => {
+    // A proxy chain may send a list ("https, http"); the first entry is the
+    // scheme the client used.
+    const forwardedProto = c.req
+      .header("x-forwarded-proto")
+      ?.split(",")[0]
+      ?.trim()
+      .toLowerCase();
+
+    if (forwardedProto !== "https" && forwardedProto !== "http") {
+      return next();
+    }
+
+    const originalRequest = c.req.raw;
+    const url = new URL(originalRequest.url);
+    if (url.protocol === `${forwardedProto}:`) {
+      return next();
+    }
+
+    url.protocol = `${forwardedProto}:`;
+    c.req.raw = new Request(url, {
+      method: originalRequest.method,
+      headers: originalRequest.headers,
+      body: originalRequest.body,
+      signal: originalRequest.signal,
+      // @ts-expect-error - duplex is required for streaming bodies
+      duplex: "half",
+    });
+
+    return next();
+  });
+}
+
+/**
  * Protected routes middleware
  *
  * @param options.publicPath - The public paths

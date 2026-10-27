@@ -26,6 +26,7 @@ import {
   simpleModeLoader,
 } from "~/modules/asset/data.server";
 import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
+import { resolveBookableListScope } from "~/modules/asset/list-scope.server";
 import { bulkDeleteAssets } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import {
@@ -242,6 +243,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
             access,
             currentOrganization
           ),
+          bookableScope: resolveBookableListScope({ access, userId }),
           confirmation,
           timeZone,
         });

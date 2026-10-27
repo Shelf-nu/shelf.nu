@@ -1,5 +1,6 @@
 import { apiFetch } from "./client";
 import { cachedApiFetch } from "./cache";
+import { scanContextHeaders, type ScanContext } from "../scan-context";
 import type {
   AssetsResponse,
   AssetDetail,
@@ -193,10 +194,20 @@ export const assetsApi = {
       retry: false,
     }),
 
-  /** Resolve a barcode (additional code) to an asset */
-  barcode: (value: string, orgId: string) =>
+  /**
+   * Resolve a barcode (additional code) to an asset. The server records the
+   * lookup as a scan.
+   *
+   * @param value - The scanned barcode value.
+   * @param orgId - Caller's current workspace id.
+   * @param context - `"audit"` from the audit scanner, so the scan is recorded
+   *   as an audit scan with no Activity note (see `lib/scan-context.ts`); omit
+   *   from the normal scanner.
+   */
+  barcode: (value: string, orgId: string, context?: ScanContext) =>
     apiFetch<BarcodeResponse>(
-      `/api/mobile/barcode/${encodeURIComponent(value)}?orgId=${orgId}`
+      `/api/mobile/barcode/${encodeURIComponent(value)}?orgId=${orgId}`,
+      { headers: scanContextHeaders(context) }
     ),
 
   /** Get team members for an organization (for custody picker) */

@@ -5,9 +5,10 @@ import type {
   TeamMember,
   User,
 } from "@prisma/client";
-import { TagUseFor } from "@prisma/client";
+import { BookingStatus, TagUseFor } from "@prisma/client";
 import loadash from "lodash";
 import { db } from "~/database/db.server";
+import { bookingDraftVisibilityClause } from "~/modules/booking/draft-visibility";
 import {
   assertBulkDeleteConfirmed,
   assertDeleteConfirmedFor,
@@ -74,8 +75,17 @@ export async function getTags(params: {
   perPage?: number;
   search?: string | null;
   request: Request;
+  /** The viewer: the bookings count includes only their own drafts */
+  userId: User["id"];
 }) {
-  const { organizationId, page = 1, perPage = 8, search, request } = params;
+  const {
+    organizationId,
+    page = 1,
+    perPage = 8,
+    search,
+    request,
+    userId,
+  } = params;
 
   try {
     const searchParams = getCurrentSearchParams(request);
@@ -93,6 +103,27 @@ export async function getTags(params: {
         take,
         where,
         orderBy: { updatedAt: "desc" },
+        include: {
+          /**
+           * What the tags list links each count to, counted the way those
+           * lists show by default: the asset index hides archived assets, the
+           * bookings index hides archived and cancelled bookings and other
+           * people's drafts.
+           */
+          _count: {
+            select: {
+              assets: { where: { archivedAt: null } },
+              bookings: {
+                where: {
+                  status: {
+                    notIn: [BookingStatus.ARCHIVED, BookingStatus.CANCELLED],
+                  },
+                  ...bookingDraftVisibilityClause(userId),
+                },
+              },
+            },
+          },
+        },
       }),
 
       /** Count them */
