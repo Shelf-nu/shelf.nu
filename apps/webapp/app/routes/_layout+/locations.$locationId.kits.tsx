@@ -39,7 +39,11 @@ import {
 } from "~/modules/location/service.server";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { updateCookieWithPerPage } from "~/utils/cookies.server";
+import {
+  setCookie,
+  updateCookieWithPerPage,
+  userPrefs,
+} from "~/utils/cookies.server";
 import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
@@ -127,24 +131,29 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       subHeading: locationId,
     };
 
-    return payload({
-      modelName,
-      // The custodian's name and user.email are on every row regardless of
-      // whether the UI draws them, so a viewer without custody visibility can
-      // read them straight out of the route's data payload. Redact here, not
-      // in the component.
-      items: redactCustodianForViewer(kits, {
-        canSeeAllCustody: access.custody.seeAll,
-        userId,
+    // The page-size picker writes `?per_page=`; storing it here keeps the
+    // choice once the query parameter is gone.
+    return data(
+      payload({
+        modelName,
+        // The custodian's name and user.email are on every row regardless of
+        // whether the UI draws them, so a viewer without custody visibility can
+        // read them straight out of the route's data payload. Redact here, not
+        // in the component.
+        items: redactCustodianForViewer(kits, {
+          canSeeAllCustody: access.custody.seeAll,
+          userId,
+        }),
+        page,
+        totalItems: totalKits,
+        perPage,
+        totalPages,
+        header,
+        teamMembers,
+        totalTeamMembers,
       }),
-      page,
-      totalItems: totalKits,
-      perPage,
-      totalPages,
-      header,
-      teamMembers,
-      totalTeamMembers,
-    });
+      { headers: [setCookie(await userPrefs.serialize(cookie))] }
+    );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, locationId });
     throw data(error(reason), { status: reason.status });

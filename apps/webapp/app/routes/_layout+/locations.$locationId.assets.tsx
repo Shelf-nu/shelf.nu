@@ -89,7 +89,11 @@ import {
   scopeCustodianFilterIds,
 } from "~/modules/team-member/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { updateCookieWithPerPage } from "~/utils/cookies.server";
+import {
+  setCookie,
+  updateCookieWithPerPage,
+  userPrefs,
+} from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -261,19 +265,24 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       subHeading: location.id,
     };
 
-    return payload({
-      location,
-      archivedAssetCount,
-      header,
-      modelName,
-      items,
-      page,
-      totalItems,
-      perPage,
-      totalPages,
-      teamMembers,
-      totalTeamMembers,
-    });
+    // The page-size picker writes `?per_page=`; storing it here keeps the
+    // choice once the query parameter is gone.
+    return data(
+      payload({
+        location,
+        archivedAssetCount,
+        header,
+        modelName,
+        items,
+        page,
+        totalItems,
+        perPage,
+        totalPages,
+        teamMembers,
+        totalTeamMembers,
+      }),
+      { headers: [setCookie(await userPrefs.serialize(cookie))] }
+    );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, locationId });
     throw data(error(reason), { status: reason.status });

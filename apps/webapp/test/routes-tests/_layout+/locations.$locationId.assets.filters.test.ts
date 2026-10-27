@@ -12,6 +12,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { loader } from "~/routes/_layout+/locations.$locationId.assets";
+import { userPrefs } from "~/utils/cookies.server";
 import { CUSTODY_FILTER_REFUSED } from "~/utils/custody-filter";
 
 // why: the loader reaches Prisma; the custodian narrowing reads the caller's
@@ -81,6 +82,24 @@ function signInAs({ seeAllCustody }: { seeAllCustody: boolean }) {
       policy: { assets: { seeArchived: false } },
     },
   } as never);
+}
+
+/** The `Set-Cookie` header the loader's response carries, if any. */
+function setCookieHeader(result: unknown) {
+  const init = (result as { init?: ResponseInit | null }).init;
+  return new Headers(init?.headers).get("Set-Cookie") ?? "";
+}
+
+/** The per-page preference stored in the cookie the loader sets. */
+async function perPageFromCookie(result: unknown) {
+  const prefs = await userPrefs.parse(setCookieHeader(result));
+  return prefs?.perPage;
+}
+
+/** The loader's payload, whether or not it carries response headers. */
+function loaderData(result: unknown) {
+  const wrapped = result as { data?: Record<string, unknown> };
+  return (wrapped.data ?? result) as Record<string, unknown>;
 }
 
 /** The custodian ids the loader handed to getLocation. */
@@ -167,7 +186,7 @@ describe("locations.$locationId.assets loader: archived-hidden count", () => {
   it("counts archived assets on an unfiltered list", async () => {
     const result = await loader(buildArgs(""));
 
-    expect(result.archivedAssetCount).toBe(3);
+    expect(loaderData(result).archivedAssetCount).toBe(3);
   });
 
   it.each([
@@ -178,8 +197,37 @@ describe("locations.$locationId.assets loader: archived-hidden count", () => {
     async (_label, query) => {
       const result = await loader(buildArgs(query));
 
-      expect(result.archivedAssetCount).toBe(0);
+      expect(loaderData(result).archivedAssetCount).toBe(0);
       expect(db.asset.count).not.toHaveBeenCalled();
     }
   );
+});
+
+describe("locations.$locationId.assets loader: per-page preference", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    signInAs({ seeAllCustody: true });
+    vi.mocked(getLocation).mockResolvedValue({
+      location: { id: "location-1", name: "Shelf B2" },
+      totalAssetsWithinLocation: 0,
+      assets: [],
+    } as never);
+    vi.mocked(getTeamMemberForCustodianFilter).mockResolvedValue({
+      teamMembers: [],
+      totalTeamMembers: 0,
+    } as never);
+    vi.mocked(getCustodyFromLocationByPool).mockResolvedValue({} as never);
+    vi.mocked(loadMultiPlacedPoolIds).mockResolvedValue(new Set() as never);
+    vi.mocked(countUnitsOnBookingsFromLocation).mockResolvedValue(
+      new Map() as never
+    );
+    vi.mocked(db.asset.count).mockResolvedValue(0);
+  });
+
+  it("stores the chosen page size in the preferences cookie", async () => {
+    const result = await loader(buildArgs("?per_page=50"));
+
+    expect(setCookieHeader(result)).toContain("user-prefs=");
+    expect(await perPageFromCookie(result)).toBe(50);
+  });
 });
