@@ -1,13 +1,14 @@
 /**
  * Idle Assets Report: Idle Predicate Tests
  *
- * Covers the public `idleAssetsReport` function: that the rows, the count and
- * the KPIs all select idle assets with one database predicate (so a page holds
- * as many rows as the pager says), that the predicate reads a "use" as an
- * archive-aware returned booking (archiving rewrites a COMPLETE booking's
- * status to ARCHIVED, so matching COMPLETE alone would make assets look idle
- * the moment their last booking ages into the archive), and that a recent use
- * is one ending on or after the cutoff.
+ * Covers the public `idleAssetsReport` function: that the rows and the KPIs
+ * (whose total is the row count) select idle assets with one database
+ * predicate, so a page holds as many rows as the pager says. A "use" is the
+ * asset's own slice going out on an archive-aware returned booking (archiving
+ * rewrites a COMPLETE booking's status to ARCHIVED, so matching COMPLETE alone
+ * would make assets look idle the moment their last booking ages into the
+ * archive); a recent use is one on a booking ending on or after the cutoff;
+ * and "out right now" is the asset's slice, not the booking's status.
  *
  * @see {@link file://./helpers.server.ts}
  */
@@ -70,12 +71,15 @@ describe("idleAssetsReport", () => {
     vi.useRealTimers();
   });
 
-  /** The archive-aware "returned booking" predicate a use is matched with. */
-  const RETURNED = {
-    OR: [
-      { status: "COMPLETE" },
-      { status: "ARCHIVED", archivedWithoutCheckin: false },
-    ],
+  /** A use: the asset's slice went out on an archive-aware returned booking. */
+  const RETURNED_USE = {
+    checkedOutAt: { not: null },
+    booking: {
+      OR: [
+        { status: "COMPLETE" },
+        { status: "ARCHIVED", archivedWithoutCheckin: false },
+      ],
+    },
   };
 
   /** The `where` of the rows read and of the KPI read, in that order. */
@@ -84,12 +88,12 @@ describe("idleAssetsReport", () => {
     return [rowsCall?.[0]?.where, kpiCall?.[0]?.where];
   }
 
-  /** The booking predicate a query uses to find each asset's last use. */
+  /** The slice predicate a query uses to find each asset's last use. */
   function lastUseWhere(args: { select?: unknown } | undefined) {
     const select = args?.select as
-      | { bookingAssets?: { where?: { booking?: unknown } } }
+      | { bookingAssets?: { where?: unknown } }
       | undefined;
-    return select?.bookingAssets?.where?.booking;
+    return select?.bookingAssets?.where;
   }
 
   it("finds the last use with the archive-aware predicate", async () => {
@@ -101,11 +105,11 @@ describe("idleAssetsReport", () => {
     const calls = vi.mocked(db.asset.findMany).mock.calls;
     expect(calls).toHaveLength(2);
     for (const [args] of calls) {
-      expect(lastUseWhere(args)).toEqual(RETURNED);
+      expect(lastUseWhere(args)).toEqual(RETURNED_USE);
     }
   });
 
-  it("leaves out assets returned from a booking on or after the cutoff", async () => {
+  it("leaves out assets used on a booking ending on or after the cutoff", async () => {
     // why: The idle cutoff derives from the wall clock (`now - threshold`);
     // pinning `now` makes the cutoff exact.
     vi.useFakeTimers().setSystemTime(new Date("2026-08-26T12:00:00Z"));
@@ -122,21 +126,24 @@ describe("idleAssetsReport", () => {
       NOT: {
         bookingAssets: {
           some: {
-            booking: {
-              AND: [
-                RETURNED,
-                { to: { gte: new Date("2026-07-27T12:00:00Z") } },
-              ],
-            },
+            AND: [
+              RETURNED_USE,
+              { booking: { to: { gte: new Date("2026-07-27T12:00:00Z") } } },
+            ],
           },
         },
       },
     });
-    // Assets out on a booking right now are not idle either.
+    // An asset whose own slice is out on a running booking is not idle. One
+    // checked back in, or never checked out, on that booking is.
     expect(where?.AND).toContainEqual({
       NOT: {
         bookingAssets: {
-          some: { booking: { status: { in: ["ONGOING", "OVERDUE"] } } },
+          some: {
+            checkedOutAt: { not: null },
+            checkedInAt: null,
+            booking: { status: { in: ["ONGOING", "OVERDUE"] } },
+          },
         },
       },
     });

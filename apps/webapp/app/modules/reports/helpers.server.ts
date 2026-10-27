@@ -58,6 +58,7 @@ import type {
   TopBookedKitRow,
 } from "./types";
 import { bookingStatusTransitionCounts } from "../activity-event/reports.server";
+import { CURRENT_BOOKING_SLICE_FILTER } from "../asset/fields";
 import type { ResolvableAssetModelImage } from "../asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "../asset/image-select";
 import { refreshExpiredAssetImages } from "../asset/service.server";
@@ -1704,17 +1705,34 @@ export async function idleAssetsReport(
 }
 
 /**
- * The assets the Idle Assets report lists: the caller's asset predicate,
- * not out on a booking right now, and with no returned booking that ended on
- * or after the cutoff (never-booked assets qualify).
+ * A use of an asset: its slice on a returned booking, and only when that
+ * slice actually went out. Being listed on a booking is not a use; an asset
+ * left behind at check-out never moved. Whether a slice went out is answered
+ * by its `checkedOutAt` marker, never by the booking's status.
  *
- * The rows, the count and the KPIs all query with this one predicate, in the
- * database, so `skip`/`take` page through idle assets only and every page
- * holds as many rows as the pager says.
+ * @see {@link file://./../../../../../.claude/rules/booking-checkout-is-recorded-per-slice.md}
+ */
+const RETURNED_USE_SLICE_WHERE = {
+  checkedOutAt: { not: null },
+  booking: RETURNED_BOOKING_WHERE,
+} satisfies Prisma.BookingAssetWhereInput;
+
+/**
+ * The assets the Idle Assets report lists: the caller's asset predicate, not
+ * out on a booking right now, and with no use (see `RETURNED_USE_SLICE_WHERE`)
+ * on a booking that ended on or after the cutoff. Never-used assets qualify.
+ *
+ * "Out right now" is the asset's own slice: checked out and not yet checked
+ * in on an ONGOING or OVERDUE booking. An asset already checked back in, or
+ * never checked out, on a running booking is on the shelf.
+ *
+ * The rows and the KPIs both query with this one predicate, in the database,
+ * so `skip`/`take` page through idle assets only and every page holds as many
+ * rows as the pager says.
  *
  * @param organizationId - Workspace scope, enforced here as well as in `assetWhere`
  * @param assetWhere - Active inventory plus the filter bar's predicate
- * @param cutoffDate - A returned booking ending on or after this is a recent use
+ * @param cutoffDate - A use on a booking ending on or after this is recent
  */
 function idleAssetWhere(
   organizationId: string,
@@ -1727,18 +1745,17 @@ function idleAssetWhere(
       { organizationId },
       {
         NOT: {
-          bookingAssets: {
-            some: { booking: { status: { in: ["ONGOING", "OVERDUE"] } } },
-          },
+          bookingAssets: { some: CURRENT_BOOKING_SLICE_FILTER.where },
         },
       },
       {
         NOT: {
           bookingAssets: {
             some: {
-              booking: {
-                AND: [RETURNED_BOOKING_WHERE, { to: { gte: cutoffDate } }],
-              },
+              AND: [
+                RETURNED_USE_SLICE_WHERE,
+                { booking: { to: { gte: cutoffDate } } },
+              ],
             },
           },
         },
@@ -1799,14 +1816,11 @@ async function fetchIdleAssetRows(
           },
         },
       },
-      // Pull the most-recent returned booking via the pivot (archive-aware
-      // — see `RETURNED_BOOKING_WHERE`). We sort pivot rows by their
-      // related booking's `to` desc and take the first one to find the
-      // last completed booking for this asset.
+      // The most recent use (see `RETURNED_USE_SLICE_WHERE`), by its
+      // booking's end, for the Last Used column. Same test as the idle
+      // predicate, so a listed asset never shows a use after the cutoff.
       bookingAssets: {
-        where: {
-          booking: RETURNED_BOOKING_WHERE,
-        },
+        where: RETURNED_USE_SLICE_WHERE,
         orderBy: { booking: { to: "desc" } },
         take: 1,
         select: {
@@ -1887,9 +1901,7 @@ async function computeIdleAssetsKpis(
       quantity: true,
       updatedAt: true,
       bookingAssets: {
-        where: {
-          booking: RETURNED_BOOKING_WHERE,
-        },
+        where: RETURNED_USE_SLICE_WHERE,
         orderBy: { booking: { to: "desc" } },
         take: 1,
         select: {
