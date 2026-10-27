@@ -410,9 +410,9 @@ const Row = ({
   extraProps: { canReadCustody: boolean; userRoleCanManageKits: boolean };
 }) => {
   const { category, custody } = item;
-  // why: this is a kit-listing surface, and kits are code-bearing entities.
-  // It was the only one whose query did not even fetch the relations, so the
-  // chip could not be rendered here at all. See
+  // why: kits are code-bearing entities, so every kit list renders the
+  // workspace's display code. The loader must keep selecting `qrCodes` and
+  // `barcodes` for `resolveDisplayCode` to have something to show. See
   // `.claude/rules/code-bearing-entity-list-consistency.md`.
   const currentOrganization = useCurrentOrganization();
   const displayCode = currentOrganization
