@@ -29,6 +29,22 @@ type AssetAlertEmailProps = {
   nextOccurrence?: Date | null;
   /** The recipient's date format and timezone, when they could be resolved. */
   prefs?: ResolvedFormatPrefs;
+  /** Set when this occurrence ends the series or is the last one sent. */
+  seriesStatus?: SeriesStopReason;
+};
+
+/** Why a recurring series sends nothing after this occurrence. */
+export type SeriesStopReason = "ended" | "paused";
+
+/**
+ * What the email and the asset note say when a series stops after this
+ * occurrence. Shared so both always tell the same story.
+ */
+export const SERIES_STOP_MESSAGES: Record<SeriesStopReason, string> = {
+  ended:
+    "This was the last occurrence of this recurring reminder (end date reached).",
+  paused:
+    "Later occurrences of this recurring reminder will not be sent until the workspace plan includes recurring reminders again.",
 };
 
 /**
@@ -40,7 +56,8 @@ type AssetAlertEmailProps = {
  * @param reminder - The reminder, for its cadence and series timezone.
  * @param nextOccurrence - The next scheduled occurrence, if any.
  * @param prefs - The recipient's resolved date format and timezone.
- * @returns The line, or null for a one-time reminder or an ended series.
+ * @param seriesStatus - Set when the series sends nothing after this one.
+ * @returns The line, or null for a one-time reminder.
  */
 export function recurrenceLine(
   reminder: Pick<
@@ -48,8 +65,11 @@ export function recurrenceLine(
     "recurrenceUnit" | "recurrenceInterval" | "recurrenceTimezone"
   >,
   nextOccurrence?: Date | null,
-  prefs?: ResolvedFormatPrefs
+  prefs?: ResolvedFormatPrefs,
+  seriesStatus?: SeriesStopReason
 ): string | null {
+  if (seriesStatus) return SERIES_STOP_MESSAGES[seriesStatus];
+
   const cadence = describeRecurrence(reminder);
   if (!cadence || !nextOccurrence) return null;
 
@@ -74,6 +94,7 @@ export function assetAlertEmailText({
   customEmailFooter,
   nextOccurrence,
   prefs,
+  seriesStatus,
 }: AssetAlertEmailProps) {
   const userName = resolveUserDisplayName(user);
 
@@ -82,7 +103,12 @@ export function assetAlertEmailText({
     : `This email was sent to ${user.email} because it is part of the Shelf workspace ${workspaceName}.
 If you think you weren't supposed to have received this email please contact the owner of the workspace.`;
 
-  const recurrence = recurrenceLine(reminder, nextOccurrence, prefs);
+  const recurrence = recurrenceLine(
+    reminder,
+    nextOccurrence,
+    prefs,
+    seriesStatus
+  );
 
   return `Asset reminder notice
 
@@ -125,12 +151,18 @@ function AssetAlertEmailTemplate({
   customEmailFooter,
   nextOccurrence,
   prefs,
+  seriesStatus,
 }: AssetAlertEmailProps) {
   const userName = resolveUserDisplayName(user);
 
   const isEmailExpired = isAssetImageExpired(asset.mainImageExpiration);
 
-  const recurrence = recurrenceLine(reminder, nextOccurrence, prefs);
+  const recurrence = recurrenceLine(
+    reminder,
+    nextOccurrence,
+    prefs,
+    seriesStatus
+  );
 
   return (
     <Html>

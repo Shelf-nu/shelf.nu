@@ -75,7 +75,9 @@ vitest.mock("./scheduler.server", async (importOriginal) => {
 });
 
 // why: preventing real email template rendering during tests
-vitest.mock("./emails", () => ({
+vitest.mock("./emails", async (importOriginal) => ({
+  // the stop messages are plain strings; the notes assert on their wording
+  ...((await importOriginal()) as object),
   assetAlertEmailHtmlString: vitest.fn().mockResolvedValue("<html></html>"),
   assetAlertEmailText: vitest.fn().mockReturnValue("text"),
 }));

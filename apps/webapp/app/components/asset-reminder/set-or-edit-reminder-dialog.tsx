@@ -12,8 +12,8 @@ import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
 import {
+  endsAtCalendarDay,
   REMINDER_REPEAT_VALUES,
-  resolveRecurrenceZone,
   type ReminderRepeatValue,
 } from "~/modules/asset-reminder/recurrence";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
@@ -322,9 +322,7 @@ export default function SetOrEditReminderDialog({
   // toISOString) so the date shown matches what was picked and does not drift
   // +1 day per save for west-of-UTC workspaces.
   const endsAtDefault = reminder?.endsAt
-    ? DateTime.fromJSDate(new Date(reminder.endsAt))
-        .setZone(resolveRecurrenceZone(reminder.recurrenceTimezone ?? null))
-        .toFormat("yyyy-MM-dd")
+    ? endsAtCalendarDay(reminder.endsAt, reminder.recurrenceTimezone ?? null)
     : undefined;
 
   return (

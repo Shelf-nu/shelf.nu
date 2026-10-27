@@ -211,6 +211,21 @@ describe("recurrence helpers", () => {
     ).toBe("never");
   });
 
+  it("falls back to the same unit's preset for a cadence that is not a preset", () => {
+    expect(
+      repeatValueFromRecurrence({
+        recurrenceUnit: ReminderRecurrenceUnit.DAY,
+        recurrenceInterval: 3,
+      })
+    ).toBe("daily");
+    expect(
+      repeatValueFromRecurrence({
+        recurrenceUnit: ReminderRecurrenceUnit.YEAR,
+        recurrenceInterval: 2,
+      })
+    ).toBe("yearly");
+  });
+
   it("describes cadences for the UI and emails", () => {
     expect(
       describeRecurrence({

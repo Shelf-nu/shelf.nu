@@ -44,7 +44,9 @@ type OrganizationsForTier = {
  *
  * @throws {ShelfError} 400 with a field-level validation error (matching the
  *         parseData shape so the form shows it on the input) when the
- *         resolved alertDateTime is not in the future.
+ *         resolved alertDateTime is not in the future (`alertDateTime` key),
+ *         or when the end-of-day `endsAt` is earlier than the resolved
+ *         alertDateTime (`endsAt` key).
  */
 export function resolveReminderPayloadDates({
   timeZone,

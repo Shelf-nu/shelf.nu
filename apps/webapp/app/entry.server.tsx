@@ -104,7 +104,7 @@ schedulerService
     reconcileRecurringReminders()
       .then(({ scanned, rearmed }) => {
         if (scanned > 0) {
-          console.log(
+          Logger.info(
             `Recurring reminders reconciled: ${rearmed}/${scanned} chains re-armed`
           );
         }

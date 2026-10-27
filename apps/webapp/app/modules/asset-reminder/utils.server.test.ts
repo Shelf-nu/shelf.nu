@@ -9,7 +9,6 @@
  *
  * @see {@link file://./utils.server.ts} resolveRemindersActions — code under test
  */
-import { DateTime } from "luxon";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type * as ClientHintsModule from "~/utils/client-hints";
@@ -57,7 +56,7 @@ vi.mock("../tier/service.server", () => ({
   }),
 }));
 
-import { resolveRecurrenceZone } from "./recurrence";
+import { endsAtCalendarDay } from "./recurrence";
 import {
   resolveReminderPayloadDates,
   resolveRemindersActions,
@@ -75,13 +74,6 @@ function formData(fields: Record<string, string>): FormData {
   const fd = new FormData();
   for (const [k, v] of Object.entries(fields)) fd.set(k, v);
   return fd;
-}
-
-/** Mirrors the dialog's endsAtDefault computation exactly. */
-function dialogEndsAtDefault(endsAt: Date, timezone: string | null): string {
-  return DateTime.fromJSDate(endsAt)
-    .setZone(resolveRecurrenceZone(timezone))
-    .toFormat("yyyy-MM-dd");
 }
 
 /** Builds a valid edit-reminder POST request with the given wall-clock string. */
@@ -158,7 +150,7 @@ describe("resolveReminderPayloadDates end-date round-trip", () => {
     const storedEndsAt = first.recurrence!.endsAt!;
 
     // DISPLAY: the dialog renders the calendar date back in the stored zone
-    const shownDate = dialogEndsAtDefault(storedEndsAt, zone);
+    const shownDate = endsAtCalendarDay(storedEndsAt, zone);
     expect(shownDate).toBe("2099-07-15"); // NOT 2099-07-16
 
     // RE-SUBMIT unchanged: the parsed instant must equal the stored one

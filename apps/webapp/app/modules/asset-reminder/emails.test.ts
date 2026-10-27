@@ -72,4 +72,28 @@ describe("recurrenceLine", () => {
       )
     ).toBeNull();
   });
+
+  it("says the series ended on its last occurrence", () => {
+    expect(
+      recurrenceLine(
+        cadence(ReminderRecurrenceUnit.DAY, 1),
+        null,
+        SOFIA_PREFS,
+        "ended"
+      )
+    ).toBe(
+      "This was the last occurrence of this recurring reminder (end date reached)."
+    );
+  });
+
+  it("says later occurrences are held back after a downgrade", () => {
+    expect(
+      recurrenceLine(
+        cadence(ReminderRecurrenceUnit.DAY, 1),
+        null,
+        undefined,
+        "paused"
+      )
+    ).toContain("will not be sent until the workspace plan");
+  });
 });

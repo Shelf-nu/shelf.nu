@@ -14,7 +14,12 @@ import {
   advanceRecurringReminder,
   orgCanUseRecurringReminders,
 } from "./chain.server";
-import { assetAlertEmailHtmlString, assetAlertEmailText } from "./emails";
+import {
+  assetAlertEmailHtmlString,
+  assetAlertEmailText,
+  SERIES_STOP_MESSAGES,
+  type SeriesStopReason,
+} from "./emails";
 import { isRecurringReminder } from "./recurrence";
 import {
   ASSETS_EVENT_TYPE_MAP,
@@ -292,6 +297,13 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
     }
     if (seriesPaused) nextOccurrence = null;
 
+    /** Set when nothing more will be sent after this occurrence. */
+    const seriesStatus: SeriesStopReason | undefined = seriesEnded
+      ? "ended"
+      : seriesPaused
+      ? "paused"
+      : undefined;
+
     const usersToSendEmail = reminder.teamMembers
       .filter((tm) => !!tm.user)
       .map((teamMember) => teamMember.user! as UserToEmail);
@@ -353,10 +365,8 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
       noteContent += ` Next reminder scheduled for ${wrapDateForNote(
         nextOccurrence
       )}.`;
-    } else if (seriesEnded) {
-      noteContent += ` This was the last occurrence of this recurring reminder (end date reached).`;
-    } else if (seriesPaused) {
-      noteContent += ` Later occurrences of this recurring reminder will not be sent until the workspace plan includes recurring reminders again.`;
+    } else if (seriesStatus) {
+      noteContent += ` ${SERIES_STOP_MESSAGES[seriesStatus]}`;
     }
 
     /** Sending alert mails to all associated users. */
@@ -382,6 +392,7 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
           customEmailFooter: reminder.organization.customEmailFooter,
           nextOccurrence,
           prefs,
+          seriesStatus,
         });
 
         sendEmail({
@@ -396,6 +407,7 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
             customEmailFooter: reminder.organization.customEmailFooter,
             nextOccurrence,
             prefs,
+            seriesStatus,
           }),
           html,
         });

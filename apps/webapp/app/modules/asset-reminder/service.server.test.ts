@@ -375,6 +375,36 @@ describe("editAssetReminder tier gate", () => {
     );
   });
 
+  it("keeps the stored timezone and its end-of-day when edited from another zone", async () => {
+    // Stored series: New York, ending 2099-07-15 at end of day there (EDT).
+    givenStoredRow({
+      ...MONTHLY_ROW,
+      recurrenceTimezone: "America/New_York",
+      recurrenceEndsAt: new Date("2099-07-16T03:59:59.999Z"),
+    } as unknown as typeof MONTHLY_ROW);
+
+    // Editor in Tokyo submits the same calendar day, end of day in Tokyo.
+    await editAssetReminder({
+      ...EDIT_ARGS,
+      recurrence: {
+        ...EDIT_ARGS.recurrence,
+        timezone: "Asia/Tokyo",
+        endsAt: new Date("2099-07-15T14:59:59.999Z"),
+      },
+    });
+
+    // A plain edit on a plan without recurrence is not refused, and the
+    // series keeps its zone and its end instant.
+    expect(db.assetReminder.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          recurrenceTimezone: "America/New_York",
+          recurrenceEndsAt: new Date("2099-07-16T03:59:59.999Z"),
+        }),
+      })
+    );
+  });
+
   it("lets a tier with the capability change the cadence", async () => {
     givenStoredRow(MONTHLY_ROW);
 

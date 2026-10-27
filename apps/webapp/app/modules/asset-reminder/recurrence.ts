@@ -86,10 +86,22 @@ export function isRecurringReminder(
   return reminder.recurrenceUnit !== null && !!reminder.recurrenceInterval;
 }
 
+/** The every-1 preset for each unit, used when a stored cadence is not a preset. */
+const SAME_UNIT_PRESET: Record<
+  ReminderRecurrenceUnit,
+  Exclude<ReminderRepeatValue, "never">
+> = {
+  DAY: "daily",
+  WEEK: "weekly",
+  MONTH: "monthly",
+  YEAR: "yearly",
+};
+
 /**
  * Resolves the stored (unit, interval) pair back to the dialog preset value.
- * All v1 rows are written from presets; the fallback covers hypothetical
- * hand-written data so the edit dialog never crashes.
+ * All v1 rows are written from presets. A cadence that matches none (data
+ * written outside the dialog) falls back to the every-1 preset of the same
+ * unit, so the edit dialog never crashes and never jumps to another unit.
  */
 export function repeatValueFromRecurrence(
   reminder: Pick<AssetReminder, "recurrenceUnit" | "recurrenceInterval">
@@ -102,7 +114,10 @@ export function repeatValueFromRecurrence(
       preset.interval === reminder.recurrenceInterval
   );
 
-  return (match?.[0] as ReminderRepeatValue) ?? "monthly";
+  return (
+    (match?.[0] as ReminderRepeatValue | undefined) ??
+    SAME_UNIT_PRESET[reminder.recurrenceUnit!]
+  );
 }
 
 /** Luxon duration key for a recurrence unit. */
@@ -176,6 +191,24 @@ export function formatOccurrenceInZone(
 }
 
 /**
+ * The calendar day (yyyy-MM-dd) of a stored end-of-day instant, read in the
+ * series' own timezone. This is the date the "Ends on" field shows, so a
+ * stored end date round-trips through the form without drifting a day.
+ *
+ * @param endsAt - The stored end-of-day instant.
+ * @param timezone - The series' recurrence timezone (UTC when missing or invalid).
+ * @returns The calendar day as yyyy-MM-dd.
+ */
+export function endsAtCalendarDay(
+  endsAt: Date | string,
+  timezone: string | null
+): string {
+  return DateTime.fromJSDate(new Date(endsAt))
+    .setZone(resolveRecurrenceZone(timezone))
+    .toFormat("yyyy-MM-dd");
+}
+
+/**
  * Re-anchors an end-of-day instant from one timezone to another while keeping
  * the same CALENDAR date. Used when an existing recurring reminder is edited
  * from a different timezone: the submitted endsAt was parsed as end-of-day in
@@ -193,9 +226,7 @@ export function rebaseEndOfDayToZone(
   fromZone: string | null,
   toZone: string | null
 ): Date {
-  const calendarDay = DateTime.fromJSDate(endsAt)
-    .setZone(resolveRecurrenceZone(fromZone))
-    .toFormat("yyyy-MM-dd");
+  const calendarDay = endsAtCalendarDay(endsAt, fromZone);
   return DateTime.fromFormat(calendarDay, "yyyy-MM-dd", {
     zone: resolveRecurrenceZone(toZone),
   })
