@@ -58,11 +58,13 @@ import type {
   TopBookedKitRow,
 } from "./types";
 import { bookingStatusTransitionCounts } from "../activity-event/reports.server";
+import { CURRENT_BOOKING_SLICE_FILTER } from "../asset/fields";
 import type { ResolvableAssetModelImage } from "../asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "../asset/image-select";
 import { refreshExpiredAssetImages } from "../asset/service.server";
 import { getPrimaryLocation } from "../asset/utils";
 import { refreshExpiredKitImages } from "../kit/service.server";
+import { getUnitsAtLocation } from "../location/utils";
 import { USER_NAME_SELECT } from "../user/fields";
 
 // Re-export timeframe utilities for server use
@@ -1650,7 +1652,9 @@ export async function idleAssetsReport(
 
     // Fetch data — `fetchIdleAssetRows` re-signs any expired thumbnail URLs
     // inline (see its body) so we don't need a separate refresh round-trip.
-    const [rows, totalCount, kpis] = await Promise.all([
+    // The KPI read already loads every idle asset, so its total doubles as
+    // the pager's row count.
+    const [rows, { kpis, totalIdle }] = await Promise.all([
       fetchIdleAssetRows(
         organizationId,
         assetWhere,
@@ -1658,7 +1662,6 @@ export async function idleAssetsReport(
         page,
         pageSize
       ),
-      countIdleAssets(organizationId, assetWhere, cutoffDate),
       computeIdleAssetsKpis(organizationId, assetWhere, cutoffDate, currency),
     ]);
 
@@ -1687,7 +1690,7 @@ export async function idleAssetsReport(
       kpis,
       rows,
       computedMs,
-      totalRows: totalCount,
+      totalRows: totalIdle,
       page,
       pageSize,
     };
@@ -1702,10 +1705,67 @@ export async function idleAssetsReport(
 }
 
 /**
- * Fetch idle asset rows with last booking date.
+ * A use of an asset: its slice on a returned booking, and only when that
+ * slice actually went out. Being listed on a booking is not a use; an asset
+ * left behind at check-out never moved. Whether a slice went out is answered
+ * by its `checkedOutAt` marker, never by the booking's status.
  *
- * An asset is considered idle if it hasn't been part of any booking
- * that was checked out since the cutoff date.
+ * @see {@link file://./../../../../../.claude/rules/booking-checkout-is-recorded-per-slice.md}
+ */
+const RETURNED_USE_SLICE_WHERE = {
+  checkedOutAt: { not: null },
+  booking: RETURNED_BOOKING_WHERE,
+} satisfies Prisma.BookingAssetWhereInput;
+
+/**
+ * The assets the Idle Assets report lists: the caller's asset predicate, not
+ * out on a booking right now, and with no use (see `RETURNED_USE_SLICE_WHERE`)
+ * on a booking that ended on or after the cutoff. Never-used assets qualify.
+ *
+ * "Out right now" is the asset's own slice: checked out and not yet checked
+ * in on an ONGOING or OVERDUE booking. An asset already checked back in, or
+ * never checked out, on a running booking is on the shelf.
+ *
+ * The rows and the KPIs both query with this one predicate, in the database,
+ * so `skip`/`take` page through idle assets only and every page holds as many
+ * rows as the pager says.
+ *
+ * @param organizationId - Workspace scope, enforced here as well as in `assetWhere`
+ * @param assetWhere - Active inventory plus the filter bar's predicate
+ * @param cutoffDate - A use on a booking ending on or after this is recent
+ */
+function idleAssetWhere(
+  organizationId: string,
+  assetWhere: Prisma.AssetWhereInput,
+  cutoffDate: Date
+): Prisma.AssetWhereInput {
+  return {
+    AND: [
+      assetWhere,
+      { organizationId },
+      {
+        NOT: {
+          bookingAssets: { some: CURRENT_BOOKING_SLICE_FILTER.where },
+        },
+      },
+      {
+        NOT: {
+          bookingAssets: {
+            some: {
+              AND: [
+                RETURNED_USE_SLICE_WHERE,
+                { booking: { to: { gte: cutoffDate } } },
+              ],
+            },
+          },
+        },
+      },
+    ],
+  };
+}
+
+/**
+ * Fetch one page of idle asset rows with their last booking date.
  */
 async function fetchIdleAssetRows(
   organizationId: string,
@@ -1716,27 +1776,12 @@ async function fetchIdleAssetRows(
 ): Promise<IdleAssetRow[]> {
   const now = new Date();
 
-  // Get assets with their last booking checkout. Phase 3a: walk the
-  // `BookingAsset` pivot for both the exclusion filter and the
-  // most-recent-completed sub-query. `organizationId` is enforced
-  // explicitly here for defense-in-depth alongside the caller's
-  // `assetWhere`. `mainImage`, `mainImageExpiration`, `organizationId`
-  // are selected so we can pipe the assets through
-  // `refreshExpiredAssetImages` below without an extra round-trip.
+  // One page of idle assets (see `idleAssetWhere`), each with its most
+  // recent returned booking for the Last Used column. `mainImage`,
+  // `mainImageExpiration` and `organizationId` are selected so the assets
+  // can go through `refreshExpiredAssetImages` without an extra round-trip.
   const assets = await db.asset.findMany({
-    where: {
-      ...assetWhere,
-      organizationId,
-      NOT: {
-        bookingAssets: {
-          some: {
-            booking: {
-              status: { in: ["ONGOING", "OVERDUE"] },
-            },
-          },
-        },
-      },
-    },
+    where: idleAssetWhere(organizationId, assetWhere, cutoffDate),
     // Least recently updated first; `id` tiebreaker keeps skip/take paging
     // deterministic for assets sharing an `updatedAt` (bulk operations).
     orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
@@ -1771,14 +1816,11 @@ async function fetchIdleAssetRows(
           },
         },
       },
-      // Pull the most-recent returned booking via the pivot (archive-aware
-      // — see `RETURNED_BOOKING_WHERE`). We sort pivot rows by their
-      // related booking's `to` desc and take the first one to find the
-      // last completed booking for this asset.
+      // The most recent use (see `RETURNED_USE_SLICE_WHERE`), by its
+      // booking's end, for the Last Used column. Same test as the idle
+      // predicate, so a listed asset never shows a use after the cutoff.
       bookingAssets: {
-        where: {
-          booking: RETURNED_BOOKING_WHERE,
-        },
+        where: RETURNED_USE_SLICE_WHERE,
         orderBy: { booking: { to: "desc" } },
         take: 1,
         select: {
@@ -1788,16 +1830,9 @@ async function fetchIdleAssetRows(
     },
   });
 
-  // Filter to only include assets that are actually idle (no recent booking)
-  const idleAssets = assets.filter((asset) => {
-    const lastBookingEnd = asset.bookingAssets[0]?.booking.to;
-    if (!lastBookingEnd) return true; // Never booked = idle
-    return lastBookingEnd < cutoffDate;
-  });
-
   // Re-sign expired thumbnail signed URLs in place. No-op when URLs are
   // still fresh (the helper checks `mainImageExpiration > now` first).
-  const refreshedAssets = await refreshExpiredAssetImages(idleAssets);
+  const refreshedAssets = await refreshExpiredAssetImages(assets);
 
   return refreshedAssets.map((asset) => {
     const lastBookedAt = asset.bookingAssets[0]?.booking.to || null;
@@ -1830,60 +1865,17 @@ async function fetchIdleAssetRows(
 }
 
 /**
- * Count total idle assets matching the criteria.
+ * Compute the Idle Assets KPIs over every idle asset (see `idleAssetWhere`).
+ *
+ * @returns The KPI cards, and `totalIdle`, the number of idle assets, which
+ *   the report also uses as its row count
  */
-async function countIdleAssets(
-  organizationId: string,
-  assetWhere: Prisma.AssetWhereInput,
-  cutoffDate: Date
-): Promise<number> {
-  // Get all potentially idle assets — Phase 3a: walk the BookingAsset
-  // pivot for both the exclusion filter and the most-recent-completed
-  // sub-query. `organizationId` is enforced explicitly as a
-  // defense-in-depth guard alongside the caller-supplied `assetWhere`.
-  const assets = await db.asset.findMany({
-    where: {
-      ...assetWhere,
-      organizationId,
-      NOT: {
-        bookingAssets: {
-          some: {
-            booking: {
-              status: { in: ["ONGOING", "OVERDUE"] },
-            },
-          },
-        },
-      },
-    },
-    select: {
-      id: true,
-      bookingAssets: {
-        where: {
-          booking: RETURNED_BOOKING_WHERE,
-        },
-        orderBy: { booking: { to: "desc" } },
-        take: 1,
-        select: {
-          booking: { select: { to: true } },
-        },
-      },
-    },
-  });
-
-  // Filter to only truly idle assets
-  return assets.filter((asset) => {
-    const lastBookingEnd = asset.bookingAssets[0]?.booking.to;
-    if (!lastBookingEnd) return true;
-    return lastBookingEnd < cutoffDate;
-  }).length;
-}
-
 async function computeIdleAssetsKpis(
   organizationId: string,
   assetWhere: Prisma.AssetWhereInput,
   cutoffDate: Date,
   currency: Currency
-): Promise<ReportKpi[]> {
+): Promise<{ kpis: ReportKpi[]; totalIdle: number }> {
   const now = new Date();
 
   // Get total asset count for percentage.
@@ -1897,24 +1889,10 @@ async function computeIdleAssetsKpis(
     },
   });
 
-  // Get idle assets with details — Phase 3a: walk the BookingAsset
-  // pivot for both the exclusion filter and the most-recent-completed
-  // sub-query. Org scoping is enforced explicitly here so the helper is
-  // safe even if `assetWhere` ever loses its organizationId clause.
-  const idleAssets = await db.asset.findMany({
-    where: {
-      ...assetWhere,
-      organizationId,
-      NOT: {
-        bookingAssets: {
-          some: {
-            booking: {
-              status: { in: ["ONGOING", "OVERDUE"] },
-            },
-          },
-        },
-      },
-    },
+  // Every idle asset (see `idleAssetWhere`) with its most recent returned
+  // booking, for the value and average-days KPIs.
+  const trulyIdle = await db.asset.findMany({
+    where: idleAssetWhere(organizationId, assetWhere, cutoffDate),
     select: {
       id: true,
       valuation: true,
@@ -1923,9 +1901,7 @@ async function computeIdleAssetsKpis(
       quantity: true,
       updatedAt: true,
       bookingAssets: {
-        where: {
-          booking: RETURNED_BOOKING_WHERE,
-        },
+        where: RETURNED_USE_SLICE_WHERE,
         orderBy: { booking: { to: "desc" } },
         take: 1,
         select: {
@@ -1933,13 +1909,6 @@ async function computeIdleAssetsKpis(
         },
       },
     },
-  });
-
-  // Filter to truly idle and calculate metrics
-  const trulyIdle = idleAssets.filter((asset) => {
-    const lastBookingEnd = asset.bookingAssets[0]?.booking.to;
-    if (!lastBookingEnd) return true;
-    return lastBookingEnd < cutoffDate;
   });
 
   const totalIdle = trulyIdle.length;
@@ -1972,7 +1941,7 @@ async function computeIdleAssetsKpis(
         )
       : 0;
 
-  return [
+  const kpis: ReportKpi[] = [
     {
       id: "total_idle",
       label: "Idle Assets",
@@ -2027,6 +1996,8 @@ async function computeIdleAssetsKpis(
           : "positive",
     },
   ];
+
+  return { kpis, totalIdle };
 }
 
 // -----------------------------------------------------------------------------
@@ -3184,7 +3155,7 @@ export async function assetDistributionReport(
 }
 
 /** The shared asset row every distribution breakdown reduces over. */
-type DistributionAsset = {
+export type DistributionAsset = {
   id: string;
   categoryId: string | null;
   assetModelId: string | null;
@@ -3280,7 +3251,8 @@ function computeDistributionByLocation(
 ): AssetDistributionRow[] {
   // A QUANTITY_TRACKED asset can span multiple locations, so it may
   // contribute to several buckets; value weighs the per-unit valuation by
-  // the UNITS AT THAT LOCATION (`AssetLocation.quantity`).
+  // the UNITS AT THAT LOCATION (`getUnitsAtLocation`), counted once per
+  // location even when a manual row and kit slices share it.
   //
   // "No Location" holds only assets with no placement rows at all: the
   // donut slice drills down to `/assets?location=without-location`, whose
@@ -3316,11 +3288,30 @@ function computeDistributionByLocation(
       );
       continue;
     }
+    // One bucket entry per location, not per row: a manual row and a kit
+    // slice at the same location are the same physical units, so they are
+    // combined by `getUnitsAtLocation` rather than added up.
+    const rowsByLocation = new Map<
+      string,
+      { name: string; quantities: number[] }
+    >();
     for (const pivot of asset.assetLocations) {
+      const entry = rowsByLocation.get(pivot.location.id) ?? {
+        name: pivot.location.name,
+        quantities: [],
+      };
+      entry.quantities.push(pivot.quantity);
+      rowsByLocation.set(pivot.location.id, entry);
+    }
+    for (const [locationId, { name, quantities }] of rowsByLocation) {
+      const units = getUnitsAtLocation({
+        stock: asset.quantity,
+        placedQuantities: quantities,
+      });
       addToBucket(
-        pivot.location.id,
-        pivot.location.name,
-        asset.valuation === null ? null : asset.valuation * pivot.quantity
+        locationId,
+        name,
+        asset.valuation === null ? null : asset.valuation * units
       );
     }
   }

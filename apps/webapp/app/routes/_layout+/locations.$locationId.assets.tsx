@@ -84,9 +84,20 @@ import {
   getLocation,
   updateLocationAssets,
 } from "~/modules/location/service.server";
-import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
+import {
+  getTeamMemberForCustodianFilter,
+  scopeCustodianFilterIdsWithoutCustodyKept,
+} from "~/modules/team-member/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { updateCookieWithPerPage } from "~/utils/cookies.server";
+import {
+  setCookie,
+  updateCookieWithPerPage,
+  userPrefs,
+} from "~/utils/cookies.server";
+import {
+  redactCustodianForViewer,
+  type RowWithCustody,
+} from "~/utils/custody-visibility.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -138,6 +149,26 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const cookie = await updateCookieWithPerPage(request, perPageParam);
     const { perPage } = cookie;
 
+    /**
+     * `?teamMember=` is raw request input. A member who may not see other
+     * people's custody could otherwise filter by a colleague's id and read
+     * which assets that person holds, so person ids are narrowed to the
+     * caller's own.
+     */
+    const custodianFilterIds = await scopeCustodianFilterIdsWithoutCustodyKept({
+      teamMemberIds,
+      canSeeAllCustody: access.custody.seeAll,
+      userId,
+      organizationId,
+    });
+
+    /**
+     * The Active view's "archived assets are hidden" empty state explains an
+     * empty location. Under a search or custodian filter the list can be empty
+     * for that reason instead, so the count is only taken when neither is set.
+     */
+    const isFiltered = !!search || custodianFilterIds.length > 0;
+
     const [
       // `assets` is returned alongside `location` — there is no direct
       // Location.assets relation; getLocation runs a separate pivot-filtered
@@ -156,7 +187,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         orderDirection,
         userOrganizations,
         request,
-        teamMemberIds,
+        teamMemberIds: custodianFilterIds,
         archivedFilter: resolveArchivedViewForMember({ access, searchParams }),
       }),
       getTeamMemberForCustodianFilter({
@@ -171,13 +202,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       }),
       // Archived assets the Active view hides, so its empty state can say
       // where they went.
-      db.asset.count({
-        where: {
-          organizationId,
-          archivedAt: { not: null },
-          assetLocations: { some: { locationId } },
-        },
-      }),
+      isFiltered
+        ? 0
+        : db.asset.count({
+            where: {
+              organizationId,
+              archivedAt: { not: null },
+              assetLocations: { some: { locationId } },
+            },
+          }),
     ]);
 
     const modelName = {
@@ -217,7 +250,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         })
       ),
     ]);
-    const items = assets.map((asset) => ({
+    // Rows carry each custodian's name and email whether or not the UI draws
+    // them, so a viewer without custody visibility could read them out of the
+    // route's data payload. Redact here, not in the component.
+    // `getLocation` types its page as plain assets, but the query selects each
+    // row's `custody` (see `ListAssetContent`'s item type), which is what the
+    // redaction reads.
+    const items = redactCustodianForViewer(
+      assets as Array<(typeof assets)[number] & RowWithCustody>,
+      {
+        canSeeAllCustody: access.custody.seeAll,
+        userId,
+      }
+    ).map((asset) => ({
       ...asset,
       inCustodyHere: custodyFromHere[asset.id] ?? 0,
       onBookingFromHere: onBookingByAssetId.get(asset.id) ?? 0,
@@ -228,19 +273,24 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       subHeading: location.id,
     };
 
-    return payload({
-      location,
-      archivedAssetCount,
-      header,
-      modelName,
-      items,
-      page,
-      totalItems,
-      perPage,
-      totalPages,
-      teamMembers,
-      totalTeamMembers,
-    });
+    // The page-size picker writes `?per_page=`; storing it here keeps the
+    // choice once the query parameter is gone.
+    return data(
+      payload({
+        location,
+        archivedAssetCount,
+        header,
+        modelName,
+        items,
+        page,
+        totalItems,
+        perPage,
+        totalPages,
+        teamMembers,
+        totalTeamMembers,
+      }),
+      { headers: [setCookie(await userPrefs.serialize(cookie))] }
+    );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, locationId });
     throw data(error(reason), { status: reason.status });
@@ -763,10 +813,10 @@ const ListAssetContent = ({
       </Td>
 
       <Td>
-        <CategoryBadge category={category} />
+        <CategoryBadge category={category} linkToAssets />
       </Td>
       <Td className="text-left">
-        <ListItemTagsColumn tags={tags} />
+        <ListItemTagsColumn tags={tags} linkToAssets />
       </Td>
       {/* Custodian */}
       <When truthy={extraProps.canReadCustody}>

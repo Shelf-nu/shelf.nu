@@ -60,15 +60,21 @@ describe("getAssetsWhereInput location override", () => {
       "building-a",
     ]);
 
-    expect(where.OR).toEqual([
+    expect(where.AND).toEqual([
       {
-        assetLocations: {
-          some: {
-            locationId: { in: ["without-location", "campus", "building-a"] },
+        OR: [
+          {
+            assetLocations: {
+              some: {
+                locationId: {
+                  in: ["without-location", "campus", "building-a"],
+                },
+              },
+            },
           },
-        },
+          { assetLocations: { none: {} } },
+        ],
       },
-      { assetLocations: { none: {} } },
     ]);
     expect(where.assetLocations).toBeUndefined();
   });
