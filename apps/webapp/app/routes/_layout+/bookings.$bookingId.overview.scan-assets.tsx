@@ -32,6 +32,7 @@ import {
   assertCanAddBookingItems,
   validateBookingOwnership,
 } from "~/utils/booking-authorization.server";
+import { getClientHint } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
@@ -324,6 +325,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         kitSlices,
         // Re-checks the add rule against the locked status inside the write.
         access,
+        hints: getClientHint(request),
       });
 
     /**

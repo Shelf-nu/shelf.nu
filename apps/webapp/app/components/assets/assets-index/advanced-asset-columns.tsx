@@ -8,6 +8,7 @@ import {
   PopoverPortal,
   PopoverContent,
 } from "@radix-ui/react-popover";
+import { RepeatIcon } from "lucide-react";
 import { Link, useLoaderData } from "react-router";
 import { StockStatusBadge } from "~/components/assets/stock-status-badge";
 import { EventCardContent } from "~/components/calendar/event-card";
@@ -44,6 +45,7 @@ import type {
 } from "~/modules/asset/types";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import type { ColumnLabelKey } from "~/modules/asset-index-settings/helpers";
+import { describeRecurrence } from "~/modules/asset-reminder/recurrence";
 import { formatCustodyList } from "~/modules/custody/utils";
 import { type AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { formatAssetValueWithBreakdown } from "~/utils/asset-value";
@@ -798,7 +800,7 @@ function CategoryColumn({
 }) {
   return (
     <Td className="w-full max-w-none whitespace-nowrap">
-      <CategoryBadge category={category} />
+      <CategoryBadge category={category} linkToAssets />
     </Td>
   );
 }
@@ -806,7 +808,7 @@ function CategoryColumn({
 function TagsColumn({ tags }: { tags: AdvancedIndexAsset["tags"] }) {
   return (
     <Td className="text-left">
-      <ListItemTagsColumn tags={tags} />
+      <ListItemTagsColumn tags={tags} linkToAssets />
     </Td>
   );
 }
@@ -1101,18 +1103,31 @@ function UpcomingReminderColumn({
     return <Td>No upcoming reminder</Td>;
   }
 
+  const recurrenceLabel = describeRecurrence(upcomingReminder);
+
   return (
     <Td>
       <Tooltip>
         <TooltipTrigger asChild>
           <Button variant="link-gray" to={`/assets/${assetId}/reminders`}>
-            <DateS date={upcomingReminder.alertDateTime} includeTime />
+            <span className="flex items-center gap-1">
+              <DateS date={upcomingReminder.alertDateTime} includeTime />
+              {recurrenceLabel ? (
+                <RepeatIcon
+                  className="size-3 text-gray-400"
+                  aria-label="Recurring reminder"
+                />
+              ) : null}
+            </span>
           </Button>
         </TooltipTrigger>
 
         <TooltipContent className="max-w-[400px]">
           <p className="mb-1 font-bold">{upcomingReminder.name}</p>
           <p>{upcomingReminder.message.substring(0, 1000)}</p>
+          {recurrenceLabel ? (
+            <p className="mt-1 text-gray-500">Repeats: {recurrenceLabel}</p>
+          ) : null}
         </TooltipContent>
       </Tooltip>
     </Td>
@@ -1191,10 +1206,12 @@ function UpcomingBookingsColumn({
                         start: booking.from,
                         end: booking.to,
                         custodian: {
+                          id: booking.custodianTeamMember?.id ?? null,
                           name: custodianName ?? "",
                           user: booking.custodianUser ?? null,
                         },
                         creator: {
+                          id: null,
                           name: booking.creator
                             ? resolveUserDisplayName(booking.creator)
                             : "Unknown",

@@ -154,7 +154,7 @@ const Row = ({
 
       {/* Category — hidden on small screens to prevent overflow */}
       <Td className="hidden lg:table-cell">
-        <CategoryBadge category={category} />
+        <CategoryBadge category={category} linkToAssets />
       </Td>
     </>
   );
