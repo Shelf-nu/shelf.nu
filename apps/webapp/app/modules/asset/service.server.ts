@@ -132,6 +132,7 @@ import {
   updateCookieWithPerPage,
   userPrefs,
 } from "~/utils/cookies.server";
+import { CUSTODY_FILTER_REFUSED } from "~/utils/custody-filter";
 import {
   buildCustomFieldValue,
   extractCustomFieldValuesFromPayload,
@@ -233,6 +234,7 @@ import {
   detectPotentialChanges,
   detectCustomFieldChanges,
   type CustomFieldChangeInfo,
+  andAssetWhere,
   applyArchivedFilter,
   getArchivedFilterFromParams,
   type ArchivedFilter,
@@ -730,23 +732,19 @@ export async function getAssets(params: {
     const where: Prisma.AssetWhereInput = { organizationId };
 
     // Active/Archived/All dimension (defaults to active = hide archived).
-    // Sits on the top-level `where`, so it ANDs with the search `where.OR`
+    // Sits on the top-level `where`, so it ANDs with the search id set
     // below: the UNION resolves candidate ids across all assets, then Prisma
     // filters them by archived state. No re-query is needed on this path.
     applyArchivedFilter(where, archivedFilter);
 
-    // In `AND`, not spread: the scope is an OR group, and search and the
-    // category filter below write `where.OR`.
+    // Every filter below is its own group in `where.AND` (see andAssetWhere),
+    // so each one narrows the list and none can widen another.
     if (bookableScope) {
-      where.AND = [bookableListScopeWhere(bookableScope)];
+      andAssetWhere(where, bookableListScopeWhere(bookableScope));
     }
 
-    // Spread: the bookable scope above may already have written `where.AND`.
     if (lowStockOnly) {
-      where.AND = [
-        ...(Array.isArray(where.AND) ? where.AND : []),
-        buildLowStockWhere(),
-      ];
+      andAssetWhere(where, buildLowStockWhere());
     }
 
     if (search) {
@@ -765,19 +763,15 @@ export async function getAssets(params: {
         // semantics the client extension cannot infer) and guards the id set
         // against Postgres' ~65k bind-param ceiling, throwing a friendly 400
         // rather than letting an extreme org + very broad term hard-fail.
-        // Setting where.OR here — BEFORE the category/tag/location/team-member
-        // filters below — preserves the historical OR-entanglement: those
-        // filters append to where.OR, so search OR-combines with them exactly
-        // as the previous Prisma OR clause did. The UNION always
-        // searches all 11 sources (the old id-shaped fast path searched a
-        // subset and fell back on zero rows); id-shaped searches therefore now
-        // return the full result set — a superset of before, the more-correct
-        // answer.
+        // The UNION always searches all 11 sources, so id-shaped searches
+        // return the full result set. The id set is ANDed with the category,
+        // tag, location and custodian filters below: a filter narrows a
+        // search, it never adds rows the search did not match.
         const ids = await resolveAssetSearchIds({
           organizationId,
           terms: searchTerms,
         });
-        where.OR = [{ id: { in: ids } }];
+        andAssetWhere(where, { id: { in: ids } });
       }
     }
 
@@ -792,15 +786,8 @@ export async function getAssets(params: {
       // unit does).
       if (status === AssetStatus.AVAILABLE) {
         // QT-aware fragment shared with getAssetsWhereInput and the mobile
-        // assets endpoint — see buildAssetStatusWhere for the rationale.
-        where.AND = [
-          ...(Array.isArray(where.AND)
-            ? where.AND
-            : where.AND
-            ? [where.AND]
-            : []),
-          buildAssetStatusWhere(status),
-        ];
+        // assets endpoint. See buildAssetStatusWhere for the rationale.
+        andAssetWhere(where, buildAssetStatusWhere(status));
       } else {
         where.status = status;
       }
@@ -808,11 +795,9 @@ export async function getAssets(params: {
 
     if (categoriesIds?.length) {
       if (categoriesIds.includes("uncategorized")) {
-        where.OR = [
-          ...(where.OR ?? []),
-          { categoryId: { in: categoriesIds } },
-          { categoryId: null },
-        ];
+        andAssetWhere(where, {
+          OR: [{ categoryId: { in: categoriesIds } }, { categoryId: null }],
+        });
       } else {
         where.categoryId = { in: categoriesIds };
       }
@@ -826,16 +811,9 @@ export async function getAssets(params: {
        * For QUANTITY_TRACKED assets, always show them — partial availability
        * is checked at booking time based on available quantity.
        */
-      where.AND = [
-        ...(Array.isArray(where.AND)
-          ? where.AND
-          : where.AND
-          ? [where.AND]
-          : []),
-        {
-          OR: [{ type: "QUANTITY_TRACKED" }, { custody: { none: {} } }],
-        },
-      ];
+      andAssetWhere(where, {
+        OR: [{ type: "QUANTITY_TRACKED" }, { custody: { none: {} } }],
+      });
       if (bookingFrom && bookingTo) {
         /**
          * Booking overlap filters only apply to INDIVIDUAL assets.
@@ -843,62 +821,55 @@ export async function getAssets(params: {
          * as long as total reserved doesn't exceed available quantity.
          * Availability is validated at booking time, not at filter time.
          */
-        where.AND = [
-          ...(Array.isArray(where.AND)
-            ? where.AND
-            : where.AND
-            ? [where.AND]
-            : []),
-          // Rule 1: Exclude INDIVIDUAL assets from RESERVED bookings
-          {
-            OR: [
-              { type: "QUANTITY_TRACKED" },
-              {
-                bookingAssets: {
-                  none: {
-                    booking: {
-                      ...(unhideAssetsBookigIds?.length && {
-                        id: { notIn: unhideAssetsBookigIds },
-                      }),
-                      status: BookingStatus.RESERVED,
-                      OR: [
-                        { from: { lte: bookingTo }, to: { gte: bookingFrom } },
-                        { from: { gte: bookingFrom }, to: { lte: bookingTo } },
-                      ],
-                    },
+        // Rule 1: Exclude INDIVIDUAL assets from RESERVED bookings
+        andAssetWhere(where, {
+          OR: [
+            { type: "QUANTITY_TRACKED" },
+            {
+              bookingAssets: {
+                none: {
+                  booking: {
+                    ...(unhideAssetsBookigIds?.length && {
+                      id: { notIn: unhideAssetsBookigIds },
+                    }),
+                    status: BookingStatus.RESERVED,
+                    OR: [
+                      { from: { lte: bookingTo }, to: { gte: bookingFrom } },
+                      { from: { gte: bookingFrom }, to: { lte: bookingTo } },
+                    ],
                   },
                 },
               },
-            ],
-          },
-          // Rule 2: For ONGOING/OVERDUE bookings, only exclude CHECKED_OUT INDIVIDUAL assets
-          {
-            OR: [
-              { type: "QUANTITY_TRACKED" },
-              // Either asset is AVAILABLE (checked in from partial check-in)
-              { status: AssetStatus.AVAILABLE },
-              // Or asset has no conflicting ONGOING/OVERDUE bookings
-              {
-                bookingAssets: {
-                  none: {
-                    booking: {
-                      ...(unhideAssetsBookigIds?.length && {
-                        id: { notIn: unhideAssetsBookigIds },
-                      }),
-                      status: {
-                        in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
-                      },
-                      OR: [
-                        { from: { lte: bookingTo }, to: { gte: bookingFrom } },
-                        { from: { gte: bookingFrom }, to: { lte: bookingTo } },
-                      ],
+            },
+          ],
+        });
+        // Rule 2: For ONGOING/OVERDUE bookings, only exclude CHECKED_OUT INDIVIDUAL assets
+        andAssetWhere(where, {
+          OR: [
+            { type: "QUANTITY_TRACKED" },
+            // Either asset is AVAILABLE (checked in from partial check-in)
+            { status: AssetStatus.AVAILABLE },
+            // Or asset has no conflicting ONGOING/OVERDUE bookings
+            {
+              bookingAssets: {
+                none: {
+                  booking: {
+                    ...(unhideAssetsBookigIds?.length && {
+                      id: { notIn: unhideAssetsBookigIds },
+                    }),
+                    status: {
+                      in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
                     },
+                    OR: [
+                      { from: { lte: bookingTo }, to: { gte: bookingFrom } },
+                      { from: { gte: bookingFrom }, to: { lte: bookingTo } },
+                    ],
                   },
                 },
               },
-            ],
-          },
-        ];
+            },
+          ],
+        });
       }
     }
     if (hideUnavailable === true && (!bookingFrom || !bookingTo)) {
@@ -918,34 +889,27 @@ export async function getAssets(params: {
     }
 
     if (tagsIds && tagsIds.length) {
-      // Check if 'untagged' is part of the selected tag IDs
-      if (tagsIds.includes("untagged")) {
-        // Remove 'untagged' from the list of tags
-        tagsIds = tagsIds.filter((id) => id !== "untagged");
-
-        // Filter for assets that are untagged only
-        where.OR = [
-          ...(where.OR || []), // Preserve existing AND conditions if any
-          { tags: { none: {} } }, // Include assets with no tags
-        ];
-      }
-
-      // If there are other tags specified, apply AND condition
-      if (tagsIds.length > 0) {
-        where.OR = [
-          ...(where.OR || []), // Preserve existing AND conditions if any
-          { tags: { some: { id: { in: tagsIds } } } }, // Filter by remaining tags
-        ];
-      }
+      // One group: assets with any of the picked tags, or with no tags at
+      // all when 'untagged' is picked.
+      const realTagIds = tagsIds.filter((id) => id !== "untagged");
+      andAssetWhere(where, {
+        OR: [
+          ...(tagsIds.includes("untagged") ? [{ tags: { none: {} } }] : []),
+          ...(realTagIds.length > 0
+            ? [{ tags: { some: { id: { in: realTagIds } } } }]
+            : []),
+        ],
+      });
     }
 
     if (locationIds && locationIds.length > 0) {
       if (locationIds.includes("without-location")) {
-        where.OR = [
-          ...(where.OR ?? []),
-          { assetLocations: { some: { locationId: { in: locationIds } } } },
-          { assetLocations: { none: {} } },
-        ];
+        andAssetWhere(where, {
+          OR: [
+            { assetLocations: { some: { locationId: { in: locationIds } } } },
+            { assetLocations: { none: {} } },
+          ],
+        });
       } else {
         where.assetLocations = {
           some: { locationId: { in: locationIds } },
@@ -963,59 +927,59 @@ export async function getAssets(params: {
      * already correct.
      */
     if (hideUnavailable === true) {
-      where.AND = [
-        ...(Array.isArray(where.AND)
-          ? where.AND
-          : where.AND
-          ? [where.AND]
-          : []),
-        {
-          OR: [{ type: "QUANTITY_TRACKED" }, { assetKits: { none: {} } }],
-        },
-      ];
+      andAssetWhere(where, {
+        OR: [{ type: "QUANTITY_TRACKED" }, { assetKits: { none: {} } }],
+      });
     }
 
     if (teamMemberIds && teamMemberIds.length) {
-      where.OR = [
-        ...(where.OR ?? []),
-        {
-          custody: { some: { teamMemberId: { in: teamMemberIds } } },
-        },
-        {
-          custody: {
-            some: { custodian: { userId: { in: teamMemberIds } } },
+      andAssetWhere(where, {
+        OR: [
+          {
+            custody: { some: { teamMemberId: { in: teamMemberIds } } },
           },
-        },
-        {
-          bookingAssets: {
-            some: {
-              booking: {
-                custodianTeamMemberId: { in: teamMemberIds },
-                /** We only get them if the booking is ongoing */
-                status: {
-                  in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+          {
+            custody: {
+              some: { custodian: { userId: { in: teamMemberIds } } },
+            },
+          },
+          {
+            bookingAssets: {
+              some: {
+                booking: {
+                  custodianTeamMemberId: { in: teamMemberIds },
+                  /** We only get them if the booking is ongoing */
+                  status: {
+                    in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                  },
                 },
               },
             },
           },
-        },
-        {
-          bookingAssets: {
-            some: {
-              booking: {
-                custodianUserId: { in: teamMemberIds },
-                /** We only get them if the booking is ongoing */
-                status: {
-                  in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+          {
+            bookingAssets: {
+              some: {
+                booking: {
+                  custodianUserId: { in: teamMemberIds },
+                  /** We only get them if the booking is ongoing */
+                  status: {
+                    in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                  },
                 },
               },
             },
           },
-        },
-        ...(teamMemberIds.includes("without-custody")
-          ? [{ custody: { none: {} } }]
-          : []),
-      ];
+          ...(teamMemberIds.includes("without-custody")
+            ? [{ custody: { none: {} } }]
+            : []),
+        ],
+      });
+
+      // A refused custodian filter matches nothing, whatever else the group
+      // holds. Same guard as getAssetsWhereInput.
+      if (teamMemberIds.includes(CUSTODY_FILTER_REFUSED)) {
+        andAssetWhere(where, { id: CUSTODY_FILTER_REFUSED });
+      }
     }
 
     if (assetKitFilter === "NOT_IN_KIT") {
@@ -1026,9 +990,7 @@ export async function getAssets(params: {
 
     /**
      * Runs the paginated asset query and its total count for a given `where`
-     * clause. Extracted so the ID-shaped-search fallback can re-run the same
-     * query shape with a different `where.OR` without duplicating the include
-     * and ordering config.
+     * clause, with the list's include and ordering config.
      *
      * @param assetWhere - The Prisma where clause to fetch and count against
      * @returns A tuple of `[assets, totalAssets]`
