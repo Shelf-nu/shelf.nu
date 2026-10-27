@@ -2866,8 +2866,11 @@ export async function topBookedKitsReport(
  * metadata in a single org-scoped query, and re-signs expired kit image URLs
  * server-side.
  *
+ * @param kitWhere - The filter bar's Category and Location as a kit `where`,
+ *   applied to the kit lookup so it decides which kits are listed.
  * @returns Paginated rows, total unique-kit count, the #1 kit, and the total
- *   kit-booking incidences (sum of every kit's booking count) for the KPIs.
+ *   kit-booking incidences (sum of the listed kits' booking counts) for the
+ *   KPIs.
  */
 async function fetchTopBookedKitData(
   organizationId: string,
@@ -3065,7 +3068,7 @@ async function fetchTopBookedKitData(
  * Builds the KPI cards for the Top Booked Kits report from pre-computed
  * aggregates (pure — no DB access).
  *
- * `total_kit_bookings` is the sum of every kit's booking count, so it
+ * `total_kit_bookings` is the sum of the listed kits' booking counts, so it
  * reconciles exactly with the table's Bookings column (deliberately defined
  * differently from the asset report's raw booking count, which would be
  * inflated here by bookings that contain no kits).

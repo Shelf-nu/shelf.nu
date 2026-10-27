@@ -461,6 +461,7 @@ export default function ReportPage() {
             distributionBreakdown={distributionBreakdown}
             chartSeries={chartSeries}
             handlers={handlers}
+            hasActiveFilters={activeFilters.length > 0}
           />
         </div>
 

@@ -73,6 +73,9 @@ type Props = {
   chartSeries?: ChartSeries[];
   /** Stable row-click handlers from `useReportRowHandlers`. */
   handlers: ReportRowHandlers;
+  /** Whether the filter bar narrows the report. An empty result then means
+   *  "nothing matches", not "nothing happened in the timeframe". */
+  hasActiveFilters?: boolean;
 };
 
 /**
@@ -91,6 +94,7 @@ export function ReportContentSwitch({
   distributionBreakdown,
   chartSeries,
   handlers,
+  hasActiveFilters = false,
 }: Props) {
   // Distribution is the one report with no row table — it's purely
   // donut-driven, so `hasData` is meaningless there. Always render it
@@ -105,7 +109,16 @@ export function ReportContentSwitch({
   }
 
   // Every other report falls back to a shared empty state when no
-  // rows came back.
+  // rows came back. With filters on, the filters are the likely cause, so
+  // say so instead of the report's "nothing happened yet" copy.
+  if (rows.length === 0 && hasActiveFilters) {
+    return (
+      <div className="rounded border border-gray-200 bg-white">
+        <ReportEmptyState reason="no_results" />
+      </div>
+    );
+  }
+
   if (rows.length === 0) {
     return (
       <div className="rounded border border-gray-200 bg-white">
