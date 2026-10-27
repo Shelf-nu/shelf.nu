@@ -16,6 +16,7 @@
 
 import { Link } from "react-router";
 import { DateS } from "~/components/shared/date";
+import { isReservationExpired } from "~/modules/booking/helpers";
 import { tw } from "~/utils/tw";
 import type { BookingAssetRecord, QuantityBreakdown } from "./quantity-data";
 
@@ -90,7 +91,9 @@ export function QuantityTooltipContent({ data }: { data: QuantityBreakdown }) {
   const {
     total,
     inCustody,
+    inKits,
     reserved,
+    expiredReservedBookings,
     checkedOut,
     bookingAssets,
     assetKits,
@@ -140,7 +143,13 @@ export function QuantityTooltipContent({ data }: { data: QuantityBreakdown }) {
   for (const ba of bookingAssets) {
     const bStatus = ba.booking?.status;
     if (bStatus === "ONGOING" || bStatus === "OVERDUE") pushSlice(ongoing, ba);
-    else if (bStatus === "RESERVED") pushSlice(reservedSlices, ba);
+    // An expired reservation is not a claim on the units (see
+    // `getQuantityData`), so it gets no bullet; the count line below names it.
+    else if (
+      bStatus === "RESERVED" &&
+      !isReservationExpired(bStatus, ba.booking?.to)
+    )
+      pushSlice(reservedSlices, ba);
   }
 
   const sum = (slices: Slice[]) =>
@@ -265,6 +274,24 @@ export function QuantityTooltipContent({ data }: { data: QuantityBreakdown }) {
     // HoverCard shell is `bg-white` — use readable grays in the 600-800
     // range and let the headline stay at default (near-black).
     <div className="space-y-1 text-xs text-gray-800">
+      {/* "Free right now", not "available", every other line in this card
+          describes a booking window in the future, and this one describes the
+          shelf today. Without the time word the card reads as arithmetic that
+          does not close: "12 reserved" above "10 available". Matches the
+          `Free now` column on the assets index.
+
+          First, because it is the line people open the card for. Emerald when
+          non-zero so the "you can still book N" signal pops; muted gray when
+          zero. */}
+      <p
+        className={tw(
+          "font-medium",
+          freeNow > 0 ? "text-emerald-700" : "text-gray-500"
+        )}
+      >
+        {freeNow} free right now
+      </p>
+
       {/* Checked-out summary */}
       {checkedOut > 0 &&
         renderBuckets({
@@ -294,6 +321,17 @@ export function QuantityTooltipContent({ data }: { data: QuantityBreakdown }) {
         </>
       )}
 
+      {/* Reservations whose end date passed with no check-out. They are not
+          in `reserved` and own no bullet, so without this line the card would
+          silently disagree with the bookings list, which still shows them. */}
+      {expiredReservedBookings > 0 ? (
+        <p className="text-gray-500">
+          {expiredReservedBookings} expired{" "}
+          {expiredReservedBookings === 1 ? "reservation" : "reservations"}, not
+          counted
+        </p>
+      ) : null}
+
       {/* Custody line (only when there's also booking data, otherwise
        * show a simpler format) */}
       {inCustody > 0 && (checkedOut > 0 || reserved > 0) && (
@@ -307,22 +345,10 @@ export function QuantityTooltipContent({ data }: { data: QuantityBreakdown }) {
         </p>
       )}
 
-      {/* "Free right now", not "available", every other line in this card
-          describes a booking window in the future, and this one describes the
-          shelf today. Without the time word the card reads as arithmetic that
-          does not close: "12 reserved" above "10 available". Matches the
-          `Free now` column on the assets index.
-
-          Emerald when non-zero so the "you can still book N" signal pops;
-          muted gray when zero. */}
-      <p
-        className={tw(
-          "font-medium",
-          freeNow > 0 ? "text-emerald-700" : "text-gray-500"
-        )}
-      >
-        {freeNow} free right now
-      </p>
+      {/* Units held by kits. Already out of `freeNow`, and the one subtraction
+          the card never printed, so the numbers did not add up for an asset
+          that sits in a kit: 10 owned, 3 reserved, 5 free, 2 unaccounted for. */}
+      {inKits > 0 ? <p className="text-gray-700">{inKits} in kits</p> : null}
     </div>
   );
 }

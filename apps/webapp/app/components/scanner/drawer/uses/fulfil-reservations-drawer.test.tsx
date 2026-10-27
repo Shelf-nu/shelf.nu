@@ -228,6 +228,7 @@ function renderDrawer(
     bookingId: "booking-1",
     bookingName: "Nishanth",
     bookingFrom: new Date("2099-01-01T10:00:00Z").toISOString(),
+    bookingTo: new Date("2099-01-01T18:00:00Z").toISOString(),
     bookingStatus: "RESERVED",
     checksOutScannedOnly: options.checksOutScannedOnly ?? false,
     expectedModelRequests,

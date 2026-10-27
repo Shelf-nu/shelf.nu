@@ -1,5 +1,6 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
+import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 import { db } from "~/database/db.server";
 import {
   getMobileUserContext,
@@ -38,7 +39,10 @@ import { isExplicitScanRequired } from "~/utils/permissions/role-access";
  * gets the default: see `recordCheckoutSourceLocations`.
  *
  * For mobile, we always do "without-adjusted-date" to keep things simple.
- * The mobile user just taps "Check Out" and it happens.
+ * The mobile user just taps "Check Out" and it happens. That choice is sent
+ * explicitly: on an expired reservation the service now refuses a check-out
+ * that made no choice (see `resolveExpiredCheckoutState`), and the phone has
+ * no reschedule prompt yet, so it keeps today's "as overdue" outcome.
  *
  * Refused with a 403 when the workspace requires explicit check-out for the
  * caller's role: they scan or select the assets instead (partial check-out).
@@ -148,9 +152,11 @@ export async function action({ request }: ActionFunctionArgs) {
       hints,
       userId: user.id,
       seesAllBookings: access.bookings.seeAll,
+      // The phone's one tap keeps the stored dates: no early-start adjustment,
+      // and an expired reservation goes out as overdue (see the route doc).
+      intentChoice: CheckoutIntentEnum["without-adjusted-date"],
       // Pass the booking's own window: this enables the conflict guard without
-      // adjusting any dates (date adjustment requires intentChoice, which mobile
-      // never sends — so this stays a "without-adjusted-date" checkout).
+      // adjusting any dates.
       from: existingBooking.from,
       to: existingBooking.to,
       // "Check Out All Assets": the phone's one tap.

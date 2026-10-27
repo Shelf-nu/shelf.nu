@@ -73,6 +73,15 @@ const earlyBooking = {
   from: new Date(Date.now() + 48 * 60 * 60 * 1000),
 };
 
+/** A reservation whose whole window passed three weeks ago, never checked out. */
+const expiredBooking = {
+  id: "booking-3",
+  name: "Conference loan",
+  status: "RESERVED" as const,
+  from: new Date(Date.now() - 21 * 24 * 60 * 60 * 1000),
+  to: new Date(Date.now() - 21 * 24 * 60 * 60 * 1000 + 8 * 60 * 60 * 1000),
+};
+
 /**
  * Renders the dialog inside a form the way the booking page does and records
  * every submit with the fields it would send.
@@ -357,5 +366,99 @@ describe("CheckoutDialog From location question", () => {
     const submit = screen.getByRole("button", { name: "Check out" });
     expect(submit).toHaveAttribute("type", "submit");
     expect(submit).toHaveAttribute("value", "checkOut");
+  });
+
+  describe("expired reservation", () => {
+    it("asks for a new end date or an explicit overdue instead of a plain confirm", () => {
+      const { submissions } = renderInForm({ booking: expiredBooking });
+
+      fireEvent.click(screen.getByRole("button", { name: "Check Out" }));
+
+      expect(submissions).toHaveLength(0);
+      expect(
+        screen.getByRole("alertdialog", {
+          name: "Reservation dates have passed",
+        })
+      ).toBeInTheDocument();
+      expect(screen.getByText(/reserved period ended on/)).toBeInTheDocument();
+      // Not the plain sentence, and not the early warning: those are other
+      // situations, and this one is neither.
+      expect(screen.queryByText(/This checks out/)).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(/more than 15 minutes/)
+      ).not.toBeInTheDocument();
+    });
+
+    it("proposes now plus the planned length as the new end date", () => {
+      renderInForm({ booking: expiredBooking });
+      fireEvent.click(screen.getByRole("button", { name: "Check Out" }));
+
+      const input = screen.getByLabelText("New end date") as HTMLInputElement;
+      expect(input.type).toBe("datetime-local");
+      expect(input.name).toBe("expiredCheckoutNewTo");
+      expect(input.getAttribute("form")).toBe("edit-booking-form");
+      // Planned length is 8 hours; the proposal is minute-aligned, so allow
+      // the minute the test straddles.
+      const proposed = new Date(input.value).getTime();
+      const expected = Date.now() + 8 * 60 * 60 * 1000;
+      expect(Math.abs(proposed - expected)).toBeLessThan(2 * 60 * 1000);
+    });
+
+    it("submits the new-end-date choice with the picked date", () => {
+      const { submissions } = renderInForm({ booking: expiredBooking });
+      fireEvent.click(screen.getByRole("button", { name: "Check Out" }));
+
+      const input = screen.getByLabelText("New end date") as HTMLInputElement;
+      fireEvent.change(input, { target: { value: "2030-01-02T10:30" } });
+      fireEvent.click(
+        screen.getByRole("button", { name: "Check out with new end date" })
+      );
+
+      expect(submissions).toHaveLength(1);
+      expect(submissions[0]).toContainEqual(["intent", "checkOut"]);
+      expect(submissions[0]).toContainEqual([
+        "checkoutIntentChoice",
+        "with-adjusted-date",
+      ]);
+      expect(submissions[0]).toContainEqual([
+        "expiredCheckoutNewTo",
+        "2030-01-02T10:30",
+      ]);
+    });
+
+    it("submits an explicit as-overdue choice", () => {
+      const { submissions } = renderInForm({ booking: expiredBooking });
+      fireEvent.click(screen.getByRole("button", { name: "Check Out" }));
+      fireEvent.click(
+        screen.getByRole("button", { name: "Check out as overdue" })
+      );
+
+      expect(submissions).toHaveLength(1);
+      expect(submissions[0]).toContainEqual([
+        "checkoutIntentChoice",
+        "without-adjusted-date",
+      ]);
+    });
+
+    it("does not prompt once the booking is underway", () => {
+      // why: an OVERDUE booking past its end is late, its own state; the
+      // prompt is for the first check-out of a dead reservation only.
+      renderInForm({
+        booking: { ...expiredBooking, status: "OVERDUE" },
+        intent: "checkOutRemaining",
+        label: "Check out remaining",
+        suppressEarlyCheckoutPrompt: true,
+      });
+      fireEvent.click(
+        screen.getByRole("button", { name: "Check out remaining" })
+      );
+
+      expect(
+        screen.queryByRole("alertdialog", {
+          name: "Reservation dates have passed",
+        })
+      ).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("New end date")).not.toBeInTheDocument();
+    });
   });
 });

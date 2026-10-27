@@ -71,6 +71,7 @@ import {
   revertBookingToDraft,
   updateBasicBooking,
   updateBookingNotificationRecipients,
+  parseExpiredCheckoutNewTo,
 } from "~/modules/booking/service.server";
 import { shapeBookingAssets } from "~/modules/booking/shape-booking-assets";
 import {
@@ -1482,7 +1483,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   try {
     const formData = await request.formData();
     logMissingFormIntent({ formData, request, bookingId: id, userId });
-    const { intent, checkoutIntentChoice, checkinIntentChoice } = parseData(
+    const {
+      intent,
+      checkoutIntentChoice,
+      expiredCheckoutNewTo,
+      checkinIntentChoice,
+    } = parseData(
       formData,
       z.object({
         intent: z.enum([
@@ -1508,6 +1514,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           .optional()
           .transform((val) => (val === "yes" ? true : false)),
         checkoutIntentChoice: z.nativeEnum(CheckoutIntentEnum).optional(),
+        // The end date picked in the expired-reservation prompt; see
+        // `parseExpiredCheckoutNewTo`.
+        expiredCheckoutNewTo: z.string().optional(),
         checkinIntentChoice: z.nativeEnum(CheckinIntentEnum).optional(),
       }),
       {
@@ -1831,11 +1840,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         // explicit flow (scan or select) for this caller.
         assertQuickCheckoutAllowed({ access, bookingSettings });
 
+        const checkoutHints = getClientHint(request);
         const booking = await checkoutBooking({
           id,
           organizationId,
-          hints: getClientHint(request),
+          hints: checkoutHints,
           intentChoice: checkoutIntentChoice,
+          newEndDate: parseExpiredCheckoutNewTo(
+            expiredCheckoutNewTo,
+            checkoutHints
+          ),
           from: basicBookingInfo.from,
           to: basicBookingInfo.to,
           userId: user.id,

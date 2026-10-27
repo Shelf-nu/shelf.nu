@@ -18,6 +18,7 @@
 import type { AssetType } from "@prisma/client";
 import { ASSET_QTY_STATUS_LABELS } from "@shelf/labels";
 import { isQuantityTracked } from "~/modules/asset/utils";
+import { isReservationExpired } from "~/modules/booking/helpers";
 import { BADGE_COLORS, type BadgeColorScheme } from "~/utils/badge-colors";
 
 /** Shape for a booking-asset pivot record with quantity and booking info */
@@ -35,6 +36,13 @@ export interface BookingAssetRecord {
      * a string across the loader/fetcher boundary, hence the union.
      */
     from?: string | Date | null;
+    /**
+     * Booking end. A RESERVED slice whose end has passed is an expired
+     * reservation (see `isReservationExpired`) and is left out of `reserved`.
+     * Optional like `from`: a loader that omits it counts every RESERVED slice,
+     * which is the pre-existing behaviour, not a crash.
+     */
+    to?: string | Date | null;
   };
   [key: string]: unknown;
 }
@@ -133,9 +141,29 @@ export function getQuantityData(asset?: QuantityAwareAsset | null) {
     ? bookingRows
     : [];
 
+  /**
+   * A RESERVED slice counts only while its window is still open. Once the end
+   * date has passed with no check-out, the reservation is dead: it blocks
+   * nothing (conflict math is by window) and nobody is coming for the units.
+   * Counting it kept assets reading "3 reserved" for months after the date.
+   */
+  const isExpiredSlice = (ba: BookingAssetRecord) =>
+    isReservationExpired(ba.booking?.status, ba.booking?.to);
+
   const reserved = bookingAssets
-    .filter((ba) => ba.booking?.status === "RESERVED")
+    .filter((ba) => ba.booking?.status === "RESERVED" && !isExpiredSlice(ba))
     .reduce((sum, ba) => sum + (ba.quantity ?? 0), 0);
+
+  const expiredSlices = bookingAssets.filter(isExpiredSlice);
+  /** Units on reservations whose window has passed; shown, never counted. */
+  const expiredReserved = expiredSlices.reduce(
+    (sum, ba) => sum + (ba.quantity ?? 0),
+    0
+  );
+  /** Distinct expired reservations, for the card's "N expired" line. */
+  const expiredReservedBookings = new Set(
+    expiredSlices.map((ba) => ba.booking?.id ?? ba.booking?.name)
+  ).size;
 
   // `ba.quantity` for ONGOING/OVERDUE rows is the SERVER-COMPUTED count of
   // units still off the shelf on that booking: what went out minus what came
@@ -200,6 +228,8 @@ export function getQuantityData(asset?: QuantityAwareAsset | null) {
     inCustody,
     inKits,
     reserved,
+    expiredReserved,
+    expiredReservedBookings,
     checkedOut,
     available,
     freeNow,

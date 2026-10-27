@@ -81,6 +81,7 @@ import {
 } from "~/atoms/qr-scanner";
 import CheckoutDialog, {
   CheckoutIntentEnum,
+  type CheckoutDialogBooking,
 } from "~/components/booking/checkout-dialog";
 import type { ModelProgress } from "~/components/booking/model-pending-rows";
 import { buildPendingModelRows } from "~/components/booking/model-pending-rows";
@@ -612,6 +613,9 @@ export default function FulfilReservationsDrawer({
             id: session.bookingId,
             name: session.bookingName,
             from: new Date(session.bookingFrom),
+            // For the expired-reservation prompt; see `CheckoutDialog`.
+            status: session.bookingStatus,
+            to: session.bookingTo,
           }}
           assetIds={assetIdsToSubmit}
           kitIds={kitIdsToSubmit}
@@ -953,8 +957,8 @@ function AlreadyIncludedRows({
  * Props for {@link FulfilCheckoutForm}.
  */
 type FulfilCheckoutFormProps = {
-  /** Booking summary for `CheckoutDialog`'s early-checkout detection. */
-  booking: { id: string; name: string; from: Date };
+  /** Booking summary for `CheckoutDialog`'s early and expired prompts. */
+  booking: CheckoutDialogBooking;
   /** Matched + unmatched scanned asset ids to attach to the booking. */
   assetIds: string[];
   /** Scanned kit ids to attach to the booking as kit-driven rows. */

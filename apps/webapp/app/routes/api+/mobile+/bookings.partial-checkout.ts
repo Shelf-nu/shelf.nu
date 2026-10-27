@@ -1,5 +1,6 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
+import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 import { db } from "~/database/db.server";
 import {
   getMobileUserContext,
@@ -162,6 +163,10 @@ export async function action({ request }: ActionFunctionArgs) {
       checkouts,
       userId: user.id,
       hints,
+      // The phone keeps the stored dates: an expired reservation's first scan
+      // goes out as overdue until the app has the reschedule prompt (see
+      // `resolveExpiredCheckoutState`).
+      intentChoice: CheckoutIntentEnum["without-adjusted-date"],
       // Never guessed: a bundle that declared no method is recorded as null.
       provenance: { surface: "phone", method: method ?? null },
       sourceLocations: sourceSubmissionFromRecord(sourceLocations),

@@ -2706,8 +2706,11 @@ export const POOL_AGGREGATE_JOIN = Prisma.sql`
         FROM public."Custody" cu_a
         WHERE cu_a."assetId" = a.id
       ), 0) AS in_custody_all,
-      COALESCE((SELECT SUM(remaining)::int FROM slices WHERE standalone AND status = 'RESERVED'), 0) AS reserved,
-      COALESCE((SELECT SUM(remaining)::int FROM slices WHERE status = 'RESERVED'), 0) AS reserved_all,
+      -- "ahead" keeps an expired reservation (RESERVED, end date passed, never
+      -- checked out) out of the count, as next_reserved_from and the peak
+      -- sweep already do. It claims nothing: the conflict check is by window.
+      COALESCE((SELECT SUM(remaining)::int FROM slices WHERE standalone AND ahead AND status = 'RESERVED'), 0) AS reserved,
+      COALESCE((SELECT SUM(remaining)::int FROM slices WHERE ahead AND status = 'RESERVED'), 0) AS reserved_all,
       COALESCE((SELECT SUM(out_now)::int FROM slices WHERE standalone AND status IN ('ONGOING', 'OVERDUE')), 0) AS checked_out,
       COALESCE((SELECT SUM(out_now)::int FROM slices WHERE status IN ('ONGOING', 'OVERDUE')), 0) AS checked_out_all,
       COALESCE((

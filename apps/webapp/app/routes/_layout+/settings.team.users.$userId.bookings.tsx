@@ -2,6 +2,7 @@ import type { MetaFunction } from "react-router";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import type { HeaderData } from "~/components/layout/header/types";
+import { bookingStatusFilterWhereParams } from "~/modules/booking/constants";
 import { decorateBookingsForList } from "~/modules/booking/list-flags.server";
 import {
   getBookings,
@@ -90,10 +91,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         search,
         userId: authSession?.userId,
         custodianScope,
-        ...(status && {
-          // If status is in the params, we filter based on it
-          statuses: [status],
-        }),
+        // The picked status, if any ("Expired" = RESERVED past its end).
+        ...bookingStatusFilterWhereParams(status),
         tags: filterTags,
         // PERF: the list renders booking-level fields plus an asset COUNT. The
         // per-booking `bookingAssets` payload existed only for the assets

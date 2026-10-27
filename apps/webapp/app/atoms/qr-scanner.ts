@@ -816,6 +816,12 @@ export type FulfilSessionInfo = {
   /** ISO string — drives `isBookingEarlyCheckout` in the submit path. */
   bookingFrom: string;
   /**
+   * ISO string, or null for a booking with no end yet. With `bookingStatus`
+   * it drives the expired-reservation prompt (`isReservationExpired`) in the
+   * submit path.
+   */
+  bookingTo: string | null;
+  /**
    * Booking status when the scanner opened. Only a RESERVED booking's first
    * check-out can move its start date, so only then is the operator asked.
    */

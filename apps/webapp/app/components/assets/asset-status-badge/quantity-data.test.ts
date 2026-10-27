@@ -156,4 +156,105 @@ describe("quantity pool status label", () => {
     expect(getQuantityData({ ...kitInCustody, freeNow: 20 })?.freeNow).toBe(20);
     expect(getQuantityData(kitInCustody)?.freeNow).toBe(10);
   });
+
+  describe("expired reservations", () => {
+    const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const twoDaysAgo = new Date(Date.now() - 48 * 60 * 60 * 1000);
+    const inADay = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const inTwoDays = new Date(Date.now() + 48 * 60 * 60 * 1000);
+
+    /** A RESERVED slice with an explicit window. */
+    function reservedSlice(
+      quantity: number,
+      id: string,
+      window: { from: Date; to: Date }
+    ) {
+      return {
+        quantity,
+        assetKitId: null,
+        booking: { id, name: id, status: "RESERVED", ...window },
+      };
+    }
+
+    it("leaves a reservation whose end date has passed out of the reserved count", () => {
+      // why: nothing in the lifecycle moves a RESERVED booking nobody checked
+      // out, so it stayed RESERVED forever and kept colouring the asset. It
+      // claims no units (conflicts are judged by window), so it must not
+      // count. It is still named, so the card agrees with the bookings list.
+      const data = getQuantityData(
+        asset({
+          quantity: 10,
+          bookingAssets: [
+            reservedSlice(3, "dead", { from: twoDaysAgo, to: dayAgo }),
+            reservedSlice(2, "live", { from: inADay, to: inTwoDays }),
+          ],
+        })
+      );
+
+      expect(data?.reserved).toBe(2);
+      expect(data?.expiredReserved).toBe(3);
+      expect(data?.expiredReservedBookings).toBe(1);
+      expect(data?.available).toBe(8);
+    });
+
+    it("counts one expired reservation once across its slices", () => {
+      const data = getQuantityData(
+        asset({
+          quantity: 10,
+          bookingAssets: [
+            reservedSlice(3, "dead", { from: twoDaysAgo, to: dayAgo }),
+            {
+              ...reservedSlice(1, "dead", { from: twoDaysAgo, to: dayAgo }),
+              assetKitId: "ak1",
+            },
+            reservedSlice(2, "live", { from: inADay, to: inTwoDays }),
+          ],
+        })
+      );
+
+      expect(data?.expiredReserved).toBe(4);
+      expect(data?.expiredReservedBookings).toBe(1);
+    });
+
+    it("falls back to the plain badge when only expired reservations remain", () => {
+      // why: with nothing live claimed, there is nothing to put on a card and
+      // the asset reads Available, which is what the shelf says.
+      expect(
+        labelFor(
+          asset({
+            quantity: 10,
+            bookingAssets: [
+              reservedSlice(3, "dead", { from: twoDaysAgo, to: dayAgo }),
+            ],
+          })
+        )
+      ).toBeNull();
+    });
+
+    it("still counts a reservation past its start while its end is ahead", () => {
+      // why: a late pickup is a live claim; only the end date decides.
+      const data = getQuantityData(
+        asset({
+          quantity: 10,
+          bookingAssets: [
+            reservedSlice(3, "late", { from: dayAgo, to: inADay }),
+          ],
+        })
+      );
+
+      expect(data?.reserved).toBe(3);
+      expect(data?.expiredReserved).toBe(0);
+    });
+
+    it("keeps counting a RESERVED slice that carries no end date", () => {
+      // why: a loader that selects no `to` must get today's behaviour, not a
+      // silently emptier card.
+      const data = getQuantityData(
+        asset({ quantity: 10, bookingAssets: [slice(3, "RESERVED")] })
+      );
+
+      expect(data?.reserved).toBe(3);
+      expect(data?.expiredReserved).toBe(0);
+    });
+  });
 });

@@ -618,7 +618,16 @@ function EditBookingFormInner({
                     portalContainer={formElement || undefined}
                     formId="edit-booking-form"
                     sourceQuestions={checkoutSourceQuestions}
-                    booking={{ id, name: name!, from: startDateAsDate }}
+                    booking={{
+                      id,
+                      name: name!,
+                      from: startDateAsDate,
+                      // For the expired-reservation prompt: a RESERVED
+                      // booking whose end has passed is asked for a new end
+                      // date or an explicit "as overdue".
+                      status,
+                      to: endDateAsDate,
+                    }}
                     disabled={disabled}
                     canFullCheckOut={!!bookingStatus?.isReserved}
                     canCheckOutRemaining={

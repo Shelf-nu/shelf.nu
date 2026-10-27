@@ -55,6 +55,7 @@ import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
 import { parseSourceLocationsFromFormData } from "~/modules/booking/checkout-source-location";
 import { getCheckoutSourceQuestions } from "~/modules/booking/checkout-source-location.server";
 import { fulfilAndCheckOut } from "~/modules/booking/fulfil-and-checkout.server";
+import { parseExpiredCheckoutNewTo } from "~/modules/booking/service.server";
 import { getBooking } from "~/modules/booking/service.server";
 import { deriveBookingScanSession } from "~/modules/booking-model-request/scan-session.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
@@ -106,6 +107,9 @@ export const fulfilAndCheckoutSchema = z.object({
   assetIds: z.array(z.string()).default([]),
   kitIds: z.array(z.string()).optional().default([]),
   checkoutIntentChoice: z.nativeEnum(CheckoutIntentEnum).optional(),
+  // The end date picked in the expired-reservation prompt; see
+  // `parseExpiredCheckoutNewTo`.
+  expiredCheckoutNewTo: z.string().optional(),
 });
 
 /**
@@ -285,10 +289,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const formData = await request.formData();
 
-    const { assetIds, kitIds, checkoutIntentChoice } = parseData(
-      formData,
-      fulfilAndCheckoutSchema
-    );
+    const { assetIds, kitIds, checkoutIntentChoice, expiredCheckoutNewTo } =
+      parseData(formData, fulfilAndCheckoutSchema);
+    const hints = getClientHint(request);
 
     /**
      * Pull the booking's from/to for the full check-out's pre-tx conflict
@@ -335,7 +338,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       assetIds,
       kitIds,
       checkoutIntentChoice,
-      hints: getClientHint(request),
+      newEndDate: parseExpiredCheckoutNewTo(expiredCheckoutNewTo, hints),
+      hints,
       seesAllBookings: access.bookings.seeAll,
       from: basicBookingInfo.from,
       to: basicBookingInfo.to,
@@ -424,6 +428,7 @@ export default function FulfilAndCheckoutForBooking() {
       bookingFrom: booking.from
         ? new Date(booking.from).toISOString()
         : new Date().toISOString(),
+      bookingTo: booking.to ? new Date(booking.to).toISOString() : null,
       bookingStatus: booking.status,
       checksOutScannedOnly,
       expectedModelRequests,

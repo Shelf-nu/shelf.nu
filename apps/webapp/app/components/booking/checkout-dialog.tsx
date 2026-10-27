@@ -1,11 +1,16 @@
 import { useRef, useState, type MouseEvent } from "react";
-import type { Booking } from "@prisma/client";
+import type { Booking, BookingStatus } from "@prisma/client";
 import { Zap } from "lucide-react";
+import { DateTime } from "luxon";
 import { useDisabled } from "~/hooks/use-disabled";
 import type { CheckoutSourceQuestion } from "~/modules/booking/checkout-source-location";
-import { isBookingEarlyCheckout } from "~/modules/booking/helpers";
+import {
+  isBookingEarlyCheckout,
+  isReservationExpired,
+} from "~/modules/booking/helpers";
 import type { UnassignedModelUnits } from "~/utils/booking-model-requests";
 import { summarizeUnassignedUnits } from "~/utils/booking-model-requests";
+import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { tw } from "~/utils/tw";
 import { CheckoutSourceSelect } from "./checkout-source-select";
 import type { ButtonProps } from "../shared/button";
@@ -27,9 +32,50 @@ export enum CheckoutIntentEnum {
   "without-adjusted-date" = "without-adjusted-date",
 }
 
+/**
+ * The booking a check-out dialog is about. `status` and `to` are what the
+ * expired-reservation prompt reads (see `isReservationExpired`): a caller that
+ * leaves them out never shows it, and the service then refuses the check-out
+ * with its own message rather than landing the booking in OVERDUE silently.
+ */
+export type CheckoutDialogBooking = Pick<Booking, "id" | "name" | "from"> & {
+  status?: BookingStatus;
+  /** May arrive as an ISO string off serialized loader data. */
+  to?: Date | string | null;
+};
+
+/** The field the expired-reservation prompt posts its picked end date in. */
+export const EXPIRED_CHECKOUT_NEW_TO_FIELD = "expiredCheckoutNewTo";
+
+/**
+ * The end date the expired-reservation prompt proposes: now plus the planned
+ * length, as a naive `yyyy-MM-dd'T'HH:mm` string for the input, the format
+ * every booking date input posts and the server reads in the viewer's
+ * timezone.
+ *
+ * @param booking - The expired reservation
+ * @returns The input's default value
+ */
+export function proposedExpiredCheckoutEndDate(
+  booking: Pick<CheckoutDialogBooking, "from" | "to">
+): string {
+  const from = booking.from ? new Date(booking.from) : null;
+  const to = booking.to ? new Date(booking.to) : null;
+  const plannedLengthMs =
+    from && to ? Math.max(to.getTime() - from.getTime(), 0) : 0;
+  const now = DateTime.now().startOf("minute");
+  // A reservation with no measurable length (bad data) still gets a usable
+  // proposal: an hour from now, so the operator is not handed "now" to fix.
+  const proposed =
+    plannedLengthMs > 0
+      ? now.plus({ milliseconds: plannedLengthMs })
+      : now.plus({ hours: 1 });
+  return proposed.toFormat(DATE_TIME_FORMAT);
+}
+
 type CheckoutDialogProps = {
   disabled?: ButtonProps["disabled"];
-  booking: Pick<Booking, "id" | "name" | "from">;
+  booking: CheckoutDialogBooking;
   /** A container to render the AlertContent inside */
   portalContainer?: HTMLElement;
   /** Form ID for explicit form association when buttons render in a portal */
@@ -111,14 +157,17 @@ const NO_SOURCE_QUESTIONS: CheckoutSourceQuestion[] = [];
 function checkoutDialogTitle({
   hasUnassigned,
   isEarlyCheckout,
+  isExpiredCheckout,
   asksSource,
 }: {
   hasUnassigned: boolean;
   isEarlyCheckout: boolean;
+  isExpiredCheckout: boolean;
   asksSource: boolean;
 }): string {
   if (hasUnassigned) return "Some reserved units aren't assigned";
   if (isEarlyCheckout) return "Early Check-Out Warning";
+  if (isExpiredCheckout) return "Reservation dates have passed";
   if (asksSource) return "Where do the units come from?";
   return "Check out booking";
 }
@@ -166,6 +215,14 @@ export default function CheckoutDialog({
   const isDisabled = disabled || isNavigating;
   const isEarlyCheckout =
     !suppressEarlyCheckoutPrompt && isBookingEarlyCheckout(booking.from);
+  /**
+   * The reservation's whole window has passed. Exclusive with the early
+   * prompt (early needs a future start, expired a past end), and never true
+   * once the booking is underway, where `status` is no longer RESERVED. The
+   * server refuses an expired check-out that made no choice, so this prompt
+   * is the only way the operator can answer it.
+   */
+  const isExpiredCheckout = isReservationExpired(booking.status, booking.to);
   const unassignedSummary = summarizeUnassignedUnits(unassignedUnits);
   const unassignedUnitCount = unassignedUnits.reduce(
     (sum, unit) => sum + Math.max(0, unit.count),
@@ -196,8 +253,9 @@ export default function CheckoutDialog({
   );
 
   const asksSource = sourceQuestions.length > 0;
-  /** No early, unassigned or source reason applies: only the plain confirmation. */
-  const isPlainCheckout = !isEarlyCheckout && !unassignedSummary && !asksSource;
+  /** No early, expired, unassigned or source reason applies: only the plain confirmation. */
+  const isPlainCheckout =
+    !isEarlyCheckout && !isExpiredCheckout && !unassignedSummary && !asksSource;
   const plainSentence = plainCheckoutSentence(intent);
   /**
    * The dialog is controlled so a submit closes it: a refused check-out then
@@ -275,6 +333,7 @@ export default function CheckoutDialog({
             {checkoutDialogTitle({
               hasUnassigned: Boolean(unassignedSummary),
               isEarlyCheckout,
+              isExpiredCheckout,
               asksSource,
             })}
           </AlertDialogTitle>
@@ -320,9 +379,42 @@ export default function CheckoutDialog({
                   come off that location at check-in.
                 </p>
               ) : null}
+              {isExpiredCheckout ? (
+                <p>
+                  This booking's reserved period ended on{" "}
+                  <span className="font-bold text-gray-700">
+                    <DateS date={booking.to!} includeTime />
+                  </span>
+                  . Check it out with a new end date, starting now, or check it
+                  out as overdue.
+                </p>
+              ) : null}
             </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
+
+        {isExpiredCheckout ? (
+          <div className="flex flex-col gap-1">
+            <label
+              htmlFor={`${EXPIRED_CHECKOUT_NEW_TO_FIELD}-${booking.id}`}
+              className="text-sm font-medium text-gray-700"
+            >
+              New end date
+            </label>
+            {/* Proposed: now plus the planned length. Posted with the form,
+                read on the server only when the operator picks "with a new end
+                date"; the "as overdue" button leaves the dates alone. */}
+            <input
+              id={`${EXPIRED_CHECKOUT_NEW_TO_FIELD}-${booking.id}`}
+              type="datetime-local"
+              name={EXPIRED_CHECKOUT_NEW_TO_FIELD}
+              form={formId}
+              defaultValue={proposedExpiredCheckoutEndDate(booking)}
+              disabled={Boolean(isDisabled)}
+              className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-primary-300 focus:outline-none"
+            />
+          </div>
+        ) : null}
 
         {asksSource ? (
           <div className="flex max-h-72 flex-col gap-3 overflow-y-auto">
@@ -345,7 +437,35 @@ export default function CheckoutDialog({
             </Button>
           </AlertDialogCancel>
 
-          {isEarlyCheckout ? (
+          {isExpiredCheckout ? (
+            <>
+              <input type="hidden" name="intent" value={intent} form={formId} />
+              <Button
+                disabled={isDisabled}
+                className="flex-1"
+                type="submit"
+                variant="secondary"
+                name="checkoutIntentChoice"
+                value={CheckoutIntentEnum["without-adjusted-date"]}
+                form={formId}
+                onClick={closeOnSubmit}
+              >
+                Check out as overdue
+              </Button>
+
+              <Button
+                disabled={isDisabled}
+                className="flex-1"
+                type="submit"
+                name="checkoutIntentChoice"
+                value={CheckoutIntentEnum["with-adjusted-date"]}
+                form={formId}
+                onClick={closeOnSubmit}
+              >
+                Check out with new end date
+              </Button>
+            </>
+          ) : isEarlyCheckout ? (
             <>
               <input type="hidden" name="intent" value={intent} form={formId} />
               <Button

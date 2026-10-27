@@ -36,6 +36,7 @@ import {
 import { useDisabled } from "~/hooks/use-disabled";
 import {
   makeCheckoutEligibility,
+  isReservationExpired,
   shouldPromptEarlyCheckout,
 } from "~/modules/booking/helpers";
 import type {
@@ -341,7 +342,16 @@ export default function BulkPartialCheckoutDialog({
           count: request.quantity - request.fulfilledQuantity,
         }))
       : [];
-  const needsConfirmation = isEarlyCheckout || unassignedUnits.length > 0;
+  // Any first batch on a RESERVED booking whose end date has passed: the
+  // server refuses it without a choice, so the dialog has to ask. Not only
+  // the final batch, because the first batch is what moves the booking out of
+  // RESERVED.
+  const isExpiredCheckout = Boolean(
+    selectedAssetIds.length > 0 &&
+      isReservationExpired(booking.status, booking.to)
+  );
+  const needsConfirmation =
+    isEarlyCheckout || isExpiredCheckout || unassignedUnits.length > 0;
 
   function handleCloseDialog() {
     setOpen(false);
@@ -823,6 +833,8 @@ export default function BulkPartialCheckoutDialog({
                   id: booking.id,
                   name: booking.name,
                   from: booking.from,
+                  status: booking.status,
+                  to: booking.to,
                 }}
                 intent="partial-checkout"
                 label={isEarlyCheckout ? undefined : "Check out items"}

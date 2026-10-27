@@ -470,6 +470,7 @@ async function checkOutScannedUnits(
     userId,
     hints: args.hints,
     intentChoice: args.checkoutIntentChoice,
+    newEndDate: args.newEndDate,
     provenance: args.provenance,
     sourceLocations: args.sourceLocations,
   });

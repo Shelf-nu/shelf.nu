@@ -661,6 +661,14 @@ function StatusColumn({
       bookingAssets: [],
       assetKits: [],
       nextReservedFrom: asset.nextReservedFrom ?? null,
+      /**
+       * The index's `reserved` already leaves expired reservations out (the
+       * SQL counts only windows still ahead). How many there were is a
+       * per-booking fact the row does not carry; the lazy fetch on hover
+       * brings it with the lists.
+       */
+      expiredReserved: 0,
+      expiredReservedBookings: 0,
     };
   }, [asset]);
 

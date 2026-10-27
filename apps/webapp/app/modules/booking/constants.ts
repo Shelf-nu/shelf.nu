@@ -16,6 +16,40 @@ import { USER_NAME_SELECT } from "../user/fields";
  *   2. the `/api/model-filters` search the picker fires once you type,
  *   3. the client-side `renderItem` guard in the dialog itself.
  */
+/**
+ * The bookings list's "Expired" status option: RESERVED bookings whose end
+ * date has passed with no check-out. A view over RESERVED, not a stored
+ * status, so it lives beside the enum rather than in it. `getParamsValues`
+ * accepts it as a status, and `buildBookingsWhere` turns it into
+ * `status = RESERVED AND to < now`. See `isReservationExpired`.
+ */
+export const EXPIRED_BOOKINGS_FILTER = "EXPIRED" as const;
+
+/** What the bookings list's status picker can hold. */
+export type BookingStatusFilter =
+  | BookingStatus
+  | typeof EXPIRED_BOOKINGS_FILTER;
+
+/**
+ * The where-params a picked status stands for, for every bookings list.
+ *
+ * "Expired" is RESERVED narrowed by date, so it sets `expiredOnly` beside
+ * `statuses`; a stored status is itself; nothing picked adds nothing, and the
+ * list's default applies.
+ *
+ * @param status - The picked status, as `getParamsValues` returns it
+ * @returns The params to spread into the list's where-params
+ */
+export function bookingStatusFilterWhereParams(
+  status: BookingStatusFilter | null | undefined
+): { statuses?: BookingStatus[]; expiredOnly?: boolean } {
+  if (!status) return {};
+  if (status === EXPIRED_BOOKINGS_FILTER) {
+    return { statuses: [BookingStatus.RESERVED], expiredOnly: true };
+  }
+  return { statuses: [status] };
+}
+
 export const ADDABLE_BOOKING_STATUSES: BookingStatus[] = [
   BookingStatus.DRAFT,
   BookingStatus.RESERVED,
