@@ -37,6 +37,7 @@ import {
 import { assertScannedUnitsAreNotKitMembers } from "~/modules/booking/kit-member-scan-guard.server";
 import {
   assertModelUnitsNotReservedElsewhere,
+  assertOutstandingModelRequestsFit,
   claimUnstampedBookingRows,
   fulfilModelRequestsForAssets,
   lockModelsForOutstandingRequests,
@@ -6332,6 +6333,85 @@ describe("fulfilModelRequestsAndCheckout", () => {
     );
   });
 
+  /**
+   * Queues the reads one scan of a single INDIVIDUAL unit makes on a RESERVED
+   * booking, in the order the flow makes them.
+   */
+  function queueSingleUnitScan() {
+    const mockBooking = buildPreTxBooking();
+    // why: no database in unit tests; the pre-tx load, then the post-tx
+    // hydrate. The in-tx status lock reads through the stubbed `$queryRaw`.
+    (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce(mockBooking)
+      .mockResolvedValueOnce({ ...mockBooking, status: BookingStatus.ONGOING });
+    // why: every read of the scanned unit (the org guard, the metadata read
+    // inside the transaction, the title for the booking note after it) gets
+    // the full row, whatever order the flow issues them in.
+    const scannedUnit = {
+      id: "dell-1",
+      title: "Dell #1",
+      type: AssetType.INDIVIDUAL,
+      assetModelId: "am-dell",
+      unitOfMeasure: null,
+    };
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+      (args?: { where?: { archivedAt?: { not?: null } } }) =>
+        Promise.resolve(
+          args?.where?.archivedAt?.not === null ? [] : [scannedUnit]
+        )
+    );
+    // why: first the rows the scan already holds (none), then the post-scan
+    // snapshot the check-out reads.
+    (db.bookingAsset.findMany as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          quantity: 1,
+          asset: { id: "dell-1", title: "Dell #1", type: AssetType.INDIVIDUAL },
+        },
+      ]);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ id: "booking-1" });
+  }
+
+  it("formats a pool refusal for the caller and keeps other bookings unnamed by default", async () => {
+    expect.assertions(1);
+    queueSingleUnitScan();
+
+    await fulfilModelRequestsAndCheckout({
+      ...mockFulfilParams,
+      assetIds: ["dell-1"],
+    });
+
+    expect(assertModelUnitsNotReservedElsewhere).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingId: "booking-1",
+        hints: mockClientHints,
+        userId: "user-1",
+        revealOtherBookings: false,
+      })
+    );
+  });
+
+  it("names other bookings in a pool refusal for a caller who sees every booking", async () => {
+    expect.assertions(1);
+    queueSingleUnitScan();
+
+    await fulfilModelRequestsAndCheckout({
+      ...mockFulfilParams,
+      assetIds: ["dell-1"],
+      seesAllBookings: true,
+    });
+
+    expect(assertModelUnitsNotReservedElsewhere).toHaveBeenCalledWith(
+      expect.objectContaining({
+        hints: mockClientHints,
+        userId: "user-1",
+        revealOtherBookings: true,
+      })
+    );
+  });
+
   it("records the scan's method on the rows it scanned, and no method on rows already on the booking", async () => {
     expect.assertions(1);
 
@@ -10259,14 +10339,21 @@ describe("extendBooking", () => {
       roles: [OrganizationRoles.ADMIN],
     });
 
-    // Every INDIVIDUAL unit the booking holds is handed over, under the new
-    // end date, with the whole footprint re-measured.
+    // Every INDIVIDUAL unit the booking holds is handed over, with the whole
+    // footprint re-measured over the ADDED days only: from the current end to
+    // the new one. Claims lying entirely in the days already covered are not
+    // the extension's business. The refusal is formatted for the caller, who
+    // as an admin may see other members' bookings named.
     expect(assertModelUnitsNotReservedElsewhere).toHaveBeenCalledWith(
       expect.objectContaining({
         bookingId: "booking-1",
         bookingStatus: BookingStatus.ONGOING,
         windowChanged: true,
+        from: extendableBookingData.to,
         to: newEndDate,
+        hints: mockClientHints,
+        userId: "user-1",
+        revealOtherBookings: true,
         assets: [
           expect.objectContaining({ id: "asset-1" }),
           expect.objectContaining({ id: "asset-2" }),
@@ -19550,6 +19637,45 @@ describe("model reservation guard — write paths", () => {
       );
     });
 
+    it("formats a pool refusal for the caller, naming other bookings only for one who sees them all", async () => {
+      expect.assertions(2);
+
+      await updateBookingAssets({
+        id: "booking-1",
+        organizationId: "org-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
+        assetIds: ["asset-ind"],
+        userId: "user-1",
+        hints: mockClientHints,
+      });
+      // The same reach for writing, but not for seeing every booking: the
+      // workspace leaves other members' bookings hidden from this caller.
+      const admin = accessFor([OrganizationRoles.ADMIN]);
+      await updateBookingAssets({
+        id: "booking-1",
+        organizationId: "org-1",
+        access: { ...admin, bookings: { ...admin.bookings, seeAll: false } },
+        assetIds: ["asset-ind"],
+        userId: "user-1",
+        hints: mockClientHints,
+      });
+
+      expect(guard.mock.calls[0][0]).toEqual(
+        expect.objectContaining({
+          hints: mockClientHints,
+          userId: "user-1",
+          revealOtherBookings: true,
+        })
+      );
+      expect(guard.mock.calls[1][0]).toEqual(
+        expect.objectContaining({
+          hints: mockClientHints,
+          userId: "user-1",
+          revealOtherBookings: false,
+        })
+      );
+    });
+
     it("offers fulfilment the kit arrival as well as the new standalone row", async () => {
       expect.assertions(2);
 
@@ -19685,6 +19811,59 @@ describe("model reservation guard — write paths", () => {
         (fulfilModelRequestsForAssets as ReturnType<typeof vitest.fn>).mock
           .invocationCallOrder[0]
       );
+    });
+
+    it("formats a pool refusal for the caller, keeping other bookings unnamed without an access to ask", async () => {
+      expect.assertions(3);
+
+      await addScannedAssetsToBooking({
+        assetIds: ["asset-ind"],
+        bookingId: "booking-1",
+        organizationId: "org-1",
+        userId: "user-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
+        hints: mockClientHints,
+      });
+      // The fulfil flow authorizes under the check-out rule and passes no
+      // access; it states the caller's reach explicitly instead.
+      await addScannedAssetsToBooking({
+        assetIds: ["asset-ind"],
+        bookingId: "booking-1",
+        organizationId: "org-1",
+        userId: "user-1",
+        access: null,
+        hints: mockClientHints,
+      });
+      await addScannedAssetsToBooking({
+        assetIds: ["asset-ind"],
+        bookingId: "booking-1",
+        organizationId: "org-1",
+        userId: "user-1",
+        access: null,
+        seesAllBookings: true,
+        hints: mockClientHints,
+      });
+
+      const handed = guard.mock.calls.map(([args]) => ({
+        hints: args.hints,
+        userId: args.userId,
+        revealOtherBookings: args.revealOtherBookings,
+      }));
+      expect(handed[0]).toEqual({
+        hints: mockClientHints,
+        userId: "user-1",
+        revealOtherBookings: true,
+      });
+      expect(handed[1]).toEqual({
+        hints: mockClientHints,
+        userId: "user-1",
+        revealOtherBookings: false,
+      });
+      expect(handed[2]).toEqual({
+        hints: mockClientHints,
+        userId: "user-1",
+        revealOtherBookings: true,
+      });
     });
 
     it("lets a scanned kit's member discharge a reservation, and stamps its row", async () => {
@@ -19966,6 +20145,38 @@ describe("model reservation guard — write paths", () => {
           data: expect.objectContaining({ status: BookingStatus.RESERVED }),
         })
       );
+    });
+
+    it("formats a pool refusal for the caller and keeps other bookings unnamed by default", async () => {
+      expect.assertions(2);
+
+      await reserveBooking({ ...reserveParams, userId: "user-2" });
+
+      const expected = expect.objectContaining({
+        hints: mockClientHints,
+        userId: "user-2",
+        revealOtherBookings: false,
+      });
+      expect(guard).toHaveBeenCalledWith(expected);
+      expect(assertOutstandingModelRequestsFit).toHaveBeenCalledWith(expected);
+    });
+
+    it("names other bookings in a pool refusal for a caller who sees every booking", async () => {
+      expect.assertions(2);
+
+      await reserveBooking({
+        ...reserveParams,
+        userId: "user-2",
+        seesAllBookings: true,
+      });
+
+      const expected = expect.objectContaining({
+        hints: mockClientHints,
+        userId: "user-2",
+        revealOtherBookings: true,
+      });
+      expect(guard).toHaveBeenCalledWith(expected);
+      expect(assertOutstandingModelRequestsFit).toHaveBeenCalledWith(expected);
     });
 
     it("keeps the draft a draft when the guard refuses", async () => {

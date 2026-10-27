@@ -780,9 +780,13 @@ describe("manage-assets route validation", () => {
         skipBookingNote: true,
         // The caller's access, so the service re-checks the add rule against
         // the booking status it reads under the row lock.
+        // `bookings.seeAll` decides whether a pool refusal names other
+        // members' bookings.
         access: expect.objectContaining({
-          bookings: expect.objectContaining({ writeAll: true }),
+          bookings: expect.objectContaining({ writeAll: true, seeAll: true }),
         }),
+        // The pool refusal names its day in the acting user's time zone.
+        hints: expect.objectContaining({ timeZone: expect.any(String) }),
       });
 
       // Verify per-asset note creation. The route now uses markdoc link
@@ -1020,6 +1024,12 @@ describe("manage-assets route validation", () => {
           organizationId: "org123",
           assetIds: ["asset-pens"],
           quantities: { "asset-pens": 6 },
+          // The quantity edit re-measures the pool too, so its refusal is
+          // formatted for the caller and scoped by what they may see.
+          access: expect.objectContaining({
+            bookings: expect.objectContaining({ seeAll: true }),
+          }),
+          hints: expect.objectContaining({ timeZone: expect.any(String) }),
         })
       );
 
@@ -1600,6 +1610,7 @@ describe("manage-assets loader — units reserved by model elsewhere", () => {
       reservedViaRequest: 3 - 1 - available,
       reserved: 3 - 1 - available,
       available,
+      peak: { at: null, requestedBy: [] },
     });
   }
 
