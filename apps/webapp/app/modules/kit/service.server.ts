@@ -8131,6 +8131,7 @@ export async function bulkRemoveAssetsFromKits({
 
     return { removedFromKitCount };
   } catch (cause) {
+    rethrowIfClientError(cause);
     throw new ShelfError({
       cause,
       message: "Failed to bulk remove assets from kits",

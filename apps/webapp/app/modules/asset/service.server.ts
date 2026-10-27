@@ -8286,6 +8286,7 @@ export async function bulkUpdateAssetCategory({
 
     return true;
   } catch (cause) {
+    rethrowIfClientError(cause);
     throw new ShelfError({
       cause,
       message: "Something went wrong while bulk updating category.",
@@ -8947,6 +8948,7 @@ export async function bulkMarkAvailability({
 
     return true;
   } catch (cause) {
+    rethrowIfClientError(cause);
     throw new ShelfError({
       cause,
       message: "Something went wrong while marking assets as available.",

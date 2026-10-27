@@ -4710,7 +4710,11 @@ describe("bulkUpdateAssetCategory", () => {
         // @ts-expect-error settings not relevant for this test
         settings: {},
       })
-    ).rejects.toThrow(ShelfError);
+    ).rejects.toMatchObject({
+      status: 404,
+      title: "Category not found",
+      message: expect.stringContaining("does not exist"),
+    });
   });
 });
 
