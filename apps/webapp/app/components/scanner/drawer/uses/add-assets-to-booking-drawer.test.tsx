@@ -515,3 +515,119 @@ describe("AddAssetsToBookingDrawer reservation progress", () => {
     expect(screen.getByRole("button", { name: "Confirm" })).toBeDisabled();
   });
 });
+
+describe("AddAssetsToBookingDrawer scanned row details", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const oneUnitOfModelOne: ExpectedModelRequest[] = [
+    {
+      assetModelId: "model-1",
+      assetModelName: "Model One",
+      booked: 1,
+      remaining: 1,
+    },
+  ];
+
+  // Two assets can share a title, so a row must carry something the operator
+  // can check against the physical item.
+  it("names each row by its asset ID and the code that was scanned", () => {
+    renderDrawer({
+      scannedAssets: {
+        "qr-a": { id: "asset-1", title: "Asset 2", sequentialId: "SAM-0001" },
+        "qr-b": { id: "asset-2", title: "Asset 2", sequentialId: "SAM-0002" },
+      },
+    });
+
+    expect(screen.getByText("SAM-0001")).toBeTruthy();
+    expect(screen.getByText("SAM-0002")).toBeTruthy();
+    expect(screen.getByText("qr-a")).toBeTruthy();
+    expect(screen.getByText("qr-b")).toBeTruthy();
+  });
+
+  it("does not repeat the asset ID when the asset ID is what was scanned", () => {
+    renderDrawer({
+      scannedAssets: {
+        "sam-0001": {
+          id: "asset-1",
+          title: "Asset 1",
+          sequentialId: "SAM-0001",
+        },
+      },
+    });
+
+    expect(screen.getByText("SAM-0001")).toBeTruthy();
+    expect(screen.queryByText("sam-0001")).toBeNull();
+  });
+
+  it("names the model a matched scan fills", () => {
+    renderDrawer({
+      expectedModelRequests: oneUnitOfModelOne,
+      scannedAssets: {
+        "qr-1": { id: "asset-1", title: "Asset 1", assetModelId: "model-1" },
+      },
+    });
+
+    expect(screen.getByText("Counts toward Model One")).toBeTruthy();
+  });
+
+  it("marks a scan past the reserved count as an extra for that model", () => {
+    renderDrawer({
+      expectedModelRequests: oneUnitOfModelOne,
+      scannedAssets: {
+        "qr-1": { id: "asset-1", title: "Asset 1", assetModelId: "model-1" },
+        "qr-2": { id: "asset-2", title: "Asset 2", assetModelId: "model-1" },
+      },
+    });
+
+    expect(screen.getAllByText("Counts toward Model One")).toHaveLength(1);
+    expect(
+      screen.getByText("Extra: every Model One unit is already filled")
+    ).toBeTruthy();
+  });
+
+  it("marks a scan of an unreserved model as an extra", () => {
+    renderDrawer({
+      expectedModelRequests: oneUnitOfModelOne,
+      scannedAssets: {
+        "qr-1": { id: "asset-1", title: "Asset 1", assetModelId: "model-9" },
+      },
+    });
+
+    expect(screen.getByText("Extra: model not reserved")).toBeTruthy();
+  });
+
+  // On a booking with no reservations every scan is simply added, so
+  // calling each one an extra would be noise.
+  it("adds no reservation note on a booking that reserves no models", () => {
+    renderDrawer({
+      scannedAssets: {
+        "qr-1": { id: "asset-1", title: "Asset 1", assetModelId: "model-9" },
+      },
+    });
+
+    expect(screen.queryByText(/^Extra:/)).toBeNull();
+    expect(screen.queryByText(/^Counts toward/)).toBeNull();
+  });
+
+  // A reservation is for whole units, so a quantity-tracked scan never fills
+  // one and must not be told it is an extra of a model either.
+  it("adds no reservation note to a quantity-tracked scan", () => {
+    renderDrawer({
+      expectedModelRequests: oneUnitOfModelOne,
+      scannedAssets: {
+        "qr-1": {
+          id: "asset-1",
+          title: "Cables",
+          type: AssetType.QUANTITY_TRACKED,
+          quantity: 10,
+          assetModelId: "model-1",
+        },
+      },
+    });
+
+    expect(screen.queryByText(/^Extra:/)).toBeNull();
+    expect(screen.queryByText(/^Counts toward/)).toBeNull();
+  });
+});

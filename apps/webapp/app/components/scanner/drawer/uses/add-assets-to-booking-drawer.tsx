@@ -24,7 +24,10 @@ import { buildPendingModelRows } from "~/components/booking/model-pending-rows";
 import { ModelProgressStrips } from "~/components/booking/model-progress-strips";
 import { Badge } from "~/components/shared/badge";
 import { isQuantityTracked } from "~/modules/asset/utils";
-import { matchScansToModelRequests } from "~/modules/booking-model-request/scan-matching";
+import {
+  matchScansToModelRequests,
+  type ScannedAssetRow,
+} from "~/modules/booking-model-request/scan-matching";
 import type { loader } from "~/routes/_layout+/bookings.$bookingId.overview.scan-assets";
 import type {
   AssetFromQr,
@@ -40,6 +43,7 @@ import {
 import { createBlockers } from "../blockers-factory";
 import ConfigurableDrawer from "../configurable-drawer";
 import { GenericItemRow, DefaultLoadingState } from "../generic-item-row";
+import { ScannedAssetIdentifiers } from "../scanned-asset-identifiers";
 import { ScannedAssetQuantityInput } from "../scanned-asset-quantity-input";
 import {
   buildAddToBookingBlockers,
@@ -248,6 +252,27 @@ export default function AddAssetsToBookingDrawer({
     [scannedBuckets.rows]
   );
 
+  /**
+   * The matcher's verdict per scanned code, so each row can say which
+   * reservation it fills, or that it fills none.
+   */
+  const scannedRowByQrId = useMemo(
+    () => new Map(scannedBuckets.rows.map((row) => [row.qrId, row] as const)),
+    [scannedBuckets.rows]
+  );
+
+  /** Reserved model names by id, to name the model an over-scan exceeds. */
+  const reservedModelNameById = useMemo(
+    () =>
+      new Map(
+        expectedModelRequests.map(
+          (expected) =>
+            [expected.assetModelId, expected.assetModelName] as const
+        )
+      ),
+    [expectedModelRequests]
+  );
+
   /** Per-model progress. `prefulfilled` covers units assigned before this scan. */
   const progressByModel = useMemo<ModelProgress[]>(
     () =>
@@ -295,11 +320,22 @@ export default function AddAssetsToBookingDrawer({
       renderItem={(data) => {
         if (item?.type === "asset") {
           const scannedAsset = data as AssetFromQr;
+          const scannedRow = scannedRowByQrId.get(qrId);
           return (
             <AssetRow
               asset={scannedAsset}
+              scannedCode={qrId}
               isClaimed={claimedModelNameByAssetId.has(scannedAsset.id)}
               claimedModelName={claimedModelNameByAssetId.get(scannedAsset.id)}
+              reservation={resolveRowReservation({
+                bucket: scannedRow?.bucket,
+                matchedModelName: scannedRow?.matchedModelName,
+                hasReservations: expectedModelRequests.length > 0,
+                assetType: scannedAsset.type,
+                reservedModelName: scannedAsset.assetModelId
+                  ? reservedModelNameById.get(scannedAsset.assetModelId)
+                  : undefined,
+              })}
             />
           );
         } else if (item?.type === "kit") {
@@ -426,17 +462,85 @@ function PendingModelRowItem({ assetModelName }: { assetModelName: string }) {
   );
 }
 
-// Implement item renderers if they're not already defined elsewhere
+/**
+ * What a scanned row means for the booking's model reservations.
+ *
+ * - `matched`: fills an outstanding unit of `modelName`.
+ * - `overReserved`: its model is reserved, but every unit is already filled,
+ *   so it joins the booking as an extra.
+ * - `notReserved`: its model is not reserved at all (or it has none), so it
+ *   joins the booking as an extra.
+ */
+export type RowReservation =
+  | { kind: "matched"; modelName: string }
+  | { kind: "overReserved"; modelName: string }
+  | { kind: "notReserved" };
+
+/**
+ * Turns the matcher's bucket for one scanned asset into the reservation note
+ * its row shows, or null when the row needs none.
+ *
+ * Only a booking that reserves models gets a note: on a plain booking every
+ * scan is simply added, and calling each one "not reserved" would be noise.
+ * Quantity-tracked assets never answer a model reservation (a reservation is
+ * for whole units), so they get no note either.
+ *
+ * @param args.bucket - The matcher's bucket for the row, if it has one yet.
+ * @param args.matchedModelName - The model a `matched` row fills.
+ * @param args.hasReservations - Whether the booking reserves any model.
+ * @param args.assetType - The scanned asset's type.
+ * @param args.reservedModelName - The asset's model name when that model is
+ *   reserved on this booking, used to name the model an over-scan exceeds.
+ * @returns The note for the row, or null.
+ */
+export function resolveRowReservation({
+  bucket,
+  matchedModelName,
+  hasReservations,
+  assetType,
+  reservedModelName,
+}: {
+  bucket: ScannedAssetRow["bucket"] | undefined;
+  matchedModelName: string | undefined;
+  hasReservations: boolean;
+  assetType: AssetType;
+  reservedModelName: string | undefined;
+}): RowReservation | null {
+  if (bucket === "matched" && matchedModelName) {
+    return { kind: "matched", modelName: matchedModelName };
+  }
+  if (
+    bucket !== "unmatched" ||
+    !hasReservations ||
+    assetType !== AssetType.INDIVIDUAL
+  ) {
+    return null;
+  }
+  return reservedModelName
+    ? { kind: "overReserved", modelName: reservedModelName }
+    : { kind: "notReserved" };
+}
+
+/**
+ * Body of a scanned asset row on Scan to Assign: title, identifiers, and the
+ * badges that say what submitting will do with it.
+ */
 export function AssetRow({
   asset,
+  scannedCode,
   isClaimed = false,
   claimedModelName,
+  reservation = null,
 }: {
   asset: AssetFromQr;
+  /** The code the operator scanned to add this row. */
+  scannedCode: string;
   /** The matcher credited this scan against an outstanding reserved unit. */
   isClaimed?: boolean;
   /** Name of the model that unit belongs to, when known. */
   claimedModelName?: string;
+  /** What this scan means for the booking's model reservations. */
+  reservation?: RowReservation | null;
 }) {
   const { booking } = useLoaderData<typeof loader>();
   // Whether the booking is in a checked-out state and the asset is checked out.
@@ -479,6 +583,39 @@ export function AssetRow({
         "This asset was already on the booking without answering a reservation. Submitting assigns it to one.",
       priority: 75,
       className: "bg-green-50 border-green-200 text-green-700",
+    },
+    {
+      condition: reservation?.kind === "matched",
+      badgeText:
+        reservation?.kind === "matched"
+          ? `Counts toward ${reservation.modelName}`
+          : "",
+      tooltipTitle: "Fills a reserved unit",
+      tooltipContent:
+        "Submitting assigns this asset to one of the units reserved for its model.",
+      priority: 75,
+      className: "bg-green-50 border-green-200 text-green-700",
+    },
+    {
+      condition: reservation?.kind === "overReserved",
+      badgeText:
+        reservation?.kind === "overReserved"
+          ? `Extra: every ${reservation.modelName} unit is already filled`
+          : "",
+      tooltipTitle: "Over the reserved count",
+      tooltipContent:
+        "All reserved units of this model are already filled. Submitting adds this asset to the booking as an extra item.",
+      priority: 60,
+      className: "bg-warning-50 border-warning-200 text-warning-700",
+    },
+    {
+      condition: reservation?.kind === "notReserved",
+      badgeText: "Extra: model not reserved",
+      tooltipTitle: "Not part of a reservation",
+      tooltipContent:
+        "This asset's model is not reserved on this booking. Submitting adds it to the booking as an extra item.",
+      priority: 60,
+      className: "bg-warning-50 border-warning-200 text-warning-700",
     },
     // Custom preset for "already in this booking"
     {
@@ -532,6 +669,11 @@ export function AssetRow({
             </span>
           ) : null}
         </p>
+
+        <ScannedAssetIdentifiers
+          sequentialId={asset.sequentialId}
+          scannedCode={scannedCode}
+        />
 
         <div className="flex flex-wrap items-center gap-1">
           <span

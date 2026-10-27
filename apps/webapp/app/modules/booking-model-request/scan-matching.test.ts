@@ -42,6 +42,7 @@ describe("matchScansToModelRequests", () => {
     );
 
     expect(result.rows.map((row) => row.bucket)).toEqual(["matched"]);
+    expect(result.rows[0].matchedModelName).toBe("Model One");
     expect(result.matchedCountByModel.get("model-1")).toBe(1);
   });
 

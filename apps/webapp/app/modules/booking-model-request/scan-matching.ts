@@ -55,6 +55,8 @@ export type ScannedAssetRow = {
   viaKitName?: string;
   /** Model this row answered. `claimed` rows only. */
   claimedModelName?: string;
+  /** Model whose pending unit this row fills. `matched` rows only. */
+  matchedModelName?: string;
 };
 
 /**
@@ -288,7 +290,12 @@ export function matchScansToModelRequests(
       // flip to unmatched/over-scan.
       if (consumed < expected.remaining) {
         matchedCountByModel.set(expected.assetModelId, consumed + 1);
-        rows.push({ qrId, asset, bucket: "matched" });
+        rows.push({
+          qrId,
+          asset,
+          bucket: "matched",
+          matchedModelName: expected.assetModelName,
+        });
         continue;
       }
     }
