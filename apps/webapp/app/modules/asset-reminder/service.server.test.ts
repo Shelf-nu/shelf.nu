@@ -14,14 +14,17 @@
  * @see {@link file://./service.server.ts}
  */
 import { db } from "~/database/db.server";
+import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { ShelfError } from "~/utils/error";
 import {
+  findUndeliveredReminderJobIds,
   recurringReminderJobOptions,
   scheduleAssetReminder,
 } from "./scheduler.server";
 import {
   createAssetReminder,
   editAssetReminder,
+  getPaginatedAndFilterableReminders,
   getUpcomingRemindersForHomePage,
 } from "./service.server";
 
@@ -36,6 +39,7 @@ vi.mock("~/database/db.server", () => ({
     assetReminder: {
       create: vi.fn(),
       findMany: vi.fn(),
+      count: vi.fn(),
       findFirstOrThrow: vi.fn(),
       update: vi.fn(),
     },
@@ -48,11 +52,18 @@ vi.mock("./scheduler.server", () => ({
   ASSETS_EVENT_TYPE_MAP: { REMINDER: "REMINDER" },
   scheduleAssetReminder: vi.fn().mockResolvedValue(undefined),
   cancelAssetReminderScheduler: vi.fn(),
+  // why: reads pg-boss's job table; the test decides which jobs are live
+  findUndeliveredReminderJobIds: vi.fn(),
   // why: the real helper lives beside pg-boss wiring; a stand-in that echoes
   // its inputs lets the tests prove which options reached the scheduler
   recurringReminderJobOptions: vi.fn((reminderId: string, when: Date) => ({
     singletonKey: `asset-reminder-${reminderId}-${when.toISOString()}`,
   })),
+}));
+
+// why: the per-page cookie is request plumbing unrelated to the rows returned
+vi.mock("~/utils/cookies.server", () => ({
+  updateCookieWithPerPage: vi.fn().mockResolvedValue({ perPage: 20 }),
 }));
 
 // why: the user lookup pulls in the whole user service; only the name is used here
@@ -400,5 +411,66 @@ describe("getUpcomingRemindersForHomePage", () => {
         }),
       })
     );
+  });
+});
+
+describe("getPaginatedAndFilterableReminders delivery state", () => {
+  const PAST = new Date("2020-01-01T09:00:00Z");
+  const FUTURE = new Date("2099-01-01T09:00:00Z");
+  const ROWS = [
+    { id: "queued", alertDateTime: PAST, activeSchedulerReference: "job-q" },
+    { id: "done", alertDateTime: PAST, activeSchedulerReference: "job-d" },
+    { id: "ahead", alertDateTime: FUTURE, activeSchedulerReference: "job-f" },
+    { id: "skipped", alertDateTime: PAST, activeSchedulerReference: null },
+  ];
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.mocked(db.assetReminder.findMany).mockResolvedValue(ROWS as never);
+    vi.mocked(db.assetReminder.count).mockResolvedValue(ROWS.length);
+    vi.mocked(updateCookieWithPerPage).mockResolvedValue({
+      perPage: 20,
+    } as never);
+  });
+
+  async function loadRows() {
+    const { reminders } = await getPaginatedAndFilterableReminders({
+      organizationId: "org-1",
+      request: new Request("https://localhost/reminders"),
+    });
+    return Object.fromEntries(
+      reminders.map((row) => [row.id, row.deliveryPending])
+    );
+  }
+
+  it("marks only due reminders whose job is still live", async () => {
+    vi.mocked(findUndeliveredReminderJobIds).mockResolvedValue(
+      new Set(["job-q"])
+    );
+
+    expect(await loadRows()).toEqual({
+      queued: true,
+      done: false,
+      ahead: false,
+      skipped: false,
+    });
+    // Only past-due rows with a job are looked up.
+    expect(findUndeliveredReminderJobIds).toHaveBeenCalledWith([
+      "job-q",
+      "job-d",
+    ]);
+  });
+
+  it("falls back to unmarked rows when the job lookup fails", async () => {
+    vi.mocked(findUndeliveredReminderJobIds).mockRejectedValue(
+      new Error("pgboss unavailable")
+    );
+
+    expect(Object.values(await loadRows())).toEqual([
+      false,
+      false,
+      false,
+      false,
+    ]);
   });
 });

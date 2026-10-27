@@ -32,6 +32,7 @@ import { canUseRecurringReminders } from "~/utils/subscription.server";
 import { getNextOccurrence, isRecurringReminder } from "./recurrence";
 import {
   ASSETS_EVENT_TYPE_MAP,
+  LIVE_JOB_STATES,
   recurringReminderJobOptions,
   scheduleAssetReminder,
 } from "./scheduler.server";
@@ -53,9 +54,6 @@ export const RECONCILE_GRACE_MS = 60 * 60 * 1000; // 1 hour
  * (releasing the job).
  */
 export const ADVANCE_CLOCK_EPSILON_MS = 60 * 1000; // 1 minute
-
-/** pg-boss job states in which a job will still run. */
-const LIVE_JOB_STATES = new Set(["created", "retry", "active"]);
 
 type AdvanceResult = {
   /** The next occurrence now scheduled, when the advance happened. */
@@ -251,7 +249,9 @@ export async function reconcileRecurringReminders({
         const job = await scheduler.getJobById(
           reminder.activeSchedulerReference
         );
-        if (job && LIVE_JOB_STATES.has(job.state)) continue;
+        if (job && (LIVE_JOB_STATES as readonly string[]).includes(job.state)) {
+          continue;
+        }
       }
 
       const { advanced } = await advanceRecurringReminder({

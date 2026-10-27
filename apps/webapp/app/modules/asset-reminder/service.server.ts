@@ -4,6 +4,7 @@ import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { isLikeShelfError, isNotFoundError, ShelfError } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
+import { Logger } from "~/utils/logger";
 import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import { assertAssetsBelongToOrg } from "~/utils/org-validation.server";
 import { ASSET_REMINDER_INCLUDE_FIELDS } from "./fields";
@@ -11,6 +12,7 @@ import { isRecurringReminder, rebaseEndOfDayToZone } from "./recurrence";
 import {
   ASSETS_EVENT_TYPE_MAP,
   cancelAssetReminderScheduler,
+  findUndeliveredReminderJobIds,
   recurringReminderJobOptions,
   scheduleAssetReminder,
 } from "./scheduler.server";
@@ -277,7 +279,7 @@ export async function getPaginatedAndFilterableReminders({
     const totalPages = Math.ceil(totalReminders / take);
 
     return {
-      reminders,
+      reminders: await withDeliveryState(reminders),
       totalReminders,
       page,
       perPage,
@@ -291,6 +293,50 @@ export async function getPaginatedAndFilterableReminders({
       label,
     });
   }
+}
+
+/**
+ * Marks each reminder whose alert time has passed but whose job has not run
+ * yet (`deliveryPending`), so the list shows "Sending" instead of claiming it
+ * was sent. The worker polls on an interval, so a due reminder can wait a few
+ * minutes for its job.
+ *
+ * A failed lookup leaves every row unmarked, so the list falls back to the
+ * alert time alone instead of failing the page.
+ *
+ * @param reminders - One page of reminders
+ * @returns The same rows with `deliveryPending` added
+ */
+async function withDeliveryState<
+  T extends Pick<AssetReminder, "alertDateTime" | "activeSchedulerReference">,
+>(reminders: T[]): Promise<(T & { deliveryPending: boolean })[]> {
+  const now = new Date();
+  const dueJobIds = reminders.flatMap((reminder) =>
+    reminder.activeSchedulerReference && reminder.alertDateTime <= now
+      ? [reminder.activeSchedulerReference]
+      : []
+  );
+
+  const undelivered = await findUndeliveredReminderJobIds(dueJobIds).catch(
+    (cause) => {
+      Logger.warn(
+        new ShelfError({
+          cause,
+          message: "Could not read reminder job states. Showing alert times.",
+          label,
+          shouldBeCaptured: false,
+        })
+      );
+      return new Set<string>();
+    }
+  );
+
+  return reminders.map((reminder) => ({
+    ...reminder,
+    deliveryPending:
+      !!reminder.activeSchedulerReference &&
+      undelivered.has(reminder.activeSchedulerReference),
+  }));
 }
 
 /**

@@ -14,6 +14,12 @@ export const ASSETS_EVENT_TYPE_MAP = {
 export type AssetsEventType =
   (typeof ASSETS_EVENT_TYPE_MAP)[keyof typeof ASSETS_EVENT_TYPE_MAP];
 
+/**
+ * pg-boss job states in which a job has not run to completion yet: waiting,
+ * waiting for a retry, or running.
+ */
+export const LIVE_JOB_STATES = ["created", "retry", "active"] as const;
+
 export type AssetsSchedulerData = {
   reminderId: string;
   eventType: AssetsEventType;
@@ -148,4 +154,33 @@ export async function cancelAssetReminderScheduler(
       })
     );
   }
+}
+
+/**
+ * Finds which of the given reminder jobs have not delivered yet (still
+ * waiting, retrying or running), in one query against pg-boss's job table.
+ * Completed jobs are moved out of that table by pg-boss, so a job that is
+ * missing from it has finished.
+ *
+ * @param jobIds - `activeSchedulerReference` values of past-due reminders
+ * @returns The subset of `jobIds` whose job is still live
+ */
+export async function findUndeliveredReminderJobIds(
+  jobIds: string[]
+): Promise<Set<string>> {
+  // pg-boss ids are uuids; anything else cannot match and would fail the cast.
+  const ids = jobIds.filter((id) =>
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+  );
+  if (ids.length === 0) return new Set();
+
+  const states = [...LIVE_JOB_STATES];
+  const rows = await db.$queryRaw<{ id: string }[]>`
+    SELECT id::text AS id
+    FROM pgboss.job
+    WHERE id = ANY(${ids}::uuid[])
+      AND state::text = ANY(${states}::text[])
+  `;
+
+  return new Set(rows.map((row) => row.id));
 }

@@ -38,6 +38,7 @@ export const REMINDERS_SORTING_OPTIONS = {
  */
 const REMINDER_STATUS_COLORS: Record<ReminderStatus, string> = {
   Pending: colors.yellow["500"],
+  Sending: colors.blue["500"],
   "Reminder sent": colors.green["500"],
   Paused: colors.gray["500"],
   "Not sent": colors.gray["500"],
@@ -132,7 +133,10 @@ function ListContent({
 }: {
   item: Prisma.AssetReminderGetPayload<{
     include: typeof ASSET_REMINDER_INCLUDE_FIELDS;
-  }>;
+  }> & {
+    /** The alert has passed but its job has not run yet (list loader). */
+    deliveryPending?: boolean;
+  };
   extraProps: { isAssetReminderPage: boolean };
 }) {
   /**
@@ -144,6 +148,7 @@ function ListContent({
     alertDateTime: item.alertDateTime,
     schedulerReference: item.activeSchedulerReference,
     assetArchivedAt: item.asset.archivedAt,
+    deliveryPending: item.deliveryPending,
   });
   const recurrenceLabel = describeRecurrence(item);
 
