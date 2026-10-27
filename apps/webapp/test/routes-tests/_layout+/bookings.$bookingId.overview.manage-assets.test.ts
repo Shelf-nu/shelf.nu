@@ -2141,9 +2141,14 @@ describe("manage-assets: include assets from child locations", () => {
       allowedTeamMemberIds: "all",
       locationIdsOverride: override,
     });
+    // Plain locations sit on `where.assetLocations`; with "without location"
+    // picked they share an OR group in `where.AND` with `assetLocations: none`.
     const inLocations = (where.assetLocations?.some?.locationId ??
-      where.OR?.find((clause) => clause.assetLocations?.some)?.assetLocations
-        ?.some?.locationId) as { in: string[] } | undefined;
+      [where.AND ?? []]
+        .flat()
+        .flatMap((group) => [group.OR ?? []].flat())
+        .find((clause) => clause.assetLocations?.some)?.assetLocations?.some
+        ?.locationId) as { in: string[] } | undefined;
     return inLocations?.in;
   }
 
@@ -2191,6 +2196,9 @@ describe("manage-assets: include assets from child locations", () => {
       "without-location",
     ]);
     expect(selectAllIds).toEqual(listIds);
+    expect(
+      [...((await clauseLocationIds(query, selectAllIds)) ?? [])].sort()
+    ).toEqual(listIds?.slice().sort());
   });
 
   it("offers the checkbox only when a ticked location has child locations", async () => {

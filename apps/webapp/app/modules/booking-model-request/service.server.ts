@@ -38,8 +38,8 @@
  * @see {@link file://./../../routes/api+/bookings.$bookingId.model-requests.ts} — HTTP surface
  */
 
-import type { Asset, BookingModelRequest, Prisma } from "@prisma/client";
-import { AssetType, BookingStatus } from "@prisma/client";
+import type { Asset, BookingModelRequest } from "@prisma/client";
+import { AssetType, BookingStatus, Prisma } from "@prisma/client";
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
@@ -218,63 +218,84 @@ type RawQueryClient = {
 };
 
 /**
- * The exact reads {@link getAssetModelAvailability} issues. Structural rather
+ * Custody rows reach the model only through `Asset`, and Prisma cannot group
+ * by a relation field, so they are read as rows and summed per model in code.
+ */
+type QuantityOnModelRow = {
+  quantity: number;
+  asset: { assetModelId: string | null };
+};
+
+/** The select behind {@link QuantityOnModelRow}. */
+type QuantityOnModelSelect = {
+  quantity: true;
+  asset: { select: { assetModelId: true } };
+};
+
+/**
+ * One OTHER active booking that touches the window, with what it holds of the
+ * measured models: the units it names and the reservations it is still owed.
+ * The pool is measured at the instant demand peaks, and that needs each
+ * claim's own dates, which a sum per model cannot carry.
+ */
+type PoolBookingRow = {
+  id: string;
+  name: string;
+  from: Date | null;
+  to: Date | null;
+  bookingAssets: Array<{
+    assetId: string;
+    asset: { assetModelId: string | null };
+  }>;
+  modelRequests: Array<{
+    assetModelId: string;
+    quantity: number;
+    fulfilledQuantity: number;
+  }>;
+};
+
+/** The select behind {@link PoolBookingRow}. */
+type PoolBookingSelect = {
+  id: true;
+  name: true;
+  from: true;
+  to: true;
+  bookingAssets: {
+    where: Prisma.BookingAssetWhereInput;
+    select: { assetId: true; asset: { select: { assetModelId: true } } };
+  };
+  modelRequests: {
+    where: Prisma.BookingModelRequestWhereInput;
+    select: { assetModelId: true; quantity: true; fulfilledQuantity: true };
+  };
+};
+
+/**
+ * The exact reads {@link getAssetModelAvailabilities} issues. Structural rather
  * than Prisma's own client type so an interactive transaction client
  * satisfies it without casting.
- *
- * The two booking reads return ROWS, not sums: the pool is measured at the
- * instant inside the window where demand peaks, and that needs each claim's
- * own dates (see {@link measureModelPoolPeak}).
  */
 export type AssetModelAvailabilityClient = {
   asset: {
-    count: (args: { where: Prisma.AssetWhereInput }) => Promise<number>;
+    groupBy: (args: {
+      by: ["assetModelId"];
+      where: Prisma.AssetWhereInput;
+      _count: { _all: true };
+    }) => Promise<
+      Array<{ assetModelId: string | null; _count: { _all: number } }>
+    >;
   };
   custody: {
-    aggregate: (args: {
+    findMany: (args: {
       where: Prisma.CustodyWhereInput;
-      _sum: { quantity: true };
-    }) => Promise<{ _sum: { quantity: number | null } }>;
+      select: QuantityOnModelSelect;
+    }) => Promise<QuantityOnModelRow[]>;
   };
-  bookingAsset: {
+  booking: {
     findMany: (args: {
-      where: Prisma.BookingAssetWhereInput;
-      select: {
-        assetId: true;
-        booking: { select: { id: true; name: true; from: true; to: true } };
-      };
-    }) => Promise<
-      Array<{
-        assetId: string;
-        booking: {
-          id: string;
-          name: string;
-          from: Date | null;
-          to: Date | null;
-        };
-      }>
-    >;
-  };
-  bookingModelRequest: {
-    findMany: (args: {
-      where: Prisma.BookingModelRequestWhereInput;
-      select: {
-        quantity: true;
-        fulfilledQuantity: true;
-        booking: { select: { id: true; name: true; from: true; to: true } };
-      };
-    }) => Promise<
-      Array<{
-        quantity: number;
-        fulfilledQuantity: number;
-        booking: {
-          id: string;
-          name: string;
-          from: Date | null;
-          to: Date | null;
-        };
-      }>
-    >;
+      where: Prisma.BookingWhereInput;
+      select: PoolBookingSelect;
+    }) => Promise<PoolBookingRow[]>;
   };
 };
 
@@ -421,8 +442,20 @@ export function measureModelPoolPeak(
   };
 }
 
+/** The refusal for a model id the caller's workspace does not hold. */
+function assetModelNotFound(): ShelfError {
+  return new ShelfError({
+    cause: null,
+    label,
+    status: 404,
+    message: "Asset model not found in current workspace.",
+    shouldBeCaptured: false,
+  });
+}
+
 /**
- * Serializes reservations competing for one `AssetModel`'s pool.
+ * Serializes reservations competing for several `AssetModel` pools, in one
+ * statement.
  *
  * Availability is a read-then-decide: count what is free, then write a row
  * claiming some of it. Under READ COMMITTED a plain `SELECT` inside a
@@ -440,8 +473,46 @@ export function measureModelPoolPeak(
  * reservation held still needs {@link lockModelRequestRow}.
  *
  * Scoped by `organizationId` as well as `id`, so a caller supplying another
- * workspace's model id takes no lock at all rather than contending on a row
- * it cannot see — the same rule as `lockAssetForQuantityUpdate`.
+ * workspace's model id takes no lock on it rather than contending on a row it
+ * cannot see, the same rule as `lockAssetForQuantityUpdate`.
+ *
+ * Rows are locked in plain code-unit id order, the order every writer of these
+ * rows uses, so two transactions contending for the same models cannot
+ * deadlock. `FOR UPDATE` locks rows as the sorted result is produced, and
+ * `COLLATE "C"` makes the database's order byte order, which is what
+ * JavaScript's `sort()` gives for these ASCII ids whatever collation the
+ * database was created with. Same shape as `lockAssetsForQuantityUpdate`.
+ *
+ * @param tx - Prisma interactive transaction client
+ * @param assetModelIds - Models whose pools are being claimed; duplicates are
+ *   ignored, and an empty list issues no query
+ * @param organizationId - The caller's authenticated organization id
+ * @throws {ShelfError} 404 if any model is not in the caller's workspace
+ */
+export async function lockAssetModelsForReservation(
+  tx: RawQueryClient,
+  assetModelIds: string[],
+  organizationId: string
+): Promise<void> {
+  const ids = [...new Set(assetModelIds)].sort();
+  if (ids.length === 0) return;
+
+  // Column names are literal: `AssetModel` declares no `@map`.
+  // @see {@link file://./../../../../../.claude/rules/raw-sql-respects-prisma-map.md}
+  const rows = await tx.$queryRaw<{ id: string }[]>`
+    SELECT id FROM "AssetModel"
+    WHERE id IN (${Prisma.join(ids)}) AND "organizationId" = ${organizationId}
+    ORDER BY id COLLATE "C"
+    FOR UPDATE
+  `;
+
+  if (!rows || rows.length < ids.length) throw assetModelNotFound();
+}
+
+/**
+ * {@link lockAssetModelsForReservation} for a single model, for callers that
+ * claim one pool at a time. Takes the same row lock under the same workspace
+ * scope; a single row needs no ordering.
  *
  * @param tx - Prisma interactive transaction client
  * @param assetModelId - Model whose pool is being claimed
@@ -457,15 +528,7 @@ async function lockAssetModelForReservation(
     SELECT id FROM "AssetModel" WHERE id = ${assetModelId} AND "organizationId" = ${organizationId} FOR UPDATE
   `;
 
-  if (!rows || rows.length === 0) {
-    throw new ShelfError({
-      cause: null,
-      label,
-      status: 404,
-      message: "Asset model not found in current workspace.",
-      shouldBeCaptured: false,
-    });
-  }
+  if (!rows || rows.length === 0) throw assetModelNotFound();
 }
 
 /**
@@ -515,116 +578,160 @@ async function lockModelRequestRow(
   `;
 }
 
+/** Sums each row's `quantity` into the model of the unit it sits on. */
+function sumQuantityByModel(rows: QuantityOnModelRow[]): Map<string, number> {
+  const byModel = new Map<string, number>();
+  for (const row of rows) {
+    const assetModelId = row.asset.assetModelId;
+    if (!assetModelId) continue;
+    byModel.set(assetModelId, (byModel.get(assetModelId) ?? 0) + row.quantity);
+  }
+  return byModel;
+}
+
+/** Arguments for {@link getAssetModelAvailabilities}. */
+type GetAssetModelAvailabilitiesArgs = Omit<
+  GetAssetModelAvailabilityArgs,
+  "assetModelId"
+> & {
+  /** Models to measure. Duplicates are ignored. */
+  assetModelIds: string[];
+};
+
 /**
- * Compute availability for an `AssetModel` over a booking window.
+ * Compute availability for several `AssetModel`s over one booking window.
  *
- * Safe to call from any loader/action path. Does not mutate. Excludes
- * the supplied `bookingId` from reservation sums.
+ * Three reads in total, whatever the number of models: an interactive
+ * transaction runs its statements one after another on a single connection,
+ * so a per-model read inside one costs a round trip per model. Every model
+ * asked for gets an entry, with zeros for a model that has no rows.
  *
  * `reservedConcrete` and `reservedViaRequest` are what OTHER bookings take
  * from the pool at the instant inside the window where that is largest
  * ({@link measureModelPoolPeak}), not the sum of every booking that touches
  * the window. Custody is not dated, so it is deducted in full.
+ *
+ * Safe to call from any loader/action path. Does not mutate. Excludes the
+ * supplied `bookingId` from reservation sums.
+ *
+ * @returns One {@link AssetModelAvailability} per distinct id asked for
+ * @throws {ShelfError} When any of the reads fails
  */
-export async function getAssetModelAvailability({
-  assetModelId,
+export async function getAssetModelAvailabilities({
+  assetModelIds,
   organizationId,
   bookingId,
   from,
   to,
   db: dbClient,
-}: GetAssetModelAvailabilityArgs): Promise<AssetModelAvailability> {
+}: GetAssetModelAvailabilitiesArgs): Promise<
+  Map<string, AssetModelAvailability>
+> {
+  const ids = [...new Set(assetModelIds)];
+  const availabilities = new Map<string, AssetModelAvailability>();
+  if (ids.length === 0) return availabilities;
+
   const client = dbClient ?? db;
 
   try {
     const dateOverlap = bookingWindowOverlap(from, to);
 
-    const [total, custodyAgg, namedRows, requestRows] = await Promise.all([
-      // Total INDIVIDUAL assets of this model in the org. QUANTITY_TRACKED
+    const unitOfTheseModels: Prisma.AssetWhereInput = {
+      organizationId,
+      assetModelId: { in: ids },
+      type: AssetType.INDIVIDUAL,
+      archivedAt: null,
+    };
+
+    const [totalRows, custodyRows, otherBookings] = await Promise.all([
+      // INDIVIDUAL assets of these models in the org. QUANTITY_TRACKED
       // assets aren't part of the model-request flow (they have their own
-      // quantity booking path from Phase 3b).
+      // quantity booking path).
       // Archived assets are out of service and can't be booked (issue #382),
       // so they are not part of the pool. The custody and booking reads below
       // read the same asset set, so the subtraction stays coherent.
-      client.asset.count({
+      client.asset.groupBy({
+        by: ["assetModelId"],
         where: {
           organizationId,
-          assetModelId,
+          assetModelId: { in: ids },
           type: AssetType.INDIVIDUAL,
           archivedAt: null,
         },
+        _count: { _all: true },
       }),
       // Units currently held by team members / users.
-      client.custody.aggregate({
-        where: {
-          asset: {
-            organizationId,
-            assetModelId,
-            type: AssetType.INDIVIDUAL,
-            archivedAt: null,
-          },
-        },
-        _sum: { quantity: true },
+      client.custody.findMany({
+        where: { asset: unitOfTheseModels },
+        select: { quantity: true, asset: { select: { assetModelId: true } } },
       }),
-      // Concrete BookingAsset rows for assets of this model, in OTHER
-      // active-status bookings whose window overlaps. One row per unit per
-      // booking, with the booking's dates, so the sweep can tell which of
-      // them run at the same time.
-      client.bookingAsset.findMany({
+      // The OTHER active bookings whose window overlaps and that hold units of
+      // these models, by name or by reservation, each with those rows. One
+      // read whatever the number of models or bookings. Only units STILL
+      // OUTSTANDING on a reservation count (`quantity - fulfilledQuantity`):
+      // fulfilled units have been materialised into `BookingAsset` rows and
+      // arrive as named units.
+      client.booking.findMany({
         where: {
-          asset: {
-            organizationId,
-            assetModelId,
-            type: AssetType.INDIVIDUAL,
-            archivedAt: null,
-          },
-          bookingId: { not: bookingId },
-          booking: {
-            status: { in: [...ACTIVE_BOOKING_STATUSES] },
-            ...dateOverlap,
-          },
+          organizationId,
+          id: { not: bookingId },
+          status: { in: [...ACTIVE_BOOKING_STATUSES] },
+          ...dateOverlap,
+          AND: [
+            {
+              OR: [
+                { bookingAssets: { some: { asset: unitOfTheseModels } } },
+                {
+                  modelRequests: {
+                    some: { assetModelId: { in: ids }, fulfilledAt: null },
+                  },
+                },
+              ],
+            },
+          ],
         },
         select: {
-          assetId: true,
-          booking: { select: { id: true, name: true, from: true, to: true } },
-        },
-      }),
-      // Other bookings' model-level requests for this same model. Only the
-      // units STILL OUTSTANDING count (`quantity - fulfilledQuantity`):
-      // fulfilled units have been materialised into concrete `BookingAsset`
-      // rows and arrive through the read above.
-      client.bookingModelRequest.findMany({
-        where: {
-          assetModelId,
-          bookingId: { not: bookingId },
-          fulfilledAt: null,
-          booking: {
-            organizationId,
-            status: { in: [...ACTIVE_BOOKING_STATUSES] },
-            ...dateOverlap,
+          id: true,
+          name: true,
+          from: true,
+          to: true,
+          bookingAssets: {
+            where: { asset: unitOfTheseModels },
+            select: {
+              assetId: true,
+              asset: { select: { assetModelId: true } },
+            },
           },
-        },
-        select: {
-          quantity: true,
-          fulfilledQuantity: true,
-          booking: { select: { id: true, name: true, from: true, to: true } },
+          modelRequests: {
+            where: { assetModelId: { in: ids }, fulfilledAt: null },
+            select: {
+              assetModelId: true,
+              quantity: true,
+              fulfilledQuantity: true,
+            },
+          },
         },
       }),
     ]);
 
-    // One claim per booking: the units it names (a unit holding both a
-    // standalone and a kit row counts once) plus what it is still owed.
-    const claimsByBooking = new Map<
-      string,
-      Omit<ModelPoolClaim, "named"> & { named: Set<string> }
-    >();
-    const claimFor = (booking: {
-      id: string;
-      name: string;
-      from: Date | null;
-      to: Date | null;
-    }) => {
-      let claim = claimsByBooking.get(booking.id);
+    const totalByModel = new Map<string, number>();
+    for (const row of totalRows) {
+      if (row.assetModelId) totalByModel.set(row.assetModelId, row._count._all);
+    }
+    const inCustodyByModel = sumQuantityByModel(custodyRows);
+
+    // One claim per (model, booking): the units the booking names of the
+    // model (a unit holding both a standalone and a kit row counts once) plus
+    // what it is still owed of it.
+    type MutableClaim = Omit<ModelPoolClaim, "named"> & { named: Set<string> };
+    const claimsByModel = new Map<string, Map<string, MutableClaim>>();
+    const claimFor = (assetModelId: string, booking: PoolBookingRow) => {
+      let byBooking = claimsByModel.get(assetModelId);
+      if (!byBooking) {
+        byBooking = new Map();
+        claimsByModel.set(assetModelId, byBooking);
+      }
+      let claim = byBooking.get(booking.id);
       if (!claim) {
         claim = {
           bookingId: booking.id,
@@ -634,47 +741,78 @@ export async function getAssetModelAvailability({
           named: new Set<string>(),
           outstanding: 0,
         };
-        claimsByBooking.set(booking.id, claim);
+        byBooking.set(booking.id, claim);
       }
       return claim;
     };
-    for (const row of namedRows) {
-      claimFor(row.booking).named.add(row.assetId);
+    for (const booking of otherBookings) {
+      for (const row of booking.bookingAssets) {
+        if (!row.asset.assetModelId) continue;
+        claimFor(row.asset.assetModelId, booking).named.add(row.assetId);
+      }
+      for (const request of booking.modelRequests) {
+        const outstanding = Math.max(
+          0,
+          request.quantity - request.fulfilledQuantity
+        );
+        if (outstanding === 0) continue;
+        claimFor(request.assetModelId, booking).outstanding += outstanding;
+      }
     }
-    for (const row of requestRows) {
-      const outstanding = Math.max(0, row.quantity - row.fulfilledQuantity);
-      if (outstanding === 0) continue;
-      claimFor(row.booking).outstanding += outstanding;
+
+    for (const assetModelId of ids) {
+      const total = totalByModel.get(assetModelId) ?? 0;
+      const inCustody = inCustodyByModel.get(assetModelId) ?? 0;
+      const peak = measureModelPoolPeak(
+        [...(claimsByModel.get(assetModelId)?.values() ?? [])],
+        { from, to }
+      );
+      const reservedConcrete = peak.named;
+      const reservedViaRequest = peak.requested;
+      const reserved = reservedConcrete + reservedViaRequest;
+      availabilities.set(assetModelId, {
+        total,
+        inCustody,
+        reservedConcrete,
+        reservedViaRequest,
+        reserved,
+        available: Math.max(0, total - inCustody - reserved),
+        peak: { at: peak.at, requestedBy: peak.requestedBy },
+      });
     }
-
-    const peak = measureModelPoolPeak([...claimsByBooking.values()], {
-      from,
-      to,
-    });
-
-    const inCustody = custodyAgg._sum.quantity ?? 0;
-    const reservedConcrete = peak.named;
-    const reservedViaRequest = peak.requested;
-    const reserved = reservedConcrete + reservedViaRequest;
-    const available = Math.max(0, total - inCustody - reserved);
-
-    return {
-      total,
-      inCustody,
-      reservedConcrete,
-      reservedViaRequest,
-      reserved,
-      available,
-      peak: { at: peak.at, requestedBy: peak.requestedBy },
-    };
+    return availabilities;
   } catch (cause) {
     throw new ShelfError({
       cause,
       label,
       message: "Failed to compute asset-model availability.",
-      additionalData: { assetModelId, bookingId, organizationId },
+      additionalData: { assetModelIds: ids, bookingId, organizationId },
     });
   }
+}
+
+/**
+ * Compute availability for one `AssetModel` over a booking window.
+ *
+ * {@link getAssetModelAvailabilities} for a single model, so there is one
+ * implementation of the pool math. Callers measuring several models should
+ * call the batch directly.
+ *
+ * Safe to call from any loader/action path. Does not mutate. Excludes
+ * the supplied `bookingId` from reservation sums.
+ *
+ * @throws {ShelfError} When any of the reads fails
+ */
+export async function getAssetModelAvailability({
+  assetModelId,
+  ...args
+}: GetAssetModelAvailabilityArgs): Promise<AssetModelAvailability> {
+  const availabilities = await getAssetModelAvailabilities({
+    ...args,
+    assetModelIds: [assetModelId],
+  });
+  // The batch returns an entry for every id it is asked about.
+  return availabilities.get(assetModelId)!;
 }
 
 /**
@@ -762,7 +900,7 @@ type ModelUnitCandidate = Pick<Asset, "id" | "title" | "assetModelId">;
  */
 export type ModelReservationGuardClient = RawQueryClient &
   AssetModelAvailabilityClient & {
-    bookingModelRequest: AssetModelAvailabilityClient["bookingModelRequest"] & {
+    bookingModelRequest: {
       findMany: (args: {
         where: Prisma.BookingModelRequestWhereInput;
         select: {
@@ -1130,13 +1268,13 @@ export async function assertModelUnitsNotReservedElsewhere({
   }
   if (claims.length === 0) return;
 
-  // Sorted so two transactions contending for the same models take the locks
-  // in one global order and cannot deadlock. Every lock is taken before any
-  // pool is measured, matching the reservation guard.
+  // Every lock is taken in one statement, in the global id order
+  // `lockAssetModelsForReservation` imposes, before any pool is measured,
+  // matching the reservation guard.
   //
-  // Plain code-unit order, which is what every other writer of these rows
-  // uses. `localeCompare` would be a second ordering over one lock set, and
-  // two orderings are the cycle this sort exists to prevent.
+  // The claims are sorted in the same plain code-unit order so the refusal
+  // names models in a stable order. `localeCompare` would be a second ordering
+  // over one lock set.
   claims.sort((a, b) =>
     a.assetModelId < b.assetModelId
       ? -1
@@ -1144,9 +1282,11 @@ export async function assertModelUnitsNotReservedElsewhere({
       ? 1
       : 0
   );
-  for (const claim of claims) {
-    await lockAssetModelForReservation(tx, claim.assetModelId, organizationId);
-  }
+  await lockAssetModelsForReservation(
+    tx,
+    claims.map((claim) => claim.assetModelId),
+    organizationId
+  );
 
   /**
    * Only a model another booking still owes unnamed units of can be
@@ -1168,18 +1308,22 @@ export async function assertModelUnitsNotReservedElsewhere({
   );
   if (contestedClaims.length === 0) return;
 
+  // One batched read for every contested model, under the locks above.
+  const availabilities = await getAssetModelAvailabilities({
+    assetModelIds: contestedClaims.map((claim) => claim.assetModelId),
+    organizationId,
+    bookingId,
+    from,
+    to,
+    db: tx,
+  });
+
   const shortfalls: Array<
     ModelClaim & { availability: AssetModelAvailability }
   > = [];
   for (const claim of contestedClaims) {
-    const availability = await getAssetModelAvailability({
-      assetModelId: claim.assetModelId,
-      organizationId,
-      bookingId,
-      from,
-      to,
-      db: tx,
-    });
+    // The batch returns an entry for every id it is asked about.
+    const availability = availabilities.get(claim.assetModelId)!;
     if (
       claim.namedNotInCustody + claim.stillToAssign >
       availability.available
@@ -1247,13 +1391,13 @@ export async function assertModelUnitsNotReservedElsewhere({
 /* -------------------------------------------------------------------------- */
 
 /**
- * The reads {@link measureModelPoolFit} issues. Structural, like
+ * The reads {@link measureModelPoolFits} issues. Structural, like
  * {@link AssetModelAvailabilityClient}, so an interactive transaction client
  * satisfies it without a cast.
  */
 export type ModelPoolFitClient = Pick<
   ModelReservationGuardClient,
-  "asset" | "custody" | "bookingAsset" | "bookingModelRequest"
+  "asset" | "custody" | "booking" | "bookingModelRequest"
 >;
 
 /** What one model's free pool holds, and what one booking takes from it. */
@@ -1274,52 +1418,59 @@ export type ModelPoolFit = {
 };
 
 /**
- * Measures one booking's whole footprint on one model's pool.
+ * Measures one booking's whole footprint on several models' pools.
  *
- * {@link getAssetModelAvailability} excludes the booking, so BOTH halves of
+ * {@link getAssetModelAvailabilities} excludes the booking, so BOTH halves of
  * what it takes belong on the booking's side of the comparison: the units it
  * holds by name, and the units of its own reservation that stay unassigned. A
  * reservation and a named unit draw on the same physical pool, so measuring
  * either half alone lets a pair of writes that each pass still over-commit it.
  *
- * Callers take {@link lockAssetModelForReservation} on the model FIRST. This is
- * a read-then-decide, and under READ COMMITTED a plain `SELECT` takes no lock,
- * so two callers otherwise measure the same free pool and both commit.
+ * Four reads in total, whatever the number of models: the three pool reads
+ * and one {@link readOwnNamedUnits}.
  *
- * Reports the numbers rather than refusing, because the two callers refuse in
+ * Callers take {@link lockAssetModelsForReservation} on the models FIRST. This
+ * is a read-then-decide, and under READ COMMITTED a plain `SELECT` takes no
+ * lock, so two callers otherwise measure the same free pool and both commit.
+ *
+ * Reports the numbers rather than refusing, because the callers refuse in
  * different registers: adding a reservation names the model and the quantity
  * asked for, a booking starting to claim the pool names every model that no
  * longer fits.
  *
- * @param args.outstanding - Units of the booking's reservation left unassigned
- *   once the caller's write lands. Already-fulfilled units are named units, so
- *   they belong to the other half and have to be netted out of this one.
+ * @param args.outstandingByModel - Per model, units of the booking's
+ *   reservation left unassigned once the caller's write lands. Already-fulfilled
+ *   units are named units, so they belong to the other half and have to be
+ *   netted out of this one. The keys are the models measured.
  * @param args.from - Start of the window being claimed. With either end
  *   missing there is nothing to overlap, so every active booking competes, per
- *   {@link getAssetModelAvailability}.
+ *   {@link getAssetModelAvailabilities}.
  * @param args.to - End of that window.
  * @param args.tx - The caller's interactive transaction. Required: the counts
  *   see the transaction's own rows, and take part in its locks, only through it.
+ * @returns One {@link ModelPoolFit} per key of `outstandingByModel`
  */
-export async function measureModelPoolFit({
+export async function measureModelPoolFits({
   bookingId,
-  assetModelId,
   organizationId,
   from,
   to,
-  outstanding,
+  outstandingByModel,
   tx,
 }: {
   bookingId: string;
-  assetModelId: string;
   organizationId: string;
   from: Date | null | undefined;
   to: Date | null | undefined;
-  outstanding: number;
+  outstandingByModel: Map<string, number>;
   tx: ModelPoolFitClient;
-}): Promise<ModelPoolFit> {
-  const availability = await getAssetModelAvailability({
-    assetModelId,
+}): Promise<Map<string, ModelPoolFit>> {
+  const fits = new Map<string, ModelPoolFit>();
+  const assetModelIds = [...outstandingByModel.keys()];
+  if (assetModelIds.length === 0) return fits;
+
+  const availabilities = await getAssetModelAvailabilities({
+    assetModelIds,
     organizationId,
     bookingId,
     from,
@@ -1329,19 +1480,56 @@ export async function measureModelPoolFit({
 
   const heldByModel = await readOwnNamedUnits({
     bookingId,
-    assetModelIds: [assetModelId],
+    assetModelIds,
     organizationId,
     tx,
   });
-  const held = heldByModel.get(assetModelId);
-  const namedNotInCustody = (held?.unitIds.size ?? 0) - (held?.inCustody ?? 0);
 
-  return {
-    availability,
-    namedNotInCustody,
-    outstanding,
-    fits: namedNotInCustody + outstanding <= availability.available,
-  };
+  for (const [assetModelId, outstanding] of outstandingByModel) {
+    // The batch returns an entry for every id it is asked about.
+    const availability = availabilities.get(assetModelId)!;
+    const held = heldByModel.get(assetModelId);
+    const namedNotInCustody =
+      (held?.unitIds.size ?? 0) - (held?.inCustody ?? 0);
+    fits.set(assetModelId, {
+      availability,
+      namedNotInCustody,
+      outstanding,
+      fits: namedNotInCustody + outstanding <= availability.available,
+    });
+  }
+  return fits;
+}
+
+/**
+ * Measures one booking's whole footprint on one model's pool.
+ *
+ * {@link measureModelPoolFits} for a single model; see it for what is measured
+ * and the lock a caller takes first.
+ *
+ * @param args.outstanding - Units of the booking's reservation left unassigned
+ *   once the caller's write lands, net of already-fulfilled units.
+ * @param args.tx - The caller's interactive transaction.
+ */
+export async function measureModelPoolFit({
+  assetModelId,
+  outstanding,
+  ...args
+}: {
+  bookingId: string;
+  assetModelId: string;
+  organizationId: string;
+  from: Date | null | undefined;
+  to: Date | null | undefined;
+  outstanding: number;
+  tx: ModelPoolFitClient;
+}): Promise<ModelPoolFit> {
+  const fits = await measureModelPoolFits({
+    ...args,
+    outstandingByModel: new Map([[assetModelId, outstanding]]),
+  });
+  // The batch returns an entry for every model it is asked about.
+  return fits.get(assetModelId)!;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1411,20 +1599,46 @@ export async function findModelReservationsShortAfterArchive({
     },
   });
 
-  const shortfalls: ModelReservationShortfall[] = [];
-  for (const request of requests) {
-    const outstanding = request.quantity - request.fulfilledQuantity;
-    if (outstanding <= 0) continue;
+  // One measurement per booking rather than per reservation: a booking has
+  // one window and at most one reservation per model, so its reservations
+  // share every input the batch needs.
+  const outstandingRequests = requests.filter(
+    (request) => request.quantity - request.fulfilledQuantity > 0
+  );
+  const requestsByBooking = new Map<string, typeof outstandingRequests>();
+  for (const request of outstandingRequests) {
+    const group = requestsByBooking.get(request.bookingId) ?? [];
+    group.push(request);
+    requestsByBooking.set(request.bookingId, group);
+  }
 
-    const fit = await measureModelPoolFit({
-      bookingId: request.bookingId,
-      assetModelId: request.assetModelId,
-      organizationId,
-      from: request.booking.from,
-      to: request.booking.to,
-      outstanding,
-      tx,
-    });
+  const fitsByBooking = new Map<string, Map<string, ModelPoolFit>>();
+  for (const [bookingId, group] of requestsByBooking) {
+    fitsByBooking.set(
+      bookingId,
+      await measureModelPoolFits({
+        bookingId,
+        organizationId,
+        from: group[0].booking.from,
+        to: group[0].booking.to,
+        outstandingByModel: new Map(
+          group.map((request) => [
+            request.assetModelId,
+            request.quantity - request.fulfilledQuantity,
+          ])
+        ),
+        tx,
+      })
+    );
+  }
+
+  // Reported in the order the reservations were read.
+  const shortfalls: ModelReservationShortfall[] = [];
+  for (const request of outstandingRequests) {
+    // Every outstanding reservation was measured above.
+    const fit = fitsByBooking
+      .get(request.bookingId)!
+      .get(request.assetModelId)!;
     if (fit.fits) continue;
 
     shortfalls.push({
@@ -1460,9 +1674,8 @@ export type BookingModelShortfall = {
  * so the booking page can warn its owner before check-out refuses it.
  *
  * Read-only and lock-free, for a page loader: the numbers are a warning, and
- * the reserve and check-out guards still measure under their own locks. The
- * reservations are measured concurrently, which is safe because the reads go
- * through the global client, not an interactive transaction.
+ * the reserve and check-out guards still measure under their own locks. Every
+ * reservation is measured in one batched pass through the global client.
  *
  * @param args.booking - The booking, with its dates and outstanding reservations
  * @param args.organizationId - The caller's workspace
@@ -1492,23 +1705,25 @@ export async function findModelRequestShortfallsForBooking({
     return outstanding > 0 ? [{ request, outstanding }] : [];
   });
 
-  const measured = await Promise.all(
-    outstandingRequests.map(async ({ request, outstanding }) => ({
-      request,
-      outstanding,
-      fit: await measureModelPoolFit({
-        bookingId: booking.id,
-        assetModelId: request.assetModelId,
-        organizationId,
-        from: booking.from,
-        to: booking.to,
+  // One batched measurement for every reservation: they share the booking's
+  // window, and a booking holds at most one reservation per model.
+  const fits = await measureModelPoolFits({
+    bookingId: booking.id,
+    organizationId,
+    from: booking.from,
+    to: booking.to,
+    outstandingByModel: new Map(
+      outstandingRequests.map(({ request, outstanding }) => [
+        request.assetModelId,
         outstanding,
-        tx: db,
-      }),
-    }))
-  );
+      ])
+    ),
+    tx: db,
+  });
 
-  return measured.flatMap(({ request, outstanding, fit }) => {
+  return outstandingRequests.flatMap(({ request, outstanding }) => {
+    // Every outstanding reservation was measured above.
+    const fit = fits.get(request.assetModelId)!;
     if (fit.fits) return [];
     const available = Math.max(
       0,
@@ -1536,9 +1751,10 @@ export async function findModelRequestShortfallsForBooking({
  * request rows first inverts that pair, and the two transactions deadlock
  * against each other with no booking lock between them to serialise the pair.
  *
- * Plain code-unit order, the comparator every writer of these rows uses, and
- * the same set {@link assertOutstandingModelRequestsFit} goes on to lock
- * downstream. Re-locking a row the transaction already holds costs nothing.
+ * One statement, in plain code-unit order (the order every writer of these
+ * rows uses, see {@link lockAssetModelsForReservation}), over the same set
+ * {@link assertOutstandingModelRequestsFit} goes on to lock downstream.
+ * Re-locking a row the transaction already holds costs nothing.
  *
  * @param tx - Transaction client, already holding the booking row.
  * @param args.bookingId - Booking whose outstanding reservations to lock.
@@ -1564,13 +1780,11 @@ export async function lockModelsForOutstandingRequests(
     select: { assetModelId: true, quantity: true, fulfilledQuantity: true },
   });
 
-  const orderedModelIds = [
-    ...new Set(requests.map((request) => request.assetModelId)),
-  ].sort();
-
-  for (const assetModelId of orderedModelIds) {
-    await lockAssetModelForReservation(tx, assetModelId, organizationId);
-  }
+  await lockAssetModelsForReservation(
+    tx,
+    requests.map((request) => request.assetModelId),
+    organizationId
+  );
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1618,7 +1832,7 @@ type OutstandingModelShortfall = ModelPoolFit & { assetModelId: string };
  *   Absent dates mean nothing to overlap, so there is nothing to measure.
  * @param args.to - The other end of that window.
  * @param args.tx - The transaction that flips the status. Required, for the
- *   reason {@link measureModelPoolFit} gives.
+ *   reason {@link measureModelPoolFits} gives.
  * @throws {ShelfError} 400 (`shouldBeCaptured: false`) naming every model whose
  *   outstanding units do not fit, and by how much, in one message.
  * @throws {ShelfError} 404 when a model is not in the caller's workspace.
@@ -1671,27 +1885,28 @@ export async function assertOutstandingModelRequestsFit({
 
   const orderedModelIds = [...outstandingByModel.keys()].sort();
 
-  // Plain code-unit order, which is what every other writer of these rows
-  // uses. `localeCompare` would be a second ordering over one lock set, and
-  // two orderings are the cycle this sort exists to prevent.
-  const modelIdsToLock = [
-    ...new Set([...orderedModelIds, ...alsoLockAssetModelIds]),
-  ].sort();
-  for (const assetModelId of modelIdsToLock) {
-    await lockAssetModelForReservation(tx, assetModelId, organizationId);
-  }
+  // One statement locks the union, in the plain code-unit order every other
+  // writer of these rows uses, before any pool is measured.
+  await lockAssetModelsForReservation(
+    tx,
+    [...orderedModelIds, ...alsoLockAssetModelIds],
+    organizationId
+  );
+
+  // One batched measurement for every model, under the locks above.
+  const fits = await measureModelPoolFits({
+    bookingId,
+    organizationId,
+    from,
+    to,
+    outstandingByModel,
+    tx,
+  });
 
   const shortfalls: OutstandingModelShortfall[] = [];
   for (const assetModelId of orderedModelIds) {
-    const fit = await measureModelPoolFit({
-      bookingId,
-      assetModelId,
-      organizationId,
-      from,
-      to,
-      outstanding: outstandingByModel.get(assetModelId)!,
-      tx,
-    });
+    // Every model in `outstandingByModel` was measured above.
+    const fit = fits.get(assetModelId)!;
     if (!fit.fits) shortfalls.push({ assetModelId, ...fit });
   }
   if (shortfalls.length === 0) return;
