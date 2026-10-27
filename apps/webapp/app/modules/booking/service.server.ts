@@ -97,7 +97,10 @@ import {
   writeBookingModelRequestInTx,
 } from "~/modules/booking-model-request/service.server";
 import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
-import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
+import {
+  lockAssetForQuantityUpdate,
+  lockEveryAssetForQuantityUpdate,
+} from "~/modules/consumption-log/quantity-lock.server";
 import { createConsumptionLog } from "~/modules/consumption-log/service.server";
 import {
   readStockState,
@@ -2465,10 +2468,10 @@ export async function reserveBooking({
      * unique asset id, since both compete for the same physical pool.
      *
      * Mirrors `checkoutBookingWritesWithinTx`'s pattern: lock every unique
-     * QT asset via `lockAssetForQuantityUpdate` (serializing concurrent
-     * writers on the same asset) before reading availability, all inside
-     * the SAME transaction as the status write, so the read-then-decide
-     * can't race a sibling reservation/checkout/quantity-adjustment.
+     * QT asset via `lockEveryAssetForQuantityUpdate` (one statement,
+     * serializing concurrent writers on the same assets) before reading
+     * availability, all inside the SAME transaction as the status write,
+     * so the read-then-decide can't race a sibling reservation/checkout/quantity-adjustment.
      */
     // Only STANDALONE (free-pool) slices are validated against `bookable`.
     // Kit-driven slices (`assetKitId != null`) draw from their kit's own
@@ -2563,13 +2566,15 @@ export async function reserveBooking({
           );
         }
 
-        // Acquire locks in a deterministic (sorted) global order so two
-        // concurrent transactions touching the same assets can never deadlock
-        // by locking them in opposite orders. Mirrors `updateBookingAssets`
-        // and the checkout guard.
-        for (const assetId of [...uniqueQtyTrackedAssetIds].sort()) {
-          await lockAssetForQuantityUpdate(tx, assetId, organizationId);
-        }
+        // One statement locks every asset in a deterministic (sorted) global
+        // order, so two concurrent transactions touching the same assets can
+        // never deadlock by locking them in opposite orders. Mirrors
+        // `updateBookingAssets` and the checkout guard.
+        await lockEveryAssetForQuantityUpdate(
+          tx,
+          uniqueQtyTrackedAssetIds,
+          organizationId
+        );
 
         await assertAssetQuantitiesAvailable(
           uniqueQtyTrackedAssetIds.map((assetId) => ({
@@ -11575,15 +11580,18 @@ export async function updateBookingAssets({
 
           if (requestedQtyByAssetId.size > 0) {
             const assetById = new Map(validAssets.map((a) => [a.id, a]));
-            // Sorted for a deterministic global lock order (deadlock-safety) —
-            // matches `reserveBooking` / the checkout guard.
+            // The helper locks in sorted id order, a deterministic global lock
+            // order (deadlock-safety) that matches `reserveBooking` and the
+            // checkout guard.
             const affectedAssetIds = Array.from(
               requestedQtyByAssetId.keys()
             ).sort();
 
-            for (const assetId of affectedAssetIds) {
-              await lockAssetForQuantityUpdate(tx, assetId, organizationId);
-            }
+            await lockEveryAssetForQuantityUpdate(
+              tx,
+              affectedAssetIds,
+              organizationId
+            );
 
             // This booking's CURRENT standalone quantity per affected asset
             // (pre-upsert), so a reduction is recognized as directional and
@@ -17487,12 +17495,15 @@ async function addScannedAssetsToBookingWithinTx(
       preExistingStandaloneRows.map((row) => [row.assetId, row.quantity])
     );
 
-    // Sorted so two transactions touching the same assets acquire them in
-    // one global order and cannot deadlock by taking them in opposite ones.
-    // Mirrors `updateBookingAssets` and the checkout guard.
-    for (const assetId of [...qtScannedAssetIds].sort()) {
-      await lockAssetForQuantityUpdate(tx, assetId, organizationId);
-    }
+    // One statement locks them in sorted id order, so two transactions
+    // touching the same assets acquire them in one global order and cannot
+    // deadlock by taking them in opposite ones. Mirrors `updateBookingAssets`
+    // and the checkout guard.
+    await lockEveryAssetForQuantityUpdate(
+      tx,
+      qtScannedAssetIds,
+      organizationId
+    );
 
     await assertAssetQuantitiesAvailable(
       qtScannedAssetIds.map((assetId) => {

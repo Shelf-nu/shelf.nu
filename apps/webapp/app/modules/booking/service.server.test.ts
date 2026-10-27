@@ -481,14 +481,16 @@ vitest.mock("~/modules/user/service.server", () => ({
 }));
 
 // why: quantity-lock relies on $queryRaw (FOR UPDATE) which the db mock
-// can't express cleanly — stub the helper to return a minimal asset
-// stub. Tests override the return per-asset as needed.
+// can't express cleanly. The single-asset lock resolves a minimal asset stub
+// (tests override the return per-asset as needed); the batch lock returns
+// nothing, so it resolves once every asset is locked.
 vitest.mock("~/modules/consumption-log/quantity-lock.server", () => ({
   lockAssetForQuantityUpdate: vitest.fn().mockResolvedValue({
     id: "asset-qty-default",
     title: "Default Asset",
     quantity: 0,
   }),
+  lockEveryAssetForQuantityUpdate: vitest.fn().mockResolvedValue(undefined),
 }));
 
 // why: partial-mock so real helpers (computeBookingAvailableQuantity and
@@ -4832,6 +4834,47 @@ describe("reserveBooking", () => {
           data: expect.objectContaining({ status: BookingStatus.RESERVED }),
         })
       );
+    });
+
+    it("locks every QT asset on the booking with one statement", async () => {
+      expect.assertions(3);
+
+      // Three distinct QT assets, each well inside the 10-unit pool, so the
+      // reservation goes through and the lock count is the only variable.
+      const base = draftBookingWithQtyAsset(1);
+      const assetIds = ["asset-qty-c", "asset-qty-a", "asset-qty-b"];
+      const mockBooking = {
+        ...base,
+        bookingAssets: assetIds.map((assetId, index) => ({
+          ...base.bookingAssets[0],
+          asset: { ...base.bookingAssets[0].asset, id: assetId },
+          assetId,
+          id: `ba-qty-${index}`,
+        })),
+      };
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+      //@ts-expect-error missing vitest type
+      db.booking.update.mockResolvedValue({
+        ...mockBooking,
+        status: BookingStatus.RESERVED,
+      });
+
+      await reserveBooking(mockReserveParams);
+
+      expect(
+        quantityLock.lockEveryAssetForQuantityUpdate
+      ).toHaveBeenCalledTimes(1);
+      expect(
+        new Set(
+          (
+            quantityLock.lockEveryAssetForQuantityUpdate as ReturnType<
+              typeof vitest.fn
+            >
+          ).mock.calls[0][1]
+        )
+      ).toEqual(new Set(assetIds));
+      expect(quantityLock.lockAssetForQuantityUpdate).not.toHaveBeenCalled();
     });
 
     it("reserves successfully at exactly the remaining bookable amount (no increase beyond the pool)", async () => {
@@ -16582,8 +16625,17 @@ describe("addScannedAssetsToBooking", () => {
 
     beforeEach(() => {
       sequence = [];
-      // why: the lock is a module mock, so it records its own turn in the
-      // sequence and still resolves the minimal asset stub its callers expect.
+      // why: the locks are module mocks, so each records its own turn in the
+      // sequence and still resolves what its callers expect (the scan path
+      // takes the batch lock; the single-asset stub keeps its return shape).
+      (
+        quantityLock.lockEveryAssetForQuantityUpdate as ReturnType<
+          typeof vitest.fn
+        >
+      ).mockImplementation(() => {
+        sequence.push("lock");
+        return Promise.resolve();
+      });
       (
         quantityLock.lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
       ).mockImplementation(() => {
@@ -16639,9 +16691,9 @@ describe("addScannedAssetsToBooking", () => {
 
       // Measuring an unclaimed pool is the race: a plain SELECT takes no lock
       // under READ COMMITTED, so two scans read the same free count.
-      expect(quantityLock.lockAssetForQuantityUpdate).toHaveBeenCalledWith(
+      expect(quantityLock.lockEveryAssetForQuantityUpdate).toHaveBeenCalledWith(
         expect.anything(),
-        QT_ID,
+        [QT_ID],
         "org-1"
       );
 
@@ -16664,6 +16716,9 @@ describe("addScannedAssetsToBooking", () => {
 
       // An INDIVIDUAL asset has no pool to draw on — locking it here would
       // serialize scans that never compete.
+      expect(
+        quantityLock.lockEveryAssetForQuantityUpdate
+      ).not.toHaveBeenCalled();
       expect(quantityLock.lockAssetForQuantityUpdate).not.toHaveBeenCalled();
     });
   });
