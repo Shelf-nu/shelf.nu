@@ -16,6 +16,7 @@ import type { BookableListScope } from "./list-scope.server";
 import { expandLocationHierarchyFilters } from "./location-filter.server";
 import { buildAssetSearchUnion } from "./search-union.server";
 import { splitAssetSearchTerms } from "./search.server";
+import { splitSortParam } from "./sort-param";
 import type { ArchivedFilter, CustomFieldSorting } from "./types";
 import type { Column } from "../asset-index-settings/helpers";
 
@@ -1591,9 +1592,10 @@ const directAssetFields: Record<DirectAssetField, string> = {
  * - Place purely alphabetic entries before alphanumeric ones
  *
  * SECURITY: `columnRef` and `direction` are interpolated into raw SQL.
- * Callers MUST pass either a hardcoded literal or a value validated against
- * `SAFE_SQL_IDENTIFIER` (and an allowlisted direction). Never pass raw user
- * input here.
+ * Callers MUST pass either a hardcoded literal, a value validated against
+ * `SAFE_SQL_IDENTIFIER`, or an expression built only from those (such as
+ * `NULLIF(cf_sort_0, '')`), and an allowlisted direction. Never pass raw
+ * user input here.
  *
  * @param columnRef - The column or expression to sort. Caller-validated.
  * @param direction - Sort direction ('asc' or 'desc'). Caller-validated.
@@ -1687,11 +1689,8 @@ function normalizeDirection(raw: string | undefined): "asc" | "desc" {
 }
 
 /**
- * Splits one `sortBy` spec, `name:direction[:fieldType]`, into its parts.
- *
- * Direction and type are read from the END: a custom field name is free
- * text and may itself contain ":" ("Ratio: target"), so splitting from the
- * start would read part of the name as the direction.
+ * Splits one `sortBy` spec, `name:direction[:fieldType]`, into its parts
+ * with {@link splitSortParam} and normalizes the direction.
  *
  * @param spec - One `sortBy` value from the URL.
  * @returns The field name, normalized direction and optional field type.
@@ -1702,14 +1701,9 @@ function splitSortSpec(spec: string): {
   direction: "asc" | "desc";
   fieldType: CustomFieldType;
 } {
-  const parts = spec.split(":");
-  const last = parts[parts.length - 1]?.toLowerCase();
-  const hasType =
-    parts.length >= 3 && !VALID_DIRECTIONS.has(last as "asc" | "desc");
-  const fieldType = hasType ? parts.pop() : undefined;
-  const direction = parts.length >= 2 ? parts.pop() : undefined;
+  const [name, direction, fieldType] = splitSortParam(spec);
   return {
-    name: parts.join(":"),
+    name,
     direction: normalizeDirection(direction),
     fieldType: fieldType as CustomFieldType,
   };
@@ -1723,9 +1717,12 @@ function splitSortSpec(spec: string): {
  * `Prisma.raw(...)` inside `getAdvancedPaginatedAndFilterableAssets`. Every
  * value interpolated into the clause must be either a hardcoded literal or
  * validated against {@link isSafeSqlIdentifier}. Direction is normalized via
- * {@link normalizeDirection}. Field names that don't match a known branch
- * (or whose dynamic suffix fails identifier validation) are dropped with a
- * warning — the caller falls back to the default sort. See GHSA-69xv-wmgg-3qp3.
+ * {@link normalizeDirection}. Custom field sorts are aliased by position
+ * (`cf_sort_<n>`), so a custom field name never reaches the SQL text; it is a
+ * bound parameter in {@link generateCustomFieldSelect}. Field names that don't
+ * match a known branch (or whose dynamic suffix fails identifier validation)
+ * are dropped with a warning, and the caller falls back to the default sort.
+ * See GHSA-69xv-wmgg-3qp3.
  *
  * @param sortBy - Array of sort specifications in format: field:direction[:fieldType]
  * @returns Object containing the full SQL `ORDER BY` clause, the same clause
@@ -1895,10 +1892,11 @@ export function parseSortingOptions(sortBy: string[]): {
         // Direct sort for dates and booleans
         orderByParts.push(`${alias} ${field.direction} NULLS LAST`);
       } else if (field.fieldType === "AMOUNT" || field.fieldType === "NUMBER") {
-        // Numeric order (3 before 12.5). A stored value that is not a plain
-        // number sorts with the empty ones instead of failing the cast.
+        // Numeric order (3 before 12.5). The guard admits every plain decimal
+        // `::numeric` accepts (" 12", "+5", ".5", "5."); any other stored
+        // value sorts with the empty ones instead of failing the cast.
         orderByParts.push(
-          `(CASE WHEN ${alias} ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN ${alias}::numeric END) ${field.direction} NULLS LAST`
+          `(CASE WHEN ${alias} ~ '^\\s*[-+]?([0-9]+(\\.[0-9]*)?|\\.[0-9]+)\\s*$' THEN ${alias}::numeric END) ${field.direction} NULLS LAST`
         );
       } else {
         // Natural sort for text-based custom fields. An empty string is an
@@ -2013,7 +2011,9 @@ export function generateCustomFieldSelect(
         END
       FROM public."AssetCustomFieldValue" acfv
       JOIN public."CustomField" cf ON acfv."customFieldId" = cf.id
-      WHERE acfv."assetId" = a.id AND cf.name = ${cf.name}
+      WHERE acfv."assetId" = a.id
+        AND cf.name = ${cf.name}
+        AND cf."deletedAt" IS NULL
     ) AS ${Prisma.raw(cf.alias)}`
     )
   )}`;
