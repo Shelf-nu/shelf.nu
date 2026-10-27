@@ -2189,6 +2189,7 @@ export async function reserveBooking({
   alertsOrgOnReservation,
   tags,
   userId,
+  seesAllBookings = false,
 }: Partial<
   Pick<
     Booking,
@@ -2211,6 +2212,11 @@ export async function reserveBooking({
     alertsOrgOnReservation: boolean;
     tags: { id: string }[];
     userId?: User["id"];
+    /**
+     * The caller's `access.bookings.seeAll`. A model-pool refusal names other
+     * members' bookings only when it is true; absent means they stay unnamed.
+     */
+    seesAllBookings?: boolean;
   }) {
   try {
     const bookingFound = await db.booking
@@ -2629,6 +2635,8 @@ export async function reserveBooking({
           .filter((assetModelId): assetModelId is string => !!assetModelId),
         tx,
         hints,
+        userId,
+        revealOtherBookings: seesAllBookings,
       });
 
       /**
@@ -2646,6 +2654,8 @@ export async function reserveBooking({
         to,
         tx,
         hints,
+        userId,
+        revealOtherBookings: seesAllBookings,
       });
 
       return tx.booking.update({
@@ -3061,6 +3071,8 @@ async function readFullCheckoutDepartures(
  * @param args.dataToUpdate - Pre-computed update payload for the booking row (status, optional from/originalFrom)
  * @param args.kitIds - Kits to flip to `CHECKED_OUT`
  * @param args.hasKits - Whether the kit update should fire
+ * @param args.hints - Acting user's locale and time zone, for the day a pool refusal names
+ * @param args.revealOtherBookings - Whether a pool refusal may name other members' bookings
  * @throws {ShelfError} 400 when the booking holds no items to check out
  * @throws {ShelfError} 400 when any QUANTITY_TRACKED asset lacks sufficient pool availability
  * @throws {ShelfError} 400 when a DRAFT booking's outstanding model reservations no longer fit
@@ -3083,11 +3095,17 @@ async function checkoutBookingWritesWithinTx(
     checkedOutById,
     sourceLocations,
     hints,
+    revealOtherBookings = false,
   }: {
     bookingId: Booking["id"];
     organizationId: Booking["organizationId"];
     /** Acting user's locale and time zone, for the day a pool refusal names. */
     hints?: ClientHint;
+    /**
+     * The acting user's `access.bookings.seeAll`. A model-pool refusal names
+     * other members' bookings only when it is true.
+     */
+    revealOtherBookings?: boolean;
     /**
      * The booking's status as this transaction holds it, before the flip below.
      * Read under the booking's row lock, because it decides whether the
@@ -3299,6 +3317,8 @@ async function checkoutBookingWritesWithinTx(
       action: "check out booking",
       tx,
       hints,
+      userId: checkedOutById ?? undefined,
+      revealOtherBookings,
     });
   }
 
@@ -3576,8 +3596,14 @@ export async function checkoutBooking({
   userId,
   provenance,
   sourceLocations,
+  seesAllBookings = false,
 }: Pick<Booking, "id" | "organizationId"> & {
   hints: ClientHint;
+  /**
+   * The caller's `access.bookings.seeAll`. A model-pool refusal names other
+   * members' bookings only when it is true; absent means they stay unnamed.
+   */
+  seesAllBookings?: boolean;
   intentChoice?: CheckoutIntentEnum;
   from?: Date | null;
   to?: Date | null;
@@ -3900,6 +3926,7 @@ export async function checkoutBooking({
           checkedOutById: userId ?? null,
           sourceLocations,
           hints,
+          revealOtherBookings: seesAllBookings,
         });
 
         // Activity events — one BOOKING_CHECKED_OUT per asset on the
@@ -4021,6 +4048,7 @@ export async function checkoutBooking({
  * @param args.hints - Client hints used for scheduler timestamps + check-in reminder emails post-commit.
  * @param args.from - Optional booking.from for conflict detection (mirrors `checkoutBooking`'s pre-tx conflict guard).
  * @param args.to - Optional booking.to for conflict detection.
+ * @param args.seesAllBookings - The caller's `access.bookings.seeAll`; a model-pool refusal names other members' bookings only when true.
  * @returns The hydrated booking with reservation-email includes (same shape as `checkoutBooking`).
  * @throws {ShelfError} 400 if the booking holds no items after the scan.
  * @throws {ShelfError} 400 if any QUANTITY_TRACKED asset lacks pool availability.
@@ -4039,10 +4067,16 @@ export async function fulfilModelRequestsAndCheckout({
   to,
   provenance,
   sourceLocations,
+  seesAllBookings = false,
 }: {
   bookingId: Booking["id"];
   organizationId: Booking["organizationId"];
   userId: string;
+  /**
+   * The caller's `access.bookings.seeAll`. A model-pool refusal names other
+   * members' bookings only when it is true; absent means they stay unnamed.
+   */
+  seesAllBookings?: boolean;
   assetIds: Asset["id"][];
   kitIds?: string[];
   /**
@@ -4278,6 +4312,8 @@ export async function fulfilModelRequestsAndCheckout({
           bookingId,
           organizationId,
           userId,
+          hints,
+          revealOtherBookings: seesAllBookings,
         });
         // Read post-commit, for the notes below. A scan that only claimed a
         // unit already on the booking added nothing to narrate.
@@ -4354,6 +4390,7 @@ export async function fulfilModelRequestsAndCheckout({
           checkedOutById: userId ?? null,
           sourceLocations,
           hints,
+          revealOtherBookings: seesAllBookings,
         });
 
         /**
@@ -11776,6 +11813,8 @@ export async function updateBookingAssets({
         to: b.to,
         tx,
         hints,
+        userId,
+        revealOtherBookings: access.bookings.seeAll,
       });
 
       await Promise.all([
@@ -12784,14 +12823,18 @@ export async function extendBooking({
        * The days being added may overlap model reservations that other
        * bookings hold, which the clash check above cannot see: a
        * `BookingModelRequest` names no asset. Every INDIVIDUAL unit the
-       * booking holds by name is measured again against the pool for the
-       * ADDED days only, `(booking.to, newEndDate]`, the same span the clash
-       * check above looks at. The days the booking already covers were
-       * measured when it was reserved and an extension takes nothing more
-       * from them, so claims that lie entirely inside them are not this
-       * extension's business. Kit-driven rows are included: the extension
-       * takes the unit off the pool for the added days however it got onto
-       * the booking.
+       * booking holds by name is measured again against the pool from
+       * `booking.to` to `newEndDate`. The start is inclusive: a claim already
+       * running at the instant `booking.to` counts, because the booking holds
+       * its units through that instant too. Each claim counts until its own
+       * end, exclusive, so one that ends exactly at `booking.to` does not, and
+       * one that starts at `newEndDate` is never reached. This is one instant
+       * wider than the clash check above, which looks only at bookings that
+       * start strictly after `booking.to`. Claims lying entirely inside the
+       * days the booking already covers were measured when it was reserved
+       * and are not this extension's business. Kit-driven rows are included:
+       * the extension takes the unit off the pool for the added days however
+       * it got onto the booking.
        */
       await assertModelUnitsNotReservedElsewhere({
         assets: booking.bookingAssets
@@ -12805,6 +12848,8 @@ export async function extendBooking({
         to: newEndDate,
         tx,
         hints,
+        userId,
+        revealOtherBookings: access.bookings.seeAll,
       });
 
       // The row must still be exactly as read when the lock is taken: an
@@ -17046,7 +17091,9 @@ async function createNotesForScannedAssetsAndKits({
  * @param args.kitIds - Optional kit IDs. Retained on the contract for callers; no longer read here (assets are added AVAILABLE — progressive checkout — so there is no kit status to sync at add time).
  * @param args.bookingId - Booking being modified
  * @param args.organizationId - Organization scope for the booking + assets
- * @param args.userId - User performing the scan (attributed on materialized logs)
+ * @param args.userId - User performing the scan (attributed on materialized logs and the refusal's date format)
+ * @param args.hints - Acting user's locale and time zone, for the day a pool refusal names
+ * @param args.revealOtherBookings - Whether a pool refusal may name other members' bookings
  * @returns The updated booking's `{ id, name, status }`, `addedAssetIds` (assets
  *   that gained a new `BookingAsset` row on this call) and `claimedAssetIds`
  *   (assets whose pre-existing row answered a reservation without a new row).
@@ -17065,6 +17112,8 @@ async function addScannedAssetsToBookingWithinTx(
     quantities = {},
     kitSlices = [],
     callerAccess,
+    hints,
+    revealOtherBookings = false,
   }: {
     /** Directly-scanned (standalone) asset IDs — written with `assetKitId = null`. */
     assetIds: Asset["id"][];
@@ -17102,6 +17151,13 @@ async function addScannedAssetsToBookingWithinTx(
      * fulfil-and-checkout flow omits it: it runs the check-out rule instead.
      */
     callerAccess?: RoleAccess;
+    /** Acting user's locale and time zone, for the day a pool refusal names. */
+    hints?: ClientHint;
+    /**
+     * The acting user's `access.bookings.seeAll`. A model-pool refusal names
+     * other members' bookings only when it is true.
+     */
+    revealOtherBookings?: boolean;
   }
 ) {
   // The deduped union of standalone + kit-slice asset ids. Model-request
@@ -17656,6 +17712,9 @@ async function addScannedAssetsToBookingWithinTx(
     from: bookingWindow?.from,
     to: bookingWindow?.to,
     tx,
+    hints,
+    userId,
+    revealOtherBookings,
   });
 
   const modelRequestIdByAssetId = await fulfilModelRequestsForAssets({
@@ -17930,12 +17989,23 @@ export async function addScannedAssetsToBooking({
   kitSlices = [],
   access,
   inSameTransaction,
+  hints,
+  seesAllBookings,
 }: {
   assetIds: Asset["id"][];
   kitIds?: string[];
   bookingId: Booking["id"];
   organizationId: Booking["organizationId"];
   userId: string;
+  /** Acting user's locale and time zone, for the day a pool refusal names. */
+  hints?: ClientHint;
+  /**
+   * The caller's `access.bookings.seeAll`. A model-pool refusal names other
+   * members' bookings only when it is true. Defaults to `access`'s answer, so
+   * only a caller passing `access: null` needs to state it; absent both, the
+   * bookings stay unnamed.
+   */
+  seesAllBookings?: boolean;
   /**
    * Further writes that must commit or roll back with the add. Runs inside
    * the add's transaction, after its writes and before its notes, so a
@@ -17996,6 +18066,9 @@ export async function addScannedAssetsToBooking({
         quantities,
         kitSlices,
         callerAccess: access ?? undefined,
+        hints,
+        revealOtherBookings:
+          seesAllBookings ?? access?.bookings.seeAll ?? false,
       });
       await inSameTransaction?.(tx);
       return result;

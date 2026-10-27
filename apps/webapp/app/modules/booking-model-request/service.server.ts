@@ -25,13 +25,16 @@
  *
  *   available = total − inCustody − reservedConcrete − reservedViaRequest
  *
- * - `total`              — count of INDIVIDUAL assets with this model in the org
- * - `inCustody`          — sum of `Custody.quantity` on those assets
- * - `reservedConcrete`   — sum of `BookingAsset.quantity` for concrete assets
- *                          of this model, across OTHER bookings whose window
- *                          overlaps this one
- * - `reservedViaRequest` — sum of `BookingModelRequest.quantity` for OTHER
- *                          bookings whose window overlaps this one
+ * - `total`              : count of INDIVIDUAL assets with this model in the org
+ * - `inCustody`          : sum of `Custody.quantity` on those assets
+ * - `reservedConcrete`   : distinct units of this model OTHER overlapping
+ *                          bookings hold by name at the peak instant, less
+ *                          the units already counted in custody
+ * - `reservedViaRequest` : units OTHER overlapping bookings are still owed by
+ *                          model at the peak instant
+ *
+ * Both reservation terms are measured at the instant inside the window where
+ * they peak ({@link measureModelPoolPeak}), never summed across the window.
  *
  * @see {@link file://./../../../../../packages/database/prisma/schema.prisma} — BookingModelRequest model
  * @see {@link file://./../booking/service.server.ts} — downstream booking service
@@ -47,6 +50,9 @@ import type { ModelReservationShortfall } from "~/modules/asset/archive-shortfal
 import { canEditModelReservations } from "~/utils/booking-model-requests";
 import type { ClientHint } from "~/utils/client-hints";
 import { getDateTimeFormatFromHints } from "~/utils/client-hints";
+import type { RawFormatPrefs } from "~/utils/date-format";
+import { formatDate } from "~/utils/date-format";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
@@ -220,14 +226,18 @@ type RawQueryClient = {
 /**
  * Custody rows reach the model only through `Asset`, and Prisma cannot group
  * by a relation field, so they are read as rows and summed per model in code.
+ * `assetId` names the unit in custody, so the same unit named on another
+ * booking is not deducted a second time.
  */
-type QuantityOnModelRow = {
+type CustodyOnModelRow = {
+  assetId: string;
   quantity: number;
   asset: { assetModelId: string | null };
 };
 
-/** The select behind {@link QuantityOnModelRow}. */
-type QuantityOnModelSelect = {
+/** The select behind {@link CustodyOnModelRow}. */
+type CustodyOnModelSelect = {
+  assetId: true;
   quantity: true;
   asset: { select: { assetModelId: true } };
 };
@@ -288,8 +298,8 @@ export type AssetModelAvailabilityClient = {
   custody: {
     findMany: (args: {
       where: Prisma.CustodyWhereInput;
-      select: QuantityOnModelSelect;
-    }) => Promise<QuantityOnModelRow[]>;
+      select: CustodyOnModelSelect;
+    }) => Promise<CustodyOnModelRow[]>;
   };
   booking: {
     findMany: (args: {
@@ -362,8 +372,15 @@ export type ModelPoolClaim = {
  * it, the same tie-break `peakConcurrent` applies. The earliest instant wins a
  * tie, so the date in a refusal is the first day the operator has to free.
  *
+ * One sorted sweep over the claims' starts and ends: a running count of
+ * outstanding units, and a per-unit count of the active claims naming each
+ * unit, so a unit named by two concurrent claims counts once. At one instant
+ * ends are applied before starts, which is what makes the interval
+ * end-exclusive. Cost is O(E log E) for E start and end events plus the named
+ * units they carry, whatever the length of the window.
+ *
  * Without a window there is nothing to sweep: every claim counts as concurrent,
- * which is the conservative reading a draft without dates gets today.
+ * the conservative reading for a draft without dates.
  *
  * Pure, and exported for its own tests.
  */
@@ -406,13 +423,23 @@ export function measureModelPoolPeak(
   const windowFrom = window.from.getTime();
   const windowTo = window.to.getTime();
   // A window that is a single instant has no half-open interior; the claims
-  // that reach that instant are the ones active on it.
+  // that reach that instant are the ones active on it, so no claim ends.
   const degenerate = windowTo <= windowFrom;
-  const bounded = claims.map((claim) => ({
-    claim,
-    start: Math.max(claim.from?.getTime() ?? windowFrom, windowFrom),
-    end: Math.min(claim.to?.getTime() ?? windowTo, windowTo),
-  }));
+  const bounded = claims
+    .map((claim) => ({
+      claim,
+      start: Math.max(claim.from?.getTime() ?? windowFrom, windowFrom),
+      end: degenerate
+        ? Infinity
+        : Math.min(claim.to?.getTime() ?? windowTo, windowTo),
+    }))
+    // A claim whose clamped interval is empty is never active.
+    .filter(({ start, end }) => start < end);
+  const activeAt = (t: number) =>
+    bounded
+      .filter(({ start, end }) => start <= t && t < end)
+      .map(({ claim }) => claim);
+
   const instants = [
     ...new Set([
       windowFrom,
@@ -422,23 +449,45 @@ export function measureModelPoolPeak(
     ]),
   ].sort((a, b) => a - b);
 
-  let best: { at: number; active: ModelPoolClaim[]; demand: number } | null =
-    null;
+  // Ends sort before starts at the same time: `[start, end)`.
+  type SweepEvent = { time: number; isStart: boolean; claim: ModelPoolClaim };
+  const events: SweepEvent[] = [];
+  for (const { claim, start, end } of bounded) {
+    events.push({ time: start, isStart: true, claim });
+    if (end !== Infinity) events.push({ time: end, isStart: false, claim });
+  }
+  events.sort(
+    (a, b) => a.time - b.time || Number(a.isStart) - Number(b.isStart)
+  );
+
+  const holders = new Map<string, number>();
+  let distinctNamed = 0;
+  let requested = 0;
+  let next = 0;
+  let best: { at: number; demand: number } | null = null;
   for (const t of instants) {
-    const active = bounded
-      .filter(({ start, end }) => start <= t && (t < end || degenerate))
-      .map(({ claim }) => claim);
-    const { named, requested } = demandOf(active);
-    const demand = named + requested;
-    if (best === null || demand > best.demand) best = { at: t, active, demand };
+    while (next < events.length && events[next].time <= t) {
+      const { isStart, claim } = events[next++];
+      requested += isStart ? claim.outstanding : -claim.outstanding;
+      for (const assetId of claim.named) {
+        const count = (holders.get(assetId) ?? 0) + (isStart ? 1 : -1);
+        if (isStart && count === 1) distinctNamed += 1;
+        if (!isStart && count === 0) distinctNamed -= 1;
+        if (count === 0) holders.delete(assetId);
+        else holders.set(assetId, count);
+      }
+    }
+    const demand = distinctNamed + requested;
+    if (best === null || demand > best.demand) best = { at: t, demand };
   }
   if (best === null || best.demand === 0) {
     return { named: 0, requested: 0, at: null, requestedBy: [] };
   }
+  const active = activeAt(best.at);
   return {
-    ...demandOf(best.active),
+    ...demandOf(active),
     at: new Date(best.at),
-    requestedBy: requestedBy(best.active),
+    requestedBy: requestedBy(active),
   };
 }
 
@@ -579,7 +628,7 @@ async function lockModelRequestRow(
 }
 
 /** Sums each row's `quantity` into the model of the unit it sits on. */
-function sumQuantityByModel(rows: QuantityOnModelRow[]): Map<string, number> {
+function sumQuantityByModel(rows: CustodyOnModelRow[]): Map<string, number> {
   const byModel = new Map<string, number>();
   for (const row of rows) {
     const assetModelId = row.asset.assetModelId;
@@ -601,15 +650,21 @@ type GetAssetModelAvailabilitiesArgs = Omit<
 /**
  * Compute availability for several `AssetModel`s over one booking window.
  *
- * Three reads in total, whatever the number of models: an interactive
+ * Three Prisma reads, whatever the number of models: an interactive
  * transaction runs its statements one after another on a single connection,
- * so a per-model read inside one costs a round trip per model. Every model
- * asked for gets an entry, with zeros for a model that has no rows.
+ * so a per-model read inside one costs a round trip per model. The statement
+ * count is fixed but is more than three: the custody read and the booking read
+ * carry nested relation selects, and without the `relationJoins` preview
+ * feature Prisma resolves each nested relation with a follow-up query (the
+ * booking's `bookingAssets`, their `asset`, its `modelRequests`, and the
+ * custody rows' `asset`). Every model asked for gets an entry, with zeros for
+ * a model that has no rows.
  *
  * `reservedConcrete` and `reservedViaRequest` are what OTHER bookings take
  * from the pool at the instant inside the window where that is largest
  * ({@link measureModelPoolPeak}), not the sum of every booking that touches
- * the window. Custody is not dated, so it is deducted in full.
+ * the window. Custody is not dated, so it is deducted in full, and a unit in
+ * custody is left out of the units other bookings hold by name.
  *
  * Safe to call from any loader/action path. Does not mutate. Excludes the
  * supplied `bookingId` from reservation sums.
@@ -663,7 +718,11 @@ export async function getAssetModelAvailabilities({
       // Units currently held by team members / users.
       client.custody.findMany({
         where: { asset: unitOfTheseModels },
-        select: { quantity: true, asset: { select: { assetModelId: true } } },
+        select: {
+          assetId: true,
+          quantity: true,
+          asset: { select: { assetModelId: true } },
+        },
       }),
       // The OTHER active bookings whose window overlaps and that hold units of
       // these models, by name or by reservation, each with those rows. One
@@ -719,6 +778,9 @@ export async function getAssetModelAvailabilities({
       if (row.assetModelId) totalByModel.set(row.assetModelId, row._count._all);
     }
     const inCustodyByModel = sumQuantityByModel(custodyRows);
+    // Custody is deducted in full above, so a unit in custody that another
+    // booking also names must not be charged again as a named unit.
+    const unitsInCustody = new Set(custodyRows.map((row) => row.assetId));
 
     // One claim per (model, booking): the units the booking names of the
     // model (a unit holding both a standalone and a kit row counts once) plus
@@ -747,7 +809,9 @@ export async function getAssetModelAvailabilities({
     };
     for (const booking of otherBookings) {
       for (const row of booking.bookingAssets) {
-        if (!row.asset.assetModelId) continue;
+        if (!row.asset.assetModelId || unitsInCustody.has(row.assetId)) {
+          continue;
+        }
         claimFor(row.asset.assetModelId, booking).named.add(row.assetId);
       }
       for (const request of booking.modelRequests) {
@@ -832,6 +896,61 @@ function formatPoolDay(at: Date, hints?: ClientHint): string {
   }
 }
 
+/** The `user` read {@link resolveUserFormatPrefsById} issues, structurally. */
+type UserFormatPrefsClient = {
+  user: {
+    findFirst: (args: {
+      where: { id: string };
+      select: {
+        dateFormat: true;
+        timeFormat: true;
+        weekStart: true;
+        timeZone: true;
+      };
+    }) => Promise<RawFormatPrefs | null>;
+  };
+};
+
+/**
+ * Builds the formatter for the days a refusal names, in the acting user's own
+ * date preferences when `userId` is given (date only, no time). Without a
+ * user, or when the preferences cannot be read or applied, it falls back to
+ * {@link formatPoolDay}: a refusal must never fail on how it prints a date.
+ *
+ * Call only on the refusal path, never before a guard knows it will throw: the
+ * preference read is one more statement inside the caller's transaction.
+ *
+ * @param args.userId - The acting user, whose preferences the day follows
+ * @param args.hints - The request's locale and time zone, for the fallback and
+ *   for preferences the user has not set
+ * @param args.tx - The caller's transaction client
+ * @returns A function formatting one instant as a day
+ */
+async function poolDayFormatter({
+  userId,
+  hints,
+  tx,
+}: {
+  userId?: string;
+  hints?: ClientHint;
+  tx: UserFormatPrefsClient;
+}): Promise<(at: Date) => string> {
+  const fallback = (at: Date) => formatPoolDay(at, hints);
+  if (!userId) return fallback;
+  try {
+    const prefs = await resolveUserFormatPrefsById(userId, hints ?? null, tx);
+    return (at: Date) => {
+      try {
+        return formatDate(at, prefs);
+      } catch {
+        return fallback(at);
+      }
+    };
+  } catch {
+    return fallback;
+  }
+}
+
 /**
  * Names the bookings that still hold a model by reservation, so the operator
  * knows where a specific unit can be assigned to free the pool.
@@ -849,14 +968,26 @@ function describeRequestedBy(
   return `${names.slice(0, 2).join(", ")} and ${names.length - 2} more`;
 }
 
+/** `n` with "unit" or "units". */
+function units(n: number): string {
+  return `${n} ${n === 1 ? "unit" : "units"}`;
+}
+
 /**
  * What a pool already owes at its peak instant, as one clause: custody first,
- * then units other bookings hold by name, then units still promised by model
- * with the bookings they are promised to.
+ * then units other bookings hold by name, then units still promised by model.
+ *
+ * @param revealOtherBookings - Whether the reader may see other members'
+ *   bookings. Only then are the bookings owed units by model named; otherwise
+ *   the clause says only that they are other bookings.
  */
-function describePoolDeductions(availability: AssetModelAvailability): string {
-  const units = (n: number) => `${n} ${n === 1 ? "unit" : "units"}`;
-  const requestedBy = describeRequestedBy(availability.peak.requestedBy);
+function describePoolDeductions(
+  availability: AssetModelAvailability,
+  revealOtherBookings: boolean
+): string {
+  const requestedBy = revealOtherBookings
+    ? describeRequestedBy(availability.peak.requestedBy)
+    : "";
   return [
     availability.inCustody > 0
       ? `${units(availability.inCustody)} in custody`
@@ -865,8 +996,8 @@ function describePoolDeductions(availability: AssetModelAvailability): string {
       ? `${units(availability.reservedConcrete)} on other bookings`
       : null,
     availability.reservedViaRequest > 0
-      ? `${units(availability.reservedViaRequest)} reserved by model${
-          requestedBy ? ` for ${requestedBy}` : ""
+      ? `${units(availability.reservedViaRequest)} reserved by model ${
+          requestedBy ? `for ${requestedBy}` : "for other bookings"
         }`
       : null,
   ]
@@ -875,11 +1006,46 @@ function describePoolDeductions(availability: AssetModelAvailability): string {
 }
 
 /**
+ * The second half of a refusal sentence, after "but": the day the pool runs
+ * out and what holds it then.
+ *
+ * `available` is clamped to zero while the deductions are not, so a pool that
+ * is claimed beyond its size (a unit archived or taken into custody after it
+ * was promised by model) cannot be written as "0 of 3 are free"
+ * followed by deductions that add up to more than 3. That case states the
+ * claim against the pool instead.
+ *
+ * @param availability - The pool, measured at its peak
+ * @param day - The formatted peak day, or `null` when the pool has no peak
+ *   instant (no window)
+ * @param revealOtherBookings - See {@link describePoolDeductions}
+ * @returns e.g. ` on May 1, 2026 only 0 of 3 are free: 1 unit in custody, ...`
+ */
+function describePoolAtPeak(
+  availability: AssetModelAvailability,
+  day: string | null,
+  revealOtherBookings: boolean
+): string {
+  const when = day ? ` on ${day}` : " for these dates";
+  const deductions = describePoolDeductions(availability, revealOtherBookings);
+  const claimed = availability.inCustody + availability.reserved;
+  if (claimed > availability.total) {
+    return `${when} none are free: ${units(claimed)} ${
+      claimed === 1 ? "is" : "are"
+    } claimed against a pool of ${availability.total} (${deductions})`;
+  }
+  return `${when} only ${availability.available} of ${availability.total} ${
+    availability.total === 1 ? "is" : "are"
+  } free${deductions ? `: ${deductions}` : ""}`;
+}
+
+/**
  * The pool numbers a refusal may carry in its `additionalData`, which the
  * HTTP layer serialises into the response body for any role. The bookings
- * holding reservations at the peak are named in the message for the operator
- * to act on; their ids never leave the server, because a user who may only
- * see their own bookings must not be able to enumerate other people's.
+ * holding reservations at the peak are named in the message only for a reader
+ * allowed to see them (`revealOtherBookings`); their ids never leave the
+ * server, because a user who may only see their own bookings must not be able
+ * to enumerate other people's.
  */
 function availabilityForErrorData(availability: AssetModelAvailability) {
   const { peak, ...numbers } = availability;
@@ -895,11 +1061,13 @@ type ModelUnitCandidate = Pick<Asset, "id" | "title" | "assetModelId">;
 
 /**
  * The reads {@link assertModelUnitsNotReservedElsewhere} issues on top of the
- * availability reads. Structural, like {@link AssetModelAvailabilityClient},
- * so an interactive transaction client satisfies it without a cast.
+ * availability reads, including the acting user's date preferences a refusal
+ * reads. Structural, like {@link AssetModelAvailabilityClient}, so an
+ * interactive transaction client satisfies it without a cast.
  */
 export type ModelReservationGuardClient = RawQueryClient &
-  AssetModelAvailabilityClient & {
+  AssetModelAvailabilityClient &
+  UserFormatPrefsClient & {
     bookingModelRequest: {
       findMany: (args: {
         where: Prisma.BookingModelRequestWhereInput;
@@ -986,6 +1154,19 @@ type AssertModelUnitsNotReservedElsewhereArgs = {
   tx: ModelReservationGuardClient;
   /** Acting user's locale and time zone, for the day a refusal names. */
   hints?: ClientHint;
+  /**
+   * The acting user. When given, a refusal names its day in that user's own
+   * date preferences, read only once the guard knows it will refuse. Without
+   * it the day follows `hints`, else UTC.
+   */
+  userId?: string;
+  /**
+   * Whether the acting user may see other members' bookings (callers pass
+   * `access.bookings.seeAll`). Only then does a refusal name the other
+   * bookings holding the model; otherwise it calls them "other bookings".
+   * Defaults to `false`.
+   */
+  revealOtherBookings?: boolean;
 };
 
 /** Groups asset ids by model, each asset counted once per model. */
@@ -1200,6 +1381,8 @@ export async function assertModelUnitsNotReservedElsewhere({
   to,
   tx,
   hints,
+  userId,
+  revealOtherBookings = false,
 }: AssertModelUnitsNotReservedElsewhereArgs): Promise<void> {
   if (!from || !to) return;
 
@@ -1341,12 +1524,11 @@ export async function assertModelUnitsNotReservedElsewhere({
     select: { id: true, name: true },
   });
   const nameById = new Map(models.map((m) => [m.id, m.name]));
+  const formatDay = await poolDayFormatter({ userId, hints, tx });
 
-  const units = (n: number) => `${n} ${n === 1 ? "unit" : "units"}`;
   // One sentence per model, written for the person who has to free a unit:
-  // what this booking needs, the day the pool runs out, and who holds it
-  // then. The numbers add up to the model's total, so a reader can check them
-  // against the bookings the sentence names.
+  // what this booking needs, the day the pool runs out, and what holds it
+  // then.
   const lines = shortfalls.map((s) => {
     const { availability } = s;
     const needs =
@@ -1355,17 +1537,20 @@ export async function assertModelUnitsNotReservedElsewhere({
             s.stillToAssign
           )} still to assign from its own reservation`
         : `${units(s.named)} by name`;
-    const when = availability.peak.at
-      ? ` on ${formatPoolDay(availability.peak.at, hints)}`
-      : " for these dates";
-    const free = `${availability.available} of ${availability.total}`;
-    const deductions = describePoolDeductions(availability);
+    const day = availability.peak.at ? formatDay(availability.peak.at) : null;
     return `"${
       nameById.get(s.assetModelId) ?? s.assetModelId
-    }": this booking needs ${needs}, but${when} only ${free} ${
-      availability.total === 1 ? "is" : "are"
-    } free${deductions ? `: ${deductions}` : ""}.`;
+    }": this booking needs ${needs}, but${describePoolAtPeak(
+      availability,
+      day,
+      revealOtherBookings
+    )}.`;
   });
+  // The remedy points at the bookings by name only for a reader who can see
+  // them; anyone else is told what to free without being told whose it is.
+  const remedy = revealOtherBookings
+    ? "Change the dates, or free a unit of that model: assign a specific unit to the reservation named above, or remove a unit from one of those bookings."
+    : "Change the dates, or free a unit of that model: a specific unit assigned to a reservation on another booking, or a unit removed from another booking, makes room for this one.";
 
   throw new ShelfError({
     cause: null,
@@ -1375,7 +1560,7 @@ export async function assertModelUnitsNotReservedElsewhere({
     title: "Not enough units",
     message: `Some assets cannot be booked for these dates:\n${lines.join(
       "\n"
-    )}\nChange the dates, or free a unit of that model: assign a specific unit to the reservation named above, or remove a unit from one of those bookings.`,
+    )}\n${remedy}`,
     additionalData: {
       bookingId,
       shortfalls: shortfalls.map(({ availability, ...claim }) => ({
@@ -1426,8 +1611,10 @@ export type ModelPoolFit = {
  * reservation and a named unit draw on the same physical pool, so measuring
  * either half alone lets a pair of writes that each pass still over-commit it.
  *
- * Four reads in total, whatever the number of models: the three pool reads
- * and one {@link readOwnNamedUnits}.
+ * A fixed number of statements whatever the number of models: the pool reads
+ * of {@link getAssetModelAvailabilities} (three Prisma reads, plus the
+ * follow-up queries Prisma issues for their nested relations) and one
+ * {@link readOwnNamedUnits} (one more, plus one for its `custody` relation).
  *
  * Callers take {@link lockAssetModelsForReservation} on the models FIRST. This
  * is a read-then-decide, and under READ COMMITTED a plain `SELECT` takes no
@@ -1846,6 +2033,8 @@ export async function assertOutstandingModelRequestsFit({
   alsoLockAssetModelIds = [],
   tx,
   hints,
+  userId,
+  revealOtherBookings = false,
 }: {
   bookingId: string;
   organizationId: string;
@@ -1856,6 +2045,19 @@ export async function assertOutstandingModelRequestsFit({
   tx: ModelReservationGuardClient;
   /** Acting user's locale and time zone, for the day a refusal names. */
   hints?: ClientHint;
+  /**
+   * The acting user. When given, a refusal names its day in that user's own
+   * date preferences, read only once the guard knows it will refuse. Without
+   * it the day follows `hints`, else UTC.
+   */
+  userId?: string;
+  /**
+   * Whether the acting user may see other members' bookings (callers pass
+   * `access.bookings.seeAll`). Only then does a refusal name the other
+   * bookings holding the model; otherwise it calls them "other bookings".
+   * Defaults to `false`.
+   */
+  revealOtherBookings?: boolean;
 }): Promise<void> {
   if (!from || !to) return;
 
@@ -1919,8 +2121,8 @@ export async function assertOutstandingModelRequestsFit({
     select: { id: true, name: true },
   });
   const nameById = new Map(models.map((model) => [model.id, model.name]));
+  const formatDay = await poolDayFormatter({ userId, hints, tx });
 
-  const units = (n: number) => `${n} ${n === 1 ? "unit" : "units"}`;
   const lines = shortfalls.map((shortfall) => {
     const { availability } = shortfall;
     const heldNote =
@@ -1930,19 +2132,17 @@ export async function assertOutstandingModelRequestsFit({
           )} of it by name.`
         : "";
     // Everything the pool already owes someone else at the instant it runs
-    // out, named so the numbers in the sentence add up for whoever has to
-    // act on it.
-    const when = availability.peak.at
-      ? ` on ${formatPoolDay(availability.peak.at, hints)}`
-      : " for these dates";
-    const deductions = describePoolDeductions(availability);
+    // out, so whoever has to act on it can see where the units are.
+    const day = availability.peak.at ? formatDay(availability.peak.at) : null;
     return `"${
       nameById.get(shortfall.assetModelId) ?? shortfall.assetModelId
-    }": ${units(shortfall.outstanding)} still to assign, but${when} only ${
-      availability.available
-    } of ${availability.total} ${availability.total === 1 ? "is" : "are"} free${
-      deductions ? `: ${deductions}` : ""
-    }.${heldNote}`;
+    }": ${units(
+      shortfall.outstanding
+    )} still to assign, but${describePoolAtPeak(
+      availability,
+      day,
+      revealOtherBookings
+    )}.${heldNote}`;
   });
 
   throw new ShelfError({

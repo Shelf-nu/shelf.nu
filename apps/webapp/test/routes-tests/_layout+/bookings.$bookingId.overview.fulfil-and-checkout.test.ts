@@ -234,6 +234,24 @@ describe("fulfil-and-checkout action", () => {
     );
   });
 
+  it("hands the service what a model-pool refusal needs, names hidden from a caller who cannot see every booking", async () => {
+    await post({ roles: [OrganizationRoles.ADMIN] });
+    await post({
+      roles: [OrganizationRoles.SELF_SERVICE],
+      creatorId: "user-1",
+    });
+
+    // An admin sees every booking, so a refusal may name other members'. A
+    // self-service user with the workspace toggle off sees only their own.
+    expect(fulfilMock.mock.calls[0][0]).toMatchObject({
+      hints: expect.objectContaining({ timeZone: expect.any(String) }),
+      seesAllBookings: true,
+    });
+    expect(fulfilMock.mock.calls[1][0]).toMatchObject({
+      seesAllBookings: false,
+    });
+  });
+
   it("checks ownership before it reads the workspace settings", async () => {
     // A SELF_SERVICE user on someone else's booking is refused first; the
     // explicit check-out rule is never consulted for a booking they cannot
