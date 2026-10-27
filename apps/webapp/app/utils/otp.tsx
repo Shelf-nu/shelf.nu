@@ -9,8 +9,20 @@ export type OtpPageData = Record<
     title: string;
     SubHeading: FC<{ email: string }>;
     buttonTitle: string;
+    /** Notice shown after "Send again" succeeds. */
+    resentMessage: string;
   }
 >;
+
+/** The resend notice for modes where a code always goes out. */
+const CODE_RESENT = "Email sent successfully. Please check your inbox.";
+
+/**
+ * The resend notice for modes whose send answers the same for every address,
+ * so it cannot claim a code went out.
+ */
+const CODE_MAYBE_RESENT =
+  "If this address can receive a code, a new one is on its way. Please check your inbox.";
 
 export const OTP_PAGE_MAP: OtpPageData = {
   login: {
@@ -25,6 +37,7 @@ export const OTP_PAGE_MAP: OtpPageData = {
       </SubHeading>
     ),
     buttonTitle: "Log In",
+    resentMessage: CODE_MAYBE_RESENT,
   },
   signup: {
     title: "Create an account",
@@ -34,6 +47,7 @@ export const OTP_PAGE_MAP: OtpPageData = {
       </SubHeading>
     ),
     buttonTitle: "Create Account",
+    resentMessage: CODE_RESENT,
   },
   confirm_signup: {
     title: "Confirm your email",
@@ -45,12 +59,14 @@ export const OTP_PAGE_MAP: OtpPageData = {
       </SubHeading>
     ),
     buttonTitle: "Confirm",
+    resentMessage: CODE_RESENT,
   },
 };
 
 export const DEFAULT_PAGE_DATA: OtpPageData["login"] = {
   title: "One Time Password",
   buttonTitle: "Continue",
+  resentMessage: CODE_MAYBE_RESENT,
   SubHeading: () => (
     <SubHeading className="-mt-4 text-center">
       Please confirm your OTP to continue
