@@ -76,5 +76,7 @@ describe("locations.$locationId loader: header asset count", () => {
     expect(args?.search).toBeUndefined();
     expect(args?.teamMemberIds).toBeUndefined();
     expect(args?.archivedFilter).toBeUndefined();
+    // The header reads only the total; the Assets tab loads its own rows.
+    expect(args?.withAssetsPage).toBe(false);
   });
 });

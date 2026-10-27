@@ -185,7 +185,18 @@ export async function getLocation(
     orderDirection?: "asc" | "desc";
     userOrganizations?: Pick<UserOrganization, "organizationId">[];
     request?: Request;
+    /**
+     * Extra relations to load on the location. Passing it asks for the
+     * location alone: neither the asset page nor the asset count is queried,
+     * and `assets` comes back empty with `totalAssetsWithinLocation` 0.
+     */
     include?: Prisma.LocationInclude;
+    /**
+     * Whether to load a page of the location's assets. `false` keeps the
+     * asset count without the page, for pages that show only the total.
+     * Defaults to `true`; ignored when `include` is passed.
+     */
+    withAssetsPage?: boolean;
     teamMemberIds?: string[] | null;
     /**
      * Which of the location's assets to list by archive state. Pages that
@@ -206,6 +217,7 @@ export async function getLocation(
     orderBy = "createdAt",
     orderDirection,
     include,
+    withAssetsPage = true,
     teamMemberIds,
     archivedFilter = "all",
   } = params;
@@ -340,17 +352,20 @@ export async function getLocation(
       }),
 
       /** Count them */
-      db.asset.count({
-        // Same where as the list (archived view, search, custodians), so the
-        // count and the pager built on it describe exactly the listed rows.
-        where: assetsWhereForLocation,
-      }),
+      include
+        ? Promise.resolve(0)
+        : db.asset.count({
+            // Same where as the list (archived view, search, custodians), so
+            // the count and the pager built on it describe exactly the listed
+            // rows.
+            where: assetsWhereForLocation,
+          }),
 
       /**
        * One page of the assets placed at this location, returned as
        * `assets` in `{ location, assets, totalAssetsWithinLocation }`.
        */
-      include
+      include || !withAssetsPage
         ? Promise.resolve([] as Awaited<ReturnType<typeof db.asset.findMany>>)
         : db.asset.findMany({
             skip,

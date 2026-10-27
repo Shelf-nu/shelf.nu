@@ -84,7 +84,10 @@ import {
   getLocation,
   updateLocationAssets,
 } from "~/modules/location/service.server";
-import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
+import {
+  getTeamMemberForCustodianFilter,
+  scopeCustodianFilterIds,
+} from "~/modules/team-member/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -108,6 +111,9 @@ import { requirePermission } from "~/utils/roles.server";
 import { resolveTeamMemberName } from "~/utils/user";
 
 const paramsSchema = z.object({ locationId: z.string() });
+
+/** The custodian filter's "Without custody" option, which names no person. */
+const WITHOUT_CUSTODY = "without-custody";
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
@@ -138,6 +144,31 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const cookie = await updateCookieWithPerPage(request, perPageParam);
     const { perPage } = cookie;
 
+    /**
+     * `?teamMember=` is raw request input. A member who may not see other
+     * people's custody could otherwise filter by a colleague's id and read
+     * which assets that person holds, so person ids are narrowed to the
+     * caller's own. "Without custody" names nobody and the dropdown offers it
+     * to every member who sees custody, so it is kept as requested.
+     */
+    const wantsWithoutCustody = teamMemberIds.includes(WITHOUT_CUSTODY);
+    const custodianFilterIds = [
+      ...(await scopeCustodianFilterIds({
+        teamMemberIds: teamMemberIds.filter((id) => id !== WITHOUT_CUSTODY),
+        canSeeAllCustody: access.custody.seeAll,
+        userId,
+        organizationId,
+      })),
+      ...(wantsWithoutCustody ? [WITHOUT_CUSTODY] : []),
+    ];
+
+    /**
+     * The Active view's "archived assets are hidden" empty state explains an
+     * empty location. Under a search or custodian filter the list can be empty
+     * for that reason instead, so the count is only taken when neither is set.
+     */
+    const isFiltered = !!search || custodianFilterIds.length > 0;
+
     const [
       // `assets` is returned alongside `location` — there is no direct
       // Location.assets relation; getLocation runs a separate pivot-filtered
@@ -156,7 +187,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         orderDirection,
         userOrganizations,
         request,
-        teamMemberIds,
+        teamMemberIds: custodianFilterIds,
         archivedFilter: resolveArchivedViewForMember({ access, searchParams }),
       }),
       getTeamMemberForCustodianFilter({
@@ -171,13 +202,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       }),
       // Archived assets the Active view hides, so its empty state can say
       // where they went.
-      db.asset.count({
-        where: {
-          organizationId,
-          archivedAt: { not: null },
-          assetLocations: { some: { locationId } },
-        },
-      }),
+      isFiltered
+        ? 0
+        : db.asset.count({
+            where: {
+              organizationId,
+              archivedAt: { not: null },
+              assetLocations: { some: { locationId } },
+            },
+          }),
     ]);
 
     const modelName = {
