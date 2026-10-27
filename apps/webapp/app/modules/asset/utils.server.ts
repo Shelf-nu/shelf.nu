@@ -718,12 +718,13 @@ export function buildLowStockWhere(): Prisma.AssetWhereInput {
 }
 
 /**
- * Prisma `where` clause for "select all" and bulk actions, built from a
- * serialized list query string.
+ * Prisma `where` clause for "select all" on a location's assets tab, built
+ * from a serialized list query string (search by title, status, category,
+ * tag, location, custodian), always scoped to the organization.
  *
- * It mirrors the simple-mode list filters (search, status, category, tag,
- * location, custodian), always scoped to the organization, so a bulk action
- * acts on the rows the list showed.
+ * Lists served by `getAssets` (the asset index and the kit, location and
+ * booking pickers) do not use this: their select-all runs the list's own query
+ * through `getAssetListWhereForSelectAll` in `list-where.server.ts`.
  *
  * @returns The clause; just `{ organizationId }` when there is no query string
  */

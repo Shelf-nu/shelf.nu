@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { resolveAssetIdsForBulkOperation } from "~/modules/asset/bulk-operations-helper.server";
 import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
+import { resolveBookableListScope } from "~/modules/asset/list-scope.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import {
@@ -115,6 +116,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           access,
           currentOrganization
         ),
+        bookableScope: resolveBookableListScope({ access, userId }),
       });
     } else {
       assetIds = directAssetIds;
