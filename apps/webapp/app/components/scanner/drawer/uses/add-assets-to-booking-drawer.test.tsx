@@ -26,7 +26,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   type AlreadyIncludedRow,
   type ExpectedModelRequest,
+  type ReservedModel,
   assignAlreadyIncludedAtom,
+  assignReservedModelsAtom,
   expectedModelRequestsAtom,
   scannedItemsAtom,
 } from "~/atoms/qr-scanner";
@@ -158,6 +160,8 @@ function kitFixture({
  *
  * @param options.expectedModelRequests - Outstanding model reservations, as
  *   the route's session hook would seed `expectedModelRequestsAtom`.
+ * @param options.reservedModels - Every model the booking reserves, fully
+ *   filled ones included. Defaults to the models in `expectedModelRequests`.
  * @param options.alreadyIncluded - Assets already on the booking, as the
  *   route would seed `assignAlreadyIncludedAtom`.
  * @param options.bookingAssets - The booking's own `bookingAssets` rows, as
@@ -170,6 +174,7 @@ function kitFixture({
 function renderDrawer(
   options: {
     expectedModelRequests?: ExpectedModelRequest[];
+    reservedModels?: ReservedModel[];
     alreadyIncluded?: AlreadyIncludedRow[];
     bookingAssets?: Array<{ assetId: string }>;
     scannedAssets?: Record<string, Partial<AssetFromQr>>;
@@ -178,6 +183,13 @@ function renderDrawer(
 ) {
   const store = createStore();
   store.set(expectedModelRequestsAtom, options.expectedModelRequests ?? []);
+  store.set(
+    assignReservedModelsAtom,
+    options.reservedModels ??
+      (options.expectedModelRequests ?? []).map(
+        ({ assetModelId, assetModelName }) => ({ assetModelId, assetModelName })
+      )
+  );
   store.set(assignAlreadyIncludedAtom, options.alreadyIncluded ?? []);
   store.set(scannedItemsAtom, {
     ...Object.fromEntries(
@@ -585,6 +597,45 @@ describe("AddAssetsToBookingDrawer scanned row details", () => {
     expect(
       screen.getByText("Extra: every Model One unit is already filled")
     ).toBeTruthy();
+  });
+
+  // A reservation filled before the drawer opened is gone from the
+  // outstanding list, but its model is still reserved: an extra scan of it is
+  // over the count, not an unreserved model.
+  it("marks a scan of a fully filled model as over the count, not unreserved", () => {
+    renderDrawer({
+      expectedModelRequests: oneUnitOfModelOne,
+      reservedModels: [
+        { assetModelId: "model-1", assetModelName: "Model One" },
+        { assetModelId: "model-2", assetModelName: "Model Two" },
+      ],
+      scannedAssets: {
+        "qr-1": { id: "asset-1", title: "Asset 1", assetModelId: "model-2" },
+      },
+    });
+
+    expect(
+      screen.getByText("Extra: every Model Two unit is already filled")
+    ).toBeTruthy();
+    expect(screen.queryByText("Extra: model not reserved")).toBeNull();
+  });
+
+  it("still marks an over-scan when every reservation is already filled", () => {
+    renderDrawer({
+      expectedModelRequests: [],
+      reservedModels: [
+        { assetModelId: "model-1", assetModelName: "Model One" },
+      ],
+      scannedAssets: {
+        "qr-1": { id: "asset-1", title: "Asset 1", assetModelId: "model-1" },
+      },
+    });
+
+    expect(
+      screen.getByText("Extra: every Model One unit is already filled")
+    ).toBeTruthy();
+    // Nothing is outstanding, so there is no progress chrome to show.
+    expect(screen.queryByText(/models? reserved/)).toBeNull();
   });
 
   it("marks a scan of an unreserved model as an extra", () => {

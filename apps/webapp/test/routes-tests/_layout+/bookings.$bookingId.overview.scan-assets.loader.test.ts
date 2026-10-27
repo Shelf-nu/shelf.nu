@@ -3,12 +3,12 @@
  *
  * Pins:
  *  - `assignSession` is null when the booking reserves no models, so the
- *    screen renders exactly as it did before this reservation context
- *    existed;
+ *    screen renders a plain scan list;
  *  - each outstanding model request reports `remaining` as `quantity`
  *    minus `fulfilledQuantity`, not the raw booked count;
  *  - a request with `fulfilledAt` set is settled and does not surface as
- *    outstanding, even when `fulfilledQuantity` is still below `quantity`;
+ *    outstanding, even when `fulfilledQuantity` is still below `quantity`,
+ *    but its model is still listed in `reservedModels`;
  *  - a standalone `BookingAsset` row with no reservation stamp is
  *    claimable, and one that already answered a reservation is not;
  *  - a SELF_SERVICE or BASE user who is neither the booking's creator nor its
@@ -179,7 +179,13 @@ describe("scan-assets loader assignSession", () => {
       }) as unknown as Awaited<ReturnType<typeof getBooking>>
     );
 
-    expect((await runLoader()).assignSession).toBeNull();
+    // Settled, so nothing is owed. The model is still reserved, though, and
+    // the session carries it so an extra scan of it reads as over the count.
+    const { assignSession } = await runLoader();
+    expect(assignSession?.expectedModelRequests).toEqual([]);
+    expect(assignSession?.reservedModels).toEqual([
+      { assetModelId: "model-1", assetModelName: "Model One" },
+    ]);
   });
 
   it("marks an unstamped standalone row claimable and a stamped one not", async () => {

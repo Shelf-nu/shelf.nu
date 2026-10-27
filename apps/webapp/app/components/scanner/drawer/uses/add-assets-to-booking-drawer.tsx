@@ -7,6 +7,7 @@ import { useLoaderData } from "react-router";
 import { z } from "zod";
 import {
   assignAlreadyIncludedAtom,
+  assignReservedModelsAtom,
   clearScannedItemsAtom,
   expectedModelRequestsAtom,
   removeScannedItemAtom,
@@ -261,16 +262,24 @@ export default function AddAssetsToBookingDrawer({
     [scannedBuckets.rows]
   );
 
+  /**
+   * Every model the booking reserves, fully filled ones included, so an extra
+   * scan of a filled model reads as over the reserved count rather than as an
+   * unreserved model. `expectedModelRequests` cannot answer this: it lists
+   * only reservations still owed.
+   */
+  const reservedModels = useAtomValue(assignReservedModelsAtom);
+
   /** Reserved model names by id, to name the model an over-scan exceeds. */
   const reservedModelNameById = useMemo(
     () =>
       new Map(
-        expectedModelRequests.map(
-          (expected) =>
-            [expected.assetModelId, expected.assetModelName] as const
+        reservedModels.map(
+          (reserved) =>
+            [reserved.assetModelId, reserved.assetModelName] as const
         )
       ),
-    [expectedModelRequests]
+    [reservedModels]
   );
 
   /** Per-model progress. `prefulfilled` covers units assigned before this scan. */
@@ -330,7 +339,7 @@ export default function AddAssetsToBookingDrawer({
               reservation={resolveRowReservation({
                 bucket: scannedRow?.bucket,
                 matchedModelName: scannedRow?.matchedModelName,
-                hasReservations: expectedModelRequests.length > 0,
+                hasReservations: reservedModels.length > 0,
                 assetType: scannedAsset.type,
                 reservedModelName: scannedAsset.assetModelId
                   ? reservedModelNameById.get(scannedAsset.assetModelId)

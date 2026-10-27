@@ -51,11 +51,20 @@ export function ScannedAssetIdentifiers({
   return (
     <p className="flex flex-wrap items-center gap-x-1.5 text-xs text-gray-600">
       {parts.map((part, index) => (
-        <span key={part.label} className="inline-flex items-center gap-1.5">
+        // `min-w-0` and `break-all` let a long code (a Code128 value, an
+        // external QR URL) wrap inside the row: it is one opaque token with
+        // no natural break, and it is never truncated because the operator
+        // matches the full value against the label.
+        <span
+          key={part.label}
+          className="inline-flex min-w-0 items-center gap-1.5"
+        >
           {index > 0 ? <span aria-hidden="true">·</span> : null}
-          <span>
+          <span className="min-w-0">
             {part.label}{" "}
-            <span className="font-mono text-gray-800">{part.value}</span>
+            <span className="break-all font-mono text-gray-800">
+              {part.value}
+            </span>
           </span>
         </span>
       ))}
