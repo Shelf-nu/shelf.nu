@@ -763,10 +763,10 @@ const ListAssetContent = ({
       </Td>
 
       <Td>
-        <CategoryBadge category={category} />
+        <CategoryBadge category={category} linkToAssets />
       </Td>
       <Td className="text-left">
-        <ListItemTagsColumn tags={tags} />
+        <ListItemTagsColumn tags={tags} linkToAssets />
       </Td>
       {/* Custodian */}
       <When truthy={extraProps.canReadCustody}>

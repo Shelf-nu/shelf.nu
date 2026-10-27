@@ -300,11 +300,14 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
               newTab && onlyNewTabIconOnHover ? "hover-parent " : ""
             )}
           >
-            <style>{`
-              .hover-parent:hover .external-link-icon {
-                display: inline-flex !important;
-              }
-            `}</style>
+            {/* Only a new-tab link that reveals its icon on hover needs this */}
+            {newTab && onlyNewTabIconOnHover ? (
+              <style>{`
+                .hover-parent:hover .external-link-icon {
+                  display: inline-flex !important;
+                }
+              `}</style>
+            ) : null}
 
             <span>{children}</span>
             {newTab && (

@@ -24,7 +24,7 @@ import type { ResolvedImportEntities, StoredImportRow } from "./types";
 const tx = vi.hoisted(() => ({
   assetImport: { updateMany: vi.fn() },
   customField: { findMany: vi.fn() },
-  asset: { createMany: vi.fn() },
+  asset: { createMany: vi.fn(), aggregate: vi.fn() },
   qr: { updateMany: vi.fn(), createMany: vi.fn() },
   assetLocation: { createMany: vi.fn() },
   assetKit: { createMany: vi.fn() },
@@ -120,6 +120,7 @@ describe("writeImportChunk", () => {
     tx.$queryRaw.mockResolvedValue([{ id: "SAM-0001" }, { id: "SAM-0002" }]);
     tx.$executeRaw.mockResolvedValue(1);
     tx.customField.findMany.mockResolvedValue([]);
+    tx.asset.aggregate.mockResolvedValue({ _max: { createdAt: null } });
     tx.barcode.findMany.mockResolvedValue([]);
     tx.barcode.updateMany.mockResolvedValue({ count: 1 });
     tx.qr.updateMany.mockResolvedValue({ count: 1 });
@@ -195,6 +196,37 @@ describe("writeImportChunk", () => {
         "Some categories this import uses were deleted while it ran. Resume the import to create them again and continue.",
     });
     expect(tx.asset.createMany).not.toHaveBeenCalled();
+  });
+
+  it("stamps rows one millisecond apart in file order, after the newest asset", async () => {
+    tx.assetImport.updateMany.mockResolvedValue({ count: 1 });
+    tx.$queryRaw.mockResolvedValue([
+      { id: "SAM-0001" },
+      { id: "SAM-0002" },
+      { id: "SAM-0003" },
+    ]);
+    // A newest asset in the future of the clock: the chunk must still land
+    // after it, or the index would show it between earlier chunks.
+    const newest = new Date(Date.now() + 60_000);
+    tx.asset.aggregate.mockResolvedValue({ _max: { createdAt: newest } });
+
+    await writeImportChunk(args({ rows: [row("a1"), row("a2"), row("a3")] }));
+
+    expect(tx.asset.aggregate).toHaveBeenCalledWith({
+      where: { organizationId: "org" },
+      _max: { createdAt: true },
+    });
+    const data = tx.asset.createMany.mock.calls[0][0].data;
+    expect(
+      data.map((d: { sequentialId: string; createdAt: Date }) => [
+        d.sequentialId,
+        d.createdAt.getTime() - newest.getTime(),
+      ])
+    ).toEqual([
+      ["SAM-0001", 1],
+      ["SAM-0002", 2],
+      ["SAM-0003", 3],
+    ]);
   });
 
   it("skips a chunk whose rows are already committed", async () => {

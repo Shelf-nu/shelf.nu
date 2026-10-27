@@ -46,7 +46,9 @@ vi.mock("~/utils/scheduler.server", () => ({
 }));
 
 // why: preventing actual email rendering/sending during worker tests
-vi.mock("./emails", () => ({
+vi.mock("./emails", async (importOriginal) => ({
+  // the stop messages are plain strings shared with the note
+  ...((await importOriginal()) as object),
   assetAlertEmailHtmlString: vi.fn().mockResolvedValue("<html></html>"),
   assetAlertEmailText: vi.fn().mockReturnValue("text body"),
 }));

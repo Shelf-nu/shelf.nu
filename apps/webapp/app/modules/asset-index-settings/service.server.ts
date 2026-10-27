@@ -183,6 +183,46 @@ export async function getAssetIndexSettings({
 }
 
 /**
+ * The mode a member's asset index will open in, for pages that link into it
+ * with a filter (see `buildAssetIndexFilterHref`). Read-only: unlike
+ * `getAssetIndexSettings` it never creates or repairs a settings row.
+ *
+ * @param args.userId - The viewer
+ * @param args.organizationId - The viewer's current workspace
+ * @param args.ui - The viewer's role policy UI flags, from `requirePermission().access.policy.ui`
+ * @returns The saved mode, or the role default when nothing is saved. ADVANCED
+ *   resolves to SIMPLE for a role without the advanced index, because the index
+ *   switches such a member back to simple mode.
+ */
+export async function getAssetIndexModeForUser({
+  userId,
+  organizationId,
+  ui,
+}: {
+  userId: string;
+  organizationId: string;
+  ui: { advancedAssetIndex: boolean; defaultAssetIndexMode: AssetIndexMode };
+}): Promise<AssetIndexMode> {
+  try {
+    const settings = await db.assetIndexSettings.findFirst({
+      where: { userId, organizationId },
+      select: { mode: true },
+    });
+    const mode = settings?.mode ?? ui.defaultAssetIndexMode;
+    return mode === AssetIndexMode.ADVANCED && !ui.advancedAssetIndex
+      ? AssetIndexMode.SIMPLE
+      : mode;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while reading your asset index mode.",
+      additionalData: { userId, organizationId },
+      label,
+    });
+  }
+}
+
+/**
  * Ensure a user's asset index settings align with the defaults for their role.
  * Creates settings when missing and promotes to ADVANCED when the role allows.
  */
