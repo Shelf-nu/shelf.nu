@@ -90,6 +90,7 @@ async function runLoader() {
         booked: number;
         remaining: number;
       }>;
+      reservedModels: Array<{ assetModelId: string; assetModelName: string }>;
       alreadyIncluded: Array<{ id: string; claimable: boolean }>;
     } | null;
   };
