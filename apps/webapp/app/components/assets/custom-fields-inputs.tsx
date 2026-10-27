@@ -301,7 +301,8 @@ export default function AssetCustomFields({
 }
 
 /**
- * Component that renders select for CustomField OPTION fields.
+ * Component that renders select for CustomField OPTION fields. Shared by the
+ * asset form and the asset model form's default values.
  *
  * The value travels in a hidden input, so the browser never flags it as
  * invalid on its own: the validation message has to be rendered here,
@@ -310,12 +311,12 @@ export default function AssetCustomFields({
  *
  * @param error - Validation message for this field, shown under the trigger
  */
-function OptionSelect({
+export function OptionSelect({
   field,
   getCustomFieldVal,
   error,
 }: {
-  field: CustomField;
+  field: Pick<CustomField, "id" | "name" | "options">;
   getCustomFieldVal: (id: string) => string;
   error?: string;
 }) {

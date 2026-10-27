@@ -36,6 +36,8 @@ import { recordEvents } from "~/modules/activity-event/service.server";
 import { validateQtyTrackedFields } from "~/modules/asset/qty-validation.server";
 import { getNextSequentialIds } from "~/modules/asset/sequential-id.server";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
+import { planModelDefaultFill } from "~/modules/asset-model/defaults";
+import { getAssetModelsDefaults } from "~/modules/asset-model/defaults.server";
 import { resolveImportedAssetModel } from "~/modules/asset-model/service.server";
 import { BARCODE_IMPORT_COLUMNS } from "~/modules/barcode/service.server";
 import { normalizeBarcodeValue } from "~/modules/barcode/validation";
@@ -113,6 +115,8 @@ type PreparedRow = {
   kitId: string | undefined;
   custodianId: string | undefined;
   assetModelId: string | undefined;
+  /** The row's value, or the model's default when the cell is empty. */
+  valuation: number | null;
   tagIds: string[];
   type: AssetType | undefined;
   quantity: number | undefined;
@@ -212,6 +216,7 @@ function prepareRow(
     kitId,
     custodianId,
     assetModelId: model.id,
+    valuation: row.valuation ? +row.valuation : null,
     tagIds: (row.tags ?? [])
       .filter((tag) => resolved.tags[tag])
       .map((tag) => resolved.tags[tag]),
@@ -247,7 +252,7 @@ function toAssetCreateManyInput(
     organizationId: ctx.organizationId,
     categoryId: prepared.categoryId,
     assetModelId: prepared.assetModelId ?? null,
-    valuation: row.valuation ? +row.valuation : null,
+    valuation: prepared.valuation,
     availableToBook: row.bookable !== "no",
     mainImage: ctx.image?.mainImage ?? null,
     mainImageExpiration: ctx.image?.mainImageExpiration ?? null,
@@ -387,6 +392,63 @@ function buildCustomFieldValueRows(
   }
 
   return values;
+}
+
+/**
+ * Fills the empty cells of rows that name an asset model from that model's
+ * defaults (category, valuation, custom field values), in place. Same rule as
+ * every other way an asset joins a model: only empty fields are filled, and a
+ * value in the file always wins.
+ *
+ * @param tx - The chunk's transaction
+ * @param prepared - The chunk's rows (category and valuation are updated)
+ * @param customFieldValues - The rows' custom field values (defaults appended)
+ * @param organizationId - Workspace the models belong to
+ */
+async function fillRowsFromModelDefaults(
+  tx: ChunkTxClient,
+  prepared: PreparedRow[],
+  customFieldValues: Prisma.AssetCustomFieldValueCreateManyInput[],
+  organizationId: string
+): Promise<void> {
+  const modelIds = distinct(prepared.map((p) => p.assetModelId));
+  if (modelIds.length === 0) return;
+
+  const models = await getAssetModelsDefaults(
+    { assetModelIds: modelIds, organizationId },
+    tx
+  );
+
+  const fieldIdsByAsset = new Map<string, Set<string>>();
+  for (const value of customFieldValues) {
+    const ids = fieldIdsByAsset.get(value.assetId) ?? new Set<string>();
+    ids.add(value.customFieldId);
+    fieldIdsByAsset.set(value.assetId, ids);
+  }
+
+  for (const p of prepared) {
+    const model = p.assetModelId ? models.get(p.assetModelId) : undefined;
+    if (!model) continue;
+
+    const fill = planModelDefaultFill({
+      model,
+      current: {
+        categoryId: p.categoryId,
+        valuation: p.valuation,
+        customFieldIdsWithValue:
+          fieldIdsByAsset.get(p.row.assetId) ?? new Set(),
+      },
+    });
+    if (fill.categoryId !== undefined) p.categoryId = fill.categoryId;
+    if (fill.valuation !== undefined) p.valuation = fill.valuation;
+    for (const fieldDefault of fill.customFields) {
+      customFieldValues.push({
+        assetId: p.row.assetId,
+        customFieldId: fieldDefault.customFieldId,
+        value: fieldDefault.value as unknown as Prisma.InputJsonValue,
+      });
+    }
+  }
 }
 
 /**
@@ -683,6 +745,13 @@ export async function writeImportChunk({
           resolved.customFields,
           new Map(definitions.map((d) => [d.id, d])),
           warnings
+        );
+
+        await fillRowsFromModelDefaults(
+          tx,
+          prepared,
+          customFieldValues,
+          organizationId
         );
 
         const sequentialIds = await getNextSequentialIds(

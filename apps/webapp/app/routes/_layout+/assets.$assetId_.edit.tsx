@@ -15,6 +15,7 @@ import { AssetForm, NewAssetFormSchema } from "~/components/assets/form";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Button } from "~/components/shared/button";
+import { db } from "~/database/db.server";
 import {
   getAllEntriesForCreateAndEdit,
   getAsset,
@@ -22,6 +23,10 @@ import {
   updateAssetMainImage,
 } from "~/modules/asset/service.server";
 import { getPrimaryLocation } from "~/modules/asset/utils";
+import {
+  fillAssetFormDataFromModel,
+  getAssetModelDefaults,
+} from "~/modules/asset-model/defaults.server";
 import { getAssetModels } from "~/modules/asset-model/service.server";
 
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
@@ -196,6 +201,46 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const clonedRequest = request.clone();
     const formData = await clonedRequest.formData();
+
+    /**
+     * Moving the asset onto a model fills its empty fields from the model's
+     * defaults. Filled before validation, so the category decides which custom
+     * fields load and a required field the model fills passes. A field the
+     * saved asset already holds is never filled, even if the form left it
+     * blank.
+     */
+    const joiningModelId = formData.get("assetModelId");
+    if (typeof joiningModelId === "string" && joiningModelId) {
+      const saved = await db.asset.findFirst({
+        where: { id, organizationId, archivedAt: null },
+        select: {
+          assetModelId: true,
+          categoryId: true,
+          valuation: true,
+          customFields: { select: { customFieldId: true } },
+        },
+      });
+      const model =
+        saved && saved.assetModelId !== joiningModelId
+          ? await getAssetModelDefaults({
+              assetModelId: joiningModelId,
+              organizationId,
+            })
+          : null;
+      if (saved && model) {
+        fillAssetFormDataFromModel({
+          formData,
+          model,
+          stored: {
+            categoryId: saved.categoryId,
+            valuation: saved.valuation,
+            customFieldIdsWithValue: new Set(
+              saved.customFields.map((value) => value.customFieldId)
+            ),
+          },
+        });
+      }
+    }
 
     const searchParams = getCurrentSearchParams(request);
 

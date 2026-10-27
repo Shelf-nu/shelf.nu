@@ -380,6 +380,8 @@ describe("updateCustomField", () => {
         .fn()
         .mockResolvedValueOnce([{ id: "cf-brand" }])
         .mockResolvedValueOnce(rewritten),
+      // The same rename applied to the defaults asset models hold.
+      $executeRaw: vi.fn().mockResolvedValue(0),
     };
     dbTransactionMock.mockImplementation(((
       callback: (client: typeof tx) => unknown
@@ -455,6 +457,29 @@ describe("updateCustomField", () => {
       oldField: savedField,
       newField: { ...savedField, options: ["Sony", "Canon"] },
     });
+  });
+
+  it("rewrites asset model defaults that hold a renamed option, in the same transaction", async () => {
+    const tx = mockTransaction();
+
+    await updateCustomField({
+      id: "cf-brand",
+      organizationId: "org-1",
+      userId: "user-1",
+      options: ["Sony", "Canon"],
+      optionRenames: [{ from: "sony", to: "Sony" }],
+    });
+
+    expect(tx.$executeRaw).toHaveBeenCalledTimes(1);
+    const statement = tx.$executeRaw.mock.calls[0][0] as {
+      text: string;
+      values: unknown[];
+    };
+    expect(statement.text).toContain(
+      'UPDATE "AssetModelCustomFieldDefault" AS d'
+    );
+    expect(statement.text).toContain(`d."customFieldId" = $3`);
+    expect(statement.values).toEqual(["sony", "Sony", "cf-brand"]);
   });
 
   it("saves without rewriting values when no spelling changes", async () => {

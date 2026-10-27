@@ -3,6 +3,7 @@ import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import type { RecordEventTxClient } from "~/modules/activity-event/service.server";
 import { recordEvents } from "~/modules/activity-event/service.server";
+import type { ModelDefaultsTxClient } from "~/modules/asset-model/defaults.server";
 import {
   buildAssetModelChangeNote,
   resolveUserLink,
@@ -227,34 +228,43 @@ export async function getAssetModel({
 
 /**
  * Updates an existing asset model's fields.
+ *
+ * @param tx - Optional transaction, so the model and its custom field
+ *   defaults can be saved together
  */
-export async function updateAssetModel({
-  id,
-  organizationId,
-  name,
-  description,
-  defaultCategoryId,
-  defaultValuation,
-}: Pick<AssetModel, "id" | "organizationId"> & {
-  name?: string;
-  description?: string | null;
-  defaultCategoryId?: string | null;
-  defaultValuation?: number | null;
-}) {
+export async function updateAssetModel(
+  {
+    id,
+    organizationId,
+    name,
+    description,
+    defaultCategoryId,
+    defaultValuation,
+  }: Pick<AssetModel, "id" | "organizationId"> & {
+    name?: string;
+    description?: string | null;
+    defaultCategoryId?: string | null;
+    defaultValuation?: number | null;
+  },
+  tx: ModelDefaultsTxClient = db
+) {
   // why: defaultCategoryId comes from form input and Prisma's foreign key
   // only proves the row exists, not that it belongs to this workspace —
   // without this the model would connect another tenant's category. Runs
   // outside the try so its 400 reaches the form instead of being rewritten
   // into the generic constraint-violation message.
   if (defaultCategoryId) {
-    await assertCategoryBelongsToOrg({
-      categoryId: defaultCategoryId,
-      organizationId,
-    });
+    await assertCategoryBelongsToOrg(
+      {
+        categoryId: defaultCategoryId,
+        organizationId,
+      },
+      tx
+    );
   }
 
   try {
-    return await db.assetModel.update({
+    return await tx.assetModel.update({
       where: { id, organizationId },
       data: {
         name: name?.trim(),

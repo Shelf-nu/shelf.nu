@@ -84,6 +84,12 @@ import {
   getPrimaryLocation,
   isQuantityTracked,
 } from "~/modules/asset/utils";
+import { planModelDefaultFill } from "~/modules/asset-model/defaults";
+import {
+  applyAssetModelDefaultsToAssets,
+  getAssetModelDefaults,
+  getAssetModelsDefaults,
+} from "~/modules/asset-model/defaults.server";
 import {
   updateBarcodes,
   validateBarcodeUniqueness,
@@ -6295,6 +6301,16 @@ export async function createAssetsFromContentImport({
       }),
     ]);
 
+    /**
+     * Defaults of every model the file names, read once. A row joining a
+     * model gets them in its empty cells, the same rule as every other way an
+     * asset joins a model.
+     */
+    const modelDefaults = await getAssetModelsDefaults({
+      assetModelIds: [...new Set(Object.values(assetModels ?? {}))],
+      organizationId,
+    });
+
     // Process assets sequentially to handle image uploads
     for (const asset of data) {
       // Generate asset ID upfront
@@ -6522,6 +6538,32 @@ export async function createAssetsFromContentImport({
       // so neither can fail here. `createAsset` keeps its own guards for the
       // callers that do not come through the importer.
 
+      let categoryId = asset.category ? categories?.[asset.category] : null;
+      let valuation: number | null = asset.valuation ? +asset.valuation : null;
+      const joinedModel = assetModelId
+        ? modelDefaults.get(assetModelId)
+        : undefined;
+      if (joinedModel) {
+        const fill = planModelDefaultFill({
+          model: joinedModel,
+          current: {
+            categoryId: categoryId ?? null,
+            valuation,
+            customFieldIdsWithValue: new Set(
+              customFieldsValues.map((value) => value.id)
+            ),
+          },
+        });
+        categoryId = fill.categoryId ?? categoryId;
+        valuation = fill.valuation ?? valuation;
+        for (const fieldDefault of fill.customFields) {
+          customFieldsValues.push({
+            id: fieldDefault.customFieldId,
+            value: fieldDefault.value,
+          } as ShelfAssetCustomFieldValueType);
+        }
+      }
+
       await createAsset({
         id: assetId, // Pass the pre-generated ID
         qrId: qrCodesPerAsset.find((item) => item?.key === asset.key)?.qrId,
@@ -6530,7 +6572,7 @@ export async function createAssetsFromContentImport({
         description: asset.description || "",
         userId,
         kitId,
-        categoryId: asset.category ? categories?.[asset.category] : null,
+        categoryId,
         locationId: asset.location ? locations?.[asset.location] : undefined,
         // Kit rows: custody belongs to the kit (assigned + inherited to members
         // in setKitCustodyAfterAssetImport). Don't also create a direct operator
@@ -6545,7 +6587,7 @@ export async function createAssetsFromContentImport({
                   .map((t) => ({ id: tags[t] })),
               }
             : undefined,
-        valuation: asset.valuation ? +asset.valuation : null,
+        valuation,
         customFieldsValues,
         availableToBook: asset?.bookable !== "no",
         mainImage: mainImage || null,
@@ -8568,6 +8610,8 @@ export type BulkUpdateAssetModelResult = {
   skippedQuantityTracked: number;
   /** Name of the target model, or `null` when the action removed the link. */
   modelName: string | null;
+  /** Of `updated`, how many had empty fields the model's defaults filled. */
+  filled: number;
 };
 
 /**
@@ -8584,10 +8628,10 @@ export type BulkUpdateAssetModelResult = {
  *   link. A mixed selection is normal in a real library, so the batch applies
  *   to the individually-tracked assets and reports the skip. Only a selection
  *   with nothing eligible in it is an error.
- * - The model's `defaultCategoryId` / `defaultValuation` are **not** applied.
- *   Those are create-time conveniences (see `bulkCreateAssetsFromModel`);
- *   retro-applying them here would silently overwrite curated data on assets
- *   that already exist.
+ * - The model's defaults (category, valuation, custom field values) fill
+ *   the EMPTY fields of the assets that join it, in the same transaction, and
+ *   never overwrite a value an asset already has. See
+ *   `applyAssetModelDefaultsToAssets`.
  * - One `ASSET_MODEL_CHANGED` event and one note per asset that actually
  *   changed, matching what the singular `updateAsset` path emits, as
  *   `.claude/rules/bulk-event-parity.md` requires. Both are written inside the
@@ -8620,11 +8664,14 @@ export async function bulkUpdateAssetModel({
   currentSearchParams,
   settings,
   lastAuditDateAccess,
+  locale,
 }: {
   userId: string;
   assetIds: Asset["id"][];
   organizationId: Asset["organizationId"];
   assetModelId: Asset["assetModelId"];
+  /** Request locale, for the valuation in the defaults-fill notes. */
+  locale: string;
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
   /**
@@ -8666,6 +8713,7 @@ export async function bulkUpdateAssetModel({
         moved: 0,
         skippedQuantityTracked: 0,
         modelName: null,
+        filled: 0,
       };
     }
 
@@ -8745,11 +8793,29 @@ export async function bulkUpdateAssetModel({
      */
     let updated = assetsThatChange.length;
 
+    /** Assets whose empty fields the target model's defaults filled. */
+    let filled = 0;
+
     if (assetsThatChange.length > 0) {
       // Resolved once, outside the transaction: it can hit the user table, and
       // every note in this batch is written by the same person.
       const loadUserForNotes = createLoadUserForNotes(userId);
       const userLink = await resolveUserLink({ userId, loadUserForNotes });
+      // Read before the transaction: defaults only fill on the link path.
+      const modelDefaults = newAssetModelId
+        ? await getAssetModelDefaults({
+            assetModelId: newAssetModelId,
+            organizationId,
+          })
+        : null;
+      const currency = modelDefaults
+        ? (
+            await db.organization.findUniqueOrThrow({
+              where: { id: organizationId },
+              select: { currency: true },
+            })
+          ).currency
+        : null;
       const newModel = newAssetModelId
         ? // Keyed on the id, never the name: a model saved with a
           // whitespace-only name trims to "", and branching on that would
@@ -8872,6 +8938,22 @@ export async function bulkUpdateAssetModel({
               tx
             );
           }
+
+          // Joining a model fills the assets' empty fields from its defaults.
+          if (modelDefaults && currency) {
+            ({ assetsFilled: filled } = await applyAssetModelDefaultsToAssets(
+              tx,
+              {
+                organizationId,
+                userId,
+                userLink,
+                model: modelDefaults,
+                assetIds: changing.map((asset) => asset.id),
+                currency,
+                locale,
+              }
+            ));
+          }
         },
         { timeout: 15000 }
       );
@@ -8895,6 +8977,7 @@ export async function bulkUpdateAssetModel({
        */
       skippedQuantityTracked: linked ? skippedQuantityTracked : 0,
       modelName,
+      filled,
     };
   } catch (cause) {
     // why: the eligibility 400 and the cross-org 404 are the two errors the
