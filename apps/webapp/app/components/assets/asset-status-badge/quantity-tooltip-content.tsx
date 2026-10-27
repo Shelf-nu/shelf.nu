@@ -93,7 +93,6 @@ export function QuantityTooltipContent({ data }: { data: QuantityBreakdown }) {
     inCustody,
     inKits,
     reserved,
-    expiredReservedBookings,
     checkedOut,
     bookingAssets,
     assetKits,
@@ -139,18 +138,26 @@ export function QuantityTooltipContent({ data }: { data: QuantityBreakdown }) {
 
   const ongoing: Buckets = makeBuckets();
   const reservedSlices: Buckets = makeBuckets();
+  /**
+   * Reservations whose window has passed. Not a claim on the units (see
+   * `getQuantityData`), so no bullet; counted here, from the rows this card
+   * renders, because on the assets index the rows arrive with the lazy fetch
+   * while the totals come from the index query.
+   */
+  const expiredReservations = new Set<string>();
 
   for (const ba of bookingAssets) {
     const bStatus = ba.booking?.status;
     if (bStatus === "ONGOING" || bStatus === "OVERDUE") pushSlice(ongoing, ba);
-    // An expired reservation is not a claim on the units (see
-    // `getQuantityData`), so it gets no bullet; the count line below names it.
-    else if (
-      bStatus === "RESERVED" &&
-      !isReservationExpired(bStatus, ba.booking?.to)
-    )
-      pushSlice(reservedSlices, ba);
+    else if (bStatus === "RESERVED") {
+      if (isReservationExpired(bStatus, ba.booking?.to)) {
+        expiredReservations.add(ba.booking?.id ?? ba.booking?.name ?? "");
+      } else {
+        pushSlice(reservedSlices, ba);
+      }
+    }
   }
+  const expiredReservedBookings = expiredReservations.size;
 
   const sum = (slices: Slice[]) =>
     slices.reduce((acc, s) => acc + s.quantity, 0);
@@ -345,9 +352,9 @@ export function QuantityTooltipContent({ data }: { data: QuantityBreakdown }) {
         </p>
       )}
 
-      {/* Units held by kits. Already out of `freeNow`, and the one subtraction
-          the card never printed, so the numbers did not add up for an asset
-          that sits in a kit: 10 owned, 3 reserved, 5 free, 2 unaccounted for. */}
+      {/* Units held by kits. Already out of `freeNow`; printed so the numbers
+          add up for an asset that sits in a kit (10 owned, 3 reserved, 2 in
+          kits, 5 free). */}
       {inKits > 0 ? <p className="text-gray-700">{inKits} in kits</p> : null}
     </div>
   );

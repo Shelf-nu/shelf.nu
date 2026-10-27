@@ -164,7 +164,7 @@ export async function action({ request }: ActionFunctionArgs) {
       userId: user.id,
       hints,
       // The phone keeps the stored dates: an expired reservation's first scan
-      // goes out as overdue until the app has the reschedule prompt (see
+      // goes out as overdue, since the app has no reschedule prompt (see
       // `resolveExpiredCheckoutState`).
       intentChoice: CheckoutIntentEnum["without-adjusted-date"],
       // Never guessed: a bundle that declared no method is recorded as null.

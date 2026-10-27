@@ -145,7 +145,6 @@ export function getQuantityData(asset?: QuantityAwareAsset | null) {
    * A RESERVED slice counts only while its window is still open. Once the end
    * date has passed with no check-out, the reservation is dead: it blocks
    * nothing (conflict math is by window) and nobody is coming for the units.
-   * Counting it kept assets reading "3 reserved" for months after the date.
    */
   const isExpiredSlice = (ba: BookingAssetRecord) =>
     isReservationExpired(ba.booking?.status, ba.booking?.to);
@@ -153,17 +152,6 @@ export function getQuantityData(asset?: QuantityAwareAsset | null) {
   const reserved = bookingAssets
     .filter((ba) => ba.booking?.status === "RESERVED" && !isExpiredSlice(ba))
     .reduce((sum, ba) => sum + (ba.quantity ?? 0), 0);
-
-  const expiredSlices = bookingAssets.filter(isExpiredSlice);
-  /** Units on reservations whose window has passed; shown, never counted. */
-  const expiredReserved = expiredSlices.reduce(
-    (sum, ba) => sum + (ba.quantity ?? 0),
-    0
-  );
-  /** Distinct expired reservations, for the card's "N expired" line. */
-  const expiredReservedBookings = new Set(
-    expiredSlices.map((ba) => ba.booking?.id ?? ba.booking?.name)
-  ).size;
 
   // `ba.quantity` for ONGOING/OVERDUE rows is the SERVER-COMPUTED count of
   // units still off the shelf on that booking: what went out minus what came
@@ -228,8 +216,6 @@ export function getQuantityData(asset?: QuantityAwareAsset | null) {
     inCustody,
     inKits,
     reserved,
-    expiredReserved,
-    expiredReservedBookings,
     checkedOut,
     available,
     freeNow,

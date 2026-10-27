@@ -684,6 +684,68 @@ describe("partialCheckoutBooking", () => {
     );
   });
 
+  describe("first scan of an expired reservation", () => {
+    /** The reservation's 8-hour window ended three weeks ago. */
+    const expiredFrom = new Date(Date.now() - 21 * 24 * 60 * 60 * 1000);
+    const expiredTo = new Date(expiredFrom.getTime() + 8 * 60 * 60 * 1000);
+    const expiredReservation = {
+      ...reservedBooking,
+      from: expiredFrom,
+      to: expiredTo,
+      originalFrom: null,
+      originalTo: null,
+    };
+
+    it("refuses the scan that made no choice, and writes nothing", async () => {
+      expect.assertions(3);
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(expiredReservation);
+
+      await expect(
+        partialCheckoutBooking({ ...baseParams, assetIds: ["asset-1"] })
+      ).rejects.toThrow(/reserved period has already ended/);
+
+      expect(db.asset.updateMany).not.toHaveBeenCalled();
+      expect(db.booking.update).not.toHaveBeenCalled();
+    });
+
+    it("lands in OVERDUE with the dates untouched when scanned out as overdue", async () => {
+      expect.assertions(1);
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(expiredReservation);
+
+      await partialCheckoutBooking({
+        ...baseParams,
+        assetIds: ["asset-1"],
+        intentChoice: CheckoutIntentEnum["without-adjusted-date"],
+      });
+
+      expect(db.booking.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { status: BookingStatus.OVERDUE } })
+      );
+    });
+
+    it("refuses a new end date from a batch, and writes nothing", async () => {
+      expect.assertions(2);
+      // why: a batch judges only its own items against the window; the whole
+      // booking's new window is the full check-out's job.
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(expiredReservation);
+
+      await expect(
+        partialCheckoutBooking({
+          ...baseParams,
+          assetIds: ["asset-1"],
+          intentChoice: CheckoutIntentEnum["with-new-end-date"],
+        })
+      ).rejects.toThrow(/Use Check out on the booking page/);
+      expect(db.booking.update).not.toHaveBeenCalled();
+    });
+  });
+
   it("records one BOOKING_PARTIAL_CHECKOUT event per scanned asset", async () => {
     expect.assertions(1);
 

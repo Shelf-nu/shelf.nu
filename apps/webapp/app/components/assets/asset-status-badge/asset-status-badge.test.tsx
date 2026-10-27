@@ -105,8 +105,6 @@ function makeIndexFigures(): QuantityBreakdown {
     inCustody: 2,
     inKits: 0,
     reserved: 2,
-    expiredReserved: 0,
-    expiredReservedBookings: 0,
     checkedOut: 0,
     available: 6,
     freeNow: 6,

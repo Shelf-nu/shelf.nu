@@ -39,10 +39,10 @@ import { isExplicitScanRequired } from "~/utils/permissions/role-access";
  * gets the default: see `recordCheckoutSourceLocations`.
  *
  * For mobile, we always do "without-adjusted-date" to keep things simple.
- * The mobile user just taps "Check Out" and it happens. That choice is sent
- * explicitly: on an expired reservation the service now refuses a check-out
- * that made no choice (see `resolveExpiredCheckoutState`), and the phone has
- * no reschedule prompt yet, so it keeps today's "as overdue" outcome.
+ * The mobile user just taps "Check Out" and it happens. The choice is sent
+ * explicitly because the service refuses a check-out of an expired
+ * reservation that made none (see `resolveExpiredCheckoutState`); the phone
+ * has no reschedule prompt, so an expired reservation goes out as overdue.
  *
  * Refused with a 403 when the workspace requires explicit check-out for the
  * caller's role: they scan or select the assets instead (partial check-out).

@@ -113,7 +113,6 @@ import {
   getActionTextFromTransition,
   getSystemActionText,
   resolveExpiredCheckoutState,
-  parseExpiredCheckoutNewTo,
 } from "./service.server";
 
 // @vitest-environment node
@@ -5092,9 +5091,8 @@ describe("checkoutBooking", () => {
 
     it("refuses a check-out that made no choice, before any read or write", async () => {
       expect.assertions(4);
-      // why: until now this landed the booking in OVERDUE on the click with no
-      // warning. The dialog asks; a caller that skipped it is refused. The
-      // route passes the booking's own dates, so the gate answers before the
+      // why: the dialog asks; a caller that skipped it is refused. The route
+      // passes the booking's own dates, so the gate answers before the
       // booking is even loaded. No queued read here: a queued value the
       // service never consumes would leak into the next test.
       await expect(
@@ -5110,6 +5108,15 @@ describe("checkoutBooking", () => {
       expect(db.booking.update).not.toHaveBeenCalled();
     });
 
+    /** The row lock reads the status the answer was given for. */
+    function lockReadsReserved() {
+      // why: the shared mock defaults the `SELECT … FOR UPDATE` to ONGOING;
+      // an expired-reservation answer is only honoured for a RESERVED row.
+      (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+        { status: BookingStatus.RESERVED },
+      ]);
+    }
+
     it("lands in OVERDUE with the dates untouched when checked out as overdue", async () => {
       expect.assertions(3);
       const booking = expiredBooking();
@@ -5118,6 +5125,7 @@ describe("checkoutBooking", () => {
         .mockResolvedValueOnce({ ...booking, status: BookingStatus.OVERDUE });
       //@ts-expect-error missing vitest type
       db.booking.update.mockResolvedValue({ id: "booking-1" });
+      lockReadsReserved();
 
       await checkoutBooking({
         ...mockCheckoutParams,
@@ -5133,35 +5141,85 @@ describe("checkoutBooking", () => {
     });
 
     it("moves the window to start now and lands ONGOING when checked out with a new end date", async () => {
-      expect.assertions(5);
+      expect.assertions(6);
       const booking = expiredBooking();
       (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
         .mockResolvedValueOnce(booking)
         .mockResolvedValueOnce({ ...booking, status: BookingStatus.ONGOING });
       //@ts-expect-error missing vitest type
       db.booking.update.mockResolvedValue({ id: "booking-1" });
+      lockReadsReserved();
       const newEndDate = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
 
       const before = Date.now();
       await checkoutBooking({
         ...mockCheckoutParams,
+        userId: "user-1",
         from: expiredFrom,
         to: expiredTo,
-        intentChoice: CheckoutIntentEnum["with-adjusted-date"],
+        intentChoice: CheckoutIntentEnum["with-new-end-date"],
         newEndDate,
       });
 
       const write = statusWrite();
       expect(write?.data?.status).toBe(BookingStatus.ONGOING);
-      // `from` is now, minute-truncated in the org's timezone, as the
-      // early-check-out adjustment writes it.
+      // `from` is now, minute-aligned.
       expect(
         Math.abs((write?.data?.from as Date).getTime() - before)
       ).toBeLessThan(5 * 60 * 1000);
       expect(write?.data?.to).toEqual(newEndDate);
-      // The plan the custodian agreed to is kept for compliance.
-      expect(write?.data?.originalFrom).toEqual(expiredFrom);
-      expect(write?.data?.originalTo).toEqual(expiredTo);
+      // The new window is the plan: compliance measures against it.
+      expect(write?.data?.originalFrom).toEqual(write?.data?.from);
+      expect(write?.data?.originalTo).toEqual(newEndDate);
+      // The replaced period goes on the activity trail.
+      expect(bookingNoteService.createSystemBookingNote).toHaveBeenCalledWith(
+        expect.objectContaining({
+          content: expect.stringMatching(
+            /checked out an expired reservation with a new period/
+          ),
+        })
+      );
+    });
+
+    it("refuses the early-check-out value on an expired reservation", async () => {
+      expect.assertions(2);
+      // why: the same value means "move the start to now" on an early
+      // check-out; on an expired one it would silently become a reschedule
+      // with a server-chosen end. A client has to say which it means.
+      await expect(
+        checkoutBooking({
+          ...mockCheckoutParams,
+          from: expiredFrom,
+          to: expiredTo,
+          intentChoice: CheckoutIntentEnum["with-adjusted-date"],
+        })
+      ).rejects.toThrow(/reserved period has already ended/);
+      expect(db.booking.update).not.toHaveBeenCalled();
+    });
+
+    it("withdraws the answer when the row is no longer RESERVED under the lock", async () => {
+      expect.assertions(2);
+      // why: another operator's click, or a retry after a success, lands on
+      // an ONGOING or OVERDUE row; the answer was given for a reservation.
+      // One queued read only: the transaction refuses before the hydrating
+      // read, and a queued value nothing consumes would leak into the next
+      // test.
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValueOnce(expiredBooking());
+      (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+        { status: BookingStatus.OVERDUE },
+      ]);
+
+      await expect(
+        checkoutBooking({
+          ...mockCheckoutParams,
+          from: expiredFrom,
+          to: expiredTo,
+          intentChoice: CheckoutIntentEnum["without-adjusted-date"],
+        })
+      ).rejects.toThrow(/changed while you were checking it out/);
+      expect(db.asset.updateMany).not.toHaveBeenCalled();
     });
   });
 
@@ -22396,31 +22454,60 @@ describe("booking emails name who acted", () => {
 });
 
 describe("resolveExpiredCheckoutState", () => {
-  const hints = { timeZone: "Europe/Amsterdam", locale: "en-US" };
   const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
   const twoDaysAgo = new Date(Date.now() - 48 * 60 * 60 * 1000);
   const inADay = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  const notExpired = { isExpired: false, rescheduledWindow: null };
 
   it("does nothing while the end date is still ahead", () => {
     // why: a late pickup (start passed, end ahead) is a normal check-out.
-    expect(
-      resolveExpiredCheckoutState({ from: dayAgo, to: inADay, hints })
-    ).toEqual({ isExpired: false, rescheduledWindow: null });
+    expect(resolveExpiredCheckoutState({ from: dayAgo, to: inADay })).toEqual(
+      notExpired
+    );
+  });
+
+  it("does nothing for a booking that is not RESERVED, whatever its dates", () => {
+    // why: an OVERDUE or ONGOING booking past its end is late, its own state;
+    // a DRAFT check-out stays what it is.
+    for (const status of [
+      BookingStatus.DRAFT,
+      BookingStatus.ONGOING,
+      BookingStatus.OVERDUE,
+    ]) {
+      expect(
+        resolveExpiredCheckoutState({
+          status,
+          from: twoDaysAgo,
+          to: dayAgo,
+          intentChoice: CheckoutIntentEnum["with-new-end-date"],
+        })
+      ).toEqual(notExpired);
+    }
   });
 
   it("refuses an expired reservation that made no choice", () => {
     expect(() =>
-      resolveExpiredCheckoutState({ from: twoDaysAgo, to: dayAgo, hints })
+      resolveExpiredCheckoutState({ from: twoDaysAgo, to: dayAgo })
+    ).toThrow(/reserved period has already ended/);
+  });
+
+  it("refuses the early-check-out value, which means something else", () => {
+    expect(() =>
+      resolveExpiredCheckoutState({
+        from: twoDaysAgo,
+        to: dayAgo,
+        intentChoice: CheckoutIntentEnum["with-adjusted-date"],
+      })
     ).toThrow(/reserved period has already ended/);
   });
 
   it("confirms the overdue outcome on an explicit as-overdue", () => {
     expect(
       resolveExpiredCheckoutState({
+        status: BookingStatus.RESERVED,
         from: twoDaysAgo,
         to: dayAgo,
         intentChoice: CheckoutIntentEnum["without-adjusted-date"],
-        hints,
       })
     ).toEqual({ isExpired: true, rescheduledWindow: null });
   });
@@ -22429,8 +22516,7 @@ describe("resolveExpiredCheckoutState", () => {
     const { isExpired, rescheduledWindow } = resolveExpiredCheckoutState({
       from: twoDaysAgo,
       to: dayAgo,
-      intentChoice: CheckoutIntentEnum["with-adjusted-date"],
-      hints,
+      intentChoice: CheckoutIntentEnum["with-new-end-date"],
     });
 
     expect(isExpired).toBe(false);
@@ -22447,9 +22533,8 @@ describe("resolveExpiredCheckoutState", () => {
     const { rescheduledWindow } = resolveExpiredCheckoutState({
       from: twoDaysAgo,
       to: dayAgo,
-      intentChoice: CheckoutIntentEnum["with-adjusted-date"],
+      intentChoice: CheckoutIntentEnum["with-new-end-date"],
       newEndDate: inADay,
-      hints,
     });
 
     expect(rescheduledWindow?.to).toEqual(inADay);
@@ -22460,32 +22545,22 @@ describe("resolveExpiredCheckoutState", () => {
       resolveExpiredCheckoutState({
         from: twoDaysAgo,
         to: dayAgo,
-        intentChoice: CheckoutIntentEnum["with-adjusted-date"],
+        intentChoice: CheckoutIntentEnum["with-new-end-date"],
         newEndDate: dayAgo,
-        hints,
       })
     ).toThrow(/after the check-out time/);
   });
-});
 
-describe("parseExpiredCheckoutNewTo", () => {
-  const hints = { timeZone: "Europe/Amsterdam", locale: "en-US" };
-
-  it("reads the dialog's wall-clock string in the viewer's timezone", () => {
-    // 10:30 in Amsterdam on 2 Jan 2030 (CET, UTC+1) is 09:30 UTC.
-    expect(parseExpiredCheckoutNewTo("2030-01-02T10:30", hints)).toEqual(
-      new Date("2030-01-02T09:30:00.000Z")
-    );
-  });
-
-  it("is null when nothing was posted", () => {
-    expect(parseExpiredCheckoutNewTo(undefined, hints)).toBeNull();
-    expect(parseExpiredCheckoutNewTo("", hints)).toBeNull();
-  });
-
-  it("refuses a string that is not a date", () => {
-    expect(() => parseExpiredCheckoutNewTo("soon", hints)).toThrow(
-      /not a valid date/
-    );
+  it("refuses a reschedule on a path that cannot commit one", () => {
+    // why: a scan or a selected batch judges only its own items against the
+    // window; the whole booking's new window is the full check-out's job.
+    expect(() =>
+      resolveExpiredCheckoutState({
+        from: twoDaysAgo,
+        to: dayAgo,
+        intentChoice: CheckoutIntentEnum["with-new-end-date"],
+        allowReschedule: false,
+      })
+    ).toThrow(/Use Check out on the booking page/);
   });
 });

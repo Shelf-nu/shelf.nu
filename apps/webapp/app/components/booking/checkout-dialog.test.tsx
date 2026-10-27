@@ -23,6 +23,22 @@ vi.mock("react-router", async () => {
   };
 });
 
+// why: the expired prompt proposes its end date in the user's resolved
+// timezone, read from the root loader data this test does not mount.
+vi.mock("~/hooks/use-date-formatter", () => ({
+  useDateFormatter: () => ({
+    prefs: {
+      dateFormat: "MM_DD_YYYY",
+      timeFormat: "H12",
+      weekStartsOn: 0,
+      timeZone: "UTC",
+    },
+    formatDate: (value: string | Date) => String(value),
+    formatTime: (value: string | Date) => String(value),
+    formatDateTime: (value: string | Date) => String(value),
+  }),
+}));
+
 // why: `DateS` reads the user's format preferences from the root loader data,
 // which this component test does not mount. The dates are not under test.
 vi.mock("~/components/shared/date", () => ({
@@ -370,7 +386,10 @@ describe("CheckoutDialog From location question", () => {
 
   describe("expired reservation", () => {
     it("asks for a new end date or an explicit overdue instead of a plain confirm", () => {
-      const { submissions } = renderInForm({ booking: expiredBooking });
+      const { submissions } = renderInForm({
+        booking: expiredBooking,
+        allowNewEndDate: true,
+      });
 
       fireEvent.click(screen.getByRole("button", { name: "Check Out" }));
 
@@ -390,22 +409,28 @@ describe("CheckoutDialog From location question", () => {
     });
 
     it("proposes now plus the planned length as the new end date", () => {
-      renderInForm({ booking: expiredBooking });
+      renderInForm({ booking: expiredBooking, allowNewEndDate: true });
       fireEvent.click(screen.getByRole("button", { name: "Check Out" }));
 
       const input = screen.getByLabelText("New end date") as HTMLInputElement;
       expect(input.type).toBe("datetime-local");
       expect(input.name).toBe("expiredCheckoutNewTo");
       expect(input.getAttribute("form")).toBe("edit-booking-form");
-      // Planned length is 8 hours; the proposal is minute-aligned, so allow
-      // the minute the test straddles.
-      const proposed = new Date(input.value).getTime();
+      expect(input.required).toBe(true);
+      expect(input.min).not.toBe("");
+      // Planned length is 8 hours; the proposal is minute-aligned in the
+      // mocked UTC zone, so read it as UTC and allow the minute the test
+      // straddles.
+      const proposed = new Date(`${input.value}:00.000Z`).getTime();
       const expected = Date.now() + 8 * 60 * 60 * 1000;
       expect(Math.abs(proposed - expected)).toBeLessThan(2 * 60 * 1000);
     });
 
     it("submits the new-end-date choice with the picked date", () => {
-      const { submissions } = renderInForm({ booking: expiredBooking });
+      const { submissions } = renderInForm({
+        booking: expiredBooking,
+        allowNewEndDate: true,
+      });
       fireEvent.click(screen.getByRole("button", { name: "Check Out" }));
 
       const input = screen.getByLabelText("New end date") as HTMLInputElement;
@@ -418,7 +443,7 @@ describe("CheckoutDialog From location question", () => {
       expect(submissions[0]).toContainEqual(["intent", "checkOut"]);
       expect(submissions[0]).toContainEqual([
         "checkoutIntentChoice",
-        "with-adjusted-date",
+        "with-new-end-date",
       ]);
       expect(submissions[0]).toContainEqual([
         "expiredCheckoutNewTo",
@@ -427,7 +452,10 @@ describe("CheckoutDialog From location question", () => {
     });
 
     it("submits an explicit as-overdue choice", () => {
-      const { submissions } = renderInForm({ booking: expiredBooking });
+      const { submissions } = renderInForm({
+        booking: expiredBooking,
+        allowNewEndDate: true,
+      });
       fireEvent.click(screen.getByRole("button", { name: "Check Out" }));
       fireEvent.click(
         screen.getByRole("button", { name: "Check out as overdue" })
@@ -438,6 +466,24 @@ describe("CheckoutDialog From location question", () => {
         "checkoutIntentChoice",
         "without-adjusted-date",
       ]);
+    });
+
+    it("offers only as-overdue, and points at the booking page, where a batch cannot reschedule", () => {
+      // why: a scan or a selected batch judges only its own items; the
+      // whole booking's new window is the header's Check out.
+      renderInForm({ booking: expiredBooking, intent: "partial-checkout" });
+      fireEvent.click(screen.getByRole("button", { name: "Check Out" }));
+
+      expect(
+        screen.getByText(/use Check out on the booking page/)
+      ).toBeInTheDocument();
+      expect(screen.queryByLabelText("New end date")).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Check out with new end date" })
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Check out as overdue" })
+      ).toBeInTheDocument();
     });
 
     it("does not prompt once the booking is underway", () => {

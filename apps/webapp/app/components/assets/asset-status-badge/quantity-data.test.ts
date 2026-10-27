@@ -192,28 +192,9 @@ describe("quantity pool status label", () => {
       );
 
       expect(data?.reserved).toBe(2);
-      expect(data?.expiredReserved).toBe(3);
-      expect(data?.expiredReservedBookings).toBe(1);
       expect(data?.available).toBe(8);
-    });
-
-    it("counts one expired reservation once across its slices", () => {
-      const data = getQuantityData(
-        asset({
-          quantity: 10,
-          bookingAssets: [
-            reservedSlice(3, "dead", { from: twoDaysAgo, to: dayAgo }),
-            {
-              ...reservedSlice(1, "dead", { from: twoDaysAgo, to: dayAgo }),
-              assetKitId: "ak1",
-            },
-            reservedSlice(2, "live", { from: inADay, to: inTwoDays }),
-          ],
-        })
-      );
-
-      expect(data?.expiredReserved).toBe(4);
-      expect(data?.expiredReservedBookings).toBe(1);
+      // The rows stay on the breakdown, so the card can still name them.
+      expect(data?.bookingAssets).toHaveLength(2);
     });
 
     it("falls back to the plain badge when only expired reservations remain", () => {
@@ -243,7 +224,6 @@ describe("quantity pool status label", () => {
       );
 
       expect(data?.reserved).toBe(3);
-      expect(data?.expiredReserved).toBe(0);
     });
 
     it("keeps counting a RESERVED slice that carries no end date", () => {
@@ -254,7 +234,6 @@ describe("quantity pool status label", () => {
       );
 
       expect(data?.reserved).toBe(3);
-      expect(data?.expiredReserved).toBe(0);
     });
   });
 });

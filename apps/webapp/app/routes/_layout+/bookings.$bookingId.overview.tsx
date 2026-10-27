@@ -5,13 +5,14 @@ import {
   TagUseFor,
   type Prisma,
 } from "@prisma/client";
+import { DateTime } from "luxon";
+import { Outlet, useMatches, data, redirect } from "react-router";
 import type {
   ActionFunctionArgs,
   LinksFunction,
   LoaderFunctionArgs,
   MetaFunction,
 } from "react-router";
-import { Outlet, useMatches, data, redirect } from "react-router";
 import { z } from "zod";
 import { BulkRemoveAssetsAndKitSchema } from "~/components/booking/bulk-remove-asset-and-kit-dialog";
 import { CheckinIntentEnum } from "~/components/booking/checkin-dialog";
@@ -71,7 +72,6 @@ import {
   revertBookingToDraft,
   updateBasicBooking,
   updateBookingNotificationRecipients,
-  parseExpiredCheckoutNewTo,
 } from "~/modules/booking/service.server";
 import { shapeBookingAssets } from "~/modules/booking/shape-booking-assets";
 import {
@@ -111,6 +111,7 @@ import { canAssignModelUnits } from "~/utils/booking-model-requests";
 import { calculateTotalValueOfAssets } from "~/utils/bookings";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint } from "~/utils/client-hints";
+import { DATE_TIME_FORMAT } from "~/utils/constants";
 import {
   setCookie,
   updateCookieWithPerPage,
@@ -1514,8 +1515,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           .optional()
           .transform((val) => (val === "yes" ? true : false)),
         checkoutIntentChoice: z.nativeEnum(CheckoutIntentEnum).optional(),
-        // The end date picked in the expired-reservation prompt; see
-        // `parseExpiredCheckoutNewTo`.
+        // The end date picked in the expired-reservation prompt, validated
+        // in the `checkOut` case with the extend schema.
         expiredCheckoutNewTo: z.string().optional(),
         checkinIntentChoice: z.nativeEnum(CheckinIntentEnum).optional(),
       }),
@@ -1841,15 +1842,42 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         assertQuickCheckoutAllowed({ access, bookingSettings });
 
         const checkoutHints = getClientHint(request);
+
+        /**
+         * The end date picked for an expired reservation is a new booking
+         * window, so it passes the rules an extension passes: read in the
+         * acting user's resolved timezone, inside working hours, within the
+         * workspace's maximum length measured from now (the new start), with
+         * the caller's time-limit bypass honoured. See
+         * `resolveExpiredCheckoutState`.
+         */
+        let newEndDate: Date | null = null;
+        if (checkoutIntentChoice === CheckoutIntentEnum["with-new-end-date"]) {
+          const prefs = await resolveUserFormatPrefsById(userId, checkoutHints);
+          const parsed = parseData(
+            {
+              startDate: DateTime.now()
+                .setZone(prefs.timeZone)
+                .toFormat(DATE_TIME_FORMAT),
+              endDate: expiredCheckoutNewTo ?? "",
+            },
+            ExtendBookingSchema({
+              workingHours,
+              prefs,
+              bookingSettings,
+              bypassTimeLimits: access.policy.bookings.bypassTimeLimits,
+            }),
+            { additionalData: { userId, organizationId } }
+          );
+          newEndDate = parsed.endDate;
+        }
+
         const booking = await checkoutBooking({
           id,
           organizationId,
           hints: checkoutHints,
           intentChoice: checkoutIntentChoice,
-          newEndDate: parseExpiredCheckoutNewTo(
-            expiredCheckoutNewTo,
-            checkoutHints
-          ),
+          newEndDate,
           from: basicBookingInfo.from,
           to: basicBookingInfo.to,
           userId: user.id,

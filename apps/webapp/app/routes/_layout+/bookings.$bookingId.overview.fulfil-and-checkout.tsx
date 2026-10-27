@@ -55,7 +55,6 @@ import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
 import { parseSourceLocationsFromFormData } from "~/modules/booking/checkout-source-location";
 import { getCheckoutSourceQuestions } from "~/modules/booking/checkout-source-location.server";
 import { fulfilAndCheckOut } from "~/modules/booking/fulfil-and-checkout.server";
-import { parseExpiredCheckoutNewTo } from "~/modules/booking/service.server";
 import { getBooking } from "~/modules/booking/service.server";
 import { deriveBookingScanSession } from "~/modules/booking-model-request/scan-session.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
@@ -107,9 +106,6 @@ export const fulfilAndCheckoutSchema = z.object({
   assetIds: z.array(z.string()).default([]),
   kitIds: z.array(z.string()).optional().default([]),
   checkoutIntentChoice: z.nativeEnum(CheckoutIntentEnum).optional(),
-  // The end date picked in the expired-reservation prompt; see
-  // `parseExpiredCheckoutNewTo`.
-  expiredCheckoutNewTo: z.string().optional(),
 });
 
 /**
@@ -289,8 +285,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const formData = await request.formData();
 
-    const { assetIds, kitIds, checkoutIntentChoice, expiredCheckoutNewTo } =
-      parseData(formData, fulfilAndCheckoutSchema);
+    const { assetIds, kitIds, checkoutIntentChoice } = parseData(
+      formData,
+      fulfilAndCheckoutSchema
+    );
     const hints = getClientHint(request);
 
     /**
@@ -338,7 +336,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       assetIds,
       kitIds,
       checkoutIntentChoice,
-      newEndDate: parseExpiredCheckoutNewTo(expiredCheckoutNewTo, hints),
       hints,
       seesAllBookings: access.bookings.seeAll,
       from: basicBookingInfo.from,

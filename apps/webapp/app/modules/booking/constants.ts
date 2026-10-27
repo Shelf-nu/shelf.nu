@@ -4,19 +4,6 @@ import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
 import { USER_NAME_SELECT } from "../user/fields";
 
 /**
- * Booking statuses an asset or kit can still be added to.
- *
- * DRAFT/RESERVED are not yet started; ONGOING/OVERDUE are active — items added
- * to an active booking stay AVAILABLE until purposefully checked out
- * (progressive checkout).
- *
- * This single list has to drive all three layers of the "Add to existing
- * booking" dialogs, or they disagree and rows vanish:
- *   1. the loader that seeds the picker (`loadBookingsData`),
- *   2. the `/api/model-filters` search the picker fires once you type,
- *   3. the client-side `renderItem` guard in the dialog itself.
- */
-/**
  * The bookings list's "Expired" status option: RESERVED bookings whose end
  * date has passed with no check-out. A view over RESERVED, not a stored
  * status, so it lives beside the enum rather than in it. `getParamsValues`
@@ -50,6 +37,19 @@ export function bookingStatusFilterWhereParams(
   return { statuses: [status] };
 }
 
+/**
+ * Booking statuses an asset or kit can still be added to.
+ *
+ * DRAFT/RESERVED are not yet started; ONGOING/OVERDUE are active — items added
+ * to an active booking stay AVAILABLE until purposefully checked out
+ * (progressive checkout).
+ *
+ * This single list has to drive all three layers of the "Add to existing
+ * booking" dialogs, or they disagree and rows vanish:
+ *   1. the loader that seeds the picker (`loadBookingsData`),
+ *   2. the `/api/model-filters` search the picker fires once you type,
+ *   3. the client-side `renderItem` guard in the dialog itself.
+ */
 export const ADDABLE_BOOKING_STATUSES: BookingStatus[] = [
   BookingStatus.DRAFT,
   BookingStatus.RESERVED,

@@ -60,7 +60,7 @@ import { isExplicitScanRequired } from "~/utils/permissions/role-access";
  * Like the plain checkout endpoint, this is always a "without-adjusted-date"
  * checkout, sent explicitly: an early checkout keeps the booking's original
  * `from`, and an expired reservation goes out as overdue, since the phone has
- * no reschedule prompt yet (see `resolveExpiredCheckoutState`).
+ * no reschedule prompt (see `resolveExpiredCheckoutState`).
  *
  * @see {@link file://../../../modules/booking/fulfil-and-checkout.server.ts} — `fulfilAndCheckOut`
  * @see {@link file://./bookings.checkout.ts} — the plain (no model requests) checkout

@@ -79,6 +79,8 @@ type CheckoutDropdownProps = {
    * with a "From location" select per pool; see `CheckoutDialog`.
    */
   sourceQuestions?: CheckoutSourceQuestion[];
+  /** See `CheckoutDialog`: the header's full check-out may reschedule. */
+  allowNewEndDate?: boolean;
 };
 
 /**
@@ -103,6 +105,7 @@ export default function CheckoutDropdown({
   canScanCheckOut,
   requireExplicitCheckout,
   sourceQuestions,
+  allowNewEndDate = false,
 }: CheckoutDropdownProps) {
   const {
     ref: dropdownRef,
@@ -209,6 +212,7 @@ export default function CheckoutDropdown({
         label={quickCheckoutLabel}
         suppressEarlyCheckoutPrompt={canCheckOutRemaining}
         sourceQuestions={sourceQuestions}
+        allowNewEndDate={allowNewEndDate && canFullCheckOut}
       />
     );
   }
@@ -286,6 +290,7 @@ export default function CheckoutDropdown({
                 variant="dropdown"
                 suppressEarlyCheckoutPrompt={canCheckOutRemaining}
                 sourceQuestions={sourceQuestions}
+                allowNewEndDate={allowNewEndDate && canFullCheckOut}
               />
             </DropdownMenuItem>
             <DropdownMenuItem className="py-1 lg:p-0">

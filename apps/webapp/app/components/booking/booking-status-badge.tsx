@@ -42,13 +42,15 @@ export function BookingStatusBadge({
    * reserved and the user is the custodian of the booking.
    * Shown to members whose reservations are requests (they cannot check out).
    */
+  const isExpired = isReservationExpired(status, to);
   const shouldShowExtraInfo =
     reservationIsRequest &&
     status === BookingStatus.RESERVED &&
+    // A dead request is not under review any more.
+    !isExpired &&
     custodianUserId &&
     custodianUserId === user?.id;
 
-  const isExpired = isReservationExpired(status, to);
   const colors = isExpired ? BADGE_COLORS.gray : bookingStatusColorMap[status];
   const label = isExpired ? "EXPIRED" : status;
   return (

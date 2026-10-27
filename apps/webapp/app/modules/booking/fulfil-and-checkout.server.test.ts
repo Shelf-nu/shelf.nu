@@ -64,6 +64,13 @@ vi.mock("~/modules/booking/service.server", () => ({
   // checkout sessions and is covered where that math lives; this module only
   // has to ask for it per kit-driven row and pass the answer through.
   computeBookingAssetSliceRemainingToCheckOut: vi.fn(),
+  // why: the expired-reservation gate is a pure function with its own suite
+  // in the service tests; here it must only let the fixtures through, which
+  // all carry a future window or no dates.
+  resolveExpiredCheckoutState: vi.fn(() => ({
+    isExpired: false,
+    rescheduledWindow: null,
+  })),
 }));
 
 // why: the claim step has its own suite next to the helper it wraps; here only

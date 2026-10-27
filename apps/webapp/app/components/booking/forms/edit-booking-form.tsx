@@ -629,6 +629,9 @@ function EditBookingFormInner({
                       to: endDateAsDate,
                     }}
                     disabled={disabled}
+                    // The full check-out from the header is the one path
+                    // that can give an expired reservation a new window.
+                    allowNewEndDate
                     canFullCheckOut={!!bookingStatus?.isReserved}
                     canCheckOutRemaining={
                       !!(

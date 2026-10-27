@@ -243,10 +243,9 @@ export function shouldPromptEarlyCheckout(
  * A derived state, not a stored status. Nothing in the lifecycle moves a
  * RESERVED booking on its own: the overdue job only touches ONGOING bookings,
  * and the dates freeze at reserve time. So a reservation nobody picked up stays
- * RESERVED forever, and 80 percent of the RESERVED rows on prod are exactly
- * that. Every surface that treats "reserved" as "spoken for" (the asset pill,
- * the quantity card, the bookings list chip) reads this first, so a dead
- * reservation stops counting against stock.
+ * RESERVED forever. Every surface that treats "reserved" as "spoken for" (the
+ * asset pill, the quantity card, the bookings list chip) reads this first, so
+ * a dead reservation does not count against stock.
  *
  * The server-side twin is `isBookingExpired` in `utils.server.ts`; both are a
  * strict `to < now`. The start date plays no part: a reservation past its start
