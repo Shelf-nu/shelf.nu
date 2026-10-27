@@ -94,7 +94,10 @@ import {
   updateCookieWithPerPage,
   userPrefs,
 } from "~/utils/cookies.server";
-import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
+import {
+  redactCustodianForViewer,
+  type RowWithCustody,
+} from "~/utils/custody-visibility.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -250,10 +253,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // Rows carry each custodian's name and email whether or not the UI draws
     // them, so a viewer without custody visibility could read them out of the
     // route's data payload. Redact here, not in the component.
-    const items = redactCustodianForViewer(assets, {
-      canSeeAllCustody: access.custody.seeAll,
-      userId,
-    }).map((asset) => ({
+    // `getLocation` types its page as plain assets, but the query selects each
+    // row's `custody` (see `ListAssetContent`'s item type), which is what the
+    // redaction reads.
+    const items = redactCustodianForViewer(
+      assets as Array<(typeof assets)[number] & RowWithCustody>,
+      {
+        canSeeAllCustody: access.custody.seeAll,
+        userId,
+      }
+    ).map((asset) => ({
       ...asset,
       inCustodyHere: custodyFromHere[asset.id] ?? 0,
       onBookingFromHere: onBookingByAssetId.get(asset.id) ?? 0,
