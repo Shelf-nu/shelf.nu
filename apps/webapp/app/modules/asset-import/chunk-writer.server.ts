@@ -229,6 +229,8 @@ function toAssetCreateManyInput(
   prepared: PreparedRow,
   ctx: {
     sequentialId: string;
+    /** Distinct per row, see {@link getCreatedAtStamps}. */
+    createdAt: Date;
     userId: string;
     organizationId: string;
     image: ImportedImage | undefined;
@@ -240,6 +242,7 @@ function toAssetCreateManyInput(
     title: row.title,
     description: row.description || "",
     sequentialId: ctx.sequentialId,
+    createdAt: ctx.createdAt,
     userId: ctx.userId,
     organizationId: ctx.organizationId,
     categoryId: prepared.categoryId,
@@ -259,6 +262,36 @@ function toAssetCreateManyInput(
       ? { status: AssetStatus.IN_CUSTODY }
       : {}),
   };
+}
+
+/**
+ * One `createdAt` per row of a chunk, one millisecond apart in file order.
+ *
+ * The asset index sorts by `createdAt`, and a single `createMany` would give
+ * every row of the chunk the same `now()`, leaving the `id` tiebreaker (random)
+ * to decide their order. Distinct stamps keep the rows in file order, so they
+ * line up with their sequential ids. The first stamp is after the newest asset
+ * of the workspace, which keeps each chunk after the one before it however
+ * fast the chunks run.
+ *
+ * @param organizationId - Workspace the chunk is written to
+ * @param count - Number of rows in the chunk
+ * @param tx - The chunk's transaction
+ * @returns `count` ascending dates
+ */
+async function getCreatedAtStamps(
+  organizationId: string,
+  count: number,
+  tx: ChunkTxClient
+): Promise<Date[]> {
+  const { _max } = await tx.asset.aggregate({
+    // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: archived assets keep their createdAt and still sort in the archived view, so the newest stamp counts across both sides
+    where: { organizationId },
+    _max: { createdAt: true },
+  });
+  const newest = _max.createdAt?.getTime() ?? 0;
+  const start = Math.max(Date.now(), newest + 1);
+  return Array.from({ length: count }, (_, index) => new Date(start + index));
 }
 
 /**
@@ -658,10 +691,17 @@ export async function writeImportChunk({
           tx
         );
 
+        const createdAts = await getCreatedAtStamps(
+          organizationId,
+          rows.length,
+          tx
+        );
+
         await tx.asset.createMany({
           data: prepared.map((p, index) =>
             toAssetCreateManyInput(p, {
               sequentialId: sequentialIds[index],
+              createdAt: createdAts[index],
               userId,
               organizationId,
               image: imagePaths[p.row.assetId],

@@ -24,8 +24,10 @@ import {
   fulfilModelRequestsForAssets,
   findModelReservationsShortAfterArchive,
   findModelRequestShortfallsForBooking,
+  getAssetModelAvailabilities,
   getAssetModelAvailability,
   getBookingModelTabData,
+  lockAssetModelsForReservation,
   materializeModelRequestForAsset,
   MAX_MODELS_PER_RESERVATION_BATCH,
   removeBookingModelRequest,
@@ -54,7 +56,9 @@ vitest.mock("~/database/db.server", () => ({
           : Promise.all(callbackOrArray)
       ),
     asset: {
-      count: vitest.fn().mockResolvedValue(0),
+      // why: the pool's unit total, one batched `groupBy` across every model a
+      // call measures. Tests stage it per requested model with `stageTotal`.
+      groupBy: vitest.fn().mockResolvedValue([]),
       // why: `readOwnNamedUnits` reads the units a booking already holds of a
       // model, and whether a custodian has any of them, through `asset` rather
       // than the pivot — one row per unit, custody included.
@@ -73,10 +77,9 @@ vitest.mock("~/database/db.server", () => ({
       findUnique: vitest.fn().mockResolvedValue(null),
     },
     bookingAsset: {
-      aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
-      // why: `assertModelUnitsNotReservedElsewhere` reads the standalone units
-      // the booking already holds of a model, which count on the claiming
-      // side. Default to none; the guard's tests stage held rows per case.
+      // why: serves the pool's concrete-reservation rows (staged per model
+      // with `stageReservedConcrete`) and the claim path's row reads. Default
+      // to none.
       findMany: vitest.fn().mockResolvedValue([]),
       // why: `claimUnstampedBookingRows` writes the provenance onto rows that
       // already exist, which is the one path that stamps without inserting.
@@ -92,7 +95,9 @@ vitest.mock("~/database/db.server", () => ({
       // reserves itself, read through this query. Default to none so the
       // guard measures every model unless a test stages an own request.
       findMany: vitest.fn().mockResolvedValue([]),
-      aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
+      // why: the pool's still-outstanding reservations of other bookings, one
+      // batched `groupBy` across models. Staged with `stageReservedViaRequest`.
+      groupBy: vitest.fn().mockResolvedValue([]),
       upsert: vitest.fn().mockResolvedValue({
         // Equal timestamps = the CREATE branch ran (Prisma stamps both
         // identically on create). Update-path tests override `updatedAt`
@@ -115,7 +120,9 @@ vitest.mock("~/database/db.server", () => ({
       create: vitest.fn().mockResolvedValue({}),
     },
     custody: {
-      aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
+      // why: the pool's custody rows, read across models in one statement.
+      // Staged per model with `stageInCustody`.
+      findMany: vitest.fn().mockResolvedValue([]),
     },
     // why: `recordEvent` writes through the same client it is handed, so the
     // in-tx event writes land here (the `$transaction` mock routes `tx` back
@@ -255,6 +262,139 @@ function lockOn(table: string) {
   );
 }
 
+/**
+ * The `AssetModel` ids locked this test, in lock order. A batched lock passes
+ * its ids as one `Prisma.join` fragment, so that fragment is expanded; a
+ * single-model lock passes the id as its first value.
+ */
+function lockedAssetModelIds(): unknown[] {
+  return rawStatements()
+    .filter(
+      (statement) =>
+        statement.sql.includes('"AssetModel"') &&
+        statement.sql.includes("FOR UPDATE")
+    )
+    .flatMap((statement) => joinedValues(statement.values[0]));
+}
+
+/** The values of a `Prisma.join` fragment, or the value itself. */
+function joinedValues(value: unknown): unknown[] {
+  return value !== null &&
+    typeof value === "object" &&
+    Array.isArray((value as { values?: unknown }).values)
+    ? (value as { values: unknown[] }).values
+    : [value];
+}
+
+/**
+ * Answers an `AssetModel` lock with one row per id it asks for, so the
+ * org-scoped lock finds every model it is asked for, batched or single.
+ *
+ * why: the lock is raw SQL; answering with the ids it was handed keeps a
+ * multi-model lock from reading as "a model is missing" (404).
+ */
+function stageEveryModelLockable() {
+  (db.$queryRaw as unknown as Mock).mockImplementation(
+    (_strings: TemplateStringsArray, ...values: unknown[]) =>
+      Promise.resolve(joinedValues(values[0]).map((id) => ({ id })))
+  );
+}
+
+/** The model ids a batched pool read asks about, read off its `where`. */
+function modelIdsAskedFor(args: unknown): string[] {
+  const where = (
+    args as
+      | {
+          where?: {
+            assetModelId?: unknown;
+            asset?: { assetModelId?: unknown };
+          };
+        }
+      | undefined
+  )?.where;
+  const filter = where?.assetModelId ?? where?.asset?.assetModelId;
+  if (typeof filter === "string") return [filter];
+  return (filter as { in?: string[] } | undefined)?.in ?? [];
+}
+
+/** `units` one-unit rows on every model the read asks about. */
+function unitRowsPerModel(args: unknown, units: number) {
+  return modelIdsAskedFor(args).flatMap((assetModelId) =>
+    Array.from({ length: units }, () => ({
+      quantity: 1,
+      asset: { assetModelId },
+    }))
+  );
+}
+
+/**
+ * Stages `total` active units of EVERY model a pool read asks about.
+ *
+ * why: the pool is read in one batched `groupBy` across models, so the stub
+ * answers per requested model. Every model gets the same pool, which is what
+ * the scenarios in this file describe.
+ */
+function stageTotal(total: number) {
+  (db.asset.groupBy as unknown as Mock).mockImplementation((args: unknown) =>
+    Promise.resolve(
+      total === 0
+        ? []
+        : modelIdsAskedFor(args).map((assetModelId) => ({
+            assetModelId,
+            _count: { _all: total },
+          }))
+    )
+  );
+}
+
+/**
+ * Stages `units` in custody on every model a pool read asks about.
+ *
+ * why: custody is read as rows across models and summed per model in code.
+ */
+function stageInCustody(units: number) {
+  (db.custody.findMany as unknown as Mock).mockImplementation((args: unknown) =>
+    Promise.resolve(unitRowsPerModel(args, units))
+  );
+}
+
+/**
+ * Stages `units` booked by name on other bookings, on every model a pool read
+ * asks about.
+ *
+ * why: `bookingAsset.findMany` also serves the claim path's row reads, so the
+ * stub answers only the pool read (the one selecting the unit's model) and
+ * gives every other read no rows.
+ */
+function stageReservedConcrete(units: number) {
+  (db.bookingAsset.findMany as unknown as Mock).mockImplementation(
+    (args: unknown) =>
+      Promise.resolve(
+        (args as { select?: { asset?: unknown } } | undefined)?.select?.asset
+          ? unitRowsPerModel(args, units)
+          : []
+      )
+  );
+}
+
+/**
+ * Stages other bookings' model reservations, on every model a pool read asks
+ * about: `quantity` promised, `fulfilledQuantity` of it already delivered.
+ *
+ * why: the pool reads them in one batched `groupBy` across models.
+ */
+function stageReservedViaRequest(quantity: number, fulfilledQuantity = 0) {
+  (db.bookingModelRequest.groupBy as unknown as Mock).mockImplementation(
+    (args: unknown) =>
+      Promise.resolve(
+        modelIdsAskedFor(args).map((assetModelId) => ({
+          assetModelId,
+          _sum: { quantity, fulfilledQuantity },
+        }))
+      )
+  );
+}
+
 const BOOKING_ID = "booking-1";
 const ORG_ID = "org-1";
 const USER_ID = "user-1";
@@ -324,17 +464,11 @@ describe("getAssetModelAvailability", () => {
     installClaimSimulator();
     // why: clearAllMocks only resets call history — `mockResolvedValue`
     // implementations from earlier describe blocks leak into later ones.
-    // Re-default the aggregates so each test starts from a clean pool.
-    // @ts-expect-error mocked
-    db.asset.count.mockResolvedValue(0);
-    // @ts-expect-error mocked
-    db.custody.aggregate.mockResolvedValue({ _sum: { quantity: 0 } });
-    // @ts-expect-error mocked
-    db.bookingAsset.aggregate.mockResolvedValue({ _sum: { quantity: 0 } });
-    // @ts-expect-error mocked
-    db.bookingModelRequest.aggregate.mockResolvedValue({
-      _sum: { quantity: 0 },
-    });
+    // Re-default the pool reads so each test starts from a clean pool.
+    stageTotal(0);
+    stageInCustody(0);
+    stageReservedConcrete(0);
+    stageReservedViaRequest(0);
     // @ts-expect-error mocked
     db.bookingModelRequest.findUnique.mockResolvedValue(null);
     // @ts-expect-error mocked
@@ -343,16 +477,10 @@ describe("getAssetModelAvailability", () => {
 
   it("returns total − inCustody − reserved for a clean window", async () => {
     expect.assertions(1);
-    // @ts-expect-error mocked
-    db.asset.count.mockResolvedValue(10);
-    // @ts-expect-error mocked
-    db.custody.aggregate.mockResolvedValue({ _sum: { quantity: 1 } });
-    // @ts-expect-error mocked
-    db.bookingAsset.aggregate.mockResolvedValue({ _sum: { quantity: 2 } });
-    // @ts-expect-error mocked
-    db.bookingModelRequest.aggregate.mockResolvedValue({
-      _sum: { quantity: 3 },
-    });
+    stageTotal(10);
+    stageInCustody(1);
+    stageReservedConcrete(2);
+    stageReservedViaRequest(3);
 
     const result = await getAssetModelAvailability({
       assetModelId: MODEL_ID,
@@ -375,16 +503,10 @@ describe("getAssetModelAvailability", () => {
 
   it("clamps `available` to zero when reserved exceeds total", async () => {
     expect.assertions(1);
-    // @ts-expect-error mocked
-    db.asset.count.mockResolvedValue(2);
-    // @ts-expect-error mocked
-    db.custody.aggregate.mockResolvedValue({ _sum: { quantity: 0 } });
-    // @ts-expect-error mocked
-    db.bookingAsset.aggregate.mockResolvedValue({ _sum: { quantity: 3 } });
-    // @ts-expect-error mocked
-    db.bookingModelRequest.aggregate.mockResolvedValue({
-      _sum: { quantity: 2 },
-    });
+    stageTotal(2);
+    stageInCustody(0);
+    stageReservedConcrete(3);
+    stageReservedViaRequest(2);
 
     const result = await getAssetModelAvailability({
       assetModelId: MODEL_ID,
@@ -399,8 +521,7 @@ describe("getAssetModelAvailability", () => {
 
   it("omits the date-overlap filter when from/to are missing", async () => {
     expect.assertions(1);
-    // @ts-expect-error mocked
-    db.asset.count.mockResolvedValue(5);
+    stageTotal(5);
 
     await getAssetModelAvailability({
       assetModelId: MODEL_ID,
@@ -410,12 +531,12 @@ describe("getAssetModelAvailability", () => {
       to: null,
     });
 
-    // The bookingAsset.aggregate `where.booking` must NOT include the
+    // The bookingAsset pool read's `where.booking` must NOT include the
     // `OR: [{from:...}, ...]` overlap clause — non-windowed queries
     // count ALL active bookings as competing, which is the
     // conservative reading for DRAFT bookings without dates yet.
     const call = (
-      db.bookingAsset.aggregate as unknown as { mock: { calls: unknown[][] } }
+      db.bookingAsset.findMany as unknown as { mock: { calls: unknown[][] } }
     ).mock.calls[0];
     // @ts-expect-error inspecting mock arg
     expect(call?.[0]?.where?.booking?.OR).toBeUndefined();
@@ -423,8 +544,7 @@ describe("getAssetModelAvailability", () => {
 
   it("excludes the current booking from reservation sums", async () => {
     expect.assertions(2);
-    // @ts-expect-error mocked
-    db.asset.count.mockResolvedValue(0);
+    stageTotal(0);
 
     await getAssetModelAvailability({
       assetModelId: MODEL_ID,
@@ -434,12 +554,12 @@ describe("getAssetModelAvailability", () => {
       to,
     });
 
-    // Both aggregate calls must filter `bookingId: { not: <this> }`.
+    // Both reservation reads must filter `bookingId: { not: <this> }`.
     const bookingAssetCall = (
-      db.bookingAsset.aggregate as unknown as { mock: { calls: unknown[][] } }
+      db.bookingAsset.findMany as unknown as { mock: { calls: unknown[][] } }
     ).mock.calls[0];
     const modelRequestCall = (
-      db.bookingModelRequest.aggregate as unknown as {
+      db.bookingModelRequest.groupBy as unknown as {
         mock: { calls: unknown[][] };
       }
     ).mock.calls[0];
@@ -470,13 +590,13 @@ describe("getAssetModelAvailability", () => {
     const whereOf = (fn: unknown) =>
       (fn as { mock: { calls: [{ where: Record<string, unknown> }][] } }).mock
         .calls[0]?.[0]?.where;
-    expect(whereOf(db.asset.count)?.archivedAt).toBeNull();
+    expect(whereOf(db.asset.groupBy)?.archivedAt).toBeNull();
     expect(
-      (whereOf(db.custody.aggregate)?.asset as Record<string, unknown>)
+      (whereOf(db.custody.findMany)?.asset as Record<string, unknown>)
         ?.archivedAt
     ).toBeNull();
     expect(
-      (whereOf(db.bookingAsset.aggregate)?.asset as Record<string, unknown>)
+      (whereOf(db.bookingAsset.findMany)?.asset as Record<string, unknown>)
         ?.archivedAt
     ).toBeNull();
   });
@@ -485,6 +605,11 @@ describe("getAssetModelAvailability", () => {
 describe("findModelRequestShortfallsForBooking", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
+    // Nothing in custody or out on other bookings; each test states its total.
+    stageTotal(0);
+    stageInCustody(0);
+    stageReservedConcrete(0);
+    stageReservedViaRequest(0);
   });
 
   const booking = (
@@ -508,7 +633,7 @@ describe("findModelRequestShortfallsForBooking", () => {
 
   it("reports a reservation the pool can no longer fill, and by how much", async () => {
     // why: three active units of the model remain for these dates.
-    vitest.mocked(db.asset.count).mockResolvedValueOnce(3);
+    stageTotal(3);
 
     await expect(
       findModelRequestShortfallsForBooking({
@@ -527,7 +652,7 @@ describe("findModelRequestShortfallsForBooking", () => {
   });
 
   it("reports nothing while the reservation fits", async () => {
-    vitest.mocked(db.asset.count).mockResolvedValueOnce(5);
+    stageTotal(5);
 
     await expect(
       findModelRequestShortfallsForBooking({
@@ -546,7 +671,7 @@ describe("findModelRequestShortfallsForBooking", () => {
         organizationId: "org-1",
       })
     ).resolves.toEqual([]);
-    expect(db.asset.count).not.toHaveBeenCalled();
+    expect(db.asset.groupBy).not.toHaveBeenCalled();
   });
 });
 
@@ -566,21 +691,17 @@ describe("findModelReservationsShortAfterArchive (issue #382)", () => {
   function archiveTx(total: number) {
     return {
       asset: {
-        count: vitest.fn().mockResolvedValue(total),
+        groupBy: vitest
+          .fn()
+          .mockResolvedValue([
+            { assetModelId: MODEL_ID, _count: { _all: total } },
+          ]),
         // The booking holds no units of the model by name.
         findMany: vitest.fn().mockResolvedValue([]),
       },
-      custody: {
-        aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
-      },
-      bookingAsset: {
-        aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
-      },
-      bookingModelRequest: {
-        aggregate: vitest
-          .fn()
-          .mockResolvedValue({ _sum: { quantity: 0, fulfilledQuantity: 0 } }),
-      },
+      custody: { findMany: vitest.fn().mockResolvedValue([]) },
+      bookingAsset: { findMany: vitest.fn().mockResolvedValue([]) },
+      bookingModelRequest: { groupBy: vitest.fn().mockResolvedValue([]) },
     };
   }
 
@@ -652,18 +773,26 @@ describe("getAssetModelAvailability — injected client", () => {
     // values are chosen to make the returned arithmetic checkable
     // (7 total − 1 in custody − 2 reserved = 4 available).
     const client = {
-      asset: { count: vitest.fn().mockResolvedValue(7) },
+      asset: {
+        groupBy: vitest
+          .fn()
+          .mockResolvedValue([{ assetModelId: MODEL_ID, _count: { _all: 7 } }]),
+      },
       custody: {
-        aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 1 } }),
+        findMany: vitest
+          .fn()
+          .mockResolvedValue([
+            { quantity: 1, asset: { assetModelId: MODEL_ID } },
+          ]),
       },
       bookingAsset: {
-        aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 2 } }),
-      },
-      bookingModelRequest: {
-        aggregate: vitest
+        findMany: vitest
           .fn()
-          .mockResolvedValue({ _sum: { quantity: 0, fulfilledQuantity: 0 } }),
+          .mockResolvedValue([
+            { quantity: 2, asset: { assetModelId: MODEL_ID } },
+          ]),
       },
+      bookingModelRequest: { groupBy: vitest.fn().mockResolvedValue([]) },
     };
 
     const availability = await getAssetModelAvailability({
@@ -676,11 +805,11 @@ describe("getAssetModelAvailability — injected client", () => {
       db: client as any,
     });
 
-    expect(client.asset.count).toHaveBeenCalledTimes(1);
+    expect(client.asset.groupBy).toHaveBeenCalledTimes(1);
     expect(availability.total).toBe(7);
     expect(availability.available).toBe(4);
     // The global client must not have been consulted at all.
-    expect(db.asset.count).not.toHaveBeenCalled();
+    expect(db.asset.groupBy).not.toHaveBeenCalled();
   });
 });
 
@@ -700,16 +829,10 @@ describe("upsertBookingModelRequest", () => {
     // why: clearAllMocks only resets call history — `mockResolvedValue`
     // implementations leak in from earlier describe blocks. Re-default the
     // pool and the "no existing row" case so each test starts from a create.
-    // @ts-expect-error mocked
-    db.asset.count.mockResolvedValue(0);
-    // @ts-expect-error mocked
-    db.custody.aggregate.mockResolvedValue({ _sum: { quantity: 0 } });
-    // @ts-expect-error mocked
-    db.bookingAsset.aggregate.mockResolvedValue({ _sum: { quantity: 0 } });
-    // @ts-expect-error mocked
-    db.bookingModelRequest.aggregate.mockResolvedValue({
-      _sum: { quantity: 0 },
-    });
+    stageTotal(0);
+    stageInCustody(0);
+    stageReservedConcrete(0);
+    stageReservedViaRequest(0);
     // @ts-expect-error mocked
     db.bookingModelRequest.findUnique.mockResolvedValue(null);
     // why: the reservation guard now also asks what this booking already
@@ -728,8 +851,7 @@ describe("upsertBookingModelRequest", () => {
     // Three units exist and nobody else has claimed any, but this booking
     // already holds two of them by name. Reserving three more by model would
     // promise five units out of three.
-    // @ts-expect-error mocked
-    db.asset.count.mockResolvedValue(3);
+    stageTotal(3);
     // @ts-expect-error mocked
     db.asset.findMany.mockResolvedValue([
       { id: "asset-held-1", assetModelId: MODEL_ID, custody: [] },
@@ -753,10 +875,8 @@ describe("upsertBookingModelRequest", () => {
     expect.assertions(2);
     // Two units, one of them in a custodian's hands and named by this
     // booking. The pool already subtracted it, so naming it takes nothing.
-    // @ts-expect-error mocked
-    db.asset.count.mockResolvedValue(2);
-    // @ts-expect-error mocked
-    db.custody.aggregate.mockResolvedValue({ _sum: { quantity: 1 } });
+    stageTotal(2);
+    stageInCustody(1);
     // @ts-expect-error mocked
     db.asset.findMany.mockResolvedValue([
       { id: "asset-held-1", assetModelId: MODEL_ID, custody: [{ id: "c-1" }] },
@@ -776,8 +896,7 @@ describe("upsertBookingModelRequest", () => {
 
   it("locks the model pool before it measures availability", async () => {
     expect.assertions(2);
-    // @ts-expect-error mocked
-    db.asset.count.mockResolvedValue(5);
+    stageTotal(5);
 
     await upsertBookingModelRequest({
       bookingId: BOOKING_ID,
@@ -792,7 +911,7 @@ describe("upsertBookingModelRequest", () => {
     // that both happened.
     const lockOrder = (db.$queryRaw as ReturnType<typeof vitest.fn>).mock
       .invocationCallOrder[0];
-    const readOrder = (db.asset.count as ReturnType<typeof vitest.fn>).mock
+    const readOrder = (db.asset.groupBy as ReturnType<typeof vitest.fn>).mock
       .invocationCallOrder[0];
 
     expect(lockOrder).toBeDefined();
@@ -801,8 +920,7 @@ describe("upsertBookingModelRequest", () => {
 
   it("locks this booking's reservation row before it reads it", async () => {
     expect.assertions(2);
-    // @ts-expect-error mocked
-    db.asset.count.mockResolvedValue(10);
+    stageTotal(10);
     // The scenario, not incidental data: ten units promised and eight
     // already on the booking is the state a concurrent scan can move under
     // the reader's feet, so it is what makes the ordering below matter.
@@ -840,8 +958,7 @@ describe("upsertBookingModelRequest", () => {
 
   it("takes the pool lock before the reservation row lock", async () => {
     expect.assertions(1);
-    // @ts-expect-error mocked
-    db.asset.count.mockResolvedValue(10);
+    stageTotal(10);
 
     await upsertBookingModelRequest({
       bookingId: BOOKING_ID,
@@ -862,8 +979,7 @@ describe("upsertBookingModelRequest", () => {
 
   it("scopes the reservation row lock to this booking and model", async () => {
     expect.assertions(1);
-    // @ts-expect-error mocked
-    db.asset.count.mockResolvedValue(10);
+    stageTotal(10);
 
     await upsertBookingModelRequest({
       bookingId: BOOKING_ID,
@@ -881,8 +997,7 @@ describe("upsertBookingModelRequest", () => {
 
   it("scopes the lock to the caller's workspace", async () => {
     expect.assertions(2);
-    // @ts-expect-error mocked
-    db.asset.count.mockResolvedValue(5);
+    stageTotal(5);
 
     await upsertBookingModelRequest({
       bookingId: BOOKING_ID,
@@ -919,13 +1034,12 @@ describe("upsertBookingModelRequest", () => {
     ).rejects.toThrow(ShelfError);
 
     // Refused before any pool measurement happens.
-    expect(db.asset.count).not.toHaveBeenCalled();
+    expect(db.asset.groupBy).not.toHaveBeenCalled();
   });
 
   it("creates the row when quantity is within availability", async () => {
     expect.assertions(1);
-    // @ts-expect-error mocked
-    db.asset.count.mockResolvedValue(5);
+    stageTotal(5);
 
     await upsertBookingModelRequest({
       bookingId: BOOKING_ID,
@@ -956,8 +1070,7 @@ describe("upsertBookingModelRequest", () => {
 
   it("rejects over-reservation when quantity > available", async () => {
     expect.assertions(2);
-    // @ts-expect-error mocked
-    db.asset.count.mockResolvedValue(2);
+    stageTotal(2);
 
     await expect(
       upsertBookingModelRequest({
@@ -981,8 +1094,7 @@ describe("upsertBookingModelRequest", () => {
       from,
       to,
     });
-    // @ts-expect-error mocked
-    db.asset.count.mockResolvedValue(10);
+    stageTotal(10);
     // Ten promised, eight collected and taken out — the other two are still
     // on the shelf and the booking is never getting them.
     // @ts-expect-error mocked
@@ -1025,8 +1137,7 @@ describe("upsertBookingModelRequest", () => {
       from,
       to,
     });
-    // @ts-expect-error mocked
-    db.asset.count.mockResolvedValue(10);
+    stageTotal(10);
     // @ts-expect-error mocked
     db.bookingModelRequest.findUnique.mockResolvedValue({
       quantity: 5,
@@ -1061,8 +1172,7 @@ describe("upsertBookingModelRequest", () => {
     });
     // The workspace now owns fewer units of this model than the booking is
     // holding — assets were retired, or moved into custody, after it went out.
-    // @ts-expect-error mocked
-    db.asset.count.mockResolvedValue(2);
+    stageTotal(2);
     // @ts-expect-error mocked
     db.bookingModelRequest.findUnique.mockResolvedValue({
       quantity: 10,
@@ -1106,8 +1216,7 @@ describe("upsertBookingModelRequest", () => {
       from,
       to,
     });
-    // @ts-expect-error mocked
-    db.asset.count.mockResolvedValue(10);
+    stageTotal(10);
     // @ts-expect-error mocked
     db.bookingModelRequest.findUnique.mockResolvedValue({
       quantity: 10,
@@ -1143,8 +1252,7 @@ describe("upsertBookingModelRequest", () => {
       from,
       to,
     });
-    // @ts-expect-error mocked
-    db.asset.count.mockResolvedValue(10);
+    stageTotal(10);
 
     await expect(
       upsertBookingModelRequest({
@@ -1206,8 +1314,7 @@ describe("upsertBookingModelRequest", () => {
   describe("activity events", () => {
     it("records BOOKING_MODEL_REQUESTED when the reservation is created", async () => {
       expect.assertions(2);
-      // @ts-expect-error mocked
-      db.asset.count.mockResolvedValue(5);
+      stageTotal(5);
 
       await upsertBookingModelRequest({
         bookingId: BOOKING_ID,
@@ -1239,8 +1346,7 @@ describe("upsertBookingModelRequest", () => {
 
     it("records a quantity field-change (not an umbrella event) when the reservation is edited", async () => {
       expect.assertions(2);
-      // @ts-expect-error mocked
-      db.asset.count.mockResolvedValue(10);
+      stageTotal(10);
       // @ts-expect-error mocked
       db.bookingModelRequest.findUnique.mockResolvedValue({
         quantity: 3,
@@ -1287,8 +1393,7 @@ describe("upsertBookingModelRequest", () => {
 
     it("records a change, not a duplicate REQUESTED, when it loses a create race", async () => {
       expect.assertions(2);
-      // @ts-expect-error mocked
-      db.asset.count.mockResolvedValue(10);
+      stageTotal(10);
       // The pre-upsert read saw nothing (findUnique default: null), but a
       // concurrent transaction created the row first: the upsert serialized
       // on the unique constraint and ran its UPDATE branch. The result's
@@ -1322,8 +1427,7 @@ describe("upsertBookingModelRequest", () => {
     it("preserves the original fulfilledAt when an unchanged quantity is re-saved", async () => {
       expect.assertions(2);
       const originallyFulfilledAt = new Date("2026-05-02T10:00:00Z");
-      // @ts-expect-error mocked
-      db.asset.count.mockResolvedValue(10);
+      stageTotal(10);
       // Already complete: 3 reserved, 3 scanned in, stamped back in May.
       // @ts-expect-error mocked
       db.bookingModelRequest.findUnique.mockResolvedValue({
@@ -1365,8 +1469,7 @@ describe("upsertBookingModelRequest", () => {
 
     it("records nothing when the submitted quantity is unchanged", async () => {
       expect.assertions(1);
-      // @ts-expect-error mocked
-      db.asset.count.mockResolvedValue(10);
+      stageTotal(10);
       // @ts-expect-error mocked
       db.bookingModelRequest.findUnique.mockResolvedValue({
         quantity: 3,
@@ -1399,8 +1502,7 @@ describe("upsertBookingModelRequest", () => {
 
     it("records quantity and fulfilledAt as separate events when an edit closes the request out", async () => {
       expect.assertions(3);
-      // @ts-expect-error mocked
-      db.asset.count.mockResolvedValue(10);
+      stageTotal(10);
       // Three of five units already scanned in; the operator edits down to 3
       // to close the reservation out.
       // @ts-expect-error mocked
@@ -1454,8 +1556,7 @@ describe("upsertBookingModelRequest", () => {
         from,
         to,
       });
-      // @ts-expect-error mocked
-      db.asset.count.mockResolvedValue(10);
+      stageTotal(10);
       // @ts-expect-error mocked
       db.bookingModelRequest.findUnique.mockResolvedValue({
         quantity: 10,
@@ -1500,8 +1601,7 @@ describe("upsertBookingModelRequest", () => {
 
     it("records no event when the reservation is rejected", async () => {
       expect.assertions(2);
-      // @ts-expect-error mocked
-      db.asset.count.mockResolvedValue(2);
+      stageTotal(2);
 
       await expect(
         upsertBookingModelRequest({
@@ -1519,8 +1619,7 @@ describe("upsertBookingModelRequest", () => {
 
     it("supplies the actor snapshot rather than re-reading the user inside the transaction", async () => {
       expect.assertions(2);
-      // @ts-expect-error mocked
-      db.asset.count.mockResolvedValue(5);
+      stageTotal(5);
 
       await upsertBookingModelRequest({
         bookingId: BOOKING_ID,
@@ -1539,8 +1638,7 @@ describe("upsertBookingModelRequest", () => {
 
   it("cannot be used to inject a live Markdoc tag via the asset-model name", async () => {
     expect.assertions(3);
-    // @ts-expect-error mocked
-    db.asset.count.mockResolvedValue(5);
+    stageTotal(5);
     // AssetModel.name is free-form user input and lands in the note as
     // literal text, so a raw `{% … %}` splice would be a stored XSS.
     // @ts-expect-error mocked
@@ -1640,16 +1738,10 @@ describe("upsertBookingModelRequests", () => {
     // pool, the reads and the write so each test states its own scenario.
     // Twelve units of every model, nobody else claiming any: enough headroom
     // that a test refusing a write is refusing it for the reason it names.
-    // @ts-expect-error mocked
-    db.asset.count.mockResolvedValue(12);
-    // @ts-expect-error mocked
-    db.custody.aggregate.mockResolvedValue({ _sum: { quantity: 0 } });
-    // @ts-expect-error mocked
-    db.bookingAsset.aggregate.mockResolvedValue({ _sum: { quantity: 0 } });
-    // @ts-expect-error mocked
-    db.bookingModelRequest.aggregate.mockResolvedValue({
-      _sum: { quantity: 0 },
-    });
+    stageTotal(12);
+    stageInCustody(0);
+    stageReservedConcrete(0);
+    stageReservedViaRequest(0);
     // @ts-expect-error mocked
     db.bookingModelRequest.findUnique.mockResolvedValue(null);
     // why: the reservation guard also asks what this booking already holds by
@@ -1928,8 +2020,7 @@ describe("upsertBookingModelRequests", () => {
     // without this the pool guard refuses the batch and the test would pass on
     // the wrong refusal. Enough units that the only thing left to refuse it is
     // the limit under test.
-    // @ts-expect-error mocked
-    db.asset.count.mockResolvedValue(100);
+    stageTotal(100);
 
     // Well past the limit in entries, one model in writes. Repeats are summed
     // into a single write before the transaction opens, so they cost the
@@ -1982,17 +2073,11 @@ describe("removeBookingModelRequest", () => {
     installClaimSimulator();
     // why: clearAllMocks only resets call history — `mockResolvedValue`
     // implementations from earlier describe blocks leak into later ones.
-    // Re-default the aggregates so each test starts from a clean pool.
-    // @ts-expect-error mocked
-    db.asset.count.mockResolvedValue(0);
-    // @ts-expect-error mocked
-    db.custody.aggregate.mockResolvedValue({ _sum: { quantity: 0 } });
-    // @ts-expect-error mocked
-    db.bookingAsset.aggregate.mockResolvedValue({ _sum: { quantity: 0 } });
-    // @ts-expect-error mocked
-    db.bookingModelRequest.aggregate.mockResolvedValue({
-      _sum: { quantity: 0 },
-    });
+    // Re-default the pool reads so each test starts from a clean pool.
+    stageTotal(0);
+    stageInCustody(0);
+    stageReservedConcrete(0);
+    stageReservedViaRequest(0);
     // @ts-expect-error mocked
     db.bookingModelRequest.findUnique.mockResolvedValue(null);
     // @ts-expect-error mocked
@@ -2363,17 +2448,11 @@ describe("materializeModelRequestForAsset", () => {
     installClaimSimulator();
     // why: clearAllMocks only resets call history — `mockResolvedValue`
     // implementations from earlier describe blocks leak into later ones.
-    // Re-default the aggregates so each test starts from a clean pool.
-    // @ts-expect-error mocked
-    db.asset.count.mockResolvedValue(0);
-    // @ts-expect-error mocked
-    db.custody.aggregate.mockResolvedValue({ _sum: { quantity: 0 } });
-    // @ts-expect-error mocked
-    db.bookingAsset.aggregate.mockResolvedValue({ _sum: { quantity: 0 } });
-    // @ts-expect-error mocked
-    db.bookingModelRequest.aggregate.mockResolvedValue({
-      _sum: { quantity: 0 },
-    });
+    // Re-default the pool reads so each test starts from a clean pool.
+    stageTotal(0);
+    stageInCustody(0);
+    stageReservedConcrete(0);
+    stageReservedViaRequest(0);
     // @ts-expect-error mocked
     db.bookingModelRequest.findUnique.mockResolvedValue(null);
     // @ts-expect-error mocked
@@ -2741,21 +2820,15 @@ describe("getBookingModelTabData", () => {
     installClaimSimulator();
     // why: clearAllMocks only resets call history — `mockResolvedValue`
     // implementations from earlier describe blocks leak into later ones.
-    // Re-default the aggregates so each test starts from a clean pool.
+    // Re-default the pool reads so each test starts from a clean pool.
     // @ts-expect-error mocked
     db.assetModel.count.mockResolvedValue(0);
     // @ts-expect-error mocked
     db.assetModel.findMany.mockResolvedValue([]);
-    // @ts-expect-error mocked
-    db.asset.count.mockResolvedValue(0);
-    // @ts-expect-error mocked
-    db.custody.aggregate.mockResolvedValue({ _sum: { quantity: 0 } });
-    // @ts-expect-error mocked
-    db.bookingAsset.aggregate.mockResolvedValue({ _sum: { quantity: 0 } });
-    // @ts-expect-error mocked
-    db.bookingModelRequest.aggregate.mockResolvedValue({
-      _sum: { quantity: 0 },
-    });
+    stageTotal(0);
+    stageInCustody(0);
+    stageReservedConcrete(0);
+    stageReservedViaRequest(0);
   });
 
   /** Minimal `BookingForModelTab` fixture with no model requests. */
@@ -2810,16 +2883,10 @@ describe("getBookingModelTabData", () => {
       { id: "model-1", name: "Dell Latitude 5550" },
       { id: "model-2", name: "MacBook Pro 16" },
     ]);
-    // @ts-expect-error mocked
-    db.asset.count.mockResolvedValue(10);
-    // @ts-expect-error mocked
-    db.custody.aggregate.mockResolvedValue({ _sum: { quantity: 1 } });
-    // @ts-expect-error mocked
-    db.bookingAsset.aggregate.mockResolvedValue({ _sum: { quantity: 2 } });
-    // @ts-expect-error mocked
-    db.bookingModelRequest.aggregate.mockResolvedValue({
-      _sum: { quantity: 3 },
-    });
+    stageTotal(10);
+    stageInCustody(1);
+    stageReservedConcrete(2);
+    stageReservedViaRequest(3);
 
     const result = await getBookingModelTabData({
       organizationId: ORG_ID,
@@ -3618,18 +3685,10 @@ describe("assertModelUnitsNotReservedElsewhere", () => {
     reservedElsewhere?: number;
     requestedElsewhere?: number;
   }) {
-    // @ts-expect-error mocked
-    db.asset.count.mockResolvedValue(total);
-    // @ts-expect-error mocked
-    db.custody.aggregate.mockResolvedValue({ _sum: { quantity: inCustody } });
-    // @ts-expect-error mocked
-    db.bookingAsset.aggregate.mockResolvedValue({
-      _sum: { quantity: reservedElsewhere },
-    });
-    // @ts-expect-error mocked
-    db.bookingModelRequest.aggregate.mockResolvedValue({
-      _sum: { quantity: requestedElsewhere, fulfilledQuantity: 0 },
-    });
+    stageTotal(total);
+    stageInCustody(inCustody);
+    stageReservedConcrete(reservedElsewhere);
+    stageReservedViaRequest(requestedElsewhere, 0);
     // A pool the guard would refuse against is a pool somebody has reserved;
     // the same number has to be visible to the lookup that decides whether
     // the model is worth measuring at all.
@@ -3708,8 +3767,7 @@ describe("assertModelUnitsNotReservedElsewhere", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
     // The org-scoped lock finds every model it is asked for.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (db.$queryRaw as any).mockResolvedValue([{ id: MODEL_ID }]);
+    stageEveryModelLockable();
     ownRequestRows = [];
     foreignRequestRows = [];
     // @ts-expect-error mocked
@@ -3741,7 +3799,7 @@ describe("assertModelUnitsNotReservedElsewhere", () => {
 
     // Nothing to overlap, so no lock is taken and no pool is measured.
     expect(db.$queryRaw).not.toHaveBeenCalled();
-    expect(db.asset.count).not.toHaveBeenCalled();
+    expect(db.asset.groupBy).not.toHaveBeenCalled();
   });
 
   it("ignores assets that have no model", async () => {
@@ -3751,13 +3809,13 @@ describe("assertModelUnitsNotReservedElsewhere", () => {
     await guard([{ ...NEW_UNIT, assetModelId: null }]);
 
     expect(db.$queryRaw).not.toHaveBeenCalled();
-    expect(db.asset.count).not.toHaveBeenCalled();
+    expect(db.asset.groupBy).not.toHaveBeenCalled();
   });
 
   it("locks every model, in sorted order, before measuring any pool", async () => {
     expect.assertions(3);
     // Both models are contested, so both are measured and the ordering the
-    // lock loop guarantees is observable.
+    // lock guarantees is observable.
     stageReservedElsewhere({ "model-a": 1, "model-b": 1 });
 
     await guard([
@@ -3765,14 +3823,15 @@ describe("assertModelUnitsNotReservedElsewhere", () => {
       { id: "asset-a", title: "A", assetModelId: "model-a" },
     ]);
 
-    const lockCalls = (db.$queryRaw as ReturnType<typeof vitest.fn>).mock.calls;
-    // Values follow the template: [assetModelId, organizationId].
-    expect(lockCalls.map((call) => call[1])).toEqual(["model-a", "model-b"]);
-    expect(lockCalls.every((call) => call[2] === ORG_ID)).toBe(true);
+    // Values follow the template: [model ids, organizationId].
+    expect(lockedAssetModelIds()).toEqual(["model-a", "model-b"]);
+    expect(
+      rawStatements().every((statement) => statement.values[1] === ORG_ID)
+    ).toBe(true);
 
-    const lastLock = (db.$queryRaw as ReturnType<typeof vitest.fn>).mock
-      .invocationCallOrder[1];
-    const firstRead = (db.asset.count as ReturnType<typeof vitest.fn>).mock
+    const statements = rawStatements();
+    const lastLock = statements[statements.length - 1].order;
+    const firstRead = (db.asset.groupBy as ReturnType<typeof vitest.fn>).mock
       .invocationCallOrder[0];
     expect(lastLock).toBeLessThan(firstRead);
   });
@@ -3783,7 +3842,7 @@ describe("assertModelUnitsNotReservedElsewhere", () => {
     (db.$queryRaw as any).mockResolvedValue([]);
 
     await expect(guard([NEW_UNIT])).rejects.toMatchObject({ status: 404 });
-    expect(db.asset.count).not.toHaveBeenCalled();
+    expect(db.asset.groupBy).not.toHaveBeenCalled();
   });
 
   it("refuses a unit when other bookings' model reservations leave none free", async () => {
@@ -3798,7 +3857,7 @@ describe("assertModelUnitsNotReservedElsewhere", () => {
     expect(error.message).toContain(
       '"Dell Latitude 5550": 1 unit requested by name, but 2 units are reserved by model on other bookings for these dates and only 0 more can be booked.'
     );
-    expect(db.bookingAsset.aggregate).toHaveBeenCalledWith(
+    expect(db.bookingAsset.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({ bookingId: { not: BOOKING_ID } }),
       })
@@ -3859,7 +3918,7 @@ describe("assertModelUnitsNotReservedElsewhere", () => {
     await expect(
       guard([NEW_UNIT], { status: BookingStatus.DRAFT })
     ).resolves.toBeUndefined();
-    expect(db.asset.count).toHaveBeenCalled();
+    expect(db.asset.groupBy).toHaveBeenCalled();
   });
 
   it("never refuses an active booking a unit that fulfils its own request", async () => {
@@ -3879,7 +3938,7 @@ describe("assertModelUnitsNotReservedElsewhere", () => {
       })
     );
     expect(db.$queryRaw).not.toHaveBeenCalled();
-    expect(db.asset.count).not.toHaveBeenCalled();
+    expect(db.asset.groupBy).not.toHaveBeenCalled();
   });
 
   it("measures the units an active booking adds beyond its own request", async () => {
@@ -3960,7 +4019,7 @@ describe("assertModelUnitsNotReservedElsewhere", () => {
     ).resolves.toBeUndefined();
     // Measuring it at all would be wasted work: this is the shape of every
     // write in a workspace that does not reserve by model.
-    expect(db.asset.count).not.toHaveBeenCalled();
+    expect(db.asset.groupBy).not.toHaveBeenCalled();
     expect(db.assetModel.findMany).not.toHaveBeenCalled();
   });
 
@@ -3976,7 +4035,7 @@ describe("assertModelUnitsNotReservedElsewhere", () => {
     await expect(
       guard([NEW_UNIT], { status: BookingStatus.DRAFT })
     ).resolves.toBeUndefined();
-    expect(db.asset.count).not.toHaveBeenCalled();
+    expect(db.asset.groupBy).not.toHaveBeenCalled();
   });
 
   it("does not charge a named unit that a custodian already holds", async () => {
@@ -3992,7 +4051,7 @@ describe("assertModelUnitsNotReservedElsewhere", () => {
         status: BookingStatus.DRAFT,
       })
     ).resolves.toBeUndefined();
-    expect(db.asset.count).toHaveBeenCalled();
+    expect(db.asset.groupBy).toHaveBeenCalled();
   });
 
   it("still refuses units beyond the ones a custodian holds", async () => {
@@ -4038,10 +4097,7 @@ describe("assertModelUnitsNotReservedElsewhere", () => {
     stageReservedElsewhereFulfilled({
       [MODEL_ID]: { quantity: 1, fulfilled: 0 },
     });
-    // @ts-expect-error mocked
-    db.bookingModelRequest.aggregate.mockResolvedValue({
-      _sum: { quantity: 1, fulfilledQuantity: 1 },
-    });
+    stageReservedViaRequest(1, 1);
 
     const error = await guard([NEW_UNIT, SECOND_NEW_UNIT], {
       status: BookingStatus.DRAFT,
@@ -4064,6 +4120,31 @@ describe("assertModelUnitsNotReservedElsewhere", () => {
     expect(error).toBeInstanceOf(ShelfError);
     expect(error.message).toContain('"Dell Latitude 5550"');
     expect(error.message).toContain('"Arterial Puncture Simulator"');
+  });
+
+  it("locks and measures any number of contested models in a fixed number of statements", async () => {
+    expect.assertions(7);
+    // Three contested models, each with room for the unit named on it.
+    stagePool({ total: 5, requestedElsewhere: 1 });
+    stageReservedElsewhere({ "model-a": 1, "model-b": 1, "model-c": 1 });
+
+    await expect(
+      guard([
+        { id: "asset-c", title: "C", assetModelId: "model-c" },
+        { id: "asset-a", title: "A", assetModelId: "model-a" },
+        { id: "asset-b", title: "B", assetModelId: "model-b" },
+      ])
+    ).resolves.toBeUndefined();
+
+    // Call counts are the invariant here: the guard runs inside an
+    // interactive transaction, where every statement is a sequential round
+    // trip, so the count must not grow with the number of models.
+    expect(db.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(lockedAssetModelIds()).toEqual(["model-a", "model-b", "model-c"]);
+    expect(db.asset.groupBy).toHaveBeenCalledTimes(1);
+    expect(db.custody.findMany).toHaveBeenCalledTimes(1);
+    expect(db.bookingAsset.findMany).toHaveBeenCalledTimes(1);
+    expect(db.bookingModelRequest.groupBy).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -4090,18 +4171,10 @@ describe("assertOutstandingModelRequestsFit", () => {
     /** Units other bookings are still owed by model. */
     requestedElsewhere?: number;
   }) {
-    // @ts-expect-error mocked
-    db.asset.count.mockResolvedValue(total);
-    // @ts-expect-error mocked
-    db.custody.aggregate.mockResolvedValue({ _sum: { quantity: inCustody } });
-    // @ts-expect-error mocked
-    db.bookingAsset.aggregate.mockResolvedValue({
-      _sum: { quantity: namedElsewhere },
-    });
-    // @ts-expect-error mocked
-    db.bookingModelRequest.aggregate.mockResolvedValue({
-      _sum: { quantity: requestedElsewhere, fulfilledQuantity: 0 },
-    });
+    stageTotal(total);
+    stageInCustody(inCustody);
+    stageReservedConcrete(namedElsewhere);
+    stageReservedViaRequest(requestedElsewhere, 0);
   }
 
   /** Stages the reservations this booking still carries. */
@@ -4132,9 +4205,7 @@ describe("assertOutstandingModelRequestsFit", () => {
 
   /** Every `AssetModel` id the guard locked, in the order it locked them. */
   function lockedModelIds() {
-    return rawStatements()
-      .filter((statement) => statement.sql.includes('"AssetModel"'))
-      .map((statement) => statement.values[0]);
+    return lockedAssetModelIds();
   }
 
   function guard({
@@ -4162,8 +4233,7 @@ describe("assertOutstandingModelRequestsFit", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
     // The org-scoped lock finds every model it is asked for.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (db.$queryRaw as any).mockResolvedValue([{ id: MODEL_ID }]);
+    stageEveryModelLockable();
     stageOwnRequests([]);
     // @ts-expect-error mocked
     db.asset.findMany.mockResolvedValue([]);
@@ -4226,15 +4296,15 @@ describe("assertOutstandingModelRequestsFit", () => {
 
     await guard();
 
-    // Values follow the template: [assetModelId, organizationId].
+    // Values follow the template: [model ids, organizationId].
     expect(lockedModelIds()).toEqual([OTHER_MODEL_ID, MODEL_ID]);
     expect(
       rawStatements().every((statement) => statement.values[1] === ORG_ID)
     ).toBe(true);
 
-    const lastLock = (db.$queryRaw as ReturnType<typeof vitest.fn>).mock
-      .invocationCallOrder[1];
-    const firstRead = (db.asset.count as ReturnType<typeof vitest.fn>).mock
+    const statements = rawStatements();
+    const lastLock = statements[statements.length - 1].order;
+    const firstRead = (db.asset.groupBy as ReturnType<typeof vitest.fn>).mock
       .invocationCallOrder[0];
     expect(lastLock).toBeLessThan(firstRead);
   });
@@ -4285,7 +4355,7 @@ describe("assertOutstandingModelRequestsFit", () => {
     ]);
 
     await expect(guard()).resolves.toBeUndefined();
-    expect(db.asset.count).toHaveBeenCalled();
+    expect(db.asset.groupBy).toHaveBeenCalled();
   });
 
   it("counts only the units still unassigned on the booking's own reservation", async () => {
@@ -4342,7 +4412,7 @@ describe("assertOutstandingModelRequestsFit", () => {
     (db.$queryRaw as any).mockResolvedValue([]);
 
     await expect(guard()).rejects.toMatchObject({ status: 404 });
-    expect(db.asset.count).not.toHaveBeenCalled();
+    expect(db.asset.groupBy).not.toHaveBeenCalled();
   });
 
   it("names every model that does not fit in one refusal", async () => {
@@ -4372,5 +4442,249 @@ describe("assertOutstandingModelRequestsFit", () => {
     );
 
     expect(error.message).toContain("Cannot check out booking.");
+  });
+
+  it("locks and measures any number of models in a fixed number of statements", async () => {
+    expect.assertions(8);
+    stagePool({ total: 5 });
+    stageOwnRequests([
+      { assetModelId: "model-c", quantity: 1, fulfilledQuantity: 0 },
+      { assetModelId: "model-a", quantity: 1, fulfilledQuantity: 0 },
+      { assetModelId: "model-b", quantity: 1, fulfilledQuantity: 0 },
+    ]);
+
+    await expect(guard()).resolves.toBeUndefined();
+
+    // Call counts are the invariant here: the guard runs inside an
+    // interactive transaction, where every statement is a sequential round
+    // trip, so the count must not grow with the number of models.
+    expect(db.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(lockedModelIds()).toEqual(["model-a", "model-b", "model-c"]);
+    expect(db.asset.groupBy).toHaveBeenCalledTimes(1);
+    expect(db.custody.findMany).toHaveBeenCalledTimes(1);
+    expect(db.bookingAsset.findMany).toHaveBeenCalledTimes(1);
+    expect(db.bookingModelRequest.groupBy).toHaveBeenCalledTimes(1);
+    // The units the booking holds by name, read once for every model.
+    expect(db.asset.findMany).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("getAssetModelAvailabilities", () => {
+  /**
+   * A pool client distinct from the mocked global `db`, staged with rows.
+   *
+   * why: the rows ARE the subject of these tests. A separate client keeps
+   * each delegate's rows explicit per test, and makes "which models the rows
+   * were summed into" checkable.
+   */
+  function poolClient({
+    totals = [],
+    custody = [],
+    booked = [],
+    requests = [],
+  }: {
+    totals?: Array<{ assetModelId: string; units: number }>;
+    custody?: Array<{ assetModelId: string; quantity: number }>;
+    booked?: Array<{ assetModelId: string; quantity: number }>;
+    requests?: Array<{
+      assetModelId: string;
+      quantity: number;
+      fulfilledQuantity: number;
+    }>;
+  }) {
+    const asRows = (rows: Array<{ assetModelId: string; quantity: number }>) =>
+      rows.map(({ assetModelId, quantity }) => ({
+        quantity,
+        asset: { assetModelId },
+      }));
+    return {
+      asset: {
+        groupBy: vitest.fn().mockResolvedValue(
+          totals.map(({ assetModelId, units }) => ({
+            assetModelId,
+            _count: { _all: units },
+          }))
+        ),
+      },
+      custody: { findMany: vitest.fn().mockResolvedValue(asRows(custody)) },
+      bookingAsset: { findMany: vitest.fn().mockResolvedValue(asRows(booked)) },
+      bookingModelRequest: {
+        groupBy: vitest.fn().mockResolvedValue(
+          requests.map(({ assetModelId, quantity, fulfilledQuantity }) => ({
+            assetModelId,
+            _sum: { quantity, fulfilledQuantity },
+          }))
+        ),
+      },
+    };
+  }
+
+  function measure(client: ReturnType<typeof poolClient>, ids: string[]) {
+    return getAssetModelAvailabilities({
+      assetModelIds: ids,
+      organizationId: ORG_ID,
+      bookingId: BOOKING_ID,
+      from,
+      to,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      db: client as any,
+    });
+  }
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("gives a model with no rows a zero pool", async () => {
+    expect.assertions(1);
+    const client = poolClient({
+      totals: [{ assetModelId: "model-a", units: 4 }],
+    });
+
+    const availabilities = await measure(client, ["model-a", "model-b"]);
+
+    expect(availabilities.get("model-b")).toEqual({
+      total: 0,
+      inCustody: 0,
+      reservedConcrete: 0,
+      reservedViaRequest: 0,
+      reserved: 0,
+      available: 0,
+    });
+  });
+
+  it("sums custody, booked and requested units into the model they belong to", async () => {
+    expect.assertions(2);
+    const client = poolClient({
+      totals: [
+        { assetModelId: "model-a", units: 10 },
+        { assetModelId: "model-b", units: 6 },
+      ],
+      custody: [
+        { assetModelId: "model-a", quantity: 1 },
+        { assetModelId: "model-b", quantity: 1 },
+        { assetModelId: "model-a", quantity: 1 },
+      ],
+      booked: [
+        { assetModelId: "model-b", quantity: 1 },
+        { assetModelId: "model-a", quantity: 1 },
+        { assetModelId: "model-b", quantity: 1 },
+        { assetModelId: "model-b", quantity: 1 },
+      ],
+      requests: [
+        { assetModelId: "model-a", quantity: 5, fulfilledQuantity: 2 },
+      ],
+    });
+
+    const availabilities = await measure(client, ["model-a", "model-b"]);
+
+    // 10 total - 2 custody - 1 booked - (5 - 2) still owed = 4
+    expect(availabilities.get("model-a")).toEqual({
+      total: 10,
+      inCustody: 2,
+      reservedConcrete: 1,
+      reservedViaRequest: 3,
+      reserved: 4,
+      available: 4,
+    });
+    // 6 total - 1 custody - 3 booked = 2
+    expect(availabilities.get("model-b")).toEqual({
+      total: 6,
+      inCustody: 1,
+      reservedConcrete: 3,
+      reservedViaRequest: 0,
+      reserved: 3,
+      available: 2,
+    });
+  });
+
+  it("reads every model in four statements, with this booking excluded", async () => {
+    expect.assertions(7);
+    const client = poolClient({});
+
+    await measure(client, ["model-a", "model-b", "model-c", "model-a"]);
+
+    // One statement per pool read whatever the number of models: inside an
+    // interactive transaction each statement is a sequential round trip.
+    expect(client.asset.groupBy).toHaveBeenCalledTimes(1);
+    expect(client.custody.findMany).toHaveBeenCalledTimes(1);
+    expect(client.bookingAsset.findMany).toHaveBeenCalledTimes(1);
+    expect(client.bookingModelRequest.groupBy).toHaveBeenCalledTimes(1);
+    expect(client.asset.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          assetModelId: { in: ["model-a", "model-b", "model-c"] },
+          archivedAt: null,
+        }),
+      })
+    );
+    expect(client.bookingAsset.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ bookingId: { not: BOOKING_ID } }),
+      })
+    );
+    expect(client.bookingModelRequest.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ bookingId: { not: BOOKING_ID } }),
+      })
+    );
+  });
+
+  it("reads nothing when no model is asked for", async () => {
+    expect.assertions(2);
+    const client = poolClient({});
+
+    const availabilities = await measure(client, []);
+
+    expect(availabilities.size).toBe(0);
+    expect(client.asset.groupBy).not.toHaveBeenCalled();
+  });
+});
+
+describe("lockAssetModelsForReservation", () => {
+  /**
+   * why: the lock is raw SQL, so the stub stands in for the transaction and
+   * answers with the rows the statement would find.
+   */
+  function lockTx(rows: Array<{ id: string }>) {
+    return { $queryRaw: vitest.fn().mockResolvedValue(rows) };
+  }
+
+  it("locks every model in one workspace-scoped statement, deduplicated and in id order", async () => {
+    expect.assertions(4);
+    const tx = lockTx([{ id: "model-a" }, { id: "model-b" }]);
+
+    await lockAssetModelsForReservation(
+      tx,
+      ["model-b", "model-a", "model-b"],
+      ORG_ID
+    );
+
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    const [strings, ids, organizationId] = tx.$queryRaw.mock.calls[0];
+    expect((strings as TemplateStringsArray).join("?")).toContain(
+      'ORDER BY id COLLATE "C"'
+    );
+    expect(joinedValues(ids)).toEqual(["model-a", "model-b"]);
+    expect(organizationId).toBe(ORG_ID);
+  });
+
+  it("refuses with a 404 when any model is not in the caller's workspace", async () => {
+    expect.assertions(1);
+    // The org-scoped statement finds only one of the two models.
+    const tx = lockTx([{ id: "model-a" }]);
+
+    await expect(
+      lockAssetModelsForReservation(tx, ["model-a", "model-foreign"], ORG_ID)
+    ).rejects.toMatchObject({ status: 404 });
+  });
+
+  it("issues no statement when there is nothing to lock", async () => {
+    expect.assertions(1);
+    const tx = lockTx([]);
+
+    await lockAssetModelsForReservation(tx, [], ORG_ID);
+
+    expect(tx.$queryRaw).not.toHaveBeenCalled();
   });
 });

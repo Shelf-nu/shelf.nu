@@ -82,6 +82,7 @@ function makeCustody(
     name,
     quantity,
     custodian: {
+      id: null,
       name,
       user: null,
     },
