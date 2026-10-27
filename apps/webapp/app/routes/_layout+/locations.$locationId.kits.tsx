@@ -37,7 +37,10 @@ import {
   getLocationKits,
   updateLocationKits,
 } from "~/modules/location/service.server";
-import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
+import {
+  getTeamMemberForCustodianFilter,
+  scopeCustodianFilterIdsWithoutCustodyKept,
+} from "~/modules/team-member/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
   setCookie,
@@ -96,6 +99,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const cookie = await updateCookieWithPerPage(request, perPageParam);
     const { perPage } = cookie;
 
+    /**
+     * `?teamMember=` is raw request input. A member who may not see other
+     * people's custody could otherwise filter by a colleague's id and read
+     * which kits that person holds, so person ids are narrowed to the
+     * caller's own.
+     */
+    const custodianFilterIds = await scopeCustodianFilterIdsWithoutCustodyKept({
+      teamMemberIds,
+      canSeeAllCustody: access.custody.seeAll,
+      userId,
+      organizationId,
+    });
+
     const [{ kits, totalKits }, { teamMembers, totalTeamMembers }] =
       await Promise.all([
         getLocationKits({
@@ -106,7 +122,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           search,
           orderBy,
           orderDirection,
-          teamMemberIds,
+          teamMemberIds: custodianFilterIds,
         }),
         getTeamMemberForCustodianFilter({
           organizationId,

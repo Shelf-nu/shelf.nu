@@ -86,7 +86,7 @@ import {
 } from "~/modules/location/service.server";
 import {
   getTeamMemberForCustodianFilter,
-  scopeCustodianFilterIds,
+  scopeCustodianFilterIdsWithoutCustodyKept,
 } from "~/modules/team-member/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
@@ -94,6 +94,7 @@ import {
   updateCookieWithPerPage,
   userPrefs,
 } from "~/utils/cookies.server";
+import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -115,9 +116,6 @@ import { requirePermission } from "~/utils/roles.server";
 import { resolveTeamMemberName } from "~/utils/user";
 
 const paramsSchema = z.object({ locationId: z.string() });
-
-/** The custodian filter's "Without custody" option, which names no person. */
-const WITHOUT_CUSTODY = "without-custody";
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
@@ -152,19 +150,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * `?teamMember=` is raw request input. A member who may not see other
      * people's custody could otherwise filter by a colleague's id and read
      * which assets that person holds, so person ids are narrowed to the
-     * caller's own. "Without custody" names nobody and the dropdown offers it
-     * to every member who sees custody, so it is kept as requested.
+     * caller's own.
      */
-    const wantsWithoutCustody = teamMemberIds.includes(WITHOUT_CUSTODY);
-    const custodianFilterIds = [
-      ...(await scopeCustodianFilterIds({
-        teamMemberIds: teamMemberIds.filter((id) => id !== WITHOUT_CUSTODY),
-        canSeeAllCustody: access.custody.seeAll,
-        userId,
-        organizationId,
-      })),
-      ...(wantsWithoutCustody ? [WITHOUT_CUSTODY] : []),
-    ];
+    const custodianFilterIds = await scopeCustodianFilterIdsWithoutCustodyKept({
+      teamMemberIds,
+      canSeeAllCustody: access.custody.seeAll,
+      userId,
+      organizationId,
+    });
 
     /**
      * The Active view's "archived assets are hidden" empty state explains an
@@ -254,7 +247,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         })
       ),
     ]);
-    const items = assets.map((asset) => ({
+    // Rows carry each custodian's name and email whether or not the UI draws
+    // them, so a viewer without custody visibility could read them out of the
+    // route's data payload. Redact here, not in the component.
+    const items = redactCustodianForViewer(assets, {
+      canSeeAllCustody: access.custody.seeAll,
+      userId,
+    }).map((asset) => ({
       ...asset,
       inCustodyHere: custodyFromHere[asset.id] ?? 0,
       onBookingFromHere: onBookingByAssetId.get(asset.id) ?? 0,

@@ -231,3 +231,74 @@ describe("locations.$locationId.assets loader: per-page preference", () => {
     expect(await perPageFromCookie(result)).toBe(50);
   });
 });
+
+describe("locations.$locationId.assets loader: custodian privacy", () => {
+  /** An asset held by `userId`, as getLocation selects its custody. */
+  function assetHeldBy(assetId: string, userId: string, email: string) {
+    return {
+      id: assetId,
+      quantity: null,
+      custody: [
+        {
+          quantity: 1,
+          custodian: {
+            id: `tm-${userId}`,
+            name: `Holder ${userId}`,
+            user: {
+              id: userId,
+              firstName: "Holder",
+              lastName: userId,
+              displayName: null,
+              profilePicture: null,
+              email,
+            },
+          },
+        },
+      ],
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getLocation).mockResolvedValue({
+      location: { id: "location-1", name: "Shelf B2" },
+      totalAssetsWithinLocation: 2,
+      assets: [
+        assetHeldBy("asset-own", "user-1", "me@example.com"),
+        assetHeldBy("asset-colleague", "user-2", "colleague@example.com"),
+      ],
+    } as never);
+    vi.mocked(getTeamMemberForCustodianFilter).mockResolvedValue({
+      teamMembers: [],
+      totalTeamMembers: 0,
+    } as never);
+    vi.mocked(getCustodyFromLocationByPool).mockResolvedValue({} as never);
+    vi.mocked(loadMultiPlacedPoolIds).mockResolvedValue(new Set() as never);
+    vi.mocked(countUnitsOnBookingsFromLocation).mockResolvedValue(
+      new Map() as never
+    );
+    vi.mocked(db.asset.count).mockResolvedValue(0);
+  });
+
+  it("hides a colleague's identity from a member who may not see all custody", async () => {
+    signInAs({ seeAllCustody: false });
+
+    const result = await loader(buildArgs(""));
+
+    const payload = JSON.stringify(loaderData(result).items);
+    expect(payload).not.toContain("colleague@example.com");
+    expect(payload).not.toContain("Holder user-2");
+    // The viewer's own custody stays visible.
+    expect(payload).toContain("me@example.com");
+  });
+
+  it("shows every custodian to a member who sees all custody", async () => {
+    signInAs({ seeAllCustody: true });
+
+    const result = await loader(buildArgs(""));
+
+    expect(JSON.stringify(loaderData(result).items)).toContain(
+      "colleague@example.com"
+    );
+  });
+});
