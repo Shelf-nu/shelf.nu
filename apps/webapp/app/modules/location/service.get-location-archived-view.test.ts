@@ -81,7 +81,40 @@ describe("getLocation archived view", () => {
       contains: "Sony",
       mode: "insensitive",
     });
-    expect(countWhere?.OR).toBeDefined();
+    // Every way a team member can hold an asset: custody (by team member or
+    // user id) and an ongoing or overdue booking (by either id).
+    expect(countWhere?.OR).toEqual([
+      {
+        custody: {
+          some: expect.objectContaining({ teamMemberId: { in: ["tm-1"] } }),
+        },
+      },
+      {
+        custody: {
+          some: expect.objectContaining({
+            custodian: { userId: { in: ["tm-1"] } },
+          }),
+        },
+      },
+      {
+        bookingAssets: {
+          some: {
+            booking: expect.objectContaining({
+              custodianTeamMemberId: { in: ["tm-1"] },
+            }),
+          },
+        },
+      },
+      {
+        bookingAssets: {
+          some: {
+            booking: expect.objectContaining({
+              custodianUserId: { in: ["tm-1"] },
+            }),
+          },
+        },
+      },
+    ]);
     // The pager reads this count, so it must describe exactly the listed rows.
     expect(countWhere).toEqual(listWhere);
   });
