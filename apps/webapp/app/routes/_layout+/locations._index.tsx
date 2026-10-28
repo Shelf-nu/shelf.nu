@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import type { Prisma } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
-import { data } from "react-router";
+import { data, useLoaderData } from "react-router";
 import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 
 import Header from "~/components/layout/header";
@@ -108,7 +108,8 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 export default function LocationsIndexPage() {
   const roles = useOrganizationRoles();
   const showRowActions = useShowLocationRowActions();
-  const linkState = useListContextLinkState("location");
+  const { perPage } = useLoaderData<typeof loader>();
+  const linkState = useListContextLinkState("location", perPage);
   const listItemProps = useMemo(
     () => ({ showRowActions, linkState }),
     [showRowActions, linkState]

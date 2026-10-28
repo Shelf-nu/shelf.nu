@@ -76,6 +76,29 @@ export function readPage(search: string): number {
 }
 
 /**
+ * The list search string with the page size the list actually showed.
+ *
+ * The page size otherwise comes from a cookie every list shares, so a size
+ * picked on another list later would shift where each row sits. A search
+ * that already names `per_page` is kept as it is.
+ *
+ * @param search - A list search string, with or without the leading `?`
+ * @param perPage - The page size the list's loader resolved, if known
+ * @returns The search string with a leading `?`
+ */
+export function withPerPage(
+  search: string,
+  perPage: number | undefined
+): string {
+  const params = new URLSearchParams(search);
+  if (!params.has("per_page") && perPage && perPage > 0) {
+    params.set("per_page", String(perPage));
+  }
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}
+
+/**
  * The same list search string pointed at another page.
  *
  * @param search - A list search string, with or without the leading `?`
