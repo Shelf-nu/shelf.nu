@@ -25,6 +25,7 @@ import type {
 import {
   buildCheckinReceipt,
   formatLatenessNote,
+  resolveReceiptMoments,
   resolveSentUnits,
   summariseCheckinMethods,
 } from "./checkin-receipt";
@@ -813,6 +814,172 @@ describe("buildCheckinReceipt — status stamp", () => {
     // Two rows, four units. Nothing came back, so the sentence in front of the
     // count says so.
     expect(result.stamp).toBe("Nothing returned · 4 still out");
+  });
+});
+
+describe("resolveReceiptMoments", () => {
+  const EARLIER = new Date("2026-09-02T10:00:00.000Z");
+
+  /** Rows of a finished booking, reconciled by the real rules. */
+  function finishedRows(
+    slices: CheckinReceiptSlice[],
+    breakdowns: Map<string, CheckinReceiptDispositionBreakdown> = new Map()
+  ) {
+    return build({ slices, breakdownByBookingAsset: breakdowns }).rows;
+  }
+
+  it("takes the departure from the earliest slice that names its dispatcher", () => {
+    const moments = resolveReceiptMoments({
+      rows: [],
+      departures: [
+        // Earlier, but no user is recorded making it.
+        {
+          checkedOutAt: new Date("2026-08-30T09:00:00.000Z"),
+          checkedOutById: null,
+        },
+        { checkedOutAt: CHECKED_IN_AT, checkedOutById: "user-2" },
+        { checkedOutAt: CHECKED_OUT_AT, checkedOutById: "user-1" },
+        { checkedOutAt: null, checkedOutById: null },
+      ],
+      completedAt: null,
+    });
+
+    expect(moments.checkedOutAt).toEqual(CHECKED_OUT_AT);
+    expect(moments.checkedOutById).toBe("user-1");
+  });
+
+  it("states no departure when no slice names its dispatcher", () => {
+    const moments = resolveReceiptMoments({
+      rows: [],
+      departures: [{ checkedOutAt: CHECKED_OUT_AT, checkedOutById: null }],
+      completedAt: null,
+    });
+
+    expect(moments.checkedOutAt).toBeNull();
+    expect(moments.checkedOutById).toBeNull();
+  });
+
+  it("returns the booking at its completion event whatever the rows carry", () => {
+    const moments = resolveReceiptMoments({
+      rows: finishedRows([slice({ checkedOutAt: CHECKED_OUT_AT })]),
+      departures: [],
+      completedAt: CHECKED_IN_AT,
+    });
+
+    expect(moments.returnedAt).toEqual(CHECKED_IN_AT);
+  });
+
+  it("falls back to the latest row moment when every returned row is dated", () => {
+    const moments = resolveReceiptMoments({
+      rows: finishedRows([
+        slice({
+          bookingAssetId: "ba-1",
+          checkedOutAt: CHECKED_OUT_AT,
+          checkedInAt: EARLIER,
+          checkedInById: "user-2",
+        }),
+        slice({
+          bookingAssetId: "ba-2",
+          assetId: "asset-2",
+          checkedOutAt: CHECKED_OUT_AT,
+          checkedInAt: CHECKED_IN_AT,
+          checkedInById: "user-1",
+        }),
+      ]),
+      departures: [],
+      completedAt: null,
+    });
+
+    expect(moments.returnedAt).toEqual(CHECKED_IN_AT);
+    // In the order they first received something.
+    expect(moments.checkedInByIds).toEqual(["user-2", "user-1"]);
+  });
+
+  it("states no return when a returned row is undated and no completion event exists", () => {
+    // The undated item came back at a moment nothing recorded, possibly after
+    // the dated one, so the dated row is not the booking's return.
+    const moments = resolveReceiptMoments({
+      rows: finishedRows([
+        slice({
+          bookingAssetId: "ba-1",
+          checkedOutAt: CHECKED_OUT_AT,
+          checkedInAt: EARLIER,
+          checkedInById: "user-2",
+        }),
+        slice({
+          bookingAssetId: "ba-2",
+          assetId: "asset-2",
+          checkedOutAt: CHECKED_OUT_AT,
+        }),
+      ]),
+      departures: [],
+      completedAt: null,
+    });
+
+    expect(moments.returnedAt).toBeNull();
+  });
+
+  it("does not wait for a date on a row whose units were all written off", () => {
+    // Accounted for, nothing returned: there is no return for it to date.
+    const moments = resolveReceiptMoments({
+      rows: finishedRows(
+        [
+          slice({
+            bookingAssetId: "ba-consumed",
+            assetId: "asset-qty",
+            assetType: AssetType.QUANTITY_TRACKED,
+            quantity: 5,
+            checkedOutAt: CHECKED_OUT_AT,
+            checkedOutQuantity: 5,
+          }),
+          slice({
+            bookingAssetId: "ba-1",
+            checkedOutAt: CHECKED_OUT_AT,
+            checkedInAt: EARLIER,
+            checkedInById: "user-2",
+          }),
+          slice({
+            bookingAssetId: "ba-2",
+            assetId: "asset-2",
+            checkedOutAt: CHECKED_OUT_AT,
+            checkedInAt: CHECKED_IN_AT,
+            checkedInById: "user-2",
+          }),
+        ],
+        new Map([["ba-consumed", breakdown({ consumed: 5 })]])
+      ),
+      departures: [],
+      completedAt: null,
+    });
+
+    expect(moments.returnedAt).toEqual(CHECKED_IN_AT);
+    expect(moments.checkedInByIds).toEqual(["user-2"]);
+  });
+
+  it("names no receivers when a returned row records none", () => {
+    // The header would otherwise name a person above an item nobody is
+    // recorded receiving; each row still prints its own name.
+    const moments = resolveReceiptMoments({
+      rows: finishedRows([
+        slice({
+          bookingAssetId: "ba-1",
+          checkedOutAt: CHECKED_OUT_AT,
+          checkedInAt: CHECKED_IN_AT,
+          checkedInById: "user-1",
+        }),
+        slice({
+          bookingAssetId: "ba-2",
+          assetId: "asset-2",
+          checkedOutAt: CHECKED_OUT_AT,
+          checkedInAt: CHECKED_IN_AT,
+          checkedInById: null,
+        }),
+      ]),
+      departures: [],
+      completedAt: CHECKED_IN_AT,
+    });
+
+    expect(moments.checkedInByIds).toEqual([]);
   });
 });
 

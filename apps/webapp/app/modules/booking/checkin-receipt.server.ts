@@ -36,6 +36,7 @@ import {
   buildCheckinReceipt,
   formatLatenessNote,
   isRowCheckedIn,
+  resolveReceiptMoments,
   resolveSentUnits,
   summariseCheckinMethods,
 } from "./checkin-receipt";
@@ -85,24 +86,21 @@ export type CheckinReceiptDbResult = {
   plannedFrom: Date | null;
   plannedTo: Date | null;
   /**
-   * The earliest departure the slice markers still record, and who made it.
+   * The earliest departure a user is recorded making, from the slice markers
+   * that name a dispatcher ({@link resolveReceiptMoments}).
    *
    * `BookingAsset.checkedOutAt` holds a slice's CURRENT departure (sending a
    * returned slice out again overwrites it), so on a re-dispatched booking this
    * is the earliest departure still on record, not the first one that ever
-   * happened. The sheet labels it "Checked out" for that reason.
-   *
-   * `null` when nothing left, and when that departure is dated after a return
-   * the sheet prints: something was back before it, so it is not when the
-   * booking left.
+   * happened. The sheet labels it "Checked out" for that reason. `null` when no
+   * slice names its dispatcher.
    */
   checkedOutAt: Date | null;
-  /** Who sent that first slice out; `""` when the marker records none. */
+  /** Who made that departure. */
   checkedOutByName: string;
   /**
-   * The recorded return moment; `null` when nothing recorded one, including
-   * when a returned row carries no moment and no completion event dates the
-   * booking's return.
+   * The booking's recorded return: its completion event, else the latest row
+   * moment while no row with returned units is undated; `null` otherwise.
    */
   returnedAt: Date | null;
   /**
@@ -112,10 +110,13 @@ export type CheckinReceiptDbResult = {
    * not finished or nothing recorded a moment.
    */
   latenessNote: CheckinLatenessNote | null;
-  /** Distinct receiving users, ordered by their first check-in. */
+  /**
+   * Distinct receiving users, ordered by their first check-in. Empty when a
+   * row with returned units records no receiver; the rows carry their own.
+   */
   checkedInByNames: string[];
   /**
-   * The one method line for the header when every returned row recorded the
+   * The one method line for the header when every checked-in row recorded the
    * same method; `null` when they differ or none recorded one.
    */
   checkedInHow: string | null;
@@ -449,39 +450,20 @@ export async function fetchCheckinReceiptData(
       isBookingFinished: isFinished,
     });
 
-    // The earliest departure still on record, and the person who made it. Both
-    // come from the same slice: a booking checked out in several passes has
-    // several dispatchers, and naming one against another's moment would be a
-    // claim nothing recorded.
-    const earliestCheckedOutSlice = slices
-      .filter((slice) => slice.checkedOutAt !== null)
-      .sort(
-        (a, b) =>
-          (a.checkedOutAt as Date).getTime() -
-          (b.checkedOutAt as Date).getTime()
-      )[0];
-
-    // Distinct receivers in the order they first received something, taken
-    // from the reconciled rows rather than the raw markers so the summary names
-    // exactly the people the rows below it name.
-    const checkedInUserIdsInOrder = [
-      ...new Set(
-        receipt.rows
-          .filter((row) => row.checkedInAt !== null)
-          .sort(
-            (a, b) =>
-              (a.checkedInAt as Date).getTime() -
-              (b.checkedInAt as Date).getTime()
-          )
-          .flatMap((row) => row.checkedInByIds)
-      ),
-    ];
+    // The header's departure, return and receivers, read from the reconciled
+    // rows rather than the raw markers so it never states more than the rows
+    // below it. The departures span every slice, printed or not.
+    const moments = resolveReceiptMoments({
+      rows: receipt.rows,
+      departures: slices,
+      completedAt: checkInTimes.get(bookingId) ?? null,
+    });
 
     // Ids read off the booking's own rows, not supplied by the caller.
     const markerUserIds = [
       ...new Set(
         [
-          earliestCheckedOutSlice?.checkedOutById ?? null,
+          moments.checkedOutById,
           ...slices.map((slice) => slice.checkedInById),
           ...dispositionLogs.map((log) => log.userId),
         ].filter((id): id is string => id !== null)
@@ -527,46 +509,6 @@ export async function fetchCheckinReceiptData(
       ];
     });
 
-    // The recorded return: the status transition into COMPLETE. When no event
-    // was written, the latest moment the printed rows carry stands in for it,
-    // but only while every returned row carries one. A returned row that
-    // nothing dated came back at a moment nothing recorded, possibly after
-    // every dated row, so the latest dated row would understate the return and
-    // the lateness measured from it. `Booking.updatedAt` is never a fallback:
-    // any later edit moves it.
-    //
-    // Read from the reconciled rows rather than the raw markers, so the summary
-    // can never be blank above rows that all show a time: a partly returned
-    // quantity row is dated by its logs, which its marker does not carry.
-    const latestRowCheckIn = receipt.rows.reduce<Date | null>((latest, row) => {
-      if (!row.checkedInAt) return latest;
-      return !latest || row.checkedInAt > latest ? row.checkedInAt : latest;
-    }, null);
-    const isEveryReturnDated = receipt.rows.every(
-      (row) => row.state !== "RETURNED" || row.checkedInAt !== null
-    );
-    const returnedAt =
-      checkInTimes.get(bookingId) ??
-      (isEveryReturnDated ? latestRowCheckIn : null);
-
-    // The earliest return the sheet prints, on a row or as the booking's. A
-    // departure dated after it is not when the booking left, because something
-    // was already back; the sheet leaves the line out rather than print a
-    // departure after a return it records.
-    const earliestPrintedReturn = [
-      returnedAt,
-      ...receipt.rows.map((row) => row.checkedInAt),
-    ].reduce<Date | null>((earliest, at) => {
-      if (!at) return earliest;
-      return !earliest || at < earliest ? at : earliest;
-    }, null);
-    const printedDeparture =
-      earliestCheckedOutSlice &&
-      (!earliestPrintedReturn ||
-        (earliestCheckedOutSlice.checkedOutAt as Date) <= earliestPrintedReturn)
-        ? earliestCheckedOutSlice
-        : undefined;
-
     const plannedTo = resolvePlannedEnd(booking);
 
     // Lateness is only meaningful once the booking has finished. An OVERDUE
@@ -576,7 +518,7 @@ export async function fetchCheckinReceiptData(
       ? getLatenessMs({
           status: booking.status,
           scheduledEnd: plannedTo,
-          checkInAt: returnedAt,
+          checkInAt: moments.returnedAt,
         })
       : null;
 
@@ -588,13 +530,13 @@ export async function fetchCheckinReceiptData(
       stamp: receipt.stamp,
       plannedFrom: resolvePlannedStart(booking),
       plannedTo,
-      checkedOutAt: printedDeparture?.checkedOutAt ?? null,
-      checkedOutByName: printedDeparture?.checkedOutById
-        ? nameByUserId.get(printedDeparture.checkedOutById) ?? ""
+      checkedOutAt: moments.checkedOutAt,
+      checkedOutByName: moments.checkedOutById
+        ? nameByUserId.get(moments.checkedOutById) ?? ""
         : "",
-      returnedAt,
+      returnedAt: moments.returnedAt,
       latenessNote: formatLatenessNote(latenessMs),
-      checkedInByNames: checkedInUserIdsInOrder
+      checkedInByNames: moments.checkedInByIds
         .map((id) => nameByUserId.get(id) ?? "")
         .filter((name) => name !== ""),
       checkedInHow: summariseCheckinMethods(rows),

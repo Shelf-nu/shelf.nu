@@ -222,7 +222,7 @@ describe("fetchCheckinReceiptData", () => {
   it("prints every item of a finished booking returned when its markers date no return after the departure", async () => {
     // Two loose items came back in a scan session, which dates their markers.
     // The kit member carries no check-in marker at all. Every departure carries
-    // the booking's last update, later than the session.
+    // the booking's last update, later than the session, and names nobody.
     const departure = new Date("2025-10-02T14:48:20.311Z");
     const sessionAt = new Date("2025-09-26T11:45:52.688Z");
     mockOf(fetchAllPdfRelatedData).mockResolvedValue(
@@ -280,15 +280,116 @@ describe("fetchCheckinReceiptData", () => {
       "Grace Hopper",
       "",
     ]);
-    expect(receipt.checkedInByNames).toEqual(["Grace Hopper"]);
+    // The kit member records no receiver, so the header names nobody above it.
+    expect(receipt.checkedInByNames).toEqual([]);
     // The kit member came back at a moment nothing recorded, and no completion
     // event dates the booking's return, so the latest dated row is not it.
     expect(receipt.returnedAt).toBeNull();
     expect(receipt.latenessNote).toBeNull();
-    // A departure dated after the returns on the same sheet is not when the
-    // booking left.
+    // No slice names its dispatcher, so no departure is recorded.
     expect(receipt.checkedOutAt).toBeNull();
     expect(receipt.checkedOutByName).toBe("");
+  });
+
+  it("leaves out a departure no user is recorded making, even when it is dated with the return", async () => {
+    // Both markers carry the booking's last update and name nobody: the
+    // departure is a stand-in, so the sheet does not print it.
+    const lastUpdate = new Date("2025-06-12T16:20:00.000Z");
+    mockOf(fetchAllPdfRelatedData).mockResolvedValue(
+      pdfResultWith([pdfRow("ba-1", "asset-1", "Tent")], BookingStatus.ARCHIVED)
+    );
+    mockOf(db.bookingAsset.findMany).mockResolvedValue([
+      {
+        id: "ba-1",
+        assetId: "asset-1",
+        quantity: 1,
+        assetKitId: null,
+        checkedOutAt: lastUpdate,
+        checkedOutById: null,
+        checkedOutQuantity: 0,
+        checkedInAt: lastUpdate,
+        checkedInById: null,
+        asset: { type: AssetType.INDIVIDUAL },
+      },
+    ]);
+    mockOf(db.user.findMany).mockResolvedValue([]);
+
+    const receipt = await run();
+
+    expect(receipt.rows[0].state).toBe("RETURNED");
+    expect(receipt.stamp).toBe("All items returned");
+    expect(receipt.checkedOutAt).toBeNull();
+    expect(receipt.checkedOutByName).toBe("");
+    // The row is dated, so its moment still stands in for the return.
+    expect(receipt.returnedAt).toEqual(lastUpdate);
+  });
+
+  it("keeps the departure on a live booking whose quantity slice went out again", async () => {
+    // Three units went out, came back, and went out again with the button,
+    // which refreshes the departure. The row is dated by the first trip's
+    // return log, older than the departure that is still on record.
+    const firstReturnAt = new Date("2026-09-02T09:00:00.000Z");
+    const secondDepartureAt = new Date("2026-09-02T15:00:00.000Z");
+    mockOf(fetchAllPdfRelatedData).mockResolvedValue(
+      pdfResultWith(
+        [pdfRow("ba-1", "asset-1", "XLR cable")],
+        BookingStatus.ONGOING
+      )
+    );
+    mockOf(db.bookingAsset.findMany).mockResolvedValue([
+      {
+        id: "ba-1",
+        assetId: "asset-1",
+        quantity: 3,
+        assetKitId: null,
+        checkedOutAt: secondDepartureAt,
+        checkedOutById: "user-1",
+        checkedOutQuantity: 6,
+        checkedInAt: null,
+        checkedInById: null,
+        asset: { type: AssetType.QUANTITY_TRACKED },
+      },
+    ]);
+    mockOf(db.consumptionLog.findMany).mockResolvedValue([
+      {
+        assetId: "asset-1",
+        bookingAssetId: "ba-1",
+        category: "RETURN",
+        quantity: 3,
+        createdAt: firstReturnAt,
+        userId: "user-7",
+      },
+    ]);
+    mockOf(db.user.findMany).mockResolvedValue([
+      {
+        id: "user-1",
+        displayName: "Ada Lovelace",
+        firstName: null,
+        lastName: null,
+      },
+      {
+        id: "user-7",
+        displayName: "Grace Hopper",
+        firstName: null,
+        lastName: null,
+      },
+    ]);
+
+    const receipt = await run();
+
+    const row = receipt.rows[0];
+    expect(row.state).toBe("STILL_OUT");
+    expect(row.sent).toBe(6);
+    expect(row.returned).toBe(3);
+    expect(row.checkedInAt).toEqual(firstReturnAt);
+    expect(receipt.stamp).toBe("Partial return · 3 still out");
+    expect(receipt.checkedOutAt).toEqual(secondDepartureAt);
+    expect(receipt.checkedOutByName).toBe("Ada Lovelace");
+    // No completion event on a live booking: the dated row stands in, it names
+    // its receiver, and nothing is measured against the planned end yet.
+    expect(receipt.returnedAt).toEqual(firstReturnAt);
+    expect(receipt.checkedInByNames).toEqual(["Grace Hopper"]);
+    expect(receipt.latenessNote).toBeNull();
   });
 
   it("returns a finished booking at its completion event when some rows carry no date", async () => {
@@ -336,7 +437,14 @@ describe("fetchCheckinReceiptData", () => {
     mockOf(resolveCheckInTimes).mockResolvedValue(
       new Map([["booking-1", COMPLETED_AT]])
     );
-    mockOf(db.user.findMany).mockResolvedValue([]);
+    mockOf(db.user.findMany).mockResolvedValue([
+      {
+        id: "user-1",
+        displayName: "Ada Lovelace",
+        firstName: null,
+        lastName: null,
+      },
+    ]);
 
     const receipt = await run();
 
@@ -348,8 +456,13 @@ describe("fetchCheckinReceiptData", () => {
     expect(receipt.stamp).toBe("All items returned");
     expect(receipt.returnedAt).toEqual(COMPLETED_AT);
     expect(receipt.latenessNote).toEqual({ text: "early", isLate: false });
-    // The departure precedes every return, so it stays on the sheet.
+    // The departure names who made it, so it stays on the sheet.
     expect(receipt.checkedOutAt).toEqual(CHECKED_OUT_AT);
+    expect(receipt.checkedOutByName).toBe("Ada Lovelace");
+    // Two returned rows record no receiver, so the header names nobody; the
+    // dated row still names its own.
+    expect(receipt.checkedInByNames).toEqual([]);
+    expect(receipt.rows[0].checkedInByName).toBe("Ada Lovelace");
     // Every returned row says how, dated or not. They disagree, so the header
     // carries no single line.
     expect(receipt.rows.map((row) => row.checkedInHow)).toEqual([

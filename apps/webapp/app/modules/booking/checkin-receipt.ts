@@ -363,20 +363,29 @@ export type CheckinReceiptView = {
   /** The agreed period, never the live one. `null` when neither end is set. */
   plannedFrom: string | null;
   plannedTo: string | null;
-  /** The first moment anything left on this booking. */
+  /**
+   * The earliest departure a user is recorded making; `null` when no slice
+   * names its dispatcher ({@link resolveReceiptMoments}).
+   */
   checkedOutAt: string | null;
-  /** Who sent that first slice out; `""` when the marker records none. */
+  /** Who made that departure. */
   checkedOutByName: string;
-  /** The recorded return moment; `null` when nothing recorded one. */
+  /**
+   * The booking's recorded return: its completion event, else the latest row
+   * moment while no row with returned units is undated; `null` otherwise.
+   */
   returnedAt: string | null;
   /** How that return compares to the planned end. */
   latenessNote: CheckinLatenessNote | null;
-  /** Distinct receiving users, ordered by their first check-in. */
+  /**
+   * Distinct receiving users, ordered by their first check-in. Empty when a
+   * row with returned units records no receiver; the rows carry their own.
+   */
   checkedInByNames: string[];
   /**
-   * How the items were checked in, when every row with a recorded method
-   * agrees ({@link summariseCheckinMethods}); otherwise `null` and each row
-   * prints its own.
+   * How the items were checked in, when every checked-in row, dated or not,
+   * recorded the same method ({@link summariseCheckinMethods}); otherwise
+   * `null` and each row prints its own.
    */
   checkedInHow: string | null;
 };
@@ -672,4 +681,107 @@ export function buildCheckinReceipt(
       : "All items accounted for";
 
   return { rows, totals, stamp };
+}
+
+/** One slice's departure marker, as {@link resolveReceiptMoments} reads it. */
+export type CheckinReceiptDeparture = {
+  checkedOutAt: Date | null;
+  /** Who sent the slice out; `null` when no user is recorded making it. */
+  checkedOutById: string | null;
+};
+
+/** The booking-level moments and people the sheet's header prints. */
+export type CheckinReceiptMoments = {
+  /** The earliest departure a user is recorded making; `null` when none is. */
+  checkedOutAt: Date | null;
+  /** Who made that departure. */
+  checkedOutById: string | null;
+  /** The booking's recorded return; `null` when nothing records it. */
+  returnedAt: Date | null;
+  /**
+   * The receiving users in the order they first received something; empty
+   * when a row with returned units records no receiver.
+   */
+  checkedInByIds: string[];
+};
+
+/** Arguments for {@link resolveReceiptMoments}. */
+export type ResolveReceiptMomentsArgs = {
+  /** The reconciled rows, as {@link buildCheckinReceipt} returns them. */
+  rows: CheckinReceiptRow[];
+  /** Every slice on the booking, printed or not. */
+  departures: CheckinReceiptDeparture[];
+  /** The booking's transition into COMPLETE, when an event recorded it. */
+  completedAt: Date | null;
+};
+
+/**
+ * The header's booking-level moments and people, derived from the reconciled
+ * rows so the header never states more than the rows below it.
+ *
+ * - **Checked out** is the earliest departure a user is recorded making. Every
+ *   check-out records who made it, so a departure marker naming no dispatcher
+ *   is a stand-in for a moment nobody recorded, and it can sit at or after the
+ *   return it precedes. It never supplies the line.
+ * - **Returned** is the completion event. Without one, the latest moment the
+ *   rows carry stands in, but only while no row with returned units is
+ *   undated: such a row came back at a moment nothing recorded, possibly after
+ *   every dated row, so the latest dated row would understate the return and
+ *   the lateness measured from it. A row whose units were all written off has
+ *   nothing returned to date and does not hold the line back.
+ * - **Checked in by** names the receivers only while every row with returned
+ *   units records one. Otherwise the header would name people above rows they
+ *   are not recorded receiving, so it stays empty and each row prints its own.
+ *
+ * `Booking.updatedAt` is never a fallback for any of them: any later edit moves
+ * it.
+ *
+ * @param args - The reconciled rows, every slice's departure marker, and the
+ *   completion event's moment
+ * @returns The header's departure, return and receivers
+ */
+export function resolveReceiptMoments({
+  rows,
+  departures,
+  completedAt,
+}: ResolveReceiptMomentsArgs): CheckinReceiptMoments {
+  // The moment and the dispatcher come from the same slice: a booking checked
+  // out in several passes has several dispatchers, and naming one against
+  // another's moment would be a claim nothing recorded.
+  let recordedDeparture: { at: Date; byId: string } | null = null;
+  for (const { checkedOutAt, checkedOutById } of departures) {
+    if (!checkedOutAt || !checkedOutById) continue;
+    if (!recordedDeparture || checkedOutAt < recordedDeparture.at) {
+      recordedDeparture = { at: checkedOutAt, byId: checkedOutById };
+    }
+  }
+
+  // Ordered by the moment each row came back, so receivers read in the order
+  // they first received something.
+  const datedRows = rows
+    .filter((row): row is CheckinReceiptRow & { checkedInAt: Date } =>
+      Boolean(row.checkedInAt)
+    )
+    .sort((a, b) => a.checkedInAt.getTime() - b.checkedInAt.getTime());
+  const rowsWithReturns = rows.filter((row) => row.returned > 0);
+
+  const latestRowCheckIn = datedRows[datedRows.length - 1]?.checkedInAt ?? null;
+  const returnedAt =
+    completedAt ??
+    (rowsWithReturns.every((row) => row.checkedInAt !== null)
+      ? latestRowCheckIn
+      : null);
+
+  const checkedInByIds = rowsWithReturns.every(
+    (row) => row.checkedInByIds.length > 0
+  )
+    ? distinctInOrder(datedRows.flatMap((row) => row.checkedInByIds))
+    : [];
+
+  return {
+    checkedOutAt: recordedDeparture?.at ?? null,
+    checkedOutById: recordedDeparture?.byId ?? null,
+    returnedAt,
+    checkedInByIds,
+  };
 }
