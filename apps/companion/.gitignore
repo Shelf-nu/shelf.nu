@@ -49,3 +49,7 @@ google-service-account*.json
 # local copy used for signing is fine only while it stays untracked here. If a
 # private key is ever committed or exposed, rotate it (new pair + new build).
 keys/
+
+# Firebase client config for Android: supplied to EAS as the GOOGLE_SERVICES_JSON file
+# variable and kept locally for expo run:android. See PUSH-NOTIFICATIONS.md.
+google-services.json

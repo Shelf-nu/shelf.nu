@@ -16,6 +16,7 @@ import { beforeEach, describe, expect, it, vitest } from "vitest";
 import type { Mock } from "vitest";
 import { db } from "~/database/db.server";
 import { createSystemBookingNote } from "~/modules/booking-note/service.server";
+import { getUserByID } from "~/modules/user/service.server";
 import { ShelfError } from "~/utils/error";
 import {
   assertModelUnitsNotReservedElsewhere,
@@ -124,6 +125,9 @@ vitest.mock("~/database/db.server", () => ({
     },
     bookingNote: {
       create: vitest.fn().mockResolvedValue({}),
+      // why: `fulfilModelRequestsForAssets` writes the notes for every unit it
+      // assigns in one statement at the end of its loop.
+      createMany: vitest.fn().mockResolvedValue({ count: 0 }),
     },
     custody: {
       // why: the pool's custody rows, read across models in one statement.
@@ -3822,7 +3826,7 @@ describe("fulfilModelRequestsForAssets", () => {
   });
 
   it("decrements once per asset when several units of one model arrive together", async () => {
-    expect.assertions(2);
+    expect.assertions(3);
     // A single 3-unit reservation, read fresh before each write. The service
     // must see the previous increment, so the mock advances the counter the
     // way the database would.
@@ -3856,6 +3860,20 @@ describe("fulfilModelRequestsForAssets", () => {
     // helper loops sequentially.
     expect(row.fulfilledQuantity).toBe(3);
     expect(result.size).toBe(3);
+    // The last claim completes the reservation, and its `fulfilledAt` change
+    // travels in the same batched event write as the per-unit events.
+    const events = vitest
+      .mocked(db.activityEvent.createMany)
+      .mock.calls.flatMap((call) => call[0]?.data ?? []) as Array<{
+      action: string;
+      field?: string | null;
+    }>;
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        action: "BOOKING_MODEL_REQUEST_CHANGED",
+        field: "fulfilledAt",
+      })
+    );
   });
 
   it("stops decrementing once the reservation is full, so extras are plain assets", async () => {
@@ -3889,6 +3907,122 @@ describe("fulfilModelRequestsForAssets", () => {
     expect(result).toEqual(new Map([["a1", "req-1"]]));
   });
 
+  // This loop runs inside the caller's interactive transaction, once per
+  // scanned asset. The actor and reservation reads are cached within the
+  // loop, and the notes and events are written in batches after it, so the
+  // atomic reservation claim is the only round trip each asset costs.
+  it("writes one batch of notes and events, and reads the actor and each reservation once", async () => {
+    expect.assertions(9);
+    // @ts-expect-error mocked
+    db.bookingModelRequest.findUnique.mockResolvedValue({
+      id: "req-1",
+      bookingId: BOOKING_ID,
+      assetModelId: MODEL_ID,
+      quantity: 5,
+      fulfilledQuantity: 0,
+      fulfilledAt: null,
+      assetModel: { name: "Dell Latitude 5550" },
+    });
+
+    const result = await fulfilModelRequestsForAssets({
+      bookingId: BOOKING_ID,
+      assets: [asset("a1"), asset("a2"), asset("a3")],
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      tx,
+    });
+
+    expect(result.size).toBe(3);
+    // One actor lookup for the call, not one per assigned unit.
+    expect(getUserByID).toHaveBeenCalledTimes(1);
+    // One reservation read per model. The claim simulator also reads through
+    // this mock, but with no arguments, so only the service's reads carry a
+    // `where`.
+    const serviceReads = vitest
+      .mocked(db.bookingModelRequest.findUnique)
+      .mock.calls.filter((call) => call[0] !== undefined);
+    expect(serviceReads).toHaveLength(1);
+    // The same three notes, in one statement, in scan order.
+    expect(db.bookingNote.create).not.toHaveBeenCalled();
+    expect(db.bookingNote.createMany).toHaveBeenCalledTimes(1);
+    const notes = vitest.mocked(db.bookingNote.createMany).mock.calls[0][0]
+      ?.data as Array<{ content: string; createdAt: Date }>;
+    expect(notes.map((note) => note.content.match(/Asset (a\d)/)?.[1])).toEqual(
+      ["a1", "a2", "a3"]
+    );
+    // The feed orders notes by `createdAt`, so one shared timestamp would
+    // shuffle them. Each later unit gets a later stamp.
+    expect(
+      notes.every(
+        (note, index) =>
+          index === 0 ||
+          note.createdAt.getTime() > notes[index - 1].createdAt.getTime()
+      )
+    ).toBe(true);
+    // And the per-unit events, in one statement too: one FULFILLED per
+    // claimed asset, in scan order. A completed reservation would add a
+    // CHANGED event as well, so only the FULFILLED ones are counted.
+    expect(db.activityEvent.create).not.toHaveBeenCalled();
+    const eventWrites = vitest.mocked(db.activityEvent.createMany).mock.calls;
+    const fulfilled = (
+      eventWrites.flatMap((call) => call[0]?.data ?? []) as Array<{
+        action: string;
+        assetId: string | null;
+      }>
+    ).filter((event) => event.action === "BOOKING_MODEL_REQUEST_FULFILLED");
+    expect({
+      writes: eventWrites.length,
+      assetIds: fulfilled.map((event) => event.assetId),
+    }).toEqual({ writes: 1, assetIds: ["a1", "a2", "a3"] });
+  });
+
+  // Notes written after this batch (the save's "added assets" note) take the
+  // database default stamp, and the feed sorts by `createdAt` desc. A batch
+  // stamped forward from now would sort above them on a large scan.
+  it("never stamps a batched note later than now", async () => {
+    expect.assertions(2);
+    const now = new Date("2026-10-28T12:00:00.000Z");
+    // why: the stamps derive from the clock; freeze only `Date` so promises
+    // and the claim simulator still run normally.
+    vitest.useFakeTimers({ toFake: ["Date"] });
+    vitest.setSystemTime(now);
+    // @ts-expect-error mocked
+    db.bookingModelRequest.findUnique.mockResolvedValue({
+      id: "req-1",
+      bookingId: BOOKING_ID,
+      assetModelId: MODEL_ID,
+      quantity: 5,
+      fulfilledQuantity: 0,
+      fulfilledAt: null,
+      assetModel: { name: "Dell Latitude 5550" },
+    });
+
+    try {
+      await fulfilModelRequestsForAssets({
+        bookingId: BOOKING_ID,
+        assets: [asset("a1"), asset("a2"), asset("a3")],
+        organizationId: ORG_ID,
+        userId: USER_ID,
+        tx,
+      });
+    } finally {
+      vitest.useRealTimers();
+    }
+
+    const stamps = (
+      vitest.mocked(db.bookingNote.createMany).mock.calls[0][0]?.data as Array<{
+        createdAt: Date;
+      }>
+    ).map((note) => note.createdAt.getTime());
+    // The range ends at now, one millisecond apart, so scan order holds.
+    expect(stamps[stamps.length - 1]).toBe(now.getTime());
+    expect(stamps).toEqual([
+      now.getTime() - 2,
+      now.getTime() - 1,
+      now.getTime(),
+    ]);
+  });
+
   it("fulfils even when the caller threads no actor through", async () => {
     expect.assertions(2);
     // @ts-expect-error mocked
@@ -3915,7 +4049,7 @@ describe("fulfilModelRequestsForAssets", () => {
 
     expect(result).toEqual(new Map([["asset-1", "req-1"]]));
     // The note is still written, in the system voice.
-    expect(db.bookingNote.create).toHaveBeenCalled();
+    expect(db.bookingNote.createMany).toHaveBeenCalled();
   });
 });
 

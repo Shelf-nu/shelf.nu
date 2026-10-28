@@ -220,6 +220,22 @@ export const NewAssetBulkFormSchema = NewAssetFormSchema.extend({
   ),
 });
 
+/**
+ * Starting value of the Value input for a stored valuation.
+ *
+ * Zero is a real valuation and must show as 0. Only a missing valuation
+ * leaves the field blank, because the form schema reads a blank field as
+ * "no value" and saving it would clear the stored 0.
+ *
+ * @param valuation - The asset's stored valuation, if any.
+ * @returns The number to show, or `""` for no valuation.
+ */
+export function valuationInputDefault(
+  valuation: Asset["valuation"] | undefined
+): number | "" {
+  return valuation ?? "";
+}
+
 /** Pass props of the values to be used as default for the form fields */
 
 type Props = Partial<
@@ -1432,7 +1448,7 @@ const AssetFormInner = ({
               step="any"
               min={0}
               className="w-full"
-              defaultValue={valuation || ""}
+              defaultValue={valuationInputDefault(valuation)}
             />
             <span className="absolute bottom-0 border-r px-3 py-2.5 text-[16px] text-gray-600 lg:bottom-[11px]">
               {currency}
