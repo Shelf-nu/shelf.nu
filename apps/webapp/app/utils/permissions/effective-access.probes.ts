@@ -393,17 +393,15 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
   // may grant. Role changes on existing members are B9:D-07:change-role-guard.
   snapshot["D-04:invite-guard"] = perCase(CALLER_ROLES, (caller) =>
     Object.fromEntries(
-      [...INVITABLE_ROLES]
-        .sort()
-        .map((role) => [
+      [...INVITABLE_ROLES].sort().map((role) => [
+        role,
+        canInviteRole({
+          actorOwnsWorkspace: isWorkspaceOwner([caller]),
           role,
-          canInviteRole({
-            actorOwnsWorkspace: isWorkspaceOwner([caller]),
-            role,
-          })
-            ? "allowed"
-            : "refused",
-        ])
+        })
+          ? "allowed"
+          : "refused",
+      ])
     )
   );
   snapshot["D-10:labels"] = Object.fromEntries(
@@ -698,6 +696,28 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
                 userId: "caller",
                 access: accessFor(roles),
                 action: "cancel",
+              })
+            ),
+        ],
+      ])
+    )
+  );
+
+  // B9:D-15: mobile extend (bookings.extend.ts: gate booking:extend, then
+  // ownership on the context's `access`).
+  snapshot["B9:D-15:mobile-extend"] = perRoleSet((roles) =>
+    perCase(RELATIONSHIP_NAMES, (rel) =>
+      firstRefusal([
+        ["denied:gate", () => !can(roles, E.booking, A.extend)],
+        [
+          "denied:owner",
+          () =>
+            throws(() =>
+              validateBookingOwnership({
+                booking: RELATIONSHIPS[rel],
+                userId: "caller",
+                access: accessFor(roles),
+                action: "extend",
               })
             ),
         ],

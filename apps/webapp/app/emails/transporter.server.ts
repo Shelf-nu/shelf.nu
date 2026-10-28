@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import type { Transporter } from "nodemailer";
 
 import {
   NODE_ENV,
@@ -8,11 +9,11 @@ import {
   SMTP_USER,
 } from "../utils/env";
 
-let transporter: nodemailer.Transporter;
+let transporter: Transporter;
 
 declare global {
   // eslint-disable-next-line no-var
-  var __transporter__: nodemailer.Transporter;
+  var __transporter__: Transporter;
 }
 
 /**
@@ -33,7 +34,7 @@ const transporterSettings = {
     },
   }),
   tls: {
-    // do not fail on invalid certs
+    // reject invalid or self-signed SMTP certificates
     rejectUnauthorized: true,
   },
 };

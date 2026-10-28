@@ -7,7 +7,6 @@ import type {
   Tag,
   Organization,
   TeamMember,
-  Booking,
   Kit,
   AssetIndexSettings,
   UserOrganization,
@@ -72,7 +71,6 @@ import {
   loadCustodySources,
   rehomeCustodyForPlacementChange,
 } from "~/modules/asset/custody-source.server";
-import { bookableListScopeWhere } from "~/modules/asset/list-scope.server";
 import type { BookableListScope } from "~/modules/asset/list-scope.server";
 import {
   assertStockNotBelowManualPlacements,
@@ -197,6 +195,16 @@ import { setCustodyDrivenAssetStatus } from "./custody-status.server";
 import { assetIndexFields } from "./fields";
 import { removeImageFilesOfDeletedAssets } from "./image-files.server";
 import { validateContentImportRows } from "./import-preflight.server";
+import {
+  LAST_AUDIT_DATE_COLUMN,
+  canQueryLastAuditDate,
+} from "./last-audit-date-access";
+import type { LastAuditDateAccess } from "./last-audit-date-access";
+import {
+  buildAssetListWhere,
+  resolveAssetListFilters,
+} from "./list-where.server";
+import type { AssetListFilters } from "./list-where.server";
 import type {
   MoveAssetLocationUnitsArgs,
   MoveUnitsResult,
@@ -210,8 +218,6 @@ import {
   parseFiltersWithHierarchy,
   parseSortingOptions,
 } from "./query.server";
-import { resolveAssetSearchIds } from "./search-ids.server";
-import { buildAssetStatusWhere, splitAssetSearchTerms } from "./search.server";
 import { getNextSequentialId } from "./sequential-id.server";
 import type {
   AdvancedIndexAsset,
@@ -222,13 +228,11 @@ import type {
 } from "./types";
 import type { AllowedCustodianFilterIds } from "./utils.server";
 import {
-  buildLowStockWhere,
   getLocationUpdateNoteContent,
   getCustomFieldUpdateNoteContent,
   detectPotentialChanges,
   detectCustomFieldChanges,
   type CustomFieldChangeInfo,
-  applyArchivedFilter,
   getArchivedFilterFromParams,
   type ArchivedFilter,
 } from "./utils.server";
@@ -242,9 +246,17 @@ import {
 import { cancelAssetReminderScheduler } from "../asset-reminder/scheduler.server";
 import { createSystemBookingNotes } from "../booking-note/service.server";
 import { ASSET_EDIT_ADJUSTMENT_NOTE } from "../consumption-log/constants";
-import { checkAndNotifyLowStock } from "../consumption-log/low-stock.server";
+import {
+  checkAndNotifyLowStock,
+  syncLowStockMarkers,
+} from "../consumption-log/low-stock.server";
 import { lockAssetForQuantityUpdate } from "../consumption-log/quantity-lock.server";
 import { createConsumptionLog } from "../consumption-log/service.server";
+import { emptyStockState } from "../consumption-log/stock-ledger";
+import {
+  readStockState,
+  recordStockChanges,
+} from "../consumption-log/stock-ledger.server";
 import { createKitsIfNotExists } from "../kit/service.server";
 import { createSystemLocationNote } from "../location-note/service.server";
 import {
@@ -411,8 +423,12 @@ export async function setKitCustodyAfterAssetImport({
  * - Assets with custody being imported into kits that exist but are not in custody,
  * - Existing kits with different custodians,
  * - Multiple custodians assigned to the same kit within the same import.
+ *
+ * @param args.data - Import rows; only rows with both a kit and a custodian matter
+ * @param args.organizationId - Workspace whose kits are checked
+ * @throws {ShelfError} 400 when a kit would end up with conflicting custodians
  */
-async function validateKitCustodyConflicts({
+export async function validateKitCustodyConflicts({
   data,
   organizationId,
 }: {
@@ -538,7 +554,8 @@ async function validateKitCustodyConflicts({
   if (conflicts.length > 0) {
     throw new ShelfError({
       cause: null,
-      message: `We found custody conflicts with existing kits. Assets with custody cannot be imported into existing kits that are not in custody.`,
+      message:
+        "Some rows have conflicting kit custody assignments. See the issue on each row.",
       additionalData: {
         kitCustodyConflicts: conflicts,
       },
@@ -647,370 +664,34 @@ const unavailableBookingStatuses = [
  * @param params Search and filtering parameters for asset queries
  * @returns Assets and total count matching the criteria
  */
-export async function getAssets(params: {
-  organizationId: Organization["id"];
-  page: number;
-  orderBy: SortingOptions;
-  orderDirection: SortingDirection;
-  perPage?: number;
-  search?: string | null;
-  categoriesIds?: Category["id"][] | null;
-  locationIds?: Location["id"][] | null;
-  tagsIds?: Tag["id"][] | null;
-  status?: Asset["status"] | null;
-  hideUnavailable?: Asset["availableToBook"];
-  bookingFrom?: Booking["from"];
-  bookingTo?: Booking["to"];
-  unhideAssetsBookigIds?: Booking["id"][];
-  teamMemberIds?: TeamMember["id"][] | null;
-  extraInclude?: Prisma.AssetInclude;
-  /**
-   * Hide all assets that cannot currently be added to kit.
-   * This includes:
-   * - assets in custody
-   * - assets that are checkedout
-   * */
-  hideUnavailableToAddToKit?: boolean;
-  assetKitFilter?: string | null;
-  /** QUANTITY_TRACKED assets at or below their minimum only. */
-  lowStockOnly?: boolean;
-  /** The caller's list scope; `null` or omitted lists every asset. */
-  bookableScope?: BookableListScope | null;
-  /**
-   * Active/Archived/All view dimension (orthogonal to `status`). Defaults to
-   * `active`, so every caller hides archived assets unless it opts in.
-   */
-  archivedFilter?: ArchivedFilter;
-}) {
-  let {
-    organizationId,
+export async function getAssets(
+  params: AssetListFilters & {
+    page: number;
+    orderBy: SortingOptions;
+    orderDirection: SortingDirection;
+    perPage?: number;
+    extraInclude?: Prisma.AssetInclude;
+  }
+) {
+  const {
     orderBy,
     orderDirection,
     page = 1,
     perPage = 8,
-    search,
-    categoriesIds,
-    locationIds,
-    tagsIds,
-    status,
     bookingFrom,
     bookingTo,
-    hideUnavailable,
-    unhideAssetsBookigIds,
-    teamMemberIds,
     extraInclude,
-    assetKitFilter,
-    lowStockOnly,
-    bookableScope,
-    archivedFilter = "active",
   } = params;
 
   try {
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 && perPage <= 100 ? perPage : 20;
 
-    const where: Prisma.AssetWhereInput = { organizationId };
-
-    // Active/Archived/All dimension (defaults to active = hide archived).
-    // Sits on the top-level `where`, so it ANDs with the search `where.OR`
-    // below: the UNION resolves candidate ids across all assets, then Prisma
-    // filters them by archived state. No re-query is needed on this path.
-    applyArchivedFilter(where, archivedFilter);
-
-    // In `AND`, not spread: the scope is an OR group, and search and the
-    // category filter below write `where.OR`.
-    if (bookableScope) {
-      where.AND = [bookableListScopeWhere(bookableScope)];
-    }
-
-    // Spread: the bookable scope above may already have written `where.AND`.
-    if (lowStockOnly) {
-      where.AND = [
-        ...(Array.isArray(where.AND) ? where.AND : []),
-        buildLowStockWhere(),
-      ];
-    }
-
-    if (search) {
-      const searchTerms = splitAssetSearchTerms(search);
-
-      if (searchTerms.length === 0) {
-        // Typed input that yields zero terms (whitespace / bare commas)
-        // matches NOTHING — a debounced type-ahead sending a single space
-        // must not return the full list. Mirrors the mobile composer.
-        where.id = { in: [] };
-      } else {
-        // Resolve the search to a set of matching asset ids via the shared
-        // org-scoped UNION (resolveAssetSearchIds → buildAssetSearchUnion) —
-        // index-driven, org-scoped branches, ~165ms vs the old multi-table OR's
-        // cross-org seq scans. The helper is retry-wrapped (to claim the read
-        // semantics the client extension cannot infer) and guards the id set
-        // against Postgres' ~65k bind-param ceiling, throwing a friendly 400
-        // rather than letting an extreme org + very broad term hard-fail.
-        // Setting where.OR here — BEFORE the category/tag/location/team-member
-        // filters below — preserves the historical OR-entanglement: those
-        // filters append to where.OR, so search OR-combines with them exactly
-        // as the previous Prisma OR clause did. The UNION always
-        // searches all 11 sources (the old id-shaped fast path searched a
-        // subset and fell back on zero rows); id-shaped searches therefore now
-        // return the full result set — a superset of before, the more-correct
-        // answer.
-        const ids = await resolveAssetSearchIds({
-          organizationId,
-          terms: searchTerms,
-        });
-        where.OR = [{ id: { in: ids } }];
-      }
-    }
-
-    if (status) {
-      // why: Asset.status flips to IN_CUSTODY/CHECKED_OUT for QUANTITY_TRACKED
-      // assets as soon as ANY unit is allocated, even if other units remain
-      // available. Filtering with `where.status = AVAILABLE` would incorrectly
-      // exclude qty-tracked rows that still have free stock. Treat AVAILABLE
-      // as inclusive of all qty-tracked rows; row.status keeps the existing
-      // strict semantic for IN_CUSTODY / CHECKED_OUT (which are already
-      // truthful for qty-tracked — the row enters those states whenever ANY
-      // unit does).
-      if (status === AssetStatus.AVAILABLE) {
-        // QT-aware fragment shared with getAssetsWhereInput and the mobile
-        // assets endpoint — see buildAssetStatusWhere for the rationale.
-        where.AND = [
-          ...(Array.isArray(where.AND)
-            ? where.AND
-            : where.AND
-            ? [where.AND]
-            : []),
-          buildAssetStatusWhere(status),
-        ];
-      } else {
-        where.status = status;
-      }
-    }
-
-    if (categoriesIds?.length) {
-      if (categoriesIds.includes("uncategorized")) {
-        where.OR = [
-          ...(where.OR ?? []),
-          { categoryId: { in: categoriesIds } },
-          { categoryId: null },
-        ];
-      } else {
-        where.categoryId = { in: categoriesIds };
-      }
-    }
-
-    if (hideUnavailable) {
-      //not disabled for booking
-      where.availableToBook = true;
-      /**
-       * For INDIVIDUAL assets, exclude those with active custody.
-       * For QUANTITY_TRACKED assets, always show them — partial availability
-       * is checked at booking time based on available quantity.
-       */
-      where.AND = [
-        ...(Array.isArray(where.AND)
-          ? where.AND
-          : where.AND
-          ? [where.AND]
-          : []),
-        {
-          OR: [{ type: "QUANTITY_TRACKED" }, { custody: { none: {} } }],
-        },
-      ];
-      if (bookingFrom && bookingTo) {
-        /**
-         * Booking overlap filters only apply to INDIVIDUAL assets.
-         * QUANTITY_TRACKED assets can have multiple overlapping bookings
-         * as long as total reserved doesn't exceed available quantity.
-         * Availability is validated at booking time, not at filter time.
-         */
-        where.AND = [
-          ...(Array.isArray(where.AND)
-            ? where.AND
-            : where.AND
-            ? [where.AND]
-            : []),
-          // Rule 1: Exclude INDIVIDUAL assets from RESERVED bookings
-          {
-            OR: [
-              { type: "QUANTITY_TRACKED" },
-              {
-                bookingAssets: {
-                  none: {
-                    booking: {
-                      ...(unhideAssetsBookigIds?.length && {
-                        id: { notIn: unhideAssetsBookigIds },
-                      }),
-                      status: BookingStatus.RESERVED,
-                      OR: [
-                        { from: { lte: bookingTo }, to: { gte: bookingFrom } },
-                        { from: { gte: bookingFrom }, to: { lte: bookingTo } },
-                      ],
-                    },
-                  },
-                },
-              },
-            ],
-          },
-          // Rule 2: For ONGOING/OVERDUE bookings, only exclude CHECKED_OUT INDIVIDUAL assets
-          {
-            OR: [
-              { type: "QUANTITY_TRACKED" },
-              // Either asset is AVAILABLE (checked in from partial check-in)
-              { status: AssetStatus.AVAILABLE },
-              // Or asset has no conflicting ONGOING/OVERDUE bookings
-              {
-                bookingAssets: {
-                  none: {
-                    booking: {
-                      ...(unhideAssetsBookigIds?.length && {
-                        id: { notIn: unhideAssetsBookigIds },
-                      }),
-                      status: {
-                        in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
-                      },
-                      OR: [
-                        { from: { lte: bookingTo }, to: { gte: bookingFrom } },
-                        { from: { gte: bookingFrom }, to: { lte: bookingTo } },
-                      ],
-                    },
-                  },
-                },
-              },
-            ],
-          },
-        ];
-      }
-    }
-    if (hideUnavailable === true && (!bookingFrom || !bookingTo)) {
-      throw new ShelfError({
-        cause: null,
-        message: "booking dates are needed to hide unavailable assets",
-        additionalData: {
-          hideUnavailable,
-          bookingFrom,
-          bookingTo,
-        },
-        label,
-      });
-    }
-    if (bookingFrom && bookingTo) {
-      where.availableToBook = true;
-    }
-
-    if (tagsIds && tagsIds.length) {
-      // Check if 'untagged' is part of the selected tag IDs
-      if (tagsIds.includes("untagged")) {
-        // Remove 'untagged' from the list of tags
-        tagsIds = tagsIds.filter((id) => id !== "untagged");
-
-        // Filter for assets that are untagged only
-        where.OR = [
-          ...(where.OR || []), // Preserve existing AND conditions if any
-          { tags: { none: {} } }, // Include assets with no tags
-        ];
-      }
-
-      // If there are other tags specified, apply AND condition
-      if (tagsIds.length > 0) {
-        where.OR = [
-          ...(where.OR || []), // Preserve existing AND conditions if any
-          { tags: { some: { id: { in: tagsIds } } } }, // Filter by remaining tags
-        ];
-      }
-    }
-
-    if (locationIds && locationIds.length > 0) {
-      if (locationIds.includes("without-location")) {
-        where.OR = [
-          ...(where.OR ?? []),
-          { assetLocations: { some: { locationId: { in: locationIds } } } },
-          { assetLocations: { none: {} } },
-        ];
-      } else {
-        where.assetLocations = {
-          some: { locationId: { in: locationIds } },
-        };
-      }
-    }
-
-    /**
-     * `hideUnavailable` filters INDIVIDUAL assets that are in any kit out
-     * of the picker (those are managed via the kit, not picked directly).
-     * QUANTITY_TRACKED assets bypass this filter: a partial-kit allocation
-     * is a slice, not whole-asset exclusion — the free pool stays bookable
-     * as a standalone slice. Picker's availability math subtracts the
-     * kit-committed sum downstream so the displayed "Available" count is
-     * already correct.
-     */
-    if (hideUnavailable === true) {
-      where.AND = [
-        ...(Array.isArray(where.AND)
-          ? where.AND
-          : where.AND
-          ? [where.AND]
-          : []),
-        {
-          OR: [{ type: "QUANTITY_TRACKED" }, { assetKits: { none: {} } }],
-        },
-      ];
-    }
-
-    if (teamMemberIds && teamMemberIds.length) {
-      where.OR = [
-        ...(where.OR ?? []),
-        {
-          custody: { some: { teamMemberId: { in: teamMemberIds } } },
-        },
-        {
-          custody: {
-            some: { custodian: { userId: { in: teamMemberIds } } },
-          },
-        },
-        {
-          bookingAssets: {
-            some: {
-              booking: {
-                custodianTeamMemberId: { in: teamMemberIds },
-                /** We only get them if the booking is ongoing */
-                status: {
-                  in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
-                },
-              },
-            },
-          },
-        },
-        {
-          bookingAssets: {
-            some: {
-              booking: {
-                custodianUserId: { in: teamMemberIds },
-                /** We only get them if the booking is ongoing */
-                status: {
-                  in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
-                },
-              },
-            },
-          },
-        },
-        ...(teamMemberIds.includes("without-custody")
-          ? [{ custody: { none: {} } }]
-          : []),
-      ];
-    }
-
-    if (assetKitFilter === "NOT_IN_KIT") {
-      where.assetKits = { none: {} };
-    } else if (assetKitFilter === "IN_OTHER_KITS") {
-      where.assetKits = { some: {} };
-    }
+    const where = await buildAssetListWhere(params);
 
     /**
      * Runs the paginated asset query and its total count for a given `where`
-     * clause. Extracted so the ID-shaped-search fallback can re-run the same
-     * query shape with a different `where.OR` without duplicating the include
-     * and ordering config.
+     * clause, with the list's include and ordering config.
      *
      * @param assetWhere - The Prisma where clause to fetch and count against
      * @returns A tuple of `[assets, totalAssets]`
@@ -1086,6 +767,8 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   timeZone = "UTC",
   honorArchivedView = false,
   archivedFilter,
+  lastAuditDateAccess = "hidden",
+  includeHiddenColumns = false,
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
@@ -1119,6 +802,18 @@ export async function getAdvancedPaginatedAndFilterableAssets({
    * archived rows included, whatever view the request came from.
    */
   archivedFilter?: ArchivedFilter;
+  /**
+   * How the last audit date column is exposed to the caller. Anything other
+   * than `available` never reaches the database: its filter and sort are
+   * dropped. Defaults to `hidden`.
+   */
+  lastAuditDateAccess?: LastAuditDateAccess;
+  /**
+   * Compute the last audit date even when the column is hidden in the
+   * caller's settings (exports include every column). Still requires
+   * `available` access.
+   */
+  includeHiddenColumns?: boolean;
 }) {
   const currentFilterParams = new URLSearchParams(filters || "");
   const searchParams = filters
@@ -1149,13 +844,18 @@ export async function getAdvancedPaginatedAndFilterableAssets({
     // advertises pages that come back empty.
     const take = Math.min(Math.max(perPage, 1), 100);
     const skip = page > 1 ? (page - 1) * take : 0;
-    const parsedFilters =
+    const canQueryAuditDate = canQueryLastAuditDate(lastAuditDateAccess);
+    const allParsedFilters =
       preParsedFilters ??
       (await parseFiltersWithHierarchy(
         filters,
         settingColumns,
         organizationId
       ));
+    // Without queryable access the audit date filter must not reach SQL.
+    const parsedFilters = canQueryAuditDate
+      ? allParsedFilters
+      : allParsedFilters.filter((f) => f.name !== LAST_AUDIT_DATE_COLUMN);
 
     const whereClause = generateWhereClause(
       organizationId,
@@ -1172,9 +872,18 @@ export async function getAdvancedPaginatedAndFilterableAssets({
           ? getArchivedFilterFromParams(searchParams)
           : "active")
     );
-    const sortByValues = searchParams.getAll("sortBy");
+    // Without queryable access the audit date sort must not reach SQL either.
+    const sortByValues = searchParams
+      .getAll("sortBy")
+      .filter(
+        (spec) =>
+          canQueryAuditDate || spec.split(":")[0] !== LAST_AUDIT_DATE_COLUMN
+      );
     const { orderByInner, customFieldSortings } =
       parseSortingOptions(sortByValues);
+    const isLastAuditDateColumnVisible = settingColumns?.some(
+      (col) => col.name === LAST_AUDIT_DATE_COLUMN && col.visible
+    );
     // Modify query to conditionally include LIMIT/OFFSET
     const paginationClause = takeAll
       ? Prisma.empty
@@ -1189,8 +898,12 @@ export async function getAdvancedPaginatedAndFilterableAssets({
       customFieldSortings,
       sortBy: sortByValues,
       parsedFilters,
+      lowStockOnly,
       withBookings: getBookings || isUpcomingBookingsColumnVisible,
       withBarcodes: canUseBarcodes,
+      withLastAuditDate:
+        canQueryAuditDate &&
+        (Boolean(isLastAuditDateColumnVisible) || includeHiddenColumns),
       paginationClause,
     });
 
@@ -1222,6 +935,9 @@ export async function getAdvancedPaginatedAndFilterableAssets({
       cookie,
     };
   } catch (cause) {
+    // A deliberate client error (an unknown filter value, the search
+    // bind-param ceiling) keeps its own status and message.
+    rethrowIfClientError(cause);
     throw new ShelfError({
       cause,
       message: "Failed to fetch paginated and filterable assets",
@@ -1676,6 +1392,21 @@ export async function createAsset({
               quantity:
                 type === AssetType.QUANTITY_TRACKED && quantity ? quantity : 1,
             },
+          });
+        }
+
+        // The stock the pool starts with, where it landed.
+        if (type === AssetType.QUANTITY_TRACKED && quantity) {
+          await recordStockChanges(tx, {
+            organizationId,
+            userId,
+            changes: [
+              {
+                assetId: created.id,
+                before: emptyStockState(),
+                events: [{ category: "INITIAL", change: quantity, locationId }],
+              },
+            ],
           });
         }
 
@@ -2620,6 +2351,8 @@ export async function updateAsset({
       /** Custody sources before a placement rewrite, for the re-home. */
       let custodyBefore: Awaited<ReturnType<typeof loadCustodySources>> | null =
         null;
+      /** The pool's stock under the lock, before this patch writes. */
+      let stockBefore: Awaited<ReturnType<typeof readStockState>> = null;
 
       // Block lowering a QUANTITY_TRACKED asset's total below the units
       // already committed to custody, kits, or overlapping bookings. Lock the
@@ -2636,6 +2369,12 @@ export async function updateAsset({
       // against the multi-asset lockers in the booking paths.
       if (quantity != null || shouldUpdatePlacement) {
         const locked = await lockAssetForQuantityUpdate(tx, id, organizationId);
+        if (locked.type === AssetType.QUANTITY_TRACKED) {
+          stockBefore = await readStockState(tx, {
+            assetId: id,
+            organizationId,
+          });
+        }
         if (quantity != null) {
           quantityBeforeUpdate = locked.quantity ?? 0;
           lockedAssetType = locked.type;
@@ -2760,32 +2499,6 @@ export async function updateAsset({
         },
       });
 
-      // Immutable stock-movement audit for a QUANTITY_TRACKED total change made
-      // through the asset-edit form. The form has no consumption-category
-      // input, so a manual total correction is an `ADJUSTMENT` (schema
-      // Decision #9: `ConsumptionLog.quantity` is always positive — direction
-      // lives in the `ASSET_QUANTITY_CHANGED` event's from/to below). Written
-      // IN this tx (not via `adjustQuantity`, which opens its own tx and
-      // re-locks the row we already hold). Skipped for a no-op edit
-      // (`delta === 0`) because `createConsumptionLog` rejects a zero quantity.
-      if (
-        quantity != null &&
-        lockedAssetType === AssetType.QUANTITY_TRACKED &&
-        quantityBeforeUpdate != null
-      ) {
-        const delta = Math.abs(quantity - quantityBeforeUpdate);
-        if (delta > 0) {
-          await createConsumptionLog({
-            assetId: id,
-            category: ConsumptionCategory.ADJUSTMENT,
-            quantity: delta,
-            userId,
-            note: ASSET_EDIT_ADJUSTMENT_NOTE,
-            tx,
-          });
-        }
-      }
-
       if (shouldUpdatePlacement) {
         if (newLocationId) {
           locationChangeQuantity = resolveNewLocationQuantity(
@@ -2842,6 +2555,40 @@ export async function updateAsset({
           });
         }
       }
+
+      /**
+       * Ledger rows for the patch: a total typed into the edit form is an
+       * `ADJUSTMENT` (the form has no category input), and units the
+       * placement rewrite moved are `MOVE`s. Written IN this tx (not via
+       * `adjustQuantity`, which opens its own tx and re-locks the row held
+       * here).
+       */
+      const totalChange =
+        quantity != null &&
+        lockedAssetType === AssetType.QUANTITY_TRACKED &&
+        quantityBeforeUpdate != null
+          ? quantity - quantityBeforeUpdate
+          : 0;
+      await recordStockChanges(tx, {
+        organizationId,
+        userId,
+        changes: [
+          {
+            assetId: id,
+            before: stockBefore,
+            events:
+              totalChange !== 0
+                ? [
+                    {
+                      category: ConsumptionCategory.ADJUSTMENT,
+                      change: totalChange,
+                      note: ASSET_EDIT_ADJUSTMENT_NOTE,
+                    },
+                  ]
+                : [],
+          },
+        ],
+      });
 
       // Re-read so the returned `assetLocations` reflects the pivot ops.
       return shouldUpdatePlacement
@@ -3579,7 +3326,15 @@ export async function deleteAsset({
         where: { id, organizationId },
         select: {
           reminders: {
-            select: { alertDateTime: true, activeSchedulerReference: true },
+            select: {
+              alertDateTime: true,
+              activeSchedulerReference: true,
+              // why: cancelAssetReminderScheduler skips its already-fired
+              // early-return for recurring rows (they can hold a queued job
+              // while alertDateTime is briefly past)
+              recurrenceUnit: true,
+              recurrenceInterval: true,
+            },
           },
         },
       });
@@ -4217,6 +3972,8 @@ export async function bulkArchiveAssets({
   assetIds,
   currentSearchParams,
   settings,
+  lastAuditDateAccess,
+  bookableScope,
   actorUserId,
   timeZone = "UTC",
   confirmModelShortfall = false,
@@ -4225,6 +3982,18 @@ export async function bulkArchiveAssets({
   assetIds: Asset["id"][];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * How the caller may use the last audit date, from `lastAuditDateAccessFor`.
+   * A select-all `lastAuditDate` filter without `available` access refuses the
+   * whole selection.
+   */
+  lastAuditDateAccess: LastAuditDateAccess;
+  /**
+   * The caller's list scope, from `resolveBookableListScope`; `null` for a
+   * member who sees every asset. "Select all" expands to the assets the
+   * caller's list showed, never past it.
+   */
+  bookableScope: BookableListScope | null;
   /** Optional — caller-supplied userId for the activity event actor. */
   actorUserId?: string;
   /**
@@ -4257,6 +4026,8 @@ export async function bulkArchiveAssets({
       // Acts ON archived assets in the view the user selected from; reached
       // only with asset:archive / asset:delete (ADMIN, OWNER). Issue #382.
       honorArchivedView: true,
+      lastAuditDateAccess,
+      bookableScope,
     });
 
     // Fetch the eligible subset first so we can emit one event per asset
@@ -4412,6 +4183,8 @@ export async function bulkUnarchiveAssets({
   assetIds,
   currentSearchParams,
   settings,
+  lastAuditDateAccess,
+  bookableScope,
   actorUserId,
   timeZone = "UTC",
 }: {
@@ -4419,6 +4192,18 @@ export async function bulkUnarchiveAssets({
   assetIds: Asset["id"][];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * How the caller may use the last audit date, from `lastAuditDateAccessFor`.
+   * A select-all `lastAuditDate` filter without `available` access refuses the
+   * whole selection.
+   */
+  lastAuditDateAccess: LastAuditDateAccess;
+  /**
+   * The caller's list scope, from `resolveBookableListScope`; `null` for a
+   * member who sees every asset. "Select all" expands to the assets the
+   * caller's list showed, never past it.
+   */
+  bookableScope: BookableListScope | null;
   /** Optional — caller-supplied userId for the activity event actor. */
   actorUserId?: string;
   /**
@@ -4441,6 +4226,8 @@ export async function bulkUnarchiveAssets({
       // Acts ON archived assets in the view the user selected from; reached
       // only with asset:archive / asset:delete (ADMIN, OWNER). Issue #382.
       honorArchivedView: true,
+      lastAuditDateAccess,
+      bookableScope,
     });
 
     const eligible = await db.asset.findMany({
@@ -4829,6 +4616,12 @@ export async function replaceAssetPlacements({
         },
       });
 
+      /** The pool's stock before the diff, for the ledger's MOVE rows. */
+      const stockBefore =
+        locked.type === AssetType.QUANTITY_TRACKED
+          ? await readStockState(tx, { assetId, organizationId })
+          : null;
+
       /** Custody sources before the diff, for the re-home below. */
       const custodyBefore =
         locked.type === AssetType.QUANTITY_TRACKED
@@ -4891,9 +4684,20 @@ export async function replaceAssetPlacements({
         });
       }
 
+      /**
+       * The editor never changes the total, so every unit it shifts is a
+       * move: between locations, or to and from the unplaced units.
+       */
+      await recordStockChanges(tx, {
+        organizationId,
+        userId,
+        changes: [{ assetId, before: stockBefore }],
+      });
+
       // Activity events — one ASSET_LOCATION_CHANGED per net add /
       // remove. Qty-only edits don't emit an event today (deliberate
-      // gap). Mirrors the `updateLocationAssets` event pattern.
+      // gap; the stock ledger above records them). Mirrors the
+      // `updateLocationAssets` event pattern.
       // `meta.quantity` carries the per-row placement qty (this is the
       // QUANTITY_TRACKED multi-placement editor, so the count is
       // always meaningful here); `assetQtyMeta` no-ops for INDIVIDUAL.
@@ -5793,11 +5597,9 @@ export async function getPaginatedAndFilterableAssets({
     : getCurrentSearchParams(request);
 
   const paramsValues = getParamsValues(searchParams);
-  const status =
-    searchParams.get("status") === "ALL" // If the value is "ALL", we just remove the param
-      ? null
-      : (searchParams.get("status") as AssetStatus | null);
   const getAllEntries = searchParams.getAll("getAll") as AllowedModelNames[];
+  // Paging, ordering and the dropdown seeds only. The filters the asset query
+  // applies come from resolveAssetListFilters below.
   const {
     page,
     perPageParam,
@@ -5806,13 +5608,8 @@ export async function getPaginatedAndFilterableAssets({
     search,
     categoriesIds,
     tagsIds,
-    bookingFrom,
-    bookingTo,
-    hideUnavailable,
-    unhideAssetsBookigIds,
     locationIds,
     teamMemberIds,
-    assetKitFilter,
   } = paramsValues;
 
   const cookie = await updateCookieWithPerPage(request, perPageParam);
@@ -5872,29 +5669,20 @@ export async function getPaginatedAndFilterableAssets({
         userId,
       }),
       getAssets({
-        organizationId,
+        ...resolveAssetListFilters({
+          organizationId,
+          searchParams,
+          teamMemberIds: scopedTeamMemberIds,
+          bookableScope,
+          locationIdsOverride,
+          honorArchivedView,
+          honorLowStockFilter,
+        }),
         page,
         perPage,
         orderBy,
         orderDirection,
-        search,
-        categoriesIds,
-        tagsIds,
-        status,
-        bookingFrom: bookingFrom ?? undefined,
-        bookingTo: bookingTo ?? undefined,
-        hideUnavailable,
-        unhideAssetsBookigIds,
-        locationIds: locationIdsOverride ?? locationIds,
-        teamMemberIds: scopedTeamMemberIds,
         extraInclude,
-        assetKitFilter,
-        bookableScope,
-        archivedFilter: honorArchivedView
-          ? getArchivedFilterFromParams(searchParams)
-          : "active",
-        lowStockOnly:
-          honorLowStockFilter && searchParams.get("lowStockOnly") === "true",
       }),
     ]);
 
@@ -7088,6 +6876,8 @@ export async function bulkDeleteAssets({
   userId,
   currentSearchParams,
   settings,
+  lastAuditDateAccess,
+  bookableScope,
   confirmation,
   timeZone = "UTC",
 }: {
@@ -7096,6 +6886,18 @@ export async function bulkDeleteAssets({
   userId: User["id"];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * How the caller may use the last audit date, from `lastAuditDateAccessFor`.
+   * A select-all `lastAuditDate` filter without `available` access refuses the
+   * whole selection.
+   */
+  lastAuditDateAccess: LastAuditDateAccess;
+  /**
+   * The caller's list scope, from `resolveBookableListScope`; `null` for a
+   * member who sees every asset. "Select all" expands to the assets the
+   * caller's list showed, never past it.
+   */
+  bookableScope: BookableListScope | null;
   /**
    * The number the user typed in the delete dialog. Must equal the number of
    * assets this call removes, see {@link assertBulkDeleteConfirmed}.
@@ -7122,6 +6924,8 @@ export async function bulkDeleteAssets({
       // Acts ON archived assets in the view the user selected from; reached
       // only with asset:archive / asset:delete (ADMIN, OWNER). Issue #382.
       honorArchivedView: true,
+      lastAuditDateAccess,
+      bookableScope,
     });
 
     /**
@@ -7244,6 +7048,8 @@ export async function bulkCheckOutAssets({
   organizationId,
   currentSearchParams,
   settings,
+  lastAuditDateAccess,
+  bookableScope,
   timeZone = "UTC",
   allowedTeamMemberIds,
 }: {
@@ -7260,6 +7066,18 @@ export async function bulkCheckOutAssets({
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * How the caller may use the last audit date, from `lastAuditDateAccessFor`.
+   * A select-all `lastAuditDate` filter without `available` access refuses the
+   * whole selection.
+   */
+  lastAuditDateAccess: LastAuditDateAccess;
+  /**
+   * The caller's list scope, from `resolveBookableListScope`; `null` for a
+   * member who sees every asset. "Select all" expands to the assets the
+   * caller's list showed, never past it.
+   */
+  bookableScope: BookableListScope | null;
   /**
    * Acting user's IANA timezone. Forwarded to the select-all id resolution so
    * built-in date-column filters truncate the day in the user's tz (avoids an
@@ -7283,6 +7101,8 @@ export async function bulkCheckOutAssets({
       settings,
       allowedTeamMemberIds,
       timeZone,
+      lastAuditDateAccess,
+      bookableScope,
     });
 
     /**
@@ -7559,6 +7379,8 @@ export async function bulkCheckInAssets({
   organizationId,
   currentSearchParams,
   settings,
+  lastAuditDateAccess,
+  bookableScope,
   timeZone = "UTC",
   allowedTeamMemberIds,
 }: {
@@ -7573,6 +7395,18 @@ export async function bulkCheckInAssets({
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * How the caller may use the last audit date, from `lastAuditDateAccessFor`.
+   * A select-all `lastAuditDate` filter without `available` access refuses the
+   * whole selection.
+   */
+  lastAuditDateAccess: LastAuditDateAccess;
+  /**
+   * The caller's list scope, from `resolveBookableListScope`; `null` for a
+   * member who sees every asset. "Select all" expands to the assets the
+   * caller's list showed, never past it.
+   */
+  bookableScope: BookableListScope | null;
   /**
    * Acting user's IANA timezone. Forwarded to the select-all id resolution so
    * built-in date-column filters truncate the day in the user's tz (avoids an
@@ -7595,6 +7429,8 @@ export async function bulkCheckInAssets({
       settings,
       allowedTeamMemberIds,
       timeZone,
+      lastAuditDateAccess,
+      bookableScope,
     });
 
     /**
@@ -7807,6 +7643,8 @@ export async function bulkUpdateAssetLocation({
   newLocationId,
   currentSearchParams,
   settings,
+  lastAuditDateAccess,
+  bookableScope,
   timeZone = "UTC",
 }: {
   userId: User["id"];
@@ -7815,6 +7653,18 @@ export async function bulkUpdateAssetLocation({
   newLocationId?: Location["id"] | null;
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * How the caller may use the last audit date, from `lastAuditDateAccessFor`.
+   * A select-all `lastAuditDate` filter without `available` access refuses the
+   * whole selection.
+   */
+  lastAuditDateAccess: LastAuditDateAccess;
+  /**
+   * The caller's list scope, from `resolveBookableListScope`; `null` for a
+   * member who sees every asset. "Select all" expands to the assets the
+   * caller's list showed, never past it.
+   */
+  bookableScope: BookableListScope | null;
   /**
    * Acting user's IANA timezone. Forwarded to the select-all id resolution so
    * built-in date-column filters truncate the day in the user's tz (avoids an
@@ -7833,6 +7683,8 @@ export async function bulkUpdateAssetLocation({
       // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
       allowedTeamMemberIds: "all",
       timeZone,
+      lastAuditDateAccess,
+      bookableScope,
     });
 
     // Archived assets are frozen (issue #382): can't be edited in bulk either.
@@ -8133,6 +7985,160 @@ export async function bulkUpdateAssetLocation({
   }
 }
 
+/**
+ * Sets (or clears) the low-stock reorder point on many assets at once.
+ *
+ * Exists because `minQuantity` is the input the whole Stock status column
+ * depends on, and almost nobody has set it: measured on a live workspace, 2 of
+ * 12 quantity assets had one, and 0 of 10 in dev. Nothing in the product ever
+ * asks for it, it is optional in the create form and in the CSV importer. A
+ * column that tells a customer "no reorder point" on most of their catalogue,
+ * with only a one-at-a-time cure, diagnoses a problem it cannot treat.
+ *
+ * INDIVIDUAL assets are skipped, not rejected. `minQuantity` is meaningless for
+ * a single tracked object, and a mixed selection is the normal case in a
+ * workspace that has both kinds, failing the whole batch because a camera came
+ * along for the ride would make the action unusable on exactly the lists people
+ * select from.
+ *
+ * @param args.assetIds - Selected ids, or the sentinel for "all matching".
+ * @param args.minQuantity - The new reorder point, or `null` to clear it.
+ * @param args.currentSearchParams - Live filters, used to resolve "select all".
+ * @returns How many assets actually changed. The caller needs this to report
+ *   honestly: a selection can be entirely individually-tracked assets, or
+ *   already hold the threshold being applied, in which case nothing happened and
+ *   saying "reorder point set" would be a lie.
+ * @throws {ShelfError} If the write fails.
+ */
+export async function bulkUpdateAssetMinQuantity({
+  userId,
+  assetIds,
+  organizationId,
+  minQuantity,
+  currentSearchParams,
+  settings,
+  lastAuditDateAccess,
+  bookableScope,
+  timeZone = "UTC",
+}: {
+  userId: string;
+  assetIds: Asset["id"][];
+  organizationId: Asset["organizationId"];
+  minQuantity: number | null;
+  currentSearchParams?: string | null;
+  settings: AssetIndexSettings;
+  /**
+   * How the caller may use the last audit date, from `lastAuditDateAccessFor`.
+   * Select-all drops a last audit date filter the caller may not query.
+   */
+  lastAuditDateAccess: LastAuditDateAccess;
+  /**
+   * The caller's list scope, from `resolveBookableListScope`; `null` for a
+   * member who sees every asset. "Select all" expands to the assets the
+   * caller's list showed, never past it.
+   */
+  bookableScope: BookableListScope | null;
+  /** Acting user's IANA timezone, for select-all date-filter truncation. */
+  timeZone?: string;
+}) {
+  try {
+    const resolvedIds = await resolveAssetIdsForBulkOperation({
+      assetIds,
+      organizationId,
+      currentSearchParams,
+      settings,
+      // Reachable only with an asset write permission, which BASE and
+      // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
+      allowedTeamMemberIds: "all",
+      lastAuditDateAccess,
+      bookableScope,
+      timeZone,
+    });
+
+    if (resolvedIds.length === 0) {
+      return 0;
+    }
+
+    // Archived assets are frozen (issue #382): can't change their min quantity.
+    await assertAssetsAreNotArchived({
+      assetIds: resolvedIds,
+      organizationId,
+      actorUserId: userId,
+    });
+
+    // Org-scoped read, so every id below is already proven to belong here.
+    // Quantity assets only, see the note on skipping INDIVIDUAL above.
+    const assetsBeforeUpdate = await db.asset.findMany({
+      where: {
+        id: { in: resolvedIds },
+        organizationId,
+        archivedAt: null,
+        type: AssetType.QUANTITY_TRACKED,
+      },
+      select: { id: true, minQuantity: true },
+    });
+
+    // Only rows that actually change, so the activity feed does not fill with
+    // no-op entries when someone re-applies the same threshold.
+    const assetsThatChange = assetsBeforeUpdate.filter(
+      (asset) => (asset.minQuantity ?? null) !== minQuantity
+    );
+
+    if (assetsThatChange.length === 0) {
+      return 0;
+    }
+
+    await db.$transaction(async (tx) => {
+      await tx.asset.updateMany({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: assetsThatChange derives from assetsBeforeUpdate, fetched above with where { id in resolvedIds, organizationId }
+        where: { id: { in: assetsThatChange.map((a) => a.id) } },
+        data: { minQuantity },
+      });
+
+      // One event per asset that changed. ASSET_MIN_QUANTITY_CHANGED already
+      // exists and is what the singular edit path emits, so the bulk action
+      // keeps reporting parity with it.
+      await recordEvents(
+        assetsThatChange.map((asset) => ({
+          organizationId,
+          actorUserId: userId,
+          action: "ASSET_MIN_QUANTITY_CHANGED" as const,
+          entityType: "ASSET" as const,
+          entityId: asset.id,
+          assetId: asset.id,
+          field: "minQuantity",
+          fromValue: asset.minQuantity ?? null,
+          toValue: minQuantity,
+        })),
+        tx
+      );
+    });
+
+    // Changing a threshold moves assets into or out of the low-stock band, so
+    // the `lowStockNotifiedAt` marker has to be brought up to date or the very
+    // next stock movement fires an alert for an episode that is already known.
+    // Silent and in one pass: the user just made this change deliberately and
+    // can see the result, so no asset is worth an email. Best-effort, never
+    // fails the committed threshold write.
+    await syncLowStockMarkers({
+      assetIds: assetsThatChange.map((asset) => asset.id),
+      organizationId,
+    });
+
+    return assetsThatChange.length;
+  } catch (cause) {
+    // Keep a deliberate refusal's status and message (archived assets in the
+    // selection, a last audit date filter the caller may not use).
+    if (isLikeShelfError(cause)) throw cause;
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while bulk updating the min quantity.",
+      additionalData: { userId, assetIds, organizationId },
+      label,
+    });
+  }
+}
+
 export async function bulkUpdateAssetCategory({
   userId,
   assetIds,
@@ -8140,6 +8146,8 @@ export async function bulkUpdateAssetCategory({
   categoryId,
   currentSearchParams,
   settings,
+  lastAuditDateAccess,
+  bookableScope,
   timeZone = "UTC",
 }: {
   userId: string;
@@ -8148,6 +8156,18 @@ export async function bulkUpdateAssetCategory({
   categoryId: Asset["categoryId"];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * How the caller may use the last audit date, from `lastAuditDateAccessFor`.
+   * A select-all `lastAuditDate` filter without `available` access refuses the
+   * whole selection.
+   */
+  lastAuditDateAccess: LastAuditDateAccess;
+  /**
+   * The caller's list scope, from `resolveBookableListScope`; `null` for a
+   * member who sees every asset. "Select all" expands to the assets the
+   * caller's list showed, never past it.
+   */
+  bookableScope: BookableListScope | null;
   /**
    * Acting user's IANA timezone. Forwarded to the select-all id resolution so
    * built-in date-column filters truncate the day in the user's tz (avoids an
@@ -8166,6 +8186,8 @@ export async function bulkUpdateAssetCategory({
       // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
       allowedTeamMemberIds: "all",
       timeZone,
+      lastAuditDateAccess,
+      bookableScope,
     });
 
     if (resolvedIds.length === 0) {
@@ -8275,6 +8297,7 @@ export async function bulkUpdateAssetCategory({
 
     return true;
   } catch (cause) {
+    rethrowIfClientError(cause);
     throw new ShelfError({
       cause,
       message: "Something went wrong while bulk updating category.",
@@ -8357,6 +8380,8 @@ export async function bulkUpdateAssetModel({
   assetModelId,
   currentSearchParams,
   settings,
+  lastAuditDateAccess,
+  bookableScope,
 }: {
   userId: string;
   assetIds: Asset["id"][];
@@ -8364,6 +8389,18 @@ export async function bulkUpdateAssetModel({
   assetModelId: Asset["assetModelId"];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * How the caller may use the last audit date, from `lastAuditDateAccessFor`.
+   * A select-all `lastAuditDate` filter without `available` access refuses the
+   * whole selection.
+   */
+  lastAuditDateAccess: LastAuditDateAccess;
+  /**
+   * The caller's list scope, from `resolveBookableListScope`; `null` for a
+   * member who sees every asset. "Select all" expands to the assets the
+   * caller's list showed, never past it.
+   */
+  bookableScope: BookableListScope | null;
 }): Promise<BulkUpdateAssetModelResult> {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -8375,6 +8412,8 @@ export async function bulkUpdateAssetModel({
       // Reachable only with an asset write permission, which BASE and
       // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
       allowedTeamMemberIds: "all",
+      lastAuditDateAccess,
+      bookableScope,
     });
 
     // Archived assets are frozen (issue #382): can't be edited in bulk either.
@@ -8651,6 +8690,8 @@ export async function bulkAssignAssetTags({
   currentSearchParams,
   remove,
   settings,
+  lastAuditDateAccess,
+  bookableScope,
   timeZone = "UTC",
 }: {
   userId: string;
@@ -8660,6 +8701,18 @@ export async function bulkAssignAssetTags({
   currentSearchParams?: string | null;
   remove: boolean;
   settings: AssetIndexSettings;
+  /**
+   * How the caller may use the last audit date, from `lastAuditDateAccessFor`.
+   * A select-all `lastAuditDate` filter without `available` access refuses the
+   * whole selection.
+   */
+  lastAuditDateAccess: LastAuditDateAccess;
+  /**
+   * The caller's list scope, from `resolveBookableListScope`; `null` for a
+   * member who sees every asset. "Select all" expands to the assets the
+   * caller's list showed, never past it.
+   */
+  bookableScope: BookableListScope | null;
   /**
    * Acting user's IANA timezone. Forwarded to the select-all id resolution so
    * built-in date-column filters truncate the day in the user's tz (avoids an
@@ -8678,6 +8731,8 @@ export async function bulkAssignAssetTags({
       // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
       allowedTeamMemberIds: "all",
       timeZone,
+      lastAuditDateAccess,
+      bookableScope,
     });
 
     if (resolvedIds.length === 0) {
@@ -8844,6 +8899,8 @@ export async function bulkMarkAvailability({
   type,
   currentSearchParams,
   settings,
+  lastAuditDateAccess,
+  bookableScope,
   timeZone = "UTC",
 }: {
   organizationId: Asset["organizationId"];
@@ -8851,6 +8908,18 @@ export async function bulkMarkAvailability({
   type: "available" | "unavailable";
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * How the caller may use the last audit date, from `lastAuditDateAccessFor`.
+   * A select-all `lastAuditDate` filter without `available` access refuses the
+   * whole selection.
+   */
+  lastAuditDateAccess: LastAuditDateAccess;
+  /**
+   * The caller's list scope, from `resolveBookableListScope`; `null` for a
+   * member who sees every asset. "Select all" expands to the assets the
+   * caller's list showed, never past it.
+   */
+  bookableScope: BookableListScope | null;
   /**
    * Acting user's IANA timezone. Forwarded to the select-all id resolution so
    * built-in date-column filters truncate the day in the user's tz (avoids an
@@ -8869,6 +8938,8 @@ export async function bulkMarkAvailability({
       // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
       allowedTeamMemberIds: "all",
       timeZone,
+      lastAuditDateAccess,
+      bookableScope,
     });
 
     // Archived assets are frozen (issue #382): can't change availability.
@@ -8888,6 +8959,7 @@ export async function bulkMarkAvailability({
 
     return true;
   } catch (cause) {
+    rethrowIfClientError(cause);
     throw new ShelfError({
       cause,
       message: "Something went wrong while marking assets as available.",
@@ -10313,6 +10385,12 @@ export async function releaseQuantity({
       const consumedTotal = lines.reduce((sum, line) => sum + line.consumed, 0);
       const returnedTotal = quantity - consumedTotal;
 
+      /** The pool's stock before any write, for the CONSUME ledger rows. */
+      const stockBefore =
+        consumedTotal > 0
+          ? await readStockState(tx, { assetId, organizationId })
+          : null;
+
       /**
        * Step 6: Delete each drawn row when fully released, else decrement.
        * Targets by `Custody.id`: the rows were read above under the lock.
@@ -10448,29 +10526,38 @@ export async function releaseQuantity({
 
       /**
        * Step 7: Immutable audit log, one entry per non-zero leg per source.
-       * `CONSUME` records units that were used up; `RETURN` records units
-       * that went back into the available pool. Both carry the source
-       * location. Same category discriminator booking check-in uses, so
-       * consumption reporting sees every path identically.
+       * `CONSUME` records units that were used up, at the place the
+       * reconcile above actually took them from (the ledger diffs the stock
+       * before and after); `RETURN` records units that went back into the
+       * available pool, with the custody's source. Same category
+       * discriminator booking check-in uses, so consumption reporting sees
+       * every path identically.
        *
        * `createConsumptionLog` rejects a non-positive quantity, hence the
-       * guards. A split attaches the operator's note to both rows: it
+       * guard. A split attaches the operator's note to both rows: it
        * explains the single action the operator took.
        */
+      await recordStockChanges(tx, {
+        organizationId,
+        userId,
+        changes: [
+          {
+            assetId,
+            before: stockBefore,
+            events: lines
+              .filter((line) => line.consumed > 0)
+              .map((line) => ({
+                category: "CONSUME" as const,
+                change: -line.consumed,
+                locationId: line.locationId,
+                custodianId: teamMemberId,
+                note,
+              })),
+          },
+        ],
+      });
       for (const line of lines) {
         const lineReturned = line.quantity - line.consumed;
-        if (line.consumed > 0) {
-          await createConsumptionLog({
-            assetId,
-            category: "CONSUME",
-            quantity: line.consumed,
-            userId,
-            custodianId: teamMemberId,
-            locationId: line.locationId,
-            note,
-            tx,
-          });
-        }
         if (lineReturned > 0) {
           await createConsumptionLog({
             assetId,
@@ -10782,6 +10869,8 @@ export async function moveAssetLocationUnits(
         assetId,
         total: asset.quantity ?? 0,
       });
+      /** The pool's stock before the move, for the ledger's MOVE rows. */
+      const stockBefore = await readStockState(tx, { assetId, organizationId });
 
       /**
        * Step 8: Decrement (or delete) the source manual row. Deleting
@@ -10834,6 +10923,13 @@ export async function moveAssetLocationUnits(
           },
         });
       }
+
+      /** Step 9b: Ledger rows, one MOVE out of the source, one into the destination. */
+      await recordStockChanges(tx, {
+        organizationId,
+        userId,
+        changes: [{ assetId, before: stockBefore }],
+      });
 
       /**
        * Step 10: Emit two paired `ASSET_LOCATION_CHANGED` events
@@ -11173,6 +11269,8 @@ export async function placeUnplacedUnits(
         assetId,
         total: totalQuantity,
       });
+      /** The pool's stock before placing, for the ledger's MOVE rows. */
+      const stockBefore = await readStockState(tx, { assetId, organizationId });
 
       /**
        * Upsert the manual destination row, scoped by the
@@ -11204,6 +11302,13 @@ export async function placeUnplacedUnits(
           },
         });
       }
+
+      /** Ledger rows: a MOVE out of the unplaced units and into the location. */
+      await recordStockChanges(tx, {
+        organizationId,
+        userId,
+        changes: [{ assetId, before: stockBefore }],
+      });
 
       /**
        * One `ASSET_LOCATION_CHANGED` event for the to-side. We still

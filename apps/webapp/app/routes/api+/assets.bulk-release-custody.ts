@@ -2,6 +2,8 @@ import { AssetType } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { BulkReleaseCustodySchema } from "~/components/assets/bulk-release-custody-dialog";
 import { db } from "~/database/db.server";
+import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
+import { resolveBookableListScope } from "~/modules/asset/list-scope.server";
 import { bulkCheckInAssets } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
@@ -30,13 +32,18 @@ export async function action({ request, context }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId, role, canUseBarcodes, access } =
-      await requirePermission({
-        userId,
-        request,
-        entity: PermissionEntity.asset,
-        action: PermissionAction.custody,
-      });
+    const {
+      organizationId,
+      role,
+      canUseBarcodes,
+      access,
+      currentOrganization,
+    } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.custody,
+    });
 
     // Fetch asset index settings to determine mode
     const settings = await getAssetIndexSettings({
@@ -129,6 +136,11 @@ export async function action({ request, context }: ActionFunctionArgs) {
           organizationId,
           currentSearchParams,
           settings,
+          lastAuditDateAccess: lastAuditDateAccessFor(
+            access,
+            currentOrganization
+          ),
+          bookableScope: resolveBookableListScope({ access, userId }),
           timeZone,
           // `asset: custody` is a SELF_SERVICE permission, so narrow the
           // select-all custodian filter to the caller's own custody, otherwise a

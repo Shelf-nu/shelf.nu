@@ -8,6 +8,8 @@ import {
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
 import { mobileBulkIdsSchema } from "~/modules/api/mobile-bulk-ids.server";
+import { resolveLastAuditDateAccess } from "~/modules/asset/last-audit-date-access";
+import { resolveBookableListScope } from "~/modules/asset/list-scope.server";
 import { bulkUpdateAssetLocation } from "~/modules/asset/service.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -72,7 +74,7 @@ export async function action({ request }: ActionFunctionArgs) {
       return data({ error: archivedRefusal }, { status: 400 });
     }
 
-    const { canUseBarcodes, access } = await getMobileUserContext(
+    const { canUseBarcodes, canUseAudits, access } = await getMobileUserContext(
       user.id,
       organizationId
     );
@@ -91,6 +93,11 @@ export async function action({ request }: ActionFunctionArgs) {
       newLocationId: locationId,
       currentSearchParams: null,
       settings,
+      lastAuditDateAccess: resolveLastAuditDateAccess({
+        seeAllAudits: access.audits.seeAll,
+        auditsUsable: canUseAudits,
+      }),
+      bookableScope: resolveBookableListScope({ access, userId: user.id }),
     });
 
     return data({ success: true });

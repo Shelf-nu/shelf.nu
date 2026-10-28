@@ -111,6 +111,26 @@ function isBareGatewayStatusError(event: ErrorEvent): boolean {
 }
 
 /**
+ * Messages browsers use when a JavaScript module fails to download or
+ * evaluate as a module: Chrome/Edge ("Failed to fetch dynamically imported
+ * module"), Firefox ("error loading dynamically imported module") and Safari
+ * ("Importing a module script failed").
+ */
+const MODULE_LOAD_FAILURE_PATTERN =
+  /dynamically imported module|importing a module script failed/i;
+
+/**
+ * Whether an error message reports a JavaScript chunk that could not be
+ * loaded, as opposed to an interrupted data request.
+ *
+ * @param message - The exception message
+ * @returns `true` for module load failures in any supported browser
+ */
+function isModuleLoadFailure(message: string): boolean {
+  return MODULE_LOAD_FAILURE_PATTERN.test(message);
+}
+
+/**
  * Client `beforeSend` hook body: decides whether a captured browser error is
  * worth sending to Sentry. Returns the (unchanged) event to send it, or
  * `null` to drop it.
@@ -180,15 +200,21 @@ export function handleClientBeforeSend(event: ErrorEvent): ErrorEvent | null {
   // check `exception.type` for `AbortError` — Sentry serializes the
   // error name into `.type` separately from `.value` (the message),
   // and some AbortErrors arrive with empty/generic messages.
+  //
+  // A JavaScript chunk that fails to download is exempt: Chrome words it
+  // "Failed to fetch dynamically imported module", but it means part of the
+  // app is missing, not that a request was interrupted, and it is the only
+  // trace a broken deploy or a blocking proxy leaves.
   if (
-    message.includes("Load failed") ||
-    message.includes("Failed to fetch") ||
-    message.includes("NetworkError") ||
-    message.includes("fetch failed") ||
-    message.includes("AbortError") ||
-    message.includes("The operation was aborted") ||
-    message.includes("Fetch is aborted") ||
-    event.exception?.values?.some((v) => v.type === "AbortError")
+    !isModuleLoadFailure(message) &&
+    (message.includes("Load failed") ||
+      message.includes("Failed to fetch") ||
+      message.includes("NetworkError") ||
+      message.includes("fetch failed") ||
+      message.includes("AbortError") ||
+      message.includes("The operation was aborted") ||
+      message.includes("Fetch is aborted") ||
+      event.exception?.values?.some((v) => v.type === "AbortError"))
   ) {
     return null;
   }

@@ -1,7 +1,12 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import { resolveAssetIdsForBulkOperation } from "~/modules/asset/bulk-operations-helper.server";
+import { ASSET_LOCATIONS_INCLUDE } from "~/modules/asset/fields";
+import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
+import { resolveBookableListScope } from "~/modules/asset/list-scope.server";
+import { getPrimaryLocation } from "~/modules/asset/utils";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
+import { buildLabelsCsv } from "~/modules/qr/labels-csv.server";
 import { generateQrObj } from "~/modules/qr/utils.server";
 import { scopeCustodianFilterIds } from "~/modules/team-member/service.server";
 import { getClientHint } from "~/utils/client-hints";
@@ -29,6 +34,11 @@ export type BulkQrDownloadLoaderData = {
   }>;
   qrIdDisplayPreference: string;
   showShelfBranding: boolean;
+  /**
+   * `labels.csv` for the zip: one row per asset, same order as `assets`. The
+   * row is written even if that asset's image fails to render in the browser.
+   */
+  labelsCsv: string;
 };
 
 /**
@@ -122,6 +132,11 @@ export async function loader({ context, request }: ActionFunctionArgs) {
         // assets (`assets.seeArchived`, issue #382); anyone else downloads
         // the codes of active assets, whatever the URL says.
         honorArchivedView: access.policy.assets.seeArchived,
+        lastAuditDateAccess: lastAuditDateAccessFor(
+          access,
+          currentOrganization
+        ),
+        bookableScope: resolveBookableListScope({ access, userId }),
       });
     }
 
@@ -139,7 +154,20 @@ export async function loader({ context, request }: ActionFunctionArgs) {
     const assets = await db.asset.findMany({
       // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: ids are already resolved; select-all honours the archived view above, and an explicit selection may print an archived asset's label
       where: { id: { in: resolvedIds }, organizationId },
-      select: { id: true, title: true, createdAt: true, sequentialId: true },
+      select: {
+        id: true,
+        title: true,
+        createdAt: true,
+        sequentialId: true,
+        // Only for labels.csv; not part of the per-asset payload.
+        category: { select: { name: true } },
+        // The primary location, same ordering every list view reads index 0 of.
+        assetLocations: {
+          orderBy: ASSET_LOCATIONS_INCLUDE.orderBy,
+          take: 1,
+          select: { location: { select: { name: true } } },
+        },
+      },
     });
 
     /**
@@ -155,9 +183,10 @@ export async function loader({ context, request }: ActionFunctionArgs) {
       existingQrs.map((qr) => [qr.assetId, qr] as const)
     );
 
-    const assetsWithQrObj = [];
+    const assetsWithQrObj: BulkQrDownloadLoaderData["assets"] = [];
+    const labelRows = [];
 
-    for (const asset of assets) {
+    for (const { category, assetLocations, ...asset } of assets) {
       const qrObj = await generateQrObj({
         assetId: asset.id,
         organizationId,
@@ -171,6 +200,13 @@ export async function loader({ context, request }: ActionFunctionArgs) {
         ...asset,
         qr: qrObj.qr,
       });
+      labelRows.push({
+        title: asset.title,
+        sequentialId: asset.sequentialId,
+        qrId: qrObj.qr.id,
+        category,
+        location: getPrimaryLocation({ assetLocations }),
+      });
     }
 
     return data(
@@ -178,6 +214,7 @@ export async function loader({ context, request }: ActionFunctionArgs) {
         assets: assetsWithQrObj,
         qrIdDisplayPreference: currentOrganization.qrIdDisplayPreference,
         showShelfBranding: currentOrganization.showShelfBranding,
+        labelsCsv: buildLabelsCsv(labelRows),
       })
     );
   } catch (cause) {

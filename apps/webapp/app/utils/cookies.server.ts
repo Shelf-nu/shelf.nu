@@ -318,29 +318,61 @@ export const createAdvancedAssetFilterCookie = (orgId: string) =>
   });
 
 /**
+ * Simple-mode asset filter keys whose Advanced column has a different name,
+ * mapped to that column and the operator one value is matched with.
+ *
+ * Several values become `containsAny`, the any-of match the simple index
+ * applies to repeated keys. Both target columns read it as a comma-separated
+ * list of ids.
+ */
+const SIMPLE_TO_ADVANCED_FILTER_ALIASES: Record<
+  string,
+  { column: string; single: "is" | "contains" }
+> = {
+  // The tags column matches one tag with `contains`, it has no `is`.
+  tag: { column: "tags", single: "contains" },
+  teamMember: { column: "custody", single: "is" },
+};
+
+/**
  * Normalize a filter param string for the Advanced-mode Assets index.
  *
  * Column filters not in operator form (e.g. `?location=<uuid>` emitted by
  * report drill-downs or external deep links) are promoted to `is:<value>`
  * so downstream filter parsing applies them rather than dropping them
- * silently — which previously broke drill-down for Advanced-mode workspaces.
+ * silently.
  * Non-column params (page, search, etc.) pass through unchanged.
  *
  * Values that contain a `:` but fail operator validation are treated as
- * **malformed operator attempts** and dropped, preserving the previous
- * reject-unknown-operator semantics. Otherwise downstream code would split
+ * **malformed operator attempts** and dropped (unknown operators are
+ * rejected). Otherwise downstream code would split
  * something like `?status=foo:AVAILABLE` into operator=`is`, value=`foo`
  * and try to cast `foo` to the AssetStatus enum at query time.
+ *
+ * Simple-mode keys that have no Advanced column of the same name are
+ * translated to their column (see {@link SIMPLE_TO_ADVANCED_FILTER_ALIASES}),
+ * so one link in the simple grammar opens filtered in either mode.
  *
  * Used by both the URL path (CASE 1) and the cookie path (CASE 2) of
  * {@link getAdvancedFiltersFromRequest}.
  */
 function normalizeAdvancedFilterParams(
   filters: string,
-  columnNames: string[]
+  columnNames: string[],
+  dropParam?: (key: string, value: string) => boolean
 ): URLSearchParams {
   const normalized = new URLSearchParams();
+  const aliasedValues = new Map<string, string[]>();
   new URLSearchParams(filters).forEach((value, key) => {
+    if (dropParam?.(key, value)) return;
+    if (Object.hasOwn(SIMPLE_TO_ADVANCED_FILTER_ALIASES, key)) {
+      // Bare values only: the simple grammar has no operators, so a `:` is
+      // not something this alias can translate.
+      if (value && !value.includes(":")) {
+        aliasedValues.set(key, [...(aliasedValues.get(key) ?? []), value]);
+      }
+      return;
+    }
     if (!columnNames.includes(key)) {
       normalized.append(key, value);
       return;
@@ -351,10 +383,19 @@ function normalizeAdvancedFilterParams(
     }
     // Only promote unambiguous bare values. A `:` indicates the caller meant
     // operator form; if it didn't validate above, the operator is unknown and
-    // we keep the old "drop malformed" behavior rather than coercing it.
+    // the value is dropped rather than coerced.
     if (value && !value.includes(":")) {
       normalized.append(key, `is:${value}`);
     }
+  });
+  aliasedValues.forEach((values, key) => {
+    const { column, single } = SIMPLE_TO_ADVANCED_FILTER_ALIASES[key];
+    normalized.append(
+      column,
+      values.length === 1
+        ? `${single}:${values[0]}`
+        : `containsAny:${values.join(",")}`
+    );
   });
   return normalized;
 }
@@ -365,12 +406,15 @@ function normalizeAdvancedFilterParams(
  * @param request - The incoming request
  * @param organizationId - The organization ID for the request
  * @param settings - The asset index settings containing column configuration
+ * @param dropParam - Params the caller may not use. They are removed from both
+ *   the URL (with a redirect, and from the saved cookie) and a restored cookie.
  * @returns Object containing filters, serialized cookie, and redirect status
  */
 export async function getAdvancedFiltersFromRequest(
   request: Request,
   organizationId: string,
-  settings: AssetIndexSettings
+  settings: AssetIndexSettings,
+  dropParam?: (key: string, value: string) => boolean
 ): Promise<{
   filters: string | undefined;
   serializedCookie: string | undefined;
@@ -386,7 +430,11 @@ export async function getAdvancedFiltersFromRequest(
   // CASE 1: URL has filters
   // Validate them, save to cookie, and return (with redirect if validation changed params)
   if (filters) {
-    const validatedParams = normalizeAdvancedFilterParams(filters, columnNames);
+    const validatedParams = normalizeAdvancedFilterParams(
+      filters,
+      columnNames,
+      dropParam
+    );
     const validatedParamsString = validatedParams.toString();
     const serializedCookie = await serializeFilterCookieForUrl(
       advancedAssetFilterCookie,
@@ -411,7 +459,8 @@ export async function getAdvancedFiltersFromRequest(
     if (filters) {
       const validatedParams = normalizeAdvancedFilterParams(
         filters,
-        columnNames
+        columnNames,
+        dropParam
       );
       const validatedParamsString = validatedParams.toString();
       const cleanedFilters = cleanParamsForFilterCookie(validatedParamsString);

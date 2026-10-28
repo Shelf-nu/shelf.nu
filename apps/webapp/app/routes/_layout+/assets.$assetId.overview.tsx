@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { RenderableTreeNode } from "@markdoc/markdoc";
 import { AssetStatus, CustomFieldType } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
 import type {
   MetaFunction,
   ActionFunctionArgs,
@@ -10,7 +11,13 @@ import { data, useFetcher, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { CustodyCard } from "~/components/assets/asset-custody-card";
+import {
+  AssetLastAuditCard,
+  LAST_AUDIT_CARD_RECENT_LIMIT,
+} from "~/components/assets/asset-last-audit-card";
 import { AssetReminderCards } from "~/components/assets/asset-reminder-cards";
+import { AssetsFilterLink } from "~/components/assets/assets-filter-link";
+import { CategoryBadge } from "~/components/assets/category-badge";
 import { MoveUnitsDialog } from "~/components/assets/move-units-dialog";
 import { QuantityCustodyList } from "~/components/assets/quantity-custody-list";
 import { QuantityOverviewCard } from "~/components/assets/quantity-overview-card";
@@ -27,7 +34,6 @@ import { LocationBadge } from "~/components/location/location-badge";
 import { LocationSelect } from "~/components/location/location-select";
 import { ScanDetails } from "~/components/location/scan-details";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
-import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { DateS } from "~/components/shared/date";
@@ -51,10 +57,12 @@ import { usePosition } from "~/hooks/use-position";
 import { useRoleAccess } from "~/hooks/use-role-access";
 import { getAssetAvailability } from "~/modules/asset/availability.server";
 import { getAssetOverviewFields } from "~/modules/asset/fields";
+import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
 import {
   MOVE_UNITS_INTENT_FIELD,
   type MoveAxis,
 } from "~/modules/asset/move-units.types";
+import { resolveOverCommitment } from "~/modules/asset/over-commitment";
 import {
   buildQuantityData,
   type QuantityData,
@@ -77,6 +85,7 @@ import {
   isQuantityTracked,
 } from "~/modules/asset/utils";
 import { getRemindersForOverviewPage } from "~/modules/asset-reminder/service.server";
+import { getAssetAuditHistory } from "~/modules/audit/asset-audit-history.server";
 import { getCustodyCardHolderUserId } from "~/modules/custody/utils";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { moveAssetKitUnits } from "~/modules/kit/service.server";
@@ -86,6 +95,7 @@ import { getTeamMembersForQuantityCustody } from "~/modules/team-member/service.
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { assetDescriptionSchema } from "~/utils/asset-description";
 import { formatAssetValueWithBreakdown } from "~/utils/asset-value";
+import { canSeeBooking } from "~/utils/booking-authorization.server";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint } from "~/utils/client-hints";
 import { ASSET_DESCRIPTION_MAX_LENGTH } from "~/utils/constants";
@@ -188,13 +198,30 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * `<ScanDetails>` behind the same check, but a client-side check only
      * hides the data — BASE and SELF_SERVICE hold `scan: []` and were still
      * receiving all of it in the page payload.
+     *
+     * Read alongside it: the "Last audit" card's history. Gated server-side by
+     * the same rule as the "Last audit date" column: only callers who see
+     * every audit, in a workspace with the audits add-on, receive it. Everyone
+     * else gets null and no card, so no audit dates reach roles whose audits
+     * are assignment-scoped.
      */
-    const lastScan = await getLastScanForViewer({
-      target: { assetId: asset.id },
-      userId,
-      organizationId,
-      roles,
-    });
+    const canSeeAuditHistory =
+      lastAuditDateAccessFor(access, currentOrganization) === "available";
+    const [lastScan, auditHistory] = await Promise.all([
+      getLastScanForViewer({
+        target: { assetId: asset.id },
+        userId,
+        organizationId,
+        roles,
+      }),
+      canSeeAuditHistory
+        ? getAssetAuditHistory({
+            assetId: asset.id,
+            organizationId,
+            limit: LAST_AUDIT_CARD_RECENT_LIMIT,
+          })
+        : null,
+    ]);
 
     const qrObj = await generateQrObj({
       assetId: asset.id,
@@ -234,6 +261,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * (`reservedTotal`), just no longer baked into the headline.
      */
     let quantityData: QuantityData | null = null;
+    let overCommitmentReads: Awaited<
+      ReturnType<typeof loadOverCommitmentReads>
+    > | null = null;
 
     if (isQuantityTracked(asset)) {
       // Sum each location's slice — the asset's pool that has a physical
@@ -258,10 +288,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         0
       );
 
-      const availability = await getAssetAvailability({
-        assetId: asset.id,
-        organizationId,
-      });
+      // Run together: both availability reads and the booking lookup are
+      // independent, and each walks the asset's active bookings.
+      const [availability, overCommitment] = await Promise.all([
+        getAssetAvailability({
+          assetId: asset.id,
+          organizationId,
+        }),
+        loadOverCommitmentReads(asset.id, organizationId),
+      ]);
+      overCommitmentReads = overCommitment;
 
       quantityData = buildQuantityData({
         availability,
@@ -286,6 +322,79 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // `bookingAssets` is already the asset's current booking: the query keeps
     // only the slice that is out (`CURRENT_BOOKING_SLICE_FILTER`), so the first
     // row is the one the page shows. Nothing further is derived from it here.
+
+    /**
+     * Is this pool promised beyond its size at any point ahead, and which
+     * upcoming booking asks for the most units?
+     *
+     * `asset.bookingAssets` cannot answer it: `getAssetOverviewFields` filters
+     * that relation to ONGOING/OVERDUE, so no upcoming booking is ever in it.
+     * The peak comes from the same primitive the booking engine consults,
+     * windowed from now onwards so it is the future peak, not a sum.
+     *
+     * The booking is ONE grouped row, never a list: an asset can carry
+     * hundreds of future bookings and this page must not pay for all of them
+     * to name one. Standalone slices only, a kit's slices are its `inKits`
+     * units, and the primitive excludes them for the same reason. The figure
+     * is the booked quantity of the largest upcoming RESERVED booking, which
+     * the page names as the biggest upcoming booking, not as part of the peak.
+     */
+    const [availabilityAhead, topReservedBooking] = overCommitmentReads ?? [
+      null,
+      null,
+    ];
+
+    /**
+     * The shortfall first, without a booking: the booking's name is read only
+     * for a pool that is actually over-committed, since nothing shows it
+     * otherwise.
+     */
+    const shortfall = availabilityAhead
+      ? resolveOverCommitment({
+          total: availabilityAhead.total,
+          inCustody: availabilityAhead.inCustody,
+          inKits: availabilityAhead.inKits,
+          peakBooked: availabilityAhead.reserved,
+          topBooking: null,
+        })
+      : null;
+
+    /**
+     * The booking is named and linked only for a viewer who may open it, by
+     * the same `canSeeBooking` rule the booking page enforces. Anyone else
+     * still reads the shortfall, without a name or a link that would 403.
+     */
+    const topReservedBookingRow =
+      shortfall && topReservedBooking
+        ? await db.booking.findFirst({
+            where: { id: topReservedBooking.bookingId, organizationId },
+            select: {
+              name: true,
+              custodianUserId: true,
+              custodianTeamMember: { select: { userId: true } },
+            },
+          })
+        : null;
+
+    const overCommitment =
+      shortfall &&
+      topReservedBooking &&
+      topReservedBookingRow &&
+      canSeeBooking({
+        access,
+        booking: topReservedBookingRow,
+        userId,
+      })
+        ? {
+            ...shortfall,
+            booking: {
+              id: topReservedBooking.bookingId,
+              name: topReservedBookingRow.name,
+              units: topReservedBooking._sum.quantity ?? 0,
+            },
+          }
+        : shortfall;
+
     /** We only need customField with same category of asset or without any category */
     const customFields = asset.categoryId
       ? asset.customFields.filter(
@@ -409,12 +518,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       currentOrganization,
       userId,
       lastScan,
+      auditHistory,
       header,
       locale,
       timeZone,
       qrObj,
       reminders,
       quantityData,
+      overCommitment,
       teamMembers,
       totalTeamMembers,
       categories,
@@ -431,6 +542,44 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     throw data(error(reason), { status: reason.status });
   }
 }
+
+/**
+ * The reads behind the over-commitment notice: the pool's availability from
+ * now on, and the largest upcoming RESERVED booking's standalone units. See
+ * the note where the loader uses them.
+ */
+function loadOverCommitmentReads(assetId: string, organizationId: string) {
+  return Promise.all([
+    getAssetAvailability({
+      assetId,
+      organizationId,
+      window: { from: new Date(), to: AVAILABILITY_HORIZON },
+    }),
+    db.bookingAsset
+      .groupBy({
+        by: ["bookingId"],
+        where: {
+          assetId,
+          assetKitId: null,
+          booking: {
+            status: BookingStatus.RESERVED,
+            to: { gt: new Date() },
+          },
+        },
+        _sum: { quantity: true },
+        orderBy: { _sum: { quantity: "desc" } },
+        take: 1,
+      })
+      .then((rows) => rows[0] ?? null),
+  ]);
+}
+
+/**
+ * "From now on" for the over-commitment peak. A window end the booking
+ * engine's filter can hold: Prisma refuses to serialise the package's
+ * `FAR_FUTURE_SENTINEL` (the JS max date) as a DateTime argument.
+ */
+const AVAILABILITY_HORIZON = new Date("9999-12-31T00:00:00.000Z");
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
@@ -779,9 +928,11 @@ export default function AssetOverview() {
     locale,
     qrObj,
     lastScan,
+    auditHistory,
     currentOrganization,
     userId,
     quantityData,
+    overCommitment,
     allCustomFieldDefs,
     moveDestinations,
     unplacedQuantity,
@@ -917,12 +1068,7 @@ export default function AssetOverview() {
                 label="Category"
                 canEdit={canEditAsset}
                 renderDisplay={() => (
-                  <Badge
-                    color={asset.category?.color ?? "#808080"}
-                    withDot={false}
-                  >
-                    {asset.category?.name ?? "Uncategorized"}
-                  </Badge>
+                  <CategoryBadge category={asset.category} linkToAssets />
                 )}
                 renderEditor={() => (
                   <DynamicSelect
@@ -1032,7 +1178,7 @@ export default function AssetOverview() {
                         variant="link"
                         aria-label="Manage placements"
                         title="Manage placements"
-                        className="hidden shrink-0 rounded p-1 text-gray-500 transition-opacity hover:bg-gray-100 hover:text-gray-700 md:inline-flex md:opacity-0 md:group-hover/field:opacity-100 md:focus-visible:opacity-100"
+                        className="md:group-hover/field:opacity-100 hidden shrink-0 rounded p-1 text-gray-500 transition-opacity hover:bg-gray-100 hover:text-gray-700 md:inline-flex md:opacity-0 md:focus-visible:opacity-100"
                       >
                         <Icon icon="pen" />
                       </Button>
@@ -1110,14 +1256,19 @@ export default function AssetOverview() {
                   {asset.tags?.length > 0 ? (
                     <div className="-ml-2">
                       {asset.tags.map((tag) => (
-                        <Tag
+                        <AssetsFilterLink
                           key={tag.id}
-                          className="ml-2"
-                          color={tag.color ?? undefined}
-                          withDot={false}
+                          filter={{ tag: tag.id }}
+                          title={`View assets tagged ${tag.name}`}
                         >
-                          {tag.name}
-                        </Tag>
+                          <Tag
+                            className="ml-2"
+                            color={tag.color ?? undefined}
+                            withDot={false}
+                          >
+                            {tag.name}
+                          </Tag>
+                        </AssetsFilterLink>
                       ))}
                     </div>
                   ) : (
@@ -1441,8 +1592,12 @@ export default function AssetOverview() {
                                     ?.filter(
                                       (o: string) => o !== null && o !== ""
                                     )
-                                    .map((option: string) => (
-                                      <option key={option} value={option}>
+                                    .map((option: string, index: number) => (
+                                      // Legacy fields can hold the same option twice.
+                                      <option
+                                        key={`${index}-${option}`}
+                                        value={option}
+                                      >
                                         {option}
                                       </option>
                                     ))}
@@ -1536,6 +1691,8 @@ export default function AssetOverview() {
           </When>
 
           <AssetReminderCards className="my-2" />
+
+          <AssetLastAuditCard assetId={asset.id} history={auditHistory} />
 
           {(() => {
             /**
@@ -1850,6 +2007,7 @@ export default function AssetOverview() {
               inLocationsQuantity={quantityData?.inLocations}
               inLocationsManualQuantity={quantityData?.inLocationsManual}
               reservedQuantity={quantityData?.reserved}
+              overCommitment={overCommitment}
               reservingBookingCount={quantityData?.reservingBookingCount}
               checkedOutQuantity={quantityData?.checkedOut}
               canUpdate={canUpdateAvailability}

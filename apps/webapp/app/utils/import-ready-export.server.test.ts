@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { AdvancedIndexAsset } from "~/modules/asset/types";
 import { ASSET_CSV_HEADERS } from "~/modules/asset/utils.server";
 import type { Column } from "~/modules/asset-index-settings/helpers";
+import { defaultFields } from "~/modules/asset-index-settings/helpers";
+import { parseCsv } from "./csv.server";
 import {
   buildImportReadyColumns,
   buildImportReadyCsvFromAssets,
@@ -18,6 +20,11 @@ import { extractCSVDataFromContentImport } from "./import.server";
 // for the same pattern).
 vi.mock("~/database/db.server", () => ({
   db: {},
+}));
+
+// why: suppress lottie animation initialization when csv.server loads
+vi.mock("lottie-react", () => ({
+  default: () => null,
 }));
 
 /** Minimal visible-column config: only name + category visible. */
@@ -478,6 +485,34 @@ describe("buildImportReadyCsvFromAssets (round-trip)", () => {
     expect(parsed[0]["cf:Brand,type:OPTION"]).toBe("amd");
   });
 
+  it("writes formula-leading cells as text and re-imports them unchanged", async () => {
+    const args = {
+      columnScope: "all" as const,
+      settingsColumns: [],
+      activeCustomFields: [],
+      barcodesEnabled: false,
+      assets: [
+        makeAsset({
+          title: '=HYPERLINK("http://evil.example","x")',
+          description: "'=already",
+          valuation: -5,
+        }),
+      ],
+    };
+    const [header, row] = buildImportReadyRows(args);
+    const csv = buildImportReadyCsvFromAssets(args);
+
+    expect(csv).toContain(`"'=HYPERLINK(""http://evil.example"",""x"")"`);
+    expect(csv).toContain(`"''=already"`);
+    expect(row[header.indexOf("valuation")]).toBe("-5");
+    expect(csv).toContain('"-5"');
+
+    const bytes = new TextEncoder().encode(csv);
+    const parsed = await parseCsv(bytes.buffer as ArrayBuffer);
+
+    expect(parsed[1]).toEqual(row);
+  });
+
   it("emits a quoted, CRLF-delimited CSV string", () => {
     const csv = buildImportReadyCsvFromAssets({
       columnScope: "all",
@@ -488,6 +523,71 @@ describe("buildImportReadyCsvFromAssets (round-trip)", () => {
     });
     expect(csv.split("\r\n")).toHaveLength(2); // header + 1 row
     expect(csv.startsWith('"id"')).toBe(true);
+  });
+});
+
+describe("unit of measure column in the index settings", () => {
+  // The asset index has a "Unit of measure" column next to "Quantity". The
+  // Import-ready export does not follow index columns for these fields: it
+  // always writes quantity and unitOfMeasure as separate importer columns.
+  const QT_ASSET = makeAsset({
+    id: "asset-gloves",
+    title: "Gloves",
+    type: AssetType.QUANTITY_TRACKED,
+    quantity: 5,
+    minQuantity: 2,
+    unitOfMeasure: "pcs",
+    consumptionType: ConsumptionType.ONE_WAY,
+    assetModelName: null,
+  });
+
+  /** Index columns as saved before the unit column existed. */
+  const withoutUnitColumn: Column[] = defaultFields
+    .filter((col) => col.name !== "unitOfMeasure")
+    .map((col, position) => ({
+      ...col,
+      position,
+      visible: col.name === "quantity",
+    }));
+  const withUnitHidden: Column[] = defaultFields.map((col) => ({
+    ...col,
+    visible: col.name === "quantity",
+  }));
+  const withUnitVisible: Column[] = defaultFields.map((col) => ({
+    ...col,
+    visible: col.name === "quantity" || col.name === "unitOfMeasure",
+  }));
+
+  function exportWith(
+    settingsColumns: Column[],
+    columnScope: "visible" | "all"
+  ): string {
+    return buildImportReadyCsvFromAssets({
+      columnScope,
+      settingsColumns,
+      activeCustomFields: [],
+      barcodesEnabled: false,
+      assets: [QT_ASSET],
+    });
+  }
+
+  it.each(["visible", "all"] as const)(
+    "writes the same file in '%s' scope whatever the unit column's state",
+    (columnScope) => {
+      const before = exportWith(withoutUnitColumn, columnScope);
+
+      expect(exportWith(withUnitHidden, columnScope)).toBe(before);
+      expect(exportWith(withUnitVisible, columnScope)).toBe(before);
+    }
+  );
+
+  it("keeps quantity and unitOfMeasure as separate importer columns", () => {
+    expect(exportWith(withUnitVisible, "visible")).toBe(
+      [
+        '"id","title","type","quantity","minQuantity","unitOfMeasure","consumptionType"',
+        '"asset-gloves","Gloves","QUANTITY_TRACKED","5","2","pcs","ONE_WAY"',
+      ].join("\r\n")
+    );
   });
 });
 

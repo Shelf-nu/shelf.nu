@@ -12,7 +12,12 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { decodeCsvListCell, encodeCsvListCell } from "./csv-cells";
+import {
+  decodeCsvListCell,
+  encodeCsvListCell,
+  neutralizeCsvFormula,
+  restoreCsvFormulaCell,
+} from "./csv-cells";
 
 describe("encodeCsvListCell", () => {
   it("leaves a plain list alone", () => {
@@ -88,4 +93,64 @@ describe("round trip", () => {
   ])("survives %j", (values) => {
     expect(decodeCsvListCell(encodeCsvListCell(values))).toEqual(values);
   });
+});
+
+describe("neutralizeCsvFormula", () => {
+  it.each([
+    ["=1+1", "'=1+1"],
+    ["+cmd", "'+cmd"],
+    ["+31 20 123", "'+31 20 123"],
+    ["-20C Freezer", "'-20C Freezer"],
+    ["@SUM(A1)", "'@SUM(A1)"],
+    ["-2+3+cmd|' /C calc'!A0", "'-2+3+cmd|' /C calc'!A0"],
+    ["-CHF 5.00", "'-CHF 5.00"],
+    ["'=x", "''=x"],
+    ["-1e5+cmd", "'-1e5+cmd"],
+  ])("prefixes %s", (value, expected) => {
+    expect(neutralizeCsvFormula(value)).toBe(expected);
+  });
+
+  it.each([
+    "-5",
+    "-1,234.50",
+    "-$5.00",
+    "-€0.99",
+    "-1e-7",
+    "-1e+21",
+    "Laptop",
+    "a=b",
+    "'note",
+    "Freezer -80",
+  ])("leaves %s as it is", (value) => {
+    expect(neutralizeCsvFormula(value)).toBe(value);
+  });
+
+  it("neutralizes a leading tab or carriage return, even for signed text", () => {
+    expect(neutralizeCsvFormula("\t=1+1")).toBe("'\t=1+1");
+    expect(neutralizeCsvFormula("\r=1")).toBe("'\r=1");
+    expect(neutralizeCsvFormula("\t-20C", { keepSignedText: true })).toBe(
+      "'\t-20C"
+    );
+  });
+
+  it("keeps a plain signed measurement when asked, never = or @", () => {
+    const keep = { keepSignedText: true };
+    expect(neutralizeCsvFormula("-20C Freezer", keep)).toBe("-20C Freezer");
+    expect(neutralizeCsvFormula("+5V PSU", keep)).toBe("+5V PSU");
+    expect(neutralizeCsvFormula("-1+cmd|' /C calc'!A0", keep)).toBe(
+      "'-1+cmd|' /C calc'!A0"
+    );
+    expect(neutralizeCsvFormula("-2*3", keep)).toBe("'-2*3");
+    expect(neutralizeCsvFormula("=1", keep)).toBe("'=1");
+    expect(neutralizeCsvFormula("@HQ", keep)).toBe("'@HQ");
+  });
+});
+
+describe("restoreCsvFormulaCell", () => {
+  it.each(["=1+1", "@x", "-2+3", "'=x", "-$5.00", "'note", "it's", "", "\t=1"])(
+    "gives back %j after neutralizeCsvFormula",
+    (value) => {
+      expect(restoreCsvFormulaCell(neutralizeCsvFormula(value))).toBe(value);
+    }
+  );
 });

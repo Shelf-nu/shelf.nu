@@ -38,6 +38,11 @@ vi.mock("~/database/db.server", () => ({
     location: {
       count: vi.fn(),
     },
+    // why: the distribution report names its asset-model buckets from the
+    // AssetModel table.
+    assetModel: {
+      findMany: vi.fn(),
+    },
     // why: `bookingStatusTransitionCounts` issues `db.$queryRaw` for the
     // chart series. We stub it to a resolved empty array so the hero-data
     // path is not coupled to chart math.
@@ -47,11 +52,13 @@ vi.mock("~/database/db.server", () => ({
 
 import { db } from "~/database/db.server";
 
+import { buildReportAssetFilter } from "./asset-filter";
 import {
   assetDistributionReport,
   bookingComplianceReport,
   overdueItemsReport,
 } from "./helpers.server";
+import type { DistributionAsset } from "./helpers.server";
 import type { ResolvedTimeframe } from "./types";
 
 const TIMEFRAME: ResolvedTimeframe = {
@@ -503,6 +510,9 @@ describe("assetDistributionReport — quantity-aware bucket values", () => {
     vi.mocked(db.category.findMany).mockResolvedValue([
       { id: "cat-1", name: "Cameras" },
     ] as any);
+    vi.mocked(db.assetModel.findMany).mockResolvedValue([
+      { id: "model-1", name: "Sony A7 IV" },
+    ] as any);
   });
 
   it("sums category buckets as valuation × stock, matching the headline", async () => {
@@ -586,7 +596,43 @@ describe("assetDistributionReport — quantity-aware bucket values", () => {
     expect(noLocation?.assetCount).toBe(1);
   });
 
-  it("reads the asset table once for all three breakdowns", async () => {
+  it("counts a manual row and a kit slice at one location once, capped at the stock", async () => {
+    // 100 pens at $1.50: all 100 placed by hand at Warehouse, and a 50-unit
+    // kit slice that also sits at Warehouse. Both rows describe the same
+    // physical units, so Warehouse holds 100 pens (one asset), not 150.
+    const assets: DistributionAsset[] = [
+      {
+        id: "a-pens",
+        categoryId: null,
+        assetModelId: null,
+        status: "AVAILABLE",
+        valuation: 1.5,
+        quantity: 100,
+        assetLocations: [
+          { quantity: 100, location: { id: "loc-1", name: "Warehouse" } },
+          { quantity: 50, location: { id: "loc-1", name: "Warehouse" } },
+        ],
+      },
+    ];
+    // The fixture is the narrow select the report reads; findMany's declared
+    // type is the full Asset row, so it is widened only at the mock boundary.
+    vi.mocked(db.asset.findMany).mockResolvedValue(
+      assets as unknown as Awaited<ReturnType<typeof db.asset.findMany>>
+    );
+
+    const result = await assetDistributionReport({
+      organizationId: "org-1",
+      currency: "USD",
+    });
+
+    const warehouse = result.distributionBreakdown!.byLocation.find(
+      (b) => b.id === "loc-1"
+    );
+    expect(warehouse?.totalValue).toBe(150);
+    expect(warehouse?.assetCount).toBe(1);
+  });
+
+  it("reads the asset table once for all four breakdowns", async () => {
     vi.mocked(db.asset.findMany).mockResolvedValue([] as any);
 
     await assetDistributionReport({
@@ -595,6 +641,98 @@ describe("assetDistributionReport — quantity-aware bucket values", () => {
     });
 
     expect(vi.mocked(db.asset.findMany)).toHaveBeenCalledTimes(1);
+  });
+
+  it("buckets assets by model, with modelless assets under 'No model'", async () => {
+    vi.mocked(db.asset.findMany).mockResolvedValue([
+      {
+        id: "a-1",
+        categoryId: null,
+        assetModelId: "model-1",
+        status: "AVAILABLE",
+        valuation: 100,
+        quantity: null,
+        assetLocations: [],
+      },
+      {
+        id: "a-2",
+        categoryId: null,
+        assetModelId: "model-1",
+        status: "AVAILABLE",
+        valuation: 50,
+        quantity: 2,
+        assetLocations: [],
+      },
+      {
+        id: "a-3",
+        categoryId: null,
+        assetModelId: null,
+        status: "AVAILABLE",
+        valuation: null,
+        quantity: null,
+        assetLocations: [],
+      },
+    ] as any);
+
+    const result = await assetDistributionReport({
+      organizationId: "org-1",
+      currency: "USD",
+    });
+
+    const byAssetModel = result.distributionBreakdown!.byAssetModel;
+    expect(byAssetModel[0]).toMatchObject({
+      id: "model-1",
+      groupName: "Sony A7 IV",
+      assetCount: 2,
+      // 100 × 1 + 50 × 2: per-unit valuation × stock, like the other buckets.
+      totalValue: 200,
+      percentage: 67,
+    });
+    expect(byAssetModel[1]).toMatchObject({
+      id: "no-model",
+      groupName: "No model",
+      assetCount: 1,
+      totalValue: null,
+    });
+    // Model names are looked up org-scoped, and only for models that appear.
+    expect(vi.mocked(db.assetModel.findMany)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: { in: ["model-1"] }, organizationId: "org-1" },
+      })
+    );
+  });
+
+  it("narrows the asset read, the count and the money sum to the same filter", async () => {
+    vi.mocked(db.asset.findMany).mockResolvedValue([] as any);
+    const assetFilter = buildReportAssetFilter({ categoryIds: ["cat-1"] });
+
+    await assetDistributionReport({
+      organizationId: "org-1",
+      currency: "USD",
+      assetFilter,
+    });
+
+    const expectedWhere = {
+      AND: [
+        { organizationId: "org-1", archivedAt: null },
+        { categoryId: { in: ["cat-1"] } },
+      ],
+    };
+    expect(vi.mocked(db.asset.findMany)).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expectedWhere })
+    );
+    expect(vi.mocked(db.asset.count)).toHaveBeenCalledWith({
+      where: expectedWhere,
+    });
+    // The raw money sum carries the same filter as a SQL fragment.
+    const rawCall = vi.mocked(db.$queryRaw).mock.calls[0]?.[0] as {
+      sql: string;
+    };
+    expect(rawCall.sql).toContain('"categoryId" IN');
+    expect(rawCall.sql).toContain('"archivedAt" IS NULL');
+    // Category/location counts come from the filtered rows, not org totals.
+    expect(vi.mocked(db.category.count)).not.toHaveBeenCalled();
+    expect(vi.mocked(db.location.count)).not.toHaveBeenCalled();
   });
 });
 

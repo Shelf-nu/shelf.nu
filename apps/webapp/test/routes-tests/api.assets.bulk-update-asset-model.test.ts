@@ -16,6 +16,7 @@
  * @see {@link file://./../../app/routes/api+/assets.bulk-update-asset-model.ts}
  * @see {@link file://./../../app/modules/asset/service.server.ts} `bulkUpdateAssetModel`
  */
+import { accessFor } from "@helpers/role-access";
 import { OrganizationRoles } from "@prisma/client";
 import type { ActionFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -78,18 +79,22 @@ const bulkUpdateAssetModelMock = vi.mocked(bulkUpdateAssetModel);
 const sendNotificationMock = vi.mocked(sendNotification);
 
 /**
- * The three fields this route actually destructures from `requirePermission`.
+ * The fields this route actually reads from `requirePermission`.
  *
  * Asserted to the real return type instead of `any`: the full result also
- * carries `currentOrganization` / `organizations` / `userOrganizations`, which
- * are Prisma payloads running to ~30 fields the route never reads, so building
- * a complete literal would be noise. The assertion still fails the build if one
- * of these three is renamed or retyped, which the `any` cast would not.
+ * carries `organizations` / `userOrganizations` and the rest of
+ * `currentOrganization`, which are Prisma payloads running to ~30 fields the
+ * route never reads, so building a complete literal would be noise. The
+ * assertion still fails the build if one of these is renamed or retyped, which
+ * the `any` cast would not. `access` and `auditsEnabled` decide the last audit
+ * date access the route forwards for select-all resolution.
  */
 const permissionResult = {
   organizationId: "org-1",
   role: OrganizationRoles.ADMIN,
   canUseBarcodes: false,
+  access: accessFor([OrganizationRoles.ADMIN]),
+  currentOrganization: { auditsEnabled: true },
 } as Awaited<ReturnType<typeof requirePermission>>;
 
 /** Builds the result shape the service returns, with link-success defaults. */
@@ -192,7 +197,28 @@ describe("api/assets/bulk-update-asset-model", () => {
         organizationId: "org-1",
         currentSearchParams: "category=cat-1&status=AVAILABLE",
         settings: { mode: "SIMPLE" },
+        lastAuditDateAccess: "available",
+        // An admin sees every asset, so the list scope is null.
+        bookableScope: null,
       });
+    });
+
+    it("forwards a locked last audit date access when the workspace lacks the audits add-on", async () => {
+      // A select-all over a last audit date filter must be refused for a
+      // workspace without audits, so the route has to pass the real access.
+      requirePermissionMock.mockResolvedValue({
+        ...permissionResult,
+        currentOrganization: {
+          ...permissionResult.currentOrganization,
+          auditsEnabled: false,
+        },
+      });
+
+      await callAction({});
+
+      expect(bulkUpdateAssetModelMock).toHaveBeenCalledWith(
+        expect.objectContaining({ lastAuditDateAccess: "locked" })
+      );
     });
 
     it("passes an empty assetModelId straight through, because that is how removal is requested", async () => {

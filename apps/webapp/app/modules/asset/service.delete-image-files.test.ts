@@ -146,6 +146,8 @@ describe("bulkDeleteAssets", () => {
       organizationId: "org-1",
       userId: "deleter-2",
       confirmation: String(assetIds.length),
+      lastAuditDateAccess: "hidden" as const,
+      bookableScope: null,
       // why: only read by the mocked id resolution
       settings: {} as never,
     };

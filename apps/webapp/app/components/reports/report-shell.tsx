@@ -16,6 +16,7 @@ import type { ReactNode } from "react";
 import { ArrowLeft, ChevronLeft, ChevronRight, Download } from "lucide-react";
 import { Link } from "react-router";
 
+import { Spinner } from "~/components/shared/spinner";
 import { useSearchParams } from "~/hooks/search-params";
 import { tw } from "~/utils/tw";
 
@@ -142,7 +143,7 @@ export function ReportShell({
         {/* Loading indicator */}
         {loading && (
           <div className="mb-4 flex items-center gap-2 text-xs text-gray-500">
-            <div className="animate-spin size-3 rounded-full border-2 border-gray-300 border-t-gray-600" />
+            <Spinner className="size-3" />
             <span>Loading...</span>
           </div>
         )}

@@ -63,7 +63,9 @@ export async function lockAssetForQuantityUpdate(
  * The order is the one every multi-asset locker uses (the booking check-out
  * and check-in paths lock asset by asset in sorted id order), so two
  * transactions touching the same assets can never deadlock. `FOR UPDATE`
- * locks rows as the sorted result is produced. Org-scoped like
+ * locks rows as the sorted result is produced. `COLLATE "C"` makes the
+ * database order byte order, which is what JavaScript's `sort()` gives for
+ * these ASCII ids, whatever collation the database was created with. Org-scoped like
  * {@link lockAssetForQuantityUpdate}: foreign ids match nothing and are not
  * locked. Missing ids are simply absent from the result.
  *
@@ -84,7 +86,45 @@ export function lockAssetsForQuantityUpdate(
   return tx.$queryRaw`
     SELECT id, type, quantity FROM "Asset"
     WHERE id IN (${Prisma.join(ids)}) AND "organizationId" = ${organizationId}
-    ORDER BY id
+    ORDER BY id COLLATE "C"
     FOR UPDATE
   `;
+}
+
+/**
+ * Row-locks every given asset in one statement, or throws if any is missing.
+ *
+ * The strict form of {@link lockAssetsForQuantityUpdate}: same single sorted,
+ * org-scoped `FOR UPDATE` statement (so the same global lock order), plus the
+ * 404 that {@link lockAssetForQuantityUpdate} throws when an id matches no row
+ * in the caller's organization. A foreign-org or deleted id therefore fails
+ * the whole call instead of being skipped. Empty input issues no query.
+ *
+ * Must be called within a `db.$transaction()` interactive transaction.
+ *
+ * @param tx - Prisma interactive transaction client
+ * @param assetIds - Assets to lock; duplicates are ignored
+ * @param organizationId - The caller's organization
+ * @throws {ShelfError} If any asset is not found in the caller's org (404)
+ */
+export async function lockEveryAssetForQuantityUpdate(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tx: any, // Prisma interactive tx client (no clean type for extended clients)
+  assetIds: string[],
+  organizationId: string
+): Promise<void> {
+  const requestedCount = new Set(assetIds).size;
+  if (requestedCount === 0) return;
+
+  const rows = await lockAssetsForQuantityUpdate(tx, assetIds, organizationId);
+  const lockedCount = new Set((rows ?? []).map((row) => row.id)).size;
+
+  if (lockedCount < requestedCount) {
+    throw new ShelfError({
+      cause: null,
+      message: "Asset not found",
+      label: "Consumption Log",
+      status: 404,
+    });
+  }
 }

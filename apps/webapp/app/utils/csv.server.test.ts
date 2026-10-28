@@ -5,17 +5,21 @@ import {
 } from "@remix-run/form-data-parser";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { stripHiddenAuditColumns } from "~/modules/asset/last-audit-date-access";
+import type { Column } from "~/modules/asset-index-settings/helpers";
+import { defaultFields } from "~/modules/asset-index-settings/helpers";
 import {
   buildCsvExportDataFromAssets,
   buildCsvExportDataFromBookings,
   buildCsvExportDataFromTeamMembers,
+  buildIndexExportColumns,
   csvDataFromRequest,
   formatValueForCsv,
   parseCsv,
 } from "~/utils/csv.server";
 import { ShelfError } from "~/utils/error";
 
-import { HARDCODED_DEFAULT_PREFS } from "./date-format";
+import { HARDCODED_DEFAULT_PREFS, formatDate } from "./date-format";
 
 // why: mock parseFormData to control file upload parsing in tests
 // while keeping MaxFileSizeExceededError available
@@ -35,9 +39,30 @@ vi.mock("lottie-react", () => ({
   default: () => null,
 }));
 
+const env = vi.hoisted(() => ({ URL_SHORTENER: "" as string }));
+
+// why: URL_SHORTENER is read from the process environment once at import;
+// a getter lets each test choose whether a shortener is configured.
+vi.mock("~/utils/env", async (importActual) => ({
+  ...(await importActual<Record<string, unknown>>()),
+  get URL_SHORTENER() {
+    return env.URL_SHORTENER;
+  },
+}));
+
 const parseFormDataMock = vi.mocked(parseFormData);
 
 describe("parseCsv", () => {
+  it("drops one apostrophe before a formula trigger and leaves others alone", async () => {
+    const bytes = new TextEncoder().encode(
+      ["title", "'=x", "''=x", "it's", "'note"].join("\n")
+    );
+
+    const result = await parseCsv(bytes.buffer as ArrayBuffer);
+
+    expect(result).toEqual([["title"], ["=x"], ["'=x"], ["it's"], ["'note"]]);
+  });
+
   it("parses CSV data with detected delimiters and escaped quotes", async () => {
     const csvContent =
       'name;description\n"MacBook ""Pro"" 16";"16-inch laptop"';
@@ -263,9 +288,25 @@ describe("formatValueForCsv", () => {
 
     expect(formatValueForCsv("**Bold** text", true)).toBe('"Bold text"');
   });
+
+  it("writes a formula-leading value as text, after markdown cleanup", () => {
+    expect(formatValueForCsv("=1+1")).toBe('"\'=1+1"');
+    expect(formatValueForCsv("  @SUM(A1)")).toBe('"\'@SUM(A1)"');
+    expect(formatValueForCsv("**=1+1**", true)).toBe('"\'=1+1"');
+    expect(formatValueForCsv('=A1&"x"')).toBe('"\'=A1&""x"""');
+  });
+
+  it("leaves negative numbers numeric", () => {
+    expect(formatValueForCsv(-5)).toBe('"-5"');
+    expect(formatValueForCsv("-$1,234.50")).toBe('"-$1,234.50"');
+    expect(formatValueForCsv(-0.0000001)).toBe('"-1e-7"');
+  });
 });
 
 describe("buildCsvExportDataFromAssets", () => {
+  /** The builder's argument shape, for typing partial test fixtures. */
+  type BuildArgs = Parameters<typeof buildCsvExportDataFromAssets>[0];
+
   it("builds ordered CSV rows with fixed and custom field values", () => {
     const assets = [
       {
@@ -365,6 +406,7 @@ describe("buildCsvExportDataFromAssets", () => {
         currency: "USD",
       },
       prefs: HARDCODED_DEFAULT_PREFS,
+      workspaceCustomFieldNames: [],
     });
 
     expect(headers).toEqual([
@@ -442,6 +484,7 @@ describe("buildCsvExportDataFromAssets", () => {
         currency: "USD",
       },
       prefs: HARDCODED_DEFAULT_PREFS,
+      workspaceCustomFieldNames: [],
     });
 
     // MM_DD_YYYY default prefs: July 6 from `raw`, never July 5 from `valueDate`.
@@ -483,10 +526,459 @@ describe("buildCsvExportDataFromAssets", () => {
         currency: "USD",
       },
       prefs: HARDCODED_DEFAULT_PREFS,
+      workspaceCustomFieldNames: [],
     });
 
     expect(headers).toEqual(['"Name"', '"Value"', '"Total value"']);
     expect(row).toEqual(['"Pens"', '"$1.00"', '"$100.00"']);
+  });
+
+  describe("QR URL column", () => {
+    const assets = [
+      { id: "asset-1", title: "Camera", qrId: "cm4abc123" },
+      { id: "asset-2", title: "Tripod", qrId: null },
+    ];
+
+    /** Builds the export over `columns` for a workspace with these fields. */
+    const exportWith = (
+      columns: BuildArgs["columns"],
+      workspaceCustomFieldNames: string[] = []
+    ) =>
+      buildCsvExportDataFromAssets({
+        assets: assets as unknown as BuildArgs["assets"],
+        columns,
+        currentOrganization: {
+          id: "org-1",
+          barcodesEnabled: false,
+          currency: "USD",
+        },
+        prefs: HARDCODED_DEFAULT_PREFS,
+        workspaceCustomFieldNames,
+      });
+
+    /** Builds the export with the QR ID column shown or hidden. */
+    const exportWithQrId = (qrIdVisible: boolean) =>
+      exportWith([
+        { name: "name", visible: true, position: 0 },
+        { name: "qrId", visible: qrIdVisible, position: 1 },
+        { name: "status", visible: true, position: 2 },
+      ]);
+
+    beforeEach(() => {
+      env.URL_SHORTENER = "";
+    });
+
+    it("follows the QR ID column with the shortener URL the code encodes", () => {
+      env.URL_SHORTENER = "eam.sh";
+
+      const [headers, withCode, withoutCode] = exportWithQrId(true);
+
+      expect(headers).toEqual(['"Name"', '"QR ID"', '"QR URL"', '"Status"']);
+      expect(withCode.slice(1, 3)).toEqual([
+        '"cm4abc123"',
+        '"https://eam.sh/cm4abc123"',
+      ]);
+      // An asset without a code leaves both cells empty.
+      expect(withoutCode.slice(1, 3)).toEqual(['""', '""']);
+    });
+
+    it("uses this server's /qr route when no shortener is configured", () => {
+      const [, withCode] = exportWithQrId(true);
+
+      expect(withCode[2]).toBe('"http://localhost:3000/qr/cm4abc123"');
+    });
+
+    it("is left out when the QR ID column is hidden", () => {
+      const [headers] = exportWithQrId(false);
+
+      expect(headers).toEqual(['"Name"', '"Status"']);
+    });
+
+    // The update importer resolves a "QR URL" header to a workspace custom
+    // field of that name, so the export must never emit the URL under it.
+    describe("in a workspace with a custom field named QR URL", () => {
+      it("leaves the header to the exported custom field", () => {
+        const [headers] = exportWith(
+          [
+            { name: "name", visible: true, position: 0 },
+            { name: "qrId", visible: true, position: 1 },
+            { name: "cf_QR URL", visible: true, position: 2 },
+          ] as BuildArgs["columns"],
+          ["QR URL"]
+        );
+
+        expect(headers).toEqual(['"Name"', '"QR ID"', '"QR URL"']);
+      });
+
+      it("is left out when that field is hidden", () => {
+        const [headers] = exportWith(
+          [
+            { name: "name", visible: true, position: 0 },
+            { name: "qrId", visible: true, position: 1 },
+            { name: "cf_QR URL", visible: false, position: 2 },
+          ] as BuildArgs["columns"],
+          ["QR URL"]
+        );
+
+        expect(headers).toEqual(['"Name"', '"QR ID"']);
+      });
+
+      it("is left out when the column settings do not list that field", () => {
+        const [headers] = exportWith(
+          [
+            { name: "name", visible: true, position: 0 },
+            { name: "qrId", visible: true, position: 1 },
+          ],
+          [" qr url "]
+        );
+
+        expect(headers).toEqual(['"Name"', '"QR ID"']);
+      });
+    });
+  });
+
+  describe("spreadsheet formula injection (CWE-1236)", () => {
+    const assets = [
+      {
+        id: "asset-evil",
+        title: '=HYPERLINK("http://evil.example","x")',
+        valuation: -5,
+        tags: [{ name: "+cmd" }],
+        custody: [],
+        customFields: [
+          { customField: { name: "=cf" }, value: { raw: "@SUM(A1)" } },
+          { customField: { name: "refund" }, value: { raw: -5 } },
+          {
+            customField: { name: "dde" },
+            value: { raw: "-2+3+cmd|' /C calc'!A0" },
+          },
+          { customField: { name: "quoted" }, value: { raw: "'=already" } },
+        ],
+      },
+    ];
+    const columns: BuildArgs["columns"] = [
+      { name: "name", visible: true, position: 0 },
+      { name: "valuation", visible: true, position: 1 },
+      { name: "tags", visible: true, position: 2 },
+      {
+        name: "cf_=cf",
+        visible: true,
+        position: 3,
+        cfType: CustomFieldType.TEXT,
+      },
+      {
+        name: "cf_refund",
+        visible: true,
+        position: 4,
+        cfType: CustomFieldType.AMOUNT,
+      },
+      {
+        name: "cf_dde",
+        visible: true,
+        position: 5,
+        cfType: CustomFieldType.TEXT,
+      },
+      {
+        name: "cf_quoted",
+        visible: true,
+        position: 6,
+        cfType: CustomFieldType.TEXT,
+      },
+    ];
+    const build = () =>
+      buildCsvExportDataFromAssets({
+        assets: assets as unknown as BuildArgs["assets"],
+        columns,
+        currentOrganization: {
+          id: "org-1",
+          barcodesEnabled: false,
+          currency: "USD",
+        },
+        prefs: HARDCODED_DEFAULT_PREFS,
+        workspaceCustomFieldNames: [],
+      });
+
+    it("prefixes formula-leading cells with an apostrophe and leaves negative amounts numeric", () => {
+      const [headers, row] = build();
+
+      expect(headers).toEqual([
+        '"Name"',
+        '"Value"',
+        '"Tags"',
+        '"\'=cf"',
+        '"refund"',
+        '"dde"',
+        '"quoted"',
+      ]);
+      expect(row).toEqual([
+        '"\'=HYPERLINK(""http://evil.example"",""x"")"',
+        '"-$5.00"',
+        '"\'+cmd"',
+        '"\'@SUM(A1)"',
+        '"-$5.00"',
+        "\"'-2+3+cmd|' /C calc'!A0\"",
+        "\"''=already\"",
+      ]);
+    });
+
+    it("round-trips through the importer's parser to the original values", async () => {
+      const csv = build()
+        .map((r) => r.join(","))
+        .join("\n");
+      const bytes = new TextEncoder().encode(csv);
+
+      const parsed = await parseCsv(
+        bytes.buffer.slice(
+          bytes.byteOffset,
+          bytes.byteOffset + bytes.byteLength
+        )
+      );
+
+      expect(parsed).toEqual([
+        ["Name", "Value", "Tags", "=cf", "refund", "dde", "quoted"],
+        [
+          '=HYPERLINK("http://evil.example","x")',
+          "-$5.00",
+          "+cmd",
+          "@SUM(A1)",
+          "-$5.00",
+          "-2+3+cmd|' /C calc'!A0",
+          "'=already",
+        ],
+      ]);
+    });
+  });
+});
+
+describe("quantity and unit of measure in the index export", () => {
+  const ORG = {
+    id: "org-1",
+    barcodesEnabled: false,
+    currency: "USD" as const,
+  };
+
+  /** A consumable counted in pieces and an individual asset. */
+  const ASSETS = [
+    {
+      id: "asset-gloves",
+      title: "Gloves",
+      type: "QUANTITY_TRACKED",
+      quantity: 5,
+      unitOfMeasure: "pcs",
+      tags: [],
+      custody: [],
+      customFields: [],
+    },
+    {
+      id: "asset-drill",
+      title: "Drill",
+      type: "INDIVIDUAL",
+      quantity: 1,
+      unitOfMeasure: null,
+      tags: [],
+      custody: [],
+      customFields: [],
+    },
+  ];
+
+  /** Default columns with only the named ones visible. */
+  function columnsWithVisible(...visible: string[]): Column[] {
+    return defaultFields.map((col) => ({
+      ...col,
+      visible: visible.includes(col.name),
+    }));
+  }
+
+  function exportCsv(
+    settingsColumns: Column[],
+    columnScope: "visible" | "all"
+  ) {
+    return buildCsvExportDataFromAssets({
+      assets: ASSETS as any,
+      columns: buildIndexExportColumns({ settingsColumns, columnScope }),
+      currentOrganization: ORG,
+      prefs: HARDCODED_DEFAULT_PREFS,
+      workspaceCustomFieldNames: [],
+    });
+  }
+
+  it("exports quantity as a bare number and the unit in its own column", () => {
+    const [headers, gloves, drill] = exportCsv(
+      columnsWithVisible("quantity", "unitOfMeasure"),
+      "visible"
+    );
+
+    expect(headers).toEqual([
+      '"Name"',
+      '"Total quantity"',
+      '"Unit of measure"',
+      '"Total value"',
+    ]);
+    expect(gloves).toEqual(['"Gloves"', '"5"', '"pcs"', '""']);
+    // Individual assets have no stock count and no unit.
+    expect(drill).toEqual(['"Drill"', '""', '""', '""']);
+  });
+
+  it("writes a unit that looks like a formula as plain text", () => {
+    const [, row] = buildCsvExportDataFromAssets({
+      assets: [{ ...ASSETS[0], unitOfMeasure: '=HYPERLINK("x")' }] as any,
+      columns: buildIndexExportColumns({
+        settingsColumns: columnsWithVisible("quantity", "unitOfMeasure"),
+        columnScope: "visible",
+      }),
+      currentOrganization: ORG,
+      prefs: HARDCODED_DEFAULT_PREFS,
+      workspaceCustomFieldNames: [],
+    });
+
+    expect(row[2]).toBe('"\'=HYPERLINK(""x"")"');
+  });
+
+  it("adds the unit right after quantity when only quantity is visible", () => {
+    const [headers, gloves] = exportCsv(
+      columnsWithVisible("sequentialId", "quantity", "minQuantity"),
+      "visible"
+    );
+
+    expect(headers).toEqual([
+      '"Name"',
+      '"Asset ID"',
+      '"Total quantity"',
+      '"Unit of measure"',
+      '"Min quantity"',
+      '"Total value"',
+    ]);
+    expect(gloves.slice(2, 4)).toEqual(['"5"', '"pcs"']);
+  });
+
+  it("keeps the unit where the user put it when it is already visible", () => {
+    // Unit of measure moved to the front of the index, Quantity left in place.
+    const settingsColumns = columnsWithVisible(
+      "sequentialId",
+      "quantity",
+      "unitOfMeasure"
+    ).map((col) =>
+      col.name === "unitOfMeasure" ? { ...col, position: 0 } : col
+    );
+
+    const [headers] = exportCsv(settingsColumns, "visible");
+
+    expect(headers).toEqual([
+      '"Name"',
+      '"Unit of measure"',
+      '"Asset ID"',
+      '"Total quantity"',
+      '"Total value"',
+    ]);
+  });
+
+  it("does not add the unit when quantity is not exported", () => {
+    const [headers] = exportCsv(columnsWithVisible("sequentialId"), "visible");
+
+    expect(headers).toEqual(['"Name"', '"Asset ID"', '"Total value"']);
+  });
+
+  it("exports every column in 'all' scope, with the unit right after quantity", () => {
+    const [headers] = exportCsv(columnsWithVisible(), "all");
+
+    expect(headers).toEqual([
+      '"Name"',
+      '"ID"',
+      '"Asset ID"',
+      '"QR ID"',
+      '"QR URL"',
+      '"Status"',
+      '"Free now"',
+      '"Total quantity"',
+      '"Unit of measure"',
+      '"Reserved"',
+      '"Stock status"',
+      '"Min quantity"',
+      '"Description"',
+      '"Value"',
+      '"Available to book"',
+      '"Created at"',
+      '"Updated at"',
+      '"Category"',
+      '"Tags"',
+      '"Location"',
+      '"Kit"',
+      '"Custody"',
+      '"Upcoming Reminder"',
+      '"Upcoming Bookings"',
+      '"Tracking method"',
+      '"Asset model"',
+      '"Last audit date"',
+      '"Total value"',
+    ]);
+  });
+});
+
+describe("buildCsvExportDataFromAssets last audit date", () => {
+  const organization = {
+    id: "org-1",
+    barcodesEnabled: false,
+    currency: "USD" as const,
+  };
+  const columns = [
+    { name: "name", visible: true, position: 0 },
+    { name: "lastAuditDate", visible: true, position: 1 },
+  ];
+  const build = (
+    assets: Array<{ id: string; title: string; lastAuditDate: string | null }>,
+    cols = columns
+  ) =>
+    buildCsvExportDataFromAssets({
+      assets: assets as unknown as Parameters<
+        typeof buildCsvExportDataFromAssets
+      >[0]["assets"],
+      columns: cols as Parameters<
+        typeof buildCsvExportDataFromAssets
+      >[0]["columns"],
+      currentOrganization: organization,
+      prefs: HARDCODED_DEFAULT_PREFS,
+      workspaceCustomFieldNames: [],
+    });
+
+  it("exports the last audit date formatted with the user's prefs", () => {
+    const iso = "2026-09-30T10:00:00.000Z";
+    const [headers, row] = build([
+      { id: "a1", title: "Pens", lastAuditDate: iso },
+    ]);
+
+    expect(headers).toEqual(['"Name"', '"Last audit date"']);
+    expect(row[1]).toBe(
+      formatValueForCsv(
+        formatDate(new Date(iso), HARDCODED_DEFAULT_PREFS, {
+          includeTime: true,
+        })
+      )
+    );
+  });
+
+  it("exports an empty value for a never-audited asset", () => {
+    const [, row] = build([{ id: "a1", title: "Pens", lastAuditDate: null }]);
+
+    expect(row[1]).toBe(formatValueForCsv(""));
+  });
+
+  it("has no Last audit date header once the column is stripped as hidden", () => {
+    const [headers] = build(
+      [{ id: "a1", title: "Pens", lastAuditDate: null }],
+      stripHiddenAuditColumns(columns, "hidden")
+    );
+
+    expect(headers).toEqual(['"Name"']);
+  });
+
+  it("keeps the column with empty values when access is locked", () => {
+    const [headers, row] = build(
+      [{ id: "a1", title: "Pens", lastAuditDate: null }],
+      stripHiddenAuditColumns(columns, "locked")
+    );
+
+    expect(headers).toEqual(['"Name"', '"Last audit date"']);
+    expect(row[1]).toBe(formatValueForCsv(""));
   });
 });
 

@@ -86,6 +86,7 @@ describe("POST /api/assets/bulk-archive", () => {
       role: "ADMIN",
       canUseBarcodes: false,
       access: accessFor(["ADMIN"]),
+      currentOrganization: { auditsEnabled: true },
     } as never);
     vi.mocked(bulkArchiveAssets).mockResolvedValue({
       archivedCount: 2,
@@ -122,6 +123,8 @@ describe("POST /api/assets/bulk-archive", () => {
         organizationId: "org-1",
         assetIds: ["a1", "a2"],
         actorUserId: "user-1",
+        // An admin in a workspace with audits may select by last audit date.
+        lastAuditDateAccess: "available",
       })
     );
     expect(bulkUnarchiveAssets).not.toHaveBeenCalled();

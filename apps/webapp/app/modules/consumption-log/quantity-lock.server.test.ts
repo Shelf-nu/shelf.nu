@@ -1,5 +1,6 @@
 /**
- * Unit tests for `lockAssetForQuantityUpdate` — the org-scoped asset row lock.
+ * Unit tests for the org-scoped asset row locks: `lockAssetForQuantityUpdate`
+ * (one asset) and `lockEveryAssetForQuantityUpdate` (many, one statement).
  *
  * The lock runs a raw `SELECT ... FOR UPDATE`, so it can't execute against a
  * mocked transaction client. Instead we stub `tx.$queryRaw` and assert on the
@@ -11,7 +12,10 @@
  */
 import { describe, expect, it, vitest } from "vitest";
 
-import { lockAssetForQuantityUpdate } from "./quantity-lock.server";
+import {
+  lockAssetForQuantityUpdate,
+  lockEveryAssetForQuantityUpdate,
+} from "./quantity-lock.server";
 
 describe("lockAssetForQuantityUpdate — org-scoped FOR UPDATE lock", () => {
   it("binds BOTH the asset id and the organization id into the FOR UPDATE predicate", async () => {
@@ -53,5 +57,52 @@ describe("lockAssetForQuantityUpdate — org-scoped FOR UPDATE lock", () => {
     await expect(
       lockAssetForQuantityUpdate(tx, "asset-1", "org-1")
     ).resolves.toEqual(row);
+  });
+});
+
+describe("lockEveryAssetForQuantityUpdate", () => {
+  it("locks N assets with one org-scoped FOR UPDATE statement", async () => {
+    // why: the raw `SELECT ... FOR UPDATE` can't run against a mocked tx, so
+    // `$queryRaw` stands in and returns every requested row.
+    const queryRaw = vitest
+      .fn()
+      .mockResolvedValue([
+        { id: "asset-a" },
+        { id: "asset-b" },
+        { id: "asset-c" },
+      ]);
+    const tx = { $queryRaw: queryRaw };
+
+    await lockEveryAssetForQuantityUpdate(
+      tx,
+      ["asset-c", "asset-a", "asset-b", "asset-a"],
+      "org-1"
+    );
+
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+    const [strings] = queryRaw.mock.calls[0];
+    expect(strings.join("?")).toContain('"organizationId"');
+    expect(strings.join("?")).toContain("FOR UPDATE");
+  });
+
+  it("throws 404 when one of the ids matches no row in the caller's org", async () => {
+    // why: stands in for the raw lock query; "foreign-asset" is absent from
+    // the result, as a foreign-org or deleted id would be.
+    const queryRaw = vitest.fn().mockResolvedValue([{ id: "asset-a" }]);
+    const tx = { $queryRaw: queryRaw };
+
+    await expect(
+      lockEveryAssetForQuantityUpdate(tx, ["asset-a", "foreign-asset"], "org-1")
+    ).rejects.toMatchObject({ status: 404, message: "Asset not found" });
+  });
+
+  it("issues no query for an empty id list", async () => {
+    // why: observes that no lock statement is sent.
+    const queryRaw = vitest.fn();
+    const tx = { $queryRaw: queryRaw };
+
+    await lockEveryAssetForQuantityUpdate(tx, [], "org-1");
+
+    expect(queryRaw).not.toHaveBeenCalled();
   });
 });

@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { valuationFromInput, valuationToInput } from "./asset-valuation";
+import {
+  sanitizeValuationInput,
+  valuationFromInput,
+  valuationToInput,
+} from "./asset-valuation";
 
 describe("valuationToInput", () => {
   it("shows a stored zero", () => {
@@ -46,6 +50,14 @@ describe("valuationFromInput", () => {
   it("never yields NaN for text that is not a number", () => {
     assert.equal(valuationFromInput("abc"), null);
   });
+
+  it("reads a lone decimal point as no answer", () => {
+    assert.equal(valuationFromInput("."), null);
+  });
+
+  it("reads a trailing decimal point as the whole number", () => {
+    assert.equal(valuationFromInput("5."), 5);
+  });
 });
 
 describe("the two directions agree", () => {
@@ -58,5 +70,33 @@ describe("the two directions agree", () => {
 
   it("round-trips no valuation as no valuation", () => {
     assert.equal(valuationFromInput(valuationToInput(null)), null);
+  });
+});
+
+describe("sanitizeValuationInput", () => {
+  it("reads a comma as the decimal point, as comma-locale keypads type it", () => {
+    assert.equal(sanitizeValuationInput("12,50"), "12.50");
+    assert.equal(
+      valuationFromInput(sanitizeValuationInput("12,50") ?? ""),
+      12.5
+    );
+  });
+
+  it("keeps an ordinary decimal unchanged", () => {
+    assert.equal(sanitizeValuationInput("12.50"), "12.50");
+  });
+
+  it("drops characters that cannot be part of the value", () => {
+    assert.equal(sanitizeValuationInput("$ 1 250"), "1250");
+  });
+
+  it("refuses a second separator instead of guessing at grouping", () => {
+    assert.equal(sanitizeValuationInput("1,250.00"), null);
+    assert.equal(sanitizeValuationInput("1.250,00"), null);
+    assert.equal(sanitizeValuationInput("1,2,3"), null);
+  });
+
+  it("keeps an empty field empty", () => {
+    assert.equal(sanitizeValuationInput(""), "");
   });
 });
