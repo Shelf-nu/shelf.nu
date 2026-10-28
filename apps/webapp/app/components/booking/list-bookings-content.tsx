@@ -172,11 +172,7 @@ export default function ListBookingsContent({
             <div className="min-w-[130px]">
               <span className="word-break mb-1 block font-medium">
                 <Button
-                  to={
-                    extraProps?.linkState
-                      ? LIST_DETAIL_PATH.booking(item.id)
-                      : `/bookings/${item.id}`
-                  }
+                  to={LIST_DETAIL_PATH.booking(item.id)}
                   state={extraProps?.linkState}
                   variant="link"
                   className="text-left font-medium text-gray-900 hover:text-gray-700"

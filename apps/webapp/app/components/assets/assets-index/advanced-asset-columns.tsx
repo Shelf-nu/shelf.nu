@@ -88,7 +88,7 @@ export function AdvancedIndexColumn({
 }: {
   column: ColumnLabelKey;
   item: AdvancedIndexAsset;
-  /** History state for the name link; with it, the link opens the overview tab directly. */
+  /** History state for the name link, so the asset page can step through this list. */
   linkState?: ListContextLinkState;
 }) {
   const { locale, currentOrganization, lastAuditDateAccess } =
@@ -195,7 +195,7 @@ export function AdvancedIndexColumn({
               <div className="min-w-0 flex-1 truncate">
                 <div className="flex items-center gap-1.5">
                   <Link
-                    to={linkState ? LIST_DETAIL_PATH.asset(item.id) : item.id}
+                    to={LIST_DETAIL_PATH.asset(item.id)}
                     state={linkState}
                     className="truncate font-medium underline hover:text-gray-600"
                     title={item.title}

@@ -48,7 +48,9 @@ vi.mock("~/modules/list-navigation/registry.server", () => ({
   },
 }));
 
-const { loader } = await import("~/routes/api+/list-neighbours");
+const { loader, shouldRevalidate } = await import(
+  "~/routes/api+/list-neighbours"
+);
 
 /** Calls the loader with `query` and returns its status and body. */
 async function load(query: string) {
@@ -136,5 +138,11 @@ describe("GET /api/list-neighbours", () => {
 
     expect(status).toBe(400);
     expect(requirePermission).not.toHaveBeenCalled();
+  });
+
+  it("never revalidates after an action on the detail page", () => {
+    // The neighbours load once per record; a submit on the page must not
+    // re-run the list queries.
+    expect(shouldRevalidate()).toBe(false);
   });
 });

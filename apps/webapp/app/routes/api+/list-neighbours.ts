@@ -1,3 +1,14 @@
+/**
+ * List neighbours API
+ *
+ * `GET /api/list-neighbours?entity=<asset|booking|kit|location>&id=<id>&filters=<search>`:
+ * the previous and next records around `id` in the list a detail page was
+ * opened from. Requires `read` on that list's entity. Loaded by the record
+ * arrows in detail page headers.
+ *
+ * @see {@link file://./../../modules/list-navigation/neighbours.server.ts}
+ * @see {@link file://./../../hooks/use-list-context.ts}
+ */
 import type { LoaderFunctionArgs } from "react-router";
 import { data } from "react-router";
 import { z } from "zod";
@@ -20,6 +31,18 @@ const ListNeighboursQuerySchema = z.object({
   /** The list's search string, without the leading `?`. */
   filters: z.string().default(""),
 });
+
+/**
+ * Never revalidates: an action on the detail page (a note, a custody change,
+ * an edit) does not move the record in the list it was opened from, and each
+ * step to another record loads its own neighbours under a new fetcher key.
+ *
+ * A CLIENT export, unlike `loader`: every `*.server` import above is used only
+ * inside the loader, so none of them reaches the browser bundle.
+ */
+export function shouldRevalidate() {
+  return false;
+}
 
 /**
  * The previous and next records around `id` in the list a detail page was

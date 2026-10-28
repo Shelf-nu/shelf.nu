@@ -182,6 +182,55 @@ describe("RecordNavigation", () => {
     );
   });
 
+  it("ignores ] while a native dialog is open", async () => {
+    const user = userEvent.setup();
+    renderAt({ pathname: "/assets/a2/overview", state: FROM_LIST });
+    const next = screen.getByRole("button", { name: "Next in list" });
+    await waitFor(() => expect(next).toBeEnabled());
+
+    // The shared Dialog renders `<dialog open>` with no explicit role and
+    // focuses its first button.
+    const dialog = document.createElement("dialog");
+    dialog.setAttribute("open", "");
+    const cancel = document.createElement("button");
+    dialog.appendChild(cancel);
+    document.body.appendChild(dialog);
+    cancel.focus();
+    await user.keyboard("]");
+    dialog.remove();
+
+    expect(screen.getByTestId("where")).toHaveTextContent(
+      "/assets/a2/overview"
+    );
+  });
+
+  it("disables both arrows when the endpoint answers with an error", async () => {
+    neighboursLoader.mockImplementation(() => ({
+      error: { message: "Stale list" },
+    }));
+    renderAt({ pathname: "/assets/a2/overview", state: FROM_LIST });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("status")).toHaveTextContent("ready")
+    );
+    expect(screen.getByRole("button", { name: "Next in list" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Previous in list" })
+    ).toBeDisabled();
+  });
+
+  it("treats a context from another list as no context", async () => {
+    renderAt({
+      pathname: "/assets/a2/overview",
+      state: { listContext: { entity: "booking", search: "?page=1" } },
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("status")).toHaveTextContent("no-context")
+    );
+    expect(neighboursLoader).not.toHaveBeenCalled();
+  });
+
   it("settles as ready with no neighbours when a load ends without data", async () => {
     neighboursLoader.mockImplementation(() => undefined);
     renderAt({ pathname: "/assets/a2/overview", state: FROM_LIST });

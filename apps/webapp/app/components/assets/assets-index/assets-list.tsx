@@ -583,7 +583,7 @@ export const ListAssetContent = ({
   item: AssetsFromViewItem;
   bulkActions?: ReactNode;
   isUserPage?: boolean;
-  /** `linkState` makes the title link open the asset with this list's context. */
+  /** History state for the title link, so the asset page can step through this list. */
   extraProps?: { linkState?: ListContextLinkState };
 }) => {
   const { category, tags, custody: custodyArray } = item;
@@ -648,11 +648,7 @@ export const ListAssetContent = ({
             <div className="min-w-[130px]">
               <span className="word-break mb-1 block ">
                 <Button
-                  to={
-                    extraProps?.linkState
-                      ? LIST_DETAIL_PATH.asset(item.id)
-                      : `/assets/${item.id}`
-                  }
+                  to={LIST_DETAIL_PATH.asset(item.id)}
                   state={extraProps?.linkState}
                   variant="link"
                   className="text-left font-medium text-gray-900 hover:text-gray-700"

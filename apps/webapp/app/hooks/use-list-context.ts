@@ -175,9 +175,14 @@ export function useRecordNavigation({
   return { status, prev, next, goTo };
 }
 
-/** Open overlays that own the keyboard while they are on screen. */
+/**
+ * Open overlays that own the keyboard while they are on screen. `dialog[open]`
+ * is listed apart from `[role="dialog"]`: an attribute selector matches only
+ * an explicit `role`, never the implicit one of a native `<dialog>`, which is
+ * what the shared `Dialog` (`components/layout/dialog.tsx`) renders.
+ */
 const OVERLAY_SELECTOR =
-  '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]';
+  'dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]';
 
 /** `true` when a key press is typing into a field rather than a shortcut. */
 function isTypingTarget(target: EventTarget | null): boolean {

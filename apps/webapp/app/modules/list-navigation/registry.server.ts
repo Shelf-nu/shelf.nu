@@ -7,12 +7,20 @@
  * user saw. Never replace those calls with a hand-written `where`: the index
  * functions carry the bookable scope, custody and archived-view rules.
  */
+import type { AssetIndexSettings } from "@prisma/client";
 import { canViewArchivedAssets } from "~/modules/asset/data.server";
+import {
+  canQueryLastAuditDate,
+  isLastAuditDateParam,
+  stripHiddenAuditColumns,
+} from "~/modules/asset/last-audit-date-access";
+import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
 import { resolveBookableListScope } from "~/modules/asset/list-scope.server";
 import {
   getAdvancedPaginatedAndFilterableAssets,
   getPaginatedAndFilterableAssets,
 } from "~/modules/asset/service.server";
+import type { Column } from "~/modules/asset-index-settings/helpers";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import {
   getBookings,
@@ -123,12 +131,25 @@ async function createAssetPageFetcher({
     access,
     currentOrganization,
   } = caller;
-  const settings = await getAssetIndexSettings({
+  const loadedSettings = await getAssetIndexSettings({
     userId,
     organizationId,
     canUseBarcodes,
     role,
   });
+  // The index strips the last audit date column for a caller who may not see
+  // it, and the query honours its filter and sort only when it is queryable.
+  const lastAuditDateAccess = lastAuditDateAccessFor(
+    access,
+    currentOrganization
+  );
+  const settings: AssetIndexSettings = {
+    ...loadedSettings,
+    columns: stripHiddenAuditColumns(
+      loadedSettings.columns as Column[],
+      lastAuditDateAccess
+    ),
+  };
   const honorArchivedView = canViewArchivedAssets(access);
   const bookableScope = resolveBookableListScope({ access, userId });
 
@@ -145,7 +166,10 @@ async function createAssetPageFetcher({
             headers: request.headers,
           }),
           organizationId,
-          settings
+          settings,
+          canQueryLastAuditDate(lastAuditDateAccess)
+            ? undefined
+            : isLastAuditDateParam
         ),
         resolveUserFormatPrefsById(userId, getClientHint(request)),
       ]
@@ -161,6 +185,7 @@ async function createAssetPageFetcher({
         canUseBarcodes: currentOrganization.barcodesEnabled ?? false,
         bookableScope,
         honorArchivedView,
+        lastAuditDateAccess,
       });
       return assets.map((asset) => asset.id);
     };
@@ -176,6 +201,10 @@ async function createAssetPageFetcher({
       filters: pageFilters,
       bookableScope,
       userId,
+      // Only the ids are read, so skip the filter dropdown seeds.
+      excludeCategoriesQuery: true,
+      excludeTagsQuery: true,
+      excludeLocationQuery: true,
     });
     return assets.map((asset) => asset.id);
   };
