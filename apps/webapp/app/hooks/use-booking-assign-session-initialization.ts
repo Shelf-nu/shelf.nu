@@ -50,9 +50,9 @@ export type AssignSessionInfo = {
  * survive a revalidation for the same booking.
  *
  * `expectedModelRequestsAtom`, `assignReservedModelsAtom` and
- * `assignAlreadyIncludedAtom` follow `session` itself, emptying when it is null so a booking with no
- * reservations renders exactly as the screen always has. They must stay
- * current: the drawer decides from them which scans count toward a
+ * `assignAlreadyIncludedAtom` follow `session` itself, emptying when it is
+ * null so a booking with no reservations renders as a plain scan list. They
+ * must stay current: the drawer decides from them which scans count toward a
  * reservation and which are refused as duplicates, so stale context reports
  * a claim the server will not make.
  *

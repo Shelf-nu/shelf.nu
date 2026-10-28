@@ -15,7 +15,11 @@
  * @see {@link file://./claimable.ts} for who may claim at all.
  */
 import { AssetType } from "@prisma/client";
-import type { ExpectedModelRequest, ScanListItems } from "~/atoms/qr-scanner";
+import type {
+  ExpectedModelRequest,
+  ReservedModel,
+  ScanListItems,
+} from "~/atoms/qr-scanner";
 import type {
   AssetFromQr,
   KitFromQr,
@@ -57,6 +61,19 @@ export type ScannedAssetRow = {
   claimedModelName?: string;
   /** Model whose pending unit this row fills. `matched` rows only. */
   matchedModelName?: string;
+  /**
+   * Why a resolved whole-unit scan fills no reservation. `unmatched`
+   * INDIVIDUAL rows only; absent while the row is loading and for
+   * quantity-tracked scans, which never answer a model reservation.
+   *
+   * - `"overReserved"`: its model is reserved, but every unit is filled
+   *   (by this session's other scans or before it started).
+   * - `"notReserved"`: its model is not reserved on this booking, or it has
+   *   no model.
+   */
+  unmatchedReason?: "overReserved" | "notReserved";
+  /** The reserved model an `overReserved` row exceeds. */
+  overReservedModelName?: string;
 };
 
 /**
@@ -87,6 +104,14 @@ export type ScanMatchingInput = {
   items: ScanListItems;
   /** Outstanding `BookingModelRequest` entries this booking still needs filled. */
   expectedModelRequests: ExpectedModelRequest[];
+  /**
+   * Every model the booking reserves, fully filled ones included. Only used
+   * to tell an over-scan apart from a scan of an unreserved model; matching
+   * itself reads `expectedModelRequests`. Defaults to the models in
+   * `expectedModelRequests`, which cannot see a reservation filled before
+   * the session started.
+   */
+  reservedModels?: ReservedModel[];
   /** Ids of the concrete `BookingAsset`s already on the booking. */
   alreadyIncludedIds: Set<string>;
   /** Already-included asset ids whose row still answers no reservation. */
@@ -132,6 +157,7 @@ export function matchScansToModelRequests(
   const {
     items,
     expectedModelRequests,
+    reservedModels = [],
     alreadyIncludedIds,
     claimableIncludedIds,
     checksOutScannedOnly,
@@ -140,6 +166,16 @@ export function matchScansToModelRequests(
   const expectedByModelId = new Map(
     expectedModelRequests.map((expected) => [expected.assetModelId, expected])
   );
+
+  /** Every reserved model's name by id, outstanding or fully filled. */
+  const reservedModelNameById = new Map<string, string>([
+    ...reservedModels.map(
+      (reserved) => [reserved.assetModelId, reserved.assetModelName] as const
+    ),
+    ...expectedModelRequests.map(
+      (expected) => [expected.assetModelId, expected.assetModelName] as const
+    ),
+  ]);
 
   // assetModelId → number of units consumed against that model's
   // `remaining` quota so far in this iteration. "Remaining" already
@@ -300,11 +336,29 @@ export function matchScansToModelRequests(
       }
     }
 
-    // Either (a) the asset resolved but its model isn't expected,
-    // (b) it's an over-scan of an expected model, or (c) the asset
+    // Either (a) the asset resolved but its model isn't reserved,
+    // (b) it's an over-scan of a reserved model, or (c) the asset
     // hasn't resolved yet. In all cases we park it in "unmatched"
-    // so `GenericItemRow` still mounts + fires the fetch.
-    rows.push({ qrId, asset, bucket: "unmatched" });
+    // so `GenericItemRow` still mounts + fires the fetch. A resolved
+    // whole unit also says which of (a) and (b) it is.
+    if (asset?.type !== AssetType.INDIVIDUAL) {
+      rows.push({ qrId, asset, bucket: "unmatched" });
+      continue;
+    }
+    const overReservedModelName = modelId
+      ? reservedModelNameById.get(modelId)
+      : undefined;
+    rows.push(
+      overReservedModelName
+        ? {
+            qrId,
+            asset,
+            bucket: "unmatched",
+            unmatchedReason: "overReserved",
+            overReservedModelName,
+          }
+        : { qrId, asset, bucket: "unmatched", unmatchedReason: "notReserved" }
+    );
   }
 
   return { rows, kitRows, matchedCountByModel };

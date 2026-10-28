@@ -176,6 +176,14 @@ export default function AddAssetsToBookingDrawer({
   const expectedModelRequests = useAtomValue(expectedModelRequestsAtom);
 
   /**
+   * Every model the booking reserves, fully filled ones included, so the
+   * matcher can tell an extra scan of a filled model (over the reserved
+   * count) from a scan of an unreserved one. `expectedModelRequests` cannot
+   * answer this: it lists only reservations still owed.
+   */
+  const reservedModels = useAtomValue(assignReservedModelsAtom);
+
+  /**
    * Assets already on the booking before this scan session, as the route
    * seeded them. Read from `assignAlreadyIncludedAtom` rather than the Check
    * Out drawer's session atom: the two screens own separate lifecycles, so
@@ -214,11 +222,18 @@ export default function AddAssetsToBookingDrawer({
       matchScansToModelRequests({
         items,
         expectedModelRequests,
+        reservedModels,
         alreadyIncludedIds,
         claimableIncludedIds,
         checksOutScannedOnly: false,
       }),
-    [items, expectedModelRequests, alreadyIncludedIds, claimableIncludedIds]
+    [
+      items,
+      expectedModelRequests,
+      reservedModels,
+      alreadyIncludedIds,
+      claimableIncludedIds,
+    ]
   );
 
   /**
@@ -260,26 +275,6 @@ export default function AddAssetsToBookingDrawer({
   const scannedRowByQrId = useMemo(
     () => new Map(scannedBuckets.rows.map((row) => [row.qrId, row] as const)),
     [scannedBuckets.rows]
-  );
-
-  /**
-   * Every model the booking reserves, fully filled ones included, so an extra
-   * scan of a filled model reads as over the reserved count rather than as an
-   * unreserved model. `expectedModelRequests` cannot answer this: it lists
-   * only reservations still owed.
-   */
-  const reservedModels = useAtomValue(assignReservedModelsAtom);
-
-  /** Reserved model names by id, to name the model an over-scan exceeds. */
-  const reservedModelNameById = useMemo(
-    () =>
-      new Map(
-        reservedModels.map(
-          (reserved) =>
-            [reserved.assetModelId, reserved.assetModelName] as const
-        )
-      ),
-    [reservedModels]
   );
 
   /** Per-model progress. `prefulfilled` covers units assigned before this scan. */
@@ -334,16 +329,15 @@ export default function AddAssetsToBookingDrawer({
             <AssetRow
               asset={scannedAsset}
               scannedCode={qrId}
-              isClaimed={claimedModelNameByAssetId.has(scannedAsset.id)}
-              claimedModelName={claimedModelNameByAssetId.get(scannedAsset.id)}
               reservation={resolveRowReservation({
-                bucket: scannedRow?.bucket,
-                matchedModelName: scannedRow?.matchedModelName,
+                row: scannedRow,
+                // Keyed by asset, as the blocker exemption is: every row of
+                // a claimed asset reads as claimed, never as a duplicate.
+                isClaimed: claimedModelNameByAssetId.has(scannedAsset.id),
+                claimedModelName: claimedModelNameByAssetId.get(
+                  scannedAsset.id
+                ),
                 hasReservations: reservedModels.length > 0,
-                assetType: scannedAsset.type,
-                reservedModelName: scannedAsset.assetModelId
-                  ? reservedModelNameById.get(scannedAsset.assetModelId)
-                  : undefined,
               })}
             />
           );
@@ -474,6 +468,8 @@ function PendingModelRowItem({ assetModelName }: { assetModelName: string }) {
 /**
  * What a scanned row means for the booking's model reservations.
  *
+ * - `claimed`: already on the booking without answering a reservation, and
+ *   this scan makes it answer one of `modelName`.
  * - `matched`: fills an outstanding unit of `modelName`.
  * - `overReserved`: its model is reserved, but every unit is already filled,
  *   so it joins the booking as an extra.
@@ -481,53 +477,52 @@ function PendingModelRowItem({ assetModelName }: { assetModelName: string }) {
  *   joins the booking as an extra.
  */
 export type RowReservation =
+  | { kind: "claimed"; modelName: string | undefined }
   | { kind: "matched"; modelName: string }
   | { kind: "overReserved"; modelName: string }
   | { kind: "notReserved" };
 
 /**
- * Turns the matcher's bucket for one scanned asset into the reservation note
+ * Turns the matcher's verdict for one scanned asset into the reservation note
  * its row shows, or null when the row needs none.
  *
- * Only a booking that reserves models gets a note: on a plain booking every
- * scan is simply added, and calling each one "not reserved" would be noise.
- * Quantity-tracked assets never answer a model reservation (a reservation is
- * for whole units), so they get no note either.
+ * Only a booking that reserves models gets an "extra" note: on a plain
+ * booking every scan is simply added, and calling each one "not reserved"
+ * would be noise. The matcher gives quantity-tracked scans no
+ * `unmatchedReason` (a reservation is for whole units), so they get none
+ * either.
  *
- * @param args.bucket - The matcher's bucket for the row, if it has one yet.
- * @param args.matchedModelName - The model a `matched` row fills.
+ * @param args.row - The matcher's row for this scan, if it has one yet.
+ * @param args.isClaimed - Whether this asset's scan answers a reservation
+ *   from a row already on the booking.
+ * @param args.claimedModelName - The model a claimed row answers, when known.
  * @param args.hasReservations - Whether the booking reserves any model.
- * @param args.assetType - The scanned asset's type.
- * @param args.reservedModelName - The asset's model name when that model is
- *   reserved on this booking, used to name the model an over-scan exceeds.
  * @returns The note for the row, or null.
  */
 export function resolveRowReservation({
-  bucket,
-  matchedModelName,
+  row,
+  isClaimed,
+  claimedModelName,
   hasReservations,
-  assetType,
-  reservedModelName,
 }: {
-  bucket: ScannedAssetRow["bucket"] | undefined;
-  matchedModelName: string | undefined;
+  row: ScannedAssetRow | undefined;
+  isClaimed: boolean;
+  claimedModelName: string | undefined;
   hasReservations: boolean;
-  assetType: AssetType;
-  reservedModelName: string | undefined;
 }): RowReservation | null {
-  if (bucket === "matched" && matchedModelName) {
-    return { kind: "matched", modelName: matchedModelName };
+  if (isClaimed) {
+    return { kind: "claimed", modelName: claimedModelName };
   }
-  if (
-    bucket !== "unmatched" ||
-    !hasReservations ||
-    assetType !== AssetType.INDIVIDUAL
-  ) {
+  if (row?.bucket === "matched" && row.matchedModelName) {
+    return { kind: "matched", modelName: row.matchedModelName };
+  }
+  if (row?.bucket !== "unmatched" || !hasReservations) {
     return null;
   }
-  return reservedModelName
-    ? { kind: "overReserved", modelName: reservedModelName }
-    : { kind: "notReserved" };
+  if (row.unmatchedReason === "overReserved" && row.overReservedModelName) {
+    return { kind: "overReserved", modelName: row.overReservedModelName };
+  }
+  return row.unmatchedReason === "notReserved" ? { kind: "notReserved" } : null;
 }
 
 /**
@@ -537,17 +532,11 @@ export function resolveRowReservation({
 export function AssetRow({
   asset,
   scannedCode,
-  isClaimed = false,
-  claimedModelName,
   reservation = null,
 }: {
   asset: AssetFromQr;
   /** The code the operator scanned to add this row. */
   scannedCode: string;
-  /** The matcher credited this scan against an outstanding reserved unit. */
-  isClaimed?: boolean;
-  /** Name of the model that unit belongs to, when known. */
-  claimedModelName?: string;
   /** What this scan means for the booking's model reservations. */
   reservation?: RowReservation | null;
 }) {
@@ -569,6 +558,19 @@ export function AssetRow({
   const maxAllowed = unitsAvailable ?? 0;
   const noUnitsAvailable = qtyTracked && !alreadyInBooking && maxAllowed <= 0;
 
+  /**
+   * States a blocker refuses on submit (see `buildAddToBookingBlockers`). A
+   * refused row gets no reservation note: telling the operator it counts
+   * toward a model, or joins as an extra, is false for a row that cannot go.
+   */
+  const refusedOnSubmit =
+    !!asset.archivedAt ||
+    !asset.availableToBook ||
+    (asset.type === AssetType.INDIVIDUAL && asset.assetKits.length > 0) ||
+    (bookingIsCheckedOut && isCheckedOut) ||
+    noUnitsAvailable;
+  const shownReservation = refusedOnSubmit ? null : reservation;
+
   // Use a combination of standard presets and custom configurations
   const availabilityConfigs = [
     assetLabelPresets.archived(!!asset.archivedAt),
@@ -583,10 +585,11 @@ export function AssetRow({
     // the answer to a reservation. It reads green and names the model, so an
     // operator can tell it apart from a rescan that does nothing.
     {
-      condition: isClaimed,
-      badgeText: claimedModelName
-        ? `Already here, now counts toward ${claimedModelName}`
-        : "Already here, now counts",
+      condition: shownReservation?.kind === "claimed",
+      badgeText:
+        shownReservation?.kind === "claimed" && shownReservation.modelName
+          ? `Already here, now counts toward ${shownReservation.modelName}`
+          : "Already here, now counts",
       tooltipTitle: "Counts toward a reserved unit",
       tooltipContent:
         "This asset was already on the booking without answering a reservation. Submitting assigns it to one.",
@@ -594,10 +597,10 @@ export function AssetRow({
       className: "bg-green-50 border-green-200 text-green-700",
     },
     {
-      condition: reservation?.kind === "matched",
+      condition: shownReservation?.kind === "matched",
       badgeText:
-        reservation?.kind === "matched"
-          ? `Counts toward ${reservation.modelName}`
+        shownReservation?.kind === "matched"
+          ? `Counts toward ${shownReservation.modelName}`
           : "",
       tooltipTitle: "Fills a reserved unit",
       tooltipContent:
@@ -606,10 +609,10 @@ export function AssetRow({
       className: "bg-green-50 border-green-200 text-green-700",
     },
     {
-      condition: reservation?.kind === "overReserved",
+      condition: shownReservation?.kind === "overReserved",
       badgeText:
-        reservation?.kind === "overReserved"
-          ? `Extra: every ${reservation.modelName} unit is already filled`
+        shownReservation?.kind === "overReserved"
+          ? `Extra: every ${shownReservation.modelName} unit is already filled`
           : "",
       tooltipTitle: "Over the reserved count",
       tooltipContent:
@@ -618,7 +621,7 @@ export function AssetRow({
       className: "bg-warning-50 border-warning-200 text-warning-700",
     },
     {
-      condition: reservation?.kind === "notReserved",
+      condition: shownReservation?.kind === "notReserved",
       badgeText: "Extra: model not reserved",
       tooltipTitle: "Not part of a reservation",
       tooltipContent:
@@ -628,9 +631,7 @@ export function AssetRow({
     },
     // Custom preset for "already in this booking"
     {
-      condition:
-        !isClaimed &&
-        booking.bookingAssets.some((ba) => ba.assetId === asset.id),
+      condition: reservation?.kind !== "claimed" && alreadyInBooking,
       badgeText: "Already added to this booking",
       tooltipTitle: "Asset is part of booking",
       tooltipContent: "This asset is already added to the current booking.",

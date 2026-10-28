@@ -558,6 +558,18 @@ describe("AddAssetsToBookingDrawer scanned row details", () => {
     expect(screen.getByText("qr-b")).toBeTruthy();
   });
 
+  it("shows only the scanned code for an asset with no asset ID", () => {
+    renderDrawer({
+      scannedAssets: {
+        "qr-a": { id: "asset-1", title: "Asset 1", sequentialId: null },
+      },
+    });
+
+    expect(screen.getByText("qr-a")).toBeTruthy();
+    expect(screen.queryByText("ID")).toBeNull();
+    expect(screen.queryByText(/undefined|null/)).toBeNull();
+  });
+
   it("does not repeat the asset ID when the asset ID is what was scanned", () => {
     renderDrawer({
       scannedAssets: {
@@ -647,6 +659,28 @@ describe("AddAssetsToBookingDrawer scanned row details", () => {
     });
 
     expect(screen.getByText("Extra: model not reserved")).toBeTruthy();
+  });
+
+  // A blocker refuses these on submit, so a note saying the scan counts
+  // toward a model, or joins as an extra, would be false.
+  it.each([
+    ["archived", { archivedAt: new Date("2026-01-01T00:00:00Z") }],
+    ["not available to book", { availableToBook: false }],
+  ])("adds no reservation note to a scan that is %s", (_state, overrides) => {
+    renderDrawer({
+      expectedModelRequests: oneUnitOfModelOne,
+      scannedAssets: {
+        "qr-1": {
+          id: "asset-1",
+          title: "Asset 1",
+          assetModelId: "model-1",
+          ...overrides,
+        } as Partial<AssetFromQr>,
+      },
+    });
+
+    expect(screen.queryByText(/^Counts toward/)).toBeNull();
+    expect(screen.queryByText(/^Extra:/)).toBeNull();
   });
 
   // On a booking with no reservations every scan is simply added, so
