@@ -1,10 +1,18 @@
+import { useMemo } from "react";
 import { TagUseFor } from "@prisma/client";
 import type {
   MetaFunction,
   LoaderFunctionArgs,
   ShouldRevalidateFunction,
 } from "react-router";
-import { data, redirect, Link, Outlet, useMatches } from "react-router";
+import {
+  data,
+  redirect,
+  Link,
+  Outlet,
+  useLoaderData,
+  useMatches,
+} from "react-router";
 import BookingFilters from "~/components/booking/booking-filters";
 import BulkActionsDropdown from "~/components/booking/bulk-actions-dropdown";
 import CreateBookingDialog from "~/components/booking/create-booking-dialog";
@@ -20,6 +28,7 @@ import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Button } from "~/components/shared/button";
 import { Th } from "~/components/table";
 import { db } from "~/database/db.server";
+import { useListContextLinkState } from "~/hooks/use-list-context";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useRoleAccess } from "~/hooks/use-role-access";
 import { decorateBookingsForList } from "~/modules/booking/list-flags.server";
@@ -318,6 +327,19 @@ export default function BookingsIndexPage({
     "$kitId.bookings",
   ].includes(currentRoute?.handle?.name);
 
+  /**
+   * Only the bookings index carries its list context: the neighbours lookup
+   * replays the index's own query, which is not what a child page lists.
+   */
+  // Child bookings pages render this with their own loader; only the index's
+  // page size matters, since only the index carries a list context.
+  const { perPage } = useLoaderData<BookingsIndexLoaderData>();
+  const linkState = useListContextLinkState("booking", perPage);
+  const listItemProps = useMemo(
+    () => (isChildBookingsPage ? undefined : { linkState }),
+    [isChildBookingsPage, linkState]
+  );
+
   const isBookingUpdateExisting =
     currentRoute?.handle?.name === "bookings.update-existing";
 
@@ -361,6 +383,7 @@ export default function BookingsIndexPage({
             newButtonContent: "Create your first booking",
           }}
           ItemComponent={ListBookingsContent}
+          extraItemComponentProps={listItemProps}
           headerChildren={
             <>
               <Th />

@@ -9,6 +9,7 @@ import type {
 } from "@prisma/client";
 import { CustomFieldType } from "@prisma/client";
 import { parseFormData } from "@remix-run/form-data-parser";
+import { STOCK_STATUS_LABELS } from "@shelf/labels";
 
 import chardet from "chardet";
 import { CsvError, parse } from "csv-parse";
@@ -45,6 +46,7 @@ import type { BookingWithCustodians } from "~/modules/booking/types";
 import { calculatePartialCheckinProgress } from "~/modules/booking/utils.server";
 import { getPrimaryCustody } from "~/modules/custody/utils";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
+import { getQrUrl } from "~/modules/qr/qr-url.server";
 import { getNrmSelectionWhere } from "~/modules/team-member/nrm-scope";
 import type { RoleAccess } from "~/utils/permissions/role-access";
 import { getAssetTotalValue } from "./asset-value";
@@ -52,7 +54,7 @@ import { getBookingAssetCheckinLabel } from "./booking-assets";
 import { checkExhaustiveSwitch } from "./check-exhaustive-switch";
 import { getClientHint } from "./client-hints";
 import { getAdvancedFiltersFromRequest } from "./cookies.server";
-import { neutralizeSpreadsheetFormula } from "./csv-cells";
+import { neutralizeCsvFormula, restoreCsvFormulaCell } from "./csv-cells";
 import { formatCurrency } from "./currency";
 import { formatDate, type ResolvedFormatPrefs } from "./date-format";
 import { resolveUserFormatPrefsById } from "./date-format.server";
@@ -95,7 +97,7 @@ function guessDelimiters(csv: string, delimiters: string[]) {
 
 /** Parses csv Data into an array with type {@link CSVData} */
 export const parseCsv = (csvData: ArrayBuffer) => {
-  const results = [] as CSVData;
+  const results: string[][] = [];
   /** Detect the file encoding */
   const encoding = chardet.detect(Buffer.from(csvData));
 
@@ -113,16 +115,15 @@ export const parseCsv = (csvData: ArrayBuffer) => {
       ltrim: true, // Trim whitespace from left side of cell
       relax_column_count: true, // Ignore inconsistent column count
     })
-      .on("data", (data) => {
-        // Process each row of data as it is parsed
-        // @ts-ignore
-        results.push(data);
+      .on("data", (data: string[]) => {
+        // Undo the export's formula guard so a Shelf export re-imports as-is.
+        results.push(data.map(restoreCsvFormulaCell));
       })
       .on("error", (error) => {
         reject(error);
       })
       .on("end", () => {
-        resolve(results);
+        resolve(results as CSVData);
       });
 
     parser.write(csv);
@@ -135,11 +136,27 @@ function isEmptyRow(row: string[]): boolean {
   return row.every((cell) => cell.trim() === "");
 }
 
-/** Takes a request object and extracts the file from it and parses it as csvData */
-export const csvDataFromRequest = async ({ request }: { request: Request }) => {
+/**
+ * Takes a request object and extracts the file from it and parses it as csvData.
+ *
+ * @param args.request - The multipart request carrying a `file` field
+ * @param args.maxFileSize - Largest accepted upload in bytes; the multipart
+ *   parser's default (2 MB) applies when omitted
+ * @throws {ShelfError} "File too large" past the limit, or a parse error
+ */
+export const csvDataFromRequest = async ({
+  request,
+  maxFileSize,
+}: {
+  request: Request;
+  maxFileSize?: number;
+}) => {
   try {
     // Files are automatically stored in memory with parseFormData
-    const formData = await parseFormData(request);
+    const formData = await parseFormData(
+      request,
+      maxFileSize ? { maxFileSize } : undefined
+    );
 
     const csvFile = formData.get("file") as File;
 
@@ -160,9 +177,16 @@ export const csvDataFromRequest = async ({ request }: { request: Request }) => {
       throw new ShelfError({
         cause,
         title: "File too large",
-        message:
-          "The CSV file is too large. Please reduce the file size by removing empty rows or splitting it into smaller files and try again.",
+        message: maxFileSize
+          ? `The CSV file is larger than ${(
+              maxFileSize /
+              (1024 * 1024)
+            ).toLocaleString("en-US", {
+              maximumFractionDigits: 1,
+            })} MB. Split it into smaller files or remove empty rows and try again.`
+          : "The CSV file is too large. Please reduce the file size by removing empty rows or splitting it into smaller files and try again.",
         label: "CSV",
+        status: 400,
         shouldBeCaptured: false,
       });
     }
@@ -323,18 +347,30 @@ export async function exportAssetsFromIndexToCsv({
     getClientHint(request)
   );
 
-  const { assets } = await resolveExportAssets({
-    request,
-    assetIds,
-    settings,
-    currentOrganization,
-    assetIndexCurrentSearchParams,
-    timeZone: prefs.timeZone,
-    lastAuditDateAccess,
-    // "All columns" exports hidden columns too, so the date is computed even
-    // when the user has hidden it in their settings.
-    includeHiddenColumns: columnScope === "all",
-  });
+  const [{ assets }, workspaceCustomFields] = await Promise.all([
+    resolveExportAssets({
+      request,
+      assetIds,
+      settings,
+      currentOrganization,
+      assetIndexCurrentSearchParams,
+      timeZone: prefs.timeZone,
+      lastAuditDateAccess,
+      // "All columns" exports hidden columns too, so the date is computed even
+      // when the user has hidden it in their settings.
+      includeHiddenColumns: columnScope === "all",
+    }),
+    // The custom fields the update importer matches headers against (same
+    // filter as `buildUpdatePreview`).
+    db.customField.findMany({
+      where: {
+        organizationId: currentOrganization.id,
+        active: true,
+        deletedAt: null,
+      },
+      select: { name: true },
+    }),
+  ]);
 
   const csvData = buildCsvExportDataFromAssets({
     assets,
@@ -347,6 +383,7 @@ export async function exportAssetsFromIndexToCsv({
     }),
     currentOrganization,
     prefs,
+    workspaceCustomFieldNames: workspaceCustomFields.map((cf) => cf.name),
   });
 
   // Join rows with CRLF as per CSV spec
@@ -517,6 +554,8 @@ export async function exportAssetsForImportToCsv({
  * @param assets - Array of assets to export
  * @param columns - Column settings that define the order and visibility of fields
  * @param prefs - Acting user's resolved date/time preferences for humanized columns
+ * @param workspaceCustomFieldNames - Names of the workspace's active custom
+ *   fields, exported or not; the `QR URL` column gives way to one of that name
  * @returns Array of string arrays representing CSV rows, including headers
  */
 export const buildCsvExportDataFromAssets = ({
@@ -524,6 +563,7 @@ export const buildCsvExportDataFromAssets = ({
   columns,
   currentOrganization,
   prefs,
+  workspaceCustomFieldNames,
 }: {
   assets: AdvancedIndexAsset[];
   columns: Column[];
@@ -532,13 +572,28 @@ export const buildCsvExportDataFromAssets = ({
     "id" | "barcodesEnabled" | "currency"
   >;
   prefs: ResolvedFormatPrefs;
+  workspaceCustomFieldNames: string[];
 }): string[][] => {
   if (!assets.length) return [];
 
-  // Get visible columns in the correct order
-  const visibleColumns = columns
+  const exportedColumns = columns
     .filter((col) => col.visible && col.name !== "actions")
     .sort((a, b) => a.position - b.position);
+
+  // The export-only `qrUrl` column rides directly behind `qrId`, so it is
+  // shown exactly when the QR ID is. It gives way to any workspace custom
+  // field with the same header, exported or not: the update importer resolves
+  // that header to the custom field, so a `qrUrl` column under it would write
+  // the code's URL into the field.
+  const qrUrlLabel = columnsLabelsMap.qrUrl.toLowerCase();
+  const customFieldTakesQrUrlHeader = workspaceCustomFieldNames.some(
+    (name) => name.trim().toLowerCase() === qrUrlLabel
+  );
+  const visibleColumns = exportedColumns.flatMap((col): Column[] =>
+    col.name === "qrId" && !customFieldTakesQrUrlHeader
+      ? [col, { name: "qrUrl", visible: true, position: col.position }]
+      : [col]
+  );
 
   // Create headers row using column names
   const headers = visibleColumns.map((col) =>
@@ -561,7 +616,8 @@ export const buildCsvExportDataFromAssets = ({
           | FixedField
           | BarcodeField
           | "name"
-          | "total_value";
+          | "total_value"
+          | "qrUrl";
 
         switch (fieldName) {
           case "id":
@@ -572,6 +628,10 @@ export const buildCsvExportDataFromAssets = ({
             break;
           case "qrId":
             value = asset.qrId;
+            break;
+          case "qrUrl":
+            // The URL the printed code encodes; empty when the asset has none.
+            value = getQrUrl(asset.qrId);
             break;
           case "name":
             value = asset.title;
@@ -701,11 +761,10 @@ export const buildCsvExportDataFromAssets = ({
                 : "";
             break;
           case "unitOfMeasure":
-            // Free text that starts its own cell, so a stored "=..." must not
-            // reach a spreadsheet as a formula.
+            // Free text; formatValueForCsv applies the formula guard to it.
             value =
               isQuantityTracked(asset) && asset.unitOfMeasure
-                ? neutralizeSpreadsheetFormula(asset.unitOfMeasure)
+                ? asset.unitOfMeasure
                 : "";
             break;
           case "minQuantity":
@@ -720,6 +779,36 @@ export const buildCsvExportDataFromAssets = ({
             value = isQuantityTracked(asset)
               ? "Tracked by quantity"
               : "Individual";
+            break;
+          case "available":
+            // Derived, so export-only in practice: the importer has no
+            // "available" input and never will, it is an output of custody,
+            // kits and bookings. Included because "filter to Running low, then
+            // export" is the reorder list an inventory manager actually wants,
+            // and it is useless without the number next to the name.
+            value =
+              isQuantityTracked(asset) && asset.available != null
+                ? `${asset.available}`
+                : "";
+            break;
+          case "reserved":
+            // NOT gated on quantity-tracking, matching the column exactly. An
+            // individually-tracked asset is a pool of one and reads 1 here when
+            // a booking claims it, gating this emitted a blank cell for every
+            // booked camera while the screen showed 1, so the export quietly
+            // disagreed with the page it was exported from.
+            value = asset.reserved != null ? `${asset.reserved}` : "";
+            break;
+          case "stockStatus":
+            // Emit the human label, not the enum key: a CSV opened in a
+            // spreadsheet is read by people, and "Running low" is the word they
+            // saw on screen. Blank for INDIVIDUAL assets and for quantity
+            // assets with no reorder point, matching the column exactly, a
+            // CSV that disagrees with the screen is worse than an empty cell.
+            value =
+              asset.stockStatus && asset.stockStatus !== "NO_THRESHOLD"
+                ? STOCK_STATUS_LABELS[asset.stockStatus]
+                : "";
             break;
           case "assetModel":
             value = asset.assetModelName ?? "";
@@ -761,7 +850,16 @@ export const buildCsvExportDataFromAssets = ({
 };
 
 /**
- * Safely formats a value for CSV export by properly escaping and quoting values
+ * Formats one value as a quoted CSV cell.
+ *
+ * The value is trimmed, a date is written as `yyyy-MM-dd`, and markdown is
+ * cleaned when asked. A value a spreadsheet would run as a formula gets a
+ * leading `'` (see `neutralizeCsvFormula`), which `parseCsv` removes on import;
+ * a plain negative number such as `-5` or `-$5.00` is left numeric.
+ *
+ * @param value - The cell value: text, number, boolean or date.
+ * @param isMarkdown - Strip markdown formatting before writing the cell.
+ * @returns The cell, wrapped in double quotes with inner quotes doubled.
  */
 export const formatValueForCsv = (value: any, isMarkdown = false): string => {
   // Handle null/undefined/empty values
@@ -794,10 +892,10 @@ export const formatValueForCsv = (value: any, isMarkdown = false): string => {
     stringValue = cleanMarkdownFormatting(stringValue);
   }
 
-  // Escape quotes by doubling them
-  stringValue = stringValue.replace(/"/g, '""');
+  // Every caller writes member-typed text, so the formula guard is applied
+  // here rather than per column.
+  stringValue = neutralizeCsvFormula(stringValue).replace(/"/g, '""');
 
-  // Always wrap in quotes
   return `"${stringValue}"`;
 };
 

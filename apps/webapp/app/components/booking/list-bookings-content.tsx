@@ -15,6 +15,8 @@
  * @see {@link file://../../routes/_layout+/bookings._index.tsx}
  */
 import type { Prisma } from "@prisma/client";
+import type { ListContextLinkState } from "~/hooks/use-list-context";
+import { LIST_DETAIL_PATH } from "~/modules/list-navigation/list-context";
 import { BADGE_COLORS } from "~/utils/badge-colors";
 import {
   canAssignModelUnits,
@@ -138,6 +140,11 @@ type ListBookingsContentProps = {
      */
     hasUnavailableAssets?: boolean;
   };
+  /**
+   * History state for the row link, so the booking page can step through
+   * this list. Only the bookings index passes it.
+   */
+  extraProps?: { linkState?: ListContextLinkState };
 };
 
 /**
@@ -154,6 +161,7 @@ type ListBookingsContentProps = {
  */
 export default function ListBookingsContent({
   item,
+  extraProps,
 }: ListBookingsContentProps) {
   return (
     <>
@@ -164,7 +172,8 @@ export default function ListBookingsContent({
             <div className="min-w-[130px]">
               <span className="word-break mb-1 block font-medium">
                 <Button
-                  to={`/bookings/${item.id}`}
+                  to={LIST_DETAIL_PATH.booking(item.id)}
+                  state={extraProps?.linkState}
                   variant="link"
                   className="text-left font-medium text-gray-900 hover:text-gray-700"
                 >
@@ -262,11 +271,13 @@ export default function ListBookingsContent({
       <Td>
         <TeamMemberBadge
           teamMember={{
+            id: item.custodianTeamMemberId,
             name: item.custodianTeamMember
               ? item.custodianTeamMember.name
               : resolveUserDisplayName(item.custodianUser),
             user: item?.custodianUser ?? null,
           }}
+          linkTo="bookings"
         />
       </Td>
 

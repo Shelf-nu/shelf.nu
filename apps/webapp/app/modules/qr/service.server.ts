@@ -605,13 +605,22 @@ export type QRCodePerImportedAsset = {
   qrId: string;
 };
 
-export async function parseQrCodesFromImportData({
+/**
+ * Validates the QR codes of an import payload without writing anything.
+ * Throws a 400 `ShelfError` (additionalData keys `duplicateCodes`,
+ * `nonExistentCodes`, `linkedCodes`, `connectedToOtherOrgs`) when a code is
+ * repeated, unknown, linked to an asset or kit, or owned by another workspace.
+ *
+ * @param args.data - Import rows; rows without `qrId` are ignored
+ * @param args.organizationId - Workspace the import targets
+ * @returns The `{ key, title, qrId }` entry of every row that carries a code
+ * @throws {ShelfError} 400 for invalid codes, otherwise a failure ShelfError
+ */
+export async function validateImportQrCodes({
   data,
-  userId,
   organizationId,
 }: {
   data: CreateAssetFromContentImportPayload[];
-  userId: User["id"];
   organizationId: Organization["id"];
 }) {
   try {
@@ -717,23 +726,6 @@ export async function parseQrCodesFromImportData({
       });
     }
 
-    /** Check for codes that dont have org id. If they dont, update them to link them to current org */
-    const unclaimedCodes = codes.filter((code) => !code.organizationId);
-    if (unclaimedCodes.length) {
-      await db.qr.updateMany({
-        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: only unclaimed codes are updated here (filtered to !code.organizationId at line 633); they have no organizationId to scope by — this assigns their first org. Codes belonging to other orgs were already rejected at lines 613-630
-        where: {
-          id: {
-            in: unclaimedCodes.map((code) => code.id),
-          },
-        },
-        data: {
-          organizationId,
-          userId,
-        },
-      });
-    }
-
     return qrCodePerAsset;
   } catch (cause) {
     const isShelfError = isLikeShelfError(cause);
@@ -742,8 +734,97 @@ export async function parseQrCodesFromImportData({
       message: isShelfError ? cause.message : "Failed to get qr codes",
       additionalData: {
         data,
-        userId,
         organizationId,
+        ...(isShelfError && cause.additionalData),
+      },
+      label,
+    });
+  }
+}
+
+/**
+ * Claims import QR codes for a workspace: sets `organizationId` and `userId`
+ * on every given code that has no workspace yet. Codes that already belong to
+ * a workspace are left untouched, so the call is idempotent and safe to retry.
+ * Callers validate the codes first with `validateImportQrCodes`.
+ *
+ * @param args.qrIds - Ids of the QR codes to claim
+ * @param args.organizationId - Workspace that receives the codes
+ * @param args.userId - User recorded as the claimer
+ * @throws {ShelfError} If the database update fails
+ */
+export async function claimImportQrCodes({
+  qrIds,
+  organizationId,
+  userId,
+}: {
+  qrIds: string[];
+  organizationId: Organization["id"];
+  userId: User["id"];
+}): Promise<void> {
+  if (!qrIds.length) {
+    return;
+  }
+
+  try {
+    await db.qr.updateMany({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: only codes with no workspace (organizationId: null) are updated; they have no organizationId to scope by, this assigns their first workspace. Codes of other workspaces never match.
+      where: {
+        id: { in: qrIds },
+        organizationId: null,
+      },
+      data: {
+        organizationId,
+        userId,
+      },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to claim qr codes",
+      additionalData: { qrIds, userId, organizationId },
+      label,
+    });
+  }
+}
+
+/**
+ * Validates the QR codes in an import payload and claims the unclaimed ones.
+ * Composition of `validateImportQrCodes` and `claimImportQrCodes`.
+ *
+ * @param args.data - Import rows; rows without `qrId` are ignored
+ * @param args.userId - User recorded as the claimer of unclaimed codes
+ * @param args.organizationId - Workspace the import targets
+ * @returns The `{ key, title, qrId }` entry of every row that carries a code
+ * @throws {ShelfError} 400 for invalid codes, otherwise a failure ShelfError
+ */
+export async function parseQrCodesFromImportData({
+  data,
+  userId,
+  organizationId,
+}: {
+  data: CreateAssetFromContentImportPayload[];
+  userId: User["id"];
+  organizationId: Organization["id"];
+}) {
+  try {
+    const qrCodePerAsset = await validateImportQrCodes({
+      data,
+      organizationId,
+    });
+    await claimImportQrCodes({
+      qrIds: qrCodePerAsset.map((asset) => asset.qrId),
+      organizationId,
+      userId,
+    });
+    return qrCodePerAsset;
+  } catch (cause) {
+    const isShelfError = isLikeShelfError(cause);
+    throw new ShelfError({
+      cause,
+      message: isShelfError ? cause.message : "Failed to get qr codes",
+      additionalData: {
+        userId,
         ...(isShelfError && cause.additionalData),
       },
       label,

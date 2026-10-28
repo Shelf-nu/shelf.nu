@@ -105,6 +105,7 @@ model User {
   contact            UserContact?
   businessIntel      UserBusinessIntel?
   auditsCreated      AuditSession[]
+  assetImports       AssetImport[]
   auditAssignments   AuditAssignment[]
   auditAssetsScanned AuditAsset[]
   auditScans         AuditScan[]
@@ -1112,6 +1113,7 @@ model Organization {
 
   auditSessions      AuditSession[]
   auditImages        AuditImage[]
+  assetImports       AssetImport[]
 
   usersWithLastSelected User[] @relation("lastSelectedOrg")
   
@@ -1307,6 +1309,8 @@ model TierLimit {
   canExportAssets      Boolean  @default(false)
   canImportNRM         Boolean  @default(false)
   canHideShelfBranding Boolean  @default(false)
+  canUseReports        Boolean  @default(false)
+  canUseRecurringReminders Boolean @default(false)
   maxCustomFields      Int      @default(0)
   maxOrganizations     Int      @default(1)
   createdAt            DateTime @default(now())
@@ -1322,6 +1326,8 @@ model CustomTierLimit {
   canExportAssets      Boolean  @default(true)
   canImportNRM         Boolean  @default(true)
   canHideShelfBranding Boolean  @default(true)
+  canUseReports        Boolean  @default(true)
+  canUseRecurringReminders Boolean @default(true)
   maxCustomFields      Int      @default(1000)
   maxOrganizations     Int      @default(1)
   isEnterprise         Boolean  @default(false) // Set this to true for enterprise users. It is used to control some visuals in the app
@@ -2291,12 +2297,34 @@ model AssetLocation {
   @@index([assetKitId])
 }
 
+// Units for reminder recurrence cadences ("every N <unit>"). Stored as
+// unit + interval (not presets) so future custom cadences need no migration.
+enum ReminderRecurrenceUnit {
+  DAY
+  WEEK
+  MONTH
+  YEAR
+}
+
 model AssetReminder {
   id                       String       @id @default(cuid())
   name                     String
   message                  String
   alertDateTime            DateTime
   activeSchedulerReference String?
+
+  // Recurrence (null unit/interval = one-shot reminder, the default). For an
+  // active recurring reminder, alertDateTime always holds the NEXT occurrence:
+  // the worker advances it in place each time the reminder fires, keeping every
+  // "upcoming" surface and the status/edit/cancel guards correct without forks.
+  recurrenceUnit     ReminderRecurrenceUnit?
+  recurrenceInterval Int?
+  // IANA zone captured from client hints at create/edit so "every month at
+  // 09:00" stays wall-clock-stable across DST. Null = UTC math (legacy rows).
+  recurrenceTimezone String?
+  // Optional series end (inclusive). Null = repeat until deleted.
+  recurrenceEndsAt DateTime?
+
   organization             Organization @relation(fields: [organizationId], references: [id])
   organizationId           String
   asset                    Asset        @relation(fields: [assetId], references: [id], onDelete: Cascade)
@@ -2539,6 +2567,72 @@ model AuditSession {
   @@index([organizationId, status])
   @@index([createdById])
   @@index([status, createdAt])
+}
+
+/// Lifecycle of a background asset import.
+enum AssetImportStatus {
+  /// Parsed and validated, waiting for the user to confirm. Never processed.
+  DRAFT
+  /// Confirmed; a job is on the queue.
+  QUEUED
+  /// A worker is processing it.
+  RUNNING
+  /// Every row imported.
+  COMPLETED
+  /// A step exhausted its retries or stalled. Can be resumed.
+  FAILED
+}
+
+/// Which step of the background import runs next (or failed).
+enum AssetImportPhase {
+  /// Claim QR codes and find-or-create categories, locations, tags, kits,
+  /// custodians, custom fields and asset models.
+  PREPARE
+  /// Create assets, one chunk per job.
+  ROWS
+  /// Assign kit custody, mark complete, send the email.
+  FINALIZE
+}
+
+/// One CSV content import. Holds the parsed rows from preview until the import
+/// completes, so the job imports exactly the file the user previewed.
+/// A partial unique index on (organizationId) WHERE status IN (QUEUED, RUNNING) allows one
+/// active import per workspace. Prisma cannot express it; it lives in migration
+/// 20261015120100_asset_import_one_active_per_workspace.
+model AssetImport {
+  id             String            @id @default(cuid())
+  status         AssetImportStatus @default(DRAFT)
+  phase          AssetImportPhase  @default(PREPARE)
+  fileName       String?
+  totalRows      Int
+  /// Rows committed so far. Advanced in the same transaction as each chunk.
+  processedRows  Int               @default(0)
+  /// Parsed rows (`StoredImportRow[]`). Cleared when the import completes.
+  rows           Json?
+  /// Name to id maps written by the PREPARE step (`ResolvedImportEntities`).
+  resolved       Json?
+  canUseBarcodes Boolean           @default(false)
+  /// User-facing reason the import failed. Null unless status is FAILED.
+  errorMessage   String?
+  /// Rows imported without a conflicting piece (`ImportWarning[]`), capped at 500.
+  warnings       Json?
+  /// Exact number of warnings, including any beyond the stored cap.
+  warningCount   Int               @default(0)
+  /// A step holds the import until this time. Null when no step is running.
+  lockedUntil    DateTime?
+  confirmedAt    DateTime?
+  startedAt      DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  createdBy      User         @relation(fields: [createdById], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  createdById    String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  organizationId String
+
+  @@index([organizationId, status])
+  @@index([createdById, organizationId, status])
 }
 
 model AuditAssignment {

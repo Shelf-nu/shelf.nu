@@ -56,6 +56,7 @@ import {
   SegmentedControl,
   type ListTab,
 } from "@/components/audit/segmented-control";
+import { CompleteAuditSheet } from "@/components/audit/complete-audit-sheet";
 import { EvidenceModal } from "@/components/audit/evidence-modal";
 import { EvidenceCoachmark } from "@/components/audit/evidence-coachmark";
 import type { ScannedItem } from "@/hooks/use-audit-init";
@@ -243,6 +244,9 @@ function AuditScannerContent() {
   // ── Evidence modal (notes + photos per scanned item) ──
 
   const [evidenceModalVisible, setEvidenceModalVisible] = useState(false);
+  const [showCompleteSheet, setShowCompleteSheet] = useState(false);
+  const isCompletingRef = useRef(false);
+  const [isCompleting, setIsCompleting] = useState(false);
   const [selectedItem, setSelectedItem] = useState<ScannedItem | null>(null);
   // Opening the sheet once proves the user found evidence capture, which
   // retires the coachmark for good.
@@ -685,7 +689,10 @@ function AuditScannerContent() {
 
           const { data: barcodeData, error: barcodeError } = await api.barcode(
             data,
-            currentOrg.id
+            currentOrg.id,
+            // why: records an AUDIT scan with no Activity note; the audit
+            // keeps its own trail (the normal scanner omits this).
+            "audit"
           );
 
           if (barcodeError || !barcodeData?.barcode?.asset) {
@@ -832,97 +839,127 @@ function AuditScannerContent() {
 
   // Performs the actual completion request + cleanup. Extracted so it can be
   // reached both from the normal confirm and the "complete anyway" path.
-  const runCompletion = useCallback(async () => {
-    if (!auditId || !currentOrg) return;
+  const runCompletion = useCallback(
+    async (completionNote?: string) => {
+      if (!auditId || !currentOrg) return;
 
-    // TOCTOU guard: handleComplete blocked on a non-empty PENDING queue, but the
-    // camera stays live while the confirm dialog is open, so a scan can have
-    // been enqueued since that gate. Completing now would mark its asset MISSING
-    // and the queue-clear below would destroy it. Re-gate on the pending queue
-    // (this is the freshly-scanned path; the failed queue is what "Complete
-    // anyway" intentionally accepts, and is unaffected here).
-    if (scanQueueRef.current.length > 0) {
-      processQueue();
-      reportAuditDurabilityEvent("completion_blocked_unsynced", {
-        auditId,
-        reason: "toctou_pending",
-        pending: scanQueueRef.current.length,
-      });
-      Alert.alert(
-        "Scan still syncing",
-        "A scan just came in and is still saving. Give it a moment, then tap Complete again."
-      );
-      return;
-    }
-
-    const timeZone = (() => {
-      try {
-        return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-      } catch {
-        return "UTC";
+      // TOCTOU guard: handleComplete blocked on a non-empty PENDING queue, but the
+      // camera stays live while the confirm dialog is open, so a scan can have
+      // been enqueued since that gate. Completing now would mark its asset MISSING
+      // and the queue-clear below would destroy it. Re-gate on the pending queue
+      // (this is the freshly-scanned path; the failed queue is what "Complete
+      // anyway" intentionally accepts, and is unaffected here).
+      if (scanQueueRef.current.length > 0) {
+        processQueue();
+        reportAuditDurabilityEvent("completion_blocked_unsynced", {
+          auditId,
+          reason: "toctou_pending",
+          pending: scanQueueRef.current.length,
+        });
+        Alert.alert(
+          "Scan still syncing",
+          "A scan just came in and is still saving. Give it a moment, then tap Complete again."
+        );
+        return;
       }
-    })();
 
-    const { error: err } = await api.completeAudit(currentOrg.id, {
-      sessionId: auditId,
-      timeZone,
-    });
+      const timeZone = (() => {
+        try {
+          return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+        } catch {
+          return "UTC";
+        }
+      })();
 
-    if (err) {
-      // Completion failed — KEEP recovery state so nothing is lost.
-      Alert.alert("Error", err);
-      return;
-    }
+      const { error: err } = await api.completeAudit(currentOrg.id, {
+        sessionId: auditId,
+        timeZone,
+        completionNote,
+      });
 
-    // Server accepted completion — only now is it safe to drop the local
-    // recovery snapshot. Clear the in-memory queues too (in place): otherwise
-    // the unmount cleanup would see a non-empty failedQueue on navigate-back and
-    // re-flush a recovery snapshot for an audit that is already completed.
-    debouncedSaverRef.current?.cancel();
-    scanQueueRef.current.length = 0;
-    failedQueueRef.current.length = 0;
-    await clearAuditScanState(auditId);
+      if (err) {
+        // Completion failed: KEEP recovery state so nothing is lost.
+        Alert.alert("Error", err);
+        return;
+      }
 
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    playScanSound();
-    Alert.alert("Audit Complete", `"${auditName}" has been completed.`, [
-      {
-        text: "OK",
-        onPress: () => {
-          router.back();
-          // Completing an audit is a clear "value delivered" moment — a good
-          // (throttled, OS-gated) time to ask a happy user for a review.
-          void maybeAskForReview();
+      // Server accepted completion. Only now is it safe to drop the local
+      // recovery snapshot. Clear the in-memory queues too (in place): otherwise
+      // the unmount cleanup would see a non-empty failedQueue on navigate-back and
+      // re-flush a recovery snapshot for an audit that is already completed.
+      debouncedSaverRef.current?.cancel();
+      scanQueueRef.current.length = 0;
+      failedQueueRef.current.length = 0;
+      await clearAuditScanState(auditId);
+
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      playScanSound();
+
+      // Leave the scanner before confirming, and never from an alert callback.
+      // The queues and the persisted snapshot are already cleared by this
+      // point, so a confirmation the user never gets to tap would strand them
+      // on a scanner with no recoverable state.
+      router.back();
+      Alert.alert("Audit Complete", `"${auditName}" has been completed.`, [
+        {
+          text: "OK",
+          // Completing an audit is a clear "value delivered" moment, a good
+          // (throttled, OS-gated) time to ask a happy user for a review. It
+          // waits for OK so it never competes with this alert, and losing it
+          // with a dropped alert costs nothing.
+          onPress: () => void maybeAskForReview(),
         },
-      },
-    ]);
-  }, [
-    auditId,
-    currentOrg,
-    auditName,
-    router,
-    debouncedSaverRef,
-    scanQueueRef,
-    failedQueueRef,
-    processQueue,
-  ]);
+      ]);
+    },
+    [
+      auditId,
+      currentOrg,
+      auditName,
+      router,
+      debouncedSaverRef,
+      scanQueueRef,
+      failedQueueRef,
+      processQueue,
+    ]
+  );
 
-  // Standard confirm: warns how many expected assets will be marked missing.
+  // Standard confirm. The sheet names the audit, states how many unscanned
+  // assets become missing, and takes the closing note: the same confirmation
+  // the detail screen shows, so a worker finishing at the scanner gets the note
+  // field too.
   const confirmAndComplete = useCallback(() => {
-    const remaining = expectedTotal - foundCount;
-    Alert.alert(
-      "Complete Audit",
-      remaining > 0
-        ? `Complete "${auditName}"?\n\n${remaining} unscanned ${
-            remaining === 1 ? "asset" : "assets"
-          } will be marked as missing.`
-        : `Complete "${auditName}"?\n\nAll expected assets have been found.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Complete", onPress: runCompletion },
-      ]
-    );
-  }, [auditName, expectedTotal, foundCount, runCompletion]);
+    setShowCompleteSheet(true);
+  }, []);
+
+  // Completion driven by the sheet: the note travels with the request. The
+  // sheet is dismissed before the request is sent, and `isCompleting` keeps it
+  // disabled if the worker reopens it while the request is still in flight.
+  // The sheet keeps its note, so a blocked or failed completion can be retried
+  // without retyping it.
+  const handleSheetConfirm = useCallback(
+    async (completionNote?: string) => {
+      // Re-entry guard: the sheet is dismissed immediately below, so it cannot
+      // confirm twice, but the ref is set synchronously and covers the gap
+      // before React applies that state.
+      if (isCompletingRef.current) return;
+      isCompletingRef.current = true;
+      setIsCompleting(true);
+
+      // Dismissed BEFORE the request. `runCompletion` reports its outcome with
+      // `Alert.alert`, and an alert presented from a modal that is then torn
+      // down can be dismissed along with it, taking the message and any
+      // action attached to it.
+      setShowCompleteSheet(false);
+
+      try {
+        await runCompletion(completionNote);
+      } finally {
+        isCompletingRef.current = false;
+        setIsCompleting(false);
+      }
+    },
+    [runCompletion]
+  );
 
   const handleComplete = useCallback(() => {
     if (!auditId || !currentOrg) return;
@@ -1461,6 +1498,16 @@ function AuditScannerContent() {
           </TouchableOpacity>
         )}
       </View>
+
+      <CompleteAuditSheet
+        key={auditId}
+        visible={showCompleteSheet}
+        auditName={auditName}
+        pendingCount={Math.max(0, expectedTotal - foundCount)}
+        isSubmitting={isCompleting}
+        onClose={() => setShowCompleteSheet(false)}
+        onConfirm={(note) => void handleSheetConfirm(note)}
+      />
 
       {/* Evidence modal for adding notes + photos to scanned items */}
       <EvidenceModal

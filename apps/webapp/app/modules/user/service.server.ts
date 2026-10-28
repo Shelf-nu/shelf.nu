@@ -82,7 +82,7 @@ import { randomUsernameFromEmail } from "~/utils/user";
 import { USER_WITH_SSO_DETAILS_SELECT } from "./fields";
 import { lockMembership } from "./membership-lock.server";
 import type { UpdateUserPayload } from "./types";
-import { defaultFields } from "../asset-index-settings/helpers";
+import { defaultColumnsForWorkspace } from "../asset-index-settings/helpers";
 import { ensureAssetIndexModeForRole } from "../asset-index-settings/service.server";
 import { defaultUserCategories } from "../category/default-categories";
 import {
@@ -1137,7 +1137,10 @@ export async function createUser(
                     assetIndexSettings: {
                       create: {
                         mode: AssetIndexMode.ADVANCED,
-                        columns: defaultFields,
+                        // A new workspace has no assets yet, so no quantity-tracked ones.
+                        columns: defaultColumnsForWorkspace({
+                          hasQuantityAssets: false,
+                        }),
                         user: {
                           connect: {
                             id: userId,

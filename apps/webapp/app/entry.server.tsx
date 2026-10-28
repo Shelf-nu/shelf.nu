@@ -9,6 +9,8 @@ import { ServerRouter } from "react-router";
 import type { AppLoadContext, EntryContext } from "react-router";
 import { registerEmailWorkers } from "./emails/email.worker.server";
 import { registerAddonTrialWorkers } from "./modules/addon-trial/worker.server";
+import { registerAssetImportWorkers } from "./modules/asset-import/worker.server";
+import { reconcileRecurringReminders } from "./modules/asset-reminder/chain.server";
 import { regierAssetWorkers } from "./modules/asset-reminder/worker.server";
 import { registerAuditWorkers } from "./modules/audit/worker.server";
 import { registerBookingWorkers } from "./modules/booking/worker.server";
@@ -67,6 +69,18 @@ schedulerService
             })
           );
         }),
+      registerAssetImportWorkers()
+        .then(() => console.log("Asset import workers registered"))
+        .catch((cause) => {
+          Logger.error(
+            new ShelfError({
+              cause,
+              message:
+                "Something went wrong while registering asset import workers.",
+              label: "Scheduler",
+            })
+          );
+        }),
       registerAddonTrialWorkers()
         .then(() => console.log("Addon trial workers registered"))
         .catch((cause) => {
@@ -80,6 +94,31 @@ schedulerService
           );
         }),
     ])
+  )
+  .then(() =>
+    /**
+     * Boot-time safety net for recurring reminders (no cron by design):
+     * re-arms series whose self-rescheduling chain died. Runs after worker
+     * registration so a re-armed overdue job can be picked up immediately.
+     */
+    reconcileRecurringReminders()
+      .then(({ scanned, rearmed }) => {
+        if (scanned > 0) {
+          Logger.info(
+            `Recurring reminders reconciled: ${rearmed}/${scanned} chains re-armed`
+          );
+        }
+      })
+      .catch((cause) => {
+        Logger.error(
+          new ShelfError({
+            cause,
+            message:
+              "Something went wrong while reconciling recurring reminders.",
+            label: "Scheduler",
+          })
+        );
+      })
   )
   .finally(() => {
     // eslint-disable-next-line no-console

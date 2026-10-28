@@ -31,6 +31,7 @@
  * @see {@link file://./availability.ts} — peak/sweep/formula primitives.
  * @see {@link file://./guards.ts} — pure availability verdicts + cause/cure copy.
  * @see {@link file://./low-stock.ts} — low-stock threshold predicates.
+ * @see {@link file://./stock-status.ts}, the derived Stock status verdict.
  * @see {@link file://./dispositions.ts} — check-in disposition arithmetic and
  *   the shared release-category predicate.
  * @see {@link file://./format.ts} — unit-count formatting.
@@ -42,6 +43,7 @@ export * from "./types";
 export * from "./availability";
 export * from "./guards";
 export * from "./low-stock";
+export * from "./stock-status";
 export * from "./dispositions";
 export * from "./format";
 export * from "./custody-source";

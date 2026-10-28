@@ -138,6 +138,10 @@ export default {
             link: "/asset-import",
           },
           {
+            text: "Import Column Mapping",
+            link: "/import-column-mapping",
+          },
+          {
             text: "Advanced Asset Index",
             link: "/advanced-index/",
           },

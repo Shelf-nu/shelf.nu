@@ -10,6 +10,7 @@ import {
 import { onTestFinished } from "vitest";
 
 import { db } from "~/database/db.server";
+import type * as AssetUtilsModule from "~/modules/asset/utils.server";
 import { ShelfError } from "~/utils/error";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import { Logger } from "~/utils/logger";
@@ -282,7 +283,10 @@ vitest.mock("~/modules/booking-note/service.server", () => ({
 }));
 
 // why: isolating kit service logic from asset utility dependencies
-vitest.mock("~/modules/asset/utils.server", () => ({
+// why: the note text is not under test; the real where-builders stay so a
+// select-all expansion runs as it does in production.
+vitest.mock("~/modules/asset/utils.server", async (importOriginal) => ({
+  ...(await importOriginal<typeof AssetUtilsModule>()),
   getKitLocationUpdateNoteContent: vitest
     .fn()
     .mockReturnValue("Mock note content"),
@@ -1191,10 +1195,12 @@ describe("bulkRemoveAssetsFromKits", () => {
 
     await bulkRemoveAssetsFromKits({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       assetIds: ["asset-1", "asset-2"],
       organizationId: "org-1",
       userId: "user-1",
       request: new Request("http://test.com"),
+      currentSearchParams: null,
       // @ts-expect-error settings shape not relevant for this test
       settings: {},
     });
@@ -1263,10 +1269,12 @@ describe("bulkRemoveAssetsFromKits", () => {
 
     await bulkRemoveAssetsFromKits({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       assetIds: ["asset-1"],
       organizationId: "org-1",
       userId: "user-1",
       request: new Request("http://test.com"),
+      currentSearchParams: null,
       // @ts-expect-error settings shape not relevant
       settings: {},
     });
@@ -6731,10 +6739,12 @@ describe("kit detach flows — helper wiring", () => {
 
     await bulkRemoveAssetsFromKits({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       assetIds: ["switch-a"],
       organizationId: "org-1",
       userId: "user-1",
       request: new Request("http://test.com"),
+      currentSearchParams: null,
       // @ts-expect-error settings shape not relevant for this test
       settings: {},
     });
@@ -6774,10 +6784,12 @@ describe("kit detach flows — helper wiring", () => {
 
     await bulkRemoveAssetsFromKits({
       lastAuditDateAccess: "hidden",
+      bookableScope: null,
       assetIds: ["battery"],
       organizationId: "org-1",
       userId: "user-1",
       request: new Request("http://test.com"),
+      currentSearchParams: null,
       // @ts-expect-error settings shape not relevant for this test
       settings: {},
     });
@@ -6788,6 +6800,32 @@ describe("kit detach flows — helper wiring", () => {
     });
     expect(db.bookingAsset.deleteMany).toHaveBeenCalledWith({
       where: { id: { in: ["ba-kit"] } },
+    });
+  });
+
+  it("bulkRemoveAssetsFromKits expands select-all with the list's submitted filters", async () => {
+    routeBookingAssetReads({});
+    const findMany = vitest.mocked(db.asset.findMany);
+    findMany.mockClear();
+    findMany.mockResolvedValue([]);
+
+    await bulkRemoveAssetsFromKits({
+      lastAuditDateAccess: "hidden",
+      bookableScope: null,
+      assetIds: [ALL_SELECTED_KEY],
+      organizationId: "org-1",
+      userId: "user-1",
+      // The action posts to its own URL, which carries no list filters.
+      request: new Request("http://test.com/api/assets/bulk-remove-from-kits"),
+      currentSearchParams: "tag=tag-1",
+      // @ts-expect-error only the mode matters for select-all resolution
+      settings: { mode: "SIMPLE" },
+    });
+
+    // The first findMany is the select-all expansion, built by the list's query.
+    expect(findMany.mock.calls[0][0]?.where).toMatchObject({
+      organizationId: "org-1",
+      AND: [{ OR: [{ tags: { some: { id: { in: ["tag-1"] } } } }] }],
     });
   });
 
@@ -8281,6 +8319,26 @@ describe("removeDestroyedUnitsFromKits", () => {
       emptiedMemberships: [],
       shrunkMemberships: [],
       detachmentImpact: [],
+    });
+  });
+});
+
+describe("getPaginatedAndFilterableKits: list order", () => {
+  beforeEach(() => {
+    vitest.mocked(db.kit.findMany).mockResolvedValue([]);
+    vitest.mocked(db.kit.count).mockResolvedValue(0);
+  });
+
+  it("sorts newest first and breaks ties by id, so pages never overlap", async () => {
+    await getPaginatedAndFilterableKits({
+      request: new Request("https://app.shelf.nu/kits?page=2"),
+      organizationId: "org-1",
+      canSeeAllCustody: true,
+      userId: "user-1",
+    });
+
+    expect(vitest.mocked(db.kit.findMany).mock.calls.at(-1)![0]).toMatchObject({
+      orderBy: [{ createdAt: "desc" }, { id: "asc" }],
     });
   });
 });

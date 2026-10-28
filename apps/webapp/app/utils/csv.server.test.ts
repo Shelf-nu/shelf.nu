@@ -39,9 +39,30 @@ vi.mock("lottie-react", () => ({
   default: () => null,
 }));
 
+const env = vi.hoisted(() => ({ URL_SHORTENER: "" as string }));
+
+// why: URL_SHORTENER is read from the process environment once at import;
+// a getter lets each test choose whether a shortener is configured.
+vi.mock("~/utils/env", async (importActual) => ({
+  ...(await importActual<Record<string, unknown>>()),
+  get URL_SHORTENER() {
+    return env.URL_SHORTENER;
+  },
+}));
+
 const parseFormDataMock = vi.mocked(parseFormData);
 
 describe("parseCsv", () => {
+  it("drops one apostrophe before a formula trigger and leaves others alone", async () => {
+    const bytes = new TextEncoder().encode(
+      ["title", "'=x", "''=x", "it's", "'note"].join("\n")
+    );
+
+    const result = await parseCsv(bytes.buffer as ArrayBuffer);
+
+    expect(result).toEqual([["title"], ["=x"], ["'=x"], ["it's"], ["'note"]]);
+  });
+
   it("parses CSV data with detected delimiters and escaped quotes", async () => {
     const csvContent =
       'name;description\n"MacBook ""Pro"" 16";"16-inch laptop"';
@@ -267,9 +288,25 @@ describe("formatValueForCsv", () => {
 
     expect(formatValueForCsv("**Bold** text", true)).toBe('"Bold text"');
   });
+
+  it("writes a formula-leading value as text, after markdown cleanup", () => {
+    expect(formatValueForCsv("=1+1")).toBe('"\'=1+1"');
+    expect(formatValueForCsv("  @SUM(A1)")).toBe('"\'@SUM(A1)"');
+    expect(formatValueForCsv("**=1+1**", true)).toBe('"\'=1+1"');
+    expect(formatValueForCsv('=A1&"x"')).toBe('"\'=A1&""x"""');
+  });
+
+  it("leaves negative numbers numeric", () => {
+    expect(formatValueForCsv(-5)).toBe('"-5"');
+    expect(formatValueForCsv("-$1,234.50")).toBe('"-$1,234.50"');
+    expect(formatValueForCsv(-0.0000001)).toBe('"-1e-7"');
+  });
 });
 
 describe("buildCsvExportDataFromAssets", () => {
+  /** The builder's argument shape, for typing partial test fixtures. */
+  type BuildArgs = Parameters<typeof buildCsvExportDataFromAssets>[0];
+
   it("builds ordered CSV rows with fixed and custom field values", () => {
     const assets = [
       {
@@ -369,6 +406,7 @@ describe("buildCsvExportDataFromAssets", () => {
         currency: "USD",
       },
       prefs: HARDCODED_DEFAULT_PREFS,
+      workspaceCustomFieldNames: [],
     });
 
     expect(headers).toEqual([
@@ -446,6 +484,7 @@ describe("buildCsvExportDataFromAssets", () => {
         currency: "USD",
       },
       prefs: HARDCODED_DEFAULT_PREFS,
+      workspaceCustomFieldNames: [],
     });
 
     // MM_DD_YYYY default prefs: July 6 from `raw`, never July 5 from `valueDate`.
@@ -487,10 +526,227 @@ describe("buildCsvExportDataFromAssets", () => {
         currency: "USD",
       },
       prefs: HARDCODED_DEFAULT_PREFS,
+      workspaceCustomFieldNames: [],
     });
 
     expect(headers).toEqual(['"Name"', '"Value"', '"Total value"']);
     expect(row).toEqual(['"Pens"', '"$1.00"', '"$100.00"']);
+  });
+
+  describe("QR URL column", () => {
+    const assets = [
+      { id: "asset-1", title: "Camera", qrId: "cm4abc123" },
+      { id: "asset-2", title: "Tripod", qrId: null },
+    ];
+
+    /** Builds the export over `columns` for a workspace with these fields. */
+    const exportWith = (
+      columns: BuildArgs["columns"],
+      workspaceCustomFieldNames: string[] = []
+    ) =>
+      buildCsvExportDataFromAssets({
+        assets: assets as unknown as BuildArgs["assets"],
+        columns,
+        currentOrganization: {
+          id: "org-1",
+          barcodesEnabled: false,
+          currency: "USD",
+        },
+        prefs: HARDCODED_DEFAULT_PREFS,
+        workspaceCustomFieldNames,
+      });
+
+    /** Builds the export with the QR ID column shown or hidden. */
+    const exportWithQrId = (qrIdVisible: boolean) =>
+      exportWith([
+        { name: "name", visible: true, position: 0 },
+        { name: "qrId", visible: qrIdVisible, position: 1 },
+        { name: "status", visible: true, position: 2 },
+      ]);
+
+    beforeEach(() => {
+      env.URL_SHORTENER = "";
+    });
+
+    it("follows the QR ID column with the shortener URL the code encodes", () => {
+      env.URL_SHORTENER = "eam.sh";
+
+      const [headers, withCode, withoutCode] = exportWithQrId(true);
+
+      expect(headers).toEqual(['"Name"', '"QR ID"', '"QR URL"', '"Status"']);
+      expect(withCode.slice(1, 3)).toEqual([
+        '"cm4abc123"',
+        '"https://eam.sh/cm4abc123"',
+      ]);
+      // An asset without a code leaves both cells empty.
+      expect(withoutCode.slice(1, 3)).toEqual(['""', '""']);
+    });
+
+    it("uses this server's /qr route when no shortener is configured", () => {
+      const [, withCode] = exportWithQrId(true);
+
+      expect(withCode[2]).toBe('"http://localhost:3000/qr/cm4abc123"');
+    });
+
+    it("is left out when the QR ID column is hidden", () => {
+      const [headers] = exportWithQrId(false);
+
+      expect(headers).toEqual(['"Name"', '"Status"']);
+    });
+
+    // The update importer resolves a "QR URL" header to a workspace custom
+    // field of that name, so the export must never emit the URL under it.
+    describe("in a workspace with a custom field named QR URL", () => {
+      it("leaves the header to the exported custom field", () => {
+        const [headers] = exportWith(
+          [
+            { name: "name", visible: true, position: 0 },
+            { name: "qrId", visible: true, position: 1 },
+            { name: "cf_QR URL", visible: true, position: 2 },
+          ] as BuildArgs["columns"],
+          ["QR URL"]
+        );
+
+        expect(headers).toEqual(['"Name"', '"QR ID"', '"QR URL"']);
+      });
+
+      it("is left out when that field is hidden", () => {
+        const [headers] = exportWith(
+          [
+            { name: "name", visible: true, position: 0 },
+            { name: "qrId", visible: true, position: 1 },
+            { name: "cf_QR URL", visible: false, position: 2 },
+          ] as BuildArgs["columns"],
+          ["QR URL"]
+        );
+
+        expect(headers).toEqual(['"Name"', '"QR ID"']);
+      });
+
+      it("is left out when the column settings do not list that field", () => {
+        const [headers] = exportWith(
+          [
+            { name: "name", visible: true, position: 0 },
+            { name: "qrId", visible: true, position: 1 },
+          ],
+          [" qr url "]
+        );
+
+        expect(headers).toEqual(['"Name"', '"QR ID"']);
+      });
+    });
+  });
+
+  describe("spreadsheet formula injection (CWE-1236)", () => {
+    const assets = [
+      {
+        id: "asset-evil",
+        title: '=HYPERLINK("http://evil.example","x")',
+        valuation: -5,
+        tags: [{ name: "+cmd" }],
+        custody: [],
+        customFields: [
+          { customField: { name: "=cf" }, value: { raw: "@SUM(A1)" } },
+          { customField: { name: "refund" }, value: { raw: -5 } },
+          {
+            customField: { name: "dde" },
+            value: { raw: "-2+3+cmd|' /C calc'!A0" },
+          },
+          { customField: { name: "quoted" }, value: { raw: "'=already" } },
+        ],
+      },
+    ];
+    const columns: BuildArgs["columns"] = [
+      { name: "name", visible: true, position: 0 },
+      { name: "valuation", visible: true, position: 1 },
+      { name: "tags", visible: true, position: 2 },
+      {
+        name: "cf_=cf",
+        visible: true,
+        position: 3,
+        cfType: CustomFieldType.TEXT,
+      },
+      {
+        name: "cf_refund",
+        visible: true,
+        position: 4,
+        cfType: CustomFieldType.AMOUNT,
+      },
+      {
+        name: "cf_dde",
+        visible: true,
+        position: 5,
+        cfType: CustomFieldType.TEXT,
+      },
+      {
+        name: "cf_quoted",
+        visible: true,
+        position: 6,
+        cfType: CustomFieldType.TEXT,
+      },
+    ];
+    const build = () =>
+      buildCsvExportDataFromAssets({
+        assets: assets as unknown as BuildArgs["assets"],
+        columns,
+        currentOrganization: {
+          id: "org-1",
+          barcodesEnabled: false,
+          currency: "USD",
+        },
+        prefs: HARDCODED_DEFAULT_PREFS,
+        workspaceCustomFieldNames: [],
+      });
+
+    it("prefixes formula-leading cells with an apostrophe and leaves negative amounts numeric", () => {
+      const [headers, row] = build();
+
+      expect(headers).toEqual([
+        '"Name"',
+        '"Value"',
+        '"Tags"',
+        '"\'=cf"',
+        '"refund"',
+        '"dde"',
+        '"quoted"',
+      ]);
+      expect(row).toEqual([
+        '"\'=HYPERLINK(""http://evil.example"",""x"")"',
+        '"-$5.00"',
+        '"\'+cmd"',
+        '"\'@SUM(A1)"',
+        '"-$5.00"',
+        "\"'-2+3+cmd|' /C calc'!A0\"",
+        "\"''=already\"",
+      ]);
+    });
+
+    it("round-trips through the importer's parser to the original values", async () => {
+      const csv = build()
+        .map((r) => r.join(","))
+        .join("\n");
+      const bytes = new TextEncoder().encode(csv);
+
+      const parsed = await parseCsv(
+        bytes.buffer.slice(
+          bytes.byteOffset,
+          bytes.byteOffset + bytes.byteLength
+        )
+      );
+
+      expect(parsed).toEqual([
+        ["Name", "Value", "Tags", "=cf", "refund", "dde", "quoted"],
+        [
+          '=HYPERLINK("http://evil.example","x")',
+          "-$5.00",
+          "+cmd",
+          "@SUM(A1)",
+          "-$5.00",
+          "-2+3+cmd|' /C calc'!A0",
+          "'=already",
+        ],
+      ]);
+    });
   });
 });
 
@@ -542,6 +798,7 @@ describe("quantity and unit of measure in the index export", () => {
       columns: buildIndexExportColumns({ settingsColumns, columnScope }),
       currentOrganization: ORG,
       prefs: HARDCODED_DEFAULT_PREFS,
+      workspaceCustomFieldNames: [],
     });
   }
 
@@ -553,7 +810,7 @@ describe("quantity and unit of measure in the index export", () => {
 
     expect(headers).toEqual([
       '"Name"',
-      '"Quantity"',
+      '"Total quantity"',
       '"Unit of measure"',
       '"Total value"',
     ]);
@@ -571,6 +828,7 @@ describe("quantity and unit of measure in the index export", () => {
       }),
       currentOrganization: ORG,
       prefs: HARDCODED_DEFAULT_PREFS,
+      workspaceCustomFieldNames: [],
     });
 
     expect(row[2]).toBe('"\'=HYPERLINK(""x"")"');
@@ -585,7 +843,7 @@ describe("quantity and unit of measure in the index export", () => {
     expect(headers).toEqual([
       '"Name"',
       '"Asset ID"',
-      '"Quantity"',
+      '"Total quantity"',
       '"Unit of measure"',
       '"Min quantity"',
       '"Total value"',
@@ -609,7 +867,7 @@ describe("quantity and unit of measure in the index export", () => {
       '"Name"',
       '"Unit of measure"',
       '"Asset ID"',
-      '"Quantity"',
+      '"Total quantity"',
       '"Total value"',
     ]);
   });
@@ -628,7 +886,14 @@ describe("quantity and unit of measure in the index export", () => {
       '"ID"',
       '"Asset ID"',
       '"QR ID"',
+      '"QR URL"',
       '"Status"',
+      '"Free now"',
+      '"Total quantity"',
+      '"Unit of measure"',
+      '"Reserved"',
+      '"Stock status"',
+      '"Min quantity"',
       '"Description"',
       '"Value"',
       '"Available to book"',
@@ -641,11 +906,8 @@ describe("quantity and unit of measure in the index export", () => {
       '"Custody"',
       '"Upcoming Reminder"',
       '"Upcoming Bookings"',
-      '"Quantity"',
-      '"Unit of measure"',
       '"Tracking method"',
       '"Asset model"',
-      '"Min quantity"',
       '"Last audit date"',
       '"Total value"',
     ]);
@@ -675,6 +937,7 @@ describe("buildCsvExportDataFromAssets last audit date", () => {
       >[0]["columns"],
       currentOrganization: organization,
       prefs: HARDCODED_DEFAULT_PREFS,
+      workspaceCustomFieldNames: [],
     });
 
   it("exports the last audit date formatted with the user's prefs", () => {
