@@ -951,7 +951,6 @@ export function describeAuditPhoto(
   let flag = null;
   if (capturedMs === null) flag = "NO_DATE";
   else if (
-    capturedMs !== null &&
     checkMs !== null &&
     checkMs - capturedMs > AUDIT_PHOTO_OLD_AFTER_MS
   ) {
