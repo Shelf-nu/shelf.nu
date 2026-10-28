@@ -290,6 +290,83 @@ describe("fetchCheckinReceiptData", () => {
       "",
     ]);
     expect(receipt.checkedInByNames).toEqual(["Grace Hopper"]);
+    // The kit member came back at a moment nothing recorded, and no completion
+    // event dates the booking's return, so the latest dated row is not it.
+    expect(receipt.returnedAt).toBeNull();
+    expect(receipt.latenessNote).toBeNull();
+    // A departure dated after the returns on the same sheet is not when the
+    // booking left.
+    expect(receipt.checkedOutAt).toBeNull();
+    expect(receipt.checkedOutByName).toBe("");
+  });
+
+  it("returns a finished booking at its completion event when some rows carry no date", async () => {
+    // One item came back in a scan session and carries a marker. The other two
+    // were reconciled by the check-in that completed the booking and carry
+    // none, but their check-in events say how.
+    mockOf(fetchAllPdfRelatedData).mockResolvedValue(
+      pdfResultWith(
+        [
+          pdfRow("ba-1", "asset-1", "Tripod"),
+          pdfRow("ba-2", "asset-2", "Monitor"),
+          pdfRow("ba-3", "asset-3", "Cable"),
+        ],
+        BookingStatus.COMPLETE
+      )
+    );
+    mockOf(db.bookingAsset.findMany).mockResolvedValue(
+      ["ba-1", "ba-2", "ba-3"].map((id, index) => ({
+        id,
+        assetId: `asset-${index + 1}`,
+        quantity: 1,
+        assetKitId: null,
+        checkedOutAt: CHECKED_OUT_AT,
+        checkedOutById: "user-1",
+        checkedOutQuantity: 1,
+        checkedInAt: id === "ba-1" ? LOGGED_AT : null,
+        checkedInById: id === "ba-1" ? "user-1" : null,
+        asset: { type: AssetType.INDIVIDUAL },
+      }))
+    );
+    mockOf(db.activityEvent.findMany).mockResolvedValue([
+      {
+        assetId: "asset-1",
+        action: "BOOKING_PARTIAL_CHECKIN",
+        occurredAt: LOGGED_AT,
+        meta: { method: "scanned", surface: "phone" },
+      },
+      ...["asset-2", "asset-3"].map((assetId) => ({
+        assetId,
+        action: "BOOKING_CHECKED_IN",
+        occurredAt: COMPLETED_AT,
+        meta: { method: "quick", surface: "web" },
+      })),
+    ]);
+    mockOf(resolveCheckInTimes).mockResolvedValue(
+      new Map([["booking-1", COMPLETED_AT]])
+    );
+    mockOf(db.user.findMany).mockResolvedValue([]);
+
+    const receipt = await run();
+
+    expect(receipt.rows.map((row) => row.state)).toEqual([
+      "RETURNED",
+      "RETURNED",
+      "RETURNED",
+    ]);
+    expect(receipt.stamp).toBe("All items returned");
+    expect(receipt.returnedAt).toEqual(COMPLETED_AT);
+    expect(receipt.latenessNote).toEqual({ text: "early", isLate: false });
+    // The departure precedes every return, so it stays on the sheet.
+    expect(receipt.checkedOutAt).toEqual(CHECKED_OUT_AT);
+    // Every returned row says how, dated or not. They disagree, so the header
+    // carries no single line.
+    expect(receipt.rows.map((row) => row.checkedInHow)).toEqual([
+      "Scanned on the phone",
+      "In one click on the web",
+      "In one click on the web",
+    ]);
+    expect(receipt.checkedInHow).toBeNull();
   });
 
   it("says how each returned row came back, from its check-in event", async () => {

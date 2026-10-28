@@ -986,11 +986,19 @@ describe("summariseCheckinMethods", () => {
   it("gives one line when every returned row came back the same way", () => {
     expect(
       summariseCheckinMethods([
-        { checkedInHow: "Scanned on the phone", checkedInAt: CHECKED_IN_AT },
-        { checkedInHow: "Scanned on the phone", checkedInAt: CHECKED_IN_AT },
+        {
+          state: "RETURNED",
+          checkedInHow: "Scanned on the phone",
+          checkedInAt: CHECKED_IN_AT,
+        },
+        {
+          state: "RETURNED",
+          checkedInHow: "Scanned on the phone",
+          checkedInAt: CHECKED_IN_AT,
+        },
         // A row that never came back has no method and does not break the
         // agreement.
-        { checkedInHow: null, checkedInAt: null },
+        { state: "STILL_OUT", checkedInHow: null, checkedInAt: null },
       ])
     ).toBe("Scanned on the phone");
   });
@@ -998,8 +1006,35 @@ describe("summariseCheckinMethods", () => {
   it("gives nothing when the returned rows disagree, so each prints its own", () => {
     expect(
       summariseCheckinMethods([
-        { checkedInHow: "Scanned on the phone", checkedInAt: CHECKED_IN_AT },
-        { checkedInHow: "Selected on the web", checkedInAt: CHECKED_IN_AT },
+        {
+          state: "RETURNED",
+          checkedInHow: "Scanned on the phone",
+          checkedInAt: CHECKED_IN_AT,
+        },
+        {
+          state: "RETURNED",
+          checkedInHow: "Selected on the web",
+          checkedInAt: CHECKED_IN_AT,
+        },
+      ])
+    ).toBeNull();
+  });
+
+  it("counts a returned row that nothing dated", () => {
+    // Its check-in recorded how, even though no marker recorded when. A header
+    // line from the dated rows alone would claim it came back their way.
+    expect(
+      summariseCheckinMethods([
+        {
+          state: "RETURNED",
+          checkedInHow: "Scanned on the phone",
+          checkedInAt: CHECKED_IN_AT,
+        },
+        {
+          state: "RETURNED",
+          checkedInHow: "In one click on the web",
+          checkedInAt: null,
+        },
       ])
     ).toBeNull();
   });
@@ -1009,8 +1044,12 @@ describe("summariseCheckinMethods", () => {
     // A header line would claim the unrecorded row came back the same way.
     expect(
       summariseCheckinMethods([
-        { checkedInHow: "Scanned on the phone", checkedInAt: CHECKED_IN_AT },
-        { checkedInHow: null, checkedInAt: CHECKED_IN_AT },
+        {
+          state: "RETURNED",
+          checkedInHow: "Scanned on the phone",
+          checkedInAt: CHECKED_IN_AT,
+        },
+        { state: "RETURNED", checkedInHow: null, checkedInAt: CHECKED_IN_AT },
       ])
     ).toBeNull();
   });
@@ -1018,7 +1057,7 @@ describe("summariseCheckinMethods", () => {
   it("gives nothing when no row recorded a method", () => {
     expect(
       summariseCheckinMethods([
-        { checkedInHow: null, checkedInAt: CHECKED_IN_AT },
+        { state: "RETURNED", checkedInHow: null, checkedInAt: CHECKED_IN_AT },
       ])
     ).toBeNull();
     expect(summariseCheckinMethods([])).toBeNull();

@@ -35,6 +35,7 @@ import type {
 import {
   buildCheckinReceipt,
   formatLatenessNote,
+  isRowCheckedIn,
   resolveSentUnits,
   summariseCheckinMethods,
 } from "./checkin-receipt";
@@ -86,15 +87,23 @@ export type CheckinReceiptDbResult = {
   /**
    * The earliest departure the slice markers still record, and who made it.
    *
-   * `BookingAsset.checkedOutAt` holds a slice's CURRENT departure — sending a
-   * returned slice out again overwrites it — so on a re-dispatched booking this
+   * `BookingAsset.checkedOutAt` holds a slice's CURRENT departure (sending a
+   * returned slice out again overwrites it), so on a re-dispatched booking this
    * is the earliest departure still on record, not the first one that ever
    * happened. The sheet labels it "Checked out" for that reason.
+   *
+   * `null` when nothing left, and when that departure is dated after a return
+   * the sheet prints: something was back before it, so it is not when the
+   * booking left.
    */
   checkedOutAt: Date | null;
   /** Who sent that first slice out; `""` when the marker records none. */
   checkedOutByName: string;
-  /** The recorded return moment; `null` when nothing recorded one. */
+  /**
+   * The recorded return moment; `null` when nothing recorded one, including
+   * when a returned row carries no moment and no completion event dates the
+   * booking's return.
+   */
   returnedAt: Date | null;
   /**
    * How the closing moment compares to the planned end — "on time", "early", or
@@ -546,31 +555,55 @@ export async function fetchCheckinReceiptData(
             .map((id) => nameByUserId.get(id) ?? "")
             .filter((name) => name !== "")
             .join(", "),
-          // Only a row the sheet dates as returned says how it came back; a
-          // row still out has no return to describe.
-          checkedInHow:
-            row.checkedInAt !== null
-              ? checkedInHowByAsset.get(row.assetId) ?? null
-              : null,
+          // Only a checked-in row says how it came back, dated or not; a row
+          // still out has no return to describe.
+          checkedInHow: isRowCheckedIn(row)
+            ? checkedInHowByAsset.get(row.assetId) ?? null
+            : null,
         },
       ];
     });
 
     // The recorded return: the status transition into COMPLETE. When no event
-    // was written, the latest moment the printed rows carry is the closest
-    // record there is. `Booking.updatedAt` is never a fallback — any later edit
-    // moves it.
+    // was written, the latest moment the printed rows carry stands in for it,
+    // but only while every returned row carries one. A returned row that
+    // nothing dated came back at a moment nothing recorded, possibly after
+    // every dated row, so the latest dated row would understate the return and
+    // the lateness measured from it. `Booking.updatedAt` is never a fallback:
+    // any later edit moves it.
     //
     // Read from the reconciled rows rather than the raw markers, so the summary
-    // can never be blank above rows that show a time. A legacy booking whose
-    // return survives only as a progressive session has no marker to find and
-    // no event either, and the rows resolve that session where the summary
-    // could not see it.
+    // can never be blank above rows that all show a time: a return recorded
+    // only by a progressive session has no marker to find, and the rows
+    // resolve it.
     const latestRowCheckIn = receipt.rows.reduce<Date | null>((latest, row) => {
       if (!row.checkedInAt) return latest;
       return !latest || row.checkedInAt > latest ? row.checkedInAt : latest;
     }, null);
-    const returnedAt = checkInTimes.get(bookingId) ?? latestRowCheckIn;
+    const isEveryReturnDated = receipt.rows.every(
+      (row) => row.state !== "RETURNED" || row.checkedInAt !== null
+    );
+    const returnedAt =
+      checkInTimes.get(bookingId) ??
+      (isEveryReturnDated ? latestRowCheckIn : null);
+
+    // The earliest return the sheet prints, on a row or as the booking's. A
+    // departure dated after it is not when the booking left, because something
+    // was already back; the sheet leaves the line out rather than print a
+    // departure after a return it records.
+    const earliestPrintedReturn = [
+      returnedAt,
+      ...receipt.rows.map((row) => row.checkedInAt),
+    ].reduce<Date | null>((earliest, at) => {
+      if (!at) return earliest;
+      return !earliest || at < earliest ? at : earliest;
+    }, null);
+    const printedDeparture =
+      earliestCheckedOutSlice &&
+      (!earliestPrintedReturn ||
+        (earliestCheckedOutSlice.checkedOutAt as Date) <= earliestPrintedReturn)
+        ? earliestCheckedOutSlice
+        : undefined;
 
     const plannedTo = resolvePlannedEnd(booking);
 
@@ -593,9 +626,9 @@ export async function fetchCheckinReceiptData(
       stamp: receipt.stamp,
       plannedFrom: resolvePlannedStart(booking),
       plannedTo,
-      checkedOutAt: earliestCheckedOutSlice?.checkedOutAt ?? null,
-      checkedOutByName: earliestCheckedOutSlice?.checkedOutById
-        ? nameByUserId.get(earliestCheckedOutSlice.checkedOutById) ?? ""
+      checkedOutAt: printedDeparture?.checkedOutAt ?? null,
+      checkedOutByName: printedDeparture?.checkedOutById
+        ? nameByUserId.get(printedDeparture.checkedOutById) ?? ""
         : "",
       returnedAt,
       latenessNote: formatLatenessNote(latenessMs),

@@ -268,26 +268,47 @@ export type CheckinReceiptRowAsset = {
   checkedInHow: string | null;
 };
 
+/** The row fields that say whether, and when, a printed row was checked in. */
+type CheckedInRowFields = {
+  state: CheckinReceiptRowState;
+  checkedInAt: Date | null;
+};
+
 /**
- * The one method line the sheet's header prints when every row the sheet
- * dates as returned recorded the same method. Rows then do not repeat it.
+ * Whether a printed row has been checked in, in whole or in part: every unit
+ * is accounted for, or a log dates the units already back.
  *
- * `null` otherwise: when the returned rows disagree, when none recorded a
- * method, and also when one returned row recorded nothing (a return made
- * before methods were recorded, or by a phone bundle that declared none). In
- * every one of those cases the rows carry their own phrase instead, so the
- * header never claims a way of returning for an item whose way was not
- * recorded. Rows that never came back have no method to agree on and are
- * ignored.
+ * The rows that may say how they came back, and so the rows the header's
+ * method line has to agree across. A returned row that nothing dated counts:
+ * its check-in can record how even when no marker recorded when.
  *
- * @param rows - The printed rows, with their recorded method phrase and
- *   whether the sheet dates them as returned
+ * @param row - The printed row's state and check-in moment
+ * @returns `true` when the row has a check-in to describe
+ */
+export function isRowCheckedIn(row: CheckedInRowFields): boolean {
+  return row.state === "RETURNED" || row.checkedInAt !== null;
+}
+
+/**
+ * The one method line the sheet's header prints when every checked-in row
+ * ({@link isRowCheckedIn}) recorded the same method. Rows then do not repeat
+ * it.
+ *
+ * `null` otherwise: when the checked-in rows disagree, when none recorded a
+ * method, and also when one of them recorded nothing (a return made before
+ * methods were recorded, or by a phone bundle that declared none). In every one
+ * of those cases the rows carry their own phrase instead, so the header never
+ * claims a way of returning for an item whose way was not recorded. Rows that
+ * never came back have no method to agree on and are ignored.
+ *
+ * @param rows - The printed rows, with their recorded method phrase, state and
+ *   check-in moment
  * @returns The shared phrase, or `null`
  */
 export function summariseCheckinMethods(
-  rows: ReadonlyArray<{ checkedInHow: string | null; checkedInAt: Date | null }>
+  rows: ReadonlyArray<CheckedInRowFields & { checkedInHow: string | null }>
 ): string | null {
-  const returned = rows.filter((row) => row.checkedInAt !== null);
+  const returned = rows.filter(isRowCheckedIn);
   if (returned.length === 0) return null;
   if (returned.some((row) => row.checkedInHow === null)) return null;
   const phrases = new Set(returned.map((row) => row.checkedInHow));
