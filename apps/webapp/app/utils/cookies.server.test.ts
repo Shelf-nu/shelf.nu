@@ -392,6 +392,121 @@ describe("the Advanced assets index reads simple-mode filter links", () => {
   });
 });
 
+describe("the Advanced assets cookie never keeps an enum value the query rejects", () => {
+  const settings = { columns: [{ name: "status" }, { name: "type" }] } as never;
+
+  it("answers the bad URL as typed but saves only the valid filters", async () => {
+    const { filters, serializedCookie } = await getAdvancedFiltersFromRequest(
+      listRequest(
+        "http://localhost/assets?status=is:ARCHIVED&type=is:INDIVIDUAL"
+      ),
+      "org-1",
+      settings
+    );
+
+    // The query still sees the bad value, so the person gets the 400 that
+    // explains it.
+    expect(new URLSearchParams(filters).get("status")).toBe("is:ARCHIVED");
+    const saved = await createAdvancedAssetFilterCookie("org-1").parse(
+      storedValue(serializedCookie as string)
+    );
+    expect(new URLSearchParams(saved)).toEqual(
+      new URLSearchParams("type=is:INDIVIDUAL")
+    );
+  });
+
+  it("forgets the saved filters when the bad value was all the URL held", async () => {
+    const remembered = storedValue(
+      await createAdvancedAssetFilterCookie("org-1").serialize(
+        "status=is:AVAILABLE"
+      )
+    );
+
+    const { serializedCookie } = await getAdvancedFiltersFromRequest(
+      listRequest("http://localhost/assets?status=ARCHIVED", [remembered]),
+      "org-1",
+      settings
+    );
+
+    expect(serializedCookie).toMatch(
+      /^org-1_advancedAssetFilter_v2=;.*Max-Age=0/
+    );
+  });
+
+  it("drops a containsAny filter when any of its values is rejected", async () => {
+    // The query rejects the whole filter, so none of it is worth remembering.
+    const { serializedCookie } = await getAdvancedFiltersFromRequest(
+      listRequest(
+        "http://localhost/assets?status=containsAny:AVAILABLE,archived&type=is:INDIVIDUAL"
+      ),
+      "org-1",
+      settings
+    );
+
+    const saved = await createAdvancedAssetFilterCookie("org-1").parse(
+      storedValue(serializedCookie as string)
+    );
+    expect(new URLSearchParams(saved)).toEqual(
+      new URLSearchParams("type=is:INDIVIDUAL")
+    );
+  });
+
+  it("keeps an enum filter whose values are all accepted", async () => {
+    const { serializedCookie } = await getAdvancedFiltersFromRequest(
+      listRequest(
+        "http://localhost/assets?status=containsAny:AVAILABLE,IN_CUSTODY&type=isNot:INDIVIDUAL"
+      ),
+      "org-1",
+      settings
+    );
+
+    const saved = await createAdvancedAssetFilterCookie("org-1").parse(
+      storedValue(serializedCookie as string)
+    );
+    expect(new URLSearchParams(saved)).toEqual(
+      new URLSearchParams(
+        "status=containsAny:AVAILABLE,IN_CUSTODY&type=isNot:INDIVIDUAL"
+      )
+    );
+  });
+
+  it("restores a cookie that already holds a rejected value without it", async () => {
+    const stuck = storedValue(
+      await createAdvancedAssetFilterCookie("org-1").serialize(
+        "status=is:ARCHIVED&type=is:INDIVIDUAL"
+      )
+    );
+
+    const { filters, redirectNeeded } = await getAdvancedFiltersFromRequest(
+      listRequest("http://localhost/assets", [stuck]),
+      "org-1",
+      settings
+    );
+
+    expect(redirectNeeded).toBe(true);
+    expect(new URLSearchParams(filters)).toEqual(
+      new URLSearchParams("type=is:INDIVIDUAL")
+    );
+  });
+
+  it("restores nothing when the rejected value was all the cookie held", async () => {
+    const stuck = storedValue(
+      await createAdvancedAssetFilterCookie("org-1").serialize(
+        "status=is:ARCHIVED"
+      )
+    );
+
+    const { filters, redirectNeeded } = await getAdvancedFiltersFromRequest(
+      listRequest("http://localhost/assets", [stuck]),
+      "org-1",
+      settings
+    );
+
+    expect(redirectNeeded).toBe(false);
+    expect(filters).toBeUndefined();
+  });
+});
+
 describe("expireListPreferenceCookies", () => {
   beforeEach(() => {
     envMock.COOKIE_DOMAIN = undefined;
