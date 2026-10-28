@@ -9,7 +9,7 @@
  * prefers the file's own EXIF and falls back to these fields. It also sends
  * `captureSource`: a photo from the app's own camera cannot be an old picture,
  * which an editable EXIF date cannot prove. The words shown under each photo
- * come from `describeAuditPhotoTime` in `@shelf/labels`.
+ * come from `describeAuditPhoto` in `@shelf/labels`.
  *
  * Pure, so it runs under Node's test runner: no React Native, Expo or
  * `@/`-aliased imports.

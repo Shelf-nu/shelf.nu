@@ -4,8 +4,8 @@
  * Same rules and words as the webapp's audit photo tile, from
  * `describeAuditPhoto` in `@shelf/labels`: a photo that is fine shows an icon
  * for how it reached Shelf (Shelf app camera, photo library, web upload) and a
- * short time; only a photo taken before the audit started ("Older than
- * audit") or with no date ("No date") gets a chip. The full sentence
+ * short date and time; only a photo taken more than a day before its asset
+ * was scanned ("Old photo") or with no date ("No date") gets a chip. The full sentence
  * (`detail`) is for screen readers.
  *
  * @see ../../../webapp/app/components/audit/audit-photo.tsx the web tile
@@ -29,6 +29,8 @@ export type AuditPhotoCaptureFields = {
   capturedAt: string | null;
   captureSource: AuditPhotoCaptureSource | null;
   createdAt: string;
+  /** When the photo's asset was scanned; null for a photo of the whole audit */
+  assetScannedAt: string | null;
 };
 
 /** The icon for each way a photo reaches Shelf. */
@@ -43,8 +45,9 @@ const SOURCE_ICONS = {
  * so a list can describe every row with one formatter from
  * {@link useDateFormatter}.
  *
- * @param image - The photo's capture fields
- * @param auditStartedAt - When its audit started; no age flag without it
+ * @param image - The photo's capture fields, with its asset's scan time
+ * @param auditStartedAt - When its audit started: what a photo of the whole
+ *   audit is checked against
  * @param formatter - `useDateFormatter()`
  * @returns What to show for the photo
  */
@@ -54,17 +57,24 @@ export function describeAuditPhotoForUser(
   { formatDate, formatDateTime }: ReturnType<typeof useDateFormatter>
 ): AuditPhotoDescription {
   return describeAuditPhoto(image, {
+    assetScannedAt: image.assetScannedAt,
     auditStartedAt,
     format: {
-      date: (value) => formatDate(value),
-      time: (value) => formatDate(value, { onlyTime: true }),
       dateTime: (value) => formatDateTime(value),
+      shortDateTime: (value, withYear) =>
+        formatDate(value, {
+          day: "numeric",
+          month: "short",
+          ...(withYear ? { year: "numeric" as const } : {}),
+          hour: "numeric",
+          minute: "2-digit",
+        }),
     },
   });
 }
 
 /**
- * Icon and short time, then a chip when the photo needs a second look.
+ * Icon and short date and time, then a chip when the photo needs a second look.
  *
  * @param props.description - From {@link describeAuditPhotoForUser}
  * @param props.width - The thumbnail's width, so the caption wraps under it
@@ -79,7 +89,7 @@ export function AuditPhotoCaption({
   const styles = useStyles();
   const { colors } = useTheme();
   const flagColors =
-    description.flag === "OLDER_THAN_AUDIT"
+    description.flag === "OLD_PHOTO"
       ? { bg: colors.warningBg, text: colors.warningText }
       : { bg: colors.backgroundSecondary, text: colors.muted };
 
