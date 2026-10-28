@@ -1,26 +1,15 @@
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import type { LoaderFunctionArgs } from "react-router";
 import { data } from "react-router";
 import { z } from "zod";
 import { AssetsList } from "~/components/assets/assets-index/assets-list";
-import { BulkDeleteAssetsSchema } from "~/components/assets/bulk-delete-dialog";
-import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
 import {
-  bulkDeleteAssets,
   getPaginatedAndFilterableAssets,
   updateAssetsWithBookingCustodians,
 } from "~/modules/asset/service.server";
-import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
-import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
-import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { payload, error, getParams, parseData } from "~/utils/http.server";
-import {
-  PermissionAction,
-  PermissionEntity,
-} from "~/utils/permissions/permission.data";
-import { requireAdmin, requirePermission } from "~/utils/roles.server";
+import { payload, error, getParams } from "~/utils/http.server";
+import { requireAdmin } from "~/utils/roles.server";
 
 export const meta = () => [{ title: appendToMetaTitle("Organization assets") }];
 
@@ -99,84 +88,6 @@ export const loader = async ({
     throw data(error(reason), { status: reason.status });
   }
 };
-
-export async function action({ context, request }: ActionFunctionArgs) {
-  const authSession = context.getSession();
-  const { userId } = authSession;
-
-  try {
-    const formData = await request.formData();
-
-    const { intent } = parseData(
-      formData,
-      z.object({ intent: z.enum(["bulk-delete"]) })
-    );
-
-    const intent2ActionMap: { [K in typeof intent]: PermissionAction } = {
-      "bulk-delete": PermissionAction.delete,
-    };
-
-    const {
-      organizationId,
-      canUseBarcodes,
-      role,
-      access,
-      currentOrganization,
-    } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.asset,
-      action: intent2ActionMap[intent],
-    });
-
-    // Fetch asset index settings to determine mode
-    const settings = await getAssetIndexSettings({
-      userId,
-      organizationId,
-      canUseBarcodes,
-      role,
-    });
-
-    switch (intent) {
-      case "bulk-delete": {
-        const { assetIds, confirmation, currentSearchParams } = parseData(
-          formData,
-          BulkDeleteAssetsSchema.and(CurrentSearchParamsSchema)
-        );
-
-        await bulkDeleteAssets({
-          assetIds,
-          organizationId,
-          userId,
-          currentSearchParams,
-          settings,
-          lastAuditDateAccess: lastAuditDateAccessFor(
-            access,
-            currentOrganization
-          ),
-          confirmation,
-        });
-
-        sendNotification({
-          title: "Assets deleted",
-          message: "Your assets has been deleted successfully",
-          icon: { name: "success", variant: "success" },
-          senderId: authSession.userId,
-        });
-
-        return payload({ success: true });
-      }
-
-      default: {
-        checkExhaustiveSwitch(intent);
-        return payload(null);
-      }
-    }
-  } catch (cause) {
-    const reason = makeShelfError(cause, { userId });
-    return data(error(reason), { status: reason.status });
-  }
-}
 
 export default function AdminOrgQrAssets() {
   return (

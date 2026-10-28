@@ -128,8 +128,13 @@ vi.mock("~/modules/activity-event/service.server", () => ({
   recordEvents: vi.fn().mockResolvedValue(undefined),
 }));
 
+// why: select-all expansion is covered by the asset list-where tests; here it
+// only has to yield a where so the org-scope assertion below is reached.
+vi.mock("~/modules/asset/list-where.server", () => ({
+  getAssetListWhereForSelectAll: vi.fn(() => Promise.resolve({})),
+}));
+
 vi.mock("~/modules/asset/utils.server", () => ({
-  getAssetsWhereInput: vi.fn(() => ({})),
   getLocationUpdateNoteContent: vi.fn(() => "asset note"),
   getKitLocationUpdateNoteContent: vi.fn(() => "kit asset note"),
 }));
