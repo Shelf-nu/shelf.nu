@@ -55,6 +55,7 @@ import {
 import * as noteService from "~/modules/note/service.server";
 import { ShelfError } from "~/utils/error";
 import { ALL_SELECTED_KEY } from "~/utils/list";
+import { Logger } from "~/utils/logger";
 import { wrapBookingStatusForNote } from "~/utils/markdoc-wrappers";
 import { scheduler } from "~/utils/scheduler.server";
 import { sendBookingUpdatedEmail } from "./email-helpers";
@@ -10241,6 +10242,85 @@ describe("extendBooking", () => {
       {},
       new Date("2025-01-01T14:00:00Z")
     );
+  });
+
+  it("logs a scheduler failure and still writes the note and sends the emails", async () => {
+    expect.assertions(3);
+    const newEndDate = new Date("2025-01-01T15:00:00Z");
+    const booking = bookingWithOneAssetOut(BookingStatus.ONGOING);
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(booking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ ...booking, to: newEndDate });
+    //@ts-expect-error missing vitest type
+    db.booking.findUnique.mockResolvedValueOnce({
+      to: newEndDate,
+      activeSchedulerReference: "reminder-job",
+    });
+    //@ts-expect-error missing vitest type
+    scheduler.sendAfter.mockRejectedValueOnce(new Error("pg-boss down"));
+    // why: keeps the expected scheduler failure out of the test output and
+    // lets the case assert that it was reported
+    const loggerError = vitest
+      .spyOn(Logger, "error")
+      .mockImplementation(() => {});
+
+    await expect(changeEndTo(newEndDate)).resolves.toBeDefined();
+
+    expect(loggerError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message:
+          "Failed to reschedule the booking jobs after an end-date change.",
+      })
+    );
+    expect(bookingNoteService.createSystemBookingNote).toHaveBeenCalledWith(
+      expect.objectContaining({ bookingId: "booking-1" })
+    );
+    loggerError.mockRestore();
+  });
+
+  it("schedules the overdue job before the immediate reminder when the new end is under an hour away", async () => {
+    expect.assertions(3);
+    const newEndDate = new Date("2025-01-01T12:30:00Z");
+    const booking = bookingWithOneAssetOut(BookingStatus.ONGOING);
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(booking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...booking,
+      to: newEndDate,
+      _count: { bookingAssets: 1 },
+    });
+    //@ts-expect-error missing vitest type
+    db.booking.findUnique.mockResolvedValueOnce({
+      to: newEndDate,
+      activeSchedulerReference: "reminder-job",
+    });
+    //@ts-expect-error missing vitest type
+    scheduler.sendAfter.mockResolvedValueOnce("overdue-job");
+    //@ts-expect-error missing vitest type
+    db.booking.updateMany.mockResolvedValueOnce({ count: 1 });
+
+    await changeEndTo(newEndDate);
+
+    expect(scheduler.sendAfter).toHaveBeenCalledWith(
+      "booking-queue",
+      {
+        id: "booking-1",
+        hints: mockClientHints,
+        eventType: "booking-overdue-handler",
+      },
+      {},
+      newEndDate
+    );
+    const lookups = vitest.mocked(getBookingNotificationRecipients).mock;
+    const reminderLookup = lookups.calls.findIndex(
+      ([args]) => args.eventType === "CHECKIN_REMINDER"
+    );
+    expect(reminderLookup).toBeGreaterThanOrEqual(0);
+    expect(
+      vitest.mocked(scheduler.sendAfter).mock.invocationCallOrder[0]
+    ).toBeLessThan(lookups.invocationCallOrder[reminderLookup]);
   });
 
   it("moves an overdue booking's end earlier and reopens it as ongoing", async () => {
@@ -21811,6 +21891,9 @@ describe("booking emails name who acted", () => {
     });
 
     expectActorLine("Extended by");
+    const [payload] = vitest.mocked(sendEmail).mock.calls[0];
+    expect(payload.subject).toBe("Booking extended (Test Booking) - shelf.nu");
+    expect(payload.text).toContain("Your booking has been extended from ");
   });
 
   it("extendBooking: Shortened by, for an earlier end", async () => {

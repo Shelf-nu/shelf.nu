@@ -12944,71 +12944,82 @@ export async function extendBooking({
         });
     });
 
-    /**
-     * In case of ONGOING, a checkin reminder should have be scheduled. So we have to reschedule it.
-     * And in case of OVERDUE all the jobs are completed, so we have to reschedule the checkin reminder.
-     */
-    // Another end-date change can commit after this one. The reminder belongs
-    // to the change whose end is stored now: it cancels the job stored now,
-    // and stores its own only if neither has moved on again meanwhile.
-    const live = await db.booking.findUnique({
-      where: { id: booking.id, organizationId },
-      select: { to: true, activeSchedulerReference: true },
-    });
-    // The reminder and the overdue job are rescheduled before the note and
-    // the emails: those can fail after the end is already stored, and a
-    // shortened booking with the old, later reminder would not turn overdue
-    // at its new end.
-    if (!live || live.to.getTime() === newEndDate.getTime()) {
-      const storedReference =
-        live?.activeSchedulerReference ?? booking.activeSchedulerReference;
-      await cancelScheduler({
-        id: booking.id,
-        activeSchedulerReference: storedReference,
+    // The stored end has moved, so the check-in reminder (ONGOING) or the
+    // finished job chain (OVERDUE) no longer matches it: cancel the stored
+    // job and schedule the next one against the new end.
+    //
+    // This runs before the note and the emails, so a failed note never leaves
+    // a shortened booking on its old, later reminder. It is best-effort: the
+    // end is already committed, so a scheduler failure is logged and the note
+    // and emails still go out instead of failing a change that has happened.
+    try {
+      // Another end-date change can commit after this one. The reminder
+      // belongs to the change whose end is stored now: it cancels the job
+      // stored now, and stores its own only if neither has moved on since.
+      const live = await db.booking.findUnique({
+        where: { id: booking.id, organizationId },
+        select: { to: true, activeSchedulerReference: true },
       });
-      const expected = {
-        to: newEndDate,
-        activeSchedulerReference: storedReference,
-      };
-
-      const { hours } = calcTimeDifference(newEndDate, new Date());
-
-      /**
-       * If there is less than 1 hours left for checkin, then we immediately send the checkin
-       * reminder and we schedule the overdue handler.
-       */
-      if (hours < 1) {
-        await scheduleNextBookingJob({
-          data: {
-            id: updatedBooking.id,
-            hints,
-            eventType: BOOKING_SCHEDULER_EVENTS_ENUM.overdueHandler,
-          },
-          when: newEndDate,
-          expected,
+      if (!live || live.to.getTime() === newEndDate.getTime()) {
+        const storedReference =
+          live?.activeSchedulerReference ?? booking.activeSchedulerReference;
+        await cancelScheduler({
+          id: booking.id,
+          activeSchedulerReference: storedReference,
         });
+        const expected = {
+          to: newEndDate,
+          activeSchedulerReference: storedReference,
+        };
 
-        await sendCheckinReminder(
-          updatedBooking,
-          updatedBooking._count.bookingAssets,
-          hints,
-          updatedBooking.organizationId
-        );
-      } else {
-        // A copy: `expected.to` must stay the stored end.
-        const when = new Date(newEndDate);
-        when.setHours(when.getHours() - 1);
+        const { hours } = calcTimeDifference(newEndDate, new Date());
 
-        await scheduleNextBookingJob({
-          data: {
-            id: updatedBooking.id,
+        // Under an hour to the new end: schedule the overdue job first, then
+        // send the reminder now, so a failed reminder email never costs the
+        // overdue flip.
+        if (hours < 1) {
+          await scheduleNextBookingJob({
+            data: {
+              id: updatedBooking.id,
+              hints,
+              eventType: BOOKING_SCHEDULER_EVENTS_ENUM.overdueHandler,
+            },
+            when: newEndDate,
+            expected,
+          });
+
+          await sendCheckinReminder(
+            updatedBooking,
+            updatedBooking._count.bookingAssets,
             hints,
-            eventType: BOOKING_SCHEDULER_EVENTS_ENUM.checkinReminder,
-          },
-          when,
-          expected,
-        });
+            updatedBooking.organizationId
+          );
+        } else {
+          // A copy: `expected.to` must stay the stored end.
+          const when = new Date(newEndDate);
+          when.setHours(when.getHours() - 1);
+
+          await scheduleNextBookingJob({
+            data: {
+              id: updatedBooking.id,
+              hints,
+              eventType: BOOKING_SCHEDULER_EVENTS_ENUM.checkinReminder,
+            },
+            when,
+            expected,
+          });
+        }
       }
+    } catch (cause) {
+      Logger.error(
+        new ShelfError({
+          cause,
+          message:
+            "Failed to reschedule the booking jobs after an end-date change.",
+          additionalData: { bookingId: booking.id, newEndDate },
+          label,
+        })
+      );
     }
 
     const user = await getUserByID(userId, {

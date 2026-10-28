@@ -284,6 +284,26 @@ describe("POST /api/mobile/bookings/extend", () => {
     expect(args.roles).toEqual([OrganizationRoles.OWNER]);
   });
 
+  it("passes an end earlier than the current end through to the service", async () => {
+    vi.mocked(db.booking.findFirst).mockResolvedValue({
+      ...ONGOING_BOOKING,
+      to: new Date("2030-06-02T06:30:00.000Z"),
+    } as never);
+    vi.mocked(extendBooking).mockResolvedValue({
+      id: "booking-1",
+      name: "Site survey",
+      status: "ONGOING",
+      to: new Date("2030-06-01T06:30:00.000Z"),
+    } as never);
+
+    const { status } = await extendToKualaLumpurAfternoon();
+
+    expect(status).toBe(200);
+    expect(vi.mocked(extendBooking).mock.calls[0][0].newEndDate).toEqual(
+      new Date("2030-06-01T06:30:00.000Z")
+    );
+  });
+
   it("names the clashing bookings in the message the phone shows", async () => {
     vi.mocked(extendBooking).mockRejectedValue(
       new ShelfError({
