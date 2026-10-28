@@ -137,6 +137,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         name: true,
         description: true,
         status: true,
+        archivedWithoutCheckin: true,
         from: true,
         to: true,
         createdAt: true,
@@ -972,6 +973,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       checkedInAssetIds,
       checkedOutAssetIds,
       bookingStatus: booking.status,
+      archivedWithoutCheckin: booking.archivedWithoutCheckin,
       countKitsAsSingleUnit: bookingSettings.countKitsAsSingleUnit ?? false,
     });
 

@@ -11,30 +11,37 @@
  * gitignored copy next to this file; see PUSH-NOTIFICATIONS.md for where that
  * copy comes from and why it is not committed.
  *
- * The field is left unset when neither exists: Expo's Android plugin copies
- * the file during prebuild and aborts when the path points nowhere, which
- * would block `expo run:android` for anyone who is not testing push. Without
- * the file the app builds and runs, and push registration is unavailable.
+ * When neither exists, `googleServicesFile` is left unset: the Android prebuild
+ * plugin throws on a path it cannot copy, so naming a missing file would fail
+ * the whole build. Without it the build succeeds and the app simply cannot
+ * register for push.
  *
  * @see {@link file://./PUSH-NOTIFICATIONS.md}
  */
-const fs = require("fs");
-const path = require("path");
+const fs = require("node:fs");
+const path = require("node:path");
 
-const LOCAL_GOOGLE_SERVICES = "./google-services.json";
+const LOCAL_GOOGLE_SERVICES_FILE = "./google-services.json";
 
-/** The Firebase file to build with, or undefined when there is none. */
-function googleServicesFile() {
+/**
+ * Picks the Firebase client config for Android: the EAS file variable, else
+ * the local gitignored copy, else none.
+ *
+ * @returns {string | undefined} Path to `google-services.json`, or undefined when there is none
+ */
+function resolveGoogleServicesFile() {
   if (process.env.GOOGLE_SERVICES_JSON) return process.env.GOOGLE_SERVICES_JSON;
-  return fs.existsSync(path.join(__dirname, LOCAL_GOOGLE_SERVICES))
-    ? LOCAL_GOOGLE_SERVICES
-    : undefined;
+  const localPath = path.join(__dirname, LOCAL_GOOGLE_SERVICES_FILE);
+  return fs.existsSync(localPath) ? LOCAL_GOOGLE_SERVICES_FILE : undefined;
 }
 
-module.exports = ({ config }) => ({
-  ...config,
-  android: {
-    ...config.android,
-    googleServicesFile: googleServicesFile(),
-  },
-});
+module.exports = ({ config }) => {
+  const googleServicesFile = resolveGoogleServicesFile();
+  return {
+    ...config,
+    android: {
+      ...config.android,
+      ...(googleServicesFile ? { googleServicesFile } : {}),
+    },
+  };
+};

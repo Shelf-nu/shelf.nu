@@ -336,6 +336,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       kitIds,
       checkoutIntentChoice,
       hints: getClientHint(request),
+      seesAllBookings: access.bookings.seeAll,
       from: basicBookingInfo.from,
       to: basicBookingInfo.to,
       requireExplicitCheckout,

@@ -62,10 +62,10 @@ target 'Shelf' do
 
     # Expo's EXConstants and EXUpdates script phases run
     # `bash -l -c "$PODS_TARGET_SRCROOT/../scripts/<name>.sh"`. The outer shell
-    # expands the variable before bash -c sees it, so a checkout path with a
-    # space (this repo lives under "Shelf Local Dev") word-splits and the
-    # phase fails with "No such file or directory". Wrap the expanded path in
-    # literal quotes so the phases run from any path.
+    # expands the variable into the command string, and bash -c then splits
+    # that string on spaces, so a checkout path containing a space fails with
+    # "No such file or directory". Wrap the expanded path in literal quotes so
+    # the phases run from any checkout path.
     installer.pods_project.targets.each do |target|
       target.shell_script_build_phases.each do |phase|
         next unless phase.shell_script.include?('bash -l -c "$PODS_TARGET_SRCROOT/')
