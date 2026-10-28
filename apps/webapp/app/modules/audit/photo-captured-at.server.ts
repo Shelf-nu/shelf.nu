@@ -19,6 +19,7 @@
  * @see {@link file://../../utils/storage.server.ts} `inspectOriginal`
  */
 import type { AuditImageCaptureSource } from "@prisma/client";
+import { isValidTimeZone } from "@shelf/datetime";
 import { fromZonedTime } from "date-fns-tz";
 import exifReader from "exif-reader";
 import { Logger } from "~/utils/logger";
@@ -214,7 +215,8 @@ export type AuditImageUploadedVia = "web" | "phone";
 
 /**
  * How the phone app says a photo was captured: `CAMERA` for its own camera,
- * `LIBRARY` for the photo library. Anything else, including no field from an
+ * `LIBRARY` for the photo library. This is what the app reports; a modified
+ * client could claim CAMERA, the official app cannot. Anything else, including no field from an
  * app version that does not send it, is unknown.
  *
  * @param formData - The parsed upload
@@ -225,4 +227,21 @@ export function captureSourceFromPhoneForm(
 ): Extract<AuditImageCaptureSource, "CAMERA" | "LIBRARY"> | null {
   const value = formData.get("captureSource");
   return value === "CAMERA" || value === "LIBRARY" ? value : null;
+}
+
+/**
+ * The IANA time zone the phone app declares its device is in, sent with each
+ * photo. An EXIF date with no offset is a wall-clock time on that device, so
+ * this is the zone to read it in, ahead of the user's stored preference (the
+ * same rule as `prefsForDeclaredZone` in `date-format.server.ts`). Android
+ * never reports `OffsetTimeOriginal`, so this decides every Android photo.
+ *
+ * @param formData - The parsed upload
+ * @returns The zone, or null when absent or not a valid IANA zone
+ */
+export function deviceTimeZoneFromPhoneForm(formData: FormData): string | null {
+  const value = formData.get("deviceTimeZone");
+  return typeof value === "string" && value && isValidTimeZone(value)
+    ? value
+    : null;
 }

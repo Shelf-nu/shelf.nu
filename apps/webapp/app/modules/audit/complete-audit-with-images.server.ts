@@ -51,6 +51,8 @@ export async function completeAuditWithImages({
           organizationId,
           uploadedById: userId,
           uploadedVia: "web",
+          // The rebuilt request has no cookies; keep the user's own hints.
+          hints: getClientHint(request),
           auditAssetId: undefined, // General audit image
           description: "Completion image",
         })

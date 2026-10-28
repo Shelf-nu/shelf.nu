@@ -772,8 +772,8 @@ export const DELETE_CONSEQUENCE_LABELS = Object.freeze({
 
 /**
  * How an audit photo reached Shelf, as `AuditImage.captureSource` stores it.
- * `CAMERA` is a photo taken with the phone app's own camera, which cannot hand
- * back an old picture; `LIBRARY` was picked from the phone's photo library;
+ * `CAMERA` is a photo the phone app reports it took with its own camera, which
+ * cannot hand back an old picture; `LIBRARY` was picked from the phone's photo library;
  * `WEB_UPLOAD` came through the web app, which cannot tell a camera shot from
  * a file. Photos from before this field, or from app versions that do not send
  * it, have none.

@@ -32,6 +32,7 @@ vi.mock("~/database/db.server", () => ({
 }));
 
 import { db } from "~/database/db.server";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { parseFileFormData, removePublicFile } from "~/utils/storage.server";
 
 import {
@@ -517,7 +518,7 @@ describe("uploadAuditImage returnParsedFormData", () => {
         auditSessionId: "audit-1",
         organizationId: "org-1",
         uploadedById: "user-1",
-        uploadedVia: "web",
+        uploadedVia,
       });
     }
 
@@ -547,6 +548,60 @@ describe("uploadAuditImage returnParsedFormData", () => {
 
       // America/New_York in October is UTC-4.
       expect(storedCapturedAt()).toEqual(new Date("2026-10-21T13:15:00Z"));
+    });
+
+    it("reads the uploader's zone with the hints of the request they sent", async () => {
+      // why: the web routes rebuild one request per file, which drops the
+      // browser's cookies, so the hints must travel separately.
+      uploadReceives(await jpeg({ DateTimeOriginal: "2026:10:21 09:15:00" }));
+      vi.mocked(db.auditImage.count).mockResolvedValue(0);
+      vi.mocked(db.auditImage.create).mockImplementation(
+        (args) => ({ id: "img-1", ...args.data }) as never
+      );
+      const hints = { locale: "nl-NL", timeZone: "Europe/Amsterdam" };
+
+      await uploadAuditImage({
+        request: new Request("https://app.test/upload", { method: "POST" }),
+        auditSessionId: "audit-1",
+        organizationId: "org-1",
+        uploadedById: "user-1",
+        uploadedVia: "web",
+        hints,
+      });
+
+      expect(resolveUserFormatPrefsById).toHaveBeenCalledWith("user-1", hints);
+    });
+
+    it("reads a phone photo's offset-less date in the zone its device declared", async () => {
+      // why: Android never reports an offset, and a phone-only user may have
+      // no saved zone; the photo was taken on the device, so its zone decides.
+      uploadReceives(await jpeg(), {
+        exifDateTimeOriginal: "2026:10:21 09:00:00",
+        deviceTimeZone: "Asia/Tokyo",
+      });
+      vi.mocked(resolveUserFormatPrefsById).mockClear();
+
+      await upload("phone");
+
+      // Tokyo is UTC+9; the mocked preference zone (New York) would give 13:00Z.
+      expect(storedCapturedAt()).toEqual(new Date("2026-10-21T00:00:00Z"));
+      expect(resolveUserFormatPrefsById).not.toHaveBeenCalled();
+    });
+
+    it("ignores a declared zone on a web upload, and an invalid one", async () => {
+      uploadReceives(await jpeg({ DateTimeOriginal: "2026:10:21 09:00:00" }), {
+        deviceTimeZone: "Asia/Tokyo",
+      });
+      await upload("web");
+      // The mocked preference zone, America/New_York (UTC-4 in October).
+      expect(storedCapturedAt()).toEqual(new Date("2026-10-21T13:00:00Z"));
+
+      vi.mocked(db.auditImage.create).mockClear();
+      uploadReceives(await jpeg({ DateTimeOriginal: "2026:10:21 09:00:00" }), {
+        deviceTimeZone: "Not/AZone",
+      });
+      await upload("phone");
+      expect(storedCapturedAt()).toEqual(new Date("2026-10-21T13:00:00Z"));
     });
 
     it("falls back to the phone app's fields when the file has no EXIF", async () => {
