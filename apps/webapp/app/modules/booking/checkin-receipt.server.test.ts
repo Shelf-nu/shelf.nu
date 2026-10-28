@@ -221,6 +221,77 @@ describe("fetchCheckinReceiptData", () => {
     expect(receipt.rows[0].title).toBe("Tripod");
   });
 
+  it("prints every item of a finished booking returned when its markers date no return after the departure", async () => {
+    // Two loose items came back in a scan session, which dates their markers.
+    // The kit member carries no check-in marker at all. Every departure carries
+    // the booking's last update, later than the session.
+    const departure = new Date("2025-10-02T14:48:20.311Z");
+    const sessionAt = new Date("2025-09-26T11:45:52.688Z");
+    mockOf(fetchAllPdfRelatedData).mockResolvedValue(
+      pdfResultWith(
+        [
+          pdfRow("ba-1", "asset-1", "Tent"),
+          pdfRow("ba-2", "asset-2", "Stove"),
+          pdfRow("ba-3", "asset-3", "Headlamp"),
+        ],
+        BookingStatus.COMPLETE
+      )
+    );
+    mockOf(db.bookingAsset.findMany).mockResolvedValue(
+      ["ba-1", "ba-2", "ba-3"].map((id, index) => {
+        const isKitMember = id === "ba-3";
+        return {
+          id,
+          assetId: `asset-${index + 1}`,
+          quantity: 1,
+          assetKitId: isKitMember ? "ak-1" : null,
+          checkedOutAt: departure,
+          checkedOutById: null,
+          checkedOutQuantity: 1,
+          checkedInAt: isKitMember ? null : sessionAt,
+          checkedInById: isKitMember ? null : "user-7",
+          asset: { type: AssetType.INDIVIDUAL },
+        };
+      })
+    );
+    mockOf(db.partialBookingCheckin.findMany).mockResolvedValue([
+      {
+        assetIds: ["asset-1", "asset-2"],
+        checkinTimestamp: sessionAt,
+        checkedInById: "user-7",
+      },
+    ]);
+    mockOf(db.user.findMany).mockResolvedValue([
+      {
+        id: "user-7",
+        displayName: "Grace Hopper",
+        firstName: null,
+        lastName: null,
+      },
+    ]);
+
+    const receipt = await run();
+
+    expect(receipt.rows.map((row) => row.state)).toEqual([
+      "RETURNED",
+      "RETURNED",
+      "RETURNED",
+    ]);
+    expect(receipt.stamp).toBe("All items returned");
+    expect(receipt.totals.stillOut).toBe(0);
+    expect(receipt.rows.map((row) => row.checkedInAt)).toEqual([
+      sessionAt,
+      sessionAt,
+      null,
+    ]);
+    expect(receipt.rows.map((row) => row.checkedInByName)).toEqual([
+      "Grace Hopper",
+      "Grace Hopper",
+      "",
+    ]);
+    expect(receipt.checkedInByNames).toEqual(["Grace Hopper"]);
+  });
+
   it("says how each returned row came back, from its check-in event", async () => {
     mockOf(fetchAllPdfRelatedData).mockResolvedValue(
       pdfResultWith(

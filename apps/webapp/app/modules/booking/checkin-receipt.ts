@@ -9,12 +9,13 @@
  * reading and the attribution and hands the result here, so every rule below is
  * unit-testable on its own.
  *
- * **The reference is the completion gate in `checkinBooking`**, which decides
- * whether a booking may close: it judges a slice by its own markers and by the
- * stored `checkedOutQuantity` counter. The booking page's progress bar answers a
- * different question — it derives "sent" from scan sessions and therefore reads
- * 0 for a booking checked out with the button. The receipt is the paper form of
- * what the gate judged, so it must not be aligned to the bar.
+ * **The reference is the check-in that closes a booking** (`checkinBooking`, and
+ * `isBookingFullyCheckedIn` behind the progressive one). It judges a slice by
+ * its own markers and by the stored `checkedOutQuantity` counter, never by scan
+ * sessions alone, and the receipt is the paper form of what it judged. Once it
+ * has closed the booking, the status is itself the record that every
+ * dispatched INDIVIDUAL item came back. Quantity units stay counted from the
+ * logs that accounted for them, because a booking can close with units pending.
  *
  * @see {@link file://./checkin-receipt.server.ts}
  * @see {@link file://./service.server.ts} — `checkinBooking`'s completion gate
@@ -70,12 +71,10 @@ export type CheckinReceiptSlice = {
    */
   checkedInById: string | null;
   /**
-   * The most recent progressive check-in session naming this slice's ASSET, for
-   * rows reconciled before the per-slice markers existed.
+   * The most recent progressive check-in session naming this slice's ASSET.
    *
-   * The completion gate accepts such a session as proof an INDIVIDUAL asset
-   * came back, so the receipt has to read it too or a legacy booking the gate
-   * closed prints as still out. Sessions are asset-grained and cannot express
+   * Read only on a finished booking, where it dates an INDIVIDUAL row whose
+   * marker records no return. Sessions are asset-grained and cannot express
    * partial units, so they answer for INDIVIDUAL slices only; a quantity slice
    * is settled by its attributed units instead.
    */
@@ -127,9 +126,10 @@ export type CheckinReceiptRowState =
  *
  * `checkedInAt` and `checkedInByIds` carry what dated this row's return, from
  * the slice marker, a progressive session, or the disposition logs naming the
- * slice. A slice that never left, or one dispatched again since its return,
- * carries nothing rather than a moment that would contradict the row it sits
- * on.
+ * slice. A slice that never left, or one on a live booking dispatched again
+ * since its return, carries nothing rather than a moment that would contradict
+ * the row it sits on. A returned row that nothing dated carries nothing too,
+ * and prints a blank rather than a substitute.
  */
 export type CheckinReceiptRow = {
   bookingAssetId: string;
@@ -377,12 +377,16 @@ export type BuildCheckinReceiptArgs = {
   /**
    * Whether the booking has finished (COMPLETE or ARCHIVED).
    *
-   * Gates the legacy-session fallback. Progressive check-out keeps a slice's
-   * ORIGINAL `checkedOutAt` and only clears the check-in pair, so on a live
-   * booking a session from an earlier trip still sorts at or after the recorded
-   * departure and would read as a return for units that are out right now. A
-   * finished booking has already passed the completion gate, which is what
-   * makes the fallback safe there and nowhere else.
+   * A booking reaches COMPLETE only through a check-in that reconciles every
+   * dispatched INDIVIDUAL slice, and ARCHIVED only from COMPLETE or from a
+   * reservation nothing left on. So on a finished booking such a slice is
+   * returned whatever its markers say, and its marker or the latest session
+   * naming it dates the return without being held to the departure (see
+   * {@link resolveCheckIn}).
+   *
+   * A QUANTITY_TRACKED slice is not settled by the status. A booking can close
+   * with units left pending and the status does not say how many, so its units
+   * are counted from the logs that accounted for them, as on a live booking.
    */
   isBookingFinished: boolean;
   /**
@@ -425,22 +429,32 @@ function distinctInOrder(ids: Array<string | null | undefined>): string[] {
  * Three records can answer, in order of how directly they speak for the slice.
  *
  * 1. The slice marker, which means fully reconciled.
- * 2. For an INDIVIDUAL slice on a finished booking, the progressive session
- *    naming its asset — what the completion gate accepts for rows reconciled
- *    before the markers existed.
+ * 2. For an INDIVIDUAL slice on a finished booking, the latest progressive
+ *    session naming its asset.
  * 3. For a QUANTITY_TRACKED slice, the RETURN logs that name it. Units
  *    returned in part never set the marker, so without this a partial return
  *    prints with no date and no name against it. Write-offs are excluded: a
  *    consumed, lost or damaged unit was not handed to anybody.
  *
- * The first two are held to the departure they claim to answer: a moment beside
- * a row this receipt calls never checked out claims a return for units that
- * never moved, and one from an earlier trip beside a row it calls still out
- * contradicts the row it sits on.
+ * Nothing dates a slice that never left: a moment beside a row this receipt
+ * calls never checked out claims a return for units that never moved.
  *
- * Tier 3 is not, deliberately. The attributed unit counts beside it span every
- * log on the slice regardless of trip, so filtering the moment by departure
- * would date a different set of units from the one the row reports.
+ * On a live booking the marker is held to the departure it claims to answer. A
+ * slice sent out again after a return is out now, and a moment from the
+ * earlier trip beside a row this receipt calls still out contradicts the row
+ * it sits on. A session is not read there at all: progressive check-out keeps
+ * the original departure, so a session answering an earlier trip still sorts
+ * after it while the units are out again.
+ *
+ * On a finished booking neither the marker nor the session is held to the
+ * departure. Every check-out clears the return marker of a slice it sends out
+ * again, and the check-in that finished the booking reconciled every slice
+ * still out, so a departure marker dated after the recorded return is not a
+ * later trip.
+ *
+ * Tier 3 is never held to the departure. The attributed unit counts beside it
+ * span every log on the slice regardless of trip, so filtering the moment by
+ * departure would date a different set of units from the one the row reports.
  */
 function resolveCheckIn(
   slice: CheckinReceiptSlice,
@@ -451,7 +465,10 @@ function resolveCheckIn(
   }
   const departedAt = slice.checkedOutAt.getTime();
 
-  if (slice.checkedInAt && slice.checkedInAt.getTime() >= departedAt) {
+  if (
+    slice.checkedInAt &&
+    (isBookingFinished || slice.checkedInAt.getTime() >= departedAt)
+  ) {
     return {
       at: slice.checkedInAt,
       byIds: distinctInOrder([slice.checkedInById]),
@@ -481,23 +498,15 @@ function resolveCheckIn(
     };
   }
 
-  // On a live booking a session cannot be trusted at all: progressive
-  // check-out leaves the original departure in place, so one answering an
-  // earlier trip still passes the test above while the units are out again.
-  if (!isBookingFinished) {
+  if (!isBookingFinished || !slice.sessionCheckedInAt) {
     return null;
   }
 
-  const sessionAt = slice.sessionCheckedInAt;
-  if (sessionAt && sessionAt.getTime() >= departedAt) {
-    return {
-      at: sessionAt,
-      byIds: distinctInOrder([slice.sessionCheckedInById]),
-      datesRecordedUnits: false,
-    };
-  }
-
-  return null;
+  return {
+    at: slice.sessionCheckedInAt,
+    byIds: distinctInOrder([slice.sessionCheckedInById]),
+    datesRecordedUnits: false,
+  };
 }
 
 /** The columns {@link resolveSentUnits} reads. */
@@ -552,9 +561,13 @@ function buildRow(
   const isReconciledHere = reconciledBy !== null;
 
   // An INDIVIDUAL slice carries no disposition units: its whole obligation is
-  // the one item, and the markers alone say whether it came back.
+  // the one item. On a finished booking every item that went out came back,
+  // whether or not anything dated the return; on a live one the markers alone
+  // say whether it did.
   const returned = isQuantityTracked
     ? dispositions.returned
+    : isBookingFinished
+    ? sent
     : isReconciledHere
     ? 1
     : 0;

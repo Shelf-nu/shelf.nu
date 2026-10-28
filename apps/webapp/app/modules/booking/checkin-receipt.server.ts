@@ -221,11 +221,8 @@ export async function fetchCheckinReceiptData(
         },
       }),
       resolveCheckInTimes([bookingId]),
-      // Progressive check-in sessions, for slices reconciled before the
-      // per-slice markers existed. The completion gate accepts a session at or
-      // after a slice's departure as proof an INDIVIDUAL asset came back, so
-      // the receipt reads them too: otherwise a booking the gate closed prints
-      // as still out.
+      // Progressive check-in sessions. On a finished booking the latest one
+      // naming an INDIVIDUAL asset dates the row its marker leaves blank.
       db.partialBookingCheckin.findMany({
         where: { bookingId, booking: { organizationId } },
         select: {
@@ -315,10 +312,8 @@ export async function fetchCheckinReceiptData(
       checkedInHowEventsByAsset.set(event.assetId, forAsset);
     }
 
-    // The most recent session naming each asset. Kept as a moment rather than a
-    // flag: a slice that departed twice has a session for the first trip whose
-    // asset id never leaves the list, and a bare set would let it reconcile the
-    // second departure too.
+    // The most recent session naming each asset, with the user who ran it: the
+    // moment and the receiver the row prints.
     const latestSessionByAsset = new Map<
       string,
       { at: Date; byId: string | null }
