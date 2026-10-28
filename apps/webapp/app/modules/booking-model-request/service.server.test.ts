@@ -3962,6 +3962,53 @@ describe("fulfilModelRequestsForAssets", () => {
     }).toEqual({ writes: 1, assetIds: ["a1", "a2", "a3"] });
   });
 
+  // Notes written after this batch (the save's "added assets" note) take the
+  // database default stamp, and the feed sorts by `createdAt` desc. A batch
+  // stamped forward from now would sort above them on a large scan.
+  it("never stamps a batched note later than now", async () => {
+    expect.assertions(2);
+    const now = new Date("2026-10-28T12:00:00.000Z");
+    // why: the stamps derive from the clock; freeze only `Date` so promises
+    // and the claim simulator still run normally.
+    vitest.useFakeTimers({ toFake: ["Date"] });
+    vitest.setSystemTime(now);
+    // @ts-expect-error mocked
+    db.bookingModelRequest.findUnique.mockResolvedValue({
+      id: "req-1",
+      bookingId: BOOKING_ID,
+      assetModelId: MODEL_ID,
+      quantity: 5,
+      fulfilledQuantity: 0,
+      fulfilledAt: null,
+      assetModel: { name: "Dell Latitude 5550" },
+    });
+
+    try {
+      await fulfilModelRequestsForAssets({
+        bookingId: BOOKING_ID,
+        assets: [asset("a1"), asset("a2"), asset("a3")],
+        organizationId: ORG_ID,
+        userId: USER_ID,
+        tx,
+      });
+    } finally {
+      vitest.useRealTimers();
+    }
+
+    const stamps = (
+      vitest.mocked(db.bookingNote.createMany).mock.calls[0][0]?.data as Array<{
+        createdAt: Date;
+      }>
+    ).map((note) => note.createdAt.getTime());
+    // The range ends at now, one millisecond apart, so scan order holds.
+    expect(stamps[stamps.length - 1]).toBe(now.getTime());
+    expect(stamps).toEqual([
+      now.getTime() - 2,
+      now.getTime() - 1,
+      now.getTime(),
+    ]);
+  });
+
   it("fulfils even when the caller threads no actor through", async () => {
     expect.assertions(2);
     // @ts-expect-error mocked

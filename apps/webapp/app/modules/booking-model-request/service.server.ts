@@ -3710,8 +3710,10 @@ export async function fulfilModelRequestsForAssets({
   if (batch.notes.length > 0) {
     // The booking feed orders notes by `createdAt`, so one shared default
     // stamp would shuffle them. Each later claim gets a later millisecond,
-    // which keeps the feed in scan order.
-    const firstStamp = Date.now();
+    // which keeps the feed in scan order, and the range ENDS at now: notes the
+    // caller writes after this batch (its "added assets" note) take the
+    // database default stamp, and must not sort below these.
+    const firstStamp = Date.now() - (batch.notes.length - 1);
     await tx.bookingNote.createMany({
       data: batch.notes.map((content, index) => ({
         type: "UPDATE",
