@@ -8323,6 +8323,26 @@ describe("removeDestroyedUnitsFromKits", () => {
   });
 });
 
+describe("getPaginatedAndFilterableKits: list order", () => {
+  beforeEach(() => {
+    vitest.mocked(db.kit.findMany).mockResolvedValue([]);
+    vitest.mocked(db.kit.count).mockResolvedValue(0);
+  });
+
+  it("sorts newest first and breaks ties by id, so pages never overlap", async () => {
+    await getPaginatedAndFilterableKits({
+      request: new Request("https://app.shelf.nu/kits?page=2"),
+      organizationId: "org-1",
+      canSeeAllCustody: true,
+      userId: "user-1",
+    });
+
+    expect(vitest.mocked(db.kit.findMany).mock.calls.at(-1)![0]).toMatchObject({
+      orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+    });
+  });
+});
+
 describe("getPaginatedAndFilterableKits: booking kit picker availability", () => {
   const BOOKING_ID = "booking-current";
   const FROM = "2026-10-08T09:00:00.000Z";
