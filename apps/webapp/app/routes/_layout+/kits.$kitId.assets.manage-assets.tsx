@@ -30,6 +30,10 @@ import { ChevronRight } from "~/components/icons/library";
 import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 import type { KitRemovalBookingImpact } from "~/components/kits/booking-removal-notice";
 import { BookingRemovalNotice } from "~/components/kits/booking-removal-notice";
+import {
+  CrossKitMoveNotice,
+  getCrossKitMoves,
+} from "~/components/kits/cross-kit-move-notice";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { SortBy } from "~/components/list/filters/sort-by";
@@ -308,6 +312,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
  */
 const REMOVAL_NOTICE_ID = "manage-kit-assets-removal-notice";
 
+/** `aria-describedby` target for the cross-kit move notice. */
+const MOVE_NOTICE_ID = "manage-kit-assets-move-notice";
+
 export default function ManageAssetsInKit() {
   const { kit, items, totalItems, bookingImpactByAssetId } =
     useLoaderData<LoaderData>();
@@ -427,6 +434,16 @@ export default function ManageAssetsInKit() {
       },
     };
   }, [bookingImpactByAssetId, selectedBulkItems]);
+
+  /**
+   * Selected INDIVIDUAL assets that sit in another kit. Confirming moves them
+   * here, out of that kit and off its bookings that are not checked out yet,
+   * so the dialog names them.
+   */
+  const crossKitMoves = useMemo(
+    () => getCrossKitMoves(selectedBulkItems, kit.id),
+    [selectedBulkItems, kit.id]
+  );
 
   const kitIsInCustody =
     kit.status === KitStatus.IN_CUSTODY || kit.status === KitStatus.CHECKED_OUT;
@@ -657,14 +674,19 @@ export default function ManageAssetsInKit() {
 
               <AlertDialogContent
                 // The dialog has no `AlertDialogDescription`, so Radix has
-                // nothing to announce beyond the heading. When the removal
-                // warning is present it IS the consequential part — point the
-                // dialog's description at it so it's read out on open.
+                // nothing to announce beyond the heading. The move and removal
+                // warnings are the consequential part, so the dialog's
+                // description points at whichever are present.
                 aria-describedby={
-                  deselectedBookingImpact.reserved.bookings.length > 0 ||
-                  deselectedBookingImpact.checkedOut.bookings.length > 0
-                    ? REMOVAL_NOTICE_ID
-                    : undefined
+                  [
+                    crossKitMoves.length > 0 ? MOVE_NOTICE_ID : null,
+                    deselectedBookingImpact.reserved.bookings.length > 0 ||
+                    deselectedBookingImpact.checkedOut.bookings.length > 0
+                      ? REMOVAL_NOTICE_ID
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" ") || undefined
                 }
               >
                 <div className="flex items-center gap-4">
@@ -712,11 +734,16 @@ export default function ManageAssetsInKit() {
                     </p>
                   ) : (
                     <p className="mb-3">
-                      <strong>Location Update Notice:</strong> Adding assets to
-                      this kit will remove their current location since this kit
-                      has no location assigned.
+                      <strong>Location Update Notice:</strong> This kit has no
+                      location, so the assets you add keep their current
+                      location.
                     </p>
                   )}
+                  <CrossKitMoveNotice
+                    id={MOVE_NOTICE_ID}
+                    className="mb-3"
+                    moves={crossKitMoves}
+                  />
                   {/* Removal notice: deselecting a row is destructive even
                       though this dialog is titled "Add Assets to kit?" — the
                       asset leaves the kit AND every reserved booking that
