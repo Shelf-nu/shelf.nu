@@ -83,6 +83,7 @@
     "date-fns": "^4.1.0",
     "date-fns-tz": "^3.2.0",
     "detectrtc": "^1.4.1",
+    "exif-reader": "^2.0.2",
     "framer-motion": "^12.38.0",
     "fuse.js": "^7.3.0",
     "hono": "^4.13.11",

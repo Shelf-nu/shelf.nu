@@ -2750,6 +2750,11 @@ model AuditImage {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   organizationId String
 
+  /// When the photo was taken, from its EXIF data (or the phone app's copy of
+  /// it). Null when the photo carried no usable date. EXIF can be edited, so
+  /// this is the best signal available, not proof.
+  capturedAt DateTime?
+
   // Datetime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

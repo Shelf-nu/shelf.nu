@@ -176,6 +176,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         id: true,
         imageUrl: true,
         thumbnailUrl: true,
+        capturedAt: true,
       },
       orderBy: {
         createdAt: "desc",

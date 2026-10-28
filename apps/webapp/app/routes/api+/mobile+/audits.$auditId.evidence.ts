@@ -179,6 +179,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           imageUrl: true,
           thumbnailUrl: true,
           description: true,
+          capturedAt: true,
           createdAt: true,
           auditAssetId: true,
           uploadedBy: {
@@ -217,6 +218,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       // gap where a photo plainly exists.
       thumbnailUrl: i.thumbnailUrl ?? i.imageUrl,
       description: i.description,
+      // When the photo was taken (from its EXIF); null when unknown.
+      capturedAt: i.capturedAt?.toISOString() ?? null,
       createdAt: i.createdAt.toISOString(),
       authorName: actorName(i.uploadedBy),
       authorImage: i.uploadedBy?.profilePicture ?? null,

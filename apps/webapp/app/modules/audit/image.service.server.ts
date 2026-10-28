@@ -8,10 +8,12 @@ import type {
 } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import { getClientHint } from "~/utils/client-hints";
 import {
   DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
   PUBLIC_BUCKET,
 } from "~/utils/constants";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import {
@@ -19,6 +21,12 @@ import {
   parseFileFormData,
   removePublicFile,
 } from "~/utils/storage.server";
+import type { ExifCaptureTags } from "./photo-captured-at.server";
+import {
+  captureTagsFromFormData,
+  readExifCaptureTags,
+  resolveCapturedAt,
+} from "./photo-captured-at.server";
 
 const label: ErrorLabel = "Audit Image";
 
@@ -31,6 +39,11 @@ const MAX_GENERAL_IMAGES_PER_AUDIT = 5;
 /**
  * Uploads an image for an audit session.
  * Can be either a general audit image or tied to a specific asset.
+ *
+ * The photo is stored as uploaded (resized, never drawn on). The time it was
+ * taken is saved as `capturedAt`: from the file's EXIF, else from the
+ * `exifDateTimeOriginal` / `exifOffsetTimeOriginal` fields the phone app sends,
+ * else null. See `photo-captured-at.server.ts`.
  *
  * @param request - The request containing the image file
  * @param auditSessionId - ID of the audit session
@@ -91,6 +104,9 @@ export async function uploadAuditImage({
       organizationId,
     });
 
+    // Read from the original bytes: the stored copy is re-encoded without EXIF.
+    let fileTags: ExifCaptureTags | null = null;
+
     // Parse and upload the file to Supabase storage
     const fileData = await parseFileFormData({
       request,
@@ -107,6 +123,9 @@ export async function uploadAuditImage({
       generateThumbnail: true,
       thumbnailSize: 108,
       maxFileSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
+      inspectOriginal: async (original) => {
+        fileTags = await readExifCaptureTags(original);
+      },
     });
 
     const image = fileData.get("image") as string | null;
@@ -150,9 +169,19 @@ export async function uploadAuditImage({
       thumbnailPublicUrl = publicUrl;
     }
 
+    const capturedAt = await resolveCapturedAt({
+      fileTags,
+      formTags: captureTagsFromFormData(fileData),
+      // An EXIF date with no offset is a wall-clock time in the uploader's zone.
+      getTimeZone: async () =>
+        (await resolveUserFormatPrefsById(uploadedById, getClientHint(request)))
+          .timeZone,
+    });
+
     // Create the database record
     const auditImage = await db.auditImage.create({
       data: {
+        capturedAt,
         imageUrl: imagePublicUrl,
         thumbnailUrl: thumbnailPublicUrl ?? null,
         description: description ?? null,

@@ -114,6 +114,7 @@ const IMAGE_GENERAL = {
   imageUrl: "https://x/full-rack.jpg",
   thumbnailUrl: "https://x/thumb-rack.jpg",
   description: "Rack before the sweep",
+  capturedAt: new Date("2026-08-19T12:40:00.000Z"),
   createdAt: new Date("2026-08-19T12:42:00.000Z"),
   auditAssetId: null,
   uploadedBy: { firstName: "John", lastName: "Doe", profilePicture: null },
@@ -126,6 +127,7 @@ const IMAGE_ASSET = {
   // than send null into a thumbnail grid.
   thumbnailUrl: null,
   description: null,
+  capturedAt: null,
   createdAt: new Date("2026-08-19T12:34:00.000Z"),
   auditAssetId: "aa-1",
   uploadedBy: null,
@@ -227,6 +229,36 @@ describe("GET /api/mobile/audits/:auditId/evidence", () => {
 
       expect(json.general.notes[0].authorName).toBe("John Doe");
       expect(json.general.notes[0].createdAt).toBe("2026-08-19T12:42:00.000Z");
+    });
+  });
+
+  describe("when each photo was taken", () => {
+    it("sends the capture time as an ISO string, and null when unknown", async () => {
+      // why: the app shows "Time taken unknown" for null, so a missing time
+      // must arrive as null and never be dropped or replaced by the upload time.
+      mockDb.auditImage.findMany.mockResolvedValue([
+        IMAGE_GENERAL,
+        IMAGE_ASSET,
+      ]);
+
+      const json = await body(
+        await loader(createLoaderArgs({ request: request(), ...ARGS }))
+      );
+
+      expect(json.general.images[0].capturedAt).toBe(
+        "2026-08-19T12:40:00.000Z"
+      );
+      expect(json.byAuditAsset["aa-1"].images[0].capturedAt).toBeNull();
+    });
+
+    it("asks the database for the capture time", async () => {
+      await loader(createLoaderArgs({ request: request(), ...ARGS }));
+
+      expect(mockDb.auditImage.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          select: expect.objectContaining({ capturedAt: true }),
+        })
+      );
     });
   });
 
