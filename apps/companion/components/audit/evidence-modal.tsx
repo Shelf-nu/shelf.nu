@@ -106,7 +106,7 @@ type EvidenceModalProps = {
   onClose: () => void;
   item: ScannedItem | null;
   auditSessionId: string;
-  /** When the audit started; photos taken before it are flagged */
+  /** When the audit started: what a photo of the whole audit is checked against */
   auditStartedAt?: string | null;
   /** Callback when evidence is added, to update counts */
   onEvidenceAdded: (assetId: string, type: "note" | "image") => void;
@@ -251,6 +251,7 @@ export function EvidenceModal({
   const resetState = useCallback(() => {
     setNoteText("");
     setSelectedImageUri(null);
+    setImageCapture(null);
     setIsSubmittingNote(false);
     setIsSubmittingImage(false);
   }, []);

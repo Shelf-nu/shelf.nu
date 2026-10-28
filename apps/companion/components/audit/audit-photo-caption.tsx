@@ -38,6 +38,7 @@ const SOURCE_ICONS = {
   CAMERA: "camera-outline",
   LIBRARY: "images-outline",
   WEB_UPLOAD: "globe-outline",
+  PHONE: "phone-portrait-outline",
 } as const;
 
 /**
@@ -61,14 +62,7 @@ export function describeAuditPhotoForUser(
     auditStartedAt,
     format: {
       dateTime: (value) => formatDateTime(value),
-      shortDateTime: (value, withYear) =>
-        formatDate(value, {
-          day: "numeric",
-          month: "short",
-          ...(withYear ? { year: "numeric" as const } : {}),
-          hour: "numeric",
-          minute: "2-digit",
-        }),
+      custom: (value, options) => formatDate(value, options),
     },
   });
 }

@@ -44,7 +44,7 @@ type EvidenceViewerProps = {
   title: string;
   notes: AuditEvidenceNote[];
   images: AuditEvidenceImage[];
-  /** When the audit started; photos taken before it are flagged */
+  /** When the audit started: what a photo of the whole audit is checked against */
   auditStartedAt?: string | null;
   isLoading?: boolean;
   error?: string | null;

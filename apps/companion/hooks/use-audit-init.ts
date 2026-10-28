@@ -106,7 +106,7 @@ export function useAuditInit({
   scanQueueRef,
 }: UseAuditInitParams): AuditInitResult {
   const [auditName, setAuditName] = useState("");
-  // Audit photos taken before this are flagged "Older than audit".
+  // What a photo of the whole audit is checked against.
   const [auditStartedAt, setAuditStartedAt] = useState<string | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
   const [initError, setInitError] = useState<string | null>(null);

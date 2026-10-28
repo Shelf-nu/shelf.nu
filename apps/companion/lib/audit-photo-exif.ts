@@ -39,8 +39,9 @@ function text(value: unknown): string | null {
 /**
  * Picks the capture tags out of an image picker result's `exif`.
  *
- * Android returns the tags flat (`exif.DateTimeOriginal`). iOS nests them by
- * dictionary (`exif["{Exif}"].DateTimeOriginal`). Both are read.
+ * The picker returns the tags flat (`exif.DateTimeOriginal`) on both platforms.
+ * The nested iOS shape (`exif["{Exif}"].DateTimeOriginal`) that older picker
+ * versions returned is read too.
  *
  * @param exif - `ImagePickerAsset.exif`
  * @returns The tags, or null when the photo carries no capture date

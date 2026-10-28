@@ -1681,7 +1681,7 @@ export type AuditEvidenceImage = {
   /** When the photo was taken (from its EXIF), ISO; null when unknown. */
   capturedAt: string | null;
   /** How the photo reached Shelf; null when unknown. */
-  captureSource: "CAMERA" | "LIBRARY" | "WEB_UPLOAD" | null;
+  captureSource: "CAMERA" | "LIBRARY" | "WEB_UPLOAD" | "PHONE" | null;
   /** When the photo's asset was scanned (ISO); null for a whole-audit photo. */
   assetScannedAt: string | null;
   createdAt: string;
