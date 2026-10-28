@@ -432,6 +432,27 @@ describe("calculateBookingLifecycleProgress (unit mode)", () => {
     expect(p.bookedCount).toBe(0);
     expect(p.checkedOutCount).toBe(0);
   });
+
+  it("COMPLETE: a kit whose dispatched members carry no return marker is Returned", () => {
+    // Neither member is in `checkedInAssetIds` and neither slice is stamped
+    // in: the finished status is the record that both came back.
+    const member = (id: string) => ({
+      ...A(id, AssetStatus.AVAILABLE, "K"),
+      sliceCheckedOut: true,
+      sliceCheckedIn: false,
+    });
+    const p = calculateBookingLifecycleProgress({
+      bookingAssets: [member("k1"), member("k2")],
+      checkedInAssetIds: [],
+      checkedOutAssetIds: ["k1", "k2"],
+      bookingStatus: BookingStatus.COMPLETE,
+      countKitsAsSingleUnit: true,
+    });
+    expect(p.totalUnits).toBe(1);
+    expect(p.returnedCount).toBe(1);
+    expect(p.checkedOutCount).toBe(0);
+    expect(p.bookedCount).toBe(0);
+  });
 });
 
 /**
