@@ -19,6 +19,7 @@ import {
   USER_ID,
   USER_PASSWORD,
 } from "@mocks/user";
+import { config } from "~/config/shelf.config";
 import { db, type ExtendedPrismaClient } from "~/database/db.server";
 import { captureServerEvent } from "~/integrations/posthog/client.server";
 
@@ -33,6 +34,7 @@ import {
 } from "./service.server";
 import { defaultColumnsForWorkspace } from "../asset-index-settings/helpers";
 import { ensureAssetIndexModeForRole } from "../asset-index-settings/service.server";
+import { builtInPdfDocumentsCreate } from "../pdf-document/service.server";
 
 // @vitest-environment node
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
@@ -286,6 +288,9 @@ describe(createUserAccountForTesting.name, () => {
                   user: { connect: { id: USER_ID } },
                 },
               },
+              pdfDocuments: builtInPdfDocumentsCreate({
+                canCustomize: !config.enablePremiumFeatures,
+              }),
               assetIndexSettings: {
                 create: {
                   mode: AssetIndexMode.ADVANCED,

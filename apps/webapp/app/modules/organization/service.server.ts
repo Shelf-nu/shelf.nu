@@ -7,6 +7,7 @@ import {
 import type { Organization, Prisma, TierId, User } from "@prisma/client";
 import type Stripe from "stripe";
 
+import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
@@ -35,7 +36,8 @@ import { newOwnerEmailText, previousOwnerEmailText } from "./email";
 import { recordEvent } from "../activity-event/service.server";
 import { defaultColumnsForWorkspace } from "../asset-index-settings/helpers";
 import { defaultUserCategories } from "../category/default-categories";
-import { updateUserTierId } from "../tier/service.server";
+import { builtInPdfDocumentsCreate } from "../pdf-document/service.server";
+import { getUserTierLimit, updateUserTierId } from "../tier/service.server";
 import { USER_NAME_SELECT } from "../user/fields";
 import { lockMembership } from "../user/membership-lock.server";
 import { getDefaultWeeklySchedule } from "../working-hours/service.server";
@@ -266,6 +268,14 @@ export async function createOrganization({
           bufferStartTime: 0,
         },
       },
+
+      pdfDocuments: builtInPdfDocumentsCreate({
+        // The rule of `canCustomizePdfDocuments` (~/utils/subscription.server),
+        // inlined: importing that module here closes an import cycle.
+        canCustomize:
+          !config.enablePremiumFeatures ||
+          (await getUserTierLimit(userId)).canCustomizePdfDocuments,
+      }),
     } satisfies Prisma.OrganizationCreateInput;
 
     const org = await db.organization.create({ data });

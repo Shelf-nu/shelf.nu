@@ -132,7 +132,13 @@ vi.mock("~/utils/stripe.server", () => ({
 
 // why: tier writes are a subscription-transfer side effect, and these tests run
 // with premiumIsEnabled false to assert only the authorization branch
-vi.mock("../tier/service.server", () => ({ updateUserTierId: vi.fn() }));
+vi.mock("../tier/service.server", () => ({
+  updateUserTierId: vi.fn(),
+  // why: createOrganization reads the owner's tier to seed its PDF documents.
+  getUserTierLimit: vi
+    .fn()
+    .mockResolvedValue({ canCustomizePdfDocuments: false }),
+}));
 
 const currentOrganization = {
   id: ORG_ID,

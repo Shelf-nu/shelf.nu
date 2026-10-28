@@ -58,6 +58,23 @@ export const canHideShelfBranding = (
   return tierLimit.canHideShelfBranding;
 };
 
+/**
+ * Whether the workspace's tier lets it keep PDF documents: saved layouts for
+ * a booking's PDF, picked when the PDF is generated. Without it the booking
+ * PDF prints the Checklist layout, and nothing about it can be chosen.
+ *
+ * @param tierLimit - The tier limits of the workspace's owner (from
+ *   getOrganizationTierLimit).
+ * @returns `true` when the tier includes it or premium features are disabled.
+ */
+export const canCustomizePdfDocuments = (
+  tierLimit: { canCustomizePdfDocuments: boolean } | null | undefined
+) => {
+  if (!premiumIsEnabled) return true;
+  if (!tierLimit) return false;
+  return tierLimit.canCustomizePdfDocuments;
+};
+
 export async function assertUserCanExportAssets({
   organizationId,
   organizations,
