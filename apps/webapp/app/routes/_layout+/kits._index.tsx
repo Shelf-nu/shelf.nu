@@ -322,8 +322,8 @@ export const handle = {
 };
 
 export default function KitsIndexPage() {
-  const { items } = useLoaderData<typeof loader>();
-  const linkState = useListContextLinkState("kit");
+  const { items, perPage } = useLoaderData<typeof loader>();
+  const linkState = useListContextLinkState("kit", perPage);
   const listItemProps = useMemo(() => ({ linkState }), [linkState]);
   const roles = useOrganizationRoles();
   /**

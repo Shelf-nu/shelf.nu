@@ -15,6 +15,7 @@ import {
   LIST_DETAIL_PATH,
   readListContext,
   withPage,
+  withPerPage,
 } from "~/modules/list-navigation/list-context";
 
 /** History state a list row link carries to its detail page. */
@@ -25,13 +26,20 @@ export type ListContextLinkState = { listContext: ListContext };
  * through this list. Pass it as `state` on the row's `Link` or `Button`.
  *
  * @param entity - Which list the row belongs to
+ * @param perPage - The page size the list's loader resolved. It is pinned in
+ *   the context, because the page size cookie is shared by every list and may
+ *   change before the detail page looks up its neighbours.
  * @returns History state naming the list and its current search string
  */
 export function useListContextLinkState(
-  entity: ListEntity
+  entity: ListEntity,
+  perPage: number | undefined
 ): ListContextLinkState {
   const { search } = useLocation();
-  return useMemo(() => ({ listContext: { entity, search } }), [entity, search]);
+  return useMemo(
+    () => ({ listContext: { entity, search: withPerPage(search, perPage) } }),
+    [entity, search, perPage]
+  );
 }
 
 /** What the neighbours endpoint answers: the neighbours, or an error payload. */

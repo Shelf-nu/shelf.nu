@@ -130,6 +130,7 @@ export const AssetsList = ({
     totalModels,
     totalAssetModels,
     locale,
+    perPage,
   } = useLoaderData<AssetIndexLoaderData>();
   // We use the hook because it handles optimistic UI
   const {
@@ -141,7 +142,7 @@ export const AssetsList = ({
   const columns = useAssetIndexColumns();
   // Memoize so the object reference stays stable across re-renders,
   // allowing React.memo on AdvancedAssetRow to work effectively.
-  const listContextLinkState = useListContextLinkState("asset");
+  const listContextLinkState = useListContextLinkState("asset", perPage);
   const linkState = withListContext ? listContextLinkState : undefined;
   const advancedExtraProps = useMemo(
     () => ({ columns, linkState }),

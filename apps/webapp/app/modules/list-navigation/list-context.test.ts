@@ -4,6 +4,7 @@ import {
   readListContext,
   readPage,
   withPage,
+  withPerPage,
 } from "./list-context";
 
 describe("readPage", () => {
@@ -34,6 +35,26 @@ describe("withPage", () => {
 
   it("keeps repeated params", () => {
     expect(withPage("?status=a&status=b", 1)).toBe("?status=a&status=b&page=1");
+  });
+});
+
+describe("withPerPage", () => {
+  it("pins the page size the list showed when the search has none", () => {
+    expect(withPerPage("?s=drill&page=2", 50)).toBe(
+      "?s=drill&page=2&per_page=50"
+    );
+    expect(withPerPage("", 20)).toBe("?per_page=20");
+  });
+
+  it("keeps a page size the search already names", () => {
+    expect(withPerPage("?per_page=100&page=3", 20)).toBe(
+      "?per_page=100&page=3"
+    );
+  });
+
+  it("leaves the search alone when the page size is unknown", () => {
+    expect(withPerPage("?s=drill", undefined)).toBe("?s=drill");
+    expect(withPerPage("", undefined)).toBe("");
   });
 });
 
