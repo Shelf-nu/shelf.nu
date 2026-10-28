@@ -32,7 +32,10 @@ import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { CONTENT_MAX_WIDTH } from "@/lib/content-column";
 import { useDateFormatter } from "@/lib/use-date-formatter";
 import type { AuditEvidenceImage, AuditEvidenceNote } from "@/lib/api/types";
-import { describeAuditPhotoTime } from "@shelf/labels";
+import {
+  AuditPhotoCaption,
+  describeAuditPhotoForUser,
+} from "@/components/audit/audit-photo-caption";
 
 type EvidenceViewerProps = {
   visible: boolean;
@@ -41,6 +44,8 @@ type EvidenceViewerProps = {
   title: string;
   notes: AuditEvidenceNote[];
   images: AuditEvidenceImage[];
+  /** When the audit started; photos taken before it are flagged */
+  auditStartedAt?: string | null;
   isLoading?: boolean;
   error?: string | null;
   /** Opens one photo full-screen. Omitted when there is nothing to open into. */
@@ -62,6 +67,7 @@ export function EvidenceViewer({
   title,
   notes,
   images,
+  auditStartedAt = null,
   isLoading = false,
   error = null,
   onImagePress,
@@ -72,7 +78,8 @@ export function EvidenceViewer({
   // why: the workspace's own date format — the same hook every other audit
   // surface uses, so a completed audit does not suddenly render dates
   // differently from the screen that opened it.
-  const { formatDateTime } = useDateFormatter();
+  const formatter = useDateFormatter();
+  const { formatDateTime } = formatter;
 
   const renderNote = useCallback(
     (note: AuditEvidenceNote) => (
@@ -86,13 +93,6 @@ export function EvidenceViewer({
       </View>
     ),
     [styles, formatDateTime]
-  );
-
-  /** How the photo arrived, then when it was taken (shared wording). */
-  const takenLines = useCallback(
-    (image: AuditEvidenceImage) =>
-      describeAuditPhotoTime(image, formatDateTime),
-    [formatDateTime]
   );
 
   const isEmpty =
@@ -159,7 +159,11 @@ export function EvidenceViewer({
                   </Text>
                   <View style={styles.grid}>
                     {images.map((image) => {
-                      const taken = takenLines(image);
+                      const photo = describeAuditPhotoForUser(
+                        image,
+                        auditStartedAt,
+                        formatter
+                      );
                       return (
                         <TouchableOpacity
                           key={image.id}
@@ -172,21 +176,16 @@ export function EvidenceViewer({
                             image.description
                               ? `Photo: ${image.description}`
                               : `Photo by ${image.authorName ?? "Unknown"}`
-                          }. ${[taken.source, taken.time]
-                            .filter(Boolean)
-                            .join(". ")}`}
+                          }. ${photo.detail}${
+                            photo.flagLabel ? `. ${photo.flagLabel}` : ""
+                          }`}
                         >
                           <Image
                             source={{ uri: image.thumbnailUrl }}
                             style={styles.thumb}
                             contentFit="cover"
                           />
-                          {/* A photo with no capture time is shown as unknown
-                            on purpose: it is the one a reviewer must notice. */}
-                          {taken.source ? (
-                            <Text style={styles.takenAt}>{taken.source}</Text>
-                          ) : null}
-                          <Text style={styles.takenAt}>{taken.time}</Text>
+                          <AuditPhotoCaption description={photo} width={104} />
                           {image.description ? (
                             <Text style={styles.caption} numberOfLines={2}>
                               {image.description}
@@ -303,12 +302,6 @@ const useStyles = createStyles((colors) => ({
   caption: {
     width: 104,
     marginTop: 4,
-    fontSize: fontSize.xs,
-    color: colors.muted,
-  },
-  takenAt: {
-    width: 104,
-    marginTop: 2,
     fontSize: fontSize.xs,
     color: colors.muted,
   },

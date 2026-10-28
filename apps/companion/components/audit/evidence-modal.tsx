@@ -26,7 +26,10 @@ import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { api } from "@/lib/api";
-import { describeAuditPhotoTime } from "@shelf/labels";
+import {
+  AuditPhotoCaption,
+  describeAuditPhotoForUser,
+} from "@/components/audit/audit-photo-caption";
 import type { PhotoCapture } from "@/lib/audit-photo-exif";
 import { photoCaptureFromPicker } from "@/lib/audit-photo-exif";
 import type { AuditEvidenceImage, AuditEvidenceNote } from "@/lib/api/types";
@@ -103,6 +106,8 @@ type EvidenceModalProps = {
   onClose: () => void;
   item: ScannedItem | null;
   auditSessionId: string;
+  /** When the audit started; photos taken before it are flagged */
+  auditStartedAt?: string | null;
   /** Callback when evidence is added, to update counts */
   onEvidenceAdded: (assetId: string, type: "note" | "image") => void;
   /**
@@ -150,6 +155,7 @@ export function EvidenceModal({
   onClose,
   item,
   auditSessionId,
+  auditStartedAt = null,
   onEvidenceAdded,
   onRemoveScan,
   onEvidenceCounts,
@@ -224,7 +230,7 @@ export function EvidenceModal({
   }, [visible, auditAssetId, currentOrg?.id, auditSessionId, savedCount]);
   const { colors } = useTheme();
   const styles = useStyles();
-  const { formatDateTime } = useDateFormatter();
+  const dateFormatter = useDateFormatter();
 
   const [noteText, setNoteText] = useState("");
   const [isSubmittingNote, setIsSubmittingNote] = useState(false);
@@ -518,9 +524,10 @@ export function EvidenceModal({
                 {existing.images.length > 0 ? (
                   <View style={styles.existingImages}>
                     {existing.images.map((img) => {
-                      const { source, time } = describeAuditPhotoTime(
+                      const photo = describeAuditPhotoForUser(
                         img,
-                        formatDateTime
+                        auditStartedAt,
+                        dateFormatter
                       );
                       return (
                         <View key={img.id} style={styles.existingPhoto}>
@@ -528,14 +535,11 @@ export function EvidenceModal({
                             source={{ uri: img.thumbnailUrl }}
                             style={styles.existingThumb}
                             contentFit="cover"
-                            accessibilityLabel={`Photo. ${[source, time]
-                              .filter(Boolean)
-                              .join(". ")}`}
+                            accessibilityLabel={`Photo. ${photo.detail}${
+                              photo.flagLabel ? `. ${photo.flagLabel}` : ""
+                            }`}
                           />
-                          {source ? (
-                            <Text style={styles.existingTakenAt}>{source}</Text>
-                          ) : null}
-                          <Text style={styles.existingTakenAt}>{time}</Text>
+                          <AuditPhotoCaption description={photo} width={72} />
                         </View>
                       );
                     })}
@@ -780,11 +784,6 @@ const useStyles = createStyles((colors) => ({
     height: 72,
     borderRadius: borderRadius.sm,
     backgroundColor: colors.borderLight,
-  },
-  existingTakenAt: {
-    marginTop: 2,
-    fontSize: fontSize.xs,
-    color: colors.muted,
   },
   existingNote: {
     backgroundColor: colors.backgroundSecondary,

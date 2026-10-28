@@ -199,6 +199,7 @@ function AuditScannerContent() {
 
   const {
     auditName,
+    auditStartedAt,
     isInitializing,
     initError,
     expectedAssetIdsRef,
@@ -1515,6 +1516,7 @@ function AuditScannerContent() {
         onClose={handleCloseEvidenceModal}
         item={selectedItem}
         auditSessionId={auditId ?? ""}
+        auditStartedAt={auditStartedAt}
         onEvidenceAdded={handleEvidenceAdded}
         onRemoveScan={handleRemoveScan}
         onEvidenceCounts={handleEvidenceCounts}
