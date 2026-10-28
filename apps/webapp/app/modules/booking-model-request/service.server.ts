@@ -57,8 +57,11 @@ import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
-import { recordEvent } from "../activity-event/service.server";
-import type { ActorSnapshot } from "../activity-event/types";
+import { recordEvent, recordEvents } from "../activity-event/service.server";
+import type {
+  ActivityEventInput,
+  ActorSnapshot,
+} from "../activity-event/types";
 import { createSystemBookingNote } from "../booking-note/service.server";
 import { getUserByID } from "../user/service.server";
 
@@ -3254,6 +3257,37 @@ type MaterializeArgs = {
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   tx: any;
+  /**
+   * Shared state for a caller assigning many assets in one transaction. With
+   * it, the actor and each model's reservation row are read once for the
+   * whole batch, and the note and events are collected for the caller to
+   * write in one statement each, instead of costing round trips per asset.
+   * Without it, everything is read and written here, as for a single asset.
+   */
+  batch?: MaterializeBatch;
+};
+
+/** A reservation row as the claim needs it: its id and its model's name. */
+type ReservationForClaim = { id: string; assetModel: { name: string } };
+
+/**
+ * Per-call state {@link fulfilModelRequestsForAssets} threads through
+ * {@link materializeModelRequestForAsset}. See `MaterializeArgs.batch`.
+ *
+ * The cached reservation row only supplies the row's id and its model's name,
+ * neither of which a claim changes. Every claim still reads the live
+ * `fulfilledQuantity` inside its own conditional `UPDATE`, so caching the row
+ * cannot let two units claim one slot.
+ */
+type MaterializeBatch = {
+  /** Loads the acting user at most once for the whole batch. */
+  loadActor: () => Promise<NoteActor | null>;
+  /** Reservation rows read so far, by model id; `null` means none exists. */
+  reservationByModelId: Map<string, ReservationForClaim | null>;
+  /** Note contents to write, in claim order. */
+  notes: string[];
+  /** Activity events to write, in claim order. */
+  events: ActivityEventInput[];
 };
 
 /**
@@ -3285,6 +3319,7 @@ export async function materializeModelRequestForAsset({
   organizationId,
   userId,
   tx,
+  batch,
 }: MaterializeArgs): Promise<
   | { matched: true; requestId: string; remaining: number; modelName: string }
   | { matched: false }
@@ -3314,15 +3349,20 @@ export async function materializeModelRequestForAsset({
       return { matched: false };
     }
 
-    const existing = await tx.bookingModelRequest.findUnique({
-      where: {
-        bookingId_assetModelId: {
-          bookingId,
-          assetModelId: asset.assetModelId,
-        },
-      },
-      include: { assetModel: { select: { name: true } } },
-    });
+    const cached = batch?.reservationByModelId.get(asset.assetModelId);
+    const existing: ReservationForClaim | null =
+      cached !== undefined
+        ? cached
+        : await tx.bookingModelRequest.findUnique({
+            where: {
+              bookingId_assetModelId: {
+                bookingId,
+                assetModelId: asset.assetModelId,
+              },
+            },
+            include: { assetModel: { select: { name: true } } },
+          });
+    batch?.reservationByModelId.set(asset.assetModelId, existing);
 
     if (!existing) {
       return { matched: false };
@@ -3407,8 +3447,13 @@ export async function materializeModelRequestForAsset({
         : null;
 
     // Activity note — IN the tx so the note rolls back with the
-    // materialization if anything later in the pipeline fails.
-    const actor = userId ? await loadActor(userId) : null;
+    // materialization if anything later in the pipeline fails. A batch writes
+    // it with the others once its loop ends, still inside the same tx.
+    const actor = batch
+      ? await batch.loadActor()
+      : userId
+      ? await loadActor(userId)
+      : null;
     const assetLink = wrapLinkForNote(`/assets/${asset.id}`, asset.title);
     const modelNameForNote = stripMarkdocDelimiters(existing.assetModel.name);
     // Same sentence either way; only the subject changes, so the feed reads
@@ -3416,13 +3461,17 @@ export async function materializeModelRequestForAsset({
     const content = actor?.link
       ? `${actor.link} assigned ${assetLink} (${modelNameForNote}) to this booking — ${remaining} × ${modelNameForNote} remaining.`
       : `${assetLink} (${modelNameForNote}) was assigned to this booking — ${remaining} × ${modelNameForNote} remaining.`;
-    await tx.bookingNote.create({
-      data: {
-        type: "UPDATE",
-        content,
-        booking: { connect: { id: bookingId } },
-      },
-    });
+    if (batch) {
+      batch.notes.push(content);
+    } else {
+      await tx.bookingNote.create({
+        data: {
+          type: "UPDATE",
+          content,
+          booking: { connect: { id: bookingId } },
+        },
+      });
+    }
 
     /**
      * One `BOOKING_MODEL_REQUEST_FULFILLED` per UNIT, carrying the concrete
@@ -3447,7 +3496,7 @@ export async function materializeModelRequestForAsset({
       bookingId,
     };
 
-    await recordEvent(
+    const events: ActivityEventInput[] = [
       {
         ...eventBase,
         action: "BOOKING_MODEL_REQUEST_FULFILLED",
@@ -3459,25 +3508,29 @@ export async function materializeModelRequestForAsset({
           remaining,
         },
       },
-      tx
-    );
+    ];
 
     // `fulfilledAt` flipping null → set is its own field change, and it gets
     // the same event here as it does when an operator closes a request out by
     // editing the quantity down — the field's history reads the same whichever
     // path caused it.
     if (completedNow) {
-      await recordEvent(
-        {
-          ...eventBase,
-          action: "BOOKING_MODEL_REQUEST_CHANGED",
-          field: "fulfilledAt",
-          fromValue: null,
-          toValue: completedNow.toISOString(),
-          meta: modelMeta,
-        },
-        tx
-      );
+      events.push({
+        ...eventBase,
+        action: "BOOKING_MODEL_REQUEST_CHANGED",
+        field: "fulfilledAt",
+        fromValue: null,
+        toValue: completedNow.toISOString(),
+        meta: modelMeta,
+      });
+    }
+
+    if (batch) {
+      batch.events.push(...events);
+    } else {
+      for (const event of events) {
+        await recordEvent(event, tx);
+      }
     }
 
     return {
@@ -3616,6 +3669,23 @@ export async function fulfilModelRequestsForAssets({
     alreadyClaimedRows.map((row) => row.assetId)
   );
 
+  /**
+   * One batch for the whole call, so the loop below spends only the claim
+   * itself per asset. The actor is read on the first claim (none for a call
+   * that matches nothing), each model's reservation row on its first asset,
+   * and every note and event is written in one statement after the loop.
+   */
+  let actorLoad: Promise<NoteActor | null> | undefined;
+  const batch: MaterializeBatch = {
+    loadActor: () => {
+      actorLoad ??= userId ? loadActor(userId) : Promise.resolve(null);
+      return actorLoad;
+    },
+    reservationByModelId: new Map(),
+    notes: [],
+    events: [],
+  };
+
   for (const asset of assets) {
     if (alreadyClaimedAssetIds.has(asset.id)) continue;
     // Sequential, not `Promise.all`: several assets of the SAME model compete
@@ -3629,12 +3699,29 @@ export async function fulfilModelRequestsForAssets({
       organizationId,
       userId,
       tx,
+      batch,
     });
 
     if (result.matched) {
       fulfilledRequestIdByAssetId.set(asset.id, result.requestId);
     }
   }
+
+  if (batch.notes.length > 0) {
+    // The booking feed orders notes by `createdAt`, so one shared default
+    // stamp would shuffle them. Each later claim gets a later millisecond,
+    // which keeps the feed in scan order.
+    const firstStamp = Date.now();
+    await tx.bookingNote.createMany({
+      data: batch.notes.map((content, index) => ({
+        type: "UPDATE",
+        content,
+        bookingId,
+        createdAt: new Date(firstStamp + index),
+      })),
+    });
+  }
+  await recordEvents(batch.events, tx);
 
   return fulfilledRequestIdByAssetId;
 }
