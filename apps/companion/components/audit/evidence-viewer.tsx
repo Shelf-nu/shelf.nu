@@ -87,6 +87,15 @@ export function EvidenceViewer({
     [styles, formatDateTime]
   );
 
+  /** "Taken <date and time>", or "Time taken unknown" when EXIF had no date. */
+  const takenLabel = useCallback(
+    (image: AuditEvidenceImage) =>
+      image.capturedAt
+        ? `Taken ${formatDateTime(image.capturedAt)}`
+        : "Time taken unknown",
+    [formatDateTime]
+  );
+
   const isEmpty =
     !isLoading && !error && notes.length === 0 && images.length === 0;
 
@@ -158,17 +167,22 @@ export function EvidenceViewer({
                           onImagePress ? () => onImagePress(image) : undefined
                         }
                         accessibilityRole={onImagePress ? "button" : "image"}
-                        accessibilityLabel={
+                        accessibilityLabel={`${
                           image.description
                             ? `Photo: ${image.description}`
                             : `Photo by ${image.authorName ?? "Unknown"}`
-                        }
+                        }. ${takenLabel(image)}`}
                       >
                         <Image
                           source={{ uri: image.thumbnailUrl }}
                           style={styles.thumb}
                           contentFit="cover"
                         />
+                        {/* A photo with no capture time is shown as unknown
+                            on purpose: it is the one a reviewer must notice. */}
+                        <Text style={styles.takenAt} numberOfLines={2}>
+                          {takenLabel(image)}
+                        </Text>
                         {image.description ? (
                           <Text style={styles.caption} numberOfLines={2}>
                             {image.description}
@@ -282,6 +296,12 @@ const useStyles = createStyles((colors) => ({
     backgroundColor: colors.borderLight,
   },
   caption: {
+    width: 104,
+    marginTop: 4,
+    fontSize: fontSize.xs,
+    color: colors.muted,
+  },
+  takenAt: {
     width: 104,
     marginTop: 4,
     fontSize: fontSize.xs,

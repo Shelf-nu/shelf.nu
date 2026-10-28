@@ -26,6 +26,8 @@ import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { api } from "@/lib/api";
+import type { PhotoCaptureTags } from "@/lib/audit-photo-exif";
+import { captureTagsFromPickerExif } from "@/lib/audit-photo-exif";
 import type { AuditEvidenceImage, AuditEvidenceNote } from "@/lib/api/types";
 import { useOrg } from "@/lib/org-context";
 import { useTheme } from "@/lib/theme-context";
@@ -224,6 +226,10 @@ export function EvidenceModal({
   const [isRemoving, setIsRemoving] = useState(false);
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
   const [imageMimeType, setImageMimeType] = useState("image/jpeg");
+  // When the selected photo was taken, read from the picker before any HEIC
+  // to JPEG conversion drops the file's EXIF.
+  const [imageCaptureTags, setImageCaptureTags] =
+    useState<PhotoCaptureTags | null>(null);
 
   const resetState = useCallback(() => {
     setNoteText("");
@@ -289,11 +295,13 @@ export function EvidenceModal({
           mediaTypes: ["images"],
           quality: 0.8,
           allowsEditing: false,
+          exif: true,
         })
       : await ImagePicker.launchImageLibraryAsync({
           mediaTypes: ["images"],
           quality: 0.8,
           allowsEditing: false,
+          exif: true,
         });
 
     if (!result.canceled && result.assets[0]) {
@@ -305,6 +313,7 @@ export function EvidenceModal({
       );
       setSelectedImageUri(uri);
       setImageMimeType(mimeType);
+      setImageCaptureTags(captureTagsFromPickerExif(asset.exif));
     }
   }, []);
 
@@ -340,7 +349,8 @@ export function EvidenceModal({
         item.auditAssetId,
         selectedImageUri,
         imageMimeType,
-        noteText.trim() || undefined
+        noteText.trim() || undefined,
+        imageCaptureTags
       );
 
       if (error) {
@@ -369,6 +379,7 @@ export function EvidenceModal({
     auditSessionId,
     selectedImageUri,
     imageMimeType,
+    imageCaptureTags,
     noteText,
     onEvidenceAdded,
   ]);
