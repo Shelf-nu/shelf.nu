@@ -385,15 +385,20 @@ async function withOriginalInspected(
   }
   const original = Buffer.concat(chunks);
 
-  try {
-    await inspect(original);
-  } catch (cause) {
-    Logger.warn({ message: "Could not inspect an uploaded file", cause });
+  // why: only a format `cropImage` accepts reaches an inspector. The upload
+  // handler admits any image/* type, and the image libraries behind an
+  // inspector must not parse bytes the upload is about to refuse.
+  if (detectImageFormat(original)) {
+    try {
+      await inspect(original);
+    } catch (cause) {
+      Logger.warn({ message: "Could not inspect an uploaded file", cause });
+    }
   }
 
   return (async function* () {
     await Promise.resolve(); // Satisfy eslint requirement
-    yield new Uint8Array(original);
+    yield original;
   })();
 }
 

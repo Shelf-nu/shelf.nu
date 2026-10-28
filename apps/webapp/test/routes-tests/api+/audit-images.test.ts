@@ -144,6 +144,20 @@ describe("GET /api/audit-images", () => {
     expect(body.images).toEqual([{ id: "img-1" }]);
   });
 
+  it("asks for every field the photo caption reads", async () => {
+    // why: the consumer (audit-images-component) types these fields; a select
+    // that drops one shows the wrong flag with no error anywhere.
+    await loader(args("img-1"));
+
+    expect(mockFindMany.mock.calls[0][0].select).toMatchObject({
+      capturedAt: true,
+      captureSource: true,
+      createdAt: true,
+      auditSession: { select: { startedAt: true } },
+      auditAsset: { select: { scannedAt: true } },
+    });
+  });
+
   it("reads nothing when no ids are asked for", async () => {
     await loader(args());
 

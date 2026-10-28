@@ -30,7 +30,7 @@ interface AuditImage {
   /** How the photo reached Shelf; null when unknown */
   captureSource: AuditPhotoCaptureSource | null;
   createdAt: string;
-  /** The photo's audit, for the "Older than audit" flag */
+  /** The photo's audit: what a photo of the whole audit is checked against */
   auditSession: { startedAt: string | null };
   /** The photo's audited asset, for its scan time; null for a general photo */
   auditAsset: { scannedAt: string | null } | null;

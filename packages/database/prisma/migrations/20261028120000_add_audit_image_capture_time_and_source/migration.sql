@@ -1,6 +1,6 @@
 -- CreateEnum
 DO $$ BEGIN
-  CREATE TYPE "AuditImageCaptureSource" AS ENUM ('CAMERA', 'LIBRARY', 'WEB_UPLOAD');
+  CREATE TYPE "AuditImageCaptureSource" AS ENUM ('CAMERA', 'LIBRARY', 'WEB_UPLOAD', 'PHONE');
 EXCEPTION
   WHEN duplicate_object THEN NULL;
 END $$;

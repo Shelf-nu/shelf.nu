@@ -472,13 +472,18 @@ export declare const DELETE_CONSEQUENCE_LABELS: {
 };
 
 /** How an audit photo reached Shelf, as `AuditImage.captureSource` stores it. */
-export type AuditPhotoCaptureSource = "CAMERA" | "LIBRARY" | "WEB_UPLOAD";
+export type AuditPhotoCaptureSource =
+  | "CAMERA"
+  | "LIBRARY"
+  | "WEB_UPLOAD"
+  | "PHONE";
 
 /** The label for each audit photo capture source. */
 export declare const AUDIT_PHOTO_SOURCE_LABELS: {
   readonly CAMERA: string;
   readonly LIBRARY: string;
   readonly WEB_UPLOAD: string;
+  readonly PHONE: string;
 };
 
 /** A case on an audit photo a reviewer should check. */
@@ -529,9 +534,21 @@ export declare function describeAuditPhoto(
   options: {
     assetScannedAt?: string | Date | null;
     auditStartedAt?: string | Date | null;
+    /** The current time; defaults to now. A photo from another year shows it. */
+    now?: Date;
     format: {
       dateTime: (value: string | Date) => string;
-      shortDateTime: (value: string | Date, withYear: boolean) => string;
+      /** The viewer's formatter with explicit `Intl` field options */
+      custom: (
+        value: string | Date,
+        options: {
+          year?: "numeric";
+          month?: "short";
+          day?: "numeric";
+          hour?: "numeric";
+          minute?: "2-digit";
+        }
+      ) => string;
     };
   }
 ): AuditPhotoDescription;

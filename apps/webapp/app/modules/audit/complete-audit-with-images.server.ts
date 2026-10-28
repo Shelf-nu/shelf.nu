@@ -52,7 +52,7 @@ export async function completeAuditWithImages({
           uploadedById: userId,
           uploadedVia: "web",
           // The rebuilt request has no cookies; keep the user's own hints.
-          hints: getClientHint(request),
+          hints,
           auditAssetId: undefined, // General audit image
           description: "Completion image",
         })

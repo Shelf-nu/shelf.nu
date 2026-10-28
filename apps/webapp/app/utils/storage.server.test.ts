@@ -15,9 +15,15 @@ import {
 // why: the Supabase admin client talks to storage over HTTP; stub `remove` so
 // the tests stay offline and can assert the paths sent in each request
 const storageRemoveMock = vi.hoisted(() => vi.fn());
+// why: same client, for `upload`: a stored file's path is all the parser needs
+const storageUploadMock = vi.hoisted(() =>
+  vi.fn((path: string) => Promise.resolve({ data: { path }, error: null }))
+);
 vi.mock("~/integrations/supabase/client", () => ({
   getSupabaseAdmin: () => ({
-    storage: { from: () => ({ remove: storageRemoveMock }) },
+    storage: {
+      from: () => ({ remove: storageRemoveMock, upload: storageUploadMock }),
+    },
   }),
 }));
 
@@ -383,5 +389,77 @@ describe("unreadable image upload", () => {
       shouldBeCaptured: false,
       title: "Image could not be read",
     });
+  });
+});
+
+describe("inspecting the original upload", () => {
+  /** A real JPEG carrying a real EXIF capture date. */
+  async function jpegWithDate(): Promise<Buffer> {
+    const sharp = (await import("sharp")).default;
+    return sharp({
+      create: { width: 64, height: 64, channels: 3, background: "#2b6cb0" },
+    })
+      .jpeg()
+      .withExif({ IFD2: { DateTimeOriginal: "2026:10:21 09:15:00" } })
+      .toBuffer();
+  }
+
+  /** Uploads one file through the real form-data parser. */
+  function upload(file: File, inspectOriginal: (original: Buffer) => void) {
+    const form = new FormData();
+    form.append("image", file);
+    return parseFileFormData({
+      request: new Request("http://localhost/audits/a/upload-image", {
+        method: "POST",
+        body: form,
+      }),
+      newFileName: "audit-1/photo",
+      bucketName: "files",
+      inspectOriginal,
+    });
+  }
+
+  it("hands the inspector the file as uploaded, EXIF and all", async () => {
+    // why: the stored copy is re-encoded without EXIF, so if the parser stops
+    // forwarding the inspector every photo is silently saved with no date.
+    const original = await jpegWithDate();
+    const seen: Buffer[] = [];
+
+    await upload(
+      new File([new Uint8Array(original)], "photo.jpg", { type: "image/jpeg" }),
+      (bytes) => void seen.push(bytes)
+    );
+
+    expect(seen).toHaveLength(1);
+    expect(Buffer.compare(seen[0], original)).toBe(0);
+  });
+
+  it("never inspects a file the upload refuses as a format", async () => {
+    // why: the handler admits any image/* type; the libraries behind an
+    // inspector must not parse an SVG or TIFF the upload then rejects.
+    const seen: Buffer[] = [];
+    const svg = new File(
+      ['<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"/>'],
+      "photo.svg",
+      { type: "image/svg+xml" }
+    );
+
+    await expect(
+      upload(svg, (bytes) => void seen.push(bytes))
+    ).rejects.toMatchObject({ status: 400 });
+    expect(seen).toHaveLength(0);
+  });
+
+  it("still uploads when the inspector throws", async () => {
+    const original = await jpegWithDate();
+
+    const form = await upload(
+      new File([new Uint8Array(original)], "photo.jpg", { type: "image/jpeg" }),
+      () => {
+        throw new Error("could not read EXIF");
+      }
+    );
+
+    expect(form.get("image")).toBeTruthy();
   });
 });

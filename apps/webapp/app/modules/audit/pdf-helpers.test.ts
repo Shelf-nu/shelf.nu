@@ -113,6 +113,12 @@ describe("audit receipt — what it may truncate", () => {
     expect(noteQueryFor("COMMENT")?.orderBy).toEqual({ createdAt: "asc" });
   });
 
+  it("carries each photo's asset scan time, for the Old photo flag", () => {
+    const include = mockOf(db.auditImage.findMany).mock.calls[0][0].include;
+
+    expect(include.auditAsset.select).toMatchObject({ scannedAt: true });
+  });
+
   it("carries each note's asset, so a note prints beside its photos", () => {
     // why: a note about an asset and a photo of that asset are one
     // observation. Without the asset on the note the receipt cannot group

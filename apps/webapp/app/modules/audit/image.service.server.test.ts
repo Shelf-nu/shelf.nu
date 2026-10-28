@@ -684,13 +684,16 @@ describe("uploadAuditImage returnParsedFormData", () => {
       }
     );
 
-    it("stores no source when the phone app sends none or an unknown one", async () => {
+    it("stores PHONE when the phone app sends no source or an unknown one", async () => {
+      // why: an app version that does not send a source is still a new upload.
+      // Stored as null it would read as a photo from before capture times were
+      // read, and a dateless one would never be flagged.
       uploadReceivesFields();
-      expect(await storedSource("phone")).toBeNull();
+      expect(await storedSource("phone")).toBe("PHONE");
 
       vi.mocked(db.auditImage.create).mockClear();
       uploadReceivesFields({ captureSource: "WEB_UPLOAD" });
-      expect(await storedSource("phone")).toBeNull();
+      expect(await storedSource("phone")).toBe("PHONE");
     });
   });
 });

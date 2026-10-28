@@ -579,16 +579,23 @@ test("a withheld custodian is a name, never the empty answer", () => {
 /** Formatters that show which one was used. */
 const format = {
   dateTime: (value) => `dt(${new Date(value).toISOString().slice(0, 16)})`,
-  shortDateTime: (value, withYear) =>
-    `s(${new Date(value).toISOString().slice(withYear ? 0 : 5, 16)})`,
+  // A year-only request returns the year; a tile request returns s(...), with
+  // the year only when the caller asked for one.
+  custom: (value, options) => {
+    const iso = new Date(value).toISOString();
+    if (!options.month) return iso.slice(0, 4);
+    return `s(${iso.slice(options.year ? 0 : 5, 16)})`;
+  },
 };
 const AUDIT_STARTED = "2026-08-13T13:37:00Z";
 const ASSET_SCANNED = "2026-10-28T10:50:00Z";
+const NOW = new Date("2026-10-28T12:00:00Z");
 const describe = (photo, assetScannedAt = ASSET_SCANNED) =>
   describeAuditPhoto(photo, {
     assetScannedAt,
     auditStartedAt: AUDIT_STARTED,
     format,
+    now: NOW,
   });
 
 test("a camera photo taken at the scan is quiet: icon, date and time, no flag", () => {
@@ -624,6 +631,50 @@ test("a photo taken days before its asset was scanned is an old photo", () => {
   );
 });
 
+test("a photo uploaded before its asset is scanned is measured against its upload", () => {
+  // why: a photo can be added to an asset before the asset is scanned, or the
+  // scan can be undone and redone days later. A camera photo taken and
+  // uploaded at once must never read as older than its own upload.
+  const photo = describe(
+    {
+      captureSource: "CAMERA",
+      capturedAt: "2026-10-26T09:00:00Z",
+      createdAt: "2026-10-26T09:01:00Z",
+    },
+    "2026-10-28T10:00:00Z"
+  );
+
+  assert.equal(photo.flag, null);
+});
+
+test("a library photo uploaded before the scan is still old against its upload", () => {
+  const photo = describe(
+    {
+      captureSource: "LIBRARY",
+      capturedAt: "2026-10-01T09:00:00Z",
+      createdAt: "2026-10-26T09:00:00Z",
+    },
+    "2026-10-28T10:00:00Z"
+  );
+
+  assert.equal(photo.flag, "OLD_PHOTO");
+  assert.match(photo.detail, /25 days before upload$/);
+});
+
+test("an upload from an app version that does not say how is still checked", () => {
+  // why: older app versions send no source and, after their HEIC to JPEG
+  // conversion, no date. The server stores PHONE for them, so they are not
+  // mistaken for photos from before capture times were read.
+  const photo = describe({
+    captureSource: "PHONE",
+    capturedAt: null,
+    createdAt: "2026-10-28T10:52:00Z",
+  });
+
+  assert.equal(photo.sourceLabel, "Phone app");
+  assert.equal(photo.flag, "NO_DATE");
+});
+
 test("a photo taken the evening before the scan is not flagged", () => {
   assert.equal(
     describe({
@@ -649,7 +700,7 @@ test("a photo of the whole audit is measured against the audit's start", () => {
   assert.match(photo.detail, /58 days before this audit started$/);
 });
 
-test("the year shows only when the photo is from another year than its upload", () => {
+test("the year shows only when the photo is from another year than its upload or today", () => {
   assert.equal(
     describe({
       captureSource: "LIBRARY",
@@ -672,7 +723,7 @@ test("a new photo with no date is flagged, and never borrows its upload time", (
   assert.equal(photo.detail, "Photo library · time taken unknown");
 });
 
-test("a camera photo with no EXIF date shows its upload time, and says so", () => {
+test("a camera photo with no EXIF date shows its upload time, and is flagged", () => {
   const photo = describe({
     captureSource: "CAMERA",
     capturedAt: null,
@@ -680,7 +731,9 @@ test("a camera photo with no EXIF date shows its upload time, and says so", () =
   });
 
   assert.equal(photo.short, "s(10-28T10:58)");
-  assert.equal(photo.flag, null);
+  // why: the official app sends the camera's date, so a camera claim with no
+  // date is what a modified client would send with an old, stripped picture.
+  assert.equal(photo.flag, "NO_DATE");
   assert.equal(
     photo.detail,
     "Shelf app camera · uploaded dt(2026-10-28T10:58)"
@@ -704,7 +757,7 @@ test("a photo from before capture times were read shows its upload time, unflagg
 test("no age flag when there is nothing to measure against", () => {
   const photo = describeAuditPhoto(
     { captureSource: "LIBRARY", capturedAt: "2020-01-01T00:00:00Z" },
-    { assetScannedAt: null, auditStartedAt: null, format }
+    { assetScannedAt: null, auditStartedAt: null, format, now: NOW }
   );
 
   assert.equal(photo.flag, null);
@@ -715,6 +768,7 @@ test("audit photo labels carry no dashes", () => {
     "CAMERA",
     "LIBRARY",
     "WEB_UPLOAD",
+    "PHONE",
   ]);
   for (const text of [
     ...Object.values(AUDIT_PHOTO_SOURCE_LABELS),

@@ -23,7 +23,12 @@ import type {
   AuditPhotoDescription,
 } from "@shelf/labels";
 import { describeAuditPhoto } from "@shelf/labels";
-import { CameraIcon, GlobeIcon, ImagesIcon } from "lucide-react";
+import {
+  CameraIcon,
+  GlobeIcon,
+  ImagesIcon,
+  SmartphoneIcon,
+} from "lucide-react";
 import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 import { useDateFormatter } from "~/hooks/use-date-formatter";
 import { BADGE_COLORS } from "~/utils/badge-colors";
@@ -60,6 +65,7 @@ const SOURCE_ICONS = {
   CAMERA: CameraIcon,
   LIBRARY: ImagesIcon,
   WEB_UPLOAD: GlobeIcon,
+  PHONE: SmartphoneIcon,
 } as const;
 
 /** Flag chip colours: amber for "check this", gray for "nothing to go on". */
@@ -89,14 +95,7 @@ export function useAuditPhotoDescription(
     auditStartedAt: check.auditStartedAt,
     format: {
       dateTime: (value) => formatDateTime(value),
-      shortDateTime: (value, withYear) =>
-        formatDate(value, {
-          day: "numeric",
-          month: "short",
-          ...(withYear ? { year: "numeric" as const } : {}),
-          hour: "numeric",
-          minute: "2-digit",
-        }),
+      custom: (value, options) => formatDate(value, options),
     },
   });
 }

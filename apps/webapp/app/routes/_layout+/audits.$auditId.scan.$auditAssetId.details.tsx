@@ -106,7 +106,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         auditSession: {
           select: {
             status: true,
-            // Photos taken before this are flagged "Older than audit".
+            // What a photo of the whole audit is checked against.
             startedAt: true,
             assignments: {
               select: { userId: true },

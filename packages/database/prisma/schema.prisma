@@ -2774,11 +2774,13 @@ model AuditImage {
 /// reports CAMERA only for its own camera, which cannot hand back an old
 /// picture, so it is the strongest evidence short of a modified client; a
 /// library photo's date is only what its file claims; the web app cannot tell
-/// a camera shot from a file.
+/// a camera shot from a file; PHONE is a phone app version that does not say
+/// which.
 enum AuditImageCaptureSource {
   CAMERA
   LIBRARY
   WEB_UPLOAD
+  PHONE
 }
 
 /// How a membership's role came to change.

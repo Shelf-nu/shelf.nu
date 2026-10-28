@@ -68,6 +68,8 @@ export function captureTimeFromTags(
 
   // why: cameras with an unset clock write zeros ("0000:00:00 00:00:00"), and
   // Date.UTC rolls an out-of-range day or month into the next one silently.
+  // This catches both in the phone's form fields; a date read from the file
+  // has already been rolled over by exif-reader, which this cannot undo.
   // Rebuilding the parts and comparing catches both.
   const wallClock = new Date(
     Date.UTC(year, month - 1, day, hour, minute, second)
@@ -216,17 +218,19 @@ export type AuditImageUploadedVia = "web" | "phone";
 /**
  * How the phone app says a photo was captured: `CAMERA` for its own camera,
  * `LIBRARY` for the photo library. This is what the app reports; a modified
- * client could claim CAMERA, the official app cannot. Anything else, including no field from an
- * app version that does not send it, is unknown.
+ * client could claim CAMERA, the official app cannot. Anything else, including
+ * no field from an app version that does not send one, is `PHONE`: still a new
+ * upload whose date is checked, never mistaken for a photo from before capture
+ * times were read.
  *
  * @param formData - The parsed upload
- * @returns The capture source, or null when unknown
+ * @returns The capture source
  */
 export function captureSourceFromPhoneForm(
   formData: FormData
-): Extract<AuditImageCaptureSource, "CAMERA" | "LIBRARY"> | null {
+): Extract<AuditImageCaptureSource, "CAMERA" | "LIBRARY" | "PHONE"> {
   const value = formData.get("captureSource");
-  return value === "CAMERA" || value === "LIBRARY" ? value : null;
+  return value === "CAMERA" || value === "LIBRARY" ? value : "PHONE";
 }
 
 /**

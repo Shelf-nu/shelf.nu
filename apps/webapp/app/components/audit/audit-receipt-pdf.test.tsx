@@ -425,13 +425,16 @@ describe("audit receipt PDF: when each audit photo was taken", () => {
   const auditPhoto = (
     id: string,
     capturedAt: string | null,
-    auditAsset: unknown = null
+    auditAsset: unknown = null,
+    captureSource: string | null = null
   ) => ({
     id,
     imageUrl: `https://storage.test/audits/${id}.webp`,
     thumbnailUrl: `https://storage.test/audits/${id}-thumbnail.webp`,
     description: null,
     capturedAt,
+    captureSource,
+    createdAt: "2026-10-21T10:00:00.000Z",
     auditAsset,
   });
 
@@ -474,7 +477,33 @@ describe("audit receipt PDF: when each audit photo was taken", () => {
     // date looked for, so they are not flagged as missing one.
     renderWithPhotos();
 
-    expect(cellText("Photo of Camera")).toBe("Time taken unknown");
+    expect(cellText("Photo of Camera")).toMatch(/^Uploaded 21\/10\/2026/);
+  });
+
+  it("prints the Old photo flag on a photo taken days before its asset's scan", () => {
+    const pdfMeta = {
+      ...pdfMetaWith({ displayCode: SAM_CODE }),
+      generalImages: [],
+      assetImages: [
+        auditPhoto(
+          "asset-photo-1",
+          "2026-10-01T06:30:00.000Z",
+          {
+            scannedAt: "2026-10-21T09:00:00.000Z",
+            asset: { id: "asset-1", title: "Camera" },
+          },
+          "LIBRARY"
+        ),
+      ],
+    } as unknown as AuditPdfDbResult;
+    render(
+      <AuditPDFContent componentRef={{ current: null }} pdfMeta={pdfMeta} />
+    );
+
+    expect(cellText("Photo of Camera")).toContain(
+      "20 days before this asset was scanned"
+    );
+    expect(cellText("Photo of Camera")).toMatch(/Old photo$/);
   });
 
   it("prints thumbnails, not the full-size photos", () => {
