@@ -4,10 +4,12 @@
  * Every place the web app shows an audit photo uses these, so a reviewer reads
  * every photo the same way. A photo that is fine stays quiet: an icon for how
  * it reached Shelf (Shelf app camera, photo library, web upload) and a short
- * time. Only a photo that needs a second look gets a chip: "Older than audit"
- * when it was taken before the audit started, "No date" when it carries no
- * time. The full sentence ("Photo library · file says 1 Oct 2026, 08:30 · 27
- * days before this audit started") is in the preview and the tooltip.
+ * date and time. Only a photo that needs a second look gets a chip: "Old
+ * photo" when it was taken more than a day before its asset was scanned (or,
+ * for a photo of the whole audit, before the audit started), "No date" when it
+ * carries no time. The full sentence ("Photo library · file says 1 Oct 2026,
+ * 08:30 · 27 days before this asset was scanned") is in the preview and the
+ * tooltip. Photos from before capture times were read show their upload time.
  *
  * The wording and the rules come from `describeAuditPhoto` in `@shelf/labels`,
  * which the receipt PDF and the companion app use too.
@@ -39,6 +41,18 @@ export type AuditPhotoImage = {
   captureSource?: AuditPhotoCaptureSource | null;
   /** When it was uploaded; stands in for a camera photo with no capture time. */
   createdAt?: Date | string | null;
+  /** The photo's audited asset, when the query carries it, for its scan time */
+  auditAsset?: { scannedAt?: Date | string | null } | null;
+};
+
+/**
+ * What a photo is checked against: when its asset was scanned (from the photo
+ * itself, or from the list it sits in) and when its audit started.
+ */
+export type AuditPhotoCheck = {
+  /** When the photo's asset was scanned; null for a photo of the whole audit */
+  assetScannedAt?: Date | string | null;
+  auditStartedAt?: Date | string | null;
 };
 
 /** The icon for each way a photo reaches Shelf. */
@@ -50,7 +64,7 @@ const SOURCE_ICONS = {
 
 /** Flag chip colours: amber for "check this", gray for "nothing to go on". */
 const FLAG_COLORS = {
-  OLDER_THAN_AUDIT: BADGE_COLORS.amber,
+  OLD_PHOTO: BADGE_COLORS.amber,
   NO_DATE: BADGE_COLORS.gray,
 } as const;
 
@@ -58,20 +72,31 @@ const FLAG_COLORS = {
  * Describes a photo in the viewer's own date and time format.
  *
  * @param image - The photo's capture fields
- * @param auditStartedAt - When its audit started; no age flag without it
+ * @param check - When its asset was scanned and its audit started; the
+ *   photo's own `auditAsset.scannedAt` wins when the query carried it
  * @returns What to show for the photo
  */
 export function useAuditPhotoDescription(
-  image: Pick<AuditPhotoImage, "capturedAt" | "captureSource" | "createdAt">,
-  auditStartedAt: Date | string | null | undefined
+  image: Pick<
+    AuditPhotoImage,
+    "capturedAt" | "captureSource" | "createdAt" | "auditAsset"
+  >,
+  check: AuditPhotoCheck
 ): AuditPhotoDescription {
   const { formatDate, formatDateTime } = useDateFormatter();
   return describeAuditPhoto(image, {
-    auditStartedAt,
+    assetScannedAt: image.auditAsset?.scannedAt ?? check.assetScannedAt,
+    auditStartedAt: check.auditStartedAt,
     format: {
-      date: (value) => formatDate(value),
-      time: (value) => formatDate(value, { onlyTime: true }),
       dateTime: (value) => formatDateTime(value),
+      shortDateTime: (value, withYear) =>
+        formatDate(value, {
+          day: "numeric",
+          month: "short",
+          ...(withYear ? { year: "numeric" as const } : {}),
+          hour: "numeric",
+          minute: "2-digit",
+        }),
     },
   });
 }
@@ -132,11 +157,17 @@ export function AuditPhotoSourceIcon({
 function AuditPhotoPreviewLine({
   image,
   auditStartedAt,
+  assetScannedAt,
 }: {
   image: AuditPhotoImage;
   auditStartedAt?: Date | string | null;
+  /** When the photo's asset was scanned, when the list knows it */
+  assetScannedAt?: Date | string | null;
 }) {
-  const description = useAuditPhotoDescription(image, auditStartedAt);
+  const description = useAuditPhotoDescription(image, {
+    assetScannedAt,
+    auditStartedAt,
+  });
   return (
     <span className="flex flex-wrap items-center gap-2">
       <AuditPhotoSourceIcon description={description} className="size-4" />
@@ -153,8 +184,10 @@ function AuditPhotoPreviewLine({
  * @param props.image - The photo to show
  * @param props.images - Every photo in the same group, for previous/next in the
  *   preview; defaults to this photo alone
- * @param props.auditStartedAt - When the audit started; photos taken before it
- *   are flagged "Older than audit"
+ * @param props.auditStartedAt - When the audit started: what a photo of the
+ *   whole audit is checked against
+ * @param props.assetScannedAt - When the photo's asset was scanned, for a list
+ *   whose photos do not carry `auditAsset.scannedAt` themselves
  * @param props.alt - Alt text, also the preview title
  * @param props.className - Size classes for the thumbnail (and so the tile)
  * @param props.disablePortal - Render the preview inline when already inside a
@@ -164,6 +197,7 @@ export function AuditPhoto({
   image,
   images = [image],
   auditStartedAt,
+  assetScannedAt,
   alt,
   className = "size-24",
   disablePortal,
@@ -171,11 +205,15 @@ export function AuditPhoto({
   image: AuditPhotoImage;
   images?: AuditPhotoImage[];
   auditStartedAt?: Date | string | null;
+  assetScannedAt?: Date | string | null;
   alt: string;
   className?: string;
   disablePortal?: boolean;
 }) {
-  const description = useAuditPhotoDescription(image, auditStartedAt);
+  const description = useAuditPhotoDescription(image, {
+    assetScannedAt,
+    auditStartedAt,
+  });
 
   return (
     <figure className="m-0 flex flex-col gap-1">
@@ -195,6 +233,7 @@ export function AuditPhoto({
             <AuditPhotoPreviewLine
               image={img}
               auditStartedAt={auditStartedAt}
+              assetScannedAt={assetScannedAt}
             />
           ),
         }))}
@@ -202,6 +241,7 @@ export function AuditPhoto({
           <AuditPhotoPreviewLine
             image={image}
             auditStartedAt={auditStartedAt}
+            assetScannedAt={assetScannedAt}
           />
         }
         currentImageId={image.id}
@@ -235,11 +275,20 @@ export function AuditPhoto({
 export function AuditPhotoPrintCaption({
   image,
   auditStartedAt,
+  assetScannedAt,
 }: {
-  image: Pick<AuditPhotoImage, "capturedAt" | "captureSource" | "createdAt">;
+  image: Pick<
+    AuditPhotoImage,
+    "capturedAt" | "captureSource" | "createdAt" | "auditAsset"
+  >;
   auditStartedAt?: Date | string | null;
+  /** When the photo's asset was scanned, when the list knows it */
+  assetScannedAt?: Date | string | null;
 }) {
-  const description = useAuditPhotoDescription(image, auditStartedAt);
+  const description = useAuditPhotoDescription(image, {
+    assetScannedAt,
+    auditStartedAt,
+  });
   return (
     <span className="flex flex-col items-start gap-1">
       <span className="flex items-start gap-1">

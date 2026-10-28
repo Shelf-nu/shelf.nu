@@ -212,8 +212,10 @@ type AuditImageUploadSectionProps = {
   inputNamePrefix?: string;
   /** Existing images from server */
   existingImages?: AuditPhotoImage[];
-  /** When the audit started; photos taken before it are flagged */
+  /** When the audit started */
   auditStartedAt?: Date | string | null;
+  /** When this asset was scanned; photos taken well before it are flagged */
+  assetScannedAt?: Date | string | null;
   /** Callback when an existing image is removed */
   onExistingImageRemove?: (imageId: string) => void;
   /** Callback when new images are selected (opens dialog) */
@@ -241,6 +243,7 @@ export function AuditImageUploadSection({
   inputNamePrefix = "auditImage",
   existingImages = EMPTY_EXISTING_IMAGES,
   auditStartedAt,
+  assetScannedAt,
   onExistingImageRemove,
   onImagesSelected,
   isUploading = false,
@@ -390,6 +393,7 @@ export function AuditImageUploadSection({
               image={image}
               images={existingImages}
               auditStartedAt={auditStartedAt}
+              assetScannedAt={assetScannedAt}
               alt="Audit image"
               disablePortal
               className="size-24 rounded-lg border-2 border-gray-200"

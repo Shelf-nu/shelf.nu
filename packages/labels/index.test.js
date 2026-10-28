@@ -576,17 +576,22 @@ test("a withheld custodian is a name, never the empty answer", () => {
   assert.ok(WITHHELD_CUSTODIAN_NAME.trim().length > 0);
 });
 
-/** Formatters that show which one was used: dates as d(...), times as t(...). */
+/** Formatters that show which one was used. */
 const format = {
-  date: (value) => `d(${new Date(value).toISOString().slice(0, 10)})`,
-  time: (value) => `t(${new Date(value).toISOString().slice(11, 16)})`,
   dateTime: (value) => `dt(${new Date(value).toISOString().slice(0, 16)})`,
+  shortDateTime: (value, withYear) =>
+    `s(${new Date(value).toISOString().slice(withYear ? 0 : 5, 16)})`,
 };
-const AUDIT_STARTED = "2026-10-28T09:00:00Z";
-const describe = (photo) =>
-  describeAuditPhoto(photo, { auditStartedAt: AUDIT_STARTED, format });
+const AUDIT_STARTED = "2026-08-13T13:37:00Z";
+const ASSET_SCANNED = "2026-10-28T10:50:00Z";
+const describe = (photo, assetScannedAt = ASSET_SCANNED) =>
+  describeAuditPhoto(photo, {
+    assetScannedAt,
+    auditStartedAt: AUDIT_STARTED,
+    format,
+  });
 
-test("a camera photo taken during the audit is quiet: icon, time, no flag", () => {
+test("a camera photo taken at the scan is quiet: icon, date and time, no flag", () => {
   const photo = describe({
     captureSource: "CAMERA",
     capturedAt: "2026-10-28T10:56:00Z",
@@ -594,7 +599,7 @@ test("a camera photo taken during the audit is quiet: icon, time, no flag", () =
   });
 
   assert.equal(photo.source, "CAMERA");
-  assert.equal(photo.short, "t(10:56)");
+  assert.equal(photo.short, "s(10-28T10:56)");
   assert.equal(photo.flag, null);
   assert.equal(
     photo.detail,
@@ -602,23 +607,60 @@ test("a camera photo taken during the audit is quiet: icon, time, no flag", () =
   );
 });
 
-test("a photo taken before the audit started is flagged, with how much older", () => {
+test("a photo taken days before its asset was scanned is an old photo", () => {
+  // The audit started in August, so the photo is not older than the audit,
+  // but it was not taken when this asset was checked.
   const photo = describe({
     captureSource: "LIBRARY",
     capturedAt: "2026-10-01T06:30:00Z",
     createdAt: "2026-10-28T10:52:00Z",
   });
 
-  assert.equal(photo.short, "d(2026-10-01)");
-  assert.equal(photo.flag, "OLDER_THAN_AUDIT");
-  assert.equal(photo.flagLabel, "Older than audit");
+  assert.equal(photo.flag, "OLD_PHOTO");
+  assert.equal(photo.flagLabel, "Old photo");
   assert.equal(
     photo.detail,
-    "Photo library · file says dt(2026-10-01T06:30) · 27 days before this audit started"
+    "Photo library · file says dt(2026-10-01T06:30) · 27 days before this asset was scanned"
   );
 });
 
-test("a photo with no date is flagged, and a library one never borrows its upload time", () => {
+test("a photo taken the evening before the scan is not flagged", () => {
+  assert.equal(
+    describe({
+      captureSource: "LIBRARY",
+      capturedAt: "2026-10-27T20:00:00Z",
+      createdAt: "2026-10-28T10:52:00Z",
+    }).flag,
+    null
+  );
+});
+
+test("a photo of the whole audit is measured against the audit's start", () => {
+  const photo = describe(
+    {
+      captureSource: "WEB_UPLOAD",
+      capturedAt: "2026-06-15T14:20:00Z",
+      createdAt: "2026-10-28T11:02:00Z",
+    },
+    null
+  );
+
+  assert.equal(photo.flag, "OLD_PHOTO");
+  assert.match(photo.detail, /58 days before this audit started$/);
+});
+
+test("the year shows only when the photo is from another year than its upload", () => {
+  assert.equal(
+    describe({
+      captureSource: "LIBRARY",
+      capturedAt: "2025-12-30T10:00:00Z",
+      createdAt: "2026-10-28T10:52:00Z",
+    }).short,
+    "s(2025-12-30T10:00)"
+  );
+});
+
+test("a new photo with no date is flagged, and never borrows its upload time", () => {
   const photo = describe({
     captureSource: "LIBRARY",
     capturedAt: null,
@@ -637,7 +679,7 @@ test("a camera photo with no EXIF date shows its upload time, and says so", () =
     createdAt: "2026-10-28T10:58:00Z",
   });
 
-  assert.equal(photo.short, "t(10:58)");
+  assert.equal(photo.short, "s(10-28T10:58)");
   assert.equal(photo.flag, null);
   assert.equal(
     photo.detail,
@@ -645,22 +687,24 @@ test("a camera photo with no EXIF date shows its upload time, and says so", () =
   );
 });
 
-test("a photo from before capture sources keeps a plain time line", () => {
+test("a photo from before capture times were read shows its upload time, unflagged", () => {
+  // why: its date was never looked for. Flagging it would put "No date" on
+  // every photo in every audit taken before this release.
   const photo = describe({
-    capturedAt: "2026-10-28T10:00:00Z",
-    createdAt: null,
+    captureSource: null,
+    capturedAt: null,
+    createdAt: "2026-08-19T16:27:00Z",
   });
 
-  assert.equal(photo.source, null);
-  assert.equal(photo.sourceLabel, null);
-  assert.equal(photo.short, "d(2026-10-28)");
-  assert.equal(photo.detail, "Taken dt(2026-10-28T10:00)");
+  assert.equal(photo.flag, null);
+  assert.equal(photo.short, "s(08-19T16:27)");
+  assert.equal(photo.detail, "Uploaded dt(2026-08-19T16:27)");
 });
 
-test("no flag for age when the audit has not started", () => {
+test("no age flag when there is nothing to measure against", () => {
   const photo = describeAuditPhoto(
     { captureSource: "LIBRARY", capturedAt: "2020-01-01T00:00:00Z" },
-    { auditStartedAt: null, format }
+    { assetScannedAt: null, auditStartedAt: null, format }
   );
 
   assert.equal(photo.flag, null);

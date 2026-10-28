@@ -181,6 +181,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           description: true,
           capturedAt: true,
           captureSource: true,
+          // A photo taken well before its asset's scan is flagged "Old photo".
+          auditAsset: { select: { scannedAt: true } },
           createdAt: true,
           auditAssetId: true,
           uploadedBy: {
@@ -223,6 +225,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       capturedAt: i.capturedAt?.toISOString() ?? null,
       // How the photo arrived (camera, library, web); null when unknown.
       captureSource: i.captureSource ?? null,
+      // When the photo's asset was scanned; null for a photo of the whole audit.
+      assetScannedAt: i.auditAsset?.scannedAt?.toISOString() ?? null,
       createdAt: i.createdAt.toISOString(),
       authorName: actorName(i.uploadedBy),
       authorImage: i.uploadedBy?.profilePicture ?? null,

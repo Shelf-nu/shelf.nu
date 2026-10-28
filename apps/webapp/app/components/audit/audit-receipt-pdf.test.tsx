@@ -469,12 +469,12 @@ describe("audit receipt PDF: when each audit photo was taken", () => {
     ).toBeTruthy();
   });
 
-  it("prints that the time is unknown when the photo carried none", () => {
-    // why: a photo with no capture time is exactly the one a reviewer of the
-    // receipt needs to notice, so it is stated rather than left blank.
+  it("prints an older photo by its upload time, with no flag", () => {
+    // why: photos uploaded before capture times were read never had their
+    // date looked for, so they are not flagged as missing one.
     renderWithPhotos();
 
-    expect(cellText("Photo of Camera")).toBe("Time taken unknownNo date");
+    expect(cellText("Photo of Camera")).toBe("Time taken unknown");
   });
 
   it("prints thumbnails, not the full-size photos", () => {

@@ -482,13 +482,16 @@ export declare const AUDIT_PHOTO_SOURCE_LABELS: {
 };
 
 /** A case on an audit photo a reviewer should check. */
-export type AuditPhotoFlag = "OLDER_THAN_AUDIT" | "NO_DATE";
+export type AuditPhotoFlag = "OLD_PHOTO" | "NO_DATE";
 
 /** The label for each audit photo flag. */
 export declare const AUDIT_PHOTO_FLAG_LABELS: {
-  readonly OLDER_THAN_AUDIT: string;
+  readonly OLD_PHOTO: string;
   readonly NO_DATE: string;
 };
+
+/** How much older than its check a photo may be before it is flagged. */
+export declare const AUDIT_PHOTO_OLD_AFTER_MS: number;
 
 /** One line explaining the icons and flags, for a printed receipt. */
 export declare const AUDIT_PHOTO_KEY: string;
@@ -497,7 +500,7 @@ export declare const AUDIT_PHOTO_KEY: string;
 export type AuditPhotoDescription = {
   source: AuditPhotoCaptureSource | null;
   sourceLabel: string | null;
-  /** Time alone when taken the day of upload, else the date; null if unknown */
+  /** Short date and time (year only when it differs from the upload's) */
   short: string | null;
   /** Set only when the photo needs a second look */
   flag: AuditPhotoFlag | null;
@@ -507,13 +510,15 @@ export type AuditPhotoDescription = {
 };
 
 /**
- * Describes one audit photo: quiet when it is fine (icon and short time), a
- * flag when it was taken before the audit started or has no date, and the
- * full sentence for the preview.
+ * Describes one audit photo: quiet when it is fine (icon and short date and
+ * time), "Old photo" when taken more than a day before its asset was scanned
+ * (or the audit started), "No date" when it has no time, and the full
+ * sentence for the preview. Photos from before capture times were read show
+ * their upload time with no flag.
  *
  * @param photo - the `AuditImage` fields
- * @param options - when the audit started (no flag without it) and the
- *   viewer's own formatters
+ * @param options - the asset's scan time (null for a photo of the whole
+ *   audit), the audit's start, and the viewer's own formatters
  */
 export declare function describeAuditPhoto(
   photo: {
@@ -522,11 +527,11 @@ export declare function describeAuditPhoto(
     createdAt?: string | Date | null;
   },
   options: {
+    assetScannedAt?: string | Date | null;
     auditStartedAt?: string | Date | null;
     format: {
-      date: (value: string | Date) => string;
-      time: (value: string | Date) => string;
       dateTime: (value: string | Date) => string;
+      shortDateTime: (value: string | Date, withYear: boolean) => string;
     };
   }
 ): AuditPhotoDescription;

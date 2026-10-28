@@ -116,6 +116,7 @@ const IMAGE_GENERAL = {
   description: "Rack before the sweep",
   capturedAt: new Date("2026-08-19T12:40:00.000Z"),
   captureSource: "CAMERA",
+  auditAsset: null,
   createdAt: new Date("2026-08-19T12:42:00.000Z"),
   auditAssetId: null,
   uploadedBy: { firstName: "John", lastName: "Doe", profilePicture: null },
@@ -130,6 +131,7 @@ const IMAGE_ASSET = {
   description: null,
   capturedAt: null,
   captureSource: null,
+  auditAsset: { scannedAt: new Date("2026-08-19T12:30:00.000Z") },
   createdAt: new Date("2026-08-19T12:34:00.000Z"),
   auditAssetId: "aa-1",
   uploadedBy: null,
@@ -265,6 +267,11 @@ describe("GET /api/mobile/audits/:auditId/evidence", () => {
 
       expect(json.general.images[0].captureSource).toBe("CAMERA");
       expect(json.byAuditAsset["aa-1"].images[0].captureSource).toBeNull();
+      // The asset's scan time, for the "Old photo" flag; none for a general photo.
+      expect(json.byAuditAsset["aa-1"].images[0].assetScannedAt).toBe(
+        "2026-08-19T12:30:00.000Z"
+      );
+      expect(json.general.images[0].assetScannedAt).toBeNull();
     });
 
     it("asks the database for the capture time", async () => {

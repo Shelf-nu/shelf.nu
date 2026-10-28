@@ -1126,6 +1126,7 @@ export default function AuditAssetDetails() {
           inputNamePrefix="auditImage"
           existingImages={localImages}
           auditStartedAt={auditAsset.auditSession.startedAt}
+          assetScannedAt={auditAsset.scannedAt}
           onExistingImageRemove={handleImageDeleteWithConfirm}
           disabled={isUploadInProgress}
           isUploading={isUploadInProgress}

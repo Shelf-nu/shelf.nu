@@ -32,6 +32,8 @@ interface AuditImage {
   createdAt: string;
   /** The photo's audit, for the "Older than audit" flag */
   auditSession: { startedAt: string | null };
+  /** The photo's audited asset, for its scan time; null for a general photo */
+  auditAsset: { scannedAt: string | null } | null;
 }
 
 export const AuditImagesComponent = React.memo(
