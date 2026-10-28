@@ -56,6 +56,12 @@ const STALE_RECORD: PushTokenRecord = {
   lastFailure: null,
 };
 
+/** {@link STALE_RECORD} after a sign-out whose DELETE went unconfirmed. */
+const UNCONFIRMED_RECORD: PushTokenRecord = {
+  ...STALE_RECORD,
+  registration: { ...STALE_RECORD.registration!, removalUnconfirmed: true },
+};
+
 /** The boundary's state and what the registrar did to it. */
 type Phone = {
   session: PushSession | null;
@@ -331,7 +337,7 @@ test("a DELETE the server answers 404 to counts as forgotten", async () => {
   assert.deepEqual(phone.reports, []);
 });
 
-test("a failed DELETE keeps the record and is reported as an unregister failure", async () => {
+test("a failed DELETE keeps the record, marked unconfirmed, and is reported as an unregister failure", async () => {
   const { phone, effects } = fakePhone({
     record: STALE_RECORD,
     deleteAnswer: async () => ({ kind: "unreachable", message: "offline" }),
@@ -339,11 +345,11 @@ test("a failed DELETE keeps the record and is reported as an unregister failure"
   const registrar = createPushRegistrar(effects);
 
   await registrar.unregister();
-  assert.deepEqual(phone.record, STALE_RECORD);
+  assert.deepEqual(phone.record, UNCONFIRMED_RECORD);
   assert.deepEqual(phone.reports, [["unregister", "offline"]]);
 });
 
-test("sign-out gives up on a DELETE that never answers, keeping the record", async () => {
+test("sign-out gives up on a DELETE that never answers, keeping the record marked unconfirmed", async () => {
   const { phone, effects } = fakePhone({
     record: STALE_RECORD,
     deleteAnswer: (signal) =>
@@ -354,7 +360,64 @@ test("sign-out gives up on a DELETE that never answers, keeping the record", asy
   const registrar = createPushRegistrar(effects, { unregisterTimeoutMs: 20 });
 
   await registrar.unregister();
-  assert.deepEqual(phone.record, STALE_RECORD);
+  await flush();
+  assert.deepEqual(phone.record, UNCONFIRMED_RECORD);
+});
+
+test("after an unconfirmed sign-out, the same person's next sign-in registers again at once", async () => {
+  const { phone, effects } = fakePhone({
+    record: {
+      ...UNCONFIRMED_RECORD,
+      registration: {
+        ...UNCONFIRMED_RECORD.registration!,
+        token: TOKEN,
+        deviceToken: "apns-new",
+        sentAt: NOW - HOUR,
+      },
+    },
+    session: { userId: "user_1", accessToken: "access-2" },
+  });
+  const registrar = createPushRegistrar(effects);
+
+  assert.equal(await registrar.register(), "registered");
+  assert.deepEqual(phone.posts, [TOKEN]);
+  assert.equal(phone.record?.registration?.removalUnconfirmed, undefined);
+});
+
+test("sign-out leaves a registration made on another server alone, even when the active one answers 404", async () => {
+  const otherServer: PushTokenRecord = {
+    ...STALE_RECORD,
+    registration: {
+      ...STALE_RECORD.registration!,
+      baseUrl: "https://shelf.acme.edu",
+    },
+  };
+  const { phone, effects } = fakePhone({
+    record: otherServer,
+    deleteAnswer: async () => ({
+      kind: "rejected",
+      status: 404,
+      message: "Push token not found.",
+    }),
+  });
+  const registrar = createPushRegistrar(effects);
+
+  await registrar.unregister();
+  assert.deepEqual(phone.deletes, []);
+  assert.deepEqual(phone.record, otherServer);
+});
+
+test("sign-out leaves another person's registration alone", async () => {
+  const otherPerson: PushTokenRecord = {
+    ...STALE_RECORD,
+    registration: { ...STALE_RECORD.registration!, userId: "user_2" },
+  };
+  const { phone, effects } = fakePhone({ record: otherPerson });
+  const registrar = createPushRegistrar(effects);
+
+  await registrar.unregister();
+  assert.deepEqual(phone.deletes, []);
+  assert.deepEqual(phone.record, otherPerson);
 });
 
 test("the session that signed out never registers again, and the next one does", async () => {

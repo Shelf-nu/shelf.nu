@@ -7,9 +7,13 @@
  * @see ./routing.ts
  */
 import assert from "node:assert/strict";
+import { readdirSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 
 import {
+  NOT_A_DETAIL,
+  acceptTap,
   nextTapStep,
   resolvePushRoute,
   type PushPayload,
@@ -136,14 +140,43 @@ test("a list path opens that tab's list, in the workspace from ?orgId=", () => {
   });
 });
 
-test("a kit list path opens the Assets list, as a universal link does", () => {
+test("a kit list path opens the kits list inside the Assets tab", () => {
   for (const url of ["/kits", "/assets/kits"]) {
     assert.deepEqual(
       resolvePushRoute(payload({ url })),
-      { tabRoot: "/(tabs)/assets", href: null, organizationId: "org_a" },
+      {
+        tabRoot: "/(tabs)/assets",
+        href: "/(tabs)/assets/kits",
+        organizationId: "org_a",
+      },
       url
     );
   }
+});
+
+/**
+ * The static screens and folders in a stack's folder: every entry that is
+ * not the layout, the list or the `[id]` detail.
+ */
+function staticScreens(...folder: string[]): string[] {
+  return readdirSync(join(__dirname, "..", "..", "app", "(tabs)", ...folder))
+    .filter((name) => !["_layout.tsx", "index.tsx", "[id].tsx"].includes(name))
+    .map((name) => name.replace(/\.tsx$/, ""))
+    .sort();
+}
+
+test("every static screen in a stack is excluded from push details", () => {
+  // `assets/kits` is the kits stack, matched as a resource of its own.
+  assert.deepEqual(
+    staticScreens("assets").filter((name) => name !== "kits"),
+    [...NOT_A_DETAIL.assets].sort()
+  );
+  assert.deepEqual(staticScreens("assets", "kits"), [...NOT_A_DETAIL.kits]);
+  assert.deepEqual(
+    staticScreens("bookings"),
+    [...NOT_A_DETAIL.bookings].sort()
+  );
+  assert.deepEqual(staticScreens("audits"), [...NOT_A_DETAIL.audits].sort());
 });
 
 test("a path that names no native screen resolves to null", () => {
@@ -215,6 +248,7 @@ const READY = {
   authLoading: false,
   hasSession: true,
   orgsLoading: false,
+  orgsFailed: false,
   inTabs: true,
   organizations: ORGS,
   currentOrgId: "org_a",
@@ -234,6 +268,13 @@ test("a tap waits for the session, the workspaces and the tabs", () => {
   assert.deepEqual(nextTapStep({ ...READY, inTabs: false }), {
     kind: "wait",
   });
+});
+
+test("a tap waits, never drops, while the workspaces failed to load", () => {
+  assert.deepEqual(
+    nextTapStep({ ...READY, orgsFailed: true, organizations: [] }),
+    { kind: "wait" }
+  );
 });
 
 test("a tap with nobody signed in is dropped", () => {
@@ -285,5 +326,58 @@ test("a tap naming no workspace opens the screen as is", () => {
       tabRoot: "/(tabs)/bookings",
       href: "/(tabs)/bookings/bk_1",
     }
+  );
+});
+
+const DEFAULT_ACTION = "expo.modules.notifications.actions.DEFAULT";
+
+/** A plain tap on a push about a booking in workspace B. */
+const TAP = {
+  actionIdentifier: DEFAULT_ACTION,
+  tapId: "tap_1",
+  data: {
+    url: "/bookings/bk_1",
+    category: "bookings",
+    organizationId: "org_b",
+  },
+};
+
+test("a plain tap on a push about a screen waits to be opened", () => {
+  assert.deepEqual(
+    acceptTap(TAP, { defaultAction: DEFAULT_ACTION, lastHandledTapId: null }),
+    { kind: "pending", tapId: "tap_1", route: BOOKING_IN_B }
+  );
+});
+
+test("a tap already handled is ignored, so a cold start or remount opens it once", () => {
+  assert.deepEqual(
+    acceptTap(TAP, {
+      defaultAction: DEFAULT_ACTION,
+      lastHandledTapId: "tap_1",
+    }),
+    { kind: "ignore" }
+  );
+});
+
+test("an action other than a plain tap is ignored", () => {
+  assert.deepEqual(
+    acceptTap(
+      {
+        ...TAP,
+        actionIdentifier: "expo.modules.notifications.actions.DISMISS",
+      },
+      { defaultAction: DEFAULT_ACTION, lastHandledTapId: null }
+    ),
+    { kind: "ignore" }
+  );
+});
+
+test("a tap on a push about nothing the app can open is marked handled", () => {
+  assert.deepEqual(
+    acceptTap(
+      { ...TAP, data: { url: "/locations/lc_1" } },
+      { defaultAction: DEFAULT_ACTION, lastHandledTapId: null }
+    ),
+    { kind: "handled", tapId: "tap_1" }
   );
 });

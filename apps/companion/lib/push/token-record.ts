@@ -82,6 +82,12 @@ export type PushRegistration = {
   baseUrl: string;
   /** When it was sent, in epoch milliseconds. */
   sentAt: number;
+  /**
+   * Set when sign-out asked the server to forget this token and got no
+   * confirmation: the server may or may not still hold it. Such a
+   * registration is never current, so the next registration sends it again.
+   */
+  removalUnconfirmed?: true;
 };
 
 /** The last registration run that failed, for one person on one server. */
@@ -156,7 +162,17 @@ function parseRegistration(value: unknown): PushRegistration | null {
   if (!token || !deviceToken || !userId || !baseUrl || sentAt === null) {
     return null;
   }
-  return { token, deviceToken, userId, baseUrl, sentAt };
+  const registration: PushRegistration = {
+    token,
+    deviceToken,
+    userId,
+    baseUrl,
+    sentAt,
+  };
+  if (fields.removalUnconfirmed === true) {
+    registration.removalUnconfirmed = true;
+  }
+  return registration;
 }
 
 /** Parses the failure half of a stored record. */
@@ -232,8 +248,9 @@ function isFor(entry: PushAudience | null, audience: PushAudience): boolean {
  * @param now - The current time in epoch milliseconds
  * @returns True when the registration names the same person, server and (if
  *   given) device token, was sent less than {@link PUSH_REGISTRATION_TTL_MS}
- *   ago, and no run for them has failed since. A registration dated in the
- *   future (a clock change) does not count.
+ *   ago, no run for them has failed since, and no sign-out left its removal
+ *   unconfirmed. A registration dated in the future (a clock change) does not
+ *   count.
  */
 export function isRegistrationCurrent(
   record: PushTokenRecord | null,
@@ -245,6 +262,7 @@ export function isRegistrationCurrent(
   }
   if (isFor(record.lastFailure, current)) return false;
   const { registration } = record;
+  if (registration.removalUnconfirmed) return false;
   if (current.deviceToken && registration.deviceToken !== current.deviceToken) {
     return false;
   }
@@ -337,18 +355,54 @@ export function withoutFailure(
 }
 
 /**
+ * Whether the stored registration was made for this person on this server,
+ * so a session of theirs may ask that server to forget it.
+ *
+ * @param record - The stored record, or null
+ * @param current - The person whose session is ending, and the active server
+ * @returns True when the registration names the same person and server
+ */
+export function isRegistrationFor(
+  record: PushTokenRecord | null,
+  current: PushAudience
+): boolean {
+  return isFor(record?.registration ?? null, current);
+}
+
+/**
+ * The record after a sign-out whose DELETE went unconfirmed: the server may
+ * still hold the token, so the registration is kept, marked so the next
+ * registration for this person sends it again.
+ *
+ * @param record - The record before; must hold a registration
+ * @returns The next record
+ */
+export function withRemovalUnconfirmed(
+  record: PushTokenRecord & { registration: PushRegistration }
+): PushTokenRecord {
+  return {
+    ...record,
+    registration: { ...record.registration, removalUnconfirmed: true },
+  };
+}
+
+/**
  * Whether this phone is connected for this person on this server.
  *
  * @param record - The stored record, or null
  * @param current - The signed-in person and the active server
  * @returns "failed" when the last run for them failed, "registered" when a
- *   registration for them stands, and "none" otherwise
+ *   registration for them stands and no sign-out left its removal
+ *   unconfirmed, and "none" otherwise
  */
 export function registrationStatus(
   record: PushTokenRecord | null,
   current: PushAudience
 ): PushRegistrationStatus {
   if (isFor(record?.lastFailure ?? null, current)) return "failed";
-  if (isFor(record?.registration ?? null, current)) return "registered";
+  const registration = record?.registration ?? null;
+  if (isFor(registration, current) && !registration?.removalUnconfirmed) {
+    return "registered";
+  }
   return "none";
 }

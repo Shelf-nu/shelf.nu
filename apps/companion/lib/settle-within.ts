@@ -6,7 +6,7 @@
  * load it.
  *
  * @see {@link file://./settle-within.test.ts}
- * @see {@link file://./server/active-server.ts} `runBeforeSessionEnd`, the caller
+ * @see {@link file://./server/session-end.ts} `runBeforeSessionEnd`, the caller
  */
 
 /**

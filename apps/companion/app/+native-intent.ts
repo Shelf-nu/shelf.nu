@@ -29,14 +29,14 @@
  * `useDeepLinkHandler` (lib/deep-links.ts) finishes the job from the original
  * URL.
  *
- * Which paths count is decided by `matchResourcePath` (`lib/resource-path.ts`),
- * the allowlist push taps match against too; this file maps each matched
- * resource to its native route.
+ * Which paths count, and the native route each maps to, is decided by
+ * `nativeRouteForLink` (`lib/resource-path.ts`), which matches through the
+ * same allowlist push taps use.
  *
  * @see {@link file://./../lib/deep-links.ts}
  * @see {@link file://./../lib/resource-path.ts} the shared path allowlist
  */
-import { matchResourcePath, splitLinkUrl } from "../lib/resource-path";
+import { nativeRouteForLink } from "../lib/resource-path";
 
 type RedirectSystemPathArgs = {
   /**
@@ -57,45 +57,9 @@ type RedirectSystemPathArgs = {
  */
 export function redirectSystemPath({ path }: RedirectSystemPathArgs): string {
   try {
-    const { segments, query } = splitLinkUrl(path);
-    if (segments.length === 0) return "/";
-
-    // Re-attach the original query so param-consuming routes keep working
-    // (e.g. /assets/new?qrId=... reads qrId via useLocalSearchParams to link
-    // the scanned QR to the created asset). Extra params on routes that
-    // ignore them are harmless.
-    const withQuery = (route: string) => (query ? `${route}?${query}` : route);
-
-    const match = matchResourcePath(segments);
-    // Not a claimed prefix (dev-client URLs, custom-scheme extras): leave the
-    // URL unchanged so existing behavior is preserved. `app/+not-found.tsx`
-    // catches anything the router still can't match.
-    if (!match) return path;
-    const { resource, id } = match;
-
-    switch (resource) {
-      case "assets":
-        // Any deeper web path (/assets/:id/overview, /assets/:id/activity...)
-        // maps to the native asset detail, which is what the tapper wants.
-        // This also covers /assets/new (id = "new" opens the create screen).
-        return withQuery(id ? `/assets/${id}` : "/assets");
-      case "kits":
-        // The kit detail lives inside the assets stack.
-        return withQuery(id ? `/assets/kits/${id}` : "/assets");
-      case "bookings":
-        return withQuery(id ? `/bookings/${id}` : "/bookings");
-      case "audits":
-        return withQuery(id ? `/audits/${id}` : "/audits");
-      case "qr":
-        // Needs an async API resolve (asset vs kit vs other-org) that a path
-        // rewrite cannot express. Land on the start screen; useDeepLinkHandler
-        // reads the original URL via Linking and navigates once resolved.
-        return "/";
-      case "scanner":
-        return "/scanner";
-    }
+    return nativeRouteForLink(path);
   } catch {
-    // Never let a parse error strand the user — fall back to the start screen.
+    // Never let a parse error strand the user: fall back to the start screen.
     return "/";
   }
 }

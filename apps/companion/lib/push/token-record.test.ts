@@ -12,12 +12,14 @@ import { test } from "node:test";
 import {
   isBackingOff,
   isRegistrationCurrent,
+  isRegistrationFor,
   parsePushTokenRecord,
   registrationStatus,
   retryDelay,
   withFailure,
   withoutFailure,
   withRegistration,
+  withRemovalUnconfirmed,
   type PushFailure,
   type PushRegistration,
   type PushTokenRecord,
@@ -275,6 +277,42 @@ test("forgetting a failure keeps the registration, and leaves nothing without on
     withoutFailure({ registration: null, lastFailure: TOKEN_FAILURE }),
     null
   );
+});
+
+test("a registration whose removal went unconfirmed is never current, nor shown as registered", () => {
+  const unconfirmed = withRemovalUnconfirmed({
+    ...RECORD,
+    registration: REGISTRATION,
+  });
+  assert.equal(
+    isRegistrationCurrent(unconfirmed, SAME_PERSON, SENT_AT + MINUTE),
+    false
+  );
+  assert.equal(registrationStatus(unconfirmed, SAME_PERSON), "none");
+  assert.deepEqual(
+    parsePushTokenRecord(JSON.stringify(unconfirmed)),
+    unconfirmed
+  );
+  assert.equal(
+    withRegistration(REGISTRATION).registration?.removalUnconfirmed,
+    undefined
+  );
+});
+
+test("a registration belongs to the person and server it was made for", () => {
+  assert.equal(isRegistrationFor(RECORD, SAME_PERSON), true);
+  assert.equal(
+    isRegistrationFor(RECORD, { ...SAME_PERSON, userId: "user_2" }),
+    false
+  );
+  assert.equal(
+    isRegistrationFor(RECORD, {
+      ...SAME_PERSON,
+      baseUrl: "https://shelf.acme.edu",
+    }),
+    false
+  );
+  assert.equal(isRegistrationFor(null, SAME_PERSON), false);
 });
 
 test("the registration status speaks for this person on this server only", () => {

@@ -115,3 +115,49 @@ export function matchResourcePath(
       return null;
   }
 }
+
+/**
+ * The in-app route for a link the OS delivered, as `redirectSystemPath` in
+ * `app/+native-intent.ts` returns it.
+ *
+ * Every matched resource maps to a real native screen, so a cold start never
+ * lands on an unmatched route. The query is re-attached, because some routes
+ * read it (`/assets/new?qrId=...`); routes that ignore it are unaffected.
+ *
+ * - `assets/:id` and deeper open the asset (`assets/new` the create screen)
+ * - `kits/:id` and `assets/kits/:id` open the kit, `kits` the kits list
+ * - `bookings` and `audits` open the detail or the list
+ * - `qr/:id` lands on the start screen: only an API call can tell an asset
+ *   from a kit, and `useDeepLinkHandler` (`lib/deep-links.ts`) finishes the
+ *   job from the original URL
+ * - `scanner` and `scan` open the scanner
+ *
+ * @param url - The raw URL the OS delivered (scheme, host, path and query)
+ * @returns The in-app route, `/` for an empty path, or `url` unchanged when it
+ *   is not on the allowlist (dev-client URLs, custom-scheme extras), which
+ *   `app/+not-found.tsx` catches if the router cannot match it either
+ */
+export function nativeRouteForLink(url: string): string {
+  const { segments, query } = splitLinkUrl(url);
+  if (segments.length === 0) return "/";
+
+  const match = matchResourcePath(segments);
+  if (!match) return url;
+  const { resource, id } = match;
+  const withQuery = (route: string) => (query ? `${route}?${query}` : route);
+
+  switch (resource) {
+    case "assets":
+      return withQuery(id ? `/assets/${id}` : "/assets");
+    case "kits":
+      return withQuery(id ? `/assets/kits/${id}` : "/assets/kits");
+    case "bookings":
+      return withQuery(id ? `/bookings/${id}` : "/bookings");
+    case "audits":
+      return withQuery(id ? `/audits/${id}` : "/audits");
+    case "qr":
+      return "/";
+    case "scanner":
+      return "/scanner";
+  }
+}

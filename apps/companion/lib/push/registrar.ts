@@ -14,10 +14,13 @@
  * session that is about to end. The DELETE names the stored token and the
  * token the aborted POST carried, since the server may have applied that POST
  * before the abort reached it, and leaves once the POST has settled, which the
- * abort makes immediate. The record is removed once the server acknowledges
- * the DELETE; a failed DELETE keeps it, so the stored registration still says
- * which token the server holds. The session that signed out is never
- * registered again.
+ * abort makes immediate. The stored token is sent only when it was registered
+ * for the same person on the active server: no other server can remove it,
+ * and another server's 404 says nothing about the one that holds it. The
+ * record is removed once the server acknowledges the DELETE. A failed DELETE
+ * keeps the registration, marked unconfirmed, so it still says which token
+ * the server may hold and the next registration sends it again. The session
+ * that signed out is never registered again.
  *
  * The registrar is one explicit state, `idle`, `registering` or
  * `unregistering`, rather than a chain of promises, so each decision reads
@@ -35,9 +38,11 @@ import type { PushPermission } from "./preferences";
 import {
   isBackingOff,
   isRegistrationCurrent,
+  isRegistrationFor,
   withFailure,
   withoutFailure,
   withRegistration,
+  withRemovalUnconfirmed,
   type PushFailureStage,
   type PushTokenRecord,
   type RegistrationFailureStage,
@@ -352,18 +357,44 @@ export function createPushRegistrar<Reported>(
     const session = await effects.getSession();
     if (!session) return "no-session";
     endedSession = session.accessToken;
+    const audience = { userId: session.userId, baseUrl: effects.getBaseUrl() };
 
     // The abort settles the POST at once; waiting for it keeps the DELETE
     // from leaving while the POST is still on the wire.
     const post = interrupted?.post ?? null;
     if (post) await Promise.race([post.answer, onAbort(deadline, null)]);
-    if (deadline.aborted) return { failed: "No answer before sign-out." };
 
     const record = await effects.readRecord();
+    // A registration for another person or server stays as it is: the next
+    // registration on its own server claims the token.
+    const owned =
+      record?.registration && isRegistrationFor(record, audience)
+        ? record.registration
+        : null;
+
+    /** Keeps the owned registration, marked unconfirmed, and fails. */
+    const unconfirmed = async (failed: string): Promise<ForgetResult> => {
+      if (owned) {
+        // Re-read: a registration that replaced this one is left alone.
+        const latest = await effects.readRecord();
+        if (
+          latest?.registration?.token === owned.token &&
+          latest.registration.sentAt === owned.sentAt
+        ) {
+          await effects.writeRecord(
+            withRemovalUnconfirmed({ ...latest, registration: owned })
+          );
+        }
+      }
+      return { failed };
+    };
+
+    if (deadline.aborted) return unconfirmed("No answer before sign-out.");
+
     const tokens = [
       ...new Set(
-        [record?.registration?.token, post?.token].filter(
-          (token): token is string => Boolean(token)
+        [owned?.token, post?.token].filter((token): token is string =>
+          Boolean(token)
         )
       ),
     ];
@@ -372,14 +403,13 @@ export function createPushRegistrar<Reported>(
     );
     const refused = answers.find((answer) => !isAcknowledged(answer));
     if (refused) {
-      return {
-        failed:
-          refused.kind === "rejected" || refused.kind === "unreachable"
-            ? refused.message
-            : "No answer before sign-out.",
-      };
+      return unconfirmed(
+        refused.kind === "rejected" || refused.kind === "unreachable"
+          ? refused.message
+          : "No answer before sign-out."
+      );
     }
-    await effects.writeRecord(null);
+    if (owned || !record?.registration) await effects.writeRecord(null);
     return "forgotten";
   };
 

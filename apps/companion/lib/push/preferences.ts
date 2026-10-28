@@ -86,6 +86,8 @@ export type PushDeviceState = {
 export type PushServerState =
   | { status: "loading" }
   | { status: "failed"; message: string }
+  /** The server answered 404: it runs a Shelf version without push. */
+  | { status: "unsupported" }
   | {
       status: "loaded";
       /** The switches as the server last answered them. */
@@ -145,7 +147,48 @@ export type PushSettingsAction =
       preferences: NotificationPreferences;
       pushAvailable: boolean;
     }
-  | { type: "server-failed"; request: number; message: string };
+  | { type: "server-failed"; request: number; message: string }
+  /** The server answered 404 to the read: it has no push routes. */
+  | { type: "server-unsupported"; request: number };
+
+/** The server's answer to a read of the switches, as `apiFetch` returns it. */
+export type PreferencesReadAnswer = {
+  data: { preferences: NotificationPreferences; pushAvailable: boolean } | null;
+  error: string | null;
+  /** The HTTP status of an error answer; absent when nothing answered. */
+  status?: number;
+};
+
+/**
+ * The action a read's answer dispatches.
+ *
+ * A 404 means the server has no push routes, the same answer the registrar
+ * reads as a server without push. An answer with neither data nor an error
+ * is a failure too, so the screen never waits on it.
+ *
+ * @param request - The read's request number
+ * @param answer - What the server answered
+ * @returns The action to dispatch
+ */
+export function preferencesReadAction(
+  request: number,
+  { data, error, status }: PreferencesReadAnswer
+): PushSettingsAction {
+  if (data) {
+    return {
+      type: "server-loaded",
+      request,
+      preferences: data.preferences,
+      pushAvailable: data.pushAvailable,
+    };
+  }
+  if (status === 404) return { type: "server-unsupported", request };
+  return {
+    type: "server-failed",
+    request,
+    message: error ?? "Invalid response from server",
+  };
+}
 
 /**
  * Applies one action to the model.
@@ -191,6 +234,9 @@ export function pushSettingsReducer(
         ...model,
         server: { status: "failed", message: action.message },
       };
+    case "server-unsupported":
+      if (action.request !== model.latestRequest) return model;
+      return { ...model, server: { status: "unsupported" } };
   }
 }
 
@@ -277,6 +323,8 @@ function shownPreferences(
 export type PushScreenState =
   | { kind: "loading" }
   | { kind: "error"; message: string }
+  /** The server runs a Shelf version without push. */
+  | { kind: "server-unsupported" }
   /** No workspace plan includes push: the switches show, disabled. */
   | { kind: "unavailable"; preferences: NotificationPreferences }
   /**
@@ -310,6 +358,7 @@ export function derivePushScreenState(
   if (server.status === "failed") {
     return { kind: "error", message: server.message };
   }
+  if (server.status === "unsupported") return { kind: "server-unsupported" };
   if (device === null || server.status === "loading") {
     return { kind: "loading" };
   }
@@ -354,6 +403,7 @@ export function notificationsRowValue(
       return null;
     case "denied":
       return "Off in system settings";
+    case "server-unsupported":
     case "unavailable":
     case "opt-in":
       return "Off";

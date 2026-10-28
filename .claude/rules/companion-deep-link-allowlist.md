@@ -6,6 +6,7 @@ paths:
   - "apps/companion/lib/deep-links.ts"
   - "apps/companion/app/**/*.tsx"
   - "apps/companion/app/+native-intent.ts"
+  - "apps/companion/lib/resource-path.ts"
 ---
 
 # Companion Deep-Link Allowlist Consistency
@@ -18,7 +19,7 @@ they MUST stay in sync. Touch one → check the other three.
 | --- | --------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | 1   | `apps/webapp/app/routes/[.well-known].apple-app-site-association.tsx` | a `{ "/": "/locations/*" }` entry in `DEEP_LINK_COMPONENTS` (iOS)                      |
 | 2   | `apps/companion/app.json` → `android.intentFilters[].data`            | `{ "scheme": "https", "host": "app.shelf.nu", "pathPrefix": "/locations/" }` (Android) |
-| 3   | `apps/companion/lib/resource-path.ts` + `app/+native-intent.ts`       | `locations` in shared `matchResourcePath`, then a REAL route in `redirectSystemPath`   |
+| 3   | `apps/companion/lib/resource-path.ts`                                 | `locations` in `matchResourcePath`, then a REAL route in `nativeRouteForLink`          |
 | 4   | `apps/companion/lib/deep-links.ts`                                    | a `case "locations":` in `parseDeepLink` + `navigateToLink` (custom-scheme links)      |
 
 **Division of labour:** HTTPS universal links are routed natively by

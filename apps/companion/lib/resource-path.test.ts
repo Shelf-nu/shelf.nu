@@ -10,7 +10,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { matchResourcePath, splitLinkUrl } from "./resource-path";
+import {
+  matchResourcePath,
+  nativeRouteForLink,
+  splitLinkUrl,
+} from "./resource-path";
 
 test("a detail path names its resource and id, however deep the web path is", () => {
   assert.deepEqual(matchResourcePath(["assets", "as_1"]), {
@@ -114,4 +118,38 @@ test("the query survives the split and the hash does not", () => {
     segments: ["bookings", "bk_1"],
     query: "orgId=org_b&tab=assets",
   });
+});
+
+test("a delivered link maps to its native screen, keeping the query", () => {
+  const cases: [string, string][] = [
+    ["https://app.shelf.nu/assets/as_1/overview", "/assets/as_1"],
+    ["https://app.shelf.nu/assets", "/assets"],
+    ["shelf://assets/new?qrId=qr_1", "/assets/new?qrId=qr_1"],
+    ["https://app.shelf.nu/kits/kt_1", "/assets/kits/kt_1"],
+    ["shelf://assets/kits/kt_1", "/assets/kits/kt_1"],
+    ["https://app.shelf.nu/kits", "/assets/kits"],
+    [
+      "https://app.shelf.nu/bookings/bk_1?orgId=org_b",
+      "/bookings/bk_1?orgId=org_b",
+    ],
+    ["https://app.shelf.nu/bookings", "/bookings"],
+    ["https://app.shelf.nu/audits/au_1/overview", "/audits/au_1"],
+    ["https://app.shelf.nu/audits", "/audits"],
+    ["https://app.shelf.nu/qr/qr_1", "/"],
+    ["shelf://scan", "/scanner"],
+    ["shelf://scanner", "/scanner"],
+    ["https://app.shelf.nu", "/"],
+  ];
+  for (const [url, route] of cases) {
+    assert.equal(nativeRouteForLink(url), route, url);
+  }
+});
+
+test("a link outside the allowlist is returned unchanged", () => {
+  for (const url of [
+    "exp+shelf://expo-development-client/?url=http%3A%2F%2F10.0.0.2%3A8081",
+    "https://app.shelf.nu/locations/lc_1",
+  ]) {
+    assert.equal(nativeRouteForLink(url), url);
+  }
 });

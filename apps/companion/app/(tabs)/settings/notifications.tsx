@@ -10,6 +10,7 @@
  *   permission without asking.
  * - denied: notifications are blocked in the phone's settings, with a button
  *   that opens them
+ * - server-unsupported: the server runs a Shelf version without push
  * - unavailable: no workspace plan includes push; the switches show, disabled
  * - ready: the master switch and one switch per category, saved as they flip,
  *   with a notice and "Try again" when this phone's last registration failed
@@ -128,6 +129,19 @@ export default function NotificationsScreen() {
           >
             <Text style={styles.buttonText}>Try again</Text>
           </TouchableOpacity>
+        </View>
+      );
+
+    case "server-unsupported":
+      return (
+        <View style={styles.centered}>
+          <Text style={styles.title}>
+            Push notifications aren&apos;t available
+          </Text>
+          <Text style={styles.body}>
+            This Shelf server doesn&apos;t support push notifications yet. Email
+            notifications are unchanged.
+          </Text>
         </View>
       );
 

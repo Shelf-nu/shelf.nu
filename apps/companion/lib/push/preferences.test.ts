@@ -14,6 +14,7 @@ import {
   flipPreference,
   INITIAL_PUSH_SETTINGS,
   notificationsRowValue,
+  preferencesReadAction,
   pushSettingsReducer,
   settlePreferenceSave,
   toPushPermission,
@@ -167,6 +168,20 @@ test("a failed first load is an error, and a retry goes back to loading", () => 
   assert.deepEqual(
     derivePushScreenState(pushSettingsReducer(failed, requested(2))),
     { kind: "loading" }
+  );
+});
+
+test("a server without the push routes says so, rather than offering a retry", () => {
+  const unsupported = after(device(), requested(1), {
+    type: "server-unsupported",
+    request: 1,
+  });
+  assert.deepEqual(derivePushScreenState(unsupported), {
+    kind: "server-unsupported",
+  });
+  assert.equal(
+    notificationsRowValue(derivePushScreenState(unsupported)),
+    "Off"
   );
 });
 
@@ -412,4 +427,32 @@ test("the OS permission answer reduces to granted, undetermined or denied", () =
     toPushPermission({ granted: false, status: "denied", canAskAgain: false }),
     "denied"
   );
+});
+
+test("a read's answer becomes loaded, unsupported on 404, or failed otherwise", () => {
+  assert.deepEqual(
+    preferencesReadAction(3, {
+      data: { preferences: ALL_ON, pushAvailable: true },
+      error: null,
+    }),
+    loaded(3)
+  );
+  assert.deepEqual(
+    preferencesReadAction(3, {
+      data: null,
+      error: "Request failed (404)",
+      status: 404,
+    }),
+    { type: "server-unsupported", request: 3 }
+  );
+  assert.deepEqual(preferencesReadAction(3, { data: null, error: "offline" }), {
+    type: "server-failed",
+    request: 3,
+    message: "offline",
+  });
+  assert.deepEqual(preferencesReadAction(3, { data: null, error: null }), {
+    type: "server-failed",
+    request: 3,
+    message: "Invalid response from server",
+  });
 });

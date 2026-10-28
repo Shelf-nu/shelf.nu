@@ -35,6 +35,7 @@ import {
   derivePushScreenState,
   flipPreference,
   INITIAL_PUSH_SETTINGS,
+  preferencesReadAction,
   pushSettingsReducer,
   settlePreferenceSave,
   type NotificationPreferenceKey,
@@ -119,18 +120,9 @@ function usePushSettingsState(): PushSettings {
 
     const request = ++requestCount.current;
     dispatch({ type: "server-requested", request });
-    void api.notificationPreferences().then(({ data, error }) => {
-      if (data) {
-        dispatch({
-          type: "server-loaded",
-          request,
-          preferences: data.preferences,
-          pushAvailable: data.pushAvailable,
-        });
-      } else if (error) {
-        dispatch({ type: "server-failed", request, message: error });
-      }
-    });
+    void api
+      .notificationPreferences()
+      .then((answer) => dispatch(preferencesReadAction(request, answer)));
   }, [dispatch, readDevice]);
 
   useFocusEffect(reload);
@@ -164,7 +156,12 @@ function usePushSettingsState(): PushSettings {
       void api
         .updateNotificationPreferences(changes)
         .then(({ data, error }) => {
-          if (error) Alert.alert("Couldn't save the change", error);
+          if (!data) {
+            Alert.alert(
+              "Couldn't save the change",
+              error ?? "Invalid response from server"
+            );
+          }
           const step = settlePreferenceSave(
             modelRef.current,
             data?.preferences ?? null

@@ -62,7 +62,11 @@ export type PushDestination =
   | { tabRoot: "/(tabs)/audits"; href: `/(tabs)/audits/${string}` | null }
   | {
       tabRoot: "/(tabs)/assets";
-      href: `/(tabs)/assets/${string}` | `/(tabs)/assets/kits/${string}` | null;
+      href:
+        | `/(tabs)/assets/${string}`
+        | "/(tabs)/assets/kits"
+        | `/(tabs)/assets/kits/${string}`
+        | null;
     };
 
 /**
@@ -80,14 +84,16 @@ function readString(data: object, key: string): string | null {
 
 /**
  * Screens in each stack whose name sits where an id would. A push opens
- * details and lists only, so these never resolve. Keep each list in step with
- * the static screens in that tab's folder under `app/(tabs)/`.
+ * details and lists only, so these never resolve. Each list holds every
+ * static screen and folder in that stack's folder under `app/(tabs)/`, which
+ * `routing.test.ts` checks against the folder itself.
  */
-const NOT_A_DETAIL: Record<
-  "assets" | "bookings" | "audits",
+export const NOT_A_DETAIL: Record<
+  "assets" | "kits" | "bookings" | "audits",
   readonly string[]
 > = {
   assets: ["new", "edit", "link-qr"],
+  kits: [],
   bookings: ["new", "edit", "add-assets"],
   audits: ["scan", "asset", "kit"],
 };
@@ -117,9 +123,10 @@ function toDestination({ resource, id }: ResourcePath): PushDestination | null {
         href: id ? `/(tabs)/assets/${id}` : null,
       };
     case "kits":
+      if (id && NOT_A_DETAIL.kits.includes(id)) return null;
       return {
         tabRoot: "/(tabs)/assets",
-        href: id ? `/(tabs)/assets/kits/${id}` : null,
+        href: id ? `/(tabs)/assets/kits/${id}` : "/(tabs)/assets/kits",
       };
     case "scanner":
     case "qr":
@@ -138,7 +145,8 @@ function toDestination({ resource, id }: ResourcePath): PushDestination | null {
  * - `/audits/:id`, `/audits/:id/overview` and deeper open the audit
  * - `/assets/:id` and deeper open the asset
  * - `/assets/kits/:id` and `/kits/:id` open the kit
- * - `/bookings`, `/audits`, `/assets` (and `/kits`) open that tab's list
+ * - `/bookings`, `/audits` and `/assets` open that tab's list
+ * - `/kits` and `/assets/kits` open the kits list
  *
  * The workspace is `organizationId`, or the path's `?orgId=` when the payload
  * lacks one. The query never reaches the native route.
@@ -163,10 +171,58 @@ export function resolvePushRoute(data: unknown): PushRoute | null {
   return { ...destination, organizationId };
 }
 
+/** A tapped notification, as far as accepting it needs. */
+export type TapResponse = {
+  /** Which action the person chose; a plain tap is the default action. */
+  actionIdentifier: string;
+  /** The notification's request identifier. */
+  tapId: string;
+  /** The notification's `request.content.data`. */
+  data: unknown;
+};
+
+/** What to do with a tap that just arrived. */
+export type TapAcceptance =
+  /** Not a plain tap, or one already handled: nothing to do. */
+  | { kind: "ignore" }
+  /** A push about nothing the app can open: mark it handled, open nothing. */
+  | { kind: "handled"; tapId: string }
+  /** A tap to open once the app is ready (see {@link nextTapStep}). */
+  | { kind: "pending"; tapId: string; route: PushRoute };
+
+/**
+ * Decides what to do with a tap, whether it launched the app or arrived
+ * while it runs.
+ *
+ * The same tap reaches the handler twice on a cold start (the stored launch
+ * response and the listener) and again after a remount, so a tap whose id
+ * was already handled is ignored.
+ *
+ * @param response - The tapped notification
+ * @param context.defaultAction - The identifier of a plain tap
+ * @param context.lastHandledTapId - The id of the last tap handled, or null
+ * @returns What to do with it
+ */
+export function acceptTap(
+  response: TapResponse,
+  context: { defaultAction: string; lastHandledTapId: string | null }
+): TapAcceptance {
+  if (response.actionIdentifier !== context.defaultAction) {
+    return { kind: "ignore" };
+  }
+  if (response.tapId === context.lastHandledTapId) return { kind: "ignore" };
+  const route = resolvePushRoute(response.data);
+  if (!route) return { kind: "handled", tapId: response.tapId };
+  return { kind: "pending", tapId: response.tapId, route };
+}
+
 /** What the tap handler does next with a pending tap. */
 export type TapStep<Org> =
   | { kind: "none" }
-  /** Not ready yet: the session, the workspaces or the tabs are still loading. */
+  /**
+   * Not ready yet: the session, the workspaces or the tabs are still loading,
+   * or the workspaces failed to load and are not known.
+   */
   | { kind: "wait" }
   /** Nobody is signed in, or the push names a workspace the person left; the tap is let go. */
   | { kind: "drop" }
@@ -181,6 +237,11 @@ export type TapContext<Org extends { id: string }> = {
   authLoading: boolean;
   hasSession: boolean;
   orgsLoading: boolean;
+  /**
+   * Whether the last workspace load failed. The list is then not the person's
+   * membership, so it cannot say they left the push's workspace.
+   */
+  orgsFailed: boolean;
   /** Whether the tab navigator is on screen, so `pushIntoTab` can anchor. */
   inTabs: boolean;
   /** The person's workspaces. */
@@ -192,7 +253,8 @@ export type TapContext<Org extends { id: string }> = {
  * Decides the next step for a pending tap.
  *
  * A tap waits until the session is known, the workspaces have loaded and the
- * tabs are on screen. A tap for another of the person's workspaces switches
+ * tabs are on screen. A failed workspace load keeps it waiting for the next
+ * load, never drops it. A tap for another of the person's workspaces switches
  * to it first, and the caller asks again once the switch lands, so the screen
  * loads that workspace's data. A tap for a workspace the person no longer
  * belongs to is dropped: opening the screen in the current workspace would
@@ -209,7 +271,9 @@ export function nextTapStep<Org extends { id: string }>(
   if (!pending) return { kind: "none" };
   if (context.authLoading) return { kind: "wait" };
   if (!context.hasSession) return { kind: "drop" };
-  if (context.orgsLoading || !context.inTabs) return { kind: "wait" };
+  if (context.orgsLoading || context.orgsFailed || !context.inTabs) {
+    return { kind: "wait" };
+  }
 
   // Membership is checked before the current-workspace comparison: the current
   // workspace can be one the person was just removed from.

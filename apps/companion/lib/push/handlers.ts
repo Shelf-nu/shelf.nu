@@ -21,7 +21,7 @@ import { useAuth } from "../auth-context";
 import { useOrg } from "../org-context";
 import { pushIntoTab } from "../navigation";
 import { registerThisDevice } from "./registration";
-import { nextTapStep, resolvePushRoute, type PushRoute } from "./routing";
+import { acceptTap, nextTapStep, type PushRoute } from "./routing";
 
 /**
  * Shows a push that arrives in the foreground as a banner with sound, and
@@ -109,8 +109,9 @@ export function usePushTapHandler(): void {
   const {
     organizations,
     currentOrg,
-    setCurrentOrg,
+    visitOrg,
     isLoading: orgsLoading,
+    error: orgsError,
   } = useOrg();
   const segments = useSegments();
   const inTabs = segments[0] === "(tabs)";
@@ -121,20 +122,29 @@ export function usePushTapHandler(): void {
     let mounted = true;
 
     const accept = (response: Notifications.NotificationResponse) => {
-      if (response.actionIdentifier !== Notifications.DEFAULT_ACTION_IDENTIFIER)
-        return;
-      const tapId = response.notification.request.identifier;
-      if (tapId === lastHandledTapId || !mounted) return;
-
-      const route = resolvePushRoute(
-        response.notification.request.content.data
+      if (!mounted) return;
+      const acceptance = acceptTap(
+        {
+          actionIdentifier: response.actionIdentifier,
+          tapId: response.notification.request.identifier,
+          data: response.notification.request.content.data,
+        },
+        {
+          defaultAction: Notifications.DEFAULT_ACTION_IDENTIFIER,
+          lastHandledTapId,
+        }
       );
-      // A push about nothing the app can open only brings the app forward.
-      if (!route) {
-        markTapHandled(tapId);
-        return;
+      switch (acceptance.kind) {
+        case "ignore":
+          return;
+        case "handled":
+          // A push about nothing the app can open only brings the app forward.
+          markTapHandled(acceptance.tapId);
+          return;
+        case "pending":
+          setPending({ tapId: acceptance.tapId, route: acceptance.route });
+          return;
       }
-      setPending({ tapId, route });
     };
 
     try {
@@ -158,6 +168,7 @@ export function usePushTapHandler(): void {
       authLoading,
       hasSession: Boolean(session),
       orgsLoading,
+      orgsFailed: Boolean(orgsError),
       inTabs,
       organizations,
       currentOrgId,
@@ -167,8 +178,9 @@ export function usePushTapHandler(): void {
       case "wait":
         return;
       case "switch-org":
-        // This effect runs again once the switch lands, and opens then.
-        setCurrentOrg(step.organization);
+        // This effect runs again once the switch lands, and opens then. The
+        // switch is for this visit: the person's chosen workspace stays.
+        visitOrg(step.organization);
         return;
       case "drop":
       case "open":
@@ -184,9 +196,10 @@ export function usePushTapHandler(): void {
     authLoading,
     session,
     orgsLoading,
+    orgsError,
     inTabs,
     organizations,
     currentOrgId,
-    setCurrentOrg,
+    visitOrg,
   ]);
 }

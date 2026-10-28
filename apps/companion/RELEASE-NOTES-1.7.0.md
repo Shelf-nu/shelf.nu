@@ -53,6 +53,12 @@ key, the Android build installs and runs, but registration fails and no Android
 phone receives a push. Check both before `eas build --profile production`. The
 steps are in `PUSH-NOTIFICATIONS.md`.
 
+**The server ships first.** This build calls `/api/mobile/push-token` and
+`/api/mobile/notification-preferences`, which arrive with the webapp push PR
+(#3249). Deploy that to Shelf Cloud before this build goes live. A server
+without those routes is not an error: registration stays quiet, and Settings,
+Notifications says the server does not support push yet.
+
 **Who gets pushes in this version.** Only the "about you" events: the custodian
 of a booking, the assignees of an audit, and the people an asset reminder
 names. Pushes go only to workspaces whose plan includes push; the server checks
