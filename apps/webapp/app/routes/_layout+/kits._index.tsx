@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useMemo } from "react";
 import type { Prisma } from "@prisma/client";
 import { KitStatus } from "@prisma/client";
 import type {
@@ -36,6 +37,10 @@ import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import { db } from "~/database/db.server";
 import { useAssetIndexView } from "~/hooks/use-asset-index-view";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
+import {
+  type ListContextLinkState,
+  useListContextLinkState,
+} from "~/hooks/use-list-context";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { getLocationsForCreateAndEdit } from "~/modules/asset/service.server";
@@ -46,6 +51,7 @@ import {
   updateKitsWithBookingCustodians,
 } from "~/modules/kit/service.server";
 import type { KITS_INCLUDE_FIELDS } from "~/modules/kit/types";
+import { LIST_DETAIL_PATH } from "~/modules/list-navigation/list-context";
 import calendarStyles from "~/styles/layout/calendar.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getFiltersFromRequest, setCookie } from "~/utils/cookies.server";
@@ -316,7 +322,9 @@ export const handle = {
 };
 
 export default function KitsIndexPage() {
-  const { items } = useLoaderData<typeof loader>();
+  const { items, perPage } = useLoaderData<typeof loader>();
+  const linkState = useListContextLinkState("kit", perPage);
+  const listItemProps = useMemo(() => ({ linkState }), [linkState]);
   const roles = useOrganizationRoles();
   /**
    * The bulk menu holds custody, edit and delete actions; any one opens it.
@@ -452,6 +460,7 @@ export default function KitsIndexPage() {
           <List
             className="overflow-x-visible md:overflow-x-auto"
             ItemComponent={ListContent}
+            extraItemComponentProps={listItemProps}
             bulkActions={canBulkAct ? <BulkActionsDropdown /> : undefined}
             customEmptyStateContent={{
               title: "No kits yet",
@@ -532,6 +541,7 @@ function KitCalendarCodeBadge({
 function ListContent({
   item,
   bulkActions,
+  extraProps,
 }: {
   item: Prisma.KitGetPayload<{
     include: MergeInclude<
@@ -551,6 +561,8 @@ function ListContent({
     >;
   }>;
   bulkActions?: ReactNode;
+  /** History state for the row link, so the kit page can step through this list. */
+  extraProps: { linkState: ListContextLinkState };
 }) {
   const locationWithHierarchy = item.location as Prisma.LocationGetPayload<
     typeof LOCATION_WITH_HIERARCHY
@@ -572,7 +584,8 @@ function ListContent({
     <>
       <Td className="w-full whitespace-normal p-0 md:p-0">
         <Link
-          to={`/kits/${item.id}/assets`}
+          to={LIST_DETAIL_PATH.kit(item.id)}
+          state={extraProps.linkState}
           className={tw(
             "flex justify-between gap-3 py-4  md:justify-normal",
             bulkActions ? "md:pl-0 md:pr-6" : "md:px-6"

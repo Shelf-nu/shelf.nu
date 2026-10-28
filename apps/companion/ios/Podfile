@@ -60,6 +60,21 @@ target 'Shelf' do
       :ccache_enabled => ccache_enabled?(podfile_properties),
     )
 
+    # Expo's EXConstants and EXUpdates script phases run
+    # `bash -l -c "$PODS_TARGET_SRCROOT/../scripts/<name>.sh"`. The outer shell
+    # expands the variable into the command string, and bash -c then splits
+    # that string on spaces, so a checkout path containing a space fails with
+    # "No such file or directory". Wrap the expanded path in literal quotes so
+    # the phases run from any checkout path.
+    installer.pods_project.targets.each do |target|
+      target.shell_script_build_phases.each do |phase|
+        next unless phase.shell_script.include?('bash -l -c "$PODS_TARGET_SRCROOT/')
+        phase.shell_script = phase.shell_script
+          .sub('bash -l -c "$PODS_TARGET_SRCROOT/', 'bash -l -c "\"$PODS_TARGET_SRCROOT/')
+          .sub(/\.sh"/, '.sh\""')
+      end
+    end
+
     # Fix Swift 6 strict concurrency errors in expo-image (Xcode 16.4+)
     installer.pods_project.targets.each do |target|
       target.build_configurations.each do |bc|
