@@ -336,6 +336,42 @@ describe("calculateBookingLifecycleProgress (asset mode)", () => {
       expect(p.checkinProgressCount).toBe(2);
     }
   );
+
+  it("ARCHIVED without check-in keeps every item Booked", () => {
+    // Archived straight from RESERVED: nothing left, so no slice markers and
+    // no session records. Without the flag that reads as legacy data.
+    const p = calculateBookingLifecycleProgress({
+      bookingAssets: [
+        A("a", AssetStatus.AVAILABLE),
+        A("b", AssetStatus.AVAILABLE),
+        {
+          ...A("cables", AssetStatus.AVAILABLE),
+          assetType: AssetType.QUANTITY_TRACKED,
+          bookedQuantity: 5,
+          checkedOutQuantity: 0,
+          dispositionedQuantity: 0,
+        },
+      ],
+      checkedInAssetIds: [],
+      bookingStatus: BookingStatus.ARCHIVED,
+      archivedWithoutCheckin: true,
+    });
+    expect(p.bookedCount).toBe(3);
+    expect(p.returnedCount).toBe(0);
+    expect(p.checkoutProgressPercentage).toBe(0);
+    expect(p.checkinProgressPercentage).toBe(0);
+  });
+
+  it("ARCHIVED from COMPLETE with no records still reads legacy data as returned", () => {
+    const p = calculateBookingLifecycleProgress({
+      bookingAssets: [A("a", AssetStatus.AVAILABLE)],
+      checkedInAssetIds: [],
+      bookingStatus: BookingStatus.ARCHIVED,
+      archivedWithoutCheckin: false,
+    });
+    expect(p.returnedCount).toBe(1);
+    expect(p.bookedCount).toBe(0);
+  });
 });
 
 describe("calculateBookingLifecycleProgress (unit mode)", () => {

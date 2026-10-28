@@ -413,9 +413,9 @@ export type BookingLifecycleProgress = {
  * - INDIVIDUAL: every dispatched asset is Returned, whatever its return
  *   marker says. The status is the record: a booking reaches COMPLETE only
  *   through a check-in that reconciles every dispatched INDIVIDUAL slice, and
- *   ARCHIVED only from COMPLETE or from a reservation nothing left on. The
- *   asset rows and the check-in receipt (`buildCheckinReceipt`) apply the
- *   same rule.
+ *   ARCHIVED only from COMPLETE or from a reservation nothing left on (see
+ *   `archivedWithoutCheckin` below). The asset rows and the check-in receipt
+ *   (`buildCheckinReceipt`) apply the same rule.
  * - QUANTITY_TRACKED: Returned only when recorded dispositions cover the
  *   dispatched units. A booking can close with units pending, so a row still
  *   holding some reads Partial (some back) or Checked out (none back).
@@ -423,10 +423,10 @@ export type BookingLifecycleProgress = {
  * Either way a row the records show never left stays Booked: the status
  * settles returns, not departures. With no slice markers and no session
  * records at all, nothing says which rows left, so every row counts as
- * dispatched and reads Returned. That covers legacy data and also a
- * reservation archived without ever going out.
+ * dispatched and reads Returned (legacy data from before the markers).
  *
- * For pre-checkout bookings (DRAFT/RESERVED/CANCELLED) no checkout has happened
+ * For pre-checkout bookings (DRAFT/RESERVED/CANCELLED, and an ARCHIVED booking
+ * flagged `archivedWithoutCheckin`) no checkout has happened
  * in THIS booking — only ONGOING/OVERDUE own a live checkout — so every unit is
  * forced into the Booked bucket. This prevents the global asset `status` (which
  * may be CHECKED_OUT because the asset is out in a DIFFERENT booking — e.g.
@@ -441,6 +441,7 @@ export function calculateBookingLifecycleProgress({
   checkedInAssetIds,
   checkedOutAssetIds = [],
   bookingStatus,
+  archivedWithoutCheckin = false,
   countKitsAsSingleUnit = false,
 }: {
   bookingAssets: LifecycleAsset[];
@@ -454,6 +455,12 @@ export function calculateBookingLifecycleProgress({
    */
   checkedOutAssetIds?: string[];
   bookingStatus?: BookingStatus;
+  /**
+   * `Booking.archivedWithoutCheckin`: the booking was archived straight from
+   * RESERVED, so nothing on it ever left. It carries no slice markers, which
+   * would otherwise read as legacy data and collapse every row to Returned.
+   */
+  archivedWithoutCheckin?: boolean;
   countKitsAsSingleUnit?: boolean;
 }): BookingLifecycleProgress {
   const countMode = countKitsAsSingleUnit ? "units" : "assets";
@@ -471,12 +478,15 @@ export function calculateBookingLifecycleProgress({
   // physically out in a DIFFERENT booking (e.g. after duplicating an ongoing
   // booking into a fresh DRAFT, or reserving an asset for a future window while
   // it's checked out elsewhere now). Force every unit to Booked so cross-booking
-  // status never leaks into this booking's progress bar. (COMPLETE/ARCHIVED is
-  // handled separately below via `checkedOutAssetIds`, not live status.)
+  // status never leaks into this booking's progress bar. A reservation archived
+  // without ever going out belongs here too. (Other COMPLETE/ARCHIVED bookings
+  // are handled below via the slice markers and `checkedOutAssetIds`, not live
+  // status.)
   const isPreCheckout =
     bookingStatus === BookingStatus.DRAFT ||
     bookingStatus === BookingStatus.RESERVED ||
-    bookingStatus === BookingStatus.CANCELLED;
+    bookingStatus === BookingStatus.CANCELLED ||
+    (bookingStatus === BookingStatus.ARCHIVED && archivedWithoutCheckin);
 
   // An asset "was actually checked out" iff it has a checkout record. When no
   // records exist at all (empty array), every asset was checked out.
@@ -602,8 +612,8 @@ export function calculateBookingLifecycleProgress({
     return individualBucketOf(a);
   };
 
-  // Pre-checkout bookings (DRAFT/RESERVED/CANCELLED): force every unit to
-  // Booked, ignoring the global asset status that may belong to another
+  // Pre-checkout bookings (DRAFT/RESERVED/CANCELLED, or archived without
+  // check-in): force every unit to Booked, ignoring the global asset status that may belong to another
   // booking. Every other status goes through `bucketOf`, whose two resolvers
   // each handle COMPLETE/ARCHIVED themselves.
   const resolveBucket = isPreCheckout ? (): "booked" => "booked" : bucketOf;
