@@ -119,6 +119,32 @@ describe("getLocation archived view", () => {
     expect(countWhere).toEqual(listWhere);
   });
 
+  it("loads the location alone when the caller passes an include", async () => {
+    const result = await getLocation({
+      id: "loc-1",
+      organizationId: "org-1",
+      include: { notes: { select: { id: true } } },
+    });
+
+    expect(findManyMock).not.toHaveBeenCalled();
+    expect(countMock).not.toHaveBeenCalled();
+    expect(result.totalAssetsWithinLocation).toBe(0);
+  });
+
+  it("counts without loading a page when the caller asks for no page", async () => {
+    countMock.mockResolvedValue(8);
+
+    const result = await getLocation({
+      id: "loc-1",
+      organizationId: "org-1",
+      withAssetsPage: false,
+    });
+
+    expect(findManyMock).not.toHaveBeenCalled();
+    expect(result.totalAssetsWithinLocation).toBe(8);
+    expect(result.assets).toEqual([]);
+  });
+
   it("lists every asset when the caller names no view", async () => {
     await getLocation({ id: "loc-1", organizationId: "org-1" });
 

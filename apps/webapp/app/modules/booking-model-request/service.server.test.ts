@@ -27,6 +27,7 @@ import {
   getAssetModelAvailabilities,
   getAssetModelAvailability,
   getBookingModelTabData,
+  measureModelPoolPeak,
   lockAssetModelsForReservation,
   materializeModelRequestForAsset,
   MAX_MODELS_PER_RESERVATION_BATCH,
@@ -35,6 +36,7 @@ import {
   upsertBookingModelRequest,
   upsertBookingModelRequests,
 } from "./service.server";
+import type { ModelPoolClaim } from "./service.server";
 
 vitest.mock("~/database/db.server", () => ({
   db: {
@@ -75,6 +77,10 @@ vitest.mock("~/database/db.server", () => ({
     },
     booking: {
       findUnique: vitest.fn().mockResolvedValue(null),
+      // why: the pool reads the OTHER bookings that touch the window, each
+      // with the units it names and the reservations it is owed, so the
+      // pool can be measured at the instant demand peaks.
+      findMany: vitest.fn().mockResolvedValue([]),
     },
     bookingAsset: {
       // why: serves the pool's concrete-reservation rows (staged per model
@@ -141,6 +147,11 @@ vitest.mock("~/database/db.server", () => ({
         lastName: "User",
         displayName: null,
       }),
+      // why: a pool refusal reads the acting user's date preferences through
+      // `resolveUserFormatPrefsById` to print the peak day. Default to no row
+      // (preferences then fall back to the request hints); tests that pin a
+      // preference stage it.
+      findFirst: vitest.fn().mockResolvedValue(null),
     },
   },
 }));
@@ -302,25 +313,33 @@ function stageEveryModelLockable() {
 
 /** The model ids a batched pool read asks about, read off its `where`. */
 function modelIdsAskedFor(args: unknown): string[] {
-  const where = (
-    args as
+  const { where, select } =
+    (args as
       | {
           where?: {
             assetModelId?: unknown;
             asset?: { assetModelId?: unknown };
           };
+          select?: { modelRequests?: { where?: { assetModelId?: unknown } } };
         }
-      | undefined
-  )?.where;
-  const filter = where?.assetModelId ?? where?.asset?.assetModelId;
+      | undefined) ?? {};
+  const filter =
+    where?.assetModelId ??
+    where?.asset?.assetModelId ??
+    select?.modelRequests?.where?.assetModelId;
   if (typeof filter === "string") return [filter];
   return (filter as { in?: string[] } | undefined)?.in ?? [];
 }
 
-/** `units` one-unit rows on every model the read asks about. */
+/**
+ * `units` one-unit custody rows on every model the read asks about, each on
+ * its own unit (`<model>-custody-<n>`), distinct from the units other bookings
+ * hold by name unless a test names one of these ids itself.
+ */
 function unitRowsPerModel(args: unknown, units: number) {
   return modelIdsAskedFor(args).flatMap((assetModelId) =>
-    Array.from({ length: units }, () => ({
+    Array.from({ length: units }, (_, i) => ({
+      assetId: `${assetModelId}-custody-${i + 1}`,
       quantity: 1,
       asset: { assetModelId },
     }))
@@ -359,39 +378,77 @@ function stageInCustody(units: number) {
 }
 
 /**
- * Stages `units` booked by name on other bookings, on every model a pool read
- * asks about.
+ * What the one other booking in these scenarios holds of every model a pool
+ * read asks about: units by name, and a reservation still owed.
  *
- * why: `bookingAsset.findMany` also serves the claim path's row reads, so the
- * stub answers only the pool read (the one selecting the unit's model) and
- * gives every other read no rows.
+ * why: the pool reads the OTHER bookings that touch the window in one
+ * `booking.findMany`, each with its named units and its reservations, so both
+ * stagings feed that single read. Every model gets the same claim, spanning
+ * the whole window, which is what the scenarios in this file describe.
  */
-function stageReservedConcrete(units: number) {
-  (db.bookingAsset.findMany as unknown as Mock).mockImplementation(
-    (args: unknown) =>
-      Promise.resolve(
-        (args as { select?: { asset?: unknown } } | undefined)?.select?.asset
-          ? unitRowsPerModel(args, units)
-          : []
-      )
+let pooledNamedUnits = 0;
+let pooledRequest = { quantity: 0, fulfilledQuantity: 0 };
+function installPoolBookings() {
+  (db.booking.findMany as unknown as Mock).mockImplementation(
+    (args: unknown) => {
+      const ids = modelIdsAskedFor(args);
+      if (ids.length === 0) return Promise.resolve([]);
+      const bookingAssets = ids.flatMap((assetModelId) =>
+        Array.from({ length: pooledNamedUnits }, (_, i) => ({
+          assetId: `${assetModelId}-elsewhere-${i + 1}`,
+          asset: { assetModelId },
+        }))
+      );
+      const modelRequests =
+        pooledRequest.quantity > 0
+          ? ids.map((assetModelId) => ({ assetModelId, ...pooledRequest }))
+          : [];
+      if (bookingAssets.length === 0 && modelRequests.length === 0) {
+        return Promise.resolve([]);
+      }
+      return Promise.resolve([
+        { ...OTHER_BOOKING, bookingAssets, modelRequests },
+      ]);
+    }
   );
 }
 
+/** Stages `units` booked by name on the other booking, for every model. */
+function stageReservedConcrete(units: number) {
+  pooledNamedUnits = units;
+  installPoolBookings();
+}
+
 /**
- * Stages other bookings' model reservations, on every model a pool read asks
- * about: `quantity` promised, `fulfilledQuantity` of it already delivered.
- *
- * why: the pool reads them in one batched `groupBy` across models.
+ * Stages the other booking's model reservation, for every model: `quantity`
+ * promised, `fulfilledQuantity` of it already delivered.
  */
 function stageReservedViaRequest(quantity: number, fulfilledQuantity = 0) {
-  (db.bookingModelRequest.groupBy as unknown as Mock).mockImplementation(
-    (args: unknown) =>
-      Promise.resolve(
-        modelIdsAskedFor(args).map((assetModelId) => ({
-          assetModelId,
-          _sum: { quantity, fulfilledQuantity },
-        }))
-      )
+  pooledRequest = { quantity, fulfilledQuantity };
+  installPoolBookings();
+}
+
+/** Stages exactly these other bookings for the pool read, dates and all. */
+function stageOtherBookings(
+  bookings: Array<{
+    id: string;
+    name: string;
+    from: Date;
+    to: Date;
+    bookingAssets?: Array<{ assetId: string; asset: { assetModelId: string } }>;
+    modelRequests?: Array<{
+      assetModelId: string;
+      quantity: number;
+      fulfilledQuantity: number;
+    }>;
+  }>
+) {
+  (db.booking.findMany as unknown as Mock).mockResolvedValue(
+    bookings.map((booking) => ({
+      bookingAssets: [],
+      modelRequests: [],
+      ...booking,
+    }))
   );
 }
 
@@ -443,6 +500,9 @@ function markdocTagsIn(content: string) {
 
 const from = new Date("2026-05-01T09:00:00Z");
 const to = new Date("2026-05-05T18:00:00Z");
+
+/** The one other booking every staged pool claim belongs to. */
+const OTHER_BOOKING = { id: "booking-other", name: "Other booking", from, to };
 
 /**
  * The `findUnique` mock as this suite drives it: the `$queryRaw` stub calls it
@@ -498,6 +558,175 @@ describe("getAssetModelAvailability", () => {
       reservedViaRequest: 3,
       reserved: 5,
       available: 4,
+      peak: {
+        at: from,
+        requestedBy: [
+          { id: OTHER_BOOKING.id, name: OTHER_BOOKING.name, outstanding: 3 },
+        ],
+      },
+    });
+  });
+
+  /** Another booking, as the pool read returns it. */
+  const otherBooking = (
+    id: string,
+    bookingFrom: Date,
+    bookingTo: Date,
+    name = id
+  ) => ({ id, name, from: bookingFrom, to: bookingTo });
+  const unit = (assetId: string) => ({
+    assetId,
+    asset: { assetModelId: MODEL_ID },
+  });
+  const request = (quantity: number, fulfilledQuantity = 0) => ({
+    assetModelId: MODEL_ID,
+    quantity,
+    fulfilledQuantity,
+  });
+  const day = (d: number, hour = 9) =>
+    new Date(`2026-05-0${d}T${String(hour).padStart(2, "0")}:00:00Z`);
+  const measure = (
+    window: { from: Date | null; to: Date | null } = { from, to }
+  ) =>
+    getAssetModelAvailability({
+      assetModelId: MODEL_ID,
+      organizationId: ORG_ID,
+      bookingId: BOOKING_ID,
+      from: window.from,
+      to: window.to,
+    });
+
+  it("measures the pool at its busiest instant, not the sum of every booking touching the window", async () => {
+    expect.assertions(3);
+    // Three bookings run one after the other inside the window, each with
+    // one unit. Added up they look like three units, the whole pool; at no
+    // instant is more than one out. Long bookings that hand units from one
+    // job to the next look exactly like this, and they have to fit.
+    stageTotal(3);
+    stageOtherBookings([
+      { ...otherBooking("a", day(1), day(2)), bookingAssets: [unit("unit-1")] },
+      {
+        ...otherBooking("b", day(2, 12), day(3)),
+        bookingAssets: [unit("unit-2")],
+      },
+      { ...otherBooking("c", day(4), day(5)), bookingAssets: [unit("unit-3")] },
+    ]);
+
+    const result = await measure();
+
+    expect(result.reservedConcrete).toBe(1);
+    expect(result.available).toBe(2);
+    expect(result.peak.at).toEqual(from);
+  });
+
+  it("counts a unit that moves from one booking to the next once", async () => {
+    expect.assertions(2);
+    stageTotal(2);
+    // The same unit, booked on two consecutive jobs: one physical unit.
+    stageOtherBookings([
+      { ...otherBooking("a", day(1), day(2)), bookingAssets: [unit("unit-1")] },
+      { ...otherBooking("b", day(3), day(4)), bookingAssets: [unit("unit-1")] },
+    ]);
+
+    const result = await measure();
+
+    expect(result.reservedConcrete).toBe(1);
+    expect(result.available).toBe(1);
+  });
+
+  it("treats a booking that ends exactly when another starts as not overlapping", async () => {
+    expect.assertions(1);
+    stageTotal(2);
+    // Same tie-break as the quantity-tracked sweep: the hand-over instant
+    // belongs to the booking that starts, not the one that ends.
+    stageOtherBookings([
+      { ...otherBooking("a", day(1), day(3)), bookingAssets: [unit("unit-1")] },
+      { ...otherBooking("b", day(3), day(5)), bookingAssets: [unit("unit-2")] },
+    ]);
+
+    const result = await measure();
+
+    expect(result.reservedConcrete).toBe(1);
+  });
+
+  it("charges a model reservation only while its booking runs, and names it", async () => {
+    expect.assertions(1);
+    stageTotal(3);
+    stageOtherBookings([
+      { ...otherBooking("a", day(1), day(2)), bookingAssets: [unit("unit-1")] },
+      {
+        ...otherBooking("req", day(4), day(5), "Trial"),
+        modelRequests: [request(2)],
+      },
+    ]);
+
+    const result = await measure();
+
+    // One unit out on day 1, two promised on day 4: the pool is tightest on
+    // day 4, and that is where the numbers and the date come from.
+    expect(result).toMatchObject({
+      reservedConcrete: 0,
+      reservedViaRequest: 2,
+      available: 1,
+      peak: {
+        at: day(4),
+        requestedBy: [{ id: "req", name: "Trial", outstanding: 2 }],
+      },
+    });
+  });
+
+  it("points at the earliest instant when two instants tie", async () => {
+    expect.assertions(1);
+    stageTotal(3);
+    stageOtherBookings([
+      { ...otherBooking("a", day(1), day(2)), bookingAssets: [unit("unit-1")] },
+      {
+        ...otherBooking("req", day(4), day(5), "Trial"),
+        modelRequests: [request(1)],
+      },
+    ]);
+
+    const result = await measure();
+
+    // The first day the operator would have to free is the useful one.
+    expect(result.peak).toEqual({ at: from, requestedBy: [] });
+  });
+
+  it("ignores the units of a reservation that are already fulfilled", async () => {
+    expect.assertions(1);
+    stageTotal(5);
+    stageOtherBookings([{ ...OTHER_BOOKING, modelRequests: [request(3, 2)] }]);
+
+    const result = await measure();
+
+    // Fulfilled units arrive as named rows; only the outstanding one is owed.
+    expect(result.reservedViaRequest).toBe(1);
+  });
+
+  it("counts every claim as concurrent when from/to are missing", async () => {
+    expect.assertions(1);
+    stageTotal(5);
+    // Sequential on paper, but a draft without dates competes with all of
+    // them: the conservative reading.
+    stageOtherBookings([
+      { ...otherBooking("a", day(1), day(2)), bookingAssets: [unit("unit-1")] },
+      { ...otherBooking("b", day(3), day(4)), bookingAssets: [unit("unit-2")] },
+      {
+        ...otherBooking("req", day(4), day(5), "Trial"),
+        modelRequests: [request(1)],
+      },
+    ]);
+
+    const result = await measure({ from: null, to: null });
+
+    expect(result).toMatchObject({
+      reservedConcrete: 2,
+      reservedViaRequest: 1,
+      available: 2,
+      peak: {
+        at: null,
+        requestedBy: [{ id: "req", name: "Trial", outstanding: 1 }],
+      },
     });
   });
 
@@ -531,15 +760,15 @@ describe("getAssetModelAvailability", () => {
       to: null,
     });
 
-    // The bookingAsset pool read's `where.booking` must NOT include the
-    // `OR: [{from:...}, ...]` overlap clause — non-windowed queries
-    // count ALL active bookings as competing, which is the
-    // conservative reading for DRAFT bookings without dates yet.
+    // The pool's booking read must NOT include the `OR: [{from:...}, ...]`
+    // overlap clause: non-windowed queries read ALL active bookings as
+    // competing, which is the conservative reading for DRAFT bookings
+    // without dates yet.
     const call = (
-      db.bookingAsset.findMany as unknown as { mock: { calls: unknown[][] } }
+      db.booking.findMany as unknown as { mock: { calls: unknown[][] } }
     ).mock.calls[0];
     // @ts-expect-error inspecting mock arg
-    expect(call?.[0]?.where?.booking?.OR).toBeUndefined();
+    expect(call?.[0]?.where?.OR).toBeUndefined();
   });
 
   it("excludes the current booking from reservation sums", async () => {
@@ -554,23 +783,24 @@ describe("getAssetModelAvailability", () => {
       to,
     });
 
-    // Both reservation reads must filter `bookingId: { not: <this> }`.
-    const bookingAssetCall = (
-      db.bookingAsset.findMany as unknown as { mock: { calls: unknown[][] } }
-    ).mock.calls[0];
-    const modelRequestCall = (
-      db.bookingModelRequest.groupBy as unknown as {
-        mock: { calls: unknown[][] };
+    // The booking read must leave this booking out, and so must the rows it
+    // reads per booking (they are nested under it, so the same filter).
+    const bookingCall = (
+      db.booking.findMany as unknown as {
+        mock: {
+          calls: [
+            {
+              where: { id?: unknown };
+              select: { modelRequests: { where: { fulfilledAt?: unknown } } };
+            },
+          ][];
+        };
       }
     ).mock.calls[0];
-    // @ts-expect-error inspecting mock arg
-    expect(bookingAssetCall?.[0]?.where?.bookingId).toEqual({
-      not: BOOKING_ID,
-    });
-    // @ts-expect-error inspecting mock arg
-    expect(modelRequestCall?.[0]?.where?.bookingId).toEqual({
-      not: BOOKING_ID,
-    });
+    expect(bookingCall?.[0]?.where?.id).toEqual({ not: BOOKING_ID });
+    expect(
+      bookingCall?.[0]?.select?.modelRequests?.where?.fulfilledAt
+    ).toBeNull();
   });
 
   it("leaves archived assets out of the pool (issue #382)", async () => {
@@ -595,10 +825,144 @@ describe("getAssetModelAvailability", () => {
       (whereOf(db.custody.findMany)?.asset as Record<string, unknown>)
         ?.archivedAt
     ).toBeNull();
+    const bookingCall = (
+      db.booking.findMany as unknown as {
+        mock: {
+          calls: [
+            {
+              select: {
+                bookingAssets: { where: { asset: { archivedAt: unknown } } };
+              };
+            },
+          ][];
+        };
+      }
+    ).mock.calls[0];
     expect(
-      (whereOf(db.bookingAsset.findMany)?.asset as Record<string, unknown>)
-        ?.archivedAt
+      bookingCall?.[0]?.select?.bookingAssets?.where?.asset?.archivedAt
     ).toBeNull();
+  });
+});
+
+describe("measureModelPoolPeak", () => {
+  const day = (d: number) =>
+    new Date(`2026-11-${String(d).padStart(2, "0")}T09:00:00Z`);
+  const claim = (
+    id: string,
+    bookingFrom: Date,
+    bookingTo: Date,
+    named: string[],
+    outstanding = 0
+  ): ModelPoolClaim => ({
+    bookingId: id,
+    bookingName: id,
+    from: bookingFrom,
+    to: bookingTo,
+    named: new Set(named),
+    outstanding,
+  });
+
+  it("finds the busiest instant of a window full of hand-overs", () => {
+    expect.assertions(1);
+    // Six rows touch the window; two units are ever out at once.
+    const peak = measureModelPoolPeak(
+      [
+        claim("long", day(1), day(30), ["u1"]),
+        claim("a", day(2), day(5), ["u2"]),
+        claim("b", day(5), day(9), ["u2"]),
+        claim("c", day(10), day(12), ["u3"]),
+        claim("d", day(14), day(16), ["u4"]),
+        claim("trial", day(20), day(25), [], 1),
+      ],
+      { from: day(1), to: day(30) }
+    );
+
+    expect(peak).toEqual({
+      named: 2,
+      requested: 0,
+      at: day(2),
+      requestedBy: [],
+    });
+  });
+
+  it("clamps claims that start before the window to its start", () => {
+    expect.assertions(1);
+    const peak = measureModelPoolPeak(
+      [claim("early", day(1), day(12), ["u1"], 2)],
+      { from: day(10), to: day(20) }
+    );
+
+    expect(peak).toEqual({
+      named: 1,
+      requested: 2,
+      at: day(10),
+      requestedBy: [{ id: "early", name: "early", outstanding: 2 }],
+    });
+  });
+
+  it("matches a per-instant recount over many overlapping claims", () => {
+    expect.assertions(1);
+    // Forty claims over a month: staggered starts and ends, shared units,
+    // some owed units, and claims that end exactly as others begin. A naive
+    // recount at every start is the reference the sweep must agree with.
+    const claims: ModelPoolClaim[] = Array.from({ length: 40 }, (_, i) =>
+      claim(
+        `b${String(i).padStart(2, "0")}`,
+        day(1 + (i % 20)),
+        day(2 + ((i * 7) % 28)),
+        [`u${i % 9}`, `u${(i * 5) % 11}`],
+        i % 4
+      )
+    );
+    const window = { from: day(1), to: day(29) };
+    const windowFrom = window.from.getTime();
+    const windowTo = window.to.getTime();
+    let expected = {
+      at: windowFrom,
+      demand: -1,
+      named: 0,
+      requested: 0,
+    };
+    const instants = [
+      windowFrom,
+      ...claims.map((c) => Math.max(c.from!.getTime(), windowFrom)),
+    ]
+      .filter((t) => t < windowTo)
+      .sort((a, b) => a - b);
+    for (const t of instants) {
+      const active = claims.filter(
+        (c) =>
+          Math.max(c.from!.getTime(), windowFrom) <= t &&
+          t < Math.min(c.to!.getTime(), windowTo)
+      );
+      const named = new Set(active.flatMap((c) => [...c.named])).size;
+      const requested = active.reduce((sum, c) => sum + c.outstanding, 0);
+      if (named + requested > expected.demand) {
+        expected = { at: t, demand: named + requested, named, requested };
+      }
+    }
+
+    const peak = measureModelPoolPeak(claims, window);
+
+    expect({
+      at: peak.at?.getTime(),
+      named: peak.named,
+      requested: peak.requested,
+    }).toEqual({
+      at: expected.at,
+      named: expected.named,
+      requested: expected.requested,
+    });
+  });
+
+  it("returns nothing for an empty pool", () => {
+    expect.assertions(1);
+    expect(measureModelPoolPeak([], { from: day(1), to: day(2) })).toEqual({
+      named: 0,
+      requested: 0,
+      at: null,
+      requestedBy: [],
+    });
   });
 });
 
@@ -700,8 +1064,7 @@ describe("findModelReservationsShortAfterArchive (issue #382)", () => {
         findMany: vitest.fn().mockResolvedValue([]),
       },
       custody: { findMany: vitest.fn().mockResolvedValue([]) },
-      bookingAsset: { findMany: vitest.fn().mockResolvedValue([]) },
-      bookingModelRequest: { groupBy: vitest.fn().mockResolvedValue([]) },
+      booking: { findMany: vitest.fn().mockResolvedValue([]) },
     };
   }
 
@@ -768,10 +1131,10 @@ describe("getAssetModelAvailability — injected client", () => {
     //
     // why: this stub IS the subject of the test, not a dependency stood in
     // for convenience. It has to be a client distinct from the mocked `db`
-    // so "which client did the reads go to" is observable at all; the four
+    // so "which client did the reads go to" is observable at all; the three
     // delegates below are exactly the reads the function issues, and their
     // values are chosen to make the returned arithmetic checkable
-    // (7 total − 1 in custody − 2 reserved = 4 available).
+    // (7 total − 1 in custody − 2 out on another booking = 4 available).
     const client = {
       asset: {
         groupBy: vitest
@@ -785,14 +1148,18 @@ describe("getAssetModelAvailability — injected client", () => {
             { quantity: 1, asset: { assetModelId: MODEL_ID } },
           ]),
       },
-      bookingAsset: {
-        findMany: vitest
-          .fn()
-          .mockResolvedValue([
-            { quantity: 2, asset: { assetModelId: MODEL_ID } },
-          ]),
+      booking: {
+        findMany: vitest.fn().mockResolvedValue([
+          {
+            ...OTHER_BOOKING,
+            bookingAssets: [
+              { assetId: "unit-1", asset: { assetModelId: MODEL_ID } },
+              { assetId: "unit-2", asset: { assetModelId: MODEL_ID } },
+            ],
+            modelRequests: [],
+          },
+        ]),
       },
-      bookingModelRequest: { groupBy: vitest.fn().mockResolvedValue([]) },
     };
 
     const availability = await getAssetModelAvailability({
@@ -3744,10 +4111,16 @@ describe("assertModelUnitsNotReservedElsewhere", () => {
       status = BookingStatus.RESERVED,
       window = { from, to },
       windowChanged = false,
+      revealOtherBookings,
+      userId,
+      hints,
     }: {
       status?: BookingStatus;
       window?: { from: Date | null; to: Date | null };
       windowChanged?: boolean;
+      revealOtherBookings?: boolean;
+      userId?: string;
+      hints?: { locale: string; timeZone: string };
     } = {}
   ) {
     return assertModelUnitsNotReservedElsewhere({
@@ -3761,6 +4134,9 @@ describe("assertModelUnitsNotReservedElsewhere", () => {
       // why: the mocked `db` stands in for the interactive transaction, the
       // same way `$transaction` hands the callback `db` in this file.
       tx: db as never,
+      revealOtherBookings,
+      userId,
+      hints,
     });
   }
 
@@ -3846,22 +4222,246 @@ describe("assertModelUnitsNotReservedElsewhere", () => {
   });
 
   it("refuses a unit when other bookings' model reservations leave none free", async () => {
-    expect.assertions(4);
+    expect.assertions(5);
     // Three units, one in custody, two promised to other bookings by model.
+    stagePool({ total: 3, inCustody: 1, requestedElsewhere: 2 });
+
+    const error = await guard([NEW_UNIT], { revealOtherBookings: true }).catch(
+      (cause) => cause
+    );
+
+    expect(error).toBeInstanceOf(ShelfError);
+    expect(error).toMatchObject({ status: 400, shouldBeCaptured: false });
+    // Written for the person who has to free a unit: what this booking needs,
+    // the day the pool runs out, and who holds it then.
+    expect(error.message).toContain(
+      '"Dell Latitude 5550": this booking needs 1 unit by name, but on May 1, 2026 only 0 of 3 are free: 1 unit in custody, 2 units reserved by model for "Other booking".'
+    );
+    expect(error.message).toContain(
+      "assign a specific unit to the reservation named above"
+    );
+    expect(db.booking.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: { not: BOOKING_ID } }),
+      })
+    );
+  });
+
+  it("keeps other bookings' ids and names out of the error payload", async () => {
+    expect.assertions(3);
+    // The HTTP layer serialises `additionalData` for any role. A user who may
+    // only see their own bookings reads the name in the message, never a
+    // structured list of other people's booking ids.
     stagePool({ total: 3, inCustody: 1, requestedElsewhere: 2 });
 
     const error = await guard([NEW_UNIT]).catch((cause) => cause);
 
+    const shortfall = error.additionalData.shortfalls[0];
+    expect(JSON.stringify(error.additionalData)).not.toContain(
+      OTHER_BOOKING.id
+    );
+    expect(shortfall.availability.peak).toBeUndefined();
+    expect(shortfall.availability.peakAt).toEqual(from);
+  });
+
+  it("does not name other bookings to a user who may not see them", async () => {
+    expect.assertions(4);
+    stagePool({ total: 3, inCustody: 1, requestedElsewhere: 2 });
+
+    const error = await guard([NEW_UNIT], {
+      revealOtherBookings: false,
+    }).catch((cause) => cause);
+
+    expect(error).toMatchObject({ status: 400 });
+    expect(error.message).not.toContain(OTHER_BOOKING.name);
+    expect(error.message).toContain(
+      "2 units reserved by model for other bookings."
+    );
+    // The remedy cannot point at a reservation the reader was not shown.
+    expect(error.message).not.toContain("named above");
+  });
+
+  it("names other bookings to a user who may see them", async () => {
+    expect.assertions(2);
+    stagePool({ total: 3, inCustody: 1, requestedElsewhere: 2 });
+
+    const error = await guard([NEW_UNIT], {
+      revealOtherBookings: true,
+    }).catch((cause) => cause);
+
+    expect(error.message).toContain(`for "${OTHER_BOOKING.name}"`);
+    expect(error.message).toContain("the reservation named above");
+  });
+
+  it("names the peak day in the request's locale and time zone", async () => {
+    expect.assertions(2);
+    // The window opens at 22:00 UTC on 1 May, inside the other booking's
+    // claim, so the pool peaks then: already 2 May in Auckland (UTC+12).
+    const lateUtc = {
+      from: new Date("2026-05-01T22:00:00Z"),
+      to: new Date("2026-05-05T18:00:00Z"),
+    };
+    stagePool({ total: 3, inCustody: 1, requestedElsewhere: 2 });
+
+    const error = await guard([NEW_UNIT], {
+      window: lateUtc,
+      hints: { locale: "en-GB", timeZone: "Pacific/Auckland" },
+    }).catch((cause) => cause);
+
+    expect(error.message).toContain("but on 2 May 2026 only 0 of 3 are free");
+    expect(error.message).not.toContain("1 May");
+  });
+
+  it("falls back to the UTC day when the hinted time zone is invalid", async () => {
+    expect.assertions(3);
+    stagePool({ total: 3, inCustody: 1, requestedElsewhere: 2 });
+
+    const error = await guard([NEW_UNIT], {
+      hints: { locale: "en-GB", timeZone: "Not/AZone" },
+    }).catch((cause) => cause);
+
     expect(error).toBeInstanceOf(ShelfError);
     expect(error).toMatchObject({ status: 400, shouldBeCaptured: false });
+    expect(error.message).toContain("but on May 1, 2026 only 0 of 3 are free");
+  });
+
+  it("names the peak day in the acting user's own date preference", async () => {
+    expect.assertions(2);
+    stagePool({ total: 3, inCustody: 1, requestedElsewhere: 2 });
+    // @ts-expect-error mocked
+    db.user.findFirst.mockResolvedValueOnce({
+      dateFormat: "DD_MM_YYYY",
+      timeFormat: "H24",
+      weekStart: "MONDAY",
+      timeZone: "UTC",
+    });
+
+    const error = await guard([NEW_UNIT], { userId: USER_ID }).catch(
+      (cause) => cause
+    );
+
+    expect(error.message).toContain("but on 01/05/2026 only 0 of 3 are free");
+    expect(db.user.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: USER_ID } })
+    );
+  });
+
+  it("falls back to the default day format when the user's preferences cannot be read", async () => {
+    expect.assertions(2);
+    stagePool({ total: 3, inCustody: 1, requestedElsewhere: 2 });
+    // @ts-expect-error mocked
+    db.user.findFirst.mockRejectedValueOnce(new Error("connection lost"));
+
+    const error = await guard([NEW_UNIT], { userId: USER_ID }).catch(
+      (cause) => cause
+    );
+
+    expect(error).toMatchObject({ status: 400, shouldBeCaptured: false });
+    expect(error.message).toContain("but on May 1, 2026 only 0 of 3 are free");
+  });
+
+  it("reads no date preferences when the unit fits", async () => {
+    expect.assertions(2);
+    stagePool({ total: 3, requestedElsewhere: 1 });
+
+    await expect(
+      guard([NEW_UNIT], { userId: USER_ID })
+    ).resolves.toBeUndefined();
+    expect(db.user.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("does not pretend an over-committed pool's deductions add up to its size", async () => {
+    expect.assertions(2);
+    // Three units: one in custody, two named elsewhere, two more owed by
+    // model. Five units are claimed against a pool of three.
+    stagePool({
+      total: 3,
+      inCustody: 1,
+      reservedElsewhere: 2,
+      requestedElsewhere: 2,
+    });
+
+    const error = await guard([NEW_UNIT]).catch((cause) => cause);
+
     expect(error.message).toContain(
-      '"Dell Latitude 5550": 1 unit requested by name, but 2 units are reserved by model on other bookings for these dates and only 0 more can be booked.'
+      "but on May 1, 2026 none are free: 5 units are claimed against a pool of 3 (1 unit in custody, 2 units on other bookings, 2 units reserved by model for other bookings)."
     );
-    expect(db.bookingAsset.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({ bookingId: { not: BOOKING_ID } }),
-      })
-    );
+    expect(error.message).not.toContain("0 of 3 are free");
+  });
+
+  it("does not charge a unit in custody again when another booking names it", async () => {
+    expect.assertions(1);
+    // Three units. One is in custody AND named on another booking; one more
+    // is owed by model elsewhere. That is two units taken, one free, so the
+    // new unit fits. Counting the custody unit a second time as a named one
+    // would leave nothing free.
+    stagePool({ total: 3, inCustody: 1 });
+    stageOtherBookings([
+      {
+        ...OTHER_BOOKING,
+        bookingAssets: [
+          {
+            assetId: `${MODEL_ID}-custody-1`,
+            asset: { assetModelId: MODEL_ID },
+          },
+        ],
+        modelRequests: [
+          { assetModelId: MODEL_ID, quantity: 1, fulfilledQuantity: 0 },
+        ],
+      },
+    ]);
+    stageReservedElsewhere({ [MODEL_ID]: 1 });
+
+    await expect(guard([NEW_UNIT])).resolves.toBeUndefined();
+  });
+
+  it("fits an extension beside claims that hand the pool's units from job to job", async () => {
+    expect.assertions(1);
+    // Three units. Over the added days the other bookings hold, in turn, one
+    // unit each (three rows, the whole pool on paper) and one of them is also
+    // owed a unit by model for its own span. At no instant are more than two
+    // taken, so the one unit this booking keeps for the added days fits.
+    const day = (d: number) => new Date(`2026-05-0${d}T09:00:00Z`);
+    const addedDays = { from: day(1), to: day(5) };
+    stagePool({ total: 3 });
+    const unitOf = (assetId: string) => ({
+      assetId,
+      asset: { assetModelId: MODEL_ID },
+    });
+    stageOtherBookings([
+      {
+        id: "a",
+        name: "A",
+        from: day(1),
+        to: day(2),
+        bookingAssets: [unitOf("u-a")],
+      },
+      {
+        id: "b",
+        name: "B",
+        from: day(2),
+        to: day(3),
+        bookingAssets: [unitOf("u-b")],
+        modelRequests: [
+          { assetModelId: MODEL_ID, quantity: 1, fulfilledQuantity: 0 },
+        ],
+      },
+      {
+        id: "c",
+        name: "C",
+        from: day(4),
+        to: day(5),
+        bookingAssets: [unitOf("u-c")],
+      },
+    ]);
+    foreignRequestRows = [
+      { assetModelId: MODEL_ID, quantity: 1, fulfilledQuantity: 0 },
+    ];
+    stageHeldUnits([NEW_UNIT.id]);
+
+    await expect(
+      guard([NEW_UNIT], { windowChanged: true, window: addedDays })
+    ).resolves.toBeUndefined();
   });
 
   it("names custody and units booked by name elsewhere when they shrink the pool", async () => {
@@ -3875,11 +4475,13 @@ describe("assertModelUnitsNotReservedElsewhere", () => {
       requestedElsewhere: 1,
     });
 
-    const error = await guard([NEW_UNIT]).catch((cause) => cause);
+    const error = await guard([NEW_UNIT], { revealOtherBookings: true }).catch(
+      (cause) => cause
+    );
 
     expect(error).toBeInstanceOf(ShelfError);
     expect(error.message).toContain(
-      "only 0 more can be booked. 1 unit in custody and 1 unit booked by name on other bookings also count against the pool."
+      'only 0 of 3 are free: 1 unit in custody, 1 unit on other bookings, 1 unit reserved by model for "Other booking".'
     );
   });
 
@@ -3904,7 +4506,7 @@ describe("assertModelUnitsNotReservedElsewhere", () => {
 
     expect(error).toBeInstanceOf(ShelfError);
     expect(error.message).toContain(
-      '"Dell Latitude 5550": 2 units requested by name'
+      '"Dell Latitude 5550": this booking needs 2 units by name'
     );
   });
 
@@ -3954,7 +4556,7 @@ describe("assertModelUnitsNotReservedElsewhere", () => {
 
     expect(error).toBeInstanceOf(ShelfError);
     expect(error.message).toContain(
-      '"Dell Latitude 5550": 2 units requested by name, but 2 units are reserved by model'
+      '"Dell Latitude 5550": this booking needs 2 units by name, but on May 1, 2026 only 1 of 3 are free: 2 units reserved by model for other bookings.'
     );
   });
 
@@ -3983,7 +4585,7 @@ describe("assertModelUnitsNotReservedElsewhere", () => {
 
     expect(error).toBeInstanceOf(ShelfError);
     expect(error.message).toContain(
-      '"Dell Latitude 5550": 1 unit requested by name and 1 unit still to assign from this booking\'s own reservation, but 2 units are reserved by model'
+      '"Dell Latitude 5550": this booking needs 1 unit by name and 1 unit still to assign from its own reservation, but on May 1, 2026 only 1 of 3 are free: 2 units reserved by model for other bookings.'
     );
   });
 
@@ -4000,7 +4602,7 @@ describe("assertModelUnitsNotReservedElsewhere", () => {
 
     expect(error).toBeInstanceOf(ShelfError);
     expect(error.message).toContain(
-      '"Dell Latitude 5550": 1 unit requested by name and 1 unit still to assign from this booking\'s own reservation, but 2 units are reserved by model'
+      '"Dell Latitude 5550": this booking needs 1 unit by name and 1 unit still to assign from its own reservation, but on May 1, 2026 only 1 of 3 are free: 2 units reserved by model for other bookings.'
     );
   });
 
@@ -4103,8 +4705,8 @@ describe("assertModelUnitsNotReservedElsewhere", () => {
       status: BookingStatus.DRAFT,
     }).catch((cause) => cause);
 
-    expect(error.message).not.toContain("0 units are reserved");
-    expect(error.message).toContain("1 unit in custody also counts");
+    expect(error.message).not.toContain("reserved by model");
+    expect(error.message).toContain("only 1 of 2 are free: 1 unit in custody.");
   });
 
   it("names every model that does not fit in one refusal", async () => {
@@ -4123,7 +4725,7 @@ describe("assertModelUnitsNotReservedElsewhere", () => {
   });
 
   it("locks and measures any number of contested models in a fixed number of statements", async () => {
-    expect.assertions(7);
+    expect.assertions(6);
     // Three contested models, each with room for the unit named on it.
     stagePool({ total: 5, requestedElsewhere: 1 });
     stageReservedElsewhere({ "model-a": 1, "model-b": 1, "model-c": 1 });
@@ -4143,8 +4745,7 @@ describe("assertModelUnitsNotReservedElsewhere", () => {
     expect(lockedAssetModelIds()).toEqual(["model-a", "model-b", "model-c"]);
     expect(db.asset.groupBy).toHaveBeenCalledTimes(1);
     expect(db.custody.findMany).toHaveBeenCalledTimes(1);
-    expect(db.bookingAsset.findMany).toHaveBeenCalledTimes(1);
-    expect(db.bookingModelRequest.groupBy).toHaveBeenCalledTimes(1);
+    expect(db.booking.findMany).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -4212,10 +4813,16 @@ describe("assertOutstandingModelRequestsFit", () => {
     window = { from, to },
     action = "reserve booking",
     alsoLockAssetModelIds,
+    revealOtherBookings,
+    userId,
+    hints,
   }: {
     window?: { from: Date | null; to: Date | null };
     action?: string;
     alsoLockAssetModelIds?: string[];
+    revealOtherBookings?: boolean;
+    userId?: string;
+    hints?: { locale: string; timeZone: string };
   } = {}) {
     return assertOutstandingModelRequestsFit({
       bookingId: BOOKING_ID,
@@ -4227,6 +4834,9 @@ describe("assertOutstandingModelRequestsFit", () => {
       // why: the mocked `db` stands in for the interactive transaction, the
       // same way `$transaction` hands the callback `db` in this file.
       tx: db as never,
+      revealOtherBookings,
+      userId,
+      hints,
     });
   }
 
@@ -4339,11 +4949,9 @@ describe("assertOutstandingModelRequestsFit", () => {
     expect(error).toMatchObject({ status: 400, shouldBeCaptured: false });
     expect(error.message).toContain("Cannot reserve booking.");
     expect(error.message).toContain(
-      '"Dell Latitude 5550": 3 units still to assign, but only 0 can be booked.'
+      '"Dell Latitude 5550": 3 units still to assign, but on May 1, 2026 only 0 of 3 are free: 3 units on other bookings.'
     );
-    expect(error.message).toContain(
-      "3 units booked by name on other bookings counts against the pool"
-    );
+    expect(error.message).toContain("Reduce them, or change the dates.");
   });
 
   it("allows outstanding units that still fit the free pool", async () => {
@@ -4430,6 +5038,160 @@ describe("assertOutstandingModelRequestsFit", () => {
     expect(error.message).toContain('"Arterial Puncture Simulator"');
   });
 
+  it("does not name other bookings to a user who may not see them", async () => {
+    expect.assertions(3);
+    // Three units, two owed by model to another booking: one is free, and
+    // this booking still owes two.
+    stagePool({ total: 3, requestedElsewhere: 2 });
+    stageOwnRequests([
+      { assetModelId: MODEL_ID, quantity: 2, fulfilledQuantity: 0 },
+    ]);
+
+    const error = await guard({ revealOtherBookings: false }).catch(
+      (cause) => cause
+    );
+
+    expect(error).toMatchObject({ status: 400 });
+    expect(error.message).not.toContain(OTHER_BOOKING.name);
+    expect(error.message).toContain(
+      "only 1 of 3 are free: 2 units reserved by model for other bookings."
+    );
+  });
+
+  it("names other bookings to a user who may see them", async () => {
+    expect.assertions(1);
+    stagePool({ total: 3, requestedElsewhere: 2 });
+    stageOwnRequests([
+      { assetModelId: MODEL_ID, quantity: 2, fulfilledQuantity: 0 },
+    ]);
+
+    const error = await guard({ revealOtherBookings: true }).catch(
+      (cause) => cause
+    );
+
+    expect(error.message).toContain(
+      `only 1 of 3 are free: 2 units reserved by model for "${OTHER_BOOKING.name}".`
+    );
+  });
+
+  it("keeps other bookings' ids out of the error payload", async () => {
+    expect.assertions(3);
+    // The HTTP layer serialises `additionalData` for any role, so even a user
+    // allowed to read the names never receives other bookings' ids.
+    stagePool({ total: 3, requestedElsewhere: 2 });
+    stageOwnRequests([
+      { assetModelId: MODEL_ID, quantity: 2, fulfilledQuantity: 0 },
+    ]);
+
+    const error = await guard({ revealOtherBookings: true }).catch(
+      (cause) => cause
+    );
+
+    const shortfall = error.additionalData.shortfalls[0];
+    expect(JSON.stringify(error.additionalData)).not.toContain(
+      OTHER_BOOKING.id
+    );
+    expect(shortfall.availability.peak).toBeUndefined();
+    expect(shortfall.availability.peakAt).toEqual(from);
+  });
+
+  it("names the peak day in the request's locale and time zone", async () => {
+    expect.assertions(2);
+    // The window opens at 22:00 UTC on 1 May, inside the other booking's
+    // claim, so the pool peaks then: already 2 May in Auckland (UTC+12).
+    stagePool({ total: 1, namedElsewhere: 1 });
+    stageOwnRequests([
+      { assetModelId: MODEL_ID, quantity: 1, fulfilledQuantity: 0 },
+    ]);
+
+    const error = await guard({
+      window: {
+        from: new Date("2026-05-01T22:00:00Z"),
+        to: new Date("2026-05-05T18:00:00Z"),
+      },
+      hints: { locale: "en-GB", timeZone: "Pacific/Auckland" },
+    }).catch((cause) => cause);
+
+    expect(error.message).toContain("but on 2 May 2026 only 0 of 1 is free");
+    expect(error.message).not.toContain("1 May");
+  });
+
+  it("falls back to the UTC day when the hinted time zone is invalid", async () => {
+    expect.assertions(2);
+    stagePool({ total: 1, namedElsewhere: 1 });
+    stageOwnRequests([
+      { assetModelId: MODEL_ID, quantity: 1, fulfilledQuantity: 0 },
+    ]);
+
+    const error = await guard({
+      hints: { locale: "en-GB", timeZone: "Not/AZone" },
+    }).catch((cause) => cause);
+
+    expect(error).toMatchObject({ status: 400, shouldBeCaptured: false });
+    expect(error.message).toContain("but on May 1, 2026 only 0 of 1 is free");
+  });
+
+  it("names the peak day in the acting user's own date preference", async () => {
+    expect.assertions(1);
+    stagePool({ total: 1, namedElsewhere: 1 });
+    stageOwnRequests([
+      { assetModelId: MODEL_ID, quantity: 1, fulfilledQuantity: 0 },
+    ]);
+    // @ts-expect-error mocked
+    db.user.findFirst.mockResolvedValueOnce({
+      dateFormat: "DD_MM_YYYY",
+      timeFormat: "H24",
+      weekStart: "MONDAY",
+      timeZone: "UTC",
+    });
+
+    const error = await guard({ userId: USER_ID }).catch((cause) => cause);
+
+    expect(error.message).toContain("but on 01/05/2026 only 0 of 1 is free");
+  });
+
+  it("falls back to the default day format when the user's preferences cannot be read", async () => {
+    expect.assertions(2);
+    stagePool({ total: 1, namedElsewhere: 1 });
+    stageOwnRequests([
+      { assetModelId: MODEL_ID, quantity: 1, fulfilledQuantity: 0 },
+    ]);
+    // @ts-expect-error mocked
+    db.user.findFirst.mockRejectedValueOnce(new Error("connection lost"));
+
+    const error = await guard({ userId: USER_ID }).catch((cause) => cause);
+
+    expect(error).toMatchObject({ status: 400, shouldBeCaptured: false });
+    expect(error.message).toContain("but on May 1, 2026 only 0 of 1 is free");
+  });
+
+  it("reads no date preferences when the reservation fits", async () => {
+    expect.assertions(2);
+    stagePool({ total: 3 });
+    stageOwnRequests([
+      { assetModelId: MODEL_ID, quantity: 1, fulfilledQuantity: 0 },
+    ]);
+
+    await expect(guard({ userId: USER_ID })).resolves.toBeUndefined();
+    expect(db.user.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("does not pretend an over-committed pool's deductions add up to its size", async () => {
+    expect.assertions(1);
+    // Two units: one in custody, two named elsewhere. Three units are claimed
+    // against a pool of two.
+    stagePool({ total: 2, inCustody: 1, namedElsewhere: 2 });
+    stageOwnRequests([
+      { assetModelId: MODEL_ID, quantity: 1, fulfilledQuantity: 0 },
+    ]);
+
+    const error = await guard().catch((cause) => cause);
+
+    expect(error.message).toContain(
+      "but on May 1, 2026 none are free: 3 units are claimed against a pool of 2 (1 unit in custody, 2 units on other bookings)."
+    );
+  });
+
   it("completes the refusal with the caller's own verb", async () => {
     expect.assertions(1);
     stagePool({ total: 1, namedElsewhere: 1 });
@@ -4445,7 +5207,7 @@ describe("assertOutstandingModelRequestsFit", () => {
   });
 
   it("locks and measures any number of models in a fixed number of statements", async () => {
-    expect.assertions(8);
+    expect.assertions(7);
     stagePool({ total: 5 });
     stageOwnRequests([
       { assetModelId: "model-c", quantity: 1, fulfilledQuantity: 0 },
@@ -4462,8 +5224,7 @@ describe("assertOutstandingModelRequestsFit", () => {
     expect(lockedModelIds()).toEqual(["model-a", "model-b", "model-c"]);
     expect(db.asset.groupBy).toHaveBeenCalledTimes(1);
     expect(db.custody.findMany).toHaveBeenCalledTimes(1);
-    expect(db.bookingAsset.findMany).toHaveBeenCalledTimes(1);
-    expect(db.bookingModelRequest.groupBy).toHaveBeenCalledTimes(1);
+    expect(db.booking.findMany).toHaveBeenCalledTimes(1);
     // The units the booking holds by name, read once for every model.
     expect(db.asset.findMany).toHaveBeenCalledTimes(1);
   });
@@ -4497,6 +5258,21 @@ describe("getAssetModelAvailabilities", () => {
         quantity,
         asset: { assetModelId },
       }));
+    // Everything other bookings hold sits on one other booking spanning the
+    // window, so sums per model are the peak as well.
+    const otherBooking =
+      booked.length > 0 || requests.length > 0
+        ? [
+            {
+              ...OTHER_BOOKING,
+              bookingAssets: booked.map(({ assetModelId }, i) => ({
+                assetId: `unit-${i + 1}`,
+                asset: { assetModelId },
+              })),
+              modelRequests: requests,
+            },
+          ]
+        : [];
     return {
       asset: {
         groupBy: vitest.fn().mockResolvedValue(
@@ -4507,15 +5283,7 @@ describe("getAssetModelAvailabilities", () => {
         ),
       },
       custody: { findMany: vitest.fn().mockResolvedValue(asRows(custody)) },
-      bookingAsset: { findMany: vitest.fn().mockResolvedValue(asRows(booked)) },
-      bookingModelRequest: {
-        groupBy: vitest.fn().mockResolvedValue(
-          requests.map(({ assetModelId, quantity, fulfilledQuantity }) => ({
-            assetModelId,
-            _sum: { quantity, fulfilledQuantity },
-          }))
-        ),
-      },
+      booking: { findMany: vitest.fn().mockResolvedValue(otherBooking) },
     };
   }
 
@@ -4550,6 +5318,7 @@ describe("getAssetModelAvailabilities", () => {
       reservedViaRequest: 0,
       reserved: 0,
       available: 0,
+      peak: { at: null, requestedBy: [] },
     });
   });
 
@@ -4586,6 +5355,12 @@ describe("getAssetModelAvailabilities", () => {
       reservedViaRequest: 3,
       reserved: 4,
       available: 4,
+      peak: {
+        at: from,
+        requestedBy: [
+          { id: OTHER_BOOKING.id, name: OTHER_BOOKING.name, outstanding: 3 },
+        ],
+      },
     });
     // 6 total - 1 custody - 3 booked = 2
     expect(availabilities.get("model-b")).toEqual({
@@ -4595,11 +5370,12 @@ describe("getAssetModelAvailabilities", () => {
       reservedViaRequest: 0,
       reserved: 3,
       available: 2,
+      peak: { at: from, requestedBy: [] },
     });
   });
 
-  it("reads every model in four statements, with this booking excluded", async () => {
-    expect.assertions(7);
+  it("reads every model in three statements, with this booking excluded", async () => {
+    expect.assertions(5);
     const client = poolClient({});
 
     await measure(client, ["model-a", "model-b", "model-c", "model-a"]);
@@ -4608,8 +5384,7 @@ describe("getAssetModelAvailabilities", () => {
     // interactive transaction each statement is a sequential round trip.
     expect(client.asset.groupBy).toHaveBeenCalledTimes(1);
     expect(client.custody.findMany).toHaveBeenCalledTimes(1);
-    expect(client.bookingAsset.findMany).toHaveBeenCalledTimes(1);
-    expect(client.bookingModelRequest.groupBy).toHaveBeenCalledTimes(1);
+    expect(client.booking.findMany).toHaveBeenCalledTimes(1);
     expect(client.asset.groupBy).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
@@ -4618,14 +5393,9 @@ describe("getAssetModelAvailabilities", () => {
         }),
       })
     );
-    expect(client.bookingAsset.findMany).toHaveBeenCalledWith(
+    expect(client.booking.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ bookingId: { not: BOOKING_ID } }),
-      })
-    );
-    expect(client.bookingModelRequest.groupBy).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({ bookingId: { not: BOOKING_ID } }),
+        where: expect.objectContaining({ id: { not: BOOKING_ID } }),
       })
     );
   });
