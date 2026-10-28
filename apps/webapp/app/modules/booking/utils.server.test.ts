@@ -306,6 +306,36 @@ describe("calculateBookingLifecycleProgress (asset mode)", () => {
     expect(p.checkinProgressPercentage).toBe(50);
     expect(p.hasPartialCheckins).toBe(true);
   });
+
+  it.each([BookingStatus.COMPLETE, BookingStatus.ARCHIVED])(
+    "%s: a dispatched INDIVIDUAL slice with no return marker is Returned",
+    (bookingStatus) => {
+      // The status is the record: a finished booking returned every
+      // INDIVIDUAL slice that left, so "unstamped" reads Returned like the
+      // rows and the check-in receipt do. The status settles returns, not
+      // departures, so a slice that never left stays Booked.
+      const slice = (id: string, out: boolean, back: boolean) => ({
+        ...A(id, AssetStatus.AVAILABLE),
+        assetType: AssetType.INDIVIDUAL,
+        sliceCheckedOut: out,
+        sliceCheckedIn: back,
+      });
+      const p = calculateBookingLifecycleProgress({
+        bookingAssets: [
+          slice("stamped", true, true),
+          slice("unstamped", true, false),
+          slice("never", false, false),
+        ],
+        checkedInAssetIds: ["stamped"],
+        checkedOutAssetIds: ["stamped", "unstamped"],
+        bookingStatus,
+      });
+      expect(p.returnedCount).toBe(2);
+      expect(p.checkedOutCount).toBe(0);
+      expect(p.bookedCount).toBe(1);
+      expect(p.checkinProgressCount).toBe(2);
+    }
+  );
 });
 
 describe("calculateBookingLifecycleProgress (unit mode)", () => {
