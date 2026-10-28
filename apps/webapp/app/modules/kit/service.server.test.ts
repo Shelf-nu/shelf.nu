@@ -784,6 +784,54 @@ describe("deleteKit", () => {
     expect(result).toEqual(availableKit);
   });
 
+  it("writes a kit-deleted line on each member of a kit that was not in custody", async () => {
+    const availableKit = {
+      ...mockKitData,
+      assetKits: [
+        {
+          quantity: 1,
+          asset: {
+            id: "drill-1",
+            title: "Drill",
+            type: AssetType.INDIVIDUAL,
+            unitOfMeasure: null,
+          },
+        },
+        {
+          quantity: 5,
+          asset: {
+            id: "pens-1",
+            title: "Pens",
+            type: AssetType.QUANTITY_TRACKED,
+            unitOfMeasure: "pens",
+          },
+        },
+      ],
+      custody: null,
+    };
+    //@ts-expect-error missing vitest type
+    db.kit.findUniqueOrThrow.mockResolvedValue(availableKit);
+    //@ts-expect-error missing vitest type
+    db.custody.findMany.mockResolvedValue([]);
+
+    await deleteKit({
+      id: "kit-1",
+      organizationId: "org-1",
+      actorUserId: "user-actor",
+    });
+
+    expect(db.note.createMany).toHaveBeenCalledTimes(1);
+    const rows = (db.note.createMany as ReturnType<typeof vitest.fn>).mock
+      .calls[0][0].data as { assetId: string; content: string }[];
+    expect(rows.map((row) => row.assetId)).toEqual(["drill-1", "pens-1"]);
+    expect(rows[0].content).toContain(
+      `deleted kit **${mockKitData.name}**, which removed this asset from it.`
+    );
+    expect(rows[1].content).toContain(
+      `deleted kit **${mockKitData.name}**, which removed 5 pens from it.`
+    );
+  });
+
   it("deletes an in-custody kit and emits CUSTODY_RELEASED + flips status + writes notes", async () => {
     // Setup: kit in custody to Bob, contains Drill (INDIVIDUAL, no operator
     // custody) and Pens (QUANTITY_TRACKED, has operator custody to Alice).

@@ -92,7 +92,11 @@ import {
   KIT_SELECT_FIELDS_FOR_LIST_ITEMS,
   KITS_INCLUDE_FIELDS,
 } from "./types";
-import { getKitsWhereInput, isOwnKitImagePath } from "./utils.server";
+import {
+  getKitAnAssetLeaves,
+  getKitsWhereInput,
+  isOwnKitImagePath,
+} from "./utils.server";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
 import type { ActivityEventInput } from "../activity-event/types";
 import { resolveAssetIdsForBulkOperation } from "../asset/bulk-operations-helper.server";
@@ -3000,8 +3004,9 @@ type KitForDeletion = {
  *         with surviving operator custody (Phase 2 multi-custodian)
  *         keep `IN_CUSTODY` so we don't lie about state.
  *   3. Outside the tx (best-effort, audit-only):
- *      a. Write asset notes — one `createNotes` call per in-custody
- *        kit so each group gets its kit's correct custodian.
+ *      a. Write asset notes: members of an in-custody kit get the custody
+ *        release line naming their kit's custodian, members of any other
+ *        kit get a line saying the deletion removed them from the kit.
  *      b. Delete each kit's stored image (see `deleteKitImage`).
  *
  * @param args.kits - Pre-fetched kits with the shape above. Caller is
@@ -3024,10 +3029,10 @@ async function performKitDeletion({
   const inCustodyKits = kits.filter((k) => !!k.custody);
   const allAssetIds = kits.flatMap((k) => k.assets.map((a) => a.id));
 
-  // Resolve the actor once for note text — only needed when at least
-  // one kit was in custody (an AVAILABLE kit emits nothing).
+  // Resolve the actor once for the member notes, written for every deleted
+  // kit that held assets.
   let actorLink = "";
-  if (inCustodyKits.length > 0) {
+  if (allAssetIds.length > 0) {
     const actor = await getUserByID(userId, {
       select: {
         firstName: true,
@@ -3232,6 +3237,29 @@ async function performKitDeletion({
     if (noteData.length > 0) {
       await db.note.createMany({ data: noteData });
     }
+  }
+
+  // Every member of a kit that was not in custody gets a line saying it left
+  // the kit, the way removing it from the kit would. Members of an in-custody
+  // kit already got the release line above, which names the deleted kit.
+  // why: org-scoping is implicit, as above: the kits come from org-scoped reads.
+  const membershipNotes = kits
+    .filter((k) => !k.custody)
+    .flatMap((k) =>
+      k.assets.map((asset) => {
+        const count = formatUnitCount(asset, asset.kitQuantity);
+        return {
+          content: `${actorLink} deleted kit **${stripMarkdocDelimiters(
+            k.name
+          )}**, which removed ${count ?? "this asset"} from it.`,
+          type: "UPDATE" as const,
+          userId,
+          assetId: asset.id,
+        };
+      })
+    );
+  if (membershipNotes.length > 0) {
+    await db.note.createMany({ data: membershipNotes });
   }
 
   const kitWithImages = kits.filter((k) => !!k.image);
@@ -6173,12 +6201,19 @@ export async function updateKitAssets({
           // unitOfMeasure labels the qty-tracked unit count in the custody
           // grant/release notes ("custody of 50 boxes").
           unitOfMeasure: true,
-          // Pull all of the asset's AssetKit rows. Pre-polish there was at
-          // most one (the @@unique held); post-polish a QUANTITY_TRACKED
-          // asset can be in multiple kits. We need:
+          // All of the asset's AssetKit rows: an INDIVIDUAL asset has at
+          // most one, a QUANTITY_TRACKED asset can be in several kits. We need:
           //   - kitId (cross-kit detection)
           //   - quantity (this kit's slice for qty-change diff)
-          assetKits: { select: { kitId: true, quantity: true } },
+          //   - kit name (the kit an INDIVIDUAL asset leaves, named in its
+          //     activity note)
+          assetKits: {
+            select: {
+              kitId: true,
+              quantity: true,
+              kit: { select: { id: true, name: true } },
+            },
+          },
           custody: true,
           assetLocations: {
             select: { location: { select: { id: true, name: true } } },
@@ -6200,6 +6235,10 @@ export async function updateKitAssets({
       (asset) =>
         !kit.assets.some((existingAsset) => existingAsset.id === asset.id)
     );
+
+    /** The kit a newly-added asset leaves by joining this one, if any. */
+    const sourceKitOf = (asset: (typeof newlyAddedAssets)[number]) =>
+      getKitAnAssetLeaves(asset, kit.id);
 
     /**
      * The `AssetKit.quantity` each newly-added asset will hold IN THIS KIT
@@ -6821,13 +6860,8 @@ export async function updateKitAssets({
       type: asset.type,
       unitOfMeasure: asset.unitOfMeasure,
       quantity: addedAssetKitQuantity(asset),
-      kit: asset.assetKits[0]?.kitId
-        ? // For freshly-attached assets we don't have the source kit's
-          // name in scope; the note helper's `currentKit` path only
-          // uses `id` + `name`, so fall back to "" for the latter — the
-          // helper still renders a sane link.
-          { id: asset.assetKits[0].kitId, name: "" }
-        : null,
+      // The kit it leaves, so a move reads "changed kit from A to B".
+      kit: sourceKitOf(asset),
     }));
     const removedAssetsForNotes = (addOnly ? [] : removedAssets).map(
       (asset) => ({
@@ -6899,9 +6933,8 @@ export async function updateKitAssets({
         assetId: asset.id,
         kitId: kit.id,
         field: "kitId",
-        // (the 1:1 FK). With the pivot, an asset already in another kit
-        // has its kit-id in `assetKits[0].kitId`.
-        fromValue: asset.assetKits[0]?.kitId ?? null,
+        // The kit an INDIVIDUAL asset leaves; null for a plain add.
+        fromValue: sourceKitOf(asset)?.id ?? null,
         toValue: kit.id,
         // Qty-tracked: record the per-row AssetKit.quantity this asset now
         // holds in the kit (same value the pivot createMany wrote).
