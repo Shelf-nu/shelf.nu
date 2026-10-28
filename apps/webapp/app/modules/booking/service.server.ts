@@ -2678,6 +2678,10 @@ export async function reserveBooking({
         // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingFound id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) at L1020; this is the write on that same proven id
         where: { id: bookingFound.id },
         data: dataToUpdate,
+        // The notifications below read the booking as reserved: a reservation
+        // can change the custodian and the dates, and `bookingFound` still
+        // holds the draft's.
+        include: BOOKING_INCLUDE_FOR_RESERVATION_EMAIL,
       });
     }, LONG_TRANSACTION_OPTIONS);
 
@@ -2742,11 +2746,12 @@ export async function reserveBooking({
       }
     }
 
-    // Resolve notification recipients and send emails.
+    // Resolve notification recipients and send emails, from the booking as
+    // reserved so a changed custodian or date reaches the right people.
     // Forwarded so the broadcast fires only for reservations whose maker's
     // role triggers it.
     const recipients = await getBookingNotificationRecipients({
-      booking: bookingFound,
+      booking: updatedBooking,
       eventType: "RESERVATION",
       organizationId,
       editorUserId: userId,
@@ -2754,16 +2759,16 @@ export async function reserveBooking({
     });
 
     if (recipients.length > 0) {
-      const custodian = bookingFound?.custodianUser
-        ? resolveUserDisplayName(bookingFound.custodianUser)
-        : bookingFound.custodianTeamMember?.name ?? "";
+      const custodian = updatedBooking.custodianUser
+        ? resolveUserDisplayName(updatedBooking.custodianUser)
+        : updatedBooking.custodianTeamMember?.name ?? "";
 
       // Only forward outstanding requests so the email doesn't render
       // fulfilled historical rows. `fulfilledAt
       // IS NULL` is the canonical outstanding filter in the new schema;
       // each row shows the STILL-PENDING unit count
       // (`quantity - fulfilledQuantity`).
-      const outstandingModelRequests = bookingFound.modelRequests
+      const outstandingModelRequests = updatedBooking.modelRequests
         .filter((req) => req.fulfilledAt === null)
         .map((req) => ({
           quantity: req.quantity - req.fulfilledQuantity,
@@ -2778,17 +2783,17 @@ export async function reserveBooking({
       await sendBookingEmailToAllRecipients({
         eventType: "RESERVATION",
         recipients,
-        booking: bookingFound,
+        booking: updatedBooking,
         buildText: (textArgs) =>
           assetReservedEmailContent({
             ...textArgs,
-            bookingName: bookingFound.name,
-            assetsCount: bookingFound._count.bookingAssets,
+            bookingName: updatedBooking.name,
+            assetsCount: updatedBooking._count.bookingAssets,
             custodian,
             from,
             to,
-            bookingId: bookingFound.id,
-            customEmailFooter: bookingFound.organization.customEmailFooter,
+            bookingId: updatedBooking.id,
+            customEmailFooter: updatedBooking.organization.customEmailFooter,
             modelRequests: outstandingModelRequests,
           }),
         buildHeading: () => `Booking reservation for ${custodian}`,
@@ -2796,13 +2801,13 @@ export async function reserveBooking({
         actor,
         actorUserId: userId,
         templateProps: {
-          assets: bookingFound.bookingAssets,
+          assets: updatedBooking.bookingAssets,
           // Forward any outstanding `BookingModelRequest` rows so the
           // reservation email can render a "Requested models" section.
           // The include widening on
           // `BOOKING_INCLUDE_FOR_RESERVATION_EMAIL` guarantees
           // `modelRequests` is present on the loaded booking.
-          modelRequests: bookingFound.modelRequests,
+          modelRequests: updatedBooking.modelRequests,
         },
       });
     }

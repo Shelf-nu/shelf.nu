@@ -22420,6 +22420,91 @@ describe("booking emails name who acted", () => {
     });
   });
 
+  it("notifies from the booking as reserved when the reservation changes custodian and dates", async () => {
+    const draft = {
+      ...mockBookingData,
+      ...EMAIL_FIELDS,
+      status: BookingStatus.DRAFT,
+      bookingAssets: [
+        {
+          asset: {
+            id: "asset-1",
+            title: "Asset 1",
+            status: "AVAILABLE",
+            availableToBook: true,
+            bookingAssets: [],
+          },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-rebook-1",
+          checkedOutAt: null,
+          checkedInAt: null,
+        },
+      ],
+    };
+    const newCustodian = {
+      id: "user-4",
+      email: "next@example.com",
+      firstName: "Nia",
+      lastName: "Next",
+      displayName: null,
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(draft);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...draft,
+      status: BookingStatus.RESERVED,
+      custodianUserId: newCustodian.id,
+      custodianUser: newCustodian,
+      from: new Date("2027-03-05T09:00:00.000Z"),
+      to: new Date("2027-03-06T15:00:00.000Z"),
+    });
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.count.mockResolvedValueOnce(1);
+    vitest.mocked(getBookingNotificationRecipients).mockResolvedValueOnce([
+      {
+        email: newCustodian.email,
+        firstName: newCustodian.firstName,
+        lastName: newCustodian.lastName,
+        userId: newCustodian.id,
+        dateFormat: "DD_MM_YYYY",
+        timeFormat: "H24",
+        weekStart: "MONDAY",
+        timeZone: "Europe/Berlin",
+        reason: "custodian",
+      },
+    ]);
+
+    await reserveBooking({
+      id: "booking-1",
+      name: "Test Booking",
+      organizationId: "org-1",
+      custodianUserId: newCustodian.id,
+      custodianTeamMemberId: "team-4",
+      from: new Date("2027-03-05T09:00:00.000Z"),
+      to: new Date("2027-03-06T15:00:00.000Z"),
+      hints: mockClientHints,
+      alertsOrgOnReservation: false,
+      tags: [],
+      userId: "user-1",
+    });
+
+    // The recipients and the push come from the row the update returned, not
+    // from the draft that was read before it.
+    expect(getBookingNotificationRecipients).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "RESERVATION",
+        booking: expect.objectContaining({ custodianUserId: newCustodian.id }),
+      })
+    );
+    expect(sendPush).toHaveBeenCalledOnce();
+    expect(vitest.mocked(sendPush).mock.calls[0][0]).toMatchObject({
+      userIds: [newCustodian.id],
+      body: "05/03/2027, 10:00 to 06/03/2027, 16:00",
+    });
+  });
+
   describe("custodian is the editor: email sent, no push", () => {
     it("reserveBooking", async () => {
       const draft = {
