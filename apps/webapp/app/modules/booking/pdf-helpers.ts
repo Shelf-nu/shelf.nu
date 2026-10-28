@@ -2,6 +2,7 @@ import type {
   Asset,
   Location,
   Category,
+  CustomField,
   Organization,
   Prisma,
   Kit,
@@ -15,10 +16,12 @@ import {
 } from "~/modules/barcode/display";
 import type { PdfCodeImage } from "~/modules/barcode/pdf-code-image";
 import { buildPdfCodeImageMap } from "~/modules/barcode/pdf-code-image.server";
+import { formatDocumentCustomFieldValue } from "~/modules/pdf-document/format";
 import { assertCanDownloadBookingDocuments } from "~/utils/booking-authorization.server";
 import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { calculateTotalValueOfAssets } from "~/utils/bookings";
 import { getClientHint } from "~/utils/client-hints";
+import type { ResolvedFormatPrefs } from "~/utils/date-format";
 import { rethrowIfClientError, ShelfError } from "~/utils/error";
 import type { RoleAccess } from "~/utils/permissions/role-access";
 import type { PdfSnapshotKit } from "./helpers";
@@ -89,7 +92,19 @@ export interface PdfDbResult {
     /** Cover image of the asset's model, rendered in the PDF when the asset
      * has no image of its own. See `~/modules/asset/image-resolution`. */
     assetModel: { image: string | null; thumbnailImage: string | null } | null;
+    /**
+     * The printed text of each of {@link PdfDbResult.customFields} this asset
+     * has a value for, keyed by custom field id. A field with no value has no
+     * entry and prints an empty cell.
+     */
+    customFieldValues: Record<string, string>;
   })[];
+  /**
+   * The custom fields the document prints, in the document's order. Only live
+   * fields of the workspace of a type a document can print: a field deleted since
+   * the document was saved drops out here.
+   */
+  customFields: Pick<CustomField, "id" | "name" | "type">[];
   totalValue: string;
   organization: Pick<
     Organization,
@@ -101,7 +116,7 @@ export interface PdfDbResult {
     // Read by `resolveDisplayCode` when building `assetIdToDisplayCodeMap`.
     | "qrIdDisplayPreference"
     | "barcodesEnabled"
-    // Whether the sheet prints the code pictures at all.
+    // Whether the document prints the code pictures at all.
     | "showQrCodesOnPdfs"
   >;
   /**
@@ -138,15 +153,19 @@ export interface PdfDbResult {
 /** Optional switches for {@link fetchAllPdfRelatedData}. */
 export interface PdfDataOptions {
   /**
-   * Whether to draw a code picture per asset. `true` by default, so a sheet
+   * Whether to draw a code picture per asset. `true` by default, so a document
    * that prints code pictures needs no opt-in.
    *
-   * A sheet that prints only the text code passes `false`: the encode is a
+   * A document that prints only the text code passes `false`: the encode is a
    * per-asset cost and puts a data URL per asset into a response that nothing
    * reads. The workspace's own `showQrCodesOnPdfs` still wins over a `true`
    * here: this switch can only turn generation off, never on.
    */
   includeCodeImages?: boolean;
+  /** Custom fields whose values the document prints. None by default. */
+  customFieldIds?: string[];
+  /** The acting user's format preferences, for printed custom field dates. */
+  formatPrefs?: ResolvedFormatPrefs;
 }
 
 export async function fetchAllPdfRelatedData(
@@ -160,6 +179,7 @@ export async function fetchAllPdfRelatedData(
   options?: PdfDataOptions
 ): Promise<PdfDbResult> {
   const includeCodeImages = options?.includeCodeImages ?? true;
+  const customFieldIds = options?.customFieldIds ?? [];
 
   try {
     const booking = await getBooking({
@@ -211,94 +231,110 @@ export async function fetchAllPdfRelatedData(
       ),
     ];
 
-    const [rawAssets, organization, snapshotKits] = await Promise.all([
-      db.asset.findMany({
-        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: booking PDF lists every asset the booking already holds, archived ones included
-        where: {
-          id: { in: visibleAssetIds },
-          // Defense-in-depth: scope to the caller's org even though the
-          // asset ids originate from an already org-scoped booking
-          organizationId,
-        },
-        include: {
-          // Model cover image for assets with no image of their own — the
-          // exported PDF renders the same cascade as every web surface.
-          ...ASSET_MODEL_IMAGE_SELECT,
-          category: {
-            select: {
-              name: true,
-            },
+    const [rawAssets, organization, snapshotKits, documentCustomFields] =
+      await Promise.all([
+        db.asset.findMany({
+          // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: booking PDF lists every asset the booking already holds, archived ones included
+          where: {
+            id: { in: visibleAssetIds },
+            // Defense-in-depth: scope to the caller's org even though the
+            // asset ids originate from an already org-scoped booking
+            organizationId,
           },
-          // why: out of this rule: `getQrCodeMaps` renders the image from
-          // `Qr.version`/`errorCorrection`, so the tight select cannot be used.
-          // Ordered so the QR picture and the QR id printed under it are the
-          // same first code on every print.
-          qrCodes: { orderBy: QR_CODES_ORDER_BY },
-          // Feeds `resolveDisplayCode` so a barcode-preference workspace gets
-          // its barcode value printed instead of the QR id.
-          barcodes: { select: { id: true, type: true, value: true } },
-          assetLocations: {
-            select: {
-              location: {
-                select: {
-                  name: true,
+          include: {
+            // Model cover image for assets with no image of their own: the
+            // exported PDF renders the same cascade as every web surface.
+            ...ASSET_MODEL_IMAGE_SELECT,
+            category: {
+              select: {
+                name: true,
+              },
+            },
+            // why: out of this rule: `getQrCodeMaps` renders the image from
+            // `Qr.version`/`errorCorrection`, so the tight select cannot be used.
+            // Ordered so the QR picture and the QR id printed under it are the
+            // same first code on every print.
+            qrCodes: { orderBy: QR_CODES_ORDER_BY },
+            // Feeds `resolveDisplayCode` so a barcode-preference workspace gets
+            // its barcode value printed instead of the QR id.
+            barcodes: { select: { id: true, type: true, value: true } },
+            assetLocations: {
+              select: {
+                location: {
+                  select: {
+                    name: true,
+                  },
                 },
               },
             },
-          },
-          // Each slice's `kit` / `kitId` are resolved PER SLICE below by
-          // matching the slice's `BookingAsset.assetKitId` against these
-          // memberships' `id` (a QT asset can be in several kits, so
-          // `assetKits[0]` is not necessarily the slice's kit). `kit.location`
-          // is included so `groupAndSortAssetsByKit` can sort kit groups by
-          // Location in the exported PDF (otherwise every kit is treated as
-          // null-location and falls back to kit-name order, making the PDF not
-          // match the selected Location sort).
-          assetKits: {
-            select: {
-              id: true,
-              kit: {
-                select: {
-                  id: true,
-                  name: true,
-                  location: { select: { name: true } },
+            // Each slice's `kit` / `kitId` are resolved PER SLICE below by
+            // matching the slice's `BookingAsset.assetKitId` against these
+            // memberships' `id` (a QT asset can be in several kits, so
+            // `assetKits[0]` is not necessarily the slice's kit). `kit.location`
+            // is included so `groupAndSortAssetsByKit` can sort kit groups by
+            // Location in the exported PDF (otherwise every kit is treated as
+            // null-location and falls back to kit-name order, making the PDF not
+            // match the selected Location sort).
+            assetKits: {
+              select: {
+                id: true,
+                kit: {
+                  select: {
+                    id: true,
+                    name: true,
+                    location: { select: { name: true } },
+                  },
                 },
               },
             },
-          },
-        },
-      }),
-      db.organization.findUnique({
-        where: { id: organizationId },
-        select: {
-          imageId: true,
-          name: true,
-          id: true,
-          currency: true,
-          updatedAt: true,
-          // Which code the workspace wants printed, and whether its picture is
-          // printed at all.
-          qrIdDisplayPreference: true,
-          barcodesEnabled: true,
-          showQrCodesOnPdfs: true,
-        },
-      }),
-      // SECURITY (cross-org IDOR): `sourceKitId`'s FK accepts a `Kit` in ANY
-      // organization, so this lookup is org-scoped and an id that doesn't
-      // resolve simply leaves the slice rendering as a standalone row.
-      snapshotKitIds.length > 0
-        ? db.kit.findMany({
-            where: { id: { in: snapshotKitIds }, organizationId },
-            select: {
-              id: true,
-              name: true,
-              // Kit location — `groupAndSortAssetsByKit` sorts kit groups by
-              // it, so a snapshot kit must carry it like a live one.
-              location: { select: { name: true } },
+            // Only the values of the custom fields the document prints.
+            customFields: {
+              where: { customFieldId: { in: customFieldIds } },
+              select: { customFieldId: true, value: true },
             },
-          })
-        : Promise.resolve<PdfSnapshotKit[]>([]),
-    ]);
+          },
+        }),
+        db.organization.findUnique({
+          where: { id: organizationId },
+          select: {
+            imageId: true,
+            name: true,
+            id: true,
+            currency: true,
+            updatedAt: true,
+            // Which code the workspace wants printed, and whether its picture is
+            // printed at all.
+            qrIdDisplayPreference: true,
+            barcodesEnabled: true,
+            showQrCodesOnPdfs: true,
+          },
+        }),
+        // SECURITY (cross-org IDOR): `sourceKitId`'s FK accepts a `Kit` in ANY
+        // organization, so this lookup is org-scoped and an id that doesn't
+        // resolve simply leaves the slice rendering as a standalone row.
+        snapshotKitIds.length > 0
+          ? db.kit.findMany({
+              where: { id: { in: snapshotKitIds }, organizationId },
+              select: {
+                id: true,
+                name: true,
+                // Kit location: `groupAndSortAssetsByKit` sorts kit groups by
+                // it, so a snapshot kit must carry it like a live one.
+                location: { select: { name: true } },
+              },
+            })
+          : Promise.resolve<PdfSnapshotKit[]>([]),
+        customFieldIds.length > 0
+          ? db.customField.findMany({
+              where: {
+                id: { in: customFieldIds },
+                organizationId,
+                deletedAt: null,
+              },
+              select: { id: true, name: true, type: true },
+            })
+          : Promise.resolve<Pick<CustomField, "id" | "name" | "type">[]>([]),
+      ]);
 
     if (!organization) {
       throw new ShelfError({
@@ -352,8 +388,8 @@ export async function fetchAllPdfRelatedData(
         ])
       );
 
-    // Drawn only when the sheet will print them: a workspace that turned code
-    // pictures off, or a caller whose sheet has no picture at all, renders
+    // Drawn only when the document will print them: a workspace that turned code
+    // pictures off, or a caller whose document has no picture at all, renders
     // nothing from this map, so drawing it would cost an encode per asset and
     // put a data URL per asset in the response that nothing reads. The renderer
     // treats a missing entry as "text only", so an empty map needs no handling
@@ -388,27 +424,51 @@ export async function fetchAllPdfRelatedData(
       },
     }));
 
+    // The document's custom fields in the document's own order, not the database's.
+    const customFields = customFieldIds.flatMap((id) => {
+      const field = documentCustomFields.find((f) => f.id === id);
+      return field ? [field] : [];
+    });
+    const locale = getClientHint(request).locale;
+
     // Everything dropped here is fetch-only. The code relations have done their
     // job in the two maps above; `assetKits` and `assetLocations` were reduced
     // to this row's `kit` and `location` by `buildPdfAssetRows`. Nothing reads
     // any of them again, here or in the browser, and the render list is one row
-    // per SLICE — so a QUANTITY_TRACKED asset booked standalone and through
-    // three kits would otherwise serialise four copies of each.
+    // per SLICE, so a QUANTITY_TRACKED asset booked standalone and through
+    // three kits would otherwise serialise four copies of each. Each row keeps
+    // only the printed text of the document's custom fields.
+
     const printableAssets = sortedAssets.map(
       ({
         qrCodes: _qrCodes,
         barcodes: _barcodes,
         assetKits: _assetKits,
         assetLocations: _assetLocations,
+        customFields: storedValues,
         ...row
-      }) => row
+      }) => {
+        const customFieldValues: Record<string, string> = {};
+        for (const field of customFields) {
+          const stored = storedValues.find((v) => v.customFieldId === field.id);
+          const text = formatDocumentCustomFieldValue({
+            value: stored?.value,
+            type: field.type,
+            currency: organization.currency,
+            locale,
+            prefs: options?.formatPrefs,
+          });
+          if (text !== null) customFieldValues[field.id] = text;
+        }
+        return { ...row, customFieldValues };
+      }
     );
 
     // `getBooking` returns the whole booking, and `BOOKING_WITH_ASSETS_INCLUDE`
-    // hangs two things off it that the sheet never reads: `bookingAssets`,
+    // hangs two things off it that the document never reads: `bookingAssets`,
     // carrying a second, select-shaped copy of every asset — code relations
     // included — once per slice, and `modelRequests` with full `AssetModel`
-    // rows, which the sheet reads from the projection above instead. The
+    // rows, which the document reads from the projection above instead. The
     // booking itself is here for its name, description, custodian and tags.
     const {
       bookingAssets: _bookingAssets,
@@ -435,8 +495,9 @@ export async function fetchAllPdfRelatedData(
           bookedQuantity: slice.quantity,
         })),
         currency: organization.currency,
-        locale: getClientHint(request).locale,
+        locale,
       }),
+      customFields,
       organization,
       assetIdToCodeImageMap,
       assetIdToDisplayCodeMap,

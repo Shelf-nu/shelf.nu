@@ -1,11 +1,19 @@
 /**
- * Booking Checklist API
+ * Booking Document API
  *
- * Serves `/api/bookings/:bookingId/generate-pdf`: everything the printable
- * booking checklist renders, loaded when its preview opens. Dates are
- * formatted in the acting user's format, lapsed asset photos are signed for
- * print (read-only, no row cap) so every photo prints, and one
- * `pdf_preview_opened` event is sent per preview.
+ * Serves `/api/bookings/:bookingId/generate-pdf`: everything a booking's PDF
+ * renders, loaded when its preview opens and again when the person picks
+ * another document. Dates are formatted in the acting user's format, lapsed
+ * asset photos are signed for print (read-only, no row cap) so every photo
+ * prints, and one `pdf_preview_opened` event is sent per preview.
+ *
+ * PDF documents are a paid feature. A workspace whose tier includes them picks
+ * one with `?document=<id>`: it must be one of the workspace's documents, or
+ * the answer is a 404, and the pick is remembered for this person and
+ * workspace. Without it the document is the person's last pick, then the
+ * workspace default. Every other workspace prints the built-in Checklist and
+ * `?document=` is ignored. Refusals are returned with their status, for the
+ * dialog to show.
  *
  * @see {@link file://./../../modules/booking/pdf-helpers.ts}
  * @see {@link file://./../../modules/asset/print-images.server.ts}
@@ -19,6 +27,13 @@ import { captureServerEvent } from "~/integrations/posthog/client.server";
 import { signAssetPhotosForPrint } from "~/modules/asset/print-images.server";
 import type { PdfDbResult } from "~/modules/booking/pdf-helpers";
 import { fetchAllPdfRelatedData } from "~/modules/booking/pdf-helpers";
+import { BOOKING_CHECKLIST_CONFIG } from "~/modules/pdf-document/config";
+import {
+  readLastPdfDocumentId,
+  rememberPdfDocument,
+} from "~/modules/pdf-document/cookie.server";
+import { resolvePdfDocumentForPrint } from "~/modules/pdf-document/service.server";
+import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import { getClientHint } from "~/utils/client-hints";
 import { formatDate } from "~/utils/date-format";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
@@ -35,6 +50,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { canCustomizePdfDocuments } from "~/utils/subscription.server";
 
 export const loader = async ({
   context,
@@ -53,7 +69,7 @@ export const loader = async ({
   );
 
   try {
-    const { organizationId, access } = await requirePermission({
+    const { organizationId, organizations, access } = await requirePermission({
       userId: userId,
       request,
       entity: PermissionEntity.booking,
@@ -63,10 +79,48 @@ export const loader = async ({
     // Extract sorting params from URL using standard utilities
     const searchParams = getCurrentSearchParams(request);
     const paramsValues = getParamsValues(searchParams);
-    // Default to "status" for booking assets (getParamsValues defaults to "createdAt" which isn't valid here)
-    const orderBy =
-      paramsValues.orderBy === "createdAt" ? "status" : paramsValues.orderBy;
-    const orderDirection = paramsValues.orderDirection;
+
+    const canCustomize = canCustomizePdfDocuments(
+      await getOrganizationTierLimit({ organizationId, organizations })
+    );
+    // Read only when the tier includes PDF documents; a free workspace's
+    // `?document=` never reaches the database.
+    const requestedDocumentId = canCustomize
+      ? searchParams.get("document")
+      : null;
+
+    // The acting user's format preferences, so booking PDF dates, custom
+    // field dates included, render per their settings rather than the
+    // request locale.
+    const [resolved, prefs] = await Promise.all([
+      canCustomize
+        ? resolvePdfDocumentForPrint({
+            organizationId,
+            requestedId: requestedDocumentId,
+            rememberedId: await readLastPdfDocumentId({
+              request,
+              organizationId,
+              userId,
+            }),
+          })
+        : null,
+      resolveUserFormatPrefsById(userId, getClientHint(request)),
+    ]);
+    const config = resolved?.document.config ?? BOOKING_CHECKLIST_CONFIG;
+
+    // A document sorted by name prints A to Z; one sorted by status prints in
+    // the booking page's order, which defaults to status (getParamsValues
+    // defaults to "createdAt", which isn't valid here).
+    const { orderBy, orderDirection } =
+      config.sortBy === "name"
+        ? { orderBy: "title", orderDirection: "asc" as const }
+        : {
+            orderBy:
+              paramsValues.orderBy === "createdAt"
+                ? "status"
+                : paramsValues.orderBy,
+            orderDirection: paramsValues.orderDirection,
+          };
 
     const pdfMeta: PdfDbResult = await fetchAllPdfRelatedData(
       bookingId,
@@ -74,20 +128,17 @@ export const loader = async ({
       userId,
       access,
       request,
-      { orderBy, orderDirection, search: paramsValues.search }
+      { orderBy, orderDirection, search: paramsValues.search },
+      { customFieldIds: config.customFieldIds, formatPrefs: prefs }
     );
 
     // Asset photos are signed URLs that stop loading once they lapse, and a
     // photo that does not load prints as the placeholder. Signed here, in the
-    // loader of the sheet that prints photos, rather than in the shared data
+    // loader of the document that prints photos, rather than in the shared data
     // helper: the check-in receipt reuses that helper and prints none.
-    // The acting user's format preferences are resolved alongside, so booking
-    // PDF dates render per their settings rather than the request locale.
-    const [signedAssets, prefs] = await Promise.all([
-      signAssetPhotosForPrint(pdfMeta.assets, { organizationId }),
-      resolveUserFormatPrefsById(userId, getClientHint(request)),
-    ]);
-    pdfMeta.assets = signedAssets;
+    pdfMeta.assets = await signAssetPhotosForPrint(pdfMeta.assets, {
+      organizationId,
+    });
 
     // Preserve the existing `.format(date)` call shape used below.
     const dateTimeFormat = {
@@ -108,21 +159,56 @@ export const loader = async ({
       pdfMeta.originalTo = dateTimeFormat.format(new Date(originalTo));
     }
 
-    captureServerEvent({
-      distinctId: userId,
-      event: "pdf_preview_opened",
-      properties: {
-        sheet: "booking_checklist",
-        organizationId,
-        rowCount: pdfMeta.assets.length,
-        // Rows are booking slices: one asset can print in several of them.
-        assetCount: new Set(pdfMeta.assets.map((asset) => asset.id)).size,
-      },
-    });
+    // Counted once per opening of the preview: picking another document
+    // reloads this route with `?document=`, which is not a new preview.
+    if (!requestedDocumentId) {
+      captureServerEvent({
+        distinctId: userId,
+        event: "pdf_preview_opened",
+        properties: {
+          sheet: "booking_checklist",
+          organizationId,
+          rowCount: pdfMeta.assets.length,
+          // Rows are booking slices: one asset can print in several of them.
+          assetCount: new Set(pdfMeta.assets.map((asset) => asset.id)).size,
+        },
+      });
+    }
 
-    return data(payload({ pdfMeta }));
+    return data(
+      payload({
+        pdfMeta,
+        // `null` for a workspace without PDF documents: it prints the
+        // built-in Checklist and the dialog offers no choice.
+        document: resolved
+          ? {
+              id: resolved.document.id,
+              name: resolved.document.name,
+              config: resolved.document.config,
+            }
+          : null,
+        documents: (resolved?.documents ?? []).map(
+          ({ id, name, isDefault }) => ({ id, name, isDefault })
+        ),
+      }),
+      resolved && requestedDocumentId
+        ? {
+            headers: {
+              "Set-Cookie": await rememberPdfDocument({
+                organizationId,
+                userId,
+                documentId: resolved.document.id,
+              }),
+            },
+          }
+        : undefined
+    );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
-    throw data(error(reason), { status: reason.status });
+    // Returned, not thrown: only the PDF dialog's fetcher loads this route,
+    // and a thrown response would replace the whole booking page with the
+    // route error screen. The dialog shows the message instead.
+    // No toast: the dialog shows the message where it was asked for.
+    return data(error(reason, false), { status: reason.status });
   }
 };

@@ -1,17 +1,21 @@
 /**
- * The Checklist sheet prints what the booking PDF printed before sheets existed.
+ * The Checklist prints the booking PDF as it was before PDF documents existed.
  *
- * `__snapshots__/checklist-sheet.html` is the markup of the booking PDF for one
- * busy booking. A workspace's seeded "Checklist" sheet must keep printing that
- * same page, so nobody who never opens the sheet settings sees a change.
+ * `__snapshots__/checklist-document.html` is the markup the booking PDF rendered
+ * for one busy booking before it read a document, recorded by the commit that
+ * added this test. A free workspace must keep printing exactly that page; a
+ * paid workspace's seeded "Checklist" document prints it too, titled by the
+ * document ("Checklist - ...") where the page said "Booking checklist for ...".
  *
  * @see {@link file://./booking-overview-pdf.tsx}
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { busyBookingPdfMeta } from "@factories";
 
-import type { PdfCodeImage } from "~/modules/barcode/pdf-code-image";
-import type { PdfDbResult } from "~/modules/booking/pdf-helpers";
+import { BOOKING_CHECKLIST_CONFIG } from "~/modules/pdf-document/config";
 import type {
   DateFormatOptions,
   ResolvedFormatPrefs,
@@ -49,161 +53,7 @@ vi.mock("~/hooks/use-date-formatter", async () => {
   };
 });
 
-const QR_IMAGE: PdfCodeImage = {
-  src: "data:image/svg+xml;base64,PHN2Zy8+",
-  shape: "square",
-  placement: "cell",
-};
-
-const LINE_BARCODE: PdfCodeImage = {
-  src: "data:image/svg+xml;base64,PHN2ZyBpZD0ibGluZSIvPg==",
-  shape: "linear",
-  placement: "line",
-};
-
-function row(overrides: Record<string, unknown>) {
-  return {
-    description: null,
-    quantity: 1,
-    mainImage: null,
-    thumbnailImage: null,
-    mainImageExpiration: null,
-    assetModel: null,
-    category: null,
-    location: null,
-    kit: null,
-    kitId: null,
-    isRemovedFromKit: false,
-    status: "AVAILABLE",
-    ...overrides,
-  };
-}
-
-/**
- * One booking that exercises every part of the page: custodian with an email,
- * a changed period, a description, tags, kit rows, a detached kit row, a code
- * printed on its own line, description rows, and an outstanding model request.
- */
-export function busyBookingPdfMeta(): PdfDbResult {
-  return {
-    booking: {
-      id: "booking-1",
-      name: "Campaign Shoot",
-      description: "Two days on location.\nLoad the van first.",
-      custodianUser: {
-        firstName: "Ada",
-        lastName: "Lovelace",
-        displayName: null,
-        email: "ada@example.com",
-      },
-      custodianTeamMember: null,
-      tags: [
-        { id: "tag-1", name: "Outdoor", color: null },
-        { id: "tag-2", name: "Client", color: null },
-      ],
-    },
-    organization: {
-      id: "org-1",
-      name: "ACME",
-      imageId: null,
-      currency: "USD",
-      updatedAt: new Date("2026-01-01T00:00:00.000Z"),
-      qrIdDisplayPreference: "QR_ID",
-      barcodesEnabled: true,
-      showQrCodesOnPdfs: true,
-    },
-    assets: [
-      row({
-        id: "asset-1",
-        bookingAssetId: "ba-1",
-        title: "Canon C200",
-        description: "Cinema camera with Super 35 sensor.",
-        category: { name: "Camera" },
-        location: { name: "Studio A" },
-        kitId: "kit-1",
-        kit: { id: "kit-1", name: "Camera kit", location: null },
-      }),
-      row({
-        id: "asset-2",
-        bookingAssetId: "ba-2",
-        title: "Battery V-mount",
-        quantity: 4,
-        category: { name: "Batteries" },
-        location: { name: "Studio A" },
-        kitId: "kit-1",
-        kit: { id: "kit-1", name: "Camera kit", location: null },
-      }),
-      row({
-        id: "asset-3",
-        bookingAssetId: "ba-3",
-        title: "Old monitor",
-        category: { name: "Monitors" },
-        kitId: "kit-1",
-        kit: { id: "kit-1", name: "Camera kit", location: null },
-        isRemovedFromKit: true,
-      }),
-      row({
-        id: "asset-4",
-        bookingAssetId: "ba-4",
-        title: "Aputure 300d",
-        description: "x".repeat(320),
-        category: { name: "Lighting" },
-        location: { name: "Studio B" },
-      }),
-      row({
-        id: "asset-5",
-        bookingAssetId: "ba-5",
-        title: "Sandbag",
-        quantity: 6,
-      }),
-    ],
-    totalValue: "$11,077.95",
-    assetIdToCodeImageMap: {
-      "asset-1": QR_IMAGE,
-      "asset-2": QR_IMAGE,
-      "asset-4": LINE_BARCODE,
-    },
-    assetIdToDisplayCodeMap: {
-      "asset-1": {
-        value: "QR-AAAA",
-        type: "QR_ID",
-        isFallback: false,
-        entityKind: "asset",
-        workspacePreference: "QR_ID",
-      },
-      "asset-2": {
-        value: "QR-BBBB",
-        type: "QR_ID",
-        isFallback: false,
-        entityKind: "asset",
-        workspacePreference: "QR_ID",
-      },
-      "asset-4": {
-        value: "AB-12345678901",
-        type: "Code128",
-        isFallback: false,
-        entityKind: "asset",
-        workspacePreference: "QR_ID",
-      },
-    },
-    modelRequests: [
-      {
-        id: "req-1",
-        assetModelId: "model-1",
-        quantity: 3,
-        fulfilledQuantity: 1,
-        fulfilledAt: null,
-        assetModel: { id: "model-1", name: "Tripod" },
-      },
-    ],
-    from: "27/10/2026, 5:24 pm",
-    to: "29/10/2026, 6:00 pm",
-    originalFrom: "26/10/2026, 9:00 am",
-    originalTo: "29/10/2026, 6:00 pm",
-  } as unknown as PdfDbResult;
-}
-
-describe("booking PDF: the Checklist sheet", () => {
+describe("booking PDF: the Checklist document", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-10-28T12:00:00.000Z"));
@@ -213,16 +63,40 @@ describe("booking PDF: the Checklist sheet", () => {
     vi.useRealTimers();
   });
 
-  it("prints the same page as the booking PDF before sheets", async () => {
-    const { container } = render(
+  function printedMarkup(
+    pdfDocument: {
+      name: string;
+      config: typeof BOOKING_CHECKLIST_CONFIG;
+    } | null
+  ) {
+    return render(
       <BookingPDFPreview
         componentRef={{ current: null }}
         pdfMeta={busyBookingPdfMeta()}
+        pdfDocument={pdfDocument}
       />
+    ).container.innerHTML;
+  }
+
+  const before = () =>
+    readFileSync(
+      join(__dirname, "__snapshots__", "checklist-document.html"),
+      "utf8"
     );
 
-    await expect(container.innerHTML).toMatchFileSnapshot(
-      "./__snapshots__/checklist-sheet.html"
+  it("prints exactly the page it always has for a workspace without PDF documents", () => {
+    expect(printedMarkup(null)).toBe(before());
+  });
+
+  it("prints the same page for a workspace's Checklist document, titled by the document", () => {
+    expect(before()).toContain("Booking checklist for Campaign Shoot");
+    expect(
+      printedMarkup({ name: "Checklist", config: BOOKING_CHECKLIST_CONFIG })
+    ).toBe(
+      before().replace(
+        "Booking checklist for Campaign Shoot",
+        "Checklist - Campaign Shoot"
+      )
     );
   });
 });
