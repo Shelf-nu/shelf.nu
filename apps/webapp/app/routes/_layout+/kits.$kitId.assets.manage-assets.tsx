@@ -673,6 +673,10 @@ export default function ManageAssetsInKit() {
               </AlertDialogTrigger>
 
               <AlertDialogContent
+                // The notices stack (custody, location, move, removal), and the
+                // shared content caps its height without scrolling, so this
+                // dialog scrolls to keep Cancel and Continue reachable.
+                className="overflow-y-auto"
                 // The dialog has no `AlertDialogDescription`, so Radix has
                 // nothing to announce beyond the heading. The move and removal
                 // warnings are the consequential part, so the dialog's
