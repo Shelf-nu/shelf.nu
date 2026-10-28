@@ -5,8 +5,8 @@
  * sits in another kit and confirming MOVES it: `updateKitAssets` deletes its
  * membership in the other kit and its slices on that kit's DRAFT/RESERVED
  * bookings (`removeKitSlicesFromPlanningBookings`), while ONGOING/OVERDUE
- * bookings keep the slice relabelled. The picker row shows the other kit's
- * name, but nothing at confirm time said the asset would leave it.
+ * bookings keep the slice relabelled. The confirm names these assets so the
+ * operator sees the move before it happens.
  *
  * QUANTITY_TRACKED assets are not listed: their units can sit in several kits
  * at once, so adding them here leaves their other kits untouched.
@@ -20,16 +20,15 @@
 import { AssetType } from "@prisma/client";
 import { ArrowRightLeftIcon } from "lucide-react";
 import { tw } from "~/utils/tw";
+import { formatNameList } from "./booking-removal-notice";
 
 /** One asset that confirming would take out of another kit. */
 export type CrossKitMove = {
   assetId: string;
   assetTitle: string;
+  fromKitId: string;
   fromKitName: string;
 };
-
-/** How many moving assets are spelled out before the list is elided. */
-const MAX_NAMED_MOVES = 3;
 
 /**
  * The fields of a picker row this notice reads. Declared so a renamed field
@@ -69,6 +68,7 @@ export function getCrossKitMoves(
       {
         assetId: item.id,
         assetTitle: item.title || "Untitled asset",
+        fromKitId: otherKit.id,
         fromKitName: otherKit.name,
       },
     ];
@@ -82,12 +82,9 @@ export function getCrossKitMoves(
  * @returns The rendered list
  */
 function formatMoves(moves: CrossKitMove[]): string {
-  const shown = moves
-    .slice(0, MAX_NAMED_MOVES)
-    .map((move) => `${move.assetTitle} (from ${move.fromKitName})`)
-    .join(", ");
-  const hiddenCount = moves.length - MAX_NAMED_MOVES;
-  return hiddenCount > 0 ? `${shown} and ${hiddenCount} more` : shown;
+  return formatNameList(
+    moves.map((move) => `${move.assetTitle} (from ${move.fromKitName})`)
+  );
 }
 
 type CrossKitMoveNoticeProps = {
@@ -117,7 +114,8 @@ export function CrossKitMoveNotice({
   if (moves.length === 0) return null;
   const isSingle = moves.length === 1;
   // Several assets can leave the same kit; the copy names one kit or several.
-  const isSingleKit = new Set(moves.map((move) => move.fromKitName)).size === 1;
+  // Counted by id: two kits can share a name.
+  const isSingleKit = new Set(moves.map((move) => move.fromKitId)).size === 1;
 
   return (
     <span
@@ -136,8 +134,7 @@ export function CrossKitMoveNotice({
       {isSingle ? "This asset leaves" : `These ${moves.length} assets leave`}{" "}
       {isSingle ? "its" : "their"} current kit{isSingleKit ? "" : "s"}:{" "}
       {formatMoves(moves)}. {isSingle ? "It also comes" : "They also come"} off{" "}
-      {isSingleKit ? "that kit's" : "those kits'"} bookings that are not checked
-      out yet.
+      {isSingleKit ? "that kit's" : "those kits'"} draft and reserved bookings.
     </span>
   );
 }

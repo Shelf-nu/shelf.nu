@@ -41,7 +41,12 @@ describe("getCrossKitMoves", () => {
     );
 
     expect(moves).toEqual([
-      { assetId: "asset_1", assetTitle: "Camera A", fromKitName: "Box 1" },
+      {
+        assetId: "asset_1",
+        assetTitle: "Camera A",
+        fromKitId: "kit_other",
+        fromKitName: "Box 1",
+      },
     ]);
   });
 
@@ -88,14 +93,21 @@ describe("<CrossKitMoveNotice>", () => {
   it("names one moving asset and the kit it leaves", () => {
     render(
       <CrossKitMoveNotice
-        moves={[{ assetId: "a", assetTitle: "Camera A", fromKitName: "Box 1" }]}
+        moves={[
+          {
+            assetId: "a",
+            assetTitle: "Camera A",
+            fromKitId: "k1",
+            fromKitName: "Box 1",
+          },
+        ]}
       />
     );
 
     expect(screen.getByText(/Kit move notice:/)).toBeInTheDocument();
     expect(
       screen.getByText(
-        /This asset leaves its current kit: Camera A \(from Box 1\)\. It also comes off that kit's bookings/
+        /This asset leaves its current kit: Camera A \(from Box 1\)\. It also comes off that kit's draft and reserved bookings/
       )
     ).toBeInTheDocument();
   });
@@ -106,6 +118,7 @@ describe("<CrossKitMoveNotice>", () => {
         moves={["A", "B", "C", "D", "E"].map((name) => ({
           assetId: name,
           assetTitle: `Item ${name}`,
+          fromKitId: "k2",
           fromKitName: "Box 2",
         }))}
       />
@@ -113,7 +126,7 @@ describe("<CrossKitMoveNotice>", () => {
 
     expect(
       screen.getByText(
-        /These 5 assets leave their current kit: Item A \(from Box 2\), Item B \(from Box 2\), Item C \(from Box 2\) and 2 more\. They also come off that kit's bookings/
+        /These 5 assets leave their current kit: Item A \(from Box 2\), Item B \(from Box 2\), Item C \(from Box 2\) and 2 more\. They also come off that kit's draft and reserved bookings/
       )
     ).toBeInTheDocument();
   });
@@ -122,15 +135,52 @@ describe("<CrossKitMoveNotice>", () => {
     render(
       <CrossKitMoveNotice
         moves={[
-          { assetId: "a", assetTitle: "Camera A", fromKitName: "Box 1" },
-          { assetId: "b", assetTitle: "Mic", fromKitName: "Box 2" },
+          {
+            assetId: "a",
+            assetTitle: "Camera A",
+            fromKitId: "k1",
+            fromKitName: "Box 1",
+          },
+          {
+            assetId: "b",
+            assetTitle: "Mic",
+            fromKitId: "k2",
+            fromKitName: "Box 2",
+          },
         ]}
       />
     );
 
     expect(
       screen.getByText(
-        /These 2 assets leave their current kits: Camera A \(from Box 1\), Mic \(from Box 2\)\. They also come off those kits' bookings/
+        /These 2 assets leave their current kits: Camera A \(from Box 1\), Mic \(from Box 2\)\. They also come off those kits' draft and reserved bookings/
+      )
+    ).toBeInTheDocument();
+  });
+
+  it("counts two kits that share a name as two kits", () => {
+    render(
+      <CrossKitMoveNotice
+        moves={[
+          {
+            assetId: "a",
+            assetTitle: "Lens",
+            fromKitId: "k1",
+            fromKitName: "Camera Kit",
+          },
+          {
+            assetId: "b",
+            assetTitle: "Body",
+            fromKitId: "k2",
+            fromKitName: "Camera Kit",
+          },
+        ]}
+      />
+    );
+
+    expect(
+      screen.getByText(
+        /leave their current kits: .* those kits' draft and reserved bookings/
       )
     ).toBeInTheDocument();
   });

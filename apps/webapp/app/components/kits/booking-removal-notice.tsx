@@ -60,8 +60,8 @@ export type KitRemovalBookingImpact = {
   checkedOut: BookingForNotice[];
 };
 
-/** How many booking names are spelled out before the list is elided. */
-const MAX_NAMED_BOOKINGS = 3;
+/** How many names a notice spells out before the list is elided. */
+const MAX_NAMED_ITEMS = 3;
 
 type BookingRemovalNoticeProps = {
   /** RESERVED bookings that would LOSE their slice. */
@@ -88,21 +88,29 @@ function dedupe(bookings: BookingForNotice[]): BookingForNotice[] {
 }
 
 /**
- * Renders the booking list as "A, B, C and 2 more".
+ * Renders a list of names as "A, B, C and 2 more".
  *
- * Same count-and-overflow shape as the `moveAssetKitUnits` block message —
- * name up to three, then elide. It spells the remainder out ("and 2 more")
- * rather than reusing that message's trailing ", …", which would collide with
- * this sentence's full stop and render as "…, Gala, ….".
+ * Names up to three, then elides. It spells the remainder out ("and 2 more")
+ * rather than a trailing ", …", which would collide with the sentence's full
+ * stop. Shared by the kit notices so their lists read the same.
+ *
+ * @param names - The names to list, in display order
+ * @returns The rendered list
+ */
+export function formatNameList(names: string[]): string {
+  const shown = names.slice(0, MAX_NAMED_ITEMS).join(", ");
+  const hiddenCount = names.length - MAX_NAMED_ITEMS;
+  return hiddenCount > 0 ? `${shown} and ${hiddenCount} more` : shown;
+}
+
+/**
+ * Renders the booking list as "A, B, C and 2 more".
  *
  * @param bookings - Already-deduped bookings
  * @returns The rendered name list
  */
 function formatBookingNames(bookings: BookingForNotice[]): string {
-  const names = bookings.map((booking) => booking.name);
-  const shown = names.slice(0, MAX_NAMED_BOOKINGS).join(", ");
-  const hiddenCount = names.length - MAX_NAMED_BOOKINGS;
-  return hiddenCount > 0 ? `${shown} and ${hiddenCount} more` : shown;
+  return formatNameList(bookings.map((booking) => booking.name));
 }
 
 /**
