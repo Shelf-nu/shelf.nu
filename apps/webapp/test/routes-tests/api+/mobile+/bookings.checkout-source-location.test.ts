@@ -10,6 +10,9 @@
  * answers" rather than being refused. The service's own handling (default,
  * 400 for a foreign location) is covered next to it.
  *
+ * The full check-out routes also hand the service what a model-pool refusal
+ * needs: the request's client hints and whether the caller sees every booking.
+ *
  * @see {@link file://../../../../app/routes/api+/mobile+/bookings.checkout.ts}
  * @see {@link file://../../../../app/routes/api+/mobile+/bookings.partial-checkout.ts}
  * @see {@link file://../../../../app/routes/api+/mobile+/bookings.fulfil-and-checkout.ts}
@@ -229,3 +232,22 @@ describe.each(ROUTES)("POST /api/mobile/$name sourceLocations", (route) => {
     expect(route.service).not.toHaveBeenCalled();
   });
 });
+
+describe.each([ROUTES[0], ROUTES[2]])(
+  "POST /api/mobile/$name model-pool refusal context",
+  (route) => {
+    it("hands the service the client hints and the caller's booking visibility", async () => {
+      expect.assertions(1);
+
+      await post(route.action, route.path, route.body);
+
+      // An admin sees every booking, so a refusal may name other members'.
+      expect(route.service).toHaveBeenCalledWith(
+        expect.objectContaining({
+          hints: expect.objectContaining({ timeZone: expect.any(String) }),
+          seesAllBookings: true,
+        })
+      );
+    });
+  }
+);

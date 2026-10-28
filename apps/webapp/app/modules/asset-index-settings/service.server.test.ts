@@ -26,8 +26,11 @@ vi.mock("../organization/service.server", () => ({
 }));
 
 const { db } = await import("~/database/db.server");
-const { getAssetIndexSettings, removeCustomFieldFromAssetIndexSettings } =
-  await import("./service.server");
+const {
+  getAssetIndexModeForUser,
+  getAssetIndexSettings,
+  removeCustomFieldFromAssetIndexSettings,
+} = await import("./service.server");
 
 const executeRawMock = vi.mocked(db.$executeRaw);
 const assetFindFirstMock = vi.mocked(db.asset.findFirst);
@@ -624,5 +627,59 @@ describe("getAssetIndexSettings with a column set saved before the unit column",
     await loadSavedColumns(saved, false);
 
     expect(updateMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("getAssetIndexModeForUser", () => {
+  const args = { userId: "user-1", organizationId: "org-1" };
+
+  beforeEach(() => {
+    findFirstMock.mockReset();
+    createMock.mockClear();
+  });
+
+  it("returns the saved mode", async () => {
+    findFirstMock.mockResolvedValue({ mode: "ADVANCED" } as never);
+
+    await expect(
+      getAssetIndexModeForUser({
+        ...args,
+        ui: { advancedAssetIndex: true, defaultAssetIndexMode: "SIMPLE" },
+      })
+    ).resolves.toBe("ADVANCED");
+  });
+
+  it("falls back to the role default without creating a settings row", async () => {
+    findFirstMock.mockResolvedValue(null);
+
+    await expect(
+      getAssetIndexModeForUser({
+        ...args,
+        ui: { advancedAssetIndex: true, defaultAssetIndexMode: "ADVANCED" },
+      })
+    ).resolves.toBe("ADVANCED");
+    expect(createMock).not.toHaveBeenCalled();
+  });
+
+  it("reports SIMPLE when the role cannot use the advanced index", async () => {
+    findFirstMock.mockResolvedValue({ mode: "ADVANCED" } as never);
+
+    await expect(
+      getAssetIndexModeForUser({
+        ...args,
+        ui: { advancedAssetIndex: false, defaultAssetIndexMode: "SIMPLE" },
+      })
+    ).resolves.toBe("SIMPLE");
+  });
+
+  it("wraps database errors in a ShelfError", async () => {
+    findFirstMock.mockRejectedValue(new Error("boom"));
+
+    await expect(
+      getAssetIndexModeForUser({
+        ...args,
+        ui: { advancedAssetIndex: true, defaultAssetIndexMode: "SIMPLE" },
+      })
+    ).rejects.toBeInstanceOf(ShelfError);
   });
 });

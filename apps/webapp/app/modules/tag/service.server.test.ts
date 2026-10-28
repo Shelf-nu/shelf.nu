@@ -1,8 +1,9 @@
-import { TagUseFor } from "@prisma/client";
+import { BookingStatus, TagUseFor } from "@prisma/client";
 import { describe, vitest } from "vitest";
 import { USER_ID, ORGANIZATION_ID } from "@factories";
 import { db } from "~/database/db.server";
-import { createTag, updateTag } from "~/modules/tag/service.server";
+import { bookingDraftVisibilityClause } from "~/modules/booking/draft-visibility";
+import { createTag, getTags, updateTag } from "~/modules/tag/service.server";
 
 // why: avoid database dependency and test tag service business logic in isolation
 vitest.mock("~/database/db.server", () => ({
@@ -11,6 +12,8 @@ vitest.mock("~/database/db.server", () => ({
     tag: {
       create: vitest.fn().mockResolvedValue({}),
       update: vitest.fn().mockResolvedValue({}),
+      findMany: vitest.fn().mockResolvedValue([]),
+      count: vitest.fn().mockResolvedValue(0),
     },
   },
 }));
@@ -53,6 +56,38 @@ describe("tag service", () => {
         color: "#ffffff",
         useFor: [TagUseFor.ASSET],
       });
+    });
+  });
+
+  describe("getTags", () => {
+    it("counts the assets and bookings the linked lists show by default", async () => {
+      await getTags({
+        organizationId: ORGANIZATION_ID,
+        userId: USER_ID,
+        request: new Request("http://localhost/tags"),
+      });
+
+      // The tags list links each count to the asset and bookings indexes, so
+      // each count must match what those lists show the viewer.
+      expect(db.tag.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          include: {
+            _count: {
+              select: {
+                assets: { where: { archivedAt: null } },
+                bookings: {
+                  where: {
+                    status: {
+                      notIn: [BookingStatus.ARCHIVED, BookingStatus.CANCELLED],
+                    },
+                    ...bookingDraftVisibilityClause(USER_ID),
+                  },
+                },
+              },
+            },
+          },
+        })
+      );
     });
   });
 
