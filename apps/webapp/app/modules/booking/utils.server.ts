@@ -291,12 +291,13 @@ export function calculateUnitCheckinProgress(
  *   checkedOut = max(0, C - D')
  *   booked     = max(0, B - C)
  *
- * For COMPLETE/ARCHIVED bookings, buckets follow the recorded dispatch and
- * return evidence: rows whose dispatched units are covered by dispositions
- * read Returned, rows dispatched with no recorded return stay visibly
- * Checked out (or Partial when only some units came back) — a closed booking
- * holding unreturned items says so. Only pure legacy data with no records of
- * any kind keeps the historical collapse-to-Returned.
+ * For COMPLETE/ARCHIVED bookings, an INDIVIDUAL asset that was dispatched reads
+ * Returned whether or not a return marker exists: the check-in that closed the
+ * booking reconciled it. A QUANTITY_TRACKED row reads Returned when
+ * dispositions cover its dispatched units, and otherwise stays Checked out (or
+ * Partial when only some units came back), because a booking can close with
+ * units pending. With no slice marker supplied, an empty `checkedOutAssetIds`
+ * counts every asset as dispatched.
  */
 type LifecycleAsset = {
   id: string;
@@ -516,9 +517,11 @@ export function calculateBookingLifecycleProgress({
    * - Partial:     0 < C < B  OR  0 < D < B  (mid-flight)
    * - Booked:      everything else (nothing out, nothing returned)
    *
-   * At COMPLETE/ARCHIVED, rows where any units were ever checked out collapse
-   * to Returned; rows that were never out stay Booked. Partial and CheckedOut
-   * are unreachable in the final branch by construction.
+   * At COMPLETE/ARCHIVED, a row is judged against its dispatched units:
+   * Returned when dispositions cover them, Partial when they cover some,
+   * Checked out when they cover none. A row with no dispatched units stays
+   * Booked, except record-free legacy data (empty `checkedOutAssetIds` and no
+   * slice marker), which reads Returned.
    *
    * QUICK-CHECKOUT CAVEAT: `checkedOutQuantity` (C) is sourced ONLY from
    * `PartialBookingCheckout` rows (progressive checkout). A quick / all-at-once
