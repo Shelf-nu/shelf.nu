@@ -75,6 +75,11 @@ export type PhotoCapture = {
   source: PhotoCaptureSource;
   /** The EXIF capture tags; null when the photo carries no date */
   tags: PhotoCaptureTags | null;
+  /**
+   * The device's IANA time zone. An EXIF date with no offset (every Android
+   * photo) is a wall-clock time on this device, so the server reads it here.
+   */
+  deviceTimeZone: string | null;
 };
 
 /**
@@ -83,21 +88,25 @@ export type PhotoCapture = {
  * @param fromCamera - True for `launchCameraAsync` (the app's own camera, which
  *   cannot hand back an old picture), false for the photo library
  * @param exif - `ImagePickerAsset.exif`
+ * @param deviceTimeZone - The device's IANA zone, from `Intl`; null when the
+ *   runtime does not report one
  * @returns How and when the photo was taken
  */
 export function photoCaptureFromPicker(
   fromCamera: boolean,
-  exif: PickerExif
+  exif: PickerExif,
+  deviceTimeZone: string | null
 ): PhotoCapture {
   return {
     source: fromCamera ? "CAMERA" : "LIBRARY",
     tags: captureTagsFromPickerExif(exif),
+    deviceTimeZone: deviceTimeZone || null,
   };
 }
 
 /**
  * Adds how and when a photo was taken to an upload, as the form fields the
- * server reads: `captureSource`, `exifDateTimeOriginal` and
+ * server reads: `captureSource`, `deviceTimeZone`, `exifDateTimeOriginal` and
  * `exifOffsetTimeOriginal`.
  *
  * @param formData - The multipart upload
@@ -110,6 +119,10 @@ export function appendPhotoCapture(
 ): void {
   if (!capture) return;
   formData.append("captureSource", capture.source);
+  // Sent with or without a picker date: the file itself may still carry one.
+  if (capture.deviceTimeZone) {
+    formData.append("deviceTimeZone", capture.deviceTimeZone);
+  }
   if (!capture.tags) return;
   formData.append("exifDateTimeOriginal", capture.tags.dateTimeOriginal);
   if (capture.tags.offsetTimeOriginal) {

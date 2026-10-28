@@ -89,6 +89,15 @@ async function ensureJpegFormat(
   return { uri: result.uri, mimeType: "image/jpeg" };
 }
 
+/** The device's IANA time zone, or null when the runtime reports none. */
+function deviceTimeZone(): string | null {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || null;
+  } catch {
+    return null;
+  }
+}
+
 type EvidenceModalProps = {
   visible: boolean;
   onClose: () => void;
@@ -315,7 +324,9 @@ export function EvidenceModal({
       );
       setSelectedImageUri(uri);
       setImageMimeType(mimeType);
-      setImageCapture(photoCaptureFromPicker(useCamera, asset.exif));
+      setImageCapture(
+        photoCaptureFromPicker(useCamera, asset.exif, deviceTimeZone())
+      );
     }
   }, []);
 

@@ -67,16 +67,21 @@ function fieldsOf(capture: Parameters<typeof appendPhotoCapture>[1]) {
   return fields;
 }
 
-test("a camera photo is sent as CAMERA with its date and offset", () => {
+test("a camera photo is sent as CAMERA with its date, offset and device zone", () => {
   assert.deepEqual(
     fieldsOf(
-      photoCaptureFromPicker(true, {
-        DateTimeOriginal: "2026:10:21 09:15:00",
-        OffsetTimeOriginal: "+02:00",
-      })
+      photoCaptureFromPicker(
+        true,
+        {
+          DateTimeOriginal: "2026:10:21 09:15:00",
+          OffsetTimeOriginal: "+02:00",
+        },
+        "Europe/Amsterdam"
+      )
     ),
     [
       ["captureSource", "CAMERA"],
+      ["deviceTimeZone", "Europe/Amsterdam"],
       ["exifDateTimeOriginal", "2026:10:21 09:15:00"],
       ["exifOffsetTimeOriginal", "+02:00"],
     ]
@@ -86,14 +91,24 @@ test("a camera photo is sent as CAMERA with its date and offset", () => {
 test("a library photo is sent as LIBRARY, with only the fields it has", () => {
   assert.deepEqual(
     fieldsOf(
-      photoCaptureFromPicker(false, { DateTimeOriginal: "2026:10:21 09:15:00" })
+      photoCaptureFromPicker(
+        false,
+        { DateTimeOriginal: "2026:10:21 09:15:00" },
+        "America/New_York"
+      )
     ),
     [
       ["captureSource", "LIBRARY"],
+      ["deviceTimeZone", "America/New_York"],
       ["exifDateTimeOriginal", "2026:10:21 09:15:00"],
     ]
   );
-  assert.deepEqual(fieldsOf(photoCaptureFromPicker(false, null)), [
+  // The zone still travels without a picker date: the file may carry one.
+  assert.deepEqual(fieldsOf(photoCaptureFromPicker(false, null, "UTC")), [
+    ["captureSource", "LIBRARY"],
+    ["deviceTimeZone", "UTC"],
+  ]);
+  assert.deepEqual(fieldsOf(photoCaptureFromPicker(false, null, null)), [
     ["captureSource", "LIBRARY"],
   ]);
   assert.deepEqual(fieldsOf(null), []);
@@ -109,8 +124,11 @@ test("a HEIC photo converted to JPEG still sends its date", () => {
   const convertedFile = { uri: "file:///photo.jpg", exif: null };
 
   assert.equal(captureTagsFromPickerExif(convertedFile.exif), null);
-  assert.deepEqual(fieldsOf(photoCaptureFromPicker(false, pickerResult.exif)), [
-    ["captureSource", "LIBRARY"],
-    ["exifDateTimeOriginal", "2026:10:21 09:15:00"],
-  ]);
+  assert.deepEqual(
+    fieldsOf(photoCaptureFromPicker(false, pickerResult.exif, null)),
+    [
+      ["captureSource", "LIBRARY"],
+      ["exifDateTimeOriginal", "2026:10:21 09:15:00"],
+    ]
+  );
 });
