@@ -6437,6 +6437,56 @@ describe("fulfilModelRequestsAndCheckout", () => {
     );
   });
 
+  it("writes one check-out line on each unit that leaves", async () => {
+    expect.assertions(1);
+    queueSingleUnitScan();
+    // why: the check-out reads the slices leaving now by their markers (an
+    // `OR` of never out, or out and fully back); the scanned unit's new row
+    // has not left yet. The queued reads above are answered first.
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockImplementation((args?: { where?: { OR?: unknown } }) =>
+      Promise.resolve(
+        args?.where?.OR
+          ? [
+              {
+                id: "ba-dell-1",
+                assetId: "dell-1",
+                assetKitId: null,
+                quantity: 1,
+              },
+            ]
+          : []
+      )
+    );
+    onTestFinished(() => {
+      (db.bookingAsset.findMany as ReturnType<typeof vitest.fn>)
+        .mockReset()
+        .mockResolvedValue([]);
+    });
+
+    await fulfilModelRequestsAndCheckout({
+      ...mockFulfilParams,
+      assetIds: ["dell-1"],
+      provenance: { surface: "web", method: "scanned" },
+    });
+
+    // The scan's "added" line is a separate fact; the check-out is said once.
+    const checkOutLines = (
+      noteService.createNotes as ReturnType<typeof vitest.fn>
+    ).mock.calls
+      .map(([args]) => args as { content: string; assetIds: string[] })
+      .filter((args) => args.content.includes("checked out"))
+      .map((args) => ({ content: args.content, assetIds: args.assetIds }));
+    expect(checkOutLines).toEqual([
+      {
+        content:
+          '{% link to="/settings/team/users/user-1" text="Test User" /%} checked out asset with {% link to="/bookings/booking-1" text="Test Booking" /%} (scanned on the web).',
+        assetIds: ["dell-1"],
+      },
+    ]);
+  });
+
   it("records the scan's method on the rows it scanned, and no method on rows already on the booking", async () => {
     expect.assertions(1);
 
@@ -14345,6 +14395,60 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
         expect.objectContaining({ assetId: mockQtyAssetId })
       );
     });
+
+    it("says the camera's return completed the booking when the batch also counts the pens back", async () => {
+      expect.assertions(3);
+
+      // All 10 pens and the camera come back in one web scan. The pens carry
+      // a count, so the batch stays in the partial check-in rather than handing
+      // over to `checkinBooking`, and it is this batch that completes the
+      // booking.
+      setupQtyMocks();
+      const booking = makeMixedBooking({
+        quantity: 10,
+        checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+        checkedInAt: null,
+        checkedOutQuantity: 10,
+      });
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(booking);
+      // why: the completing write returns the booking the asset lines link to.
+      (db.booking.update as ReturnType<typeof vitest.fn>).mockResolvedValue({
+        ...booking,
+        status: BookingStatus.COMPLETE,
+      });
+
+      const result = await partialCheckinBooking({
+        ...baseParams,
+        checkins: [{ assetId: mockQtyAssetId, returned: 10 }],
+        assetIds: ["asset-camera"],
+        provenance: { surface: "web", method: "scanned" },
+      });
+
+      expect(result.isComplete).toBe(true);
+      const cameraLines = (
+        noteService.createNotes as ReturnType<typeof vitest.fn>
+      ).mock.calls
+        .map(([args]) => args as { content: string; assetIds: string[] })
+        .filter((args) => args.assetIds.includes("asset-camera"));
+      expect(cameraLines).toEqual([
+        expect.objectContaining({
+          content:
+            '{% link to="/settings/team/users/user-1" text="Test User" /%} checked in the last items still out (scanned on the web), which completed the booking.',
+          assetIds: ["asset-camera"],
+        }),
+      ]);
+      // The pens keep their count line.
+      expect(noteService.createNotes).toHaveBeenCalledWith(
+        expect.objectContaining({
+          content: expect.stringContaining(
+            'via partial check-in on {% link to="/bookings/booking-q1" text="Qty Booking" /%}: returned **10**'
+          ),
+          assetIds: [mockQtyAssetId],
+        })
+      );
+    });
   });
 
   it("writes three logs and decrements pool when returned+lost+damaged equals remaining", async () => {
@@ -21893,6 +21997,36 @@ describe("check-in and check-out method on activity events", () => {
     );
   });
 
+  it("writes one check-in line per asset when the last rows close the booking through the full check-in", async () => {
+    expect.assertions(1);
+
+    // The batch's own line is the asset's check-in line; the full check-in it
+    // hands over to must not add "checked in asset with" on top.
+    setupTwoRowsThatCloseTheBooking();
+
+    await partialCheckinBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      assetIds: ["asset-1", "asset-2"],
+      userId: "user-1",
+      hints: mockClientHints,
+      provenance: { surface: "web", method: "scanned" },
+    });
+
+    const checkInLines = (
+      noteService.createNotes as ReturnType<typeof vitest.fn>
+    ).mock.calls
+      .map(([args]) => args as { content: string; assetIds: string[] })
+      .filter((args) => args.content.includes("checked in"));
+    expect(checkInLines).toEqual([
+      expect.objectContaining({
+        content:
+          '{% link to="/settings/team/users/user-1" text="Test User" /%} checked in the last items still out (scanned on the web), which completed the booking.',
+        assetIds: ["asset-1", "asset-2"],
+      }),
+    ]);
+  });
+
   it("partialCheckinBooking keeps the batch's method on rows that name no slice, whatever slices were ticked", async () => {
     expect.assertions(1);
 
@@ -21957,6 +22091,232 @@ describe("check-in and check-out method on activity events", () => {
       ["asset-1", { method: "scanned", surface: "web" }],
       ["asset-2", { method: "scanned", surface: "web" }],
     ]);
+  });
+});
+
+/**
+ * The line each asset's activity shows when a whole booking goes out or comes
+ * back. The services write it themselves, so the web button, the phone and a
+ * scan batch that covers the whole booking all leave one such line on every
+ * asset that moved, saying how the batch was made.
+ */
+describe("asset activity lines for a whole-booking check-out and check-in", () => {
+  const ACTOR = '{% link to="/settings/team/users/user-1" text="Test User" /%}';
+  const BOOKING_LINK =
+    '{% link to="/bookings/booking-1" text="Test Booking" /%}';
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // why: the check-out's org guard reads the booking's assets back by id;
+    // echo them so it passes.
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+      (args?: { where?: { id?: { in?: string[] } } }) =>
+        Promise.resolve((args?.where?.id?.in ?? []).map((id) => ({ id })))
+    );
+  });
+
+  /** Every asset note whose content contains `phrase`, as content and assets. */
+  function assetNotesWith(phrase: string) {
+    return (noteService.createNotes as ReturnType<typeof vitest.fn>).mock.calls
+      .map(([args]) => args as { content: string; assetIds: string[] })
+      .filter((args) => args.content.includes(phrase))
+      .map((args) => ({ content: args.content, assetIds: args.assetIds }));
+  }
+
+  /** A booking slice of one INDIVIDUAL asset, in the shape both services load. */
+  function slice(
+    assetId: string,
+    { checkedOutAt, status }: { checkedOutAt: Date | null; status: AssetStatus }
+  ) {
+    return {
+      id: `ba-${assetId}`,
+      assetId,
+      quantity: 1,
+      assetKitId: null,
+      checkedOutAt,
+      checkedInAt: null,
+      asset: {
+        id: assetId,
+        title: `Title ${assetId}`,
+        type: AssetType.INDIVIDUAL,
+        status,
+        assetKits: [],
+        bookingAssets:
+          status === AssetStatus.CHECKED_OUT
+            ? [{ booking: { id: "booking-1", status: BookingStatus.ONGOING } }]
+            : [],
+      },
+    };
+  }
+
+  /**
+   * Loads `slices` as the booking `checkoutBooking` sends out. The slices not
+   * out yet are the ones the check-out reads as leaving now.
+   */
+  function setupCheckout(slices: ReturnType<typeof slice>[]) {
+    const booking = {
+      ...mockBookingData,
+      status: BookingStatus.RESERVED,
+      bookingAssets: slices,
+    };
+    (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce(booking)
+      .mockResolvedValueOnce({ ...booking, status: BookingStatus.ONGOING });
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ id: "booking-1" });
+    // why: the check-out reads the slices that leave in this call by their
+    // markers (an `OR` of never out, or out and fully back). Every other read
+    // of the pivot in this flow answers nothing.
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockImplementation((args?: { where?: { OR?: unknown } }) =>
+      Promise.resolve(
+        args?.where?.OR
+          ? slices
+              .filter((ba) => !ba.checkedOutAt)
+              .map((ba) => ({
+                id: ba.id,
+                assetId: ba.assetId,
+                assetKitId: null,
+                quantity: 1,
+              }))
+          : []
+      )
+    );
+    onTestFinished(() => {
+      (db.bookingAsset.findMany as ReturnType<typeof vitest.fn>)
+        .mockReset()
+        .mockResolvedValue([]);
+    });
+  }
+
+  it.each([
+    { surface: "web" as const, words: "in one click on the web" },
+    { surface: "phone" as const, words: "in one tap on the phone" },
+  ])(
+    "checkoutBooking writes one check-out line per asset for the $surface one-click check-out",
+    async ({ surface, words }) => {
+      expect.assertions(1);
+
+      setupCheckout([
+        slice("asset-1", { checkedOutAt: null, status: AssetStatus.AVAILABLE }),
+        slice("asset-2", { checkedOutAt: null, status: AssetStatus.AVAILABLE }),
+      ]);
+
+      await checkoutBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        hints: mockClientHints,
+        from: futureFromDate,
+        to: futureToDate,
+        userId: "user-1",
+        provenance: { surface, method: "quick" },
+      });
+
+      expect(assetNotesWith("checked out")).toEqual([
+        {
+          content: `${ACTOR} checked out asset with ${BOOKING_LINK} (${words}).`,
+          assetIds: ["asset-1", "asset-2"],
+        },
+      ]);
+    }
+  );
+
+  it("checkoutBooking names only the assets whose slices leave in this check-out", async () => {
+    expect.assertions(1);
+
+    // asset-3's slice is already out, so nothing of it leaves now.
+    setupCheckout([
+      slice("asset-1", { checkedOutAt: null, status: AssetStatus.AVAILABLE }),
+      slice("asset-3", {
+        checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+        status: AssetStatus.CHECKED_OUT,
+      }),
+    ]);
+
+    await checkoutBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      hints: mockClientHints,
+      from: futureFromDate,
+      to: futureToDate,
+      userId: "user-1",
+      provenance: { surface: "web", method: "quick" },
+    });
+
+    expect(assetNotesWith("checked out").map((note) => note.assetIds)).toEqual([
+      ["asset-1"],
+    ]);
+  });
+
+  /**
+   * Loads an ongoing booking for `checkinBooking`: asset-1 went out and is not
+   * back, asset-2 never left.
+   */
+  function setupCheckin() {
+    const booking = {
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      bookingAssets: [
+        slice("asset-1", {
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          status: AssetStatus.CHECKED_OUT,
+        }),
+        slice("asset-2", { checkedOutAt: null, status: AssetStatus.AVAILABLE }),
+      ],
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(booking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...booking,
+      status: BookingStatus.COMPLETE,
+    });
+  }
+
+  it.each([
+    { surface: "web" as const, words: "in one click on the web" },
+    { surface: "phone" as const, words: "in one tap on the phone" },
+  ])(
+    "checkinBooking writes one check-in line on each asset that was out, for the $surface one-click check-in",
+    async ({ surface, words }) => {
+      expect.assertions(1);
+
+      setupCheckin();
+
+      await checkinBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        hints: mockClientHints,
+        userId: "user-1",
+        provenance: { surface, method: "quick" },
+      });
+
+      // asset-2 never left, so it gets no line.
+      expect(assetNotesWith("checked in")).toEqual([
+        {
+          content: `${ACTOR} checked in asset with ${BOOKING_LINK} (${words}).`,
+          assetIds: ["asset-1"],
+        },
+      ]);
+    }
+  );
+
+  it("checkinBooking writes no line when the caller already wrote this check-in's asset lines", async () => {
+    expect.assertions(1);
+
+    setupCheckin();
+
+    await checkinBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      hints: mockClientHints,
+      userId: "user-1",
+      provenance: { surface: "web", method: "scanned" },
+      assetNotesWritten: true,
+    });
+
+    expect(assetNotesWith("checked in")).toEqual([]);
   });
 });
 
