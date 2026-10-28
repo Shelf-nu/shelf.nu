@@ -2,18 +2,20 @@
  * Read-only viewer for evidence already recorded on an audit.
  *
  * The sibling {@link file://./evidence-modal.tsx} WRITES evidence during a
- * live scan. This one only READS: the notes and photos recorded against one
- * asset, or against the audit as a whole, including long after the audit
- * closed. A photo opens full-screen on tap, which is where its capture stamp
- * is readable.
+ * live scan. This one only READS, and exists because there was previously no
+ * way to read at all: a field worker photographed a damaged asset, completed
+ * the audit, and every note and photo they had taken became visible only on
+ * the web app. The phone even knew how many there were — the detail payload
+ * carries counts — and still could not show one of them.
  *
  * Deliberately has no edit or delete affordance. Removing evidence is a
- * destructive act that belongs on the surface with room to confirm it.
+ * destructive act that belongs on the surface with room to confirm it; this
+ * is for looking at the record in the field, including long after the audit
+ * closed.
  *
  * @see {@link file://./../../lib/api/audits.ts} `auditEvidence`
- * @see {@link file://../full-screen-image-viewer.tsx}
  */
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 import {
   View,
   Text,
@@ -30,7 +32,6 @@ import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { CONTENT_MAX_WIDTH } from "@/lib/content-column";
 import { useDateFormatter } from "@/lib/use-date-formatter";
 import type { AuditEvidenceImage, AuditEvidenceNote } from "@/lib/api/types";
-import { FullScreenImageViewer } from "@/components/full-screen-image-viewer";
 
 type EvidenceViewerProps = {
   visible: boolean;
@@ -41,6 +42,8 @@ type EvidenceViewerProps = {
   images: AuditEvidenceImage[];
   isLoading?: boolean;
   error?: string | null;
+  /** Opens one photo full-screen. Omitted when there is nothing to open into. */
+  onImagePress?: (image: AuditEvidenceImage) => void;
   /**
    * Fetches again after a failure.
    *
@@ -60,12 +63,11 @@ export function EvidenceViewer({
   images,
   isLoading = false,
   error = null,
+  onImagePress,
   onRetry,
 }: EvidenceViewerProps) {
   const { colors } = useTheme();
   const styles = useStyles();
-  /** The photo open full-screen, if any. */
-  const [openImage, setOpenImage] = useState<AuditEvidenceImage | null>(null);
   // why: the workspace's own date format — the same hook every other audit
   // surface uses, so a completed audit does not suddenly render dates
   // differently from the screen that opened it.
@@ -151,10 +153,11 @@ export function EvidenceViewer({
                     {images.map((image) => (
                       <TouchableOpacity
                         key={image.id}
-                        activeOpacity={0.7}
-                        onPress={() => setOpenImage(image)}
-                        accessibilityRole="button"
-                        accessibilityHint="Opens the photo full-screen"
+                        activeOpacity={onImagePress ? 0.7 : 1}
+                        onPress={
+                          onImagePress ? () => onImagePress(image) : undefined
+                        }
+                        accessibilityRole={onImagePress ? "button" : "image"}
                         accessibilityLabel={
                           image.description
                             ? `Photo: ${image.description}`
@@ -189,12 +192,6 @@ export function EvidenceViewer({
           )}
         </View>
       </View>
-      {/* Inside this modal's tree: iOS shows a modal only from the one on screen. */}
-      <FullScreenImageViewer
-        uri={openImage?.imageUrl ?? null}
-        onClose={() => setOpenImage(null)}
-        accessibilityLabel={openImage?.description ?? `Photo from ${title}`}
-      />
     </Modal>
   );
 }

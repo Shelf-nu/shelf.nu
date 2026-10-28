@@ -283,18 +283,15 @@ export async function uploadFile(
     generateThumbnail = false,
     thumbnailSize = 108, // Default thumbnail size
     upsert = false,
-    transformImage,
   }: UploadOptions & {
     generateThumbnail?: boolean;
     thumbnailSize?: number;
     upsert?: boolean;
-    transformImage?: TransformImage;
   }
 ): Promise<string | { originalPath: string; thumbnailPath: string }> {
   try {
     // Process original image
-    const cropped = await cropImage(fileData, resizeOptions);
-    const file = transformImage ? await transformImage(cropped) : cropped;
+    const file = await cropImage(fileData, resizeOptions);
 
     // Upload original file
     const { data, error } = await getSupabaseAdmin()
@@ -364,13 +361,6 @@ export interface UploadOptions {
   upsert?: boolean;
 }
 
-/**
- * A last step applied to the resized main image before it is stored. It
- * receives what `cropImage` returns and must return an image of the same
- * format. When a thumbnail is generated, it is cut from this step's output.
- */
-export type TransformImage = (image: Buffer) => Promise<Buffer>;
-
 export async function parseFileFormData({
   request,
   newFileName,
@@ -379,7 +369,6 @@ export async function parseFileFormData({
   generateThumbnail = false,
   thumbnailSize = 108,
   maxFileSize = DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
-  transformImage,
 }: {
   request: Request;
   newFileName: string;
@@ -388,8 +377,6 @@ export async function parseFileFormData({
   generateThumbnail?: boolean;
   thumbnailSize?: number;
   maxFileSize?: number;
-  /** Applied to each uploaded image after resizing; see {@link TransformImage}. */
-  transformImage?: TransformImage;
 }) {
   try {
     const uploadHandler = async (upload: any) => {
@@ -431,7 +418,6 @@ export async function parseFileFormData({
         resizeOptions,
         generateThumbnail,
         thumbnailSize,
-        transformImage,
       });
 
       // For profile pictures and other cases that don't need thumbnails,

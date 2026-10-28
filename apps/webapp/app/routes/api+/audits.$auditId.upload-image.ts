@@ -65,9 +65,6 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     // Parse form data to extract auditAssetId if present
     const formData = await request.clone().formData();
     const auditAssetId = formData.get("auditAssetId") as string | null;
-    // Sent only by the "take photo" input, for a photo just taken with the
-    // camera; within ten minutes of the server's clock it earns a capture stamp.
-    const capturedAt = formData.get("capturedAt");
 
     const result = await uploadAuditImage({
       request,
@@ -75,7 +72,6 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       organizationId,
       uploadedById: userId,
       auditAssetId: auditAssetId || undefined,
-      capturedAt: typeof capturedAt === "string" ? capturedAt : null,
     });
 
     if (auditAssetId && result?.id) {

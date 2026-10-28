@@ -25,10 +25,8 @@ import {
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { FullScreenImageViewer } from "@/components/full-screen-image-viewer";
 import { api } from "@/lib/api";
 import type { AuditEvidenceImage, AuditEvidenceNote } from "@/lib/api/types";
-import { pickedPhoto, type PickedPhoto } from "@/lib/audit-photo-capture";
 import { useOrg } from "@/lib/org-context";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
@@ -224,18 +222,12 @@ export function EvidenceModal({
    * second tap fires a second removal.
    */
   const [isRemoving, setIsRemoving] = useState(false);
-  /**
-   * The photo chosen but not yet uploaded. Its `capturedAt` is set only when
-   * the camera took it, which is what earns the photo a capture stamp.
-   */
-  const [selectedPhoto, setSelectedPhoto] = useState<PickedPhoto | null>(null);
-  /** Full-size URL of the recorded photo open in the viewer, if any. */
-  const [viewerUri, setViewerUri] = useState<string | null>(null);
+  const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
+  const [imageMimeType, setImageMimeType] = useState("image/jpeg");
 
   const resetState = useCallback(() => {
     setNoteText("");
-    setSelectedPhoto(null);
-    setViewerUri(null);
+    setSelectedImageUri(null);
     setIsSubmittingNote(false);
     setIsSubmittingImage(false);
   }, []);
@@ -305,14 +297,14 @@ export function EvidenceModal({
         });
 
     if (!result.canceled && result.assets[0]) {
-      // The moment the camera handed the photo back, before any conversion.
-      const pickedAt = new Date();
       const asset = result.assets[0];
       // Convert HEIC to JPEG if needed (iOS captures in HEIC by default)
-      const file = await ensureJpegFormat(asset.uri, asset.mimeType || null);
-      setSelectedPhoto(
-        pickedPhoto(file, useCamera ? "camera" : "library", pickedAt)
+      const { uri, mimeType } = await ensureJpegFormat(
+        asset.uri,
+        asset.mimeType || null
       );
+      setSelectedImageUri(uri);
+      setImageMimeType(mimeType);
     }
   }, []);
 
@@ -338,7 +330,7 @@ export function EvidenceModal({
   }, [pickImage]);
 
   const handleSubmitImage = useCallback(async () => {
-    if (!item?.auditAssetId || !currentOrg || !selectedPhoto) return;
+    if (!item?.auditAssetId || !currentOrg || !selectedImageUri) return;
 
     setIsSubmittingImage(true);
     try {
@@ -346,10 +338,9 @@ export function EvidenceModal({
         currentOrg.id,
         auditSessionId,
         item.auditAssetId,
-        selectedPhoto.uri,
-        selectedPhoto.mimeType,
-        noteText.trim() || undefined,
-        selectedPhoto.capturedAt
+        selectedImageUri,
+        imageMimeType,
+        noteText.trim() || undefined
       );
 
       if (error) {
@@ -365,7 +356,7 @@ export function EvidenceModal({
         onEvidenceAdded(item.assetId, "note");
         setSavedCount((n) => n + 1);
       }
-      setSelectedPhoto(null);
+      setSelectedImageUri(null);
       setNoteText("");
     } catch {
       Alert.alert("Error", "Failed to upload photo. Please try again.");
@@ -376,7 +367,8 @@ export function EvidenceModal({
     item,
     currentOrg,
     auditSessionId,
-    selectedPhoto,
+    selectedImageUri,
+    imageMimeType,
     noteText,
     onEvidenceAdded,
   ]);
@@ -401,7 +393,7 @@ export function EvidenceModal({
   if (!item) return null;
 
   const canSubmitNote = noteText.trim().length > 0 && !isSubmittingNote;
-  const canSubmitImage = selectedPhoto !== null && !isSubmittingImage;
+  const canSubmitImage = selectedImageUri && !isSubmittingImage;
   const isSubmitting = isSubmittingNote || isSubmittingImage;
 
   // If auditAssetId is not yet available (scan still queued), show a message
@@ -502,19 +494,12 @@ export function EvidenceModal({
                 {existing.images.length > 0 ? (
                   <View style={styles.existingImages}>
                     {existing.images.map((img) => (
-                      <TouchableOpacity
+                      <Image
                         key={img.id}
-                        onPress={() => setViewerUri(img.imageUrl)}
-                        activeOpacity={0.7}
-                        accessibilityRole="button"
-                        accessibilityLabel="Open photo full-screen"
-                      >
-                        <Image
-                          source={{ uri: img.thumbnailUrl }}
-                          style={styles.existingThumb}
-                          contentFit="cover"
-                        />
-                      </TouchableOpacity>
+                        source={{ uri: img.thumbnailUrl }}
+                        style={styles.existingThumb}
+                        contentFit="cover"
+                      />
                     ))}
                   </View>
                 ) : null}
@@ -529,18 +514,18 @@ export function EvidenceModal({
                 ))}
 
                 {/* Image preview / picker */}
-                {selectedPhoto ? (
+                {selectedImageUri ? (
                   <View style={styles.imagePreviewContainer}>
                     <Image
-                      key={selectedPhoto.uri}
-                      source={{ uri: selectedPhoto.uri }}
+                      key={selectedImageUri}
+                      source={{ uri: selectedImageUri }}
                       style={styles.imagePreview}
                       contentFit="cover"
                       cachePolicy="memory-disk"
                     />
                     <TouchableOpacity
                       style={styles.removeImageButton}
-                      onPress={() => setSelectedPhoto(null)}
+                      onPress={() => setSelectedImageUri(null)}
                       accessibilityLabel="Remove photo"
                     >
                       <Ionicons name="close-circle" size={28} color="#fff" />
@@ -585,7 +570,7 @@ export function EvidenceModal({
 
                 {/* Submit buttons */}
                 <View style={styles.actions}>
-                  {selectedPhoto ? (
+                  {selectedImageUri ? (
                     <TouchableOpacity
                       style={[
                         styles.submitButton,
@@ -706,12 +691,6 @@ export function EvidenceModal({
           </ScrollView>
         </View>
       </KeyboardAvoidingView>
-      {/* Inside this modal's tree: iOS shows a modal only from the one on screen. */}
-      <FullScreenImageViewer
-        uri={viewerUri}
-        onClose={() => setViewerUri(null)}
-        accessibilityLabel={`Photo of ${item.name}`}
-      />
     </Modal>
   );
 }

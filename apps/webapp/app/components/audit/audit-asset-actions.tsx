@@ -8,7 +8,6 @@ import { incrementAuditAssetMetaAtom } from "~/atoms/qr-scanner";
 import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
 import { useDisabled } from "~/hooks/use-disabled";
-import { fileCaptureTime } from "~/utils/file-capture-time";
 import { tw } from "~/utils/tw";
 
 type AuditAssetActionsProps = {
@@ -50,12 +49,6 @@ export function AuditAssetActions({
     const formData = new FormData();
     formData.append("image", file);
     formData.append("auditAssetId", auditAssetId);
-    // This input opens the camera, so the file is a photo just taken; the
-    // server stamps it when this time is within its freshness window.
-    const capturedAt = fileCaptureTime(file);
-    if (capturedAt) {
-      formData.append("capturedAt", capturedAt);
-    }
 
     void fetcher.submit(formData, {
       method: "POST",
