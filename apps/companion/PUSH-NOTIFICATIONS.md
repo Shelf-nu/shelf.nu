@@ -13,14 +13,14 @@ build (see [STORE-RELEASE.md](./STORE-RELEASE.md)).
 
 ## Who does what
 
-| Step                                  | Owner                          | Where                          |
-| ------------------------------------- | ------------------------------ | ------------------------------ |
-| 1. APNs key                           | Apple Developer account holder | `eas credentials` on a Mac     |
-| 2. Firebase project + FCM V1 key      | Google account holder          | Firebase console, then EAS     |
-| 3. `google-services.json` in the repo | whoever did step 2             | `apps/companion/`              |
-| 4. Enhanced push security             | EAS project owner              | expo.dev dashboard             |
-| 5. `EXPO_ACCESS_TOKEN` on the webapp  | whoever deploys the webapp     | Fly secrets / `.env`           |
-| 6. iOS entitlement stays in git       | every companion contributor    | `ios/Shelf/Shelf.entitlements` |
+| Step                                 | Owner                          | Where                          |
+| ------------------------------------ | ------------------------------ | ------------------------------ |
+| 1. APNs key                          | Apple Developer account holder | `eas credentials` on a Mac     |
+| 2. Firebase project + FCM V1 key     | Google account holder          | Firebase console, then EAS     |
+| 3. `google-services.json` on EAS     | whoever did step 2             | EAS file variable              |
+| 4. Enhanced push security            | EAS project owner              | expo.dev dashboard             |
+| 5. `EXPO_ACCESS_TOKEN` on the webapp | whoever deploys the webapp     | Fly secrets / `.env`           |
+| 6. iOS entitlement stays in git      | every companion contributor    | `ios/Shelf/Shelf.entitlements` |
 
 ## 1. APNs key (iOS)
 
@@ -78,7 +78,7 @@ Profiles` that names `com.shelf.companion.carlos`, so Xcode fetches a fresh
 
 ## 2. Firebase project and FCM V1 service account (Android)
 
-Android pushes need a Firebase project. There is none yet.
+Android pushes need a Firebase project. Shelf's is `shelf-companion`; the steps below set one up from scratch.
 
 1. In the [Firebase console](https://console.firebase.google.com) create a
    project for Shelf, then add an Android app with package name

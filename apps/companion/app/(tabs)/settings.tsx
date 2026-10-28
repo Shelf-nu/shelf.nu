@@ -82,12 +82,6 @@ export default function SettingsScreen() {
   })();
 
   /**
-   * Offers the server actions available from this row.
-   *
-   * Both of them end the current session — `setActiveServer` signs out and
-   * clears server-scoped state — so each is confirmed before anything happens.
-   */
-  /**
    * Development-only. Hands this device's Expo push token to the share sheet
    * so it can be pasted into the Expo push tool for an end-to-end delivery
    * check before the in-app notification settings exist.
@@ -104,6 +98,12 @@ export default function SettingsScreen() {
     }
   };
 
+  /**
+   * Offers the server actions available from this row.
+   *
+   * Both of them end the current session — `setActiveServer` signs out and
+   * clears server-scoped state — so each is confirmed before anything happens.
+   */
   const handleServerPress = () => {
     if (isSwitchingServer) return;
     const connectLabel = server.isCloud
