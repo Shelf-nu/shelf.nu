@@ -506,10 +506,28 @@ describe("generateWhereClause - enum filter values", () => {
     }
   );
 
-  it("answers an unknown asset type with a 400", () => {
-    const error = thrownBy("type=is:KIT");
-    expect(error?.status).toBe(400);
-    expect(error?.message).toContain("INDIVIDUAL, QUANTITY_TRACKED");
+  it.each(["type=is:KIT", "type=isNot:KIT"])(
+    "answers an unknown asset type in %s with a 400",
+    (query) => {
+      const error = thrownBy(query);
+      expect(error?.status).toBe(400);
+      expect(error?.message).toContain("INDIVIDUAL, QUANTITY_TRACKED");
+    }
+  );
+
+  it("quotes each unknown value on its own", () => {
+    const error = thrownBy("status=containsAny:LOST,FOO");
+    expect(error?.message).toContain('Unknown status "LOST", "FOO".');
+  });
+
+  it("ignores empty items in a status list", () => {
+    const result = generateWhereClause(
+      "org-1",
+      null,
+      parseFilters("status=containsAny:AVAILABLE,", columns)
+    );
+    expect(result.values).toContain("AVAILABLE");
+    expect(result.values).not.toContain("");
   });
 
   it("still casts known values in the SQL", () => {

@@ -573,15 +573,14 @@ const ENUM_FILTER_VALUES: Record<"status" | "type", readonly string[]> = {
  * its Postgres enum does not have, so the caller (a person editing a URL, or a
  * script) gets a plain answer instead of a database error.
  *
- * @param filter - A `status` or `type` filter from the URL.
+ * @param name - The enum filter being checked.
  * @param values - The filter's values, already split and trimmed.
  * @throws {ShelfError} 400 when any value is not in the enum.
  */
-export function assertEnumFilterValues(
-  filter: Pick<Filter, "name">,
+function assertEnumFilterValues(
+  name: keyof typeof ENUM_FILTER_VALUES,
   values: string[]
 ): void {
-  const name = filter.name as keyof typeof ENUM_FILTER_VALUES;
   const accepted = ENUM_FILTER_VALUES[name];
   const unknown = values.filter((value) => !accepted.includes(value));
   if (unknown.length === 0) return;
@@ -592,10 +591,10 @@ export function assertEnumFilterValues(
   throw new ShelfError({
     cause: null,
     title: `Unknown ${name} filter value`,
-    message: `Unknown ${name} "${unknown.join(
-      ", "
-    )}". Use one of: ${accepted.join(", ")}.${archivedHint}`,
-    additionalData: { filter: filter.name, unknown },
+    message: `Unknown ${name} ${unknown
+      .map((value) => `"${value}"`)
+      .join(", ")}. Use one of: ${accepted.join(", ")}.${archivedHint}`,
+    additionalData: { filter: name, unknown },
     label: "Assets",
     status: 400,
     shouldBeCaptured: false,
@@ -641,17 +640,21 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
     switch (filter.operator) {
       case "is": {
         const trimmedValue = String(filter.value).trim();
-        assertEnumFilterValues(filter, [trimmedValue]);
+        assertEnumFilterValues("status", [trimmedValue]);
         return Prisma.sql`${whereClause} AND a.status = ${trimmedValue}::public."AssetStatus"`;
       }
       case "isNot": {
         const trimmedValue = String(filter.value).trim();
-        assertEnumFilterValues(filter, [trimmedValue]);
+        assertEnumFilterValues("status", [trimmedValue]);
         return Prisma.sql`${whereClause} AND a.status != ${trimmedValue}::public."AssetStatus"`;
       }
       case "containsAny": {
-        const values = (filter.value as string).split(",").map((v) => v.trim());
-        assertEnumFilterValues(filter, values);
+        const values = String(filter.value)
+          .split(",")
+          .map((v) => v.trim())
+          .filter(Boolean);
+        if (values.length === 0) return whereClause;
+        assertEnumFilterValues("status", values);
         const valuesArray = Prisma.join(
           values.map((v) => Prisma.sql`${v}`),
           ", "
@@ -668,13 +671,13 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
     switch (filter.operator) {
       case "is": {
         const trimmedValue = String(filter.value).trim();
-        assertEnumFilterValues(filter, [trimmedValue]);
+        assertEnumFilterValues("type", [trimmedValue]);
         whereClause = Prisma.sql`${whereClause} AND a."type" = ${trimmedValue}::public."AssetType"`;
         break;
       }
       case "isNot": {
         const trimmedValue = String(filter.value).trim();
-        assertEnumFilterValues(filter, [trimmedValue]);
+        assertEnumFilterValues("type", [trimmedValue]);
         whereClause = Prisma.sql`${whereClause} AND a."type" != ${trimmedValue}::public."AssetType"`;
         break;
       }
