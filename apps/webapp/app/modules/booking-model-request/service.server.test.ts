@@ -3826,7 +3826,7 @@ describe("fulfilModelRequestsForAssets", () => {
   });
 
   it("decrements once per asset when several units of one model arrive together", async () => {
-    expect.assertions(2);
+    expect.assertions(3);
     // A single 3-unit reservation, read fresh before each write. The service
     // must see the previous increment, so the mock advances the counter the
     // way the database would.
@@ -3860,6 +3860,20 @@ describe("fulfilModelRequestsForAssets", () => {
     // helper loops sequentially.
     expect(row.fulfilledQuantity).toBe(3);
     expect(result.size).toBe(3);
+    // The last claim completes the reservation, and its `fulfilledAt` change
+    // travels in the same batched event write as the per-unit events.
+    const events = vitest
+      .mocked(db.activityEvent.createMany)
+      .mock.calls.flatMap((call) => call[0]?.data ?? []) as Array<{
+      action: string;
+      field?: string | null;
+    }>;
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        action: "BOOKING_MODEL_REQUEST_CHANGED",
+        field: "fulfilledAt",
+      })
+    );
   });
 
   it("stops decrementing once the reservation is full, so extras are plain assets", async () => {
