@@ -671,15 +671,20 @@ const useStyles = createStyles((colors, shadows) => ({
     alignItems: "center",
     padding: 14,
   },
+  // Each side of a row may shrink and its text wrap, so a long value next to
+  // a label still fits on a narrow screen with large text instead of being
+  // clipped by the card.
   settingLeft: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.md,
+    flexShrink: 1,
   },
   settingLabel: {
     fontSize: fontSize.base,
     color: colors.foreground,
     fontWeight: "500",
+    flexShrink: 1,
   },
   settingHint: {
     fontSize: fontSize.xs,
@@ -689,6 +694,8 @@ const useStyles = createStyles((colors, shadows) => ({
   settingValue: {
     fontSize: fontSize.sm,
     color: colors.muted,
+    flexShrink: 1,
+    textAlign: "right",
   },
 
   // Theme toggle (segmented control)
