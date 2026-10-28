@@ -1812,6 +1812,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             access.policy.notifications.reservationAlertsAdmins,
           tags,
           userId,
+          seesAllBookings: access.bookings.seeAll,
         });
 
         sendNotification({
@@ -1838,6 +1839,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           from: basicBookingInfo.from,
           to: basicBookingInfo.to,
           userId: user.id,
+          seesAllBookings: access.bookings.seeAll,
           // The booking header's one-click "Check out".
           provenance: { surface: "web", method: "quick" },
           // The confirm dialog's "From location" picks, one per pool at two

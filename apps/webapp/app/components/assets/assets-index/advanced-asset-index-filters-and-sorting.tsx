@@ -29,6 +29,7 @@ import { useDisabled } from "~/hooks/use-disabled";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
 import { useKeyboardReorder } from "~/hooks/use-keyboard-reorder";
 import { filterQueryableColumns } from "~/modules/asset/last-audit-date-access";
+import { splitSortParam } from "~/modules/asset/sort-param";
 import {
   parseColumnName,
   type Column,
@@ -619,7 +620,7 @@ export function AdvancedSorting() {
 
     const parsedSorts = filterQueryableColumns(
       searchParams.getAll("sortBy").map((s) => {
-        const [name, direction, cfType] = s.split(":");
+        const [name, direction, cfType] = splitSortParam(s);
         return { name, direction, cfType } as Sort;
       }),
       sortAccess
@@ -631,7 +632,7 @@ export function AdvancedSorting() {
 
   const initialSorts = filterQueryableColumns(
     searchParams.getAll("sortBy").map((s) => {
-      const [name, direction, cfType] = s.split(":");
+      const [name, direction, cfType] = splitSortParam(s);
       return { name, direction, cfType } as Sort;
     }),
     sortAccess

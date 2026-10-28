@@ -170,6 +170,7 @@ export async function action({ request }: ActionFunctionArgs) {
       assetIds,
       kitIds,
       hints,
+      seesAllBookings: access.bookings.seeAll,
       requireExplicitCheckout,
       // Pass the booking's own window: enables the full check-out's conflict
       // guard without adjusting any dates (adjustment needs a
