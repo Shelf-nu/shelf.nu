@@ -208,6 +208,29 @@ describe("adding a kit to a booking from the kit page", () => {
     ).toEqual(["kit123"]);
   });
 
+  it("hands the add the caller's access and client hints, for the pool guard's refusal", async () => {
+    expect.assertions(1);
+
+    await action(
+      createActionArgs({
+        context: mockContext,
+        params: { kitId: "kit123" },
+        request: mockRequest,
+      })
+    );
+
+    // `bookings.seeAll` decides whether a pool refusal names other members'
+    // bookings; the hints carry the time zone its day is written in.
+    expect(bookingService.updateBookingAssets).toHaveBeenCalledWith(
+      expect.objectContaining({
+        access: expect.objectContaining({
+          bookings: expect.objectContaining({ seeAll: true }),
+        }),
+        hints: expect.objectContaining({ timeZone: expect.any(String) }),
+      })
+    );
+  });
+
   it("refuses SELF_SERVICE adding kits to someone else's booking even with the see-toggle on", async () => {
     vi.mocked(requirePermission).mockResolvedValue(
       permissionContext({

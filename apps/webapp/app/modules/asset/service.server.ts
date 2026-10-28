@@ -7,7 +7,6 @@ import type {
   Tag,
   Organization,
   TeamMember,
-  Booking,
   Kit,
   AssetIndexSettings,
   UserOrganization,
@@ -72,7 +71,6 @@ import {
   loadCustodySources,
   rehomeCustodyForPlacementChange,
 } from "~/modules/asset/custody-source.server";
-import { bookableListScopeWhere } from "~/modules/asset/list-scope.server";
 import type { BookableListScope } from "~/modules/asset/list-scope.server";
 import {
   assertStockNotBelowManualPlacements,
@@ -132,7 +130,6 @@ import {
   updateCookieWithPerPage,
   userPrefs,
 } from "~/utils/cookies.server";
-import { CUSTODY_FILTER_REFUSED } from "~/utils/custody-filter";
 import {
   buildCustomFieldValue,
   extractCustomFieldValuesFromPayload,
@@ -203,6 +200,11 @@ import {
   canQueryLastAuditDate,
 } from "./last-audit-date-access";
 import type { LastAuditDateAccess } from "./last-audit-date-access";
+import {
+  buildAssetListWhere,
+  resolveAssetListFilters,
+} from "./list-where.server";
+import type { AssetListFilters } from "./list-where.server";
 import type {
   MoveAssetLocationUnitsArgs,
   MoveUnitsResult,
@@ -216,8 +218,6 @@ import {
   parseFiltersWithHierarchy,
   parseSortingOptions,
 } from "./query.server";
-import { resolveAssetSearchIds } from "./search-ids.server";
-import { buildAssetStatusWhere, splitAssetSearchTerms } from "./search.server";
 import { getNextSequentialId } from "./sequential-id.server";
 import type {
   AdvancedIndexAsset,
@@ -228,14 +228,11 @@ import type {
 } from "./types";
 import type { AllowedCustodianFilterIds } from "./utils.server";
 import {
-  buildLowStockWhere,
   getLocationUpdateNoteContent,
   getCustomFieldUpdateNoteContent,
   detectPotentialChanges,
   detectCustomFieldChanges,
   type CustomFieldChangeInfo,
-  andAssetWhere,
-  applyArchivedFilter,
   getArchivedFilterFromParams,
   type ArchivedFilter,
 } from "./utils.server";
@@ -667,326 +664,30 @@ const unavailableBookingStatuses = [
  * @param params Search and filtering parameters for asset queries
  * @returns Assets and total count matching the criteria
  */
-export async function getAssets(params: {
-  organizationId: Organization["id"];
-  page: number;
-  orderBy: SortingOptions;
-  orderDirection: SortingDirection;
-  perPage?: number;
-  search?: string | null;
-  categoriesIds?: Category["id"][] | null;
-  locationIds?: Location["id"][] | null;
-  tagsIds?: Tag["id"][] | null;
-  status?: Asset["status"] | null;
-  hideUnavailable?: Asset["availableToBook"];
-  bookingFrom?: Booking["from"];
-  bookingTo?: Booking["to"];
-  unhideAssetsBookigIds?: Booking["id"][];
-  teamMemberIds?: TeamMember["id"][] | null;
-  extraInclude?: Prisma.AssetInclude;
-  /**
-   * Hide all assets that cannot currently be added to kit.
-   * This includes:
-   * - assets in custody
-   * - assets that are checkedout
-   * */
-  hideUnavailableToAddToKit?: boolean;
-  assetKitFilter?: string | null;
-  /** QUANTITY_TRACKED assets at or below their minimum only. */
-  lowStockOnly?: boolean;
-  /** The caller's list scope; `null` or omitted lists every asset. */
-  bookableScope?: BookableListScope | null;
-  /**
-   * Active/Archived/All view dimension (orthogonal to `status`). Defaults to
-   * `active`, so every caller hides archived assets unless it opts in.
-   */
-  archivedFilter?: ArchivedFilter;
-}) {
-  let {
-    organizationId,
+export async function getAssets(
+  params: AssetListFilters & {
+    page: number;
+    orderBy: SortingOptions;
+    orderDirection: SortingDirection;
+    perPage?: number;
+    extraInclude?: Prisma.AssetInclude;
+  }
+) {
+  const {
     orderBy,
     orderDirection,
     page = 1,
     perPage = 8,
-    search,
-    categoriesIds,
-    locationIds,
-    tagsIds,
-    status,
     bookingFrom,
     bookingTo,
-    hideUnavailable,
-    unhideAssetsBookigIds,
-    teamMemberIds,
     extraInclude,
-    assetKitFilter,
-    lowStockOnly,
-    bookableScope,
-    archivedFilter = "active",
   } = params;
 
   try {
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 && perPage <= 100 ? perPage : 20;
 
-    const where: Prisma.AssetWhereInput = { organizationId };
-
-    // Active/Archived/All dimension (defaults to active = hide archived).
-    // Sits on the top-level `where`, so it ANDs with the search id set
-    // below: the UNION resolves candidate ids across all assets, then Prisma
-    // filters them by archived state. No re-query is needed on this path.
-    applyArchivedFilter(where, archivedFilter);
-
-    // Every filter below is its own group in `where.AND` (see andAssetWhere),
-    // so each one narrows the list and none can widen another.
-    if (bookableScope) {
-      andAssetWhere(where, bookableListScopeWhere(bookableScope));
-    }
-
-    if (lowStockOnly) {
-      andAssetWhere(where, buildLowStockWhere());
-    }
-
-    if (search) {
-      const searchTerms = splitAssetSearchTerms(search);
-
-      if (searchTerms.length === 0) {
-        // Typed input that yields zero terms (whitespace / bare commas)
-        // matches NOTHING — a debounced type-ahead sending a single space
-        // must not return the full list. Mirrors the mobile composer.
-        where.id = { in: [] };
-      } else {
-        // Resolve the search to a set of matching asset ids via the shared
-        // org-scoped UNION (resolveAssetSearchIds → buildAssetSearchUnion) —
-        // index-driven, org-scoped branches, ~165ms vs the old multi-table OR's
-        // cross-org seq scans. The helper is retry-wrapped (to claim the read
-        // semantics the client extension cannot infer) and guards the id set
-        // against Postgres' ~65k bind-param ceiling, throwing a friendly 400
-        // rather than letting an extreme org + very broad term hard-fail.
-        // The UNION always searches all 11 sources, so id-shaped searches
-        // return the full result set. The id set is ANDed with the category,
-        // tag, location and custodian filters below: a filter narrows a
-        // search, it never adds rows the search did not match.
-        const ids = await resolveAssetSearchIds({
-          organizationId,
-          terms: searchTerms,
-        });
-        andAssetWhere(where, { id: { in: ids } });
-      }
-    }
-
-    if (status) {
-      // why: Asset.status flips to IN_CUSTODY/CHECKED_OUT for QUANTITY_TRACKED
-      // assets as soon as ANY unit is allocated, even if other units remain
-      // available. Filtering with `where.status = AVAILABLE` would incorrectly
-      // exclude qty-tracked rows that still have free stock. Treat AVAILABLE
-      // as inclusive of all qty-tracked rows; row.status keeps the existing
-      // strict semantic for IN_CUSTODY / CHECKED_OUT (which are already
-      // truthful for qty-tracked — the row enters those states whenever ANY
-      // unit does).
-      if (status === AssetStatus.AVAILABLE) {
-        // QT-aware fragment shared with getAssetsWhereInput and the mobile
-        // assets endpoint. See buildAssetStatusWhere for the rationale.
-        andAssetWhere(where, buildAssetStatusWhere(status));
-      } else {
-        where.status = status;
-      }
-    }
-
-    if (categoriesIds?.length) {
-      if (categoriesIds.includes("uncategorized")) {
-        andAssetWhere(where, {
-          OR: [{ categoryId: { in: categoriesIds } }, { categoryId: null }],
-        });
-      } else {
-        where.categoryId = { in: categoriesIds };
-      }
-    }
-
-    if (hideUnavailable) {
-      //not disabled for booking
-      where.availableToBook = true;
-      /**
-       * For INDIVIDUAL assets, exclude those with active custody.
-       * For QUANTITY_TRACKED assets, always show them — partial availability
-       * is checked at booking time based on available quantity.
-       */
-      andAssetWhere(where, {
-        OR: [{ type: "QUANTITY_TRACKED" }, { custody: { none: {} } }],
-      });
-      if (bookingFrom && bookingTo) {
-        /**
-         * Booking overlap filters only apply to INDIVIDUAL assets.
-         * QUANTITY_TRACKED assets can have multiple overlapping bookings
-         * as long as total reserved doesn't exceed available quantity.
-         * Availability is validated at booking time, not at filter time.
-         */
-        // Rule 1: Exclude INDIVIDUAL assets from RESERVED bookings
-        andAssetWhere(where, {
-          OR: [
-            { type: "QUANTITY_TRACKED" },
-            {
-              bookingAssets: {
-                none: {
-                  booking: {
-                    ...(unhideAssetsBookigIds?.length && {
-                      id: { notIn: unhideAssetsBookigIds },
-                    }),
-                    status: BookingStatus.RESERVED,
-                    OR: [
-                      { from: { lte: bookingTo }, to: { gte: bookingFrom } },
-                      { from: { gte: bookingFrom }, to: { lte: bookingTo } },
-                    ],
-                  },
-                },
-              },
-            },
-          ],
-        });
-        // Rule 2: For ONGOING/OVERDUE bookings, only exclude CHECKED_OUT INDIVIDUAL assets
-        andAssetWhere(where, {
-          OR: [
-            { type: "QUANTITY_TRACKED" },
-            // Either asset is AVAILABLE (checked in from partial check-in)
-            { status: AssetStatus.AVAILABLE },
-            // Or asset has no conflicting ONGOING/OVERDUE bookings
-            {
-              bookingAssets: {
-                none: {
-                  booking: {
-                    ...(unhideAssetsBookigIds?.length && {
-                      id: { notIn: unhideAssetsBookigIds },
-                    }),
-                    status: {
-                      in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
-                    },
-                    OR: [
-                      { from: { lte: bookingTo }, to: { gte: bookingFrom } },
-                      { from: { gte: bookingFrom }, to: { lte: bookingTo } },
-                    ],
-                  },
-                },
-              },
-            },
-          ],
-        });
-      }
-    }
-    if (hideUnavailable === true && (!bookingFrom || !bookingTo)) {
-      throw new ShelfError({
-        cause: null,
-        message: "booking dates are needed to hide unavailable assets",
-        additionalData: {
-          hideUnavailable,
-          bookingFrom,
-          bookingTo,
-        },
-        label,
-      });
-    }
-    if (bookingFrom && bookingTo) {
-      where.availableToBook = true;
-    }
-
-    if (tagsIds && tagsIds.length) {
-      // One group: assets with any of the picked tags, or with no tags at
-      // all when 'untagged' is picked.
-      const realTagIds = tagsIds.filter((id) => id !== "untagged");
-      andAssetWhere(where, {
-        OR: [
-          ...(tagsIds.includes("untagged") ? [{ tags: { none: {} } }] : []),
-          ...(realTagIds.length > 0
-            ? [{ tags: { some: { id: { in: realTagIds } } } }]
-            : []),
-        ],
-      });
-    }
-
-    if (locationIds && locationIds.length > 0) {
-      if (locationIds.includes("without-location")) {
-        andAssetWhere(where, {
-          OR: [
-            { assetLocations: { some: { locationId: { in: locationIds } } } },
-            { assetLocations: { none: {} } },
-          ],
-        });
-      } else {
-        where.assetLocations = {
-          some: { locationId: { in: locationIds } },
-        };
-      }
-    }
-
-    /**
-     * `hideUnavailable` filters INDIVIDUAL assets that are in any kit out
-     * of the picker (those are managed via the kit, not picked directly).
-     * QUANTITY_TRACKED assets bypass this filter: a partial-kit allocation
-     * is a slice, not whole-asset exclusion — the free pool stays bookable
-     * as a standalone slice. Picker's availability math subtracts the
-     * kit-committed sum downstream so the displayed "Available" count is
-     * already correct.
-     */
-    if (hideUnavailable === true) {
-      andAssetWhere(where, {
-        OR: [{ type: "QUANTITY_TRACKED" }, { assetKits: { none: {} } }],
-      });
-    }
-
-    if (teamMemberIds && teamMemberIds.length) {
-      andAssetWhere(where, {
-        OR: [
-          {
-            custody: { some: { teamMemberId: { in: teamMemberIds } } },
-          },
-          {
-            custody: {
-              some: { custodian: { userId: { in: teamMemberIds } } },
-            },
-          },
-          {
-            bookingAssets: {
-              some: {
-                booking: {
-                  custodianTeamMemberId: { in: teamMemberIds },
-                  /** We only get them if the booking is ongoing */
-                  status: {
-                    in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
-                  },
-                },
-              },
-            },
-          },
-          {
-            bookingAssets: {
-              some: {
-                booking: {
-                  custodianUserId: { in: teamMemberIds },
-                  /** We only get them if the booking is ongoing */
-                  status: {
-                    in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
-                  },
-                },
-              },
-            },
-          },
-          ...(teamMemberIds.includes("without-custody")
-            ? [{ custody: { none: {} } }]
-            : []),
-        ],
-      });
-
-      // A refused custodian filter matches nothing, whatever else the group
-      // holds. Same guard as getAssetsWhereInput.
-      if (teamMemberIds.includes(CUSTODY_FILTER_REFUSED)) {
-        andAssetWhere(where, { id: CUSTODY_FILTER_REFUSED });
-      }
-    }
-
-    if (assetKitFilter === "NOT_IN_KIT") {
-      where.assetKits = { none: {} };
-    } else if (assetKitFilter === "IN_OTHER_KITS") {
-      where.assetKits = { some: {} };
-    }
+    const where = await buildAssetListWhere(params);
 
     /**
      * Runs the paginated asset query and its total count for a given `where`
@@ -3625,7 +3326,15 @@ export async function deleteAsset({
         where: { id, organizationId },
         select: {
           reminders: {
-            select: { alertDateTime: true, activeSchedulerReference: true },
+            select: {
+              alertDateTime: true,
+              activeSchedulerReference: true,
+              // why: cancelAssetReminderScheduler skips its already-fired
+              // early-return for recurring rows (they can hold a queued job
+              // while alertDateTime is briefly past)
+              recurrenceUnit: true,
+              recurrenceInterval: true,
+            },
           },
         },
       });
@@ -4264,6 +3973,7 @@ export async function bulkArchiveAssets({
   currentSearchParams,
   settings,
   lastAuditDateAccess,
+  bookableScope,
   actorUserId,
   timeZone = "UTC",
   confirmModelShortfall = false,
@@ -4278,6 +3988,12 @@ export async function bulkArchiveAssets({
    * whole selection.
    */
   lastAuditDateAccess: LastAuditDateAccess;
+  /**
+   * The caller's list scope, from `resolveBookableListScope`; `null` for a
+   * member who sees every asset. "Select all" expands to the assets the
+   * caller's list showed, never past it.
+   */
+  bookableScope: BookableListScope | null;
   /** Optional — caller-supplied userId for the activity event actor. */
   actorUserId?: string;
   /**
@@ -4311,6 +4027,7 @@ export async function bulkArchiveAssets({
       // only with asset:archive / asset:delete (ADMIN, OWNER). Issue #382.
       honorArchivedView: true,
       lastAuditDateAccess,
+      bookableScope,
     });
 
     // Fetch the eligible subset first so we can emit one event per asset
@@ -4467,6 +4184,7 @@ export async function bulkUnarchiveAssets({
   currentSearchParams,
   settings,
   lastAuditDateAccess,
+  bookableScope,
   actorUserId,
   timeZone = "UTC",
 }: {
@@ -4480,6 +4198,12 @@ export async function bulkUnarchiveAssets({
    * whole selection.
    */
   lastAuditDateAccess: LastAuditDateAccess;
+  /**
+   * The caller's list scope, from `resolveBookableListScope`; `null` for a
+   * member who sees every asset. "Select all" expands to the assets the
+   * caller's list showed, never past it.
+   */
+  bookableScope: BookableListScope | null;
   /** Optional — caller-supplied userId for the activity event actor. */
   actorUserId?: string;
   /**
@@ -4503,6 +4227,7 @@ export async function bulkUnarchiveAssets({
       // only with asset:archive / asset:delete (ADMIN, OWNER). Issue #382.
       honorArchivedView: true,
       lastAuditDateAccess,
+      bookableScope,
     });
 
     const eligible = await db.asset.findMany({
@@ -5872,11 +5597,9 @@ export async function getPaginatedAndFilterableAssets({
     : getCurrentSearchParams(request);
 
   const paramsValues = getParamsValues(searchParams);
-  const status =
-    searchParams.get("status") === "ALL" // If the value is "ALL", we just remove the param
-      ? null
-      : (searchParams.get("status") as AssetStatus | null);
   const getAllEntries = searchParams.getAll("getAll") as AllowedModelNames[];
+  // Paging, ordering and the dropdown seeds only. The filters the asset query
+  // applies come from resolveAssetListFilters below.
   const {
     page,
     perPageParam,
@@ -5885,13 +5608,8 @@ export async function getPaginatedAndFilterableAssets({
     search,
     categoriesIds,
     tagsIds,
-    bookingFrom,
-    bookingTo,
-    hideUnavailable,
-    unhideAssetsBookigIds,
     locationIds,
     teamMemberIds,
-    assetKitFilter,
   } = paramsValues;
 
   const cookie = await updateCookieWithPerPage(request, perPageParam);
@@ -5951,29 +5669,20 @@ export async function getPaginatedAndFilterableAssets({
         userId,
       }),
       getAssets({
-        organizationId,
+        ...resolveAssetListFilters({
+          organizationId,
+          searchParams,
+          teamMemberIds: scopedTeamMemberIds,
+          bookableScope,
+          locationIdsOverride,
+          honorArchivedView,
+          honorLowStockFilter,
+        }),
         page,
         perPage,
         orderBy,
         orderDirection,
-        search,
-        categoriesIds,
-        tagsIds,
-        status,
-        bookingFrom: bookingFrom ?? undefined,
-        bookingTo: bookingTo ?? undefined,
-        hideUnavailable,
-        unhideAssetsBookigIds,
-        locationIds: locationIdsOverride ?? locationIds,
-        teamMemberIds: scopedTeamMemberIds,
         extraInclude,
-        assetKitFilter,
-        bookableScope,
-        archivedFilter: honorArchivedView
-          ? getArchivedFilterFromParams(searchParams)
-          : "active",
-        lowStockOnly:
-          honorLowStockFilter && searchParams.get("lowStockOnly") === "true",
       }),
     ]);
 
@@ -7168,6 +6877,7 @@ export async function bulkDeleteAssets({
   currentSearchParams,
   settings,
   lastAuditDateAccess,
+  bookableScope,
   confirmation,
   timeZone = "UTC",
 }: {
@@ -7182,6 +6892,12 @@ export async function bulkDeleteAssets({
    * whole selection.
    */
   lastAuditDateAccess: LastAuditDateAccess;
+  /**
+   * The caller's list scope, from `resolveBookableListScope`; `null` for a
+   * member who sees every asset. "Select all" expands to the assets the
+   * caller's list showed, never past it.
+   */
+  bookableScope: BookableListScope | null;
   /**
    * The number the user typed in the delete dialog. Must equal the number of
    * assets this call removes, see {@link assertBulkDeleteConfirmed}.
@@ -7209,6 +6925,7 @@ export async function bulkDeleteAssets({
       // only with asset:archive / asset:delete (ADMIN, OWNER). Issue #382.
       honorArchivedView: true,
       lastAuditDateAccess,
+      bookableScope,
     });
 
     /**
@@ -7332,6 +7049,7 @@ export async function bulkCheckOutAssets({
   currentSearchParams,
   settings,
   lastAuditDateAccess,
+  bookableScope,
   timeZone = "UTC",
   allowedTeamMemberIds,
 }: {
@@ -7354,6 +7072,12 @@ export async function bulkCheckOutAssets({
    * whole selection.
    */
   lastAuditDateAccess: LastAuditDateAccess;
+  /**
+   * The caller's list scope, from `resolveBookableListScope`; `null` for a
+   * member who sees every asset. "Select all" expands to the assets the
+   * caller's list showed, never past it.
+   */
+  bookableScope: BookableListScope | null;
   /**
    * Acting user's IANA timezone. Forwarded to the select-all id resolution so
    * built-in date-column filters truncate the day in the user's tz (avoids an
@@ -7378,6 +7102,7 @@ export async function bulkCheckOutAssets({
       allowedTeamMemberIds,
       timeZone,
       lastAuditDateAccess,
+      bookableScope,
     });
 
     /**
@@ -7655,6 +7380,7 @@ export async function bulkCheckInAssets({
   currentSearchParams,
   settings,
   lastAuditDateAccess,
+  bookableScope,
   timeZone = "UTC",
   allowedTeamMemberIds,
 }: {
@@ -7675,6 +7401,12 @@ export async function bulkCheckInAssets({
    * whole selection.
    */
   lastAuditDateAccess: LastAuditDateAccess;
+  /**
+   * The caller's list scope, from `resolveBookableListScope`; `null` for a
+   * member who sees every asset. "Select all" expands to the assets the
+   * caller's list showed, never past it.
+   */
+  bookableScope: BookableListScope | null;
   /**
    * Acting user's IANA timezone. Forwarded to the select-all id resolution so
    * built-in date-column filters truncate the day in the user's tz (avoids an
@@ -7698,6 +7430,7 @@ export async function bulkCheckInAssets({
       allowedTeamMemberIds,
       timeZone,
       lastAuditDateAccess,
+      bookableScope,
     });
 
     /**
@@ -7911,6 +7644,7 @@ export async function bulkUpdateAssetLocation({
   currentSearchParams,
   settings,
   lastAuditDateAccess,
+  bookableScope,
   timeZone = "UTC",
 }: {
   userId: User["id"];
@@ -7925,6 +7659,12 @@ export async function bulkUpdateAssetLocation({
    * whole selection.
    */
   lastAuditDateAccess: LastAuditDateAccess;
+  /**
+   * The caller's list scope, from `resolveBookableListScope`; `null` for a
+   * member who sees every asset. "Select all" expands to the assets the
+   * caller's list showed, never past it.
+   */
+  bookableScope: BookableListScope | null;
   /**
    * Acting user's IANA timezone. Forwarded to the select-all id resolution so
    * built-in date-column filters truncate the day in the user's tz (avoids an
@@ -7944,6 +7684,7 @@ export async function bulkUpdateAssetLocation({
       allowedTeamMemberIds: "all",
       timeZone,
       lastAuditDateAccess,
+      bookableScope,
     });
 
     // Archived assets are frozen (issue #382): can't be edited in bulk either.
@@ -8277,6 +8018,7 @@ export async function bulkUpdateAssetMinQuantity({
   currentSearchParams,
   settings,
   lastAuditDateAccess,
+  bookableScope,
   timeZone = "UTC",
 }: {
   userId: string;
@@ -8290,6 +8032,12 @@ export async function bulkUpdateAssetMinQuantity({
    * Select-all drops a last audit date filter the caller may not query.
    */
   lastAuditDateAccess: LastAuditDateAccess;
+  /**
+   * The caller's list scope, from `resolveBookableListScope`; `null` for a
+   * member who sees every asset. "Select all" expands to the assets the
+   * caller's list showed, never past it.
+   */
+  bookableScope: BookableListScope | null;
   /** Acting user's IANA timezone, for select-all date-filter truncation. */
   timeZone?: string;
 }) {
@@ -8303,6 +8051,7 @@ export async function bulkUpdateAssetMinQuantity({
       // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
       allowedTeamMemberIds: "all",
       lastAuditDateAccess,
+      bookableScope,
       timeZone,
     });
 
@@ -8398,6 +8147,7 @@ export async function bulkUpdateAssetCategory({
   currentSearchParams,
   settings,
   lastAuditDateAccess,
+  bookableScope,
   timeZone = "UTC",
 }: {
   userId: string;
@@ -8412,6 +8162,12 @@ export async function bulkUpdateAssetCategory({
    * whole selection.
    */
   lastAuditDateAccess: LastAuditDateAccess;
+  /**
+   * The caller's list scope, from `resolveBookableListScope`; `null` for a
+   * member who sees every asset. "Select all" expands to the assets the
+   * caller's list showed, never past it.
+   */
+  bookableScope: BookableListScope | null;
   /**
    * Acting user's IANA timezone. Forwarded to the select-all id resolution so
    * built-in date-column filters truncate the day in the user's tz (avoids an
@@ -8431,6 +8187,7 @@ export async function bulkUpdateAssetCategory({
       allowedTeamMemberIds: "all",
       timeZone,
       lastAuditDateAccess,
+      bookableScope,
     });
 
     if (resolvedIds.length === 0) {
@@ -8540,6 +8297,7 @@ export async function bulkUpdateAssetCategory({
 
     return true;
   } catch (cause) {
+    rethrowIfClientError(cause);
     throw new ShelfError({
       cause,
       message: "Something went wrong while bulk updating category.",
@@ -8623,6 +8381,7 @@ export async function bulkUpdateAssetModel({
   currentSearchParams,
   settings,
   lastAuditDateAccess,
+  bookableScope,
 }: {
   userId: string;
   assetIds: Asset["id"][];
@@ -8636,6 +8395,12 @@ export async function bulkUpdateAssetModel({
    * whole selection.
    */
   lastAuditDateAccess: LastAuditDateAccess;
+  /**
+   * The caller's list scope, from `resolveBookableListScope`; `null` for a
+   * member who sees every asset. "Select all" expands to the assets the
+   * caller's list showed, never past it.
+   */
+  bookableScope: BookableListScope | null;
 }): Promise<BulkUpdateAssetModelResult> {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -8648,6 +8413,7 @@ export async function bulkUpdateAssetModel({
       // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
       allowedTeamMemberIds: "all",
       lastAuditDateAccess,
+      bookableScope,
     });
 
     // Archived assets are frozen (issue #382): can't be edited in bulk either.
@@ -8925,6 +8691,7 @@ export async function bulkAssignAssetTags({
   remove,
   settings,
   lastAuditDateAccess,
+  bookableScope,
   timeZone = "UTC",
 }: {
   userId: string;
@@ -8940,6 +8707,12 @@ export async function bulkAssignAssetTags({
    * whole selection.
    */
   lastAuditDateAccess: LastAuditDateAccess;
+  /**
+   * The caller's list scope, from `resolveBookableListScope`; `null` for a
+   * member who sees every asset. "Select all" expands to the assets the
+   * caller's list showed, never past it.
+   */
+  bookableScope: BookableListScope | null;
   /**
    * Acting user's IANA timezone. Forwarded to the select-all id resolution so
    * built-in date-column filters truncate the day in the user's tz (avoids an
@@ -8959,6 +8732,7 @@ export async function bulkAssignAssetTags({
       allowedTeamMemberIds: "all",
       timeZone,
       lastAuditDateAccess,
+      bookableScope,
     });
 
     if (resolvedIds.length === 0) {
@@ -9126,6 +8900,7 @@ export async function bulkMarkAvailability({
   currentSearchParams,
   settings,
   lastAuditDateAccess,
+  bookableScope,
   timeZone = "UTC",
 }: {
   organizationId: Asset["organizationId"];
@@ -9139,6 +8914,12 @@ export async function bulkMarkAvailability({
    * whole selection.
    */
   lastAuditDateAccess: LastAuditDateAccess;
+  /**
+   * The caller's list scope, from `resolveBookableListScope`; `null` for a
+   * member who sees every asset. "Select all" expands to the assets the
+   * caller's list showed, never past it.
+   */
+  bookableScope: BookableListScope | null;
   /**
    * Acting user's IANA timezone. Forwarded to the select-all id resolution so
    * built-in date-column filters truncate the day in the user's tz (avoids an
@@ -9158,6 +8939,7 @@ export async function bulkMarkAvailability({
       allowedTeamMemberIds: "all",
       timeZone,
       lastAuditDateAccess,
+      bookableScope,
     });
 
     // Archived assets are frozen (issue #382): can't change availability.
@@ -9177,6 +8959,7 @@ export async function bulkMarkAvailability({
 
     return true;
   } catch (cause) {
+    rethrowIfClientError(cause);
     throw new ShelfError({
       cause,
       message: "Something went wrong while marking assets as available.",

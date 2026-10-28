@@ -21,3 +21,9 @@
  * `TeamMember.id` or `User.id`.
  */
 export const CUSTODY_FILTER_REFUSED = "__custody-filter-refused__";
+
+/**
+ * The custodian filter's "Without custody" option. It names no person, so it
+ * reveals nothing about anyone's custody and is never narrowed away.
+ */
+export const WITHOUT_CUSTODY = "without-custody";

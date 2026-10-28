@@ -37,6 +37,7 @@ vi.mock("~/database/db.server", () => ({
 
 import { db } from "~/database/db.server";
 
+import { WITHOUT_LOCATION_ID } from "./filter-params";
 import { topBookedKitsReport } from "./helpers.server";
 import type { ResolvedTimeframe } from "./types";
 
@@ -395,5 +396,97 @@ describe("topBookedKitsReport", () => {
     expect(where.from).toEqual({ lte: TIMEFRAME.to });
     expect(where.to).toEqual({ gte: TIMEFRAME.from });
     expect(where.OR).toBeUndefined();
+  });
+
+  it("matches the filter bar's Category and Location against the kit itself", async () => {
+    vi.mocked(db.booking.findMany).mockResolvedValue([
+      booking("2026-04-05T00:00:00Z", "2026-04-06T00:00:00Z", ["kit-1"]),
+    ] as any);
+
+    await topBookedKitsReport({
+      organizationId: "org-1",
+      timeframe: TIMEFRAME,
+      kitFilter: {
+        categoryIds: ["cat-1", "cat-2"],
+        locationIds: ["loc-1", WITHOUT_LOCATION_ID],
+      },
+    });
+
+    const where = vi.mocked(db.kit.findMany).mock.calls[0][0]!.where!;
+    expect(where.organizationId).toBe("org-1");
+    expect(where.AND).toEqual([
+      { categoryId: { in: ["cat-1", "cat-2"] } },
+      { OR: [{ locationId: { in: ["loc-1"] } }, { locationId: null }] },
+    ]);
+  });
+
+  it("leaves the kit query unfiltered when no filter is chosen", async () => {
+    vi.mocked(db.booking.findMany).mockResolvedValue([
+      booking("2026-04-05T00:00:00Z", "2026-04-06T00:00:00Z", ["kit-1"]),
+    ] as any);
+
+    await topBookedKitsReport({
+      organizationId: "org-1",
+      timeframe: TIMEFRAME,
+      kitFilter: { categoryIds: [], locationIds: [] },
+    });
+
+    const where = vi.mocked(db.kit.findMany).mock.calls[0][0]!.where!;
+    expect(where).not.toHaveProperty("AND");
+  });
+
+  it.each([
+    {
+      choice: "one location",
+      locationIds: ["loc-1"],
+      expected: { locationId: { in: ["loc-1"] } },
+    },
+    {
+      choice: "Without location alone",
+      locationIds: [WITHOUT_LOCATION_ID],
+      expected: { locationId: null },
+    },
+  ])(
+    "matches $choice without wrapping it in an OR",
+    async ({ locationIds, expected }) => {
+      vi.mocked(db.booking.findMany).mockResolvedValue([
+        booking("2026-04-05T00:00:00Z", "2026-04-06T00:00:00Z", ["kit-1"]),
+      ] as any);
+
+      await topBookedKitsReport({
+        organizationId: "org-1",
+        timeframe: TIMEFRAME,
+        kitFilter: { categoryIds: [], locationIds },
+      });
+
+      const where = vi.mocked(db.kit.findMany).mock.calls[0][0]!.where!;
+      expect(where.AND).toEqual([expected]);
+    }
+  );
+
+  it("totals only the kits the filter keeps", async () => {
+    // Two kits booked; the location filter keeps kit-2 only, so the kit query
+    // answers with kit-2 alone.
+    vi.mocked(db.booking.findMany).mockResolvedValue([
+      booking("2026-04-05T00:00:00Z", "2026-04-06T00:00:00Z", ["kit-1"]),
+      booking("2026-04-10T00:00:00Z", "2026-04-11T00:00:00Z", ["kit-1"]),
+      booking("2026-04-12T00:00:00Z", "2026-04-13T00:00:00Z", ["kit-2"]),
+    ] as any);
+    vi.mocked(db.kit.findMany).mockResolvedValue([
+      kitMeta("kit-2", "Lighting Kit"),
+    ] as any);
+
+    const result = await topBookedKitsReport({
+      organizationId: "org-1",
+      timeframe: TIMEFRAME,
+      kitFilter: { categoryIds: [], locationIds: ["loc-2"] },
+    });
+
+    expect(result.rows.map((r) => r.kitId)).toEqual(["kit-2"]);
+    expect(result.totalRows).toBe(1);
+    const totalBookings = result.kpis.find(
+      (k) => k.id === "total_kit_bookings"
+    );
+    expect(totalBookings?.rawValue).toBe(1);
   });
 });
