@@ -68,36 +68,45 @@ function resolve(
 }
 
 /**
- * The built-in documents as a nested create, for the paths that create a
- * workspace.
+ * The built-in documents of a new workspace, as fields of its
+ * `OrganizationCreateInput`: the documents, and when the paid ones were
+ * given, so the first read does not seed them again.
  *
  * @param params.canCustomize - Whether the owner's tier includes PDF
  *   documents, which adds the Check-out receipt
- * @returns The `pdfDocuments` value of an `OrganizationCreateInput`
+ * @returns `pdfDocuments` and `paidPdfDocumentsSeededAt`, to spread into the
+ *   create input
  */
-export function builtInPdfDocumentsCreate({
+export function pdfDocumentsForNewWorkspace({
   canCustomize,
 }: {
   canCustomize: boolean;
 }) {
   return {
-    createMany: {
-      data: builtInBookingDocuments({ canCustomize }).map((document) => ({
-        name: document.name,
-        kind: KIND,
-        config: document.config,
-        isDefault: document.isDefault,
-      })),
+    pdfDocuments: {
+      createMany: {
+        data: builtInBookingDocuments({ canCustomize }).map((document) => ({
+          name: document.name,
+          kind: KIND,
+          config: document.config,
+          isDefault: document.isDefault,
+        })),
+      },
     },
-  } satisfies Prisma.PdfDocumentCreateNestedManyWithoutOrganizationInput;
+    paidPdfDocumentsSeededAt: canCustomize ? new Date() : null,
+  } satisfies Pick<
+    Prisma.OrganizationCreateInput,
+    "pdfDocuments" | "paidPdfDocumentsSeededAt"
+  >;
 }
 
 /**
- * Gives a workspace whose tier includes PDF documents the built-in ones.
- * Idempotent: two concurrent calls create each document once, because the
- * name and the default are both unique per workspace.
+ * Gives a workspace whose tier includes PDF documents the built-in ones it
+ * lacks, then records that it has them. Idempotent: two concurrent calls
+ * create each document once, because the name and the default are both
+ * unique per workspace; a built-in the workspace already has is skipped.
  */
-async function seedDocuments(organizationId: string) {
+async function seedPaidDocuments(organizationId: string) {
   await db.pdfDocument.createMany({
     data: builtInBookingDocuments({ canCustomize: true }).map((document) => ({
       organizationId,
@@ -108,12 +117,18 @@ async function seedDocuments(organizationId: string) {
     })),
     skipDuplicates: true,
   });
+  await db.organization.updateMany({
+    where: { id: organizationId, paidPdfDocumentsSeededAt: null },
+    data: { paidPdfDocumentsSeededAt: new Date() },
+  });
 }
 
 /**
  * Every booking document of a workspace, default first. Only for a workspace
- * whose tier includes PDF documents: one that has none yet gets the built-in
- * ones here.
+ * whose tier includes PDF documents. The first time such a workspace reads
+ * them (a workspace that upgraded, or one created by a path that seeds
+ * nothing), it gets the paid built-ins it lacks. That happens once: a
+ * document an admin deleted later is not seeded back.
  *
  * @param params.organizationId - The caller's workspace
  * @returns The documents with their configs parsed
@@ -126,17 +141,23 @@ export async function getPdfDocuments({
 }): Promise<ResolvedPdfDocument[]> {
   try {
     const read = () =>
-      db.pdfDocument.findMany({
-        where: { organizationId, kind: KIND },
-        select: DOCUMENT_SELECT,
-        orderBy: DOCUMENT_ORDER,
+      db.organization.findUnique({
+        where: { id: organizationId },
+        select: {
+          paidPdfDocumentsSeededAt: true,
+          pdfDocuments: {
+            where: { kind: KIND },
+            select: DOCUMENT_SELECT,
+            orderBy: DOCUMENT_ORDER,
+          },
+        },
       });
-    let rows = await read();
-    if (rows.length === 0) {
-      await seedDocuments(organizationId);
-      rows = await read();
+    let workspace = await read();
+    if (workspace && !workspace.paidPdfDocumentsSeededAt) {
+      await seedPaidDocuments(organizationId);
+      workspace = await read();
     }
-    return rows.map(resolve);
+    return (workspace?.pdfDocuments ?? []).map(resolve);
   } catch (cause) {
     throw new ShelfError({
       cause,

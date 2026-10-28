@@ -136,9 +136,12 @@ export const loader = async ({
     // photo that does not load prints as the placeholder. Signed here, in the
     // loader of the document that prints photos, rather than in the shared data
     // helper: the check-in receipt reuses that helper and prints none.
-    pdfMeta.assets = await signAssetPhotosForPrint(pdfMeta.assets, {
-      organizationId,
-    });
+    // A document without the Image column prints no photo, so it signs none.
+    if (config.columns.image) {
+      pdfMeta.assets = await signAssetPhotosForPrint(pdfMeta.assets, {
+        organizationId,
+      });
+    }
 
     // Preserve the existing `.format(date)` call shape used below.
     const dateTimeFormat = {

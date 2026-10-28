@@ -36,7 +36,7 @@ import { newOwnerEmailText, previousOwnerEmailText } from "./email";
 import { recordEvent } from "../activity-event/service.server";
 import { defaultColumnsForWorkspace } from "../asset-index-settings/helpers";
 import { defaultUserCategories } from "../category/default-categories";
-import { builtInPdfDocumentsCreate } from "../pdf-document/service.server";
+import { pdfDocumentsForNewWorkspace } from "../pdf-document/service.server";
 import { getUserTierLimit, updateUserTierId } from "../tier/service.server";
 import { USER_NAME_SELECT } from "../user/fields";
 import { lockMembership } from "../user/membership-lock.server";
@@ -269,7 +269,7 @@ export async function createOrganization({
         },
       },
 
-      pdfDocuments: builtInPdfDocumentsCreate({
+      ...pdfDocumentsForNewWorkspace({
         // The rule of `canCustomizePdfDocuments` (~/utils/subscription.server),
         // inlined: importing that module here closes an import cycle.
         canCustomize:

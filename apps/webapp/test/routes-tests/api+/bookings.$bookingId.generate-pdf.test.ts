@@ -323,6 +323,23 @@ describe("booking document loader: which document prints", () => {
     });
   });
 
+  it("signs no photos for a document that prints no Image column", async () => {
+    vi.mocked(resolvePdfDocumentForPrint).mockResolvedValue({
+      document: {
+        ...CHECKLIST,
+        config: {
+          ...BOOKING_CHECKLIST_CONFIG,
+          columns: { ...BOOKING_CHECKLIST_CONFIG.columns, image: false },
+        },
+      },
+      documents: [CHECKLIST],
+    });
+
+    await loader(buildArgs());
+
+    expect(signAssetPhotosForPrint).not.toHaveBeenCalled();
+  });
+
   it("asks for the document's custom fields, with the user's date format", async () => {
     vi.mocked(resolvePdfDocumentForPrint).mockResolvedValue({
       document: {

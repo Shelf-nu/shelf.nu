@@ -51,6 +51,8 @@ const store = vi.hoisted(() => ({
     deletedAt: Date | null;
   }[],
   seq: 0,
+  /** Workspaces whose paid documents were already given. */
+  seeded: new Set<string>(),
 }));
 
 function matches(row: Row, where: Where = {}) {
@@ -208,12 +210,25 @@ const customField = vi.hoisted(() => ({
   ),
 }));
 
+const organization = vi.hoisted(() => ({
+  findUnique: vi.fn(async ({ where }: { where: { id: string } }) => ({
+    paidPdfDocumentsSeededAt: store.seeded.has(where.id) ? new Date() : null,
+    pdfDocuments: sorted(
+      store.rows.filter((row) => row.organizationId === where.id)
+    ),
+  })),
+  updateMany: vi.fn(async ({ where }: { where: { id: string } }) => {
+    store.seeded.add(where.id);
+  }),
+}));
+
 // why: the service's rules are about what the table holds; an in-memory table
 // with the real scoping and unique indexes keeps the tests off a database.
 vi.mock("~/database/db.server", () => {
   const db = {
     pdfDocument,
     customField,
+    organization,
     // why: the row lock has no effect on a single-threaded in-memory table.
     $queryRaw: async () => [],
     $transaction: async <T>(fn: (tx: unknown) => Promise<T>) => fn(db),
@@ -227,6 +242,7 @@ beforeEach(() => {
   store.rows = [];
   store.customFields = [];
   store.seq = 0;
+  store.seeded = new Set();
 });
 
 function documentsOf(organizationId = ORG) {
@@ -245,6 +261,32 @@ describe("PDF documents: what a workspace starts with", () => {
     ]);
     expect(documents[0].config).toEqual(BOOKING_CHECKLIST_CONFIG);
     expect(documents[1].config).toEqual(CHECKOUT_RECEIPT_CONFIG);
+  });
+
+  it("gives a workspace that upgrades its Check-out receipt once, and never seeds a deleted one back", async () => {
+    // A free workspace: the Checklist only, paid documents never given.
+    store.rows.push({
+      id: "free-checklist",
+      organizationId: ORG,
+      name: "Checklist",
+      kind: "BOOKING",
+      config: BOOKING_CHECKLIST_CONFIG,
+      isDefault: true,
+      createdAt: new Date(0),
+    });
+
+    const upgraded = await getPdfDocuments({ organizationId: ORG });
+    expect(upgraded.map(({ name, isDefault }) => [name, isDefault])).toEqual([
+      ["Checklist", true],
+      ["Check-out receipt", false],
+    ]);
+
+    await deletePdfDocument({
+      organizationId: ORG,
+      documentId: upgraded[1].id,
+    });
+    const later = await getPdfDocuments({ organizationId: ORG });
+    expect(later.map((d) => d.name)).toEqual(["Checklist"]);
   });
 
   it("does not add the built-in documents again to a workspace that has documents", async () => {

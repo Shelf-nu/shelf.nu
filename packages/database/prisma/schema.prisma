@@ -1172,6 +1172,11 @@ model Organization {
   // Off means the sheet cannot be scanned in place of the label on the item.
   showQrCodesOnPdfs Boolean @default(true)
 
+  // When the workspace was given the PDF documents of a paid plan (the
+  // Check-out receipt). Null until its tier first includes PDF documents; set
+  // once, so a document an admin deleted is never seeded back.
+  paidPdfDocumentsSeededAt DateTime?
+
   // Custom footer text appended to workspace emails
   customEmailFooter String? @db.VarChar(500)
 

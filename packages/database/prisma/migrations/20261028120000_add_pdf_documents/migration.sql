@@ -38,6 +38,11 @@ ALTER TABLE "TierLimit" ADD COLUMN "canCustomizePdfDocuments" BOOLEAN NOT NULL D
 ALTER TABLE "CustomTierLimit" ADD COLUMN "canCustomizePdfDocuments" BOOLEAN NOT NULL DEFAULT true;
 UPDATE "TierLimit" SET "canCustomizePdfDocuments" = true WHERE id IN ('tier_1', 'tier_2', 'custom');
 
+-- When a workspace was given the PDF documents of a paid plan. Set once, so a
+-- workspace that upgrades later gets them on its first read, and a document
+-- an admin deleted is never seeded back.
+ALTER TABLE "Organization" ADD COLUMN "paidPdfDocumentsSeededAt" TIMESTAMP(3);
+
 -- Every existing workspace starts with "Checklist", which prints exactly the
 -- booking PDF as it was. Workspaces whose owner is on a paid tier also get
 -- "Check-out receipt". The config values match BOOKING_CHECKLIST_CONFIG and
@@ -71,3 +76,13 @@ LEFT JOIN "CustomTierLimit" ctl ON ctl."userId" = owner."id"
 WHERE owner."tierId" IN ('tier_1', 'tier_2')
    OR (owner."tierId" = 'custom' AND COALESCE(ctl."canCustomizePdfDocuments", true))
 ON CONFLICT DO NOTHING;
+
+UPDATE "Organization" o
+SET "paidPdfDocumentsSeededAt" = CURRENT_TIMESTAMP
+FROM "User" owner
+LEFT JOIN "CustomTierLimit" ctl ON ctl."userId" = owner."id"
+WHERE owner."id" = o."userId"
+  AND (
+    owner."tierId" IN ('tier_1', 'tier_2')
+    OR (owner."tierId" = 'custom' AND COALESCE(ctl."canCustomizePdfDocuments", true))
+  );
