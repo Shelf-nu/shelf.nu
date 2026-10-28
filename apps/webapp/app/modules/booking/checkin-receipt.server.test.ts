@@ -22,7 +22,6 @@ vi.mock("~/database/db.server", () => ({
   db: {
     bookingAsset: { findMany: vi.fn() },
     consumptionLog: { findMany: vi.fn() },
-    partialBookingCheckin: { findMany: vi.fn() },
     // why: the check-in events carry how each row came back; a case stages
     // them to prove the method reaches the row, and defaults to none.
     activityEvent: { findMany: vi.fn() },
@@ -164,7 +163,6 @@ function run() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockOf(db.partialBookingCheckin.findMany).mockResolvedValue([]);
   mockOf(db.consumptionLog.findMany).mockResolvedValue([]);
   mockOf(db.activityEvent.findMany).mockResolvedValue([]);
   mockOf(resolveCheckInTimes).mockResolvedValue(new Map());
@@ -254,13 +252,6 @@ describe("fetchCheckinReceiptData", () => {
         };
       })
     );
-    mockOf(db.partialBookingCheckin.findMany).mockResolvedValue([
-      {
-        assetIds: ["asset-1", "asset-2"],
-        checkinTimestamp: sessionAt,
-        checkedInById: "user-7",
-      },
-    ]);
     mockOf(db.user.findMany).mockResolvedValue([
       {
         id: "user-7",
