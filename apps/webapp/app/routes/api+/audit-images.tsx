@@ -72,6 +72,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
         thumbnailUrl: true,
         description: true,
         capturedAt: true,
+        captureSource: true,
         createdAt: true,
       },
       orderBy: {

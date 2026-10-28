@@ -1,4 +1,5 @@
 import React from "react";
+import type { AuditPhotoCaptureSource } from "@shelf/labels";
 import { AuditPhoto } from "~/components/audit/audit-photo";
 import { Spinner } from "~/components/shared/spinner";
 import useApiQuery from "~/hooks/use-api-query";
@@ -26,6 +27,9 @@ interface AuditImage {
   description?: string | null;
   /** When the photo was taken; null when its EXIF had no date */
   capturedAt: string | null;
+  /** How the photo reached Shelf; null when unknown */
+  captureSource: AuditPhotoCaptureSource | null;
+  createdAt: string;
 }
 
 export const AuditImagesComponent = React.memo(

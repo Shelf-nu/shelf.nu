@@ -470,3 +470,30 @@ export declare const DELETE_CONSEQUENCE_LABELS: {
   readonly ASSET: string;
   readonly BOOKING: string;
 };
+
+/** How an audit photo reached Shelf, as `AuditImage.captureSource` stores it. */
+export type AuditPhotoCaptureSource = "CAMERA" | "LIBRARY" | "WEB_UPLOAD";
+
+/** The label for each audit photo capture source. */
+export declare const AUDIT_PHOTO_SOURCE_LABELS: {
+  readonly CAMERA: string;
+  readonly LIBRARY: string;
+  readonly WEB_UPLOAD: string;
+};
+
+/**
+ * The two lines shown under every audit photo: how it arrived (null when the
+ * photo carries no source), then when it was taken or that the time is
+ * unknown. A camera photo with no EXIF date shows its upload time instead.
+ *
+ * @param photo - the `AuditImage` fields
+ * @param formatDateTime - the viewer's own date-and-time formatter
+ */
+export declare function describeAuditPhotoTime(
+  photo: {
+    captureSource?: AuditPhotoCaptureSource | null;
+    capturedAt?: string | Date | null;
+    createdAt?: string | Date | null;
+  },
+  formatDateTime: (value: string | Date) => string
+): { source: string | null; time: string };

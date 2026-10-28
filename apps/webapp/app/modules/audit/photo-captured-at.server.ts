@@ -18,6 +18,7 @@
  * @see {@link file://./image.service.server.ts} `uploadAuditImage`, the caller
  * @see {@link file://../../utils/storage.server.ts} `inspectOriginal`
  */
+import type { AuditImageCaptureSource } from "@prisma/client";
 import { fromZonedTime } from "date-fns-tz";
 import exifReader from "exif-reader";
 import { Logger } from "~/utils/logger";
@@ -206,4 +207,22 @@ export async function resolveCapturedAt({
     Logger.warn({ message: "Could not resolve an audit photo's time", cause });
     return null;
   }
+}
+
+/** Which app sent an audit photo upload. */
+export type AuditImageUploadedVia = "web" | "phone";
+
+/**
+ * How the phone app says a photo was captured: `CAMERA` for its own camera,
+ * `LIBRARY` for the photo library. Anything else, including no field from an
+ * app version that does not send it, is unknown.
+ *
+ * @param formData - The parsed upload
+ * @returns The capture source, or null when unknown
+ */
+export function captureSourceFromPhoneForm(
+  formData: FormData
+): Extract<AuditImageCaptureSource, "CAMERA" | "LIBRARY"> | null {
+  const value = formData.get("captureSource");
+  return value === "CAMERA" || value === "LIBRARY" ? value : null;
 }

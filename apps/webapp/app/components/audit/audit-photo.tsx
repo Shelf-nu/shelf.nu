@@ -1,19 +1,22 @@
 /**
- * Audit photo with the time it was taken
+ * Audit photo with how it arrived and when it was taken
  *
  * Every place the web app shows an audit photo uses these, so each photo
- * carries the same line: "Taken <date and time>" when the photo's EXIF had a
- * date, or "Time taken unknown" when it did not. The unknown case is shown on
- * purpose: a photo with no capture time is exactly the one a reviewer needs to
- * look at twice. The same line appears in the full-size preview.
+ * carries the same two lines: how it reached Shelf ("Taken in the app", "From
+ * the photo library", "Uploaded on the web") and when it was taken, or "Time
+ * taken unknown". The wording comes from `describeAuditPhotoTime` in
+ * `@shelf/labels`, which the companion app uses too. The same lines appear in
+ * the full-size preview and in the receipt PDF.
  *
  * @see {@link file://../../modules/audit/photo-captured-at.server.ts} where
- *   `capturedAt` comes from
+ *   `capturedAt` and `captureSource` come from
  * @see {@link file://../image-with-preview/image-with-preview.tsx}
  */
+import type { AuditPhotoCaptureSource } from "@shelf/labels";
+import { describeAuditPhotoTime } from "@shelf/labels";
 import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
+import { useDateFormatter } from "~/hooks/use-date-formatter";
 import { tw } from "~/utils/tw";
-import { DateS } from "../shared/date";
 
 /** The fields of an `AuditImage` a photo tile needs. */
 export type AuditPhotoImage = {
@@ -22,29 +25,42 @@ export type AuditPhotoImage = {
   thumbnailUrl?: string | null;
   /** When the photo was taken; null when unknown. A string once serialized. */
   capturedAt: Date | string | null;
+  /** How the photo reached Shelf; null when unknown. */
+  captureSource?: AuditPhotoCaptureSource | null;
+  /** When it was uploaded; shown for a camera photo with no capture time. */
+  createdAt?: Date | string | null;
 };
 
 /**
- * "Taken <date and time>" or "Time taken unknown".
+ * How the photo arrived, then when it was taken, as one line or two.
  *
- * @param props.capturedAt - The photo's `AuditImage.capturedAt`
+ * @param props.image - The photo's capture fields
+ * @param props.inline - One line joined by a dot (preview title), instead of
+ *   one line per fact (under a thumbnail)
  */
 export function AuditPhotoTaken({
-  capturedAt,
+  image,
+  inline = false,
 }: {
-  capturedAt: AuditPhotoImage["capturedAt"];
+  image: Pick<AuditPhotoImage, "capturedAt" | "captureSource" | "createdAt">;
+  inline?: boolean;
 }) {
-  return capturedAt ? (
+  const { formatDateTime } = useDateFormatter();
+  const { source, time } = describeAuditPhotoTime(image, formatDateTime);
+
+  if (inline) {
+    return <>{source ? `${source} · ${time}` : time}</>;
+  }
+  return (
     <>
-      Taken <DateS date={capturedAt} includeTime />
+      {source ? <span className="block">{source}</span> : null}
+      <span className="block">{time}</span>
     </>
-  ) : (
-    <>Time taken unknown</>
   );
 }
 
 /**
- * A clickable audit photo thumbnail with its "Taken ..." line under it.
+ * A clickable audit photo thumbnail with its source and time under it.
  *
  * @param props.image - The photo to show
  * @param props.images - Every photo in the same group, for previous/next in the
@@ -81,15 +97,15 @@ export function AuditPhoto({
           imageUrl: img.imageUrl,
           thumbnailUrl: img.thumbnailUrl || img.imageUrl,
           alt,
-          caption: <AuditPhotoTaken capturedAt={img.capturedAt} />,
+          caption: <AuditPhotoTaken image={img} inline />,
         }))}
-        caption={<AuditPhotoTaken capturedAt={image.capturedAt} />}
+        caption={<AuditPhotoTaken image={image} inline />}
         currentImageId={image.id}
       />
       {/* why: the caption may not widen the tile past its thumbnail, so it
           wraps under the photo instead of pushing the row apart */}
       <figcaption className="w-0 min-w-full text-[11px] leading-tight text-gray-600">
-        <AuditPhotoTaken capturedAt={image.capturedAt} />
+        <AuditPhotoTaken image={image} />
       </figcaption>
     </figure>
   );

@@ -115,6 +115,7 @@ const IMAGE_GENERAL = {
   thumbnailUrl: "https://x/thumb-rack.jpg",
   description: "Rack before the sweep",
   capturedAt: new Date("2026-08-19T12:40:00.000Z"),
+  captureSource: "CAMERA",
   createdAt: new Date("2026-08-19T12:42:00.000Z"),
   auditAssetId: null,
   uploadedBy: { firstName: "John", lastName: "Doe", profilePicture: null },
@@ -128,6 +129,7 @@ const IMAGE_ASSET = {
   thumbnailUrl: null,
   description: null,
   capturedAt: null,
+  captureSource: null,
   createdAt: new Date("2026-08-19T12:34:00.000Z"),
   auditAssetId: "aa-1",
   uploadedBy: null,
@@ -251,12 +253,29 @@ describe("GET /api/mobile/audits/:auditId/evidence", () => {
       expect(json.byAuditAsset["aa-1"].images[0].capturedAt).toBeNull();
     });
 
+    it("sends how each photo arrived, and null when unknown", async () => {
+      mockDb.auditImage.findMany.mockResolvedValue([
+        IMAGE_GENERAL,
+        IMAGE_ASSET,
+      ]);
+
+      const json = await body(
+        await loader(createLoaderArgs({ request: request(), ...ARGS }))
+      );
+
+      expect(json.general.images[0].captureSource).toBe("CAMERA");
+      expect(json.byAuditAsset["aa-1"].images[0].captureSource).toBeNull();
+    });
+
     it("asks the database for the capture time", async () => {
       await loader(createLoaderArgs({ request: request(), ...ARGS }));
 
       expect(mockDb.auditImage.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          select: expect.objectContaining({ capturedAt: true }),
+          select: expect.objectContaining({
+            capturedAt: true,
+            captureSource: true,
+          }),
         })
       );
     });

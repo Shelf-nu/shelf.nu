@@ -477,7 +477,7 @@ export const AuditPDFContent = ({
                         className="h-24 w-full object-cover"
                       />
                       <p className="mt-1 text-[10px] text-gray-700">
-                        <AuditPhotoTaken capturedAt={img.capturedAt} />
+                        <AuditPhotoTaken image={img} />
                       </p>
                       {img.description && (
                         <p className="mt-1 text-xs text-gray-600">
@@ -527,7 +527,7 @@ export const AuditPDFContent = ({
                         className="h-24 w-full object-cover"
                       />
                       <p className="mt-1 text-[10px] text-gray-700">
-                        <AuditPhotoTaken capturedAt={img.capturedAt} />
+                        <AuditPhotoTaken image={img} />
                       </p>
                       {img.description && (
                         <p className="mt-1 text-xs text-gray-600">

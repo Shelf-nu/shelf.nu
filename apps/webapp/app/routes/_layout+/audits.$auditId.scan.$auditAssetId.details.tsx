@@ -177,6 +177,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         imageUrl: true,
         thumbnailUrl: true,
         capturedAt: true,
+        captureSource: true,
+        createdAt: true,
       },
       orderBy: {
         createdAt: "desc",
@@ -442,6 +444,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           auditSessionId: auditId,
           organizationId,
           uploadedById: userId,
+          uploadedVia: "web",
           auditAssetId: auditAssetId,
         });
 
@@ -585,6 +588,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           auditSessionId: auditId,
           organizationId,
           uploadedById: userId,
+          uploadedVia: "web",
           auditAssetId: auditAssetId,
         });
 

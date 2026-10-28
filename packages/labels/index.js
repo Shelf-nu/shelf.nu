@@ -769,3 +769,61 @@ export const DELETE_CONSEQUENCE_LABELS = Object.freeze({
   BOOKING:
     "This permanently deletes the booking with its notes, model reservations and check-in and check-out history. If it is ongoing or overdue, its assets become available. This cannot be undone.",
 });
+
+/**
+ * How an audit photo reached Shelf, as `AuditImage.captureSource` stores it.
+ * `CAMERA` is a photo taken with the phone app's own camera, which cannot hand
+ * back an old picture; `LIBRARY` was picked from the phone's photo library;
+ * `WEB_UPLOAD` came through the web app, which cannot tell a camera shot from
+ * a file. Photos from before this field, or from app versions that do not send
+ * it, have none.
+ */
+export const AUDIT_PHOTO_SOURCE_LABELS = Object.freeze({
+  CAMERA: "Taken in the app",
+  LIBRARY: "From the photo library",
+  WEB_UPLOAD: "Uploaded on the web",
+});
+
+/**
+ * The two lines shown under every audit photo, on the web, in the receipt PDF
+ * and in the companion app: how the photo arrived, then when it was taken.
+ *
+ * The time is the photo's own capture time (`capturedAt`, read from its EXIF).
+ * EXIF can be edited, so how the photo arrived is shown first: a photo taken
+ * with the app's camera is the strongest evidence, a library photo's date is
+ * only what the file claims. A missing time is stated, never left blank,
+ * because that is the photo a reviewer needs to look at twice. A camera photo
+ * with no EXIF date falls back to its upload time and says so, since a photo
+ * taken in the app is uploaded minutes later at most.
+ *
+ * @param {{
+ *   captureSource?: "CAMERA" | "LIBRARY" | "WEB_UPLOAD" | null,
+ *   capturedAt?: string | Date | null,
+ *   createdAt?: string | Date | null,
+ * }} photo - the `AuditImage` fields
+ * @param {(value: string | Date) => string} formatDateTime - the viewer's own
+ *   date-and-time formatter
+ * @returns {{ source: string | null, time: string }} `source` is null for a
+ *   photo that carries none
+ */
+export function describeAuditPhotoTime(photo, formatDateTime) {
+  const source = photo.captureSource
+    ? AUDIT_PHOTO_SOURCE_LABELS[photo.captureSource] ?? null
+    : null;
+
+  if (photo.captureSource === "CAMERA") {
+    if (photo.capturedAt) {
+      return { source, time: formatDateTime(photo.capturedAt) };
+    }
+    if (photo.createdAt) {
+      return { source, time: `Uploaded ${formatDateTime(photo.createdAt)}` };
+    }
+  }
+
+  return {
+    source,
+    time: photo.capturedAt
+      ? `Taken ${formatDateTime(photo.capturedAt)}`
+      : "Time taken unknown",
+  };
+}

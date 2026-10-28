@@ -2755,6 +2755,10 @@ model AuditImage {
   /// this is the best signal available, not proof.
   capturedAt DateTime?
 
+  /// How the photo reached Shelf. Null for photos from before this field and
+  /// from app versions that do not send it.
+  captureSource AuditImageCaptureSource?
+
   // Datetime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2764,6 +2768,16 @@ model AuditImage {
   @@index([auditAssetId])
   @@index([organizationId])
   @@index([uploadedById])
+}
+
+/// How an audit photo reached Shelf. A photo taken with the phone app's own
+/// camera cannot be an old picture, so it is the strongest evidence; a library
+/// photo's date is only what its file claims; the web app cannot tell a camera
+/// shot from a file.
+enum AuditImageCaptureSource {
+  CAMERA
+  LIBRARY
+  WEB_UPLOAD
 }
 
 /// How a membership's role came to change.

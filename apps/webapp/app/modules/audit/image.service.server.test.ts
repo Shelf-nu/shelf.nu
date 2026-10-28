@@ -74,6 +74,7 @@ describe("audit image service", () => {
         description: null,
         uploadedById: "user-1",
         capturedAt: null,
+        captureSource: null,
         createdAt: new Date(),
         updatedAt: new Date(),
       });
@@ -86,6 +87,7 @@ describe("audit image service", () => {
         auditAssetId: undefined,
         organizationId: "org-1",
         uploadedById: "user-1",
+        uploadedVia: "web",
       });
 
       expect(parseFileFormData).toHaveBeenCalledWith(
@@ -124,6 +126,7 @@ describe("audit image service", () => {
           auditAssetId: undefined,
           organizationId: "org-1",
           uploadedById: "user-1",
+          uploadedVia: "web",
         })
       ).rejects.toThrow();
     });
@@ -144,6 +147,7 @@ describe("audit image service", () => {
           auditAssetId: "asset-1",
           organizationId: "org-1",
           uploadedById: "user-1",
+          uploadedVia: "web",
         })
       ).rejects.toMatchObject({
         message: "Maximum of 3 images per asset exceeded",
@@ -168,6 +172,7 @@ describe("audit image service", () => {
           auditAssetId: undefined,
           organizationId: "org-1",
           uploadedById: "user-1",
+          uploadedVia: "web",
         })
       ).rejects.toMatchObject({
         message: "Maximum of 5 general images per audit exceeded",
@@ -189,6 +194,7 @@ describe("audit image service", () => {
         description: null,
         uploadedById: "user-1",
         capturedAt: null,
+        captureSource: null,
         createdAt: new Date(),
         updatedAt: new Date(),
       });
@@ -303,6 +309,7 @@ describe("audit image service", () => {
           description: null,
           uploadedById: "user-1",
           capturedAt: null,
+          captureSource: null,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -316,6 +323,7 @@ describe("audit image service", () => {
           description: null,
           uploadedById: "user-1",
           capturedAt: null,
+          captureSource: null,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -446,6 +454,7 @@ describe("uploadAuditImage returnParsedFormData", () => {
       description: null,
       uploadedById: "user-1",
       capturedAt: null,
+      captureSource: null,
       createdAt: new Date(),
       updatedAt: new Date(),
     });
@@ -455,6 +464,7 @@ describe("uploadAuditImage returnParsedFormData", () => {
       auditSessionId: "session-1",
       organizationId: "org-1",
       uploadedById: "user-1",
+      uploadedVia: "web",
       auditAssetId: "audit-asset-1",
       returnParsedFormData: true,
     });
@@ -497,7 +507,7 @@ describe("uploadAuditImage returnParsedFormData", () => {
       });
     }
 
-    async function upload() {
+    async function upload(uploadedVia: "web" | "phone" = "web") {
       vi.mocked(db.auditImage.count).mockResolvedValue(0);
       vi.mocked(db.auditImage.create).mockImplementation(
         (args) => ({ id: "img-1", ...args.data }) as never
@@ -507,6 +517,7 @@ describe("uploadAuditImage returnParsedFormData", () => {
         auditSessionId: "audit-1",
         organizationId: "org-1",
         uploadedById: "user-1",
+        uploadedVia: "web",
       });
     }
 
@@ -567,6 +578,64 @@ describe("uploadAuditImage returnParsedFormData", () => {
 
       expect(storedCapturedAt()).toBeNull();
       expect(image.id).toBe("img-1");
+    });
+  });
+
+  describe("uploadAuditImage: how the photo arrived", () => {
+    function uploadReceivesFields(fields: Record<string, string> = {}) {
+      vi.mocked(parseFileFormData).mockImplementation(() => {
+        const parsed = new FormData();
+        parsed.append(
+          "image",
+          JSON.stringify({ originalPath: "org-1/audits/audit-1/p.jpg" })
+        );
+        for (const [name, value] of Object.entries(fields)) {
+          parsed.append(name, value);
+        }
+        return Promise.resolve(parsed);
+      });
+    }
+
+    async function storedSource(uploadedVia: "web" | "phone") {
+      vi.mocked(db.auditImage.count).mockResolvedValue(0);
+      vi.mocked(db.auditImage.create).mockImplementation(
+        (args) => ({ id: "img-1", ...args.data }) as never
+      );
+      await uploadAuditImage({
+        request: new Request("https://app.test/upload", { method: "POST" }),
+        auditSessionId: "audit-1",
+        organizationId: "org-1",
+        uploadedById: "user-1",
+        uploadedVia,
+      });
+      return vi.mocked(db.auditImage.create).mock.calls[0][0].data
+        .captureSource;
+    }
+
+    it("marks every web upload as uploaded on the web, whatever it claims", async () => {
+      // why: the web app cannot tell a camera shot from a file, so a field
+      // claiming CAMERA from a browser must not upgrade the evidence.
+      uploadReceivesFields({ captureSource: "CAMERA" });
+
+      expect(await storedSource("web")).toBe("WEB_UPLOAD");
+    });
+
+    it.each(["CAMERA", "LIBRARY"])(
+      "stores the phone app's %s source",
+      async (source) => {
+        uploadReceivesFields({ captureSource: source });
+
+        expect(await storedSource("phone")).toBe(source);
+      }
+    );
+
+    it("stores no source when the phone app sends none or an unknown one", async () => {
+      uploadReceivesFields();
+      expect(await storedSource("phone")).toBeNull();
+
+      vi.mocked(db.auditImage.create).mockClear();
+      uploadReceivesFields({ captureSource: "WEB_UPLOAD" });
+      expect(await storedSource("phone")).toBeNull();
     });
   });
 });

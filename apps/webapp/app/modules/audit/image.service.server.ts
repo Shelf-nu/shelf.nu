@@ -22,7 +22,9 @@ import {
   removePublicFile,
 } from "~/utils/storage.server";
 import type { ExifCaptureTags } from "./photo-captured-at.server";
+import type { AuditImageUploadedVia } from "./photo-captured-at.server";
 import {
+  captureSourceFromPhoneForm,
   captureTagsFromFormData,
   readExifCaptureTags,
   resolveCapturedAt,
@@ -43,7 +45,9 @@ const MAX_GENERAL_IMAGES_PER_AUDIT = 5;
  * The photo is stored as uploaded (resized, never drawn on). The time it was
  * taken is saved as `capturedAt`: from the file's EXIF, else from the
  * `exifDateTimeOriginal` / `exifOffsetTimeOriginal` fields the phone app sends,
- * else null. See `photo-captured-at.server.ts`.
+ * else null. How it arrived is saved as `captureSource`: `WEB_UPLOAD` for the
+ * web app, and for the phone app the `captureSource` field it sends (`CAMERA`
+ * or `LIBRARY`), else null. See `photo-captured-at.server.ts`.
  *
  * @param request - The request containing the image file
  * @param auditSessionId - ID of the audit session
@@ -51,6 +55,8 @@ const MAX_GENERAL_IMAGES_PER_AUDIT = 5;
  * @param uploadedById - ID of the user uploading the image
  * @param auditAssetId - Optional ID of the audit asset this image is tied to
  * @param description - Optional description for the image
+ * @param uploadedVia - Which app sent the upload. Required, so every caller
+ *   decides: only the phone app can say whether a photo came from its camera.
  * @param returnParsedFormData - When `false` (default), returns only the
  *   created `AuditImage`. When `true`, returns `{ image, formData }` where
  *   `formData` is the already-bounded `FormData` produced by
@@ -68,6 +74,7 @@ export async function uploadAuditImage(args: {
   uploadedById: User["id"];
   auditAssetId?: AuditAsset["id"];
   description?: string;
+  uploadedVia: AuditImageUploadedVia;
   returnParsedFormData?: false;
 }): Promise<AuditImage>;
 export async function uploadAuditImage(args: {
@@ -77,6 +84,7 @@ export async function uploadAuditImage(args: {
   uploadedById: User["id"];
   auditAssetId?: AuditAsset["id"];
   description?: string;
+  uploadedVia: AuditImageUploadedVia;
   returnParsedFormData: true;
 }): Promise<{ image: AuditImage; formData: FormData }>;
 export async function uploadAuditImage({
@@ -86,6 +94,7 @@ export async function uploadAuditImage({
   uploadedById,
   auditAssetId,
   description,
+  uploadedVia,
   returnParsedFormData = false,
 }: {
   request: Request;
@@ -94,6 +103,7 @@ export async function uploadAuditImage({
   uploadedById: User["id"];
   auditAssetId?: AuditAsset["id"];
   description?: string;
+  uploadedVia: AuditImageUploadedVia;
   returnParsedFormData?: boolean;
 }): Promise<AuditImage | { image: AuditImage; formData: FormData }> {
   try {
@@ -182,6 +192,10 @@ export async function uploadAuditImage({
     const auditImage = await db.auditImage.create({
       data: {
         capturedAt,
+        captureSource:
+          uploadedVia === "web"
+            ? "WEB_UPLOAD"
+            : captureSourceFromPhoneForm(fileData),
         imageUrl: imagePublicUrl,
         thumbnailUrl: thumbnailPublicUrl ?? null,
         description: description ?? null,

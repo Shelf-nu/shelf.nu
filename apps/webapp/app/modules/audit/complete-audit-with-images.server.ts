@@ -50,6 +50,7 @@ export async function completeAuditWithImages({
           auditSessionId,
           organizationId,
           uploadedById: userId,
+          uploadedVia: "web",
           auditAssetId: undefined, // General audit image
           description: "Completion image",
         })

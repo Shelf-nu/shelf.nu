@@ -20,6 +20,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  AUDIT_PHOTO_SOURCE_LABELS,
+  describeAuditPhotoTime,
   ASSET_BOOKING_PSEUDO_STATUS_LABELS,
   ASSET_STATUS_LABELS,
   AUDIT_ASSET_STATUS_LABELS,
@@ -570,4 +572,74 @@ test("a withheld custodian is a name, never the empty answer", () => {
   // must stay a non-empty string a row can carry in the name slot.
   assert.equal(typeof WITHHELD_CUSTODIAN_NAME, "string");
   assert.ok(WITHHELD_CUSTODIAN_NAME.trim().length > 0);
+});
+
+test("an audit photo shows how it arrived, then when it was taken", () => {
+  const format = (value) => `<${value}>`;
+
+  assert.deepEqual(
+    describeAuditPhotoTime(
+      { captureSource: "CAMERA", capturedAt: "c", createdAt: "u" },
+      format
+    ),
+    { source: "Taken in the app", time: "<c>" }
+  );
+  assert.deepEqual(
+    describeAuditPhotoTime(
+      { captureSource: "LIBRARY", capturedAt: "c", createdAt: "u" },
+      format
+    ),
+    { source: "From the photo library", time: "Taken <c>" }
+  );
+  assert.deepEqual(
+    describeAuditPhotoTime(
+      { captureSource: "WEB_UPLOAD", capturedAt: null, createdAt: "u" },
+      format
+    ),
+    { source: "Uploaded on the web", time: "Time taken unknown" }
+  );
+});
+
+test("a camera photo with no EXIF date shows its upload time, and says so", () => {
+  // A photo taken with the app's camera is uploaded minutes later at most, so
+  // the upload time is a fair stand-in, labelled as what it is.
+  assert.deepEqual(
+    describeAuditPhotoTime(
+      { captureSource: "CAMERA", capturedAt: null, createdAt: "u" },
+      (value) => `<${value}>`
+    ),
+    { source: "Taken in the app", time: "Uploaded <u>" }
+  );
+});
+
+test("a photo with no source, or no time, never shows a blank", () => {
+  const format = (value) => `<${value}>`;
+
+  assert.deepEqual(describeAuditPhotoTime({ capturedAt: "c" }, format), {
+    source: null,
+    time: "Taken <c>",
+  });
+  assert.deepEqual(describeAuditPhotoTime({}, format), {
+    source: null,
+    time: "Time taken unknown",
+  });
+  // A library photo's upload time is never passed off as its capture time.
+  assert.equal(
+    describeAuditPhotoTime(
+      { captureSource: "LIBRARY", capturedAt: null, createdAt: "u" },
+      format
+    ).time,
+    "Time taken unknown"
+  );
+});
+
+test("every audit photo source has a label with no dashes", () => {
+  assert.deepEqual(Object.keys(AUDIT_PHOTO_SOURCE_LABELS), [
+    "CAMERA",
+    "LIBRARY",
+    "WEB_UPLOAD",
+  ]);
+  for (const text of Object.values(AUDIT_PHOTO_SOURCE_LABELS)) {
+    assert.doesNotMatch(text, /[\u2013\u2014]/);
+  }
 });

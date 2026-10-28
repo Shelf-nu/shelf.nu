@@ -91,4 +91,40 @@ describe("AuditPhoto", () => {
       "Time taken unknown"
     );
   });
+
+  it("says how the photo arrived above when it was taken", () => {
+    // why: a date read from the file can be edited, so how the photo reached
+    // Shelf is the first thing a reviewer reads.
+    const { container } = render(
+      <AuditPhoto
+        image={{ ...known, captureSource: "LIBRARY" }}
+        alt="Photo of Camera"
+        disablePortal
+      />
+    );
+
+    const lines = [...container.querySelectorAll("figcaption span")].map(
+      (line) => line.textContent
+    );
+    expect(lines[0]).toBe("From the photo library");
+    expect(lines[1]).toMatch(/^Taken 21\/10\/2026/);
+  });
+
+  it("shows a camera photo's upload time when it carried no capture time", () => {
+    const { container } = render(
+      <AuditPhoto
+        image={{
+          ...unknown,
+          captureSource: "CAMERA",
+          createdAt: "2026-10-21T09:20:00.000Z",
+        }}
+        alt="Photo of Camera"
+        disablePortal
+      />
+    );
+
+    expect(container.querySelector("figcaption")?.textContent).toMatch(
+      /^Taken in the appUploaded 21\/10\/2026/
+    );
+  });
 });
