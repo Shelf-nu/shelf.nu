@@ -420,3 +420,61 @@ describe("audit receipt PDF: layout", () => {
     expect(lensGroup).not.toBe(cameraGroup);
   });
 });
+
+describe("audit receipt PDF: when each audit photo was taken", () => {
+  const auditPhoto = (
+    id: string,
+    capturedAt: string | null,
+    auditAsset: unknown = null
+  ) => ({
+    id,
+    imageUrl: `https://storage.test/audits/${id}.webp`,
+    thumbnailUrl: `https://storage.test/audits/${id}-thumbnail.webp`,
+    description: null,
+    capturedAt,
+    auditAsset,
+  });
+
+  function renderWithPhotos() {
+    const pdfMeta = {
+      ...pdfMetaWith({ displayCode: SAM_CODE }),
+      generalImages: [auditPhoto("general-1", "2026-10-21T09:15:00.000Z")],
+      assetImages: [
+        auditPhoto("asset-photo-1", null, {
+          asset: { id: "asset-1", title: "Camera" },
+        }),
+      ],
+    } as unknown as AuditPdfDbResult;
+    return render(
+      <AuditPDFContent componentRef={{ current: null }} pdfMeta={pdfMeta} />
+    );
+  }
+
+  /** The text printed in the photo's own cell, under the thumbnail. */
+  function cellText(alt: string) {
+    return screen.getByAltText(alt).parentElement!.textContent;
+  }
+
+  it("prints the time a photo was taken under its thumbnail", () => {
+    renderWithPhotos();
+
+    expect(cellText("Audit image")).toMatch(/^Taken \S/);
+  });
+
+  it("prints that the time is unknown when the photo carried none", () => {
+    // why: a photo with no capture time is exactly the one a reviewer of the
+    // receipt needs to notice, so it is stated rather than left blank.
+    renderWithPhotos();
+
+    expect(cellText("Photo of Camera")).toBe("Time taken unknown");
+  });
+
+  it("prints thumbnails, not the full-size photos", () => {
+    renderWithPhotos();
+
+    expect(screen.getByAltText("Audit image")).toHaveAttribute(
+      "src",
+      "https://storage.test/audits/general-1-thumbnail.webp"
+    );
+  });
+});

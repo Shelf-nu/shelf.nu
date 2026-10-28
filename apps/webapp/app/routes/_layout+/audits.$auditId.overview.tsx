@@ -13,11 +13,11 @@ import { data, redirect, useLoaderData } from "react-router";
 import { z } from "zod";
 
 import { AuditAssetListItem } from "~/components/audit/audit-asset-list-item";
+import { AuditPhoto } from "~/components/audit/audit-photo";
 import { AuditStatusBadgeWithOverdue } from "~/components/audit/audit-status-badge-with-overdue";
 import { AuditStatusFilter } from "~/components/audit/audit-status-filter";
 import BulkActionsDropdown from "~/components/audit/bulk-actions-dropdown";
 import { BulkRemoveAssetsFromAuditSchema } from "~/components/audit/bulk-remove-assets-from-audit-dialog";
-import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
@@ -642,20 +642,11 @@ export default function AuditOverview() {
                 {generalImages.length > 0 && (
                   <div className="flex flex-wrap gap-3">
                     {generalImages.map((image) => (
-                      <ImageWithPreview
+                      <AuditPhoto
                         key={image.id}
-                        imageUrl={image.imageUrl}
-                        thumbnailUrl={image.thumbnailUrl}
+                        image={image}
+                        images={generalImages}
                         alt={image.description || "General audit image"}
-                        withPreview
-                        className="size-24 rounded border"
-                        images={generalImages.map((img) => ({
-                          id: img.id,
-                          imageUrl: img.imageUrl,
-                          thumbnailUrl: img.thumbnailUrl,
-                          alt: img.description || "General audit image",
-                        }))}
-                        currentImageId={image.id}
                       />
                     ))}
                   </div>
@@ -694,20 +685,11 @@ export default function AuditOverview() {
                   {images.length > 0 && (
                     <div className="flex flex-wrap gap-3">
                       {images.map((image) => (
-                        <ImageWithPreview
+                        <AuditPhoto
                           key={image.id}
-                          imageUrl={image.imageUrl}
-                          thumbnailUrl={image.thumbnailUrl}
+                          image={image}
+                          images={images}
                           alt={`Photo of ${assetName}`}
-                          withPreview
-                          className="size-24 rounded border"
-                          images={images.map((img) => ({
-                            id: img.id,
-                            imageUrl: img.imageUrl,
-                            thumbnailUrl: img.thumbnailUrl,
-                            alt: `Photo of ${assetName}`,
-                          }))}
-                          currentImageId={image.id}
                         />
                       ))}
                     </div>

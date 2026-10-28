@@ -1,4 +1,4 @@
-import type { HTMLProps, KeyboardEvent } from "react";
+import type { HTMLProps, KeyboardEvent, ReactNode } from "react";
 import { useCallback, useReducer } from "react";
 import { RefreshCwIcon } from "lucide-react";
 import { ChevronRight } from "~/components/icons/library";
@@ -71,6 +71,8 @@ type ImageItem = {
   imageUrl: string;
   thumbnailUrl: string | null;
   alt: string;
+  /** Shown under the title while this image is open in the preview */
+  caption?: ReactNode;
 };
 
 type ImageWithPreviewProps = {
@@ -86,6 +88,8 @@ type ImageWithPreviewProps = {
   onNavigate?: (imageId: string) => void;
   // Set to true when rendering inside another dialog/modal to avoid portal conflicts
   disablePortal?: boolean;
+  /** Shown under the preview title for a single image (`images` items carry their own) */
+  caption?: ReactNode;
 } & HTMLProps<HTMLImageElement>;
 
 export default function ImageWithPreview({
@@ -99,6 +103,7 @@ export default function ImageWithPreview({
   currentImageId,
   onNavigate,
   disablePortal = false,
+  caption,
   ...restProps
 }: ImageWithPreviewProps) {
   const [state, dispatch] = useReducer(previewReducer, INITIAL_PREVIEW_STATE);
@@ -110,7 +115,7 @@ export default function ImageWithPreview({
   // Get current image data
   const currentImage = hasNavigation
     ? images![currentIndex]
-    : { imageUrl: imageUrl!, alt, thumbnailUrl };
+    : { imageUrl: imageUrl!, alt, thumbnailUrl, caption };
 
   const canGoPrevious = hasNavigation && currentIndex > 0;
   const canGoNext = hasNavigation && currentIndex < images!.length - 1;
@@ -273,6 +278,9 @@ export default function ImageWithPreview({
                     {hasNavigation
                       ? `${currentIndex + 1} of ${images!.length} image(s)`
                       : "1 image(s)"}
+                    {currentImage.caption ? (
+                      <> &middot; {currentImage.caption}</>
+                    ) : null}
                   </div>
                 </div>
               }

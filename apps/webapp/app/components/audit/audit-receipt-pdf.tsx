@@ -15,6 +15,7 @@ import { sanitizeFilename } from "~/utils/sanitize-filename";
 import { tw } from "~/utils/tw";
 import { resolveUserDisplayName } from "~/utils/user";
 import { AuditAssetStatusBadge } from "./audit-asset-status-badge";
+import { AuditPhotoTaken } from "./audit-photo";
 import { AuditStatusBadgeWithOverdue } from "./audit-status-badge-with-overdue";
 import { AssetCodePrintImage } from "../assets/asset-code-print-image";
 import { AssetCodePrintText } from "../assets/asset-code-print-text";
@@ -475,6 +476,9 @@ export const AuditPDFContent = ({
                         alt={img.description || "Audit image"}
                         className="h-24 w-full object-cover"
                       />
+                      <p className="mt-1 text-[10px] text-gray-700">
+                        <AuditPhotoTaken capturedAt={img.capturedAt} />
+                      </p>
                       {img.description && (
                         <p className="mt-1 text-xs text-gray-600">
                           {img.description}
@@ -522,6 +526,9 @@ export const AuditPDFContent = ({
                         alt={img.description || `Photo of ${assetName}`}
                         className="h-24 w-full object-cover"
                       />
+                      <p className="mt-1 text-[10px] text-gray-700">
+                        <AuditPhotoTaken capturedAt={img.capturedAt} />
+                      </p>
                       {img.description && (
                         <p className="mt-1 text-xs text-gray-600">
                           {img.description}

@@ -1,5 +1,5 @@
 import React from "react";
-import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
+import { AuditPhoto } from "~/components/audit/audit-photo";
 import { Spinner } from "~/components/shared/spinner";
 import useApiQuery from "~/hooks/use-api-query";
 
@@ -24,6 +24,8 @@ interface AuditImage {
   imageUrl: string;
   thumbnailUrl: string;
   description?: string | null;
+  /** When the photo was taken; null when its EXIF had no date */
+  capturedAt: string | null;
 }
 
 export const AuditImagesComponent = React.memo(
@@ -95,21 +97,13 @@ export const AuditImagesComponent = React.memo(
         <div className="flex flex-wrap items-center gap-2">
           {/* Render actual images */}
           {images.map((image) => (
-            <ImageWithPreview
+            <AuditPhoto
               key={image.id}
-              imageUrl={image.imageUrl}
-              thumbnailUrl={image.thumbnailUrl}
+              image={image}
+              images={images}
               alt={image.description || "Audit image"}
-              withPreview
               className="size-16"
               disablePortal={disablePortal}
-              images={images.map((img) => ({
-                id: img.id,
-                imageUrl: img.imageUrl,
-                thumbnailUrl: img.thumbnailUrl,
-                alt: img.description || "Audit image",
-              }))}
-              currentImageId={image.id}
             />
           ))}
           {/* Render placeholders for deleted images */}
