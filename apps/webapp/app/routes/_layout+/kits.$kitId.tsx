@@ -20,11 +20,13 @@ import BookingActionsDropdown from "~/components/kits/booking-actions-dropdown";
 import KitImage from "~/components/kits/kit-image";
 import { KitStatusBadge } from "~/components/kits/kit-status-badge";
 import Header from "~/components/layout/header";
+import { RecordNavigation } from "~/components/layout/header/record-navigation";
 import type { HeaderData } from "~/components/layout/header/types";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { ScanDetails } from "~/components/location/scan-details";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
+import { useRecordNavigation } from "~/hooks/use-list-context";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { usePosition } from "~/hooks/use-position";
 import { createBarcode } from "~/modules/barcode/service.server";
@@ -637,6 +639,12 @@ export default function KitDetails() {
   const shouldRenderFullOutlet =
     currentRoute?.handle?.name === "kit.scan-assets";
 
+  const recordNavigation = useRecordNavigation({
+    entity: "kit",
+    id: kit.id,
+    enabled: !shouldRenderFullOutlet,
+  });
+
   return shouldRenderFullOutlet ? (
     <Outlet />
   ) : (
@@ -673,6 +681,7 @@ export default function KitDetails() {
           <ActionsDropdown />
         </When>
         <BookingActionsDropdown />
+        <RecordNavigation navigation={recordNavigation} />
       </Header>
 
       <HorizontalTabs items={items} />

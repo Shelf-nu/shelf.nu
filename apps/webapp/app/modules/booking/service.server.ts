@@ -300,6 +300,26 @@ import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Booking";
 
+/** The interactive-transaction client `db.$transaction` hands its callback. */
+type BookingTx = Parameters<Parameters<typeof db.$transaction>[0]>[0];
+
+/**
+ * Runs `fn` in an interactive transaction on
+ * `RESERVATION_BATCH_TX_TIMEOUT_MS` instead of Prisma's 5s default.
+ *
+ * For writes that add many assets to a booking at once. Every added asset
+ * that fills a model reservation claims its unit with a round trip of its own,
+ * so a large add (a hundred-item scan session, a select-all from the assets
+ * index) outlasts the default on a remote database and rolls back with
+ * `P2028`, adding nothing.
+ *
+ * @param fn - The transaction body.
+ * @returns Whatever `fn` returns.
+ */
+function assetBatchTx<T>(fn: (tx: BookingTx) => Promise<T>): Promise<T> {
+  return db.$transaction(fn, { timeout: RESERVATION_BATCH_TX_TIMEOUT_MS });
+}
+
 /**
  * Sends a booking event's notifications: an individual email to each resolved
  * recipient, and one push to the custodian among them.
@@ -11413,7 +11433,7 @@ export async function updateBookingAssets({
   skipBookingNote?: boolean;
 }) {
   try {
-    const { booking, addedAssetIds } = await db.$transaction(async (tx) => {
+    const { booking, addedAssetIds } = await assetBatchTx(async (tx) => {
       // Verify booking exists before inserting into the join table,
       // so a stale/deleted booking returns a proper 404 (P2025)
       // instead of a FK violation (P2003)
@@ -18103,7 +18123,7 @@ export async function addScannedAssetsToBooking({
       addedAssetIds,
       claimedAssetIds,
       archivedKitMembersLeftOut,
-    } = await db.$transaction(async (tx) => {
+    } = await assetBatchTx(async (tx) => {
       const result = await addScannedAssetsToBookingWithinTx(tx, {
         assetIds,
         kitIds,

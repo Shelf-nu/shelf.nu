@@ -398,6 +398,7 @@ export default function AssetIndexPage() {
         </When>
       </Header>
       <AssetsList
+        withListContext
         customEmptyStateContent={emptyStateContent}
         titleContent={
           canViewArchivedAssets ? (
