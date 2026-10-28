@@ -3894,11 +3894,11 @@ describe("fulfilModelRequestsForAssets", () => {
   });
 
   // This loop runs inside the caller's interactive transaction, once per
-  // scanned asset. Every write and read it can move out of the loop is a
-  // round trip the transaction no longer spends per asset, which is what
-  // decides whether a hundred-asset scan fits in the budget.
+  // scanned asset. The actor and reservation reads are cached within the
+  // loop, and the notes and events are written in batches after it, so the
+  // atomic reservation claim is the only round trip each asset costs.
   it("writes one batch of notes and events, and reads the actor and each reservation once", async () => {
-    expect.assertions(8);
+    expect.assertions(9);
     // @ts-expect-error mocked
     db.bookingModelRequest.findUnique.mockResolvedValue({
       id: "req-1",
@@ -3933,11 +3933,9 @@ describe("fulfilModelRequestsForAssets", () => {
     expect(db.bookingNote.createMany).toHaveBeenCalledTimes(1);
     const notes = vitest.mocked(db.bookingNote.createMany).mock.calls[0][0]
       ?.data as Array<{ content: string; createdAt: Date }>;
-    expect(notes.map((note) => note.content.includes("Asset a"))).toEqual([
-      true,
-      true,
-      true,
-    ]);
+    expect(notes.map((note) => note.content.match(/Asset (a\d)/)?.[1])).toEqual(
+      ["a1", "a2", "a3"]
+    );
     // The feed orders notes by `createdAt`, so one shared timestamp would
     // shuffle them. Each later unit gets a later stamp.
     expect(
@@ -3947,8 +3945,21 @@ describe("fulfilModelRequestsForAssets", () => {
           note.createdAt.getTime() > notes[index - 1].createdAt.getTime()
       )
     ).toBe(true);
-    // And the per-unit events, in one statement too.
+    // And the per-unit events, in one statement too: one FULFILLED per
+    // claimed asset, in scan order. A completed reservation would add a
+    // CHANGED event as well, so only the FULFILLED ones are counted.
     expect(db.activityEvent.create).not.toHaveBeenCalled();
+    const eventWrites = vitest.mocked(db.activityEvent.createMany).mock.calls;
+    const fulfilled = (
+      eventWrites.flatMap((call) => call[0]?.data ?? []) as Array<{
+        action: string;
+        assetId: string | null;
+      }>
+    ).filter((event) => event.action === "BOOKING_MODEL_REQUEST_FULFILLED");
+    expect({
+      writes: eventWrites.length,
+      assetIds: fulfilled.map((event) => event.assetId),
+    }).toEqual({ writes: 1, assetIds: ["a1", "a2", "a3"] });
   });
 
   it("fulfils even when the caller threads no actor through", async () => {
