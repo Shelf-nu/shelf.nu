@@ -16,6 +16,7 @@ import type { BookableListScope } from "./list-scope.server";
 import { expandLocationHierarchyFilters } from "./location-filter.server";
 import { buildAssetSearchUnion } from "./search-union.server";
 import { splitAssetSearchTerms } from "./search.server";
+import { splitSortParam } from "./sort-param";
 import type { ArchivedFilter, CustomFieldSorting } from "./types";
 import type { Column } from "../asset-index-settings/helpers";
 
@@ -1591,9 +1592,10 @@ const directAssetFields: Record<DirectAssetField, string> = {
  * - Place purely alphabetic entries before alphanumeric ones
  *
  * SECURITY: `columnRef` and `direction` are interpolated into raw SQL.
- * Callers MUST pass either a hardcoded literal or a value validated against
- * `SAFE_SQL_IDENTIFIER` (and an allowlisted direction). Never pass raw user
- * input here.
+ * Callers MUST pass either a hardcoded literal, a value validated against
+ * `SAFE_SQL_IDENTIFIER`, or an expression built only from those (such as
+ * `NULLIF(cf_sort_0, '')`), and an allowlisted direction. Never pass raw
+ * user input here.
  *
  * @param columnRef - The column or expression to sort. Caller-validated.
  * @param direction - Sort direction ('asc' or 'desc'). Caller-validated.
@@ -1687,6 +1689,27 @@ function normalizeDirection(raw: string | undefined): "asc" | "desc" {
 }
 
 /**
+ * Splits one `sortBy` spec, `name:direction[:fieldType]`, into its parts
+ * with {@link splitSortParam} and normalizes the direction.
+ *
+ * @param spec - One `sortBy` value from the URL.
+ * @returns The field name, normalized direction and optional field type.
+ * @throws {ShelfError} 400 when the direction is not "asc" or "desc".
+ */
+function splitSortSpec(spec: string): {
+  name: string;
+  direction: "asc" | "desc";
+  fieldType: CustomFieldType;
+} {
+  const [name, direction, fieldType] = splitSortParam(spec);
+  return {
+    name,
+    direction: normalizeDirection(direction),
+    fieldType: fieldType as CustomFieldType,
+  };
+}
+
+/**
  * Enhanced sorting options parser with natural sort support.
  * Handles case-insensitive sorting with natural number ordering.
  *
@@ -1694,9 +1717,12 @@ function normalizeDirection(raw: string | undefined): "asc" | "desc" {
  * `Prisma.raw(...)` inside `getAdvancedPaginatedAndFilterableAssets`. Every
  * value interpolated into the clause must be either a hardcoded literal or
  * validated against {@link isSafeSqlIdentifier}. Direction is normalized via
- * {@link normalizeDirection}. Field names that don't match a known branch
- * (or whose dynamic suffix fails identifier validation) are dropped with a
- * warning — the caller falls back to the default sort. See GHSA-69xv-wmgg-3qp3.
+ * {@link normalizeDirection}. Custom field sorts are aliased by position
+ * (`cf_sort_<n>`), so a custom field name never reaches the SQL text; it is a
+ * bound parameter in {@link generateCustomFieldSelect}. Field names that don't
+ * match a known branch (or whose dynamic suffix fails identifier validation)
+ * are dropped with a warning, and the caller falls back to the default sort.
+ * See GHSA-69xv-wmgg-3qp3.
  *
  * @param sortBy - Array of sort specifications in format: field:direction[:fieldType]
  * @returns Object containing the full SQL `ORDER BY` clause, the same clause
@@ -1708,14 +1734,7 @@ export function parseSortingOptions(sortBy: string[]): {
   orderByInner: string;
   customFieldSortings: CustomFieldSorting[];
 } {
-  const fields = sortBy.map((s) => {
-    const [name, direction, fieldType] = s.split(":");
-    return {
-      name: name ?? "",
-      direction: normalizeDirection(direction),
-      fieldType: fieldType as CustomFieldType,
-    };
-  });
+  const fields = sortBy.map(splitSortSpec);
 
   const orderByParts: string[] = [];
   const customFieldSortings: CustomFieldSorting[] = [];
@@ -1841,22 +1860,24 @@ export function parseSortingOptions(sortBy: string[]): {
       );
     } else if (field.name.startsWith("cf_")) {
       const customFieldName = field.name.slice(3);
-      const alias = `cf_${customFieldName.replace(/\s+/g, "_")}`;
-      // The alias is interpolated into raw SQL both here (ORDER BY) and in
-      // generateCustomFieldSelect (SELECT ... AS <alias>). Reject any alias
-      // that isn't a safe identifier.
-      if (!isSafeSqlIdentifier(alias)) {
+      if (!customFieldName) {
         Logger.warn(
           new ShelfError({
             cause: null,
-            message: "Skipping sort term: unsafe custom field name",
-            additionalData: { fieldName: field.name, alias },
+            message: "Skipping sort term: empty custom field name",
+            additionalData: { fieldName: field.name },
             label: "Assets",
             shouldBeCaptured: false,
           })
         );
         continue;
       }
+      // The alias is interpolated into raw SQL both here (ORDER BY) and in
+      // generateCustomFieldSelect (SELECT ... AS <alias>), so it is built from
+      // the sort position only, never from the field name. Field names are
+      // free text ("Weight (kg)", "S/N") and reach SQL only as a bound
+      // parameter in generateCustomFieldSelect.
+      const alias = `cf_sort_${customFieldSortings.length}`;
       customFieldSortings.push({
         name: customFieldName,
         valueKey: "raw",
@@ -1864,15 +1885,27 @@ export function parseSortingOptions(sortBy: string[]): {
         fieldType: field.fieldType,
       });
 
-      // Apply sort based on custom field type
+      // Apply sort based on custom field type. Most assets leave a custom
+      // field empty, so empty values stay last in both directions; otherwise
+      // a descending sort opens on a page of blanks.
       if (field.fieldType === "DATE" || field.fieldType === "BOOLEAN") {
         // Direct sort for dates and booleans
-        orderByParts.push(`${alias} ${field.direction}`);
-      } else if (field.fieldType === "AMOUNT") {
-        orderByParts.push(`${alias}::numeric ${field.direction}`);
+        orderByParts.push(`${alias} ${field.direction} NULLS LAST`);
+      } else if (field.fieldType === "AMOUNT" || field.fieldType === "NUMBER") {
+        // Numeric order (3 before 12.5). The guard admits every plain decimal
+        // `::numeric` accepts (" 12", "+5", ".5", "5."); any other stored
+        // value sorts with the empty ones instead of failing the cast.
+        orderByParts.push(
+          `(CASE WHEN ${alias} ~ '^\\s*[-+]?([0-9]+(\\.[0-9]*)?|\\.[0-9]+)\\s*$' THEN ${alias}::numeric END) ${field.direction} NULLS LAST`
+        );
       } else {
-        // Natural sort for text-based custom fields
-        orderByParts.push(getNormalizedSortExpression(alias, field.direction));
+        // Natural sort for text-based custom fields. An empty string is an
+        // empty value too, so it sorts with the NULLs.
+        orderByParts.push(
+          getNormalizedSortExpression(`NULLIF(${alias}, '')`, field.direction, {
+            nullsLast: true,
+          })
+        );
       }
     } else {
       Logger.warn(
@@ -1936,9 +1969,10 @@ function isTextColumn(fieldName: string): boolean {
  *
  * SECURITY: each alias is interpolated as a raw SQL identifier
  * (`AS ${Prisma.raw(cf.alias)}`). This is a defense-in-depth guard: the
- * parser already validates aliases via {@link isSafeSqlIdentifier}, so this
+ * parser builds aliases from the sort position (`cf_sort_<n>`), so this
  * check should never throw in practice. It exists to keep the function
- * safe under future refactors or alternate callers.
+ * safe under future refactors or alternate callers. The field name itself
+ * is always a bound parameter.
  *
  * @throws {ShelfError} If any alias fails identifier validation.
  */
@@ -1977,7 +2011,9 @@ export function generateCustomFieldSelect(
         END
       FROM public."AssetCustomFieldValue" acfv
       JOIN public."CustomField" cf ON acfv."customFieldId" = cf.id
-      WHERE acfv."assetId" = a.id AND cf.name = ${cf.name}
+      WHERE acfv."assetId" = a.id
+        AND cf.name = ${cf.name}
+        AND cf."deletedAt" IS NULL
     ) AS ${Prisma.raw(cf.alias)}`
     )
   )}`;
