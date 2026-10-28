@@ -416,8 +416,10 @@ describe("CheckoutDialog From location question", () => {
       expect(input.type).toBe("datetime-local");
       expect(input.name).toBe("expiredCheckoutNewTo");
       expect(input.getAttribute("form")).toBe("edit-booking-form");
-      expect(input.required).toBe(true);
-      expect(input.min).not.toBe("");
+      // No native constraint: both buttons post the same form, and one of
+      // them never reads this field. The server validates the date.
+      expect(input.required).toBe(false);
+      expect(input.min).toBe("");
       // Planned length is 8 hours; the proposal is minute-aligned in the
       // mocked UTC zone, so read it as UTC and allow the minute the test
       // straddles.

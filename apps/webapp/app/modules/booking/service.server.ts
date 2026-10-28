@@ -3875,17 +3875,20 @@ export async function checkoutBooking({
      * A reschedule changes the window the conflict include below has to
      * judge, and that include is part of the read. Every route passes
      * `from`/`to` as the booking's own stored dates (read org-scoped for the
-     * conflict guard), so the window is previewed from them; the row's own
-     * status and dates settle the state once it is read.
+     * conflict guard), so the window is previewed from them when the
+     * operator asked for one; the row's own status and dates settle the
+     * state once it is read, and a preview the row cannot take is refused
+     * below rather than committed against the wrong window.
      */
-    const previewWindow = to
-      ? resolveExpiredCheckoutState({
-          from: from ?? null,
-          to,
-          intentChoice,
-          newEndDate,
-        }).rescheduledWindow
-      : null;
+    const previewWindow =
+      to && intentChoice === CheckoutIntentEnum["with-new-end-date"]
+        ? resolveExpiredCheckoutState({
+            from: from ?? null,
+            to,
+            intentChoice,
+            newEndDate,
+          }).rescheduledWindow
+        : null;
     const conflictFrom = previewWindow?.from ?? from;
     const conflictTo = previewWindow?.to ?? to;
 
@@ -3976,6 +3979,21 @@ export async function checkoutBooking({
       intentChoice,
       newEndDate,
     });
+    /**
+     * The conflict include above judged the previewed window. If the row is
+     * no longer a reservation the new window does not apply, and committing
+     * the stored dates against a check judged on other dates is not safe.
+     */
+    if (previewWindow && !rescheduledWindow) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+        message:
+          "The booking changed while you were checking it out. Reload it and try again.",
+      });
+    }
     /** The window every guard below judges; see {@link CheckoutWindow}. */
     const checkoutWindow: CheckoutWindow = rescheduledWindow ?? {
       from: bookingFound.from,

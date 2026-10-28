@@ -145,6 +145,8 @@ export function QuantityTooltipContent({ data }: { data: QuantityBreakdown }) {
    * while the totals come from the index query.
    */
   const expiredReservations = new Set<string>();
+  /** When the most recent of them ended, so the line says how stale they are. */
+  let lastExpiredEnd: Date | null = null;
 
   for (const ba of bookingAssets) {
     const bStatus = ba.booking?.status;
@@ -152,6 +154,8 @@ export function QuantityTooltipContent({ data }: { data: QuantityBreakdown }) {
     else if (bStatus === "RESERVED") {
       if (isReservationExpired(bStatus, ba.booking?.to)) {
         expiredReservations.add(ba.booking?.id ?? ba.booking?.name ?? "");
+        const end = new Date(ba.booking!.to!);
+        if (!lastExpiredEnd || end > lastExpiredEnd) lastExpiredEnd = end;
       } else {
         pushSlice(reservedSlices, ba);
       }
@@ -334,8 +338,14 @@ export function QuantityTooltipContent({ data }: { data: QuantityBreakdown }) {
       {expiredReservedBookings > 0 ? (
         <p className="text-gray-500">
           {expiredReservedBookings} expired{" "}
-          {expiredReservedBookings === 1 ? "reservation" : "reservations"}, not
-          counted
+          {expiredReservedBookings === 1 ? "reservation" : "reservations"}
+          {lastExpiredEnd ? (
+            <>
+              {" "}
+              (last ended <DateS date={lastExpiredEnd} />)
+            </>
+          ) : null}
+          , not counted
         </p>
       ) : null}
 

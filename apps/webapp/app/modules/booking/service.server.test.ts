@@ -5089,12 +5089,16 @@ describe("checkoutBooking", () => {
         );
     }
 
-    it("refuses a check-out that made no choice, before any read or write", async () => {
-      expect.assertions(4);
-      // why: the dialog asks; a caller that skipped it is refused. The route
-      // passes the booking's own dates, so the gate answers before the
-      // booking is even loaded. No queued read here: a queued value the
-      // service never consumes would leak into the next test.
+    it("refuses a check-out that made no choice, before any write", async () => {
+      expect.assertions(3);
+      // why: the dialog asks; a caller that skipped it is refused once the
+      // row is read (the gate judges the row's own status and dates). One
+      // queued read only: a queued value the service never consumes would
+      // leak into the next test.
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValueOnce(expiredBooking());
+
       await expect(
         checkoutBooking({
           ...mockCheckoutParams,
@@ -5103,7 +5107,6 @@ describe("checkoutBooking", () => {
         })
       ).rejects.toThrow(/reserved period has already ended/);
 
-      expect(db.booking.findUniqueOrThrow).not.toHaveBeenCalled();
       expect(db.asset.updateMany).not.toHaveBeenCalled();
       expect(db.booking.update).not.toHaveBeenCalled();
     });
@@ -5186,6 +5189,9 @@ describe("checkoutBooking", () => {
       // why: the same value means "move the start to now" on an early
       // check-out; on an expired one it would silently become a reschedule
       // with a server-chosen end. A client has to say which it means.
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValueOnce(expiredBooking());
       await expect(
         checkoutBooking({
           ...mockCheckoutParams,
@@ -5194,6 +5200,27 @@ describe("checkoutBooking", () => {
           intentChoice: CheckoutIntentEnum["with-adjusted-date"],
         })
       ).rejects.toThrow(/reserved period has already ended/);
+      expect(db.booking.update).not.toHaveBeenCalled();
+    });
+
+    it("refuses a reschedule once the row read is no longer a reservation", async () => {
+      expect.assertions(2);
+      // why: the conflict include was judged on the previewed window; a row
+      // that moved on (here: back to DRAFT) cannot take that window, and
+      // committing its stored dates against the other check is not safe.
+      const booking = { ...expiredBooking(), status: BookingStatus.DRAFT };
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValueOnce(booking);
+
+      await expect(
+        checkoutBooking({
+          ...mockCheckoutParams,
+          from: expiredFrom,
+          to: expiredTo,
+          intentChoice: CheckoutIntentEnum["with-new-end-date"],
+        })
+      ).rejects.toThrow(/changed while you were checking it out/);
       expect(db.booking.update).not.toHaveBeenCalled();
     });
 

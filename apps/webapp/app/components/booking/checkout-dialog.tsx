@@ -62,12 +62,12 @@ export const EXPIRED_CHECKOUT_NEW_TO_FIELD = "expiredCheckoutNewTo";
  *
  * @param booking - The expired reservation
  * @param timeZone - The user's resolved timezone preference
- * @returns The input's default value, and the earliest value it accepts
+ * @returns The input's default value
  */
 export function proposedExpiredCheckoutEndDate(
   booking: Pick<CheckoutDialogBooking, "from" | "to">,
   timeZone: string
-): { value: string; min: string } {
+): string {
   const from = booking.from ? new Date(booking.from) : null;
   const to = booking.to ? new Date(booking.to) : null;
   const plannedLengthMs =
@@ -79,10 +79,7 @@ export function proposedExpiredCheckoutEndDate(
     plannedLengthMs > 0
       ? now.plus({ milliseconds: plannedLengthMs })
       : now.plus({ hours: 1 });
-  return {
-    value: proposed.toFormat(DATE_TIME_FORMAT),
-    min: now.plus({ minutes: 1 }).toFormat(DATE_TIME_FORMAT),
-  };
+  return proposed.toFormat(DATE_TIME_FORMAT);
 }
 
 type CheckoutDialogProps = {
@@ -426,17 +423,19 @@ export default function CheckoutDialog({
             </label>
             {/* Proposed: now plus the planned length, in the user's timezone.
                 Posted with the form; the server reads it only for "with a new
-                end date" and validates it like an extension. */}
+                end date" and validates it like an extension. No native
+                `required` or `min`: both buttons submit the booking form, and
+                a constraint here would block "as overdue", which never reads
+                the field. */}
             <input
               id={`${EXPIRED_CHECKOUT_NEW_TO_FIELD}-${booking.id}`}
               type="datetime-local"
               name={EXPIRED_CHECKOUT_NEW_TO_FIELD}
               form={formId}
-              required
-              defaultValue={
-                proposedExpiredCheckoutEndDate(booking, prefs.timeZone).value
-              }
-              min={proposedExpiredCheckoutEndDate(booking, prefs.timeZone).min}
+              defaultValue={proposedExpiredCheckoutEndDate(
+                booking,
+                prefs.timeZone
+              )}
               disabled={Boolean(isDisabled)}
               className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-primary-300 focus:outline-none"
             />
