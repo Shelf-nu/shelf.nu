@@ -408,13 +408,14 @@ export type BookingLifecycleProgress = {
  * - Else if all members share a single label → that label.
  * - Else (members disagree across Booked/CheckedOut/Returned) → Booked.
  *
- * For COMPLETE/ARCHIVED bookings, an asset is Returned only when a return is
- * recorded for it (slice `checkedInAt` / checkin session for INDIVIDUAL,
- * dispositions covering the dispatched units for QT). Dispatched assets with
- * no recorded return stay Checked out (or Partial for a QT row with some
- * units back); never-dispatched rows stay Booked. Pure legacy data — no
- * slice markers and no session records at all — collapses to Returned as it
- * historically did.
+ * For COMPLETE/ARCHIVED bookings, every dispatched INDIVIDUAL asset is
+ * Returned: the check-in that closed the booking reconciled each one, so the
+ * status records the return even where no marker dates it. A QT row is
+ * Returned only when dispositions cover its dispatched units, because a
+ * booking can close with units pending; otherwise it stays Checked out (or
+ * Partial with some units back). Never-dispatched rows stay Booked. Pure
+ * legacy data (no slice markers and no session records at all) collapses to
+ * Returned.
  *
  * For pre-checkout bookings (DRAFT/RESERVED/CANCELLED) no checkout has happened
  * in THIS booking — only ONGOING/OVERDUE own a live checkout — so every unit is
@@ -485,28 +486,20 @@ export function calculateBookingLifecycleProgress({
     a: LifecycleAsset
   ): Exclude<Bucket, "partial"> => {
     if (isFinal) {
-      // Final bookings: a recorded return (slice `checkedInAt`, or a
-      // partial-checkin session) is what makes an asset "Returned". An asset
-      // that went out but has no recorded return stays "Checked out" — a
-      // closed booking holding unreturned items must say so rather than
-      // report them Returned (or, worse, Booked). Never-dispatched assets
-      // stay Booked. With no per-asset records at all (pure all-at-once
-      // legacy data: empty `checkedOutAssetIds`, no sessions, no slice
-      // markers), everything collapses to Returned as before.
-      const reconciled = (a.sliceCheckedIn ?? false) || checkedInSet.has(a.id);
-      if (reconciled) return "returned";
+      // A booking reaches COMPLETE only through a check-in that reconciles
+      // every dispatched INDIVIDUAL item, so on a finished booking the status
+      // is itself the record that such an item came back, whatever its
+      // return marker says. The check-in receipt
+      // (`buildCheckinReceipt`) reads it the same way; keep the two aligned.
+      // Never-dispatched assets stay Booked.
+      if ((a.sliceCheckedIn ?? false) || checkedInSet.has(a.id)) {
+        return "returned";
+      }
       // Dispatch truth: the slice marker when the caller supplied it,
       // otherwise session records with the empty-set-means-all-at-once
       // convention.
       const dispatched = a.sliceCheckedOut ?? wasCheckedOut(a.id);
-      if (!dispatched) return "booked";
-      // Dispatched with no recorded return. When per-asset records exist
-      // (slice markers supplied, or session rows present) this is a real
-      // unreturned item and must show as still out. Pure legacy data — no
-      // records of any kind — keeps the old collapse to Returned.
-      const hasPerAssetRecords =
-        a.sliceCheckedOut !== undefined || !wasAllAtOnceCheckout;
-      return hasPerAssetRecords ? "checkedOut" : "returned";
+      return dispatched ? "returned" : "booked";
     }
     if (a.status === AssetStatus.CHECKED_OUT) return "checkedOut";
     if (checkedInSet.has(a.id)) return "returned";

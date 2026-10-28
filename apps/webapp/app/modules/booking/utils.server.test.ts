@@ -306,6 +306,58 @@ describe("calculateBookingLifecycleProgress (asset mode)", () => {
     expect(p.checkinProgressPercentage).toBe(50);
     expect(p.hasPartialCheckins).toBe(true);
   });
+
+  it.each([BookingStatus.COMPLETE, BookingStatus.ARCHIVED])(
+    "%s counts a dispatched individual asset with no return marker as returned",
+    (bookingStatus) => {
+      // The closing check-in reconciled every dispatched item, so the status is
+      // the record of the return. The check-in receipt prints the same row as
+      // Returned, and the two must agree.
+      const p = calculateBookingLifecycleProgress({
+        bookingAssets: [
+          {
+            ...A("stamped", AssetStatus.AVAILABLE),
+            sliceCheckedOut: true,
+            sliceCheckedIn: true,
+          },
+          {
+            ...A("unstamped", AssetStatus.AVAILABLE),
+            sliceCheckedOut: true,
+            sliceCheckedIn: false,
+          },
+          {
+            ...A("never", AssetStatus.AVAILABLE),
+            sliceCheckedOut: false,
+            sliceCheckedIn: false,
+          },
+        ],
+        checkedInAssetIds: [],
+        checkedOutAssetIds: ["stamped", "unstamped"],
+        bookingStatus,
+      });
+      expect(p.returnedCount).toBe(2);
+      expect(p.checkedOutCount).toBe(0);
+      expect(p.bookedCount).toBe(1);
+      expect(p.checkinProgressCount).toBe(2);
+    }
+  );
+
+  it("an ONGOING booking keeps a dispatched asset with no return marker checked out", () => {
+    const p = calculateBookingLifecycleProgress({
+      bookingAssets: [
+        {
+          ...A("out", AssetStatus.CHECKED_OUT),
+          sliceCheckedOut: true,
+          sliceCheckedIn: false,
+        },
+      ],
+      checkedInAssetIds: [],
+      checkedOutAssetIds: ["out"],
+      bookingStatus: BookingStatus.ONGOING,
+    });
+    expect(p.checkedOutCount).toBe(1);
+    expect(p.returnedCount).toBe(0);
+  });
 });
 
 describe("calculateBookingLifecycleProgress (unit mode)", () => {
