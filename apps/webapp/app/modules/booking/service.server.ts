@@ -7533,15 +7533,17 @@ function buildQtyPerAssetCheckoutFragment(
  * read the same.
  *
  * @param actor - The acting user, wrapped for the note
+ * @param bookingLink - The booking, wrapped for the note
  * @param methodClause - How the batch was made, as {@link bookingMethodClause}
  *   words it
  * @returns The note content
  */
 function lastItemsCheckedInNoteContent(
   actor: string,
+  bookingLink: string,
   methodClause: string
 ): string {
-  return `${actor} checked in the last items still out${methodClause}, which completed the booking.`;
+  return `${actor} checked in the last items still out on ${bookingLink}${methodClause}, which completed the booking.`;
 }
 
 export async function partialCheckinBooking({
@@ -8008,6 +8010,7 @@ export async function partialCheckinBooking({
         await createNotes({
           content: lastItemsCheckedInNoteContent(
             actor,
+            wrapLinkForNote(`/bookings/${bookingFound.id}`, bookingFound.name),
             bookingMethodClause(
               provenance,
               outstandingSliceIds(
@@ -9132,6 +9135,7 @@ export async function partialCheckinBooking({
           content: txResult.isComplete
             ? lastItemsCheckedInNoteContent(
                 actor,
+                bookingLink,
                 bookingMethodClause(
                   provenance,
                   outstandingSliceIds(

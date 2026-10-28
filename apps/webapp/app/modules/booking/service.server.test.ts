@@ -14435,7 +14435,7 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
       expect(cameraLines).toEqual([
         expect.objectContaining({
           content:
-            '{% link to="/settings/team/users/user-1" text="Test User" /%} checked in the last items still out (scanned on the web), which completed the booking.',
+            '{% link to="/settings/team/users/user-1" text="Test User" /%} checked in the last items still out on {% link to="/bookings/booking-q1" text="Qty Booking" /%} (scanned on the web), which completed the booking.',
           assetIds: ["asset-camera"],
         }),
       ]);
@@ -21991,7 +21991,7 @@ describe("check-in and check-out method on activity events", () => {
     expect(noteService.createNotes).toHaveBeenCalledWith(
       expect.objectContaining({
         content: expect.stringContaining(
-          "checked in the last items still out (scanned and selected on the web), which completed the booking."
+          'checked in the last items still out on {% link to="/bookings/booking-1" text="Test Booking" /%} (scanned and selected on the web), which completed the booking.'
         ),
       })
     );
@@ -22021,7 +22021,7 @@ describe("check-in and check-out method on activity events", () => {
     expect(checkInLines).toEqual([
       expect.objectContaining({
         content:
-          '{% link to="/settings/team/users/user-1" text="Test User" /%} checked in the last items still out (scanned on the web), which completed the booking.',
+          '{% link to="/settings/team/users/user-1" text="Test User" /%} checked in the last items still out on {% link to="/bookings/booking-1" text="Test Booking" /%} (scanned on the web), which completed the booking.',
         assetIds: ["asset-1", "asset-2"],
       }),
     ]);
