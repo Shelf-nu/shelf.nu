@@ -1,12 +1,13 @@
 /**
- * The capture date of an audit photo, as the phone's image picker read it
+ * The capture date of an audit photo, as the phone's image picker read it,
+ * and the "Taken ..." line every audit photo is shown with
  *
  * The server reads when an audit photo was taken from the file's EXIF. The
  * file this app uploads often has none left: converting an iPhone HEIC photo
- * to JPEG drops EXIF, and the picker's re-encode may too. So the app reads the
- * date from the picker result (`exif: true`) and sends it alongside the file
- * as `exifDateTimeOriginal` / `exifOffsetTimeOriginal`. The server prefers the
- * file's own EXIF and falls back to these fields.
+ * to JPEG drops EXIF, and so does the iOS picker's own JPEG re-encode. So the
+ * app reads the date from the picker result (`exif: true`) and sends it with
+ * the file as `exifDateTimeOriginal` / `exifOffsetTimeOriginal`. The server
+ * prefers the file's own EXIF and falls back to these fields.
  *
  * Pure, so it runs under Node's test runner: no React Native, Expo or
  * `@/`-aliased imports.
@@ -80,4 +81,22 @@ export function appendCaptureTags(
   if (tags.offsetTimeOriginal) {
     formData.append("exifOffsetTimeOriginal", tags.offsetTimeOriginal);
   }
+}
+
+/**
+ * The line shown under every audit photo: "Taken <date and time>", or "Time
+ * taken unknown" when the photo carried no date. The unknown case is stated on
+ * purpose, because that is the photo a reviewer needs to notice.
+ *
+ * @param capturedAt - `AuditEvidenceImage.capturedAt` (ISO), or null
+ * @param formatDateTime - The user's date-and-time formatter
+ * @returns The label
+ */
+export function photoTakenLabel(
+  capturedAt: string | null,
+  formatDateTime: (iso: string) => string
+): string {
+  return capturedAt
+    ? `Taken ${formatDateTime(capturedAt)}`
+    : "Time taken unknown";
 }

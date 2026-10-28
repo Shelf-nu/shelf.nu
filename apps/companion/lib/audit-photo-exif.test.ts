@@ -12,6 +12,7 @@ import { test } from "node:test";
 import {
   appendCaptureTags,
   captureTagsFromPickerExif,
+  photoTakenLabel,
 } from "./audit-photo-exif";
 
 test("reads Android's flat EXIF tags", () => {
@@ -103,4 +104,14 @@ test("a HEIC photo converted to JPEG still sends its date", () => {
   assert.deepEqual(fieldsOf(captureTagsFromPickerExif(pickerResult.exif)), [
     ["exifDateTimeOriginal", "2026:10:21 09:15:00"],
   ]);
+});
+
+test("labels a photo with the time it was taken, or says it is unknown", () => {
+  const format = (iso: string) => `formatted(${iso})`;
+
+  assert.equal(
+    photoTakenLabel("2026-10-21T07:15:00.000Z", format),
+    "Taken formatted(2026-10-21T07:15:00.000Z)"
+  );
+  assert.equal(photoTakenLabel(null, format), "Time taken unknown");
 });

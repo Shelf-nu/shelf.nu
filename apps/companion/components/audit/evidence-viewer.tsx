@@ -32,6 +32,7 @@ import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { CONTENT_MAX_WIDTH } from "@/lib/content-column";
 import { useDateFormatter } from "@/lib/use-date-formatter";
 import type { AuditEvidenceImage, AuditEvidenceNote } from "@/lib/api/types";
+import { photoTakenLabel } from "@/lib/audit-photo-exif";
 
 type EvidenceViewerProps = {
   visible: boolean;
@@ -90,9 +91,7 @@ export function EvidenceViewer({
   /** "Taken <date and time>", or "Time taken unknown" when EXIF had no date. */
   const takenLabel = useCallback(
     (image: AuditEvidenceImage) =>
-      image.capturedAt
-        ? `Taken ${formatDateTime(image.capturedAt)}`
-        : "Time taken unknown",
+      photoTakenLabel(image.capturedAt, formatDateTime),
     [formatDateTime]
   );
 
@@ -180,7 +179,7 @@ export function EvidenceViewer({
                         />
                         {/* A photo with no capture time is shown as unknown
                             on purpose: it is the one a reviewer must notice. */}
-                        <Text style={styles.takenAt} numberOfLines={2}>
+                        <Text style={styles.takenAt} numberOfLines={3}>
                           {takenLabel(image)}
                         </Text>
                         {image.description ? (

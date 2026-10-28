@@ -27,9 +27,13 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { api } from "@/lib/api";
 import type { PhotoCaptureTags } from "@/lib/audit-photo-exif";
-import { captureTagsFromPickerExif } from "@/lib/audit-photo-exif";
+import {
+  captureTagsFromPickerExif,
+  photoTakenLabel,
+} from "@/lib/audit-photo-exif";
 import type { AuditEvidenceImage, AuditEvidenceNote } from "@/lib/api/types";
 import { useOrg } from "@/lib/org-context";
+import { useDateFormatter } from "@/lib/use-date-formatter";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
@@ -213,6 +217,7 @@ export function EvidenceModal({
   }, [visible, auditAssetId, currentOrg?.id, auditSessionId, savedCount]);
   const { colors } = useTheme();
   const styles = useStyles();
+  const { formatDateTime } = useDateFormatter();
 
   const [noteText, setNoteText] = useState("");
   const [isSubmittingNote, setIsSubmittingNote] = useState(false);
@@ -505,12 +510,20 @@ export function EvidenceModal({
                 {existing.images.length > 0 ? (
                   <View style={styles.existingImages}>
                     {existing.images.map((img) => (
-                      <Image
-                        key={img.id}
-                        source={{ uri: img.thumbnailUrl }}
-                        style={styles.existingThumb}
-                        contentFit="cover"
-                      />
+                      <View key={img.id} style={styles.existingPhoto}>
+                        <Image
+                          source={{ uri: img.thumbnailUrl }}
+                          style={styles.existingThumb}
+                          contentFit="cover"
+                          accessibilityLabel={`Photo. ${photoTakenLabel(
+                            img.capturedAt,
+                            formatDateTime
+                          )}`}
+                        />
+                        <Text style={styles.existingTakenAt} numberOfLines={3}>
+                          {photoTakenLabel(img.capturedAt, formatDateTime)}
+                        </Text>
+                      </View>
                     ))}
                   </View>
                 ) : null}
@@ -747,11 +760,17 @@ const useStyles = createStyles((colors) => ({
     gap: spacing.sm,
     marginBottom: spacing.md,
   },
+  existingPhoto: { width: 72 },
   existingThumb: {
     width: 72,
     height: 72,
     borderRadius: borderRadius.sm,
     backgroundColor: colors.borderLight,
+  },
+  existingTakenAt: {
+    marginTop: 2,
+    fontSize: fontSize.xs,
+    color: colors.muted,
   },
   existingNote: {
     backgroundColor: colors.backgroundSecondary,
