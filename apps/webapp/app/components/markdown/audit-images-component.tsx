@@ -30,6 +30,8 @@ interface AuditImage {
   /** How the photo reached Shelf; null when unknown */
   captureSource: AuditPhotoCaptureSource | null;
   createdAt: string;
+  /** The photo's audit, for the "Older than audit" flag */
+  auditSession: { startedAt: string | null };
 }
 
 export const AuditImagesComponent = React.memo(
@@ -105,6 +107,7 @@ export const AuditImagesComponent = React.memo(
               key={image.id}
               image={image}
               images={images}
+              auditStartedAt={image.auditSession.startedAt}
               alt={image.description || "Audit image"}
               className="size-16"
               disablePortal={disablePortal}

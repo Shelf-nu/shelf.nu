@@ -20,8 +20,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  AUDIT_PHOTO_FLAG_LABELS,
+  AUDIT_PHOTO_KEY,
   AUDIT_PHOTO_SOURCE_LABELS,
-  describeAuditPhotoTime,
+  describeAuditPhoto,
   ASSET_BOOKING_PSEUDO_STATUS_LABELS,
   ASSET_STATUS_LABELS,
   AUDIT_ASSET_STATUS_LABELS,
@@ -574,72 +576,107 @@ test("a withheld custodian is a name, never the empty answer", () => {
   assert.ok(WITHHELD_CUSTODIAN_NAME.trim().length > 0);
 });
 
-test("an audit photo shows how it arrived, then when it was taken", () => {
-  const format = (value) => `<${value}>`;
+/** Formatters that show which one was used: dates as d(...), times as t(...). */
+const format = {
+  date: (value) => `d(${new Date(value).toISOString().slice(0, 10)})`,
+  time: (value) => `t(${new Date(value).toISOString().slice(11, 16)})`,
+  dateTime: (value) => `dt(${new Date(value).toISOString().slice(0, 16)})`,
+};
+const AUDIT_STARTED = "2026-10-28T09:00:00Z";
+const describe = (photo) =>
+  describeAuditPhoto(photo, { auditStartedAt: AUDIT_STARTED, format });
 
-  assert.deepEqual(
-    describeAuditPhotoTime(
-      { captureSource: "CAMERA", capturedAt: "c", createdAt: "u" },
-      format
-    ),
-    { source: "Taken in the app", time: "<c>" }
+test("a camera photo taken during the audit is quiet: icon, time, no flag", () => {
+  const photo = describe({
+    captureSource: "CAMERA",
+    capturedAt: "2026-10-28T10:56:00Z",
+    createdAt: "2026-10-28T10:58:00Z",
+  });
+
+  assert.equal(photo.source, "CAMERA");
+  assert.equal(photo.short, "t(10:56)");
+  assert.equal(photo.flag, null);
+  assert.equal(
+    photo.detail,
+    "Shelf app camera · dt(2026-10-28T10:56) · 2 min before upload"
   );
-  assert.deepEqual(
-    describeAuditPhotoTime(
-      { captureSource: "LIBRARY", capturedAt: "c", createdAt: "u" },
-      format
-    ),
-    { source: "From the photo library", time: "Taken <c>" }
+});
+
+test("a photo taken before the audit started is flagged, with how much older", () => {
+  const photo = describe({
+    captureSource: "LIBRARY",
+    capturedAt: "2026-10-01T06:30:00Z",
+    createdAt: "2026-10-28T10:52:00Z",
+  });
+
+  assert.equal(photo.short, "d(2026-10-01)");
+  assert.equal(photo.flag, "OLDER_THAN_AUDIT");
+  assert.equal(photo.flagLabel, "Older than audit");
+  assert.equal(
+    photo.detail,
+    "Photo library · file says dt(2026-10-01T06:30) · 27 days before this audit started"
   );
-  assert.deepEqual(
-    describeAuditPhotoTime(
-      { captureSource: "WEB_UPLOAD", capturedAt: null, createdAt: "u" },
-      format
-    ),
-    { source: "Uploaded on the web", time: "Time taken unknown" }
-  );
+});
+
+test("a photo with no date is flagged, and a library one never borrows its upload time", () => {
+  const photo = describe({
+    captureSource: "LIBRARY",
+    capturedAt: null,
+    createdAt: "2026-10-28T10:52:00Z",
+  });
+
+  assert.equal(photo.short, null);
+  assert.equal(photo.flag, "NO_DATE");
+  assert.equal(photo.detail, "Photo library · time taken unknown");
 });
 
 test("a camera photo with no EXIF date shows its upload time, and says so", () => {
-  // A photo taken with the app's camera is uploaded minutes later at most, so
-  // the upload time is a fair stand-in, labelled as what it is.
-  assert.deepEqual(
-    describeAuditPhotoTime(
-      { captureSource: "CAMERA", capturedAt: null, createdAt: "u" },
-      (value) => `<${value}>`
-    ),
-    { source: "Taken in the app", time: "Uploaded <u>" }
-  );
-});
-
-test("a photo with no source, or no time, never shows a blank", () => {
-  const format = (value) => `<${value}>`;
-
-  assert.deepEqual(describeAuditPhotoTime({ capturedAt: "c" }, format), {
-    source: null,
-    time: "Taken <c>",
+  const photo = describe({
+    captureSource: "CAMERA",
+    capturedAt: null,
+    createdAt: "2026-10-28T10:58:00Z",
   });
-  assert.deepEqual(describeAuditPhotoTime({}, format), {
-    source: null,
-    time: "Time taken unknown",
-  });
-  // A library photo's upload time is never passed off as its capture time.
+
+  assert.equal(photo.short, "t(10:58)");
+  assert.equal(photo.flag, null);
   assert.equal(
-    describeAuditPhotoTime(
-      { captureSource: "LIBRARY", capturedAt: null, createdAt: "u" },
-      format
-    ).time,
-    "Time taken unknown"
+    photo.detail,
+    "Shelf app camera · uploaded dt(2026-10-28T10:58)"
   );
 });
 
-test("every audit photo source has a label with no dashes", () => {
+test("a photo from before capture sources keeps a plain time line", () => {
+  const photo = describe({
+    capturedAt: "2026-10-28T10:00:00Z",
+    createdAt: null,
+  });
+
+  assert.equal(photo.source, null);
+  assert.equal(photo.sourceLabel, null);
+  assert.equal(photo.short, "d(2026-10-28)");
+  assert.equal(photo.detail, "Taken dt(2026-10-28T10:00)");
+});
+
+test("no flag for age when the audit has not started", () => {
+  const photo = describeAuditPhoto(
+    { captureSource: "LIBRARY", capturedAt: "2020-01-01T00:00:00Z" },
+    { auditStartedAt: null, format }
+  );
+
+  assert.equal(photo.flag, null);
+});
+
+test("audit photo labels carry no dashes", () => {
   assert.deepEqual(Object.keys(AUDIT_PHOTO_SOURCE_LABELS), [
     "CAMERA",
     "LIBRARY",
     "WEB_UPLOAD",
   ]);
-  for (const text of Object.values(AUDIT_PHOTO_SOURCE_LABELS)) {
+  for (const text of [
+    ...Object.values(AUDIT_PHOTO_SOURCE_LABELS),
+    ...Object.values(AUDIT_PHOTO_FLAG_LABELS),
+    AUDIT_PHOTO_KEY,
+  ]) {
     assert.doesNotMatch(text, /[\u2013\u2014]/);
   }
 });

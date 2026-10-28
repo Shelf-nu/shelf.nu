@@ -106,6 +106,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         auditSession: {
           select: {
             status: true,
+            // Photos taken before this are flagged "Older than audit".
+            startedAt: true,
             assignments: {
               select: { userId: true },
             },
@@ -1123,6 +1125,7 @@ export default function AuditAssetDetails() {
           maxCount={3}
           inputNamePrefix="auditImage"
           existingImages={localImages}
+          auditStartedAt={auditAsset.auditSession.startedAt}
           onExistingImageRemove={handleImageDeleteWithConfirm}
           disabled={isUploadInProgress}
           isUploading={isUploadInProgress}

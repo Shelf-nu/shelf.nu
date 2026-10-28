@@ -773,57 +773,154 @@ export const DELETE_CONSEQUENCE_LABELS = Object.freeze({
 /**
  * How an audit photo reached Shelf, as `AuditImage.captureSource` stores it.
  * `CAMERA` is a photo the phone app reports it took with its own camera, which
- * cannot hand back an old picture; `LIBRARY` was picked from the phone's photo library;
- * `WEB_UPLOAD` came through the web app, which cannot tell a camera shot from
- * a file. Photos from before this field, or from app versions that do not send
- * it, have none.
+ * cannot hand back an old picture; `LIBRARY` was picked from the phone's photo
+ * library; `WEB_UPLOAD` came through the web app, which cannot tell a camera
+ * shot from a file. Photos from before this field, or from app versions that
+ * do not send it, have none.
  */
 export const AUDIT_PHOTO_SOURCE_LABELS = Object.freeze({
-  CAMERA: "Taken in the app",
-  LIBRARY: "From the photo library",
-  WEB_UPLOAD: "Uploaded on the web",
+  CAMERA: "Shelf app camera",
+  LIBRARY: "Photo library",
+  WEB_UPLOAD: "Web upload",
+});
+
+/** The flags an audit photo can carry: the cases a reviewer should check. */
+export const AUDIT_PHOTO_FLAG_LABELS = Object.freeze({
+  OLDER_THAN_AUDIT: "Older than audit",
+  NO_DATE: "No date",
 });
 
 /**
- * The two lines shown under every audit photo, on the web, in the receipt PDF
- * and in the companion app: how the photo arrived, then when it was taken.
+ * One line that explains the icons and flags, for a printed receipt where
+ * nothing can be hovered.
+ */
+export const AUDIT_PHOTO_KEY =
+  "Each photo shows how it reached Shelf (Shelf app camera, photo library or web upload) and when it was taken. Older than audit: taken before this audit started. No date: the photo carries no capture time.";
+
+/** A duration in the largest whole unit a reader would use. */
+function describeGap(ms) {
+  const minutes = Math.floor(ms / 60000);
+  if (minutes < 1) return "under a minute";
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours} h`;
+  return `${Math.floor(hours / 24)} days`;
+}
+
+/** Reads a date-ish value as epoch milliseconds, or null. */
+function toMs(value) {
+  if (!value) return null;
+  const ms = new Date(value).getTime();
+  return Number.isNaN(ms) ? null : ms;
+}
+
+/**
+ * Everything both apps show for one audit photo, so the web, the receipt PDF
+ * and the companion read the same.
  *
- * The time is the photo's own capture time (`capturedAt`, read from its EXIF).
- * EXIF can be edited, so how the photo arrived is shown first: a photo taken
- * with the app's camera is the strongest evidence, a library photo's date is
- * only what the file claims. A missing time is stated, never left blank,
- * because that is the photo a reviewer needs to look at twice. A camera photo
- * with no EXIF date falls back to its upload time and says so, since a photo
- * taken in the app is uploaded minutes later at most.
+ * Built to stay quiet when a photo is fine and speak up when it is not: a
+ * normal photo gets an icon and a short time; only a photo taken before the
+ * audit started, or one with no date at all, gets a flag. The full sentence is
+ * for the preview, where there is room for it.
+ *
+ * - `short`: the time on its own when the photo was taken the day it was
+ *   uploaded, else the date; null when unknown.
+ * - `flag`: `OLDER_THAN_AUDIT` when the capture time is before the audit
+ *   started (the case audit evidence exists to catch), `NO_DATE` when there is
+ *   no time to show, else null.
+ * - `detail`: e.g. "Photo library · file says 1 Oct 2026, 08:30 · 27 days
+ *   before this audit started". A library or web date is what the file claims,
+ *   and says so. A camera photo with no EXIF date shows its upload time,
+ *   labelled as such.
  *
  * @param {{
  *   captureSource?: "CAMERA" | "LIBRARY" | "WEB_UPLOAD" | null,
  *   capturedAt?: string | Date | null,
  *   createdAt?: string | Date | null,
  * }} photo - the `AuditImage` fields
- * @param {(value: string | Date) => string} formatDateTime - the viewer's own
- *   date-and-time formatter
- * @returns {{ source: string | null, time: string }} `source` is null for a
- *   photo that carries none
+ * @param {{
+ *   auditStartedAt?: string | Date | null,
+ *   format: {
+ *     date: (value: string | Date) => string,
+ *     time: (value: string | Date) => string,
+ *     dateTime: (value: string | Date) => string,
+ *   },
+ * }} options - when the audit started (no flag without it), and the viewer's
+ *   own formatters
+ * @returns {{
+ *   source: "CAMERA" | "LIBRARY" | "WEB_UPLOAD" | null,
+ *   sourceLabel: string | null,
+ *   short: string | null,
+ *   flag: "OLDER_THAN_AUDIT" | "NO_DATE" | null,
+ *   flagLabel: string | null,
+ *   detail: string,
+ * }}
  */
-export function describeAuditPhotoTime(photo, formatDateTime) {
-  const source = photo.captureSource
-    ? AUDIT_PHOTO_SOURCE_LABELS[photo.captureSource] ?? null
+export function describeAuditPhoto(photo, { auditStartedAt, format }) {
+  const source = AUDIT_PHOTO_SOURCE_LABELS[photo.captureSource]
+    ? photo.captureSource
     : null;
+  const sourceLabel = source ? AUDIT_PHOTO_SOURCE_LABELS[source] : null;
 
-  if (photo.captureSource === "CAMERA") {
-    if (photo.capturedAt) {
-      return { source, time: formatDateTime(photo.capturedAt) };
-    }
-    if (photo.createdAt) {
-      return { source, time: `Uploaded ${formatDateTime(photo.createdAt)}` };
-    }
+  const capturedMs = toMs(photo.capturedAt);
+  const uploadedMs = toMs(photo.createdAt);
+  const startedMs = toMs(auditStartedAt);
+  // A photo taken in the app is uploaded minutes later at most, so its upload
+  // time stands in when the file carried no date. Never for a library photo.
+  const usesUploadTime =
+    capturedMs === null && source === "CAMERA" && uploadedMs !== null;
+  const shownValue =
+    capturedMs !== null
+      ? photo.capturedAt
+      : usesUploadTime
+      ? photo.createdAt
+      : null;
+
+  let short = null;
+  if (shownValue) {
+    const sameDay =
+      photo.createdAt &&
+      format.date(shownValue) === format.date(photo.createdAt);
+    short = sameDay ? format.time(shownValue) : format.date(shownValue);
   }
 
+  let flag = null;
+  if (!shownValue) flag = "NO_DATE";
+  else if (
+    capturedMs !== null &&
+    startedMs !== null &&
+    capturedMs < startedMs
+  ) {
+    flag = "OLDER_THAN_AUDIT";
+  }
+
+  let when;
+  if (!shownValue) when = "time taken unknown";
+  else if (usesUploadTime) when = `uploaded ${format.dateTime(shownValue)}`;
+  else if (source === "CAMERA") when = format.dateTime(shownValue);
+  else if (source) when = `file says ${format.dateTime(shownValue)}`;
+  else when = `taken ${format.dateTime(shownValue)}`;
+
+  let relation = null;
+  if (flag === "OLDER_THAN_AUDIT") {
+    relation = `${describeGap(
+      startedMs - capturedMs
+    )} before this audit started`;
+  } else if (
+    capturedMs !== null &&
+    uploadedMs !== null &&
+    uploadedMs >= capturedMs
+  ) {
+    relation = `${describeGap(uploadedMs - capturedMs)} before upload`;
+  }
+
+  const sentence = [sourceLabel, when, relation].filter(Boolean).join(" · ");
   return {
     source,
-    time: photo.capturedAt
-      ? `Taken ${formatDateTime(photo.capturedAt)}`
-      : "Time taken unknown",
+    sourceLabel,
+    short,
+    flag,
+    flagLabel: flag ? AUDIT_PHOTO_FLAG_LABELS[flag] : null,
+    detail: sentence.charAt(0).toUpperCase() + sentence.slice(1),
   };
 }

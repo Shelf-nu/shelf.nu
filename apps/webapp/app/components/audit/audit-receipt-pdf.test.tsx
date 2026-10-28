@@ -461,12 +461,20 @@ describe("audit receipt PDF: when each audit photo was taken", () => {
     expect(cellText("Audit image")).toMatch(/^Taken \S/);
   });
 
+  it("explains the photo labels once, for a reader who cannot hover", () => {
+    renderWithPhotos();
+
+    expect(
+      screen.getByText(/^Each photo shows how it reached Shelf/)
+    ).toBeTruthy();
+  });
+
   it("prints that the time is unknown when the photo carried none", () => {
     // why: a photo with no capture time is exactly the one a reviewer of the
     // receipt needs to notice, so it is stated rather than left blank.
     renderWithPhotos();
 
-    expect(cellText("Photo of Camera")).toBe("Time taken unknown");
+    expect(cellText("Photo of Camera")).toBe("Time taken unknownNo date");
   });
 
   it("prints thumbnails, not the full-size photos", () => {

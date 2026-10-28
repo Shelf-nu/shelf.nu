@@ -73,6 +73,8 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
         description: true,
         capturedAt: true,
         captureSource: true,
+        // Photos taken before their audit started are flagged.
+        auditSession: { select: { startedAt: true } },
         createdAt: true,
       },
       orderBy: {

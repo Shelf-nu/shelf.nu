@@ -646,6 +646,7 @@ export default function AuditOverview() {
                         key={image.id}
                         image={image}
                         images={generalImages}
+                        auditStartedAt={session.startedAt}
                         alt={image.description || "General audit image"}
                       />
                     ))}
@@ -689,6 +690,7 @@ export default function AuditOverview() {
                           key={image.id}
                           image={image}
                           images={images}
+                          auditStartedAt={session.startedAt}
                           alt={`Photo of ${assetName}`}
                         />
                       ))}

@@ -481,19 +481,52 @@ export declare const AUDIT_PHOTO_SOURCE_LABELS: {
   readonly WEB_UPLOAD: string;
 };
 
+/** A case on an audit photo a reviewer should check. */
+export type AuditPhotoFlag = "OLDER_THAN_AUDIT" | "NO_DATE";
+
+/** The label for each audit photo flag. */
+export declare const AUDIT_PHOTO_FLAG_LABELS: {
+  readonly OLDER_THAN_AUDIT: string;
+  readonly NO_DATE: string;
+};
+
+/** One line explaining the icons and flags, for a printed receipt. */
+export declare const AUDIT_PHOTO_KEY: string;
+
+/** What both apps show for one audit photo. */
+export type AuditPhotoDescription = {
+  source: AuditPhotoCaptureSource | null;
+  sourceLabel: string | null;
+  /** Time alone when taken the day of upload, else the date; null if unknown */
+  short: string | null;
+  /** Set only when the photo needs a second look */
+  flag: AuditPhotoFlag | null;
+  flagLabel: string | null;
+  /** The full sentence for the preview */
+  detail: string;
+};
+
 /**
- * The two lines shown under every audit photo: how it arrived (null when the
- * photo carries no source), then when it was taken or that the time is
- * unknown. A camera photo with no EXIF date shows its upload time instead.
+ * Describes one audit photo: quiet when it is fine (icon and short time), a
+ * flag when it was taken before the audit started or has no date, and the
+ * full sentence for the preview.
  *
  * @param photo - the `AuditImage` fields
- * @param formatDateTime - the viewer's own date-and-time formatter
+ * @param options - when the audit started (no flag without it) and the
+ *   viewer's own formatters
  */
-export declare function describeAuditPhotoTime(
+export declare function describeAuditPhoto(
   photo: {
     captureSource?: AuditPhotoCaptureSource | null;
     capturedAt?: string | Date | null;
     createdAt?: string | Date | null;
   },
-  formatDateTime: (value: string | Date) => string
-): { source: string | null; time: string };
+  options: {
+    auditStartedAt?: string | Date | null;
+    format: {
+      date: (value: string | Date) => string;
+      time: (value: string | Date) => string;
+      dateTime: (value: string | Date) => string;
+    };
+  }
+): AuditPhotoDescription;

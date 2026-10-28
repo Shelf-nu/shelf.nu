@@ -278,10 +278,12 @@ export default function ImageWithPreview({
                     {hasNavigation
                       ? `${currentIndex + 1} of ${images!.length} image(s)`
                       : "1 image(s)"}
-                    {currentImage.caption ? (
-                      <> &middot; {currentImage.caption}</>
-                    ) : null}
                   </div>
+                  {currentImage.caption ? (
+                    <div className="mt-1 text-sm font-normal text-gray-700">
+                      {currentImage.caption}
+                    </div>
+                  ) : null}
                 </div>
               }
             >

@@ -50,30 +50,71 @@ const known = {
 };
 const unknown = { ...known, id: "img-2", capturedAt: null };
 
+const AUDIT_STARTED = "2026-10-21T08:00:00.000Z";
+
+/** The visible caption under a tile (the sr-only sentence left out). */
+function visibleCaption(container: HTMLElement) {
+  const caption = container.querySelector("figcaption")!;
+  return [...caption.children]
+    .filter((child) => !child.classList.contains("sr-only"))
+    .map((child) => child.textContent)
+    .join(" | ");
+}
+
 describe("AuditPhoto", () => {
-  it("states when the photo was taken under its thumbnail", () => {
+  it("keeps a photo taken during the audit quiet: icon and time, no flag", () => {
     const { container } = render(
-      <AuditPhoto image={known} alt="Photo of Camera" disablePortal />
+      <AuditPhoto
+        image={{
+          ...known,
+          captureSource: "CAMERA",
+          createdAt: "2026-10-21T09:17:00.000Z",
+        }}
+        auditStartedAt={AUDIT_STARTED}
+        alt="Photo of Camera"
+        disablePortal
+      />
     );
 
-    expect(container.querySelector("figcaption")?.textContent).toMatch(
-      /^Taken 21\/10\/2026.*9:15/
+    expect(visibleCaption(container)).toMatch(/^9:15/);
+    expect(
+      container.querySelector('[aria-label="Shelf app camera"]')
+    ).not.toBeNull();
+    expect(container.textContent).not.toMatch(/Older than audit|No date/);
+  });
+
+  it("flags a photo taken before the audit started", () => {
+    // why: an old picture passed off as today's evidence is the case audit
+    // photos exist to catch, so it is the one thing on the tile in colour.
+    const { container } = render(
+      <AuditPhoto
+        image={{
+          ...known,
+          captureSource: "LIBRARY",
+          capturedAt: "2026-06-15T14:20:00.000Z",
+          createdAt: "2026-10-21T09:17:00.000Z",
+        }}
+        auditStartedAt={AUDIT_STARTED}
+        alt="Photo of Camera"
+        disablePortal
+      />
+    );
+
+    expect(visibleCaption(container)).toBe("15/06/2026 | Older than audit");
+    expect(container.querySelector("figcaption")?.title).toBe(
+      "Photo library · file says 15/06/2026, 2:20 PM · 127 days before this audit started"
     );
   });
 
-  it("states that the time is unknown when the photo carried none", () => {
-    // why: a photo with no capture time is the one a reviewer needs to see,
-    // so the tile says so rather than staying blank.
+  it("flags a photo with no date instead of leaving it blank", () => {
     const { container } = render(
       <AuditPhoto image={unknown} alt="Photo of Camera" disablePortal />
     );
 
-    expect(container.querySelector("figcaption")?.textContent).toBe(
-      "Time taken unknown"
-    );
+    expect(visibleCaption(container)).toBe("No date");
   });
 
-  it("repeats the line for the photo open in the preview", () => {
+  it("shows the full sentence and flag for the photo open in the preview", () => {
     render(
       <AuditPhoto
         image={unknown}
@@ -87,44 +128,8 @@ describe("AuditPhoto", () => {
       screen.getByRole("button", { name: "Open preview for Photo of Camera" })
     );
 
-    expect(screen.getByText(/2 of 2 image\(s\)/).textContent).toContain(
-      "Time taken unknown"
-    );
-  });
-
-  it("says how the photo arrived above when it was taken", () => {
-    // why: a date read from the file can be edited, so how the photo reached
-    // Shelf is the first thing a reviewer reads.
-    const { container } = render(
-      <AuditPhoto
-        image={{ ...known, captureSource: "LIBRARY" }}
-        alt="Photo of Camera"
-        disablePortal
-      />
-    );
-
-    const lines = [...container.querySelectorAll("figcaption span")].map(
-      (line) => line.textContent
-    );
-    expect(lines[0]).toBe("From the photo library");
-    expect(lines[1]).toMatch(/^Taken 21\/10\/2026/);
-  });
-
-  it("shows a camera photo's upload time when it carried no capture time", () => {
-    const { container } = render(
-      <AuditPhoto
-        image={{
-          ...unknown,
-          captureSource: "CAMERA",
-          createdAt: "2026-10-21T09:20:00.000Z",
-        }}
-        alt="Photo of Camera"
-        disablePortal
-      />
-    );
-
-    expect(container.querySelector("figcaption")?.textContent).toMatch(
-      /^Taken in the appUploaded 21\/10\/2026/
-    );
+    const subtitle = screen.getByText(/2 of 2 image\(s\)/).parentElement!;
+    expect(subtitle.textContent).toContain("Time taken unknown");
+    expect(subtitle.textContent).toContain("No date");
   });
 });
