@@ -64,6 +64,7 @@ import {
   payload,
   parseData,
   safeRedirect,
+  readFormData,
 } from "~/utils/http.server";
 import { assertAssetsAreNotArchived } from "~/utils/org-validation.server";
 import {
@@ -313,7 +314,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
-    const formData = await request.formData();
+    const formData = await readFormData(request);
 
     const { intent } = parseData(
       formData,

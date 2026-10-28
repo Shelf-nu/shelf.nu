@@ -484,6 +484,83 @@ describe("generateWhereClause - search fail-closed", () => {
   });
 });
 
+describe("generateWhereClause - enum filter values", () => {
+  const columns = [
+    { name: "status" as const, visible: true, position: 0 },
+    { name: "type" as const, visible: true, position: 1 },
+  ];
+
+  /** Runs the builder and returns what it threw, or null. */
+  function thrownBy(query: string): ShelfError | null {
+    try {
+      generateWhereClause("org-1", null, parseFilters(query, columns));
+      return null;
+    } catch (error) {
+      return error as ShelfError;
+    }
+  }
+
+  it("answers an unknown status with a 400 naming the valid ones", () => {
+    const error = thrownBy("status=is:ARCHIVED");
+    expect(error).toBeInstanceOf(ShelfError);
+    expect(error?.status).toBe(400);
+    expect(error?.shouldBeCaptured).toBe(false);
+    expect(error?.message).toContain('Unknown status "ARCHIVED"');
+    expect(error?.message).toContain("AVAILABLE, IN_CUSTODY, CHECKED_OUT");
+    expect(error?.message).toContain("archived=archived");
+  });
+
+  it.each(["status=isNot:LOST", "status=containsAny:AVAILABLE,LOST"])(
+    "rejects an unknown value in %s",
+    (query) => {
+      const error = thrownBy(query);
+      expect(error?.status).toBe(400);
+      expect(error?.message).toContain('"LOST"');
+      expect(error?.message).not.toContain("archived=archived");
+    }
+  );
+
+  it.each(["type=is:KIT", "type=isNot:KIT"])(
+    "answers an unknown asset type in %s with a 400",
+    (query) => {
+      const error = thrownBy(query);
+      expect(error?.status).toBe(400);
+      expect(error?.message).toContain("INDIVIDUAL, QUANTITY_TRACKED");
+    }
+  );
+
+  it("quotes each unknown value on its own", () => {
+    const error = thrownBy("status=containsAny:LOST,FOO");
+    expect(error?.message).toContain('Unknown status "LOST", "FOO".');
+  });
+
+  it("ignores empty items in a status list", () => {
+    const result = generateWhereClause(
+      "org-1",
+      null,
+      parseFilters("status=containsAny:AVAILABLE,", columns)
+    );
+    expect(result.values).toContain("AVAILABLE");
+    expect(result.values).not.toContain("");
+  });
+
+  it("still casts known values in the SQL", () => {
+    const result = generateWhereClause(
+      "org-1",
+      null,
+      parseFilters(
+        "status=containsAny:AVAILABLE, IN_CUSTODY&type=is:INDIVIDUAL",
+        columns
+      )
+    );
+    expect(getSqlString(result)).toContain('::public."AssetStatus"[]');
+    expect(getSqlString(result)).toContain('::public."AssetType"');
+    expect(result.values).toEqual(
+      expect.arrayContaining(["AVAILABLE", "IN_CUSTODY", "INDIVIDUAL"])
+    );
+  });
+});
+
 /** The unit of measure as the advanced index shows it. */
 const VISIBLE_UNIT = `CASE WHEN a."type" = 'QUANTITY_TRACKED' THEN a."unitOfMeasure" ELSE NULL END`;
 

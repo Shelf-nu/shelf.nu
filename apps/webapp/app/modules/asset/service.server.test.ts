@@ -8015,3 +8015,33 @@ describe("getAdvancedPaginatedAndFilterableAssets - lastAuditDate gating", () =>
     expect(sql).toContain('"completedAt"');
   });
 });
+
+describe("getAdvancedPaginatedAndFilterableAssets - unknown filter value", () => {
+  beforeEach(() => {
+    vi.mocked(db.$queryRaw).mockClear();
+  });
+
+  it("rethrows the filter's 400 with its own message", async () => {
+    const statusFilter: Filter = {
+      name: "status",
+      type: "enum",
+      operator: "is",
+      value: "ARCHIVED",
+    };
+
+    const error = await getAdvancedPaginatedAndFilterableAssets({
+      request: new Request("http://localhost/assets"),
+      organizationId: "org-1",
+      settings: { ...ASSET_INDEX_SETTINGS, mode: "ADVANCED" },
+      filters: "status=is%3AARCHIVED",
+      preParsedFilters: [statusFilter],
+    }).catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(ShelfError);
+    expect(error).toMatchObject({
+      status: 400,
+      message: expect.stringContaining('Unknown status "ARCHIVED"'),
+    });
+    expect(db.$queryRaw).not.toHaveBeenCalled();
+  });
+});
