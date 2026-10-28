@@ -144,7 +144,7 @@
     "tiny-invariant": "^1.3.3",
     "ua-parser-js": "^1.0.41",
     "undici": "^6.29.1",
-    "zod": "^3.25.76",
+    "zod": "^4.6.6",
     "zxing-wasm": "^3.0.2"
   },
   "devDependencies": {

@@ -554,13 +554,13 @@ importers:
         version: 7.2.0(react-dom@19.2.1(react@19.2.1))(react@19.2.1)
       react-zorm:
         specifier: ^0.9.0
-        version: 0.9.0(react-dom@19.2.1(react@19.2.1))(react@19.2.1)(zod@3.25.76)
+        version: 0.9.0(react-dom@19.2.1(react@19.2.1))(react@19.2.1)(zod@4.6.7)
       recharts:
         specifier: ^3.8.1
         version: 3.8.1(@types/react@19.2.14)(react-dom@19.2.1(react@19.2.1))(react-is@19.2.4)(react@19.2.1)(redux@5.0.1)
       remix-hono:
         specifier: ^0.0.18
-        version: 0.0.18(hono@4.13.11)(pretty-cache-header@1.0.0)(react-router@7.18.4(react-dom@19.2.1(react@19.2.1))(react@19.2.1))(zod@3.25.76)
+        version: 0.0.18(hono@4.13.11)(pretty-cache-header@1.0.0)(react-router@7.18.4(react-dom@19.2.1(react@19.2.1))(react@19.2.1))(zod@4.6.7)
       remix-utils:
         specifier: ^9.3.1
         version: 9.3.1(@standard-schema/spec@1.1.0)(intl-parse-accept-language@1.0.0)(react-router@7.18.4(react-dom@19.2.1(react@19.2.1))(react@19.2.1))(react@19.2.1)
@@ -586,8 +586,8 @@ importers:
         specifier: ^6.29.1
         version: 6.29.1
       zod:
-        specifier: ^3.25.76
-        version: 3.25.76
+        specifier: ^4.6.6
+        version: 4.6.7
       zxing-wasm:
         specifier: ^3.0.2
         version: 3.0.2(@types/emscripten@1.41.5)
@@ -10983,11 +10983,8 @@ packages:
     peerDependencies:
       zod: ^3.25.0 || ^4.0.0
 
-  zod@3.25.76:
-    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
-
-  zod@4.4.1:
-    resolution: {integrity: sha512-a6ENMBBGZBsnlSebQ/eKCguSBeGKSf4O7BPnqVPmYGtpBYI7VSqoVqw+QcB7kPRjbqPwhYTpFbVj/RqNz/CT0Q==}
+  zod@4.6.7:
+    resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
 
   zwitch@2.0.4:
     resolution: {integrity: sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A==}
@@ -17405,8 +17402,8 @@ snapshots:
       '@babel/parser': 7.29.0
       eslint: 8.57.1
       hermes-parser: 0.25.1
-      zod: 3.25.76
-      zod-validation-error: 4.0.2(zod@3.25.76)
+      zod: 4.6.7
+      zod-validation-error: 4.0.2(zod@4.6.7)
     transitivePeerDependencies:
       - supports-color
 
@@ -17416,8 +17413,8 @@ snapshots:
       '@babel/parser': 7.29.0
       eslint: 9.39.4(jiti@2.6.1)
       hermes-parser: 0.25.1
-      zod: 3.25.76
-      zod-validation-error: 4.0.2(zod@3.25.76)
+      zod: 4.6.7
+      zod-validation-error: 4.0.2(zod@4.6.7)
     transitivePeerDependencies:
       - supports-color
 
@@ -18895,7 +18892,7 @@ snapshots:
       tinyglobby: 0.2.16
       unbash: 3.0.0
       yaml: 2.8.3
-      zod: 4.4.1
+      zod: 4.6.7
     transitivePeerDependencies:
       - '@emnapi/core'
       - '@emnapi/runtime'
@@ -18915,7 +18912,7 @@ snapshots:
       tinyglobby: 0.2.16
       unbash: 3.0.0
       yaml: 2.8.3
-      zod: 4.4.1
+      zod: 4.6.7
     transitivePeerDependencies:
       - '@emnapi/core'
       - '@emnapi/runtime'
@@ -20788,11 +20785,11 @@ snapshots:
 
   react-zlib-js@1.0.5: {}
 
-  react-zorm@0.9.0(react-dom@19.2.1(react@19.2.1))(react@19.2.1)(zod@3.25.76):
+  react-zorm@0.9.0(react-dom@19.2.1(react@19.2.1))(react@19.2.1)(zod@4.6.7):
     dependencies:
       react: 19.2.1
       react-dom: 19.2.1(react@19.2.1)
-      zod: 3.25.76
+      zod: 4.6.7
 
   react@19.1.0: {}
 
@@ -20940,13 +20937,13 @@ snapshots:
       fs-extra: 11.3.3
       minimatch: 10.2.3
 
-  remix-hono@0.0.18(hono@4.13.11)(pretty-cache-header@1.0.0)(react-router@7.18.4(react-dom@19.2.1(react@19.2.1))(react@19.2.1))(zod@3.25.76):
+  remix-hono@0.0.18(hono@4.13.11)(pretty-cache-header@1.0.0)(react-router@7.18.4(react-dom@19.2.1(react@19.2.1))(react@19.2.1))(zod@4.6.7):
     dependencies:
       hono: 4.13.11
       pretty-cache-header: 1.0.0
     optionalDependencies:
       react-router: 7.18.4(react-dom@19.2.1(react@19.2.1))(react@19.2.1)
-      zod: 3.25.76
+      zod: 4.6.7
 
   remix-utils@9.3.1(@standard-schema/spec@1.1.0)(intl-parse-accept-language@1.0.0)(react-router@7.18.4(react-dom@19.2.1(react@19.2.1))(react@19.2.1))(react@19.2.1):
     dependencies:
@@ -22349,13 +22346,11 @@ snapshots:
 
   yoctocolors@2.1.2: {}
 
-  zod-validation-error@4.0.2(zod@3.25.76):
+  zod-validation-error@4.0.2(zod@4.6.7):
     dependencies:
-      zod: 3.25.76
+      zod: 4.6.7
 
-  zod@3.25.76: {}
-
-  zod@4.4.1: {}
+  zod@4.6.7: {}
 
   zwitch@2.0.4: {}
 
