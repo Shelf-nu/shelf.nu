@@ -1199,6 +1199,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       checkedInAssetIds,
       checkedOutAssetIds: sliceCheckedOutAssetIds,
       bookingStatus: booking.status,
+      archivedWithoutCheckin: booking.archivedWithoutCheckin,
       countKitsAsSingleUnit,
     });
 
