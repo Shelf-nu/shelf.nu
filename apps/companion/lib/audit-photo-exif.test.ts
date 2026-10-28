@@ -10,9 +10,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  appendCaptureTags,
+  appendPhotoCapture,
   captureTagsFromPickerExif,
-  photoTakenLabel,
+  photoCaptureFromPicker,
 } from "./audit-photo-exif";
 
 test("reads Android's flat EXIF tags", () => {
@@ -55,39 +55,47 @@ test("returns null when the photo has no capture date", () => {
 });
 
 /** Collects what an upload's form fields would carry. */
-function fieldsOf(tags: Parameters<typeof appendCaptureTags>[1]) {
+function fieldsOf(capture: Parameters<typeof appendPhotoCapture>[1]) {
   const fields: [string, string][] = [];
-  appendCaptureTags(
+  appendPhotoCapture(
     {
       append: (name: string, value: string | Blob) =>
         void fields.push([name, String(value)]),
     },
-    tags
+    capture
   );
   return fields;
 }
 
-test("sends the date and offset as the fields the server reads", () => {
+test("a camera photo is sent as CAMERA with its date and offset", () => {
   assert.deepEqual(
-    fieldsOf({
-      dateTimeOriginal: "2026:10:21 09:15:00",
-      offsetTimeOriginal: "+02:00",
-    }),
+    fieldsOf(
+      photoCaptureFromPicker(true, {
+        DateTimeOriginal: "2026:10:21 09:15:00",
+        OffsetTimeOriginal: "+02:00",
+      })
+    ),
     [
+      ["captureSource", "CAMERA"],
       ["exifDateTimeOriginal", "2026:10:21 09:15:00"],
       ["exifOffsetTimeOriginal", "+02:00"],
     ]
   );
 });
 
-test("sends no offset field when there is none, and nothing without a date", () => {
+test("a library photo is sent as LIBRARY, with only the fields it has", () => {
   assert.deepEqual(
-    fieldsOf({
-      dateTimeOriginal: "2026:10:21 09:15:00",
-      offsetTimeOriginal: null,
-    }),
-    [["exifDateTimeOriginal", "2026:10:21 09:15:00"]]
+    fieldsOf(
+      photoCaptureFromPicker(false, { DateTimeOriginal: "2026:10:21 09:15:00" })
+    ),
+    [
+      ["captureSource", "LIBRARY"],
+      ["exifDateTimeOriginal", "2026:10:21 09:15:00"],
+    ]
   );
+  assert.deepEqual(fieldsOf(photoCaptureFromPicker(false, null)), [
+    ["captureSource", "LIBRARY"],
+  ]);
   assert.deepEqual(fieldsOf(null), []);
 });
 
@@ -101,17 +109,8 @@ test("a HEIC photo converted to JPEG still sends its date", () => {
   const convertedFile = { uri: "file:///photo.jpg", exif: null };
 
   assert.equal(captureTagsFromPickerExif(convertedFile.exif), null);
-  assert.deepEqual(fieldsOf(captureTagsFromPickerExif(pickerResult.exif)), [
+  assert.deepEqual(fieldsOf(photoCaptureFromPicker(false, pickerResult.exif)), [
+    ["captureSource", "LIBRARY"],
     ["exifDateTimeOriginal", "2026:10:21 09:15:00"],
   ]);
-});
-
-test("labels a photo with the time it was taken, or says it is unknown", () => {
-  const format = (iso: string) => `formatted(${iso})`;
-
-  assert.equal(
-    photoTakenLabel("2026-10-21T07:15:00.000Z", format),
-    "Taken formatted(2026-10-21T07:15:00.000Z)"
-  );
-  assert.equal(photoTakenLabel(null, format), "Time taken unknown");
 });

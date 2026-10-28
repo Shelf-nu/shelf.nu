@@ -1,6 +1,6 @@
 import { apiFetch, apiUpload } from "./client";
-import type { PhotoCaptureTags } from "../audit-photo-exif";
-import { appendCaptureTags } from "../audit-photo-exif";
+import type { PhotoCapture } from "../audit-photo-exif";
+import { appendPhotoCapture } from "../audit-photo-exif";
 import type {
   AuditsResponse,
   AuditDetailResponse,
@@ -209,8 +209,9 @@ export const auditsApi = {
    * @param imageUri Local file URI from expo-image-picker
    * @param mimeType Image MIME type (defaults to image/jpeg)
    * @param content Optional note text to accompany the image
-   * @param captureTags When the photo was taken, from the picker's EXIF; the
-   *   server uses it when the file itself no longer carries EXIF
+   * @param capture How and when the photo was taken, from the picker: the
+   *   source (camera or library) and the EXIF date, which the server uses when
+   *   the file itself no longer carries EXIF
    */
   uploadImage: (
     orgId: string,
@@ -219,7 +220,7 @@ export const auditsApi = {
     imageUri: string,
     mimeType: string = "image/jpeg",
     content?: string,
-    captureTags: PhotoCaptureTags | null = null
+    capture: PhotoCapture | null = null
   ) => {
     const formData = new FormData();
     // React Native FormData accepts objects with uri/type/name for file uploads
@@ -232,7 +233,7 @@ export const auditsApi = {
     if (content) {
       formData.append("content", content);
     }
-    appendCaptureTags(formData, captureTags);
+    appendPhotoCapture(formData, capture);
 
     const params = new URLSearchParams({
       orgId,

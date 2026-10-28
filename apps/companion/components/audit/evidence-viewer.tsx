@@ -32,7 +32,7 @@ import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { CONTENT_MAX_WIDTH } from "@/lib/content-column";
 import { useDateFormatter } from "@/lib/use-date-formatter";
 import type { AuditEvidenceImage, AuditEvidenceNote } from "@/lib/api/types";
-import { photoTakenLabel } from "@/lib/audit-photo-exif";
+import { describeAuditPhotoTime } from "@shelf/labels";
 
 type EvidenceViewerProps = {
   visible: boolean;
@@ -88,10 +88,10 @@ export function EvidenceViewer({
     [styles, formatDateTime]
   );
 
-  /** "Taken <date and time>", or "Time taken unknown" when EXIF had no date. */
-  const takenLabel = useCallback(
+  /** How the photo arrived, then when it was taken (shared wording). */
+  const takenLines = useCallback(
     (image: AuditEvidenceImage) =>
-      photoTakenLabel(image.capturedAt, formatDateTime),
+      describeAuditPhotoTime(image, formatDateTime),
     [formatDateTime]
   );
 
@@ -158,37 +158,43 @@ export function EvidenceViewer({
                       : `${images.length} photos`}
                   </Text>
                   <View style={styles.grid}>
-                    {images.map((image) => (
-                      <TouchableOpacity
-                        key={image.id}
-                        activeOpacity={onImagePress ? 0.7 : 1}
-                        onPress={
-                          onImagePress ? () => onImagePress(image) : undefined
-                        }
-                        accessibilityRole={onImagePress ? "button" : "image"}
-                        accessibilityLabel={`${
-                          image.description
-                            ? `Photo: ${image.description}`
-                            : `Photo by ${image.authorName ?? "Unknown"}`
-                        }. ${takenLabel(image)}`}
-                      >
-                        <Image
-                          source={{ uri: image.thumbnailUrl }}
-                          style={styles.thumb}
-                          contentFit="cover"
-                        />
-                        {/* A photo with no capture time is shown as unknown
+                    {images.map((image) => {
+                      const taken = takenLines(image);
+                      return (
+                        <TouchableOpacity
+                          key={image.id}
+                          activeOpacity={onImagePress ? 0.7 : 1}
+                          onPress={
+                            onImagePress ? () => onImagePress(image) : undefined
+                          }
+                          accessibilityRole={onImagePress ? "button" : "image"}
+                          accessibilityLabel={`${
+                            image.description
+                              ? `Photo: ${image.description}`
+                              : `Photo by ${image.authorName ?? "Unknown"}`
+                          }. ${[taken.source, taken.time]
+                            .filter(Boolean)
+                            .join(". ")}`}
+                        >
+                          <Image
+                            source={{ uri: image.thumbnailUrl }}
+                            style={styles.thumb}
+                            contentFit="cover"
+                          />
+                          {/* A photo with no capture time is shown as unknown
                             on purpose: it is the one a reviewer must notice. */}
-                        <Text style={styles.takenAt} numberOfLines={3}>
-                          {takenLabel(image)}
-                        </Text>
-                        {image.description ? (
-                          <Text style={styles.caption} numberOfLines={2}>
-                            {image.description}
-                          </Text>
-                        ) : null}
-                      </TouchableOpacity>
-                    ))}
+                          {taken.source ? (
+                            <Text style={styles.takenAt}>{taken.source}</Text>
+                          ) : null}
+                          <Text style={styles.takenAt}>{taken.time}</Text>
+                          {image.description ? (
+                            <Text style={styles.caption} numberOfLines={2}>
+                              {image.description}
+                            </Text>
+                          ) : null}
+                        </TouchableOpacity>
+                      );
+                    })}
                   </View>
                 </>
               ) : null}
@@ -302,7 +308,7 @@ const useStyles = createStyles((colors) => ({
   },
   takenAt: {
     width: 104,
-    marginTop: 4,
+    marginTop: 2,
     fontSize: fontSize.xs,
     color: colors.muted,
   },

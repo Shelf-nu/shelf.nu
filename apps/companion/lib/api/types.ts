@@ -1680,6 +1680,8 @@ export type AuditEvidenceImage = {
   description: string | null;
   /** When the photo was taken (from its EXIF), ISO; null when unknown. */
   capturedAt: string | null;
+  /** How the photo reached Shelf; null when unknown. */
+  captureSource: "CAMERA" | "LIBRARY" | "WEB_UPLOAD" | null;
   createdAt: string;
   authorName: string | null;
   authorImage: string | null;

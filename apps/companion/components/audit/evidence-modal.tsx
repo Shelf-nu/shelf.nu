@@ -26,11 +26,9 @@ import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { api } from "@/lib/api";
-import type { PhotoCaptureTags } from "@/lib/audit-photo-exif";
-import {
-  captureTagsFromPickerExif,
-  photoTakenLabel,
-} from "@/lib/audit-photo-exif";
+import { describeAuditPhotoTime } from "@shelf/labels";
+import type { PhotoCapture } from "@/lib/audit-photo-exif";
+import { photoCaptureFromPicker } from "@/lib/audit-photo-exif";
 import type { AuditEvidenceImage, AuditEvidenceNote } from "@/lib/api/types";
 import { useOrg } from "@/lib/org-context";
 import { useDateFormatter } from "@/lib/use-date-formatter";
@@ -233,8 +231,7 @@ export function EvidenceModal({
   const [imageMimeType, setImageMimeType] = useState("image/jpeg");
   // When the selected photo was taken, read from the picker before any HEIC
   // to JPEG conversion drops the file's EXIF.
-  const [imageCaptureTags, setImageCaptureTags] =
-    useState<PhotoCaptureTags | null>(null);
+  const [imageCapture, setImageCapture] = useState<PhotoCapture | null>(null);
 
   const resetState = useCallback(() => {
     setNoteText("");
@@ -318,7 +315,7 @@ export function EvidenceModal({
       );
       setSelectedImageUri(uri);
       setImageMimeType(mimeType);
-      setImageCaptureTags(captureTagsFromPickerExif(asset.exif));
+      setImageCapture(photoCaptureFromPicker(useCamera, asset.exif));
     }
   }, []);
 
@@ -355,7 +352,7 @@ export function EvidenceModal({
         selectedImageUri,
         imageMimeType,
         noteText.trim() || undefined,
-        imageCaptureTags
+        imageCapture
       );
 
       if (error) {
@@ -384,7 +381,7 @@ export function EvidenceModal({
     auditSessionId,
     selectedImageUri,
     imageMimeType,
-    imageCaptureTags,
+    imageCapture,
     noteText,
     onEvidenceAdded,
   ]);
@@ -509,22 +506,28 @@ export function EvidenceModal({
 
                 {existing.images.length > 0 ? (
                   <View style={styles.existingImages}>
-                    {existing.images.map((img) => (
-                      <View key={img.id} style={styles.existingPhoto}>
-                        <Image
-                          source={{ uri: img.thumbnailUrl }}
-                          style={styles.existingThumb}
-                          contentFit="cover"
-                          accessibilityLabel={`Photo. ${photoTakenLabel(
-                            img.capturedAt,
-                            formatDateTime
-                          )}`}
-                        />
-                        <Text style={styles.existingTakenAt} numberOfLines={3}>
-                          {photoTakenLabel(img.capturedAt, formatDateTime)}
-                        </Text>
-                      </View>
-                    ))}
+                    {existing.images.map((img) => {
+                      const { source, time } = describeAuditPhotoTime(
+                        img,
+                        formatDateTime
+                      );
+                      return (
+                        <View key={img.id} style={styles.existingPhoto}>
+                          <Image
+                            source={{ uri: img.thumbnailUrl }}
+                            style={styles.existingThumb}
+                            contentFit="cover"
+                            accessibilityLabel={`Photo. ${[source, time]
+                              .filter(Boolean)
+                              .join(". ")}`}
+                          />
+                          {source ? (
+                            <Text style={styles.existingTakenAt}>{source}</Text>
+                          ) : null}
+                          <Text style={styles.existingTakenAt}>{time}</Text>
+                        </View>
+                      );
+                    })}
                   </View>
                 ) : null}
 
