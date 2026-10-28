@@ -261,6 +261,7 @@ import { createKitsIfNotExists } from "../kit/service.server";
 import { createSystemLocationNote } from "../location-note/service.server";
 import {
   buildAssetModelChangeNote,
+  buildAvailableToBookChangeNote,
   resolveUserLink,
 } from "../note/helpers.server";
 import {
@@ -6334,20 +6335,87 @@ export async function createAssetsFromContentImport({
   }
 }
 
+/**
+ * Turns an asset's "Available for bookings" switch on or off.
+ *
+ * When the value actually changes, the write, an UPDATE note on the asset and
+ * one `ASSET_AVAILABLE_TO_BOOK_CHANGED` event commit together. Setting the
+ * value the asset already has writes no note and no event, so re-submitting
+ * the switch does not fill the activity log.
+ *
+ * @param params.id - The asset to change
+ * @param params.availableToBook - The value to set
+ * @param params.organizationId - The caller's validated workspace
+ * @param params.userId - The acting user, named in the note and the event
+ * @returns The updated asset
+ * @throws {ShelfError} 400 when the asset is archived, including one archived
+ *   while this write was in flight
+ */
 export async function updateAssetBookingAvailability({
   id,
   availableToBook,
   organizationId,
-}: Pick<Asset, "id" | "availableToBook" | "organizationId">) {
+  userId,
+}: Pick<Asset, "id" | "availableToBook" | "organizationId"> & {
+  userId: User["id"];
+}) {
   try {
     // Archived assets are frozen (issue #382): availability can't be toggled.
     // The pre-check gives the clear error; `archivedAt: null` in the WHERE
     // closes the window where an archive commits between it and the write.
     await assertAssetsAreNotArchived({ assetIds: [id], organizationId });
 
-    return await db.asset.update({
-      where: { id, organizationId, archivedAt: null },
-      data: { availableToBook },
+    // Resolved before the transaction: it reads the user table, not the asset.
+    const userLink = await resolveUserLink({
+      userId,
+      loadUserForNotes: createLoadUserForNotes(userId),
+    });
+
+    return await db.$transaction(async (tx) => {
+      // The row lock makes the before-read and the write one step, so two
+      // toggles racing each other cannot both record the same change.
+      await lockAssetsForArchiveGuard(tx, [id], organizationId);
+      const before = await tx.asset.findUnique({
+        where: { id, organizationId, archivedAt: null },
+        select: { availableToBook: true },
+      });
+
+      const asset = await tx.asset.update({
+        where: { id, organizationId, archivedAt: null },
+        data: { availableToBook },
+      });
+
+      if (before && before.availableToBook !== availableToBook) {
+        await createNote(
+          {
+            content: buildAvailableToBookChangeNote({
+              userLink,
+              availableToBook,
+            }),
+            type: "UPDATE",
+            userId,
+            assetId: id,
+            organizationId,
+          },
+          tx
+        );
+        await recordEvent(
+          {
+            organizationId,
+            actorUserId: userId,
+            action: "ASSET_AVAILABLE_TO_BOOK_CHANGED",
+            entityType: "ASSET",
+            entityId: id,
+            assetId: id,
+            field: "availableToBook",
+            fromValue: before.availableToBook,
+            toValue: availableToBook,
+          },
+          tx
+        );
+      }
+
+      return asset;
     });
   } catch (cause) {
     if (isLikeShelfError(cause)) {
@@ -8893,7 +8961,24 @@ export async function bulkAssignAssetTags({
   }
 }
 
+/**
+ * Turns the "Available for bookings" switch on or off for many assets,
+ * including a cross-page "select all".
+ *
+ * Leaves the same trail as {@link updateAssetBookingAvailability}: one UPDATE
+ * note and one `ASSET_AVAILABLE_TO_BOOK_CHANGED` event per asset whose value
+ * actually changes, written in the transaction that makes the change. Assets
+ * already at the target value are skipped, as are assets archived after the
+ * archived check.
+ *
+ * @param params.userId - The acting user, named in every note and event
+ * @param params.type - The value to set
+ * @returns `true` once the change is committed
+ * @throws {ShelfError} 400 when the selection holds an archived asset, or a
+ *   select-all filter the caller may not use
+ */
 export async function bulkMarkAvailability({
+  userId,
   organizationId,
   assetIds,
   type,
@@ -8903,6 +8988,7 @@ export async function bulkMarkAvailability({
   bookableScope,
   timeZone = "UTC",
 }: {
+  userId: User["id"];
   organizationId: Asset["organizationId"];
   assetIds: Asset["id"][];
   type: "available" | "unavailable";
@@ -8945,17 +9031,82 @@ export async function bulkMarkAvailability({
     // Archived assets are frozen (issue #382): can't change availability.
     await assertAssetsAreNotArchived({ assetIds: resolvedIds, organizationId });
 
-    // Simple, consistent where clause. `archivedAt: null` skips an asset that
-    // was archived after the check above, so its availability stays frozen.
-    await db.asset.updateMany({
-      where: {
-        id: { in: resolvedIds },
-        organizationId,
-        availableToBook: type === "unavailable",
-        archivedAt: null,
-      },
-      data: { availableToBook: type === "available" },
+    if (resolvedIds.length === 0) {
+      return true;
+    }
+
+    const availableToBook = type === "available";
+
+    // Resolved once, outside the transaction: it reads the user table, and
+    // every note in this batch is written by the same person.
+    const userLink = await resolveUserLink({
+      userId,
+      loadUserForNotes: createLoadUserForNotes(userId),
     });
+
+    // The write, its events and its notes run in here over a selection that
+    // "select all" can make large, so the ceiling matches the other bulk
+    // writers rather than Prisma's 5s default.
+    await db.$transaction(
+      async (tx) => {
+        // The row lock makes the before-read and the write one step, so a
+        // concurrent toggle cannot slip between them and be recorded twice.
+        await lockAssetsForArchiveGuard(tx, resolvedIds, organizationId);
+
+        // Org-scoped, so every id below is proven to belong here. An asset
+        // archived after the check above drops out and stays frozen.
+        const assetsBeforeUpdate = await tx.asset.findMany({
+          where: { id: { in: resolvedIds }, organizationId, archivedAt: null },
+          select: { id: true, availableToBook: true },
+        });
+
+        // Only rows that actually change, so the activity log does not fill
+        // with no-op entries when the selection already holds the value.
+        const changingIds = assetsBeforeUpdate
+          .filter((asset) => asset.availableToBook !== availableToBook)
+          .map((asset) => asset.id);
+
+        if (changingIds.length === 0) {
+          return;
+        }
+
+        await tx.asset.updateMany({
+          where: { id: { in: changingIds }, organizationId, archivedAt: null },
+          data: { availableToBook },
+        });
+
+        await recordEvents(
+          changingIds.map((assetId) => ({
+            organizationId,
+            actorUserId: userId,
+            action: "ASSET_AVAILABLE_TO_BOOK_CHANGED" as const,
+            entityType: "ASSET" as const,
+            entityId: assetId,
+            assetId,
+            field: "availableToBook",
+            fromValue: !availableToBook,
+            toValue: availableToBook,
+          })),
+          tx
+        );
+
+        // Every changed asset gets the same sentence, so one `createMany`.
+        await createNotes(
+          {
+            content: buildAvailableToBookChangeNote({
+              userLink,
+              availableToBook,
+            }),
+            type: "UPDATE",
+            userId,
+            assetIds: changingIds,
+            organizationId,
+          },
+          tx
+        );
+      },
+      { timeout: 15000 }
+    );
 
     return true;
   } catch (cause) {
@@ -8963,7 +9114,7 @@ export async function bulkMarkAvailability({
     throw new ShelfError({
       cause,
       message: "Something went wrong while marking assets as available.",
-      additionalData: { assetIds, organizationId },
+      additionalData: { userId, assetIds, organizationId },
       label,
     });
   }
