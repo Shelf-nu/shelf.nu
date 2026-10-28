@@ -33,6 +33,7 @@ const DEFAULT_STATE: Record<BulkDialogType, boolean> = {
   "start-audit": false,
   "add-to-audit": false,
   "delete-audit": false,
+  "reorder-point": false,
 };
 
 export const bulkDialogAtom =

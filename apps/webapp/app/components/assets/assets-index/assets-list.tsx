@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { useEffect, useMemo } from "react";
+import { ASSET_QUANTITY_FIGURE_LABELS } from "@shelf/labels";
 import { m } from "framer-motion";
 import { useSetAtom } from "jotai";
 import { Package } from "lucide-react";
@@ -291,7 +292,9 @@ export const AssetsList = ({
         </Th>
       </When>
       <Th>Location</Th>
-      <Th>Quantity</Th>
+      <Th className="whitespace-nowrap">
+        {ASSET_QUANTITY_FIGURE_LABELS.TOTAL}
+      </Th>
       <Th>Actions</Th>
     </>
   ) : (
@@ -511,6 +514,7 @@ export const AssetsList = ({
                           />
                           <CategoryBadge
                             category={resource.extendedProps?.category}
+                            linkToAssets
                           />
                           {displayCode ? (
                             <AssetCodeBadge {...displayCode} />
@@ -651,12 +655,12 @@ export const ListAssetContent = ({
 
       {/* Category */}
       <Td>
-        <CategoryBadge category={category} />
+        <CategoryBadge category={category} linkToAssets />
       </Td>
 
       {/* Tags */}
       <Td className="text-left">
-        <ListItemTagsColumn tags={tags} />
+        <ListItemTagsColumn tags={tags} linkToAssets />
       </Td>
 
       {/* Custodian */}

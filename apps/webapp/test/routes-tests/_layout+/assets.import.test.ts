@@ -2,7 +2,9 @@
 /**
  * Asset import upload and confirm action.
  *
- * Pins the `preview` and `confirm` intents: the permission gate, the preview
+ * Pins the `analyze`, `preview` and `confirm` intents: the column mapping
+ * proposal and its refusals, the reviewed mapping applied before the preview,
+ * the funnel events, the permission gate, the preview
  * payload, the empty-file errors (shown on the page, never as a toast), the
  * redirect to the progress page, and that a draft from another workspace is
  * never confirmed. The loader is pinned for the running import it hands the
@@ -17,6 +19,13 @@ import { permissionContext } from "@helpers/role-access";
 import { createActionArgs, createLoaderArgs } from "@mocks/remix";
 
 import { db } from "~/database/db.server";
+import { captureServerEvent } from "~/integrations/posthog/client.server";
+import { isAlreadyShelfFormat } from "~/modules/import-mapping/heuristics";
+import type {
+  ColumnMapping,
+  MappingProposal,
+} from "~/modules/import-mapping/types";
+import { MAX_MAPPING_FIELD_LENGTH } from "~/modules/import-mapping/types";
 import { buildContentImportPreview } from "~/modules/asset-import/preview.server";
 import { action, loader } from "~/routes/_layout+/assets.import";
 import { csvDataFromRequest } from "~/utils/csv.server";
@@ -42,9 +51,20 @@ vi.mock("~/modules/asset-import/preview.server", () => ({
   buildContentImportPreview: vi.fn(),
 }));
 
-// why: the import rows live in the database.
+// why: the import rows, and the custom fields, categories and locations the
+// mapping step reads, live in the database.
 vi.mock("~/database/db.server", () => ({
-  db: { assetImport: { findFirst: vi.fn(), updateMany: vi.fn() } },
+  db: {
+    assetImport: { findFirst: vi.fn(), updateMany: vi.fn() },
+    customField: { findMany: vi.fn() },
+    category: { findMany: vi.fn() },
+    location: { findMany: vi.fn() },
+  },
+}));
+
+// why: analytics goes to PostHog over the network; tests assert what is sent.
+vi.mock("~/integrations/posthog/client.server", () => ({
+  captureServerEvent: vi.fn(),
 }));
 
 // why: the queue has its own tests; confirm only has to reach it.
@@ -304,5 +324,346 @@ describe("assets.import loader", () => {
     const result = await load();
 
     expect(result.runningImport).toBeNull();
+  });
+});
+
+describe("assets.import column mapping", () => {
+  const MESSY_FILE: [string[], ...string[][]] = [
+    ["Item Name", "Serial No.", "Legacy ID"],
+    ["Dell Latitude", "5CG31", "X-1"],
+    ["HP EliteBook", "8HQ22", "X-2"],
+  ];
+
+  /** The mapping the review would post for MESSY_FILE. */
+  const MAPPING: ColumnMapping[] = [
+    {
+      source: "Item Name",
+      target: { kind: "field", name: "title" },
+      confidence: "high",
+      sample: [],
+    },
+    {
+      source: "Serial No.",
+      target: { kind: "customField", name: "Serial number", type: "TEXT" },
+      confidence: "high",
+      sample: [],
+    },
+    {
+      source: "Legacy ID",
+      target: { kind: "skip" },
+      confidence: "low",
+      sample: [],
+    },
+  ];
+
+  /** Posts the import form with these fields. */
+  function post(fields: Record<string, string>) {
+    const form = new FormData();
+    for (const [key, value] of Object.entries(fields)) form.set(key, value);
+    form.set("file", new File(["x"], "assets.csv"));
+    return run(form);
+  }
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.mocked(requirePermission).mockResolvedValue({
+      ...permissionContext({}),
+      organizations: [],
+      canUseBarcodes: false,
+    } as never);
+    vi.mocked(csvDataFromRequest).mockResolvedValue(MESSY_FILE);
+    vi.mocked(db.customField.findMany).mockResolvedValue([
+      { name: "Serial number", type: "TEXT" },
+    ] as never);
+    vi.mocked(buildContentImportPreview).mockResolvedValue({
+      importId: "imp-1",
+    } as never);
+  });
+
+  describe("analyze", () => {
+    it("proposes a mapping by rules and stores nothing", async () => {
+      const result = (await post({ intent: "analyze" })) as Record<
+        string,
+        unknown
+      >;
+
+      expect(buildContentImportPreview).not.toHaveBeenCalled();
+      // New categories and locations are named once, by the preview.
+      expect(db.category.findMany).not.toHaveBeenCalled();
+      expect(db.location.findMany).not.toHaveBeenCalled();
+      expect(result).not.toHaveProperty("columnStats");
+      expect(db.customField.findMany).toHaveBeenCalledWith({
+        where: { organizationId: "org-1", deletedAt: null },
+        select: { name: true, type: true },
+      });
+      expect(result).toMatchObject({
+        intent: "analyze",
+        rowCount: 2,
+        existingCustomFields: [{ name: "Serial number", type: "TEXT" }],
+        proposal: {
+          source: "rules",
+          columns: [
+            { source: "Item Name", target: { kind: "field", name: "title" } },
+            {
+              source: "Serial No.",
+              target: {
+                kind: "customField",
+                name: "Serial number",
+                type: "TEXT",
+              },
+            },
+            { source: "Legacy ID", target: { kind: "skip" } },
+          ],
+        },
+      });
+      expect(captureServerEvent).toHaveBeenCalledWith({
+        distinctId: "user-1",
+        event: "import_mapping_proposed",
+        properties: { organizationId: "org-1", columns: 3, lowConfidence: 1 },
+      });
+    });
+
+    it("proposes a template file as already in Shelf's format", async () => {
+      vi.mocked(csvDataFromRequest).mockResolvedValue([
+        ["title", "category"],
+        ["Camera", "Video"],
+      ]);
+      const result = (await post({ intent: "analyze" })) as {
+        proposal: MappingProposal;
+      };
+      // The review reads "already matches" off the proposal it is sent.
+      expect(isAlreadyShelfFormat(result.proposal.columns)).toBe(true);
+    });
+
+    it("refuses a file over the background import's row limit before any review", async () => {
+      vi.mocked(csvDataFromRequest).mockResolvedValue([
+        ["Item Name"],
+        ...Array.from({ length: 10_001 }, (_, index) => [`Item ${index}`]),
+      ]);
+      const result = (await post({ intent: "analyze" })) as ActionResult;
+
+      expect(result.init?.status).toBe(400);
+      expect(result.data).toMatchObject({ error: { title: "File too large" } });
+      expect(captureServerEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: "import_failed",
+          properties: { organizationId: "org-1", reason: "too_many_rows" },
+        })
+      );
+    });
+
+    it("refuses a heading longer than the importer can carry", async () => {
+      vi.mocked(csvDataFromRequest).mockResolvedValue([
+        ["Item Name", "H".repeat(1001)],
+        ["A", "x"],
+      ]);
+      const result = (await post({ intent: "analyze" })) as ActionResult;
+      expect(result.data).toMatchObject({
+        error: { title: "Column heading too long" },
+      });
+    });
+
+    it("refuses more columns than the review can show", async () => {
+      vi.mocked(csvDataFromRequest).mockResolvedValue([
+        Array.from({ length: 201 }, (_, index) => `Col ${index}`),
+        ["x"],
+      ]);
+      const result = (await post({ intent: "analyze" })) as ActionResult;
+      expect(result.data).toMatchObject({
+        error: { title: "Too many columns" },
+      });
+    });
+  });
+
+  describe("preview with a reviewed mapping", () => {
+    it("renames headers and drops skipped columns before the preview", async () => {
+      await post({
+        intent: "preview",
+        mapping: JSON.stringify(MAPPING),
+        mappingChanged: "1",
+        mappingNewCustomFields: "0",
+      });
+
+      expect(buildContentImportPreview).toHaveBeenCalledWith(
+        expect.objectContaining({
+          csvData: [
+            ["title", "cf:Serial number, type:text"],
+            ["Dell Latitude", "5CG31"],
+            ["HP EliteBook", "8HQ22"],
+          ],
+        })
+      );
+      expect(captureServerEvent).toHaveBeenCalledWith({
+        distinctId: "user-1",
+        event: "import_mapping_confirmed",
+        properties: {
+          organizationId: "org-1",
+          columns: 3,
+          changedByUser: 1,
+          newCustomFields: 0,
+        },
+      });
+    });
+
+    it("tracks every row as stock when the user chose a consumption type", async () => {
+      vi.mocked(csvDataFromRequest).mockResolvedValue([
+        ["Entry Name", "Quantity"],
+        ["Cable", "10"],
+      ]);
+      await post({
+        intent: "preview",
+        mapping: JSON.stringify([
+          { ...MAPPING[0], source: "Entry Name" },
+          {
+            source: "Quantity",
+            target: { kind: "field", name: "quantity" },
+            confidence: "high",
+            sample: [],
+          },
+        ]),
+        quantityTracking: "ONE_WAY",
+      });
+
+      expect(buildContentImportPreview).toHaveBeenCalledWith(
+        expect.objectContaining({
+          csvData: [
+            ["title", "quantity", "type", "consumptionType"],
+            ["Cable", "10", "QUANTITY_TRACKED", "ONE_WAY"],
+          ],
+        })
+      );
+    });
+
+    it("refuses a quantity choice that is not one of the options", async () => {
+      const result = (await post({
+        intent: "preview",
+        mapping: JSON.stringify(MAPPING),
+        quantityTracking: "SOMETIMES",
+      })) as ActionResult;
+      expect(result.init?.status).toBe(400);
+      expect(buildContentImportPreview).not.toHaveBeenCalled();
+    });
+
+    it("reports the mapping as confirmed only once the preview is built", async () => {
+      vi.mocked(buildContentImportPreview).mockRejectedValue(
+        new ShelfError({
+          cause: null,
+          message: "Row 2: title is required",
+          label: "Assets",
+          status: 400,
+          shouldBeCaptured: false,
+        })
+      );
+      await post({ intent: "preview", mapping: JSON.stringify(MAPPING) });
+
+      expect(captureServerEvent).not.toHaveBeenCalledWith(
+        expect.objectContaining({ event: "import_mapping_confirmed" })
+      );
+    });
+
+    it("previews the file unchanged when no mapping is posted", async () => {
+      await post({ intent: "preview" });
+      expect(buildContentImportPreview).toHaveBeenCalledWith(
+        expect.objectContaining({ csvData: MESSY_FILE })
+      );
+      expect(captureServerEvent).not.toHaveBeenCalledWith(
+        expect.objectContaining({ event: "import_mapping_confirmed" })
+      );
+    });
+
+    it("accepts a long heading under the limit all the way to the preview", async () => {
+      const long = "H".repeat(900);
+      vi.mocked(csvDataFromRequest).mockResolvedValue([
+        ["Item Name", long],
+        ["A", "x"],
+      ]);
+      await post({
+        intent: "preview",
+        mapping: JSON.stringify([MAPPING[0], { ...MAPPING[2], source: long }]),
+      });
+      expect(buildContentImportPreview).toHaveBeenCalled();
+    });
+
+    it.each([
+      [
+        "two columns on one target",
+        () =>
+          JSON.stringify(
+            MAPPING.map((column) =>
+              column.source === "Legacy ID"
+                ? { ...column, target: { kind: "field", name: "title" } }
+                : column
+            )
+          ),
+        "Two columns share one Shelf field",
+        "duplicate_targets",
+      ],
+      [
+        "reordered columns",
+        () => JSON.stringify([MAPPING[1], MAPPING[0], MAPPING[2]]),
+        "Mapping does not match the file",
+        "invalid_mapping",
+      ],
+      [
+        "a header the importer does not take",
+        () =>
+          JSON.stringify(
+            MAPPING.map((column, index) =>
+              index === 2
+                ? { ...column, target: { kind: "field", name: "id" } }
+                : column
+            )
+          ),
+        "Invalid column mapping",
+        "invalid_mapping",
+      ],
+      [
+        "invalid JSON",
+        () => "{not json",
+        "Invalid column mapping",
+        "invalid_mapping",
+      ],
+    ])("refuses %s", async (_name, mapping, title, reason) => {
+      const result = (await post({
+        intent: "preview",
+        mapping: mapping(),
+      })) as ActionResult;
+
+      expect(buildContentImportPreview).not.toHaveBeenCalled();
+      expect(result.init?.status).toBe(400);
+      expect(result.data).toMatchObject({ error: { title } });
+      expect(captureServerEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: "import_failed",
+          properties: { organizationId: "org-1", reason },
+        })
+      );
+    });
+
+    it("refuses a mapping field larger than any real file needs", async () => {
+      const result = (await post({
+        intent: "preview",
+        mapping: "x".repeat(MAX_MAPPING_FIELD_LENGTH + 1),
+      })) as ActionResult;
+      expect(buildContentImportPreview).not.toHaveBeenCalled();
+      expect(result.init?.status).toBe(400);
+      // The form-field limit refuses it before the mapping is ever parsed.
+      expect(result.data).toMatchObject({
+        error: { title: "Validation error" },
+      });
+    });
+  });
+
+  it("reports nothing when the member may not import", async () => {
+    vi.mocked(requirePermission).mockRejectedValue(
+      new ShelfError({
+        cause: null,
+        message: "No access",
+        label: "Permission",
+        status: 403,
+      })
+    );
+    await post({ intent: "analyze" });
+    expect(captureServerEvent).not.toHaveBeenCalled();
   });
 });

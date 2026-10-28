@@ -179,6 +179,15 @@ export type ReservationEmailModelRequest =
 /** Max number of assets to display in booking email notifications */
 export const BOOKING_EMAIL_ASSETS_DISPLAY_LIMIT = 10;
 
+/**
+ * Toast body after a booking is created. Every create path leaves a DRAFT,
+ * which claims no assets or model capacity until it is reserved, and the next
+ * step is worded for both kinds of member: one whose reservation is a request
+ * for review and one who reserves directly.
+ */
+export const DRAFT_CREATED_MESSAGE =
+  "Your booking is saved as a draft and holds nothing yet. Reserve it, or request a reservation, from the booking page when you are ready.";
+
 /** Common relations to include in a booking */
 export const BOOKING_COMMON_INCLUDE = {
   custodianTeamMember: true,

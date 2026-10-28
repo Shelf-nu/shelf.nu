@@ -239,6 +239,7 @@ describe("fulfilAndCheckOut", () => {
 
     const result = await fulfilAndCheckOut({
       ...baseArgs,
+      seesAllBookings: true,
       requireExplicitCheckout: true,
     });
 
@@ -251,6 +252,10 @@ describe("fulfilAndCheckOut", () => {
       userId: "user-1",
       // Fulfil is authorized by the check-out rule, so it skips the add rule.
       access: null,
+      // With no access to ask, the caller's reach and client hints travel
+      // explicitly, for the model-pool refusal the add may raise.
+      hints,
+      seesAllBookings: true,
     });
     expect(partialCheckoutBooking).toHaveBeenCalledWith({
       id: "booking-1",

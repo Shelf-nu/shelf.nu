@@ -5,7 +5,10 @@ import { db } from "~/database/db.server";
 import { withBackgroundWriteSlot } from "~/utils/background-write-limiter.server";
 import { bookingCustodianIsSelf } from "~/utils/bookings";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
-import { CUSTODY_FILTER_REFUSED } from "~/utils/custody-filter";
+import {
+  CUSTODY_FILTER_REFUSED,
+  WITHOUT_CUSTODY,
+} from "~/utils/custody-filter";
 import { assertBulkDeleteConfirmed } from "~/utils/delete-confirmation.server";
 import type { ErrorLabel } from "~/utils/error";
 import {
@@ -346,6 +349,35 @@ export async function scopeCustodianFilterIds(args: {
   return teamMemberIds.length > 0 && allowed.length === 0
     ? [CUSTODY_FILTER_REFUSED]
     : allowed;
+}
+
+/**
+ * {@link scopeCustodianFilterIds} for a list whose custodian filter also offers
+ * "Without custody".
+ *
+ * Person ids are narrowed exactly as {@link scopeCustodianFilterIds} does.
+ * {@link WITHOUT_CUSTODY} names nobody and the dropdown offers it to every
+ * member who sees custody, so it passes through as requested.
+ *
+ * @param args - Same arguments as {@link scopeCustodianFilterIds}.
+ * @returns The allowed person ids (or the refusal id), followed by
+ *   {@link WITHOUT_CUSTODY} when it was requested.
+ */
+export async function scopeCustodianFilterIdsWithoutCustodyKept(args: {
+  teamMemberIds?: string[] | null;
+  canSeeAllCustody: boolean;
+  userId: string;
+  organizationId: Organization["id"];
+}): Promise<string[]> {
+  const requested = args.teamMemberIds ?? [];
+  const people = await scopeCustodianFilterIds({
+    ...args,
+    teamMemberIds: requested.filter((id) => id !== WITHOUT_CUSTODY),
+  });
+
+  return requested.includes(WITHOUT_CUSTODY)
+    ? [...people, WITHOUT_CUSTODY]
+    : people;
 }
 
 /** What a custodian picker is being used for. */

@@ -147,6 +147,7 @@ export async function action({ request }: ActionFunctionArgs) {
       organizationId,
       hints,
       userId: user.id,
+      seesAllBookings: access.bookings.seeAll,
       // Pass the booking's own window: this enables the conflict guard without
       // adjusting any dates (date adjustment requires intentChoice, which mobile
       // never sends — so this stays a "without-adjusted-date" checkout).

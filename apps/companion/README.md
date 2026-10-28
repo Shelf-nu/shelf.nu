@@ -124,7 +124,7 @@ The monorepo approach is what Expo recommends for apps that share a backend.
 
 | Tool      | Version        | Install                                                      |
 | --------- | -------------- | ------------------------------------------------------------ |
-| Node.js   | >= 22.20.0     | `nvm install 22`                                             |
+| Node.js   | >= 24.22.1     | `nvm install 24`                                             |
 | pnpm      | 9.15.9         | `corepack enable && corepack prepare pnpm@9.15.9 --activate` |
 | Xcode     | 16.4+ (stable) | App Store                                                    |
 | CocoaPods | Any            | `sudo gem install cocoapods`                                 |
@@ -413,4 +413,4 @@ reads them as off, which only under-offers.
 | Scanner    | expo-camera (QR + barcode types)  |
 | E2E Tests  | Maestro                           |
 | iOS Min    | iOS 15.1                          |
-| Node       | >= 22.20.0                        |
+| Node       | >= 24.22.1                        |

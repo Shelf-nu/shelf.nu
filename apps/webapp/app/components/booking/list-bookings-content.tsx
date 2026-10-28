@@ -262,11 +262,13 @@ export default function ListBookingsContent({
       <Td>
         <TeamMemberBadge
           teamMember={{
+            id: item.custodianTeamMemberId,
             name: item.custodianTeamMember
               ? item.custodianTeamMember.name
               : resolveUserDisplayName(item.custodianUser),
             user: item?.custodianUser ?? null,
           }}
+          linkTo="bookings"
         />
       </Td>
 

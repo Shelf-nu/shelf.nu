@@ -6,9 +6,9 @@ convention breaks and missed reuse, security holes, and what the change
 affects outside the diff. Every finding is verified before you see it, and the
 report is written in plain language.
 
-It is read-only. It never edits code and never posts to GitHub unless you ask
-after reading the report. The one exception is a "prove N" you request, which
-writes and then deletes a throwaway test. For handling CodeRabbit, Codex and Copilot comments
+It is read-only while it reviews. After the report it edits code only for the
+findings you pick to fix, or for a "prove N" you request, which writes and then
+deletes a throwaway test. It never posts to GitHub unless you ask. For handling CodeRabbit, Codex and Copilot comments
 after the review, use [`/watchdog`](./watchdog.md).
 
 ## Running it
@@ -68,13 +68,21 @@ read your working tree. A detached HEAD at the PR's head commit is fine.
    one-line reason; say "restore D2" to bring one back. Pre-existing nits are
    not listed.
 
-After the report you can say "fix 1-4", "restore D2", or "prove 3". `prove N`
-is the one exception to read-only: it writes a throwaway test under
+After the report the skill asks what to do next in a picker. You tick which
+findings to fix: each finding when there are 4 or fewer, otherwise whole
+sections (must fix, should fix, nits, spotted along the way), or type a custom
+range under "Other". A second question appears when at least one of prove,
+restore or post applies. If you close the picker, it waits for a typed reply to
+the Next line. You can also type "fix 1-4",
+"restore D2", or "prove 3". `prove N`
+writes a throwaway test under
 `apps/webapp/test/` that fails if finding N is real, runs only that file
-(`pnpm webapp:test -- --run <file>`), shows the output, and says proven, not
+(`pnpm webapp:test -- --run <file>`; for non-webapp code, the closest equivalent
+such as `node --test` for scripts), shows the output, and says proven, not
 proven, or inconclusive (the test failed for an unrelated reason such as a setup
 error). It then deletes the test in every case. It refuses when your checkout is
-not the PR head, is never committed, and never runs the full suite.
+not the PR head, when the PR's files have uncommitted edits, or when the proof
+file already exists. The test is never committed, and the full suite never runs.
 
 ## The agents
 
