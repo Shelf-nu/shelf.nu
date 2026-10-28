@@ -137,6 +137,7 @@ describe("locations.$locationId.overview loader", () => {
     });
     expect(getLocationTotalValuationMock).toHaveBeenCalledWith({
       locationId: "loc-123",
+      organizationId: "org-1",
     });
 
     expect(getClientHintMock).toHaveBeenCalledWith(args.request);
