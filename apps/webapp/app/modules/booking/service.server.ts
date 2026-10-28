@@ -263,7 +263,10 @@ import type {
   BookingEventType,
   NotificationRecipient,
 } from "./notification-recipients.server";
-import { sendBookingPushToCustodian } from "./push.server";
+import {
+  sendBookingPushToCustodian,
+  sendBookingPushToReplacedCustodian,
+} from "./push.server";
 import { resolveSliceKitIds } from "./slice-kit-attribution";
 import {
   isSliceOutByMarker,
@@ -2809,6 +2812,19 @@ export async function reserveBooking({
           // `modelRequests` is present on the loaded booking.
           modelRequests: updatedBooking.modelRequests,
         },
+      });
+    }
+
+    // A reservation that replaces the draft's custodian tells the replaced
+    // custodian, as a booking update does.
+    if (
+      bookingFound.custodianUserId &&
+      bookingFound.custodianUserId !== updatedBooking.custodianUserId
+    ) {
+      sendBookingPushToReplacedCustodian({
+        booking: updatedBooking,
+        replacedCustodianUserId: bookingFound.custodianUserId,
+        actorUserId: userId,
       });
     }
 

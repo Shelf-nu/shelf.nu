@@ -22424,6 +22424,7 @@ describe("booking emails name who acted", () => {
     const draft = {
       ...mockBookingData,
       ...EMAIL_FIELDS,
+      custodianUserId: EMAIL_FIELDS.custodianUser.id,
       status: BookingStatus.DRAFT,
       bookingAssets: [
         {
@@ -22487,22 +22488,36 @@ describe("booking emails name who acted", () => {
       hints: mockClientHints,
       alertsOrgOnReservation: false,
       tags: [],
-      userId: "user-1",
+      userId: "user-3",
     });
 
-    // The recipients and the push come from the row the update returned, not
-    // from the draft that was read before it.
+    // The recipients, the email and the push come from the row the update
+    // returned, not from the draft that was read before it.
     expect(getBookingNotificationRecipients).toHaveBeenCalledWith(
       expect.objectContaining({
         eventType: "RESERVATION",
         booking: expect.objectContaining({ custodianUserId: newCustodian.id }),
       })
     );
-    expect(sendPush).toHaveBeenCalledOnce();
-    expect(vitest.mocked(sendPush).mock.calls[0][0]).toMatchObject({
-      userIds: [newCustodian.id],
-      body: "05/03/2027, 10:00 to 06/03/2027, 16:00",
-    });
+    expect(sendEmail).toHaveBeenCalledOnce();
+    const [email] = vitest.mocked(sendEmail).mock.calls[0];
+    expect(email.to).toBe(newCustodian.email);
+    expect(email.text).toContain("Nia Next");
+    expect(email.text).toContain("05/03/2027");
+    expect(email.text).toContain("06/03/2027");
+    // The new custodian gets the reservation; the replaced one is told they
+    // were removed.
+    const pushes = vitest.mocked(sendPush).mock.calls.map(([push]) => push);
+    expect(pushes).toEqual([
+      expect.objectContaining({
+        userIds: [newCustodian.id],
+        body: "05/03/2027, 10:00 to 06/03/2027, 16:00",
+      }),
+      expect.objectContaining({
+        userIds: [EMAIL_FIELDS.custodianUser.id],
+        title: "You were removed from a booking",
+      }),
+    ]);
   });
 
   describe("custodian is the editor: email sent, no push", () => {

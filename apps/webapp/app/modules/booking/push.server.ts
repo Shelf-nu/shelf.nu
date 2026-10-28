@@ -90,13 +90,14 @@ export function sendBookingPushToCustodian({
 }
 
 /**
- * Tells the custodian a booking update replaced that they were removed,
- * unless they made the change themself. The push opens the bookings list:
+ * Tells the custodian a booking update or reservation replaced that they
+ * were removed, unless they made the change themself. The push opens the bookings list:
  * once removed, their role may no longer open the booking.
  *
- * @param args.booking - The updated booking
- * @param args.replacedCustodianUserId - The custodian the update replaced
- * @param args.actorUserId - The user who made the update
+ * @param args.booking - The booking as updated or reserved
+ * @param args.replacedCustodianUserId - The custodian the change replaced
+ * @param args.actorUserId - The user who made the change; `undefined` when
+ *   no user is known, so nobody is skipped
  */
 export function sendBookingPushToReplacedCustodian({
   booking,
@@ -105,7 +106,7 @@ export function sendBookingPushToReplacedCustodian({
 }: {
   booking: Pick<BookingForEmail, "id" | "name" | "organizationId">;
   replacedCustodianUserId: string;
-  actorUserId: string;
+  actorUserId: string | undefined;
 }): void {
   pushUnlessActor(
     replacedCustodianUserId,
