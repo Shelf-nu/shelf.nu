@@ -15,6 +15,7 @@ import {
   pushDb,
   pushStore,
   resetPushStore,
+  seedMemberships,
   seedOrganization,
   seedPreferences,
   seedPushToken,
@@ -164,6 +165,8 @@ beforeEach(() => {
   resetPushStore();
   seedOrganization({ id: "org-paid", userId: "owner-paid" }, "tier_1");
   seedOrganization({ id: "org-free", userId: "owner-free" }, "free");
+  seedMemberships("user-1", ["org-paid", "org-free"]);
+  seedMemberships("user-2", ["org-paid", "org-free"]);
   expoSend.mockImplementation(acceptChunk);
 });
 
@@ -456,6 +459,20 @@ describe("deliverPush", () => {
         body: `${"b".repeat(239)}…`,
       }),
     ]);
+  });
+
+  it("sends nothing to someone who is no longer a member of the workspace", async () => {
+    seedPushToken({ token: LIVE_TOKEN, userId: "user-1" });
+    seedPushToken({ token: "ExponentPushToken[former]", userId: "user-3" });
+
+    await sendAndDeliver({ userIds: ["user-1", "user-3"] });
+    expect(sentMessages()).toEqual([
+      expect.objectContaining({ to: LIVE_TOKEN }),
+    ]);
+
+    expoSend.mockClear();
+    await sendAndDeliver({ userIds: ["user-3"] });
+    expect(expoSend).not.toHaveBeenCalled();
   });
 
   it("sends nothing to someone who switched push off", async () => {

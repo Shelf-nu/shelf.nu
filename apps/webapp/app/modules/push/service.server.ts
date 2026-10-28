@@ -5,8 +5,9 @@
  *
  * Feature code calls `sendPush`. It only queues a job and never throws into
  * its caller, the same contract as `sendEmail`. The push worker then runs
- * `deliverPush`, which checks the workspace tier, drops recipients who switched
- * the category off, sends one message per live device through Expo, disables
+ * `deliverPush`, which checks the workspace tier, drops recipients who have left
+ * the workspace or switched the category off, sends one message per live
+ * device through Expo, disables
  * devices Expo reports as gone, queues another try for batches Expo refused
  * with an error that can clear by itself, and queues `checkPushReceipts` for
  * 15 minutes later to catch devices that fail after Expo hands the message to
@@ -60,8 +61,9 @@ import type {
  * out may have reached Expo anyway, and a job killed after Expo accepted a
  * batch but before pg-boss marked it complete expires and runs again,
  * resending that batch. Each Expo request fails after 30 seconds without an
- * answer (see `expo.server.ts`), so a send of a few batches ends well inside
- * the five minutes instead of expiring while it still runs.
+ * answer and six batches go out at once (see `expo.server.ts`), so a send to
+ * a few thousand devices ends inside the five minutes instead of expiring
+ * while it still runs.
  */
 const SEND_JOB_OPTIONS = {
   retryLimit: 2,
@@ -223,13 +225,14 @@ export async function sendPush(message: PushMessage): Promise<void> {
  * on the last follow-up, is logged and the job completes, because trying
  * again would fail the same way.
  *
- * A follow-up runs the same tier, preference and device checks, narrowed to
+ * A follow-up runs the same tier, membership, preference and device checks,
+ * narrowed to
  * its listed devices, so a device signed out, disabled or taken over by
  * someone else since the first try is skipped.
  *
  * @param job - The send job, as `sendPush` or an earlier run queued it
- * @throws {ShelfError} When loading the tier, the preferences or the devices
- *   fails, so pg-boss retries
+ * @throws {ShelfError} When loading the tier, the memberships, the preferences
+ *   or the devices fails, so pg-boss retries
  */
 export async function deliverPush({
   message,
@@ -250,8 +253,22 @@ export async function deliverPush({
     return;
   }
 
+  // The push names this workspace's assets and bookings, so only people who
+  // are still members when it is sent may receive it
+  const members = await db.userOrganization.findMany({
+    where: { organizationId, userId: { in: message.userIds } },
+    select: { userId: true },
+  });
+  if (members.length === 0) {
+    Logger.info(
+      "push.send skipped: no recipient is a member of the workspace",
+      logContext
+    );
+    return;
+  }
+
   const recipients = await filterRecipientsByPreference({
-    userIds: message.userIds,
+    userIds: members.map(({ userId }) => userId),
     category,
   });
   if (recipients.length === 0) {
@@ -377,12 +394,13 @@ export async function deliverPush({
  * Reads the delivery receipts for tickets a `send` job collected and disables
  * every device a receipt reports as unregistered: the body of a `receipts` job.
  * A device seen after `sentAt` has registered again since, so it is left
- * alone. Tickets Expo has no receipt for yet are checked again later (see
+ * alone. Tickets Expo has no receipt for yet, including those in a request
+ * Expo refused while others went through, are checked again later (see
  * {@link MAX_RECEIPT_RECHECKS}); once the re-checks run out, how many are
  * left is logged. Safe to repeat.
  *
  * @param job - The receipts job `deliverPush` or an earlier check queued
- * @throws {ShelfError} When Expo rejects the request, so pg-boss retries
+ * @throws {ShelfError} When Expo refuses every request, so pg-boss retries
  * @throws When queueing the next check fails, so pg-boss retries
  */
 export async function checkPushReceipts({

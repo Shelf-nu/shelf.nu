@@ -13,6 +13,7 @@ import type PgBoss from "pg-boss";
 import {
   pushStore,
   resetPushStore,
+  seedMemberships,
   seedOrganization,
   seedPushToken,
 } from "@helpers/in-memory-push-db";
@@ -111,6 +112,8 @@ describe("registerPushWorkers", () => {
     vi.setSystemTime(NOW);
     resetPushStore();
     seedOrganization({ id: "org-paid", userId: "owner-paid" }, "tier_2");
+    seedMemberships("user-1", ["org-paid"]);
+    seedMemberships("user-2", ["org-paid"]);
     seedPushToken({
       token: GONE_TOKEN,
       userId: "user-1",

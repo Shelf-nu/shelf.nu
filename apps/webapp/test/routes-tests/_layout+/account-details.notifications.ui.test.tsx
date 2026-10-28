@@ -107,6 +107,28 @@ describe("notifications tab", () => {
     );
   });
 
+  it("ignores a second flip while the first save is in flight, so saves never race", async () => {
+    const submissions: Record<string, FormDataEntryValue>[] = [];
+    let finishSave: () => void = () => {};
+    renderTab(async (submitted) => {
+      submissions.push(submitted);
+      await new Promise<void>((resolve) => {
+        finishSave = resolve;
+      });
+      return accept();
+    });
+    const bookings = await screen.findByRole("switch", { name: "Bookings" });
+
+    await userEvent.click(bookings);
+    await waitFor(() => expect(bookings).toHaveAttribute("aria-busy", "true"));
+    await userEvent.click(bookings);
+
+    expect(bookings).toHaveAttribute("aria-checked", "false");
+    finishSave();
+    await waitFor(() => expect(bookings).toHaveAttribute("aria-busy", "false"));
+    expect(submissions).toEqual([{ preference: "bookings", enabled: "off" }]);
+  });
+
   it("saves a switch on a fetcher the global progress bar ignores", async () => {
     const submissions: Record<string, FormDataEntryValue>[] = [];
     renderTab((submitted) => {

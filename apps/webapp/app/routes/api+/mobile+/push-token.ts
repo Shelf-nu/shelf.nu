@@ -35,13 +35,26 @@ const ExpoPushTokenSchema = z
   .max(255)
   .refine(Expo.isExpoPushToken, "Expected an Expo push token.");
 
+/**
+ * An optional display label, cut to `length` characters. These fields only
+ * describe the device, so an unusually long value is shortened rather than
+ * refusing the registration; the hard cap only turns away abuse.
+ */
+function displayLabel(length: number) {
+  return z
+    .string()
+    .max(1000)
+    .nullish()
+    .transform((value) => value?.slice(0, length));
+}
+
 /** POST body: the device to register for the signed-in person. */
 const RegisterSchema = z.object({
   token: ExpoPushTokenSchema,
   platform: z.enum(["IOS", "ANDROID"]),
   // `expo-device` reports `null` when it cannot name the model
-  deviceName: z.string().max(120).nullish(),
-  appVersion: z.string().max(20).nullish(),
+  deviceName: displayLabel(120),
+  appVersion: displayLabel(20),
 });
 
 /** DELETE body: the device to forget. */

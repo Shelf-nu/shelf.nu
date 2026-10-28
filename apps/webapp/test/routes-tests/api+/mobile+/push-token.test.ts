@@ -119,6 +119,39 @@ describe("POST /api/mobile/push-token", () => {
       }),
     ]);
   });
+
+  it("registers a device with an over-long name and version, cut to 120 and 20 characters", async () => {
+    const result = await call(
+      "POST",
+      {
+        token: TOKEN,
+        platform: "IOS",
+        deviceName: "n".repeat(200),
+        appVersion: "1.7.0-build.".padEnd(40, "0"),
+      },
+      "user-a"
+    );
+
+    expect(result).toEqual({ status: 200, body: { ok: true } });
+    expect(pushStore.pushTokens).toEqual([
+      expect.objectContaining({
+        token: TOKEN,
+        deviceName: "n".repeat(120),
+        appVersion: "1.7.0-build.".padEnd(20, "0"),
+      }),
+    ]);
+  });
+
+  it("answers 400 for a device name past the hard cap", async () => {
+    const result = await call(
+      "POST",
+      { token: TOKEN, platform: "IOS", deviceName: "n".repeat(1001) },
+      "user-a"
+    );
+
+    expect(result.status).toBe(400);
+    expect(pushStore.pushTokens).toEqual([]);
+  });
 });
 
 describe("DELETE /api/mobile/push-token", () => {

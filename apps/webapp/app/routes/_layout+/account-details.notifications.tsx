@@ -21,6 +21,7 @@ import { z } from "zod";
 import { ErrorContent } from "~/components/errors";
 import { Switch } from "~/components/forms/switch";
 import { Card } from "~/components/shared/card";
+import { useDisabled } from "~/hooks/use-disabled";
 import {
   getNotificationPreferences,
   updateNotificationPreferences,
@@ -174,7 +175,11 @@ export default function NotificationSettings() {
 /**
  * A labelled switch that saves its own value when flipped. It shows the
  * submitted value while the save is in flight and falls back to the saved
- * value afterwards, so a rejected save flips it back. Server errors show
+ * value afterwards, so a rejected save flips it back. While a save is in
+ * flight the switch ignores further flips and reports itself busy, so two
+ * saves of the same switch can never race and land out of order. It stays
+ * focusable rather than `disabled`, which would drop keyboard focus.
+ * Server errors show
  * under the help text and are announced. Its fetcher key starts with
  * `notification-preference-`, which keeps the global progress bar still:
  * the switch itself already shows the change.
@@ -195,6 +200,7 @@ function PreferenceSwitch({
   const { label, help } = SWITCH_COPY[preference];
   const id = `notification-${preference}`;
 
+  const saving = useDisabled(fetcher);
   const submitted = fetcher.formData?.get("enabled");
   const checked = submitted ? submitted === "on" : enabled;
 
@@ -228,7 +234,9 @@ function PreferenceSwitch({
       <Switch
         id={id}
         checked={checked}
+        aria-busy={saving}
         onCheckedChange={(next) => {
+          if (saving) return;
           void fetcher.submit(
             { preference, enabled: next ? "on" : "off" },
             { method: "post" }
