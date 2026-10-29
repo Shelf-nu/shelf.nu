@@ -122,8 +122,8 @@ export default function BookingProcessSidebar({
                 out.
               </li>
               <li>
-                If you need to extend your booking, contact an administrator or
-                manager before your booking end date.
+                If you need to change the end date of your booking, contact an
+                administrator or manager before your booking end date.
               </li>
               <li>
                 Administrators and managers have final say on booking approvals

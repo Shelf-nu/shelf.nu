@@ -63,7 +63,11 @@ import { db, type ExtendedPrismaClient } from "~/database/db.server";
 import { LONG_TRANSACTION_OPTIONS } from "~/database/transaction-options.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { sendEmail } from "~/emails/mail.server";
-import type { BookingEmailActor, BookingForEmail } from "~/emails/types";
+import type {
+  BookingEmailActor,
+  BookingEmailActorLabel,
+  BookingForEmail,
+} from "~/emails/types";
 import { lockAssetsForArchiveGuard } from "~/modules/asset/archive-lock.server";
 import {
   ACTIVE_BOOKING_STATUSES,
@@ -113,6 +117,7 @@ import {
   type DestroyedKitUnitsResult,
   type EmptiedKitMembership,
 } from "~/modules/kit/service.server";
+import { bookingEmailSubject } from "~/modules/push/messages";
 import { assetQtyMeta, formatUnitCount } from "~/utils/asset-quantity";
 import {
   bookingAddableStatusClause,
@@ -258,7 +263,14 @@ import {
 } from "./kit-conflicts.server";
 import { assertScannedUnitsAreNotKitMembers } from "./kit-member-scan-guard.server";
 import { getBookingNotificationRecipients } from "./notification-recipients.server";
-import type { NotificationRecipient } from "./notification-recipients.server";
+import type {
+  BookingEventType,
+  NotificationRecipient,
+} from "./notification-recipients.server";
+import {
+  sendBookingPushToCustodian,
+  sendBookingPushToReplacedCustodian,
+} from "./push.server";
 import { resolveSliceKitIds } from "./slice-kit-attribution";
 import {
   isSliceOutByMarker,
@@ -313,48 +325,48 @@ function assetBatchTx<T>(fn: (tx: BookingTx) => Promise<T>): Promise<T> {
 }
 
 /**
- * Sends a booking email to all resolved notification recipients.
- * Each recipient gets an individual email with personalized footer.
- */
-/**
- * Sends an individual personalized email to each resolved notification
- * recipient. Each email includes a per-recipient footer that explains
- * why the person received the notification (e.g., "you are the custodian",
- * "you manage bookings in the workspace"), driven by `recipient.reason`.
+ * Sends a booking event's notifications: an individual email to each resolved
+ * recipient, and one push to the custodian among them.
  *
- * Emails are fired concurrently (non-awaited `sendEmail` calls) to avoid
- * blocking the booking flow on slow SMTP delivery.
+ * Each email carries a footer that explains why the person received it (e.g.
+ * "you are the custodian", "you manage bookings in the workspace"), driven by
+ * `recipient.reason`. Emails are fired concurrently (non-awaited `sendEmail`
+ * calls) so slow SMTP delivery never blocks the booking flow, and the push is
+ * queued the same way.
  *
  * Each recipient's date/time formatting is resolved from their already-loaded
  * row (the four raw pref fields on `NotificationRecipient`) via the pure
- * `resolveFormatPrefs` — no per-recipient DB fetch (avoids an N+1). The
+ * `resolveFormatPrefs`, so the fan-out makes no per-recipient DB fetch. The
  * `buildText`/`buildHeading` callbacks receive those resolved prefs so the
  * plain-text body and heading dates honor each recipient.
  *
+ * @param eventType - The booking event; picks the email subject and the push
+ *   wording
  * @param recipients - Pre-resolved list from `getBookingNotificationRecipients()`
  * @param booking - The booking data used to render the email template
- * @param subject - Email subject line
  * @param buildText - Builds the plain-text body from a recipient's resolved prefs
  *   and the actor, passed together so the text and HTML lines always agree
  * @param buildHeading - Builds the HTML heading from a recipient's resolved prefs
  * @param hints - Acting user's hints, only the null-field fallback for recipients
  * @param actor - Who acted and when, shown under the heading and handed to
  *   `buildText` for the plain-text body
+ * @param actorUserId - The user who acted, left out of the push
  * @param templateProps - Additional props forwarded to the email template
  */
 async function sendBookingEmailToAllRecipients({
+  eventType,
   recipients,
   booking,
-  subject,
   buildText,
   buildHeading,
   hints,
   actor,
+  actorUserId,
   templateProps,
 }: {
+  eventType: BookingEventType;
   recipients: NotificationRecipient[];
   booking: BookingForEmail;
-  subject: string;
   /** From `resolveBookingEmailActor`; `undefined` leaves the line out. */
   actor: BookingEmailActor | undefined;
   /**
@@ -370,6 +382,7 @@ async function sendBookingEmailToAllRecipients({
   buildHeading: (prefs: ResolvedFormatPrefs) => string;
   /** Acting user's hints — only the null-field fallback for recipients. */
   hints: ClientHint;
+  actorUserId: string | undefined;
   templateProps?: {
     hideViewButton?: boolean;
     cancellationReason?: string;
@@ -378,6 +391,8 @@ async function sendBookingEmailToAllRecipients({
     modelRequests?: ReservationEmailModelRequest[];
   };
 }) {
+  const subject = bookingEmailSubject(eventType, booking.name);
+
   for (const recipient of recipients) {
     // Recipient prefs resolved from the ALREADY-LOADED row (raw pref fields on
     // NotificationRecipient); hints is the null-field fallback only. Pure —
@@ -402,6 +417,14 @@ async function sendBookingEmailToAllRecipients({
       html,
     });
   }
+
+  sendBookingPushToCustodian({
+    eventType,
+    booking,
+    recipients,
+    hints,
+    actorUserId,
+  });
 }
 
 async function cancelScheduler(
@@ -2746,11 +2769,19 @@ export async function reserveBooking({
       }
     }
 
-    // Resolve notification recipients and send emails.
-    // Forwarded so the broadcast fires only for reservations whose maker's
-    // role triggers it.
+    // The notifications read the booking as reserved: a reservation can change
+    // the custodian and the dates, and `bookingFound` still holds the draft's.
+    // Read after the commit so the transaction stays short, and kept apart
+    // from the return value, which callers may send to the browser.
+    const reservedBooking = await db.booking.findUniqueOrThrow({
+      where: { id: updatedBooking.id, organizationId },
+      include: BOOKING_INCLUDE_FOR_RESERVATION_EMAIL,
+    });
+
+    // Resolve notification recipients and send emails. Forwarded so the
+    // broadcast fires only for reservations whose maker's role triggers it.
     const recipients = await getBookingNotificationRecipients({
-      booking: bookingFound,
+      booking: reservedBooking,
       eventType: "RESERVATION",
       organizationId,
       editorUserId: userId,
@@ -2758,16 +2789,16 @@ export async function reserveBooking({
     });
 
     if (recipients.length > 0) {
-      const custodian = bookingFound?.custodianUser
-        ? resolveUserDisplayName(bookingFound.custodianUser)
-        : bookingFound.custodianTeamMember?.name ?? "";
+      const custodian = reservedBooking.custodianUser
+        ? resolveUserDisplayName(reservedBooking.custodianUser)
+        : reservedBooking.custodianTeamMember?.name ?? "";
 
       // Only forward outstanding requests so the email doesn't render
       // fulfilled historical rows. `fulfilledAt
       // IS NULL` is the canonical outstanding filter in the new schema;
       // each row shows the STILL-PENDING unit count
       // (`quantity - fulfilledQuantity`).
-      const outstandingModelRequests = bookingFound.modelRequests
+      const outstandingModelRequests = reservedBooking.modelRequests
         .filter((req) => req.fulfilledAt === null)
         .map((req) => ({
           quantity: req.quantity - req.fulfilledQuantity,
@@ -2780,33 +2811,47 @@ export async function reserveBooking({
       });
 
       await sendBookingEmailToAllRecipients({
+        eventType: "RESERVATION",
         recipients,
-        booking: bookingFound,
-        subject: `✅ Booking reserved (${bookingFound.name}) - shelf.nu`,
+        booking: reservedBooking,
         buildText: (textArgs) =>
           assetReservedEmailContent({
             ...textArgs,
-            bookingName: bookingFound.name,
-            assetsCount: bookingFound._count.bookingAssets,
+            bookingName: reservedBooking.name,
+            assetsCount: reservedBooking._count.bookingAssets,
             custodian,
             from,
             to,
-            bookingId: bookingFound.id,
-            customEmailFooter: bookingFound.organization.customEmailFooter,
+            bookingId: reservedBooking.id,
+            customEmailFooter: reservedBooking.organization.customEmailFooter,
             modelRequests: outstandingModelRequests,
           }),
         buildHeading: () => `Booking reservation for ${custodian}`,
         hints,
         actor,
+        actorUserId: userId,
         templateProps: {
-          assets: bookingFound.bookingAssets,
+          assets: reservedBooking.bookingAssets,
           // Forward any outstanding `BookingModelRequest` rows so the
           // reservation email can render a "Requested models" section.
           // The include widening on
           // `BOOKING_INCLUDE_FOR_RESERVATION_EMAIL` guarantees
           // `modelRequests` is present on the loaded booking.
-          modelRequests: bookingFound.modelRequests,
+          modelRequests: reservedBooking.modelRequests,
         },
+      });
+    }
+
+    // A reservation that replaces the draft's custodian tells the replaced
+    // custodian, as a booking update does.
+    if (
+      bookingFound.custodianUserId &&
+      bookingFound.custodianUserId !== reservedBooking.custodianUserId
+    ) {
+      sendBookingPushToReplacedCustodian({
+        booking: reservedBooking,
+        replacedCustodianUserId: bookingFound.custodianUserId,
+        actorUserId: userId,
       });
     }
 
@@ -2852,11 +2897,14 @@ export async function reserveBooking({
  *   a non-null `to`
  * @param hints - Client hints forwarded to the scheduled jobs and email
  * @param organizationId - Booking's organization (for recipient resolution)
+ * @param actorUserId - The user who checked the booking out; an immediate
+ *   reminder emails them but does not push them about their own checkout
  */
 async function scheduleCheckinReminderForBooking(
   booking: { id: string; to: Date | null },
   hints: ClientHint,
-  organizationId: string
+  organizationId: string,
+  actorUserId: string | undefined
 ) {
   const effectiveTo = booking.to;
   if (!effectiveTo) {
@@ -2886,7 +2934,8 @@ async function scheduleCheckinReminderForBooking(
       bookingForEmail,
       bookingForEmail._count.bookingAssets,
       hints,
-      organizationId
+      organizationId,
+      { actorUserId }
     );
 
     const when = new Date(effectiveTo);
@@ -3595,7 +3644,8 @@ async function runCheckoutSideEffects({
   await scheduleCheckinReminderForBooking(
     { id: bookingFound.id, to: effectiveTo ?? null },
     hints,
-    organizationId
+    organizationId,
+    userId
   );
 
   /** Hydrate the full booking with relations for the return payload only. */
@@ -7039,9 +7089,9 @@ export async function checkinBooking({
       });
 
       await sendBookingEmailToAllRecipients({
+        eventType: "CHECKIN",
         recipients,
         booking: updatedBooking,
-        subject: `🎉 Booking complete (${updatedBooking.name}) - shelf.nu`,
         buildText: (textArgs) =>
           completedBookingEmailContent({
             ...textArgs,
@@ -7057,6 +7107,7 @@ export async function checkinBooking({
           `Your booking has been completed: "${updatedBooking.name}"`,
         hints,
         actor,
+        actorUserId: userId,
       });
     }
 
@@ -11114,7 +11165,8 @@ export async function partialCheckoutBooking({
         await scheduleCheckinReminderForBooking(
           { id: bookingFound.id, to: bookingFound.to },
           hints,
-          organizationId
+          organizationId,
+          userId
         );
       }
     }
@@ -12427,9 +12479,9 @@ export async function cancelBooking({
       });
 
       await sendBookingEmailToAllRecipients({
+        eventType: "CANCEL",
         recipients,
         booking,
-        subject: `❌ Booking cancelled (${booking.name}) - shelf.nu`,
         buildText: (textArgs) =>
           cancelledBookingEmailContent({
             ...textArgs,
@@ -12446,6 +12498,7 @@ export async function cancelBooking({
           `Your booking has been cancelled: "${booking.name}"`,
         hints,
         actor,
+        actorUserId: userId,
         templateProps: {
           cancellationReason: cancellationReason || undefined,
         },
@@ -12590,9 +12643,9 @@ export async function revertBookingToDraft({
         });
 
         await sendBookingEmailToAllRecipients({
+          eventType: "REVERT_TO_DRAFT",
           recipients,
           booking: draftBooking,
-          subject: `↩️ Booking reverted to draft (${draftBooking.name}) - shelf.nu`,
           buildText: (textArgs) =>
             revertedToDraftEmailContent({
               ...textArgs,
@@ -12608,6 +12661,7 @@ export async function revertBookingToDraft({
             `Your booking has been reverted to draft: "${draftBooking.name}"`,
           hints,
           actor,
+          actorUserId: userId,
         });
       }
     } catch (cause) {
@@ -12635,9 +12689,33 @@ export async function revertBookingToDraft({
 }
 
 /**
- * Extends an ongoing or overdue booking to a new end date.
+ * How each direction of an end-date change reads: the activity note's verb,
+ * the email's actor line, and the booking event that words its email subject
+ * and push.
+ */
+const END_DATE_CHANGE_COPY = {
+  later: { verb: "extended", actorLabel: "Extended by", eventType: "EXTEND" },
+  earlier: {
+    verb: "shortened",
+    actorLabel: "Shortened by",
+    eventType: "SHORTEN",
+  },
+} as const satisfies Record<
+  "later" | "earlier",
+  {
+    verb: string;
+    actorLabel: BookingEmailActorLabel;
+    eventType: BookingEventType;
+  }
+>;
+
+/**
+ * Moves the end of an ongoing or overdue booking, later or earlier.
  *
- * @param params.id - The booking to extend
+ * Only the dates move: items stay checked out until they are checked in, and
+ * an item still out at the new end makes the booking overdue then.
+ *
+ * @param params.id - The booking whose end changes
  * @param params.organizationId - The caller's workspace; the lookup is scoped to it
  * @param params.newEndDate - The new live end (`to`); the planned end is left alone
  * @param params.hints - Client hints, for the note's dates, the check-in
@@ -12646,12 +12724,15 @@ export async function revertBookingToDraft({
  * @param params.access - The caller's access, for the ownership gate
  * @param params.roles - Every role on the caller's membership, for the
  *   `booking:extend` grant
- * @returns The updated booking
+ * @returns The updated booking, with `jobsRescheduled: false` when the new end
+ *   is stored but its check-in reminder and overdue job could not be
+ *   scheduled, so the booking will not turn overdue on its own
  * @throws {ShelfError} 403 when the caller lacks `booking:extend` or does not
  *   own the booking
- * @throws {ShelfError} 400 when `newEndDate` is not after the booking's end,
- *   or when the booking changed between the read and the write (another
- *   extension landed, or the booking was closed)
+ * @throws {ShelfError} 400 when `newEndDate` is not after the booking's start,
+ *   is not in the future, or equals the current end, when a later end overlaps
+ *   a reserved booking, or when the booking changed between the read and the
+ *   write (another end-date change landed, or the booking was closed)
  */
 export async function extendBooking({
   id,
@@ -12721,29 +12802,57 @@ export async function extendBooking({
       throw new ShelfError({
         cause: null,
         label: "Booking",
-        message: "You are not authorized to extend this booking.",
+        message:
+          "You are not authorized to change the end date of this booking.",
         status: 403,
         shouldBeCaptured: false,
       });
     }
 
-    validateBookingOwnership({ booking, userId, access, action: "extend" });
+    validateBookingOwnership({
+      booking,
+      userId,
+      access,
+      action: "change the end date of",
+    });
 
     if (!isExtendableStatus(booking.status)) {
       throw new ShelfError({
         cause: null,
         label,
-        message: "Extending booking is not allowed for current status.",
+        message:
+          "Changing the end date is not allowed for the current booking status.",
       });
     }
 
-    // An extension only ever moves the end later; an earlier end is a
-    // different operation.
-    if (newEndDate <= booking.to) {
+    const movesLater = newEndDate > booking.to;
+    const copy = END_DATE_CHANGE_COPY[movesLater ? "later" : "earlier"];
+
+    if (newEndDate <= booking.from) {
       throw new ShelfError({
         cause: null,
         label,
-        message: "The new end date must be after the current end date.",
+        message: "The new end date must be after the booking start.",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
+    if (newEndDate <= new Date()) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message: "The new end date must be in the future.",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
+    if (newEndDate.getTime() === booking.to.getTime()) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message: "The booking already ends at that date.",
         status: 400,
         shouldBeCaptured: false,
       });
@@ -12760,123 +12869,128 @@ export async function extendBooking({
       booking.bookingAssets
     );
 
-    /** Validate that there are still active assets to extend the booking for */
     if (activeAssets.length === 0 && kitMembershipIdsStillOut.length === 0) {
       throw new ShelfError({
         cause: null,
         label,
         message:
-          "Cannot extend booking. All assets have been returned. Please complete the booking instead.",
+          "Cannot change the end date. All assets have been returned. Please complete the booking instead.",
         shouldBeCaptured: false,
       });
     }
 
     /** Wrap conflict detection and update in a transaction to prevent race conditions */
     const updatedBooking = await db.$transaction(async (tx) => {
-      /**
-       * Every membership of the kits still out. A reservation holds a kit
-       * through any of its memberships, not only the ones this booking's slices
-       * point at.
-       */
-      let heldKitMembershipIds: string[] = [];
-      if (kitMembershipIdsStillOut.length > 0) {
-        const heldMemberships = await tx.assetKit.findMany({
-          where: { id: { in: kitMembershipIdsStillOut }, organizationId },
-          select: { kitId: true },
-        });
-        const heldKitIds = [...new Set(heldMemberships.map((m) => m.kitId))];
-        if (heldKitIds.length > 0) {
-          const memberships = await tx.assetKit.findMany({
-            where: { kitId: { in: heldKitIds }, organizationId },
-            select: { id: true },
+      // Only a later end adds time to the booking's window; an earlier end
+      // shrinks it and cannot overlap anything it did not already overlap.
+      if (movesLater) {
+        /**
+         * Every membership of the kits still out. A reservation holds a kit
+         * through any of its memberships, not only the ones this booking's
+         * slices point at.
+         */
+        let heldKitMembershipIds: string[] = [];
+        if (kitMembershipIdsStillOut.length > 0) {
+          const heldMemberships = await tx.assetKit.findMany({
+            where: { id: { in: kitMembershipIdsStillOut }, organizationId },
+            select: { kitId: true },
           });
-          heldKitMembershipIds = memberships.map((m) => m.id);
+          const heldKitIds = [...new Set(heldMemberships.map((m) => m.kitId))];
+          if (heldKitIds.length > 0) {
+            const memberships = await tx.assetKit.findMany({
+              where: { kitId: { in: heldKitIds }, organizationId },
+              select: { id: true },
+            });
+            heldKitMembershipIds = memberships.map((m) => m.id);
+          }
         }
-      }
 
-      const activeAssetsClause: Prisma.BookingAssetWhereInput = {
-        assetId: { in: activeAssets.map((a) => a.id) },
-      };
+        const activeAssetsClause: Prisma.BookingAssetWhereInput = {
+          assetId: { in: activeAssets.map((a) => a.id) },
+        };
 
-      /** Checking if the booking period is clashing with any other booking containing the same active asset(s) or kit(s).*/
-      const clashingBookings: ClashingBooking[] = await tx.booking.findMany({
-        where: {
-          id: { not: booking.id },
+        /** Checking if the booking period is clashing with any other booking containing the same active asset(s) or kit(s).*/
+        const clashingBookings: ClashingBooking[] = await tx.booking.findMany({
+          where: {
+            id: { not: booking.id },
+            organizationId,
+            status: {
+              in: [BookingStatus.RESERVED],
+            },
+            bookingAssets: {
+              some:
+                heldKitMembershipIds.length > 0
+                  ? {
+                      OR: [
+                        activeAssetsClause,
+                        { assetKitId: { in: heldKitMembershipIds } },
+                      ],
+                    }
+                  : activeAssetsClause,
+            },
+            // Check for bookings that start within the added time
+            from: {
+              gt: booking.to,
+              lte: newEndDate,
+            },
+          },
+          select: { id: true, name: true },
+        });
+
+        if (clashingBookings?.length > 0) {
+          throw new ShelfError({
+            cause: null,
+            label,
+            message:
+              "Cannot extend booking because the extended period is overlapping with the following bookings:",
+            additionalData: {
+              clashingBookings: [...clashingBookings],
+            },
+            shouldBeCaptured: false,
+          });
+        }
+
+        /**
+         * The days being added may overlap model reservations that other
+         * bookings hold, which the clash check above cannot see: a
+         * `BookingModelRequest` names no asset. Every INDIVIDUAL unit the
+         * booking holds by name is measured again against the pool from
+         * `booking.to` to `newEndDate`. The start is inclusive: a claim
+         * already running at the instant `booking.to` counts, because the
+         * booking holds its units through that instant too. Each claim counts
+         * until its own end, exclusive, so one that ends exactly at
+         * `booking.to` does not, and one that starts at `newEndDate` is never
+         * reached. This is one instant wider than the clash check above,
+         * which looks only at bookings that start strictly after
+         * `booking.to`. Claims lying entirely inside the days the booking
+         * already covers were measured when it was reserved and are not this
+         * change's business. Kit-driven rows are included: the later end
+         * takes the unit off the pool for the added days however it got onto
+         * the booking.
+         */
+        await assertModelUnitsNotReservedElsewhere({
+          assets: booking.bookingAssets
+            .filter((ba) => ba.asset.type === AssetType.INDIVIDUAL)
+            .map((ba) => ba.asset),
+          bookingId: booking.id,
+          bookingStatus: booking.status,
+          windowChanged: true,
           organizationId,
-          status: {
-            in: [BookingStatus.RESERVED],
-          },
-          bookingAssets: {
-            some:
-              heldKitMembershipIds.length > 0
-                ? {
-                    OR: [
-                      activeAssetsClause,
-                      { assetKitId: { in: heldKitMembershipIds } },
-                    ],
-                  }
-                : activeAssetsClause,
-          },
-          // Check for bookings that start within the extension period
-          from: {
-            gt: booking.to,
-            lte: newEndDate,
-          },
-        },
-        select: { id: true, name: true },
-      });
-
-      if (clashingBookings?.length > 0) {
-        throw new ShelfError({
-          cause: null,
-          label,
-          message:
-            "Cannot extend booking because the extended period is overlapping with the following bookings:",
-          additionalData: {
-            clashingBookings: [...clashingBookings],
-          },
-          shouldBeCaptured: false,
+          from: booking.to,
+          to: newEndDate,
+          tx,
+          hints,
+          userId,
+          revealOtherBookings: access.bookings.seeAll,
         });
       }
-
-      /**
-       * The days being added may overlap model reservations that other
-       * bookings hold, which the clash check above cannot see: a
-       * `BookingModelRequest` names no asset. Every INDIVIDUAL unit the
-       * booking holds by name is measured again against the pool from
-       * `booking.to` to `newEndDate`. The start is inclusive: a claim already
-       * running at the instant `booking.to` counts, because the booking holds
-       * its units through that instant too. Each claim counts until its own
-       * end, exclusive, so one that ends exactly at `booking.to` does not, and
-       * one that starts at `newEndDate` is never reached. This is one instant
-       * wider than the clash check above, which looks only at bookings that
-       * start strictly after `booking.to`. Claims lying entirely inside the
-       * days the booking already covers were measured when it was reserved
-       * and are not this extension's business. Kit-driven rows are included:
-       * the extension takes the unit off the pool for the added days however
-       * it got onto the booking.
-       */
-      await assertModelUnitsNotReservedElsewhere({
-        assets: booking.bookingAssets
-          .filter((ba) => ba.asset.type === AssetType.INDIVIDUAL)
-          .map((ba) => ba.asset),
-        bookingId: booking.id,
-        bookingStatus: booking.status,
-        windowChanged: true,
-        organizationId,
-        from: booking.to,
-        to: newEndDate,
-        tx,
-        hints,
-        userId,
-        revealOtherBookings: access.bookings.seeAll,
-      });
 
       // The row must still be exactly as read when the lock is taken: an
-      // extension that landed since the read above, a booking closed, or the
-      // overdue job flipping it meanwhile leaves no row to update. So the
-      // note and the events below, built from that read, describe the change
-      // this write made. Either live status reads ONGOING once extended.
+      // end-date change that landed since the read above, a booking closed,
+      // or the overdue job flipping it meanwhile leaves no row to update. So
+      // the note and the events below, built from that read, describe the
+      // change this write made. The new end is in the future, so the live
+      // status reads ONGOING either way.
       return tx.booking
         .update({
           where: {
@@ -12889,8 +13003,8 @@ export async function extendBooking({
             status: BookingStatus.ONGOING,
             /**
              * Only the LIVE end date moves. `originalTo` holds the end date
-             * the booking was planned for, and extension is allowed only
-             * once the booking has started (ONGOING/OVERDUE), so the plan is
+             * the booking was planned for, and the end can change only once
+             * the booking has started (ONGOING/OVERDUE), so the plan is
              * already fixed: moving it here would erase the deadline the
              * custodian actually agreed to, and with it every late return
              * from Booking Compliance.
@@ -12907,7 +13021,7 @@ export async function extendBooking({
               cause: null,
               label,
               message:
-                "The booking changed while you were extending it. Reload it and try again.",
+                "The booking changed while you were changing its end date. Reload it and try again.",
               status: 400,
               shouldBeCaptured: false,
             });
@@ -12916,7 +13030,92 @@ export async function extendBooking({
         });
     });
 
-    // Add activity log for booking extension
+    // The stored end has moved, so the check-in reminder (ONGOING) or the
+    // finished job chain (OVERDUE) no longer matches it: cancel the stored
+    // job and schedule the next one against the new end.
+    //
+    // This runs before the note and the emails, so a failed note never leaves
+    // a shortened booking on its old, later reminder. It is best-effort: the
+    // end is already committed, so a scheduler failure is logged and the note
+    // and emails still go out instead of failing a change that has happened.
+    // Nothing else moves a booking to OVERDUE, so the caller is told through
+    // `jobsRescheduled` and can warn the user that it will not turn overdue
+    // on its own.
+    let jobsRescheduled = true;
+    try {
+      // Another end-date change can commit after this one. The reminder
+      // belongs to the change whose end is stored now: it cancels the job
+      // stored now, and stores its own only if neither has moved on since.
+      const live = await db.booking.findUnique({
+        where: { id: booking.id, organizationId },
+        select: { to: true, activeSchedulerReference: true },
+      });
+      if (!live || live.to.getTime() === newEndDate.getTime()) {
+        const storedReference =
+          live?.activeSchedulerReference ?? booking.activeSchedulerReference;
+        await cancelScheduler({
+          id: booking.id,
+          activeSchedulerReference: storedReference,
+        });
+        const expected = {
+          to: newEndDate,
+          activeSchedulerReference: storedReference,
+        };
+
+        const { hours } = calcTimeDifference(newEndDate, new Date());
+
+        // Under an hour to the new end: schedule the overdue job first, then
+        // send the reminder now, so a failed reminder email never costs the
+        // overdue flip.
+        if (hours < 1) {
+          await scheduleNextBookingJob({
+            data: {
+              id: updatedBooking.id,
+              hints,
+              eventType: BOOKING_SCHEDULER_EVENTS_ENUM.overdueHandler,
+            },
+            when: newEndDate,
+            expected,
+          });
+
+          // The end-date change is this booking event's push; the reminder
+          // only emails
+          await sendCheckinReminder(
+            updatedBooking,
+            updatedBooking._count.bookingAssets,
+            hints,
+            updatedBooking.organizationId,
+            { push: false }
+          );
+        } else {
+          // A copy: `expected.to` must stay the stored end.
+          const when = new Date(newEndDate);
+          when.setHours(when.getHours() - 1);
+
+          await scheduleNextBookingJob({
+            data: {
+              id: updatedBooking.id,
+              hints,
+              eventType: BOOKING_SCHEDULER_EVENTS_ENUM.checkinReminder,
+            },
+            when,
+            expected,
+          });
+        }
+      }
+    } catch (cause) {
+      jobsRescheduled = false;
+      Logger.error(
+        new ShelfError({
+          cause,
+          message:
+            "Failed to reschedule the booking jobs after an end-date change.",
+          additionalData: { bookingId: booking.id, newEndDate },
+          label,
+        })
+      );
+    }
+
     const user = await getUserByID(userId, {
       select: {
         id: true,
@@ -12928,9 +13127,9 @@ export async function extendBooking({
     await createSystemBookingNote({
       bookingId: updatedBooking.id,
       organizationId,
-      content: `${wrapUserLinkForNote(
-        user
-      )} extended the booking from **${wrapDateForNote(
+      content: `${wrapUserLinkForNote(user)} ${
+        copy.verb
+      } the booking from **${wrapDateForNote(
         booking.to
       )}** to **${wrapDateForNote(newEndDate)}**.`,
     });
@@ -12984,7 +13183,7 @@ export async function extendBooking({
     // Resolve notification recipients and send personalized emails
     const recipients = await getBookingNotificationRecipients({
       booking: updatedBooking,
-      eventType: "EXTEND",
+      eventType: copy.eventType,
       organizationId: updatedBooking.organizationId,
       editorUserId: userId,
     });
@@ -12996,16 +13195,17 @@ export async function extendBooking({
 
       const actor = await resolveBookingEmailActor({
         userId,
-        label: "Extended by",
+        label: copy.actorLabel,
       });
 
       await sendBookingEmailToAllRecipients({
+        eventType: copy.eventType,
         recipients,
         booking: updatedBooking,
-        subject: `Booking extended (${updatedBooking.name}) - shelf.nu`,
         buildText: (textArgs) =>
           extendBookingEmailContent({
             ...textArgs,
+            verb: copy.verb,
             bookingName: updatedBooking.name,
             assetsCount: updatedBooking._count.bookingAssets,
             custodian,
@@ -13016,79 +13216,16 @@ export async function extendBooking({
             customEmailFooter: updatedBooking.organization.customEmailFooter,
           }),
         buildHeading: (prefs) =>
-          `Booking extended from ${formatDate(booking.to, prefs, {
+          `Booking ${copy.verb} from ${formatDate(booking.to, prefs, {
             includeTime: true,
           })} to ${formatDate(newEndDate, prefs, { includeTime: true })}`,
         hints,
         actor,
+        actorUserId: userId,
       });
     }
 
-    /**
-     * In case of ONGOING, a checkin reminder should have be scheduled. So we have to reschedule it.
-     * And in case of OVERDUE all the jobs are completed, so we have to reschedule the checkin reminder.
-     */
-    // A later extension can commit after this one. The reminder belongs to
-    // the extension whose end is stored now: it cancels the job stored now,
-    // and stores its own only if neither has moved on again meanwhile.
-    const live = await db.booking.findUnique({
-      where: { id: booking.id, organizationId },
-      select: { to: true, activeSchedulerReference: true },
-    });
-    if (live && live.to.getTime() !== newEndDate.getTime()) {
-      return updatedBooking;
-    }
-    const storedReference =
-      live?.activeSchedulerReference ?? booking.activeSchedulerReference;
-    await cancelScheduler({
-      id: booking.id,
-      activeSchedulerReference: storedReference,
-    });
-    const expected = {
-      to: newEndDate,
-      activeSchedulerReference: storedReference,
-    };
-
-    const { hours } = calcTimeDifference(newEndDate, new Date());
-
-    /**
-     * If there is less than 1 hours left for checkin, then we immediately send the checkin
-     * reminder and we schedule the overdue handler.
-     */
-    if (hours < 1) {
-      await sendCheckinReminder(
-        updatedBooking,
-        updatedBooking._count.bookingAssets,
-        hints,
-        updatedBooking.organizationId
-      );
-
-      await scheduleNextBookingJob({
-        data: {
-          id: updatedBooking.id,
-          hints,
-          eventType: BOOKING_SCHEDULER_EVENTS_ENUM.overdueHandler,
-        },
-        when: newEndDate,
-        expected,
-      });
-    } else {
-      // A copy: `expected.to` must stay the stored end.
-      const when = new Date(newEndDate);
-      when.setHours(when.getHours() - 1);
-
-      await scheduleNextBookingJob({
-        data: {
-          id: updatedBooking.id,
-          hints,
-          eventType: BOOKING_SCHEDULER_EVENTS_ENUM.checkinReminder,
-        },
-        when,
-        expected,
-      });
-    }
-
-    return updatedBooking;
+    return { ...updatedBooking, jobsRescheduled };
   } catch (cause) {
     const isShelfError = isLikeShelfError(cause);
     throw new ShelfError({
@@ -13097,7 +13234,7 @@ export async function extendBooking({
       title: "Error",
       message: isShelfError
         ? cause.message
-        : "Something went wrong while extending the booking.",
+        : "Something went wrong while changing the booking end date.",
       additionalData: isShelfError ? cause.additionalData : undefined,
       shouldBeCaptured: isShelfError ? cause.shouldBeCaptured : true,
     });
@@ -14730,9 +14867,9 @@ export async function deleteBooking(
       });
 
       await sendBookingEmailToAllRecipients({
+        eventType: "DELETE",
         recipients,
         booking: b,
-        subject: `🗑️ Booking deleted (${b.name}) - shelf.nu`,
         buildText: (textArgs) =>
           deletedBookingEmailContent({
             ...textArgs,
@@ -14747,6 +14884,7 @@ export async function deleteBooking(
         buildHeading: () => `Your booking has been deleted: "${b.name}"`,
         hints,
         actor,
+        actorUserId: userId,
         templateProps: {
           hideViewButton: true,
         },
@@ -16291,9 +16429,9 @@ export async function bulkDeleteBookings({
           "";
 
         await sendBookingEmailToAllRecipients({
+          eventType: "DELETE",
           recipients,
           booking: b,
-          subject: `🗑️ Booking deleted (${b.name}) - shelf.nu`,
           buildText: (textArgs) =>
             deletedBookingEmailContent({
               ...textArgs,
@@ -16307,6 +16445,7 @@ export async function bulkDeleteBookings({
           buildHeading: () => `Your booking has been deleted: "${b.name}"`,
           hints,
           actor,
+          actorUserId: userId,
           templateProps: {
             hideViewButton: true,
           },
@@ -16813,9 +16952,9 @@ export async function bulkCancelBookings({
           "";
 
         await sendBookingEmailToAllRecipients({
+          eventType: "CANCEL",
           recipients,
           booking: b,
-          subject: `❌ Booking cancelled (${b.name}) - shelf.nu`,
           buildText: (textArgs) =>
             cancelledBookingEmailContent({
               ...textArgs,
@@ -16830,6 +16969,7 @@ export async function bulkCancelBookings({
           buildHeading: () => `Your booking has been cancelled: "${b.name}"`,
           hints,
           actor,
+          actorUserId: userId,
         });
       }
     }

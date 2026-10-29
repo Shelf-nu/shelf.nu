@@ -37,7 +37,7 @@ appId: com.shelf.companion.carlos
 - tapOn: "Settings"
 - assertVisible: "WORKSPACE"
 # Open the workspace picker via the switcher's stable a11y label
-# ("Current workspace: …", settings.tsx) — not a brittle screen coordinate.
+# ("Current workspace: …", settings/index.tsx), not a brittle screen coordinate.
 - tapOn: ".*Current workspace.*"
 - tapOn: "GRANULAR WORKSPACE"
 - waitForAnimationToEnd

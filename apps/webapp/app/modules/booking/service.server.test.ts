@@ -56,8 +56,10 @@ import {
   removeDestroyedUnitsFromKits,
 } from "~/modules/kit/service.server";
 import * as noteService from "~/modules/note/service.server";
+import { sendPush } from "~/modules/push/service.server";
 import { ShelfError } from "~/utils/error";
 import { ALL_SELECTED_KEY } from "~/utils/list";
+import { Logger } from "~/utils/logger";
 import { wrapBookingStatusForNote } from "~/utils/markdoc-wrappers";
 import { scheduler } from "~/utils/scheduler.server";
 import { sendBookingUpdatedEmail } from "./email-helpers";
@@ -555,6 +557,12 @@ vitest.mock("~/modules/consumption-log/low-stock.server", () => ({
 // why: preventing actual email sending during tests
 vitest.mock("~/emails/mail.server", () => ({
   sendEmail: vitest.fn(),
+}));
+
+// why: sendPush queues a pg-boss job; the queue and delivery are the push
+// module's concern and have their own tests
+vitest.mock("~/modules/push/service.server", () => ({
+  sendPush: vitest.fn().mockResolvedValue(undefined),
 }));
 
 // why: `fulfilModelRequestsAndCheckout` calls `materializeModelRequestForAsset`
@@ -9975,14 +9983,18 @@ describe("revertBookingToDraft", () => {
 });
 
 /**
- * `mockBookingData` ends in the future; an extension must land after the
- * stored end, so these cases start from a booking that ends before the ends
- * they extend to.
+ * A booking that runs 09:00 to 17:00 on 2025-01-01, read at
+ * {@link EXTEND_NOW}, while it is under way: a new end must land after the
+ * start and in the future, so the cases below move the end around that clock.
  */
 const extendableBookingData = {
   ...mockBookingData,
+  from: new Date("2025-01-01T09:00:00Z"),
   to: new Date("2025-01-01T17:00:00Z"),
 };
+
+/** The clock every `extendBooking` case reads: noon on the booking's day. */
+const EXTEND_NOW = new Date("2025-01-01T12:00:00Z");
 
 /** The job ids `scheduler.cancel` was called with, in order. */
 function cancelledJobIds(): unknown[] {
@@ -9993,6 +10005,13 @@ function cancelledJobIds(): unknown[] {
 describe("extendBooking", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
+    // why: the service refuses an end in the past, so each case pins "now"
+    vitest.useFakeTimers({ toFake: ["Date"] });
+    vitest.setSystemTime(EXTEND_NOW);
+  });
+
+  afterEach(() => {
+    vitest.useRealTimers();
   });
 
   it("should extend booking successfully", async () => {
@@ -10052,7 +10071,7 @@ describe("extendBooking", () => {
         include: expect.any(Object),
       })
     );
-    expect(result).toEqual(extendedBooking);
+    expect(result).toEqual({ ...extendedBooking, jobsRescheduled: true });
 
     // Activity event — BOOKING_DATES_CHANGED is recorded for the new end date.
     expect(activityEventService.recordEvent).toHaveBeenCalledWith(
@@ -10120,7 +10139,7 @@ describe("extendBooking", () => {
         data: { status: BookingStatus.ONGOING, to: newEndDate },
       })
     );
-    expect(result).toEqual(stored);
+    expect(result).toEqual({ ...stored, jobsRescheduled: true });
     // The new job is stored only over the job and end it was planned for.
     expect(db.booking.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -10223,7 +10242,7 @@ describe("extendBooking", () => {
       roles: [OrganizationRoles.ADMIN],
     });
 
-    expect(result).toEqual(stored);
+    expect(result).toEqual({ ...stored, jobsRescheduled: true });
     expect(scheduler.cancel).not.toHaveBeenCalled();
     expect(scheduler.sendAfter).not.toHaveBeenCalled();
   });
@@ -10266,44 +10285,306 @@ describe("extendBooking", () => {
       })
     ).rejects.toMatchObject({
       message:
-        "The booking changed while you were extending it. Reload it and try again.",
+        "The booking changed while you were changing its end date. Reload it and try again.",
       status: 400,
     });
   });
 
-  it("refuses an end at or before the current end", async () => {
-    expect.assertions(2);
-    const newEndDate = new Date("2025-01-01T17:00:00Z");
-    const mockBooking = {
+  /** The fixture booking in `status`, with one asset still out. */
+  function bookingWithOneAssetOut(status: BookingStatus) {
+    return {
       ...extendableBookingData,
-      status: BookingStatus.ONGOING,
+      status,
+      activeSchedulerReference: "reminder-job",
       bookingAssets: [
         {
           asset: { id: "asset-1", status: AssetStatus.CHECKED_OUT },
           assetId: "asset-1",
           quantity: 1,
-          id: "ba-t153",
-          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          id: "ba-t160",
+          checkedOutAt: new Date("2025-01-01T09:00:00.000Z"),
           checkedInAt: null,
         },
       ],
       partialCheckins: [],
     };
+  }
+
+  /** Moves the fixture booking's end to `newEndDate`, as a workspace admin. */
+  function changeEndTo(newEndDate: Date) {
+    return extendBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      newEndDate,
+      hints: mockClientHints,
+      userId: "user-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
+      roles: [OrganizationRoles.ADMIN],
+    });
+  }
+
+  it("moves the end earlier and leaves the items still out checked out", async () => {
+    expect.assertions(9);
+    const newEndDate = new Date("2025-01-01T15:00:00Z");
+    const booking = bookingWithOneAssetOut(BookingStatus.ONGOING);
     //@ts-expect-error missing vitest type
-    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    db.booking.findUniqueOrThrow.mockResolvedValue(booking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ ...booking, to: newEndDate });
+    //@ts-expect-error missing vitest type
+    db.booking.findUnique.mockResolvedValueOnce({
+      to: newEndDate,
+      activeSchedulerReference: "reminder-job",
+    });
+    //@ts-expect-error missing vitest type
+    scheduler.sendAfter.mockResolvedValueOnce("earlier-reminder-job");
+    //@ts-expect-error missing vitest type
+    db.booking.updateMany.mockResolvedValueOnce({ count: 1 });
+
+    await changeEndTo(newEndDate);
+
+    expect(db.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: "booking-1",
+          organizationId: "org-1",
+          status: BookingStatus.ONGOING,
+          to: new Date("2025-01-01T17:00:00Z"),
+        },
+        data: { status: BookingStatus.ONGOING, to: newEndDate },
+      })
+    );
+    expect(db.asset.update).not.toHaveBeenCalled();
+    expect(db.asset.updateMany).not.toHaveBeenCalled();
+    // A shorter window overlaps nothing it did not already overlap.
+    expect(db.booking.findMany).not.toHaveBeenCalled();
+    expect(assertModelUnitsNotReservedElsewhere).not.toHaveBeenCalled();
+    expect(bookingNoteService.createSystemBookingNote).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingId: "booking-1",
+        content: expect.stringContaining(
+          ' shortened the booking from **{% date value="2025-01-01T17:00:00.000Z" /%}** to **{% date value="2025-01-01T15:00:00.000Z" /%}**.'
+        ),
+      })
+    );
+    expect(cancelledJobIds()).toEqual(["reminder-job"]);
+    expect(scheduler.sendAfter).toHaveBeenCalledWith(
+      "booking-queue",
+      {
+        id: "booking-1",
+        hints: mockClientHints,
+        eventType: "booking-checkin-reminder",
+      },
+      {},
+      new Date("2025-01-01T14:00:00Z")
+    );
+    expect(db.booking.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: "booking-1",
+          to: newEndDate,
+          activeSchedulerReference: "reminder-job",
+        },
+        data: { activeSchedulerReference: "earlier-reminder-job" },
+      })
+    );
+  });
+
+  it("reschedules the reminder before the note, so a failed note still leaves the new reminder", async () => {
+    expect.assertions(3);
+    const newEndDate = new Date("2025-01-01T15:00:00Z");
+    const booking = bookingWithOneAssetOut(BookingStatus.ONGOING);
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(booking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ ...booking, to: newEndDate });
+    //@ts-expect-error missing vitest type
+    db.booking.findUnique.mockResolvedValueOnce({
+      to: newEndDate,
+      activeSchedulerReference: "reminder-job",
+    });
+    //@ts-expect-error missing vitest type
+    scheduler.sendAfter.mockResolvedValueOnce("earlier-reminder-job");
+    //@ts-expect-error missing vitest type
+    db.booking.updateMany.mockResolvedValueOnce({ count: 1 });
+    (
+      bookingNoteService.createSystemBookingNote as ReturnType<typeof vitest.fn>
+    ).mockRejectedValueOnce(new Error("notes table unavailable"));
+
+    await expect(changeEndTo(newEndDate)).rejects.toMatchObject({
+      message: "Something went wrong while changing the booking end date.",
+    });
+
+    expect(cancelledJobIds()).toEqual(["reminder-job"]);
+    expect(scheduler.sendAfter).toHaveBeenCalledWith(
+      "booking-queue",
+      {
+        id: "booking-1",
+        hints: mockClientHints,
+        eventType: "booking-checkin-reminder",
+      },
+      {},
+      new Date("2025-01-01T14:00:00Z")
+    );
+  });
+
+  it("logs a scheduler failure and still writes the note and sends the emails", async () => {
+    expect.assertions(3);
+    const newEndDate = new Date("2025-01-01T15:00:00Z");
+    const booking = bookingWithOneAssetOut(BookingStatus.ONGOING);
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(booking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ ...booking, to: newEndDate });
+    //@ts-expect-error missing vitest type
+    db.booking.findUnique.mockResolvedValueOnce({
+      to: newEndDate,
+      activeSchedulerReference: "reminder-job",
+    });
+    //@ts-expect-error missing vitest type
+    scheduler.sendAfter.mockRejectedValueOnce(new Error("pg-boss down"));
+    // why: keeps the expected scheduler failure out of the test output and
+    // lets the case assert that it was reported
+    const loggerError = vitest
+      .spyOn(Logger, "error")
+      .mockImplementation(() => {});
+
+    await expect(changeEndTo(newEndDate)).resolves.toMatchObject({
+      jobsRescheduled: false,
+    });
+
+    expect(loggerError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message:
+          "Failed to reschedule the booking jobs after an end-date change.",
+      })
+    );
+    expect(bookingNoteService.createSystemBookingNote).toHaveBeenCalledWith(
+      expect.objectContaining({ bookingId: "booking-1" })
+    );
+    loggerError.mockRestore();
+  });
+
+  it("schedules the overdue job before the immediate reminder when the new end is under an hour away", async () => {
+    expect.assertions(4);
+    const newEndDate = new Date("2025-01-01T12:30:00Z");
+    const booking = bookingWithOneAssetOut(BookingStatus.ONGOING);
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(booking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...booking,
+      to: newEndDate,
+      _count: { bookingAssets: 1 },
+    });
+    //@ts-expect-error missing vitest type
+    db.booking.findUnique.mockResolvedValueOnce({
+      to: newEndDate,
+      activeSchedulerReference: "reminder-job",
+    });
+    //@ts-expect-error missing vitest type
+    scheduler.sendAfter.mockResolvedValueOnce("overdue-job");
+    //@ts-expect-error missing vitest type
+    db.booking.updateMany.mockResolvedValueOnce({ count: 1 });
+
+    await expect(changeEndTo(newEndDate)).resolves.toMatchObject({
+      jobsRescheduled: true,
+    });
+
+    expect(scheduler.sendAfter).toHaveBeenCalledWith(
+      "booking-queue",
+      {
+        id: "booking-1",
+        hints: mockClientHints,
+        eventType: "booking-overdue-handler",
+      },
+      {},
+      newEndDate
+    );
+    const lookups = vitest.mocked(getBookingNotificationRecipients).mock;
+    const reminderLookup = lookups.calls.findIndex(
+      ([args]) => args.eventType === "CHECKIN_REMINDER"
+    );
+    expect(reminderLookup).toBeGreaterThanOrEqual(0);
+    expect(
+      vitest.mocked(scheduler.sendAfter).mock.invocationCallOrder[0]
+    ).toBeLessThan(lookups.invocationCallOrder[reminderLookup]);
+  });
+
+  it("moves an overdue booking's end earlier and reopens it as ongoing", async () => {
+    expect.assertions(1);
+    // The overdue job flips the status without reading the end, so a job
+    // that outlived an end change leaves the booking OVERDUE while its stored
+    // end is still ahead.
+    const newEndDate = new Date("2025-01-01T15:00:00Z");
+    const booking = bookingWithOneAssetOut(BookingStatus.OVERDUE);
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(booking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...booking,
+      status: BookingStatus.ONGOING,
+      to: newEndDate,
+    });
+
+    await changeEndTo(newEndDate);
+
+    expect(db.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: "booking-1",
+          organizationId: "org-1",
+          status: BookingStatus.OVERDUE,
+          to: new Date("2025-01-01T17:00:00Z"),
+        },
+        data: { status: BookingStatus.ONGOING, to: newEndDate },
+      })
+    );
+  });
+
+  it("refuses an end equal to the current end", async () => {
+    expect.assertions(2);
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(
+      bookingWithOneAssetOut(BookingStatus.ONGOING)
+    );
 
     await expect(
-      extendBooking({
-        id: "booking-1",
-        organizationId: "org-1",
-        newEndDate,
-        hints: mockClientHints,
-        userId: "user-1",
-        access: accessFor([OrganizationRoles.ADMIN]),
-        roles: [OrganizationRoles.ADMIN],
-      })
+      changeEndTo(new Date("2025-01-01T17:00:00Z"))
     ).rejects.toMatchObject({
-      message: "The new end date must be after the current end date.",
+      message: "The booking already ends at that date.",
+      status: 400,
+    });
+    expect(db.booking.update).not.toHaveBeenCalled();
+  });
+
+  it("refuses an end at or before the booking start", async () => {
+    expect.assertions(2);
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(
+      bookingWithOneAssetOut(BookingStatus.ONGOING)
+    );
+
+    await expect(
+      changeEndTo(new Date("2025-01-01T09:00:00Z"))
+    ).rejects.toMatchObject({
+      message: "The new end date must be after the booking start.",
+      status: 400,
+    });
+    expect(db.booking.update).not.toHaveBeenCalled();
+  });
+
+  it("refuses an end after the start that has already passed", async () => {
+    expect.assertions(2);
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(
+      bookingWithOneAssetOut(BookingStatus.ONGOING)
+    );
+
+    await expect(
+      changeEndTo(new Date("2025-01-01T10:00:00Z"))
+    ).rejects.toMatchObject({
+      message: "The new end date must be in the future.",
       status: 400,
     });
     expect(db.booking.update).not.toHaveBeenCalled();
@@ -10979,7 +11260,7 @@ describe("extendBooking", () => {
     );
 
     expect(db.booking.update).toHaveBeenCalled();
-    expect(result).toEqual(extendedBooking);
+    expect(result).toEqual({ ...extendedBooking, jobsRescheduled: true });
   });
 
   it("should extend booking successfully when returned asset has conflict but active assets don't", async () => {
@@ -11037,7 +11318,7 @@ describe("extendBooking", () => {
 
     // Should succeed - returned asset conflicts are ignored
     expect(db.booking.update).toHaveBeenCalled();
-    expect(result).toEqual(extendedBooking);
+    expect(result).toEqual({ ...extendedBooking, jobsRescheduled: true });
   });
 
   it("should prevent extension when active (non-returned) asset has conflict", async () => {
@@ -11149,7 +11430,7 @@ describe("extendBooking", () => {
         roles: [OrganizationRoles.ADMIN],
       })
     ).rejects.toThrow(
-      "Cannot extend booking. All assets have been returned. Please complete the booking instead."
+      "Cannot change the end date. All assets have been returned. Please complete the booking instead."
     );
   });
 
@@ -21964,7 +22245,9 @@ describe("check-in and check-out method on activity events", () => {
  * Every booking email a person triggers names them and the moment, on the
  * line under the heading (HTML) and right after the event sentence (plain
  * text). One test per send site. The acting user has a display name set, so
- * it must be the name shown, never the legal first and last name.
+ * it must be the name shown, never the legal first and last name. Each test
+ * also pins the push its send site queues: one per booking, to the
+ * custodian, with that event's title.
  */
 describe("booking emails name who acted", () => {
   /** When the action runs; the Berlin recipient sees it as 16:15. */
@@ -22028,6 +22311,26 @@ describe("booking emails name who acted", () => {
       expect(payload.html).not.toContain("Johanna");
       expect(payload.text).not.toContain("Johanna");
     }
+  }
+
+  /** Asserts one push per booking, each to the custodian, with these titles. */
+  function expectCustodianPushes(titles: string[]) {
+    const pushes = vitest.mocked(sendPush).mock.calls.map(([push]) => push);
+    expect(pushes.map(({ title }) => title)).toEqual(titles);
+    for (const push of pushes) {
+      expect(push).toMatchObject({
+        userIds: ["user-2"],
+        organizationId: "org-1",
+        category: "bookings",
+      });
+    }
+  }
+
+  /** Asserts the subject of every sent email, in send order. */
+  function expectSubjects(subjects: string[]) {
+    expect(vitest.mocked(sendEmail).mock.calls.map(([p]) => p.subject)).toEqual(
+      subjects
+    );
   }
 
   beforeEach(() => {
@@ -22097,6 +22400,8 @@ describe("booking emails name who acted", () => {
     });
 
     expectActorLine("Reserved by");
+    expectCustodianPushes(["✅ Booking reserved (Test Booking)"]);
+    expectSubjects(["✅ Booking reserved (Test Booking) - shelf.nu"]);
   });
 
   it("checkinBooking: Completed by", async () => {
@@ -22140,6 +22445,8 @@ describe("booking emails name who acted", () => {
     });
 
     expectActorLine("Completed by");
+    expectCustodianPushes(["🎉 Booking complete (Test Booking)"]);
+    expectSubjects(["🎉 Booking complete (Test Booking) - shelf.nu"]);
     const [payload] = vitest.mocked(sendEmail).mock.calls[0];
     expect(payload.html).not.toContain("Checked in by");
   });
@@ -22178,6 +22485,8 @@ describe("booking emails name who acted", () => {
     });
 
     expectActorLine("Cancelled by");
+    expectCustodianPushes(["❌ Booking cancelled (Test Booking)"]);
+    expectSubjects(["❌ Booking cancelled (Test Booking) - shelf.nu"]);
     const [payload] = vitest.mocked(sendEmail).mock.calls[0];
     expect(payload.text).toContain(
       'Your booking has been cancelled: "Test Booking".\n' +
@@ -22210,6 +22519,8 @@ describe("booking emails name who acted", () => {
     });
 
     expectActorLine("Reverted by");
+    expectCustodianPushes(["↩️ Booking reverted to draft (Test Booking)"]);
+    expectSubjects(["↩️ Booking reverted to draft (Test Booking) - shelf.nu"]);
   });
 
   it("extendBooking: Extended by", async () => {
@@ -22247,6 +22558,51 @@ describe("booking emails name who acted", () => {
     });
 
     expectActorLine("Extended by");
+    expectCustodianPushes(["Booking extended (Test Booking)"]);
+    expectSubjects(["Booking extended (Test Booking) - shelf.nu"]);
+    const [payload] = vitest.mocked(sendEmail).mock.calls[0];
+    expect(payload.text).toContain("Your booking has been extended from ");
+  });
+
+  it("extendBooking: Shortened by, for an earlier end", async () => {
+    const ongoing = {
+      ...mockBookingData,
+      ...EMAIL_FIELDS,
+      status: BookingStatus.ONGOING,
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-actor-5b",
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
+        },
+      ],
+      partialCheckins: [],
+    };
+    const newEndDate = new Date(futureToDate.getTime() - 4 * 60 * 60 * 1000);
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(ongoing);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ ...ongoing, to: newEndDate });
+    mockBerlinRecipient();
+
+    await extendBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      newEndDate,
+      hints: mockClientHints,
+      userId: "user-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
+      roles: [OrganizationRoles.ADMIN],
+    });
+
+    expectActorLine("Shortened by");
+    expectCustodianPushes(["Booking shortened (Test Booking)"]);
+    expectSubjects(["Booking shortened (Test Booking) - shelf.nu"]);
+    const [payload] = vitest.mocked(sendEmail).mock.calls[0];
+    expect(payload.text).toContain("Your booking has been shortened from ");
   });
 
   it("deleteBooking: Deleted by", async () => {
@@ -22268,6 +22624,8 @@ describe("booking emails name who acted", () => {
     );
 
     expectActorLine("Deleted by");
+    expectCustodianPushes(["🗑️ Booking deleted (Test Booking)"]);
+    expectSubjects(["🗑️ Booking deleted (Test Booking) - shelf.nu"]);
   });
 
   /** Two reserved bookings, as the bulk actions read them. */
@@ -22301,6 +22659,14 @@ describe("booking emails name who acted", () => {
     });
 
     expectActorLine("Cancelled by", 2);
+    expectCustodianPushes([
+      "❌ Booking cancelled (Booking 1)",
+      "❌ Booking cancelled (Booking 2)",
+    ]);
+    expectSubjects([
+      "❌ Booking cancelled (Booking 1) - shelf.nu",
+      "❌ Booking cancelled (Booking 2) - shelf.nu",
+    ]);
   });
 
   it("bulkDeleteBookings: Deleted by, on every booking's email", async () => {
@@ -22319,5 +22685,512 @@ describe("booking emails name who acted", () => {
     });
 
     expectActorLine("Deleted by", 2);
+    expectCustodianPushes([
+      "🗑️ Booking deleted (Booking 1)",
+      "🗑️ Booking deleted (Booking 2)",
+    ]);
+    expectSubjects([
+      "🗑️ Booking deleted (Booking 1) - shelf.nu",
+      "🗑️ Booking deleted (Booking 2) - shelf.nu",
+    ]);
+  });
+
+  it("pushes to the custodian alone while the creator and an admin get emails", async () => {
+    const draft = {
+      ...mockBookingData,
+      ...EMAIL_FIELDS,
+      status: BookingStatus.DRAFT,
+      bookingAssets: [
+        {
+          asset: {
+            id: "asset-1",
+            title: "Asset 1",
+            status: "AVAILABLE",
+            availableToBook: true,
+            bookingAssets: [],
+          },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-push-1",
+          checkedOutAt: null,
+          checkedInAt: null,
+        },
+      ],
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(draft);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...draft,
+      status: BookingStatus.RESERVED,
+    });
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.count.mockResolvedValueOnce(1);
+    const noPrefs = {
+      dateFormat: null,
+      timeFormat: null,
+      weekStart: null,
+      timeZone: null,
+    };
+    vitest.mocked(getBookingNotificationRecipients).mockResolvedValueOnce([
+      {
+        email: "creator@example.com",
+        firstName: "Cora",
+        lastName: "Creator",
+        userId: "user-3",
+        ...noPrefs,
+        reason: "creator",
+      },
+      {
+        email: "custodian@example.com",
+        firstName: "Casey",
+        lastName: "Custodian",
+        userId: "user-2",
+        ...noPrefs,
+        reason: "custodian",
+      },
+      {
+        email: "admin@example.com",
+        firstName: "Admin",
+        lastName: "User",
+        userId: "admin-1",
+        ...noPrefs,
+        reason: "admin",
+      },
+    ]);
+
+    await reserveBooking({
+      id: "booking-1",
+      name: "Test Booking",
+      organizationId: "org-1",
+      custodianUserId: "user-2",
+      custodianTeamMemberId: "team-2",
+      from: futureFromDate,
+      to: futureToDate,
+      hints: mockClientHints,
+      alertsOrgOnReservation: true,
+      tags: [],
+      userId: "user-1",
+    });
+
+    expect(vitest.mocked(sendEmail).mock.calls.map(([p]) => p.to)).toEqual([
+      "creator@example.com",
+      "custodian@example.com",
+      "admin@example.com",
+    ]);
+    expect(sendPush).toHaveBeenCalledOnce();
+    expect(vitest.mocked(sendPush).mock.calls[0][0]).toMatchObject({
+      userIds: ["user-2"],
+      title: "✅ Booking reserved (Test Booking)",
+      body: expect.stringMatching(/^\d.+ to \d.+$/),
+      url: "/bookings/booking-1?orgId=org-1",
+    });
+  });
+
+  it("notifies from the booking as reserved when the reservation changes custodian and dates", async () => {
+    const draft = {
+      ...mockBookingData,
+      ...EMAIL_FIELDS,
+      custodianUserId: EMAIL_FIELDS.custodianUser.id,
+      status: BookingStatus.DRAFT,
+      bookingAssets: [
+        {
+          asset: {
+            id: "asset-1",
+            title: "Asset 1",
+            status: "AVAILABLE",
+            availableToBook: true,
+            bookingAssets: [],
+          },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-rebook-1",
+          checkedOutAt: null,
+          checkedInAt: null,
+        },
+      ],
+    };
+    const newCustodian = {
+      id: "user-4",
+      email: "next@example.com",
+      firstName: "Nia",
+      lastName: "Next",
+      displayName: null,
+    };
+    const reserved = {
+      ...draft,
+      status: BookingStatus.RESERVED,
+      custodianUserId: newCustodian.id,
+      custodianUser: newCustodian,
+      from: new Date("2027-03-05T09:00:00.000Z"),
+      to: new Date("2027-03-06T15:00:00.000Z"),
+    };
+    // The first read is the draft; the read after the commit is the booking
+    // as reserved.
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(reserved);
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValueOnce(draft);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      id: reserved.id,
+      status: reserved.status,
+      custodianUserId: reserved.custodianUserId,
+      from: reserved.from,
+      to: reserved.to,
+    });
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.count.mockResolvedValueOnce(1);
+    vitest.mocked(getBookingNotificationRecipients).mockResolvedValueOnce([
+      {
+        email: newCustodian.email,
+        firstName: newCustodian.firstName,
+        lastName: newCustodian.lastName,
+        userId: newCustodian.id,
+        dateFormat: "DD_MM_YYYY",
+        timeFormat: "H24",
+        weekStart: "MONDAY",
+        timeZone: "Europe/Berlin",
+        reason: "custodian",
+      },
+    ]);
+
+    await reserveBooking({
+      id: "booking-1",
+      name: "Test Booking",
+      organizationId: "org-1",
+      custodianUserId: newCustodian.id,
+      custodianTeamMemberId: "team-4",
+      from: new Date("2027-03-05T09:00:00.000Z"),
+      to: new Date("2027-03-06T15:00:00.000Z"),
+      hints: mockClientHints,
+      alertsOrgOnReservation: false,
+      tags: [],
+      userId: "user-3",
+    });
+
+    // The recipients, the email and the push come from the row the update
+    // returned, not from the draft that was read before it.
+    expect(getBookingNotificationRecipients).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "RESERVATION",
+        booking: expect.objectContaining({ custodianUserId: newCustodian.id }),
+      })
+    );
+    expect(sendEmail).toHaveBeenCalledOnce();
+    const [email] = vitest.mocked(sendEmail).mock.calls[0];
+    expect(email.to).toBe(newCustodian.email);
+    expect(email.text).toContain("Nia Next");
+    expect(email.text).toContain("05/03/2027");
+    expect(email.text).toContain("06/03/2027");
+    // The new custodian gets the reservation; the replaced one is told they
+    // were removed.
+    const pushes = vitest.mocked(sendPush).mock.calls.map(([push]) => push);
+    expect(pushes).toEqual([
+      expect.objectContaining({
+        userIds: [newCustodian.id],
+        body: "05/03/2027, 10:00 to 06/03/2027, 16:00",
+      }),
+      expect.objectContaining({
+        userIds: [EMAIL_FIELDS.custodianUser.id],
+        title: "You were removed from a booking",
+      }),
+    ]);
+  });
+
+  it("returns the reserved row without the relations its notifications read", async () => {
+    const draft = {
+      ...mockBookingData,
+      ...EMAIL_FIELDS,
+      status: BookingStatus.DRAFT,
+      bookingAssets: [
+        {
+          asset: {
+            id: "asset-1",
+            title: "Asset 1",
+            status: "AVAILABLE",
+            availableToBook: true,
+            bookingAssets: [],
+          },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-plain-1",
+          checkedOutAt: null,
+          checkedInAt: null,
+        },
+      ],
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(draft);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockImplementation(({ where }) =>
+      Promise.resolve({
+        id: where.id,
+        status: BookingStatus.RESERVED,
+        from: futureFromDate,
+        to: futureToDate,
+      })
+    );
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.count.mockResolvedValueOnce(1);
+    mockBerlinRecipient();
+
+    const result = await reserveBooking({
+      id: "booking-1",
+      name: "Test Booking",
+      organizationId: "org-1",
+      custodianUserId: "user-2",
+      custodianTeamMemberId: "team-2",
+      from: futureFromDate,
+      to: futureToDate,
+      hints: mockClientHints,
+      alertsOrgOnReservation: false,
+      tags: [],
+      userId: "user-1",
+    });
+
+    // The web action sends this row to the browser, so the write loads no
+    // relations: the custodian's user row, the recipients' and the owner's
+    // emails stay on the server.
+    expect(
+      vitest.mocked(db.booking.update).mock.calls[0][0]
+    ).not.toHaveProperty("include");
+    expect(result).not.toHaveProperty("custodianUser");
+    expect(result).not.toHaveProperty("organization");
+    // The notifications read the booking again after the commit, org-scoped.
+    expect(db.booking.findUniqueOrThrow).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: { id: "booking-1", organizationId: "org-1" },
+      })
+    );
+    expect(sendEmail).toHaveBeenCalledOnce();
+  });
+
+  describe("custodian is the editor: email sent, no push", () => {
+    it("reserveBooking", async () => {
+      const draft = {
+        ...mockBookingData,
+        ...EMAIL_FIELDS,
+        status: BookingStatus.DRAFT,
+        bookingAssets: [
+          {
+            asset: {
+              id: "asset-1",
+              title: "Asset 1",
+              status: "AVAILABLE",
+              availableToBook: true,
+              bookingAssets: [],
+            },
+            assetId: "asset-1",
+            quantity: 1,
+            id: "ba-self-1",
+            checkedOutAt: null,
+            checkedInAt: null,
+          },
+        ],
+      };
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue(draft);
+      //@ts-expect-error missing vitest type
+      db.booking.update.mockResolvedValue({
+        ...draft,
+        status: BookingStatus.RESERVED,
+      });
+      //@ts-expect-error missing vitest type
+      db.bookingAsset.count.mockResolvedValueOnce(1);
+      mockBerlinRecipient();
+
+      await reserveBooking({
+        id: "booking-1",
+        name: "Test Booking",
+        organizationId: "org-1",
+        custodianUserId: "user-2",
+        custodianTeamMemberId: "team-2",
+        from: futureFromDate,
+        to: futureToDate,
+        hints: mockClientHints,
+        alertsOrgOnReservation: false,
+        tags: [],
+        userId: "user-2",
+      });
+
+      expectSubjects(["✅ Booking reserved (Test Booking) - shelf.nu"]);
+      expect(sendPush).not.toHaveBeenCalled();
+    });
+
+    it("checkinBooking", async () => {
+      const ongoing = {
+        ...mockBookingData,
+        ...EMAIL_FIELDS,
+        status: BookingStatus.ONGOING,
+        bookingAssets: [
+          {
+            asset: {
+              id: "asset-1",
+              assetKits: [],
+              status: AssetStatus.CHECKED_OUT,
+              bookingAssets: [
+                { booking: { id: "booking-1", status: BookingStatus.ONGOING } },
+              ],
+            },
+            assetId: "asset-1",
+            quantity: 1,
+            id: "ba-self-2",
+            checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+            checkedInAt: null,
+          },
+        ],
+        partialCheckins: [],
+      };
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue(ongoing);
+      //@ts-expect-error missing vitest type
+      db.booking.update.mockResolvedValue({
+        ...ongoing,
+        status: BookingStatus.COMPLETE,
+      });
+      mockBerlinRecipient();
+
+      await checkinBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        hints: mockClientHints,
+        userId: "user-2",
+      });
+
+      expectSubjects(["🎉 Booking complete (Test Booking) - shelf.nu"]);
+      expect(sendPush).not.toHaveBeenCalled();
+    });
+  });
+
+  it("extendBooking into the last hour pushes the extension alone, not a checkin reminder too", async () => {
+    const ongoing = {
+      ...mockBookingData,
+      ...EMAIL_FIELDS,
+      status: BookingStatus.ONGOING,
+      from: new Date(ACTED_AT.getTime() - 2 * 60 * 60 * 1000),
+      to: new Date(ACTED_AT.getTime() + 10 * 60 * 1000),
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-last-hour",
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
+        },
+      ],
+      partialCheckins: [],
+    };
+    const newEndDate = new Date(ACTED_AT.getTime() + 30 * 60 * 1000);
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(ongoing);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ ...ongoing, to: newEndDate });
+    // The stored end is this extension's, so it owns the reminder
+    //@ts-expect-error missing vitest type
+    db.booking.findUnique.mockResolvedValueOnce({
+      to: newEndDate,
+      activeSchedulerReference: null,
+    });
+    // The checkin reminder it sends at once, then the extension email: the
+    // jobs are rescheduled before the note and the emails
+    mockBerlinRecipient();
+    mockBerlinRecipient();
+
+    await extendBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      newEndDate,
+      hints: mockClientHints,
+      userId: "user-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
+      roles: [OrganizationRoles.ADMIN],
+    });
+
+    expectSubjects([
+      "🔔 Checkin reminder (Test Booking) - shelf.nu",
+      "Booking extended (Test Booking) - shelf.nu",
+    ]);
+    expectCustodianPushes(["Booking extended (Test Booking)"]);
+  });
+
+  describe("checkout with under an hour to checkin", () => {
+    /** A reserved booking that ends 30 minutes after the checkout. */
+    function mockReservedBookingEndingSoon() {
+      const reserved = {
+        ...mockBookingData,
+        ...EMAIL_FIELDS,
+        status: BookingStatus.RESERVED,
+        from: new Date(ACTED_AT.getTime() - 60 * 60 * 1000),
+        to: new Date(ACTED_AT.getTime() + 30 * 60 * 1000),
+        bookingAssets: [
+          {
+            asset: {
+              id: "asset-1",
+              assetKits: [],
+              title: "Asset 1",
+              status: "AVAILABLE",
+              bookingAssets: [],
+            },
+            assetId: "asset-1",
+            quantity: 1,
+            id: "ba-soon-1",
+            checkedOutAt: null,
+            checkedInAt: null,
+          },
+        ],
+      };
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue(reserved);
+      //@ts-expect-error missing vitest type
+      db.booking.update.mockResolvedValue({
+        ...reserved,
+        status: BookingStatus.ONGOING,
+      });
+      (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+        (args?: { where?: { id?: { in?: string[] } } }) =>
+          Promise.resolve((args?.where?.id?.in ?? []).map((id) => ({ id })))
+      );
+      (
+        db.partialBookingCheckout.findMany as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue([]);
+      mockBerlinRecipient();
+      return reserved;
+    }
+
+    it("pushes the checkin reminder to the custodian when someone else checks out", async () => {
+      const reserved = mockReservedBookingEndingSoon();
+
+      await checkoutBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        hints: mockClientHints,
+        from: reserved.from,
+        to: reserved.to,
+        userId: "user-1",
+        provenance: { surface: "web", method: "quick" },
+      });
+
+      expectSubjects(["🔔 Checkin reminder (Test Booking) - shelf.nu"]);
+      expectCustodianPushes(["🔔 Checkin reminder (Test Booking)"]);
+    });
+
+    it("emails but does not push the custodian who checks out themself", async () => {
+      const reserved = mockReservedBookingEndingSoon();
+
+      await checkoutBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        hints: mockClientHints,
+        from: reserved.from,
+        to: reserved.to,
+        userId: "user-2",
+        provenance: { surface: "web", method: "quick" },
+      });
+
+      expectSubjects(["🔔 Checkin reminder (Test Booking) - shelf.nu"]);
+      expect(sendPush).not.toHaveBeenCalled();
+    });
   });
 });

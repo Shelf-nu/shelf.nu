@@ -1462,7 +1462,7 @@ const INTENT_VERB = {
   cancel: "cancel",
   removeKit: "remove kits from",
   "revert-to-draft": "revert",
-  "extend-booking": "extend",
+  "extend-booking": "change the end date of",
   "bulk-remove-asset-or-kit": "remove items from",
   "partial-checkin": "check in",
   "partial-checkout": "check out",
@@ -2206,7 +2206,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         // `endDate` is already a zoned `Date` produced by the schema's
         // `coerceLocalDate(timeZone)`, so no further parsing is needed here.
-        await extendBooking({
+        const { jobsRescheduled } = await extendBooking({
           id,
           organizationId,
           hints,
@@ -2218,12 +2218,22 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
               ?.roles ?? [],
         });
 
-        sendNotification({
-          title: "Booking extended",
-          message: "Your booking has been extended to new end date.",
-          icon: { name: "success", variant: "success" },
-          senderId: userId,
-        });
+        sendNotification(
+          jobsRescheduled
+            ? {
+                title: "End date changed",
+                message: "The booking now ends on the new end date.",
+                icon: { name: "success", variant: "success" },
+                senderId: userId,
+              }
+            : {
+                title: "End date changed, reminder not scheduled",
+                message:
+                  "The booking now ends on the new end date, but its check-in reminder could not be scheduled, so it will not turn overdue on its own. Change the end date again to retry.",
+                icon: { name: "x", variant: "error" },
+                senderId: userId,
+              }
+        );
 
         return payload({ success: true });
       }

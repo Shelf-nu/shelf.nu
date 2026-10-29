@@ -2,8 +2,11 @@ import type { AssetReminder, Prisma, User } from "@prisma/client";
 import type PgBoss from "pg-boss";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
+import { PUSH_MESSAGES } from "~/modules/push/messages";
+import { sendPush } from "~/modules/push/service.server";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { ShelfError } from "~/utils/error";
+import { isLastAttempt } from "~/utils/job-retry";
 import { Logger } from "~/utils/logger";
 import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import { wrapDateForNote } from "~/utils/markdoc-wrappers";
@@ -423,6 +426,18 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
         content: noteContent,
       }),
     ]);
+
+    // After the emails and the note, so a job that fails and is retried
+    // pushes only once
+    void sendPush({
+      userIds: usersToSendEmail.map(({ id }) => id),
+      ...PUSH_MESSAGES.ASSET_REMINDER({
+        assetId: reminder.asset.id,
+        organizationId: reminder.organizationId,
+        reminderName: reminder.name,
+        assetTitle: reminder.asset.title,
+      }),
+    });
   },
 };
 
@@ -451,16 +466,7 @@ export async function regierAssetWorkers() {
       try {
         await handler(job);
       } catch (cause) {
-        // why: pg-boss increments retrycount at fetch time, so with N retries
-        // the handler observes retrycount = 0, 1, 2, ... N — the final attempt
-        // has retrycount === retrylimit. Using `- 1` here double-logs (fires on
-        // both the second-to-last AND the final attempt).
-        const isLastRetry =
-          job.retrycount != null &&
-          job.retrylimit != null &&
-          job.retrycount >= job.retrylimit;
-
-        if (isLastRetry) {
+        if (isLastAttempt(job)) {
           Logger.error(
             new ShelfError({
               cause,
