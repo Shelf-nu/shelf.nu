@@ -176,6 +176,30 @@ export function buildAssetModelChangeNote({
 }
 
 /**
+ * Note content for an asset's "Available for bookings" switch being turned on
+ * or off.
+ *
+ * Only the user link varies between assets, and it is already an escaped
+ * Markdoc tag from {@link wrapUserLinkForNote}, so the rest of the sentence is
+ * fixed text with nothing user-supplied spliced in.
+ *
+ * @param args.userLink - Rendered link to the acting user.
+ * @param args.availableToBook - The value the switch was set to.
+ * @returns Markdoc note content
+ */
+export function buildAvailableToBookChangeNote({
+  userLink,
+  availableToBook,
+}: {
+  userLink: string;
+  availableToBook: boolean;
+}) {
+  return `${userLink} marked the asset as ${
+    availableToBook ? "available" : "unavailable"
+  } for bookings.`;
+}
+
+/**
  * Build the category change note content.
  */
 export function buildCategoryChangeNote({
