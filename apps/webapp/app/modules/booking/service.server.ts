@@ -18056,23 +18056,31 @@ export async function addScannedAssetsToBooking({
       addedAssetIds,
       claimedAssetIds,
       archivedKitMembersLeftOut,
-    } = await db.$transaction(async (tx) => {
-      const result = await addScannedAssetsToBookingWithinTx(tx, {
-        assetIds,
-        kitIds,
-        bookingId,
-        organizationId,
-        userId,
-        quantities,
-        kitSlices,
-        callerAccess: access ?? undefined,
-        hints,
-        revealOtherBookings:
-          seesAllBookings ?? access?.bookings.seeAll ?? false,
-      });
-      await inSameTransaction?.(tx);
-      return result;
-    });
+    } = await db.$transaction(
+      async (tx) => {
+        const result = await addScannedAssetsToBookingWithinTx(tx, {
+          assetIds,
+          kitIds,
+          bookingId,
+          organizationId,
+          userId,
+          quantities,
+          kitSlices,
+          callerAccess: access ?? undefined,
+          hints,
+          revealOtherBookings:
+            seesAllBookings ?? access?.bookings.seeAll ?? false,
+        });
+        await inSameTransaction?.(tx);
+        return result;
+      },
+      /**
+       * The body grows with the scan: each unit that answers a model
+       * reservation writes its claim, a note and its events one after another,
+       * so a large scan outlasts Prisma's 5s default.
+       */
+      LONG_TRANSACTION_OPTIONS
+    );
 
     /**
      * Step 2: Create activity notes, for the assets that actually arrived.

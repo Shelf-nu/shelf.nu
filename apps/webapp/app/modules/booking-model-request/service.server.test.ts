@@ -16,6 +16,7 @@ import { beforeEach, describe, expect, it, vitest } from "vitest";
 import type { Mock } from "vitest";
 import { db } from "~/database/db.server";
 import { createSystemBookingNote } from "~/modules/booking-note/service.server";
+import { getUserByID } from "~/modules/user/service.server";
 import { ShelfError } from "~/utils/error";
 import {
   assertModelUnitsNotReservedElsewhere,
@@ -3856,6 +3857,36 @@ describe("fulfilModelRequestsForAssets", () => {
     // helper loops sequentially.
     expect(row.fulfilledQuantity).toBe(3);
     expect(result.size).toBe(3);
+  });
+
+  it("loads the acting user once for the whole call, however many units claim", async () => {
+    expect.assertions(2);
+    const row = {
+      id: "req-1",
+      bookingId: BOOKING_ID,
+      assetModelId: MODEL_ID,
+      quantity: 3,
+      fulfilledQuantity: 0,
+      fulfilledAt: null as Date | null,
+      assetModel: { name: "Dell Latitude 5550" },
+    };
+    // @ts-expect-error mocked
+    db.bookingModelRequest.findUnique.mockImplementation(() =>
+      Promise.resolve(row)
+    );
+
+    const result = await fulfilModelRequestsForAssets({
+      bookingId: BOOKING_ID,
+      assets: [asset("a1"), asset("a2"), asset("a3")],
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      tx,
+    });
+
+    // Every claim signs its note with the same actor. A read per unit spends
+    // the caller's interactive-transaction budget on a large scan.
+    expect(result.size).toBe(3);
+    expect(getUserByID).toHaveBeenCalledTimes(1);
   });
 
   it("stops decrementing once the reservation is full, so extras are plain assets", async () => {

@@ -17104,6 +17104,41 @@ describe("addScannedAssetsToBooking", () => {
     );
   });
 
+  it("gives the add transaction the long budget, since its body grows with the scan", async () => {
+    expect.assertions(1);
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      {
+        id: "asset-scan-1",
+        title: "Scanned Asset 1",
+        type: AssetType.INDIVIDUAL,
+        assetModelId: null,
+      },
+    ]);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      id: "booking-scan",
+      name: "Scan Booking",
+      status: BookingStatus.DRAFT,
+    });
+
+    await addScannedAssetsToBooking({
+      assetIds: ["asset-scan-1"],
+      kitIds: [],
+      bookingId: "booking-scan",
+      organizationId: "org-1",
+      userId: "user-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
+    });
+
+    // Prisma's 5s default rolls back a large scan into a reserved booking
+    // part way through its per-unit claims (P2028).
+    expect(db.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      LONG_TRANSACTION_OPTIONS
+    );
+  });
+
   describe("inSameTransaction", () => {
     beforeEach(() => {
       //@ts-expect-error missing vitest type

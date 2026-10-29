@@ -3247,7 +3247,14 @@ type MaterializeArgs = {
    */
   userId?: string;
   /**
-   * Interactive Prisma transaction client. Required — this function
+   * The actor for `userId`, already loaded. {@link fulfilModelRequestsForAssets}
+   * loads it once and hands it to every asset, so a large scan does not repeat
+   * the same user read per unit inside the transaction. Omitted, it is loaded
+   * here from `userId`.
+   */
+  actor?: NoteActor | null;
+  /**
+   * Interactive Prisma transaction client. Required: this function
    * must run in the same tx as the caller's `BookingAsset.create`
    * (typically `addScannedAssetsToBooking`) so a failure anywhere in
    * the scan flow rolls the request-decrement back.
@@ -3284,6 +3291,7 @@ export async function materializeModelRequestForAsset({
   asset,
   organizationId,
   userId,
+  actor: preloadedActor,
   tx,
 }: MaterializeArgs): Promise<
   | { matched: true; requestId: string; remaining: number; modelName: string }
@@ -3408,7 +3416,12 @@ export async function materializeModelRequestForAsset({
 
     // Activity note — IN the tx so the note rolls back with the
     // materialization if anything later in the pipeline fails.
-    const actor = userId ? await loadActor(userId) : null;
+    const actor =
+      preloadedActor !== undefined
+        ? preloadedActor
+        : userId
+        ? await loadActor(userId)
+        : null;
     const assetLink = wrapLinkForNote(`/assets/${asset.id}`, asset.title);
     const modelNameForNote = stripMarkdocDelimiters(existing.assetModel.name);
     // Same sentence either way; only the subject changes, so the feed reads
@@ -3616,6 +3629,10 @@ export async function fulfilModelRequestsForAssets({
     alreadyClaimedRows.map((row) => row.assetId)
   );
 
+  // The same actor signs every note and event below: load it once, not once
+  // per claimed unit, for the same transaction budget.
+  const actor = userId ? await loadActor(userId) : null;
+
   for (const asset of assets) {
     if (alreadyClaimedAssetIds.has(asset.id)) continue;
     // Sequential, not `Promise.all`: several assets of the SAME model compete
@@ -3628,6 +3645,7 @@ export async function fulfilModelRequestsForAssets({
       asset,
       organizationId,
       userId,
+      actor,
       tx,
     });
 
