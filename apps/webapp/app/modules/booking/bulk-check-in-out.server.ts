@@ -221,50 +221,114 @@ function refuseBatch({
 }
 
 /**
+ * Whether a booking whose step threw already reached `landedStatuses`.
+ *
+ * `checkoutBooking` and `checkinBooking` commit the status change first and
+ * then run follow-up work (status note, reminder scheduling, hydration) that
+ * can still throw, so a failed step does not mean an unchanged booking. A
+ * failed re-read answers "no", which keeps the cautious wording.
+ */
+async function bookingLanded({
+  bookingId,
+  organizationId,
+  landedStatuses,
+}: {
+  bookingId: Booking["id"];
+  organizationId: Organization["id"];
+  landedStatuses: BookingStatus[];
+}): Promise<boolean> {
+  const current = await db.booking
+    .findFirst({
+      where: { id: bookingId, organizationId },
+      select: { status: true },
+    })
+    .catch(() => null);
+  return current ? landedStatuses.includes(current.status) : false;
+}
+
+/** "1 booking" / "2 bookings", for a message. */
+function countBookings(count: number): string {
+  return `${count} booking${count === 1 ? "" : "s"}`;
+}
+
+/** The verb that agrees with {@link countBookings}. */
+function wasOrWere(count: number): string {
+  return count === 1 ? "was" : "were";
+}
+
+/**
  * Runs `step` for each booking in order and stops at the first failure.
  *
  * Each step is its own locked transaction, so the bookings before a failing
  * one stay done; the error says so, with the failing booking's own message.
+ * A failing booking that already reached `landedStatuses` is counted as done,
+ * since only the work after its commit failed.
  *
- * @param bookings - The validated selection, in processing order
- * @param verb - Past participle for the message ("checked out", "checked in")
- * @param step - The per-booking work
+ * @param args.bookings - The validated selection, in processing order
+ * @param args.verb - Past participle for the message ("checked out", "checked in")
+ * @param args.organizationId - Scopes the status re-read after a failure
+ * @param args.landedStatuses - The statuses a successful step leaves a booking in
+ * @param args.step - The per-booking work
  * @throws {ShelfError} The failing booking's error, prefixed with its name and
- *   how many bookings before it were processed
+ *   how many bookings were processed
  */
-async function processOneByOne(
-  bookings: SelectedBooking[],
-  verb: string,
-  step: (booking: SelectedBooking) => Promise<void>
-): Promise<void> {
+async function processOneByOne({
+  bookings,
+  verb,
+  organizationId,
+  landedStatuses,
+  step,
+}: {
+  bookings: SelectedBooking[];
+  verb: string;
+  organizationId: Organization["id"];
+  landedStatuses: BookingStatus[];
+  /** Resolves when the booking is done; its value is unused. */
+  step: (booking: SelectedBooking) => Promise<unknown>;
+}): Promise<void> {
   for (const [index, booking] of bookings.entries()) {
     try {
       await step(booking);
     } catch (cause) {
+      const landed = await bookingLanded({
+        bookingId: booking.id,
+        organizationId,
+        landedStatuses,
+      });
       const reason = isLikeShelfError(cause)
         ? cause.message
+        : landed
+        ? `Something went wrong after it was ${verb}.`
         : `Something went wrong while it was being ${verb}.`;
-      const done = index;
+      const done = landed ? index + 1 : index;
       const left = bookings.length - index - 1;
-      const before =
-        done === 0
-          ? "No booking was changed."
-          : `The ${done} booking${done === 1 ? "" : "s"} before it ${
-              done === 1 ? "was" : "were"
-            } ${verb}.`;
+      const doneWas = `${wasOrWere(done)} ${verb}`;
+      const summary = landed
+        ? `"${
+            booking.name
+          }" was ${verb}, but a step after it failed: ${reason} The ${countBookings(
+            done
+          )} up to and including it ${doneWas}.`
+        : `"${booking.name}": ${reason} ${
+            done === 0
+              ? "No booking was changed."
+              : `The ${countBookings(done)} before it ${doneWas}.`
+          }`;
       const after =
         left === 0
           ? ""
-          : ` The ${left} booking${left === 1 ? "" : "s"} after it ${
-              left === 1 ? "was" : "were"
-            } not touched.`;
+          : ` The ${countBookings(left)} after it ${wasOrWere(
+              left
+            )} not touched.`;
       throw new ShelfError({
         cause,
-        title: `"${booking.name}" could not be ${verb}`,
-        message: `"${booking.name}": ${reason} ${before}${after}`,
+        title: landed
+          ? `"${booking.name}" was ${verb} with an error`
+          : `"${booking.name}" could not be ${verb}`,
+        message: `${summary}${after}`,
         additionalData: {
           bookingId: booking.id,
-          processedCount: index,
+          processedCount: done,
           totalCount: bookings.length,
         },
         label,
@@ -353,21 +417,26 @@ export async function bulkCheckoutBookings(
       });
     }
 
-    await processOneByOne(bookings, "checked out", async (selected) => {
-      await checkoutBooking({
-        id: selected.id,
-        organizationId,
-        hints,
-        // Bulk never asks the early-date question: the start date is kept.
-        intentChoice: CheckoutIntentEnum["without-adjusted-date"],
-        from: selected.from,
-        to: selected.to,
-        userId,
-        // A refusal names other members' conflicting bookings only to a
-        // caller who may see them, the same as on the booking page.
-        seesAllBookings: access.bookings.seeAll,
-        provenance: QUICK_WEB_PROVENANCE,
-      });
+    await processOneByOne({
+      bookings,
+      verb: "checked out",
+      organizationId,
+      landedStatuses: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+      step: (selected) =>
+        checkoutBooking({
+          id: selected.id,
+          organizationId,
+          hints,
+          // Bulk never asks the early-date question: the start date is kept.
+          intentChoice: CheckoutIntentEnum["without-adjusted-date"],
+          from: selected.from,
+          to: selected.to,
+          userId,
+          // A refusal names other members' conflicting bookings only to a
+          // caller who may see them, the same as on the booking page.
+          seesAllBookings: access.bookings.seeAll,
+          provenance: QUICK_WEB_PROVENANCE,
+        }),
     });
   } catch (cause) {
     // A refusal already says what happened, title included; only an unknown
@@ -424,16 +493,21 @@ export async function bulkCheckinBookings(
       });
     }
 
-    await processOneByOne(bookings, "checked in", async (selected) => {
-      await checkinBooking({
-        id: selected.id,
-        organizationId,
-        hints,
-        // Bulk never asks the early-date question: the end date is kept.
-        intentChoice: CheckinIntentEnum["without-adjusted-date"],
-        userId,
-        provenance: QUICK_WEB_PROVENANCE,
-      });
+    await processOneByOne({
+      bookings,
+      verb: "checked in",
+      organizationId,
+      landedStatuses: [BookingStatus.COMPLETE],
+      step: (selected) =>
+        checkinBooking({
+          id: selected.id,
+          organizationId,
+          hints,
+          // Bulk never asks the early-date question: the end date is kept.
+          intentChoice: CheckinIntentEnum["without-adjusted-date"],
+          userId,
+          provenance: QUICK_WEB_PROVENANCE,
+        }),
     });
   } catch (cause) {
     // A refusal already says what happened, title included; only an unknown

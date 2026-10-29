@@ -36,11 +36,12 @@ import {
 
 // @vitest-environment node
 
-// why: the selection query is the one database read this module makes
-// itself; everything else goes through the mocked services below.
+// why: the selection query and the status re-read after a failed step are
+// the two database reads this module makes itself; everything else goes
+// through the mocked services below.
 vi.mock("~/database/db.server", () => ({
   db: {
-    booking: { findMany: vi.fn() },
+    booking: { findMany: vi.fn(), findFirst: vi.fn() },
   },
 }));
 
@@ -82,6 +83,7 @@ const NO_EXPLICIT_SCAN = {
 };
 
 const findManyMock = vi.mocked(db.booking.findMany);
+const findFirstMock = vi.mocked(db.booking.findFirst);
 const settingsMock = vi.mocked(getBookingSettingsForOrganization);
 const checkoutMock = vi.mocked(checkoutBooking);
 const checkinMock = vi.mocked(checkinBooking);
@@ -133,6 +135,8 @@ beforeEach(() => {
   settingsMock.mockResolvedValue(NO_EXPLICIT_SCAN as never);
   questionsMock.mockResolvedValue([]);
   vi.mocked(getBulkBookingsWhereInput).mockResolvedValue({});
+  // A failed step left its booking where it was, unless a test says otherwise.
+  findFirstMock.mockResolvedValue(null);
 });
 
 describe("listBookingNames", () => {
@@ -324,6 +328,38 @@ describe("bulkCheckoutBookings", () => {
     );
     expect(checkoutMock).toHaveBeenCalledTimes(2);
   });
+
+  it("counts a booking that was checked out before a later step failed", async () => {
+    findManyMock.mockResolvedValue([
+      selected("b1", BookingStatus.RESERVED),
+      selected("b2", BookingStatus.RESERVED),
+      selected("b3", BookingStatus.RESERVED),
+    ] as never);
+    checkoutMock
+      .mockResolvedValueOnce(processed("b1", []))
+      .mockRejectedValueOnce(
+        new ShelfError({
+          cause: null,
+          message: "Could not schedule the check-in reminder.",
+          label: "Booking",
+        })
+      );
+    // The check-out committed; only its follow-up work threw.
+    findFirstMock.mockResolvedValue({ status: BookingStatus.ONGOING } as never);
+
+    const error = await bulkCheckoutBookings(args(["b1", "b2", "b3"])).catch(
+      (cause: unknown) => cause as ShelfError
+    );
+
+    expect(error.message).toBe(
+      '"Booking b2" was checked out, but a step after it failed: Could not schedule the check-in reminder. The 2 bookings up to and including it were checked out. The 1 booking after it was not touched.'
+    );
+    expect(error.additionalData).toMatchObject({ processedCount: 2 });
+    expect(findFirstMock).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "b2", organizationId: ORG } })
+    );
+    expect(checkoutMock).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("bulkCheckinBookings", () => {
@@ -425,5 +461,19 @@ describe("bulkCheckinBookings", () => {
       '"Booking b1": Something went wrong while it was being checked in. No booking was changed. The 1 booking after it was not touched.'
     );
     expect(checkinMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("counts a booking that was checked in before a later step failed", async () => {
+    findManyMock.mockResolvedValue([
+      selected("b1", BookingStatus.ONGOING),
+    ] as never);
+    checkinMock.mockRejectedValueOnce(new Error("connection lost"));
+    findFirstMock.mockResolvedValue({
+      status: BookingStatus.COMPLETE,
+    } as never);
+
+    await expect(bulkCheckinBookings(args(["b1"]))).rejects.toThrow(
+      '"Booking b1" was checked in, but a step after it failed: Something went wrong after it was checked in. The 1 booking up to and including it was checked in.'
+    );
   });
 });
