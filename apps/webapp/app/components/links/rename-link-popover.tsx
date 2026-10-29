@@ -2,11 +2,11 @@
  * The control beside a link chip that names the link for the whole
  * workspace.
  *
- * Posts `url` and `title` to /api/link-titles. The name belongs to the
- * workspace's link, not to one asset, so every chip showing the same link
- * reads it once the page revalidates. A blank name, or "Use page title",
- * clears it and the chip falls back to the page title or the words the URL
- * gives.
+ * Posts `url` (the value as stored) and `title` to /api/link-titles. The name
+ * belongs to the workspace's link, not to one asset, so every chip showing the
+ * same link reads it once the page revalidates. A blank name, or "Remove
+ * name", clears it and the chip falls back to the page title or the words the
+ * URL gives.
  *
  * @see {@link file://../../routes/api+/link-titles.ts}
  * @see {@link file://./text-with-links.tsx} which places it beside the chip
@@ -34,13 +34,17 @@ const LINK_TITLES_ACTION = "/api/link-titles";
  * Closes on a saved name and returns focus to the button; a refusal stays
  * open with the server's message under the field.
  *
+ * @param props.value - The custom field value as stored; the server names
+ *   only a link some asset of the workspace stores
  * @param props.link - The parsed value the chip shows
  * @param props.title - What the workspace knows about the link, if anything
  */
 export function RenameLinkPopover({
+  value,
   link,
   title,
 }: {
+  value: string;
   link: ParsedLink;
   title?: LinkTitle;
 }) {
@@ -83,7 +87,7 @@ export function RenameLinkPopover({
           className="z-[999999] w-72 rounded-md border border-gray-200 bg-white p-4 shadow-lg"
         >
           <fetcher.Form method="post" action={LINK_TITLES_ACTION}>
-            <input type="hidden" name="url" value={link.url} />
+            <input type="hidden" name="url" value={value} />
             <h3 id={headingId} className="text-sm font-semibold text-gray-900">
               Name this link
             </h3>
@@ -121,12 +125,12 @@ export function RenameLinkPopover({
                   disabled={disabled}
                   onClick={() =>
                     void fetcher.submit(
-                      { url: link.url, title: "" },
+                      { url: value, title: "" },
                       { method: "post", action: LINK_TITLES_ACTION }
                     )
                   }
                 >
-                  Use page title
+                  Remove name
                 </Button>
               ) : null}
               <Button type="submit" variant="primary" disabled={disabled}>

@@ -23,21 +23,26 @@ import {
 import { RenameLinkPopover } from "./rename-link-popover";
 
 /**
- * Renders the control for `MANUAL_URL` beside a stubbed /api/link-titles
- * that answers with `answer()`.
+ * Renders the control for a stored value (`MANUAL_URL` unless given) beside a
+ * stubbed /api/link-titles that answers with `answer()`.
  *
  * @returns The forms the route received, as plain objects
  */
 function renderPopover(
   answer: () => unknown,
-  title: LinkTitle | undefined = LINK_TITLES[MANUAL_URL]
+  title: LinkTitle | undefined = LINK_TITLES[MANUAL_URL],
+  value = MANUAL_URL
 ) {
   const posted: Record<string, FormDataEntryValue>[] = [];
   const Stub = createRoutesStub([
     {
       path: "/",
       Component: () => (
-        <RenameLinkPopover link={parseLink(MANUAL_URL)!} title={title} />
+        <RenameLinkPopover
+          value={value}
+          link={parseLink(value)!}
+          title={title}
+        />
       ),
     },
     {
@@ -73,7 +78,7 @@ describe("RenameLinkPopover", () => {
     expect(field).toHaveAccessibleDescription(
       "Shown everywhere this link appears in your workspace."
     );
-    expect(screen.queryByRole("button", { name: "Use page title" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Remove name" })).toBeNull();
 
     await user.type(field, "Camera manual");
     await user.click(screen.getByRole("button", { name: "Save" }));
@@ -105,7 +110,7 @@ describe("RenameLinkPopover", () => {
     expect(screen.getByRole("textbox")).toHaveAttribute("aria-invalid", "true");
   });
 
-  it("clears a name someone gave the link with Use page title", async () => {
+  it("clears a name someone gave the link with Remove name", async () => {
     const user = userEvent.setup();
     const posted = renderPopover(() => LINK_TITLE_SAVED, {
       pageTitle: "EOS R5 user manual",
@@ -116,9 +121,25 @@ describe("RenameLinkPopover", () => {
       await screen.findByRole("button", { name: "Name this link" })
     );
     expect(screen.getByRole("textbox")).toHaveValue("Camera manual");
-    await user.click(screen.getByRole("button", { name: "Use page title" }));
+    await user.click(screen.getByRole("button", { name: "Remove name" }));
 
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(posted).toEqual([{ url: MANUAL_URL, title: "" }]);
+  });
+
+  it("posts the value as stored, spaces around the link included", async () => {
+    const user = userEvent.setup();
+    // The route names only a value some asset stores exactly.
+    const stored = `  ${MANUAL_URL} `;
+    const posted = renderPopover(() => LINK_TITLE_SAVED, undefined, stored);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Name this link" })
+    );
+    await user.type(screen.getByRole("textbox"), "Camera manual");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(posted).toEqual([{ url: stored, title: "Camera manual" }]);
   });
 });

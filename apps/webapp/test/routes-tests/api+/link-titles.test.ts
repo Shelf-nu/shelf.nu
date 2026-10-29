@@ -5,7 +5,8 @@
  * are on the row written: which workspace's row (always the session's, never
  * one named in the form), the cleaned and capped name, and a blank name
  * clearing it. Also pins the permission gate, the refusal of anything that is
- * not one web link, and the response shape the rename popover reads.
+ * not one web link or is not stored on an asset of the workspace, the field
+ * length limits, and the response shape the rename popover reads.
  *
  * @see {@link file://./../../../app/routes/api+/link-titles.ts}
  */
@@ -30,10 +31,13 @@ import { action } from "~/routes/api+/link-titles";
 // is called with is the contract under test, and its answer is set per case.
 vi.mock("~/utils/roles.server", () => ({ requirePermission: vi.fn() }));
 
-// why: LinkPreview rows live in the database; the upsert the service sends is
-// what each case asserts.
+// why: LinkPreview rows and stored field values live in the database; the
+// lookup and the upsert the service sends are what each case asserts.
 vi.mock("~/database/db.server", () => ({
-  db: { linkPreview: { upsert: vi.fn() } },
+  db: {
+    assetCustomFieldValue: { findFirst: vi.fn() },
+    linkPreview: { upsert: vi.fn() },
+  },
 }));
 
 // why: a refusal notifies the user through a server-sent-events emitter with
@@ -74,6 +78,9 @@ describe("POST /api/link-titles", () => {
     vi.mocked(db.linkPreview.upsert).mockResolvedValue(
       LINK_TITLE_SAVED.linkTitle as never
     );
+    vi.mocked(db.assetCustomFieldValue.findFirst).mockResolvedValue({
+      id: "acfv-manual",
+    } as never);
   });
 
   it("saves the name on the session workspace's row and returns the link's titles", async () => {
@@ -96,6 +103,55 @@ describe("POST /api/link-titles", () => {
     });
     // The rename popover's test answers with this same body.
     expect(response).toEqual(LINK_TITLE_SAVED);
+  });
+
+  it("looks for the value as stored on an asset of the session's workspace", async () => {
+    const url = `  ${MANUAL} `;
+
+    await submit({ url, title: "Camera manual", organizationId: "org-2" });
+
+    expect(db.assetCustomFieldValue.findFirst).toHaveBeenCalledWith({
+      where: {
+        asset: { organizationId: "org-1" },
+        value: { path: ["raw"], equals: url },
+      },
+      select: { id: true },
+    });
+    expect(upserted()?.where).toEqual({
+      organizationId_url: { organizationId: "org-1", url: MANUAL },
+    });
+  });
+
+  it("refuses a link no asset of the workspace stores, and writes nothing", async () => {
+    vi.mocked(db.assetCustomFieldValue.findFirst).mockResolvedValue(null);
+
+    const response = await submit({ url: MANUAL, title: "Camera manual" });
+
+    assertIsDataWithResponseInit(response);
+    expect(response.init?.status).toBe(400);
+    expect(response.data).toMatchObject({
+      error: { message: "This link is not on any asset in this workspace." },
+    });
+    expect(db.linkPreview.upsert).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "a url longer than a link can be",
+      { url: `${MANUAL}?${"a".repeat(2048)}` },
+    ],
+    ["a name longer than 500 characters", { title: "a".repeat(501) }],
+  ])("refuses %s with 400 and writes nothing", async (_, fields) => {
+    const response = await submit({
+      url: MANUAL,
+      title: "Camera manual",
+      ...fields,
+    });
+
+    assertIsDataWithResponseInit(response);
+    expect(response.init?.status).toBe(400);
+    expect(db.assetCustomFieldValue.findFirst).not.toHaveBeenCalled();
+    expect(db.linkPreview.upsert).not.toHaveBeenCalled();
   });
 
   it("gates the write on asset: update", async () => {

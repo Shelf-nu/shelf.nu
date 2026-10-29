@@ -43,7 +43,7 @@ export function TextWithLinks({
   return (
     <span className="inline-flex max-w-full items-center gap-1">
       {chip}
-      <RenameLinkPopover link={link} title={title} />
+      <RenameLinkPopover value={value} link={link} title={title} />
     </span>
   );
 }
