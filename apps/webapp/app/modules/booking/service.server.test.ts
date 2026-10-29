@@ -41,6 +41,7 @@ import {
   claimUnstampedBookingRows,
   fulfilModelRequestsForAssets,
   lockModelsForOutstandingRequests,
+  RESERVATION_BATCH_TX_TIMEOUT_MS,
 } from "~/modules/booking-model-request/service.server";
 import * as bookingNoteService from "~/modules/booking-note/service.server";
 import * as lowStockService from "~/modules/consumption-log/low-stock.server";
@@ -2750,6 +2751,30 @@ describe("updateBasicBooking", () => {
 describe("updateBookingAssets", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
+  });
+
+  // Each added asset that fills a model reservation costs its own round trips
+  // inside this transaction, so a large add runs well past Prisma's 5s
+  // default on a remote database.
+  it("runs on the reservation-batch transaction budget, not Prisma's default", async () => {
+    // why: answer the status lock with a closed booking so the call stops
+    // early; the transaction options are what this test reads, and they are
+    // passed whatever the body does. Once, so later tests keep the default.
+    (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+      { status: BookingStatus.COMPLETE },
+    ]);
+
+    await updateBookingAssets({
+      id: "booking-1",
+      organizationId: "org-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
+      assetIds: ["asset-1"],
+      userId: "user-1",
+    }).catch(() => {});
+
+    expect(db.$transaction).toHaveBeenLastCalledWith(expect.any(Function), {
+      timeout: RESERVATION_BATCH_TX_TIMEOUT_MS,
+    });
   });
 
   it.each([
@@ -16521,6 +16546,31 @@ describe("bulkDeleteBookings", () => {
 describe("addScannedAssetsToBooking", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
+  });
+
+  // A scan session can carry a hundred assets that each fill a model
+  // reservation, and every one costs round trips inside this transaction.
+  // On Prisma's 5s default such a submit expires (P2028) and adds nothing.
+  it("runs on the reservation-batch transaction budget, not Prisma's default", async () => {
+    // why: answer the status lock with a closed booking so the call stops
+    // early; the transaction options are what this test reads, and they are
+    // passed whatever the body does. Once, so later tests keep the default.
+    (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+      { status: BookingStatus.COMPLETE },
+    ]);
+
+    await addScannedAssetsToBooking({
+      assetIds: ["asset-1"],
+      kitIds: [],
+      bookingId: "booking-1",
+      organizationId: "org-1",
+      userId: "user-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
+    }).catch(() => {});
+
+    expect(db.$transaction).toHaveBeenLastCalledWith(expect.any(Function), {
+      timeout: RESERVATION_BATCH_TX_TIMEOUT_MS,
+    });
   });
 
   it.each([
