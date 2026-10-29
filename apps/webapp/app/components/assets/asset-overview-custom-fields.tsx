@@ -50,7 +50,8 @@ type CustomFieldCardProps = {
 
 /**
  * The asset's Link fields under a "Documents & links" heading, set or not.
- * Renders nothing when the asset has no Link fields.
+ * People who can edit the asset can name a link from its chip. Renders
+ * nothing when the asset has no Link fields.
  */
 export function DocumentsAndLinksCard({
   rows,
@@ -64,7 +65,12 @@ export function DocumentsAndLinksCard({
       </div>
       <ul className="item-information">
         {rows.map((row) => (
-          <CustomFieldRow key={row.def.id} row={row} {...rowProps} />
+          <CustomFieldRow
+            key={row.def.id}
+            row={row}
+            canRename={rowProps.canEditAsset}
+            {...rowProps}
+          />
         ))}
       </ul>
     </Card>
@@ -99,6 +105,7 @@ export function CustomFieldsCard({ rows, ...rowProps }: CustomFieldCardProps) {
  * who can edit it.
  *
  * @param props.row - The field and its stored value
+ * @param props.canRename - Offer "Name this link" beside a link chip
  */
 function CustomFieldRow({
   row: { def, storedValue, isEditable },
@@ -106,7 +113,11 @@ function CustomFieldRow({
   canEditAsset,
   locale,
   currency,
-}: Omit<CustomFieldCardProps, "rows"> & { row: OverviewRow }) {
+  canRename = false,
+}: Omit<CustomFieldCardProps, "rows"> & {
+  row: OverviewRow;
+  canRename?: boolean;
+}) {
   const { prefs } = useDateFormatter();
   const hasValue = !!storedValue;
   /**
@@ -154,7 +165,11 @@ function CustomFieldRow({
                 allowExternalLinks
               />
             ) : def.type === CustomFieldType.TEXT ? (
-              <TextWithLinks value={rawValue} titles={titles} />
+              <TextWithLinks
+                value={rawValue}
+                titles={titles}
+                canRename={canRename}
+              />
             ) : def.type === CustomFieldType.AMOUNT ? (
               formatCurrency({
                 value: fieldValue!.raw as number,

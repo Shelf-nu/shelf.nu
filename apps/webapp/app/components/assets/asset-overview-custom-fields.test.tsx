@@ -5,7 +5,8 @@
  *
  * A member who cannot edit sees every Link field in "Documents & links", the
  * empty ones as "Not linked", while plain fields stay in the custom fields
- * card and empty plain fields stay hidden from them.
+ * card and empty plain fields stay hidden from them. Only editors can name a
+ * link from its chip.
  *
  * @see {@link file://./asset-overview-custom-fields.tsx}
  */
@@ -112,6 +113,7 @@ describe("asset overview custom field cards", () => {
     );
     expect(card.queryByText("Serial number")).toBeNull();
     expect(screen.queryByRole("button", { name: /^Edit / })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Name this link" })).toBeNull();
   });
 
   it("names a Link field's chip with the title the loader sent for it", async () => {
@@ -147,5 +149,18 @@ describe("asset overview custom field cards", () => {
       })
     ).toBeInTheDocument();
     expect(within(cardOf("Notes")).getByText("Not set")).toBeInTheDocument();
+  });
+
+  it("lets editors name a link from its chip in Documents & links", async () => {
+    renderCards({ canEditAsset: true });
+
+    const documents = await screen.findByRole("heading", {
+      name: "Documents & links",
+    });
+    expect(
+      within(documents.closest<HTMLElement>(".card")!).getAllByRole("button", {
+        name: "Name this link",
+      })
+    ).toHaveLength(1);
   });
 });

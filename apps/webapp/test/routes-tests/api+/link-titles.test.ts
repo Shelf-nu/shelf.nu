@@ -10,6 +10,7 @@
  * @see {@link file://./../../../app/routes/api+/link-titles.ts}
  */
 import { assertIsDataWithResponseInit } from "@helpers/assertions";
+import { LINK_TITLE_SAVED, MANUAL_URL as MANUAL } from "@helpers/link-titles";
 import { createActionArgs } from "@mocks/remix";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -41,8 +42,6 @@ vi.mock("~/utils/emitter/send-notification.server", () => ({
   sendNotification: vi.fn(),
 }));
 
-const MANUAL = "https://www.example-maker.com/manuals/eos-r5.pdf";
-
 /**
  * Posts the rename form. A URLSearchParams body, not FormData: happy-dom drops
  * empty FormData fields, and a blank `title` is the clear case.
@@ -72,10 +71,9 @@ describe("POST /api/link-titles", () => {
     vi.mocked(rolesServer.requirePermission).mockResolvedValue({
       organizationId: "org-1",
     } as never);
-    vi.mocked(db.linkPreview.upsert).mockResolvedValue({
-      pageTitle: "EOS R5 user manual",
-      customTitle: "Camera manual",
-    } as never);
+    vi.mocked(db.linkPreview.upsert).mockResolvedValue(
+      LINK_TITLE_SAVED.linkTitle as never
+    );
   });
 
   it("saves the name on the session workspace's row and returns the link's titles", async () => {
@@ -96,14 +94,8 @@ describe("POST /api/link-titles", () => {
       update: { customTitle: "Camera manual" },
       select: { pageTitle: true, customTitle: true },
     });
-    expect(response).toEqual({
-      error: null,
-      ok: true,
-      linkTitle: {
-        pageTitle: "EOS R5 user manual",
-        customTitle: "Camera manual",
-      },
-    });
+    // The rename popover's test answers with this same body.
+    expect(response).toEqual(LINK_TITLE_SAVED);
   });
 
   it("gates the write on asset: update", async () => {
