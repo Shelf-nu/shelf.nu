@@ -60,6 +60,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     );
 
     await bulkMarkAvailability({
+      userId,
       organizationId,
       assetIds,
       type,
