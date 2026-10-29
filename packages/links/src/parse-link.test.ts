@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { parseLink } from "./index";
+import { linkChipText, parseLink, segmentText } from "./index";
 import type { ParsedLink } from "./index";
 
 type Reading = Pick<
@@ -414,4 +414,29 @@ test("parseLink accepts a URL of exactly MAX_LINK_LENGTH characters", () => {
   const url = `https://example.com/${"a".repeat(2048 - 20)}`;
   assert.equal(url.length, 2048);
   assert.equal(parseLink(url)?.url, url);
+});
+
+test("parseLink keeps the kind and extension of a file name longer than a chip shows", () => {
+  // 118 characters of stem plus ".pdf": two over the cap of 120.
+  const link = parseLink(
+    `https://files.example.com/certs/${"A".repeat(118)}.pdf`
+  );
+
+  assert.equal(link?.kind, "pdf");
+  assert.equal(link?.fileName, `${"A".repeat(115)}….pdf`);
+  assert.deepEqual(link && linkChipText(link, undefined), {
+    primary: `${"A".repeat(115)}….pdf`,
+    meta: "PDF · files.example.com",
+    label: `${"A".repeat(115)}….pdf, PDF, files.example.com`,
+  });
+});
+
+test("a URL with a user name or password is never a link", () => {
+  const credentialed = "https://user:secret@files.example.com/manual.pdf";
+
+  assert.equal(parseLink(credentialed), null);
+  assert.equal(parseLink("https://user@files.example.com/manual.pdf"), null);
+  assert.deepEqual(segmentText(`Manual: ${credentialed}`), [
+    { type: "text", text: `Manual: ${credentialed}` },
+  ]);
 });

@@ -22,6 +22,13 @@ const ACCEPTED: readonly (readonly [string, string])[] = [
     "https://x.com/wiki/Mercury_(planet)",
     "https://x.com/wiki/Mercury_(planet)",
   ],
+  // With the scheme typed, a single-label intranet host is a real host.
+  [
+    "http://sharepoint/sites/Quality/Shared%20Documents/cert.pdf",
+    "http://sharepoint/sites/Quality/Shared%20Documents/cert.pdf",
+  ],
+  ["http://intranet/manual.pdf", "http://intranet/manual.pdf"],
+  ["https://localhost/manual.pdf", "https://localhost/manual.pdf"],
 ];
 
 for (const [input, url] of ACCEPTED) {
@@ -41,12 +48,14 @@ test("parseLinkInput: every accepted url reads back as one link", () => {
 const ENTER_A_LINK = "Enter a web link, like https://example.com/manual.pdf";
 const NO_SPACES = "Enter just the link, with no spaces or other text";
 const WEB_ONLY = "Use a web link that starts with https:// or http://";
+const NO_CREDENTIALS = "Enter the link without a user name or password";
 
 const REFUSED: readonly (readonly [string, string])[] = [
   ["", ENTER_A_LINK],
   ["   ", ENTER_A_LINK],
   ["notalink", ENTER_A_LINK],
-  ["https://localhost/manual.pdf", ENTER_A_LINK],
+  // Without a scheme, a lone word is a typo rather than a host.
+  ["sharepoint/sites/Quality/cert.pdf", ENTER_A_LINK],
   ["//example.com/manual.pdf", ENTER_A_LINK],
   ["https:///example.com/manual.pdf", ENTER_A_LINK],
   ["https:example.com", ENTER_A_LINK],
@@ -58,6 +67,10 @@ const REFUSED: readonly (readonly [string, string])[] = [
   ["javascript:alert(1)", WEB_ONLY],
   ["ftp://files.example.com/manual.pdf", WEB_ONLY],
   ["mailto:service@example.com", WEB_ONLY],
+  ["https://user:secret@files.example.com/manual.pdf", NO_CREDENTIALS],
+  ["https://user@files.example.com/manual.pdf", NO_CREDENTIALS],
+  ["https://contoso.sharepoint.com@files.example.com/a.pdf", NO_CREDENTIALS],
+  ["service@example.com", NO_CREDENTIALS],
 ];
 
 for (const [input, message] of REFUSED) {

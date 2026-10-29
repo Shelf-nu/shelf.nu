@@ -3,7 +3,7 @@
  * Link-format fields.
  */
 
-import { capDisplayText, normalizeDisplayText } from "./display-text";
+import { capFileName, normalizeDisplayText } from "./display-text";
 import { kindFromFileName, kindFromPath, providerForHost } from "./registry";
 import type {
   LinkInput,
@@ -70,9 +70,11 @@ function trimUrlEnd(candidate: string): string {
 }
 
 /**
- * The parsed URL when `url` is a linkable http(s) URL, else null. The host is
- * lowercased here because the URL implementation Expo installs on the phone
- * keeps the host's case, and keys must match the server's.
+ * The parsed URL when `url` is a linkable http(s) URL, else null. A URL with a
+ * user name or password is not linkable: it would show the password on a chip
+ * and in a link's key, and fetch refuses it. The host is lowercased here
+ * because the URL implementation Expo installs on the phone keeps the host's
+ * case.
  */
 function readUrl(url: string): URL | null {
   if (url.length > MAX_LINK_LENGTH) return null;
@@ -80,11 +82,16 @@ function readUrl(url: string): URL | null {
     const parsed = new URL(url);
     const isWeb = parsed.protocol === "http:" || parsed.protocol === "https:";
     if (!isWeb || parsed.hostname === "") return null;
+    if (hasCredentials(parsed)) return null;
     parsed.hostname = parsed.hostname.toLowerCase();
     return parsed;
   } catch {
     return null;
   }
+}
+
+function hasCredentials(parsed: URL): boolean {
+  return parsed.username !== "" || parsed.password !== "";
 }
 
 function findLinks(text: string): FoundLink[] {
@@ -147,8 +154,9 @@ function fileNameOf(parsed: URL): string | null {
     parsed.searchParams.get("file") ?? "",
   ];
   for (const candidate of candidates) {
-    const name = capDisplayText(normalizeDisplayText(candidate));
-    if (kindFromFileName(name)) return name;
+    const name = normalizeDisplayText(candidate);
+    // The kind is read before the cap, which keeps the extension.
+    if (kindFromFileName(name)) return capFileName(name);
   }
   return null;
 }
@@ -190,6 +198,7 @@ const ENTER_A_LINK = "Enter a web link, like https://example.com/manual.pdf";
 const NO_SPACES = "Enter just the link, with no spaces or other text";
 const WEB_ONLY = "Use a web link that starts with https:// or http://";
 const TOO_LONG = `Links can be at most ${MAX_LINK_LENGTH} characters long`;
+const NO_CREDENTIALS = "Enter the link without a user name or password";
 
 /** A scheme name; one containing a dot is a host followed by a port instead. */
 const LEADING_SCHEME = /^([a-z][a-z0-9+.-]*):/i;
@@ -202,8 +211,11 @@ function refuse(message: string): LinkInput {
  * The Link-format input rule, shared by web forms, `buildCustomFieldValue`
  * and the phone input. Trims, adds `https://` to a scheme-less
  * "host.tld/..." value, drops trailing sentence punctuation, and requires
- * http(s), a dotted host, no whitespace and at most `MAX_LINK_LENGTH`
- * characters. Every accepted `url` reads back as a `ParsedLink`.
+ * http(s), no whitespace, no user name or password and at most
+ * `MAX_LINK_LENGTH` characters. A scheme-less value also needs a dotted host,
+ * so a lone word is not read as one; with `http://` or `https://` typed, a
+ * single-label intranet host such as `http://sharepoint/sites/x` is kept.
+ * Every accepted `url` reads back as a `ParsedLink`.
  */
 export function parseLinkInput(input: string): LinkInput {
   const text = input.trim();
@@ -220,9 +232,18 @@ export function parseLinkInput(input: string): LinkInput {
   const url = trimUrlEnd(candidate);
   if (url.length > MAX_LINK_LENGTH) return refuse(TOO_LONG);
 
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return refuse(ENTER_A_LINK);
+  }
+  if (hasCredentials(parsed)) return refuse(NO_CREDENTIALS);
+
   const link = parseLink(url);
-  const labels = link?.host.split(".").filter((label) => label !== "") ?? [];
-  if (labels.length < 2) return refuse(ENTER_A_LINK);
+  if (!link) return refuse(ENTER_A_LINK);
+  const labels = link.host.split(".").filter((label) => label !== "");
+  if (!hasScheme && labels.length < 2) return refuse(ENTER_A_LINK);
 
   return { ok: true, url };
 }
