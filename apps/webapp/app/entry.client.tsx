@@ -71,6 +71,10 @@ if (window.env?.SENTRY_DSN) {
       const kept = handleClientBeforeSend(event);
       return kept && maskEmailsInSentryPayload(kept);
     },
+    /** Structured logs carry page paths and scope user data, which can name a user. */
+    beforeSendLog(log) {
+      return maskEmailsInSentryPayload(log);
+    },
   });
 }
 
