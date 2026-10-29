@@ -10064,7 +10064,7 @@ describe("extendBooking", () => {
         include: expect.any(Object),
       })
     );
-    expect(result).toEqual(extendedBooking);
+    expect(result).toEqual({ ...extendedBooking, jobsRescheduled: true });
 
     // Activity event — BOOKING_DATES_CHANGED is recorded for the new end date.
     expect(activityEventService.recordEvent).toHaveBeenCalledWith(
@@ -10132,7 +10132,7 @@ describe("extendBooking", () => {
         data: { status: BookingStatus.ONGOING, to: newEndDate },
       })
     );
-    expect(result).toEqual(stored);
+    expect(result).toEqual({ ...stored, jobsRescheduled: true });
     // The new job is stored only over the job and end it was planned for.
     expect(db.booking.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -10235,7 +10235,7 @@ describe("extendBooking", () => {
       roles: [OrganizationRoles.ADMIN],
     });
 
-    expect(result).toEqual(stored);
+    expect(result).toEqual({ ...stored, jobsRescheduled: true });
     expect(scheduler.cancel).not.toHaveBeenCalled();
     expect(scheduler.sendAfter).not.toHaveBeenCalled();
   });
@@ -10442,7 +10442,9 @@ describe("extendBooking", () => {
       .spyOn(Logger, "error")
       .mockImplementation(() => {});
 
-    await expect(changeEndTo(newEndDate)).resolves.toBeDefined();
+    await expect(changeEndTo(newEndDate)).resolves.toMatchObject({
+      jobsRescheduled: false,
+    });
 
     expect(loggerError).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -10457,7 +10459,7 @@ describe("extendBooking", () => {
   });
 
   it("schedules the overdue job before the immediate reminder when the new end is under an hour away", async () => {
-    expect.assertions(3);
+    expect.assertions(4);
     const newEndDate = new Date("2025-01-01T12:30:00Z");
     const booking = bookingWithOneAssetOut(BookingStatus.ONGOING);
     //@ts-expect-error missing vitest type
@@ -10478,7 +10480,9 @@ describe("extendBooking", () => {
     //@ts-expect-error missing vitest type
     db.booking.updateMany.mockResolvedValueOnce({ count: 1 });
 
-    await changeEndTo(newEndDate);
+    await expect(changeEndTo(newEndDate)).resolves.toMatchObject({
+      jobsRescheduled: true,
+    });
 
     expect(scheduler.sendAfter).toHaveBeenCalledWith(
       "booking-queue",
@@ -11249,7 +11253,7 @@ describe("extendBooking", () => {
     );
 
     expect(db.booking.update).toHaveBeenCalled();
-    expect(result).toEqual(extendedBooking);
+    expect(result).toEqual({ ...extendedBooking, jobsRescheduled: true });
   });
 
   it("should extend booking successfully when returned asset has conflict but active assets don't", async () => {
@@ -11307,7 +11311,7 @@ describe("extendBooking", () => {
 
     // Should succeed - returned asset conflicts are ignored
     expect(db.booking.update).toHaveBeenCalled();
-    expect(result).toEqual(extendedBooking);
+    expect(result).toEqual({ ...extendedBooking, jobsRescheduled: true });
   });
 
   it("should prevent extension when active (non-returned) asset has conflict", async () => {

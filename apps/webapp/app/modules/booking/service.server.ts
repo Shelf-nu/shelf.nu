@@ -12658,7 +12658,9 @@ const END_DATE_CHANGE_COPY = {
  * @param params.access - The caller's access, for the ownership gate
  * @param params.roles - Every role on the caller's membership, for the
  *   `booking:extend` grant
- * @returns The updated booking
+ * @returns The updated booking, with `jobsRescheduled: false` when the new end
+ *   is stored but its check-in reminder and overdue job could not be
+ *   scheduled, so the booking will not turn overdue on its own
  * @throws {ShelfError} 403 when the caller lacks `booking:extend` or does not
  *   own the booking
  * @throws {ShelfError} 400 when `newEndDate` is not after the booking's start,
@@ -12970,6 +12972,10 @@ export async function extendBooking({
     // a shortened booking on its old, later reminder. It is best-effort: the
     // end is already committed, so a scheduler failure is logged and the note
     // and emails still go out instead of failing a change that has happened.
+    // Nothing else moves a booking to OVERDUE, so the caller is told through
+    // `jobsRescheduled` and can warn the user that it will not turn overdue
+    // on its own.
+    let jobsRescheduled = true;
     try {
       // Another end-date change can commit after this one. The reminder
       // belongs to the change whose end is stored now: it cancels the job
@@ -13029,6 +13035,7 @@ export async function extendBooking({
         }
       }
     } catch (cause) {
+      jobsRescheduled = false;
       Logger.error(
         new ShelfError({
           cause,
@@ -13148,7 +13155,7 @@ export async function extendBooking({
       });
     }
 
-    return updatedBooking;
+    return { ...updatedBooking, jobsRescheduled };
   } catch (cause) {
     const isShelfError = isLikeShelfError(cause);
     throw new ShelfError({
