@@ -22,6 +22,7 @@ vi.mock("~/database/db.server", () => ({
     asset: { findMany: vi.fn() },
     organization: { findUnique: vi.fn() },
     kit: { findMany: vi.fn() },
+    customField: { findMany: vi.fn() },
   },
 }));
 
@@ -588,5 +589,77 @@ describe("booking checklist PDF — failures", () => {
         new Request("http://localhost/x")
       )
     ).rejects.toMatchObject({ status: 500 });
+  });
+});
+
+describe("booking PDF: custom field values", () => {
+  it("prints each chosen field's value per asset, in the document's order", async () => {
+    vi.clearAllMocks();
+    const asset = {
+      ...ASSET,
+      customFields: [
+        { customFieldId: "cf-price", value: { raw: 85, valueText: "85" } },
+        {
+          customFieldId: "cf-notes",
+          value: { raw: "Keep the cap on.", valueMultiLineText: "x" },
+        },
+      ],
+    };
+    // why: the booking read, the asset read and the org read, as in `run`.
+    mockOf(getBooking).mockResolvedValue({
+      id: "booking-1",
+      name: "Shoot",
+      description: null,
+      custodianUser: null,
+      custodianTeamMember: { name: "Ada" },
+      tags: [],
+      modelRequests: [],
+      bookingAssets: [{ ...BOOKING_ASSETS[0], asset }],
+    });
+    mockOf(db.asset.findMany).mockResolvedValue([asset]);
+    mockOf(db.kit.findMany).mockResolvedValue([]);
+    mockOf(db.organization.findUnique).mockResolvedValue({
+      id: "org-1",
+      name: "Org",
+      imageId: null,
+      currency: "EUR",
+      updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+      qrIdDisplayPreference: "QR_ID",
+      barcodesEnabled: false,
+      showQrCodesOnPdfs: false,
+    });
+    // why: the definitions come back in database order, not the document's;
+    // "cf-gone" was deleted since the document was saved and is absent.
+    mockOf(db.customField.findMany).mockResolvedValue([
+      { id: "cf-notes", name: "Handling notes", type: "MULTILINE_TEXT" },
+      { id: "cf-price", name: "Price per day", type: "AMOUNT" },
+    ]);
+
+    const result = await fetchAllPdfRelatedData(
+      "booking-1",
+      "org-1",
+      "user-1",
+      undefined,
+      new Request("http://localhost/x", {
+        headers: { "Accept-Language": "en-US" },
+      }),
+      undefined,
+      { customFieldIds: ["cf-price", "cf-gone", "cf-notes"] }
+    );
+
+    expect(mockOf(db.customField.findMany).mock.calls[0][0].where).toEqual({
+      id: { in: ["cf-price", "cf-gone", "cf-notes"] },
+      organizationId: "org-1",
+      deletedAt: null,
+    });
+    expect(result.customFields.map((field) => field.id)).toEqual([
+      "cf-price",
+      "cf-notes",
+    ]);
+    expect(result.assets[0].customFieldValues).toEqual({
+      "cf-price": "€85.00",
+      "cf-notes": "Keep the cap on.",
+    });
+    expect(result.assets[0]).not.toHaveProperty("customFields");
   });
 });
