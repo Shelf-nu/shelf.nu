@@ -1,6 +1,20 @@
+/**
+ * CustomFieldsSection: the "Custom Fields" card on the asset screen, one row
+ * per field with its label and formatted value.
+ *
+ * Text values with a web link in them get the full row width under their
+ * label: a value that is exactly one link shows as a chip, and a URL inside
+ * other text is tappable. Every other value sits right-aligned beside its
+ * label.
+ *
+ * @see {@link file://../../app/(tabs)/assets/[id].tsx} the asset screen
+ * @see {@link file://../links/text-with-links.tsx}
+ */
 import { memo } from "react";
 import { View, Text } from "react-native";
+import type { LinkTitles } from "@shelf/links";
 import type { AssetDetail } from "@/lib/api";
+import { containsLink } from "@/lib/custom-field-links";
 import { createStyles } from "@/lib/create-styles";
 import {
   fontSize,
@@ -9,12 +23,16 @@ import {
   formatCurrency,
 } from "@/lib/constants";
 import { useDateFormatter } from "@/lib/use-date-formatter";
+import { LinkedText } from "@/components/links/linked-text";
+import { TextWithLinks } from "@/components/links/text-with-links";
 
 type CustomField = AssetDetail["customFields"][0];
 
 interface CustomFieldsSectionProps {
   customFields: CustomField[];
   currency: string;
+  /** `asset.linkTitles`: titles for values that are exactly one link. */
+  linkTitles?: LinkTitles;
 }
 
 function formatCustomFieldValue(
@@ -59,9 +77,19 @@ function formatCustomFieldValue(
   }
 }
 
+/**
+ * The custom fields card, or nothing when the asset has no field values.
+ *
+ * @param props - Component props.
+ * @param props.customFields - The rows to show, in order.
+ * @param props.currency - Workspace currency for AMOUNT values.
+ * @param props.linkTitles - Titles for link chips.
+ * @returns The section, or null.
+ */
 export const CustomFieldsSection = memo(function CustomFieldsSection({
   customFields,
   currency,
+  linkTitles,
 }: CustomFieldsSectionProps) {
   const styles = useStyles();
   const { formatDate } = useDateFormatter();
@@ -72,14 +100,47 @@ export const CustomFieldsSection = memo(function CustomFieldsSection({
     <View style={styles.sectionContainer}>
       <Text style={styles.sectionTitle}>Custom Fields</Text>
       <View style={styles.customFieldsCard}>
-        {customFields.map((cf) => (
-          <View key={cf.id} style={styles.customFieldRow}>
-            <Text style={styles.customFieldLabel}>{cf.customField.name}</Text>
-            <Text style={styles.customFieldValue} numberOfLines={3}>
-              {formatCustomFieldValue(cf, formatDate, currency)}
-            </Text>
-          </View>
-        ))}
+        {customFields.map((cf) => {
+          const type = cf.customField.type;
+          const value = formatCustomFieldValue(cf, formatDate, currency);
+          const hasLink =
+            (type === "TEXT" || type === "MULTILINE_TEXT") &&
+            containsLink(value);
+          if (hasLink) {
+            return (
+              <View
+                key={cf.id}
+                style={[styles.customFieldRow, styles.customFieldStackedRow]}
+              >
+                <Text style={styles.customFieldStackedLabel}>
+                  {cf.customField.name}
+                </Text>
+                {type === "TEXT" ? (
+                  <TextWithLinks
+                    value={value}
+                    titles={linkTitles}
+                    style={styles.customFieldStackedValue}
+                    numberOfLines={3}
+                  />
+                ) : (
+                  <LinkedText
+                    text={value}
+                    style={styles.customFieldStackedValue}
+                    numberOfLines={3}
+                  />
+                )}
+              </View>
+            );
+          }
+          return (
+            <View key={cf.id} style={styles.customFieldRow}>
+              <Text style={styles.customFieldLabel}>{cf.customField.name}</Text>
+              <Text style={styles.customFieldValue} numberOfLines={3}>
+                {value}
+              </Text>
+            </View>
+          );
+        })}
       </View>
     </View>
   );
@@ -119,5 +180,18 @@ const useStyles = createStyles((colors, shadows) => ({
     color: colors.foreground,
     flex: 1,
     textAlign: "right",
+  },
+  // A link value takes the row's full width under its label: a chip squeezed
+  // into the right half of a phone-width card would clip its words.
+  customFieldStackedRow: {
+    flexDirection: "column",
+    alignItems: "stretch",
+    gap: spacing.sm,
+  },
+  customFieldStackedLabel: { fontSize: fontSize.base, color: colors.muted },
+  customFieldStackedValue: {
+    fontSize: fontSize.base,
+    fontWeight: "600",
+    color: colors.foreground,
   },
 }));
