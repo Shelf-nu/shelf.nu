@@ -3616,8 +3616,9 @@ type CheckoutWindow = { from: Booking["from"]; to: Booking["to"] };
  * replaces was never executed and the operator and custodian are agreeing to
  * this period at the counter. Compliance and the check-in receipt then
  * measure the return against the period the gear actually went out for. The
- * replaced period is kept on the activity trail
- * ({@link recordRescheduledWindow}), not on the row.
+ * replaced period is kept on the activity trail, not on the row: the
+ * `BOOKING_DATES_CHANGED` events commit with the check-out, and the note
+ * follows ({@link recordRescheduledWindow}).
  *
  * @param data - The update the check-out is about to commit
  * @param window - The window to commit, or null when nothing moves
@@ -3761,11 +3762,11 @@ type RescheduledDates = {
 };
 
 /**
- * Records a rescheduled window the way an extension is recorded: a system
- * note naming both periods, and one `BOOKING_DATES_CHANGED` event per date
- * for the reports. Best-effort: it runs after the check-out has committed, so
- * a failure here is logged and never reported as a failed check-out, and the
- * check-in reminder is still scheduled.
+ * Writes the system note naming both periods of a rescheduled window. The
+ * `BOOKING_DATES_CHANGED` events are not written here: they commit with the
+ * date move inside the check-out transaction. The note is best-effort: it runs
+ * after the commit, so a failure is logged and never reported as a failed
+ * check-out, and the check-in reminder is still scheduled.
  *
  * @param args.bookingId - The booking that moved
  * @param args.organizationId - Its workspace
@@ -3801,24 +3802,11 @@ async function recordRescheduledWindow({
         dates.window.from
       )} to ${stamp(dates.window.to)}.`,
     });
-    for (const field of ["from", "to"] as const) {
-      await recordEvent({
-        organizationId,
-        actorUserId: userId,
-        action: "BOOKING_DATES_CHANGED",
-        entityType: "BOOKING",
-        entityId: bookingId,
-        bookingId,
-        field,
-        fromValue: dates.previous[field]?.toISOString() ?? null,
-        toValue: dates.window[field].toISOString(),
-      });
-    }
   } catch (err) {
     Logger.error(
       new ShelfError({
         cause: err,
-        message: "Failed to record the rescheduled window's activity",
+        message: "Failed to write the rescheduled window's note",
         additionalData: { bookingId },
         label,
       })
@@ -4225,17 +4213,39 @@ export async function checkoutBooking({
         }
 
         /**
-         * A reschedule is a new reservation over the new window, so the
-         * booking's units booked by name are measured against the model
-         * pools other bookings draw from over that window, as an extension
-         * measures its added days. Assets and kits are judged by the conflict
-         * guards above, quantity pools by the windowed guard below.
+         * A reschedule is a new reservation over the new window, so it is
+         * measured the way reserving one is: the units the booking still owes
+         * by model, then its units booked by name, against the model pools
+         * other bookings draw from over that window. Assets and kits are
+         * judged by the conflict guards above, quantity pools by the windowed
+         * guard below.
+         *
+         * The request guard runs first so one sorted pass covers every
+         * `AssetModel` row this transaction locks (`alsoLockAssetModelIds`),
+         * as in `reserveBooking`.
          */
         if (rescheduledWindow) {
+          const namedIndividualAssets = bookingFound.bookingAssets
+            .map((ba) => ba.asset)
+            .filter((asset) => asset.type === AssetType.INDIVIDUAL);
+
+          await assertOutstandingModelRequestsFit({
+            bookingId: bookingFound.id,
+            organizationId,
+            from: rescheduledWindow.from,
+            to: rescheduledWindow.to,
+            action: "check out booking",
+            alsoLockAssetModelIds: namedIndividualAssets
+              .map((asset) => asset.assetModelId)
+              .filter((assetModelId): assetModelId is string => !!assetModelId),
+            tx,
+            hints,
+            userId,
+            revealOtherBookings: seesAllBookings,
+          });
+
           await assertModelUnitsNotReservedElsewhere({
-            assets: bookingFound.bookingAssets
-              .map((ba) => ba.asset)
-              .filter((asset) => asset.type === AssetType.INDIVIDUAL),
+            assets: namedIndividualAssets,
             bookingId: bookingFound.id,
             bookingStatus: lockedStatus,
             windowChanged: true,
@@ -4307,6 +4317,26 @@ export async function checkoutBooking({
                 },
               };
             }),
+            tx
+          );
+        }
+
+        // A reschedule moves both dates: one BOOKING_DATES_CHANGED per date,
+        // committed with the move itself, as the reports read them. The
+        // human-readable note follows after the commit.
+        if (rescheduledWindow) {
+          await recordEvents(
+            (["from", "to"] as const).map((field) => ({
+              organizationId,
+              actorUserId: userId ?? null,
+              action: "BOOKING_DATES_CHANGED" as const,
+              entityType: "BOOKING" as const,
+              entityId: bookingFound.id,
+              bookingId: bookingFound.id,
+              field,
+              fromValue: bookingFound[field]?.toISOString() ?? null,
+              toValue: rescheduledWindow[field].toISOString(),
+            })),
             tx
           );
         }

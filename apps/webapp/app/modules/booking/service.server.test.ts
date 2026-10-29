@@ -5326,15 +5326,51 @@ describe("checkoutBooking", () => {
       expect(db.asset.updateMany).not.toHaveBeenCalled();
     });
 
-    it("records one BOOKING_DATES_CHANGED event per moved date", async () => {
-      expect.assertions(3);
+    it("measures the booking's outstanding model requests over the new window, before its by-name units", async () => {
+      expect.assertions(2);
+      const { newEndDate } = await rescheduleCheckout();
+
+      const fit = vitest.mocked(assertOutstandingModelRequestsFit);
+      const byName = vitest.mocked(assertModelUnitsNotReservedElsewhere);
+      expect(fit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          bookingId: "booking-1",
+          organizationId: "org-1",
+          to: newEndDate,
+          action: "check out booking",
+          tx: expect.anything(),
+        })
+      );
+      // One sorted pass over the AssetModel locks: the request guard first.
+      expect(fit.mock.invocationCallOrder[0]).toBeLessThan(
+        byName.mock.invocationCallOrder[0]
+      );
+    });
+
+    it("records one BOOKING_DATES_CHANGED event per moved date, inside the check-out transaction", async () => {
+      expect.assertions(6);
       await rescheduleCheckout();
 
-      const dateEvents = (
-        activityEventService.recordEvent as ReturnType<typeof vitest.fn>
-      ).mock.calls
-        .map((c) => c[0])
-        .filter((e) => e?.action === "BOOKING_DATES_CHANGED");
+      // The events commit with the date move: written through the
+      // transaction client, never as a separate write after the commit.
+      const inTxCalls = (
+        activityEventService.recordEvents as ReturnType<typeof vitest.fn>
+      ).mock.calls.filter(([events]) =>
+        (events as { action?: string }[]).some(
+          (e) => e.action === "BOOKING_DATES_CHANGED"
+        )
+      );
+      expect(inTxCalls).toHaveLength(1);
+      expect(inTxCalls[0][1]).toBeDefined();
+      expect(
+        (
+          activityEventService.recordEvent as ReturnType<typeof vitest.fn>
+        ).mock.calls.filter(([e]) => e?.action === "BOOKING_DATES_CHANGED")
+      ).toHaveLength(0);
+
+      const dateEvents = (inTxCalls[0][0] as { action?: string }[]).filter(
+        (e) => e.action === "BOOKING_DATES_CHANGED"
+      );
       const write = statusWrite();
 
       expect(dateEvents).toHaveLength(2);
