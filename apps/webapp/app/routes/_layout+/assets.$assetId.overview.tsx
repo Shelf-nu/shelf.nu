@@ -213,6 +213,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         userId,
         organizationId,
         roles,
+        workspace: access.workspaceGrants,
       }),
       canSeeAuditHistory
         ? getAssetAuditHistory({
@@ -241,6 +242,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userId,
       organizationId,
       roles,
+      workspace: access.workspaceGrants,
       entity: PermissionEntity.asset,
       action: PermissionAction.update,
     });

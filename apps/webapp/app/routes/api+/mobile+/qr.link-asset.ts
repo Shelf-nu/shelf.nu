@@ -13,9 +13,10 @@
  * code is claimed inline into the caller's org as part of the link — the
  * companion no longer needs a separate claim step for the link flow.
  *
- * Permission gate: `qr` / `update` — Role2PermissionMap only grants BASE and
- * SELF_SERVICE `qr:read`, and ADMIN/OWNER short-circuit to allow-all in
- * `hasPermission`, so this is effectively ADMIN/OWNER only, exactly like web.
+ * Permission gate: `qr` / `update`, exactly like web. ADMIN/OWNER hold it
+ * through the allow-all short-circuit in `hasPermission`, and MANAGER when the
+ * workspace switches on `managersCanEditAssets`; the matrix itself grants
+ * every role `qr:read` only.
  *
  * Security notes:
  * - `assetId` comes from the request body (attacker-controlled) and is
@@ -70,7 +71,7 @@ const LinkQrAssetSchema = z.object({
  *   - 400 Invalid body (including a non-JSON/empty body) / asset not found
  *     in the caller's workspace
  *   - 401 Missing/invalid bearer token
- *   - 403 Caller lacks `qr:update` (non-admin/owner), the QR belongs to a
+ *   - 403 Caller lacks `qr:update`, the QR belongs to a
  *     different organization, or it is already linked to another asset/kit
  *   - 404 QR code not found
  *   - 429 Rate limited
@@ -83,8 +84,7 @@ export async function action({ request }: ActionFunctionArgs) {
     userId = user.id;
     const organizationId = await requireOrganizationAccess(request, user.id);
 
-    // Same effective gate as the web link flow: qr/update is admin+owner
-    // only (see file-level JSDoc).
+    // Same effective gate as the web link flow (see file-level JSDoc).
     await requireMobilePermission({
       userId: user.id,
       organizationId,

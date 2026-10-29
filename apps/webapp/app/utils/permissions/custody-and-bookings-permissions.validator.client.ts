@@ -1,5 +1,9 @@
 import type { Organization, OrganizationRoles } from "@prisma/client";
-import { isOrganizationRole, resolveRoleAccess } from "./role-access";
+import {
+  isOrganizationRole,
+  NO_WORKSPACE_GRANTS,
+  resolveRoleAccess,
+} from "./role-access";
 
 /**
  * Type for organization permission settings
@@ -57,9 +61,11 @@ export function userHasCustodyViewPermission({
     workspace: {
       selfServiceCanSeeCustody: organization.selfServiceCanSeeCustody,
       baseUserCanSeeCustody: organization.baseUserCanSeeCustody,
-      // Booking visibility does not affect custody visibility.
+      // Booking visibility and permission switches do not affect custody
+      // visibility.
       selfServiceCanSeeBookings: false,
       baseUserCanSeeBookings: false,
+      ...NO_WORKSPACE_GRANTS,
     },
   }).custody.seeAll;
 }

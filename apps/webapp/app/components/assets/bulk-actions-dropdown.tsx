@@ -132,6 +132,28 @@ function ConditionalDropdown() {
 
   const roles = useOrganizationRoles();
   const assignsSelfOnly = useRoleAccess().custody.assign === "self";
+
+  /** Bulk location, the one bulk edit a workspace switch can open. */
+  const canBulkUpdateLocation = userHasPermission({
+    roles,
+    entity: PermissionEntity.asset,
+    action: PermissionAction.update,
+  });
+  /**
+   * Every other bulk edit answers from the matrix alone, as its route does
+   * (`matrixOnly: true`), so a switched-on Manager never sees it.
+   */
+  const canBulkEdit = userHasPermission({
+    roles,
+    entity: PermissionEntity.asset,
+    action: PermissionAction.update,
+    matrixOnly: true,
+  });
+  const canBulkDelete = userHasPermission({
+    roles,
+    entity: PermissionEntity.asset,
+    action: PermissionAction.delete,
+  });
   const user = useUserData();
 
   /**
@@ -193,25 +215,23 @@ function ConditionalDropdown() {
           )}
         />
       )}
-      <When
-        truthy={userHasPermission({
-          roles,
-          entity: PermissionEntity.asset,
-          action: PermissionAction.update,
-        })}
-      >
+      <When truthy={canBulkUpdateLocation}>
         <BulkLocationUpdateDialog />
+      </When>
+      <When truthy={canBulkEdit}>
         <BulkAssignTagsDialog />
         <BulkRemoveTagsDialog />
         <BulkCategoryUpdateDialog />
         <BulkSetReorderPointDialog />
         <BulkAssetModelUpdateDialog />
         <BulkAssetModelRemoveDialog />
-        <BulkDeleteDialog />
         <BulkMarkAvailabilityDialog type="available" />
         <BulkMarkAvailabilityDialog type="unavailable" />
         <BulkAddToKitDialog />
         <BulkRemoveFromKits />
+      </When>
+      <When truthy={canBulkDelete}>
+        <BulkDeleteDialog />
       </When>
       {/* Archive and Reinstate share their own grant, `asset: archive`. */}
       <When truthy={canArchiveAssets}>
@@ -410,13 +430,7 @@ function ConditionalDropdown() {
               </DropdownMenuItem>
             </When>
 
-            <When
-              truthy={userHasPermission({
-                roles,
-                entity: PermissionEntity.asset,
-                action: PermissionAction.update,
-              })}
-            >
+            <When truthy={canBulkEdit}>
               <DropdownMenuItem className="py-1 lg:p-0">
                 <BulkUpdateDialogTrigger
                   type="tag-add"
@@ -433,6 +447,8 @@ function ConditionalDropdown() {
                   label="Remove tags"
                 />
               </DropdownMenuItem>
+            </When>
+            <When truthy={canBulkUpdateLocation}>
               <DropdownMenuItem className="border-t py-1 lg:p-0">
                 <BulkUpdateDialogTrigger
                   type="location"
@@ -440,6 +456,8 @@ function ConditionalDropdown() {
                   disabled={archivedBulkDisabled || isLoading}
                 />
               </DropdownMenuItem>
+            </When>
+            <When truthy={canBulkEdit}>
               <DropdownMenuItem className="py-1 lg:p-0">
                 <BulkUpdateDialogTrigger
                   type="category"
@@ -545,7 +563,8 @@ function ConditionalDropdown() {
                   />
                 </DropdownMenuItem>
               </When>
-
+            </When>
+            <When truthy={canBulkDelete}>
               <DropdownMenuItem className="py-1 lg:p-0">
                 <BulkUpdateDialogTrigger
                   type="trash"
@@ -563,6 +582,8 @@ function ConditionalDropdown() {
                   }
                 />
               </DropdownMenuItem>
+            </When>
+            <When truthy={canBulkUpdateLocation}>
               <DropdownMenuItem className="border-t md:hidden lg:p-0">
                 <Button
                   type="button"

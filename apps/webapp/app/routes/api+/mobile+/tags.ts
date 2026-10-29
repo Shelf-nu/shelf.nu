@@ -36,7 +36,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
 
-    const [{ tags }, { roles }] = await Promise.all([
+    const [{ tags }, { roles, access }] = await Promise.all([
       getTagsForAssetTagsFilter({ organizationId }),
       getMobileUserContext(user.id, organizationId),
     ]);
@@ -49,6 +49,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       userId: user.id,
       organizationId,
       roles,
+      workspace: access.workspaceGrants,
       entity: PermissionEntity.tag,
       action: PermissionAction.create,
     });

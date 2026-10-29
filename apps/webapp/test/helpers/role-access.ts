@@ -16,15 +16,20 @@ import { OrganizationRoles } from "@prisma/client";
 import type {
   RoleAccess,
   WorkspaceAccessSettings,
+  WorkspaceGrantSettings,
 } from "~/utils/permissions/role-access";
+
+/** The visibility toggles and the permission switches, as one workspace row. */
+type WorkspaceSettings = WorkspaceAccessSettings & WorkspaceGrantSettings;
 import { resolveRoleAccess } from "~/utils/permissions/role-access";
 
-/** Every workspace visibility toggle switched off. */
-export const ALL_TOGGLES_OFF: WorkspaceAccessSettings = {
+/** Every workspace visibility toggle and permission switch off. */
+export const ALL_TOGGLES_OFF: WorkspaceSettings = {
   selfServiceCanSeeBookings: false,
   baseUserCanSeeBookings: false,
   selfServiceCanSeeCustody: false,
   baseUserCanSeeCustody: false,
+  managersCanEditAssets: false,
 };
 
 /**
@@ -35,7 +40,7 @@ export const ALL_TOGGLES_OFF: WorkspaceAccessSettings = {
  */
 export function accessFor(
   roles: OrganizationRoles[],
-  workspace: Partial<WorkspaceAccessSettings> = {}
+  workspace: Partial<WorkspaceSettings> = {}
 ): RoleAccess {
   return resolveRoleAccess({
     roles,
@@ -58,7 +63,7 @@ export function permissionContext({
   organizationId = "org-1",
 }: {
   roles?: OrganizationRoles[];
-  workspace?: Partial<WorkspaceAccessSettings>;
+  workspace?: Partial<WorkspaceSettings>;
   organizationId?: string;
 } = {}) {
   const toggles = { ...ALL_TOGGLES_OFF, ...workspace };

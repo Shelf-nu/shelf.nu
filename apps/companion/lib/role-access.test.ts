@@ -44,6 +44,7 @@ function meOrganization(overrides: Partial<Organization> = {}): Organization {
     baseUserCanSeeBookings: false,
     selfServiceCanSeeCustody: false,
     baseUserCanSeeCustody: false,
+    managersCanEditAssets: false,
     ...overrides,
   };
 }
@@ -137,7 +138,12 @@ describe("accessForOrganization", () => {
     for (const entity of Object.values(PermissionEntity)) {
       for (const action of Object.values(PermissionAction)) {
         assert.equal(
-          userHasPermission({ roles: org.roles, entity, action }),
+          userHasPermission({
+            roles: org.roles,
+            workspace: org,
+            entity,
+            action,
+          }),
           false,
           `${entity}:${action}`
         );

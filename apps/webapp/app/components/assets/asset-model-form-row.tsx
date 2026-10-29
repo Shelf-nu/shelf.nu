@@ -22,6 +22,7 @@
  *
  * @see {@link file://./form.tsx} consumer
  */
+import { useInlineCreatePermissions } from "~/hooks/use-inline-create-permissions";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import FormRow from "../forms/form-row";
 import InlineEntityCreationDialog from "../inline-entity-creation-dialog/inline-entity-creation-dialog";
@@ -55,6 +56,9 @@ export function AssetModelFormRow({
   onChange,
   error,
 }: AssetModelFormRowProps) {
+  /** "Create" shortcuts show only to members who may create asset models. */
+  const canCreateAssetModel = useInlineCreatePermissions().assetModel;
+
   return (
     <FormRow
       rowLabel="Asset Model"
@@ -62,14 +66,16 @@ export function AssetModelFormRow({
       subHeading={
         <p>
           Assign a model to group similar assets together.{" "}
-          <Button
-            to="/settings/asset-models/new"
-            variant="link-gray"
-            className="text-gray-600 underline"
-            target="_blank"
-          >
-            Create asset models
-          </Button>
+          {canCreateAssetModel ? (
+            <Button
+              to="/settings/asset-models/new"
+              variant="link-gray"
+              className="text-gray-600 underline"
+              target="_blank"
+            >
+              Create asset models
+            </Button>
+          ) : null}
         </p>
       }
       className="border-b-0 pb-[10px]"
@@ -91,23 +97,27 @@ export function AssetModelFormRow({
           selectionMode="set"
           allowClear={true}
           onChange={onChange}
-          extraContent={({ onItemCreated, closePopover }) => (
-            <InlineEntityCreationDialog
-              title="Create new asset model"
-              type="assetModel"
-              buttonLabel="Create new asset model"
-              onCreated={(created) => {
-                if (created?.type !== "assetModel") return;
-                const model = created.entity;
-                onItemCreated({
-                  id: model.id,
-                  name: model.name,
-                  metadata: { ...model },
-                });
-                closePopover();
-              }}
-            />
-          )}
+          extraContent={
+            canCreateAssetModel
+              ? ({ onItemCreated, closePopover }) => (
+                  <InlineEntityCreationDialog
+                    title="Create new asset model"
+                    type="assetModel"
+                    buttonLabel="Create new asset model"
+                    onCreated={(created) => {
+                      if (created?.type !== "assetModel") return;
+                      const model = created.entity;
+                      onItemCreated({
+                        id: model.id,
+                        name: model.name,
+                        metadata: { ...model },
+                      });
+                      closePopover();
+                    }}
+                  />
+                )
+              : undefined
+          }
         />
         {error ? <p className="mt-1 text-sm text-error-500">{error}</p> : null}
       </div>

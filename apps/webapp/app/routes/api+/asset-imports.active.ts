@@ -54,6 +54,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         organizationId,
         userId,
         roles,
+        // why: no workspace switch grants this action.
+        workspace: null,
         entity: PermissionEntity.asset,
         action: PermissionAction.import,
       }),

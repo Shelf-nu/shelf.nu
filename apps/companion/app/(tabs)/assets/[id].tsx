@@ -98,21 +98,25 @@ export default function AssetDetailScreen() {
   const roles = currentOrg?.roles;
   const canUpdateAsset = userHasPermission({
     roles,
+    workspace: currentOrg,
     entity: "asset",
     action: "update",
   });
   const canDeleteAsset = userHasPermission({
     roles,
+    workspace: currentOrg,
     entity: "asset",
     action: "delete",
   });
   const canCustody = userHasPermission({
     roles,
+    workspace: currentOrg,
     entity: "asset",
     action: "custody",
   });
   const canCreateNote = userHasPermission({
     roles,
+    workspace: currentOrg,
     entity: "note",
     action: "create",
   });
@@ -120,6 +124,7 @@ export default function AssetDetailScreen() {
   // web (`asset: archive`: admins and owners).
   const canReinstate = userHasPermission({
     roles,
+    workspace: currentOrg,
     entity: "asset",
     action: "archive",
   });

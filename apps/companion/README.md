@@ -389,7 +389,9 @@ Every role decision in the app comes from `@shelf/permissions`:
 `userHasPermission` (`lib/permissions.ts`) for the permission matrix and
 `useRoleAccess()` (`hooks/use-role-access.ts`) for reach: whose bookings,
 custody scope, audit scope, booking item rules. `/api/mobile/me` sends each
-workspace's visibility toggles for this. Never compare role strings in the app:
+workspace's visibility toggles and permission switches for this; pass the
+current organization to `userHasPermission` as `workspace` so an entry point
+follows a switch such as `managersCanEditAssets`. Never compare role strings in the app:
 `local-rules/no-direct-role-checks` (shared with the webapp, wired in
 `eslint.config.js`) fails `pnpm --filter @shelf/companion lint` on a role comparison
 outside tests.

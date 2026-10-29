@@ -92,6 +92,12 @@ const ConditionalActionsDropdown = () => {
     entity: PermissionEntity.asset,
     action: PermissionAction.update,
   });
+  /** Delete is its own grant: a member who may edit may still not delete. */
+  const canDeleteAsset = userHasPermission({
+    roles,
+    entity: PermissionEntity.asset,
+    action: PermissionAction.delete,
+  });
   /** Reminders are their own entity, so "Set reminder" is gated on its grant. */
   const canSetReminder = userHasPermission({
     roles,
@@ -511,33 +517,35 @@ const ConditionalActionsDropdown = () => {
                     </Button>
                   </div>
                 </When>
-                <div
-                  className="px-0 py-1 md:p-0"
-                  aria-disabled={
-                    assetIsCheckedOut || assetIsPartOfUnavailableKit
-                  }
-                >
-                  <DeleteAsset
-                    asset={asset}
-                    trigger={
-                      <Button
-                        type="button"
-                        variant="link"
-                        data-test-id="deleteAssetButton"
-                        icon="trash"
-                        className="justify-start rounded-sm px-4 py-3 text-sm font-semibold text-gray-700 data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-slate-100 hover:text-gray-700"
-                        width="full"
-                        disabled={
-                          // Archived assets can still be permanently deleted
-                          // (along with Reinstate, the only allowed actions).
-                          assetIsCheckedOut || assetIsPartOfUnavailableKit
-                        }
-                      >
-                        Delete
-                      </Button>
+                <When truthy={canDeleteAsset}>
+                  <div
+                    className="px-0 py-1 md:p-0"
+                    aria-disabled={
+                      assetIsCheckedOut || assetIsPartOfUnavailableKit
                     }
-                  />
-                </div>
+                  >
+                    <DeleteAsset
+                      asset={asset}
+                      trigger={
+                        <Button
+                          type="button"
+                          variant="link"
+                          data-test-id="deleteAssetButton"
+                          icon="trash"
+                          className="justify-start rounded-sm px-4 py-3 text-sm font-semibold text-gray-700 data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-slate-100 hover:text-gray-700"
+                          width="full"
+                          disabled={
+                            // Archived assets can still be permanently deleted
+                            // (along with Reinstate, the only allowed actions).
+                            assetIsCheckedOut || assetIsPartOfUnavailableKit
+                          }
+                        >
+                          Delete
+                        </Button>
+                      }
+                    />
+                  </div>
+                </When>
               </When>
               {/* Outside the update group: everyone who can open this menu
                   (custody-only members included) can close it on mobile and

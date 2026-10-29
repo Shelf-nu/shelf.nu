@@ -361,6 +361,7 @@ export async function resolveUserAction(
     case "changeRole": {
       await validatePermission({
         roles: [callerAccess.role],
+        workspace: callerAccess.workspaceGrants,
         action: PermissionAction.changeRole,
         entity: PermissionEntity.teamMember,
         organizationId,

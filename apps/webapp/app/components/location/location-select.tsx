@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigation } from "react-router";
 import { Button } from "~/components/shared/button";
+import { useInlineCreatePermissions } from "~/hooks/use-inline-create-permissions";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import DynamicSelect from "../dynamic-select/dynamic-select";
@@ -68,6 +69,8 @@ export const LocationSelect = ({
   ...restProps
 }: LocationSelectProps) => {
   const navigation = useNavigation();
+  /** The inline "Create new location" shows only to members who may create one. */
+  const canCreateLocation = useInlineCreatePermissions().location;
 
   const locationIdToUse = !restProps.isBulk ? restProps.locationId : undefined;
   const initialLocationId = defaultValue ?? locationIdToUse;
@@ -105,7 +108,7 @@ export const LocationSelect = ({
           onChange={(value) => setLocationId(value)}
           popoverZIndexClassName={popoverZIndexClassName}
           extraContent={
-            hideExtraContent
+            hideExtraContent || !canCreateLocation
               ? undefined
               : ({ onItemCreated, closePopover }) => (
                   <InlineEntityCreationDialog

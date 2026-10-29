@@ -28,6 +28,8 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       userId,
       entity: PermissionEntity.asset,
       action: PermissionAction.update,
+      // Bulk edits other than location stay closed to the workspace switches.
+      matrixOnly: true,
     });
 
     const kits = await db.kit.findMany({
@@ -59,6 +61,8 @@ export async function action({ request, context }: ActionFunctionArgs) {
       userId,
       entity: PermissionEntity.asset,
       action: PermissionAction.update,
+      // Bulk edits other than location stay closed to the workspace switches.
+      matrixOnly: true,
     });
 
     const { assetIds, kit } = parseData(

@@ -44,6 +44,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
       request,
       entity: PermissionEntity.asset,
       action: PermissionAction.update,
+      // Bulk edits other than location stay closed to the workspace switches.
+      matrixOnly: true,
     });
 
     // Fetch asset index settings to determine mode

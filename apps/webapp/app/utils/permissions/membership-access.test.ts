@@ -22,6 +22,7 @@ const OFF = {
   baseUserCanSeeBookings: false,
   selfServiceCanSeeCustody: false,
   baseUserCanSeeCustody: false,
+  managersCanEditAssets: false,
 };
 
 describe("resolveMembershipAccess", () => {

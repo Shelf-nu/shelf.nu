@@ -14,9 +14,9 @@
  * codes. The confirm dialog carries the same "current QR code will be
  * unlinked" warning as the web dialog.
  *
- * Admin/owner only in practice (the server gates the link endpoint on
- * `qr:update`); the scanner never routes other roles here, and the server
- * would 403 them anyway.
+ * The server gates the link endpoint on `qr:update` (admins and owners, and
+ * managers when the workspace switches on `managersCanEditAssets`); the
+ * scanner routes only those roles here, and the server would 403 anyone else.
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";

@@ -9644,6 +9644,97 @@
       "command-palette-search": []
     }
   },
+  "workspaceGrants": {
+    "managersCanEditAssets": {
+      "OWNER": {},
+      "ADMIN": {},
+      "MANAGER": {
+        "asset": [
+          "create",
+          "update"
+        ],
+        "qr": [
+          "update"
+        ],
+        "kit": [
+          "create",
+          "update"
+        ]
+      },
+      "SELF_SERVICE": {},
+      "BASE": {},
+      "OWNER+ADMIN": {},
+      "OWNER+MANAGER": {},
+      "OWNER+SELF_SERVICE": {},
+      "OWNER+BASE": {},
+      "ADMIN+OWNER": {},
+      "ADMIN+MANAGER": {},
+      "ADMIN+SELF_SERVICE": {},
+      "ADMIN+BASE": {},
+      "MANAGER+OWNER": {},
+      "MANAGER+ADMIN": {},
+      "MANAGER+SELF_SERVICE": {
+        "asset": [
+          "create",
+          "update"
+        ],
+        "qr": [
+          "update"
+        ],
+        "kit": [
+          "create",
+          "update"
+        ]
+      },
+      "MANAGER+BASE": {
+        "asset": [
+          "create",
+          "update"
+        ],
+        "qr": [
+          "update"
+        ],
+        "kit": [
+          "create",
+          "update"
+        ]
+      },
+      "SELF_SERVICE+OWNER": {},
+      "SELF_SERVICE+ADMIN": {},
+      "SELF_SERVICE+MANAGER": {
+        "asset": [
+          "create",
+          "update"
+        ],
+        "qr": [
+          "update"
+        ],
+        "kit": [
+          "create",
+          "update"
+        ]
+      },
+      "SELF_SERVICE+BASE": {},
+      "BASE+OWNER": {},
+      "BASE+ADMIN": {},
+      "BASE+MANAGER": {
+        "asset": [
+          "create",
+          "update"
+        ],
+        "qr": [
+          "update"
+        ],
+        "kit": [
+          "create",
+          "update"
+        ]
+      },
+      "BASE+SELF_SERVICE": {},
+      "(none)": {},
+      "UNKNOWN_ROLE": {}
+    }
+  },
   "D-01": {
     "OWNER": {
       "web": "OWNER",

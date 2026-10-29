@@ -1,19 +1,26 @@
 /**
- * The assets index bulk menu disables "Assign custody" while the selection
- * holds an individually tracked kit member, and says why.
+ * The assets index bulk menu.
  *
- * Custody of a kit member comes from its kit. The server refuses the request
- * (`assertNotKitMembers`); the menu says so before the click. Selected rows
- * arrive in two shapes, `assetKits` from simple mode and a flattened `kit`
- * from advanced mode, and both must disable the action.
+ * - It disables "Assign custody" while the selection holds an individually
+ *   tracked kit member, and says why. Custody of a kit member comes from its
+ *   kit. The server refuses the request (`assertNotKitMembers`); the menu says
+ *   so before the click. Selected rows arrive in two shapes, `assetKits` from
+ *   simple mode and a flattened `kit` from advanced mode, and both must disable
+ *   the action.
+ * - It offers a Manager only the bulk edits the server lets them run. With
+ *   "Managers can edit assets" on, that is bulk location alone; every other
+ *   bulk edit and Delete stay with Administrators, as their routes do.
  *
  * @see {@link file://./bulk-actions-dropdown.tsx}
  * @see {@link file://./../../modules/asset/utils.ts} isIndividualKitMember
  */
 import { OrganizationRoles } from "@prisma/client";
-import { render } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type * as BulkUpdateDialogModule from "~/components/bulk-update-dialog/bulk-update-dialog";
 import type { DisabledProp } from "~/components/shared/button";
+import type { MemberRoles } from "~/utils/permissions/member-roles";
+import { withWorkspaceGrants } from "~/utils/permissions/member-roles";
 import BulkActionsDropdown from "./bulk-actions-dropdown";
 
 /** The selection the mocked `useAtomValue` returns. */
@@ -28,6 +35,11 @@ let mockSelectedAssets: Record<string, unknown>[] = [];
  * description) is the shared Button's job and is covered there.
  */
 let capturedDisabled: Record<string, DisabledProp | undefined> = {};
+
+/** The roles `useOrganizationRoles` hands the menu for the current render. */
+const caller = vi.hoisted(() => ({
+  roles: undefined as MemberRoles | OrganizationRoles[] | undefined,
+}));
 
 // why: the selection lives in a jotai atom whose `onMount` resets it at
 // subscription time, so a seeded selection would be wiped before render.
@@ -66,10 +78,11 @@ vi.mock("~/hooks/use-controlled-dropdown-menu", () => ({
 }));
 
 // why: the roles, the role access and the user all read the `_layout` route
-// loader, which is not mounted here. An admin sees every item and assigns
-// custody to anyone.
+// loader, which is not mounted here. The roles carry the workspace's switches
+// the way the real hook hands them out; by default an admin, who sees every
+// item and assigns custody to anyone.
 vi.mock("~/hooks/use-organization-roles", () => ({
-  useOrganizationRoles: () => [OrganizationRoles.ADMIN],
+  useOrganizationRoles: () => caller.roles,
 }));
 vi.mock("~/hooks/use-role-access", () => ({
   useRoleAccess: () => ({
@@ -81,21 +94,22 @@ vi.mock("~/hooks/use-user-data", () => ({
   useUserData: () => ({ id: "user-1" }),
 }));
 
-// why: captures each trigger's `disabled` decision (see `capturedDisabled`).
-vi.mock("../bulk-update-dialog/bulk-update-dialog", () => ({
-  BulkUpdateDialogTrigger: ({
-    type,
-    disabled,
-  }: {
-    type: string;
-    disabled?: DisabledProp;
-  }) => {
-    capturedDisabled[type] = disabled;
-    return null;
-  },
-  // The Set min quantity dialog renders its content straight from this module.
-  BulkUpdateDialogContent: () => null,
-}));
+// why: captures each trigger's `disabled` decision (see `capturedDisabled`),
+// then renders the real trigger so the menu items can be read by name.
+vi.mock("../bulk-update-dialog/bulk-update-dialog", async (importOriginal) => {
+  const actual = await importOriginal<typeof BulkUpdateDialogModule>();
+  return {
+    ...actual,
+    BulkUpdateDialogTrigger: (
+      props: Parameters<typeof actual.BulkUpdateDialogTrigger>[0]
+    ) => {
+      capturedDisabled[props.type] = props.disabled;
+      return <actual.BulkUpdateDialogTrigger {...props} />;
+    },
+    // The Set min quantity dialog renders its content straight from this module.
+    BulkUpdateDialogContent: () => null,
+  };
+});
 
 // why: every dialog brings its own form, loader and atom chain, renders
 // outside the menu, and is not under test.
@@ -138,6 +152,10 @@ function renderWithSelection(selection: Record<string, unknown>[]) {
   mockSelectedAssets = selection;
   render(<BulkActionsDropdown />);
 }
+
+beforeEach(() => {
+  caller.roles = [OrganizationRoles.ADMIN];
+});
 
 describe("assets index bulk menu: custody of kit members", () => {
   beforeEach(() => {
@@ -259,5 +277,80 @@ describe("assets index bulk menu: assets whose kit is not available", () => {
     expect(capturedDisabled["release-custody"]).not.toEqual({
       reason: KIT_CUSTODY_REASON,
     });
+  });
+});
+
+/**
+ * "Managers can edit assets" opens bulk location to a Manager and nothing
+ * else: the other bulk edits answer from the matrix alone on the server
+ * (`matrixOnly: true`), and Delete is a grant the switch never adds.
+ */
+describe("assets index bulk menu: what a Manager may edit in bulk", () => {
+  /** Every bulk edit that stays with Administrators whatever the switch. */
+  const ADMIN_ONLY_ITEMS = [
+    "Assign tags",
+    "Remove tags",
+    "Update category",
+    "Update asset model",
+    "Remove from asset model",
+    "Add to kit",
+    "Remove from kit",
+    "Mark as available",
+    "Mark as unavailable",
+    "Delete",
+  ];
+
+  /** The bulk menu items the current render shows, by visible name. */
+  function shownItems() {
+    return ["Update location", ...ADMIN_ONLY_ITEMS].filter(
+      (name) => screen.queryByRole("button", { name }) !== null
+    );
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    capturedDisabled = {};
+  });
+
+  it("shows a Manager only Update location once the switch is on", () => {
+    caller.roles = withWorkspaceGrants([OrganizationRoles.MANAGER], {
+      managersCanEditAssets: true,
+    });
+
+    renderWithSelection([row({ id: "drill" })]);
+
+    expect(shownItems()).toEqual(["Update location"]);
+  });
+
+  it("shows a Manager none of the bulk edits while the switch is off", () => {
+    caller.roles = withWorkspaceGrants([OrganizationRoles.MANAGER], {
+      managersCanEditAssets: false,
+    });
+
+    renderWithSelection([row({ id: "drill" })]);
+
+    expect(shownItems()).toEqual([]);
+  });
+
+  it("shows an Administrator every bulk edit and Delete", () => {
+    caller.roles = withWorkspaceGrants([OrganizationRoles.ADMIN], {
+      managersCanEditAssets: true,
+    });
+
+    renderWithSelection([row({ id: "drill" })]);
+
+    expect(shownItems()).toEqual([
+      "Update location",
+      "Assign tags",
+      "Remove tags",
+      "Update category",
+      "Update asset model",
+      "Remove from asset model",
+      "Add to kit",
+      "Remove from kit",
+      "Mark as available",
+      "Mark as unavailable",
+      "Delete",
+    ]);
   });
 });

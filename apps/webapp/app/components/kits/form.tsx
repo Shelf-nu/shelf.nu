@@ -9,6 +9,7 @@ import { fileErrorAtom, assetImageValidateFileAtom } from "~/atoms/file";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useDiscardRemount } from "~/hooks/use-discard-remount";
+import { useInlineCreatePermissions } from "~/hooks/use-inline-create-permissions";
 import { useTrackedFormRef } from "~/hooks/use-unsaved-changes";
 import type { action as editKitAction } from "~/routes/_layout+/kits.$kitId_.edit";
 import type { action as createKitAction } from "~/routes/_layout+/kits.new";
@@ -144,6 +145,8 @@ function KitsFormInner({
   const [, updateDynamicTitle] = useAtom(updateDynamicTitleAtom);
 
   const zo = useZorm("NewKitForm", NewKitFormSchema);
+  /** "Create new" shortcuts show only to members who may create that entity. */
+  const canCreateInline = useInlineCreatePermissions();
 
   /** The form element, shared by Zorm and the unsaved-changes tracking. */
   const { formRef, setFormRef } = useTrackedFormRef(zo.ref);
@@ -241,14 +244,16 @@ function KitsFormInner({
             <p>
               Make it unique. Each kit can have 1 category. It will show on your
               index.{" "}
-              <Button
-                to="/categories/new"
-                variant="link-gray"
-                className="text-gray-600 underline"
-                target="_blank"
-              >
-                Create categories
-              </Button>
+              {canCreateInline.category ? (
+                <Button
+                  to="/categories/new"
+                  variant="link-gray"
+                  className="text-gray-600 underline"
+                  target="_blank"
+                >
+                  Create categories
+                </Button>
+              ) : null}
             </p>
           }
           className="border-b-0 pb-[10px]"
@@ -267,24 +272,28 @@ function KitsFormInner({
             closeOnSelect
             selectionMode="none"
             allowClear={true}
-            extraContent={({ onItemCreated, closePopover }) => (
-              <InlineEntityCreationDialog
-                type="category"
-                title="Create new category"
-                buttonLabel="Create new category"
-                onCreated={(created) => {
-                  if (created?.type !== "category") return;
-                  const category = created.entity;
-                  onItemCreated({
-                    id: category.id,
-                    name: category.name,
-                    color: category.color,
-                    metadata: { ...category },
-                  });
-                  closePopover();
-                }}
-              />
-            )}
+            extraContent={
+              canCreateInline.category
+                ? ({ onItemCreated, closePopover }) => (
+                    <InlineEntityCreationDialog
+                      type="category"
+                      title="Create new category"
+                      buttonLabel="Create new category"
+                      onCreated={(created) => {
+                        if (created?.type !== "category") return;
+                        const category = created.entity;
+                        onItemCreated({
+                          id: category.id,
+                          name: category.name,
+                          color: category.color,
+                          metadata: { ...category },
+                        });
+                        closePopover();
+                      }}
+                    />
+                  )
+                : undefined
+            }
           />
         </FormRow>
 
@@ -294,14 +303,16 @@ function KitsFormInner({
             <p>
               A location is a place where an item is supposed to be located.
               This is different than the last scanned location{" "}
-              <Button
-                to="/locations/new"
-                className="text-gray-600 underline"
-                target="_blank"
-                variant="link-gray"
-              >
-                Create locations
-              </Button>
+              {canCreateInline.location ? (
+                <Button
+                  to="/locations/new"
+                  className="text-gray-600 underline"
+                  target="_blank"
+                  variant="link-gray"
+                >
+                  Create locations
+                </Button>
+              ) : null}
             </p>
           }
           className="border-b-0 py-[10px]"
@@ -320,23 +331,27 @@ function KitsFormInner({
             countKey="totalLocations"
             closeOnSelect
             allowClear
-            extraContent={({ onItemCreated, closePopover }) => (
-              <InlineEntityCreationDialog
-                type="location"
-                title="Create new location"
-                buttonLabel="Create new location"
-                onCreated={(created) => {
-                  if (created?.type !== "location") return;
-                  const location = created.entity;
-                  onItemCreated({
-                    id: location.id,
-                    name: location.name,
-                    metadata: { ...location },
-                  });
-                  closePopover();
-                }}
-              />
-            )}
+            extraContent={
+              canCreateInline.location
+                ? ({ onItemCreated, closePopover }) => (
+                    <InlineEntityCreationDialog
+                      type="location"
+                      title="Create new location"
+                      buttonLabel="Create new location"
+                      onCreated={(created) => {
+                        if (created?.type !== "location") return;
+                        const location = created.entity;
+                        onItemCreated({
+                          id: location.id,
+                          name: location.name,
+                          metadata: { ...location },
+                        });
+                        closePopover();
+                      }}
+                    />
+                  )
+                : undefined
+            }
             renderItem={({ name, metadata }) => (
               <div className="flex items-center gap-2">
                 {metadata?.thumbnailUrl ? (

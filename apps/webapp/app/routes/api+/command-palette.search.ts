@@ -197,6 +197,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         organizationId,
         userId,
         roles,
+        workspace: currentOrganization,
         entity,
         action: PermissionAction.read,
       });

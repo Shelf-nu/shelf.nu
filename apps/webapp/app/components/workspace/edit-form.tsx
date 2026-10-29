@@ -21,6 +21,7 @@ import { SSO_GROUP_ROLE, type SsoGroupField } from "~/utils/sso-group-roles";
 import { tw } from "~/utils/tw";
 import { zodFieldIsRequired } from "~/utils/zod";
 import CurrencySelector from "./currency-selector";
+import { ManagersCanEditAssetsForm } from "./managers-can-edit-assets-form";
 import QrIdDisplayPreferenceSelector from "./qr-id-display-preference-selector";
 import { WorkspaceLogoField } from "./workspace-logo-field";
 import FormRow from "../forms/form-row";
@@ -66,6 +67,13 @@ interface Props {
    */
   scimEnabled?: boolean;
   scimTokens?: ScimTokenItem[];
+  /**
+   * Whether the Permissions card shows the owner-only Managers switch
+   * (`managersCanEditAssets`). Only the workspace settings route supplies it:
+   * its action saves the switch, and the switch judges ownership in the
+   * selected workspace, which is the one that route edits.
+   */
+  showManagersSwitch?: boolean;
 }
 
 export const EditGeneralWorkspaceSettingsFormSchema = (
@@ -102,6 +110,7 @@ export const WorkspaceEditForms = ({
   className,
   scimEnabled,
   scimTokens,
+  showManagersSwitch,
 }: Props) => (
   <div className={tw("flex flex-col gap-3", className)}>
     <WorkspaceGeneralEditForms
@@ -109,7 +118,7 @@ export const WorkspaceEditForms = ({
       currency={currency}
       qrIdDisplayPreference={qrIdDisplayPreference}
     />
-    <WorkspacePermissionsEditForm />
+    <WorkspacePermissionsEditForm showManagersSwitch={showManagersSwitch} />
     <WorkspaceSSOEditForm />
     <WorkspaceScimTokensSection
       scimEnabled={scimEnabled}
@@ -393,7 +402,10 @@ export const EditWorkspacePermissionsSettingsFormSchema = () =>
       .default("false"),
   });
 
-const WorkspacePermissionsEditForm = ({ className }: Props) => {
+const WorkspacePermissionsEditForm = ({
+  className,
+  showManagersSwitch,
+}: Props) => {
   const { organization } = useLoaderData<typeof loader>();
   const fetcher = useFetcher({ key: "permissions" });
   const schema = EditWorkspacePermissionsSettingsFormSchema();
@@ -401,18 +413,43 @@ const WorkspacePermissionsEditForm = ({ className }: Props) => {
   const disabled = useDisabled(fetcher);
 
   return organization.type === OrganizationType.TEAM ? (
-    <fetcher.Form ref={zo.ref} method="post" className="flex flex-col gap-2">
-      <Card className={tw("my-0 w-full", className)}>
-        <div className="border-b pb-5">
-          <h3 className="text-text-lg font-semibold">Permissions</h3>
-          <p className="text-sm text-gray-600">
-            Adjust specific permissions for <b>Self Service</b> and <b>Base</b>{" "}
-            users.
-          </p>
-        </div>
+    <Card className={tw("my-0 w-full", className)}>
+      <div className="border-b pb-5">
+        <h3 className="text-text-lg font-semibold">Permissions</h3>
+        <p className="text-sm text-gray-600">
+          {showManagersSwitch ? (
+            <>
+              Adjust specific permissions for <b>Managers</b>,{" "}
+              <b>Self Service</b> and <b>Base</b> users.
+            </>
+          ) : (
+            <>
+              Adjust specific permissions for <b>Self Service</b> and{" "}
+              <b>Base</b> users.
+            </>
+          )}
+        </p>
+      </div>
+
+      {/* Its own form and intent: saving the visibility switches below never
+          submits it, so an Administrator cannot change it from there. */}
+      {showManagersSwitch ? (
+        <ManagersCanEditAssetsForm
+          defaultChecked={organization.managersCanEditAssets}
+        />
+      ) : null}
+
+      <fetcher.Form ref={zo.ref} method="post">
         <input type="hidden" value={organization.id} name="id" />
 
-        <h4 className="mt-5 text-text-md">Self service users</h4>
+        <h4
+          className={tw(
+            "text-text-md",
+            showManagersSwitch ? "border-t pt-5" : "mt-5"
+          )}
+        >
+          Self service users
+        </h4>
         <FormRow
           rowLabel={`View custody`}
           subHeading={
@@ -536,8 +573,8 @@ const WorkspacePermissionsEditForm = ({ className }: Props) => {
             {disabled ? <Spinner /> : "Save"}
           </Button>
         </div>
-      </Card>
-    </fetcher.Form>
+      </fetcher.Form>
+    </Card>
   ) : null;
 };
 

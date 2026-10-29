@@ -65,6 +65,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       request,
       entity: PermissionEntity.asset,
       action: PermissionAction.create,
+      // The bulk-create page (`?bulk=1`) stays closed to the workspace
+      // switches: they open single-asset creation only.
+      matrixOnly: new URL(request.url).searchParams.get("bulk") === "1",
     });
     /**
      * We need to check if the QR code passed in the URL belongs to the current org
@@ -164,6 +167,17 @@ export async function action({ context, request }: LoaderFunctionArgs) {
     // category-driven custom fields on top.
     const isBulkSubmit =
       formData.get("bulk") === "1" || formData.get("bulk") === "true";
+    if (isBulkSubmit) {
+      // Bulk create stays closed to the workspace switches: they open
+      // single-asset creation only.
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.asset,
+        action: PermissionAction.create,
+        matrixOnly: true,
+      });
+    }
     const FormSchema = mergedSchema({
       // Cast the union to the base schema's type — `mergedSchema`'s
       // generic expects a single ZodObject shape. The bulk variant is

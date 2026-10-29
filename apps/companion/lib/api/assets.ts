@@ -140,8 +140,9 @@ export const assetsApi = {
    * The server claims into the org resolved from `orgId` only; mobile
    * deliberately offers no org picker (web does).
    *
-   * Admin/owner only: the server gates on `qr:update`, which no role below
-   * ADMIN holds. A 403 also covers the already-claimed race. The server now
+   * The server gates on `qr:update`: admins and owners, and managers when the
+   * workspace switches on `managersCanEditAssets`. A 403 also covers the
+   * already-claimed race. The server now
    * rethrows its own guard errors instead of re-wrapping them, so that 403
    * carries a specific message ("already belongs to an organization") rather
    * than the old generic "Failed to claim qr code" — but still branch on
@@ -173,7 +174,8 @@ export const assetsApi = {
    * `errorDetails.reason === "unclaimed"` response from this endpoint any more
    * — do not write recovery paths against one.
    *
-   * Admin/owner only (server gates on `qr:update`, same as the web link flow).
+   * Needs `qr:update` (admins, owners, and Managers when the workspace
+   * switch is on), the same gate as the web link flow.
    *
    * @param orgId - Caller's current workspace id (must own the QR, or the
    *   code must be unclaimed — it is then claimed into this org).

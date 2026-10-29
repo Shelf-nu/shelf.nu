@@ -37,11 +37,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     // `userOrganizations` holds only this workspace's membership (filtered
     // above), so `[0]` is that membership, not a positional role read. The
-    // migration rewrites every asset, so it follows `asset:update`.
+    // migration rewrites every asset, so it follows `asset:update`; it is a
+    // bulk edit no workspace switch opens, so the matrix alone decides.
     const canRunMigration = await hasPermission({
       organizationId,
       userId,
       roles: user.userOrganizations[0]?.roles ?? [],
+      workspace: null,
       entity: PermissionEntity.asset,
       action: PermissionAction.update,
     });
