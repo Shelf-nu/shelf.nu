@@ -290,11 +290,19 @@ export declare function archivedAssetsLeftOut(count: number): string;
 /**
  * "Only 6 of 10 × Camera could be reserved for the new dates." for one model;
  * for several, names the first three with their counts and "and N more".
+ * Entries marked `failed` could not be written at all and get their own
+ * sentence, "Could not reserve 4 × Camera. Try again from the booking."
  *
  * @param models - at least one, each reserved below what was asked
  */
 export declare function modelReservationsReduced(
-  models: { assetModelName: string; requested: number; reserved: number }[]
+  models: {
+    assetModelName: string;
+    requested: number;
+    reserved: number;
+    /** The reservation errored, as opposed to the pool being short. */
+    failed?: boolean;
+  }[]
 ): string;
 
 /**

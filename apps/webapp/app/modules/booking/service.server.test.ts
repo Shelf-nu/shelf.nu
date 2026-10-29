@@ -8746,7 +8746,7 @@ describe("duplicateBooking", () => {
   it("still returns the copy when copying its reservations fails", async () => {
     // The booking has committed before the reservations are written, so a
     // failure there must not answer "duplicate failed": a retry would make a
-    // second copy. The open models are reported as not reserved instead.
+    // second copy. The open models are reported as failed to reserve instead.
     //@ts-expect-error missing vitest type
     db.booking.findFirstOrThrow.mockResolvedValue({
       ...mockBookingData,
@@ -8783,6 +8783,7 @@ describe("duplicateBooking", () => {
         assetModelName: "Camera",
         requested: 4,
         reserved: 0,
+        failed: true,
       },
     ]);
     expect(logged).toHaveBeenCalledTimes(1);

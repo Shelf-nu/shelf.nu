@@ -19398,7 +19398,7 @@ export async function duplicateBooking({
 
     // The copy has committed by now, so a failure here must not report the
     // duplicate as failed: a retry would create a second copy. Every open
-    // model is reported as not reserved instead, and the failure is logged.
+    // model is reported as failed to reserve instead, and the error is logged.
     let reducedModelReservations: ReducedModelReservation[];
     try {
       reducedModelReservations = await reserveModelsUpToAvailability({
@@ -19422,6 +19422,7 @@ export async function duplicateBooking({
         assetModelName: request.assetModelName,
         requested: request.quantity,
         reserved: 0,
+        failed: true as const,
       }));
     }
 

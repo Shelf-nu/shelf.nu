@@ -2623,7 +2623,7 @@ describe("reserveModelsUpToAvailability", () => {
     expect(reduced).toEqual([]);
   });
 
-  it("keeps the batches that wrote when a later one fails, reporting its models as 0", async () => {
+  it("keeps the batches that wrote when a later one fails, reporting its models as failed", async () => {
     // why: the failure is logged for Sentry; the test only needs it silent.
     vitest.spyOn(Logger, "error").mockImplementation(() => {});
     const ids = modelIds(MAX_MODELS_PER_RESERVATION_BATCH + 2);
@@ -2650,6 +2650,8 @@ describe("reserveModelsUpToAvailability", () => {
         assetModelName: `Model ${assetModelId}`,
         requested: 1,
         reserved: 0,
+        // A failure, not a shortfall, so the message can say so.
+        failed: true,
       }))
     );
     expect(Logger.error).toHaveBeenCalledTimes(1);

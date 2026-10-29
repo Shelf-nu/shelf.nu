@@ -459,6 +459,23 @@ test("a copied booking names the models it reserved short", () => {
   );
 });
 
+test("a reservation that failed is worded as an error, not a shortfall", () => {
+  assert.equal(
+    modelReservationsReduced([
+      { assetModelName: "Camera", requested: 4, reserved: 0, failed: true },
+    ]),
+    "Could not reserve 4 × Camera. Try again from the booking."
+  );
+  assert.equal(
+    modelReservationsReduced([
+      { assetModelName: "Camera", requested: 10, reserved: 6 },
+      { assetModelName: "Tripod", requested: 2, reserved: 0, failed: true },
+      { assetModelName: "Lens", requested: 1, reserved: 0, failed: true },
+    ]),
+    "Only 6 of 10 × Camera could be reserved for the new dates. Could not reserve 2 models (Tripod, Lens). Try again from the booking."
+  );
+});
+
 test("a kit with no active asset says whether it is empty or only archived", () => {
   assert.equal(
     kitsWithoutActiveAssetsRefusal({

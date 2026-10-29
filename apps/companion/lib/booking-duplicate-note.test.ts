@@ -39,3 +39,20 @@ test("names archived assets and short reservations together", () => {
     "2 archived assets were left out. Only 1 of 4 × Camera could be reserved for the new dates."
   );
 });
+
+test("says a reservation that failed should be retried, not that the dates were short", () => {
+  assert.equal(
+    duplicateLeftOutNote({
+      reducedModelReservations: [
+        {
+          assetModelId: "model-camera",
+          assetModelName: "Camera",
+          requested: 4,
+          reserved: 0,
+          failed: true,
+        },
+      ],
+    }),
+    "Could not reserve 4 × Camera. Try again from the booking."
+  );
+});

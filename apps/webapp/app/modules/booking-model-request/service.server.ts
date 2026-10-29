@@ -3057,6 +3057,11 @@ export type ReducedModelReservation = {
   requested: number;
   /** Units actually reserved, `0` when none could be. */
   reserved: number;
+  /**
+   * The reservation could not be written (the write errored), as opposed to
+   * the pool being short. Absent for a real shortfall.
+   */
+  failed?: true;
 };
 
 /**
@@ -3075,7 +3080,7 @@ export type ReducedModelReservation = {
  * its pools under the model locks and writes through
  * {@link writeBookingModelRequestInTx}, so the cap and the write's own pool
  * check agree. A batch that fails is logged and its models are reported as
- * reserved `0`; the batches already written stay.
+ * reserved `0` and `failed`; the batches already written stay.
  *
  * Expects a booking that holds no reservation for these models yet: each
  * quantity is written as the absolute target.
@@ -3210,7 +3215,12 @@ export async function reserveModelsUpToAvailability({
           additionalData: { bookingId, organizationId, batchIds },
         })
       );
-      reduced.push(...batchIds.map((id) => reportFor(id, 0)));
+      reduced.push(
+        ...batchIds.map((id) => ({
+          ...reportFor(id, 0),
+          failed: true as const,
+        }))
+      );
     }
   }
 
