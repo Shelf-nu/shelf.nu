@@ -59,6 +59,12 @@ export const canHideShelfBranding = (
 };
 
 /**
+ * Whether the workspace's tier lets it keep PDF documents. Defined with the
+ * PDF document service, where workspace creation can reach it too.
+ */
+export { canCustomizePdfDocuments } from "~/modules/pdf-document/service.server";
+
+/**
  * Determines whether an organization tier allows companion-app push
  * notifications. Pass the tier limit of the organization's owner.
  *

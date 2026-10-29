@@ -111,6 +111,7 @@ export type FailureReason = {
     | "Activity"
     | "Consumption Log"
     | "Update"
+    | "PDF documents"
     | "Analytics";
   /**
    * The message intended for the user.

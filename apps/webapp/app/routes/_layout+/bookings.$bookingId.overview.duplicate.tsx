@@ -20,6 +20,7 @@
  */
 import { useRef, useState } from "react";
 import { AssetType } from "@prisma/client";
+import { archivedAssetsLeftOut, modelReservationsReduced } from "@shelf/labels";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import {
   data,
@@ -196,20 +197,25 @@ export async function action({ request, context, params }: ActionFunctionArgs) {
       access,
     });
 
+    // What the copy left out is part of the success message, so a copy that
+    // dropped archived assets or reserved models short never looks complete.
+    const leftOut = [
+      newBooking.droppedArchivedCount > 0
+        ? archivedAssetsLeftOut(newBooking.droppedArchivedCount)
+        : null,
+      newBooking.reducedModelReservations.length > 0
+        ? modelReservationsReduced(newBooking.reducedModelReservations)
+        : null,
+    ].filter(Boolean);
+
     sendNotification({
       title: "Booking duplicated",
       senderId: userId,
       icon: { name: "success", variant: "success" },
-      message:
-        newBooking.droppedArchivedCount > 0
-          ? `Booking "${newBooking.name}" has been duplicated. ${
-              newBooking.droppedArchivedCount
-            } archived ${
-              newBooking.droppedArchivedCount === 1
-                ? "asset was"
-                : "assets were"
-            } left out.`
-          : `Booking "${newBooking.name}" has been duplicated.`,
+      message: [
+        `Booking "${newBooking.name}" has been duplicated.`,
+        ...leftOut,
+      ].join(" "),
     });
 
     return redirect(`/bookings/${newBooking.id}`);

@@ -98,8 +98,10 @@ import {
   loadActorBestEffort,
   lockModelsForOutstandingRequests,
   RESERVATION_BATCH_TX_TIMEOUT_MS,
+  reserveModelsUpToAvailability,
   writeBookingModelRequestInTx,
 } from "~/modules/booking-model-request/service.server";
+import type { ReducedModelReservation } from "~/modules/booking-model-request/service.server";
 import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
 import {
   lockAssetForQuantityUpdate,
@@ -3142,6 +3144,10 @@ async function readFullCheckoutDepartures(
  * @param args.hasKits - Whether the kit update should fire
  * @param args.hints - Acting user's locale and time zone, for the day a pool refusal names
  * @param args.revealOtherBookings - Whether a pool refusal may name other members' bookings
+ * @returns `departedSlices`: every slice whose units left in this call, each
+ *   with its asset, read before the stamps made them indistinguishable from
+ *   slices an earlier batch sent out. Callers name these assets in the
+ *   post-commit "checked out" line.
  * @throws {ShelfError} 400 when the booking holds no items to check out
  * @throws {ShelfError} 400 when any QUANTITY_TRACKED asset lacks sufficient pool availability
  * @throws {ShelfError} 400 when a DRAFT booking's outstanding model reservations no longer fit
@@ -3218,7 +3224,7 @@ async function checkoutBookingWritesWithinTx(
      */
     sourceLocations?: SourceLocationSubmission;
   }
-) {
+): Promise<{ departedSlices: Array<{ id: string; assetId: string }> }> {
   /**
    * A check-out sends at least one item out. `bookingAssetIds` is read after
    * any scan in the same transaction has landed, so a reservation-only booking
@@ -3563,22 +3569,165 @@ async function checkoutBookingWritesWithinTx(
       data: { status: KitStatus.CHECKED_OUT },
     });
   }
+
+  // Whole departures plus the residue of slices an earlier scan sent out only
+  // partly: units of both left in this call. A slice can be in both lists.
+  const departedSlices = new Map<string, { id: string; assetId: string }>();
+  for (const slice of [...departingSlices, ...checkoutTopUps]) {
+    departedSlices.set(slice.id, { id: slice.id, assetId: slice.assetId });
+  }
+  return { departedSlices: [...departedSlices.values()] };
+}
+
+/**
+ * The lines {@link createWholeBookingAssetNotes} writes, each built from the
+ * wrapped actor, the wrapped booking link and the method clause.
+ *
+ * "completed check-in" is the line of a partial check-in whose batch returns
+ * the last items still out, whether it completes the booking itself or hands
+ * over to {@link checkinBooking}.
+ */
+const WHOLE_BOOKING_ASSET_LINES = {
+  "checked out": (actor: string, bookingLink: string, methodClause: string) =>
+    `${actor} checked out asset with ${bookingLink}${methodClause}.`,
+  "checked in": (actor: string, bookingLink: string, methodClause: string) =>
+    `${actor} checked in asset with ${bookingLink}${methodClause}.`,
+  "completed check-in": (
+    actor: string,
+    bookingLink: string,
+    methodClause: string
+  ) =>
+    `${actor} checked in the last items still out on ${bookingLink}${methodClause}, which completed the booking.`,
+} as const;
+
+/**
+ * Writes the line an asset's activity shows when a whole-booking check-out or
+ * check-in moves it: "<user> checked out asset with <booking> (scanned on the
+ * phone)."
+ *
+ * {@link checkoutBooking}, {@link fulfilModelRequestsAndCheckout} and
+ * {@link checkinBooking} call it themselves, so every route that sends a whole
+ * booking out or brings it back (the one-click button on the web or the phone,
+ * a scan or select batch that covers the whole booking, the fulfil scanner)
+ * leaves the same line on each asset, once.
+ *
+ * Each asset's method is resolved over its own slices, so a batch that scanned
+ * one asset and ticked another says so per asset. Assets whose lines read the
+ * same are written in one call.
+ *
+ * A failure is logged, not thrown: the check-out or check-in has committed,
+ * and a caller such as the delegated scan batch still has writes to make after
+ * the service returns.
+ *
+ * @param args.line - Which line to write, see {@link WHOLE_BOOKING_ASSET_LINES}
+ * @param args.booking - The booking the assets moved with, for the link
+ * @param args.organizationId - Workspace scope for the note write
+ * @param args.userId - The acting user, named in the line
+ * @param args.actor - The acting user already wrapped for a note, when the
+ *   caller has read them; read here otherwise
+ * @param args.provenance - How and from where the batch was made
+ * @param args.unscannedSliceIds - Slices that moved with a scan batch without
+ *   being scanned themselves; an asset with one of them gets no method said
+ * @param args.slices - The slices that moved, each with its asset; an asset
+ *   with several slices gets one line
+ */
+async function createWholeBookingAssetNotes({
+  line,
+  booking,
+  organizationId,
+  userId,
+  actor: wrappedActor,
+  provenance,
+  unscannedSliceIds,
+  slices,
+}: {
+  line: keyof typeof WHOLE_BOOKING_ASSET_LINES;
+  booking: { id: string; name: string };
+  organizationId: string;
+  userId: string;
+  actor?: string;
+  provenance?: BookingMethodProvenance;
+  unscannedSliceIds?: ReadonlySet<string>;
+  slices: ReadonlyArray<{ id: string; assetId: string }>;
+}): Promise<void> {
+  if (slices.length === 0) return;
+
+  try {
+    const sliceIdsByAssetId = new Map<string, string[]>();
+    for (const slice of slices) {
+      const sliceIds = sliceIdsByAssetId.get(slice.assetId);
+      if (sliceIds) sliceIds.push(slice.id);
+      else sliceIdsByAssetId.set(slice.assetId, [slice.id]);
+    }
+
+    const assetIdsByClause = new Map<string, string[]>();
+    for (const [assetId, sliceIds] of sliceIdsByAssetId) {
+      // A slice the scan did not name went out unscanned: its asset's line
+      // must not claim the batch's method for it.
+      const assetProvenance =
+        provenance && sliceIds.some((id) => unscannedSliceIds?.has(id))
+          ? { ...provenance, method: null }
+          : provenance;
+      const clause = bookingMethodClause(assetProvenance, sliceIds);
+      const assetIds = assetIdsByClause.get(clause);
+      if (assetIds) assetIds.push(assetId);
+      else assetIdsByClause.set(clause, [assetId]);
+    }
+
+    const actor =
+      wrappedActor ??
+      wrapUserLinkForNote({
+        ...(await getUserByID(userId, {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            displayName: true,
+          } satisfies Prisma.UserSelect,
+        })),
+        id: userId,
+      });
+    const bookingLink = wrapLinkForNote(
+      `/bookings/${booking.id}`,
+      booking.name
+    );
+
+    for (const [clause, assetIds] of assetIdsByClause) {
+      await createNotes({
+        content: WHOLE_BOOKING_ASSET_LINES[line](actor, bookingLink, clause),
+        type: "UPDATE",
+        userId,
+        assetIds,
+        organizationId,
+      });
+    }
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: `Failed to write the "${line}" asset notes`,
+        label,
+        additionalData: { bookingId: booking.id, userId },
+      })
+    );
+  }
 }
 
 /**
  * Post-commit side-effects shared by {@link checkoutBooking} and
  * {@link fulfilModelRequestsAndCheckout}.
  *
- * These operations MUST run after the checkout transaction has committed
- * — they touch external systems (scheduler) and write notes that should
+ * These operations MUST run after the checkout transaction has committed:
+ * they touch external systems (scheduler) and write notes that should
  * reflect the post-commit truth.
  *
  *   1. Writes the RESERVED → ONGOING/OVERDUE status transition note.
- *   2. Cancels any outstanding scheduler job for the booking.
- *   3. Either sends the check-in reminder now (if under an hour to
+ *   2. Writes each departed asset's "checked out asset with" line.
+ *   3. Cancels any outstanding scheduler job for the booking.
+ *   4. Either sends the check-in reminder now (if under an hour to
  *      booking.to) + schedules the overdue handler, or schedules the
  *      check-in reminder for ~1h before booking.to.
- *   4. Hydrates and returns the full booking payload.
+ *   5. Hydrates and returns the full booking payload.
  *
  * @returns The hydrated booking row with reservation-email includes.
  */
@@ -3592,6 +3741,8 @@ async function runCheckoutSideEffects({
   isExpired,
   provenance,
   bookingSliceIds,
+  departedSlices,
+  unscannedSliceIds,
 }: {
   bookingFound: BookingForEmail;
   userId?: string;
@@ -3608,10 +3759,20 @@ async function runCheckoutSideEffects({
    * the two. The one-click actions pass none.
    */
   bookingSliceIds?: readonly BatchSliceId[];
+  /**
+   * The slices that left in this check-out, as
+   * {@link checkoutBookingWritesWithinTx} returns them. Only their assets get
+   * a "checked out asset with" line: a slice already out stays silent.
+   */
+  departedSlices: ReadonlyArray<{ id: string; assetId: string }>;
+  /**
+   * Slices that went out with a scan batch the scan did not name. The
+   * booking's line then says no method, and neither does the line of an asset
+   * holding one of them.
+   */
+  unscannedSliceIds?: ReadonlySet<string>;
 }) {
-  // Create status transition note. `organizationId` is required by
-  // the hardened signature merged from `main` (cross-org safety
-  // — every booking-note write must be scoped).
+  // Every booking-note write is scoped to the workspace.
   if (userId) {
     await createStatusTransitionNote({
       bookingId: bookingFound.id,
@@ -3620,7 +3781,22 @@ async function runCheckoutSideEffects({
       toStatus: effectiveStatus,
       userId,
       custodianUserId: bookingFound.custodianUserId || undefined,
-      methodClause: bookingMethodClause(provenance, bookingSliceIds),
+      methodClause: bookingMethodClause(
+        provenance && unscannedSliceIds?.size
+          ? { ...provenance, method: null }
+          : provenance,
+        bookingSliceIds
+      ),
+    });
+
+    await createWholeBookingAssetNotes({
+      line: "checked out",
+      booking: bookingFound,
+      organizationId,
+      userId,
+      provenance,
+      unscannedSliceIds,
+      slices: departedSlices,
     });
   }
 
@@ -3954,6 +4130,9 @@ export async function checkoutBooking({
       });
     }
 
+    /** The slices this check-out sent out, set inside the transaction. */
+    let departedSlices: Array<{ id: string; assetId: string }> = [];
+
     await db.$transaction(
       async (tx) => {
         // Authoritative status check. The pre-transaction assert above is a
@@ -3974,7 +4153,7 @@ export async function checkoutBooking({
           bookingId: id,
         });
 
-        await checkoutBookingWritesWithinTx(tx, {
+        ({ departedSlices } = await checkoutBookingWritesWithinTx(tx, {
           bookingId: bookingFound.id,
           // The status this transaction holds, not the pre-transaction read:
           // it decides whether the model-reservation guard runs.
@@ -3997,7 +4176,7 @@ export async function checkoutBooking({
           sourceLocations,
           hints,
           revealOtherBookings: seesAllBookings,
-        });
+        }));
 
         // Activity events — one BOOKING_CHECKED_OUT per asset on the
         // booking. Map through the deduped asset ids so a multi-row asset
@@ -4046,14 +4225,10 @@ export async function checkoutBooking({
     const effectiveStatus =
       (dataToUpdate.status as BookingStatus) ?? bookingFound.status;
 
-    // Extracted to a shared helper so `fulfilModelRequestsAndCheckout`
-    // can run the same post-commit work (status transition note,
-    // scheduler, reminders, hydrate) without duplicating the body.
-    // `organizationId` is required for `createStatusTransitionNote` and
-    // `createSystemBookingNote` — forwarded inside the helper, see
-    // {@link runCheckoutSideEffects}. The helper itself delegates the
-    // scheduler tail to `scheduleCheckinReminderForBooking` (shared with
-    // the progressive-checkout path).
+    // Shared with `fulfilModelRequestsAndCheckout`: the status transition
+    // note, each departed asset's "checked out" line, the scheduler and
+    // reminders, and the hydrated return payload. See
+    // {@link runCheckoutSideEffects}.
     return await runCheckoutSideEffects({
       bookingFound,
       userId,
@@ -4064,6 +4239,7 @@ export async function checkoutBooking({
       isExpired,
       provenance,
       bookingSliceIds: bookingFound.bookingAssets.map((ba) => ba.id),
+      departedSlices,
     });
   } catch (cause) {
     throw new ShelfError({
@@ -4100,6 +4276,7 @@ export async function checkoutBooking({
  * `checkoutBooking` + `addScannedAssetsToBooking`:
  *   - Activity notes for each scanned asset/kit
  *   - Status transition note
+ *   - A "checked out asset with" line on each asset that left
  *   - Scheduler cancellation + rescheduling (checkin-reminder / overdue)
  *   - Hydrated booking payload returned
  *
@@ -4346,11 +4523,12 @@ export async function fulfilModelRequestsAndCheckout({
      * early-date adjustment, and the status transition are all reverted
      * together.
      */
-    // Whether the scan named every row that went out, set inside the
-    // transaction. The activity line names the batch's method only then: a
-    // row the scan did not name is recorded with its method not said, and the
-    // line must not claim it was scanned.
-    let everyRowScanned = true;
+    // The rows that went out without the scan naming them, set inside the
+    // transaction. They are recorded with their method not said, so no
+    // activity line covering one of them may claim it was scanned.
+    let unscannedSliceIds = new Set<string>();
+    /** The slices this check-out sent out, set inside the transaction. */
+    let departedSlices: Array<{ id: string; assetId: string }> = [];
     await db.$transaction(
       async (tx) => {
         // Hold the booking and its model requests for the rest of the
@@ -4440,7 +4618,7 @@ export async function fulfilModelRequestsAndCheckout({
         );
         const hasKits = unionKitIds.length > 0;
 
-        await checkoutBookingWritesWithinTx(tx, {
+        ({ departedSlices } = await checkoutBookingWritesWithinTx(tx, {
           bookingId,
           organizationId,
           // Read under the booking's row lock above, so a concurrent reserve
@@ -4461,7 +4639,7 @@ export async function fulfilModelRequestsAndCheckout({
           sourceLocations,
           hints,
           revealOtherBookings: seesAllBookings,
-        });
+        }));
 
         /**
          * Activity events — mirrors `checkoutBooking`'s emission so the
@@ -4488,7 +4666,11 @@ export async function fulfilModelRequestsAndCheckout({
             addedAssetIds,
             claimedAssetIds,
           });
-          everyRowScanned = postScanBookingAssets.every(wasScanned);
+          unscannedSliceIds = new Set(
+            postScanBookingAssets
+              .filter((ba) => !wasScanned(ba))
+              .map((ba) => ba.id)
+          );
           await recordEvents(
             postScanBookingAssets.map((ba) => ({
               organizationId,
@@ -4540,10 +4722,9 @@ export async function fulfilModelRequestsAndCheckout({
       hints,
       organizationId,
       isExpired,
-      provenance:
-        provenance && !everyRowScanned
-          ? { ...provenance, method: null }
-          : provenance,
+      provenance,
+      unscannedSliceIds,
+      departedSlices,
     });
   } catch (cause) {
     throw new ShelfError({
@@ -5883,10 +6064,19 @@ export async function checkinBooking({
   specificAssetIds,
   checkins,
   provenance,
+  completesPartialCheckin = false,
 }: Pick<Booking, "id" | "organizationId"> & {
   hints: ClientHint;
   intentChoice?: CheckinIntentEnum;
   userId?: string;
+  /**
+   * True when a partial check-in hands over because its batch returns the last
+   * items still out. Each returned asset's line then says so ("checked in the
+   * last items still out ..., which completed the booking.") instead of
+   * "checked in asset with". Written after the check-in commits, so a refused
+   * check-in leaves no line.
+   */
+  completesPartialCheckin?: boolean;
   /**
    * How and from where the check-in was made. Recorded on every
    * `BOOKING_CHECKED_IN` event and said on the booking's activity line. The
@@ -6242,6 +6432,27 @@ export async function checkinBooking({
     };
 
     const qtySummariesRef: { value: CheckinQtySummary[] } = { value: [] };
+
+    /**
+     * The slices this check-in brings back: out on this booking and not back
+     * yet. A slice that never left, or came back on an earlier return, is not
+     * among them: `Asset.status` is global, so judging by asset alone would
+     * also take in a sibling slice and claim it came back now. Each one gets a
+     * BOOKING_CHECKED_IN event, and its asset the "checked in asset with" line.
+     *
+     * An INDIVIDUAL slice also needs its asset in `assetsToCheckinSet`: that
+     * set leaves out an asset another live booking still has out. A
+     * QUANTITY_TRACKED slice does not: other bookings holding units of the same
+     * pool is ordinary, and the disposition loop returns this slice's units
+     * whatever the set says.
+     */
+    const checkedInBookingAssets = bookingFound.bookingAssets.filter(
+      (ba) =>
+        (ba.asset.type === AssetType.QUANTITY_TRACKED ||
+          assetsToCheckinSet.has(ba.asset.id)) &&
+        Boolean(ba.checkedOutAt) &&
+        !ba.checkedInAt
+    );
 
     /** Kit memberships the check-in shrank or emptied, for the post-tx notes. */
     const destroyedKitUnitsRef: { value: DestroyedKitUnitsResult | null } = {
@@ -6712,19 +6923,9 @@ export async function checkinBooking({
         }
 
         // Activity events: one BOOKING_CHECKED_IN per slice this check-in
-        // reconciles, which is the same scope as the marker write below (out,
-        // not yet back). A slice that never left, or came back on an earlier
-        // return, gets no event: `Asset.status` is global, so filtering by
-        // asset alone would also emit for a sibling slice and claim it came
-        // back now. Per-row `meta.quantity` is sourced from the pivot row
-        // (qty-tracked only via assetQtyMeta). Atomic with the booking status
-        // update for audit trail consistency.
-        const checkedInBookingAssets = bookingFound.bookingAssets.filter(
-          (ba) =>
-            assetsToCheckinSet.has(ba.asset.id) &&
-            Boolean(ba.checkedOutAt) &&
-            !ba.checkedInAt
-        );
+        // reconciles (see `checkedInBookingAssets`). Per-row `meta.quantity` is
+        // sourced from the pivot row (qty-tracked only via assetQtyMeta).
+        // Atomic with the booking status update for audit trail consistency.
         if (checkedInBookingAssets.length > 0) {
           await recordEvents(
             checkedInBookingAssets.map((ba) => ({
@@ -6802,19 +7003,23 @@ export async function checkinBooking({
       { timeout: 15000 }
     );
 
+    /** The acting user wrapped for a note, read once for every note below. */
+    let actor: string | undefined;
+
     // Create status transition note
     if (userId) {
+      const actingUser = await getUserByID(userId, {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          displayName: true,
+        } satisfies Prisma.UserSelect,
+      });
+      actor = wrapUserLinkForNote({ ...actingUser, id: userId });
+
       if (specificAssetIds && specificAssetIds.length > 0) {
         // Create enhanced completion message with asset details
-        const user = await getUserByID(userId, {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            displayName: true,
-          } satisfies Prisma.UserSelect,
-        });
-
         // Get asset and kit data for consistent formatting
         const assetsWithKitInfo = await db.asset.findMany({
           // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: check-in note names assets already on the booking, archived ones included
@@ -6892,9 +7097,7 @@ export async function checkinBooking({
         await createSystemBookingNote({
           bookingId: updatedBooking.id,
           organizationId,
-          content: `${wrapUserLinkForNote(
-            user!
-          )} performed a partial check-in: ${itemsDescription}${bookingMethodClause(
+          content: `${actor} performed a partial check-in: ${itemsDescription}${bookingMethodClause(
             provenance,
             outstandingSliceIds(
               bookingFound.bookingAssets.filter((ba) =>
@@ -6931,26 +7134,29 @@ export async function checkinBooking({
           ),
         });
       }
+
+      await createWholeBookingAssetNotes({
+        line: completesPartialCheckin ? "completed check-in" : "checked in",
+        booking: updatedBooking,
+        organizationId,
+        userId,
+        actor,
+        provenance,
+        slices: checkedInBookingAssets.map((ba) => ({
+          id: ba.id,
+          assetId: ba.asset.id,
+        })),
+      });
     }
 
     /**
      * Per-asset notes for qty-tracked dispositions applied in this
-     * check-in. Wrapped in try/catch — activity logging must never
+     * check-in. Wrapped in try/catch: activity logging must never
      * fail a successful check-in. See the matching pattern in
      * `partialCheckinBooking` and `manage-assets`.
      */
-    if (userId && qtySummariesRef.value.length > 0) {
+    if (userId && actor && qtySummariesRef.value.length > 0) {
       try {
-        const actorUser = await getUserByID(userId, {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            displayName: true,
-          } satisfies Prisma.UserSelect,
-        });
-        const actor = wrapUserLinkForNote({ ...actorUser, id: userId });
-
         /**
          * Shared booking link — per-asset notes point back to the booking
          * so the asset's activity feed shows which booking consumed /
@@ -7877,27 +8083,7 @@ export async function partialCheckinBooking({
         outstandingAssetIds.every((assetId) => providedAssetIds.has(assetId))
       ) {
         // No PartialBookingCheckin row: `checkinBooking` handles completion
-        // itself. The asset-side note says how this batch was made, as the
-        // provenance recorded it; the batch may have been scanned, selected
-        // from the list, or both. Resolved over the booking's own slices for
-        // the batch's assets, as the delegated events are: a bare asset-id
-        // payload names no slice itself.
-        const actor = wrapUserLinkForNote({ ...user, id: userId });
-        await createNotes({
-          content: `${actor} checked in the last items still out${bookingMethodClause(
-            provenance,
-            outstandingSliceIds(
-              bookingFound.bookingAssets.filter((ba) =>
-                effectiveAssetIds.includes(ba.assetId)
-              )
-            )
-          )}, which completed the booking.`,
-          type: "UPDATE",
-          userId,
-          assetIds: effectiveAssetIds,
-          organizationId,
-        });
-
+        // itself, and writes each returned asset's line once it commits.
         const completedBooking = await checkinBooking({
           id,
           organizationId,
@@ -7908,6 +8094,8 @@ export async function partialCheckinBooking({
           // The batch closes the booking through the full check-in, which
           // writes the events; the rows were still scanned or selected here.
           provenance,
+          // The asset lines say this batch completed the booking.
+          completesPartialCheckin: true,
         });
 
         return {
@@ -8997,7 +9185,32 @@ export async function partialCheckinBooking({
         });
       }
 
-      if (txResult.individualAssetIds.length > 0) {
+      if (txResult.isComplete) {
+        // The batch that completes the booking says so on every asset it
+        // brought back, as the hand-over to `checkinBooking` above does: over
+        // the slices still out before this batch, so a re-scanned asset that
+        // came back earlier gets no line.
+        const returnedAssetIds = new Set([
+          ...txResult.individualAssetIds,
+          ...txResult.qtySummaries.map((s) => s.assetId),
+        ]);
+        await createWholeBookingAssetNotes({
+          line: "completed check-in",
+          booking: bookingFound,
+          organizationId,
+          userId,
+          actor,
+          provenance,
+          slices: bookingFound.bookingAssets
+            .filter(
+              (ba) =>
+                returnedAssetIds.has(ba.assetId) &&
+                Boolean(ba.checkedOutAt) &&
+                !ba.checkedInAt
+            )
+            .map((ba) => ({ id: ba.id, assetId: ba.assetId })),
+        });
+      } else if (txResult.individualAssetIds.length > 0) {
         await createNotes({
           content: `${actor} checked in via partial check-in on ${bookingLink}.`,
           type: "UPDATE",
@@ -19046,6 +19259,12 @@ export async function computeBookingKitDrift({
  * {@link computeBookingKitDrift} so the user acknowledges the change before
  * confirming.
  *
+ * **Model reservations.** Each of the source's `BookingModelRequest` rows is
+ * copied as the units it still had open (`quantity - fulfilledQuantity`), since
+ * the units already scanned in are named assets on the source and come across
+ * with them. Each is capped at what the new window can give; the models reserved
+ * short are returned as `reducedModelReservations` for the caller to report.
+ *
  * **Booking window.** The new booking's `from`/`to` are taken from the
  * caller-provided dates rather than being derived here, so the duplicate
  * dialog controls the window (timezone normalization happens upstream).
@@ -19060,7 +19279,8 @@ export async function computeBookingKitDrift({
  * @param args.access - The caller's access. The duplicate guard runs on the
  *   same source row the copy is built from, so a custodian reassigned after
  *   any earlier read cannot slip into the copy unchecked.
- * @returns The newly created booking row
+ * @returns The newly created booking row, plus `droppedArchivedCount` and
+ *   `reducedModelReservations` describing what the copy left out
  * @throws {ShelfError} 403 if the caller may not duplicate the source
  *   (`assertCanDuplicateBooking`), or if anything in the transaction fails
  */
@@ -19088,6 +19308,14 @@ export async function duplicateBooking({
       request,
       extraInclude: {
         notificationRecipients: { select: { id: true } },
+        modelRequests: {
+          select: {
+            assetModelId: true,
+            quantity: true,
+            fulfilledQuantity: true,
+            assetModel: { select: { name: true } },
+          },
+        },
       },
     });
 
@@ -19362,11 +19590,60 @@ export async function duplicateBooking({
       };
     });
 
-    // The caller tells the user how many archived assets were left out,
-    // rather than letting them vanish from the copy unannounced.
+    /**
+     * Model reservations carry over as what the source still had open:
+     * units already scanned in are named assets on the source, copied above,
+     * so reserving the full planned amount as well would count them twice.
+     *
+     * Capped at what the new dates can still give rather than refusing the
+     * copy, and written after the booking commits, in batches, because a plan
+     * can name more models than one transaction may carry.
+     */
+    const openRequests = bookingToDuplicate.modelRequests
+      .map((request) => ({
+        assetModelId: request.assetModelId,
+        assetModelName: request.assetModel.name,
+        quantity: request.quantity - request.fulfilledQuantity,
+      }))
+      .filter((request) => request.quantity > 0);
+
+    // The copy has committed by now, so a failure here must not report the
+    // duplicate as failed: a retry would create a second copy. Every open
+    // model is reported as failed to reserve instead, and the error is logged.
+    let reducedModelReservations: ReducedModelReservation[];
+    try {
+      reducedModelReservations = await reserveModelsUpToAvailability({
+        bookingId: newBooking.booking.id,
+        organizationId,
+        userId,
+        requested: openRequests,
+      });
+    } catch (cause) {
+      Logger.error(
+        new ShelfError({
+          cause,
+          label,
+          message:
+            "Failed to copy model reservations onto a duplicated booking.",
+          additionalData: { bookingId: newBooking.booking.id, organizationId },
+        })
+      );
+      reducedModelReservations = openRequests.map((request) => ({
+        assetModelId: request.assetModelId,
+        assetModelName: request.assetModelName,
+        requested: request.quantity,
+        reserved: 0,
+        failed: true as const,
+      }));
+    }
+
+    // The caller tells the user what the copy left out, archived assets and
+    // reservations the new dates could not fill, rather than letting them
+    // vanish from the copy unannounced.
     return {
       ...newBooking.booking,
       droppedArchivedCount: newBooking.droppedArchivedCount,
+      reducedModelReservations,
     };
   } catch (cause) {
     throw new ShelfError({
