@@ -119,6 +119,9 @@ importers:
       '@shelf/labels':
         specifier: workspace:*
         version: link:../../packages/labels
+      '@shelf/links':
+        specifier: workspace:*
+        version: link:../../packages/links
       '@shelf/permissions':
         specifier: workspace:*
         version: link:../../packages/permissions
@@ -363,6 +366,9 @@ importers:
       '@shelf/labels':
         specifier: workspace:*
         version: link:../../packages/labels
+      '@shelf/links':
+        specifier: workspace:*
+        version: link:../../packages/links
       '@shelf/permissions':
         specifier: workspace:*
         version: link:../../packages/permissions
@@ -802,6 +808,21 @@ importers:
         version: 6.0.3
 
   packages/labels: {}
+
+  packages/links:
+    devDependencies:
+      '@shelf/typescript-config':
+        specifier: workspace:*
+        version: link:../../tooling/typescript
+      '@types/node':
+        specifier: ^24.19.2
+        version: 24.19.2
+      tsx:
+        specifier: ^4.21.0
+        version: 4.21.0
+      typescript:
+        specifier: ^6.0.2
+        version: 6.0.3
 
   packages/permissions:
     devDependencies:
