@@ -134,9 +134,14 @@ const CHECKOUT_RECEIPT = {
 function buildArgs({
   query = "",
   cookie,
-}: { query?: string; cookie?: string } = {}): LoaderFunctionArgs {
+  userId = "user-1",
+}: {
+  query?: string;
+  cookie?: string;
+  userId?: string;
+} = {}): LoaderFunctionArgs {
   return {
-    context: { getSession: () => ({ userId: "user-1" }) },
+    context: { getSession: () => ({ userId }) },
     request: new Request(
       `https://example.com/api/bookings/booking-1/generate-pdf${query}`,
       { headers: cookie ? { Cookie: cookie } : {} }
@@ -205,11 +210,19 @@ describe("booking checklist loader", () => {
       event: "pdf_preview_opened",
       properties: {
         sheet: "booking_checklist",
+        documentId: "document-checklist",
+        documentName: "Checklist",
         organizationId: "org-1",
         rowCount: 3,
         assetCount: 2,
       },
     });
+  });
+
+  it("counts no new preview when the person picks another document", async () => {
+    await loader(buildArgs({ query: "?document=document-check-out-receipt" }));
+
+    expect(captureServerEvent).not.toHaveBeenCalled();
   });
 
   it("counts nothing when the document could not be built", async () => {
@@ -294,6 +307,35 @@ describe("booking document loader: which document prints", () => {
     });
   });
 
+  it("ignores a remembered pick of another person or another workspace", async () => {
+    const picked = (await loader(
+      buildArgs({ query: "?document=document-check-out-receipt" })
+    )) as unknown as Response;
+    const cookie = picked.headers.get("Set-Cookie")!.split(";")[0];
+
+    vi.mocked(resolvePdfDocumentForPrint).mockClear();
+    await loader(buildArgs({ cookie, userId: "user-2" }));
+    expect(resolvePdfDocumentForPrint).toHaveBeenLastCalledWith(
+      expect.objectContaining({ rememberedId: null })
+    );
+
+    vi.mocked(requirePermission).mockResolvedValue(
+      permissionContext({ organizationId: "org-2" }) as never
+    );
+    await loader(buildArgs({ cookie }));
+    expect(resolvePdfDocumentForPrint).toHaveBeenLastCalledWith(
+      expect.objectContaining({ organizationId: "org-2", rememberedId: null })
+    );
+  });
+
+  it("only sends the cookie back to the booking PDF route", async () => {
+    const picked = (await loader(
+      buildArgs({ query: "?document=document-check-out-receipt" })
+    )) as unknown as Response;
+
+    expect(picked.headers.get("Set-Cookie")).toMatch(/Path=\/api\/bookings/);
+  });
+
   it("sets no cookie when the server picked the document", async () => {
     const response = (await loader(buildArgs())) as unknown as Response;
 
@@ -370,6 +412,14 @@ describe("booking PDF loader: a workspace without PDF documents", () => {
     const body = await response.json();
 
     expect(resolvePdfDocumentForPrint).not.toHaveBeenCalled();
+    expect(captureServerEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        properties: expect.objectContaining({
+          documentId: null,
+          documentName: null,
+        }),
+      })
+    );
     expect(body.document).toBeNull();
     expect(body.documents).toEqual([]);
     expect(response.headers.get("Set-Cookie")).toBeNull();

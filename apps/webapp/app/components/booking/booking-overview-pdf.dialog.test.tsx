@@ -165,7 +165,7 @@ describe("Generate PDF dialog", () => {
     ).not.toBeInTheDocument();
 
     refuse = false;
-    fireEvent.click(screen.getByRole("button", { name: "Reload documents" }));
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
 
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Download PDF" })).toBeVisible()

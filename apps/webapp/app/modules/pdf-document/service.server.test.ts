@@ -15,6 +15,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BOOKING_CHECKLIST_CONFIG, CHECKOUT_RECEIPT_CONFIG } from "./config";
 import {
+  canCustomizePdfDocuments,
   createPdfDocument,
   deletePdfDocument,
   duplicatePdfDocument,
@@ -236,6 +237,21 @@ vi.mock("~/database/db.server", () => {
   return { db };
 });
 
+// why: the tier gate opens for everyone when premium features are off; each
+// test picks the switch.
+const premium = vi.hoisted(() => ({ enabled: true }));
+vi.mock("~/config/shelf.config", async (importOriginal) => {
+  const actual = await importOriginal<{ config: Record<string, unknown> }>();
+  return {
+    config: {
+      ...actual.config,
+      get enablePremiumFeatures() {
+        return premium.enabled;
+      },
+    },
+  };
+});
+
 const ORG = "org-1";
 
 beforeEach(() => {
@@ -243,6 +259,7 @@ beforeEach(() => {
   store.customFields = [];
   store.seq = 0;
   store.seeded = new Set();
+  premium.enabled = true;
 });
 
 function documentsOf(organizationId = ORG) {
@@ -528,5 +545,26 @@ describe("PDF documents: custom fields on a document", () => {
       status: 400,
       title: "Custom field deleted",
     });
+  });
+});
+
+describe("PDF documents: which tiers include them", () => {
+  it("follows the owner's tier when premium features are on", () => {
+    expect(canCustomizePdfDocuments({ canCustomizePdfDocuments: true })).toBe(
+      true
+    );
+    expect(canCustomizePdfDocuments({ canCustomizePdfDocuments: false })).toBe(
+      false
+    );
+    expect(canCustomizePdfDocuments(null)).toBe(false);
+  });
+
+  it("includes them for every workspace when premium features are off", () => {
+    premium.enabled = false;
+
+    expect(canCustomizePdfDocuments({ canCustomizePdfDocuments: false })).toBe(
+      true
+    );
+    expect(canCustomizePdfDocuments(null)).toBe(true);
   });
 });

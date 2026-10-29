@@ -170,6 +170,10 @@ export const loader = async ({
         event: "pdf_preview_opened",
         properties: {
           sheet: "booking_checklist",
+          // The saved document that printed; `null` for a workspace without
+          // PDF documents, which prints the built-in Checklist.
+          documentId: resolved?.document.id ?? null,
+          documentName: resolved?.document.name ?? null,
           organizationId,
           rowCount: pdfMeta.assets.length,
           // Rows are booking slices: one asset can print in several of them.

@@ -17,6 +17,7 @@
 import type { Prisma, PdfDocument } from "@prisma/client";
 import { PdfDocumentKind } from "@prisma/client";
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
+import { config } from "~/config/shelf.config";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
@@ -65,6 +66,27 @@ function resolve(
     isDefault: row.isDefault,
     config: parseBookingDocumentConfig(row.config),
   };
+}
+
+/**
+ * Whether the workspace's tier lets it keep PDF documents: saved layouts for
+ * a booking's PDF, picked when the PDF is generated. Without it the booking
+ * PDF prints the Checklist layout, and nothing about it can be chosen.
+ *
+ * Lives here rather than in `~/utils/subscription.server` (which re-exports
+ * it) so workspace creation can use it: the organization service cannot
+ * import that module without an import cycle.
+ *
+ * @param tierLimit - The tier limits of the workspace's owner (from
+ *   getOrganizationTierLimit or getUserTierLimit)
+ * @returns `true` when the tier includes it or premium features are disabled
+ */
+export function canCustomizePdfDocuments(
+  tierLimit: { canCustomizePdfDocuments: boolean } | null | undefined
+) {
+  if (!config.enablePremiumFeatures) return true;
+  if (!tierLimit) return false;
+  return tierLimit.canCustomizePdfDocuments;
 }
 
 /**
@@ -385,6 +407,8 @@ export async function duplicatePdfDocument({
 }) {
   try {
     return await db.$transaction(async (tx) => {
+      // Two copies made at once would both pick the same free name.
+      await lockWorkspaceDocuments(tx, organizationId);
       const source = await findDocumentOrThrow(tx, {
         organizationId,
         documentId,

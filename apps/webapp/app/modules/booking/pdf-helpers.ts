@@ -287,8 +287,9 @@ export async function fetchAllPdfRelatedData(
                 },
               },
             },
-            // Only the values of the custom fields the document prints.
-            customFields: {
+            // Only the values of the custom fields the document prints, and
+            // no query at all for a document that prints none.
+            customFields: customFieldIds.length > 0 && {
               where: { customFieldId: { in: customFieldIds } },
               select: { customFieldId: true, value: true },
             },
@@ -445,7 +446,7 @@ export async function fetchAllPdfRelatedData(
         barcodes: _barcodes,
         assetKits: _assetKits,
         assetLocations: _assetLocations,
-        customFields: storedValues,
+        customFields: storedValues = [],
         ...row
       }) => {
         const customFieldValues: Record<string, string> = {};

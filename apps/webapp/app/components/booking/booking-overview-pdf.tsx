@@ -263,7 +263,7 @@ export const BookingOverviewPDF = ({
                       loadDocument();
                     }}
                   >
-                    Reload documents
+                    Try again
                   </Button>
                 </div>
               ) : (

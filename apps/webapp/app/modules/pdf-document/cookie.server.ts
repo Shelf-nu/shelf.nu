@@ -21,7 +21,8 @@ const lastDocumentSchema = z.object({
 
 function lastDocumentCookie(organizationId: string) {
   return createCookie(`${organizationId}_pdf_document`, {
-    path: "/",
+    // Only the booking PDF route reads it, so no other request carries it.
+    path: "/api/bookings",
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
