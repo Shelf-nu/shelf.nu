@@ -44,11 +44,8 @@ import {
 import { useOrg } from "@/lib/org-context";
 import { useAuth } from "@/lib/auth-context";
 import { userHasPermission } from "@/lib/permissions";
-import {
-  archivedLeftOutNote,
-  assetBadgeStatus,
-  isArchivedAsset,
-} from "@/lib/archived-assets";
+import { assetBadgeStatus, isArchivedAsset } from "@/lib/archived-assets";
+import { duplicateLeftOutNote } from "@/lib/booking-duplicate-note";
 import {
   MODEL_SHORTFALL_NOTICE,
   modelShortfallLabel,
@@ -980,10 +977,11 @@ function BookingDetailScreen({ id }: { id: string }) {
             markBookingsListDirty();
             // Open the new draft's edit screen so the user can adjust dates etc.
             router.push(`/(tabs)/bookings/edit?id=${dup.booking.id}`);
-            // Archived assets cannot be booked, so the copy left them out.
-            // Say so, as the web does, instead of letting it look complete.
-            const droppedNote = archivedLeftOutNote(dup.droppedArchivedCount);
-            if (droppedNote) Alert.alert("Booking duplicated", droppedNote);
+            // Archived assets cannot be booked, and model reservations are
+            // capped at what the dates have free, so the copy can leave things
+            // out. Say so, as the web does, instead of letting it look complete.
+            const leftOutNote = duplicateLeftOutNote(dup);
+            if (leftOutNote) Alert.alert("Booking duplicated", leftOutNote);
           },
         },
       ]

@@ -107,6 +107,7 @@ import { createBlockers } from "../blockers-factory";
 import ConfigurableDrawer from "../configurable-drawer";
 import { DefaultLoadingState, GenericItemRow, Tr } from "../generic-item-row";
 import { ScanItemGroup } from "../scan-item-group";
+import { ScannedAssetIdentifiers } from "../scanned-asset-identifiers";
 
 /**
  * Zod schema for the fulfil-and-checkout form payload.
@@ -458,9 +459,11 @@ export default function FulfilReservationsDrawer({
       renderItem={(data) => (
         <ScannedAssetRowBody
           asset={data as AssetFromQr}
+          scannedCode={row.qrId}
           bucket={row.bucket}
           viaKitName={row.viaKitName}
           claimedModelName={row.claimedModelName}
+          matchedModelName={row.matchedModelName}
         />
       )}
     />
@@ -729,7 +732,7 @@ function PendingModelRow({ assetModelName }: { assetModelName: string }) {
  * Body of a scanned-asset row (rendered inside `GenericItemRow`'s
  * `renderItem` slot). Branches on `bucket` for the status chip:
  *
- * - `"matched"`   → green "Ready" chip.
+ * - `"matched"`   → green chip naming the model whose unit it fills.
  * - `"viaKit"`    → blue chip naming the scanned kit it arrives with. Not a
  *   warning and not a second assignment: the kit row is what assigns it, and
  *   this row says so rather than looking like an idle duplicate.
@@ -745,14 +748,19 @@ function PendingModelRow({ assetModelName }: { assetModelName: string }) {
  */
 function ScannedAssetRowBody({
   asset,
+  scannedCode,
   bucket,
   viaKitName,
   claimedModelName,
+  matchedModelName,
 }: {
   asset: AssetFromQr;
+  /** The code the operator scanned to add this row. */
+  scannedCode: string;
   bucket: ScannedAssetRow["bucket"];
   viaKitName?: string;
   claimedModelName?: string;
+  matchedModelName?: string;
 }) {
   return (
     <div className="flex items-center gap-2">
@@ -765,6 +773,10 @@ function ScannedAssetRowBody({
         <span className="word-break whitespace-break-spaces font-medium text-gray-800">
           {asset.title}
         </span>
+        <ScannedAssetIdentifiers
+          sequentialId={asset.sequentialId}
+          scannedCode={scannedCode}
+        />
         <div className="flex flex-wrap items-center gap-1">
           <span className={assetTypePillClass}>asset</span>
           {bucket === "matched" ? (
@@ -772,8 +784,11 @@ function ScannedAssetRowBody({
               color={BADGE_COLORS.green.bg}
               textColor={BADGE_COLORS.green.text}
               withDot={false}
+              className="max-w-full"
             >
-              Ready
+              {matchedModelName
+                ? `Ready, counts toward ${matchedModelName}`
+                : "Ready"}
             </Badge>
           ) : bucket === "viaKit" ? (
             <Badge

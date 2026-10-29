@@ -55,10 +55,14 @@ import { formatDate } from "~/utils/date-format";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
-import { recordEvent } from "../activity-event/service.server";
-import type { ActorSnapshot } from "../activity-event/types";
+import { recordEvent, recordEvents } from "../activity-event/service.server";
+import type {
+  ActivityEventInput,
+  ActorSnapshot,
+} from "../activity-event/types";
 import { createSystemBookingNote } from "../booking-note/service.server";
 import { getUserByID } from "../user/service.server";
 
@@ -3042,6 +3046,188 @@ export async function upsertBookingModelRequests({
 }
 
 /* -------------------------------------------------------------------------- */
+/*                      reserveModelsUpToAvailability                         */
+/* -------------------------------------------------------------------------- */
+
+/** A model that {@link reserveModelsUpToAvailability} reserved less of than asked. */
+export type ReducedModelReservation = {
+  assetModelId: string;
+  assetModelName: string;
+  /** Units asked for. */
+  requested: number;
+  /** Units actually reserved, `0` when none could be. */
+  reserved: number;
+  /**
+   * The reservation could not be written (the write errored), as opposed to
+   * the pool being short. Absent for a real shortfall.
+   */
+  failed?: true;
+};
+
+/**
+ * Reserves units of several models on a booking, each capped at what its pool
+ * can still give the booking's dates, and reports the models that came out
+ * short instead of refusing.
+ *
+ * For writers that copy a plan rather than take a user's explicit ask, such as
+ * duplicating a booking: the copy is still worth having when a few models have
+ * fewer units free in the new window, so the shortfall is reported back to the
+ * user rather than failing the whole copy.
+ *
+ * Models are written in batches of {@link MAX_MODELS_PER_RESERVATION_BATCH},
+ * one transaction each, sorted by id like every other writer of these rows. A
+ * plan can name more models than one transaction may carry. Each batch measures
+ * its pools under the model locks and writes through
+ * {@link writeBookingModelRequestInTx}, so the cap and the write's own pool
+ * check agree. A batch that fails is logged and its models are reported as
+ * reserved `0` and `failed`; the batches already written stay.
+ *
+ * Expects a booking that holds no reservation for these models yet: each
+ * quantity is written as the absolute target.
+ *
+ * @param args.bookingId - The booking to reserve on, in `organizationId`
+ * @param args.organizationId - The caller's workspace. Models outside it are
+ *   skipped.
+ * @param args.userId - The acting user, recorded on the activity events
+ * @param args.requested - Units wanted per model; repeated models are summed and
+ *   entries below 1 are ignored
+ * @returns One entry per model reserved below what was asked, in model-id order
+ */
+export async function reserveModelsUpToAvailability({
+  bookingId,
+  organizationId,
+  userId,
+  requested,
+}: {
+  bookingId: string;
+  organizationId: string;
+  userId: string;
+  requested: BookingModelRequestAddition[];
+}): Promise<ReducedModelReservation[]> {
+  const wantedByModel = new Map<string, number>();
+  for (const { assetModelId, quantity } of requested) {
+    if (!Number.isInteger(quantity) || quantity < 1) continue;
+    wantedByModel.set(
+      assetModelId,
+      (wantedByModel.get(assetModelId) ?? 0) + quantity
+    );
+  }
+  if (wantedByModel.size === 0) return [];
+
+  // Names for the report, and the workspace scope: a model that is not in this
+  // workspace is left out here rather than failing the batch it lands in.
+  const models = await db.assetModel.findMany({
+    where: { id: { in: [...wantedByModel.keys()] }, organizationId },
+    select: { id: true, name: true },
+  });
+  const nameById = new Map(models.map((m) => [m.id, m.name]));
+  const orderedModelIds = [...nameById.keys()].sort();
+
+  const actor = await loadActorBestEffort(userId);
+  const reduced: ReducedModelReservation[] = [];
+
+  for (
+    let start = 0;
+    start < orderedModelIds.length;
+    start += MAX_MODELS_PER_RESERVATION_BATCH
+  ) {
+    const batchIds = orderedModelIds.slice(
+      start,
+      start + MAX_MODELS_PER_RESERVATION_BATCH
+    );
+    const reportFor = (assetModelId: string, reserved: number) => ({
+      assetModelId,
+      assetModelName: nameById.get(assetModelId)!,
+      requested: wantedByModel.get(assetModelId)!,
+      reserved,
+    });
+
+    try {
+      const batchReduced = await db.$transaction(
+        async (tx) => {
+          const booking = await tx.booking.findUnique({
+            where: { id: bookingId, organizationId },
+            select: { from: true, to: true },
+          });
+          if (!booking) {
+            throw new ShelfError({
+              cause: null,
+              label,
+              status: 404,
+              message: "Booking not found in current workspace.",
+              shouldBeCaptured: false,
+            });
+          }
+
+          // Pool first, then the row, the order every writer takes them in.
+          await lockAssetModelsForReservation(tx, batchIds, organizationId);
+          for (const assetModelId of batchIds) {
+            await lockModelRequestRow(tx, bookingId, assetModelId);
+          }
+
+          const fits = await measureModelPoolFits({
+            bookingId,
+            organizationId,
+            from: booking.from,
+            to: booking.to,
+            outstandingByModel: new Map(
+              batchIds.map((id) => [id, wantedByModel.get(id)!])
+            ),
+            tx,
+          });
+
+          const short: ReducedModelReservation[] = [];
+          for (const assetModelId of batchIds) {
+            const { availability, namedNotInCustody, outstanding } =
+              fits.get(assetModelId)!;
+            // What the pool can still give this booking once the units it
+            // holds by name are counted, the headroom the write core checks.
+            const headroom = Math.max(
+              0,
+              availability.available - namedNotInCustody
+            );
+            const reserved = Math.min(outstanding, headroom);
+            if (reserved > 0) {
+              await writeBookingModelRequestInTx(tx, {
+                bookingId,
+                assetModelId,
+                quantity: reserved,
+                organizationId,
+                userId,
+                actor,
+              });
+            }
+            if (reserved < outstanding) {
+              short.push(reportFor(assetModelId, reserved));
+            }
+          }
+          return short;
+        },
+        { timeout: RESERVATION_BATCH_TX_TIMEOUT_MS }
+      );
+      reduced.push(...batchReduced);
+    } catch (cause) {
+      Logger.error(
+        new ShelfError({
+          cause,
+          label,
+          message: "Failed to reserve a batch of models on a booking.",
+          additionalData: { bookingId, organizationId, batchIds },
+        })
+      );
+      reduced.push(
+        ...batchIds.map((id) => ({
+          ...reportFor(id, 0),
+          failed: true as const,
+        }))
+      );
+    }
+  }
+
+  return reduced;
+}
+
+/* -------------------------------------------------------------------------- */
 /*                         removeBookingModelRequest                          */
 /* -------------------------------------------------------------------------- */
 
@@ -3254,6 +3440,37 @@ type MaterializeArgs = {
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   tx: any;
+  /**
+   * Shared state for a caller assigning many assets in one transaction. With
+   * it, the actor and each model's reservation row are read once for the
+   * whole batch, and the note and events are collected for the caller to
+   * write in one statement each, instead of costing round trips per asset.
+   * Without it, everything is read and written here, as for a single asset.
+   */
+  batch?: MaterializeBatch;
+};
+
+/** A reservation row as the claim needs it: its id and its model's name. */
+type ReservationForClaim = { id: string; assetModel: { name: string } };
+
+/**
+ * Per-call state {@link fulfilModelRequestsForAssets} threads through
+ * {@link materializeModelRequestForAsset}. See `MaterializeArgs.batch`.
+ *
+ * The cached reservation row only supplies the row's id and its model's name,
+ * neither of which a claim changes. Every claim still reads the live
+ * `fulfilledQuantity` inside its own conditional `UPDATE`, so caching the row
+ * cannot let two units claim one slot.
+ */
+type MaterializeBatch = {
+  /** Loads the acting user at most once for the whole batch. */
+  loadActor: () => Promise<NoteActor | null>;
+  /** Reservation rows read so far, by model id; `null` means none exists. */
+  reservationByModelId: Map<string, ReservationForClaim | null>;
+  /** Note contents to write, in claim order. */
+  notes: string[];
+  /** Activity events to write, in claim order. */
+  events: ActivityEventInput[];
 };
 
 /**
@@ -3285,6 +3502,7 @@ export async function materializeModelRequestForAsset({
   organizationId,
   userId,
   tx,
+  batch,
 }: MaterializeArgs): Promise<
   | { matched: true; requestId: string; remaining: number; modelName: string }
   | { matched: false }
@@ -3314,15 +3532,20 @@ export async function materializeModelRequestForAsset({
       return { matched: false };
     }
 
-    const existing = await tx.bookingModelRequest.findUnique({
-      where: {
-        bookingId_assetModelId: {
-          bookingId,
-          assetModelId: asset.assetModelId,
-        },
-      },
-      include: { assetModel: { select: { name: true } } },
-    });
+    const cached = batch?.reservationByModelId.get(asset.assetModelId);
+    const existing: ReservationForClaim | null =
+      cached !== undefined
+        ? cached
+        : await tx.bookingModelRequest.findUnique({
+            where: {
+              bookingId_assetModelId: {
+                bookingId,
+                assetModelId: asset.assetModelId,
+              },
+            },
+            include: { assetModel: { select: { name: true } } },
+          });
+    batch?.reservationByModelId.set(asset.assetModelId, existing);
 
     if (!existing) {
       return { matched: false };
@@ -3407,8 +3630,13 @@ export async function materializeModelRequestForAsset({
         : null;
 
     // Activity note — IN the tx so the note rolls back with the
-    // materialization if anything later in the pipeline fails.
-    const actor = userId ? await loadActor(userId) : null;
+    // materialization if anything later in the pipeline fails. A batch writes
+    // it with the others once its loop ends, still inside the same tx.
+    const actor = batch
+      ? await batch.loadActor()
+      : userId
+      ? await loadActor(userId)
+      : null;
     const assetLink = wrapLinkForNote(`/assets/${asset.id}`, asset.title);
     const modelNameForNote = stripMarkdocDelimiters(existing.assetModel.name);
     // Same sentence either way; only the subject changes, so the feed reads
@@ -3416,13 +3644,17 @@ export async function materializeModelRequestForAsset({
     const content = actor?.link
       ? `${actor.link} assigned ${assetLink} (${modelNameForNote}) to this booking — ${remaining} × ${modelNameForNote} remaining.`
       : `${assetLink} (${modelNameForNote}) was assigned to this booking — ${remaining} × ${modelNameForNote} remaining.`;
-    await tx.bookingNote.create({
-      data: {
-        type: "UPDATE",
-        content,
-        booking: { connect: { id: bookingId } },
-      },
-    });
+    if (batch) {
+      batch.notes.push(content);
+    } else {
+      await tx.bookingNote.create({
+        data: {
+          type: "UPDATE",
+          content,
+          booking: { connect: { id: bookingId } },
+        },
+      });
+    }
 
     /**
      * One `BOOKING_MODEL_REQUEST_FULFILLED` per UNIT, carrying the concrete
@@ -3447,7 +3679,7 @@ export async function materializeModelRequestForAsset({
       bookingId,
     };
 
-    await recordEvent(
+    const events: ActivityEventInput[] = [
       {
         ...eventBase,
         action: "BOOKING_MODEL_REQUEST_FULFILLED",
@@ -3459,25 +3691,29 @@ export async function materializeModelRequestForAsset({
           remaining,
         },
       },
-      tx
-    );
+    ];
 
     // `fulfilledAt` flipping null → set is its own field change, and it gets
     // the same event here as it does when an operator closes a request out by
     // editing the quantity down — the field's history reads the same whichever
     // path caused it.
     if (completedNow) {
-      await recordEvent(
-        {
-          ...eventBase,
-          action: "BOOKING_MODEL_REQUEST_CHANGED",
-          field: "fulfilledAt",
-          fromValue: null,
-          toValue: completedNow.toISOString(),
-          meta: modelMeta,
-        },
-        tx
-      );
+      events.push({
+        ...eventBase,
+        action: "BOOKING_MODEL_REQUEST_CHANGED",
+        field: "fulfilledAt",
+        fromValue: null,
+        toValue: completedNow.toISOString(),
+        meta: modelMeta,
+      });
+    }
+
+    if (batch) {
+      batch.events.push(...events);
+    } else {
+      for (const event of events) {
+        await recordEvent(event, tx);
+      }
     }
 
     return {
@@ -3616,6 +3852,23 @@ export async function fulfilModelRequestsForAssets({
     alreadyClaimedRows.map((row) => row.assetId)
   );
 
+  /**
+   * One batch for the whole call, so the loop below spends only the claim
+   * itself per asset. The actor is read on the first claim (none for a call
+   * that matches nothing), each model's reservation row on its first asset,
+   * and every note and event is written in one statement after the loop.
+   */
+  let actorLoad: Promise<NoteActor | null> | undefined;
+  const batch: MaterializeBatch = {
+    loadActor: () => {
+      actorLoad ??= userId ? loadActor(userId) : Promise.resolve(null);
+      return actorLoad;
+    },
+    reservationByModelId: new Map(),
+    notes: [],
+    events: [],
+  };
+
   for (const asset of assets) {
     if (alreadyClaimedAssetIds.has(asset.id)) continue;
     // Sequential, not `Promise.all`: several assets of the SAME model compete
@@ -3629,12 +3882,31 @@ export async function fulfilModelRequestsForAssets({
       organizationId,
       userId,
       tx,
+      batch,
     });
 
     if (result.matched) {
       fulfilledRequestIdByAssetId.set(asset.id, result.requestId);
     }
   }
+
+  if (batch.notes.length > 0) {
+    // The booking feed orders notes by `createdAt`, so one shared default
+    // stamp would shuffle them. Each later claim gets a later millisecond,
+    // which keeps the feed in scan order, and the range ENDS at now: notes the
+    // caller writes after this batch (its "added assets" note) take the
+    // database default stamp, and must not sort below these.
+    const firstStamp = Date.now() - (batch.notes.length - 1);
+    await tx.bookingNote.createMany({
+      data: batch.notes.map((content, index) => ({
+        type: "UPDATE",
+        content,
+        bookingId,
+        createdAt: new Date(firstStamp + index),
+      })),
+    });
+  }
+  await recordEvents(batch.events, tx);
 
   return fulfilledRequestIdByAssetId;
 }

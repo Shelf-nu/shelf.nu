@@ -9,6 +9,13 @@ instead — this document is the binary.
 - `eas whoami` returns an account with access to the Shelf project.
 - `apps/companion/google-service-account.json` exists. It is git-ignored and
   holds the Play submission key; without it the Android submit fails.
+- Push credentials are in place on EAS (APNs key, FCM V1 service account) and
+  `ios/Shelf/Shelf.entitlements` still carries `aps-environment`. See
+  [PUSH-NOTIFICATIONS.md](./PUSH-NOTIFICATIONS.md).
+- The `GOOGLE_SERVICES_JSON` file variable exists on EAS for the `production`
+  environment (`eas env:list --environment production`). `app.config.js` reads
+  it into `expo.android.googleServicesFile`; without it Android installs never
+  register for push. The file is not in git (it carries a Firebase client key).
 - Everything intended for this release is merged to `main`.
 - App Store Connect has screenshots for 13-inch iPad displays. The iOS build
   targets iPad as well as iPhone (`supportsTablet` in `app.json`), so App Store

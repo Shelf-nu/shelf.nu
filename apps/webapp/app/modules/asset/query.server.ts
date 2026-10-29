@@ -9,6 +9,11 @@ import { normalizeBarcodeValue } from "~/modules/barcode/validation";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { isSafeSqlIdentifier } from "~/utils/sql";
+import {
+  ENUM_FILTER_VALUES,
+  getUnknownEnumFilterValues,
+} from "./enum-filter-values";
+import type { EnumFilterName } from "./enum-filter-values";
 import { parseFilters } from "./filter-parsing";
 import { LAST_AUDIT_DATE_COLUMN } from "./last-audit-date-access";
 import { bookableListScopeSql } from "./list-scope.server";
@@ -558,6 +563,39 @@ function addDateFilter(
   }
 }
 
+/**
+ * Throws a 400 naming the accepted values when an enum filter carries a value
+ * its Postgres enum does not have, so the caller (a person editing a URL, or a
+ * script) gets a plain answer instead of a database error. Filter values come
+ * straight from the URL, and a value outside the enum fails the
+ * `::public."<Enum>"` cast below, which fails the whole query.
+ *
+ * @param name - The enum filter being checked.
+ * @param values - The filter's values, already split and trimmed.
+ * @throws {ShelfError} 400 when any value is not in the enum.
+ */
+function assertEnumFilterValues(name: EnumFilterName, values: string[]): void {
+  const unknown = getUnknownEnumFilterValues(name, values);
+  if (unknown.length === 0) return;
+
+  const archivedHint = unknown.some((value) => /^archived$/i.test(value))
+    ? " Archived is not a status: list archived assets with archived=archived."
+    : "";
+  throw new ShelfError({
+    cause: null,
+    title: `Unknown ${name} filter value`,
+    message: `Unknown ${name} ${unknown
+      .map((value) => `"${value}"`)
+      .join(", ")}. Use one of: ${ENUM_FILTER_VALUES[name].join(
+      ", "
+    )}.${archivedHint}`,
+    additionalData: { filter: name, unknown },
+    label: "Assets",
+    status: 400,
+    shouldBeCaptured: false,
+  });
+}
+
 function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
   // Derived verdict, not a stored enum, compared as text against the same
   // expression the column renders. This is the whole reason Stock status is one
@@ -596,17 +634,22 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
   if (filter.name === "status") {
     switch (filter.operator) {
       case "is": {
-        const trimmedValue =
-          typeof filter.value === "string" ? filter.value.trim() : filter.value;
+        const trimmedValue = String(filter.value).trim();
+        assertEnumFilterValues("status", [trimmedValue]);
         return Prisma.sql`${whereClause} AND a.status = ${trimmedValue}::public."AssetStatus"`;
       }
       case "isNot": {
-        const trimmedValue =
-          typeof filter.value === "string" ? filter.value.trim() : filter.value;
+        const trimmedValue = String(filter.value).trim();
+        assertEnumFilterValues("status", [trimmedValue]);
         return Prisma.sql`${whereClause} AND a.status != ${trimmedValue}::public."AssetStatus"`;
       }
       case "containsAny": {
-        const values = (filter.value as string).split(",").map((v) => v.trim());
+        const values = String(filter.value)
+          .split(",")
+          .map((v) => v.trim())
+          .filter(Boolean);
+        if (values.length === 0) return whereClause;
+        assertEnumFilterValues("status", values);
         const valuesArray = Prisma.join(
           values.map((v) => Prisma.sql`${v}`),
           ", "
@@ -622,11 +665,15 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
   if (filter.name === "type") {
     switch (filter.operator) {
       case "is": {
-        whereClause = Prisma.sql`${whereClause} AND a."type" = ${filter.value}::public."AssetType"`;
+        const trimmedValue = String(filter.value).trim();
+        assertEnumFilterValues("type", [trimmedValue]);
+        whereClause = Prisma.sql`${whereClause} AND a."type" = ${trimmedValue}::public."AssetType"`;
         break;
       }
       case "isNot": {
-        whereClause = Prisma.sql`${whereClause} AND a."type" != ${filter.value}::public."AssetType"`;
+        const trimmedValue = String(filter.value).trim();
+        assertEnumFilterValues("type", [trimmedValue]);
+        whereClause = Prisma.sql`${whereClause} AND a."type" != ${trimmedValue}::public."AssetType"`;
         break;
       }
       default:
@@ -1763,13 +1810,17 @@ export function parseSortingOptions(sortBy: string[]): {
         );
       } else if (field.name === "valuation") {
         // Quantity-aware: sort by TOTAL value (per-unit × quantity), matching
-        // what the "Value" cell displays. INDIVIDUAL assets are quantity=1 so
-        // this is identical to sorting on `assetValue` for them; QT assets
-        // are now ordered by total worth (the number users actually compare),
-        // not per-unit price. `assetValue` and `assetQuantity` are aliases on
-        // the outer SELECT — safe to multiply without quoting concerns.
+        // what the "Value" cell displays. INDIVIDUAL assets store a NULL
+        // quantity (see the Asset model), so it is COALESCEd to 1: otherwise
+        // the product is NULL for every individual asset and they all tie.
+        // For them this is identical to sorting on `assetValue`; QT assets
+        // are ordered by total worth (the number users actually compare),
+        // not per-unit price. Assets with no value sort last in both
+        // directions (Postgres would put them first on desc). `assetValue`
+        // and `assetQuantity` are aliases on the outer SELECT — safe to
+        // multiply without quoting concerns.
         orderByParts.push(
-          `("assetValue" * "assetQuantity") ${field.direction}`
+          `("assetValue" * COALESCE("assetQuantity", 1)) ${field.direction} NULLS LAST`
         );
       } else {
         // Use regular sorting for non-text columns

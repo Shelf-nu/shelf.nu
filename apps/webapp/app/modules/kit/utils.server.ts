@@ -1,3 +1,4 @@
+import { AssetType } from "@prisma/client";
 import type { Kit, KitStatus, Prisma } from "@prisma/client";
 import type { AllowedCustodianFilterIds } from "~/modules/asset/utils.server";
 import { applyCustodianAllowList } from "~/modules/asset/utils.server";
@@ -98,4 +99,28 @@ export function isOwnKitImagePath(path: string, kitId: Kit["id"]): boolean {
       (segment) => segment !== "" && segment !== "." && segment !== ".."
     )
   );
+}
+
+/**
+ * The kit an asset leaves when it is added to another kit.
+ *
+ * An INDIVIDUAL asset belongs to one kit at a time, so joining a kit moves it
+ * out of the kit it was in. A QUANTITY_TRACKED asset keeps its other kits
+ * (their units can sit in several), so it leaves none. The answer names the
+ * kit in the asset's "changed kit from A to B" activity note and is the
+ * `fromValue` of its `ASSET_KIT_CHANGED` event.
+ *
+ * @param asset - The asset being added, with its current kit memberships
+ * @param kitId - The kit it is being added to
+ * @returns The kit it leaves, or `null` for a plain add
+ */
+export function getKitAnAssetLeaves(
+  asset: {
+    type: AssetType;
+    assetKits: { kitId: string; kit: Pick<Kit, "id" | "name"> }[];
+  },
+  kitId: Kit["id"]
+): Pick<Kit, "id" | "name"> | null {
+  if (asset.type !== AssetType.INDIVIDUAL) return null;
+  return asset.assetKits.find((ak) => ak.kitId !== kitId)?.kit ?? null;
 }

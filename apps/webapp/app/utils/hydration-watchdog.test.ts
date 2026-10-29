@@ -26,7 +26,10 @@ import {
 } from "./hydration-watchdog";
 
 // why: Sentry is a network side effect; the test asserts what would be sent.
-vi.mock("@sentry/react-router", () => ({ captureMessage: vi.fn() }));
+vi.mock("@sentry/react-router", () => ({
+  captureMessage: vi.fn(),
+  logger: { info: vi.fn() },
+}));
 
 /** The origin the page is served from, as the script sees it. */
 const ORIGIN = "https://app.shelf.nu";
@@ -123,6 +126,7 @@ beforeEach(() => {
   document.documentElement.removeAttribute(HYDRATION_FAILED_ATTRIBUTE);
   document.documentElement.removeAttribute(UNSUPPORTED_BROWSER_ATTRIBUTE);
   vi.mocked(Sentry.captureMessage).mockClear();
+  vi.mocked(Sentry.logger.info).mockClear();
 });
 
 afterEach(() => {
@@ -386,13 +390,41 @@ describe("HYDRATION_GATE_STYLES", () => {
 });
 
 describe("markHydrated", () => {
-  it("reports a failed earlier load to Sentry once, then forgets it", () => {
+  it("logs a load the automatic reload fixed, once, without raising an issue", () => {
+    runWatchdog();
+    failToLoad(modulePreload(OWN_CHUNK));
+
+    // The reloaded page hydrates.
+    markHydrated();
+    markHydrated();
+
+    // The user only saw a reload, so this is counted, not alerted on.
+    expect(Sentry.captureMessage).not.toHaveBeenCalled();
+    expect(Sentry.logger.info).toHaveBeenCalledTimes(1);
+    expect(Sentry.logger.info).toHaveBeenCalledWith(
+      "App bundle reloaded after a failed load",
+      expect.objectContaining({
+        label: "Hydration",
+        reason: "load-error",
+        path: "/assets",
+        failures: 1,
+        source: expect.stringContaining("/file-assets/abc/chunk-X1.js"),
+      })
+    );
+    expect(storedReport()).toBeNull();
+  });
+
+  it("raises a warning when the reload failed too and the recovery screen showed", () => {
+    runWatchdog();
+    failToLoad(moduleScript());
+    fakeWindow.__shelfHydrationWatchdog?.done();
     runWatchdog();
     failToLoad(moduleScript());
 
-    markHydrated();
+    // A manual reload from the recovery screen hydrates.
     markHydrated();
 
+    expect(Sentry.logger.info).not.toHaveBeenCalled();
     expect(Sentry.captureMessage).toHaveBeenCalledTimes(1);
     expect(Sentry.captureMessage).toHaveBeenCalledWith(
       "App bundle failed to load before hydration",
@@ -403,9 +435,28 @@ describe("markHydrated", () => {
           hydration_failure: "load-error",
           hydration_auto_reloaded: "yes",
         },
+        extra: expect.objectContaining({ failures: 2 }),
       })
     );
-    expect(storedReport()).toBeNull();
+  });
+
+  it("raises a warning when the page timed out", () => {
+    runWatchdog();
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
+
+    markHydrated();
+
+    expect(Sentry.logger.info).not.toHaveBeenCalled();
+    expect(Sentry.captureMessage).toHaveBeenCalledWith(
+      "App bundle failed to load before hydration",
+      expect.objectContaining({
+        fingerprint: ["hydration-failure", "timeout"],
+        tags: {
+          hydration_failure: "timeout",
+          hydration_auto_reloaded: "no",
+        },
+      })
+    );
   });
 
   it("sends nothing after a clean load", () => {
@@ -413,5 +464,6 @@ describe("markHydrated", () => {
     markHydrated();
 
     expect(Sentry.captureMessage).not.toHaveBeenCalled();
+    expect(Sentry.logger.info).not.toHaveBeenCalled();
   });
 });

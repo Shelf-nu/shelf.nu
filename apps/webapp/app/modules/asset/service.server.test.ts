@@ -7117,6 +7117,7 @@ describe("availability writes on archived assets (issue #382)", () => {
       id: "a1",
       organizationId: "org-1",
       availableToBook: false,
+      userId: "user-1",
     });
 
     // The pre-check gives the clear error; the WHERE closes the window where
@@ -7146,6 +7147,7 @@ describe("availability writes on archived assets (issue #382)", () => {
         id: "a1",
         organizationId: "org-1",
         availableToBook: false,
+        userId: "user-1",
       })
     ).rejects.toMatchObject({ title: "Asset is archived", status: 400 });
   });
@@ -7169,12 +7171,21 @@ describe("availability writes on archived assets (issue #382)", () => {
         id: "a1",
         organizationId: "org-1",
         availableToBook: false,
+        userId: "user-1",
       })
     ).rejects.not.toMatchObject({ title: "Asset is archived" });
   });
 
   it("skips assets archived after the bulk check", async () => {
+    // why: the before-state read inside the transaction; both assets are
+    // bookable, so both are candidates for the change.
+    vitest.mocked(db.asset.findMany).mockResolvedValueOnce([
+      { id: "a1", availableToBook: true },
+      { id: "a2", availableToBook: true },
+    ] as never);
+
     await bulkMarkAvailability({
+      userId: "user-1",
       lastAuditDateAccess: "hidden",
       bookableScope: null,
       organizationId: "org-1",
@@ -7183,11 +7194,206 @@ describe("availability writes on archived assets (issue #382)", () => {
       settings: {} as never,
     });
 
+    // Both the read that picks the rows and the write leave archived rows out.
+    expect(db.asset.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ archivedAt: null }),
+      })
+    );
     expect(db.asset.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({ archivedAt: null }),
       })
     );
+  });
+});
+
+describe("available for bookings: activity trail", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  /** The note's actor link for the user the tests act as. */
+  const actorLink = '{% link to="/settings/team/users/user-1" text="Sam" /%}';
+
+  /** Stubs the acting user, read once to build the note's actor link. */
+  function stubActor() {
+    // why: the note names the actor by display name, read from the user table.
+    vitest.mocked(db.user.findFirst).mockResolvedValueOnce({
+      firstName: "Samantha",
+      lastName: "Jones",
+      displayName: "Sam",
+    } as never);
+  }
+
+  it.each([
+    { from: false, to: true, word: "available" },
+    { from: true, to: false, word: "unavailable" },
+  ])(
+    "records one note and one event when the switch goes from $from to $to",
+    async ({ from, to, word }) => {
+      stubActor();
+      // why: the before-read inside the transaction; the asset holds `from`.
+      vitest
+        .mocked(db.asset.findUnique)
+        .mockResolvedValueOnce({ availableToBook: from } as never);
+
+      await updateAssetBookingAvailability({
+        id: "a1",
+        organizationId: "org-1",
+        availableToBook: to,
+        userId: "user-1",
+      });
+
+      expect(db.asset.update).toHaveBeenCalledWith({
+        where: { id: "a1", organizationId: "org-1", archivedAt: null },
+        data: { availableToBook: to },
+      });
+      expect(createNote).toHaveBeenCalledTimes(1);
+      expect(createNote).toHaveBeenCalledWith(
+        {
+          content: `${actorLink} marked the asset as ${word} for bookings.`,
+          type: "UPDATE",
+          userId: "user-1",
+          assetId: "a1",
+          organizationId: "org-1",
+        },
+        // The transaction client: the note commits with the change.
+        expect.anything()
+      );
+      expect(recordEvent).toHaveBeenCalledTimes(1);
+      expect(recordEvent).toHaveBeenCalledWith(
+        {
+          organizationId: "org-1",
+          actorUserId: "user-1",
+          action: "ASSET_AVAILABLE_TO_BOOK_CHANGED",
+          entityType: "ASSET",
+          entityId: "a1",
+          assetId: "a1",
+          field: "availableToBook",
+          fromValue: from,
+          toValue: to,
+        },
+        expect.anything()
+      );
+    }
+  );
+
+  it("writes no note and no event when the switch is set to the value it holds", async () => {
+    stubActor();
+    // why: the before-read inside the transaction; already available.
+    vitest
+      .mocked(db.asset.findUnique)
+      .mockResolvedValueOnce({ availableToBook: true } as never);
+
+    await updateAssetBookingAvailability({
+      id: "a1",
+      organizationId: "org-1",
+      availableToBook: true,
+      userId: "user-1",
+    });
+
+    expect(createNote).not.toHaveBeenCalled();
+    expect(recordEvent).not.toHaveBeenCalled();
+  });
+
+  it("writes no note and no event when the asset is archived after the pre-check", async () => {
+    stubActor();
+    // why: the before-read inside the transaction excludes archived rows, so
+    // an asset archived after the pre-check reads back as missing.
+    vitest.mocked(db.asset.findUnique).mockResolvedValueOnce(null);
+
+    await updateAssetBookingAvailability({
+      id: "a1",
+      organizationId: "org-1",
+      availableToBook: true,
+      userId: "user-1",
+    });
+
+    expect(db.asset.findUnique).toHaveBeenCalledWith({
+      where: { id: "a1", organizationId: "org-1", archivedAt: null },
+      select: { availableToBook: true },
+    });
+    expect(createNote).not.toHaveBeenCalled();
+    expect(recordEvent).not.toHaveBeenCalled();
+  });
+
+  it("records one note and one event per asset the bulk action actually changes", async () => {
+    stubActor();
+    // why: the before-state read inside the transaction. a2 is already
+    // available, so marking the selection available changes a1 and a3 only.
+    vitest.mocked(db.asset.findMany).mockResolvedValueOnce([
+      { id: "a1", availableToBook: false },
+      { id: "a2", availableToBook: true },
+      { id: "a3", availableToBook: false },
+    ] as never);
+
+    await bulkMarkAvailability({
+      userId: "user-1",
+      lastAuditDateAccess: "hidden",
+      bookableScope: null,
+      organizationId: "org-1",
+      assetIds: ["a1", "a2", "a3"],
+      type: "available",
+      settings: {} as never,
+    });
+
+    expect(db.asset.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ["a1", "a3"] },
+        organizationId: "org-1",
+        archivedAt: null,
+      },
+      data: { availableToBook: true },
+    });
+    expect(recordEvents).toHaveBeenCalledTimes(1);
+    expect(vitest.mocked(recordEvents).mock.calls[0]).toEqual([
+      ["a1", "a3"].map((assetId) => ({
+        organizationId: "org-1",
+        actorUserId: "user-1",
+        action: "ASSET_AVAILABLE_TO_BOOK_CHANGED",
+        entityType: "ASSET",
+        entityId: assetId,
+        assetId,
+        field: "availableToBook",
+        fromValue: false,
+        toValue: true,
+      })),
+      expect.anything(),
+    ]);
+    expect(createNotes).toHaveBeenCalledTimes(1);
+    expect(createNotes).toHaveBeenCalledWith(
+      {
+        content: `${actorLink} marked the asset as available for bookings.`,
+        type: "UPDATE",
+        userId: "user-1",
+        assetIds: ["a1", "a3"],
+        organizationId: "org-1",
+      },
+      expect.anything()
+    );
+  });
+
+  it("writes nothing when every selected asset already holds the value", async () => {
+    stubActor();
+    // why: the before-state read inside the transaction; already unavailable.
+    vitest
+      .mocked(db.asset.findMany)
+      .mockResolvedValueOnce([{ id: "a1", availableToBook: false }] as never);
+
+    await bulkMarkAvailability({
+      userId: "user-1",
+      lastAuditDateAccess: "hidden",
+      bookableScope: null,
+      organizationId: "org-1",
+      assetIds: ["a1"],
+      type: "unavailable",
+      settings: {} as never,
+    });
+
+    expect(db.asset.updateMany).not.toHaveBeenCalled();
+    expect(recordEvents).not.toHaveBeenCalled();
+    expect(createNotes).not.toHaveBeenCalled();
   });
 });
 
@@ -8013,5 +8219,35 @@ describe("getAdvancedPaginatedAndFilterableAssets - lastAuditDate gating", () =>
       preParsedFilters: [],
     });
     expect(sql).toContain('"completedAt"');
+  });
+});
+
+describe("getAdvancedPaginatedAndFilterableAssets - unknown filter value", () => {
+  beforeEach(() => {
+    vi.mocked(db.$queryRaw).mockClear();
+  });
+
+  it("rethrows the filter's 400 with its own message", async () => {
+    const statusFilter: Filter = {
+      name: "status",
+      type: "enum",
+      operator: "is",
+      value: "ARCHIVED",
+    };
+
+    const error = await getAdvancedPaginatedAndFilterableAssets({
+      request: new Request("http://localhost/assets"),
+      organizationId: "org-1",
+      settings: { ...ASSET_INDEX_SETTINGS, mode: "ADVANCED" },
+      filters: "status=is%3AARCHIVED",
+      preParsedFilters: [statusFilter],
+    }).catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(ShelfError);
+    expect(error).toMatchObject({
+      status: 400,
+      message: expect.stringContaining('Unknown status "ARCHIVED"'),
+    });
+    expect(db.$queryRaw).not.toHaveBeenCalled();
   });
 });

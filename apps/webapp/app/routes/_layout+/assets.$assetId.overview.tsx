@@ -638,6 +638,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         id,
         organizationId,
         availableToBook,
+        userId,
       });
 
       sendNotification({
@@ -1178,7 +1179,7 @@ export default function AssetOverview() {
                         variant="link"
                         aria-label="Manage placements"
                         title="Manage placements"
-                        className="md:group-hover/field:opacity-100 hidden shrink-0 rounded p-1 text-gray-500 transition-opacity hover:bg-gray-100 hover:text-gray-700 md:inline-flex md:opacity-0 md:focus-visible:opacity-100"
+                        className="hidden shrink-0 rounded p-1 text-gray-500 transition-opacity hover:bg-gray-100 hover:text-gray-700 md:inline-flex md:opacity-0 md:group-hover/field:opacity-100 md:focus-visible:opacity-100"
                       >
                         <Icon icon="pen" />
                       </Button>

@@ -1203,6 +1203,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       checkedInAssetIds,
       checkedOutAssetIds: sliceCheckedOutAssetIds,
       bookingStatus: booking.status,
+      archivedWithoutCheckin: booking.archivedWithoutCheckin,
       countKitsAsSingleUnit,
     });
 
@@ -1465,7 +1466,7 @@ const INTENT_VERB = {
   cancel: "cancel",
   removeKit: "remove kits from",
   "revert-to-draft": "revert",
-  "extend-booking": "extend",
+  "extend-booking": "change the end date of",
   "bulk-remove-asset-or-kit": "remove items from",
   "partial-checkin": "check in",
   "partial-checkout": "check out",
@@ -1906,19 +1907,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           sourceLocations: parseSourceLocationsFromFormData(formData),
         });
 
-        const actor = wrapUserLinkForNote({ ...user, id: userId });
-        const bookingLink = wrapLinkForNote(
-          `/bookings/${booking.id}`,
-          booking.name
-        );
-        await createNotes({
-          content: `${actor} checked out asset with ${bookingLink}.`,
-          type: "UPDATE",
-          userId: user.id,
-          assetIds: [...new Set(booking.bookingAssets.map((ba) => ba.assetId))],
-          organizationId,
-        });
-
         sendNotification({
           title: "Booking checked-out",
           message: "Your booking has been checked-out successfully",
@@ -1975,21 +1963,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           "specificAssetIds[]"
         ) as string[];
 
-        // Only assets that were actually checked out get a check-in note —
-        // progressive checkout can leave never-checked-out assets in the booking.
-        // Post-pivot, asset → booking lookup goes via the `BookingAsset` pivot.
-        const checkedOutAssetIdsBeforeCheckin = (
-          await db.asset.findMany({
-            // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: check-in must cover every asset already out on the booking, archived ones included
-            where: {
-              bookingAssets: { some: { bookingId: id } },
-              organizationId,
-              status: AssetStatus.CHECKED_OUT,
-            },
-            select: { id: true },
-          })
-        ).map((a) => a.id);
-
         const booking = await checkinBooking({
           id,
           organizationId,
@@ -2004,25 +1977,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           // guard above is right to refuse it.
           provenance: { surface: "web", method: "quick" },
         });
-
-        // Only write notes for assets that were actually checked out before
-        // this check-in. With progressive checkout, a booking may still have
-        // un-checked-out assets at check-in time — those shouldn't get a
-        // "checked in" note. Falls back to no-op when nothing was out.
-        if (checkedOutAssetIdsBeforeCheckin.length > 0) {
-          const actor = wrapUserLinkForNote({ ...user, id: userId });
-          const bookingLink = wrapLinkForNote(
-            `/bookings/${booking.id}`,
-            booking.name
-          );
-          await createNotes({
-            content: `${actor} checked in asset with ${bookingLink}.`,
-            type: "UPDATE",
-            userId: user.id,
-            assetIds: checkedOutAssetIdsBeforeCheckin,
-            organizationId,
-          });
-        }
 
         sendNotification({
           title: "Booking checked-in",
@@ -2264,7 +2218,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         // `endDate` is already a zoned `Date` produced by the schema's
         // `coerceLocalDate(timeZone)`, so no further parsing is needed here.
-        await extendBooking({
+        const { jobsRescheduled } = await extendBooking({
           id,
           organizationId,
           hints,
@@ -2276,12 +2230,22 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
               ?.roles ?? [],
         });
 
-        sendNotification({
-          title: "Booking extended",
-          message: "Your booking has been extended to new end date.",
-          icon: { name: "success", variant: "success" },
-          senderId: userId,
-        });
+        sendNotification(
+          jobsRescheduled
+            ? {
+                title: "End date changed",
+                message: "The booking now ends on the new end date.",
+                icon: { name: "success", variant: "success" },
+                senderId: userId,
+              }
+            : {
+                title: "End date changed, reminder not scheduled",
+                message:
+                  "The booking now ends on the new end date, but its check-in reminder could not be scheduled, so it will not turn overdue on its own. Change the end date again to retry.",
+                icon: { name: "x", variant: "error" },
+                senderId: userId,
+              }
+        );
 
         return payload({ success: true });
       }

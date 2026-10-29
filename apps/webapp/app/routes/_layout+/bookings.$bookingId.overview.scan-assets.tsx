@@ -61,8 +61,9 @@ export const links: LinksFunction = () => [
  * `assignSession`: the outstanding model reservations and the assets already
  * on the booking, in the shape `useBookingAssignSessionInitialization` seeds
  * into the scanner atoms. `assignSession` is null when the booking reserves
- * no models, so the screen renders exactly as it did before this reservation
- * context existed.
+ * no models, so the screen renders as a plain scan list. A booking whose
+ * reservations are all filled still gets a session, so an extra scan of a
+ * reserved model is labelled as over the reserved count.
  *
  * `booking:update` is a permission every role holds, so past that gate this
  * also proves the caller may write the booking (they created it or hold it,
@@ -128,7 +129,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     /**
      * Reservation context for the scanner, or null when the booking reserves
-     * no models and the drawer should look exactly as it always has.
+     * no models and the drawer shows a plain scan list.
      *
      * `getBooking` already returns everything `deriveBookingScanSession`
      * needs, so there is no extra query here beyond its own supplementary
@@ -137,7 +138,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * derivation is shared with the Check Out scanner's loader so a scan can
      * never be worth a different amount depending which screen is open.
      */
-    const { expectedModelRequests, alreadyIncluded } =
+    const { expectedModelRequests, reservedModels, alreadyIncluded } =
       await deriveBookingScanSession({
         modelRequests: booking.modelRequests,
         bookingAssets: booking.bookingAssets,
@@ -145,9 +146,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
 
     const assignSession =
-      expectedModelRequests.length === 0
+      reservedModels.length === 0
         ? null
-        : { expectedModelRequests, alreadyIncluded };
+        : { expectedModelRequests, reservedModels, alreadyIncluded };
 
     return payload({ title, header, booking, assignSession });
   } catch (cause) {
