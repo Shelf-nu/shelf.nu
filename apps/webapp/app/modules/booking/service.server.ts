@@ -6433,16 +6433,21 @@ export async function checkinBooking({
 
     /**
      * The slices this check-in brings back: out on this booking and not back
-     * yet, on an asset the check-in returns. The same scope as the marker write
-     * inside the transaction. A slice that never left, or came back on an
-     * earlier return, is not among them: `Asset.status` is global, so judging
-     * by asset alone would also take in a sibling slice and claim it came back
-     * now. Each one gets a BOOKING_CHECKED_IN event, and its asset the
-     * "checked in asset with" line.
+     * yet. A slice that never left, or came back on an earlier return, is not
+     * among them: `Asset.status` is global, so judging by asset alone would
+     * also take in a sibling slice and claim it came back now. Each one gets a
+     * BOOKING_CHECKED_IN event, and its asset the "checked in asset with" line.
+     *
+     * An INDIVIDUAL slice also needs its asset in `assetsToCheckinSet`: that
+     * set leaves out an asset another live booking still has out. A
+     * QUANTITY_TRACKED slice does not: other bookings holding units of the same
+     * pool is ordinary, and the disposition loop returns this slice's units
+     * whatever the set says.
      */
     const checkedInBookingAssets = bookingFound.bookingAssets.filter(
       (ba) =>
-        assetsToCheckinSet.has(ba.asset.id) &&
+        (ba.asset.type === AssetType.QUANTITY_TRACKED ||
+          assetsToCheckinSet.has(ba.asset.id)) &&
         Boolean(ba.checkedOutAt) &&
         !ba.checkedInAt
     );

@@ -22542,7 +22542,7 @@ describe("asset activity lines for a whole-booking check-out and check-in", () =
       id: `ba-${assetId}`,
       assetId,
       quantity: 1,
-      assetKitId: null,
+      assetKitId: null as string | null,
       checkedOutAt,
       checkedInAt: null,
       asset: {
@@ -22712,6 +22712,68 @@ describe("asset activity lines for a whole-booking check-out and check-in", () =
     }
   );
 
+  it("checkinBooking writes the check-in line for a quantity slice whose pool another live booking also has out", async () => {
+    expect.assertions(2);
+
+    // The cables' pool is split: this booking has 4 out, another ongoing
+    // booking has some too. Their asset reads CHECKED_OUT and is listed by
+    // the other booking, which keeps an INDIVIDUAL asset in, but this slice's
+    // units still come back now.
+    const individualSlice = slice("asset-qty", {
+      checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+      status: AssetStatus.CHECKED_OUT,
+    });
+    const qtySlice = {
+      ...individualSlice,
+      quantity: 4,
+      asset: {
+        ...individualSlice.asset,
+        type: AssetType.QUANTITY_TRACKED,
+        bookingAssets: [
+          { booking: { id: "booking-1", status: BookingStatus.ONGOING } },
+          { booking: { id: "booking-2", status: BookingStatus.ONGOING } },
+        ],
+      },
+    };
+    const booking = {
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      bookingAssets: [qtySlice],
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(booking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...booking,
+      status: BookingStatus.COMPLETE,
+    });
+
+    await checkinBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      hints: mockClientHints,
+      userId: "user-1",
+      provenance: { surface: "web", method: "quick" },
+    });
+
+    expect(
+      (
+        activityEventService.recordEvents as ReturnType<typeof vitest.fn>
+      ).mock.calls
+        .flatMap(
+          ([events]) => events as Array<{ action: string; assetId: string }>
+        )
+        .filter((event) => event.action === "BOOKING_CHECKED_IN")
+        .map((event) => event.assetId)
+    ).toEqual(["asset-qty"]);
+    expect(assetNotesWith("checked in asset with")).toEqual([
+      {
+        content: `${ACTOR} checked in asset with ${BOOKING_LINK} (in one click on the web).`,
+        assetIds: ["asset-qty"],
+      },
+    ]);
+  });
+
   it("checkinBooking says the batch completed the booking when a partial check-in hands over", async () => {
     expect.assertions(1);
 
@@ -22796,9 +22858,7 @@ describe("asset activity lines for a whole-booking check-out and check-in", () =
     });
     setupCheckout([
       loose,
-      { ...loose, id: "ba-asset-1-kit", assetKitId: "ak-1" } as ReturnType<
-        typeof slice
-      >,
+      { ...loose, id: "ba-asset-1-kit", assetKitId: "ak-1" },
       slice("asset-2", { checkedOutAt: null, status: AssetStatus.AVAILABLE }),
     ]);
 
