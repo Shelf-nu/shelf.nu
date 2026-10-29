@@ -202,4 +202,27 @@ describe("validatePermission", () => {
       })
     ).rejects.toMatchObject({ status: 403, title: "Unauthorized" });
   });
+
+  it("keeps only the switches of a passed organization row in the refusal", async () => {
+    const organization = {
+      id: "org-1",
+      managersCanEditAssets: false,
+      owner: { id: "owner-1", email: "owner@example.com" },
+      ssoDetails: { adminGroupId: "admins" },
+    };
+
+    const refusal = await validatePermission({
+      ...base,
+      roles: [OrganizationRoles.BASE],
+      workspace: organization,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.delete,
+    }).catch((error: unknown) => error);
+
+    expect(refusal).toMatchObject({
+      additionalData: { workspace: { managersCanEditAssets: false } },
+    });
+    expect(JSON.stringify(refusal)).not.toContain("owner@example.com");
+    expect(JSON.stringify(refusal)).not.toContain("admins");
+  });
 });

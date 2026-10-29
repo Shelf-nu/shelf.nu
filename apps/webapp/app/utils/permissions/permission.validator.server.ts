@@ -12,7 +12,7 @@
  * @see {@link file://../../../../../packages/permissions/src/index.ts}
  */
 import type { OrganizationRoles } from "@prisma/client";
-import { roleHasPermission } from "@shelf/permissions";
+import { pickWorkspaceGrants, roleHasPermission } from "@shelf/permissions";
 import { db } from "~/database/db.server";
 
 import type { PermissionAction, PermissionEntity } from "./permission.data";
@@ -46,6 +46,21 @@ export type PermissionCheckProps = {
    */
   workspaceGrants?: boolean;
 } & PermissionSubject;
+
+/**
+ * The check, as it may appear in an error's `additionalData`. Callers often
+ * pass the whole organization row as `workspace` (it holds the switches), and
+ * that data reaches the response body of a refused request, so only the
+ * switches themselves are kept.
+ */
+function describeCheck(params: PermissionCheckProps) {
+  return {
+    ...params,
+    workspace: params.workspace
+      ? pickWorkspaceGrants(params.workspace)
+      : params.workspace,
+  };
+}
 
 /**
  * Checks whether a user holds a role granting `action` on `entity` within
@@ -100,7 +115,7 @@ export async function hasPermission(
     throw new ShelfError({
       cause,
       message: "Error while checking permission",
-      additionalData: { ...params },
+      additionalData: describeCheck(params),
       label: "Permission",
     });
   }
@@ -120,7 +135,7 @@ export const validatePermission = async (props: PermissionCheckProps) => {
       cause: null,
       title: "Unauthorized",
       message: `You have no permission to perform this action`,
-      additionalData: { ...props },
+      additionalData: describeCheck(props),
       status: 403,
       label: "Permission",
       shouldBeCaptured: false,
