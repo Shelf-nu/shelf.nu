@@ -288,6 +288,16 @@ export declare function archivedAssetsRefusal(options: {
 export declare function archivedAssetsLeftOut(count: number): string;
 
 /**
+ * "Only 6 of 10 × Camera could be reserved for the new dates." for one model;
+ * for several, names the first three with their counts and "and N more".
+ *
+ * @param models - at least one, each reserved below what was asked
+ */
+export declare function modelReservationsReduced(
+  models: { assetModelName: string; requested: number; reserved: number }[]
+): string;
+
+/**
  * The refusal when kits with no active asset (only archived ones, or none) are
  * put into custody or booked.
  *

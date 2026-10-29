@@ -56,6 +56,7 @@ import {
   archivedAssetsRefusal,
   kitWithoutActiveAssetsReason,
   kitsWithoutActiveAssetsRefusal,
+  modelReservationsReduced,
   WITHHELD_CUSTODIAN_NAME,
 } from "./index.js";
 
@@ -424,6 +425,38 @@ test("the archived refusal names the assets and the way out for this reader", ()
 test("left-out counts agree in number", () => {
   assert.equal(archivedAssetsLeftOut(1), "1 archived asset was left out.");
   assert.equal(archivedAssetsLeftOut(3), "3 archived assets were left out.");
+});
+
+test("a copied booking names the models it reserved short", () => {
+  assert.equal(
+    modelReservationsReduced([
+      { assetModelName: "Camera", requested: 10, reserved: 6 },
+    ]),
+    "Only 6 of 10 × Camera could be reserved for the new dates."
+  );
+  assert.equal(
+    modelReservationsReduced([
+      { assetModelName: "Tripod", requested: 4, reserved: 0 },
+    ]),
+    "None of the 4 × Tripod could be reserved for the new dates."
+  );
+  assert.equal(
+    modelReservationsReduced([
+      { assetModelName: "Camera", requested: 10, reserved: 6 },
+      { assetModelName: "Tripod", requested: 4, reserved: 0 },
+    ]),
+    "Fewer units are free for the new dates, so 2 models were reserved short: Camera (6 of 10), Tripod (0 of 4)."
+  );
+  assert.equal(
+    modelReservationsReduced(
+      ["A", "B", "C", "D", "E"].map((assetModelName) => ({
+        assetModelName,
+        requested: 2,
+        reserved: 1,
+      }))
+    ),
+    "Fewer units are free for the new dates, so 5 models were reserved short: A (1 of 2), B (1 of 2), C (1 of 2) and 2 more."
+  );
 });
 
 test("a kit with no active asset says whether it is empty or only archived", () => {

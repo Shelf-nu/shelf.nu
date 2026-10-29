@@ -421,6 +421,37 @@ export function archivedAssetsLeftOut(count) {
   } left out.`;
 }
 
+/** How many short models {@link modelReservationsReduced} names before "and N more". */
+const REDUCED_MODELS_NAMED = 3;
+
+/**
+ * The sentence added to a success message when a copied booking could not
+ * reserve every model unit the source had open, because the new dates have
+ * fewer units free.
+ *
+ * @param {{ assetModelName: string; requested: number; reserved: number }[]} models
+ *   - at least one, each reserved below what was asked
+ * @returns {string}
+ */
+export function modelReservationsReduced(models) {
+  if (models.length === 1) {
+    const [{ assetModelName, requested, reserved }] = models;
+    return reserved === 0
+      ? `None of the ${requested} × ${assetModelName} could be reserved for the new dates.`
+      : `Only ${reserved} of ${requested} × ${assetModelName} could be reserved for the new dates.`;
+  }
+  const named = models
+    .slice(0, REDUCED_MODELS_NAMED)
+    .map((m) => `${m.assetModelName} (${m.reserved} of ${m.requested})`)
+    .join(", ");
+  const more = models.length - REDUCED_MODELS_NAMED;
+  return `Fewer units are free for the new dates, so ${
+    models.length
+  } models were reserved short: ${named}${
+    more > 0 ? ` and ${more} more` : ""
+  }.`;
+}
+
 /**
  * The refusal when kits with no active asset are put into custody or booked.
  * Such a kit would be held or booked while nothing in it is.

@@ -42,6 +42,7 @@ import {
   fulfilModelRequestsForAssets,
   lockModelsForOutstandingRequests,
   RESERVATION_BATCH_TX_TIMEOUT_MS,
+  reserveModelsUpToAvailability,
 } from "~/modules/booking-model-request/service.server";
 import * as bookingNoteService from "~/modules/booking-note/service.server";
 import * as lowStockService from "~/modules/consumption-log/low-stock.server";
@@ -614,6 +615,10 @@ vitest.mock("~/modules/booking-model-request/service.server", () => ({
   // caller reads has to be restated or it arrives undefined. `createBooking`
   // passes this as its transaction timeout on every call.
   RESERVATION_BATCH_TX_TIMEOUT_MS: 15_000,
+  // why: `duplicateBooking` copies the source's open reservations through
+  // this. Its capping is covered in booking-model-request/service.server.test.ts;
+  // here the tests assert what the copy hands it. Default: everything fit.
+  reserveModelsUpToAvailability: vitest.fn().mockResolvedValue([]),
 }));
 
 // why: spying on booking update email calls without executing
@@ -681,6 +686,8 @@ const mockBookingData = {
   to: futureToDate,
   createdAt: futureCreatedAt,
   updatedAt: futureCreatedAt,
+  // `getBooking` always loads the booking's model reservations; none here.
+  modelRequests: [],
   bookingAssets: [
     {
       asset: { id: "asset-1", assetKits: [] },
@@ -8670,6 +8677,57 @@ describe("duplicateBooking", () => {
     expect(added.map((e) => e.assetId)).toEqual(["asset-active"]);
   });
 
+  it("copies the reservations the source still had open, and reports the short ones", async () => {
+    // Ten cameras reserved and six already scanned in: the six come across as
+    // named assets, so the copy reserves the four still open. A fully scanned
+    // reservation has nothing open and is not copied.
+    //@ts-expect-error missing vitest type
+    db.booking.findFirstOrThrow.mockResolvedValue({
+      ...mockBookingData,
+      bookingAssets: [],
+      tags: [],
+      modelRequests: [
+        { assetModelId: "model-camera", quantity: 10, fulfilledQuantity: 6 },
+        { assetModelId: "model-tripod", quantity: 2, fulfilledQuantity: 2 },
+      ],
+    });
+    //@ts-expect-error missing vitest type
+    db.booking.create.mockResolvedValue({
+      ...mockBookingData,
+      id: "booking-2",
+    });
+    const short = [
+      {
+        assetModelId: "model-camera",
+        assetModelName: "Camera",
+        requested: 4,
+        reserved: 1,
+      },
+    ];
+    vitest.mocked(reserveModelsUpToAvailability).mockResolvedValueOnce(short);
+
+    const result = await duplicateBooking({
+      bookingId: "booking-1",
+      organizationId: "org-1",
+      userId: "user-1",
+      from: DUPLICATE_FROM,
+      to: DUPLICATE_TO,
+      request: new Request("https://example.com"),
+      access: accessFor([OrganizationRoles.ADMIN]),
+    });
+
+    expect(reserveModelsUpToAvailability).toHaveBeenCalledWith({
+      bookingId: "booking-2",
+      organizationId: "org-1",
+      userId: "user-1",
+      requested: [
+        { assetModelId: "model-camera", quantity: 4 },
+        { assetModelId: "model-tripod", quantity: 0 },
+      ],
+    });
+    expect(result.reducedModelReservations).toEqual(short);
+  });
+
   it("should duplicate booking using the caller-provided from/to dates", async () => {
     expect.assertions(4);
 
@@ -8736,7 +8794,11 @@ describe("duplicateBooking", () => {
         }),
       })
     );
-    expect(result).toEqual({ ...duplicatedBooking, droppedArchivedCount: 0 });
+    expect(result).toEqual({
+      ...duplicatedBooking,
+      droppedArchivedCount: 0,
+      reducedModelReservations: [],
+    });
 
     // Lifecycle event for the duplicated booking — same recordEvent
     // contract as createBooking.
