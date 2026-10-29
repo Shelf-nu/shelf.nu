@@ -76,7 +76,6 @@ export default function BulkCustomFieldUpdateDialog() {
       arrayFieldId="assetIds"
       title="Set custom field"
       description="Pick a field and a value. By default only assets without a value for that field are filled."
-      allowBodyOverflow
     >
       {({ disabled, handleCloseDialog, fetcherError }) => (
         <div className="modal-content-wrapper">
@@ -249,8 +248,12 @@ function ValueInput({ field }: { field: BulkSettableCustomField }) {
         />
       );
     case "NUMBER":
-    case "AMOUNT":
       return <Input type="number" step="any" name="value" label={label} />;
+    case "AMOUNT":
+      // Same bound as the asset form's amount input.
+      return (
+        <Input type="number" step="any" min={0} name="value" label={label} />
+      );
     default:
       return <Input name="value" label={label} />;
   }

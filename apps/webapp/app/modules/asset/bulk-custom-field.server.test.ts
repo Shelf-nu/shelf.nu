@@ -2,6 +2,8 @@ import type { AssetIndexSettings } from "@prisma/client";
 import { beforeEach, describe, expect, it, vitest } from "vitest";
 import { db } from "~/database/db.server";
 import { recordEvents } from "~/modules/activity-event/service.server";
+import { ShelfError } from "~/utils/error";
+import { assertAssetsBelongToOrg } from "~/utils/org-validation.server";
 import { lockAssetsForArchiveGuard } from "./archive-lock.server";
 import {
   bulkCustomFieldMessage,
@@ -51,6 +53,7 @@ vitest.mock("./archive-lock.server", () => ({
 // why: the archive guard has its own suite and reads tables this stub lacks.
 vitest.mock("~/utils/org-validation.server", () => ({
   assertAssetsAreNotArchived: vitest.fn(),
+  assertAssetsBelongToOrg: vitest.fn(),
 }));
 
 // why: event persistence is covered by its own suite; the assertions here are
@@ -385,6 +388,32 @@ describe("bulkSetAssetCustomField", () => {
     });
   });
 
+  it("refuses the whole selection when an id is not in this workspace", async () => {
+    vitest.mocked(assertAssetsBelongToOrg).mockRejectedValueOnce(
+      new ShelfError({
+        cause: null,
+        message: "Invalid assets",
+        label: "Assets",
+        status: 400,
+      })
+    );
+
+    await expect(
+      bulkSetAssetCustomField({
+        ...args,
+        assetIds: ["a1", "foreign"],
+        mode: "REPLACE",
+      })
+    ).rejects.toMatchObject({ status: 400 });
+    expect(assertAssetsBelongToOrg).toHaveBeenCalledWith(
+      { assetIds: ["a1", "foreign"], organizationId: "org-1" },
+      db
+    );
+    expect(db.asset.findMany).not.toHaveBeenCalled();
+    expect(db.assetCustomFieldValue.updateMany).not.toHaveBeenCalled();
+    expect(db.note.createMany).not.toHaveBeenCalled();
+  });
+
   it("refuses a field that is not in this workspace", async () => {
     vitest.mocked(db.customField.findFirst).mockResolvedValue(null);
 
@@ -404,7 +433,20 @@ describe("bulkCustomFieldMessage", () => {
         skippedCategory: 1,
       })
     ).toBe(
-      "Set on 6 assets. 3 assets already had a value and were left alone. 1 asset skipped because the field does not apply to their category."
+      "Set on 6 assets. 3 assets already had a value and were left alone. 1 asset was skipped because the field does not apply to its category."
+    );
+  });
+
+  it("agrees the verb with the count", () => {
+    expect(
+      bulkCustomFieldMessage({
+        resolved: 4,
+        changed: 0,
+        skippedWithValue: 1,
+        skippedCategory: 3,
+      })
+    ).toBe(
+      "No asset needed changing. 1 asset already had a value and was left alone. 3 assets were skipped because the field does not apply to their category."
     );
   });
 

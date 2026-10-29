@@ -159,6 +159,21 @@ describe("BulkCustomFieldUpdateDialog", () => {
     ]);
   });
 
+  it("bounds an amount at zero, like the asset form, and leaves a number free", () => {
+    const { container } = renderWith([
+      cf({ id: "cf-cost", type: "AMOUNT" }),
+      cf({ id: "cf-count", type: "NUMBER" }),
+    ]);
+    const valueInput = () =>
+      container.querySelector<HTMLInputElement>('input[name="value"]');
+
+    pickField(container, "cf-cost");
+    expect(valueInput()?.min).toBe("0");
+
+    pickField(container, "cf-count");
+    expect(valueInput()?.min).toBe("");
+  });
+
   it("starts in the only-empty mode", () => {
     const { container } = renderWith([cf({ id: "cf-brand", type: "TEXT" })]);
 

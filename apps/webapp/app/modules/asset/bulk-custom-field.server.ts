@@ -31,7 +31,10 @@ import { buildCustomFieldValue, mergedSchema } from "~/utils/custom-fields";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { parseData } from "~/utils/http.server";
-import { assertAssetsAreNotArchived } from "~/utils/org-validation.server";
+import {
+  assertAssetsAreNotArchived,
+  assertAssetsBelongToOrg,
+} from "~/utils/org-validation.server";
 import { lockAssetsForArchiveGuard } from "./archive-lock.server";
 import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
 import type { LastAuditDateAccess } from "./last-audit-date-access";
@@ -273,6 +276,12 @@ export async function bulkSetAssetCustomField({
     return await db.$transaction(
       async (tx) => {
         await lockAssetsForArchiveGuard(tx, resolvedIds, organizationId);
+        // A missing or foreign id refuses the whole request rather than
+        // being dropped, so the toast never reports a partial selection.
+        await assertAssetsBelongToOrg(
+          { assetIds: resolvedIds, organizationId },
+          tx
+        );
         // Archived assets are frozen (issue #382): their fields cannot change.
         await assertAssetsAreNotArchived(
           { assetIds: resolvedIds, organizationId, actorUserId: userId },
@@ -430,6 +439,8 @@ export async function bulkSetAssetCustomField({
  */
 export function bulkCustomFieldMessage(result: BulkSetCustomFieldResult) {
   const assets = (n: number) => (n === 1 ? "1 asset" : `${n} assets`);
+  const was = (n: number) => (n === 1 ? "was" : "were");
+  const its = (n: number) => (n === 1 ? "its" : "their");
   const parts: string[] = [];
 
   if (result.resolved === 0) {
@@ -441,17 +452,15 @@ export function bulkCustomFieldMessage(result: BulkSetCustomFieldResult) {
       : "No asset needed changing."
   );
   if (result.skippedWithValue > 0) {
-    parts.push(
-      `${assets(
-        result.skippedWithValue
-      )} already had a value and were left alone.`
-    );
+    const n = result.skippedWithValue;
+    parts.push(`${assets(n)} already had a value and ${was(n)} left alone.`);
   }
   if (result.skippedCategory > 0) {
+    const n = result.skippedCategory;
     parts.push(
-      `${assets(
-        result.skippedCategory
-      )} skipped because the field does not apply to their category.`
+      `${assets(n)} ${was(n)} skipped because the field does not apply to ${its(
+        n
+      )} category.`
     );
   }
   return parts.join(" ");

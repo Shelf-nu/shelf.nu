@@ -263,7 +263,7 @@ describe("action", () => {
       expect.objectContaining({
         title: "Custom field set",
         message:
-          "Set on 1 asset. 1 asset already had a value and were left alone.",
+          "Set on 1 asset. 1 asset already had a value and was left alone.",
         icon: { name: "success", variant: "success" },
       })
     );
