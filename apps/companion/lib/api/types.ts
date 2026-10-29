@@ -1296,6 +1296,19 @@ export type BookingMutationResponse = {
    * servers that predate archiving.
    */
   droppedArchivedCount?: number;
+  /**
+   * Duplicate only: models the copy reserved fewer units of than the source
+   * had open, because the dates have fewer free or, when `failed`, because the
+   * reservation could not be written. Absent on other mutations and on servers
+   * that predate copying reservations.
+   */
+  reducedModelReservations?: {
+    assetModelId: string;
+    assetModelName: string;
+    requested: number;
+    reserved: number;
+    failed?: boolean;
+  }[];
 };
 
 /**

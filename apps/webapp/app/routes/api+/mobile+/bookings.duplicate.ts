@@ -100,6 +100,9 @@ export async function action({ request }: ActionFunctionArgs) {
       // Archived assets in the source are left out of the copy (issue #382);
       // the app can tell the user how many.
       droppedArchivedCount: newBooking.droppedArchivedCount,
+      // Models the copy reserved fewer units of than the source had open,
+      // because the dates have fewer free; empty when every model fit.
+      reducedModelReservations: newBooking.reducedModelReservations,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });

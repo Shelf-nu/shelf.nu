@@ -98,8 +98,10 @@ import {
   loadActorBestEffort,
   lockModelsForOutstandingRequests,
   RESERVATION_BATCH_TX_TIMEOUT_MS,
+  reserveModelsUpToAvailability,
   writeBookingModelRequestInTx,
 } from "~/modules/booking-model-request/service.server";
+import type { ReducedModelReservation } from "~/modules/booking-model-request/service.server";
 import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
 import {
   lockAssetForQuantityUpdate,
@@ -19257,6 +19259,12 @@ export async function computeBookingKitDrift({
  * {@link computeBookingKitDrift} so the user acknowledges the change before
  * confirming.
  *
+ * **Model reservations.** Each of the source's `BookingModelRequest` rows is
+ * copied as the units it still had open (`quantity - fulfilledQuantity`), since
+ * the units already scanned in are named assets on the source and come across
+ * with them. Each is capped at what the new window can give; the models reserved
+ * short are returned as `reducedModelReservations` for the caller to report.
+ *
  * **Booking window.** The new booking's `from`/`to` are taken from the
  * caller-provided dates rather than being derived here, so the duplicate
  * dialog controls the window (timezone normalization happens upstream).
@@ -19271,7 +19279,8 @@ export async function computeBookingKitDrift({
  * @param args.access - The caller's access. The duplicate guard runs on the
  *   same source row the copy is built from, so a custodian reassigned after
  *   any earlier read cannot slip into the copy unchecked.
- * @returns The newly created booking row
+ * @returns The newly created booking row, plus `droppedArchivedCount` and
+ *   `reducedModelReservations` describing what the copy left out
  * @throws {ShelfError} 403 if the caller may not duplicate the source
  *   (`assertCanDuplicateBooking`), or if anything in the transaction fails
  */
@@ -19299,6 +19308,14 @@ export async function duplicateBooking({
       request,
       extraInclude: {
         notificationRecipients: { select: { id: true } },
+        modelRequests: {
+          select: {
+            assetModelId: true,
+            quantity: true,
+            fulfilledQuantity: true,
+            assetModel: { select: { name: true } },
+          },
+        },
       },
     });
 
@@ -19573,11 +19590,60 @@ export async function duplicateBooking({
       };
     });
 
-    // The caller tells the user how many archived assets were left out,
-    // rather than letting them vanish from the copy unannounced.
+    /**
+     * Model reservations carry over as what the source still had open:
+     * units already scanned in are named assets on the source, copied above,
+     * so reserving the full planned amount as well would count them twice.
+     *
+     * Capped at what the new dates can still give rather than refusing the
+     * copy, and written after the booking commits, in batches, because a plan
+     * can name more models than one transaction may carry.
+     */
+    const openRequests = bookingToDuplicate.modelRequests
+      .map((request) => ({
+        assetModelId: request.assetModelId,
+        assetModelName: request.assetModel.name,
+        quantity: request.quantity - request.fulfilledQuantity,
+      }))
+      .filter((request) => request.quantity > 0);
+
+    // The copy has committed by now, so a failure here must not report the
+    // duplicate as failed: a retry would create a second copy. Every open
+    // model is reported as failed to reserve instead, and the error is logged.
+    let reducedModelReservations: ReducedModelReservation[];
+    try {
+      reducedModelReservations = await reserveModelsUpToAvailability({
+        bookingId: newBooking.booking.id,
+        organizationId,
+        userId,
+        requested: openRequests,
+      });
+    } catch (cause) {
+      Logger.error(
+        new ShelfError({
+          cause,
+          label,
+          message:
+            "Failed to copy model reservations onto a duplicated booking.",
+          additionalData: { bookingId: newBooking.booking.id, organizationId },
+        })
+      );
+      reducedModelReservations = openRequests.map((request) => ({
+        assetModelId: request.assetModelId,
+        assetModelName: request.assetModelName,
+        requested: request.quantity,
+        reserved: 0,
+        failed: true as const,
+      }));
+    }
+
+    // The caller tells the user what the copy left out, archived assets and
+    // reservations the new dates could not fill, rather than letting them
+    // vanish from the copy unannounced.
     return {
       ...newBooking.booking,
       droppedArchivedCount: newBooking.droppedArchivedCount,
+      reducedModelReservations,
     };
   } catch (cause) {
     throw new ShelfError({
