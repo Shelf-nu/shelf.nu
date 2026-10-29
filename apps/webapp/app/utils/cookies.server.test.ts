@@ -477,14 +477,21 @@ describe("the Advanced assets cookie never keeps an enum value the query rejects
       )
     );
 
-    const { filters, redirectNeeded } = await getAdvancedFiltersFromRequest(
-      listRequest("http://localhost/assets", [stuck]),
-      "org-1",
-      settings
-    );
+    const { filters, redirectNeeded, serializedCookie } =
+      await getAdvancedFiltersFromRequest(
+        listRequest("http://localhost/assets", [stuck]),
+        "org-1",
+        settings
+      );
 
     expect(redirectNeeded).toBe(true);
     expect(new URLSearchParams(filters)).toEqual(
+      new URLSearchParams("type=is:INDIVIDUAL")
+    );
+    const saved = await createAdvancedAssetFilterCookie("org-1").parse(
+      storedValue(serializedCookie as string)
+    );
+    expect(new URLSearchParams(saved)).toEqual(
       new URLSearchParams("type=is:INDIVIDUAL")
     );
   });
@@ -496,14 +503,34 @@ describe("the Advanced assets cookie never keeps an enum value the query rejects
       )
     );
 
-    const { filters, redirectNeeded } = await getAdvancedFiltersFromRequest(
-      listRequest("http://localhost/assets", [stuck]),
+    const { filters, redirectNeeded, serializedCookie } =
+      await getAdvancedFiltersFromRequest(
+        listRequest("http://localhost/assets", [stuck]),
+        "org-1",
+        settings
+      );
+
+    expect(redirectNeeded).toBe(false);
+    expect(filters).toBeUndefined();
+    expect(serializedCookie).toMatch(
+      /^org-1_advancedAssetFilter_v2=;.*Max-Age=0/
+    );
+  });
+
+  it("does not rewrite a restored cookie that needed no cleaning", async () => {
+    const remembered = storedValue(
+      await createAdvancedAssetFilterCookie("org-1").serialize(
+        "status=is:AVAILABLE"
+      )
+    );
+
+    const { serializedCookie } = await getAdvancedFiltersFromRequest(
+      listRequest("http://localhost/assets", [remembered]),
       "org-1",
       settings
     );
 
-    expect(redirectNeeded).toBe(false);
-    expect(filters).toBeUndefined();
+    expect(serializedCookie).toBeUndefined();
   });
 });
 

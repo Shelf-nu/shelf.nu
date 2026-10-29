@@ -488,8 +488,18 @@ export async function getAdvancedFiltersFromRequest(
 
       return {
         filters: cleanedFilters || undefined,
-        // Don't save back to cookie (already there)
-        serializedCookie: undefined,
+        // Rewrite the cookie only when cleaning changed it: store what is
+        // left, or expire it when nothing is (a cookie holding only a
+        // rejected enum filter would otherwise be parsed and discarded on
+        // every visit).
+        serializedCookie:
+          cleanedFilters === new URLSearchParams(filters).toString()
+            ? undefined
+            : (await serializeFilterCookieForUrl(
+                advancedAssetFilterCookie,
+                cleanedFilters,
+                cookieHeader
+              )) ?? undefined,
         // Redirect to apply filters to URL
         redirectNeeded: !!cleanedFilters,
       };
