@@ -44,7 +44,7 @@ type GrantRow = Partial<
  *
  * Routes that share one of these pairs but stay closed to a Manager (the bulk
  * edits other than location, bulk create from a model, the sequential id
- * migration) opt out with `workspaceGrants: false`. Delete,
+ * migration) opt out with `matrixOnly: true`. Delete,
  * archive, import and every create on categories, tags, locations, custom
  * fields and asset models use pairs this row never grants.
  */

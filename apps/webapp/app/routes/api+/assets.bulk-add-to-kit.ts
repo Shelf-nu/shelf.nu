@@ -29,7 +29,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       entity: PermissionEntity.asset,
       action: PermissionAction.update,
       // Bulk edits other than location stay closed to the workspace switches.
-      workspaceGrants: false,
+      matrixOnly: true,
     });
 
     const kits = await db.kit.findMany({
@@ -62,7 +62,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
       entity: PermissionEntity.asset,
       action: PermissionAction.update,
       // Bulk edits other than location stay closed to the workspace switches.
-      workspaceGrants: false,
+      matrixOnly: true,
     });
 
     const { assetIds, kit } = parseData(

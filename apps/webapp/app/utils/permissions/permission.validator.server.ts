@@ -44,7 +44,7 @@ export type PermissionCheckProps = {
    * switches. For routes that share an entity/action pair with a path a
    * switch opens but must stay closed to the role it opens it for.
    */
-  workspaceGrants?: boolean;
+  matrixOnly?: boolean;
 } & PermissionSubject;
 
 /**
@@ -75,7 +75,7 @@ function describeCheck(params: PermissionCheckProps) {
 export async function hasPermission(
   params: PermissionCheckProps
 ): Promise<boolean> {
-  const { userId, entity, action, organizationId, workspaceGrants } = params;
+  const { userId, entity, action, organizationId, matrixOnly } = params;
   let { roles, workspace } = params;
 
   try {
@@ -109,7 +109,7 @@ export async function hasPermission(
       entity,
       action,
       workspace,
-      workspaceGrants,
+      matrixOnly,
     });
   } catch (cause) {
     throw new ShelfError({

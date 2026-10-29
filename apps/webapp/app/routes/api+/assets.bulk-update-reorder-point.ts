@@ -60,7 +60,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       entity: PermissionEntity.asset,
       action: PermissionAction.update,
       // Bulk edits other than location stay closed to the workspace switches.
-      workspaceGrants: false,
+      matrixOnly: true,
     });
 
     // Needed to resolve "select all" in advanced mode, where the affected set

@@ -259,7 +259,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         userId,
         roles: currentOrganizationUserRoles ?? [],
         workspace: currentOrganization,
-        workspaceGrants: false,
+        matrixOnly: true,
         entity: PermissionEntity.asset,
         action: PermissionAction.update,
       }));

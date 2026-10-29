@@ -8,7 +8,7 @@
  * @see {@link file://./utils.server.ts} parseScanData, the card's payload
  * @see {@link file://./../../components/location/scan-details.tsx} the card
  */
-import type { OrganizationRoles, Prisma, Scan } from "@prisma/client";
+import type { Prisma, Scan } from "@prisma/client";
 import { ScanCodeType, ScanSource } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
@@ -522,7 +522,7 @@ type GetLastScanForViewerArgs = {
   userId: string;
   /** The viewer's active organization */
   organizationId: string;
-  /* The viewer's roles and switches there skip the validator's DB lookup. */
+  // The viewer's roles and switches there skip the validator's DB lookup.
 } & PermissionSubject;
 
 /**

@@ -321,7 +321,7 @@ export async function requireOrganizationAccess(
  * membership's roles and the workspace's permission switches in one query,
  * so mobile and web have identical authorization rules.
  *
- * @param args.workspaceGrants - `false` answers from the matrix alone, for a
+ * @param args.matrixOnly - `true` answers from the matrix alone, for a
  *   route that shares a pair with a path a workspace switch opens but must
  *   stay closed to the role the switch opens it for
  * @throws {ShelfError} 403 when the caller lacks the permission
@@ -331,20 +331,20 @@ export async function requireMobilePermission({
   organizationId,
   entity,
   action,
-  workspaceGrants,
+  matrixOnly,
 }: {
   userId: string;
   organizationId: string;
   entity: PermissionEntity;
   action: PermissionAction;
-  workspaceGrants?: boolean;
+  matrixOnly?: boolean;
 }) {
   await validatePermission({
     userId,
     organizationId,
     entity,
     action,
-    workspaceGrants,
+    matrixOnly,
   });
 }
 

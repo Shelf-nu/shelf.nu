@@ -34,7 +34,7 @@ import { workspaceGrantedActions } from "./workspace-grants";
  *   array grants nothing (except to ADMIN/OWNER, who short-circuit first).
  * @param workspace - The workspace's switches. Absent or `null` means every
  *   switch off: the matrix answer alone.
- * @param workspaceGrants - `false` ignores `workspace` and answers from the
+ * @param matrixOnly - `true` ignores `workspace` and answers from the
  *   matrix alone. For routes that share an entity/action pair with a granted
  *   path but must stay closed to whoever the switch opens it for.
  * @returns `true` when any held role grants the action on the entity.
@@ -45,7 +45,7 @@ export function roleHasPermission({
   entity,
   action,
   workspace,
-  workspaceGrants = true,
+  matrixOnly = false,
 }: {
   roles: readonly string[] | undefined;
   entity: PermissionEntity | `${PermissionEntity}`;
@@ -54,7 +54,7 @@ export function roleHasPermission({
     | `${PermissionAction}`
     | readonly (PermissionAction | `${PermissionAction}`)[];
   workspace?: WorkspaceGrantSettings | null;
-  workspaceGrants?: boolean;
+  matrixOnly?: boolean;
 }): boolean {
   if (!roles?.length) return false;
 
@@ -67,7 +67,7 @@ export function roleHasPermission({
   const actionsToCheck: readonly string[] =
     typeof action === "string" ? [action] : action;
 
-  const switches = workspaceGrants ? workspace : null;
+  const switches = matrixOnly ? null : workspace;
 
   return roles.some((role) => {
     // why: index by plain string — runtime keys are the literal role names;

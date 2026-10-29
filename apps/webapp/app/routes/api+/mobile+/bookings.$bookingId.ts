@@ -779,8 +779,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         userId: user.id,
         organizationId,
         roles,
-        // why: no workspace switch grants this action.
-        workspace: null,
+        workspace: access.workspaceGrants,
         entity: PermissionEntity.booking,
         action: PermissionAction.extend,
       }),

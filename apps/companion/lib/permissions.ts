@@ -30,7 +30,7 @@ import type { Organization } from "./api/types";
  *   point can forget them; `null` while loading reads as every switch off.
  * @param entity - The permission entity being checked.
  * @param action - The action being checked on that entity.
- * @param workspaceGrants - `false` answers from the matrix alone, for UI
+ * @param matrixOnly - `true` answers from the matrix alone, for UI
  *   whose server route opts out of the switches the same way.
  * @returns `true` when any held role grants the action on the entity.
  * @throws Never — unknown roles/entities safely resolve to `false`.
@@ -40,13 +40,13 @@ export function userHasPermission({
   workspace,
   entity,
   action,
-  workspaceGrants,
+  matrixOnly,
 }: {
   roles: string[] | undefined;
   workspace: Pick<Organization, "managersCanEditAssets"> | null | undefined;
   entity: `${PermissionEntity}`;
   action: `${PermissionAction}`;
-  workspaceGrants?: boolean;
+  matrixOnly?: boolean;
 }): boolean {
   return roleHasPermission({
     roles,
@@ -56,6 +56,6 @@ export function userHasPermission({
     workspace: {
       managersCanEditAssets: workspace?.managersCanEditAssets === true,
     },
-    workspaceGrants,
+    matrixOnly,
   });
 }

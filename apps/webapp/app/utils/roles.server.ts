@@ -61,7 +61,7 @@ export async function isAdmin(context: Record<string, any>) {
  * returns the caller's context: memberships, the selected organization and
  * `access`, the caller's resolved reach.
  *
- * @param args.workspaceGrants - `false` answers from the matrix alone. Use it
+ * @param args.matrixOnly - `true` answers from the matrix alone. Use it
  *   on a route that shares an entity/action pair with a path a workspace
  *   switch opens, when that route must stay closed to the role the switch
  *   opens it for.
@@ -72,13 +72,13 @@ export async function requirePermission({
   request,
   entity,
   action,
-  workspaceGrants,
+  matrixOnly,
 }: {
   userId: string;
   request: Request;
   entity: PermissionEntity;
   action: PermissionAction;
-  workspaceGrants?: boolean;
+  matrixOnly?: boolean;
 }) {
   /**
    * This can be very slow and consuming as there are a few queries with a few joins and this running on every loader/action makes it slow
@@ -102,7 +102,7 @@ export async function requirePermission({
   await validatePermission({
     roles,
     workspace: currentOrganization,
-    workspaceGrants,
+    matrixOnly,
     action,
     entity,
     organizationId,
@@ -166,7 +166,7 @@ export async function requireAnyPermission({
   anyOf: ReadonlyArray<{
     entity: PermissionEntity;
     action: PermissionAction;
-    workspaceGrants?: boolean;
+    matrixOnly?: boolean;
   }>;
 }): Promise<
   Awaited<ReturnType<typeof requirePermission>> & {
@@ -236,7 +236,7 @@ export async function requireAnyPermission({
  * @param organizationId - The organization named by the route, not the selected one
  * @param entity - The entity the route acts on
  * @param action - The action the route performs
- * @param workspaceGrants - `false` answers from the matrix alone (see `requirePermission`)
+ * @param matrixOnly - `true` answers from the matrix alone (see `requirePermission`)
  * @returns The caller's memberships and the organizations visible to them
  * @throws {ShelfError} 403 when the caller is not a member of `organizationId`, or
  *   their role there does not grant the permission
@@ -247,14 +247,14 @@ export async function requirePermissionInOrganization({
   organizationId,
   entity,
   action,
-  workspaceGrants,
+  matrixOnly,
 }: {
   userId: string;
   request: Request;
   organizationId: string;
   entity: PermissionEntity;
   action: PermissionAction;
-  workspaceGrants?: boolean;
+  matrixOnly?: boolean;
 }) {
   const { organizations, userOrganizations } = await getSelectedOrganization({
     userId,
@@ -273,7 +273,7 @@ export async function requirePermissionInOrganization({
   await validatePermission({
     roles,
     workspace: membership?.organization ?? null,
-    workspaceGrants,
+    matrixOnly,
     action,
     entity,
     organizationId,

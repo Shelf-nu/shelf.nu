@@ -59,7 +59,7 @@ const ClaimQrSchema = z.object({
  *   `{ error: { message } }` with an appropriate HTTP status on failure:
  *   - 400 Invalid body (including a non-JSON/empty body)
  *   - 401 Missing/invalid bearer token
- *   - 403 Caller lacks `qr:update` (non-admin/owner), the code is already
+ *   - 403 Caller lacks `qr:update`, the code is already
  *     claimed by an organization (surfaced by `claimQrCode`), or the code is
  *     linked to an asset/kit and therefore not available for claiming
  *     (mirrors the web claim loader's `assetId: null, kitId: null` guard)

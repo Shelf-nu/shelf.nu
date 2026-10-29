@@ -283,7 +283,7 @@ describe("assets index bulk menu: assets whose kit is not available", () => {
 /**
  * "Managers can edit assets" opens bulk location to a Manager and nothing
  * else: the other bulk edits answer from the matrix alone on the server
- * (`workspaceGrants: false`), and Delete is a grant the switch never adds.
+ * (`matrixOnly: true`), and Delete is a grant the switch never adds.
  */
 describe("assets index bulk menu: what a Manager may edit in bulk", () => {
   /** Every bulk edit that stays with Administrators whatever the switch. */

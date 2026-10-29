@@ -166,13 +166,13 @@ describe("hasPermission with workspace switches", () => {
     ).resolves.toBe(false);
   });
 
-  it("workspaceGrants: false refuses a Manager even with the switch on", async () => {
+  it("matrixOnly: true refuses a Manager even with the switch on", async () => {
     await expect(
       validatePermission({
         ...managerUpdatesAsset,
         roles: [OrganizationRoles.MANAGER],
         workspace: { managersCanEditAssets: true },
-        workspaceGrants: false,
+        matrixOnly: true,
       })
     ).rejects.toMatchObject({ status: 403 });
   });

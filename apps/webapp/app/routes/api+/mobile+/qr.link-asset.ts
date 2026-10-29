@@ -71,7 +71,7 @@ const LinkQrAssetSchema = z.object({
  *   - 400 Invalid body (including a non-JSON/empty body) / asset not found
  *     in the caller's workspace
  *   - 401 Missing/invalid bearer token
- *   - 403 Caller lacks `qr:update` (non-admin/owner), the QR belongs to a
+ *   - 403 Caller lacks `qr:update`, the QR belongs to a
  *     different organization, or it is already linked to another asset/kit
  *   - 404 QR code not found
  *   - 429 Rate limited

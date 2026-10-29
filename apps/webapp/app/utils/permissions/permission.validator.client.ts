@@ -50,7 +50,7 @@ type UserHasPermissionArgs = {
    * `false` answers from the matrix alone: for UI whose server route opts out
    * of the workspace switches the same way.
    */
-  workspaceGrants?: boolean;
+  matrixOnly?: boolean;
 };
 
 /**
@@ -62,7 +62,7 @@ type UserHasPermissionArgs = {
  * @param entity - The permission entity being checked.
  * @param action - A single action, or an array meaning ANY-match.
  * @param workspace - Switches to use instead of the ones the roles carry.
- * @param workspaceGrants - `false` ignores every switch.
+ * @param matrixOnly - `true` ignores every switch.
  * @returns `true` when any held role grants it.
  * @throws Never — unknown roles/entities resolve to `false`.
  */
@@ -71,13 +71,13 @@ export function userHasPermission({
   action,
   entity,
   workspace,
-  workspaceGrants,
+  matrixOnly,
 }: UserHasPermissionArgs): boolean {
   return roleHasPermission({
     roles,
     entity,
     action,
     workspace: workspace !== undefined ? workspace : workspaceGrantsOf(roles),
-    workspaceGrants,
+    matrixOnly,
   });
 }

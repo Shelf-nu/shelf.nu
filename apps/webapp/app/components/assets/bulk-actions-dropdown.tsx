@@ -141,13 +141,13 @@ function ConditionalDropdown() {
   });
   /**
    * Every other bulk edit answers from the matrix alone, as its route does
-   * (`workspaceGrants: false`), so a switched-on Manager never sees it.
+   * (`matrixOnly: true`), so a switched-on Manager never sees it.
    */
   const canBulkEdit = userHasPermission({
     roles,
     entity: PermissionEntity.asset,
     action: PermissionAction.update,
-    workspaceGrants: false,
+    matrixOnly: true,
   });
   const canBulkDelete = userHasPermission({
     roles,

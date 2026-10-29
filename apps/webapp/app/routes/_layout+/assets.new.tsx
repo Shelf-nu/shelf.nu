@@ -67,7 +67,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       action: PermissionAction.create,
       // The bulk-create page (`?bulk=1`) stays closed to the workspace
       // switches: they open single-asset creation only.
-      workspaceGrants: new URL(request.url).searchParams.get("bulk") !== "1",
+      matrixOnly: new URL(request.url).searchParams.get("bulk") === "1",
     });
     /**
      * We need to check if the QR code passed in the URL belongs to the current org
@@ -175,7 +175,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
         request,
         entity: PermissionEntity.asset,
         action: PermissionAction.create,
-        workspaceGrants: false,
+        matrixOnly: true,
       });
     }
     const FormSchema = mergedSchema({

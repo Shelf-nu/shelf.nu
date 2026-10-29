@@ -412,7 +412,7 @@ export default function AssetIndexPage() {
                 // Bulk create from a model answers from the matrix alone, as
                 // its action does: the workspace switches open single
                 // creation only.
-                workspaceGrants: false,
+                matrixOnly: true,
               })}
             />
           </>

@@ -103,14 +103,14 @@ describe("managersCanEditAssets", () => {
     }
   });
 
-  test("workspaceGrants: false answers from the matrix alone", () => {
+  test("matrixOnly: true answers from the matrix alone", () => {
     assert.equal(
       roleHasPermission({
         roles: ["MANAGER"],
         entity: PermissionEntity.asset,
         action: PermissionAction.update,
         workspace: ON,
-        workspaceGrants: false,
+        matrixOnly: true,
       }),
       false
     );
@@ -121,7 +121,7 @@ describe("managersCanEditAssets", () => {
         entity: PermissionEntity.asset,
         action: PermissionAction.update,
         workspace: ON,
-        workspaceGrants: false,
+        matrixOnly: true,
       }),
       true
     );
