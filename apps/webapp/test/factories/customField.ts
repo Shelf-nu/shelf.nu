@@ -14,6 +14,7 @@ export function createCustomField(
     required: false,
     active: true,
     type: "TEXT",
+    format: "PLAIN",
     options: [],
     organizationId: "org-123",
     userId: "user-123",

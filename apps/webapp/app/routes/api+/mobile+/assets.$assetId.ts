@@ -257,6 +257,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                 id: true,
                 name: true,
                 type: true,
+                format: true,
                 helpText: true,
                 active: true,
               },

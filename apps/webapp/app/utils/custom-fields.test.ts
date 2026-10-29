@@ -115,6 +115,7 @@ describe("buildAssetOverviewCustomFields", () => {
     id,
     name,
     type: "TEXT" as const,
+    format: "PLAIN" as const,
     options: [],
     helpText: null,
     required: false,

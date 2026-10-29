@@ -1,6 +1,10 @@
 import Markdoc from "@markdoc/markdoc";
 import type { RenderableTreeNode } from "@markdoc/markdoc";
-import type { CustomField, CustomFieldType } from "@prisma/client";
+import type {
+  CustomField,
+  CustomFieldFormat,
+  CustomFieldType,
+} from "@prisma/client";
 import { format } from "date-fns";
 import type { ZodRawShape } from "zod";
 import { z } from "zod";
@@ -571,6 +575,7 @@ export type CustomFieldDefinitionForDisplay = {
   id: string;
   name: string;
   type: CustomFieldType;
+  format: CustomFieldFormat;
   options: string[];
 };
 
@@ -657,7 +662,10 @@ export function buildAssetOverviewCustomFields<
 //header = "cf:name,type:text"
 export const getDefinitionFromCsvHeader = (
   header: string
-): Pick<CustomField, "helpText" | "name" | "type" | "required" | "active"> => {
+): Pick<
+  CustomField,
+  "helpText" | "name" | "type" | "format" | "required" | "active"
+> => {
   const defArr = header.split(",").map((e) => e.trim()); //["cf:name","type:text"]
   const name = defArr
     .find((e: string) => e.toLowerCase().startsWith("cf:"))!
@@ -674,6 +682,7 @@ export const getDefinitionFromCsvHeader = (
     helpText: "",
     required: false,
     type: type as CustomFieldType,
+    format: "PLAIN",
   };
 };
 
@@ -687,3 +696,19 @@ export const FIELD_TYPE_NAME: { [key in CustomFieldType]: string } = {
   AMOUNT: "Amount",
   NUMBER: "Number",
 };
+
+/**
+ * The type of a field as the settings pages name it, with "(link)" added for a
+ * Link-format text field.
+ *
+ * @param def - The field's type and format
+ * @returns e.g. "Single-line text (link)"
+ */
+export function fieldTypeLabel(def: Pick<CustomField, "type" | "format">) {
+  const name = FIELD_TYPE_NAME[def.type];
+  return def.format === "LINK" ? `${name} (link)` : name;
+}
+
+/** Refusal for a Link format on a field that is not single-line text. */
+export const LINK_FORMAT_NEEDS_TEXT_MESSAGE =
+  "Only single-line text fields can be Link fields";

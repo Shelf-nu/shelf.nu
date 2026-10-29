@@ -1348,8 +1348,11 @@ model CustomField {
   required Boolean @default(false)
   active   Boolean @default(true)
 
-  type    CustomFieldType @default(TEXT)
+  type    CustomFieldType   @default(TEXT)
   options String[]
+  /// How a TEXT field's values are read. LINK requires a web link in every
+  /// value; any other type stays PLAIN (enforced by a CHECK constraint).
+  format  CustomFieldFormat @default(PLAIN)
 
   // Relationships
   organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
@@ -1381,6 +1384,13 @@ enum CustomFieldType {
   MULTILINE_TEXT
   AMOUNT
   NUMBER
+}
+
+/// The format of a TEXT custom field. Unlike the type, it can change after the
+/// field exists.
+enum CustomFieldFormat {
+  PLAIN
+  LINK
 }
 
 model AssetCustomFieldValue {

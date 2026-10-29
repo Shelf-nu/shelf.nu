@@ -47,6 +47,7 @@ vi.mock("../activity-event/service.server", () => ({
 
 const { db } = await import("~/database/db.server");
 const {
+  createCustomField,
   getOptionUsageCounts,
   softDeleteCustomField,
   updateCustomField,
@@ -309,6 +310,40 @@ describe("softDeleteCustomField", () => {
   });
 });
 
+describe("createCustomField", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("saves the format chosen for the field", async () => {
+    vi.mocked(db.customField.create).mockResolvedValue({
+      name: "Manual",
+      type: "TEXT",
+      active: false,
+    } as never);
+    vi.mocked(db.assetIndexSettings.findMany).mockResolvedValue([]);
+
+    await createCustomField({
+      name: "Manual",
+      helpText: null,
+      type: "TEXT",
+      format: "LINK",
+      required: false,
+      active: false,
+      organizationId: "org-1",
+      userId: "user-1",
+    });
+
+    expect(db.customField.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        name: "Manual",
+        type: "TEXT",
+        format: "LINK",
+      }),
+    });
+  });
+});
+
 describe("upsertCustomField", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -327,6 +362,7 @@ describe("upsertCustomField", () => {
       {
         name: "Serial_No",
         type: "TEXT",
+        format: "PLAIN",
         helpText: null,
         required: false,
         active: true,
@@ -548,6 +584,42 @@ describe("updateCustomField", () => {
       ],
       tx
     );
+  });
+
+  it("switches a text field to the Link format", async () => {
+    const tx = mockTransaction({
+      field: { ...savedField, type: "TEXT", options: [] },
+    });
+
+    await updateCustomField({
+      id: "cf-brand",
+      organizationId: "org-1",
+      userId: "user-1",
+      format: "LINK",
+    });
+
+    expect(tx.customField.update).toHaveBeenCalledWith({
+      where: { id: "cf-brand", organizationId: "org-1" },
+      data: expect.objectContaining({ format: "LINK" }),
+    });
+  });
+
+  it("refuses the Link format on a field that is not text, whatever type was posted", async () => {
+    const tx = mockTransaction();
+
+    await expect(
+      updateCustomField({
+        id: "cf-brand",
+        organizationId: "org-1",
+        userId: "user-1",
+        type: "TEXT",
+        format: "LINK",
+      })
+    ).rejects.toMatchObject({
+      status: 400,
+      message: "Only single-line text fields can be Link fields",
+    });
+    expect(tx.customField.update).not.toHaveBeenCalled();
   });
 
   it("answers 404 when the field is not in the organization", async () => {
