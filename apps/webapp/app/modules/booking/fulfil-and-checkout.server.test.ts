@@ -15,8 +15,10 @@ import {
   computeBookingAssetSliceRemainingToCheckOut,
   fulfilModelRequestsAndCheckout,
   partialCheckoutBooking,
+  resolveExpiredCheckoutState,
 } from "~/modules/booking/service.server";
 import { claimUnstampedBookingRows } from "~/modules/booking-model-request/service.server";
+import { ShelfError } from "~/utils/error";
 
 import { fulfilAndCheckOut } from "./fulfil-and-checkout.server";
 
@@ -822,6 +824,73 @@ describe("fulfilAndCheckOut", () => {
         intentChoice: CheckoutIntentEnum["with-adjusted-date"],
       })
     );
+  });
+
+  it.each([BookingStatus.RESERVED, BookingStatus.ONGOING])(
+    "refuses an expired %s booking with no usable choice before assigning or checking out anything",
+    async (status) => {
+      primeRulePath();
+      vi.mocked(db.booking.findFirst).mockResolvedValue({
+        status,
+        from: new Date("2026-01-01T09:00:00Z"),
+        to: new Date("2026-01-02T17:00:00Z"),
+      } as never);
+      // why: the gate's own rules are pinned in the service suite; here it only
+      // has to refuse, so this module's ordering around it is what is tested.
+      vi.mocked(resolveExpiredCheckoutState).mockImplementationOnce(() => {
+        throw new ShelfError({
+          cause: null,
+          status: 400,
+          label: "Booking",
+          message: "This reservation has expired.",
+          shouldBeCaptured: false,
+        });
+      });
+
+      await expect(
+        fulfilAndCheckOut({ ...baseArgs, requireExplicitCheckout: false })
+      ).rejects.toMatchObject({ status: 400 });
+
+      // Called exactly once, so the refusal staged above was consumed here and
+      // cannot answer a later case.
+      expect(resolveExpiredCheckoutState).toHaveBeenCalledTimes(1);
+      // Nothing is written: no assign, no claim, no check-out of either flow.
+      expect(addScannedAssetsToBooking).not.toHaveBeenCalled();
+      expect(claimUnstampedBookingRows).not.toHaveBeenCalled();
+      expect(fulfilModelRequestsAndCheckout).not.toHaveBeenCalled();
+      expect(partialCheckoutBooking).not.toHaveBeenCalled();
+    }
+  );
+
+  it("asks the expired-reservation gate with the operator's choice and no reschedule", async () => {
+    const from = new Date("2026-01-01T09:00:00Z");
+    const to = new Date("2026-01-02T17:00:00Z");
+    vi.mocked(db.booking.findFirst).mockResolvedValue({
+      status: BookingStatus.RESERVED,
+      from,
+      to,
+    } as never);
+    vi.mocked(fulfilModelRequestsAndCheckout).mockResolvedValue({
+      id: "booking-1",
+      name: "Load-in",
+      status: BookingStatus.ONGOING,
+    } as never);
+
+    await fulfilAndCheckOut({
+      ...baseArgs,
+      checkoutIntentChoice: CheckoutIntentEnum["with-adjusted-date"],
+      requireExplicitCheckout: false,
+    });
+
+    // A scan never reschedules: only the header's full check-out may move the
+    // planned period of an expired reservation.
+    expect(resolveExpiredCheckoutState).toHaveBeenCalledWith({
+      status: BookingStatus.RESERVED,
+      from,
+      to,
+      intentChoice: CheckoutIntentEnum["with-adjusted-date"],
+      allowReschedule: false,
+    });
   });
 
   it("scopes every read of a request-supplied id to the workspace", async () => {

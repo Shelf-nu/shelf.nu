@@ -5248,6 +5248,148 @@ describe("checkoutBooking", () => {
       ).rejects.toThrow(/changed while you were checking it out/);
       expect(db.asset.updateMany).not.toHaveBeenCalled();
     });
+
+    /** Checks out the expired reservation with a new end three days ahead. */
+    async function rescheduleCheckout() {
+      const booking = expiredBooking();
+      (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
+        .mockResolvedValueOnce(booking)
+        .mockResolvedValueOnce({ ...booking, status: BookingStatus.ONGOING });
+      //@ts-expect-error missing vitest type
+      db.booking.update.mockResolvedValue({ id: "booking-1" });
+      lockReadsReserved();
+      const newEndDate = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+      const before = Date.now();
+      const result = await checkoutBooking({
+        ...mockCheckoutParams,
+        userId: "user-1",
+        from: expiredFrom,
+        to: expiredTo,
+        intentChoice: CheckoutIntentEnum["with-new-end-date"],
+        newEndDate,
+      });
+      return { result, newEndDate, before };
+    }
+
+    it("judges asset conflicts over the new window, not the expired one", async () => {
+      expect.assertions(3);
+      const { newEndDate, before } = await rescheduleCheckout();
+
+      // The first read carries the conflict include; its overlap clause is
+      // the window every other booking is measured against.
+      const read = (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mock.calls[0][0];
+      const overlap =
+        read.include.bookingAssets.include.asset.include.bookingAssets.where
+          .booking.OR[0].OR[0];
+      expect(overlap.from.lte).toEqual(newEndDate);
+      expect(
+        Math.abs((overlap.to.gte as Date).getTime() - before)
+      ).toBeLessThan(5 * 60 * 1000);
+      expect(overlap.to.gte).not.toEqual(expiredFrom);
+    });
+
+    it("refuses the reschedule when an asset is booked over the new window", async () => {
+      expect.assertions(3);
+      // why: the conflict include returns what overlaps the window it was
+      // given; here another reservation holds the asset in the new period.
+      // One queued read only: the conflict guard refuses before the
+      // transaction, so no lock read and no hydrating read is consumed.
+      const booking = expiredBooking();
+      booking.bookingAssets[0].asset.bookingAssets = [
+        {
+          id: "ba-other",
+          quantity: 1,
+          booking: {
+            id: "booking-other",
+            status: BookingStatus.RESERVED,
+            name: "Other",
+          },
+        },
+      ] as never[];
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValueOnce(booking);
+
+      await expect(
+        checkoutBooking({
+          ...mockCheckoutParams,
+          userId: "user-1",
+          from: expiredFrom,
+          to: expiredTo,
+          intentChoice: CheckoutIntentEnum["with-new-end-date"],
+          newEndDate: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+        })
+      ).rejects.toThrow(/already booked or checked out: Asset 1/);
+      expect(statusWrite()).toBeUndefined();
+      expect(db.asset.updateMany).not.toHaveBeenCalled();
+    });
+
+    it("records one BOOKING_DATES_CHANGED event per moved date", async () => {
+      expect.assertions(3);
+      await rescheduleCheckout();
+
+      const dateEvents = (
+        activityEventService.recordEvent as ReturnType<typeof vitest.fn>
+      ).mock.calls
+        .map((c) => c[0])
+        .filter((e) => e?.action === "BOOKING_DATES_CHANGED");
+      const write = statusWrite();
+
+      expect(dateEvents).toHaveLength(2);
+      expect(dateEvents).toContainEqual(
+        expect.objectContaining({
+          field: "from",
+          fromValue: expiredFrom.toISOString(),
+          toValue: (write?.data?.from as Date).toISOString(),
+          bookingId: "booking-1",
+        })
+      );
+      expect(dateEvents).toContainEqual(
+        expect.objectContaining({
+          field: "to",
+          fromValue: expiredTo.toISOString(),
+          toValue: (write?.data?.to as Date).toISOString(),
+          bookingId: "booking-1",
+        })
+      );
+    });
+
+    it("still schedules the check-in reminder when the reschedule note fails", async () => {
+      expect.assertions(2);
+      // why: the reschedule note is best-effort after the commit; fail only
+      // that note (the status-transition note shares the same writer) and
+      // restore the shared default afterwards.
+      const createNote = vitest.mocked(
+        bookingNoteService.createSystemBookingNote
+      );
+      createNote.mockImplementation((args: { content: string }) =>
+        /expired reservation with a new period/.test(args.content)
+          ? Promise.reject(new Error("note write failed"))
+          : Promise.resolve({} as never)
+      );
+      onTestFinished(() => {
+        createNote.mockResolvedValue({} as never);
+      });
+
+      const { result, newEndDate } = await rescheduleCheckout();
+
+      expect(result).toEqual(
+        expect.objectContaining({ status: BookingStatus.ONGOING })
+      );
+      const reminderAt = new Date(newEndDate);
+      reminderAt.setHours(reminderAt.getHours() - 1);
+      expect(scheduler.sendAfter).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          id: "booking-1",
+          eventType: "booking-checkin-reminder",
+        }),
+        {},
+        reminderAt
+      );
+    });
   });
 
   it("records the residue of a partially-scanned qty slice as a tagged session row", async () => {

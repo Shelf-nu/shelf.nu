@@ -122,6 +122,8 @@ import { DeleteConfirmationSchema } from "~/utils/delete-confirmation";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import {
   ShelfError,
+  VALIDATION_ERROR,
+  badRequest,
   isZodValidationError,
   makeShelfError,
 } from "~/utils/error";
@@ -1850,26 +1852,41 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
          * workspace's maximum length measured from now (the new start), with
          * the caller's time-limit bypass honoured. See
          * `resolveExpiredCheckoutState`.
+         *
+         * A refusal is reported under `expiredCheckoutNewTo`, not the extend
+         * schema's `endDate`: the booking form has an End Date field of its
+         * own, and this error belongs to the date picked in the dialog.
          */
         let newEndDate: Date | null = null;
         if (checkoutIntentChoice === CheckoutIntentEnum["with-new-end-date"]) {
           const prefs = await resolveUserFormatPrefsById(userId, checkoutHints);
-          const parsed = parseData(
-            {
-              startDate: DateTime.now()
-                .setZone(prefs.timeZone)
-                .toFormat(DATE_TIME_FORMAT),
-              endDate: expiredCheckoutNewTo ?? "",
-            },
-            ExtendBookingSchema({
-              workingHours,
-              prefs,
-              bookingSettings,
-              bypassTimeLimits: access.policy.bookings.bypassTimeLimits,
-            }),
-            { additionalData: { userId, organizationId } }
-          );
-          newEndDate = parsed.endDate;
+          const parsed = ExtendBookingSchema({
+            workingHours,
+            prefs,
+            bookingSettings,
+            bypassTimeLimits: access.policy.bookings.bypassTimeLimits,
+          }).safeParse({
+            startDate: DateTime.now()
+              .setZone(prefs.timeZone)
+              .toFormat(DATE_TIME_FORMAT),
+            endDate: expiredCheckoutNewTo ?? "",
+          });
+          if (!parsed.success) {
+            const { fieldErrors, formErrors } = parsed.error.flatten();
+            const message =
+              Object.values(fieldErrors).flat()[0] ??
+              formErrors[0] ??
+              "The new end date is not valid.";
+            throw badRequest(message, {
+              title: "Pick another end date",
+              additionalData: {
+                userId,
+                organizationId,
+                [VALIDATION_ERROR]: { expiredCheckoutNewTo: { message } },
+              },
+            });
+          }
+          newEndDate = parsed.data.endDate;
         }
 
         const booking = await checkoutBooking({
