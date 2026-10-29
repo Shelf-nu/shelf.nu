@@ -3529,6 +3529,27 @@ async function checkoutBookingWritesWithinTx(
 }
 
 /**
+ * The lines {@link createWholeBookingAssetNotes} writes, each built from the
+ * wrapped actor, the wrapped booking link and the method clause.
+ *
+ * "completed check-in" is the line of a partial check-in whose batch returns
+ * the last items still out, whether it completes the booking itself or hands
+ * over to {@link checkinBooking}.
+ */
+const WHOLE_BOOKING_ASSET_LINES = {
+  "checked out": (actor: string, bookingLink: string, methodClause: string) =>
+    `${actor} checked out asset with ${bookingLink}${methodClause}.`,
+  "checked in": (actor: string, bookingLink: string, methodClause: string) =>
+    `${actor} checked in asset with ${bookingLink}${methodClause}.`,
+  "completed check-in": (
+    actor: string,
+    bookingLink: string,
+    methodClause: string
+  ) =>
+    `${actor} checked in the last items still out on ${bookingLink}${methodClause}, which completed the booking.`,
+} as const;
+
+/**
  * Writes the line an asset's activity shows when a whole-booking check-out or
  * check-in moves it: "<user> checked out asset with <booking> (scanned on the
  * phone)."
@@ -3547,27 +3568,35 @@ async function checkoutBookingWritesWithinTx(
  * and a caller such as the delegated scan batch still has writes to make after
  * the service returns.
  *
- * @param args.verb - What happened to the assets
+ * @param args.line - Which line to write, see {@link WHOLE_BOOKING_ASSET_LINES}
  * @param args.booking - The booking the assets moved with, for the link
  * @param args.organizationId - Workspace scope for the note write
  * @param args.userId - The acting user, named in the line
+ * @param args.actor - The acting user already wrapped for a note, when the
+ *   caller has read them; read here otherwise
  * @param args.provenance - How and from where the batch was made
+ * @param args.unscannedSliceIds - Slices that moved with a scan batch without
+ *   being scanned themselves; an asset with one of them gets no method said
  * @param args.slices - The slices that moved, each with its asset; an asset
  *   with several slices gets one line
  */
 async function createWholeBookingAssetNotes({
-  verb,
+  line,
   booking,
   organizationId,
   userId,
+  actor: wrappedActor,
   provenance,
+  unscannedSliceIds,
   slices,
 }: {
-  verb: "checked out" | "checked in";
+  line: keyof typeof WHOLE_BOOKING_ASSET_LINES;
   booking: { id: string; name: string };
   organizationId: string;
   userId: string;
+  actor?: string;
   provenance?: BookingMethodProvenance;
+  unscannedSliceIds?: ReadonlySet<string>;
   slices: ReadonlyArray<{ id: string; assetId: string }>;
 }): Promise<void> {
   if (slices.length === 0) return;
@@ -3582,21 +3611,31 @@ async function createWholeBookingAssetNotes({
 
     const assetIdsByClause = new Map<string, string[]>();
     for (const [assetId, sliceIds] of sliceIdsByAssetId) {
-      const clause = bookingMethodClause(provenance, sliceIds);
+      // A slice the scan did not name went out unscanned: its asset's line
+      // must not claim the batch's method for it.
+      const assetProvenance =
+        provenance && sliceIds.some((id) => unscannedSliceIds?.has(id))
+          ? { ...provenance, method: null }
+          : provenance;
+      const clause = bookingMethodClause(assetProvenance, sliceIds);
       const assetIds = assetIdsByClause.get(clause);
       if (assetIds) assetIds.push(assetId);
       else assetIdsByClause.set(clause, [assetId]);
     }
 
-    const user = await getUserByID(userId, {
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-        displayName: true,
-      } satisfies Prisma.UserSelect,
-    });
-    const actor = wrapUserLinkForNote({ ...user, id: userId });
+    const actor =
+      wrappedActor ??
+      wrapUserLinkForNote({
+        ...(await getUserByID(userId, {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            displayName: true,
+          } satisfies Prisma.UserSelect,
+        })),
+        id: userId,
+      });
     const bookingLink = wrapLinkForNote(
       `/bookings/${booking.id}`,
       booking.name
@@ -3604,7 +3643,7 @@ async function createWholeBookingAssetNotes({
 
     for (const [clause, assetIds] of assetIdsByClause) {
       await createNotes({
-        content: `${actor} ${verb} asset with ${bookingLink}${clause}.`,
+        content: WHOLE_BOOKING_ASSET_LINES[line](actor, bookingLink, clause),
         type: "UPDATE",
         userId,
         assetIds,
@@ -3615,7 +3654,7 @@ async function createWholeBookingAssetNotes({
     Logger.error(
       new ShelfError({
         cause,
-        message: `Failed to write the "${verb}" asset notes`,
+        message: `Failed to write the "${line}" asset notes`,
         label,
         additionalData: { bookingId: booking.id, userId },
       })
@@ -3652,6 +3691,7 @@ async function runCheckoutSideEffects({
   provenance,
   bookingSliceIds,
   departedSlices,
+  unscannedSliceIds,
 }: {
   bookingFound: BookingForEmail;
   userId?: string;
@@ -3674,6 +3714,12 @@ async function runCheckoutSideEffects({
    * a "checked out asset with" line: a slice already out stays silent.
    */
   departedSlices: ReadonlyArray<{ id: string; assetId: string }>;
+  /**
+   * Slices that went out with a scan batch the scan did not name. The
+   * booking's line then says no method, and neither does the line of an asset
+   * holding one of them.
+   */
+  unscannedSliceIds?: ReadonlySet<string>;
 }) {
   // Every booking-note write is scoped to the workspace.
   if (userId) {
@@ -3684,15 +3730,21 @@ async function runCheckoutSideEffects({
       toStatus: effectiveStatus,
       userId,
       custodianUserId: bookingFound.custodianUserId || undefined,
-      methodClause: bookingMethodClause(provenance, bookingSliceIds),
+      methodClause: bookingMethodClause(
+        provenance && unscannedSliceIds?.size
+          ? { ...provenance, method: null }
+          : provenance,
+        bookingSliceIds
+      ),
     });
 
     await createWholeBookingAssetNotes({
-      verb: "checked out",
+      line: "checked out",
       booking: bookingFound,
       organizationId,
       userId,
       provenance,
+      unscannedSliceIds,
       slices: departedSlices,
     });
   }
@@ -4419,11 +4471,10 @@ export async function fulfilModelRequestsAndCheckout({
      * early-date adjustment, and the status transition are all reverted
      * together.
      */
-    // Whether the scan named every row that went out, set inside the
-    // transaction. The activity line names the batch's method only then: a
-    // row the scan did not name is recorded with its method not said, and the
-    // line must not claim it was scanned.
-    let everyRowScanned = true;
+    // The rows that went out without the scan naming them, set inside the
+    // transaction. They are recorded with their method not said, so no
+    // activity line covering one of them may claim it was scanned.
+    let unscannedSliceIds = new Set<string>();
     /** The slices this check-out sent out, set inside the transaction. */
     let departedSlices: Array<{ id: string; assetId: string }> = [];
     await db.$transaction(
@@ -4563,7 +4614,11 @@ export async function fulfilModelRequestsAndCheckout({
             addedAssetIds,
             claimedAssetIds,
           });
-          everyRowScanned = postScanBookingAssets.every(wasScanned);
+          unscannedSliceIds = new Set(
+            postScanBookingAssets
+              .filter((ba) => !wasScanned(ba))
+              .map((ba) => ba.id)
+          );
           await recordEvents(
             postScanBookingAssets.map((ba) => ({
               organizationId,
@@ -4615,10 +4670,8 @@ export async function fulfilModelRequestsAndCheckout({
       hints,
       organizationId,
       isExpired,
-      provenance:
-        provenance && !everyRowScanned
-          ? { ...provenance, method: null }
-          : provenance,
+      provenance,
+      unscannedSliceIds,
       departedSlices,
     });
   } catch (cause) {
@@ -5959,18 +6012,19 @@ export async function checkinBooking({
   specificAssetIds,
   checkins,
   provenance,
-  assetNotesWritten = false,
+  completesPartialCheckin = false,
 }: Pick<Booking, "id" | "organizationId"> & {
   hints: ClientHint;
   intentChoice?: CheckinIntentEnum;
   userId?: string;
   /**
-   * True when the caller has already written each asset's check-in line for
-   * this check-in, so this call writes no second one. The partial check-in
-   * that returns the last items out writes its own ("checked in the last items
-   * still out ..., which completed the booking.") before it hands over.
+   * True when a partial check-in hands over because its batch returns the last
+   * items still out. Each returned asset's line then says so ("checked in the
+   * last items still out ..., which completed the booking.") instead of
+   * "checked in asset with". Written after the check-in commits, so a refused
+   * check-in leaves no line.
    */
-  assetNotesWritten?: boolean;
+  completesPartialCheckin?: boolean;
   /**
    * How and from where the check-in was made. Recorded on every
    * `BOOKING_CHECKED_IN` event and said on the booking's activity line. The
@@ -6892,19 +6946,23 @@ export async function checkinBooking({
       { timeout: 15000 }
     );
 
+    /** The acting user wrapped for a note, read once for every note below. */
+    let actor: string | undefined;
+
     // Create status transition note
     if (userId) {
+      const actingUser = await getUserByID(userId, {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          displayName: true,
+        } satisfies Prisma.UserSelect,
+      });
+      actor = wrapUserLinkForNote({ ...actingUser, id: userId });
+
       if (specificAssetIds && specificAssetIds.length > 0) {
         // Create enhanced completion message with asset details
-        const user = await getUserByID(userId, {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            displayName: true,
-          } satisfies Prisma.UserSelect,
-        });
-
         // Get asset and kit data for consistent formatting
         const assetsWithKitInfo = await db.asset.findMany({
           // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: check-in note names assets already on the booking, archived ones included
@@ -6982,9 +7040,7 @@ export async function checkinBooking({
         await createSystemBookingNote({
           bookingId: updatedBooking.id,
           organizationId,
-          content: `${wrapUserLinkForNote(
-            user!
-          )} performed a partial check-in: ${itemsDescription}${bookingMethodClause(
+          content: `${actor} performed a partial check-in: ${itemsDescription}${bookingMethodClause(
             provenance,
             outstandingSliceIds(
               bookingFound.bookingAssets.filter((ba) =>
@@ -7022,39 +7078,28 @@ export async function checkinBooking({
         });
       }
 
-      if (!assetNotesWritten) {
-        await createWholeBookingAssetNotes({
-          verb: "checked in",
-          booking: updatedBooking,
-          organizationId,
-          userId,
-          provenance,
-          slices: checkedInBookingAssets.map((ba) => ({
-            id: ba.id,
-            assetId: ba.asset.id,
-          })),
-        });
-      }
+      await createWholeBookingAssetNotes({
+        line: completesPartialCheckin ? "completed check-in" : "checked in",
+        booking: updatedBooking,
+        organizationId,
+        userId,
+        actor,
+        provenance,
+        slices: checkedInBookingAssets.map((ba) => ({
+          id: ba.id,
+          assetId: ba.asset.id,
+        })),
+      });
     }
 
     /**
      * Per-asset notes for qty-tracked dispositions applied in this
-     * check-in. Wrapped in try/catch — activity logging must never
+     * check-in. Wrapped in try/catch: activity logging must never
      * fail a successful check-in. See the matching pattern in
      * `partialCheckinBooking` and `manage-assets`.
      */
-    if (userId && qtySummariesRef.value.length > 0) {
+    if (userId && actor && qtySummariesRef.value.length > 0) {
       try {
-        const actorUser = await getUserByID(userId, {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            displayName: true,
-          } satisfies Prisma.UserSelect,
-        });
-        const actor = wrapUserLinkForNote({ ...actorUser, id: userId });
-
         /**
          * Shared booking link — per-asset notes point back to the booking
          * so the asset's activity feed shows which booking consumed /
@@ -7525,27 +7570,6 @@ function buildQtyPerAssetCheckoutFragment(
   return fragments.join(", ");
 }
 
-/**
- * The line each asset's activity shows when a partial check-in returns the
- * last items still out and so completes the booking. Shared by both ways the
- * partial check-in can complete a booking (handing over to
- * {@link checkinBooking}, or finishing in its own transaction), so the two
- * read the same.
- *
- * @param actor - The acting user, wrapped for the note
- * @param bookingLink - The booking, wrapped for the note
- * @param methodClause - How the batch was made, as {@link bookingMethodClause}
- *   words it
- * @returns The note content
- */
-function lastItemsCheckedInNoteContent(
-  actor: string,
-  bookingLink: string,
-  methodClause: string
-): string {
-  return `${actor} checked in the last items still out on ${bookingLink}${methodClause}, which completed the booking.`;
-}
-
 export async function partialCheckinBooking({
   id,
   organizationId,
@@ -8001,31 +8025,7 @@ export async function partialCheckinBooking({
         outstandingAssetIds.every((assetId) => providedAssetIds.has(assetId))
       ) {
         // No PartialBookingCheckin row: `checkinBooking` handles completion
-        // itself. The asset-side note says how this batch was made, as the
-        // provenance recorded it; the batch may have been scanned, selected
-        // from the list, or both. Resolved over the booking's own slices for
-        // the batch's assets, as the delegated events are: a bare asset-id
-        // payload names no slice itself.
-        const actor = wrapUserLinkForNote({ ...user, id: userId });
-        await createNotes({
-          content: lastItemsCheckedInNoteContent(
-            actor,
-            wrapLinkForNote(`/bookings/${bookingFound.id}`, bookingFound.name),
-            bookingMethodClause(
-              provenance,
-              outstandingSliceIds(
-                bookingFound.bookingAssets.filter((ba) =>
-                  effectiveAssetIds.includes(ba.assetId)
-                )
-              )
-            )
-          ),
-          type: "UPDATE",
-          userId,
-          assetIds: effectiveAssetIds,
-          organizationId,
-        });
-
+        // itself, and writes each returned asset's line once it commits.
         const completedBooking = await checkinBooking({
           id,
           organizationId,
@@ -8036,8 +8036,8 @@ export async function partialCheckinBooking({
           // The batch closes the booking through the full check-in, which
           // writes the events; the rows were still scanned or selected here.
           provenance,
-          // The line above is this batch's asset line.
-          assetNotesWritten: true,
+          // The asset lines say this batch completed the booking.
+          completesPartialCheckin: true,
         });
 
         return {
@@ -9127,25 +9127,34 @@ export async function partialCheckinBooking({
         });
       }
 
-      if (txResult.individualAssetIds.length > 0) {
-        // The batch that completes the booking says so, in the words the
-        // hand-over to `checkinBooking` above uses.
-        const individualAssetIds = txResult.individualAssetIds;
+      if (txResult.isComplete) {
+        // The batch that completes the booking says so on every asset it
+        // brought back, as the hand-over to `checkinBooking` above does: over
+        // the slices still out before this batch, so a re-scanned asset that
+        // came back earlier gets no line.
+        const returnedAssetIds = new Set([
+          ...txResult.individualAssetIds,
+          ...txResult.qtySummaries.map((s) => s.assetId),
+        ]);
+        await createWholeBookingAssetNotes({
+          line: "completed check-in",
+          booking: bookingFound,
+          organizationId,
+          userId,
+          actor,
+          provenance,
+          slices: bookingFound.bookingAssets
+            .filter(
+              (ba) =>
+                returnedAssetIds.has(ba.assetId) &&
+                Boolean(ba.checkedOutAt) &&
+                !ba.checkedInAt
+            )
+            .map((ba) => ({ id: ba.id, assetId: ba.assetId })),
+        });
+      } else if (txResult.individualAssetIds.length > 0) {
         await createNotes({
-          content: txResult.isComplete
-            ? lastItemsCheckedInNoteContent(
-                actor,
-                bookingLink,
-                bookingMethodClause(
-                  provenance,
-                  outstandingSliceIds(
-                    bookingFound.bookingAssets.filter((ba) =>
-                      individualAssetIds.includes(ba.assetId)
-                    )
-                  )
-                )
-              )
-            : `${actor} checked in via partial check-in on ${bookingLink}.`,
+          content: `${actor} checked in via partial check-in on ${bookingLink}.`,
           type: "UPDATE",
           userId,
           assetIds: txResult.individualAssetIds,
