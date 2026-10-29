@@ -198,6 +198,34 @@ describe("sendOTP", () => {
     expect(supabaseMocks.signInWithOtp).not.toHaveBeenCalled();
   });
 
+  it.each(["otp_disabled", "signup_disabled"])(
+    "answers an address with no account exactly as a send does (%s)",
+    async (code) => {
+      // why: on an instance that does not create accounts from a code,
+      // Supabase refuses an unknown address. Passing that refusal on would
+      // show its raw text and tell a stranger which addresses have an account.
+      supabaseMocks.signInWithOtp.mockResolvedValue({
+        error: new AuthApiError("Signups not allowed for otp", 422, code),
+      });
+
+      await expect(sendOTP(EMAIL)).resolves.toBeUndefined();
+    }
+  );
+
+  it("still fails on any other refusal from Supabase", async () => {
+    supabaseMocks.signInWithOtp.mockResolvedValue({
+      error: new AuthApiError(
+        "Email address is invalid",
+        400,
+        "email_address_invalid"
+      ),
+    });
+
+    await expect(sendOTP(EMAIL)).rejects.toMatchObject({
+      message: "Email address is invalid",
+    });
+  });
+
   it("sends a code to an allowed address", async () => {
     await expect(sendOTP(EMAIL)).resolves.toBeUndefined();
 

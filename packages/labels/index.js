@@ -421,6 +421,80 @@ export function archivedAssetsLeftOut(count) {
   } left out.`;
 }
 
+/** How many short models {@link modelReservationsReduced} names before "and N more". */
+const REDUCED_MODELS_NAMED = 3;
+
+/**
+ * Names the first few models and "and N more".
+ *
+ * @param {string[]} names
+ * @returns {string}
+ */
+function namedModels(names) {
+  const more = names.length - REDUCED_MODELS_NAMED;
+  return `${names.slice(0, REDUCED_MODELS_NAMED).join(", ")}${
+    more > 0 ? ` and ${more} more` : ""
+  }`;
+}
+
+/**
+ * The sentence for models the new dates have too few units of.
+ *
+ * @param {{ assetModelName: string; requested: number; reserved: number }[]} models
+ * @returns {string}
+ */
+function reservedShort(models) {
+  if (models.length === 1) {
+    const [{ assetModelName, requested, reserved }] = models;
+    return reserved === 0
+      ? `None of the ${requested} × ${assetModelName} could be reserved for the new dates.`
+      : `Only ${reserved} of ${requested} × ${assetModelName} could be reserved for the new dates.`;
+  }
+  return `Fewer units are free for the new dates, so ${
+    models.length
+  } models were reserved short: ${namedModels(
+    models.map((m) => `${m.assetModelName} (${m.reserved} of ${m.requested})`)
+  )}.`;
+}
+
+/**
+ * The sentence for models whose reservation could not be written at all. Says
+ * nothing about availability, because the cause was an error, not the pool.
+ *
+ * @param {{ assetModelName: string; requested: number }[]} models
+ * @returns {string}
+ */
+function reservationFailed(models) {
+  if (models.length === 1) {
+    const [{ assetModelName, requested }] = models;
+    return `Could not reserve ${requested} × ${assetModelName}. Try again from the booking.`;
+  }
+  return `Could not reserve ${models.length} models (${namedModels(
+    models.map((m) => `${m.requested} × ${m.assetModelName}`)
+  )}). Try again from the booking.`;
+}
+
+/**
+ * The sentences added to a success message when a copied booking could not
+ * reserve every model unit the source had open: because the new dates have
+ * fewer units free, or because the reservation could not be written
+ * (`failed`), which is worded as an error to retry rather than as a shortfall.
+ *
+ * @param {{ assetModelName: string; requested: number; reserved: number; failed?: boolean }[]} models
+ *   - at least one, each reserved below what was asked
+ * @returns {string}
+ */
+export function modelReservationsReduced(models) {
+  const short = models.filter((m) => !m.failed);
+  const failed = models.filter((m) => m.failed);
+  return [
+    short.length > 0 ? reservedShort(short) : null,
+    failed.length > 0 ? reservationFailed(failed) : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
 /**
  * The refusal when kits with no active asset are put into custody or booked.
  * Such a kit would be held or booked while nothing in it is.

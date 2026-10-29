@@ -68,4 +68,28 @@ describe("getReminderStatus", () => {
       })
     ).toBe("Reminder sent");
   });
+
+  it("reads Sending while a due reminder's job has not run yet", () => {
+    expect(
+      getReminderStatus({
+        alertDateTime: past,
+        schedulerReference: "job-1",
+        assetArchivedAt: null,
+        deliveryPending: true,
+        now,
+      })
+    ).toBe("Sending");
+  });
+
+  it("reads Paused for a due job on an archived asset, which will not send", () => {
+    expect(
+      getReminderStatus({
+        alertDateTime: past,
+        schedulerReference: "job-1",
+        assetArchivedAt: archivedAt,
+        deliveryPending: true,
+        now,
+      })
+    ).toBe("Paused");
+  });
 });

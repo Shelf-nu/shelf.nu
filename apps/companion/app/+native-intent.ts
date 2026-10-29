@@ -29,8 +29,14 @@
  * `useDeepLinkHandler` (lib/deep-links.ts) finishes the job from the original
  * URL.
  *
+ * Which paths count, and the native route each maps to, is decided by
+ * `nativeRouteForLink` (`lib/resource-path.ts`), which matches through the
+ * same allowlist push taps use.
+ *
  * @see {@link file://./../lib/deep-links.ts}
+ * @see {@link file://./../lib/resource-path.ts} the shared path allowlist
  */
+import { nativeRouteForLink } from "../lib/resource-path";
 
 type RedirectSystemPathArgs = {
   /**
@@ -43,47 +49,6 @@ type RedirectSystemPathArgs = {
 };
 
 /**
- * Extracts the resource path segments and query string from a raw incoming URL.
- *
- * Handles all three shapes the router hands us:
- * - `https://app.shelf.nu/assets/:id/overview` → host dropped → ["assets", ":id", "overview"]
- * - `shelf://assets/:id` → custom scheme: the first component IS the resource → ["assets", ":id"]
- * - `/assets/:id` (already a path) → ["assets", ":id"]
- *
- * The query string is preserved (hash stripped) because some claimed routes
- * consume params — e.g. `/assets/new?qrId=...` links a scanned QR to the
- * asset being created. Dropping it would silently break that flow.
- *
- * @param url - the raw URL or path delivered by the OS
- * @returns the path segments (no scheme/host/query/hash) and the query string
- */
-function extractPathParts(url: string): { segments: string[]; query: string } {
-  let rest = url;
-
-  const schemeMatch = /^([a-z][a-z0-9+.-]*):\/\//i.exec(url);
-  if (schemeMatch) {
-    rest = url.slice(schemeMatch[0].length);
-    // For http(s) the first component is the domain — drop it. For custom
-    // schemes (shelf://assets/:id) the first component is the resource
-    // itself (expo-linking puts it in `hostname`) — keep it.
-    const scheme = schemeMatch[1].toLowerCase();
-    if (scheme === "http" || scheme === "https") {
-      const slash = rest.indexOf("/");
-      // Domain-only URL (no path): nothing left to match.
-      rest = slash === -1 ? "" : rest.slice(slash + 1);
-    }
-  }
-
-  // Split off the query (kept) and the hash (dropped — never meaningful here).
-  const hashless = rest.split("#")[0] ?? "";
-  const queryStart = hashless.indexOf("?");
-  const pathname = queryStart === -1 ? hashless : hashless.slice(0, queryStart);
-  const query = queryStart === -1 ? "" : hashless.slice(queryStart + 1);
-
-  return { segments: pathname.split("/").filter(Boolean), query };
-}
-
-/**
  * Rewrites OS-delivered link URLs to navigable in-app routes.
  *
  * @param args - the incoming URL and whether it launched the app
@@ -92,52 +57,9 @@ function extractPathParts(url: string): { segments: string[]; query: string } {
  */
 export function redirectSystemPath({ path }: RedirectSystemPathArgs): string {
   try {
-    const { segments, query } = extractPathParts(path);
-    if (segments.length === 0) return "/";
-
-    // Re-attach the original query so param-consuming routes keep working
-    // (e.g. /assets/new?qrId=... reads qrId via useLocalSearchParams to link
-    // the scanned QR to the created asset). Extra params on routes that
-    // ignore them are harmless.
-    const withQuery = (route: string) => (query ? `${route}?${query}` : route);
-
-    const [resource, id] = segments;
-
-    switch (resource) {
-      case "assets":
-        // Custom-scheme kit links can arrive as assets/kits/:id (the kit
-        // detail lives inside the assets stack).
-        if (id === "kits") {
-          return withQuery(
-            segments[2] ? `/assets/kits/${segments[2]}` : "/assets"
-          );
-        }
-        // Any deeper web path (/assets/:id/overview, /assets/:id/activity…)
-        // maps to the native asset detail — that is what the tapper wants.
-        // This also covers /assets/new (id = "new" → the create screen).
-        return withQuery(id ? `/assets/${id}` : "/assets");
-      case "kits":
-        return withQuery(id ? `/assets/kits/${id}` : "/assets");
-      case "bookings":
-        return withQuery(id ? `/bookings/${id}` : "/bookings");
-      case "audits":
-        return withQuery(id ? `/audits/${id}` : "/audits");
-      case "qr":
-        // Needs an async API resolve (asset vs kit vs other-org) that a path
-        // rewrite cannot express. Land on the start screen; useDeepLinkHandler
-        // reads the original URL via Linking and navigates once resolved.
-        return "/";
-      case "scanner":
-      case "scan":
-        return "/scanner";
-      default:
-        // Not a claimed prefix (dev-client URLs, custom-scheme extras): leave
-        // the URL unchanged so existing behavior is preserved.
-        // `app/+not-found.tsx` catches anything the router still can't match.
-        return path;
-    }
+    return nativeRouteForLink(path);
   } catch {
-    // Never let a parse error strand the user — fall back to the start screen.
+    // Never let a parse error strand the user: fall back to the start screen.
     return "/";
   }
 }

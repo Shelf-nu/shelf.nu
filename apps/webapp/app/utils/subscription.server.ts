@@ -58,6 +58,78 @@ export const canHideShelfBranding = (
   return tierLimit.canHideShelfBranding;
 };
 
+/**
+ * Determines whether an organization tier allows companion-app push
+ * notifications. Pass the tier limit of the organization's owner.
+ *
+ * @param tierLimit - The tier limits associated with the organization.
+ * @returns `true` if push is included in the tier or premium features are disabled.
+ */
+export const canUsePushNotifications = (
+  tierLimit: { canUsePushNotifications: boolean } | null | undefined
+) => {
+  if (!premiumIsEnabled) return true;
+  if (!tierLimit) return false;
+  return tierLimit.canUsePushNotifications;
+};
+
+/**
+ * Keeps the organizations whose owner's tier allows push. One rule for the
+ * push sender and for the settings screens that tell a person whether push
+ * can reach them. Reads every owner's tier in a single query; an owner with
+ * no limit row counts as a tier without push.
+ *
+ * @param organizationIds - Organizations to check
+ * @returns The ones with push, in their original order
+ * @throws {ShelfError} If the database read fails
+ */
+export async function filterOrganizationsWithPush(
+  organizationIds: string[]
+): Promise<string[]> {
+  if (!premiumIsEnabled) return organizationIds;
+  if (organizationIds.length === 0) return [];
+
+  try {
+    const organizations = await db.organization.findMany({
+      where: { id: { in: organizationIds } },
+      select: {
+        id: true,
+        owner: {
+          select: {
+            tierId: true,
+            tier: {
+              select: {
+                tierLimit: { select: { canUsePushNotifications: true } },
+              },
+            },
+            customTierLimit: { select: { canUsePushNotifications: true } },
+          },
+        },
+      },
+    });
+
+    const allowed = new Set(
+      organizations
+        .filter(({ owner }) =>
+          canUsePushNotifications(
+            owner.tierId === "custom"
+              ? owner.customTierLimit
+              : owner.tier.tierLimit
+          )
+        )
+        .map(({ id }) => id)
+    );
+    return organizationIds.filter((id) => allowed.has(id));
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while checking which plans include push.",
+      additionalData: { organizationIds },
+      label,
+    });
+  }
+}
+
 export async function assertUserCanExportAssets({
   organizationId,
   organizations,
@@ -581,6 +653,68 @@ export async function assertUserCanInviteUsersToWorkspace({
   }
 }
 /** End Team Features */
+
+/** Recurring Reminders */
+
+/**
+ * Determines whether the current organization's tier allows recurring
+ * (auto-repeating) asset reminders. One-shot reminders are free and are
+ * never gated by this.
+ *
+ * @param tierLimit - The tier limits of the organization OWNER (see
+ *                    getOrganizationTierLimit).
+ * @returns `true` if recurrence can be used or premium features are disabled.
+ */
+export const canUseRecurringReminders = (
+  tierLimit: { canUseRecurringReminders: boolean } | null | undefined
+) => {
+  if (!premiumIsEnabled) return true;
+  if (!tierLimit) return false;
+  return tierLimit.canUseRecurringReminders;
+};
+
+/**
+ * Throws when the organization's tier does not include recurring reminders.
+ * Call this only when a mutation actually requests recurrence: creating or
+ * editing one-shot reminders must stay free.
+ *
+ * @param organizationId - The current organization id.
+ * @param organizations - The caller's organizations (from requirePermission);
+ *                        used to resolve the org OWNER whose tier applies.
+ * @throws {ShelfError} 403 "Not allowed" upgrade nudge.
+ */
+export async function assertUserCanUseRecurringReminders({
+  organizationId,
+  organizations,
+}: {
+  organizationId: Organization["id"];
+  organizations: {
+    id: string;
+    type: OrganizationType;
+    name: string;
+    imageId: string | null;
+    userId: string;
+  }[];
+}) {
+  const tierLimit = await getOrganizationTierLimit({
+    organizationId,
+    organizations,
+  });
+
+  if (!canUseRecurringReminders(tierLimit)) {
+    throw new ShelfError({
+      cause: null,
+      title: "Not allowed",
+      message:
+        "Recurring reminders are not available on your workspace's current plan. Please upgrade your subscription to unlock this feature, or set a one-time reminder instead.",
+      additionalData: { organizationId },
+      label,
+      status: 403,
+      shouldBeCaptured: false,
+    });
+  }
+}
+/** End Recurring Reminders */
 
 /** Audit Add-on */
 export const canUseAudits = (org: { auditsEnabled: boolean }) => {

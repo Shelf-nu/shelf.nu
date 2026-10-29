@@ -599,14 +599,14 @@ export default function ListAssetContent({
           isKitAsset ? "bg-gray-50/50" : "" // Light background for kit assets
         )}
       >
-        <CategoryBadge category={category} />
+        <CategoryBadge category={category} linkToAssets />
       </Td>
       <Td
         className={tw(
           isKitAsset ? "bg-gray-50/50" : "" // Light background for kit assets
         )}
       >
-        <ListItemTagsColumn tags={tags} />
+        <ListItemTagsColumn tags={tags} linkToAssets />
       </Td>
 
       <Td
