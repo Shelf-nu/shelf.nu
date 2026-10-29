@@ -4,12 +4,13 @@
 /**
  * Tests for the link preview service: which links `getLinkTitles` reads and
  * which it claims (Link-format fields only, due rows only, capped per read),
- * the claim SQL it sends, that queue and database failures never reach the
- * loader, and what `runLinkPreviewJob` records for a fetched page.
+ * that it returns without waiting for the claim, the claim SQL it sends, that
+ * queue and database failures never reach the loader, and what
+ * `runLinkPreviewJob` records for a fetched page.
  *
- * The claim's concurrency guarantee (two readers claim a row once) lives in
- * its `ON CONFLICT ... WHERE` clause and needs a real database to prove; here
- * the SQL text is pinned instead.
+ * The claim's concurrency guarantee (two readers claim a row once) is proven
+ * against a real database in `service.db.test.ts`; here the SQL text is
+ * pinned.
  *
  * @see {@link file://./service.server.ts}
  */
@@ -87,6 +88,14 @@ function claimQuery(): Prisma.Sql | undefined {
   return vi.mocked(db.$queryRaw).mock.calls[0]?.[0] as Prisma.Sql | undefined;
 }
 
+/**
+ * Lets the claim `getLinkTitles` starts without waiting finish: its query and
+ * queue calls are mocked promises, settled once pending I/O callbacks run.
+ */
+function settleClaim() {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
 beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(db.linkPreview.findMany).mockResolvedValue([]);
@@ -154,6 +163,7 @@ describe("getLinkTitles: claiming", () => {
       organizationId: ORG,
       values: [text(MANUAL, "PLAIN"), text(SHOP), text(SHEET, "LINK")],
     });
+    await settleClaim();
 
     expect(claimQuery()?.values).toEqual([ORG, "15 minutes", [SHEET]]);
     expect(scheduler.send).toHaveBeenCalledTimes(1);
@@ -239,6 +249,28 @@ describe("getLinkTitles: claiming", () => {
     expect(claimQuery()?.values[2]).toEqual([SHEET]);
   });
 
+  it("returns the titles without waiting for the claim", async () => {
+    vi.mocked(db.linkPreview.findMany).mockResolvedValue([
+      row(MANUAL, { pageTitle: "EOS R5 user manual" }),
+    ] as never);
+    // why: a claim that never answers stands in for a slow insert and queue.
+    vi.mocked(db.$queryRaw).mockReturnValue(new Promise(() => {}) as never);
+
+    const titles = getLinkTitles({
+      organizationId: ORG,
+      values: [text(MANUAL, "LINK"), text(SHEET, "LINK")],
+    });
+    const first = await Promise.race([
+      titles,
+      settleClaim().then(() => "still waiting on the claim"),
+    ]);
+
+    expect(first).toEqual({
+      [MANUAL]: { pageTitle: "EOS R5 user manual", customTitle: null },
+    });
+    expect(claimQuery()?.values[2]).toEqual([SHEET]);
+  });
+
   it("still returns titles when queueing or claiming fails", async () => {
     vi.mocked(db.linkPreview.findMany).mockResolvedValue([
       row(MANUAL, { pageTitle: "EOS R5 user manual" }),
@@ -253,11 +285,13 @@ describe("getLinkTitles: claiming", () => {
     await expect(
       getLinkTitles({ organizationId: ORG, values })
     ).resolves.toEqual(expected);
+    await settleClaim();
 
     vi.mocked(db.$queryRaw).mockRejectedValue(new Error("db down"));
     await expect(
       getLinkTitles({ organizationId: ORG, values })
     ).resolves.toEqual(expected);
+    await settleClaim();
 
     expect(
       vi
@@ -290,7 +324,7 @@ describe("runLinkPreviewJob", () => {
     return vi.mocked(db.linkPreview.updateMany).mock.calls[0]?.[0];
   }
 
-  it("records the page title and never fetches the link again", async () => {
+  it("records the page title and reads it again in 30 days", async () => {
     let userAgent: string | null = null;
     // why: MSW answers in place of the maker's site.
     server.use(
@@ -317,10 +351,53 @@ describe("runLinkPreviewJob", () => {
       data: {
         outcome: "TITLE",
         pageTitle: "EOS R5 user manual",
-        attempts: 1,
+        attempts: 0,
         fetchedAt: NOW,
-        nextFetchAt: null,
+        nextFetchAt: new Date("2026-11-28T12:00:00.000Z"),
       },
+    });
+  });
+
+  it("keeps a known title through a server error and retries in an hour", async () => {
+    // why: MSW answers in place of the maker's site.
+    server.use(
+      http.get(MANUAL, () => new HttpResponse("busy", { status: 503 }))
+    );
+    // A row that had a title (attempts start over at a title) is read again.
+    vi.mocked(db.linkPreview.findFirst).mockResolvedValue({
+      url: MANUAL,
+      attempts: 0,
+    } as never);
+
+    await runLinkPreviewJob({ previewId: "lp-1", organizationId: ORG });
+
+    // No pageTitle in the write: the stored title stays.
+    expect(written()?.data).toEqual({
+      outcome: "UNREACHABLE",
+      attempts: 1,
+      fetchedAt: NOW,
+      nextFetchAt: new Date("2026-10-29T13:00:00.000Z"),
+    });
+  });
+
+  it("clears the title when a page is gone for good", async () => {
+    // why: MSW answers in place of the maker's site.
+    server.use(
+      http.get(MANUAL, () => new HttpResponse("gone", { status: 404 }))
+    );
+    vi.mocked(db.linkPreview.findFirst).mockResolvedValue({
+      url: MANUAL,
+      attempts: 0,
+    } as never);
+
+    await runLinkPreviewJob({ previewId: "lp-1", organizationId: ORG });
+
+    expect(written()?.data).toEqual({
+      outcome: "UNREACHABLE",
+      pageTitle: null,
+      attempts: 1,
+      fetchedAt: NOW,
+      nextFetchAt: null,
     });
   });
 
@@ -338,7 +415,6 @@ describe("runLinkPreviewJob", () => {
 
     expect(written()?.data).toEqual({
       outcome: "UNREACHABLE",
-      pageTitle: null,
       attempts: 3,
       fetchedAt: NOW,
       nextFetchAt: new Date("2026-11-05T12:00:00.000Z"),
@@ -364,6 +440,24 @@ describe("runLinkPreviewJob", () => {
   it("gives up for good on a private address, without a request", async () => {
     vi.mocked(db.linkPreview.findFirst).mockResolvedValue({
       url: "http://10.0.0.5/manual.pdf",
+      attempts: 0,
+    } as never);
+
+    await runLinkPreviewJob({ previewId: "lp-1", organizationId: ORG });
+
+    expect(written()?.data).toEqual({
+      outcome: "UNREACHABLE",
+      pageTitle: null,
+      attempts: 1,
+      fetchedAt: NOW,
+      nextFetchAt: null,
+    });
+  });
+
+  it("gives up for good on a stored link with a password, without a request", async () => {
+    // A key stored before links with a user name or password were refused.
+    vi.mocked(db.linkPreview.findFirst).mockResolvedValue({
+      url: "https://user:secret@files.example.com/manual.pdf",
       attempts: 0,
     } as never);
 

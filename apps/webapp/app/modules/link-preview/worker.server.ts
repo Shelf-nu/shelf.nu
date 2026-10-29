@@ -3,8 +3,10 @@
  *
  * Registers the pg-boss worker for `QueueNames.linkPreviewQueue` and runs
  * `runLinkPreviewJob` for each claimed link. Jobs are queued with
- * `retryLimit: 0` (retries are scheduled through `LinkPreview.nextFetchAt`),
- * so a failing job is logged and rethrown once.
+ * `retryLimit: 0`, so a failing job is logged and rethrown once. A link whose
+ * fetch failed becomes eligible again through `LinkPreview.nextFetchAt` (1
+ * hour, 1 day and 7 days later) and is fetched again only when someone views
+ * it; nothing fetches it on a timer.
  *
  * @see {@link file://./service.server.ts} what each job does
  * @see {@link file://../../entry.server.tsx} where the worker is registered

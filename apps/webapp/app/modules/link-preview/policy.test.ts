@@ -1,9 +1,9 @@
 // @vitest-environment node
 /**
  * Tests for the link preview policy: what `classifyHead` reads from real-shaped
- * page heads (title precedence, entities, charsets, sign-in pages, bot
- * challenges, statuses, non-HTML), the retry schedule of `nextFetchAfter`, and
- * `decodeHtmlEntities`.
+ * page heads (title precedence, entities, charsets, sign-in pages and titles,
+ * bot challenges, statuses, non-HTML), the refetch and retry schedule of
+ * `nextFetchAfter`, and `decodeHtmlEntities`.
  *
  * @see {@link file://./policy.ts}
  */
@@ -196,13 +196,33 @@ describe("classifyHead: pages without a usable title", () => {
     ).toEqual({ outcome: "BLOCKED", permanent: false });
   });
 
-  it("is BLOCKED for a challenge page recognised by its script", () => {
+  it("is BLOCKED for a 503 challenge page recognised by its script", () => {
     const html =
-      '<head><title>Example Shop</title><script src="/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1"></script></head>';
+      '<head><title>Example Shop</title></head><body><script src="/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1"></script></body>';
+
+    expect(classifyHead(head({ url: SHOP, status: 503, html }))).toEqual({
+      outcome: "BLOCKED",
+      permanent: false,
+    });
+  });
+
+  it("is BLOCKED for a challenge page recognised by its title", () => {
+    const html = "<head><title>Just a moment...</title></head>";
 
     expect(classifyHead(head({ url: SHOP, status: 200, html }))).toEqual({
       outcome: "BLOCKED",
       permanent: false,
+    });
+  });
+
+  it("reads the title of a page that only carries Cloudflare's script", () => {
+    // Cloudflare's bot detection adds this script to ordinary pages.
+    const html =
+      '<head><title>Example Shop</title></head><body><script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script></body>';
+
+    expect(classifyHead(head({ url: SHOP, status: 200, html }))).toEqual({
+      outcome: "TITLE",
+      title: "Example Shop",
     });
   });
 
@@ -245,6 +265,42 @@ describe("classifyHead: pages without a usable title", () => {
         head({ url, html: "<head><title>Cal cert.pdf</title></head>" })
       )
     ).toEqual({ outcome: "TITLE", title: "Cal cert.pdf" });
+  });
+
+  it.each([
+    "Sign in",
+    "Sign In to Example Corp",
+    "Sign-in",
+    "Log in",
+    "LOGIN",
+    "Login | Example Corp",
+    "Sign on",
+    "Single sign-on",
+    "Access denied",
+    "Example Corp - Sign In",
+    "Example Corp | Login",
+    "Example Corp: Sign-in",
+    "Example Corp \u2013 Single Sign-On",
+  ])("is SIGN_IN for a page titled %j", (title) => {
+    const html = `<head><title>${title}</title></head>`;
+
+    expect(
+      classifyHead(head({ url: "https://intranet.example.org/docs/7", html }))
+    ).toEqual({ outcome: "SIGN_IN" });
+  });
+
+  it.each([
+    "Signing torque wrenches out of the crib",
+    "How to sign in to the calibration portal",
+    "Logistics handbook",
+    "Access control panel manual",
+  ])("reads %j as a title, not a sign-in page", (title) => {
+    const html = `<head><title>${title}</title></head>`;
+
+    expect(classifyHead(head({ url: SHOP, html }))).toEqual({
+      outcome: "TITLE",
+      title,
+    });
   });
 
   it("is SIGN_IN for 401, and for 403 from a file-sharing service", () => {
@@ -323,8 +379,17 @@ describe("nextFetchAfter", () => {
   const now = new Date("2026-10-29T12:00:00.000Z");
   const transient = { outcome: "UNREACHABLE", permanent: false } as const;
 
+  it("reads a title again 30 days later", () => {
+    expect(
+      nextFetchAfter(
+        { outcome: "TITLE", title: "Manual" },
+        0,
+        now
+      )?.toISOString()
+    ).toBe("2026-11-28T12:00:00.000Z");
+  });
+
   it.each([
-    ["a title", { outcome: "TITLE", title: "Manual" } as const, 1],
     ["no title", { outcome: "NO_TITLE" } as const, 1],
     ["a sign-in page", { outcome: "SIGN_IN" } as const, 1],
     [

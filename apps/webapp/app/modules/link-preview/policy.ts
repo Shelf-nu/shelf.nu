@@ -9,7 +9,8 @@
  * A title is og:title, else twitter:title, else `<title>`, decoded and
  * cleaned by `cleanLinkTitle` from `@shelf/links`. Pages that sit behind a
  * sign-in or a bot challenge never yield a title: the chip falls back to what
- * the URL alone says.
+ * the URL alone says. A title is read again after a while, so a renamed
+ * document or a misread page heals on its own.
  *
  * @see {@link file://./fetch-title.server.ts} the fetch that feeds `classifyHead`
  * @see {@link file://./service.server.ts} where outcomes are stored
@@ -74,18 +75,48 @@ const SIGN_IN_PAGES: readonly { host: string; path?: string }[] = [
   { host: "app.box.com", path: "/login" },
 ];
 
-/** Text that only a bot-challenge interstitial carries (Cloudflare). */
+/**
+ * Text a Cloudflare challenge interstitial carries. Cloudflare also adds its
+ * challenge-platform script to ordinary pages, so a marker only counts on a
+ * status the interstitial is served with.
+ */
 const CHALLENGE_MARKERS: readonly string[] = [
   "challenge-platform",
   "cf-browser-verification",
 ];
 
-/** Delay before the next try after the 1st, 2nd and 3rd transient failure. */
+/** Statuses a Cloudflare challenge interstitial is served with. */
+const CHALLENGE_STATUSES: readonly number[] = [403, 429, 503];
+
+/** The title of a Cloudflare challenge interstitial. */
+const CHALLENGE_TITLE = /^just a moment(?:\.\.\.|\u2026)?$/i;
+
+/** Words that make a page title the title of a sign-in or refusal page. */
+const SIGN_IN_WORDS =
+  "(?:sign[ -]?in|log[ -]?in|sign[ -]?on|single sign[ -]?on|access denied)";
+
+/**
+ * A sign-in page's title: one of {@link SIGN_IN_WORDS} alone or leading the
+ * title ("Sign in to your account"), or after a separator at its end
+ * ("Example Corp - Sign In", "Example Corp | Login").
+ */
+const SIGN_IN_TITLE = new RegExp(
+  String.raw`^${SIGN_IN_WORDS}\b|[-|:\u00b7\u2013\u2014]\s*${SIGN_IN_WORDS}$`,
+  "i"
+);
+
+/**
+ * How long after the 1st, 2nd and 3rd transient failure in a row a link is
+ * eligible for a fetch again.
+ */
 const RETRY_DELAYS_MS: readonly number[] = [
   60 * 60 * 1000,
   24 * 60 * 60 * 1000,
   7 * 24 * 60 * 60 * 1000,
 ];
+
+/** How long after a fetch that found a title the link is eligible again. */
+const TITLE_REFRESH_MS = 30 * 24 * 60 * 60 * 1000;
 
 /**
  * Whether a response with this `content-type` may hold an HTML page. An
@@ -101,12 +132,13 @@ export function isHtmlContentType(contentType: string | null): boolean {
 /**
  * Judges the start of a fetched page.
  *
- * In order: a sign-in page as the final URL is SIGN_IN; a bot challenge
- * (`cf-mitigated: challenge`, or challenge markers in the page) is BLOCKED;
- * then the status decides (401 is SIGN_IN, 403 is SIGN_IN on a file-sharing
- * service and BLOCKED elsewhere, 429 is BLOCKED, 408 and 5xx are worth
- * retrying, any other non-2xx is not); a non-HTML 2xx is NO_TITLE; otherwise
- * the page's title decides between TITLE and NO_TITLE.
+ * In order: a sign-in page as the final URL is SIGN_IN; a bot challenge is
+ * BLOCKED (`cf-mitigated: challenge`, challenge markers on a 403, 429 or 503,
+ * or a "Just a moment..." title); then the status decides (401 is SIGN_IN,
+ * 403 is SIGN_IN on a file-sharing service and BLOCKED elsewhere, 429 is
+ * BLOCKED, 408 and 5xx are worth retrying, any other non-2xx is not); a
+ * non-HTML 2xx is NO_TITLE; otherwise the page's title decides between TITLE,
+ * SIGN_IN (a title such as "Sign in" or "Example Corp - Login") and NO_TITLE.
  *
  * @param head - The fetched status, final URL, headers and body prefix
  * @returns The outcome to store for the link
@@ -118,24 +150,30 @@ export function classifyHead(head: FetchedHead): PageTitleResult {
   const html = isHtmlContentType(contentType)
     ? decodeHtml(head.body, contentType)
     : null;
-  if (isChallenge(head.headers, html)) return BLOCKED;
+  const page = html === null ? null : pageHead(html);
+  if (isChallenge(head.status, head.headers, page)) return BLOCKED;
 
   const byStatus = outcomeForStatus(head.status, head.link);
   if (byStatus) return byStatus;
-  if (html === null) return NO_TITLE;
+  if (page === null) return NO_TITLE;
 
-  const title = readTitle(html, head.link);
-  return title ? { outcome: "TITLE", title } : NO_TITLE;
+  const title = readTitle(page, head.link);
+  if (!title) return NO_TITLE;
+  return SIGN_IN_TITLE.test(title) ? SIGN_IN : { outcome: "TITLE", title };
 }
 
 /**
- * When a link may be fetched again after this result.
+ * When a link becomes eligible for a fetch again after this result. Nothing
+ * fetches it at that time: an eligible link is fetched again only when
+ * someone views it.
  *
- * TITLE, NO_TITLE, SIGN_IN and permanent failures are final (null). A
- * transient failure is retried 1 hour, 1 day and 7 days later, then never.
+ * A title is eligible again after 30 days. A transient failure is eligible
+ * again 1 hour, 1 day and 7 days later, then never. NO_TITLE, SIGN_IN and
+ * permanent failures are final (null).
  *
  * @param result - What the fetch found
- * @param attempts - Fetches made so far, this one included
+ * @param attempts - Failed fetches in a row since the link last had a title,
+ *   this one included
  * @param now - When the fetch finished
  * @returns The earliest time of the next fetch, or null for never
  */
@@ -145,7 +183,12 @@ export function nextFetchAfter(
   now: Date
 ): Date | null {
   const transient = "permanent" in result && !result.permanent;
-  const delay = transient ? RETRY_DELAYS_MS[attempts - 1] : undefined;
+  const delay =
+    result.outcome === "TITLE"
+      ? TITLE_REFRESH_MS
+      : transient
+      ? RETRY_DELAYS_MS[attempts - 1]
+      : undefined;
   return delay === undefined ? null : new Date(now.getTime() + delay);
 }
 
@@ -212,9 +255,28 @@ function isSignInPage(url: URL): boolean {
   );
 }
 
-function isChallenge(headers: Headers, html: string | null): boolean {
+/**
+ * Whether the response is a bot challenge rather than the page. A page that
+ * merely carries Cloudflare's script is not one.
+ */
+function isChallenge(
+  status: number,
+  headers: Headers,
+  page: PageHead | null
+): boolean {
   if (headers.get("cf-mitigated")?.toLowerCase() === "challenge") return true;
-  return html !== null && CHALLENGE_MARKERS.some((m) => html.includes(m));
+  if (page === null) return false;
+  if (
+    CHALLENGE_STATUSES.includes(status) &&
+    CHALLENGE_MARKERS.some((marker) => page.lowerHtml.includes(marker))
+  ) {
+    return true;
+  }
+  const title = titleText(page);
+  return (
+    title !== undefined &&
+    CHALLENGE_TITLE.test(decodeHtmlEntities(title).trim())
+  );
 }
 
 /** The outcome a non-2xx status settles on its own; null for 2xx. */
@@ -269,6 +331,27 @@ function asciiLower(text: string): string {
   return text.replace(/[A-Z]+/g, (run) => run.toLowerCase());
 }
 
+/** A decoded page, and its head: the text before `</head`, if any. */
+interface PageHead {
+  /** The whole decoded page with A-Z lowercased. */
+  readonly lowerHtml: string;
+  readonly head: string;
+  /** `head` with A-Z lowercased, so every index lines up with it. */
+  readonly lower: string;
+}
+
+function pageHead(html: string): PageHead {
+  const lowerHtml = asciiLower(html);
+  const headEnd = lowerHtml.indexOf("</head");
+  return headEnd === -1
+    ? { lowerHtml, head: html, lower: lowerHtml }
+    : {
+        lowerHtml,
+        head: html.slice(0, headEnd),
+        lower: lowerHtml.slice(0, headEnd),
+      };
+}
+
 /**
  * og:title, else twitter:title, else `<title>`, from the page head. The first
  * candidate that is still a title after decoding and cleaning wins.
@@ -278,11 +361,8 @@ function asciiLower(text: string): string {
  * expressions that rescan from every unclosed `<meta` or `<title`: the work
  * stays linear in the page's length.
  */
-function readTitle(html: string, link: ParsedLink): string | null {
-  const lowerHtml = asciiLower(html);
-  const headEnd = lowerHtml.indexOf("</head");
-  const head = headEnd === -1 ? html : html.slice(0, headEnd);
-  const lower = headEnd === -1 ? lowerHtml : lowerHtml.slice(0, headEnd);
+function readTitle(page: PageHead, link: ParsedLink): string | null {
+  const { head, lower } = page;
 
   const metaContent = new Map<string, string>();
   for (const tag of metaTags(head, lower)) {
@@ -301,7 +381,7 @@ function readTitle(html: string, link: ParsedLink): string | null {
   const candidates = [
     metaContent.get("og:title"),
     metaContent.get("twitter:title"),
-    titleText(head, lower),
+    titleText(page),
   ];
   for (const candidate of candidates) {
     if (candidate === undefined) continue;
@@ -330,8 +410,8 @@ function metaTags(head: string, lower: string): string[] {
   }
 }
 
-/** The text of the first complete `<title>` element, if any. */
-function titleText(head: string, lower: string): string | undefined {
+/** The text of the first complete `<title>` element in the head, if any. */
+function titleText({ head, lower }: PageHead): string | undefined {
   const open = lower.indexOf("<title");
   if (open === -1) return undefined;
   const contentStart = lower.indexOf(">", open) + 1;

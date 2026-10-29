@@ -70,9 +70,10 @@ export interface LinkTitleSource {
  * Reads the workspace's rows for every TEXT value that is one link. Links
  * from Link-format fields that were never fetched, or whose next fetch is
  * due, are claimed (at most {@link MAX_CLAIMS_PER_READ}) and queued for the
- * worker, so their titles appear on a later load. Links from plain fields are
- * never claimed. Never throws: a failure is logged and the titles read so far
- * (or none) are returned.
+ * worker, so their titles appear on a later load. The claim runs in the
+ * background: the titles return without waiting for it. Links from plain
+ * fields are never claimed. Never throws: a failure is logged and the titles
+ * read so far (or none) are returned.
  *
  * @param args.organizationId - Workspace whose rows are read and claimed
  * @param args.values - Custom field values with their field's type and format
@@ -123,7 +124,7 @@ export async function getLinkTitles({
     // No row yet, or a row whose next fetch time has come.
     return next === undefined || (next !== null && next <= now);
   });
-  await claimAndQueue(organizationId, due.slice(0, MAX_CLAIMS_PER_READ));
+  void claimAndQueue(organizationId, due.slice(0, MAX_CLAIMS_PER_READ));
 
   const titles: Record<string, LinkTitle> = {};
   for (const { url, pageTitle, customTitle } of rows) {
@@ -187,9 +188,39 @@ export async function setLinkTitle({
 }
 
 /**
+ * Whether some asset of the workspace stores exactly this text as a custom
+ * field value, which is what a link must be before it can be named.
+ *
+ * @param args.organizationId - Workspace whose assets are searched
+ * @param args.value - The value as stored, untrimmed
+ * @returns True when at least one stored value equals `value`
+ */
+export async function isLinkStoredInWorkspace({
+  organizationId,
+  value,
+}: {
+  organizationId: string;
+  value: string;
+}): Promise<boolean> {
+  const stored = await db.assetCustomFieldValue.findFirst({
+    where: {
+      asset: { organizationId },
+      value: { path: ["raw"], equals: value },
+    },
+    select: { id: true },
+  });
+  return stored !== null;
+}
+
+/**
  * Worker body: fetches one claimed link and records the outcome, the attempt
  * count and the next fetch time. Never touches `customTitle`. Running it twice
  * converges on the same row, and a row deleted in the meantime is skipped.
+ *
+ * `attempts` counts failed fetches in a row since the link last had a title,
+ * so a title starts the retry delays over. A transient failure keeps the
+ * title the row already has, so a page that is briefly down keeps its name
+ * on the chips until it is fetched again.
  *
  * @param job - The claimed row's id and workspace
  * @throws When the database read or write fails
@@ -209,14 +240,17 @@ export async function runLinkPreviewJob({
   const result = link
     ? await fetchPageTitle(link)
     : ({ outcome: "UNREACHABLE", permanent: true } as const);
-  const attempts = row.attempts + 1;
+  const transient = "permanent" in result && !result.permanent;
+  const attempts = result.outcome === "TITLE" ? 0 : row.attempts + 1;
   const fetchedAt = new Date();
 
   await db.linkPreview.updateMany({
     where,
     data: {
       outcome: result.outcome,
-      pageTitle: result.outcome === "TITLE" ? result.title : null,
+      ...(transient
+        ? {}
+        : { pageTitle: result.outcome === "TITLE" ? result.title : null }),
       attempts,
       fetchedAt,
       nextFetchAt: nextFetchAfter(result, attempts, fetchedAt),
@@ -260,14 +294,23 @@ function linkKeysOf(values: readonly LinkTitleSource[]) {
  * Claims links that are absent or due and queues a fetch for each claimed
  * row. Concurrent readers on any machine claim each link once: the conflict
  * `WHERE` is re-checked on the locked row, so a second reader sees the moved
- * lease and skips it. Never throws; a claim whose job was not queued expires
- * with its lease and is claimed again by a later read.
+ * lease and skips it. A row whose `nextFetchAt` is null or still ahead is
+ * never claimed. Never throws; a claim whose job was not queued expires with
+ * its lease and is claimed again by a later read.
+ *
+ * Called without waiting by {@link getLinkTitles}; exported for the
+ * real-database test of the claim (`service.db.test.ts`).
+ *
+ * @param organizationId - Workspace that owns the rows
+ * @param keys - Distinct link keys to claim
+ * @returns The ids of the rows this call claimed (empty when the claim
+ *   failed)
  */
-async function claimAndQueue(
+export async function claimAndQueue(
   organizationId: string,
   keys: readonly LinkKey[]
-): Promise<void> {
-  if (keys.length === 0) return;
+): Promise<string[]> {
+  if (keys.length === 0) return [];
 
   let claimed: { id: string }[];
   try {
@@ -291,15 +334,15 @@ async function claimAndQueue(
         label,
       })
     );
-    return;
+    return [];
   }
 
   await Promise.all(
     claimed.map(async ({ id }) => {
       const job: LinkPreviewJob = { previewId: id, organizationId };
       try {
-        // Retries are scheduled through `nextFetchAt`, not by pg-boss: a
-        // failed link is tried again only when someone views it again.
+        // pg-boss never retries: `nextFetchAt` makes a failed link eligible
+        // again, and it is fetched again only when someone views it.
         await scheduler.send(QueueNames.linkPreviewQueue, job, {
           singletonKey: id,
           retryLimit: 0,
@@ -316,4 +359,5 @@ async function claimAndQueue(
       }
     })
   );
+  return claimed.map(({ id }) => id);
 }
