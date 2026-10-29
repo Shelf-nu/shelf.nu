@@ -141,9 +141,9 @@ type ListBookingsContentProps = {
      */
     hasUnavailableAssets?: boolean;
     /**
-     * Set by the same decorator: true while a slice of this booking is still
-     * in the Booked bucket (no `checkedOutAt`). Decides whether an ONGOING or
-     * OVERDUE row offers "Check out remaining".
+     * Set by the same decorator: true while a slice of this booking still has
+     * units to send out (`checkedOutQuantity` below its booked quantity).
+     * Decides whether an ONGOING or OVERDUE row offers "Check out remaining".
      */
     hasItemsToCheckOut?: boolean;
   };

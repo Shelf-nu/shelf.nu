@@ -10,7 +10,8 @@
  * Check out takes a selection of RESERVED bookings only and Check in a
  * selection of ONGOING or OVERDUE ones; both are disabled with a reason
  * otherwise, without the grant, and under the workspace's explicit scan
- * requirement for that direction.
+ * requirement for that direction. Both are also disabled when the selection,
+ * a select-all counted at the list's total, is over the bulk cap.
  *
  * @see {@link file://./bulk-actions-dropdown.tsx}
  */
@@ -19,18 +20,22 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { accessFor } from "@helpers/role-access";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { MAX_BULK_CHECK_IN_OUT_BOOKINGS } from "~/modules/booking/constants";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import type { ExplicitScanSettings } from "~/utils/permissions/role-access";
 import BulkActionsDropdown from "./bulk-actions-dropdown";
 
-// why: the component reads navigation state to know a request is in flight;
-// no data router is mounted, so the real hook has nothing to read.
+// why: the component reads navigation state to know a request is in flight,
+// and the list's total to size a select-all; no data router is mounted, so
+// the real hooks have nothing to read.
 let mockNavigationState: "idle" | "submitting" = "idle";
+let mockTotalItems = 2;
 vi.mock("react-router", async () => {
   const actual = await vi.importActual<Record<string, unknown>>("react-router");
   return {
     ...actual,
     useNavigation: () => ({ state: mockNavigationState }),
+    useLoaderData: () => ({ totalItems: mockTotalItems }),
   };
 });
 
@@ -105,17 +110,21 @@ function setup({
   bookings,
   isLoading = false,
   settings = NO_EXPLICIT_SCAN,
+  totalItems = 2,
 }: {
   roles: OrganizationRoles[];
   bookings: { id: string; status: BookingStatus }[];
   isLoading?: boolean;
   settings?: ExplicitScanSettings;
+  /** The list's total, which a select-all stands for */
+  totalItems?: number;
 }) {
   mockedUseOrganizationRoles.mockReturnValue(roles);
   mockRoles = roles;
   mockSelectedBookings = bookings;
   mockNavigationState = isLoading ? "submitting" : "idle";
   mockBookingSettings = settings;
+  mockTotalItems = totalItems;
 
   render(<BulkActionsDropdown />);
 }
@@ -180,6 +189,26 @@ describe("BulkActionsDropdown: bulk Check out", () => {
     });
 
     expect(item(/^check out$/i)).toBeEnabled();
+  });
+
+  it("disables Check out and Check in when a select-all stands for more bookings than the cap", () => {
+    setup({
+      roles: [OrganizationRoles.ADMIN],
+      // Only the sentinel, so neither status rule is in play: the cap alone
+      // disables both items.
+      bookings: [
+        { id: ALL_SELECTED_KEY, status: undefined as unknown as BookingStatus },
+      ],
+      totalItems: MAX_BULK_CHECK_IN_OUT_BOOKINGS + 1,
+    });
+
+    expect(item(/^check out$/i)).toHaveAttribute("aria-disabled", "true");
+    expect(item(/^check in$/i)).toHaveAttribute("aria-disabled", "true");
+    expect(
+      screen.getAllByText(
+        new RegExp(`at most ${MAX_BULK_CHECK_IN_OUT_BOOKINGS} bookings at once`)
+      ).length
+    ).toBeGreaterThan(0);
   });
 
   it("disables Check out with the status reason when a draft is in the selection", () => {

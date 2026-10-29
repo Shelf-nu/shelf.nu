@@ -6,8 +6,9 @@
  * Those services are mocked here: what this suite pins is the batch rule
  * around them (status refusal, ownership refusal, the check-out-only refusals
  * for unassigned units and from-location questions, the explicit-mode guard),
- * the arguments each booking is handed (dates kept, web quick provenance), the
- * asset notes, and how a mid-batch failure is reported.
+ * the size cap, the arguments each booking is handed (dates kept, web quick
+ * provenance), that the batch writes no asset notes of its own (the services
+ * write them), and how a mid-batch failure is reported.
  *
  * @see {@link file://./bulk-check-in-out.server.ts}
  */
@@ -25,6 +26,7 @@ import {
   listBookingNames,
 } from "./bulk-check-in-out.server";
 import { getCheckoutSourceQuestions } from "./checkout-source-location.server";
+import { MAX_BULK_CHECK_IN_OUT_BOOKINGS } from "./constants";
 import {
   assertSelectAllWithinOwnership,
   checkinBooking,
@@ -34,13 +36,11 @@ import {
 
 // @vitest-environment node
 
-// why: the selection query and the "which assets are out" read are the two
-// database reads this module makes itself; everything else goes through the
-// mocked services below.
+// why: the selection query is the one database read this module makes
+// itself; everything else goes through the mocked services below.
 vi.mock("~/database/db.server", () => ({
   db: {
     booking: { findMany: vi.fn() },
-    asset: { findMany: vi.fn().mockResolvedValue([]) },
   },
 }));
 
@@ -64,19 +64,10 @@ vi.mock("./checkout-source-location.server", () => ({
   getCheckoutSourceQuestions: vi.fn().mockResolvedValue([]),
 }));
 
-// why: the notes are asserted on as calls, not written.
+// why: asserted never called. The one-click services write the asset notes,
+// so a note from the batch itself would be a second copy on every asset.
 vi.mock("~/modules/note/service.server", () => ({
   createNotes: vi.fn(),
-}));
-
-// why: the actor's name feeds the note text only.
-vi.mock("~/modules/user/service.server", () => ({
-  getUserByID: vi.fn().mockResolvedValue({
-    id: "user-1",
-    firstName: "Jane",
-    lastName: "Doe",
-    displayName: null,
-  }),
 }));
 
 const ORG = "org-1";
@@ -91,7 +82,6 @@ const NO_EXPLICIT_SCAN = {
 };
 
 const findManyMock = vi.mocked(db.booking.findMany);
-const assetFindManyMock = vi.mocked(db.asset.findMany);
 const settingsMock = vi.mocked(getBookingSettingsForOrganization);
 const checkoutMock = vi.mocked(checkoutBooking);
 const checkinMock = vi.mocked(checkinBooking);
@@ -142,7 +132,6 @@ beforeEach(() => {
   vi.clearAllMocks();
   settingsMock.mockResolvedValue(NO_EXPLICIT_SCAN as never);
   questionsMock.mockResolvedValue([]);
-  assetFindManyMock.mockResolvedValue([]);
   vi.mocked(getBulkBookingsWhereInput).mockResolvedValue({});
 });
 
@@ -159,7 +148,7 @@ describe("listBookingNames", () => {
 });
 
 describe("bulkCheckoutBookings", () => {
-  it("checks every RESERVED booking out in order, keeping the start date, and writes the asset note", async () => {
+  it("checks every RESERVED booking out in order, keeping the start date, and writes no note of its own", async () => {
     findManyMock.mockResolvedValue([
       selected("b1", BookingStatus.RESERVED),
       selected("b2", BookingStatus.RESERVED),
@@ -183,19 +172,34 @@ describe("bulkCheckoutBookings", () => {
         intentChoice: "without-adjusted-date",
         from: new Date("2026-08-01T09:00:00Z"),
         to: new Date("2026-08-05T17:00:00Z"),
+        // An admin sees every booking, so a refusal may name other members'.
+        seesAllBookings: true,
         provenance: { surface: "web", method: "quick" },
       })
     );
-    // One note per booking that has assets; b2 has none.
-    expect(notesMock).toHaveBeenCalledTimes(1);
-    expect(notesMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        assetIds: ["a1", "a2"],
-        organizationId: ORG,
-        type: "UPDATE",
-        content: expect.stringContaining("checked out asset with"),
-      })
+    expect(notesMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses a selection over the cap before checking anything out", async () => {
+    findManyMock.mockResolvedValue(
+      Array.from({ length: MAX_BULK_CHECK_IN_OUT_BOOKINGS + 1 }, (_, i) =>
+        selected(`b${i}`, BookingStatus.RESERVED)
+      ) as never
     );
+
+    await expect(
+      bulkCheckoutBookings({
+        ...args([ALL_SELECTED_KEY]),
+        list: { kind: "index" },
+      })
+    ).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringContaining(
+        `at most ${MAX_BULK_CHECK_IN_OUT_BOOKINGS} bookings at once`
+      ),
+    });
+    expect(questionsMock).not.toHaveBeenCalled();
+    expect(checkoutMock).not.toHaveBeenCalled();
   });
 
   it("refuses the whole batch, naming the bookings, when one is not RESERVED", async () => {
@@ -323,14 +327,11 @@ describe("bulkCheckoutBookings", () => {
 });
 
 describe("bulkCheckinBookings", () => {
-  it("checks every ONGOING or OVERDUE booking in, keeping the end date, with a note for the assets that were out", async () => {
+  it("checks every ONGOING or OVERDUE booking in, keeping the end date, and writes no note of its own", async () => {
     findManyMock.mockResolvedValue([
       selected("b1", BookingStatus.ONGOING),
       selected("b2", BookingStatus.OVERDUE),
     ] as never);
-    assetFindManyMock
-      .mockResolvedValueOnce([{ id: "a1" }] as never)
-      .mockResolvedValueOnce([] as never);
     checkinMock
       .mockResolvedValueOnce(processed("b1", ["a1"]))
       .mockResolvedValueOnce(processed("b2", ["a9"]));
@@ -350,14 +351,23 @@ describe("bulkCheckinBookings", () => {
         provenance: { surface: "web", method: "quick" },
       })
     );
-    // b2's asset was never checked out, so only b1 gets a note.
-    expect(notesMock).toHaveBeenCalledTimes(1);
-    expect(notesMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        assetIds: ["a1"],
-        content: expect.stringContaining("checked in asset with"),
-      })
+    expect(notesMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses a selection over the cap before checking anything in", async () => {
+    findManyMock.mockResolvedValue(
+      Array.from({ length: MAX_BULK_CHECK_IN_OUT_BOOKINGS + 1 }, (_, i) =>
+        selected(`b${i}`, BookingStatus.ONGOING)
+      ) as never
     );
+
+    await expect(
+      bulkCheckinBookings({
+        ...args([ALL_SELECTED_KEY]),
+        list: { kind: "index" },
+      })
+    ).rejects.toMatchObject({ status: 400 });
+    expect(checkinMock).not.toHaveBeenCalled();
   });
 
   it("refuses the whole batch, naming the bookings, when one is not in progress", async () => {

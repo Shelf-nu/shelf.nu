@@ -35,6 +35,8 @@ vitest.mock("~/database/db.server", () => ({
     booking: {
       findMany: vitest.fn().mockResolvedValue([]),
     },
+    // A field reference, compared by identity in the captured `where`.
+    bookingAsset: { fields: { quantity: "BookingAsset.quantity" } },
   },
 }));
 
@@ -248,12 +250,12 @@ describe("getBookingIdsWithUnavailableAssets — scoping", () => {
 });
 
 /**
- * The row's "Check out remaining" button is offered only while a slice is
- * still in the Booked bucket. The rule is a Prisma `where`, so the test reads
- * the argument the module hands the client.
+ * The row's "Check out remaining" button is offered only while a slice still
+ * has units to send out. The rule is a Prisma `where`, so the test reads the
+ * argument the module hands the client.
  */
 describe("getBookingIdsWithItemsToCheckOut", () => {
-  it("asks for live bookings with a slice that has no checkedOutAt stamp", async () => {
+  it("asks for underway bookings with a slice not yet fully checked out", async () => {
     findManyMock.mockResolvedValue([{ id: "booking-1" }]);
 
     const flagged = await getBookingIdsWithItemsToCheckOut({
@@ -268,8 +270,12 @@ describe("getBookingIdsWithItemsToCheckOut", () => {
     expect(where).toMatchObject({
       id: { in: ["booking-1", "booking-2"] },
       organizationId: ORG_ID,
-      status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
-      bookingAssets: { some: { checkedOutAt: null } },
+      status: { in: ["ONGOING", "OVERDUE"] },
+      // A partly-out quantity-tracked slice still counts: its checkedOutAt is
+      // set, but checkedOutQuantity is below the booked quantity.
+      bookingAssets: {
+        some: { checkedOutQuantity: { lt: "BookingAsset.quantity" } },
+      },
     });
   });
 
@@ -304,7 +310,7 @@ describe("decorateBookingsForList", () => {
     findManyMock.mockImplementation(
       ({ where }: { where: { bookingAssets: { some: unknown } } }) => {
         const asksForBooked =
-          "checkedOutAt" in (where.bookingAssets.some as object);
+          "checkedOutQuantity" in (where.bookingAssets.some as object);
         return Promise.resolve(
           (asksForBooked ? itemsToCheckOut : unavailable).map((id) => ({ id }))
         );

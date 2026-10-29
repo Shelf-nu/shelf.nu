@@ -40,6 +40,7 @@ import { useRoleAccess } from "~/hooks/use-role-access";
 import { useUserData } from "~/hooks/use-user-data";
 import type { CountableModelRequest } from "~/utils/booking-model-requests";
 import { countUnassignedModelUnits } from "~/utils/booking-model-requests";
+import { canWriteBooking } from "~/utils/bookings";
 import type { DataOrErrorResponse } from "~/utils/http.server";
 import {
   PermissionAction,
@@ -138,17 +139,11 @@ export function ListRowCheckInOut({ booking }: ListRowCheckInOutProps) {
    */
   const busy = useDisabled(fetcher);
 
-  /**
-   * Whether the viewer may write this booking: everyone who writes every
-   * booking, otherwise its creator or its custodian. The same rule the
-   * action's `validateBookingOwnership` guard applies (`canWriteBooking` in
-   * `~/utils/booking-authorization.server`), mirrored here because that module
-   * is server-only; the server still decides.
-   */
+  // The same rule the action's `validateBookingOwnership` guard applies; the
+  // server still decides.
   const canWriteThisBooking =
-    roleAccess.bookings.writeAll ||
-    (userId !== undefined &&
-      (booking.creatorId === userId || booking.custodianUserId === userId));
+    userId !== undefined &&
+    canWriteBooking({ booking, userId, access: roleAccess });
   if (!canWriteThisBooking) {
     return null;
   }

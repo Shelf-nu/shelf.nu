@@ -123,23 +123,26 @@ export async function getBookingIdsWithUnavailableAssets({
 }
 
 /**
- * Statuses where the row offers a check-out, so "items still to check out"
- * is worth asking. A draft has nothing out yet and a settled booking nothing
- * left to send, and neither row shows a check-out button.
+ * Statuses where the row offers "Check out remaining", the only reader of
+ * this flag. A RESERVED row offers a plain "Check out" instead, and a draft or
+ * settled booking offers neither.
  */
-const LIVE_BOOKING_STATUSES: BookingStatus[] = [
-  BookingStatus.RESERVED,
+const UNDERWAY_BOOKING_STATUSES: BookingStatus[] = [
   BookingStatus.ONGOING,
   BookingStatus.OVERDUE,
 ];
 
 /**
- * Returns the subset of `bookingIds` that still hold at least one slice in the
- * Booked bucket: a `BookingAsset` row with no `checkedOutAt` stamp.
+ * Returns the subset of `bookingIds` that still hold units to send out: a
+ * `BookingAsset` slice whose `checkedOutQuantity` is below its booked
+ * `quantity`.
  *
  * The row's "Check out remaining" button is offered on an ONGOING or OVERDUE
- * booking only while such a slice exists, the same rule the booking header
- * applies through its lifecycle progress. One bounded query per page.
+ * booking only while such a slice exists. It reads the slice counter rather
+ * than the `checkedOutAt` stamp because a quantity-tracked slice can be partly
+ * out: the stamp is set on the first units, while the server's "Check out
+ * remaining" still tops the slice off to its booked quantity. One bounded
+ * query per page.
  *
  * @param args.bookingIds - Booking ids on the current page
  * @param args.organizationId - Caller's organization, which scopes the query
@@ -167,8 +170,12 @@ export async function getBookingIdsWithItemsToCheckOut({
         // The ids come from an already org-scoped list query, but this helper
         // is exported and must be safe on its own terms.
         organizationId,
-        status: { in: LIVE_BOOKING_STATUSES },
-        bookingAssets: { some: { checkedOutAt: null } },
+        status: { in: UNDERWAY_BOOKING_STATUSES },
+        bookingAssets: {
+          some: {
+            checkedOutQuantity: { lt: db.bookingAsset.fields.quantity },
+          },
+        },
       },
       select: { id: true },
     });
@@ -220,8 +227,6 @@ function flagOrNone(
  *
  * Runs the lookups concurrently: they are independent, and serialising them
  * would put more round trips on the critical path of every bookings list.
- * Replaces the direct {@link decorateBookingsWithStockConflicts} call the
- * five loaders used to make.
  *
  * @param args.bookings - The loader's booking rows (each needs at least
  *   `{ id, status, from, to }`; extra fields are preserved)

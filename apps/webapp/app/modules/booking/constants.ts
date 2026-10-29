@@ -465,3 +465,13 @@ export const BOOKING_ASSET_SORTING_OPTIONS = {
 
 export type BookingAssetSortingOption =
   keyof typeof BOOKING_ASSET_SORTING_OPTIONS;
+
+/**
+ * Most bookings one bulk Check out or Check in from the bookings list takes.
+ *
+ * Each booking runs its own locked check-out or check-in, one after another,
+ * inside a single request, so the batch size bounds how long that request
+ * runs. The server refuses a larger selection before any write, and the
+ * Actions menu disables both items with the same reason.
+ */
+export const MAX_BULK_CHECK_IN_OUT_BOOKINGS = 50;

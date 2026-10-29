@@ -1,15 +1,17 @@
 import { BookingStatus } from "@prisma/client";
 import { useAtomValue } from "jotai";
-import { useNavigation } from "react-router";
+import { useLoaderData, useNavigation } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { useRoleAccess } from "~/hooks/use-role-access";
+import { MAX_BULK_CHECK_IN_OUT_BOOKINGS } from "~/modules/booking/constants";
 import { isBookingArchivable } from "~/modules/booking/helpers";
+import type { BookingsIndexLoaderData } from "~/routes/_layout+/bookings._index";
 import { isFormProcessing } from "~/utils/form";
-import { ALL_SELECTED_KEY } from "~/utils/list";
+import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
 import {
   PermissionAction,
   PermissionEntity,
@@ -97,6 +99,13 @@ function ConditionalDropdown() {
   const selectedRows = selectedBookings.filter(
     (b) => b.id !== ALL_SELECTED_KEY
   );
+  // A select-all stands for every matching booking, not just this page's rows.
+  const { totalItems } = useLoaderData<BookingsIndexLoaderData>();
+  const selectedCount = isSelectingAllItems(selectedBookings)
+    ? totalItems
+    : selectedBookings.length;
+  const overBulkCheckInOutCap = selectedCount > MAX_BULK_CHECK_IN_OUT_BOOKINGS;
+  const overCapReason = `You can select at most ${MAX_BULK_CHECK_IN_OUT_BOOKINGS} bookings at once. Narrow the selection and try again.`;
   const everyBookingReserved =
     selectedBookings.length > 0 &&
     selectedRows.every((b) => b.status === BookingStatus.RESERVED);
@@ -133,6 +142,8 @@ function ConditionalDropdown() {
     ? "This workspace requires explicit check-out for your role. Open each booking and scan or select its assets."
     : !everyBookingReserved
     ? "Some of the selected bookings are not reserved. You can only check out reserved bookings."
+    : overBulkCheckInOutCap
+    ? overCapReason
     : null;
   const checkinDisabledReason = !canCheckInBooking
     ? "You don't have permission to check in bookings."
@@ -140,6 +151,8 @@ function ConditionalDropdown() {
     ? "This workspace requires explicit check-in for your role. Open each booking and scan or select its assets."
     : !everyBookingInProgress
     ? "Some of the selected bookings are not in progress. You can only check in ongoing or overdue bookings."
+    : overBulkCheckInOutCap
+    ? overCapReason
     : null;
 
   const navigation = useNavigation();

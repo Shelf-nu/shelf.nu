@@ -8,15 +8,17 @@
  * 1. The selection is resolved the way every bulk booking action resolves it
  *    (`getBulkBookingsWhereInput`, both ownership asserts), so a restricted
  *    caller reaches only their own bookings.
- * 2. The whole batch is refused, naming the bookings, when any booking has the
- *    wrong status, still has reserved model units with no asset assigned
- *    (check-out only), or needs a "From location" choice the list cannot ask
- *    (check-out only). Nothing is changed.
+ * 2. The whole batch is refused when it holds more than
+ *    `MAX_BULK_CHECK_IN_OUT_BOOKINGS` bookings, or, naming the bookings, when
+ *    any booking has the wrong status, still has reserved model units with no
+ *    asset assigned (check-out only), or needs a "From location" choice the
+ *    list cannot ask (check-out only). Nothing is changed.
  * 3. Each booking then runs through the same `checkoutBooking` /
  *    `checkinBooking` the booking page's one-click buttons use, one at a time.
- *    Each call takes its own locked transaction and re-runs its own guards. A
- *    booking that fails stops the batch with its own error; the bookings
- *    before it stay checked out or in, and the error says how many.
+ *    Each call takes its own locked transaction, re-runs its own guards and
+ *    writes the asset notes, so this module writes none of its own. A booking
+ *    that fails stops the batch with its own error; the bookings before it
+ *    stay checked out or in, and the error says how many.
  *
  * Dates are kept: no early-date prompt exists in bulk, so every call passes
  * `without-adjusted-date`.
@@ -26,7 +28,7 @@
  * @see {@link file://./../../components/booking/bulk-checkin-dialog.tsx}
  * @see {@link file://./../../routes/_layout+/bookings.$bookingId.overview.tsx} the one-click twins
  */
-import { AssetStatus, BookingStatus } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
 import type { Booking, Organization, Prisma, User } from "@prisma/client";
 import type { BookingsList } from "~/components/booking/bookings-list-fields";
 import { CheckinIntentEnum } from "~/components/booking/checkin-dialog";
@@ -37,16 +39,14 @@ import {
   assertQuickCheckoutAllowed,
 } from "~/modules/booking-settings/explicit-checkout";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
-import { createNotes } from "~/modules/note/service.server";
-import { getUserByID } from "~/modules/user/service.server";
 import { countUnassignedModelUnits } from "~/utils/booking-model-requests";
 import type { ClientHint } from "~/utils/client-hints";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
-import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import type { RoleAccess } from "~/utils/permissions/role-access";
 import type { BookingMethodProvenance } from "./checkout-method";
 import { getCheckoutSourceQuestions } from "./checkout-source-location.server";
+import { MAX_BULK_CHECK_IN_OUT_BOOKINGS } from "./constants";
 import {
   assertSelectAllWithinOwnership,
   checkinBooking,
@@ -146,6 +146,20 @@ async function loadBulkSelection(
     userId,
     action,
   });
+
+  // Every booking runs in this one request, so the batch size bounds how long
+  // it takes. Refused before the first write, like every other batch rule.
+  if (bookings.length > MAX_BULK_CHECK_IN_OUT_BOOKINGS) {
+    throw new ShelfError({
+      cause: null,
+      title: "Nothing was changed",
+      message: `You can ${action} at most ${MAX_BULK_CHECK_IN_OUT_BOOKINGS} bookings at once, and ${bookings.length} are selected. Narrow the selection and try again. Nothing was changed.`,
+      additionalData: { organizationId, selectedCount: bookings.length },
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
 
   return bookings;
 }
@@ -263,33 +277,21 @@ async function processOneByOne(
   }
 }
 
-/** The actor's name fields, for the asset notes. */
-async function loadActor(userId: User["id"]) {
-  const user = await getUserByID(userId, {
-    select: {
-      id: true,
-      firstName: true,
-      lastName: true,
-      displayName: true,
-    } satisfies Prisma.UserSelect,
-  });
-  return wrapUserLinkForNote({ ...user, id: userId });
-}
-
 /**
  * Checks out a selection of RESERVED bookings in one request, keeping their
  * start dates.
  *
  * Refused as a whole, before any write, when the caller is held to the
- * explicit check-out flow, when any selected booking is not RESERVED, still
- * has unassigned reserved model units, or needs a "From location" choice (a
- * pool at two or more placements), which only the booking page can ask. Then
- * each booking goes through {@link checkoutBooking} in turn, with the same
- * asset note the booking page writes.
+ * explicit check-out flow, when the selection is over
+ * `MAX_BULK_CHECK_IN_OUT_BOOKINGS`, or when any selected booking is not
+ * RESERVED, still has unassigned reserved model units, or needs a "From
+ * location" choice (a pool at two or more placements), which only the booking
+ * page can ask. Then each booking goes through {@link checkoutBooking} in
+ * turn, which writes the same asset notes it writes for the booking page.
  *
  * @param args - See {@link BulkCheckInOutArgs}
  * @throws {ShelfError} 403 when the explicit flow is required or the selection reaches foreign bookings
- * @throws {ShelfError} 400 when a selected booking cannot be checked out from the list
+ * @throws {ShelfError} 400 when the selection is too large or a selected booking cannot be checked out from the list
  * @throws {ShelfError} A booking's own check-out error, naming it and how many were done
  */
 export async function bulkCheckoutBookings(
@@ -351,10 +353,8 @@ export async function bulkCheckoutBookings(
       });
     }
 
-    const actor = await loadActor(userId);
-
     await processOneByOne(bookings, "checked out", async (selected) => {
-      const booking = await checkoutBooking({
+      await checkoutBooking({
         id: selected.id,
         organizationId,
         hints,
@@ -363,24 +363,11 @@ export async function bulkCheckoutBookings(
         from: selected.from,
         to: selected.to,
         userId,
+        // A refusal names other members' conflicting bookings only to a
+        // caller who may see them, the same as on the booking page.
+        seesAllBookings: access.bookings.seeAll,
         provenance: QUICK_WEB_PROVENANCE,
       });
-
-      const assetIds = [
-        ...new Set(booking.bookingAssets.map((ba) => ba.assetId)),
-      ];
-      if (assetIds.length > 0) {
-        await createNotes({
-          content: `${actor} checked out asset with ${wrapLinkForNote(
-            `/bookings/${booking.id}`,
-            booking.name
-          )}.`,
-          type: "UPDATE",
-          userId,
-          assetIds,
-          organizationId,
-        });
-      }
     });
   } catch (cause) {
     // A refusal already says what happened, title included; only an unknown
@@ -400,13 +387,14 @@ export async function bulkCheckoutBookings(
  * keeping their end dates.
  *
  * Refused as a whole, before any write, when the caller is held to the
- * explicit check-in flow or when any selected booking is neither ONGOING nor
- * OVERDUE. Then each booking goes through {@link checkinBooking} in turn, with
- * the same asset note the booking page writes for the assets that were out.
+ * explicit check-in flow, when the selection is over
+ * `MAX_BULK_CHECK_IN_OUT_BOOKINGS`, or when any selected booking is neither
+ * ONGOING nor OVERDUE. Then each booking goes through {@link checkinBooking}
+ * in turn, which writes the asset notes for the slices that were out.
  *
  * @param args - See {@link BulkCheckInOutArgs}
  * @throws {ShelfError} 403 when the explicit flow is required or the selection reaches foreign bookings
- * @throws {ShelfError} 400 when a selected booking is not in progress
+ * @throws {ShelfError} 400 when the selection is too large or a selected booking is not in progress
  * @throws {ShelfError} A booking's own check-in error, naming it and how many were done
  */
 export async function bulkCheckinBookings(
@@ -436,24 +424,8 @@ export async function bulkCheckinBookings(
       });
     }
 
-    const actor = await loadActor(userId);
-
     await processOneByOne(bookings, "checked in", async (selected) => {
-      // Only assets that were out get a check-in note: a progressive
-      // check-out can leave never-checked-out assets on the booking.
-      const checkedOutAssetIds = (
-        await db.asset.findMany({
-          // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: check-in must cover every asset already out on the booking, archived ones included
-          where: {
-            bookingAssets: { some: { bookingId: selected.id } },
-            organizationId,
-            status: AssetStatus.CHECKED_OUT,
-          },
-          select: { id: true },
-        })
-      ).map((asset) => asset.id);
-
-      const booking = await checkinBooking({
+      await checkinBooking({
         id: selected.id,
         organizationId,
         hints,
@@ -462,19 +434,6 @@ export async function bulkCheckinBookings(
         userId,
         provenance: QUICK_WEB_PROVENANCE,
       });
-
-      if (checkedOutAssetIds.length > 0) {
-        await createNotes({
-          content: `${actor} checked in asset with ${wrapLinkForNote(
-            `/bookings/${booking.id}`,
-            booking.name
-          )}.`,
-          type: "UPDATE",
-          userId,
-          assetIds: checkedOutAssetIds,
-          organizationId,
-        });
-      }
     });
   } catch (cause) {
     // A refusal already says what happened, title included; only an unknown
