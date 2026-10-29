@@ -75,11 +75,11 @@ import {
   getLocationsWhereInput,
 } from "./utils.server";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
+import { getAssetListWhereForSelectAll } from "../asset/list-where.server";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 import { getPrimaryLocation } from "../asset/utils";
 import {
   applyArchivedFilter,
-  getAssetsWhereInput,
   getLocationUpdateNoteContent,
   getKitLocationUpdateNoteContent,
 } from "../asset/utils.server";
@@ -185,7 +185,18 @@ export async function getLocation(
     orderDirection?: "asc" | "desc";
     userOrganizations?: Pick<UserOrganization, "organizationId">[];
     request?: Request;
+    /**
+     * Extra relations to load on the location. Passing it asks for the
+     * location alone: neither the asset page nor the asset count is queried,
+     * and `assets` comes back empty with `totalAssetsWithinLocation` 0.
+     */
     include?: Prisma.LocationInclude;
+    /**
+     * Whether to load a page of the location's assets. `false` keeps the
+     * asset count without the page, for pages that show only the total.
+     * Defaults to `true`; ignored when `include` is passed.
+     */
+    withAssetsPage?: boolean;
     teamMemberIds?: string[] | null;
     /**
      * Which of the location's assets to list by archive state. Pages that
@@ -206,6 +217,7 @@ export async function getLocation(
     orderBy = "createdAt",
     orderDirection,
     include,
+    withAssetsPage = true,
     teamMemberIds,
     archivedFilter = "all",
   } = params;
@@ -308,13 +320,10 @@ export async function getLocation(
     } satisfies Prisma.LocationInclude["parent"];
 
     /**
-     * Assets at a location are queried via the `AssetLocation` pivot —
-     * there is no `Location.assets` relation. We run a separate
-     * `db.asset.findMany` filtered by
-     * `assetLocations: { some: { locationId: id } }` and synthesize the
-     * `assets` array onto the wrapper return below. Consumers that read
-     * `location.assets` from the old shape must read `assets` from the
-     * wrapper return value (e.g.
+     * Placement lives on the `AssetLocation` pivot; `Location` has no
+     * `assets` relation. The location's assets come from a separate
+     * `db.asset.findMany` scoped by `assetLocations` and are returned as
+     * `assets` beside `location` (see
      * `app/routes/_layout+/locations.$locationId.assets.tsx`).
      */
     const locationInclude: Prisma.LocationInclude = include
@@ -327,11 +336,6 @@ export async function getLocation(
       assetLocations: { some: { locationId: id } },
       ...assetsWhere,
     };
-
-    const assetsCountWhere: Prisma.AssetWhereInput = applyArchivedFilter(
-      { assetLocations: { some: { locationId: id } } },
-      archivedFilter
-    );
 
     const [location, totalAssetsWithinLocation, assets] = await Promise.all([
       /** Get the items */
@@ -348,19 +352,20 @@ export async function getLocation(
       }),
 
       /** Count them */
-      db.asset.count({
-        // Follows the archived view so the count matches the list it heads.
-        where: assetsCountWhere,
-      }),
+      include
+        ? Promise.resolve(0)
+        : db.asset.count({
+            // Same where as the list (archived view, search, custodians), so
+            // the count and the pager built on it describe exactly the listed
+            // rows.
+            where: assetsWhereForLocation,
+          }),
 
       /**
-       * Paginated assets placed at this location. Returned alongside
-       * the location so consumers can keep using the existing
-       * `{ location, assets, totalAssetsWithinLocation }` contract
-       * without depending on a `Location.assets` relation (which no
-       * longer exists — placement lives on the `AssetLocation` pivot).
+       * One page of the assets placed at this location, returned as
+       * `assets` in `{ location, assets, totalAssetsWithinLocation }`.
        */
-      include
+      include || !withAssetsPage
         ? Promise.resolve([] as Awaited<ReturnType<typeof db.asset.findMany>>)
         : db.asset.findMany({
             skip,
@@ -742,7 +747,9 @@ export async function getLocations(params: {
         skip,
         take,
         where,
-        orderBy: orderByClause,
+        // `id` breaks ties between rows with the same sort key, so a page
+        // boundary never moves between requests.
+        orderBy: [orderByClause, { id: "asc" }],
         include: LOCATION_LIST_INCLUDE,
       }),
 
@@ -2188,12 +2195,22 @@ export async function updateLocationAssets({
     const hasSelectedAll = assetIds.includes(ALL_SELECTED_KEY);
     if (hasSelectedAll) {
       const searchParams = getCurrentSearchParams(request);
-      const assetsWhere = getAssetsWhereInput({
+      /**
+       * Re-runs the picker list's own query, with the options its loader
+       * (`locations.$locationId.assets.manage-assets.tsx`) passes to
+       * `getPaginatedAndFilterableAssets`, so select-all adds exactly the
+       * assets the picker showed. That list refuses every custodian filter
+       * (`canSeeAllCustody: false` with no user), hence `[]`; it is not
+       * scoped to a role and shows active assets, ignoring low stock.
+       */
+      const assetsWhere = await getAssetListWhereForSelectAll({
         organizationId,
         currentSearchParams: searchParams.toString(),
-        // Location writes are ADMIN/OWNER-only, so the custodian filter
-        // here can never come from a restricted viewer.
-        allowedTeamMemberIds: "all",
+        allowedTeamMemberIds: [],
+        bookableScope: null,
+        locationIdsOverride: undefined,
+        honorArchivedView: false,
+        honorLowStockFilter: false,
       });
 
       const allAssets = await db.asset.findMany({

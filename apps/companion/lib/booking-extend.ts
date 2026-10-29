@@ -6,13 +6,14 @@
  * checks the two rules the sheet can judge before sending (the new end must be
  * after the current end, and in the future), and builds the request body.
  *
- * `newEndError` is a MIRROR of two server checks, cosmetic only: the
- * after-current-end check in `extendBooking`
- * (`apps/webapp/app/modules/booking/service.server.ts`) and the future-date
- * check in `ExtendBookingSchema`
- * (`apps/webapp/app/components/booking/forms/forms-schema.ts`). It spares a
- * round trip; the server enforces both along with working hours, the booking
- * buffer, the maximum length and clashes, none of which the phone can see.
+ * `newEndError` is cosmetic only. Its future-date rule mirrors the check in
+ * `ExtendBookingSchema`
+ * (`apps/webapp/app/components/booking/forms/forms-schema.ts`). Its
+ * after-current-end rule is the sheet's own: the server's `extendBooking`
+ * (`apps/webapp/app/modules/booking/service.server.ts`) also accepts an
+ * earlier end, which this sheet does not offer. The server enforces working
+ * hours, the booking buffer, the maximum length and clashes, none of which
+ * the phone can see.
  * Extraction target: a pure `packages/*` booking module (none yet).
  *
  * This runs under Node's test runner too, so it must not import React Native,

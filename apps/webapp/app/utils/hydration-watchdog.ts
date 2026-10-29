@@ -26,7 +26,9 @@
  *
  * Sentry cannot see these failures: it is initialised by the bundle that did
  * not load. The script therefore keeps a report in `sessionStorage`, and the
- * next page that does hydrate sends it ({@link markHydrated}).
+ * next page that does hydrate sends it ({@link markHydrated}). A load whose
+ * automatic reload worked at once is sent as an info log, since the user only
+ * saw a reload; anything that showed the recovery screen is a warning issue.
  *
  * @see {@link file://./browser-support.ts} - the same inline gate pattern for unsupported browsers
  * @see {@link file://./../root.tsx} - renders the screen and calls markHydrated
@@ -277,17 +279,52 @@ export function consumeHydrationFailureReport(): HydrationFailureReport | null {
 }
 
 /**
+ * Whether a report describes a load the automatic reload fixed on its own: a
+ * failed load, one automatic reload, and that reload hydrated. The user saw a
+ * reload and never the recovery screen.
+ *
+ * @param report - The report the failed load left behind
+ * @returns `true` for a recovered reload; `false` when the recovery screen was
+ *   shown (the reload failed too, no reload was allowed, or the page timed out)
+ */
+export function isRecoveredReload(report: HydrationFailureReport): boolean {
+  return (
+    report.reason === "load-error" &&
+    report.reloadedAt !== null &&
+    report.failures === 1
+  );
+}
+
+/**
  * Stands the watchdog down and reports any earlier failed load to Sentry.
  * Call once, after hydration commits.
  *
  * A report present here means the page did hydrate in the end: after the
- * automatic reload, after a manual one, or late, past the timeout.
+ * automatic reload, after a manual one, or late, past the timeout. A
+ * recovered reload ({@link isRecoveredReload}) goes to Sentry Logs, which keep
+ * its rate visible without raising an issue for each flaky download; every
+ * other report is a warning issue, one per reason.
  */
 export function markHydrated(): void {
   window[WATCHDOG_GLOBAL]?.done();
 
   const report = consumeHydrationFailureReport();
   if (!report) {
+    return;
+  }
+
+  // Time from navigation start to hydration on this successful load.
+  const hydratedAfterMs = Math.round(performance.now());
+
+  if (isRecoveredReload(report)) {
+    Sentry.logger.info("App bundle reloaded after a failed load", {
+      label: "Hydration",
+      reason: report.reason,
+      path: report.path,
+      failures: report.failures,
+      hydratedAfterMs,
+      ...(report.source ? { source: report.source } : {}),
+    });
     return;
   }
 
@@ -299,10 +336,6 @@ export function markHydrated(): void {
       hydration_failure: report.reason,
       hydration_auto_reloaded: report.reloadedAt !== null ? "yes" : "no",
     },
-    extra: {
-      ...report,
-      // Time from navigation start to hydration on this successful load.
-      hydratedAfterMs: Math.round(performance.now()),
-    },
+    extra: { ...report, hydratedAfterMs },
   });
 }

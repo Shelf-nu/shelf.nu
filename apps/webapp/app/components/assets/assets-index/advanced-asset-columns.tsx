@@ -8,6 +8,7 @@ import {
   PopoverPortal,
   PopoverContent,
 } from "@radix-ui/react-popover";
+import { RepeatIcon } from "lucide-react";
 import { Link, useLoaderData } from "react-router";
 import { StockStatusBadge } from "~/components/assets/stock-status-badge";
 import { EventCardContent } from "~/components/calendar/event-card";
@@ -37,6 +38,7 @@ import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useDateFormatter } from "~/hooks/use-date-formatter";
+import type { ListContextLinkState } from "~/hooks/use-list-context";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import type {
   AdvancedIndexAsset,
@@ -44,7 +46,9 @@ import type {
 } from "~/modules/asset/types";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import type { ColumnLabelKey } from "~/modules/asset-index-settings/helpers";
+import { describeRecurrence } from "~/modules/asset-reminder/recurrence";
 import { formatCustodyList } from "~/modules/custody/utils";
+import { LIST_DETAIL_PATH } from "~/modules/list-navigation/list-context";
 import { type AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { formatAssetValueWithBreakdown } from "~/utils/asset-value";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
@@ -80,9 +84,12 @@ import { CategoryBadge } from "../category-badge";
 export function AdvancedIndexColumn({
   column,
   item,
+  linkState,
 }: {
   column: ColumnLabelKey;
   item: AdvancedIndexAsset;
+  /** History state for the name link, so the asset page can step through this list. */
+  linkState?: ListContextLinkState;
 }) {
   const { locale, currentOrganization, lastAuditDateAccess } =
     useLoaderData<AssetIndexLoaderData>();
@@ -188,7 +195,8 @@ export function AdvancedIndexColumn({
               <div className="min-w-0 flex-1 truncate">
                 <div className="flex items-center gap-1.5">
                   <Link
-                    to={item.id}
+                    to={LIST_DETAIL_PATH.asset(item.id)}
+                    state={linkState}
                     className="truncate font-medium underline hover:text-gray-600"
                     title={item.title}
                   >
@@ -1101,18 +1109,31 @@ function UpcomingReminderColumn({
     return <Td>No upcoming reminder</Td>;
   }
 
+  const recurrenceLabel = describeRecurrence(upcomingReminder);
+
   return (
     <Td>
       <Tooltip>
         <TooltipTrigger asChild>
           <Button variant="link-gray" to={`/assets/${assetId}/reminders`}>
-            <DateS date={upcomingReminder.alertDateTime} includeTime />
+            <span className="flex items-center gap-1">
+              <DateS date={upcomingReminder.alertDateTime} includeTime />
+              {recurrenceLabel ? (
+                <RepeatIcon
+                  className="size-3 text-gray-400"
+                  aria-label="Recurring reminder"
+                />
+              ) : null}
+            </span>
           </Button>
         </TooltipTrigger>
 
         <TooltipContent className="max-w-[400px]">
           <p className="mb-1 font-bold">{upcomingReminder.name}</p>
           <p>{upcomingReminder.message.substring(0, 1000)}</p>
+          {recurrenceLabel ? (
+            <p className="mt-1 text-gray-500">Repeats: {recurrenceLabel}</p>
+          ) : null}
         </TooltipContent>
       </Tooltip>
     </Td>

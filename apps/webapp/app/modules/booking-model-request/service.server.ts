@@ -25,32 +25,44 @@
  *
  *   available = total − inCustody − reservedConcrete − reservedViaRequest
  *
- * - `total`              — count of INDIVIDUAL assets with this model in the org
- * - `inCustody`          — sum of `Custody.quantity` on those assets
- * - `reservedConcrete`   — sum of `BookingAsset.quantity` for concrete assets
- *                          of this model, across OTHER bookings whose window
- *                          overlaps this one
- * - `reservedViaRequest` — sum of `BookingModelRequest.quantity` for OTHER
- *                          bookings whose window overlaps this one
+ * - `total`              : count of INDIVIDUAL assets with this model in the org
+ * - `inCustody`          : sum of `Custody.quantity` on those assets
+ * - `reservedConcrete`   : distinct units of this model OTHER overlapping
+ *                          bookings hold by name at the peak instant, less
+ *                          the units already counted in custody
+ * - `reservedViaRequest` : units OTHER overlapping bookings are still owed by
+ *                          model at the peak instant
+ *
+ * Both reservation terms are measured at the instant inside the window where
+ * they peak ({@link measureModelPoolPeak}), never summed across the window.
  *
  * @see {@link file://./../../../../../packages/database/prisma/schema.prisma} — BookingModelRequest model
  * @see {@link file://./../booking/service.server.ts} — downstream booking service
  * @see {@link file://./../../routes/api+/bookings.$bookingId.model-requests.ts} — HTTP surface
  */
 
-import type { Asset, BookingModelRequest, Prisma } from "@prisma/client";
-import { AssetType, BookingStatus } from "@prisma/client";
+import type { Asset, BookingModelRequest } from "@prisma/client";
+import { AssetType, BookingStatus, Prisma } from "@prisma/client";
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
 import type { ModelReservationShortfall } from "~/modules/asset/archive-shortfall";
 import { canEditModelReservations } from "~/utils/booking-model-requests";
+import type { ClientHint } from "~/utils/client-hints";
+import { getDateTimeFormatFromHints } from "~/utils/client-hints";
+import type { RawFormatPrefs } from "~/utils/date-format";
+import { formatDate } from "~/utils/date-format";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
-import { recordEvent } from "../activity-event/service.server";
-import type { ActorSnapshot } from "../activity-event/types";
+import { recordEvent, recordEvents } from "../activity-event/service.server";
+import type {
+  ActivityEventInput,
+  ActorSnapshot,
+} from "../activity-event/types";
 import { createSystemBookingNote } from "../booking-note/service.server";
 import { getUserByID } from "../user/service.server";
 
@@ -216,50 +228,287 @@ type RawQueryClient = {
 };
 
 /**
- * The exact reads {@link getAssetModelAvailability} issues. Structural rather
+ * Custody rows reach the model only through `Asset`, and Prisma cannot group
+ * by a relation field, so they are read as rows and summed per model in code.
+ * `assetId` names the unit in custody, so the same unit named on another
+ * booking is not deducted a second time.
+ */
+type CustodyOnModelRow = {
+  assetId: string;
+  quantity: number;
+  asset: { assetModelId: string | null };
+};
+
+/** The select behind {@link CustodyOnModelRow}. */
+type CustodyOnModelSelect = {
+  assetId: true;
+  quantity: true;
+  asset: { select: { assetModelId: true } };
+};
+
+/**
+ * One OTHER active booking that touches the window, with what it holds of the
+ * measured models: the units it names and the reservations it is still owed.
+ * The pool is measured at the instant demand peaks, and that needs each
+ * claim's own dates, which a sum per model cannot carry.
+ */
+type PoolBookingRow = {
+  id: string;
+  name: string;
+  from: Date | null;
+  to: Date | null;
+  bookingAssets: Array<{
+    assetId: string;
+    asset: { assetModelId: string | null };
+  }>;
+  modelRequests: Array<{
+    assetModelId: string;
+    quantity: number;
+    fulfilledQuantity: number;
+  }>;
+};
+
+/** The select behind {@link PoolBookingRow}. */
+type PoolBookingSelect = {
+  id: true;
+  name: true;
+  from: true;
+  to: true;
+  bookingAssets: {
+    where: Prisma.BookingAssetWhereInput;
+    select: { assetId: true; asset: { select: { assetModelId: true } } };
+  };
+  modelRequests: {
+    where: Prisma.BookingModelRequestWhereInput;
+    select: { assetModelId: true; quantity: true; fulfilledQuantity: true };
+  };
+};
+
+/**
+ * The exact reads {@link getAssetModelAvailabilities} issues. Structural rather
  * than Prisma's own client type so an interactive transaction client
  * satisfies it without casting.
  */
 export type AssetModelAvailabilityClient = {
   asset: {
-    count: (args: { where: Prisma.AssetWhereInput }) => Promise<number>;
+    groupBy: (args: {
+      by: ["assetModelId"];
+      where: Prisma.AssetWhereInput;
+      _count: { _all: true };
+    }) => Promise<
+      Array<{ assetModelId: string | null; _count: { _all: number } }>
+    >;
   };
   custody: {
-    aggregate: (args: {
+    findMany: (args: {
       where: Prisma.CustodyWhereInput;
-      _sum: { quantity: true };
-    }) => Promise<{ _sum: { quantity: number | null } }>;
+      select: CustodyOnModelSelect;
+    }) => Promise<CustodyOnModelRow[]>;
   };
-  bookingAsset: {
-    aggregate: (args: {
-      where: Prisma.BookingAssetWhereInput;
-      _sum: { quantity: true };
-    }) => Promise<{ _sum: { quantity: number | null } }>;
+  booking: {
+    findMany: (args: {
+      where: Prisma.BookingWhereInput;
+      select: PoolBookingSelect;
+    }) => Promise<PoolBookingRow[]>;
   };
-  bookingModelRequest: {
-    aggregate: (args: {
-      where: Prisma.BookingModelRequestWhereInput;
-      _sum: { quantity: true; fulfilledQuantity: true };
-    }) => Promise<{
-      _sum: { quantity: number | null; fulfilledQuantity: number | null };
-    }>;
-  };
+};
+
+/** Where inside the window a model's pool is tightest, and who holds it there. */
+export type AssetModelPoolPeak = {
+  /**
+   * The instant at which demand on the pool peaks. `null` when the window is
+   * missing (every claim is then counted as concurrent) or nothing claims the
+   * pool at all.
+   */
+  at: Date | null;
+  /**
+   * Other bookings still owed unnamed units of the model at that instant, so
+   * an operator can see which reservation to assign a specific unit to.
+   */
+  requestedBy: Array<{ id: string; name: string; outstanding: number }>;
 };
 
 export type AssetModelAvailability = {
   total: number;
   inCustody: number;
-  /** Sum of concrete `BookingAsset.quantity` rows competing for this pool. */
+  /**
+   * Distinct units other bookings hold by name at the peak instant. A unit
+   * that moves from one booking to the next is one unit, not one per booking.
+   */
   reservedConcrete: number;
-  /** Sum of `BookingModelRequest.quantity` rows competing for this pool. */
+  /** Units other bookings are still owed by model at the peak instant. */
   reservedViaRequest: number;
-  /** Total reserved (concrete + via request). */
+  /** Total reserved at the peak (concrete + via request). */
   reserved: number;
   available: number;
+  peak: AssetModelPoolPeak;
 };
 
 /**
- * Serializes reservations competing for one `AssetModel`'s pool.
+ * One other booking's claim on a model's pool, as {@link measureModelPoolPeak}
+ * sees it.
+ */
+export type ModelPoolClaim = {
+  bookingId: string;
+  bookingName: string;
+  /** The booking's own dates; `null` means "the whole window". */
+  from: Date | null;
+  to: Date | null;
+  /** Distinct units of the model the booking holds by name. */
+  named: ReadonlySet<string>;
+  /** Units of the booking's model request still unassigned. */
+  outstanding: number;
+};
+
+/**
+ * Measures a model pool's demand at the instant inside `window` where it
+ * peaks. Never add the claims up: bookings run for months and move the same
+ * units from one job to the next, so the claims overlapping a window
+ * routinely total more units than the model has while no two of them run at
+ * the same time. A pool is full only when it is full at some instant. The
+ * quantity-tracked pool follows the same rule (`peakConcurrent` in
+ * `@shelf/quantity-control`); this one also keeps the peak instant and the
+ * bookings active at it, so a refusal can name them.
+ *
+ * Demand only changes when a claim starts, so the instants worth measuring
+ * are the window's start and every claim's start inside it. A claim is active
+ * on `[start, end)`: one that ends exactly when another begins never overlaps
+ * it, the same tie-break `peakConcurrent` applies. The earliest instant wins a
+ * tie, so the date in a refusal is the first day the operator has to free.
+ *
+ * One sorted sweep over the claims' starts and ends: a running count of
+ * outstanding units, and a per-unit count of the active claims naming each
+ * unit, so a unit named by two concurrent claims counts once. At one instant
+ * ends are applied before starts, which is what makes the interval
+ * end-exclusive. Cost is O(E log E) for E start and end events plus the named
+ * units they carry, whatever the length of the window.
+ *
+ * Without a window there is nothing to sweep: every claim counts as concurrent,
+ * the conservative reading for a draft without dates.
+ *
+ * Pure, and exported for its own tests.
+ */
+export function measureModelPoolPeak(
+  claims: ModelPoolClaim[],
+  window: { from?: Date | null; to?: Date | null }
+): {
+  named: number;
+  requested: number;
+  at: Date | null;
+  requestedBy: AssetModelPoolPeak["requestedBy"];
+} {
+  const requestedBy = (active: ModelPoolClaim[]) =>
+    active
+      .filter((claim) => claim.outstanding > 0)
+      .map((claim) => ({
+        id: claim.bookingId,
+        name: claim.bookingName,
+        outstanding: claim.outstanding,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  const demandOf = (active: ModelPoolClaim[]) => {
+    const named = new Set<string>();
+    let requested = 0;
+    for (const claim of active) {
+      for (const assetId of claim.named) named.add(assetId);
+      requested += claim.outstanding;
+    }
+    return { named: named.size, requested };
+  };
+
+  if (claims.length === 0) {
+    return { named: 0, requested: 0, at: null, requestedBy: [] };
+  }
+
+  if (!window.from || !window.to) {
+    return { ...demandOf(claims), at: null, requestedBy: requestedBy(claims) };
+  }
+
+  const windowFrom = window.from.getTime();
+  const windowTo = window.to.getTime();
+  // A window that is a single instant has no half-open interior; the claims
+  // that reach that instant are the ones active on it, so no claim ends.
+  const degenerate = windowTo <= windowFrom;
+  const bounded = claims
+    .map((claim) => ({
+      claim,
+      start: Math.max(claim.from?.getTime() ?? windowFrom, windowFrom),
+      end: degenerate
+        ? Infinity
+        : Math.min(claim.to?.getTime() ?? windowTo, windowTo),
+    }))
+    // A claim whose clamped interval is empty is never active.
+    .filter(({ start, end }) => start < end);
+  const activeAt = (t: number) =>
+    bounded
+      .filter(({ start, end }) => start <= t && t < end)
+      .map(({ claim }) => claim);
+
+  const instants = [
+    ...new Set([
+      windowFrom,
+      ...bounded
+        .map(({ start }) => start)
+        .filter((start) => degenerate || start < windowTo),
+    ]),
+  ].sort((a, b) => a - b);
+
+  // Ends sort before starts at the same time: `[start, end)`.
+  type SweepEvent = { time: number; isStart: boolean; claim: ModelPoolClaim };
+  const events: SweepEvent[] = [];
+  for (const { claim, start, end } of bounded) {
+    events.push({ time: start, isStart: true, claim });
+    if (end !== Infinity) events.push({ time: end, isStart: false, claim });
+  }
+  events.sort(
+    (a, b) => a.time - b.time || Number(a.isStart) - Number(b.isStart)
+  );
+
+  const holders = new Map<string, number>();
+  let distinctNamed = 0;
+  let requested = 0;
+  let next = 0;
+  let best: { at: number; demand: number } | null = null;
+  for (const t of instants) {
+    while (next < events.length && events[next].time <= t) {
+      const { isStart, claim } = events[next++];
+      requested += isStart ? claim.outstanding : -claim.outstanding;
+      for (const assetId of claim.named) {
+        const count = (holders.get(assetId) ?? 0) + (isStart ? 1 : -1);
+        if (isStart && count === 1) distinctNamed += 1;
+        if (!isStart && count === 0) distinctNamed -= 1;
+        if (count === 0) holders.delete(assetId);
+        else holders.set(assetId, count);
+      }
+    }
+    const demand = distinctNamed + requested;
+    if (best === null || demand > best.demand) best = { at: t, demand };
+  }
+  if (best === null || best.demand === 0) {
+    return { named: 0, requested: 0, at: null, requestedBy: [] };
+  }
+  const active = activeAt(best.at);
+  return {
+    ...demandOf(active),
+    at: new Date(best.at),
+    requestedBy: requestedBy(active),
+  };
+}
+
+/** The refusal for a model id the caller's workspace does not hold. */
+function assetModelNotFound(): ShelfError {
+  return new ShelfError({
+    cause: null,
+    label,
+    status: 404,
+    message: "Asset model not found in current workspace.",
+    shouldBeCaptured: false,
+  });
+}
+
+/**
+ * Serializes reservations competing for several `AssetModel` pools, in one
+ * statement.
  *
  * Availability is a read-then-decide: count what is free, then write a row
  * claiming some of it. Under READ COMMITTED a plain `SELECT` inside a
@@ -277,8 +526,46 @@ export type AssetModelAvailability = {
  * reservation held still needs {@link lockModelRequestRow}.
  *
  * Scoped by `organizationId` as well as `id`, so a caller supplying another
- * workspace's model id takes no lock at all rather than contending on a row
- * it cannot see — the same rule as `lockAssetForQuantityUpdate`.
+ * workspace's model id takes no lock on it rather than contending on a row it
+ * cannot see, the same rule as `lockAssetForQuantityUpdate`.
+ *
+ * Rows are locked in plain code-unit id order, the order every writer of these
+ * rows uses, so two transactions contending for the same models cannot
+ * deadlock. `FOR UPDATE` locks rows as the sorted result is produced, and
+ * `COLLATE "C"` makes the database's order byte order, which is what
+ * JavaScript's `sort()` gives for these ASCII ids whatever collation the
+ * database was created with. Same shape as `lockAssetsForQuantityUpdate`.
+ *
+ * @param tx - Prisma interactive transaction client
+ * @param assetModelIds - Models whose pools are being claimed; duplicates are
+ *   ignored, and an empty list issues no query
+ * @param organizationId - The caller's authenticated organization id
+ * @throws {ShelfError} 404 if any model is not in the caller's workspace
+ */
+export async function lockAssetModelsForReservation(
+  tx: RawQueryClient,
+  assetModelIds: string[],
+  organizationId: string
+): Promise<void> {
+  const ids = [...new Set(assetModelIds)].sort();
+  if (ids.length === 0) return;
+
+  // Column names are literal: `AssetModel` declares no `@map`.
+  // @see {@link file://./../../../../../.claude/rules/raw-sql-respects-prisma-map.md}
+  const rows = await tx.$queryRaw<{ id: string }[]>`
+    SELECT id FROM "AssetModel"
+    WHERE id IN (${Prisma.join(ids)}) AND "organizationId" = ${organizationId}
+    ORDER BY id COLLATE "C"
+    FOR UPDATE
+  `;
+
+  if (!rows || rows.length < ids.length) throw assetModelNotFound();
+}
+
+/**
+ * {@link lockAssetModelsForReservation} for a single model, for callers that
+ * claim one pool at a time. Takes the same row lock under the same workspace
+ * scope; a single row needs no ordering.
  *
  * @param tx - Prisma interactive transaction client
  * @param assetModelId - Model whose pool is being claimed
@@ -294,15 +581,7 @@ async function lockAssetModelForReservation(
     SELECT id FROM "AssetModel" WHERE id = ${assetModelId} AND "organizationId" = ${organizationId} FOR UPDATE
   `;
 
-  if (!rows || rows.length === 0) {
-    throw new ShelfError({
-      cause: null,
-      label,
-      status: 404,
-      message: "Asset model not found in current workspace.",
-      shouldBeCaptured: false,
-    });
-  }
+  if (!rows || rows.length === 0) throw assetModelNotFound();
 }
 
 /**
@@ -352,117 +631,429 @@ async function lockModelRequestRow(
   `;
 }
 
+/** Sums each row's `quantity` into the model of the unit it sits on. */
+function sumQuantityByModel(rows: CustodyOnModelRow[]): Map<string, number> {
+  const byModel = new Map<string, number>();
+  for (const row of rows) {
+    const assetModelId = row.asset.assetModelId;
+    if (!assetModelId) continue;
+    byModel.set(assetModelId, (byModel.get(assetModelId) ?? 0) + row.quantity);
+  }
+  return byModel;
+}
+
+/** Arguments for {@link getAssetModelAvailabilities}. */
+type GetAssetModelAvailabilitiesArgs = Omit<
+  GetAssetModelAvailabilityArgs,
+  "assetModelId"
+> & {
+  /** Models to measure. Duplicates are ignored. */
+  assetModelIds: string[];
+};
+
 /**
- * Compute availability for an `AssetModel` over a booking window.
+ * Compute availability for several `AssetModel`s over one booking window.
  *
- * Safe to call from any loader/action path. Does not mutate. Excludes
- * the supplied `bookingId` from reservation sums.
+ * Three Prisma reads, whatever the number of models: an interactive
+ * transaction runs its statements one after another on a single connection,
+ * so a per-model read inside one costs a round trip per model. The statement
+ * count is fixed but is more than three: the custody read and the booking read
+ * carry nested relation selects, and without the `relationJoins` preview
+ * feature Prisma resolves each nested relation with a follow-up query (the
+ * booking's `bookingAssets`, their `asset`, its `modelRequests`, and the
+ * custody rows' `asset`). Every model asked for gets an entry, with zeros for
+ * a model that has no rows.
+ *
+ * `reservedConcrete` and `reservedViaRequest` are what OTHER bookings take
+ * from the pool at the instant inside the window where that is largest
+ * ({@link measureModelPoolPeak}), not the sum of every booking that touches
+ * the window. Custody is not dated, so it is deducted in full, and a unit in
+ * custody is left out of the units other bookings hold by name.
+ *
+ * Safe to call from any loader/action path. Does not mutate. Excludes the
+ * supplied `bookingId` from reservation sums.
+ *
+ * @returns One {@link AssetModelAvailability} per distinct id asked for
+ * @throws {ShelfError} When any of the reads fails
  */
-export async function getAssetModelAvailability({
-  assetModelId,
+export async function getAssetModelAvailabilities({
+  assetModelIds,
   organizationId,
   bookingId,
   from,
   to,
   db: dbClient,
-}: GetAssetModelAvailabilityArgs): Promise<AssetModelAvailability> {
+}: GetAssetModelAvailabilitiesArgs): Promise<
+  Map<string, AssetModelAvailability>
+> {
+  const ids = [...new Set(assetModelIds)];
+  const availabilities = new Map<string, AssetModelAvailability>();
+  if (ids.length === 0) return availabilities;
+
   const client = dbClient ?? db;
 
   try {
     const dateOverlap = bookingWindowOverlap(from, to);
 
-    const [total, custodyAgg, bookingAssetAgg, modelRequestAgg] =
-      await Promise.all([
-        // Total INDIVIDUAL assets of this model in the org. QUANTITY_TRACKED
-        // assets aren't part of the model-request flow (they have their own
-        // quantity booking path from Phase 3b).
-        // Archived assets are out of service and can't be booked (issue #382),
-        // so they are not part of the pool. The custody and booking sums below
-        // read the same asset set, so the subtraction stays coherent.
-        client.asset.count({
-          where: {
-            organizationId,
-            assetModelId,
-            type: AssetType.INDIVIDUAL,
-            archivedAt: null,
-          },
-        }),
-        // Units currently held by team members / users.
-        client.custody.aggregate({
-          where: {
-            asset: {
-              organizationId,
-              assetModelId,
-              type: AssetType.INDIVIDUAL,
-              archivedAt: null,
-            },
-          },
-          _sum: { quantity: true },
-        }),
-        // Concrete BookingAsset rows for assets of this model, in OTHER
-        // active-status bookings whose window overlaps.
-        client.bookingAsset.aggregate({
-          where: {
-            asset: {
-              organizationId,
-              assetModelId,
-              type: AssetType.INDIVIDUAL,
-              archivedAt: null,
-            },
-            bookingId: { not: bookingId },
-            booking: {
-              status: { in: [...ACTIVE_BOOKING_STATUSES] },
-              ...dateOverlap,
-            },
-          },
-          _sum: { quantity: true },
-        }),
-        // Other bookings' model-level requests for this same model.
-        // We only count units that are STILL OUTSTANDING (fulfilledAt
-        // IS NULL); fulfilled units have been materialised into
-        // concrete `BookingAsset` rows and are already counted in
-        // `reservedConcrete` above. Summing both `quantity` and
-        // `fulfilledQuantity` lets us compute outstanding-only as
-        // `SUM(quantity) - SUM(fulfilledQuantity)` in a single query.
-        client.bookingModelRequest.aggregate({
-          where: {
-            assetModelId,
-            bookingId: { not: bookingId },
-            fulfilledAt: null,
-            booking: {
-              organizationId,
-              status: { in: [...ACTIVE_BOOKING_STATUSES] },
-              ...dateOverlap,
-            },
-          },
-          _sum: { quantity: true, fulfilledQuantity: true },
-        }),
-      ]);
-
-    const inCustody = custodyAgg._sum.quantity ?? 0;
-    const reservedConcrete = bookingAssetAgg._sum.quantity ?? 0;
-    const reservedViaRequest =
-      (modelRequestAgg._sum.quantity ?? 0) -
-      (modelRequestAgg._sum.fulfilledQuantity ?? 0);
-    const reserved = reservedConcrete + reservedViaRequest;
-    const available = Math.max(0, total - inCustody - reserved);
-
-    return {
-      total,
-      inCustody,
-      reservedConcrete,
-      reservedViaRequest,
-      reserved,
-      available,
+    const unitOfTheseModels: Prisma.AssetWhereInput = {
+      organizationId,
+      assetModelId: { in: ids },
+      type: AssetType.INDIVIDUAL,
+      archivedAt: null,
     };
+
+    const [totalRows, custodyRows, otherBookings] = await Promise.all([
+      // INDIVIDUAL assets of these models in the org. QUANTITY_TRACKED
+      // assets aren't part of the model-request flow (they have their own
+      // quantity booking path).
+      // Archived assets are out of service and can't be booked (issue #382),
+      // so they are not part of the pool. The custody and booking reads below
+      // read the same asset set, so the subtraction stays coherent.
+      client.asset.groupBy({
+        by: ["assetModelId"],
+        where: {
+          organizationId,
+          assetModelId: { in: ids },
+          type: AssetType.INDIVIDUAL,
+          archivedAt: null,
+        },
+        _count: { _all: true },
+      }),
+      // Units currently held by team members / users.
+      client.custody.findMany({
+        where: { asset: unitOfTheseModels },
+        select: {
+          assetId: true,
+          quantity: true,
+          asset: { select: { assetModelId: true } },
+        },
+      }),
+      // The OTHER active bookings whose window overlaps and that hold units of
+      // these models, by name or by reservation, each with those rows. One
+      // read whatever the number of models or bookings. Only units STILL
+      // OUTSTANDING on a reservation count (`quantity - fulfilledQuantity`):
+      // fulfilled units have been materialised into `BookingAsset` rows and
+      // arrive as named units.
+      client.booking.findMany({
+        where: {
+          organizationId,
+          id: { not: bookingId },
+          status: { in: [...ACTIVE_BOOKING_STATUSES] },
+          ...dateOverlap,
+          AND: [
+            {
+              OR: [
+                { bookingAssets: { some: { asset: unitOfTheseModels } } },
+                {
+                  modelRequests: {
+                    some: { assetModelId: { in: ids }, fulfilledAt: null },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        select: {
+          id: true,
+          name: true,
+          from: true,
+          to: true,
+          bookingAssets: {
+            where: { asset: unitOfTheseModels },
+            select: {
+              assetId: true,
+              asset: { select: { assetModelId: true } },
+            },
+          },
+          modelRequests: {
+            where: { assetModelId: { in: ids }, fulfilledAt: null },
+            select: {
+              assetModelId: true,
+              quantity: true,
+              fulfilledQuantity: true,
+            },
+          },
+        },
+      }),
+    ]);
+
+    const totalByModel = new Map<string, number>();
+    for (const row of totalRows) {
+      if (row.assetModelId) totalByModel.set(row.assetModelId, row._count._all);
+    }
+    const inCustodyByModel = sumQuantityByModel(custodyRows);
+    // Custody is deducted in full above, so a unit in custody that another
+    // booking also names must not be charged again as a named unit.
+    const unitsInCustody = new Set(custodyRows.map((row) => row.assetId));
+
+    // One claim per (model, booking): the units the booking names of the
+    // model (a unit holding both a standalone and a kit row counts once) plus
+    // what it is still owed of it.
+    type MutableClaim = Omit<ModelPoolClaim, "named"> & { named: Set<string> };
+    const claimsByModel = new Map<string, Map<string, MutableClaim>>();
+    const claimFor = (assetModelId: string, booking: PoolBookingRow) => {
+      let byBooking = claimsByModel.get(assetModelId);
+      if (!byBooking) {
+        byBooking = new Map();
+        claimsByModel.set(assetModelId, byBooking);
+      }
+      let claim = byBooking.get(booking.id);
+      if (!claim) {
+        claim = {
+          bookingId: booking.id,
+          bookingName: booking.name,
+          from: booking.from,
+          to: booking.to,
+          named: new Set<string>(),
+          outstanding: 0,
+        };
+        byBooking.set(booking.id, claim);
+      }
+      return claim;
+    };
+    for (const booking of otherBookings) {
+      for (const row of booking.bookingAssets) {
+        if (!row.asset.assetModelId || unitsInCustody.has(row.assetId)) {
+          continue;
+        }
+        claimFor(row.asset.assetModelId, booking).named.add(row.assetId);
+      }
+      for (const request of booking.modelRequests) {
+        const outstanding = Math.max(
+          0,
+          request.quantity - request.fulfilledQuantity
+        );
+        if (outstanding === 0) continue;
+        claimFor(request.assetModelId, booking).outstanding += outstanding;
+      }
+    }
+
+    for (const assetModelId of ids) {
+      const total = totalByModel.get(assetModelId) ?? 0;
+      const inCustody = inCustodyByModel.get(assetModelId) ?? 0;
+      const peak = measureModelPoolPeak(
+        [...(claimsByModel.get(assetModelId)?.values() ?? [])],
+        { from, to }
+      );
+      const reservedConcrete = peak.named;
+      const reservedViaRequest = peak.requested;
+      const reserved = reservedConcrete + reservedViaRequest;
+      availabilities.set(assetModelId, {
+        total,
+        inCustody,
+        reservedConcrete,
+        reservedViaRequest,
+        reserved,
+        available: Math.max(0, total - inCustody - reserved),
+        peak: { at: peak.at, requestedBy: peak.requestedBy },
+      });
+    }
+    return availabilities;
   } catch (cause) {
     throw new ShelfError({
       cause,
       label,
       message: "Failed to compute asset-model availability.",
-      additionalData: { assetModelId, bookingId, organizationId },
+      additionalData: { assetModelIds: ids, bookingId, organizationId },
     });
   }
+}
+
+/**
+ * Compute availability for one `AssetModel` over a booking window.
+ *
+ * {@link getAssetModelAvailabilities} for a single model, so there is one
+ * implementation of the pool math. Callers measuring several models should
+ * call the batch directly.
+ *
+ * Safe to call from any loader/action path. Does not mutate. Excludes
+ * the supplied `bookingId` from reservation sums.
+ *
+ * @throws {ShelfError} When any of the reads fails
+ */
+export async function getAssetModelAvailability({
+  assetModelId,
+  ...args
+}: GetAssetModelAvailabilityArgs): Promise<AssetModelAvailability> {
+  const availabilities = await getAssetModelAvailabilities({
+    ...args,
+    assetModelIds: [assetModelId],
+  });
+  // The batch returns an entry for every id it is asked about.
+  return availabilities.get(assetModelId)!;
+}
+
+/**
+ * The day a pool refusal points at, in the acting user's locale and time zone
+ * when the caller has them, UTC otherwise. A refusal is read by the person who
+ * has to free a unit, so it names the first day that needs freeing.
+ */
+function formatPoolDay(at: Date, hints?: ClientHint): string {
+  const options = { day: "numeric", month: "short", year: "numeric" } as const;
+  const utc = { locale: "en-US", timeZone: "UTC" };
+  try {
+    return getDateTimeFormatFromHints(hints ?? utc, options).format(at);
+  } catch {
+    // The hint cookie is not validated upstream; a time zone Intl rejects
+    // must not turn a refusal into a crash inside the caller's transaction.
+    return getDateTimeFormatFromHints(utc, options).format(at);
+  }
+}
+
+/** The `user` read {@link resolveUserFormatPrefsById} issues, structurally. */
+type UserFormatPrefsClient = {
+  user: {
+    findFirst: (args: {
+      where: { id: string };
+      select: {
+        dateFormat: true;
+        timeFormat: true;
+        weekStart: true;
+        timeZone: true;
+      };
+    }) => Promise<RawFormatPrefs | null>;
+  };
+};
+
+/**
+ * Builds the formatter for the days a refusal names, in the acting user's own
+ * date preferences when `userId` is given (date only, no time). Without a
+ * user, or when the preferences cannot be read or applied, it falls back to
+ * {@link formatPoolDay}: a refusal must never fail on how it prints a date.
+ *
+ * Call only on the refusal path, never before a guard knows it will throw: the
+ * preference read is one more statement inside the caller's transaction.
+ *
+ * @param args.userId - The acting user, whose preferences the day follows
+ * @param args.hints - The request's locale and time zone, for the fallback and
+ *   for preferences the user has not set
+ * @param args.tx - The caller's transaction client
+ * @returns A function formatting one instant as a day
+ */
+async function poolDayFormatter({
+  userId,
+  hints,
+  tx,
+}: {
+  userId?: string;
+  hints?: ClientHint;
+  tx: UserFormatPrefsClient;
+}): Promise<(at: Date) => string> {
+  const fallback = (at: Date) => formatPoolDay(at, hints);
+  if (!userId) return fallback;
+  try {
+    const prefs = await resolveUserFormatPrefsById(userId, hints ?? null, tx);
+    return (at: Date) => {
+      try {
+        return formatDate(at, prefs);
+      } catch {
+        return fallback(at);
+      }
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * Names the bookings that still hold a model by reservation, so the operator
+ * knows where a specific unit can be assigned to free the pool.
+ */
+function describeRequestedBy(
+  requestedBy: AssetModelPoolPeak["requestedBy"]
+): string {
+  const names = requestedBy.map((booking) => `"${booking.name}"`);
+  if (names.length === 0) return "";
+  if (names.length <= 3) {
+    return names.length === 1
+      ? names[0]
+      : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+  }
+  return `${names.slice(0, 2).join(", ")} and ${names.length - 2} more`;
+}
+
+/** `n` with "unit" or "units". */
+function units(n: number): string {
+  return `${n} ${n === 1 ? "unit" : "units"}`;
+}
+
+/**
+ * What a pool already owes at its peak instant, as one clause: custody first,
+ * then units other bookings hold by name, then units still promised by model.
+ *
+ * @param revealOtherBookings - Whether the reader may see other members'
+ *   bookings. Only then are the bookings owed units by model named; otherwise
+ *   the clause says only that they are other bookings.
+ */
+function describePoolDeductions(
+  availability: AssetModelAvailability,
+  revealOtherBookings: boolean
+): string {
+  const requestedBy = revealOtherBookings
+    ? describeRequestedBy(availability.peak.requestedBy)
+    : "";
+  return [
+    availability.inCustody > 0
+      ? `${units(availability.inCustody)} in custody`
+      : null,
+    availability.reservedConcrete > 0
+      ? `${units(availability.reservedConcrete)} on other bookings`
+      : null,
+    availability.reservedViaRequest > 0
+      ? `${units(availability.reservedViaRequest)} reserved by model ${
+          requestedBy ? `for ${requestedBy}` : "for other bookings"
+        }`
+      : null,
+  ]
+    .filter((part): part is string => part !== null)
+    .join(", ");
+}
+
+/**
+ * The second half of a refusal sentence, after "but": the day the pool runs
+ * out and what holds it then.
+ *
+ * `available` is clamped to zero while the deductions are not, so a pool that
+ * is claimed beyond its size (a unit archived or taken into custody after it
+ * was promised by model) cannot be written as "0 of 3 are free"
+ * followed by deductions that add up to more than 3. That case states the
+ * claim against the pool instead.
+ *
+ * @param availability - The pool, measured at its peak
+ * @param day - The formatted peak day, or `null` when the pool has no peak
+ *   instant (no window)
+ * @param revealOtherBookings - See {@link describePoolDeductions}
+ * @returns e.g. ` on May 1, 2026 only 0 of 3 are free: 1 unit in custody, ...`
+ */
+function describePoolAtPeak(
+  availability: AssetModelAvailability,
+  day: string | null,
+  revealOtherBookings: boolean
+): string {
+  const when = day ? ` on ${day}` : " for these dates";
+  const deductions = describePoolDeductions(availability, revealOtherBookings);
+  const claimed = availability.inCustody + availability.reserved;
+  if (claimed > availability.total) {
+    return `${when} none are free: ${units(claimed)} ${
+      claimed === 1 ? "is" : "are"
+    } claimed against a pool of ${availability.total} (${deductions})`;
+  }
+  return `${when} only ${availability.available} of ${availability.total} ${
+    availability.total === 1 ? "is" : "are"
+  } free${deductions ? `: ${deductions}` : ""}`;
+}
+
+/**
+ * The pool numbers a refusal may carry in its `additionalData`, which the
+ * HTTP layer serialises into the response body for any role. The bookings
+ * holding reservations at the peak are named in the message only for a reader
+ * allowed to see them (`revealOtherBookings`); their ids never leave the
+ * server, because a user who may only see their own bookings must not be able
+ * to enumerate other people's.
+ */
+function availabilityForErrorData(availability: AssetModelAvailability) {
+  const { peak, ...numbers } = availability;
+  return { ...numbers, peakAt: peak.at };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -474,12 +1065,14 @@ type ModelUnitCandidate = Pick<Asset, "id" | "title" | "assetModelId">;
 
 /**
  * The reads {@link assertModelUnitsNotReservedElsewhere} issues on top of the
- * availability reads. Structural, like {@link AssetModelAvailabilityClient},
- * so an interactive transaction client satisfies it without a cast.
+ * availability reads, including the acting user's date preferences a refusal
+ * reads. Structural, like {@link AssetModelAvailabilityClient}, so an
+ * interactive transaction client satisfies it without a cast.
  */
 export type ModelReservationGuardClient = RawQueryClient &
-  AssetModelAvailabilityClient & {
-    bookingModelRequest: AssetModelAvailabilityClient["bookingModelRequest"] & {
+  AssetModelAvailabilityClient &
+  UserFormatPrefsClient & {
+    bookingModelRequest: {
       findMany: (args: {
         where: Prisma.BookingModelRequestWhereInput;
         select: {
@@ -563,6 +1156,21 @@ type AssertModelUnitsNotReservedElsewhereArgs = {
    * write, and the counts only see that transaction's own rows through it.
    */
   tx: ModelReservationGuardClient;
+  /** Acting user's locale and time zone, for the day a refusal names. */
+  hints?: ClientHint;
+  /**
+   * The acting user. When given, a refusal names its day in that user's own
+   * date preferences, read only once the guard knows it will refuse. Without
+   * it the day follows `hints`, else UTC.
+   */
+  userId?: string;
+  /**
+   * Whether the acting user may see other members' bookings (callers pass
+   * `access.bookings.seeAll`). Only then does a refusal name the other
+   * bookings holding the model; otherwise it calls them "other bookings".
+   * Defaults to `false`.
+   */
+  revealOtherBookings?: boolean;
 };
 
 /** Groups asset ids by model, each asset counted once per model. */
@@ -776,6 +1384,9 @@ export async function assertModelUnitsNotReservedElsewhere({
   from,
   to,
   tx,
+  hints,
+  userId,
+  revealOtherBookings = false,
 }: AssertModelUnitsNotReservedElsewhereArgs): Promise<void> {
   if (!from || !to) return;
 
@@ -844,13 +1455,13 @@ export async function assertModelUnitsNotReservedElsewhere({
   }
   if (claims.length === 0) return;
 
-  // Sorted so two transactions contending for the same models take the locks
-  // in one global order and cannot deadlock. Every lock is taken before any
-  // pool is measured, matching the reservation guard.
+  // Every lock is taken in one statement, in the global id order
+  // `lockAssetModelsForReservation` imposes, before any pool is measured,
+  // matching the reservation guard.
   //
-  // Plain code-unit order, which is what every other writer of these rows
-  // uses. `localeCompare` would be a second ordering over one lock set, and
-  // two orderings are the cycle this sort exists to prevent.
+  // The claims are sorted in the same plain code-unit order so the refusal
+  // names models in a stable order. `localeCompare` would be a second ordering
+  // over one lock set.
   claims.sort((a, b) =>
     a.assetModelId < b.assetModelId
       ? -1
@@ -858,9 +1469,11 @@ export async function assertModelUnitsNotReservedElsewhere({
       ? 1
       : 0
   );
-  for (const claim of claims) {
-    await lockAssetModelForReservation(tx, claim.assetModelId, organizationId);
-  }
+  await lockAssetModelsForReservation(
+    tx,
+    claims.map((claim) => claim.assetModelId),
+    organizationId
+  );
 
   /**
    * Only a model another booking still owes unnamed units of can be
@@ -882,29 +1495,27 @@ export async function assertModelUnitsNotReservedElsewhere({
   );
   if (contestedClaims.length === 0) return;
 
+  // One batched read for every contested model, under the locks above.
+  const availabilities = await getAssetModelAvailabilities({
+    assetModelIds: contestedClaims.map((claim) => claim.assetModelId),
+    organizationId,
+    bookingId,
+    from,
+    to,
+    db: tx,
+  });
+
   const shortfalls: Array<
-    ModelClaim & Omit<AssetModelAvailability, "total" | "reserved">
+    ModelClaim & { availability: AssetModelAvailability }
   > = [];
   for (const claim of contestedClaims) {
-    const availability = await getAssetModelAvailability({
-      assetModelId: claim.assetModelId,
-      organizationId,
-      bookingId,
-      from,
-      to,
-      db: tx,
-    });
+    // The batch returns an entry for every id it is asked about.
+    const availability = availabilities.get(claim.assetModelId)!;
     if (
       claim.namedNotInCustody + claim.stillToAssign >
       availability.available
     ) {
-      shortfalls.push({
-        ...claim,
-        inCustody: availability.inCustody,
-        reservedConcrete: availability.reservedConcrete,
-        reservedViaRequest: availability.reservedViaRequest,
-        available: availability.available,
-      });
+      shortfalls.push({ ...claim, availability });
     }
   }
   if (shortfalls.length === 0) return;
@@ -917,55 +1528,50 @@ export async function assertModelUnitsNotReservedElsewhere({
     select: { id: true, name: true },
   });
   const nameById = new Map(models.map((m) => [m.id, m.name]));
+  const formatDay = await poolDayFormatter({ userId, hints, tx });
 
-  const units = (n: number) => `${n} ${n === 1 ? "unit" : "units"}`;
+  // One sentence per model, written for the person who has to free a unit:
+  // what this booking needs, the day the pool runs out, and what holds it
+  // then.
   const lines = shortfalls.map((s) => {
-    const ownRequest =
+    const { availability } = s;
+    const needs =
       s.stillToAssign > 0
-        ? ` and ${units(
+        ? `${units(s.named)} by name and ${units(
             s.stillToAssign
-          )} still to assign from this booking's own reservation`
-        : "";
-    // Custody and concrete rows on other bookings shrink the pool as well;
-    // name them when they do, so the numbers in the sentence add up.
-    const otherDeductions = [
-      s.inCustody > 0 ? `${units(s.inCustody)} in custody` : null,
-      s.reservedConcrete > 0
-        ? `${units(s.reservedConcrete)} booked by name on other bookings`
-        : null,
-    ].filter((part): part is string => part !== null);
-    const deductions =
-      otherDeductions.length > 0
-        ? ` ${otherDeductions.join(" and ")} also ${
-            otherDeductions.length === 1 ? "counts" : "count"
-          } against the pool.`
-        : "";
-    // A model is only measured once another booking is owed units of it, so
-    // the reservation is always the leading reason. Stated conditionally all
-    // the same: a sentence that can read "0 units are reserved" tells the
-    // operator the refusal is a bug even when it is not.
-    const reservation =
-      s.reservedViaRequest > 0
-        ? `but ${units(s.reservedViaRequest)} ${
-            s.reservedViaRequest === 1 ? "is" : "are"
-          } reserved by model on other bookings for these dates and only ${
-            s.available
-          } more can be booked`
-        : `but only ${s.available} more can be booked for these dates`;
-    return `"${nameById.get(s.assetModelId) ?? s.assetModelId}": ${units(
-      s.named
-    )} requested by name${ownRequest}, ${reservation}.${deductions}`;
+          )} still to assign from its own reservation`
+        : `${units(s.named)} by name`;
+    const day = availability.peak.at ? formatDay(availability.peak.at) : null;
+    return `"${
+      nameById.get(s.assetModelId) ?? s.assetModelId
+    }": this booking needs ${needs}, but${describePoolAtPeak(
+      availability,
+      day,
+      revealOtherBookings
+    )}.`;
   });
+  // The remedy points at the bookings by name only for a reader who can see
+  // them; anyone else is told what to free without being told whose it is.
+  const remedy = revealOtherBookings
+    ? "Change the dates, or free a unit of that model: assign a specific unit to the reservation named above, or remove a unit from one of those bookings."
+    : "Change the dates, or free a unit of that model: a specific unit assigned to a reservation on another booking, or a unit removed from another booking, makes room for this one.";
 
   throw new ShelfError({
     cause: null,
     label,
     status: 400,
     shouldBeCaptured: false,
-    message: `Some assets cannot be booked by name for these dates:\n${lines.join(
+    title: "Not enough units",
+    message: `Some assets cannot be booked for these dates:\n${lines.join(
       "\n"
-    )}\nRemove them, or change the dates.`,
-    additionalData: { bookingId, shortfalls },
+    )}\n${remedy}`,
+    additionalData: {
+      bookingId,
+      shortfalls: shortfalls.map(({ availability, ...claim }) => ({
+        ...claim,
+        availability: availabilityForErrorData(availability),
+      })),
+    },
   });
 }
 
@@ -974,13 +1580,13 @@ export async function assertModelUnitsNotReservedElsewhere({
 /* -------------------------------------------------------------------------- */
 
 /**
- * The reads {@link measureModelPoolFit} issues. Structural, like
+ * The reads {@link measureModelPoolFits} issues. Structural, like
  * {@link AssetModelAvailabilityClient}, so an interactive transaction client
  * satisfies it without a cast.
  */
 export type ModelPoolFitClient = Pick<
   ModelReservationGuardClient,
-  "asset" | "custody" | "bookingAsset" | "bookingModelRequest"
+  "asset" | "custody" | "booking" | "bookingModelRequest"
 >;
 
 /** What one model's free pool holds, and what one booking takes from it. */
@@ -1001,52 +1607,61 @@ export type ModelPoolFit = {
 };
 
 /**
- * Measures one booking's whole footprint on one model's pool.
+ * Measures one booking's whole footprint on several models' pools.
  *
- * {@link getAssetModelAvailability} excludes the booking, so BOTH halves of
+ * {@link getAssetModelAvailabilities} excludes the booking, so BOTH halves of
  * what it takes belong on the booking's side of the comparison: the units it
  * holds by name, and the units of its own reservation that stay unassigned. A
  * reservation and a named unit draw on the same physical pool, so measuring
  * either half alone lets a pair of writes that each pass still over-commit it.
  *
- * Callers take {@link lockAssetModelForReservation} on the model FIRST. This is
- * a read-then-decide, and under READ COMMITTED a plain `SELECT` takes no lock,
- * so two callers otherwise measure the same free pool and both commit.
+ * A fixed number of statements whatever the number of models: the pool reads
+ * of {@link getAssetModelAvailabilities} (three Prisma reads, plus the
+ * follow-up queries Prisma issues for their nested relations) and one
+ * {@link readOwnNamedUnits} (one more, plus one for its `custody` relation).
  *
- * Reports the numbers rather than refusing, because the two callers refuse in
+ * Callers take {@link lockAssetModelsForReservation} on the models FIRST. This
+ * is a read-then-decide, and under READ COMMITTED a plain `SELECT` takes no
+ * lock, so two callers otherwise measure the same free pool and both commit.
+ *
+ * Reports the numbers rather than refusing, because the callers refuse in
  * different registers: adding a reservation names the model and the quantity
  * asked for, a booking starting to claim the pool names every model that no
  * longer fits.
  *
- * @param args.outstanding - Units of the booking's reservation left unassigned
- *   once the caller's write lands. Already-fulfilled units are named units, so
- *   they belong to the other half and have to be netted out of this one.
+ * @param args.outstandingByModel - Per model, units of the booking's
+ *   reservation left unassigned once the caller's write lands. Already-fulfilled
+ *   units are named units, so they belong to the other half and have to be
+ *   netted out of this one. The keys are the models measured.
  * @param args.from - Start of the window being claimed. With either end
  *   missing there is nothing to overlap, so every active booking competes, per
- *   {@link getAssetModelAvailability}.
+ *   {@link getAssetModelAvailabilities}.
  * @param args.to - End of that window.
  * @param args.tx - The caller's interactive transaction. Required: the counts
  *   see the transaction's own rows, and take part in its locks, only through it.
+ * @returns One {@link ModelPoolFit} per key of `outstandingByModel`
  */
-export async function measureModelPoolFit({
+export async function measureModelPoolFits({
   bookingId,
-  assetModelId,
   organizationId,
   from,
   to,
-  outstanding,
+  outstandingByModel,
   tx,
 }: {
   bookingId: string;
-  assetModelId: string;
   organizationId: string;
   from: Date | null | undefined;
   to: Date | null | undefined;
-  outstanding: number;
+  outstandingByModel: Map<string, number>;
   tx: ModelPoolFitClient;
-}): Promise<ModelPoolFit> {
-  const availability = await getAssetModelAvailability({
-    assetModelId,
+}): Promise<Map<string, ModelPoolFit>> {
+  const fits = new Map<string, ModelPoolFit>();
+  const assetModelIds = [...outstandingByModel.keys()];
+  if (assetModelIds.length === 0) return fits;
+
+  const availabilities = await getAssetModelAvailabilities({
+    assetModelIds,
     organizationId,
     bookingId,
     from,
@@ -1056,19 +1671,56 @@ export async function measureModelPoolFit({
 
   const heldByModel = await readOwnNamedUnits({
     bookingId,
-    assetModelIds: [assetModelId],
+    assetModelIds,
     organizationId,
     tx,
   });
-  const held = heldByModel.get(assetModelId);
-  const namedNotInCustody = (held?.unitIds.size ?? 0) - (held?.inCustody ?? 0);
 
-  return {
-    availability,
-    namedNotInCustody,
-    outstanding,
-    fits: namedNotInCustody + outstanding <= availability.available,
-  };
+  for (const [assetModelId, outstanding] of outstandingByModel) {
+    // The batch returns an entry for every id it is asked about.
+    const availability = availabilities.get(assetModelId)!;
+    const held = heldByModel.get(assetModelId);
+    const namedNotInCustody =
+      (held?.unitIds.size ?? 0) - (held?.inCustody ?? 0);
+    fits.set(assetModelId, {
+      availability,
+      namedNotInCustody,
+      outstanding,
+      fits: namedNotInCustody + outstanding <= availability.available,
+    });
+  }
+  return fits;
+}
+
+/**
+ * Measures one booking's whole footprint on one model's pool.
+ *
+ * {@link measureModelPoolFits} for a single model; see it for what is measured
+ * and the lock a caller takes first.
+ *
+ * @param args.outstanding - Units of the booking's reservation left unassigned
+ *   once the caller's write lands, net of already-fulfilled units.
+ * @param args.tx - The caller's interactive transaction.
+ */
+export async function measureModelPoolFit({
+  assetModelId,
+  outstanding,
+  ...args
+}: {
+  bookingId: string;
+  assetModelId: string;
+  organizationId: string;
+  from: Date | null | undefined;
+  to: Date | null | undefined;
+  outstanding: number;
+  tx: ModelPoolFitClient;
+}): Promise<ModelPoolFit> {
+  const fits = await measureModelPoolFits({
+    ...args,
+    outstandingByModel: new Map([[assetModelId, outstanding]]),
+  });
+  // The batch returns an entry for every model it is asked about.
+  return fits.get(assetModelId)!;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1138,20 +1790,46 @@ export async function findModelReservationsShortAfterArchive({
     },
   });
 
-  const shortfalls: ModelReservationShortfall[] = [];
-  for (const request of requests) {
-    const outstanding = request.quantity - request.fulfilledQuantity;
-    if (outstanding <= 0) continue;
+  // One measurement per booking rather than per reservation: a booking has
+  // one window and at most one reservation per model, so its reservations
+  // share every input the batch needs.
+  const outstandingRequests = requests.filter(
+    (request) => request.quantity - request.fulfilledQuantity > 0
+  );
+  const requestsByBooking = new Map<string, typeof outstandingRequests>();
+  for (const request of outstandingRequests) {
+    const group = requestsByBooking.get(request.bookingId) ?? [];
+    group.push(request);
+    requestsByBooking.set(request.bookingId, group);
+  }
 
-    const fit = await measureModelPoolFit({
-      bookingId: request.bookingId,
-      assetModelId: request.assetModelId,
-      organizationId,
-      from: request.booking.from,
-      to: request.booking.to,
-      outstanding,
-      tx,
-    });
+  const fitsByBooking = new Map<string, Map<string, ModelPoolFit>>();
+  for (const [bookingId, group] of requestsByBooking) {
+    fitsByBooking.set(
+      bookingId,
+      await measureModelPoolFits({
+        bookingId,
+        organizationId,
+        from: group[0].booking.from,
+        to: group[0].booking.to,
+        outstandingByModel: new Map(
+          group.map((request) => [
+            request.assetModelId,
+            request.quantity - request.fulfilledQuantity,
+          ])
+        ),
+        tx,
+      })
+    );
+  }
+
+  // Reported in the order the reservations were read.
+  const shortfalls: ModelReservationShortfall[] = [];
+  for (const request of outstandingRequests) {
+    // Every outstanding reservation was measured above.
+    const fit = fitsByBooking
+      .get(request.bookingId)!
+      .get(request.assetModelId)!;
     if (fit.fits) continue;
 
     shortfalls.push({
@@ -1187,9 +1865,8 @@ export type BookingModelShortfall = {
  * so the booking page can warn its owner before check-out refuses it.
  *
  * Read-only and lock-free, for a page loader: the numbers are a warning, and
- * the reserve and check-out guards still measure under their own locks. The
- * reservations are measured concurrently, which is safe because the reads go
- * through the global client, not an interactive transaction.
+ * the reserve and check-out guards still measure under their own locks. Every
+ * reservation is measured in one batched pass through the global client.
  *
  * @param args.booking - The booking, with its dates and outstanding reservations
  * @param args.organizationId - The caller's workspace
@@ -1219,23 +1896,25 @@ export async function findModelRequestShortfallsForBooking({
     return outstanding > 0 ? [{ request, outstanding }] : [];
   });
 
-  const measured = await Promise.all(
-    outstandingRequests.map(async ({ request, outstanding }) => ({
-      request,
-      outstanding,
-      fit: await measureModelPoolFit({
-        bookingId: booking.id,
-        assetModelId: request.assetModelId,
-        organizationId,
-        from: booking.from,
-        to: booking.to,
+  // One batched measurement for every reservation: they share the booking's
+  // window, and a booking holds at most one reservation per model.
+  const fits = await measureModelPoolFits({
+    bookingId: booking.id,
+    organizationId,
+    from: booking.from,
+    to: booking.to,
+    outstandingByModel: new Map(
+      outstandingRequests.map(({ request, outstanding }) => [
+        request.assetModelId,
         outstanding,
-        tx: db,
-      }),
-    }))
-  );
+      ])
+    ),
+    tx: db,
+  });
 
-  return measured.flatMap(({ request, outstanding, fit }) => {
+  return outstandingRequests.flatMap(({ request, outstanding }) => {
+    // Every outstanding reservation was measured above.
+    const fit = fits.get(request.assetModelId)!;
     if (fit.fits) return [];
     const available = Math.max(
       0,
@@ -1263,9 +1942,10 @@ export async function findModelRequestShortfallsForBooking({
  * request rows first inverts that pair, and the two transactions deadlock
  * against each other with no booking lock between them to serialise the pair.
  *
- * Plain code-unit order, the comparator every writer of these rows uses, and
- * the same set {@link assertOutstandingModelRequestsFit} goes on to lock
- * downstream. Re-locking a row the transaction already holds costs nothing.
+ * One statement, in plain code-unit order (the order every writer of these
+ * rows uses, see {@link lockAssetModelsForReservation}), over the same set
+ * {@link assertOutstandingModelRequestsFit} goes on to lock downstream.
+ * Re-locking a row the transaction already holds costs nothing.
  *
  * @param tx - Transaction client, already holding the booking row.
  * @param args.bookingId - Booking whose outstanding reservations to lock.
@@ -1291,13 +1971,11 @@ export async function lockModelsForOutstandingRequests(
     select: { assetModelId: true, quantity: true, fulfilledQuantity: true },
   });
 
-  const orderedModelIds = [
-    ...new Set(requests.map((request) => request.assetModelId)),
-  ].sort();
-
-  for (const assetModelId of orderedModelIds) {
-    await lockAssetModelForReservation(tx, assetModelId, organizationId);
-  }
+  await lockAssetModelsForReservation(
+    tx,
+    requests.map((request) => request.assetModelId),
+    organizationId
+  );
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1345,7 +2023,7 @@ type OutstandingModelShortfall = ModelPoolFit & { assetModelId: string };
  *   Absent dates mean nothing to overlap, so there is nothing to measure.
  * @param args.to - The other end of that window.
  * @param args.tx - The transaction that flips the status. Required, for the
- *   reason {@link measureModelPoolFit} gives.
+ *   reason {@link measureModelPoolFits} gives.
  * @throws {ShelfError} 400 (`shouldBeCaptured: false`) naming every model whose
  *   outstanding units do not fit, and by how much, in one message.
  * @throws {ShelfError} 404 when a model is not in the caller's workspace.
@@ -1358,6 +2036,9 @@ export async function assertOutstandingModelRequestsFit({
   action,
   alsoLockAssetModelIds = [],
   tx,
+  hints,
+  userId,
+  revealOtherBookings = false,
 }: {
   bookingId: string;
   organizationId: string;
@@ -1366,6 +2047,21 @@ export async function assertOutstandingModelRequestsFit({
   action: string;
   alsoLockAssetModelIds?: string[];
   tx: ModelReservationGuardClient;
+  /** Acting user's locale and time zone, for the day a refusal names. */
+  hints?: ClientHint;
+  /**
+   * The acting user. When given, a refusal names its day in that user's own
+   * date preferences, read only once the guard knows it will refuse. Without
+   * it the day follows `hints`, else UTC.
+   */
+  userId?: string;
+  /**
+   * Whether the acting user may see other members' bookings (callers pass
+   * `access.bookings.seeAll`). Only then does a refusal name the other
+   * bookings holding the model; otherwise it calls them "other bookings".
+   * Defaults to `false`.
+   */
+  revealOtherBookings?: boolean;
 }): Promise<void> {
   if (!from || !to) return;
 
@@ -1395,27 +2091,28 @@ export async function assertOutstandingModelRequestsFit({
 
   const orderedModelIds = [...outstandingByModel.keys()].sort();
 
-  // Plain code-unit order, which is what every other writer of these rows
-  // uses. `localeCompare` would be a second ordering over one lock set, and
-  // two orderings are the cycle this sort exists to prevent.
-  const modelIdsToLock = [
-    ...new Set([...orderedModelIds, ...alsoLockAssetModelIds]),
-  ].sort();
-  for (const assetModelId of modelIdsToLock) {
-    await lockAssetModelForReservation(tx, assetModelId, organizationId);
-  }
+  // One statement locks the union, in the plain code-unit order every other
+  // writer of these rows uses, before any pool is measured.
+  await lockAssetModelsForReservation(
+    tx,
+    [...orderedModelIds, ...alsoLockAssetModelIds],
+    organizationId
+  );
+
+  // One batched measurement for every model, under the locks above.
+  const fits = await measureModelPoolFits({
+    bookingId,
+    organizationId,
+    from,
+    to,
+    outstandingByModel,
+    tx,
+  });
 
   const shortfalls: OutstandingModelShortfall[] = [];
   for (const assetModelId of orderedModelIds) {
-    const fit = await measureModelPoolFit({
-      bookingId,
-      assetModelId,
-      organizationId,
-      from,
-      to,
-      outstanding: outstandingByModel.get(assetModelId)!,
-      tx,
-    });
+    // Every model in `outstandingByModel` was measured above.
+    const fit = fits.get(assetModelId)!;
     if (!fit.fits) shortfalls.push({ assetModelId, ...fit });
   }
   if (shortfalls.length === 0) return;
@@ -1428,39 +2125,28 @@ export async function assertOutstandingModelRequestsFit({
     select: { id: true, name: true },
   });
   const nameById = new Map(models.map((model) => [model.id, model.name]));
+  const formatDay = await poolDayFormatter({ userId, hints, tx });
 
-  const units = (n: number) => `${n} ${n === 1 ? "unit" : "units"}`;
   const lines = shortfalls.map((shortfall) => {
-    const { available, inCustody, reservedConcrete, reservedViaRequest } =
-      shortfall.availability;
+    const { availability } = shortfall;
     const heldNote =
       shortfall.namedNotInCustody > 0
         ? ` This booking also holds ${units(
             shortfall.namedNotInCustody
           )} of it by name.`
         : "";
-    // Everything the pool already owes someone else, named so the numbers in
-    // the sentence add up for whoever has to act on it.
-    const deductions = [
-      inCustody > 0 ? `${units(inCustody)} in custody` : null,
-      reservedConcrete > 0
-        ? `${units(reservedConcrete)} booked by name on other bookings`
-        : null,
-      reservedViaRequest > 0
-        ? `${units(reservedViaRequest)} reserved by model on other bookings`
-        : null,
-    ].filter((part): part is string => part !== null);
-    const deductionNote =
-      deductions.length > 0
-        ? ` ${deductions.join(" and ")} ${
-            deductions.length === 1 ? "counts" : "count"
-          } against the pool for these dates.`
-        : "";
+    // Everything the pool already owes someone else at the instant it runs
+    // out, so whoever has to act on it can see where the units are.
+    const day = availability.peak.at ? formatDay(availability.peak.at) : null;
     return `"${
       nameById.get(shortfall.assetModelId) ?? shortfall.assetModelId
     }": ${units(
       shortfall.outstanding
-    )} still to assign, but only ${available} can be booked.${heldNote}${deductionNote}`;
+    )} still to assign, but${describePoolAtPeak(
+      availability,
+      day,
+      revealOtherBookings
+    )}.${heldNote}`;
   });
 
   throw new ShelfError({
@@ -1472,7 +2158,13 @@ export async function assertOutstandingModelRequestsFit({
     message: `Cannot ${action}. Some model reservations no longer fit:\n${lines.join(
       "\n"
     )}\nReduce them, or change the dates.`,
-    additionalData: { bookingId, shortfalls },
+    additionalData: {
+      bookingId,
+      shortfalls: shortfalls.map(({ availability, ...fit }) => ({
+        ...fit,
+        availability: availabilityForErrorData(availability),
+      })),
+    },
   });
 }
 
@@ -2354,6 +3046,188 @@ export async function upsertBookingModelRequests({
 }
 
 /* -------------------------------------------------------------------------- */
+/*                      reserveModelsUpToAvailability                         */
+/* -------------------------------------------------------------------------- */
+
+/** A model that {@link reserveModelsUpToAvailability} reserved less of than asked. */
+export type ReducedModelReservation = {
+  assetModelId: string;
+  assetModelName: string;
+  /** Units asked for. */
+  requested: number;
+  /** Units actually reserved, `0` when none could be. */
+  reserved: number;
+  /**
+   * The reservation could not be written (the write errored), as opposed to
+   * the pool being short. Absent for a real shortfall.
+   */
+  failed?: true;
+};
+
+/**
+ * Reserves units of several models on a booking, each capped at what its pool
+ * can still give the booking's dates, and reports the models that came out
+ * short instead of refusing.
+ *
+ * For writers that copy a plan rather than take a user's explicit ask, such as
+ * duplicating a booking: the copy is still worth having when a few models have
+ * fewer units free in the new window, so the shortfall is reported back to the
+ * user rather than failing the whole copy.
+ *
+ * Models are written in batches of {@link MAX_MODELS_PER_RESERVATION_BATCH},
+ * one transaction each, sorted by id like every other writer of these rows. A
+ * plan can name more models than one transaction may carry. Each batch measures
+ * its pools under the model locks and writes through
+ * {@link writeBookingModelRequestInTx}, so the cap and the write's own pool
+ * check agree. A batch that fails is logged and its models are reported as
+ * reserved `0` and `failed`; the batches already written stay.
+ *
+ * Expects a booking that holds no reservation for these models yet: each
+ * quantity is written as the absolute target.
+ *
+ * @param args.bookingId - The booking to reserve on, in `organizationId`
+ * @param args.organizationId - The caller's workspace. Models outside it are
+ *   skipped.
+ * @param args.userId - The acting user, recorded on the activity events
+ * @param args.requested - Units wanted per model; repeated models are summed and
+ *   entries below 1 are ignored
+ * @returns One entry per model reserved below what was asked, in model-id order
+ */
+export async function reserveModelsUpToAvailability({
+  bookingId,
+  organizationId,
+  userId,
+  requested,
+}: {
+  bookingId: string;
+  organizationId: string;
+  userId: string;
+  requested: BookingModelRequestAddition[];
+}): Promise<ReducedModelReservation[]> {
+  const wantedByModel = new Map<string, number>();
+  for (const { assetModelId, quantity } of requested) {
+    if (!Number.isInteger(quantity) || quantity < 1) continue;
+    wantedByModel.set(
+      assetModelId,
+      (wantedByModel.get(assetModelId) ?? 0) + quantity
+    );
+  }
+  if (wantedByModel.size === 0) return [];
+
+  // Names for the report, and the workspace scope: a model that is not in this
+  // workspace is left out here rather than failing the batch it lands in.
+  const models = await db.assetModel.findMany({
+    where: { id: { in: [...wantedByModel.keys()] }, organizationId },
+    select: { id: true, name: true },
+  });
+  const nameById = new Map(models.map((m) => [m.id, m.name]));
+  const orderedModelIds = [...nameById.keys()].sort();
+
+  const actor = await loadActorBestEffort(userId);
+  const reduced: ReducedModelReservation[] = [];
+
+  for (
+    let start = 0;
+    start < orderedModelIds.length;
+    start += MAX_MODELS_PER_RESERVATION_BATCH
+  ) {
+    const batchIds = orderedModelIds.slice(
+      start,
+      start + MAX_MODELS_PER_RESERVATION_BATCH
+    );
+    const reportFor = (assetModelId: string, reserved: number) => ({
+      assetModelId,
+      assetModelName: nameById.get(assetModelId)!,
+      requested: wantedByModel.get(assetModelId)!,
+      reserved,
+    });
+
+    try {
+      const batchReduced = await db.$transaction(
+        async (tx) => {
+          const booking = await tx.booking.findUnique({
+            where: { id: bookingId, organizationId },
+            select: { from: true, to: true },
+          });
+          if (!booking) {
+            throw new ShelfError({
+              cause: null,
+              label,
+              status: 404,
+              message: "Booking not found in current workspace.",
+              shouldBeCaptured: false,
+            });
+          }
+
+          // Pool first, then the row, the order every writer takes them in.
+          await lockAssetModelsForReservation(tx, batchIds, organizationId);
+          for (const assetModelId of batchIds) {
+            await lockModelRequestRow(tx, bookingId, assetModelId);
+          }
+
+          const fits = await measureModelPoolFits({
+            bookingId,
+            organizationId,
+            from: booking.from,
+            to: booking.to,
+            outstandingByModel: new Map(
+              batchIds.map((id) => [id, wantedByModel.get(id)!])
+            ),
+            tx,
+          });
+
+          const short: ReducedModelReservation[] = [];
+          for (const assetModelId of batchIds) {
+            const { availability, namedNotInCustody, outstanding } =
+              fits.get(assetModelId)!;
+            // What the pool can still give this booking once the units it
+            // holds by name are counted, the headroom the write core checks.
+            const headroom = Math.max(
+              0,
+              availability.available - namedNotInCustody
+            );
+            const reserved = Math.min(outstanding, headroom);
+            if (reserved > 0) {
+              await writeBookingModelRequestInTx(tx, {
+                bookingId,
+                assetModelId,
+                quantity: reserved,
+                organizationId,
+                userId,
+                actor,
+              });
+            }
+            if (reserved < outstanding) {
+              short.push(reportFor(assetModelId, reserved));
+            }
+          }
+          return short;
+        },
+        { timeout: RESERVATION_BATCH_TX_TIMEOUT_MS }
+      );
+      reduced.push(...batchReduced);
+    } catch (cause) {
+      Logger.error(
+        new ShelfError({
+          cause,
+          label,
+          message: "Failed to reserve a batch of models on a booking.",
+          additionalData: { bookingId, organizationId, batchIds },
+        })
+      );
+      reduced.push(
+        ...batchIds.map((id) => ({
+          ...reportFor(id, 0),
+          failed: true as const,
+        }))
+      );
+    }
+  }
+
+  return reduced;
+}
+
+/* -------------------------------------------------------------------------- */
 /*                         removeBookingModelRequest                          */
 /* -------------------------------------------------------------------------- */
 
@@ -2566,6 +3440,37 @@ type MaterializeArgs = {
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   tx: any;
+  /**
+   * Shared state for a caller assigning many assets in one transaction. With
+   * it, the actor and each model's reservation row are read once for the
+   * whole batch, and the note and events are collected for the caller to
+   * write in one statement each, instead of costing round trips per asset.
+   * Without it, everything is read and written here, as for a single asset.
+   */
+  batch?: MaterializeBatch;
+};
+
+/** A reservation row as the claim needs it: its id and its model's name. */
+type ReservationForClaim = { id: string; assetModel: { name: string } };
+
+/**
+ * Per-call state {@link fulfilModelRequestsForAssets} threads through
+ * {@link materializeModelRequestForAsset}. See `MaterializeArgs.batch`.
+ *
+ * The cached reservation row only supplies the row's id and its model's name,
+ * neither of which a claim changes. Every claim still reads the live
+ * `fulfilledQuantity` inside its own conditional `UPDATE`, so caching the row
+ * cannot let two units claim one slot.
+ */
+type MaterializeBatch = {
+  /** Loads the acting user at most once for the whole batch. */
+  loadActor: () => Promise<NoteActor | null>;
+  /** Reservation rows read so far, by model id; `null` means none exists. */
+  reservationByModelId: Map<string, ReservationForClaim | null>;
+  /** Note contents to write, in claim order. */
+  notes: string[];
+  /** Activity events to write, in claim order. */
+  events: ActivityEventInput[];
 };
 
 /**
@@ -2597,6 +3502,7 @@ export async function materializeModelRequestForAsset({
   organizationId,
   userId,
   tx,
+  batch,
 }: MaterializeArgs): Promise<
   | { matched: true; requestId: string; remaining: number; modelName: string }
   | { matched: false }
@@ -2626,15 +3532,20 @@ export async function materializeModelRequestForAsset({
       return { matched: false };
     }
 
-    const existing = await tx.bookingModelRequest.findUnique({
-      where: {
-        bookingId_assetModelId: {
-          bookingId,
-          assetModelId: asset.assetModelId,
-        },
-      },
-      include: { assetModel: { select: { name: true } } },
-    });
+    const cached = batch?.reservationByModelId.get(asset.assetModelId);
+    const existing: ReservationForClaim | null =
+      cached !== undefined
+        ? cached
+        : await tx.bookingModelRequest.findUnique({
+            where: {
+              bookingId_assetModelId: {
+                bookingId,
+                assetModelId: asset.assetModelId,
+              },
+            },
+            include: { assetModel: { select: { name: true } } },
+          });
+    batch?.reservationByModelId.set(asset.assetModelId, existing);
 
     if (!existing) {
       return { matched: false };
@@ -2719,8 +3630,13 @@ export async function materializeModelRequestForAsset({
         : null;
 
     // Activity note — IN the tx so the note rolls back with the
-    // materialization if anything later in the pipeline fails.
-    const actor = userId ? await loadActor(userId) : null;
+    // materialization if anything later in the pipeline fails. A batch writes
+    // it with the others once its loop ends, still inside the same tx.
+    const actor = batch
+      ? await batch.loadActor()
+      : userId
+      ? await loadActor(userId)
+      : null;
     const assetLink = wrapLinkForNote(`/assets/${asset.id}`, asset.title);
     const modelNameForNote = stripMarkdocDelimiters(existing.assetModel.name);
     // Same sentence either way; only the subject changes, so the feed reads
@@ -2728,13 +3644,17 @@ export async function materializeModelRequestForAsset({
     const content = actor?.link
       ? `${actor.link} assigned ${assetLink} (${modelNameForNote}) to this booking — ${remaining} × ${modelNameForNote} remaining.`
       : `${assetLink} (${modelNameForNote}) was assigned to this booking — ${remaining} × ${modelNameForNote} remaining.`;
-    await tx.bookingNote.create({
-      data: {
-        type: "UPDATE",
-        content,
-        booking: { connect: { id: bookingId } },
-      },
-    });
+    if (batch) {
+      batch.notes.push(content);
+    } else {
+      await tx.bookingNote.create({
+        data: {
+          type: "UPDATE",
+          content,
+          booking: { connect: { id: bookingId } },
+        },
+      });
+    }
 
     /**
      * One `BOOKING_MODEL_REQUEST_FULFILLED` per UNIT, carrying the concrete
@@ -2759,7 +3679,7 @@ export async function materializeModelRequestForAsset({
       bookingId,
     };
 
-    await recordEvent(
+    const events: ActivityEventInput[] = [
       {
         ...eventBase,
         action: "BOOKING_MODEL_REQUEST_FULFILLED",
@@ -2771,25 +3691,29 @@ export async function materializeModelRequestForAsset({
           remaining,
         },
       },
-      tx
-    );
+    ];
 
     // `fulfilledAt` flipping null → set is its own field change, and it gets
     // the same event here as it does when an operator closes a request out by
     // editing the quantity down — the field's history reads the same whichever
     // path caused it.
     if (completedNow) {
-      await recordEvent(
-        {
-          ...eventBase,
-          action: "BOOKING_MODEL_REQUEST_CHANGED",
-          field: "fulfilledAt",
-          fromValue: null,
-          toValue: completedNow.toISOString(),
-          meta: modelMeta,
-        },
-        tx
-      );
+      events.push({
+        ...eventBase,
+        action: "BOOKING_MODEL_REQUEST_CHANGED",
+        field: "fulfilledAt",
+        fromValue: null,
+        toValue: completedNow.toISOString(),
+        meta: modelMeta,
+      });
+    }
+
+    if (batch) {
+      batch.events.push(...events);
+    } else {
+      for (const event of events) {
+        await recordEvent(event, tx);
+      }
     }
 
     return {
@@ -2928,6 +3852,23 @@ export async function fulfilModelRequestsForAssets({
     alreadyClaimedRows.map((row) => row.assetId)
   );
 
+  /**
+   * One batch for the whole call, so the loop below spends only the claim
+   * itself per asset. The actor is read on the first claim (none for a call
+   * that matches nothing), each model's reservation row on its first asset,
+   * and every note and event is written in one statement after the loop.
+   */
+  let actorLoad: Promise<NoteActor | null> | undefined;
+  const batch: MaterializeBatch = {
+    loadActor: () => {
+      actorLoad ??= userId ? loadActor(userId) : Promise.resolve(null);
+      return actorLoad;
+    },
+    reservationByModelId: new Map(),
+    notes: [],
+    events: [],
+  };
+
   for (const asset of assets) {
     if (alreadyClaimedAssetIds.has(asset.id)) continue;
     // Sequential, not `Promise.all`: several assets of the SAME model compete
@@ -2941,12 +3882,31 @@ export async function fulfilModelRequestsForAssets({
       organizationId,
       userId,
       tx,
+      batch,
     });
 
     if (result.matched) {
       fulfilledRequestIdByAssetId.set(asset.id, result.requestId);
     }
   }
+
+  if (batch.notes.length > 0) {
+    // The booking feed orders notes by `createdAt`, so one shared default
+    // stamp would shuffle them. Each later claim gets a later millisecond,
+    // which keeps the feed in scan order, and the range ENDS at now: notes the
+    // caller writes after this batch (its "added assets" note) take the
+    // database default stamp, and must not sort below these.
+    const firstStamp = Date.now() - (batch.notes.length - 1);
+    await tx.bookingNote.createMany({
+      data: batch.notes.map((content, index) => ({
+        type: "UPDATE",
+        content,
+        bookingId,
+        createdAt: new Date(firstStamp + index),
+      })),
+    });
+  }
+  await recordEvents(batch.events, tx);
 
   return fulfilledRequestIdByAssetId;
 }
