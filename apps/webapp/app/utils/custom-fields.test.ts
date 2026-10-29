@@ -10,6 +10,7 @@ import {
   getDefinitionFromCsvHeader,
   isImportableCustomFieldDate,
   mergedSchema,
+  splitOverviewCustomFields,
   toCustomFieldZodSchema,
   type CustomFieldZodSchema,
 } from "./custom-fields";
@@ -194,6 +195,32 @@ describe("buildAssetOverviewCustomFields", () => {
     });
 
     expect(result).toEqual([]);
+  });
+
+  it("lists Link fields for every reader, set or not, read-only unless editable", () => {
+    const manual = { ...def("cf-manual", "Manual"), format: "LINK" as const };
+    const result = buildAssetOverviewCustomFields({
+      storedValues: [],
+      editableDefinitions: [],
+      listedDefinitions: [manual],
+    });
+
+    expect(result).toEqual([
+      { def: manual, storedValue: null, isEditable: false },
+    ]);
+  });
+
+  it("lets an editor edit a listed Link field", () => {
+    const manual = { ...def("cf-manual", "Manual"), format: "LINK" as const };
+    const result = buildAssetOverviewCustomFields({
+      storedValues: [],
+      editableDefinitions: [manual],
+      listedDefinitions: [manual],
+    });
+
+    expect(result).toEqual([
+      { def: manual, storedValue: null, isEditable: true },
+    ]);
   });
 
   it("sorts alphabetically without mutating the caller's arrays", () => {
@@ -501,5 +528,30 @@ describe("custom field CSV headers", () => {
     expect(
       getDefinitionFromCsvHeader(customFieldCsvHeader(plain))
     ).toMatchObject(plain);
+  });
+});
+
+describe("splitOverviewCustomFields", () => {
+  it("sends Link fields to Documents & links and everything else to the custom fields card, in order", () => {
+    const row = (name: string, format: "PLAIN" | "LINK") => ({
+      def: { format },
+      name,
+    });
+
+    const { linkRows, otherRows } = splitOverviewCustomFields([
+      row("Calibration certificate", "LINK"),
+      row("Lens mount", "PLAIN"),
+      row("Manual", "LINK"),
+      row("Serial number", "PLAIN"),
+    ]);
+
+    expect(linkRows.map((r) => r.name)).toEqual([
+      "Calibration certificate",
+      "Manual",
+    ]);
+    expect(otherRows.map((r) => r.name)).toEqual([
+      "Lens mount",
+      "Serial number",
+    ]);
   });
 });

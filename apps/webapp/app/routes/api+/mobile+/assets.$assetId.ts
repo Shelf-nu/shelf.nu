@@ -9,7 +9,7 @@
  * @see {@link file://./assets.ts} the list twin of this route
  * @see {@link file://./../../../modules/asset/service.server.ts} refreshExpiredAssetImages
  */
-import { AssetStatus } from "@prisma/client";
+import { AssetStatus, CustomFieldFormat } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { getQuantityData } from "~/components/assets/asset-status-badge/quantity-data";
@@ -44,6 +44,7 @@ import {
   resolveDisplayCode,
   serializeDisplayCode,
 } from "~/modules/barcode/display";
+import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { USER_NAME_SELECT } from "~/modules/user/fields";
 import {
   canSeeBooking,
@@ -275,6 +276,19 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       organizationId,
       ...ASSET_IMAGE_RESIGN_LIMITS,
     });
+
+    // The Link fields that apply to this asset, set or not, for the
+    // "Documents & links" section. Every reader gets them, as on the web
+    // overview: the section lists empty ones as "Not linked".
+    const linkFields = (
+      await getActiveCustomFields({
+        organizationId,
+        category: storedAsset.category?.id ?? null,
+        format: CustomFieldFormat.LINK,
+      })
+    )
+      .map(({ id, name, helpText }) => ({ id, name, helpText }))
+      .sort((a, b) => a.name.localeCompare(b.name));
 
     // The companion prints `custodian.name` as it arrives, in the custody
     // card and in every `custodyList` row. The stored `TeamMember.name` can
@@ -652,6 +666,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         // workspace without alternative barcodes must not receive barcode
         // rows, matching every other mobile barcode surface.
         barcodes: barcodesAllowed ? detailBarcodes : [],
+        // Additive: Link-format custom fields that apply to this asset,
+        // ordered by name, whether or not they have a value.
+        linkFields,
       },
     });
   } catch (cause) {

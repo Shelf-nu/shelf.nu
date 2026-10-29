@@ -115,6 +115,12 @@ vitest.mock("~/utils/subscription.server", () => ({
   canUseBarcodes: vitest.fn(() => true),
 }));
 
+// why: the Link field definitions come from Postgres; each case states which
+// fields the workspace has.
+vitest.mock("~/modules/custom-field/service.server", () => ({
+  getActiveCustomFields: vitest.fn().mockResolvedValue([]),
+}));
+
 // why: we need to control error formatting without running real error logic
 vitest.mock("~/utils/error", () => ({
   makeShelfError: vitest.fn((cause: any) => ({
@@ -138,7 +144,9 @@ import {
 import { db } from "~/database/db.server";
 import { getAssetQuantityRows } from "~/modules/asset/quantity-breakdown.server";
 import { getCustodySourceOptions } from "~/modules/asset/custody-source.server";
+import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { canUseBarcodes } from "~/utils/subscription.server";
+import { createCustomField } from "@factories";
 import { accessFor } from "@helpers/role-access";
 
 /**
@@ -1275,5 +1283,56 @@ describe("GET /api/mobile/assets/:assetId — display code", () => {
         }),
       })
     );
+  });
+});
+
+describe("Link fields on GET /api/mobile/assets/:assetId", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    requireMobileAuthMock.mockResolvedValue({
+      user: mockUser,
+      authUser: { id: "auth-user-1", email: mockUser.email },
+    } as Awaited<ReturnType<typeof requireMobileAuth>>);
+    requireOrganizationAccessMock.mockResolvedValue("org-1");
+    // A member without asset:update or custody view still gets the fields.
+    getMobileUserContextMock.mockResolvedValue({
+      canUseBarcodes: false,
+      canUseAudits: false,
+      access: accessFor(["BASE"]),
+    } as Awaited<ReturnType<typeof getMobileUserContext>>);
+  });
+
+  it("lists the Link fields for the asset's category by name, for every reader", async () => {
+    assetFindUniqueMock.mockResolvedValue({
+      ...buildAsset(),
+      category: { id: "cat-cameras", name: "Cameras", color: "#000000" },
+    } as unknown as AssetFixture);
+    vitest.mocked(getActiveCustomFields).mockResolvedValue([
+      createCustomField({
+        id: "cf-manual",
+        name: "Manual",
+        format: "LINK",
+        helpText: "The maker's PDF",
+      }),
+      createCustomField({ id: "cf-cert", name: "Calibration certificate" }),
+    ]);
+
+    const response = await loader(
+      createLoaderArgs({
+        request: createDetailRequest(),
+        params: { assetId: "asset-1" },
+      })
+    );
+    const body = await (response as unknown as Response).json();
+
+    expect(getActiveCustomFields).toHaveBeenCalledWith({
+      organizationId: "org-1",
+      category: "cat-cameras",
+      format: "LINK",
+    });
+    expect(body.asset.linkFields).toEqual([
+      { id: "cf-cert", name: "Calibration certificate", helpText: null },
+      { id: "cf-manual", name: "Manual", helpText: "The maker's PDF" },
+    ]);
   });
 });

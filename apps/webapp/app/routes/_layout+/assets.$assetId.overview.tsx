@@ -1,6 +1,4 @@
-import { useState } from "react";
-import type { RenderableTreeNode } from "@markdoc/markdoc";
-import { AssetStatus, CustomFieldType } from "@prisma/client";
+import { AssetStatus, CustomFieldFormat } from "@prisma/client";
 import { BookingStatus } from "@prisma/client";
 import type {
   MetaFunction,
@@ -15,6 +13,10 @@ import {
   AssetLastAuditCard,
   LAST_AUDIT_CARD_RECENT_LIMIT,
 } from "~/components/assets/asset-last-audit-card";
+import {
+  CustomFieldsCard,
+  DocumentsAndLinksCard,
+} from "~/components/assets/asset-overview-custom-fields";
 import { AssetReminderCards } from "~/components/assets/asset-reminder-cards";
 import { AssetsFilterLink } from "~/components/assets/assets-filter-link";
 import { CategoryBadge } from "~/components/assets/category-badge";
@@ -30,19 +32,15 @@ import { Switch } from "~/components/forms/switch";
 import Icon from "~/components/icons/icon";
 import ContextualModal from "~/components/layout/contextual-modal";
 import type { HeaderData } from "~/components/layout/header/types";
-import { TextWithLinks } from "~/components/links/text-with-links";
 import { LocationBadge } from "~/components/location/location-badge";
 import { LocationSelect } from "~/components/location/location-select";
 import { ScanDetails } from "~/components/location/scan-details";
-import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { DateS } from "~/components/shared/date";
-import { DateTimePicker } from "~/components/shared/date-time-picker";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { InlineEditableField } from "~/components/shared/inline-editable-field";
 import { Tag } from "~/components/shared/tag";
-import TextualDivider from "~/components/shared/textual-divider";
 import {
   Tooltip,
   TooltipContent,
@@ -52,7 +50,6 @@ import {
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { useAssetCustodySources } from "~/hooks/use-asset-custody-sources";
-import { useDateFormatter } from "~/hooks/use-date-formatter";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { usePosition } from "~/hooks/use-position";
 import { useRoleAccess } from "~/hooks/use-role-access";
@@ -105,7 +102,7 @@ import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import {
   buildAssetOverviewCustomFields,
   buildCustomFieldValue,
-  getCustomFieldDisplayValue,
+  splitOverviewCustomFields,
 } from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -123,7 +120,6 @@ import { userHasPermission } from "~/utils/permissions/permission.validator.clie
 import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { requirePermission } from "~/utils/roles.server";
-import { tw } from "~/utils/tw";
 
 type AssetWithOptionalBarcodes = ReturnType<
   typeof useLoaderData<typeof loader>
@@ -406,6 +402,26 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       : asset.customFields;
 
     /**
+     * The Link fields that apply to this asset. Loaded for EVERY reader: the
+     * "Documents & links" card lists them, unset ones included, so this
+     * decides which rows are displayed and must not be permission-gated.
+     * Trimmed to what a row needs, as view-only users receive it too.
+     */
+    const linkDefinitions = (
+      await getActiveCustomFields({
+        organizationId,
+        category: asset.categoryId,
+        format: CustomFieldFormat.LINK,
+      })
+    ).map(({ id, name, type, format, options }) => ({
+      id,
+      name,
+      type,
+      format,
+      options,
+    }));
+
+    /**
      * Editor data is only needed for users who can update the asset. View-only
      * users see static display rows and never enter edit mode, so we skip the
      * categories/locations/custom-fields-definitions queries entirely. We also
@@ -532,6 +548,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       locations,
       totalLocations,
       allCustomFieldDefs,
+      linkDefinitions,
       moveDestinations,
       unplacedQuantity,
       otherCustodyHolders,
@@ -934,11 +951,11 @@ export default function AssetOverview() {
     quantityData,
     overCommitment,
     allCustomFieldDefs,
+    linkDefinitions,
     moveDestinations,
     unplacedQuantity,
     otherCustodyHolders,
   } = useLoaderData<typeof loader>();
-  const { prefs } = useDateFormatter();
   /**
    * The pool's sources from the asset detail loader, shared with the header
    * actions menu so every Assign / Adjust dialog shows the same numbers.
@@ -965,19 +982,23 @@ export default function AssetOverview() {
       : undefined;
 
   /**
-   * Build ONE unified list of ALL custom fields, sorted alphabetically.
-   * Each entry pairs the field definition with its stored value (or null
-   * if not set). This keeps fields in a stable position regardless of
-   * whether they have values — no jumping when a user adds or clears data.
+   * The custom field rows, sorted by name, split between the "Documents &
+   * links" card (Link fields) and the custom fields card. Each row pairs a
+   * definition with its stored value (or null if not set), so fields keep
+   * their place whether or not they have values.
    *
    * The asset's own values are the primary source: `allCustomFieldDefs` is
-   * loaded ONLY for users who can update the asset, so building the list from
-   * it alone hid every custom field from BASE and SELF_SERVICE users.
+   * loaded ONLY for users who can update the asset, so a list built from it
+   * alone would show nothing to members without that grant.
+   * `linkDefinitions` is loaded for everyone.
    */
-  const allCustomFields = buildAssetOverviewCustomFields({
-    storedValues: asset?.customFields ?? [],
-    editableDefinitions: allCustomFieldDefs ?? [],
-  });
+  const { linkRows, otherRows } = splitOverviewCustomFields(
+    buildAssetOverviewCustomFields({
+      storedValues: asset?.customFields ?? [],
+      editableDefinitions: allCustomFieldDefs ?? [],
+      listedDefinitions: linkDefinitions,
+    })
+  );
 
   const location = asset ? getPrimaryLocation(asset) : null;
   usePosition();
@@ -1024,6 +1045,12 @@ export default function AssetOverview() {
       <ContextualModal />
       <div className="mx-[-16px] mt-[-16px] block md:mx-0 lg:flex ">
         <div className="max-w-full flex-1 overflow-hidden">
+          <DocumentsAndLinksCard
+            rows={linkRows}
+            canEditAsset={canEditAsset}
+            locale={locale}
+            currency={asset.organization.currency}
+          />
           <Card className="my-3 max-w-full px-[-4] py-[-5] md:border">
             <ul className="item-information">
               <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
@@ -1460,185 +1487,12 @@ export default function AssetOverview() {
             </ul>
           </Card>
 
-          {/* Custom fields — one unified alphabetically-sorted list */}
-          {allCustomFields.some((cf) => cf.storedValue) ||
-          (canEditAsset && allCustomFields.length > 0) ? (
-            <>
-              <TextualDivider
-                text="Custom fields"
-                className="mb-8 pt-3 lg:hidden"
-              />
-              <Card className="my-3 px-[-4] py-[-5] md:border">
-                <ul className="item-information">
-                  {allCustomFields.map(({ def, storedValue, isEditable }) => {
-                    const hasValue = !!storedValue;
-                    /**
-                     * A field the action would refuse to write (its definition
-                     * is outside the asset's category scope) stays visible but
-                     * read-only — offering an editor there would dead-end on a
-                     * 400.
-                     */
-                    const canEditField = canEditAsset && isEditable;
-                    const fieldValue = hasValue
-                      ? (storedValue.value as unknown as ShelfAssetCustomFieldValueType["value"])
-                      : null;
-                    const rawValue =
-                      fieldValue?.raw !== undefined
-                        ? String(fieldValue.raw)
-                        : "";
-                    const customFieldDisplayValue = hasValue
-                      ? getCustomFieldDisplayValue(fieldValue!, prefs)
-                      : null;
-
-                    /* Hide "Not set" rows from users who can't fill them in */
-                    if (!hasValue && !canEditField) return null;
-
-                    return (
-                      <InlineEditableField
-                        key={def.id}
-                        fieldName={`customField-${def.id}`}
-                        formFieldName="customField"
-                        label={def.name}
-                        canEdit={canEditField}
-                        extraHiddenInputs={{
-                          customFieldId: def.id,
-                        }}
-                        renderDisplay={() =>
-                          hasValue ? (
-                            <div
-                              className={tw(
-                                "text-gray-600",
-                                def.type !== CustomFieldType.MULTILINE_TEXT &&
-                                  "max-w-[350px]"
-                              )}
-                            >
-                              {def.type === CustomFieldType.MULTILINE_TEXT ? (
-                                <MarkdownViewer
-                                  content={
-                                    customFieldDisplayValue as RenderableTreeNode
-                                  }
-                                  allowExternalLinks
-                                />
-                              ) : def.type === CustomFieldType.TEXT ? (
-                                <TextWithLinks value={rawValue} />
-                              ) : def.type === CustomFieldType.AMOUNT ? (
-                                formatCurrency({
-                                  value: fieldValue!.raw as number,
-                                  locale,
-                                  currency: asset.organization.currency,
-                                })
-                              ) : (
-                                (customFieldDisplayValue as string)
-                              )}
-                            </div>
-                          ) : (
-                            <span className="text-gray-400">Not set</span>
-                          )
-                        }
-                        renderEditor={() => {
-                          switch (def.type) {
-                            case CustomFieldType.MULTILINE_TEXT:
-                              return (
-                                <Input
-                                  label={def.name}
-                                  hideLabel
-                                  inputType="textarea"
-                                  name="fieldValue"
-                                  defaultValue={rawValue}
-                                  className="w-full"
-                                />
-                              );
-                            case CustomFieldType.BOOLEAN:
-                              return (
-                                <BooleanCustomFieldEditor
-                                  name="fieldValue"
-                                  label={def.name}
-                                  initialChecked={
-                                    fieldValue?.raw === "yes" ||
-                                    fieldValue?.raw === true
-                                  }
-                                  initialIsUnset={!hasValue}
-                                />
-                              );
-                            case CustomFieldType.DATE:
-                              return (
-                                <DateTimePicker
-                                  mode="date"
-                                  label={def.name}
-                                  hideLabel
-                                  name="fieldValue"
-                                  defaultValue={rawValue}
-                                  className="w-full"
-                                />
-                              );
-                            case CustomFieldType.OPTION:
-                              return (
-                                <select
-                                  aria-label={def.name}
-                                  name="fieldValue"
-                                  defaultValue={rawValue}
-                                  className="w-full rounded border border-gray-300 px-3 py-2 text-sm"
-                                >
-                                  <option value="">Select an option</option>
-                                  {(def.options as string[] | null)
-                                    ?.filter(
-                                      (o: string) => o !== null && o !== ""
-                                    )
-                                    .map((option: string, index: number) => (
-                                      // Legacy fields can hold the same option twice.
-                                      <option
-                                        key={`${index}-${option}`}
-                                        value={option}
-                                      >
-                                        {option}
-                                      </option>
-                                    ))}
-                                </select>
-                              );
-                            case CustomFieldType.AMOUNT:
-                            case CustomFieldType.NUMBER:
-                              return (
-                                <Input
-                                  label={def.name}
-                                  hideLabel
-                                  type="text"
-                                  inputMode="decimal"
-                                  name="fieldValue"
-                                  defaultValue={rawValue}
-                                  className="w-full"
-                                />
-                              );
-                            default:
-                              // A Link field gets the URL keyboard on phones.
-                              // It stays type="text": the browser's own url
-                              // check would refuse "www.example.com/a.pdf",
-                              // which the server accepts and stores as https.
-                              return (
-                                <Input
-                                  label={def.name}
-                                  hideLabel
-                                  name="fieldValue"
-                                  defaultValue={rawValue}
-                                  className="w-full"
-                                  {...(def.format === "LINK"
-                                    ? {
-                                        inputMode: "url",
-                                        placeholder: "https://",
-                                        autoComplete: "off",
-                                        spellCheck: false,
-                                      }
-                                    : {})}
-                                />
-                              );
-                          }
-                        }}
-                      />
-                    );
-                  })}
-                </ul>
-              </Card>
-            </>
-          ) : null}
+          <CustomFieldsCard
+            rows={otherRows}
+            canEditAsset={canEditAsset}
+            locale={locale}
+            currency={asset.organization.currency}
+          />
         </div>
 
         <div className="w-full md:w-[360px] lg:ml-4">
@@ -2144,62 +1998,5 @@ function PlacementCount({
       </span>
       <span className="text-gray-400">{inCustody} in custody</span>
     </span>
-  );
-}
-
-function BooleanCustomFieldEditor({
-  name,
-  label,
-  initialChecked,
-  initialIsUnset = false,
-}: {
-  name: string;
-  label: string;
-  // why: named `initialChecked` / `initialIsUnset` rather than the more
-  // common `defaultChecked` / `defaultIsUnset` so they don't get treated
-  // as controlled-input defaults that should sync — once the user
-  // toggles, local state owns the value. Also silences react-doctor's
-  // `no-derived-useState` heuristic, which flags `default*`-named
-  // props seeded into useState as derived-state-in-disguise.
-  initialChecked: boolean;
-  initialIsUnset?: boolean;
-}) {
-  const [isUnset, setIsUnset] = useState(initialIsUnset);
-  const [checked, setChecked] = useState(initialChecked);
-  return (
-    <div className="flex items-center gap-2">
-      <input
-        type="hidden"
-        name={name}
-        value={isUnset ? "" : checked ? "yes" : "no"}
-      />
-      <Switch
-        aria-label={label}
-        checked={!isUnset && checked}
-        onCheckedChange={(val) => {
-          setIsUnset(false);
-          setChecked(val);
-        }}
-      />
-      <span className="text-sm text-gray-600">
-        {isUnset ? `${label} (not set)` : label}
-      </span>
-      {/*
-       * Clear is only offered when the field was originally unset
-       * (initialIsUnset === true) and the user has just toggled the Switch on,
-       * so they can revert without committing a yes/no value. Once cleared, the
-       * only way back is to flip the Switch — which automatically un-sets
-       * isUnset via the onCheckedChange handler above.
-       */}
-      {!isUnset && initialIsUnset && (
-        <button
-          type="button"
-          onClick={() => setIsUnset(true)}
-          className="text-xs text-gray-400 underline hover:text-gray-600"
-        >
-          Clear
-        </button>
-      )}
-    </div>
   );
 }
