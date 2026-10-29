@@ -213,7 +213,8 @@ function ValueInput({ field }: { field: BulkSettableCustomField }) {
           >
             {label}
           </label>
-          <Select name="value">
+          {/* Required: an unanswered yes/no would otherwise post as "No". */}
+          <Select name="value" required>
             <SelectTrigger id="bulk-cf-value">
               <SelectValue placeholder="Pick a value" />
             </SelectTrigger>

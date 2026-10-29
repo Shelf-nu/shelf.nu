@@ -22,6 +22,11 @@ import {
 import { action, loader } from "~/routes/api+/assets.bulk-update-custom-field";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError } from "~/utils/error";
+import { ALL_SELECTED_KEY } from "~/utils/list";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
 // why: React Router v7 single fetch: `data()` outside a request context returns
@@ -83,12 +88,20 @@ const permissionResult = {
 
 const context = { getSession: () => ({ userId: "user-1" }) };
 
-/** Posts the dialog's form through the real action. */
-async function post(fields: Record<string, string>) {
+/**
+ * Posts the dialog's form through the real action. The selection defaults to
+ * two explicit ids with no live filters.
+ */
+async function post(
+  fields: Record<string, string>,
+  {
+    assetIds = ["a1", "a2"],
+    currentSearchParams = "",
+  }: { assetIds?: string[]; currentSearchParams?: string } = {}
+) {
   const body = new URLSearchParams();
-  body.append("assetIds[0]", "a1");
-  body.append("assetIds[1]", "a2");
-  body.append("currentSearchParams", "");
+  assetIds.forEach((id, i) => body.append(`assetIds[${i}]`, id));
+  body.append("currentSearchParams", currentSearchParams);
   for (const [key, value] of Object.entries(fields)) body.append(key, value);
   return (await action({
     context,
@@ -134,6 +147,33 @@ describe("loader", () => {
     };
 
     expect(response.customFields).toEqual(fields);
+    expect(requirePermission).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "user-1",
+        entity: PermissionEntity.asset,
+        action: PermissionAction.update,
+      })
+    );
+  });
+
+  it("lists nothing to a member without asset update", async () => {
+    vi.mocked(requirePermission).mockRejectedValue(
+      new ShelfError({
+        cause: null,
+        message: "Forbidden",
+        label: "Permission",
+        status: 403,
+      })
+    );
+
+    await expect(
+      loader({
+        context,
+        request: new Request("https://x/api/assets/bulk-update-custom-field"),
+        params: {},
+      } as unknown as LoaderFunctionArgs)
+    ).rejects.toMatchObject({ status: 403 });
+    expect(getBulkSettableCustomFields).not.toHaveBeenCalled();
   });
 });
 
@@ -148,6 +188,62 @@ describe("action", () => {
         customFieldId: "cf-1",
         rawValue: "Westermo",
         mode: "EMPTY_ONLY",
+      })
+    );
+  });
+
+  it("requires asset update, and refuses a member without it", async () => {
+    await post({ customFieldId: "cf-1", value: "Westermo" });
+    expect(requirePermission).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "user-1",
+        entity: PermissionEntity.asset,
+        action: PermissionAction.update,
+      })
+    );
+
+    vi.mocked(bulkSetAssetCustomField).mockClear();
+    vi.mocked(requirePermission).mockRejectedValue(
+      new ShelfError({
+        cause: null,
+        message: "Forbidden",
+        label: "Permission",
+        status: 403,
+      })
+    );
+    const response = await post({ customFieldId: "cf-1", value: "Westermo" });
+
+    expect(response.status).toBe(403);
+    expect(bulkSetAssetCustomField).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["an unknown mode", { customFieldId: "cf-1", value: "x", mode: "BOGUS" }],
+    ["no field", { value: "x" }],
+  ])("refuses %s before touching any asset", async (_, fields) => {
+    const response = await post(fields);
+
+    expect(response.status).toBe(400);
+    expect(bulkSetAssetCustomField).not.toHaveBeenCalled();
+  });
+
+  it("hands select-all the live filters and the caller's list scope", async () => {
+    await post(
+      { customFieldId: "cf-1", value: "Westermo" },
+      {
+        assetIds: [ALL_SELECTED_KEY],
+        currentSearchParams: "s=router&category=cat-1",
+      }
+    );
+
+    expect(bulkSetAssetCustomField).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetIds: [ALL_SELECTED_KEY],
+        currentSearchParams: "s=router&category=cat-1",
+        settings: { mode: "SIMPLE" },
+        timeZone: "UTC",
+        // An admin sees the whole list, so the scope narrows nothing.
+        bookableScope: null,
       })
     );
   });
@@ -168,6 +264,25 @@ describe("action", () => {
         title: "Custom field set",
         message:
           "Set on 1 asset. 1 asset already had a value and were left alone.",
+        icon: { name: "success", variant: "success" },
+      })
+    );
+  });
+
+  it("does not show a success tick when nothing changed", async () => {
+    vi.mocked(bulkSetAssetCustomField).mockResolvedValue({
+      resolved: 0,
+      changed: 0,
+      skippedWithValue: 0,
+      skippedCategory: 0,
+    });
+
+    await post({ customFieldId: "cf-1", value: "Westermo" });
+
+    expect(sendNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Nothing to change",
+        icon: { name: "custom-field", variant: "gray" },
       })
     );
   });

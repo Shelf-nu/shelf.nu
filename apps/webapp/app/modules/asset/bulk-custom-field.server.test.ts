@@ -2,12 +2,12 @@ import type { AssetIndexSettings } from "@prisma/client";
 import { beforeEach, describe, expect, it, vitest } from "vitest";
 import { db } from "~/database/db.server";
 import { recordEvents } from "~/modules/activity-event/service.server";
-import { createNotes } from "~/modules/note/service.server";
 import { lockAssetsForArchiveGuard } from "./archive-lock.server";
 import {
   bulkCustomFieldMessage,
   bulkSetAssetCustomField,
 } from "./bulk-custom-field.server";
+import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
 
 // why: the service reads and writes through Prisma; the assertions are on the
 // rows it decides to write, so the client is a stub that runs the transaction
@@ -15,7 +15,8 @@ import {
 vitest.mock("~/database/db.server", () => {
   const client = {
     customField: { findFirst: vitest.fn() },
-    asset: { findMany: vitest.fn() },
+    asset: { findMany: vitest.fn(), updateMany: vitest.fn() },
+    note: { createMany: vitest.fn() },
     user: {
       findFirst: vitest.fn().mockResolvedValue({
         firstName: "Sam",
@@ -52,11 +53,8 @@ vitest.mock("~/utils/org-validation.server", () => ({
   assertAssetsAreNotArchived: vitest.fn(),
 }));
 
-// why: note and event persistence are covered by their own suites; the
-// assertions here are on what this action asks them to write.
-vitest.mock("~/modules/note/service.server", () => ({
-  createNotes: vitest.fn().mockResolvedValue({}),
-}));
+// why: event persistence is covered by its own suite; the assertions here are
+// on what this action asks it to write.
 vitest.mock("~/modules/activity-event/service.server", () => ({
   recordEvents: vitest.fn().mockResolvedValue(undefined),
 }));
@@ -101,6 +99,7 @@ const args = {
   // The index settings are only passed through to select-all resolution.
   settings: { mode: "SIMPLE" } as unknown as AssetIndexSettings,
   lastAuditDateAccess: "available" as const,
+  bookableScope: null,
 };
 
 describe("bulkSetAssetCustomField", () => {
@@ -172,15 +171,17 @@ describe("bulkSetAssetCustomField", () => {
       .mockResolvedValue([
         asset("a1", { categoryId: "cat-network" }),
         asset("a2", { categoryId: "cat-power" }),
+        asset("a3"),
       ] as never);
 
     const result = await bulkSetAssetCustomField({
       ...args,
-      assetIds: ["a1", "a2"],
+      assetIds: ["a1", "a2", "a3"],
       mode: "EMPTY_ONLY",
     });
 
-    expect(result).toMatchObject({ changed: 1, skippedCategory: 1 });
+    // a3 has no category, so a category-limited field does not apply to it.
+    expect(result).toMatchObject({ changed: 1, skippedCategory: 2 });
   });
 
   it("writes the single edit's event and note, in the transaction", async () => {
@@ -206,23 +207,107 @@ describe("bulkSetAssetCustomField", () => {
         field: "Brand",
         fromValue: null,
         toValue: "Westermo",
+        meta: { isFirstTimeSet: true, viaBulk: true },
       }),
       expect.objectContaining({
         assetId: "a2",
         fromValue: "Siemens",
         toValue: "Westermo",
+        meta: { isFirstTimeSet: false, viaBulk: true },
       }),
     ]);
 
-    const contents = vitest
-      .mocked(createNotes)
-      .mock.calls.map(([note]) => note.content);
-    expect(contents).toEqual([
-      expect.stringContaining("set **Brand** to **Westermo**"),
-      expect.stringContaining(
-        "updated **Brand** from **Siemens** to **Westermo**"
-      ),
+    expect(db.note.createMany).toHaveBeenCalledTimes(1);
+    const [{ data: notes }] = vitest.mocked(db.note.createMany).mock
+      .calls[0] as unknown as [
+      { data: { assetId: string; content: string }[] },
+    ];
+    expect(notes).toEqual([
+      expect.objectContaining({
+        assetId: "a1",
+        type: "UPDATE",
+        content: expect.stringContaining("set **Brand** to **Westermo**"),
+      }),
+      expect.objectContaining({
+        assetId: "a2",
+        type: "UPDATE",
+        content: expect.stringContaining(
+          "updated **Brand** from **Siemens** to **Westermo**"
+        ),
+      }),
     ]);
+  });
+
+  it("writes every note in one statement, however many previous values", async () => {
+    vitest
+      .mocked(db.asset.findMany)
+      .mockResolvedValue([
+        asset("a1", { brand: "Siemens" }),
+        asset("a2", { brand: "Moxa" }),
+        asset("a3", { brand: "Cisco" }),
+      ] as never);
+
+    await bulkSetAssetCustomField({
+      ...args,
+      assetIds: ["a1", "a2", "a3"],
+      mode: "REPLACE",
+    });
+
+    expect(db.note.createMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("moves the Updated time of the changed assets only", async () => {
+    vitest
+      .mocked(db.asset.findMany)
+      .mockResolvedValue([
+        asset("a1"),
+        asset("a2", { brand: "Westermo" }),
+      ] as never);
+
+    await bulkSetAssetCustomField({
+      ...args,
+      assetIds: ["a1", "a2"],
+      mode: "REPLACE",
+    });
+
+    expect(db.asset.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["a1"] }, organizationId: "org-1" },
+      data: { updatedAt: expect.any(Date) },
+    });
+  });
+
+  it("passes the caller's list scope to select-all resolution", async () => {
+    vitest.mocked(db.asset.findMany).mockResolvedValue([asset("a1")] as never);
+    const bookableScope = { holderUserId: "user-1" };
+
+    await bulkSetAssetCustomField({
+      ...args,
+      bookableScope,
+      assetIds: ["a1"],
+      mode: "EMPTY_ONLY",
+    });
+
+    expect(resolveAssetIdsForBulkOperation).toHaveBeenCalledWith(
+      expect.objectContaining({ bookableScope, organizationId: "org-1" })
+    );
+  });
+
+  it("does nothing when the selection resolves to no assets", async () => {
+    vitest.mocked(resolveAssetIdsForBulkOperation).mockResolvedValueOnce([]);
+
+    const result = await bulkSetAssetCustomField({
+      ...args,
+      assetIds: ["a1"],
+      mode: "REPLACE",
+    });
+
+    expect(result).toEqual({
+      resolved: 0,
+      changed: 0,
+      skippedWithValue: 0,
+      skippedCategory: 0,
+    });
+    expect(db.$transaction).not.toHaveBeenCalled();
   });
 
   it("reads the assets inside the transaction, under the archive lock", async () => {
@@ -253,6 +338,53 @@ describe("bulkSetAssetCustomField", () => {
     expect(db.asset.findMany).not.toHaveBeenCalled();
   });
 
+  describe("values in the spelling the dialog posts", () => {
+    /** Runs the action for one empty asset with a field of `type`. */
+    async function setOn(type: string, rawValue: string) {
+      vitest
+        .mocked(db.customField.findFirst)
+        .mockResolvedValue({ ...field, type, options: [] } as never);
+      vitest
+        .mocked(db.asset.findMany)
+        .mockResolvedValue([asset("a1")] as never);
+      await bulkSetAssetCustomField({
+        ...args,
+        rawValue,
+        assetIds: ["a1"],
+        mode: "EMPTY_ONLY",
+      });
+      return vitest.mocked(db.assetCustomFieldValue.createMany).mock
+        .calls[0][0] as unknown as { data: { value: unknown }[] };
+    }
+
+    it("stores a yes/no `on` as Yes and `off` as No", async () => {
+      expect((await setOn("BOOLEAN", "on")).data[0].value).toMatchObject({
+        valueBoolean: true,
+      });
+      vitest.mocked(db.assetCustomFieldValue.createMany).mockClear();
+      expect((await setOn("BOOLEAN", "off")).data[0].value).toMatchObject({
+        valueBoolean: false,
+      });
+    });
+
+    it("refuses a yes/no field with no answer instead of storing No", async () => {
+      await expect(setOn("BOOLEAN", "")).rejects.toMatchObject({
+        status: 400,
+      });
+      expect(db.assetCustomFieldValue.createMany).not.toHaveBeenCalled();
+    });
+
+    it("stores a YYYY-MM-DD date", async () => {
+      const { data } = await setOn("DATE", "2026-03-14");
+      expect(data[0].value).toMatchObject({ raw: "2026-03-14" });
+      expect((data[0].value as { valueDate: string }).valueDate).toBeTruthy();
+    });
+
+    it("refuses a blank text value", async () => {
+      await expect(setOn("TEXT", "")).rejects.toMatchObject({ status: 400 });
+    });
+  });
+
   it("refuses a field that is not in this workspace", async () => {
     vitest.mocked(db.customField.findFirst).mockResolvedValue(null);
 
@@ -274,6 +406,17 @@ describe("bulkCustomFieldMessage", () => {
     ).toBe(
       "Set on 6 assets. 3 assets already had a value and were left alone. 1 asset skipped because the field does not apply to their category."
     );
+  });
+
+  it("says so when the selection matched nothing", () => {
+    expect(
+      bulkCustomFieldMessage({
+        resolved: 0,
+        changed: 0,
+        skippedWithValue: 0,
+        skippedCategory: 0,
+      })
+    ).toBe("Your selection no longer matches any assets.");
   });
 
   it("does not claim a change when nothing moved", () => {

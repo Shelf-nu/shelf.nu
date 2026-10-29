@@ -21,6 +21,7 @@ import {
   getBulkSettableCustomFields,
 } from "~/modules/asset/bulk-custom-field.server";
 import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
+import { resolveBookableListScope } from "~/modules/asset/list-scope.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { getClientHint } from "~/utils/client-hints";
@@ -119,13 +120,18 @@ export async function action({ context, request }: ActionFunctionArgs) {
       currentSearchParams,
       settings,
       lastAuditDateAccess: lastAuditDateAccessFor(access, currentOrganization),
+      bookableScope: resolveBookableListScope({ access, userId }),
       timeZone,
     });
 
     sendNotification({
       title: result.changed > 0 ? "Custom field set" : "Nothing to change",
       message: bulkCustomFieldMessage(result),
-      icon: { name: "success", variant: "success" },
+      // Only a change earns the success tick; a no-op reads as information.
+      icon:
+        result.changed > 0
+          ? { name: "success", variant: "success" }
+          : { name: "custom-field", variant: "gray" },
       senderId: userId,
     });
 

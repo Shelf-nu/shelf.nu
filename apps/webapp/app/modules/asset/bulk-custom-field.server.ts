@@ -26,7 +26,6 @@ import type {
 import { z } from "zod";
 import { db } from "~/database/db.server";
 import { recordEvents } from "~/modules/activity-event/service.server";
-import { createNotes } from "~/modules/note/service.server";
 import { USER_NAME_SELECT } from "~/modules/user/fields";
 import { buildCustomFieldValue, mergedSchema } from "~/utils/custom-fields";
 import type { ErrorLabel } from "~/utils/error";
@@ -36,6 +35,7 @@ import { assertAssetsAreNotArchived } from "~/utils/org-validation.server";
 import { lockAssetsForArchiveGuard } from "./archive-lock.server";
 import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
 import type { LastAuditDateAccess } from "./last-audit-date-access";
+import type { BookableListScope } from "./list-scope.server";
 import type { ICustomFieldValueJson } from "./types";
 import {
   detectCustomFieldChanges,
@@ -104,6 +104,20 @@ function buildValueForField(
   field: Pick<CustomField, "id" | "name" | "type" | "options" | "helpText">,
   raw: string
 ): ICustomFieldValueJson {
+  // The form posts a yes/no answer as `on` or `off`; the shared schema reads
+  // anything but `on` as "No", so a missing answer is refused here instead.
+  if (field.type === "BOOLEAN" && raw !== "on" && raw !== "off") {
+    throw new ShelfError({
+      cause: null,
+      title: "Pick Yes or No",
+      message: `Pick Yes or No for ${field.name}.`,
+      additionalData: { customFieldId: field.id },
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
+
   const key = `cf-${field.id}`;
   const schema = mergedSchema({
     baseSchema: z.object({}),
@@ -155,6 +169,7 @@ function buildValueForField(
  * @param params.currentSearchParams - Live filters, for select-all
  * @param params.settings - Asset index settings, for select-all
  * @param params.lastAuditDateAccess - From `lastAuditDateAccessFor`
+ * @param params.bookableScope - Caller's list scope, for select-all
  * @param params.timeZone - Acting user's timezone, for select-all date filters
  * @returns Counts of what changed and what was skipped, and why
  * @throws {ShelfError} 404 when the field is not in this organization, 400
@@ -170,6 +185,7 @@ export async function bulkSetAssetCustomField({
   currentSearchParams,
   settings,
   lastAuditDateAccess,
+  bookableScope,
   timeZone = "UTC",
 }: {
   userId: User["id"];
@@ -181,6 +197,7 @@ export async function bulkSetAssetCustomField({
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
   lastAuditDateAccess: LastAuditDateAccess;
+  bookableScope: BookableListScope | null;
   timeZone?: string;
 }): Promise<BulkSetCustomFieldResult> {
   try {
@@ -225,6 +242,7 @@ export async function bulkSetAssetCustomField({
       // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
       allowedTeamMemberIds: "all",
       lastAuditDateAccess,
+      bookableScope,
       timeZone,
     });
 
@@ -330,6 +348,17 @@ export async function bulkSetAssetCustomField({
             data: { value: value as unknown as object },
           });
         }
+        if (changing.length > 0) {
+          // A custom field is part of the asset, so its "Updated" time moves,
+          // as it does when the field is edited on the asset form.
+          await tx.asset.updateMany({
+            where: {
+              id: { in: changing.map(({ asset }) => asset.id) },
+              organizationId,
+            },
+            data: { updatedAt: new Date() },
+          });
+        }
 
         // One event per asset, shaped like the single edit's event.
         await recordEvents(
@@ -348,10 +377,10 @@ export async function bulkSetAssetCustomField({
           tx
         );
 
-        // The single edit's note text. Assets with the same previous value
-        // share the sentence, so each distinct sentence is one statement.
-        const assetIdsByNote = new Map<string, string[]>();
-        for (const { asset, change } of changing) {
+        // The single edit's note text, one row per asset, written in one
+        // statement however many distinct previous values there are. The ids
+        // come from the org-scoped read above, so no further org check runs.
+        const notes = changing.flatMap(({ asset, change }) => {
           const content = getCustomFieldUpdateNoteContent({
             customFieldName: change.customFieldName,
             previousValue: change.previousValue,
@@ -362,22 +391,12 @@ export async function bulkSetAssetCustomField({
             displayName: user?.displayName,
             isFirstTimeSet: change.isFirstTimeSet,
           });
-          if (!content) continue;
-          const group = assetIdsByNote.get(content) ?? [];
-          group.push(asset.id);
-          assetIdsByNote.set(content, group);
-        }
-        for (const [content, noteAssetIds] of assetIdsByNote) {
-          await createNotes(
-            {
-              content,
-              type: "UPDATE",
-              userId,
-              assetIds: noteAssetIds,
-              organizationId,
-            },
-            tx
-          );
+          return content
+            ? [{ content, type: "UPDATE" as const, userId, assetId: asset.id }]
+            : [];
+        });
+        if (notes.length > 0) {
+          await tx.note.createMany({ data: notes });
         }
 
         return {
