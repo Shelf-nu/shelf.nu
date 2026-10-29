@@ -107,7 +107,7 @@ describe("<CrossKitMoveNotice>", () => {
     expect(screen.getByText(/Kit move notice:/)).toBeInTheDocument();
     expect(
       screen.getByText(
-        /This asset leaves its current kit: Camera A \(from Box 1\)\. It also comes off that kit's draft and reserved bookings/
+        /This asset leaves its current kit: Camera A \(from Box 1\)\. It also comes off any draft or reserved bookings that kit is on/
       )
     ).toBeInTheDocument();
   });
@@ -126,7 +126,7 @@ describe("<CrossKitMoveNotice>", () => {
 
     expect(
       screen.getByText(
-        /These 5 assets leave their current kit: Item A \(from Box 2\), Item B \(from Box 2\), Item C \(from Box 2\) and 2 more\. They also come off that kit's draft and reserved bookings/
+        /These 5 assets leave their current kit: Item A \(from Box 2\), Item B \(from Box 2\), Item C \(from Box 2\) and 2 more\. They also come off any draft or reserved bookings that kit is on/
       )
     ).toBeInTheDocument();
   });
@@ -153,7 +153,7 @@ describe("<CrossKitMoveNotice>", () => {
 
     expect(
       screen.getByText(
-        /These 2 assets leave their current kits: Camera A \(from Box 1\), Mic \(from Box 2\)\. They also come off those kits' draft and reserved bookings/
+        /These 2 assets leave their current kits: Camera A \(from Box 1\), Mic \(from Box 2\)\. They also come off any draft or reserved bookings those kits are on/
       )
     ).toBeInTheDocument();
   });
@@ -180,7 +180,7 @@ describe("<CrossKitMoveNotice>", () => {
 
     expect(
       screen.getByText(
-        /leave their current kits: .* those kits' draft and reserved bookings/
+        /leave their current kits: .* draft or reserved bookings those kits are on/
       )
     ).toBeInTheDocument();
   });

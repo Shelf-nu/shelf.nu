@@ -68,6 +68,7 @@ import {
   updateKitAssets,
 } from "~/modules/kit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { joinAriaIds } from "~/utils/aria-ids";
 import { AssetQuantitiesSchema } from "~/utils/asset-quantities-schema";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
@@ -681,17 +682,12 @@ export default function ManageAssetsInKit() {
                 // nothing to announce beyond the heading. The move and removal
                 // warnings are the consequential part, so the dialog's
                 // description points at whichever are present.
-                aria-describedby={
-                  [
-                    crossKitMoves.length > 0 ? MOVE_NOTICE_ID : null,
-                    deselectedBookingImpact.reserved.bookings.length > 0 ||
-                    deselectedBookingImpact.checkedOut.bookings.length > 0
-                      ? REMOVAL_NOTICE_ID
-                      : null,
-                  ]
-                    .filter(Boolean)
-                    .join(" ") || undefined
-                }
+                aria-describedby={joinAriaIds(
+                  crossKitMoves.length > 0 && MOVE_NOTICE_ID,
+                  (deselectedBookingImpact.reserved.bookings.length > 0 ||
+                    deselectedBookingImpact.checkedOut.bookings.length > 0) &&
+                    REMOVAL_NOTICE_ID
+                )}
               >
                 <div className="flex items-center gap-4">
                   <div className="flex size-12 items-center justify-center rounded-full bg-blue-200/20">

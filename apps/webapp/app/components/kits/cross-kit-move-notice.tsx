@@ -19,8 +19,8 @@
 
 import { AssetType } from "@prisma/client";
 import { ArrowRightLeftIcon } from "lucide-react";
+import { formatNameList } from "~/utils/format-name-list";
 import { tw } from "~/utils/tw";
-import { formatNameList } from "./booking-removal-notice";
 
 /** One asset that confirming would take out of another kit. */
 export type CrossKitMove = {
@@ -133,8 +133,9 @@ export function CrossKitMoveNotice({
       <strong>Kit move notice:</strong> An asset can only be in one kit.{" "}
       {isSingle ? "This asset leaves" : `These ${moves.length} assets leave`}{" "}
       {isSingle ? "its" : "their"} current kit{isSingleKit ? "" : "s"}:{" "}
-      {formatMoves(moves)}. {isSingle ? "It also comes" : "They also come"} off{" "}
-      {isSingleKit ? "that kit's" : "those kits'"} draft and reserved bookings.
+      {formatMoves(moves)}. {isSingle ? "It also comes" : "They also come"} off
+      any draft or reserved bookings{" "}
+      {isSingleKit ? "that kit is" : "those kits are"} on.
     </span>
   );
 }

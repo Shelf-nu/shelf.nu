@@ -25,6 +25,7 @@
  */
 
 import { PackageCheckIcon, TriangleAlertIcon } from "lucide-react";
+import { formatNameList } from "~/utils/format-name-list";
 import { tw } from "~/utils/tw";
 
 /** Minimal booking shape the notice needs — id for dedupe, name for the copy. */
@@ -60,9 +61,6 @@ export type KitRemovalBookingImpact = {
   checkedOut: BookingForNotice[];
 };
 
-/** How many names a notice spells out before the list is elided. */
-const MAX_NAMED_ITEMS = 3;
-
 type BookingRemovalNoticeProps = {
   /** RESERVED bookings that would LOSE their slice. */
   reserved?: BookingRemovalNoticeGroup;
@@ -85,22 +83,6 @@ function dedupe(bookings: BookingForNotice[]): BookingForNotice[] {
   return [
     ...new Map(bookings.map((booking) => [booking.id, booking])).values(),
   ];
-}
-
-/**
- * Renders a list of names as "A, B, C and 2 more".
- *
- * Names up to three, then elides. It spells the remainder out ("and 2 more")
- * rather than a trailing ", …", which would collide with the sentence's full
- * stop. Shared by the kit notices so their lists read the same.
- *
- * @param names - The names to list, in display order
- * @returns The rendered list
- */
-export function formatNameList(names: string[]): string {
-  const shown = names.slice(0, MAX_NAMED_ITEMS).join(", ");
-  const hiddenCount = names.length - MAX_NAMED_ITEMS;
-  return hiddenCount > 0 ? `${shown} and ${hiddenCount} more` : shown;
 }
 
 /**
