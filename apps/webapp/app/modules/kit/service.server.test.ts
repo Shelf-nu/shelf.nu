@@ -38,7 +38,11 @@ import { recordEvents } from "../activity-event/service.server";
 import { lockAssetsForArchiveGuard } from "../asset/archive-lock.server";
 import { createSystemBookingNotes } from "../booking-note/service.server";
 import { lockAssetForQuantityUpdate } from "../consumption-log/quantity-lock.server";
-import { createNote, createNotes } from "../note/service.server";
+import {
+  createBulkKitChangeNotes,
+  createNote,
+  createNotes,
+} from "../note/service.server";
 import { getQr } from "../qr/service.server";
 
 // @vitest-environment node
@@ -832,6 +836,40 @@ describe("deleteKit", () => {
     );
   });
 
+  it("keeps a Markdoc tag in a deleted kit's name out of its members' lines", async () => {
+    //@ts-expect-error missing vitest type
+    db.kit.findUniqueOrThrow.mockResolvedValue({
+      ...mockKitData,
+      name: '{% link to="javascript:alert(1)" text="x" /%}',
+      assetKits: [
+        {
+          quantity: 1,
+          asset: {
+            id: "drill-1",
+            title: "Drill",
+            type: AssetType.INDIVIDUAL,
+            unitOfMeasure: null,
+          },
+        },
+      ],
+      custody: null,
+    });
+
+    await deleteKit({
+      id: "kit-1",
+      organizationId: "org-1",
+      actorUserId: "user-actor",
+    });
+
+    const [{ content }] = (db.note.createMany as ReturnType<typeof vitest.fn>)
+      .mock.calls[0][0].data as { content: string }[];
+    const tags = [...Markdoc.parse(content).walk()].filter(
+      (node) => node.type === "tag"
+    );
+    // The only legitimate tag is the actor link the line starts with.
+    expect(tags).toHaveLength(1);
+  });
+
   it("deletes an in-custody kit and emits CUSTODY_RELEASED + flips status + writes notes", async () => {
     // Setup: kit in custody to Bob, contains Drill (INDIVIDUAL, no operator
     // custody) and Pens (QUANTITY_TRACKED, has operator custody to Alice).
@@ -1186,6 +1224,156 @@ describe("bulkDeleteKits", () => {
     expect(
       (recordEvents as ReturnType<typeof vitest.fn>).mock.calls[0][0]
     ).toHaveLength(3);
+  });
+
+  it("names each deleted kit and its slice for a quantity-tracked member of both", async () => {
+    const pens = {
+      id: "pens-1",
+      title: "Pens",
+      type: AssetType.QUANTITY_TRACKED,
+      unitOfMeasure: "pens",
+    };
+    //@ts-expect-error missing vitest type
+    db.kit.findMany.mockResolvedValue([
+      {
+        id: "kit-A",
+        name: "Box A",
+        image: null,
+        assetKits: [{ quantity: 10, asset: pens }],
+        custody: null,
+      },
+      {
+        id: "kit-B",
+        name: "Box B",
+        image: null,
+        assetKits: [{ quantity: 5, asset: pens }],
+        custody: null,
+      },
+    ]);
+
+    await bulkDeleteKits({
+      kitIds: ["kit-A", "kit-B"],
+      confirmation: "2",
+      organizationId: "org-1",
+      userId: "user-1",
+    });
+
+    const events = (recordEvents as ReturnType<typeof vitest.fn>).mock
+      .calls[0][0];
+    expect(events).toEqual([
+      expect.objectContaining({
+        action: "ASSET_KIT_CHANGED",
+        assetId: "pens-1",
+        kitId: "kit-A",
+        fromValue: "kit-A",
+        meta: { quantity: 10 },
+      }),
+      expect.objectContaining({
+        action: "ASSET_KIT_CHANGED",
+        assetId: "pens-1",
+        kitId: "kit-B",
+        fromValue: "kit-B",
+        meta: { quantity: 5 },
+      }),
+    ]);
+
+    const notes = (db.note.createMany as ReturnType<typeof vitest.fn>).mock
+      .calls[0][0].data as { content: string }[];
+    expect(notes.map((note) => note.content)).toEqual([
+      expect.stringContaining("deleted kit **Box A**, which removed 10 pens"),
+      expect.stringContaining("deleted kit **Box B**, which removed 5 pens"),
+    ]);
+  });
+
+  it("names each kit's own released count for a quantity-tracked member of two in-custody kits", async () => {
+    const pens = {
+      id: "pens-1",
+      title: "Pens",
+      type: AssetType.QUANTITY_TRACKED,
+      unitOfMeasure: "pens",
+    };
+    const custodyOf = (kitCustodyId: string, name: string) => ({
+      id: kitCustodyId,
+      custodian: { id: `tm-${name}`, name, user: { id: `user-${name}` } },
+    });
+    //@ts-expect-error missing vitest type
+    db.kit.findMany.mockResolvedValue([
+      {
+        id: "kit-A",
+        name: "Box A",
+        image: null,
+        assetKits: [{ quantity: 10, asset: pens }],
+        custody: custodyOf("kc-A", "Bob"),
+      },
+      {
+        id: "kit-B",
+        name: "Box B",
+        image: null,
+        assetKits: [{ quantity: 5, asset: pens }],
+        custody: custodyOf("kc-B", "Carol"),
+      },
+    ]);
+    //@ts-expect-error missing vitest type
+    db.custody.findMany.mockResolvedValueOnce([
+      {
+        assetId: "pens-1",
+        teamMemberId: "tm-Bob",
+        kitCustodyId: "kc-A",
+        quantity: 10,
+      },
+      {
+        assetId: "pens-1",
+        teamMemberId: "tm-Carol",
+        kitCustodyId: "kc-B",
+        quantity: 5,
+      },
+    ]);
+    //@ts-expect-error missing vitest type
+    db.custody.findMany.mockResolvedValueOnce([]);
+
+    await bulkDeleteKits({
+      kitIds: ["kit-A", "kit-B"],
+      confirmation: "2",
+      organizationId: "org-1",
+      userId: "user-1",
+    });
+
+    const notes = (db.note.createMany as ReturnType<typeof vitest.fn>).mock
+      .calls[0][0].data as { content: string }[];
+    expect(notes.map((note) => note.content)).toEqual([
+      expect.stringContaining("custody of 10 pens when kit **Box A**"),
+      expect.stringContaining("custody of 5 pens when kit **Box B**"),
+    ]);
+  });
+
+  it("reports the delete as done when its history lines cannot be written", async () => {
+    //@ts-expect-error missing vitest type
+    db.kit.findMany.mockResolvedValue([
+      {
+        id: "kit-1",
+        name: "Kit 1",
+        image: null,
+        assetKits: [{ quantity: 1, asset: { id: "asset-1", title: "A" } }],
+        custody: null,
+      },
+    ]);
+    //@ts-expect-error missing vitest type
+    db.note.createMany.mockRejectedValueOnce(new Error("connection reset"));
+    // why: keeps the expected error log out of the test output
+    const loggerSpy = vitest
+      .spyOn(Logger, "error")
+      .mockImplementation(() => {});
+    onTestFinished(() => loggerSpy.mockRestore());
+
+    // Resolves rather than rejects: the kits are already deleted.
+    await bulkDeleteKits({
+      kitIds: ["kit-1"],
+      confirmation: "1",
+      organizationId: "org-1",
+      userId: "user-1",
+    });
+    expect(db.kit.deleteMany).toHaveBeenCalled();
+    expect(loggerSpy).toHaveBeenCalledTimes(1);
   });
 
   it("should not emit events when no kits have assets", async () => {
@@ -2780,6 +2968,88 @@ describe("updateKitAssets - Location Cascade", () => {
     expect(db.assetLocation.createMany).not.toHaveBeenCalled();
     expect(db.assetLocation.updateMany).not.toHaveBeenCalled();
     expect(db.assetLocation.deleteMany).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The kit an added asset leaves is named in its "changed kit from A to B" note
+ * and is the `fromValue` of its ASSET_KIT_CHANGED event. Only an INDIVIDUAL
+ * asset leaves its kit; a QUANTITY_TRACKED one keeps its other kits.
+ */
+describe("updateKitAssets - the kit an added asset leaves", () => {
+  const BOX_A = { id: "kit-a", name: "Box A" };
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    //@ts-expect-error missing vitest type
+    db.kit.findUniqueOrThrow.mockResolvedValue({
+      id: "kit-1",
+      name: "Box B",
+      location: null,
+      assetKits: [],
+      custody: null,
+    });
+  });
+
+  /** Adds `asset-1`, currently in Box A, to Box B as the given type. */
+  async function addAssetFromBoxA(type: AssetType) {
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      {
+        id: "asset-1",
+        title: "Camera",
+        type,
+        unitOfMeasure: null,
+        assetKits: [{ kitId: BOX_A.id, quantity: 1, kit: BOX_A }],
+        custody: null,
+        assetLocations: [],
+      },
+    ]);
+    const { updateKitAssets } = await import("./service.server");
+    await updateKitAssets({
+      kitId: "kit-1",
+      assetIds: ["asset-1"],
+      userId: "user-1",
+      organizationId: "org-1",
+      request: new Request("http://test.com"),
+    });
+  }
+
+  /** The ASSET_KIT_CHANGED event recorded for the added asset. */
+  function kitChangedEvent() {
+    return vitest
+      .mocked(recordEvents)
+      .mock.calls.flatMap(([events]) => events)
+      .find(
+        (event) =>
+          event.action === "ASSET_KIT_CHANGED" && event.toValue === "kit-1"
+      );
+  }
+
+  it("names the kit an individual asset moves out of", async () => {
+    await addAssetFromBoxA(AssetType.INDIVIDUAL);
+
+    expect(createBulkKitChangeNotes).toHaveBeenCalledWith(
+      expect.objectContaining({
+        newlyAddedAssets: [
+          expect.objectContaining({ id: "asset-1", kit: BOX_A }),
+        ],
+      })
+    );
+    expect(kitChangedEvent()).toMatchObject({ fromValue: BOX_A.id });
+  });
+
+  it("names no kit for a quantity-tracked asset, which stays in its other kits", async () => {
+    await addAssetFromBoxA(AssetType.QUANTITY_TRACKED);
+
+    expect(createBulkKitChangeNotes).toHaveBeenCalledWith(
+      expect.objectContaining({
+        newlyAddedAssets: [
+          expect.objectContaining({ id: "asset-1", kit: null }),
+        ],
+      })
+    );
+    expect(kitChangedEvent()).toMatchObject({ fromValue: null });
   });
 });
 

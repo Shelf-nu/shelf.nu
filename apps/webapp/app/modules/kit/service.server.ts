@@ -3043,11 +3043,15 @@ async function performKitDeletion({
     actorLink = wrapUserLinkForNote({ ...actor, id: userId });
   }
 
-  // Per-asset units released by the kit-delete, sourced from the inherited
+  // Units released per kit custody and asset, sourced from the inherited
   // Custody rows read inside the tx. Populated below; consumed by the
   // release notes written after the tx (which only have `k.assets`, not the
-  // Custody rows, in scope). Empty for INDIVIDUAL-only deletes.
-  const releasedQtyByAssetId = new Map<string, number | null>();
+  // Custody rows, in scope). Keyed by kit custody too: a quantity-tracked
+  // asset in two deleted kits holds a different count in each. Empty for
+  // INDIVIDUAL-only deletes.
+  const releasedQty = new Map<string, number | null>();
+  const releasedQtyKey = (kitCustodyId: string, assetId: string) =>
+    `${kitCustodyId}:${assetId}`;
 
   await db.$transaction(async (tx) => {
     const kitCustodyIds = inCustodyKits
@@ -3084,7 +3088,10 @@ async function performKitDeletion({
         // Record the released quantity per asset so the post-tx note can
         // name "custody of 50 units" without re-reading the Custody rows.
         for (const row of inheritedCustodyRows) {
-          releasedQtyByAssetId.set(row.assetId, row.quantity);
+          releasedQty.set(
+            releasedQtyKey(row.kitCustodyId!, row.assetId),
+            row.quantity
+          );
         }
 
         await recordEvents(
@@ -3114,46 +3121,29 @@ async function performKitDeletion({
       }
     }
 
-    // Activity events — one ASSET_KIT_CHANGED per asset that loses its
-    // kit on cascade. Emitted before the deleteMany so the AssetKit
-    // pivot rows are still readable for context if a future report
-    // needs them. Folded in from main's PR #2535 which emitted these
-    // inline in both `deleteKit` and `bulkDeleteKits`; the shared
-    // helper deduplicates that.
-    const kitByAssetId = new Map<string, KitForDeletion>();
-    // Asset shape (type) + the per-row AssetKit.quantity this asset held in
-    // the kit being deleted — both keyed by id for the cascade event meta.
-    const assetForEventById = new Map<
-      string,
-      KitForDeletion["assets"][number]
-    >();
-    for (const k of kits) {
-      for (const a of k.assets) {
-        kitByAssetId.set(a.id, k);
-        assetForEventById.set(a.id, a);
-      }
-    }
+    // Activity events: one ASSET_KIT_CHANGED per kit membership the cascade
+    // removes. A quantity-tracked asset in two deleted kits gets one event
+    // per kit, each naming that kit and its slice. Emitted before the
+    // deleteMany so the AssetKit pivot rows are still readable for context.
     if (allAssetIds.length > 0) {
       await recordEvents(
-        allAssetIds.map((assetId) => {
-          const sourceKit = kitByAssetId.get(assetId);
-          const asset = assetForEventById.get(assetId);
-          return {
+        kits.flatMap((k) =>
+          k.assets.map((asset) => ({
             organizationId,
             actorUserId: userId,
             action: "ASSET_KIT_CHANGED" as const,
             entityType: "ASSET" as const,
-            entityId: assetId,
-            assetId,
-            kitId: sourceKit?.id,
+            entityId: asset.id,
+            assetId: asset.id,
+            kitId: k.id,
             field: "kitId",
-            fromValue: sourceKit?.id ?? null,
+            fromValue: k.id,
             toValue: null,
             // Qty-tracked: the per-row AssetKit.quantity held in the deleted
-            // kit (NOT Asset.quantity); {} for INDIVIDUAL / unknown asset.
-            meta: asset ? { ...assetQtyMeta(asset, asset.kitQuantity) } : {},
-          };
-        }),
+            // kit (NOT Asset.quantity); {} for INDIVIDUAL.
+            meta: { ...assetQtyMeta(asset, asset.kitQuantity) },
+          }))
+        ),
         tx
       );
     }
@@ -3206,60 +3196,61 @@ async function performKitDeletion({
     }
   });
 
-  if (inCustodyKits.length > 0) {
-    // One note per asset (not one shared string per kit): qty-tracked assets
-    // each name their own released unit count ("custody of 50 units"), so the
-    // content differs per row. INDIVIDUAL assets keep the exact prior wording.
-    // why: org-scoping is implicit — `inCustodyKits`/`k.assets` are derived
-    // from the org-scoped kit reads at the call sites, never request input.
-    const noteData = inCustodyKits
-      .filter((k) => k.assets.length > 0)
-      .flatMap((k) => {
-        const custodianDisplay = k.custody?.custodian
-          ? wrapCustodianForNote({ teamMember: k.custody.custodian })
-          : "**Unknown Custodian**";
-        return k.assets.map((asset) => {
-          const count = formatUnitCount(
-            asset,
-            releasedQtyByAssetId.get(asset.id)
-          );
-          const custodyPhrase = count ? `custody of ${count}` : "custody";
-          return {
-            content: `${actorLink} released ${custodianDisplay}'s ${custodyPhrase} when kit **${stripMarkdocDelimiters(
-              k.name
-            )}** was deleted.`,
-            type: "UPDATE" as const,
-            userId,
-            assetId: asset.id,
-          };
-        });
-      });
-    if (noteData.length > 0) {
-      await db.note.createMany({ data: noteData });
-    }
-  }
-
-  // Every member of a kit that was not in custody gets a line saying it left
-  // the kit, the way removing it from the kit would. Members of an in-custody
-  // kit already got the release line above, which names the deleted kit.
-  // why: org-scoping is implicit, as above: the kits come from org-scoped reads.
-  const membershipNotes = kits
-    .filter((k) => !k.custody)
-    .flatMap((k) =>
-      k.assets.map((asset) => {
-        const count = formatUnitCount(asset, asset.kitQuantity);
+  // One history line per member, per deleted kit. A member of an in-custody
+  // kit gets the custody release line, which names the kit and its own
+  // released unit count ("custody of 50 units"). A member of any other kit
+  // gets a line saying the deletion removed it from the kit.
+  // why: org-scoping is implicit: `kits`/`k.assets` are derived from the
+  // org-scoped kit reads at the call sites, never request input.
+  const noteData = kits.flatMap((k) => {
+    const kitName = stripMarkdocDelimiters(k.name);
+    const kitCustody = k.custody;
+    if (kitCustody) {
+      const custodianDisplay = kitCustody.custodian
+        ? wrapCustodianForNote({ teamMember: kitCustody.custodian })
+        : "**Unknown Custodian**";
+      return k.assets.map((asset) => {
+        const count = formatUnitCount(
+          asset,
+          releasedQty.get(releasedQtyKey(kitCustody.id, asset.id))
+        );
+        const custodyPhrase = count ? `custody of ${count}` : "custody";
         return {
-          content: `${actorLink} deleted kit **${stripMarkdocDelimiters(
-            k.name
-          )}**, which removed ${count ?? "this asset"} from it.`,
+          content: `${actorLink} released ${custodianDisplay}'s ${custodyPhrase} when kit **${kitName}** was deleted.`,
           type: "UPDATE" as const,
           userId,
           assetId: asset.id,
         };
-      })
-    );
-  if (membershipNotes.length > 0) {
-    await db.note.createMany({ data: membershipNotes });
+      });
+    }
+    return k.assets.map((asset) => {
+      const count = formatUnitCount(asset, asset.kitQuantity);
+      return {
+        content: `${actorLink} deleted kit **${kitName}**, which removed ${
+          count ?? "this asset"
+        } from it.`,
+        type: "UPDATE" as const,
+        userId,
+        assetId: asset.id,
+      };
+    });
+  });
+
+  // The kits are already deleted, so a failed note write is logged, not
+  // thrown: the caller must not report a completed delete as failed.
+  if (noteData.length > 0) {
+    try {
+      await db.note.createMany({ data: noteData });
+    } catch (cause) {
+      Logger.error(
+        new ShelfError({
+          cause,
+          message: "Failed to write the history lines for deleted kits",
+          additionalData: { kitIds: kitIdsToDelete, organizationId },
+          label,
+        })
+      );
+    }
   }
 
   const kitWithImages = kits.filter((k) => !!k.image);
@@ -6236,9 +6227,16 @@ export async function updateKitAssets({
         !kit.assets.some((existingAsset) => existingAsset.id === asset.id)
     );
 
-    /** The kit a newly-added asset leaves by joining this one, if any. */
-    const sourceKitOf = (asset: (typeof newlyAddedAssets)[number]) =>
-      getKitAnAssetLeaves(asset, kit.id);
+    /**
+     * The kit each newly-added asset leaves by joining this one, by asset id.
+     * Absent for a plain add. Named in the move note and the event `fromValue`.
+     */
+    const sourceKitByAssetId = new Map(
+      newlyAddedAssets.flatMap((asset) => {
+        const sourceKit = getKitAnAssetLeaves(asset, kit.id);
+        return sourceKit ? [[asset.id, sourceKit] as const] : [];
+      })
+    );
 
     /**
      * The `AssetKit.quantity` each newly-added asset will hold IN THIS KIT
@@ -6861,7 +6859,7 @@ export async function updateKitAssets({
       unitOfMeasure: asset.unitOfMeasure,
       quantity: addedAssetKitQuantity(asset),
       // The kit it leaves, so a move reads "changed kit from A to B".
-      kit: sourceKitOf(asset),
+      kit: sourceKitByAssetId.get(asset.id) ?? null,
     }));
     const removedAssetsForNotes = (addOnly ? [] : removedAssets).map(
       (asset) => ({
@@ -6934,7 +6932,7 @@ export async function updateKitAssets({
         kitId: kit.id,
         field: "kitId",
         // The kit an INDIVIDUAL asset leaves; null for a plain add.
-        fromValue: sourceKitOf(asset)?.id ?? null,
+        fromValue: sourceKitByAssetId.get(asset.id)?.id ?? null,
         toValue: kit.id,
         // Qty-tracked: record the per-row AssetKit.quantity this asset now
         // holds in the kit (same value the pivot createMany wrote).
