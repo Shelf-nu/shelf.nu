@@ -12,6 +12,7 @@
 import { Expo } from "expo-server-sdk";
 import type { ExpoPushMessage, ExpoPushTicket } from "expo-server-sdk";
 import { ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 import { getPushReceipts, sendPushMessages } from "./expo.server";
 import type { DeviceMessage } from "./expo.server";
 
@@ -30,6 +31,11 @@ const silentExpo = await vi.hoisted(async () => {
   process.env.EXPO_BASE_URL = `http://127.0.0.1:${address.port}`;
   return server;
 });
+
+// why: keeps refusal logs out of the output so tests can assert on them
+vi.mock("~/utils/logger", () => ({
+  Logger: { error: vi.fn() },
+}));
 
 const realSend = Expo.prototype.sendPushNotificationsAsync;
 // why: the Expo push service is an external network call; chunking stays real
@@ -65,6 +71,7 @@ function expoError(fields: {
 }
 
 beforeEach(() => {
+  vi.clearAllMocks();
   sendSpy.mockReset();
   receiptsSpy.mockReset();
 });
@@ -99,6 +106,30 @@ describe("sendPushMessages", () => {
     expect(result.tickets[149]).toEqual({
       index: 149,
       ticket: { status: "ok", id: "ticket-ExponentPushToken[device-149]" },
+    });
+  });
+
+  it("keeps at most six requests in flight and still pairs every ticket with its message", async () => {
+    let inFlight = 0;
+    let peak = 0;
+    sendSpy.mockImplementation(async (chunk) => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      inFlight -= 1;
+      return acceptChunk(chunk);
+    });
+
+    const result = await sendPushMessages(messages(1000));
+
+    expect(sendSpy).toHaveBeenCalledTimes(10);
+    expect(peak).toBe(6);
+    expect(result.tickets.map(({ index }) => index)).toEqual(
+      Array.from({ length: 1000 }, (_, index) => index)
+    );
+    expect(result.tickets[999].ticket).toEqual({
+      status: "ok",
+      id: "ticket-ExponentPushToken[device-999]",
     });
   });
 
@@ -317,7 +348,40 @@ describe("getPushReceipts", () => {
     expect(receipts["ticket-449"]).toEqual({ status: "ok" });
   });
 
-  it("rejects with a Push error carrying the status when Expo refuses a request", async () => {
+  it("keeps the receipts that arrived and logs the refusal when only a later request is refused", async () => {
+    const ids = Array.from({ length: 301 }, (_, index) => `ticket-${index}`);
+    receiptsSpy
+      .mockResolvedValueOnce({
+        "ticket-0": {
+          status: "error",
+          message: "gone",
+          details: { error: "DeviceNotRegistered" },
+        },
+      })
+      .mockRejectedValueOnce(expoError({ statusCode: 400 }));
+
+    const receipts = await getPushReceipts(ids);
+
+    expect(receiptsSpy).toHaveBeenCalledTimes(2);
+    expect(receipts).toEqual({
+      "ticket-0": {
+        status: "error",
+        message: "gone",
+        details: { error: "DeviceNotRegistered" },
+      },
+    });
+    expect(Logger.error).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(Logger.error).mock.calls[0][0]).toMatchObject({
+      label: "Push",
+      additionalData: {
+        statusCode: 400,
+        ticketCount: 301,
+        refusedTicketCount: 1,
+      },
+    });
+  });
+
+  it("rejects with a Push error carrying the status when Expo refuses every request", async () => {
     receiptsSpy.mockRejectedValueOnce(expoError({ statusCode: 503 }));
 
     await expect(getPushReceipts(["ticket-1"])).rejects.toMatchObject({
@@ -325,5 +389,6 @@ describe("getPushReceipts", () => {
       message: "The Expo push service rejected a receipts request.",
       additionalData: { statusCode: 503, ticketCount: 1 },
     });
+    expect(Logger.error).not.toHaveBeenCalled();
   });
 });

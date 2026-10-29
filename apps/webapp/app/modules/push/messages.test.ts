@@ -55,6 +55,7 @@ const MESSAGES = {
     ...PERIOD,
   }),
   BOOKING_EXTEND: PUSH_MESSAGES.BOOKING_EXTEND({ ...BOOKING, ...PERIOD }),
+  BOOKING_SHORTEN: PUSH_MESSAGES.BOOKING_SHORTEN({ ...BOOKING, ...PERIOD }),
   BOOKING_DELETE: PUSH_MESSAGES.BOOKING_DELETE({ ...BOOKING, ...PERIOD }),
   BOOKING_UPDATE: PUSH_MESSAGES.BOOKING_UPDATE({ ...BOOKING, ...PERIOD }),
   BOOKING_CUSTODIAN_ASSIGNED: PUSH_MESSAGES.BOOKING_CUSTODIAN_ASSIGNED(BOOKING),
@@ -97,6 +98,7 @@ describe("PUSH_MESSAGES", () => {
         "BOOKING_OVERDUE",
         "BOOKING_RESERVATION",
         "BOOKING_REVERT_TO_DRAFT",
+        "BOOKING_SHORTEN",
         "BOOKING_UPDATE",
       ].sort()
     );
@@ -271,6 +273,7 @@ describe("email subjects", () => {
           "CANCEL",
           "REVERT_TO_DRAFT",
           "EXTEND",
+          "SHORTEN",
           "DELETE",
           "UPDATE",
         ] as const
@@ -284,6 +287,7 @@ describe("email subjects", () => {
       "❌ Booking cancelled (Camera kit) - shelf.nu",
       "↩️ Booking reverted to draft (Camera kit) - shelf.nu",
       "Booking extended (Camera kit) - shelf.nu",
+      "Booking shortened (Camera kit) - shelf.nu",
       "🗑️ Booking deleted (Camera kit) - shelf.nu",
       "📝 Booking updated (Camera kit) - shelf.nu",
     ]);

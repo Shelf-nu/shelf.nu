@@ -338,20 +338,29 @@ export const revertedToDraftEmailContent = (args: BasicEmailContentArgs) =>
   });
 
 /**
- * Booking is extended
+ * Booking end date changed
  *
- * This email is sent when a booking's end date is extended.
+ * This email is sent when an ongoing or overdue booking's end date moves
+ * later or earlier.
+ *
+ * @param args.oldToDate - The end the booking had before the change
+ * @param args.verb - How the change reads: "extended" for a later end,
+ *   "shortened" for an earlier one
  */
 export function extendBookingEmailContent({
   oldToDate,
+  verb,
   ...args
-}: BasicEmailContentArgs & { oldToDate: Date }) {
+}: BasicEmailContentArgs & {
+  oldToDate: Date;
+  verb: "extended" | "shortened";
+}) {
   const format = (date: Date) =>
     formatDate(date, args.prefs, { includeTime: true });
 
   return baseBookingTextEmailContent({
     ...args,
-    emailContent: `You booking has been extended from ${format(
+    emailContent: `Your booking has been ${verb} from ${format(
       oldToDate
     )} to ${format(args.to)}`,
   });

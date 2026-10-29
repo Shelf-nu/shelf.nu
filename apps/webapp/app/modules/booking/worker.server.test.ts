@@ -5,13 +5,18 @@ import { sendPush } from "~/modules/push/service.server";
 import { Logger } from "~/utils/logger";
 import { scheduler } from "~/utils/scheduler.server";
 import { BOOKING_SCHEDULER_EVENTS_ENUM } from "./constants";
+import { sendCheckinReminder } from "./email-helpers";
+import { getBookingNotificationRecipients } from "./notification-recipients.server";
+import type * as RecipientsModule from "./notification-recipients.server";
 import {
   createStatusTransitionNote,
   scheduleExpiryArchiveJob,
+  scheduleNextBookingJob,
 } from "./service.server";
 import type { SchedulerData } from "./types";
 import { registerBookingWorkers } from "./worker.server";
 import { recordEvent } from "../activity-event/service.server";
+import { createSystemBookingNote } from "../booking-note/service.server";
 
 // @vitest-environment node
 
@@ -82,6 +87,19 @@ vitest.mock("~/modules/push/service.server", () => ({
   sendPush: vitest.fn().mockResolvedValue(undefined),
 }));
 
+// why: the reminder and overdue pushes below resolve their recipients for
+// real; the end-date-change chain tests replace the resolver with an empty
+// list to stay on the status transition and the note
+vitest.mock("./notification-recipients.server", async (importOriginal) => {
+  const actual = await importOriginal<typeof RecipientsModule>();
+  return {
+    ...actual,
+    getBookingNotificationRecipients: vitest.fn(
+      actual.getBookingNotificationRecipients
+    ),
+  };
+});
+
 // why: preventing actual email content generation during tests
 vitest.mock("./email-helpers", () => ({
   checkoutReminderEmailContent: vitest.fn().mockReturnValue(""),
@@ -119,6 +137,7 @@ vitest.mock("~/utils/error", () => ({
       super(opts.message);
     }
   },
+  isNotFoundError: vitest.fn().mockReturnValue(false),
 }));
 
 /**
@@ -550,5 +569,134 @@ describe("checkout reminder and overdue pushes", () => {
         },
       ],
     ]);
+  });
+});
+
+/**
+ * The jobs a booking runs after its end date changes: the check-in reminder
+ * fires an hour before the stored end and schedules the overdue job at the end
+ * it reads then, and the overdue job moves ONGOING to OVERDUE. These are the
+ * only path to OVERDUE, so a shortened booking turns overdue at its new end
+ * only through this chain.
+ */
+describe("check-in reminder and overdue chain after an end-date change", () => {
+  let workerHandler: (job: { data: SchedulerData }) => Promise<void>;
+
+  beforeAll(async () => {
+    workerHandler = await getWorkerHandler();
+  });
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    vitest.mocked(getBookingNotificationRecipients).mockResolvedValue([]);
+  });
+
+  const hints = { timeZone: "UTC", locale: "en-US" };
+  /** The end the booking was shortened to. */
+  const SHORTENED_END = new Date("2030-06-01T15:00:00Z");
+
+  /** The booking as the worker reads it after the end moved earlier. */
+  function shortenedBooking(status: BookingStatus) {
+    return {
+      id: "booking-1",
+      name: "Site survey",
+      status,
+      from: new Date("2030-06-01T09:00:00Z"),
+      to: SHORTENED_END,
+      organizationId: "org-1",
+      custodianUserId: "user-1",
+      _count: { bookingAssets: 1 },
+    };
+  }
+
+  it("sends the reminder and schedules the overdue job at the end stored when it fires", async () => {
+    //@ts-expect-error missing vitest type
+    db.booking.findFirstOrThrow.mockResolvedValue(
+      shortenedBooking(BookingStatus.ONGOING)
+    );
+
+    await workerHandler({
+      data: {
+        id: "booking-1",
+        hints,
+        eventType: BOOKING_SCHEDULER_EVENTS_ENUM.checkinReminder,
+      },
+    });
+
+    expect(sendCheckinReminder).toHaveBeenCalledTimes(1);
+    expect(scheduleNextBookingJob).toHaveBeenCalledWith({
+      data: {
+        id: "booking-1",
+        hints,
+        eventType: BOOKING_SCHEDULER_EVENTS_ENUM.overdueHandler,
+      },
+      when: SHORTENED_END,
+    });
+  });
+
+  it("does nothing when a reminder left over from the old, later end fires after the booking is overdue", async () => {
+    //@ts-expect-error missing vitest type
+    db.booking.findFirstOrThrow.mockResolvedValue(
+      shortenedBooking(BookingStatus.OVERDUE)
+    );
+
+    await workerHandler({
+      data: {
+        id: "booking-1",
+        hints,
+        eventType: BOOKING_SCHEDULER_EVENTS_ENUM.checkinReminder,
+      },
+    });
+
+    expect(sendCheckinReminder).not.toHaveBeenCalled();
+    expect(scheduleNextBookingJob).not.toHaveBeenCalled();
+  });
+
+  it("moves an ONGOING booking to OVERDUE and writes the transition note", async () => {
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue(
+      shortenedBooking(BookingStatus.OVERDUE)
+    );
+
+    await workerHandler({
+      data: {
+        id: "booking-1",
+        hints,
+        eventType: BOOKING_SCHEDULER_EVENTS_ENUM.overdueHandler,
+      },
+    });
+
+    expect(db.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "booking-1", status: BookingStatus.ONGOING },
+        data: { status: BookingStatus.OVERDUE },
+      })
+    );
+    expect(createSystemBookingNote).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingId: "booking-1",
+        content: expect.stringContaining("Booking became overdue."),
+      })
+    );
+  });
+
+  it("changes nothing when an overdue job left over from the old end fires on an already overdue booking", async () => {
+    // The update is gated on ONGOING, so on an OVERDUE booking it matches no
+    // row and Prisma throws; the worker logs it and writes no second note.
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockRejectedValue(
+      new Error("Record to update not found")
+    );
+
+    await workerHandler({
+      data: {
+        id: "booking-1",
+        hints,
+        eventType: BOOKING_SCHEDULER_EVENTS_ENUM.overdueHandler,
+      },
+    });
+
+    expect(createSystemBookingNote).not.toHaveBeenCalled();
+    expect(Logger.error).toHaveBeenCalledTimes(1);
   });
 });

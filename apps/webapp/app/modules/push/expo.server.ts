@@ -24,6 +24,7 @@ import { Agent } from "undici";
 import { z } from "zod";
 import { EXPO_ACCESS_TOKEN } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 
 /**
  * The Shelf companion's identity on Expo, as `apps/companion/app.json`
@@ -48,6 +49,15 @@ const TokensByProjectSchema = z.record(z.array(z.string()));
  * job may run before pg-boss expires it and runs it again.
  */
 const EXPO_REQUEST_TIMEOUT_MS = 30_000;
+
+/**
+ * How many send requests run at once. Six batches of 100 in flight keep a
+ * send to a thousand devices at two rounds of requests, so even with every
+ * request timing out it ends well inside the send job's five-minute expiry,
+ * and match the Expo SDK's own request limit (`maxConcurrentRequests`, 6 by
+ * default), which would only queue any more.
+ */
+const EXPO_SEND_CONCURRENCY = 6;
 
 /**
  * A message for exactly one device. A single `to` keeps one ticket per
@@ -182,90 +192,151 @@ function projectMixOf(
 }
 
 /**
- * Sends push messages in the batch sizes Expo accepts. A refused batch does
- * not stop the ones after it.
+ * Runs `task` once per item, at most `limit` at a time, starting them in
+ * order, and answers the results in the order of `items`.
+ */
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  task: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  async function runNext(): Promise<void> {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await task(items[index], index);
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, runNext)
+  );
+  return results;
+}
+
+/**
+ * Sends push messages in the batch sizes Expo accepts, up to
+ * {@link EXPO_SEND_CONCURRENCY} batches at a time. A refused batch does not
+ * stop the others.
  *
  * @param messages - One message per device
  * @returns Each issued ticket with the index of its message in `messages`,
- *   and each refused batch
+ *   and each refused batch, both in send order
  */
 export async function sendPushMessages(
   messages: DeviceMessage[]
 ): Promise<SendPushResult> {
   const chunks = expoClient().chunkPushNotifications(messages);
-  const result: SendPushResult = { tickets: [], failedChunks: [] };
 
   // Each message has a single `to`, so chunks hold whole messages in order
   // and a chunk starts where the previous one ended.
+  const firstIndexes: number[] = [];
   let firstIndex = 0;
-  for (const [chunkIndex, chunk] of chunks.entries()) {
-    try {
-      const tickets = await expoClient().sendPushNotificationsAsync(chunk);
-      tickets.forEach((ticket, offset) => {
-        result.tickets.push({ index: firstIndex + offset, ticket });
-      });
-    } catch (cause) {
-      const statusCode = statusCodeOf(cause);
-      const code = codeOf(cause);
-      result.failedChunks.push({
-        index: chunkIndex,
-        firstIndex,
-        messageCount: chunk.length,
-        statusCode,
-        code,
-        retryable: isRetryable(cause),
-        error: new ShelfError({
-          cause: withoutTokens(cause),
-          message:
-            "The Expo push service rejected a push notification request.",
-          additionalData: {
-            statusCode,
-            code,
-            chunkIndex,
-            chunkCount: chunks.length,
-            messageCount: chunk.length,
-          },
-          label: "Push",
-        }),
-        projectMix: projectMixOf(cause, code),
-      });
-    }
+  for (const chunk of chunks) {
+    firstIndexes.push(firstIndex);
     firstIndex += chunk.length;
   }
 
-  return result;
+  const outcomes = await mapWithConcurrency(
+    chunks,
+    EXPO_SEND_CONCURRENCY,
+    async (chunk, chunkIndex): Promise<SendPushResult> => {
+      const start = firstIndexes[chunkIndex];
+      try {
+        const tickets = await expoClient().sendPushNotificationsAsync(chunk);
+        return {
+          tickets: tickets.map((ticket, offset) => ({
+            index: start + offset,
+            ticket,
+          })),
+          failedChunks: [],
+        };
+      } catch (cause) {
+        const statusCode = statusCodeOf(cause);
+        const code = codeOf(cause);
+        return {
+          tickets: [],
+          failedChunks: [
+            {
+              index: chunkIndex,
+              firstIndex: start,
+              messageCount: chunk.length,
+              statusCode,
+              code,
+              retryable: isRetryable(cause),
+              error: new ShelfError({
+                cause: withoutTokens(cause),
+                message:
+                  "The Expo push service rejected a push notification request.",
+                additionalData: {
+                  statusCode,
+                  code,
+                  chunkIndex,
+                  chunkCount: chunks.length,
+                  messageCount: chunk.length,
+                },
+                label: "Push",
+              }),
+              projectMix: projectMixOf(cause, code),
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  return {
+    tickets: outcomes.flatMap(({ tickets }) => tickets),
+    failedChunks: outcomes.flatMap(({ failedChunks }) => failedChunks),
+  };
 }
 
 /**
  * Fetches the delivery receipts for tickets Expo accepted earlier. A receipt
- * missing from the result is not ready yet or has expired.
+ * missing from the result is not ready yet, has expired, or sat in a request
+ * Expo refused; the caller checks those tickets again later. A refused
+ * request does not stop the others, so the receipts that did arrive are
+ * always acted on. Refusals are logged, and thrown only when every request
+ * was refused and nothing arrived.
  *
  * @param ticketIds - Ids from successful tickets
  * @returns Receipts keyed by ticket id
- * @throws {ShelfError} When Expo rejects a batch
+ * @throws {ShelfError} When Expo refuses every request
  */
 export async function getPushReceipts(
   ticketIds: string[]
 ): Promise<Record<string, ExpoPushReceipt>> {
   const receipts: Record<string, ExpoPushReceipt> = {};
+  const chunks = expoClient().chunkPushNotificationReceiptIds(ticketIds);
+  const refusals: ShelfError[] = [];
 
-  for (const chunk of expoClient().chunkPushNotificationReceiptIds(ticketIds)) {
+  for (const chunk of chunks) {
     try {
       Object.assign(
         receipts,
         await expoClient().getPushNotificationReceiptsAsync(chunk)
       );
     } catch (cause) {
-      throw new ShelfError({
-        cause: withoutTokens(cause),
-        message: "The Expo push service rejected a receipts request.",
-        additionalData: {
-          statusCode: statusCodeOf(cause),
-          ticketCount: ticketIds.length,
-        },
-        label: "Push",
-      });
+      refusals.push(
+        new ShelfError({
+          cause: withoutTokens(cause),
+          message: "The Expo push service rejected a receipts request.",
+          additionalData: {
+            statusCode: statusCodeOf(cause),
+            ticketCount: ticketIds.length,
+            refusedTicketCount: chunk.length,
+          },
+          label: "Push",
+        })
+      );
     }
+  }
+
+  if (refusals.length > 0 && refusals.length === chunks.length) {
+    throw refusals[0];
+  }
+  for (const refusal of refusals) {
+    Logger.error(refusal);
   }
 
   return receipts;

@@ -478,6 +478,20 @@ describe("deliverPush", () => {
     ]);
   });
 
+  it("sends nothing to someone who is no longer a member of the workspace", async () => {
+    seedPushToken({ token: LIVE_TOKEN, userId: "user-1" });
+    seedPushToken({ token: "ExponentPushToken[former]", userId: "user-3" });
+
+    await sendAndDeliver({ userIds: ["user-1", "user-3"] });
+    expect(sentMessages()).toEqual([
+      expect.objectContaining({ to: LIVE_TOKEN }),
+    ]);
+
+    expoSend.mockClear();
+    await sendAndDeliver({ userIds: ["user-3"] });
+    expect(expoSend).not.toHaveBeenCalled();
+  });
+
   it("sends nothing to someone who switched push off", async () => {
     seedPushToken({ token: LIVE_TOKEN, userId: "user-1" });
     seedPushToken({ token: OTHER_TOKEN, userId: "user-2" });

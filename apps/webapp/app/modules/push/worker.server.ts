@@ -14,6 +14,7 @@
 import type PgBoss from "pg-boss";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { ShelfError } from "~/utils/error";
+import { isLastAttempt } from "~/utils/job-retry";
 import { Logger } from "~/utils/logger";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import { checkPushReceipts, deliverPush } from "./service.server";
@@ -61,15 +62,7 @@ async function handlePushJob(job: PgBoss.JobWithMetadata<PushJob>) {
   try {
     await runPushJob(job.data);
   } catch (cause) {
-    // why: pg-boss increments retrycount at fetch time, so with N retries the
-    // handler observes retrycount 0, 1, ... N and the final attempt has
-    // retrycount === retrylimit
-    const isLastRetry =
-      job.retrycount != null &&
-      job.retrylimit != null &&
-      job.retrycount >= job.retrylimit;
-
-    if (isLastRetry) {
+    if (isLastAttempt(job)) {
       Logger.error(
         new ShelfError({
           cause,

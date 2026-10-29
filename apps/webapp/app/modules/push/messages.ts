@@ -116,6 +116,7 @@ const BOOKING_TITLES: Record<
   CANCEL: (name) => `❌ Booking cancelled (${name})`,
   REVERT_TO_DRAFT: (name) => `↩️ Booking reverted to draft (${name})`,
   EXTEND: (name) => `Booking extended (${name})`,
+  SHORTEN: (name) => `Booking shortened (${name})`,
   DELETE: (name) => `🗑️ Booking deleted (${name})`,
   UPDATE: (name) => `📝 Booking updated (${name})`,
 };
@@ -225,6 +226,7 @@ export const PUSH_MESSAGES: {
   BOOKING_REVERT_TO_DRAFT: (c) =>
     bookingPush(c, "REVERT_TO_DRAFT", bookingPeriod(c)),
   BOOKING_EXTEND: (c) => bookingPush(c, "EXTEND", `Now ends on ${c.to}`),
+  BOOKING_SHORTEN: (c) => bookingPush(c, "SHORTEN", `Now ends on ${c.to}`),
   BOOKING_DELETE: (c) =>
     bookingPush(c, "DELETE", bookingPeriod(c), bookingsListUrl(c)),
   BOOKING_UPDATE: (c) =>
