@@ -54,7 +54,10 @@ const SHEET = "https://contoso.sharepoint.com/:x:/s/Lab/EcAl26?e=k3";
 const SHOP = "https://www.example-shop.com/c/product/1234";
 
 /** A TEXT value from a field with the given format. */
-function text(raw: string, format?: "PLAIN" | "LINK"): LinkTitleSource {
+function text(
+  raw: string,
+  format: "PLAIN" | "LINK" = "PLAIN"
+): LinkTitleSource {
   return {
     value: { raw, valueText: raw },
     customField: { type: "TEXT", format },
@@ -110,7 +113,7 @@ describe("getLinkTitles: reading", () => {
         text("Manual: https://www.example.com/a (rev B)", "LINK"),
         {
           value: { raw: "https://www.example.com/b", valueMultiLineText: {} },
-          customField: { type: "MULTILINE_TEXT" },
+          customField: { type: "MULTILINE_TEXT", format: "PLAIN" },
         },
       ],
     });

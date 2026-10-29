@@ -7,11 +7,15 @@
  * are displayed and must load for a member who cannot edit the asset, while
  * the editor-only definitions stay skipped for them.
  *
+ * The loader also sends `linkTitles` for the links among the values shown,
+ * the same fixture the chip tests render.
+ *
  * @see {@link file://./../../../app/routes/_layout+/assets.$assetId.overview.tsx}
  * @see {@link file://./../../../app/components/assets/asset-overview-custom-fields.tsx}
  */
 import { OrganizationRoles } from "@prisma/client";
 import { createCustomField } from "@factories";
+import { LINK_TITLES, MANUAL_URL } from "@helpers/link-titles";
 import { permissionContext } from "@helpers/role-access";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -69,6 +73,15 @@ vi.mock("~/modules/custom-field/service.server", async (importOriginal) => ({
   getActiveCustomFields: mockGetActiveCustomFields,
 }));
 
+const { mockGetLinkTitles } = vi.hoisted(() => ({
+  mockGetLinkTitles: vi.fn(),
+}));
+// why: the titles are read from LinkPreview rows in Postgres (and links due a
+// fetch are queued); the test records which values the loader hands over.
+vi.mock("~/modules/link-preview/service.server", () => ({
+  getLinkTitles: mockGetLinkTitles,
+}));
+
 import { loader } from "~/routes/_layout+/assets.$assetId.overview";
 
 const manual = createCustomField({
@@ -77,6 +90,17 @@ const manual = createCustomField({
   format: "LINK",
 });
 const serial = createCustomField({ id: "cf-serial", name: "Serial number" });
+
+/** The asset row `getAsset` returns, with no custom field values. */
+const camera = {
+  id: "asset-1",
+  title: "Camera",
+  type: "INDIVIDUAL",
+  categoryId: "cat-cameras",
+  customFields: [],
+  assetLocations: [],
+  custody: [],
+};
 
 /** Grants `roles` in a workspace with the audits add-on off. */
 function grant(roles: OrganizationRoles[]) {
@@ -97,25 +121,19 @@ async function load() {
   } as unknown as Parameters<typeof loader>[0])) as unknown as {
     linkDefinitions: unknown[];
     allCustomFieldDefs: unknown[];
+    linkTitles: unknown;
   };
 }
 
 describe("asset overview loader: Documents & links", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockGetAsset.mockResolvedValue({
-      id: "asset-1",
-      title: "Camera",
-      type: "INDIVIDUAL",
-      categoryId: "cat-cameras",
-      customFields: [],
-      assetLocations: [],
-      custody: [],
-    });
+    mockGetAsset.mockResolvedValue(camera);
     mockGetActiveCustomFields.mockImplementation(
       ({ format }: { format?: string }) =>
         Promise.resolve(format === "LINK" ? [manual] : [manual, serial])
     );
+    mockGetLinkTitles.mockResolvedValue({});
   });
 
   it("sends the Link fields to a member who cannot edit the asset", async () => {
@@ -149,5 +167,40 @@ describe("asset overview loader: Documents & links", () => {
       expect.objectContaining({ id: "cf-manual", format: "LINK" }),
     ]);
     expect(result.allCustomFieldDefs).toHaveLength(2);
+  });
+
+  it("sends the titles of the links among the values the page shows", async () => {
+    grant([OrganizationRoles.BASE]);
+    const manualValue = {
+      value: { raw: MANUAL_URL, valueText: MANUAL_URL },
+      customField: { ...manual, categories: [] },
+    };
+    const cameraOnly = {
+      value: { raw: "ABC-123", valueText: "ABC-123" },
+      customField: { ...serial, categories: [{ id: "cat-cameras" }] },
+    };
+    const lensOnly = {
+      value: { raw: "https://www.example.com/lens.pdf" },
+      customField: {
+        ...manual,
+        id: "cf-lens",
+        categories: [{ id: "cat-lens" }],
+      },
+    };
+    mockGetAsset.mockResolvedValue({
+      ...camera,
+      customFields: [manualValue, cameraOnly, lensOnly],
+    });
+    mockGetLinkTitles.mockResolvedValue(LINK_TITLES);
+
+    const result = await load();
+
+    // A field outside the asset's category is not on the page, so its link
+    // is neither read nor queued for a fetch.
+    expect(mockGetLinkTitles).toHaveBeenCalledWith({
+      organizationId: "org-1",
+      values: [manualValue, cameraOnly],
+    });
+    expect(result.linkTitles).toEqual(LINK_TITLES);
   });
 });

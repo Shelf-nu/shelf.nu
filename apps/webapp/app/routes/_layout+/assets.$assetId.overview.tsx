@@ -87,6 +87,7 @@ import { getAssetAuditHistory } from "~/modules/audit/asset-audit-history.server
 import { getCustodyCardHolderUserId } from "~/modules/custody/utils";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { moveAssetKitUnits } from "~/modules/kit/service.server";
+import { getLinkTitles } from "~/modules/link-preview/service.server";
 import { generateQrObj } from "~/modules/qr/utils.server";
 import { getLastScanForViewer } from "~/modules/scan/service.server";
 import { getTeamMembersForQuantityCustody } from "~/modules/team-member/service.server";
@@ -406,20 +407,26 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * "Documents & links" card lists them, unset ones included, so this
      * decides which rows are displayed and must not be permission-gated.
      * Trimmed to what a row needs, as view-only users receive it too.
+     *
+     * Read beside them: the titles of the links among the values shown, for
+     * their chips. Never throws.
      */
-    const linkDefinitions = (
-      await getActiveCustomFields({
+    const [linkDefinitions, linkTitles] = await Promise.all([
+      getActiveCustomFields({
         organizationId,
         category: asset.categoryId,
         format: CustomFieldFormat.LINK,
-      })
-    ).map(({ id, name, type, format, options }) => ({
-      id,
-      name,
-      type,
-      format,
-      options,
-    }));
+      }).then((definitions) =>
+        definitions.map(({ id, name, type, format, options }) => ({
+          id,
+          name,
+          type,
+          format,
+          options,
+        }))
+      ),
+      getLinkTitles({ organizationId, values: customFields }),
+    ]);
 
     /**
      * Editor data is only needed for users who can update the asset. View-only
@@ -549,6 +556,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       totalLocations,
       allCustomFieldDefs,
       linkDefinitions,
+      linkTitles,
       moveDestinations,
       unplacedQuantity,
       otherCustodyHolders,
@@ -952,6 +960,7 @@ export default function AssetOverview() {
     overCommitment,
     allCustomFieldDefs,
     linkDefinitions,
+    linkTitles,
     moveDestinations,
     unplacedQuantity,
     otherCustodyHolders,
@@ -1047,6 +1056,7 @@ export default function AssetOverview() {
         <div className="max-w-full flex-1 overflow-hidden">
           <DocumentsAndLinksCard
             rows={linkRows}
+            titles={linkTitles}
             canEditAsset={canEditAsset}
             locale={locale}
             currency={asset.organization.currency}
@@ -1489,6 +1499,7 @@ export default function AssetOverview() {
 
           <CustomFieldsCard
             rows={otherRows}
+            titles={linkTitles}
             canEditAsset={canEditAsset}
             locale={locale}
             currency={asset.organization.currency}

@@ -12,6 +12,7 @@
 import { render, screen, within } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
 import { describe, expect, it, vi } from "vitest";
+import { LINK_TITLES, MANUAL_URL } from "@helpers/link-titles";
 import {
   buildAssetOverviewCustomFields,
   splitOverviewCustomFields,
@@ -41,16 +42,22 @@ const certificate = definition("cf-cert", "Calibration certificate", "LINK");
 const serial = definition("cf-serial", "Serial number", "PLAIN");
 const notes = definition("cf-notes", "Notes", "PLAIN");
 
-/** Renders both cards the way the overview does, inside a router. */
-function renderCards({ canEditAsset }: { canEditAsset: boolean }) {
+/**
+ * Renders both cards the way the overview does, inside a router, with the
+ * loader's `linkTitles` fixture.
+ */
+function renderCards({
+  canEditAsset,
+  manualUrl = "https://contoso.sharepoint.com/:b:/s/Lab/EaBc12",
+}: {
+  canEditAsset: boolean;
+  manualUrl?: string;
+}) {
   const { linkRows, otherRows } = splitOverviewCustomFields(
     buildAssetOverviewCustomFields({
       storedValues: [
         {
-          value: {
-            raw: "https://contoso.sharepoint.com/:b:/s/Lab/EaBc12",
-            valueText: "https://contoso.sharepoint.com/:b:/s/Lab/EaBc12",
-          },
+          value: { raw: manualUrl, valueText: manualUrl },
           customField: manual,
         },
         {
@@ -64,7 +71,12 @@ function renderCards({ canEditAsset }: { canEditAsset: boolean }) {
       listedDefinitions: [manual, certificate],
     })
   );
-  const props = { canEditAsset, locale: "en-US", currency: "USD" as const };
+  const props = {
+    titles: LINK_TITLES,
+    canEditAsset,
+    locale: "en-US",
+    currency: "USD" as const,
+  };
   const Stub = createRoutesStub([
     {
       path: "/",
@@ -100,6 +112,19 @@ describe("asset overview custom field cards", () => {
     );
     expect(card.queryByText("Serial number")).toBeNull();
     expect(screen.queryByRole("button", { name: /^Edit / })).toBeNull();
+  });
+
+  it("names a Link field's chip with the title the loader sent for it", async () => {
+    renderCards({ canEditAsset: false, manualUrl: MANUAL_URL });
+
+    const documents = await screen.findByRole("heading", {
+      name: "Documents & links",
+    });
+    expect(
+      within(documents.closest<HTMLElement>(".card")!).getByRole("link", {
+        name: "EOS R5 user manual, PDF, example-maker.com",
+      })
+    ).toHaveAttribute("href", `${MANUAL_URL}?ref=shelf-webapp`);
   });
 
   it("keeps plain fields in the custom fields card and hides empty ones from a member who cannot edit", async () => {

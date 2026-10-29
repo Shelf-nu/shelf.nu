@@ -14,6 +14,9 @@
  *   asset is checked out on, picked with the web asset overview's filter and
  *   shown to viewers who may see all custody or who hold that booking.
  * - The projection. Rows destructured off the query result stay off the wire.
+ * - Links. `linkFields` lists the Link fields for the Documents & links
+ *   section, and `linkTitles` carries the titles for the links in the active
+ *   values, in the shape the chip tests render.
  *
  * The visibility helpers from `mobile-custody-visibility.server`, the booking
  * read gate and the name resolvers are NOT mocked, so the real logic runs end
@@ -121,6 +124,12 @@ vitest.mock("~/modules/custom-field/service.server", () => ({
   getActiveCustomFields: vitest.fn().mockResolvedValue([]),
 }));
 
+// why: link titles are read from LinkPreview rows in Postgres (and links due a
+// fetch are queued); each case states what the workspace knows.
+vitest.mock("~/modules/link-preview/service.server", () => ({
+  getLinkTitles: vitest.fn().mockResolvedValue({}),
+}));
+
 // why: we need to control error formatting without running real error logic
 vitest.mock("~/utils/error", () => ({
   makeShelfError: vitest.fn((cause: any) => ({
@@ -145,8 +154,10 @@ import { db } from "~/database/db.server";
 import { getAssetQuantityRows } from "~/modules/asset/quantity-breakdown.server";
 import { getCustodySourceOptions } from "~/modules/asset/custody-source.server";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
+import { getLinkTitles } from "~/modules/link-preview/service.server";
 import { canUseBarcodes } from "~/utils/subscription.server";
 import { createCustomField } from "@factories";
+import { LINK_TITLES, MANUAL_URL, SHOP_URL } from "@helpers/link-titles";
 import { accessFor } from "@helpers/role-access";
 
 /**
@@ -1334,5 +1345,44 @@ describe("Link fields on GET /api/mobile/assets/:assetId", () => {
       { id: "cf-cert", name: "Calibration certificate", helpText: null },
       { id: "cf-manual", name: "Manual", helpText: "The maker's PDF" },
     ]);
+  });
+
+  it("sends the titles of the links in the asset's active values", async () => {
+    const field = {
+      name: "Manual",
+      type: "TEXT",
+      format: "LINK",
+      helpText: null,
+    };
+    const manual = {
+      id: "cfv-manual",
+      value: { raw: MANUAL_URL, valueText: MANUAL_URL },
+      customField: { ...field, id: "cf-manual", active: true },
+    };
+    const retired = {
+      id: "cfv-retired",
+      value: { raw: SHOP_URL, valueText: SHOP_URL },
+      customField: { ...field, id: "cf-retired", active: false },
+    };
+    assetFindUniqueMock.mockResolvedValue({
+      ...buildAsset(),
+      customFields: [manual, retired],
+    } as unknown as AssetFixture);
+    vitest.mocked(getLinkTitles).mockResolvedValue(LINK_TITLES);
+
+    const response = await loader(
+      createLoaderArgs({
+        request: createDetailRequest(),
+        params: { assetId: "asset-1" },
+      })
+    );
+    const body = await (response as unknown as Response).json();
+
+    // A deactivated field's value is not shown, so its link is not read.
+    expect(getLinkTitles).toHaveBeenCalledWith({
+      organizationId: "org-1",
+      values: [manual],
+    });
+    expect(body.asset.linkTitles).toEqual(LINK_TITLES);
   });
 });

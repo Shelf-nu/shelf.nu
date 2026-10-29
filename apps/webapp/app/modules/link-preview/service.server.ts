@@ -20,7 +20,7 @@
  * @see {@link file://../../routes/api+/link-titles.ts} the rename endpoint
  */
 
-import { CustomFieldType, Prisma } from "@prisma/client";
+import { CustomFieldFormat, CustomFieldType, Prisma } from "@prisma/client";
 import { cleanLinkTitle, MAX_LINK_LENGTH, parseLink } from "@shelf/links";
 import type { LinkKey, LinkTitle, LinkTitles, ParsedLink } from "@shelf/links";
 import { db } from "~/database/db.server";
@@ -59,8 +59,8 @@ export interface LinkTitleSource {
   readonly value: unknown;
   readonly customField: {
     readonly type: CustomFieldType;
-    /** Links in a "LINK" field have their page title fetched. */
-    readonly format?: "PLAIN" | "LINK";
+    /** Links in a Link-format field have their page title fetched. */
+    readonly format: CustomFieldFormat;
   };
 }
 
@@ -251,7 +251,7 @@ function linkKeysOf(values: readonly LinkTitleSource[]) {
     const link = text === null ? null : parseLink(text);
     if (!link || !isStorable(link.key)) continue;
     keys.add(link.key);
-    if (customField.format === "LINK") fetchable.add(link.key);
+    if (customField.format === CustomFieldFormat.LINK) fetchable.add(link.key);
   }
   return { keys, fetchable };
 }

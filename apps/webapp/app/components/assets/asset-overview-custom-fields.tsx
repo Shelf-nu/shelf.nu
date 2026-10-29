@@ -12,6 +12,7 @@ import { useState } from "react";
 import type { RenderableTreeNode } from "@markdoc/markdoc";
 import type { Currency } from "@prisma/client";
 import { CustomFieldFormat, CustomFieldType } from "@prisma/client";
+import type { LinkTitles } from "@shelf/links";
 import Input from "~/components/forms/input";
 import { Switch } from "~/components/forms/switch";
 import { TextWithLinks } from "~/components/links/text-with-links";
@@ -37,6 +38,8 @@ type OverviewRow = AssetOverviewCustomField<StoredCustomFieldValueForDisplay>;
 type CustomFieldCardProps = {
   /** The card's rows, from `splitOverviewCustomFields` */
   rows: OverviewRow[];
+  /** The loader's `linkTitles`, for the words on link chips */
+  titles: LinkTitles;
   /** Whether the user may edit this asset at all */
   canEditAsset: boolean;
   /** For AMOUNT values */
@@ -99,6 +102,7 @@ export function CustomFieldsCard({ rows, ...rowProps }: CustomFieldCardProps) {
  */
 function CustomFieldRow({
   row: { def, storedValue, isEditable },
+  titles,
   canEditAsset,
   locale,
   currency,
@@ -150,7 +154,7 @@ function CustomFieldRow({
                 allowExternalLinks
               />
             ) : def.type === CustomFieldType.TEXT ? (
-              <TextWithLinks value={rawValue} />
+              <TextWithLinks value={rawValue} titles={titles} />
             ) : def.type === CustomFieldType.AMOUNT ? (
               formatCurrency({
                 value: fieldValue!.raw as number,

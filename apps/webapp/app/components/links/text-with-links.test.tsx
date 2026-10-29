@@ -1,12 +1,14 @@
 /**
  * What a TEXT custom field value looks like on the asset page and the
  * advanced index: which characters become a link, where it points, and the
- * words a whole-link value's chip shows.
+ * words a whole-link value's chip shows. The titles cases read the same
+ * `linkTitles` fixture the loader tests return.
  *
  * @see {@link file://./text-with-links.tsx}
  */
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+import { LINK_TITLES, MANUAL_URL, SHOP_URL } from "@helpers/link-titles";
 
 import { TextWithLinks } from "./text-with-links";
 
@@ -61,22 +63,23 @@ describe("TextWithLinks", () => {
     );
   });
 
-  it("names the chip with a title the workspace knows for the link", () => {
-    render(
-      <TextWithLinks
-        value="https://www.example.com/c/product/123"
-        titles={{
-          "https://www.example.com/c/product/123": {
-            pageTitle: "Canon EOS R5",
-            customTitle: null,
-          },
-        }}
-      />
-    );
+  it("names the chip with the page title from the loaders' linkTitles", () => {
+    render(<TextWithLinks value={MANUAL_URL} titles={LINK_TITLES} />);
 
     expect(
-      screen.getByRole("link", { name: "Canon EOS R5, example.com" })
-    ).toHaveTextContent("Canon EOS R5example.com");
+      screen.getByRole("link", {
+        name: "EOS R5 user manual, PDF, example-maker.com",
+      })
+    ).toHaveTextContent("EOS R5 user manualPDF · example-maker.com");
+  });
+
+  it("prefers the name someone gave the link over its page title", () => {
+    // The fragment is not part of the key the titles are stored under.
+    render(<TextWithLinks value={`${SHOP_URL}#specs`} titles={LINK_TITLES} />);
+
+    expect(
+      screen.getByRole("link", { name: "Camera supplier, example-shop.com" })
+    ).toHaveTextContent("Camera supplierexample-shop.com");
   });
 
   it("leaves a javascript: value as plain text", () => {

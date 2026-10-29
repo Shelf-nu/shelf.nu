@@ -90,7 +90,7 @@ export function AdvancedIndexColumn({
   /** History state for the name link, so the asset page can step through this list. */
   linkState?: ListContextLinkState;
 }) {
-  const { locale, currentOrganization, lastAuditDateAccess } =
+  const { locale, currentOrganization, lastAuditDateAccess, linkTitles } =
     useLoaderData<AssetIndexLoaderData>();
   const { prefs } = useDateFormatter();
   const showAssetImage = useAssetIndexShowImage();
@@ -145,7 +145,11 @@ export function AdvancedIndexColumn({
             </PopoverPortal>
           </Popover>
         ) : field.customField.type === CustomFieldType.TEXT ? (
-          <TextWithLinks value={String(fieldValue.raw)} compact />
+          <TextWithLinks
+            value={String(fieldValue.raw)}
+            titles={linkTitles}
+            compact
+          />
         ) : field.customField.type === CustomFieldType.AMOUNT ? (
           formatCurrency({
             value: fieldValue.raw as number,
