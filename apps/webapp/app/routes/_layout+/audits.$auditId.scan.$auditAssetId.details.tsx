@@ -48,6 +48,7 @@ import {
   requireAuditAssigneeForScopedViewer,
 } from "~/modules/audit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { getClientHint } from "~/utils/client-hints";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { error, getParams, payload } from "~/utils/http.server";
 import {
@@ -105,6 +106,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         auditSession: {
           select: {
             status: true,
+            // What a photo of the whole audit is checked against.
+            startedAt: true,
             assignments: {
               select: { userId: true },
             },
@@ -176,6 +179,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         id: true,
         imageUrl: true,
         thumbnailUrl: true,
+        capturedAt: true,
+        captureSource: true,
+        createdAt: true,
       },
       orderBy: {
         createdAt: "desc",
@@ -441,6 +447,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           auditSessionId: auditId,
           organizationId,
           uploadedById: userId,
+          uploadedVia: "web",
+          // The rebuilt request has no cookies; keep the user's own hints.
+          hints: getClientHint(request),
           auditAssetId: auditAssetId,
         });
 
@@ -584,6 +593,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           auditSessionId: auditId,
           organizationId,
           uploadedById: userId,
+          uploadedVia: "web",
+          // The rebuilt request has no cookies; keep the user's own hints.
+          hints: getClientHint(request),
           auditAssetId: auditAssetId,
         });
 
@@ -1113,6 +1125,8 @@ export default function AuditAssetDetails() {
           maxCount={3}
           inputNamePrefix="auditImage"
           existingImages={localImages}
+          auditStartedAt={auditAsset.auditSession.startedAt}
+          assetScannedAt={auditAsset.scannedAt}
           onExistingImageRemove={handleImageDeleteWithConfirm}
           disabled={isUploadInProgress}
           isUploading={isUploadInProgress}

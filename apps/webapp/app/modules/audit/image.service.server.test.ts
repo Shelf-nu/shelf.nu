@@ -1,3 +1,4 @@
+import sharp from "sharp";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 // Mock the dependencies
 vi.mock("~/utils/storage.server", () => ({
@@ -8,6 +9,13 @@ vi.mock("~/utils/storage.server", () => ({
     (params) =>
       `${params.organizationId}/${params.type}/${params.typeId}/test.jpg`
   ),
+}));
+
+vi.mock("~/utils/date-format.server", () => ({
+  // why: resolving the uploader's time zone reads their user row from the DB
+  resolveUserFormatPrefsById: vi.fn().mockResolvedValue({
+    timeZone: "America/New_York",
+  }),
 }));
 
 vi.mock("~/database/db.server", () => ({
@@ -24,6 +32,7 @@ vi.mock("~/database/db.server", () => ({
 }));
 
 import { db } from "~/database/db.server";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { parseFileFormData, removePublicFile } from "~/utils/storage.server";
 
 import {
@@ -65,6 +74,8 @@ describe("audit image service", () => {
         thumbnailUrl: "org-1/audits/audit-1/image-123-thumbnail.jpg",
         description: null,
         uploadedById: "user-1",
+        capturedAt: null,
+        captureSource: null,
         createdAt: new Date(),
         updatedAt: new Date(),
       });
@@ -77,6 +88,7 @@ describe("audit image service", () => {
         auditAssetId: undefined,
         organizationId: "org-1",
         uploadedById: "user-1",
+        uploadedVia: "web",
       });
 
       expect(parseFileFormData).toHaveBeenCalledWith(
@@ -115,6 +127,7 @@ describe("audit image service", () => {
           auditAssetId: undefined,
           organizationId: "org-1",
           uploadedById: "user-1",
+          uploadedVia: "web",
         })
       ).rejects.toThrow();
     });
@@ -135,6 +148,7 @@ describe("audit image service", () => {
           auditAssetId: "asset-1",
           organizationId: "org-1",
           uploadedById: "user-1",
+          uploadedVia: "web",
         })
       ).rejects.toMatchObject({
         message: "Maximum of 3 images per asset exceeded",
@@ -159,6 +173,7 @@ describe("audit image service", () => {
           auditAssetId: undefined,
           organizationId: "org-1",
           uploadedById: "user-1",
+          uploadedVia: "web",
         })
       ).rejects.toMatchObject({
         message: "Maximum of 5 general images per audit exceeded",
@@ -179,6 +194,8 @@ describe("audit image service", () => {
         thumbnailUrl: "org-1/audits/audit-1/image-123-thumbnail.jpg",
         description: null,
         uploadedById: "user-1",
+        capturedAt: null,
+        captureSource: null,
         createdAt: new Date(),
         updatedAt: new Date(),
       });
@@ -292,6 +309,8 @@ describe("audit image service", () => {
           thumbnailUrl: "org-1/audits/audit-1/image-1-thumbnail.jpg",
           description: null,
           uploadedById: "user-1",
+          capturedAt: null,
+          captureSource: null,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -304,6 +323,8 @@ describe("audit image service", () => {
           thumbnailUrl: "org-1/audits/audit-1/image-2-thumbnail.jpg",
           description: null,
           uploadedById: "user-1",
+          capturedAt: null,
+          captureSource: null,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -433,6 +454,8 @@ describe("uploadAuditImage returnParsedFormData", () => {
       thumbnailUrl: "https://example.com/t",
       description: null,
       uploadedById: "user-1",
+      capturedAt: null,
+      captureSource: null,
       createdAt: new Date(),
       updatedAt: new Date(),
     });
@@ -442,6 +465,7 @@ describe("uploadAuditImage returnParsedFormData", () => {
       auditSessionId: "session-1",
       organizationId: "org-1",
       uploadedById: "user-1",
+      uploadedVia: "web",
       auditAssetId: "audit-asset-1",
       returnParsedFormData: true,
     });
@@ -450,5 +474,226 @@ describe("uploadAuditImage returnParsedFormData", () => {
     expect(result).toHaveProperty("formData");
     expect((result as any).formData.get("content")).toBe("Dent on top");
     expect((result as any).image.id).toBe("img-ret-1");
+  });
+
+  describe("uploadAuditImage: when the photo was taken", () => {
+    /** A tiny JPEG carrying the given EXIF (IFD2 is the Exif sub-directory). */
+    async function jpeg(exif?: Record<string, string>) {
+      const image = sharp({
+        create: { width: 8, height: 8, channels: 3, background: "red" },
+      }).jpeg();
+      return (exif ? image.withExif({ IFD2: exif }) : image).toBuffer();
+    }
+
+    /**
+     * Stands in for the storage upload: hands `original` to the service's
+     * `inspectOriginal` exactly as the real parser does, then returns the
+     * parsed form with the stored path and any text fields the client sent.
+     */
+    function uploadReceives(
+      original: Buffer,
+      fields: Record<string, string> = {}
+    ) {
+      vi.mocked(parseFileFormData).mockImplementation(async (args) => {
+        await args.inspectOriginal?.(original);
+        const parsed = new FormData();
+        parsed.append(
+          "image",
+          JSON.stringify({ originalPath: "org-1/audits/audit-1/p.jpg" })
+        );
+        for (const [name, value] of Object.entries(fields)) {
+          parsed.append(name, value);
+        }
+        return parsed;
+      });
+    }
+
+    async function upload(uploadedVia: "web" | "phone" = "web") {
+      vi.mocked(db.auditImage.count).mockResolvedValue(0);
+      vi.mocked(db.auditImage.create).mockImplementation(
+        (args) => ({ id: "img-1", ...args.data }) as never
+      );
+      return uploadAuditImage({
+        request: new Request("https://app.test/upload", { method: "POST" }),
+        auditSessionId: "audit-1",
+        organizationId: "org-1",
+        uploadedById: "user-1",
+        uploadedVia,
+      });
+    }
+
+    function storedCapturedAt() {
+      return vi.mocked(db.auditImage.create).mock.calls[0][0].data.capturedAt;
+    }
+
+    it("stores the time from the file's own EXIF", async () => {
+      uploadReceives(
+        await jpeg({
+          DateTimeOriginal: "2026:10:21 09:15:00",
+          OffsetTimeOriginal: "+02:00",
+        }),
+        // The file's own date wins over the phone app's copy.
+        { exifDateTimeOriginal: "2026:01:01 00:00:00" }
+      );
+
+      await upload();
+
+      expect(storedCapturedAt()).toEqual(new Date("2026-10-21T07:15:00Z"));
+    });
+
+    it("reads an offset-less date in the uploader's time zone", async () => {
+      uploadReceives(await jpeg({ DateTimeOriginal: "2026:10:21 09:15:00" }));
+
+      await upload();
+
+      // America/New_York in October is UTC-4.
+      expect(storedCapturedAt()).toEqual(new Date("2026-10-21T13:15:00Z"));
+    });
+
+    it("reads the uploader's zone with the hints of the request they sent", async () => {
+      // why: the web routes rebuild one request per file, which drops the
+      // browser's cookies, so the hints must travel separately.
+      uploadReceives(await jpeg({ DateTimeOriginal: "2026:10:21 09:15:00" }));
+      vi.mocked(db.auditImage.count).mockResolvedValue(0);
+      vi.mocked(db.auditImage.create).mockImplementation(
+        (args) => ({ id: "img-1", ...args.data }) as never
+      );
+      const hints = { locale: "nl-NL", timeZone: "Europe/Amsterdam" };
+
+      await uploadAuditImage({
+        request: new Request("https://app.test/upload", { method: "POST" }),
+        auditSessionId: "audit-1",
+        organizationId: "org-1",
+        uploadedById: "user-1",
+        uploadedVia: "web",
+        hints,
+      });
+
+      expect(resolveUserFormatPrefsById).toHaveBeenCalledWith("user-1", hints);
+    });
+
+    it("reads a phone photo's offset-less date in the zone its device declared", async () => {
+      // why: Android never reports an offset, and a phone-only user may have
+      // no saved zone; the photo was taken on the device, so its zone decides.
+      uploadReceives(await jpeg(), {
+        exifDateTimeOriginal: "2026:10:21 09:00:00",
+        deviceTimeZone: "Asia/Tokyo",
+      });
+      vi.mocked(resolveUserFormatPrefsById).mockClear();
+
+      await upload("phone");
+
+      // Tokyo is UTC+9; the mocked preference zone (New York) would give 13:00Z.
+      expect(storedCapturedAt()).toEqual(new Date("2026-10-21T00:00:00Z"));
+      expect(resolveUserFormatPrefsById).not.toHaveBeenCalled();
+    });
+
+    it("ignores a declared zone on a web upload, and an invalid one", async () => {
+      uploadReceives(await jpeg({ DateTimeOriginal: "2026:10:21 09:00:00" }), {
+        deviceTimeZone: "Asia/Tokyo",
+      });
+      await upload("web");
+      // The mocked preference zone, America/New_York (UTC-4 in October).
+      expect(storedCapturedAt()).toEqual(new Date("2026-10-21T13:00:00Z"));
+
+      vi.mocked(db.auditImage.create).mockClear();
+      uploadReceives(await jpeg({ DateTimeOriginal: "2026:10:21 09:00:00" }), {
+        deviceTimeZone: "Not/AZone",
+      });
+      await upload("phone");
+      expect(storedCapturedAt()).toEqual(new Date("2026-10-21T13:00:00Z"));
+    });
+
+    it("falls back to the phone app's fields when the file has no EXIF", async () => {
+      // The phone app's HEIC to JPEG conversion drops EXIF, so its copy of the
+      // tags is the only date the server gets.
+      uploadReceives(await jpeg(), {
+        exifDateTimeOriginal: "2026:10:20 18:30:00",
+        exifOffsetTimeOriginal: "-07:00",
+      });
+
+      await upload();
+
+      expect(storedCapturedAt()).toEqual(new Date("2026-10-21T01:30:00Z"));
+    });
+
+    it("stores null, and still uploads, when neither has a date", async () => {
+      uploadReceives(await jpeg());
+
+      const image = await upload();
+
+      expect(storedCapturedAt()).toBeNull();
+      expect(image.id).toBe("img-1");
+    });
+
+    it("stores null, and still uploads, when the EXIF date is garbage", async () => {
+      uploadReceives(await jpeg({ DateTimeOriginal: "0000:00:00 00:00:00" }));
+
+      const image = await upload();
+
+      expect(storedCapturedAt()).toBeNull();
+      expect(image.id).toBe("img-1");
+    });
+  });
+
+  describe("uploadAuditImage: how the photo arrived", () => {
+    function uploadReceivesFields(fields: Record<string, string> = {}) {
+      vi.mocked(parseFileFormData).mockImplementation(() => {
+        const parsed = new FormData();
+        parsed.append(
+          "image",
+          JSON.stringify({ originalPath: "org-1/audits/audit-1/p.jpg" })
+        );
+        for (const [name, value] of Object.entries(fields)) {
+          parsed.append(name, value);
+        }
+        return Promise.resolve(parsed);
+      });
+    }
+
+    async function storedSource(uploadedVia: "web" | "phone") {
+      vi.mocked(db.auditImage.count).mockResolvedValue(0);
+      vi.mocked(db.auditImage.create).mockImplementation(
+        (args) => ({ id: "img-1", ...args.data }) as never
+      );
+      await uploadAuditImage({
+        request: new Request("https://app.test/upload", { method: "POST" }),
+        auditSessionId: "audit-1",
+        organizationId: "org-1",
+        uploadedById: "user-1",
+        uploadedVia,
+      });
+      return vi.mocked(db.auditImage.create).mock.calls[0][0].data
+        .captureSource;
+    }
+
+    it("marks every web upload as uploaded on the web, whatever it claims", async () => {
+      // why: the web app cannot tell a camera shot from a file, so a field
+      // claiming CAMERA from a browser must not upgrade the evidence.
+      uploadReceivesFields({ captureSource: "CAMERA" });
+
+      expect(await storedSource("web")).toBe("WEB_UPLOAD");
+    });
+
+    it.each(["CAMERA", "LIBRARY"])(
+      "stores the phone app's %s source",
+      async (source) => {
+        uploadReceivesFields({ captureSource: source });
+
+        expect(await storedSource("phone")).toBe(source);
+      }
+    );
+
+    it("stores PHONE when the phone app sends no source or an unknown one", async () => {
+      // why: an app version that does not send a source is still a new upload.
+      // Stored as null it would read as a photo from before capture times were
+      // read, and a dateless one would never be flagged.
+      uploadReceivesFields();
+      expect(await storedSource("phone")).toBe("PHONE");
+
+      vi.mocked(db.auditImage.create).mockClear();
+      uploadReceivesFields({ captureSource: "WEB_UPLOAD" });
+      expect(await storedSource("phone")).toBe("PHONE");
+    });
   });
 });

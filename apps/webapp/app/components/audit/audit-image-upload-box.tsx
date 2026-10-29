@@ -3,7 +3,8 @@ import { useRef, useState, useEffect, useCallback } from "react";
 import { useAtom } from "jotai";
 import { Plus, X } from "lucide-react";
 import { fileErrorAtom } from "~/atoms/file";
-import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
+import type { AuditPhotoImage } from "~/components/audit/audit-photo";
+import { AuditPhoto } from "~/components/audit/audit-photo";
 import { Spinner } from "~/components/shared/spinner";
 import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { sanitizeFile } from "~/utils/sanitize-filename";
@@ -20,11 +21,7 @@ export type SelectedImage = {
  * Module-scope default for `existingImages` so memoized consumers don't
  * see a new array identity on every render.
  */
-const EMPTY_EXISTING_IMAGES: Array<{
-  id: string;
-  imageUrl: string;
-  thumbnailUrl?: string | null;
-}> = [];
+const EMPTY_EXISTING_IMAGES: AuditPhotoImage[] = [];
 
 type AuditImageUploadBoxProps = {
   /** Callback when an image is selected */
@@ -214,11 +211,11 @@ type AuditImageUploadSectionProps = {
   /** Name prefix for file inputs */
   inputNamePrefix?: string;
   /** Existing images from server */
-  existingImages?: Array<{
-    id: string;
-    imageUrl: string;
-    thumbnailUrl?: string | null;
-  }>;
+  existingImages?: AuditPhotoImage[];
+  /** When the audit started */
+  auditStartedAt?: Date | string | null;
+  /** When this asset was scanned; photos taken well before it are flagged */
+  assetScannedAt?: Date | string | null;
   /** Callback when an existing image is removed */
   onExistingImageRemove?: (imageId: string) => void;
   /** Callback when new images are selected (opens dialog) */
@@ -245,6 +242,8 @@ export function AuditImageUploadSection({
   disabled = false,
   inputNamePrefix = "auditImage",
   existingImages = EMPTY_EXISTING_IMAGES,
+  auditStartedAt,
+  assetScannedAt,
   onExistingImageRemove,
   onImagesSelected,
   isUploading = false,
@@ -389,21 +388,15 @@ export function AuditImageUploadSection({
       <div id="audit-images" className="flex flex-wrap gap-2">
         {/* Display existing server images */}
         {existingImages.map((image) => (
-          <div key={image.id} className="group relative size-24 shrink-0">
-            <ImageWithPreview
-              imageUrl={image.imageUrl}
-              thumbnailUrl={image.thumbnailUrl || image.imageUrl}
+          <div key={image.id} className="group relative w-24 shrink-0">
+            <AuditPhoto
+              image={image}
+              images={existingImages}
+              auditStartedAt={auditStartedAt}
+              assetScannedAt={assetScannedAt}
               alt="Audit image"
-              withPreview
               disablePortal
               className="size-24 rounded-lg border-2 border-gray-200"
-              images={existingImages.map((img) => ({
-                id: img.id,
-                imageUrl: img.imageUrl,
-                thumbnailUrl: img.thumbnailUrl || img.imageUrl,
-                alt: "Audit image",
-              }))}
-              currentImageId={image.id}
             />
             {!disabled && onExistingImageRemove && (
               <button

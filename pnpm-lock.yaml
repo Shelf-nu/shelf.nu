@@ -408,6 +408,9 @@ importers:
       detectrtc:
         specifier: ^1.4.1
         version: 1.4.1
+      exif-reader:
+        specifier: ^2.0.2
+        version: 2.0.2
       framer-motion:
         specifier: ^12.38.0
         version: 12.38.0(react-dom@19.2.1(react@19.2.1))(react@19.2.1)
@@ -6880,6 +6883,9 @@ packages:
 
   eventemitter3@5.0.4:
     resolution: {integrity: sha512-mlsTRyGaPBjPedk6Bvw+aqbsXDtoAyAzm5MO7JgU+yVRyMQ5O8bD4Kcci7BS85f93veegeCPkL8R4GLClnjLFw==}
+
+  exif-reader@2.0.2:
+    resolution: {integrity: sha512-CVFqcwdwFe2GnbbW7/Q7sUhVP5Ilaw7fuXQc6ad3AbX20uGfHhXTpkF/hQHPrtOuys9elFVgsUkvwfhfvjDa1A==}
 
   exit-hook@2.2.1:
     resolution: {integrity: sha512-eNTPlAD67BmP31LDINZ3U7HSF8l57TxOY2PmBJ1shpCvpnxBF93mWCE8YHBnXs8qiUZJc9WDcWIeC3a2HIAMfw==}
@@ -17701,6 +17707,8 @@ snapshots:
   eventemitter3@4.0.7: {}
 
   eventemitter3@5.0.4: {}
+
+  exif-reader@2.0.2: {}
 
   exit-hook@2.2.1: {}
 

@@ -8,10 +8,13 @@ import type {
 } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import type { ClientHint } from "~/utils/client-hints";
+import { getClientHint } from "~/utils/client-hints";
 import {
   DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
   PUBLIC_BUCKET,
 } from "~/utils/constants";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import {
@@ -19,6 +22,15 @@ import {
   parseFileFormData,
   removePublicFile,
 } from "~/utils/storage.server";
+import type { ExifCaptureTags } from "./photo-captured-at.server";
+import type { AuditImageUploadedVia } from "./photo-captured-at.server";
+import {
+  captureSourceFromPhoneForm,
+  deviceTimeZoneFromPhoneForm,
+  captureTagsFromFormData,
+  readExifCaptureTags,
+  resolveCapturedAt,
+} from "./photo-captured-at.server";
 
 const label: ErrorLabel = "Audit Image";
 
@@ -32,12 +44,25 @@ const MAX_GENERAL_IMAGES_PER_AUDIT = 5;
  * Uploads an image for an audit session.
  * Can be either a general audit image or tied to a specific asset.
  *
+ * The photo is stored as uploaded (resized, never drawn on). The time it was
+ * taken is saved as `capturedAt`: from the file's EXIF, else from the
+ * `exifDateTimeOriginal` / `exifOffsetTimeOriginal` fields the phone app sends,
+ * else null. How it arrived is saved as `captureSource`: `WEB_UPLOAD` for the
+ * web app, and for the phone app the `captureSource` field it sends (`CAMERA`
+ * or `LIBRARY`), else null. See `photo-captured-at.server.ts`.
+ *
  * @param request - The request containing the image file
  * @param auditSessionId - ID of the audit session
  * @param organizationId - ID of the organization
  * @param uploadedById - ID of the user uploading the image
  * @param auditAssetId - Optional ID of the audit asset this image is tied to
  * @param description - Optional description for the image
+ * @param hints - Browser hints (time zone) of the request the user sent. Pass
+ *   it when `request` is rebuilt from that one and lost its cookies; defaults
+ *   to the hints `request` carries. Used to read an offset-less EXIF date when
+ *   the uploader has no saved time zone.
+ * @param uploadedVia - Which app sent the upload. Required, so every caller
+ *   decides: only the phone app can say whether a photo came from its camera.
  * @param returnParsedFormData - When `false` (default), returns only the
  *   created `AuditImage`. When `true`, returns `{ image, formData }` where
  *   `formData` is the already-bounded `FormData` produced by
@@ -55,6 +80,8 @@ export async function uploadAuditImage(args: {
   uploadedById: User["id"];
   auditAssetId?: AuditAsset["id"];
   description?: string;
+  uploadedVia: AuditImageUploadedVia;
+  hints?: ClientHint;
   returnParsedFormData?: false;
 }): Promise<AuditImage>;
 export async function uploadAuditImage(args: {
@@ -64,6 +91,8 @@ export async function uploadAuditImage(args: {
   uploadedById: User["id"];
   auditAssetId?: AuditAsset["id"];
   description?: string;
+  uploadedVia: AuditImageUploadedVia;
+  hints?: ClientHint;
   returnParsedFormData: true;
 }): Promise<{ image: AuditImage; formData: FormData }>;
 export async function uploadAuditImage({
@@ -73,6 +102,8 @@ export async function uploadAuditImage({
   uploadedById,
   auditAssetId,
   description,
+  uploadedVia,
+  hints,
   returnParsedFormData = false,
 }: {
   request: Request;
@@ -81,6 +112,8 @@ export async function uploadAuditImage({
   uploadedById: User["id"];
   auditAssetId?: AuditAsset["id"];
   description?: string;
+  uploadedVia: AuditImageUploadedVia;
+  hints?: ClientHint;
   returnParsedFormData?: boolean;
 }): Promise<AuditImage | { image: AuditImage; formData: FormData }> {
   try {
@@ -90,6 +123,9 @@ export async function uploadAuditImage({
       auditAssetId,
       organizationId,
     });
+
+    // Read from the original bytes: the stored copy is re-encoded without EXIF.
+    let fileTags: ExifCaptureTags | null = null;
 
     // Parse and upload the file to Supabase storage
     const fileData = await parseFileFormData({
@@ -107,6 +143,9 @@ export async function uploadAuditImage({
       generateThumbnail: true,
       thumbnailSize: 108,
       maxFileSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
+      inspectOriginal: async (original) => {
+        fileTags = await readExifCaptureTags(original);
+      },
     });
 
     const image = fileData.get("image") as string | null;
@@ -150,9 +189,34 @@ export async function uploadAuditImage({
       thumbnailPublicUrl = publicUrl;
     }
 
+    const capturedAt = await resolveCapturedAt({
+      fileTags,
+      formTags: captureTagsFromFormData(fileData),
+      // An EXIF date with no offset is a wall-clock time. A phone upload is
+      // read in the zone the device declares (it was taken on that device);
+      // a web upload in the uploader's preference zone.
+      getTimeZone: async () => {
+        const deviceZone =
+          uploadedVia === "phone"
+            ? deviceTimeZoneFromPhoneForm(fileData)
+            : null;
+        if (deviceZone) return deviceZone;
+        const prefs = await resolveUserFormatPrefsById(
+          uploadedById,
+          hints ?? getClientHint(request)
+        );
+        return prefs.timeZone;
+      },
+    });
+
     // Create the database record
     const auditImage = await db.auditImage.create({
       data: {
+        capturedAt,
+        captureSource:
+          uploadedVia === "web"
+            ? "WEB_UPLOAD"
+            : captureSourceFromPhoneForm(fileData),
         imageUrl: imagePublicUrl,
         thumbnailUrl: thumbnailPublicUrl ?? null,
         description: description ?? null,

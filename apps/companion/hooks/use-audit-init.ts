@@ -77,6 +77,8 @@ type UseAuditInitParams = {
 
 export type AuditInitResult = {
   auditName: string;
+  /** When the audit started (ISO), or null when it has not */
+  auditStartedAt: string | null;
   isInitializing: boolean;
   initError: string | null;
   expectedAssetIdsRef: React.MutableRefObject<Set<string>>;
@@ -104,6 +106,8 @@ export function useAuditInit({
   scanQueueRef,
 }: UseAuditInitParams): AuditInitResult {
   const [auditName, setAuditName] = useState("");
+  // What a photo of the whole audit is checked against.
+  const [auditStartedAt, setAuditStartedAt] = useState<string | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
   const [initError, setInitError] = useState<string | null>(null);
 
@@ -141,6 +145,7 @@ export function useAuditInit({
       }
 
       setAuditName(data.audit.name);
+      setAuditStartedAt(data.audit.startedAt);
       setExpectedTotal(data.audit.expectedAssetCount);
       setFoundCount(data.audit.foundAssetCount);
       setUnexpectedCount(data.audit.unexpectedAssetCount);
@@ -351,6 +356,7 @@ export function useAuditInit({
 
   return {
     auditName,
+    auditStartedAt,
     isInitializing,
     initError,
     expectedAssetIdsRef,

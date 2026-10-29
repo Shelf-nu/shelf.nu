@@ -2750,6 +2750,15 @@ model AuditImage {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   organizationId String
 
+  /// When the photo was taken, from its EXIF data (or the phone app's copy of
+  /// it). Null when the photo carried no usable date. EXIF can be edited, so
+  /// this is the best signal available, not proof.
+  capturedAt DateTime?
+
+  /// How the photo reached Shelf. Null for photos from before this field and
+  /// from app versions that do not send it.
+  captureSource AuditImageCaptureSource?
+
   // Datetime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2759,6 +2768,19 @@ model AuditImage {
   @@index([auditAssetId])
   @@index([organizationId])
   @@index([uploadedById])
+}
+
+/// How an audit photo reached Shelf, as reported by the client. The phone app
+/// reports CAMERA only for its own camera, which cannot hand back an old
+/// picture, so it is the strongest evidence short of a modified client; a
+/// library photo's date is only what its file claims; the web app cannot tell
+/// a camera shot from a file; PHONE is a phone app version that does not say
+/// which.
+enum AuditImageCaptureSource {
+  CAMERA
+  LIBRARY
+  WEB_UPLOAD
+  PHONE
 }
 
 /// How a membership's role came to change.

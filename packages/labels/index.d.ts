@@ -470,3 +470,85 @@ export declare const DELETE_CONSEQUENCE_LABELS: {
   readonly ASSET: string;
   readonly BOOKING: string;
 };
+
+/** How an audit photo reached Shelf, as `AuditImage.captureSource` stores it. */
+export type AuditPhotoCaptureSource =
+  | "CAMERA"
+  | "LIBRARY"
+  | "WEB_UPLOAD"
+  | "PHONE";
+
+/** The label for each audit photo capture source. */
+export declare const AUDIT_PHOTO_SOURCE_LABELS: {
+  readonly CAMERA: string;
+  readonly LIBRARY: string;
+  readonly WEB_UPLOAD: string;
+  readonly PHONE: string;
+};
+
+/** A case on an audit photo a reviewer should check. */
+export type AuditPhotoFlag = "OLD_PHOTO" | "NO_DATE";
+
+/** The label for each audit photo flag. */
+export declare const AUDIT_PHOTO_FLAG_LABELS: {
+  readonly OLD_PHOTO: string;
+  readonly NO_DATE: string;
+};
+
+/** How much older than its check a photo may be before it is flagged. */
+export declare const AUDIT_PHOTO_OLD_AFTER_MS: number;
+
+/** One line explaining the icons and flags, for a printed receipt. */
+export declare const AUDIT_PHOTO_KEY: string;
+
+/** What both apps show for one audit photo. */
+export type AuditPhotoDescription = {
+  source: AuditPhotoCaptureSource | null;
+  sourceLabel: string | null;
+  /** Short date and time (year only when it differs from the upload's) */
+  short: string | null;
+  /** Set only when the photo needs a second look */
+  flag: AuditPhotoFlag | null;
+  flagLabel: string | null;
+  /** The full sentence for the preview */
+  detail: string;
+};
+
+/**
+ * Describes one audit photo: quiet when it is fine (icon and short date and
+ * time), "Old photo" when taken more than a day before its asset was scanned
+ * (or the audit started), "No date" when it has no time, and the full
+ * sentence for the preview. Photos from before capture times were read show
+ * their upload time with no flag.
+ *
+ * @param photo - the `AuditImage` fields
+ * @param options - the asset's scan time (null for a photo of the whole
+ *   audit), the audit's start, and the viewer's own formatters
+ */
+export declare function describeAuditPhoto(
+  photo: {
+    captureSource?: AuditPhotoCaptureSource | null;
+    capturedAt?: string | Date | null;
+    createdAt?: string | Date | null;
+  },
+  options: {
+    assetScannedAt?: string | Date | null;
+    auditStartedAt?: string | Date | null;
+    /** The current time; defaults to now. A photo from another year shows it. */
+    now?: Date;
+    format: {
+      dateTime: (value: string | Date) => string;
+      /** The viewer's formatter with explicit `Intl` field options */
+      custom: (
+        value: string | Date,
+        options: {
+          year?: "numeric";
+          month?: "short";
+          day?: "numeric";
+          hour?: "numeric";
+          minute?: "2-digit";
+        }
+      ) => string;
+    };
+  }
+): AuditPhotoDescription;

@@ -1678,6 +1678,12 @@ export type AuditEvidenceImage = {
   /** Always populated — the server falls back to `imageUrl`. */
   thumbnailUrl: string;
   description: string | null;
+  /** When the photo was taken (from its EXIF), ISO; null when unknown. */
+  capturedAt: string | null;
+  /** How the photo reached Shelf; null when unknown. */
+  captureSource: "CAMERA" | "LIBRARY" | "WEB_UPLOAD" | "PHONE" | null;
+  /** When the photo's asset was scanned (ISO); null for a whole-audit photo. */
+  assetScannedAt: string | null;
   createdAt: string;
   authorName: string | null;
   authorImage: string | null;

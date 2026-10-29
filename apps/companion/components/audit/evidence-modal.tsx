@@ -26,8 +26,15 @@ import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { api } from "@/lib/api";
+import {
+  AuditPhotoCaption,
+  describeAuditPhotoForUser,
+} from "@/components/audit/audit-photo-caption";
+import type { PhotoCapture } from "@/lib/audit-photo-exif";
+import { photoCaptureFromPicker } from "@/lib/audit-photo-exif";
 import type { AuditEvidenceImage, AuditEvidenceNote } from "@/lib/api/types";
 import { useOrg } from "@/lib/org-context";
+import { useDateFormatter } from "@/lib/use-date-formatter";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
@@ -85,11 +92,22 @@ async function ensureJpegFormat(
   return { uri: result.uri, mimeType: "image/jpeg" };
 }
 
+/** The device's IANA time zone, or null when the runtime reports none. */
+function deviceTimeZone(): string | null {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || null;
+  } catch {
+    return null;
+  }
+}
+
 type EvidenceModalProps = {
   visible: boolean;
   onClose: () => void;
   item: ScannedItem | null;
   auditSessionId: string;
+  /** When the audit started: what a photo of the whole audit is checked against */
+  auditStartedAt?: string | null;
   /** Callback when evidence is added, to update counts */
   onEvidenceAdded: (assetId: string, type: "note" | "image") => void;
   /**
@@ -137,6 +155,7 @@ export function EvidenceModal({
   onClose,
   item,
   auditSessionId,
+  auditStartedAt = null,
   onEvidenceAdded,
   onRemoveScan,
   onEvidenceCounts,
@@ -211,6 +230,7 @@ export function EvidenceModal({
   }, [visible, auditAssetId, currentOrg?.id, auditSessionId, savedCount]);
   const { colors } = useTheme();
   const styles = useStyles();
+  const dateFormatter = useDateFormatter();
 
   const [noteText, setNoteText] = useState("");
   const [isSubmittingNote, setIsSubmittingNote] = useState(false);
@@ -224,10 +244,14 @@ export function EvidenceModal({
   const [isRemoving, setIsRemoving] = useState(false);
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
   const [imageMimeType, setImageMimeType] = useState("image/jpeg");
+  // When the selected photo was taken, read from the picker before any HEIC
+  // to JPEG conversion drops the file's EXIF.
+  const [imageCapture, setImageCapture] = useState<PhotoCapture | null>(null);
 
   const resetState = useCallback(() => {
     setNoteText("");
     setSelectedImageUri(null);
+    setImageCapture(null);
     setIsSubmittingNote(false);
     setIsSubmittingImage(false);
   }, []);
@@ -289,11 +313,13 @@ export function EvidenceModal({
           mediaTypes: ["images"],
           quality: 0.8,
           allowsEditing: false,
+          exif: true,
         })
       : await ImagePicker.launchImageLibraryAsync({
           mediaTypes: ["images"],
           quality: 0.8,
           allowsEditing: false,
+          exif: true,
         });
 
     if (!result.canceled && result.assets[0]) {
@@ -305,6 +331,9 @@ export function EvidenceModal({
       );
       setSelectedImageUri(uri);
       setImageMimeType(mimeType);
+      setImageCapture(
+        photoCaptureFromPicker(useCamera, asset.exif, deviceTimeZone())
+      );
     }
   }, []);
 
@@ -340,7 +369,8 @@ export function EvidenceModal({
         item.auditAssetId,
         selectedImageUri,
         imageMimeType,
-        noteText.trim() || undefined
+        noteText.trim() || undefined,
+        imageCapture
       );
 
       if (error) {
@@ -369,6 +399,7 @@ export function EvidenceModal({
     auditSessionId,
     selectedImageUri,
     imageMimeType,
+    imageCapture,
     noteText,
     onEvidenceAdded,
   ]);
@@ -493,14 +524,26 @@ export function EvidenceModal({
 
                 {existing.images.length > 0 ? (
                   <View style={styles.existingImages}>
-                    {existing.images.map((img) => (
-                      <Image
-                        key={img.id}
-                        source={{ uri: img.thumbnailUrl }}
-                        style={styles.existingThumb}
-                        contentFit="cover"
-                      />
-                    ))}
+                    {existing.images.map((img) => {
+                      const photo = describeAuditPhotoForUser(
+                        img,
+                        auditStartedAt,
+                        dateFormatter
+                      );
+                      return (
+                        <View key={img.id} style={styles.existingPhoto}>
+                          <Image
+                            source={{ uri: img.thumbnailUrl }}
+                            style={styles.existingThumb}
+                            contentFit="cover"
+                            accessibilityLabel={`Photo. ${photo.detail}${
+                              photo.flagLabel ? `. ${photo.flagLabel}` : ""
+                            }`}
+                          />
+                          <AuditPhotoCaption description={photo} width={72} />
+                        </View>
+                      );
+                    })}
                   </View>
                 ) : null}
 
@@ -736,6 +779,7 @@ const useStyles = createStyles((colors) => ({
     gap: spacing.sm,
     marginBottom: spacing.md,
   },
+  existingPhoto: { width: 72 },
   existingThumb: {
     width: 72,
     height: 72,

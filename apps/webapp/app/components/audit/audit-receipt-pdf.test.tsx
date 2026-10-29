@@ -420,3 +420,98 @@ describe("audit receipt PDF: layout", () => {
     expect(lensGroup).not.toBe(cameraGroup);
   });
 });
+
+describe("audit receipt PDF: when each audit photo was taken", () => {
+  const auditPhoto = (
+    id: string,
+    capturedAt: string | null,
+    auditAsset: unknown = null,
+    captureSource: string | null = null
+  ) => ({
+    id,
+    imageUrl: `https://storage.test/audits/${id}.webp`,
+    thumbnailUrl: `https://storage.test/audits/${id}-thumbnail.webp`,
+    description: null,
+    capturedAt,
+    captureSource,
+    createdAt: "2026-10-21T10:00:00.000Z",
+    auditAsset,
+  });
+
+  function renderWithPhotos() {
+    const pdfMeta = {
+      ...pdfMetaWith({ displayCode: SAM_CODE }),
+      generalImages: [auditPhoto("general-1", "2026-10-21T09:15:00.000Z")],
+      assetImages: [
+        auditPhoto("asset-photo-1", null, {
+          asset: { id: "asset-1", title: "Camera" },
+        }),
+      ],
+    } as unknown as AuditPdfDbResult;
+    return render(
+      <AuditPDFContent componentRef={{ current: null }} pdfMeta={pdfMeta} />
+    );
+  }
+
+  /** The text printed in the photo's own cell, under the thumbnail. */
+  function cellText(alt: string) {
+    return screen.getByAltText(alt).parentElement!.textContent;
+  }
+
+  it("prints the time a photo was taken under its thumbnail", () => {
+    renderWithPhotos();
+
+    expect(cellText("Audit image")).toMatch(/^Taken \S/);
+  });
+
+  it("explains the photo labels once, for a reader who cannot hover", () => {
+    renderWithPhotos();
+
+    expect(
+      screen.getByText(/^Each photo shows how it reached Shelf/)
+    ).toBeTruthy();
+  });
+
+  it("prints an older photo by its upload time, with no flag", () => {
+    // why: photos uploaded before capture times were read never had their
+    // date looked for, so they are not flagged as missing one.
+    renderWithPhotos();
+
+    expect(cellText("Photo of Camera")).toMatch(/^Uploaded 21\/10\/2026/);
+  });
+
+  it("prints the Old photo flag on a photo taken days before its asset's scan", () => {
+    const pdfMeta = {
+      ...pdfMetaWith({ displayCode: SAM_CODE }),
+      generalImages: [],
+      assetImages: [
+        auditPhoto(
+          "asset-photo-1",
+          "2026-10-01T06:30:00.000Z",
+          {
+            scannedAt: "2026-10-21T09:00:00.000Z",
+            asset: { id: "asset-1", title: "Camera" },
+          },
+          "LIBRARY"
+        ),
+      ],
+    } as unknown as AuditPdfDbResult;
+    render(
+      <AuditPDFContent componentRef={{ current: null }} pdfMeta={pdfMeta} />
+    );
+
+    expect(cellText("Photo of Camera")).toContain(
+      "20 days before this asset was scanned"
+    );
+    expect(cellText("Photo of Camera")).toMatch(/Old photo$/);
+  });
+
+  it("prints thumbnails, not the full-size photos", () => {
+    renderWithPhotos();
+
+    expect(screen.getByAltText("Audit image")).toHaveAttribute(
+      "src",
+      "https://storage.test/audits/general-1-thumbnail.webp"
+    );
+  });
+});
