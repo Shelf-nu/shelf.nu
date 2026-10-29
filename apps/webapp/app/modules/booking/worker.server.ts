@@ -4,6 +4,7 @@ import type PgBoss from "pg-boss";
 import { db } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { sendEmail } from "~/emails/mail.server";
+import { bookingEmailSubject } from "~/modules/push/messages";
 import { getTimeRemainingMessage } from "~/utils/date-fns";
 import { resolveFormatPrefs } from "~/utils/date-format";
 import { isNotFoundError, ShelfError } from "~/utils/error";
@@ -21,6 +22,7 @@ import {
   sendCheckinReminder,
 } from "./email-helpers";
 import { getBookingNotificationRecipients } from "./notification-recipients.server";
+import { sendBookingPushToCustodian } from "./push.server";
 import {
   createStatusTransitionNote,
   scheduleExpiryArchiveJob,
@@ -47,7 +49,10 @@ const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
       });
     });
 
-  if (booking.from && booking.to) {
+  // Only a reserved booking is waiting to be checked out. Cancelling or
+  // checking out cancels this job on a best-effort basis, so a job that still
+  // runs for any other status notifies nobody.
+  if (booking.status === BookingStatus.RESERVED && booking.from && booking.to) {
     // Resolve recipients with isScheduledJob: true so no editor is excluded
     // (scheduled jobs have no human actor to filter out)
     const recipients = await getBookingNotificationRecipients({
@@ -62,7 +67,7 @@ const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
         resolveUserDisplayName(booking.custodianUser) ||
         (booking.custodianTeamMember?.name as string);
 
-      const subject = `🔔 Checkout reminder (${booking.name}) - shelf.nu`;
+      const subject = bookingEmailSubject("CHECKOUT_REMINDER", booking.name);
 
       for (const recipient of recipients) {
         // Pure resolve from the loaded recipient row; hints as null-field
@@ -99,6 +104,14 @@ const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
           html,
         });
       }
+
+      sendBookingPushToCustodian({
+        eventType: "CHECKOUT_REMINDER",
+        booking,
+        recipients,
+        hints: data.hints,
+        actorUserId: undefined,
+      });
     }
   }
 };
@@ -120,6 +133,20 @@ const checkinReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
       });
     });
 
+  // Schedule the overdue handler before notifying, so a scheduling failure
+  // that makes pg-boss retry the job does not email and push twice. Only an
+  // ongoing booking gets one: an OVERDUE or still RESERVED booking does not.
+  if (booking.to && booking.status === BookingStatus.ONGOING) {
+    const when = new Date(booking.to);
+    await scheduleNextBookingJob({
+      data: {
+        ...data,
+        eventType: BOOKING_SCHEDULER_EVENTS_ENUM.overdueHandler,
+      },
+      when,
+    });
+  }
+
   /**
    * We need to meet some conditions to send the reminder, most important the booking needs to be ongoing so we dont send check-in reminder for assets that are not even checked out yet
    */
@@ -131,20 +158,6 @@ const checkinReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
       data.hints,
       booking.organizationId
     );
-  }
-
-  //schedule the next job
-  // if the booking is ongoing and has a to date, we schedule the overdue handler
-  // this is to make sure we dont schedule the overdue handler if the booking is already OVERDUE && still RESERVED
-  if (booking.to && booking.status === BookingStatus.ONGOING) {
-    const when = new Date(booking.to);
-    await scheduleNextBookingJob({
-      data: {
-        ...data,
-        eventType: BOOKING_SCHEDULER_EVENTS_ENUM.overdueHandler,
-      },
-      when,
-    });
   }
 };
 
@@ -203,7 +216,7 @@ const overdueHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
       resolveUserDisplayName(booking.custodianUser) ||
       (booking.custodianTeamMember?.name as string);
 
-    const subject = `⚠️ Overdue booking (${booking.name}) - shelf.nu`;
+    const subject = bookingEmailSubject("OVERDUE", booking.name);
 
     for (const recipient of recipients) {
       // Pure resolve from the loaded recipient row; hints as null-field
@@ -237,6 +250,14 @@ const overdueHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
         html,
       });
     }
+
+    sendBookingPushToCustodian({
+      eventType: "OVERDUE",
+      booking,
+      recipients,
+      hints: data.hints,
+      actorUserId: undefined,
+    });
   }
 };
 

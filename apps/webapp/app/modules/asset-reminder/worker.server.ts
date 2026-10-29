@@ -2,6 +2,8 @@ import type { AssetReminder, Prisma, User } from "@prisma/client";
 import type PgBoss from "pg-boss";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
+import { PUSH_MESSAGES } from "~/modules/push/messages";
+import { sendPush } from "~/modules/push/service.server";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { ShelfError } from "~/utils/error";
 import { isLastAttempt } from "~/utils/job-retry";
@@ -424,6 +426,18 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
         content: noteContent,
       }),
     ]);
+
+    // After the emails and the note, so a job that fails and is retried
+    // pushes only once
+    void sendPush({
+      userIds: usersToSendEmail.map(({ id }) => id),
+      ...PUSH_MESSAGES.ASSET_REMINDER({
+        assetId: reminder.asset.id,
+        organizationId: reminder.organizationId,
+        reminderName: reminder.name,
+        assetTitle: reminder.asset.title,
+      }),
+    });
   },
 };
 

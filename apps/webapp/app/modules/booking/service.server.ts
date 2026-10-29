@@ -63,7 +63,11 @@ import { db, type ExtendedPrismaClient } from "~/database/db.server";
 import { LONG_TRANSACTION_OPTIONS } from "~/database/transaction-options.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { sendEmail } from "~/emails/mail.server";
-import type { BookingEmailActor, BookingForEmail } from "~/emails/types";
+import type {
+  BookingEmailActor,
+  BookingEmailActorLabel,
+  BookingForEmail,
+} from "~/emails/types";
 import { lockAssetsForArchiveGuard } from "~/modules/asset/archive-lock.server";
 import {
   ACTIVE_BOOKING_STATUSES,
@@ -113,6 +117,7 @@ import {
   type DestroyedKitUnitsResult,
   type EmptiedKitMembership,
 } from "~/modules/kit/service.server";
+import { bookingEmailSubject } from "~/modules/push/messages";
 import { assetQtyMeta, formatUnitCount } from "~/utils/asset-quantity";
 import {
   bookingAddableStatusClause,
@@ -258,7 +263,14 @@ import {
 } from "./kit-conflicts.server";
 import { assertScannedUnitsAreNotKitMembers } from "./kit-member-scan-guard.server";
 import { getBookingNotificationRecipients } from "./notification-recipients.server";
-import type { NotificationRecipient } from "./notification-recipients.server";
+import type {
+  BookingEventType,
+  NotificationRecipient,
+} from "./notification-recipients.server";
+import {
+  sendBookingPushToCustodian,
+  sendBookingPushToReplacedCustodian,
+} from "./push.server";
 import { resolveSliceKitIds } from "./slice-kit-attribution";
 import {
   isSliceOutByMarker,
@@ -313,48 +325,48 @@ function assetBatchTx<T>(fn: (tx: BookingTx) => Promise<T>): Promise<T> {
 }
 
 /**
- * Sends a booking email to all resolved notification recipients.
- * Each recipient gets an individual email with personalized footer.
- */
-/**
- * Sends an individual personalized email to each resolved notification
- * recipient. Each email includes a per-recipient footer that explains
- * why the person received the notification (e.g., "you are the custodian",
- * "you manage bookings in the workspace"), driven by `recipient.reason`.
+ * Sends a booking event's notifications: an individual email to each resolved
+ * recipient, and one push to the custodian among them.
  *
- * Emails are fired concurrently (non-awaited `sendEmail` calls) to avoid
- * blocking the booking flow on slow SMTP delivery.
+ * Each email carries a footer that explains why the person received it (e.g.
+ * "you are the custodian", "you manage bookings in the workspace"), driven by
+ * `recipient.reason`. Emails are fired concurrently (non-awaited `sendEmail`
+ * calls) so slow SMTP delivery never blocks the booking flow, and the push is
+ * queued the same way.
  *
  * Each recipient's date/time formatting is resolved from their already-loaded
  * row (the four raw pref fields on `NotificationRecipient`) via the pure
- * `resolveFormatPrefs` — no per-recipient DB fetch (avoids an N+1). The
+ * `resolveFormatPrefs`, so the fan-out makes no per-recipient DB fetch. The
  * `buildText`/`buildHeading` callbacks receive those resolved prefs so the
  * plain-text body and heading dates honor each recipient.
  *
+ * @param eventType - The booking event; picks the email subject and the push
+ *   wording
  * @param recipients - Pre-resolved list from `getBookingNotificationRecipients()`
  * @param booking - The booking data used to render the email template
- * @param subject - Email subject line
  * @param buildText - Builds the plain-text body from a recipient's resolved prefs
  *   and the actor, passed together so the text and HTML lines always agree
  * @param buildHeading - Builds the HTML heading from a recipient's resolved prefs
  * @param hints - Acting user's hints, only the null-field fallback for recipients
  * @param actor - Who acted and when, shown under the heading and handed to
  *   `buildText` for the plain-text body
+ * @param actorUserId - The user who acted, left out of the push
  * @param templateProps - Additional props forwarded to the email template
  */
 async function sendBookingEmailToAllRecipients({
+  eventType,
   recipients,
   booking,
-  subject,
   buildText,
   buildHeading,
   hints,
   actor,
+  actorUserId,
   templateProps,
 }: {
+  eventType: BookingEventType;
   recipients: NotificationRecipient[];
   booking: BookingForEmail;
-  subject: string;
   /** From `resolveBookingEmailActor`; `undefined` leaves the line out. */
   actor: BookingEmailActor | undefined;
   /**
@@ -370,6 +382,7 @@ async function sendBookingEmailToAllRecipients({
   buildHeading: (prefs: ResolvedFormatPrefs) => string;
   /** Acting user's hints — only the null-field fallback for recipients. */
   hints: ClientHint;
+  actorUserId: string | undefined;
   templateProps?: {
     hideViewButton?: boolean;
     cancellationReason?: string;
@@ -378,6 +391,8 @@ async function sendBookingEmailToAllRecipients({
     modelRequests?: ReservationEmailModelRequest[];
   };
 }) {
+  const subject = bookingEmailSubject(eventType, booking.name);
+
   for (const recipient of recipients) {
     // Recipient prefs resolved from the ALREADY-LOADED row (raw pref fields on
     // NotificationRecipient); hints is the null-field fallback only. Pure —
@@ -402,6 +417,14 @@ async function sendBookingEmailToAllRecipients({
       html,
     });
   }
+
+  sendBookingPushToCustodian({
+    eventType,
+    booking,
+    recipients,
+    hints,
+    actorUserId,
+  });
 }
 
 async function cancelScheduler(
@@ -2746,11 +2769,19 @@ export async function reserveBooking({
       }
     }
 
-    // Resolve notification recipients and send emails.
-    // Forwarded so the broadcast fires only for reservations whose maker's
-    // role triggers it.
+    // The notifications read the booking as reserved: a reservation can change
+    // the custodian and the dates, and `bookingFound` still holds the draft's.
+    // Read after the commit so the transaction stays short, and kept apart
+    // from the return value, which callers may send to the browser.
+    const reservedBooking = await db.booking.findUniqueOrThrow({
+      where: { id: updatedBooking.id, organizationId },
+      include: BOOKING_INCLUDE_FOR_RESERVATION_EMAIL,
+    });
+
+    // Resolve notification recipients and send emails. Forwarded so the
+    // broadcast fires only for reservations whose maker's role triggers it.
     const recipients = await getBookingNotificationRecipients({
-      booking: bookingFound,
+      booking: reservedBooking,
       eventType: "RESERVATION",
       organizationId,
       editorUserId: userId,
@@ -2758,16 +2789,16 @@ export async function reserveBooking({
     });
 
     if (recipients.length > 0) {
-      const custodian = bookingFound?.custodianUser
-        ? resolveUserDisplayName(bookingFound.custodianUser)
-        : bookingFound.custodianTeamMember?.name ?? "";
+      const custodian = reservedBooking.custodianUser
+        ? resolveUserDisplayName(reservedBooking.custodianUser)
+        : reservedBooking.custodianTeamMember?.name ?? "";
 
       // Only forward outstanding requests so the email doesn't render
       // fulfilled historical rows. `fulfilledAt
       // IS NULL` is the canonical outstanding filter in the new schema;
       // each row shows the STILL-PENDING unit count
       // (`quantity - fulfilledQuantity`).
-      const outstandingModelRequests = bookingFound.modelRequests
+      const outstandingModelRequests = reservedBooking.modelRequests
         .filter((req) => req.fulfilledAt === null)
         .map((req) => ({
           quantity: req.quantity - req.fulfilledQuantity,
@@ -2780,33 +2811,47 @@ export async function reserveBooking({
       });
 
       await sendBookingEmailToAllRecipients({
+        eventType: "RESERVATION",
         recipients,
-        booking: bookingFound,
-        subject: `✅ Booking reserved (${bookingFound.name}) - shelf.nu`,
+        booking: reservedBooking,
         buildText: (textArgs) =>
           assetReservedEmailContent({
             ...textArgs,
-            bookingName: bookingFound.name,
-            assetsCount: bookingFound._count.bookingAssets,
+            bookingName: reservedBooking.name,
+            assetsCount: reservedBooking._count.bookingAssets,
             custodian,
             from,
             to,
-            bookingId: bookingFound.id,
-            customEmailFooter: bookingFound.organization.customEmailFooter,
+            bookingId: reservedBooking.id,
+            customEmailFooter: reservedBooking.organization.customEmailFooter,
             modelRequests: outstandingModelRequests,
           }),
         buildHeading: () => `Booking reservation for ${custodian}`,
         hints,
         actor,
+        actorUserId: userId,
         templateProps: {
-          assets: bookingFound.bookingAssets,
+          assets: reservedBooking.bookingAssets,
           // Forward any outstanding `BookingModelRequest` rows so the
           // reservation email can render a "Requested models" section.
           // The include widening on
           // `BOOKING_INCLUDE_FOR_RESERVATION_EMAIL` guarantees
           // `modelRequests` is present on the loaded booking.
-          modelRequests: bookingFound.modelRequests,
+          modelRequests: reservedBooking.modelRequests,
         },
+      });
+    }
+
+    // A reservation that replaces the draft's custodian tells the replaced
+    // custodian, as a booking update does.
+    if (
+      bookingFound.custodianUserId &&
+      bookingFound.custodianUserId !== reservedBooking.custodianUserId
+    ) {
+      sendBookingPushToReplacedCustodian({
+        booking: reservedBooking,
+        replacedCustodianUserId: bookingFound.custodianUserId,
+        actorUserId: userId,
       });
     }
 
@@ -2852,11 +2897,14 @@ export async function reserveBooking({
  *   a non-null `to`
  * @param hints - Client hints forwarded to the scheduled jobs and email
  * @param organizationId - Booking's organization (for recipient resolution)
+ * @param actorUserId - The user who checked the booking out; an immediate
+ *   reminder emails them but does not push them about their own checkout
  */
 async function scheduleCheckinReminderForBooking(
   booking: { id: string; to: Date | null },
   hints: ClientHint,
-  organizationId: string
+  organizationId: string,
+  actorUserId: string | undefined
 ) {
   const effectiveTo = booking.to;
   if (!effectiveTo) {
@@ -2886,7 +2934,8 @@ async function scheduleCheckinReminderForBooking(
       bookingForEmail,
       bookingForEmail._count.bookingAssets,
       hints,
-      organizationId
+      organizationId,
+      { actorUserId }
     );
 
     const when = new Date(effectiveTo);
@@ -3595,7 +3644,8 @@ async function runCheckoutSideEffects({
   await scheduleCheckinReminderForBooking(
     { id: bookingFound.id, to: effectiveTo ?? null },
     hints,
-    organizationId
+    organizationId,
+    userId
   );
 
   /** Hydrate the full booking with relations for the return payload only. */
@@ -7039,9 +7089,9 @@ export async function checkinBooking({
       });
 
       await sendBookingEmailToAllRecipients({
+        eventType: "CHECKIN",
         recipients,
         booking: updatedBooking,
-        subject: `🎉 Booking complete (${updatedBooking.name}) - shelf.nu`,
         buildText: (textArgs) =>
           completedBookingEmailContent({
             ...textArgs,
@@ -7057,6 +7107,7 @@ export async function checkinBooking({
           `Your booking has been completed: "${updatedBooking.name}"`,
         hints,
         actor,
+        actorUserId: userId,
       });
     }
 
@@ -11114,7 +11165,8 @@ export async function partialCheckoutBooking({
         await scheduleCheckinReminderForBooking(
           { id: bookingFound.id, to: bookingFound.to },
           hints,
-          organizationId
+          organizationId,
+          userId
         );
       }
     }
@@ -12427,9 +12479,9 @@ export async function cancelBooking({
       });
 
       await sendBookingEmailToAllRecipients({
+        eventType: "CANCEL",
         recipients,
         booking,
-        subject: `❌ Booking cancelled (${booking.name}) - shelf.nu`,
         buildText: (textArgs) =>
           cancelledBookingEmailContent({
             ...textArgs,
@@ -12446,6 +12498,7 @@ export async function cancelBooking({
           `Your booking has been cancelled: "${booking.name}"`,
         hints,
         actor,
+        actorUserId: userId,
         templateProps: {
           cancellationReason: cancellationReason || undefined,
         },
@@ -12590,9 +12643,9 @@ export async function revertBookingToDraft({
         });
 
         await sendBookingEmailToAllRecipients({
+          eventType: "REVERT_TO_DRAFT",
           recipients,
           booking: draftBooking,
-          subject: `↩️ Booking reverted to draft (${draftBooking.name}) - shelf.nu`,
           buildText: (textArgs) =>
             revertedToDraftEmailContent({
               ...textArgs,
@@ -12608,6 +12661,7 @@ export async function revertBookingToDraft({
             `Your booking has been reverted to draft: "${draftBooking.name}"`,
           hints,
           actor,
+          actorUserId: userId,
         });
       }
     } catch (cause) {
@@ -12635,13 +12689,25 @@ export async function revertBookingToDraft({
 }
 
 /**
- * How the activity note, the email and its actor line word each direction of
- * an end-date change.
+ * How each direction of an end-date change reads: the activity note's verb,
+ * the email's actor line, and the booking event that words its email subject
+ * and push.
  */
 const END_DATE_CHANGE_COPY = {
-  later: { verb: "extended", actorLabel: "Extended by" },
-  earlier: { verb: "shortened", actorLabel: "Shortened by" },
-} as const;
+  later: { verb: "extended", actorLabel: "Extended by", eventType: "EXTEND" },
+  earlier: {
+    verb: "shortened",
+    actorLabel: "Shortened by",
+    eventType: "SHORTEN",
+  },
+} as const satisfies Record<
+  "later" | "earlier",
+  {
+    verb: string;
+    actorLabel: BookingEmailActorLabel;
+    eventType: BookingEventType;
+  }
+>;
 
 /**
  * Moves the end of an ongoing or overdue booking, later or earlier.
@@ -13012,11 +13078,14 @@ export async function extendBooking({
             expected,
           });
 
+          // The end-date change is this booking event's push; the reminder
+          // only emails
           await sendCheckinReminder(
             updatedBooking,
             updatedBooking._count.bookingAssets,
             hints,
-            updatedBooking.organizationId
+            updatedBooking.organizationId,
+            { push: false }
           );
         } else {
           // A copy: `expected.to` must stay the stored end.
@@ -13114,7 +13183,7 @@ export async function extendBooking({
     // Resolve notification recipients and send personalized emails
     const recipients = await getBookingNotificationRecipients({
       booking: updatedBooking,
-      eventType: "EXTEND",
+      eventType: copy.eventType,
       organizationId: updatedBooking.organizationId,
       editorUserId: userId,
     });
@@ -13130,9 +13199,9 @@ export async function extendBooking({
       });
 
       await sendBookingEmailToAllRecipients({
+        eventType: copy.eventType,
         recipients,
         booking: updatedBooking,
-        subject: `Booking ${copy.verb} (${updatedBooking.name}) - shelf.nu`,
         buildText: (textArgs) =>
           extendBookingEmailContent({
             ...textArgs,
@@ -13152,6 +13221,7 @@ export async function extendBooking({
           })} to ${formatDate(newEndDate, prefs, { includeTime: true })}`,
         hints,
         actor,
+        actorUserId: userId,
       });
     }
 
@@ -14797,9 +14867,9 @@ export async function deleteBooking(
       });
 
       await sendBookingEmailToAllRecipients({
+        eventType: "DELETE",
         recipients,
         booking: b,
-        subject: `🗑️ Booking deleted (${b.name}) - shelf.nu`,
         buildText: (textArgs) =>
           deletedBookingEmailContent({
             ...textArgs,
@@ -14814,6 +14884,7 @@ export async function deleteBooking(
         buildHeading: () => `Your booking has been deleted: "${b.name}"`,
         hints,
         actor,
+        actorUserId: userId,
         templateProps: {
           hideViewButton: true,
         },
@@ -16358,9 +16429,9 @@ export async function bulkDeleteBookings({
           "";
 
         await sendBookingEmailToAllRecipients({
+          eventType: "DELETE",
           recipients,
           booking: b,
-          subject: `🗑️ Booking deleted (${b.name}) - shelf.nu`,
           buildText: (textArgs) =>
             deletedBookingEmailContent({
               ...textArgs,
@@ -16374,6 +16445,7 @@ export async function bulkDeleteBookings({
           buildHeading: () => `Your booking has been deleted: "${b.name}"`,
           hints,
           actor,
+          actorUserId: userId,
           templateProps: {
             hideViewButton: true,
           },
@@ -16880,9 +16952,9 @@ export async function bulkCancelBookings({
           "";
 
         await sendBookingEmailToAllRecipients({
+          eventType: "CANCEL",
           recipients,
           booking: b,
-          subject: `❌ Booking cancelled (${b.name}) - shelf.nu`,
           buildText: (textArgs) =>
             cancelledBookingEmailContent({
               ...textArgs,
@@ -16897,6 +16969,7 @@ export async function bulkCancelBookings({
           buildHeading: () => `Your booking has been cancelled: "${b.name}"`,
           hints,
           actor,
+          actorUserId: userId,
         });
       }
     }

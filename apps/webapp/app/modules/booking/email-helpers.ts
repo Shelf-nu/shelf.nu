@@ -9,6 +9,7 @@ import type {
   BookingEmailActorLabel,
   BookingForEmail,
 } from "~/emails/types";
+import { bookingEmailSubject } from "~/modules/push/messages";
 import type { ClientHint } from "~/utils/client-hints";
 import { getTimeRemainingMessage } from "~/utils/date-fns";
 import type { ResolvedFormatPrefs } from "~/utils/date-format";
@@ -19,6 +20,10 @@ import { Logger } from "~/utils/logger";
 import { resolveUserDisplayName } from "~/utils/user";
 import { BOOKING_INCLUDE_FOR_EMAIL } from "./constants";
 import { getBookingNotificationRecipients } from "./notification-recipients.server";
+import {
+  sendBookingPushToCustodian,
+  sendBookingPushToReplacedCustodian,
+} from "./push.server";
 import { USER_NAME_SELECT } from "../user/fields";
 
 type BasicEmailContentArgs = {
@@ -130,11 +135,9 @@ export async function resolveBookingEmailActor({
  * This is the content of the email sent to the custodian when a booking
  * is reserved.
  *
- * Phase 3d (Book-by-Model): when the booking has outstanding
- * `BookingModelRequest` rows, the plain-text email appends a
- * "Requested models" block that mirrors the HTML template. The list is
- * omitted when empty so the plain-text output stays identical for
- * bookings that don't use model-level reservations.
+ * When the booking has outstanding `BookingModelRequest` rows, the
+ * plain-text email appends a "Requested models" block that mirrors the
+ * HTML template. The block is left out when there are none.
  *
  * @param args.modelRequests - Optional list of `{ quantity, modelName }`
  *   rows. Must be pre-filtered so only entries with `quantity > 0`
@@ -186,26 +189,29 @@ export const checkinReminderEmailContent = (args: BasicEmailContentArgs) =>
   });
 
 /**
- * Sends a check-in reminder email to all resolved notification recipients.
- *
- * Unlike the original implementation (which sent only to the custodian),
- * this function now resolves the full recipient list via
- * `getBookingNotificationRecipients()` and sends a personalized email
- * to each recipient with their specific reason footer.
+ * Sends the check-in reminder: a personalized email, with its reason
+ * footer, to every recipient `getBookingNotificationRecipients()` resolves,
+ * and one push to the custodian.
  *
  * Called from the `checkinReminder` scheduled job handler in
- * `worker.server.ts`, which handles the booking status guard.
+ * `worker.server.ts`, which handles the booking status guard, and at once by
+ * a checkout or extension that leaves under an hour to checkin.
  *
  * @param booking - The booking with all email-required relations included
  * @param assetCount - Number of assets in the booking (for display)
  * @param hints - Client hints for date/time formatting
  * @param organizationId - Used to resolve org-level notification settings
+ * @param options.push - `false` when the caller has already pushed about this
+ *   booking, so the custodian gets one push per booking event
+ * @param options.actorUserId - The user whose checkout triggered the reminder,
+ *   never pushed about it; absent for the scheduled job, which has no actor
  */
 export async function sendCheckinReminder(
   booking: BookingForEmail,
   assetCount: number,
   hints: ClientHint,
-  organizationId: string
+  organizationId: string,
+  { push = true, actorUserId }: { push?: boolean; actorUserId?: string } = {}
 ) {
   const recipients = await getBookingNotificationRecipients({
     booking,
@@ -220,7 +226,7 @@ export async function sendCheckinReminder(
     resolveUserDisplayName(booking.custodianUser) ||
     (booking.custodianTeamMember?.name as string);
 
-  const subject = `🔔 Checkin reminder (${booking.name}) - shelf.nu`;
+  const subject = bookingEmailSubject("CHECKIN_REMINDER", booking.name);
 
   for (const recipient of recipients) {
     // Recipient prefs resolved from the ALREADY-LOADED row (raw pref fields on
@@ -258,6 +264,16 @@ export async function sendCheckinReminder(
       html,
     });
   }
+
+  if (push) {
+    sendBookingPushToCustodian({
+      eventType: "CHECKIN_REMINDER",
+      booking,
+      recipients,
+      hints,
+      actorUserId,
+    });
+  }
 }
 
 /**
@@ -285,7 +301,7 @@ export const completedBookingEmailContent = (args: BasicEmailContentArgs) =>
 /**
  * Booking is deleted
  *
- * This email gets sent when a booking is checked-in
+ * This email gets sent when a booking is deleted
  */
 export const deletedBookingEmailContent = (args: BasicEmailContentArgs) =>
   baseBookingTextEmailContent({
@@ -380,6 +396,10 @@ export const bookingUpdatedEmailContent = (
  * Every copy, the old custodian's included, carries an "Updated by" line
  * naming `userId`.
  *
+ * The custodian gets the update push, worded as a handover when this update
+ * made them the custodian, and the custodian it replaced gets a removal push;
+ * neither is pushed when they made the change.
+ *
  * Skips sending entirely if `changes` is empty (no meaningful update).
  */
 export async function sendBookingUpdatedEmail({
@@ -419,7 +439,7 @@ export async function sendBookingUpdatedEmail({
         booking.custodianTeamMember?.name) ??
       "";
 
-    const subject = `📝 Booking updated (${booking.name}) - shelf.nu`;
+    const subject = bookingEmailSubject("UPDATE", booking.name);
 
     // Shared args for every recipient's plain-text body. `prefs` is supplied
     // per recipient inside the loop, so it is omitted here.
@@ -482,11 +502,18 @@ export async function sendBookingUpdatedEmail({
       });
     }
 
+    // The custodian this update replaced, when they have an account
+    let replacedCustodianUserId: string | undefined;
+
     // Special case: if custodian changed, notify the OLD custodian too
     // (they might not be in the recipient list anymore since they're no longer the custodian)
     if (oldCustodianEmail) {
-      const alreadySent = recipients.some((r) => r.email === oldCustodianEmail);
-      if (!alreadySent) {
+      const alreadyEmailed = recipients.find(
+        (r) => r.email === oldCustodianEmail
+      );
+      if (alreadyEmailed) {
+        replacedCustodianUserId = alreadyEmailed.userId;
+      } else {
         // Check the old custodian is not the editor. The four format-pref
         // columns are selected alongside `id` so we can resolve their prefs
         // from this single lookup (already required for the editor check) —
@@ -501,6 +528,8 @@ export async function sendBookingUpdatedEmail({
             timeZone: true,
           },
         });
+
+        replacedCustodianUserId = oldCustodianUser?.id;
 
         if (!oldCustodianUser || oldCustodianUser.id !== userId) {
           // Resolve the old custodian's prefs from the row just fetched (or
@@ -533,6 +562,24 @@ export async function sendBookingUpdatedEmail({
           });
         }
       }
+    }
+
+    sendBookingPushToCustodian({
+      eventType: "UPDATE",
+      booking,
+      recipients,
+      hints,
+      actorUserId: userId,
+      custodianChanged:
+        !!oldCustodianEmail &&
+        booking.custodianUser?.email !== oldCustodianEmail,
+    });
+    if (replacedCustodianUserId) {
+      sendBookingPushToReplacedCustodian({
+        booking,
+        replacedCustodianUserId,
+        actorUserId: userId,
+      });
     }
   } catch (cause) {
     Logger.error(

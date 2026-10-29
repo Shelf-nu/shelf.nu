@@ -52,3 +52,16 @@ export enum AUDIT_SCHEDULER_EVENTS_ENUM {
   reminder1h = `audit-reminder-1h`,
   overdueNotice = `audit-overdue-notice`,
 }
+
+/**
+ * The reminders sent to assignees before an audit's due date, each with the
+ * time left as the reminder email words it.
+ */
+export const AUDIT_REMINDER_TIMEFRAMES = {
+  REMINDER_24H: "24 hours",
+  REMINDER_4H: "4 hours",
+  REMINDER_1H: "1 hour",
+} as const;
+
+/** One of the reminders sent before an audit is due. */
+export type AuditReminder = keyof typeof AUDIT_REMINDER_TIMEFRAMES;
