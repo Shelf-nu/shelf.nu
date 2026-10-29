@@ -223,6 +223,16 @@ const organization = vi.hoisted(() => ({
   }),
 }));
 
+/** Every raw query the service ran, as its SQL text and its values. */
+const rawQueries = vi.hoisted(() => [] as { sql: string; values: unknown[] }[]);
+const queryRaw = vi.hoisted(
+  () =>
+    async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      rawQueries.push({ sql: strings.join("?"), values });
+      return [];
+    }
+);
+
 // why: the service's rules are about what the table holds; an in-memory table
 // with the real scoping and unique indexes keeps the tests off a database.
 vi.mock("~/database/db.server", () => {
@@ -230,8 +240,9 @@ vi.mock("~/database/db.server", () => {
     pdfDocument,
     customField,
     organization,
-    // why: the row lock has no effect on a single-threaded in-memory table.
-    $queryRaw: async () => [],
+    // why: the row lock has no effect on a single-threaded in-memory table;
+    // the SQL it was given is kept so a test can read it.
+    $queryRaw: queryRaw,
     $transaction: async <T>(fn: (tx: unknown) => Promise<T>) => fn(db),
   };
   return { db };
@@ -259,6 +270,7 @@ beforeEach(() => {
   store.customFields = [];
   store.seq = 0;
   store.seeded = new Set();
+  rawQueries.length = 0;
   premium.enabled = true;
 });
 
@@ -315,6 +327,20 @@ describe("PDF documents: what a workspace starts with", () => {
 });
 
 describe("PDF documents: the default and the last document", () => {
+  it("locks the workspace's documents, by table and column name, before deleting", async () => {
+    await getPdfDocuments({ organizationId: ORG });
+    const [, receipt] = documentsOf();
+
+    await deletePdfDocument({ organizationId: ORG, documentId: receipt.id });
+
+    expect(rawQueries).toEqual([
+      {
+        sql: 'SELECT "id" FROM "PdfDocument" WHERE "organizationId" = ? FOR UPDATE',
+        values: [ORG],
+      },
+    ]);
+  });
+
   it("refuses to delete the last document", async () => {
     await getPdfDocuments({ organizationId: ORG });
     const [checklist, handover] = documentsOf();
