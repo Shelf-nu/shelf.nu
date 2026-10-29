@@ -293,6 +293,17 @@ export default function CheckoutDialog({
    * rather than pulling it back to the trigger.
    */
   const [open, setOpen] = useState(false);
+  /**
+   * "Check out with new end date" with the date field cleared. Caught on the
+   * button, not with a native `required`: both expired buttons post the same
+   * form, and a constraint on the field would block "as overdue" too.
+   */
+  const [newEndDateError, setNewEndDateError] = useState<string | null>(null);
+  const newEndDateRef = useRef<HTMLInputElement>(null);
+  const onOpenChange = (next: boolean) => {
+    if (next) setNewEndDateError(null);
+    setOpen(next);
+  };
   /** The form a blocked submit belongs to, reported once the dialog closes. */
   const blockedFormRef = useRef<HTMLFormElement | null>(null);
   const closeOnSubmit = (event: MouseEvent<HTMLButtonElement>) => {
@@ -300,6 +311,17 @@ export default function CheckoutDialog({
     const form = event.currentTarget.form;
     blockedFormRef.current = form && !form.checkValidity() ? form : null;
     setTimeout(() => setOpen(false), 0);
+  };
+  const submitWithNewEndDate = (event: MouseEvent<HTMLButtonElement>) => {
+    if (!newEndDateRef.current?.value.trim()) {
+      // Stops the submit; the dialog stays open on the field to fix.
+      event.preventDefault();
+      setNewEndDateError("Pick a new end date");
+      newEndDateRef.current?.focus();
+      return;
+    }
+    setNewEndDateError(null);
+    closeOnSubmit(event);
   };
   const reportBlockedForm = (event: Event) => {
     const form = blockedFormRef.current;
@@ -328,7 +350,7 @@ export default function CheckoutDialog({
   }
 
   return (
-    <AlertDialog open={open} onOpenChange={setOpen}>
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogTrigger asChild>
         <Button
           disabled={isDisabled}
@@ -426,8 +448,9 @@ export default function CheckoutDialog({
                 end date" and validates it like an extension. No native
                 `required` or `min`: both buttons submit the booking form, and
                 a constraint here would block "as overdue", which never reads
-                the field. */}
+                the field. The new-date button checks it is filled instead. */}
             <input
+              ref={newEndDateRef}
               id={`${EXPIRED_CHECKOUT_NEW_TO_FIELD}-${booking.id}`}
               type="datetime-local"
               name={EXPIRED_CHECKOUT_NEW_TO_FIELD}
@@ -437,8 +460,24 @@ export default function CheckoutDialog({
                 prefs.timeZone
               )}
               disabled={Boolean(isDisabled)}
+              onChange={() => setNewEndDateError(null)}
+              aria-invalid={newEndDateError ? true : undefined}
+              aria-describedby={
+                newEndDateError
+                  ? `${EXPIRED_CHECKOUT_NEW_TO_FIELD}-${booking.id}-error`
+                  : undefined
+              }
               className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-primary-300 focus:outline-none"
             />
+            {newEndDateError ? (
+              <p
+                id={`${EXPIRED_CHECKOUT_NEW_TO_FIELD}-${booking.id}-error`}
+                role="alert"
+                className="text-sm text-error-500"
+              >
+                {newEndDateError}
+              </p>
+            ) : null}
           </div>
         ) : null}
 
@@ -487,7 +526,7 @@ export default function CheckoutDialog({
                   name="checkoutIntentChoice"
                   value={CheckoutIntentEnum["with-new-end-date"]}
                   form={formId}
-                  onClick={closeOnSubmit}
+                  onClick={submitWithNewEndDate}
                 >
                   Check out with new end date
                 </Button>

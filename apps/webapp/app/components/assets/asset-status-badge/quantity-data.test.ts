@@ -11,6 +11,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  getNextReservationExpiry,
   getQuantityBadgeLabelAndColor,
   getQuantityData,
   type QuantityAwareAsset,
@@ -235,5 +236,47 @@ describe("quantity pool status label", () => {
 
       expect(data?.reserved).toBe(3);
     });
+  });
+});
+
+describe("getNextReservationExpiry", () => {
+  const HOUR = 60 * 60 * 1000;
+  /** A RESERVED slice ending `offsetMs` from now. */
+  const reservedEnding = (offsetMs: number) => ({
+    quantity: 1,
+    assetKitId: null,
+    booking: { status: "RESERVED", to: new Date(Date.now() + offsetMs) },
+  });
+
+  it("returns the soonest end still ahead among reservations", () => {
+    const soon = reservedEnding(HOUR);
+    const next = getNextReservationExpiry(
+      asset({
+        bookingAssets: [reservedEnding(3 * HOUR), soon, reservedEnding(-HOUR)],
+      })
+    );
+    expect(next?.getTime()).toBe((soon.booking.to as Date).getTime());
+  });
+
+  it("ignores bookings that are underway and reservations already ended", () => {
+    expect(
+      getNextReservationExpiry(
+        asset({
+          bookingAssets: [
+            {
+              quantity: 1,
+              assetKitId: null,
+              booking: { status: "ONGOING", to: new Date(Date.now() + HOUR) },
+            },
+            reservedEnding(-HOUR),
+          ],
+        })
+      )
+    ).toBeNull();
+  });
+
+  it("returns null with no rows", () => {
+    expect(getNextReservationExpiry(null)).toBeNull();
+    expect(getNextReservationExpiry(asset({ bookingAssets: null }))).toBeNull();
   });
 });

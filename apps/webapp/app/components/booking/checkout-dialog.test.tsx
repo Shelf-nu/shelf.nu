@@ -470,6 +470,49 @@ describe("CheckoutDialog From location question", () => {
       ]);
     });
 
+    it("keeps the dialog open and submits nothing when the new end date is cleared", () => {
+      const { submissions } = renderInForm({
+        booking: expiredBooking,
+        allowNewEndDate: true,
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Check Out" }));
+
+      const input = screen.getByLabelText("New end date") as HTMLInputElement;
+      fireEvent.change(input, { target: { value: "" } });
+      fireEvent.click(
+        screen.getByRole("button", { name: "Check out with new end date" })
+      );
+
+      expect(submissions).toHaveLength(0);
+      expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Pick a new end date"
+      );
+      expect(input).toHaveAttribute("aria-invalid", "true");
+      expect(document.activeElement).toBe(input);
+    });
+
+    it("still checks out as overdue with the new end date cleared", () => {
+      const { submissions } = renderInForm({
+        booking: expiredBooking,
+        allowNewEndDate: true,
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Check Out" }));
+
+      fireEvent.change(screen.getByLabelText("New end date"), {
+        target: { value: "" },
+      });
+      fireEvent.click(
+        screen.getByRole("button", { name: "Check out as overdue" })
+      );
+
+      expect(submissions).toHaveLength(1);
+      expect(submissions[0]).toContainEqual([
+        "checkoutIntentChoice",
+        "without-adjusted-date",
+      ]);
+    });
+
     it("offers only as-overdue, and points at the booking page, where a batch cannot reschedule", () => {
       // why: a scan or a selected batch judges only its own items; the
       // whole booking's new window is the header's Check out.

@@ -101,6 +101,30 @@ export interface QuantityAwareAsset {
 }
 
 /**
+ * The soonest moment a RESERVED slice on `asset` turns into an expired
+ * reservation, so a page left open can refresh its figures then:
+ * `getQuantityData` reads the clock, and nothing else re-runs it.
+ *
+ * @param asset - The rows `getQuantityData` reads, or nothing
+ * @returns The earliest end still ahead among RESERVED slices, or null
+ */
+export function getNextReservationExpiry(
+  asset?: QuantityAwareAsset | null
+): Date | null {
+  const rows = asset?.stillOutBookingAssets ?? asset?.bookingAssets;
+  if (!Array.isArray(rows)) return null;
+  const now = Date.now();
+  let next: number | null = null;
+  for (const row of rows) {
+    if (row.booking?.status !== "RESERVED" || !row.booking.to) continue;
+    const end = new Date(row.booking.to).getTime();
+    if (Number.isNaN(end) || end <= now) continue;
+    if (next === null || end < next) next = end;
+  }
+  return next === null ? null : new Date(next);
+}
+
+/**
  * Computes quantity breakdown from an asset's custody and booking records.
  * Returns null for non-quantity-tracked assets or when there is no custody
  * or booking data to display.
