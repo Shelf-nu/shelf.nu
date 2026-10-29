@@ -7,6 +7,7 @@ import type {
   CustodySourceEntry,
   CustodySourceOption,
 } from "@shelf/quantity-control";
+import type { NotificationPreferences } from "../push/preferences";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -2045,4 +2046,45 @@ export type AssetBookingsResponse = {
   perPage: number;
   totalCount: number;
   totalPages: number;
+};
+
+// ── Push notifications ─────────────────────────────────
+
+/**
+ * Body of `POST /api/mobile/push-token`: this device, for the signed-in
+ * person. Repeating it refreshes the server's `lastSeenAt`, and a token
+ * another person registered moves to the caller.
+ *
+ * @see {@link file://../../../webapp/app/routes/api+/mobile+/push-token.ts}
+ */
+export type RegisterPushTokenPayload = {
+  /** The `ExponentPushToken[...]` string from `getExpoPushTokenAsync`. */
+  token: string;
+  platform: "IOS" | "ANDROID";
+  /** `expo-device` model name, at most 120 characters; null when unknown. */
+  deviceName: string | null;
+  /** This build's version, at most 20 characters; null when unknown. */
+  appVersion: string | null;
+};
+
+/** Answer of both `POST` and `DELETE /api/mobile/push-token`. */
+export type PushTokenResponse = { ok: true };
+
+/**
+ * Answer of `GET /api/mobile/notification-preferences`.
+ *
+ * @see {@link file://../../../webapp/app/routes/api+/mobile+/notification-preferences.ts}
+ */
+export type NotificationPreferencesResponse = {
+  /** The four switches; all on for someone who never changed them. */
+  preferences: NotificationPreferences;
+  /** Whether any of the caller's workspaces' plans include push. */
+  pushAvailable: boolean;
+  /** Ids of the caller's workspaces whose plans include push. */
+  organizationsWithPush: string[];
+};
+
+/** Answer of `PUT /api/mobile/notification-preferences`: all four switches. */
+export type UpdateNotificationPreferencesResponse = {
+  preferences: NotificationPreferences;
 };

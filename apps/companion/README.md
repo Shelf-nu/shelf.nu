@@ -323,7 +323,7 @@ apps/companion/
 │   │   ├── scanner.tsx     # QR + barcode scanner
 │   │   ├── home.tsx        # Dashboard
 │   │   ├── custody.tsx     # Custody management
-│   │   └── settings.tsx    # Theme, org switch, logout
+│   │   └── settings/       # Theme, org switch, notifications, logout
 │   └── _layout.tsx         # Root layout with providers
 ├── components/             # Shared UI components
 ├── lib/                    # Core libraries
@@ -342,7 +342,7 @@ apps/companion/
 
 ---
 
-## API Endpoints (27 routes)
+## API Endpoints (32 routes)
 
 All at `/api/mobile/*` — JWT Bearer auth required.
 
@@ -376,6 +376,10 @@ All at `/api/mobile/*` — JWT Bearer auth required.
 | `/api/mobile/categories`               | GET    | Category list (cached)                  |
 | `/api/mobile/locations`                | GET    | Location list (cached)                  |
 | `/api/mobile/team-members`             | GET    | Team member list (cached)               |
+| `/api/mobile/push-token`               | POST   | Register this device for push           |
+| `/api/mobile/push-token`               | DELETE | Forget this device (sign-out)           |
+| `/api/mobile/notification-preferences` | GET    | Push switches + plan availability       |
+| `/api/mobile/notification-preferences` | PUT    | Save push switches                      |
 
 ---
 

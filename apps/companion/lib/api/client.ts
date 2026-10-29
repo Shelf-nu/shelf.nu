@@ -223,6 +223,9 @@ export type ApiFetchOptions = RequestInit & { retry?: boolean };
  *   optional machine-readable `reason` / `qrId`) so callers can branch on
  *   contract fields instead of message strings. Absent for transport-level
  *   failures (timeout, network, non-JSON bodies).
+ * - On any HTTP error, `status` carries the response status, so a caller can
+ *   tell "the server refused" (404 for a route an older server lacks) from
+ *   "no answer", where `status` is absent.
  * - Detects 401/session-expired and notifies global auth listeners.
  * - Enforces a request timeout to avoid hanging on slow networks.
  */
@@ -234,6 +237,7 @@ export async function apiFetch<T>(
   data: T | null;
   error: string | null;
   errorDetails?: ApiErrorDetails | null;
+  status?: number;
 }> {
   // Declared outside try so catch block can read it
   let timedOut = false;
@@ -288,7 +292,11 @@ export async function apiFetch<T>(
       json = text ? JSON.parse(text) : null;
     } catch {
       if (!response.ok) {
-        return { data: null, error: `Server error (${response.status})` };
+        return {
+          data: null,
+          error: `Server error (${response.status})`,
+          status: response.status,
+        };
       }
       return { data: null, error: "Invalid response from server" };
     }
@@ -300,6 +308,7 @@ export async function apiFetch<T>(
         return {
           data: null,
           error: "Session expired. Please sign in again.",
+          status: response.status,
         };
       }
       const errorDetails = extractErrorDetails(json);
@@ -311,12 +320,14 @@ export async function apiFetch<T>(
             json?.error?.message ||
             "You don't have permission to perform this action.",
           errorDetails,
+          status: response.status,
         };
       }
       return {
         data: null,
         error: json?.error?.message || `Request failed (${response.status})`,
         errorDetails,
+        status: response.status,
       };
     }
 
