@@ -316,6 +316,11 @@ const REMOVAL_NOTICE_ID = "manage-kit-assets-removal-notice";
 /** `aria-describedby` target for the cross-kit move notice. */
 const MOVE_NOTICE_ID = "manage-kit-assets-move-notice";
 
+/** `aria-describedby` targets for the custody, quantity and location notices. */
+const CUSTODY_NOTICE_ID = "manage-kit-assets-custody-notice";
+const QUANTITY_NOTICE_ID = "manage-kit-assets-quantity-notice";
+const LOCATION_NOTICE_ID = "manage-kit-assets-location-notice";
+
 export default function ManageAssetsInKit() {
   const { kit, items, totalItems, bookingImpactByAssetId } =
     useLoaderData<LoaderData>();
@@ -679,10 +684,12 @@ export default function ManageAssetsInKit() {
                 // dialog scrolls to keep Cancel and Continue reachable.
                 className="overflow-y-auto"
                 // The dialog has no `AlertDialogDescription`, so Radix has
-                // nothing to announce beyond the heading. The move and removal
-                // warnings are the consequential part, so the dialog's
-                // description points at whichever are present.
+                // nothing to announce beyond the heading, so the dialog's
+                // description points at every notice it shows.
                 aria-describedby={joinAriaIds(
+                  kitIsInCustody && CUSTODY_NOTICE_ID,
+                  showInCustodyQtyWarning && QUANTITY_NOTICE_ID,
+                  LOCATION_NOTICE_ID,
                   crossKitMoves.length > 0 && MOVE_NOTICE_ID,
                   (deselectedBookingImpact.reserved.bookings.length > 0 ||
                     deselectedBookingImpact.checkedOut.bookings.length > 0) &&
@@ -701,7 +708,7 @@ export default function ManageAssetsInKit() {
 
                 <div>
                   {kitIsInCustody && (
-                    <p className="mb-3">
+                    <p id={CUSTODY_NOTICE_ID} className="mb-3">
                       This kit is currently{" "}
                       {kit.status === KitStatus.IN_CUSTODY
                         ? "in custody"
@@ -716,7 +723,10 @@ export default function ManageAssetsInKit() {
                       shift in the same tx. Make sure the user understands
                       the cascade before they confirm. */}
                   {showInCustodyQtyWarning && (
-                    <div className="mb-3 rounded-md border border-warning-200 bg-warning-50 px-3 py-2 text-sm text-warning-800">
+                    <div
+                      id={QUANTITY_NOTICE_ID}
+                      className="mb-3 rounded-md border border-warning-200 bg-warning-50 px-3 py-2 text-sm text-warning-800"
+                    >
                       <strong>Quantity change notice:</strong> You changed the
                       quantity for{" "}
                       {qtyEditedInExistingKitRows.length === 1
@@ -727,13 +737,13 @@ export default function ManageAssetsInKit() {
                     </div>
                   )}
                   {kit.location ? (
-                    <p className="mb-3">
+                    <p id={LOCATION_NOTICE_ID} className="mb-3">
                       <strong>Location Update Notice:</strong> Adding assets to
                       this kit will automatically update their location to{" "}
                       <strong>{kit.location.name}</strong>.
                     </p>
                   ) : (
-                    <p className="mb-3">
+                    <p id={LOCATION_NOTICE_ID} className="mb-3">
                       <strong>Location Update Notice:</strong> This kit has no
                       location, so the assets you add keep their current
                       location.

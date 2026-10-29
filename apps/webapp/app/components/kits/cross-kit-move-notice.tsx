@@ -135,7 +135,8 @@ export function CrossKitMoveNotice({
       {isSingle ? "its" : "their"} current kit{isSingleKit ? "" : "s"}:{" "}
       {formatMoves(moves)}. {isSingle ? "It also comes" : "They also come"} off
       any draft or reserved bookings{" "}
-      {isSingleKit ? "that kit is" : "those kits are"} on.
+      {isSingleKit ? "that kit is" : "those kits are"} on, and{" "}
+      {isSingle ? "joins" : "join"} the bookings this kit is on.
     </span>
   );
 }
