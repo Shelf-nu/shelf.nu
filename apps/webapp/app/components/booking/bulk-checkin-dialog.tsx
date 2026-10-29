@@ -4,8 +4,9 @@
  * Opened from the list's Actions menu for a selection of ONGOING or OVERDUE
  * bookings. Posts `bulk-checkin` to the bookings bulk-actions route, which
  * refuses the whole batch up front when a booking is not in progress and then
- * checks the bookings in one by one. End dates are kept: there is no
- * early-date prompt in bulk, so the copy says so.
+ * checks the bookings in one by one. There is no early-date prompt in bulk,
+ * so an early check-in keeps its end date; an overdue booking's end date moves
+ * to the return time, as it does on the booking page. The copy says both.
  *
  * Copies the shape of `bulk-cancel-dialog.tsx`; the shared
  * `BulkUpdateDialogContent` owns open state, the fetcher and clearing the
@@ -51,7 +52,7 @@ export default function BulkCheckinDialog() {
       arrayFieldId="bookingIds"
       actionUrl="/api/bookings/bulk-actions"
       title={`Check in (${totalSelected}) bookings`}
-      description="This checks in every asset of the selected bookings and completes them. End dates are kept. Bookings are processed one by one: if one cannot be checked in, the ones before it stay checked in and the rest are left as they are."
+      description="This checks in every asset of the selected bookings and completes them. End dates are not moved earlier, and an overdue booking's end date is set to when it is checked in. Bookings are processed one by one: if one cannot be checked in, the ones before it stay checked in and the rest are left as they are."
     >
       {({ disabled, fetcherError, handleCloseDialog }) => (
         <>

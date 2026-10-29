@@ -362,7 +362,7 @@ describe("bulkCheckoutBookings", () => {
 });
 
 describe("bulkCheckinBookings", () => {
-  it("checks every ONGOING or OVERDUE booking in, keeping the end date, and writes no note of its own", async () => {
+  it("checks every ONGOING or OVERDUE booking in without an early-date adjustment, and writes no note of its own", async () => {
     findManyMock.mockResolvedValue([
       selected("b1", BookingStatus.ONGOING),
       selected("b2", BookingStatus.OVERDUE),

@@ -20,8 +20,11 @@
  *    that fails stops the batch with its own error; the bookings before it
  *    stay checked out or in, and the error says how many.
  *
- * Dates are kept: no early-date prompt exists in bulk, so every call passes
- * `without-adjusted-date`.
+ * No early-date prompt exists in bulk, so every call passes
+ * `without-adjusted-date`: an early check-out keeps its start date and an early
+ * check-in keeps its end date. `checkinBooking` still moves an OVERDUE
+ * booking's live end date to the return time, exactly as the booking page's
+ * check-in does; the planned end stays in `originalTo`.
  *
  * @see {@link file://./../../routes/api+/bookings.bulk-actions.ts} the route
  * @see {@link file://./../../components/booking/bulk-checkout-dialog.tsx}
@@ -453,7 +456,8 @@ export async function bulkCheckoutBookings(
 
 /**
  * Checks in a selection of ONGOING or OVERDUE bookings in one request,
- * keeping their end dates.
+ * without moving an early check-in's end date. An OVERDUE booking's end date
+ * moves to the return time, as on the booking page.
  *
  * Refused as a whole, before any write, when the caller is held to the
  * explicit check-in flow, when the selection is over
@@ -503,7 +507,8 @@ export async function bulkCheckinBookings(
           id: selected.id,
           organizationId,
           hints,
-          // Bulk never asks the early-date question: the end date is kept.
+          // Bulk never asks the early-date question: an early check-in keeps
+          // its end date. An OVERDUE booking's end still moves to now.
           intentChoice: CheckinIntentEnum["without-adjusted-date"],
           userId,
           provenance: QUICK_WEB_PROVENANCE,
