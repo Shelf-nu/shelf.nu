@@ -8,7 +8,8 @@
  * the editor-only definitions stay skipped for them.
  *
  * The loader also sends `linkTitles` for the links among the values shown,
- * the same fixture the chip tests render.
+ * the same fixture the chip tests render, and reads them in the same batch as
+ * the editor data.
  *
  * @see {@link file://./../../../app/routes/_layout+/assets.$assetId.overview.tsx}
  * @see {@link file://./../../../app/components/assets/asset-overview-custom-fields.tsx}
@@ -82,6 +83,7 @@ vi.mock("~/modules/link-preview/service.server", () => ({
   getLinkTitles: mockGetLinkTitles,
 }));
 
+import { getCategoriesForCreateAndEdit } from "~/modules/asset/service.server";
 import { loader } from "~/routes/_layout+/assets.$assetId.overview";
 
 const manual = createCustomField({
@@ -202,5 +204,28 @@ describe("asset overview loader: Documents & links", () => {
       values: [manualValue, cameraOnly],
     });
     expect(result.linkTitles).toEqual(LINK_TITLES);
+  });
+
+  it("starts the editor data without waiting for the link titles", async () => {
+    grant([OrganizationRoles.ADMIN]);
+    let answerTitles: (titles: unknown) => void = () => {};
+    mockGetLinkTitles.mockReturnValue(
+      new Promise((resolve) => {
+        answerTitles = resolve;
+      })
+    );
+
+    const result = load();
+
+    await vi.waitFor(() =>
+      expect(getCategoriesForCreateAndEdit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          organizationId: "org-1",
+          defaultCategory: "cat-cameras",
+        })
+      )
+    );
+    answerTitles(LINK_TITLES);
+    expect((await result).linkTitles).toEqual(LINK_TITLES);
   });
 });

@@ -403,15 +403,27 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       : asset.customFields;
 
     /**
-     * The Link fields that apply to this asset. Loaded for EVERY reader: the
-     * "Documents & links" card lists them, unset ones included, so this
-     * decides which rows are displayed and must not be permission-gated.
-     * Trimmed to what a row needs, as view-only users receive it too.
-     *
-     * Read beside them: the titles of the links among the values shown, for
-     * their chips. Never throws.
+     * Read together, none depending on another:
+     * - `linkDefinitions`: the Link fields that apply to this asset. Loaded
+     *   for EVERY reader: the "Documents & links" card lists them, unset ones
+     *   included, so this decides which rows are displayed and must not be
+     *   permission-gated. Trimmed to what a row needs, as view-only users
+     *   receive it too.
+     * - `linkTitles`: the titles of the links among the values shown, for
+     *   their chips. Never throws.
+     * - Editor data, only for users who can update the asset. View-only users
+     *   see static display rows and never enter edit mode, so the
+     *   categories, locations and custom field definitions are skipped for
+     *   them. Tags are read-only on the overview page, so they are skipped
+     *   for everyone.
      */
-    const [linkDefinitions, linkTitles] = await Promise.all([
+    const [
+      linkDefinitions,
+      linkTitles,
+      allCustomFieldDefs,
+      categoriesData,
+      locationsData,
+    ] = await Promise.all([
       getActiveCustomFields({
         organizationId,
         category: asset.categoryId,
@@ -426,36 +438,27 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         }))
       ),
       getLinkTitles({ organizationId, values: customFields }),
-    ]);
-
-    /**
-     * Editor data is only needed for users who can update the asset. View-only
-     * users see static display rows and never enter edit mode, so we skip the
-     * categories/locations/custom-fields-definitions queries entirely. We also
-     * skip tags — they are read-only on the overview page in this iteration.
-     */
-    const [allCustomFieldDefs, categoriesData, locationsData] = canEditAsset
-      ? await Promise.all([
-          getActiveCustomFields({
+      canEditAsset
+        ? getActiveCustomFields({
             organizationId,
             category: asset.categoryId,
-          }),
-          getCategoriesForCreateAndEdit({
+          })
+        : [],
+      canEditAsset
+        ? getCategoriesForCreateAndEdit({
             request,
             organizationId,
             defaultCategory: asset.categoryId,
-          }),
-          getLocationsForCreateAndEdit({
+          })
+        : { categories: [], totalCategories: 0 },
+      canEditAsset
+        ? getLocationsForCreateAndEdit({
             request,
             organizationId,
             defaultLocation: getPrimaryLocation(asset)?.id ?? undefined,
-          }),
-        ])
-      : [
-          [],
-          { categories: [], totalCategories: 0 },
-          { locations: [], totalLocations: 0 },
-        ];
+          })
+        : { locations: [], totalLocations: 0 },
+    ]);
 
     const { categories, totalCategories } = categoriesData;
     const { locations, totalLocations } = locationsData;
