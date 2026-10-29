@@ -68,12 +68,14 @@ const allVisible = {
   baseUserCanSeeBookings: true,
   selfServiceCanSeeCustody: true,
   baseUserCanSeeCustody: true,
+  managersCanEditAssets: false,
 };
 const noneVisible = {
   selfServiceCanSeeBookings: false,
   baseUserCanSeeBookings: false,
   selfServiceCanSeeCustody: false,
   baseUserCanSeeCustody: false,
+  managersCanEditAssets: false,
 };
 
 beforeEach(() => {

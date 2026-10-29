@@ -13,9 +13,10 @@
  * code is claimed inline into the caller's org as part of the link — the
  * companion no longer needs a separate claim step for the link flow.
  *
- * Permission gate: `qr` / `update` — Role2PermissionMap only grants BASE and
- * SELF_SERVICE `qr:read`, and ADMIN/OWNER short-circuit to allow-all in
- * `hasPermission`, so this is effectively ADMIN/OWNER only, exactly like web.
+ * Permission gate: `qr` / `update`, exactly like web. ADMIN/OWNER hold it
+ * through the allow-all short-circuit in `hasPermission`, and MANAGER when the
+ * workspace switches on `managersCanEditAssets`; the matrix itself grants
+ * every role `qr:read` only.
  *
  * Security notes:
  * - `assetId` comes from the request body (attacker-controlled) and is
@@ -83,8 +84,7 @@ export async function action({ request }: ActionFunctionArgs) {
     userId = user.id;
     const organizationId = await requireOrganizationAccess(request, user.id);
 
-    // Same effective gate as the web link flow: qr/update is admin+owner
-    // only (see file-level JSDoc).
+    // Same effective gate as the web link flow (see file-level JSDoc).
     await requireMobilePermission({
       userId: user.id,
       organizationId,

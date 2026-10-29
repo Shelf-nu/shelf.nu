@@ -55,16 +55,30 @@ export async function isAdmin(context: Record<string, any>) {
   return !!user;
 }
 
+/**
+ * Asserts the caller may perform `action` on `entity` in the selected
+ * workspace, counting the permissions the workspace's switches add, and
+ * returns the caller's context: memberships, the selected organization and
+ * `access`, the caller's resolved reach.
+ *
+ * @param args.workspaceGrants - `false` answers from the matrix alone. Use it
+ *   on a route that shares an entity/action pair with a path a workspace
+ *   switch opens, when that route must stay closed to the role the switch
+ *   opens it for.
+ * @throws {ShelfError} 403 when the caller lacks the permission
+ */
 export async function requirePermission({
   userId,
   request,
   entity,
   action,
+  workspaceGrants,
 }: {
   userId: string;
   request: Request;
   entity: PermissionEntity;
   action: PermissionAction;
+  workspaceGrants?: boolean;
 }) {
   /**
    * This can be very slow and consuming as there are a few queries with a few joins and this running on every loader/action makes it slow
@@ -87,6 +101,8 @@ export async function requirePermission({
 
   await validatePermission({
     roles,
+    workspace: currentOrganization,
+    workspaceGrants,
     action,
     entity,
     organizationId,
@@ -102,7 +118,7 @@ export async function requirePermission({
 
   // The caller's reach: one object every loader and action reads, instead of
   // re-deriving it from the role. Folds this membership's policy with the
-  // workspace's visibility toggles.
+  // workspace's visibility toggles and permission switches.
   const access = resolveRoleAccess({ roles, workspace: currentOrganization });
 
   // The effective role, for logging and Sentry tags. Decisions read `access`.
@@ -147,16 +163,21 @@ export async function requireAnyPermission({
 }: {
   userId: string;
   request: Request;
-  anyOf: ReadonlyArray<{ entity: PermissionEntity; action: PermissionAction }>;
+  anyOf: ReadonlyArray<{
+    entity: PermissionEntity;
+    action: PermissionAction;
+    workspaceGrants?: boolean;
+  }>;
 }): Promise<
   Awaited<ReturnType<typeof requirePermission>> & {
     roles: OrganizationRoles[];
   }
 > {
-  const { organizationId, userOrganizations } = await getSelectedOrganization({
-    userId,
-    request,
-  });
+  const { organizationId, userOrganizations, currentOrganization } =
+    await getSelectedOrganization({
+      userId,
+      request,
+    });
   // An empty array (never `undefined`) so a non-member is refused without the
   // database lookup `hasPermission` falls back to.
   const roles =
@@ -165,7 +186,15 @@ export async function requireAnyPermission({
 
   let granted: (typeof anyOf)[number] | undefined;
   for (const candidate of anyOf) {
-    if (await hasPermission({ organizationId, userId, roles, ...candidate })) {
+    if (
+      await hasPermission({
+        organizationId,
+        userId,
+        roles,
+        workspace: currentOrganization,
+        ...candidate,
+      })
+    ) {
       granted = candidate;
       break;
     }
@@ -207,6 +236,7 @@ export async function requireAnyPermission({
  * @param organizationId - The organization named by the route, not the selected one
  * @param entity - The entity the route acts on
  * @param action - The action the route performs
+ * @param workspaceGrants - `false` answers from the matrix alone (see `requirePermission`)
  * @returns The caller's memberships and the organizations visible to them
  * @throws {ShelfError} 403 when the caller is not a member of `organizationId`, or
  *   their role there does not grant the permission
@@ -217,12 +247,14 @@ export async function requirePermissionInOrganization({
   organizationId,
   entity,
   action,
+  workspaceGrants,
 }: {
   userId: string;
   request: Request;
   organizationId: string;
   entity: PermissionEntity;
   action: PermissionAction;
+  workspaceGrants?: boolean;
 }) {
   const { organizations, userOrganizations } = await getSelectedOrganization({
     userId,
@@ -231,12 +263,22 @@ export async function requirePermissionInOrganization({
 
   // A non-member holds no roles there, which grants nothing. Passing an empty
   // array rather than `undefined` keeps the check from falling back to a
-  // database lookup that would reach the same answer.
-  const roles =
-    userOrganizations.find((o) => o.organization.id === organizationId)
-      ?.roles ?? [];
+  // database lookup that would reach the same answer. The membership carries
+  // the named organization, so its switches are judged, not the selected one's.
+  const membership = userOrganizations.find(
+    (o) => o.organization.id === organizationId
+  );
+  const roles = membership?.roles ?? [];
 
-  await validatePermission({ roles, action, entity, organizationId, userId });
+  await validatePermission({
+    roles,
+    workspace: membership?.organization ?? null,
+    workspaceGrants,
+    action,
+    entity,
+    organizationId,
+    userId,
+  });
 
   Sentry.setUser({ id: userId });
   Sentry.setTag("organizationId", organizationId);

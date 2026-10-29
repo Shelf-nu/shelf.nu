@@ -186,9 +186,9 @@ export async function requireMobileAuth(request: Request) {
  *
  * Each organization also carries the four workspace visibility toggles
  * (`selfServiceCanSeeBookings`, `baseUserCanSeeBookings`,
- * `selfServiceCanSeeCustody`, `baseUserCanSeeCustody`), so the companion can
- * resolve the same `RoleAccess` the server does for that workspace via
- * `resolveRoleAccess`.
+ * `selfServiceCanSeeCustody`, `baseUserCanSeeCustody`) and the permission
+ * switch `managersCanEditAssets`, so the companion can resolve the same
+ * `RoleAccess` and the same matrix answers the server does for that workspace.
  *
  * @param userId - the authenticated user
  * @returns organizations in landing order, plus the explicit last-selected id
@@ -224,6 +224,10 @@ export async function getUserOrganizations(userId: string) {
           baseUserCanSeeBookings: true,
           selfServiceCanSeeCustody: true,
           baseUserCanSeeCustody: true,
+          // why: the permission switches the companion passes to
+          // `roleHasPermission`, so its create/edit entry points show exactly
+          // what the server will accept in this workspace.
+          managersCanEditAssets: true,
         },
       },
     },
@@ -313,25 +317,34 @@ export async function requireOrganizationAccess(
 /**
  * Enforces RBAC permission checks for mobile API routes.
  *
- * Uses the same Role2PermissionMap as the webapp to ensure mobile
- * and web have identical authorization rules.
+ * Resolves through the same `hasPermission` as the webapp, which loads the
+ * membership's roles and the workspace's permission switches in one query,
+ * so mobile and web have identical authorization rules.
+ *
+ * @param args.workspaceGrants - `false` answers from the matrix alone, for a
+ *   route that shares a pair with a path a workspace switch opens but must
+ *   stay closed to the role the switch opens it for
+ * @throws {ShelfError} 403 when the caller lacks the permission
  */
 export async function requireMobilePermission({
   userId,
   organizationId,
   entity,
   action,
+  workspaceGrants,
 }: {
   userId: string;
   organizationId: string;
   entity: PermissionEntity;
   action: PermissionAction;
+  workspaceGrants?: boolean;
 }) {
   await validatePermission({
     userId,
     organizationId,
     entity,
     action,
+    workspaceGrants,
   });
 }
 
@@ -358,7 +371,11 @@ export async function getMobileUserContext(
 ): Promise<{
   /** Every role on this membership, for matrix checks (`hasPermission`), which union held roles. */
   roles: OrganizationRoles[];
-  /** The member's reach: effective role, booking/custody/audit scopes. Every gate reads this. */
+  /**
+   * The member's reach: effective role, booking/custody/audit scopes, and
+   * `workspaceGrants`, the switches to pass as `workspace` alongside `roles`
+   * to `hasPermission`. Every gate reads this.
+   */
   access: RoleAccess;
   canUseBarcodes: boolean;
   canUseAudits: boolean;
@@ -382,6 +399,9 @@ export async function getMobileUserContext(
           // here for the workspace setting to reach them at all.
           selfServiceCanSeeBookings: true,
           baseUserCanSeeBookings: true,
+          // why: the workspace's permission switches. `access.workspaceGrants`
+          // carries them to every `hasPermission` call made with these roles.
+          managersCanEditAssets: true,
         },
       },
     },

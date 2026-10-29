@@ -18,6 +18,8 @@ export const ROLES_DOC_END = "<!-- END GENERATED: effective-access -->";
 /** The fixture keys the doc renders. */
 export type EffectiveAccessSnapshot = {
   matrix: Record<string, Record<string, string[]>>;
+  /** Per switch, per role set: the entity actions the switch adds when on. */
+  workspaceGrants: Record<string, Record<string, Record<string, string[]>>>;
   "D-01:precedence": OrganizationRole[];
   "D-14": Record<string, Record<string, boolean>>;
   "D-28": Record<string, Record<string, boolean>>;
@@ -103,6 +105,20 @@ export function renderEffectiveAccessMarkdown(
     ["Default asset index", ...roles.map((role) => snapshot["D-33"][role])],
   ]);
 
+  // One row per workspace switch: what it adds to each role when on.
+  const switches = table(
+    ["Switch", ...header.slice(1)],
+    Object.entries(snapshot.workspaceGrants).map(([setting, byRole]) => [
+      `\`${setting}\``,
+      ...roles.map(
+        (role) =>
+          Object.entries(byRole[role] ?? {})
+            .map(([entity, actions]) => `\`${entity}\`: ${actions.join(", ")}`)
+            .join("; ") || NONE
+      ),
+    ])
+  );
+
   const precedence = snapshot["D-01:precedence"]
     .map((role) => ROLE_LABELS[role])
     .join(" > ");
@@ -118,6 +134,10 @@ export function renderEffectiveAccessMarkdown(
     "#### Permission matrix",
     "",
     matrix,
+    "",
+    "#### Added by workspace switches",
+    "",
+    switches,
     "<!-- prettier-ignore-end -->",
   ].join("\n");
 }

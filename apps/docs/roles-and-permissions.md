@@ -40,6 +40,25 @@ Settings → Bookings has four switches: _Self service can see bookings_,
 _Base can see bookings_, _Self service can see custody_, _Base can see custody_.
 Each widens what one role may **see**. None widens what it may **change**.
 
+## Workspace permission switches
+
+Settings → General → Permissions has the owner-only switch _Managers: Add and
+edit assets and kits_ (`Organization.managersCanEditAssets`, off by default).
+Unlike the visibility toggles it widens what a role may **change**: the
+`WORKSPACE_GRANTS` table in `@shelf/permissions` lists what each switch adds,
+and `roleHasPermission` unions it with the matrix when the switch is on. Every
+check reads it: `requirePermission` passes the selected workspace,
+`hasPermission` loads it with the roles, `useOrganizationRoles()` carries it
+to `userHasPermission`, and the companion passes the organization from
+`/api/mobile/me`.
+
+A route that shares an entity/action pair with a path a switch opens, but must
+stay closed to that role, opts out with `workspaceGrants: false`
+(`requirePermission`, `requireMobilePermission`, `hasPermission`,
+`userHasPermission`, `roleHasPermission`), which answers from the matrix
+alone. The bulk asset edits other than location do this. See
+`docs/manager-edit-switch.md` at the repository root.
+
 ## Effective access
 
 Rendered from the characterization fixture
@@ -96,6 +115,12 @@ Do not edit by hand: run `pnpm --filter @shelf/webapp docs:roles`.
 | `user-data` | create, read, update, delete, checkout, checkin, export, import, archive, cancel, extend, manage-assets, custody, manage-kits, change-role | create, read, update, delete, checkout, checkin, export, import, archive, cancel, extend, manage-assets, custody, manage-kits, change-role | read, update | read, update | read, update |
 | `workingHours` | create, read, update, delete, checkout, checkin, export, import, archive, cancel, extend, manage-assets, custody, manage-kits, change-role | create, read, update, delete, checkout, checkin, export, import, archive, cancel, extend, manage-assets, custody, manage-kits, change-role | read | read | read |
 | `workspace` | create, read, update, delete, checkout, checkin, export, import, archive, cancel, extend, manage-assets, custody, manage-kits, change-role | create, read, update, delete, checkout, checkin, export, import, archive, cancel, extend, manage-assets, custody, manage-kits, change-role | None | None | None |
+
+#### Added by workspace switches
+
+| Switch | Owner | Administrator | Manager | Self service | Base |
+| --- | --- | --- | --- | --- | --- |
+| `managersCanEditAssets` | None | None | `asset`: create, update; `qr`: update; `kit`: create, update | None | None |
 <!-- prettier-ignore-end -->
 <!-- END GENERATED: effective-access -->
 

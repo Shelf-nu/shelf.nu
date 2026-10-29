@@ -304,11 +304,12 @@ function ScannerContent() {
       SCANNER_ACTIONS.filter(({ permission: perm }) =>
         userHasPermission({
           roles: currentOrg?.roles,
+          workspace: currentOrg,
           entity: perm.entity,
           action: perm.action,
         })
       ),
-    [currentOrg?.roles]
+    [currentOrg]
   );
 
   const access = useRoleAccess();
@@ -316,11 +317,13 @@ function ScannerContent() {
   // web scanner, which pre-selects self and disables the custodian picker).
   const takesCustodyForSelfOnly = access.custody.assign === "self";
 
-  // Native claim / link-existing is gated on qr:update — effectively
-  // ADMIN/OWNER only (the server short-circuits those roles to allow-all;
-  // BASE/SELF_SERVICE only hold qr:read). Non-admins keep the web bridge.
+  // Native claim / link-existing is gated on qr:update: ADMIN/OWNER (the
+  // server short-circuits those roles to allow-all), and MANAGER when the
+  // workspace switches on managersCanEditAssets. Everyone else keeps the web
+  // bridge.
   const canManageQrCodes = userHasPermission({
     roles: currentOrg?.roles,
+    workspace: currentOrg,
     entity: "qr",
     action: "update",
   });
@@ -1421,6 +1424,7 @@ function ScannerContent() {
 
           const canCreateAsset = userHasPermission({
             roles: currentOrg?.roles,
+            workspace: currentOrg,
             entity: "asset",
             action: "create",
           });
@@ -1433,8 +1437,8 @@ function ScannerContent() {
           const isKitLinked = Boolean(kitId);
 
           // Claimed to the current org, truly unlinked, and the caller can
-          // act on it in-app (create is admin/owner + qr:update is too, but
-          // gate each action on its own permission for correctness).
+          // act on it in-app. Create and qr:update usually travel together,
+          // but each action is gated on its own permission.
           const canActOnUnlinked =
             codeOrgId === currentOrg?.id &&
             (canCreateAsset || canManageQrCodes);

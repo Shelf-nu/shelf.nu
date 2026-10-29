@@ -9,8 +9,9 @@
  * already-claimed, org + user assignment) and any notes/events stay in parity
  * with web for free.
  *
- * Permission gate: `qr` / `update` in the caller's current organization. Only
- * Administrators and Owners hold it. The web claim route applies the same
+ * Permission gate: `qr` / `update` in the caller's current organization.
+ * Administrators and Owners hold it, and Managers when the workspace switches
+ * on `managersCanEditAssets`. The web claim route applies the same
  * permission, judged in the workspace its form names
  * (`requirePermissionInOrganization`), since the web user picks the
  * destination there.
@@ -72,8 +73,7 @@ export async function action({ request }: ActionFunctionArgs) {
     userId = user.id;
     const organizationId = await requireOrganizationAccess(request, user.id);
 
-    // Same effective gate as the web claim route: qr/update is admin+owner
-    // only (see file-level JSDoc).
+    // Same effective gate as the web claim route (see file-level JSDoc).
     await requireMobilePermission({
       userId: user.id,
       organizationId,

@@ -296,6 +296,7 @@ Two questions, both answered by `@shelf/permissions`:
 - **May this role do X on Y?** → the matrix: `requirePermission` / `requireMobilePermission` on the server, `userHasPermission({ roles, entity, action })` on the client (`roles` from `useOrganizationRoles()`).
 - **How far does this role reach?** (whose bookings, whose custody, which audits, limits, who is notified) → `access`: `requirePermission(...).access`, `getMobileUserContext(...).access`, `useRoleAccess()` in components and in the companion.
 - Owner-only → `isWorkspaceOwner(roles)` / `access.ownsWorkspace`. Prisma role audiences → `rolesWhere(policy => …)`.
+- Workspace permission switches (owner-only, e.g. `managersCanEditAssets`) widen the matrix through `WORKSPACE_GRANTS`; every check above already reads them. A route that shares a granted pair but must stay closed passes `workspaceGrants: false`.
 
 **Never compare roles directly** (`role === "ADMIN"`, `roles.includes(...)`, `roles[0]`): `local-rules/no-direct-role-checks` blocks it in the webapp and the companion. A new reach question gets a `RolePolicy` field with a value for every role. Webapp code imports the package only via `~/utils/permissions/role-access` (TS instantiation ceiling).
 

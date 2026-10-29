@@ -73,11 +73,13 @@ export default function KitDetailScreen() {
   const roles = currentOrg?.roles;
   const canCustody = userHasPermission({
     roles,
+    workspace: currentOrg,
     entity: "kit",
     action: "custody",
   });
   const canUpdate = userHasPermission({
     roles,
+    workspace: currentOrg,
     entity: "kit",
     action: "update",
   });

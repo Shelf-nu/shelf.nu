@@ -1082,6 +1082,9 @@ model Organization {
   selfServiceCanSeeBookings Boolean @default(false) // If true, the self service users can see bookings that are not theirs
   baseUserCanSeeCustody     Boolean @default(false) // If true, the base users can see the custody of assets inside the organization
   baseUserCanSeeBookings    Boolean @default(false) // If true, the base users can see the bookings that are not theirs
+  // Owner-only switch. When true, managers may add and edit assets and kits,
+  // update locations and link codes (the grants live in @shelf/permissions WORKSPACE_GRANTS)
+  managersCanEditAssets     Boolean @default(false)
 
   // Barcode add-on (per-organization, managed via Stripe subscription)
   barcodesEnabled   Boolean   @default(false) // If true, this organization can use barcode functionality

@@ -180,7 +180,10 @@ describe("WorkspaceScimTokensSection", () => {
     it("should not render when user is not owner", () => {
       mockUseRouteLoaderData.mockImplementation((routeId: string) => {
         if (routeId === "routes/_layout+/_layout") {
-          return { currentOrganizationUserRoles: ["ADMIN"] };
+          return {
+            currentOrganizationUserRoles: ["ADMIN"],
+            roleAccess: accessFor(["ADMIN"]),
+          };
         }
         return routeLoaderDefaults[routeId];
       });

@@ -40,6 +40,13 @@ export type Organization = {
   baseUserCanSeeBookings?: boolean;
   selfServiceCanSeeCustody?: boolean;
   baseUserCanSeeCustody?: boolean;
+  /**
+   * Owner-only permission switch from `/api/mobile/me`: when true, Managers may
+   * add and edit assets and kits, update locations and link codes. Pass the
+   * organization to `userHasPermission` so entry points follow it. Absent on
+   * older servers; read as `false`, which only ever under-offers.
+   */
+  managersCanEditAssets?: boolean;
 };
 
 export type MeResponse = {

@@ -48,6 +48,7 @@ describe("hasPermission", () => {
       hasPermission({
         ...base,
         roles: [OrganizationRoles.ADMIN],
+        workspace: null,
         entity: PermissionEntity.qr,
         action: PermissionAction.update,
       })
@@ -59,6 +60,7 @@ describe("hasPermission", () => {
       hasPermission({
         ...base,
         roles: [OrganizationRoles.OWNER],
+        workspace: null,
         entity: PermissionEntity.workspace,
         action: PermissionAction.delete,
       })
@@ -70,6 +72,7 @@ describe("hasPermission", () => {
       hasPermission({
         ...base,
         roles: [OrganizationRoles.BASE],
+        workspace: null,
         entity: PermissionEntity.asset,
         action: PermissionAction.create,
       })
@@ -81,6 +84,7 @@ describe("hasPermission", () => {
       hasPermission({
         ...base,
         roles: [OrganizationRoles.SELF_SERVICE],
+        workspace: null,
         entity: PermissionEntity.booking,
         action: PermissionAction.checkout,
       })
@@ -90,6 +94,7 @@ describe("hasPermission", () => {
   it("loads roles from the DB when not supplied and applies the matrix", async () => {
     vi.mocked(db.userOrganization.findFirst).mockResolvedValueOnce({
       roles: [OrganizationRoles.BASE],
+      workspace: null,
       // why: only `roles` is read by the validator; the rest of the row is
       // irrelevant to the behavior under test.
     } as never);
@@ -114,12 +119,84 @@ describe("hasPermission", () => {
   });
 });
 
+describe("hasPermission with workspace switches", () => {
+  const managerUpdatesAsset = {
+    ...base,
+    entity: PermissionEntity.asset,
+    action: PermissionAction.update,
+  };
+
+  it.each([
+    [true, true],
+    [false, false],
+  ])(
+    "loads managersCanEditAssets=%s with the roles and lets a Manager update assets: %s",
+    async (managersCanEditAssets, expected) => {
+      vi.mocked(db.userOrganization.findFirst).mockResolvedValueOnce({
+        roles: [OrganizationRoles.MANAGER],
+        organization: { managersCanEditAssets },
+        // why: the validator reads only the roles and the switches.
+      } as never);
+
+      await expect(hasPermission(managerUpdatesAsset)).resolves.toBe(expected);
+      expect(db.userOrganization.findFirst).toHaveBeenLastCalledWith({
+        where: { userId: "user-1", organizationId: "org-1" },
+        select: {
+          roles: true,
+          organization: { select: { managersCanEditAssets: true } },
+        },
+      });
+    }
+  );
+
+  it("reads the switches the caller supplies with the roles", async () => {
+    await expect(
+      hasPermission({
+        ...managerUpdatesAsset,
+        roles: [OrganizationRoles.MANAGER],
+        workspace: { managersCanEditAssets: true },
+      })
+    ).resolves.toBe(true);
+    await expect(
+      hasPermission({
+        ...managerUpdatesAsset,
+        roles: [OrganizationRoles.MANAGER],
+        workspace: null,
+      })
+    ).resolves.toBe(false);
+  });
+
+  it("workspaceGrants: false refuses a Manager even with the switch on", async () => {
+    await expect(
+      validatePermission({
+        ...managerUpdatesAsset,
+        roles: [OrganizationRoles.MANAGER],
+        workspace: { managersCanEditAssets: true },
+        workspaceGrants: false,
+      })
+    ).rejects.toMatchObject({ status: 403 });
+  });
+
+  it("never opens asset delete to a Manager", async () => {
+    await expect(
+      hasPermission({
+        ...base,
+        roles: [OrganizationRoles.MANAGER],
+        workspace: { managersCanEditAssets: true },
+        entity: PermissionEntity.asset,
+        action: PermissionAction.delete,
+      })
+    ).resolves.toBe(false);
+  });
+});
+
 describe("validatePermission", () => {
   it("throws a 403 ShelfError when the permission is denied", async () => {
     await expect(
       validatePermission({
         ...base,
         roles: [OrganizationRoles.BASE],
+        workspace: null,
         entity: PermissionEntity.asset,
         action: PermissionAction.delete,
       })

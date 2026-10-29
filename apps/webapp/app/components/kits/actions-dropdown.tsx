@@ -288,15 +288,23 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
                 </Button>
               </DropdownMenuItem>
 
-              <DropdownMenuItem
-                className="px-4 py-1 md:p-0"
-                onSelect={(e) => {
-                  e.preventDefault();
-                }}
-                disabled={kitIsCheckedOut || someAssetIsNotAvailable}
+              <When
+                truthy={userHasPermission({
+                  roles,
+                  entity: PermissionEntity.kit,
+                  action: PermissionAction.delete,
+                })}
               >
-                <DeleteKit kit={kit} />
-              </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="px-4 py-1 md:p-0"
+                  onSelect={(e) => {
+                    e.preventDefault();
+                  }}
+                  disabled={kitIsCheckedOut || someAssetIsNotAvailable}
+                >
+                  <DeleteKit kit={kit} />
+                </DropdownMenuItem>
+              </When>
             </When>
 
             <When truthy={!assignsSelfOnly}>

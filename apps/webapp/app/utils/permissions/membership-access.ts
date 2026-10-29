@@ -26,6 +26,7 @@ import type {
   RoleAccess,
   RolePolicy,
   WorkspaceAccessSettings,
+  WorkspaceGrantSettings,
 } from "./role-access";
 import {
   ROLE_POLICIES,
@@ -44,7 +45,7 @@ import {
  *
  * @param args.userOrganizations - The caller's memberships
  * @param args.organizationId - The active organization
- * @param args.workspace - That organization's visibility toggles
+ * @param args.workspace - That organization's visibility toggles and permission switches
  * @returns The caller's access in the active organization
  */
 export function resolveMembershipAccess({
@@ -57,7 +58,7 @@ export function resolveMembershipAccess({
     roles: readonly string[];
   }>;
   organizationId: string;
-  workspace: WorkspaceAccessSettings;
+  workspace: WorkspaceAccessSettings & WorkspaceGrantSettings;
 }): RoleAccess {
   return resolveRoleAccess({
     roles: userOrganizations.find((o) => o.organization.id === organizationId)

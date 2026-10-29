@@ -140,8 +140,9 @@ export const assetsApi = {
    * The server claims into the org resolved from `orgId` only; mobile
    * deliberately offers no org picker (web does).
    *
-   * Admin/owner only: the server gates on `qr:update`, which no role below
-   * ADMIN holds. A 403 also covers the already-claimed race. The server now
+   * The server gates on `qr:update`: admins and owners, and managers when the
+   * workspace switches on `managersCanEditAssets`. A 403 also covers the
+   * already-claimed race. The server now
    * rethrows its own guard errors instead of re-wrapping them, so that 403
    * carries a specific message ("already belongs to an organization") rather
    * than the old generic "Failed to claim qr code" — but still branch on

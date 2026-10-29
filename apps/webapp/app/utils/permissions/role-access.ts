@@ -25,6 +25,7 @@ export {
   isOrganizationRole,
   isWorkspaceOwner,
   labelToRole,
+  NO_WORKSPACE_GRANTS,
   resolveRole,
   resolveRoleAccess,
   rolesWhere,
@@ -38,4 +39,5 @@ export type {
   RoleAccess,
   RolePolicy,
   WorkspaceAccessSettings,
+  WorkspaceGrantSettings,
 } from "@shelf/permissions";

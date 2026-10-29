@@ -21,8 +21,8 @@
  * @see {@link file://./../../routes/_layout+/settings.bookings.tsx} - the action
  *   that persists both cards and refuses non-owners
  */
-import { useEffect, useState } from "react";
 import { useFetcher } from "react-router";
+import { useRevisionOnRefusedSave } from "~/hooks/use-revision-on-refused-save";
 import { useRoleAccess } from "~/hooks/use-role-access";
 import { tw } from "~/utils/tw";
 import FormRow from "../forms/form-row";
@@ -65,24 +65,9 @@ export function ExplicitRequirementSettingsCard({
 }) {
   const fetcher = useFetcher();
   const { ownsWorkspace: isOwner } = useRoleAccess();
-  // Bumped on every refused save; keyed on the form, it remounts the switches
-  // from `defaultChecked`. A Radix switch keeps its visible state in React and
-  // ignores a native form reset, so remounting is what returns it to the
-  // stored value.
-  const [formRevision, setFormRevision] = useState(0);
-
-  // The switches are uncontrolled and flip the moment they are clicked. When
-  // the action refuses the save, the stored values are what still apply, so
-  // the form goes back to its defaults while the error toast explains why.
-  useEffect(() => {
-    const refused =
-      fetcher.state === "idle" &&
-      fetcher.data != null &&
-      typeof fetcher.data === "object" &&
-      "error" in fetcher.data &&
-      Boolean((fetcher.data as { error?: unknown }).error);
-    if (refused) setFormRevision((revision) => revision + 1);
-  }, [fetcher.state, fetcher.data]);
+  // Keyed on the form: a refused save remounts the switches from their
+  // stored values.
+  const formRevision = useRevisionOnRefusedSave(fetcher);
 
   return (
     <Card className="my-0">

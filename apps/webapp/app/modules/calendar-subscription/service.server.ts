@@ -269,6 +269,7 @@ export async function getCalendarFeedContext(token: string) {
           baseUserCanSeeBookings: true,
           selfServiceCanSeeCustody: true,
           baseUserCanSeeCustody: true,
+          managersCanEditAssets: true,
         },
       },
     },
@@ -309,6 +310,7 @@ export function resolveCalendarVisibility({
     baseUserCanSeeBookings: boolean;
     selfServiceCanSeeCustody: boolean;
     baseUserCanSeeCustody: boolean;
+    managersCanEditAssets: boolean;
   };
 }): { canSeeAllBookings: boolean; canSeeAllCustody: boolean } {
   const access = resolveRoleAccess({ roles, workspace: organization });
