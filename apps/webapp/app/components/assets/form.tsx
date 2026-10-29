@@ -41,7 +41,11 @@ import {
 } from "~/utils/asset-description";
 import { resolveCancelTo } from "~/utils/cancel-destination";
 import { ASSET_DESCRIPTION_MAX_LENGTH } from "~/utils/constants";
-import { mergedSchema, toCustomFieldZodSchema } from "~/utils/custom-fields";
+import {
+  mergedSchema,
+  storedCustomFieldTexts,
+  toCustomFieldZodSchema,
+} from "~/utils/custom-fields";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
@@ -355,9 +359,16 @@ const AssetFormInner = ({
     { id?: string; type: Barcode["type"]; value: string }[]
   >(barcodes ?? []);
 
-  const customFields = useLoaderData<typeof loader>()
-    .customFields.filter((cf) => cf.active)
+  const loaderData = useLoaderData<typeof loader>();
+  const customFields = loaderData.customFields
+    .filter((cf) => cf.active)
     .map(toCustomFieldZodSchema);
+  // When editing, what the asset stores now: a Link field accepts its stored
+  // value unchanged, as the edit action does.
+  const storedValues = useMemo(
+    () => storedCustomFieldTexts(loaderData.asset?.customFields ?? []),
+    [loaderData.asset?.customFields]
+  );
 
   // Bulk mode tightens a few fields (assetModelId, nameTemplate,
   // count). Same `mergedSchema` pipeline either way — both base
@@ -372,8 +383,9 @@ const AssetFormInner = ({
           ? NewAssetBulkFormSchema
           : NewAssetFormSchema) as typeof NewAssetFormSchema,
         customFields,
+        storedValues,
       }),
-    [bulkMode, customFields]
+    [bulkMode, customFields, storedValues]
   );
 
   const zo = useZorm("NewAssetFormScreen", FormSchema);

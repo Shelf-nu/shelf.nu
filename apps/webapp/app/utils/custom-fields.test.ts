@@ -6,11 +6,13 @@ import {
   buildAssetOverviewCustomFields,
   buildCustomFieldValue,
   customFieldCsvHeader,
+  extractCustomFieldValuesFromPayload,
   getCustomFieldDisplayValue,
   getDefinitionFromCsvHeader,
   isImportableCustomFieldDate,
   mergedSchema,
   splitOverviewCustomFields,
+  storedCustomFieldTexts,
   toCustomFieldZodSchema,
   type CustomFieldZodSchema,
 } from "./custom-fields";
@@ -492,6 +494,77 @@ describe("toCustomFieldZodSchema for Link fields", () => {
       schema.safeParse({ "cf-manual": "www.example.com/a.pdf" }).success
     ).toBe(true);
     expect(schema.safeParse({ "cf-manual": "" }).success).toBe(true);
+  });
+});
+
+describe("editing an asset whose Link field holds an older plain value", () => {
+  const manual: Parameters<typeof toCustomFieldZodSchema>[0] = {
+    id: "manual",
+    name: "Manual",
+    helpText: null,
+    required: false,
+    type: "TEXT",
+    format: "LINK",
+    options: [],
+  };
+  // The asset's stored values, as the edit loader and action read them.
+  const storedValues = storedCustomFieldTexts([
+    {
+      customFieldId: "manual",
+      value: { raw: "see binder 4", valueText: "see binder 4" },
+    },
+  ]);
+  const schema = mergedSchema({
+    baseSchema: z.object({ title: z.string() }),
+    customFields: [toCustomFieldZodSchema(manual)],
+    storedValues,
+  });
+
+  it("accepts the stored value unchanged beside a new title", () => {
+    expect(
+      schema.safeParse({ title: "Camera 2", "cf-manual": "see binder 4" })
+    ).toEqual({
+      success: true,
+      data: { title: "Camera 2", "cf-manual": "see binder 4" },
+    });
+  });
+
+  it("still refuses a changed value that is not a link", () => {
+    const result = schema.safeParse({
+      title: "Camera 2",
+      "cf-manual": "see binder 5",
+    });
+
+    expect(result.error?.issues.map((issue) => issue.message)).toEqual([
+      "Enter just the link, with no spaces or other text",
+    ]);
+  });
+
+  it("leaves the unchanged value out of the write, and builds a changed link", () => {
+    const customFieldDef = [manual as unknown as CustomField];
+
+    expect(
+      extractCustomFieldValuesFromPayload({
+        payload: { title: "Camera 2", "cf-manual": "see binder 4" },
+        customFieldDef,
+        storedValues,
+      })
+    ).toEqual([]);
+    expect(
+      extractCustomFieldValuesFromPayload({
+        payload: { "cf-manual": "www.example.com/manual.pdf" },
+        customFieldDef,
+        storedValues,
+      })
+    ).toEqual([
+      {
+        id: "manual",
+        value: {
+          raw: "https://www.example.com/manual.pdf",
+          valueText: "https://www.example.com/manual.pdf",
+        },
+      },
+    ]);
   });
 });
 

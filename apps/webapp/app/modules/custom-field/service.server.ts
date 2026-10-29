@@ -806,6 +806,46 @@ export async function createCustomFieldsIfNotExists({
 }
 
 /**
+ * Reads what one asset stores for some of its custom fields. The asset edit
+ * action reads its Link fields' values this way, so a stored value that
+ * predates the Link format can be submitted unchanged.
+ *
+ * @param args.assetId - The asset being edited
+ * @param args.organizationId - The caller's workspace; an asset of another
+ *   workspace yields nothing
+ * @param args.customFieldIds - The fields to read
+ * @returns One row per field the asset has a value for
+ * @throws {ShelfError} When the read fails
+ */
+export async function getAssetCustomFieldValues({
+  assetId,
+  organizationId,
+  customFieldIds,
+}: {
+  assetId: string;
+  organizationId: string;
+  customFieldIds: string[];
+}): Promise<{ customFieldId: string; value: Prisma.JsonValue }[]> {
+  try {
+    return await db.assetCustomFieldValue.findMany({
+      where: {
+        assetId,
+        asset: { organizationId },
+        customFieldId: { in: customFieldIds },
+      },
+      select: { customFieldId: true, value: true },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while reading the asset's custom fields.",
+      additionalData: { assetId, organizationId },
+      label,
+    });
+  }
+}
+
+/**
  * Retrieves active custom fields for an organization with flexible category filtering
  *
  * Usage:

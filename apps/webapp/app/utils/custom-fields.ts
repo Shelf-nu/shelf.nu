@@ -31,6 +31,7 @@ const getSchema = ({
   field_name,
   required = false,
   options,
+  storedValue,
 }: {
   id: string;
   params: {
@@ -41,6 +42,8 @@ const getSchema = ({
   field_name?: string | undefined;
   required?: boolean;
   options?: CustomField["options"];
+  /** The text the asset stores for this field now, when editing an asset. */
+  storedValue?: string;
 }) => {
   /** If the field is required, we set the correct field type using zod */
   const text = required
@@ -59,10 +62,11 @@ const getSchema = ({
 
   return {
     text,
-    // Blank stays allowed (or refused by `required` above); anything else must
-    // pass the same rule `buildCustomFieldValue` applies on the server.
+    // Blank stays allowed (or refused by `required` above), and so does the
+    // value the asset already stores, which may predate the Link format;
+    // anything else must pass the rule `buildCustomFieldValue` applies.
     link: text.superRefine((value, ctx) => {
-      if (!value?.trim()) return;
+      if (!value?.trim() || value === storedValue) return;
       const input = parseLinkInput(value);
       if (!input.ok) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: input.message });
@@ -140,7 +144,10 @@ export function toCustomFieldZodSchema(
   };
 }
 
-function buildSchema(fields: CustomFieldZodSchema[]) {
+function buildSchema(
+  fields: CustomFieldZodSchema[],
+  storedValues: StoredCustomFieldTexts | undefined
+) {
   let schema = z.object({});
 
   fields.forEach((field) => {
@@ -156,6 +163,7 @@ function buildSchema(fields: CustomFieldZodSchema[]) {
         field_name: field.name,
         required: field.required,
         options: field.options,
+        storedValue: storedValues?.get(field.id),
       })[field.type],
     });
 
@@ -165,38 +173,92 @@ function buildSchema(fields: CustomFieldZodSchema[]) {
   return schema;
 }
 
+/**
+ * The text an asset stores for each of its custom fields, by field id: the
+ * `raw` of every value whose `raw` is a string.
+ *
+ * Passed as `storedValues` to `mergedSchema` and
+ * `extractCustomFieldValuesFromPayload` when an asset is edited, so a Link
+ * field that still holds a value saved before it became a Link field does
+ * not block saving the asset's other changes.
+ */
+export type StoredCustomFieldTexts = ReadonlyMap<string, string>;
+
+/**
+ * Reads {@link StoredCustomFieldTexts} from an asset's stored values.
+ *
+ * @param values - `AssetCustomFieldValue` rows (or their JSON) of one asset
+ * @returns The stored text by custom field id
+ */
+export function storedCustomFieldTexts(
+  values: readonly { customFieldId: string; value: unknown }[]
+): StoredCustomFieldTexts {
+  const texts = new Map<string, string>();
+  for (const { customFieldId, value } of values) {
+    if (
+      typeof value === "object" &&
+      value !== null &&
+      "raw" in value &&
+      typeof value.raw === "string"
+    ) {
+      texts.set(customFieldId, value.raw);
+    }
+  }
+  return texts;
+}
+
+/**
+ * The asset form's schema: `baseSchema` plus one `cf-<id>` entry per custom
+ * field.
+ *
+ * @param args.storedValues - When editing an asset, what it stores now; a
+ *   Link field accepts its stored value unchanged
+ */
 export const mergedSchema = <T extends ZodRawShape>({
   baseSchema,
   customFields,
+  storedValues,
 }: {
   baseSchema: z.ZodObject<T, any>;
   customFields: CustomFieldZodSchema[];
+  storedValues?: StoredCustomFieldTexts;
 }) => {
-  const CustomSchema = buildSchema(customFields);
+  const CustomSchema = buildSchema(customFields, storedValues);
 
   return baseSchema.merge(CustomSchema);
 };
 
 /** Takes the result of zod's safeParseAsync and extracts custom fields values from it
  * Custom fields need to be prefixed with `cf-`
+ *
+ * With `storedValues` (when editing an asset), a Link field whose submitted
+ * value equals what the asset stores is left out, so its stored value stays
+ * as it is and is never run through the Link rule.
  */
 export const extractCustomFieldValuesFromPayload = ({
   payload,
   customFieldDef,
+  storedValues,
 }: {
   payload: { [key: string]: any };
   customFieldDef: CustomField[];
+  storedValues?: StoredCustomFieldTexts;
 }): ShelfAssetCustomFieldValueType[] => {
   /** Get the custom fields keys and values */
   const customFieldsKeys = Object.keys(payload).filter((key) =>
     key.startsWith("cf-")
   );
 
-  return customFieldsKeys.map((key) => {
+  return customFieldsKeys.flatMap((key) => {
     const id = key.split("-")[1];
     const fieldDef = customFieldDef.find((v) => v.id === id)!;
+    const unchangedLink =
+      fieldDef.format === "LINK" &&
+      storedValues?.has(id) === true &&
+      payload[key] === storedValues.get(id);
+    if (unchangedLink) return [];
     const value = buildCustomFieldValue({ raw: payload[key] }, fieldDef);
-    return { id, value } as ShelfAssetCustomFieldValueType;
+    return [{ id, value } as ShelfAssetCustomFieldValueType];
   });
 };
 
