@@ -8677,6 +8677,25 @@ describe("duplicateBooking", () => {
     expect(added.map((e) => e.assetId)).toEqual(["asset-active"]);
   });
 
+  /**
+   * Ten cameras reserved with six scanned in, and two tripods fully scanned:
+   * only the four open cameras have anything left to copy.
+   */
+  const SOURCE_MODEL_REQUESTS = [
+    {
+      assetModelId: "model-camera",
+      quantity: 10,
+      fulfilledQuantity: 6,
+      assetModel: { name: "Camera" },
+    },
+    {
+      assetModelId: "model-tripod",
+      quantity: 2,
+      fulfilledQuantity: 2,
+      assetModel: { name: "Tripod" },
+    },
+  ];
+
   it("copies the reservations the source still had open, and reports the short ones", async () => {
     // Ten cameras reserved and six already scanned in: the six come across as
     // named assets, so the copy reserves the four still open. A fully scanned
@@ -8686,10 +8705,7 @@ describe("duplicateBooking", () => {
       ...mockBookingData,
       bookingAssets: [],
       tags: [],
-      modelRequests: [
-        { assetModelId: "model-camera", quantity: 10, fulfilledQuantity: 6 },
-        { assetModelId: "model-tripod", quantity: 2, fulfilledQuantity: 2 },
-      ],
+      modelRequests: SOURCE_MODEL_REQUESTS,
     });
     //@ts-expect-error missing vitest type
     db.booking.create.mockResolvedValue({
@@ -8721,11 +8737,56 @@ describe("duplicateBooking", () => {
       organizationId: "org-1",
       userId: "user-1",
       requested: [
-        { assetModelId: "model-camera", quantity: 4 },
-        { assetModelId: "model-tripod", quantity: 0 },
+        { assetModelId: "model-camera", assetModelName: "Camera", quantity: 4 },
       ],
     });
     expect(result.reducedModelReservations).toEqual(short);
+  });
+
+  it("still returns the copy when copying its reservations fails", async () => {
+    // The booking has committed before the reservations are written, so a
+    // failure there must not answer "duplicate failed": a retry would make a
+    // second copy. The open models are reported as not reserved instead.
+    //@ts-expect-error missing vitest type
+    db.booking.findFirstOrThrow.mockResolvedValue({
+      ...mockBookingData,
+      bookingAssets: [],
+      tags: [],
+      modelRequests: SOURCE_MODEL_REQUESTS,
+    });
+    //@ts-expect-error missing vitest type
+    db.booking.create.mockResolvedValue({
+      ...mockBookingData,
+      id: "booking-2",
+    });
+    // why: a transient database error inside the reservation step.
+    vitest
+      .mocked(reserveModelsUpToAvailability)
+      .mockRejectedValueOnce(new Error("connection lost"));
+    // why: the failure is logged for Sentry; the test only needs it silent.
+    const logged = vitest.spyOn(Logger, "error").mockImplementation(() => {});
+
+    const result = await duplicateBooking({
+      bookingId: "booking-1",
+      organizationId: "org-1",
+      userId: "user-1",
+      from: DUPLICATE_FROM,
+      to: DUPLICATE_TO,
+      request: new Request("https://example.com"),
+      access: accessFor([OrganizationRoles.ADMIN]),
+    });
+
+    expect(result.id).toBe("booking-2");
+    expect(result.reducedModelReservations).toEqual([
+      {
+        assetModelId: "model-camera",
+        assetModelName: "Camera",
+        requested: 4,
+        reserved: 0,
+      },
+    ]);
+    expect(logged).toHaveBeenCalledTimes(1);
+    logged.mockRestore();
   });
 
   it("should duplicate booking using the caller-provided from/to dates", async () => {

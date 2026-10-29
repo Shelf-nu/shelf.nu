@@ -101,6 +101,7 @@ import {
   reserveModelsUpToAvailability,
   writeBookingModelRequestInTx,
 } from "~/modules/booking-model-request/service.server";
+import type { ReducedModelReservation } from "~/modules/booking-model-request/service.server";
 import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
 import {
   lockAssetForQuantityUpdate,
@@ -19101,6 +19102,7 @@ export async function duplicateBooking({
             assetModelId: true,
             quantity: true,
             fulfilledQuantity: true,
+            assetModel: { select: { name: true } },
           },
         },
       },
@@ -19386,15 +19388,42 @@ export async function duplicateBooking({
      * copy, and written after the booking commits, in batches, because a plan
      * can name more models than one transaction may carry.
      */
-    const reducedModelReservations = await reserveModelsUpToAvailability({
-      bookingId: newBooking.booking.id,
-      organizationId,
-      userId,
-      requested: bookingToDuplicate.modelRequests.map((request) => ({
+    const openRequests = bookingToDuplicate.modelRequests
+      .map((request) => ({
         assetModelId: request.assetModelId,
+        assetModelName: request.assetModel.name,
         quantity: request.quantity - request.fulfilledQuantity,
-      })),
-    });
+      }))
+      .filter((request) => request.quantity > 0);
+
+    // The copy has committed by now, so a failure here must not report the
+    // duplicate as failed: a retry would create a second copy. Every open
+    // model is reported as not reserved instead, and the failure is logged.
+    let reducedModelReservations: ReducedModelReservation[];
+    try {
+      reducedModelReservations = await reserveModelsUpToAvailability({
+        bookingId: newBooking.booking.id,
+        organizationId,
+        userId,
+        requested: openRequests,
+      });
+    } catch (cause) {
+      Logger.error(
+        new ShelfError({
+          cause,
+          label,
+          message:
+            "Failed to copy model reservations onto a duplicated booking.",
+          additionalData: { bookingId: newBooking.booking.id, organizationId },
+        })
+      );
+      reducedModelReservations = openRequests.map((request) => ({
+        assetModelId: request.assetModelId,
+        assetModelName: request.assetModelName,
+        requested: request.quantity,
+        reserved: 0,
+      }));
+    }
 
     // The caller tells the user what the copy left out, archived assets and
     // reservations the new dates could not fill, rather than letting them
