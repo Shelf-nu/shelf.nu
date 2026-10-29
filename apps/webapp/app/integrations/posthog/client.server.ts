@@ -119,6 +119,14 @@ export type ServerAnalyticsEvent =
         totalCount?: number;
         /** Which report, for `sheet: "report"` only. */
         reportId?: string;
+        /**
+         * The saved PDF document that printed, for `booking_checklist` only.
+         * `null` for a workspace without PDF documents, which prints the
+         * built-in Checklist.
+         */
+        documentId?: string | null;
+        /** That document's name, alongside `documentId`. */
+        documentName?: string | null;
       };
     }
   | {
