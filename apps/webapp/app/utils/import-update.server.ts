@@ -953,6 +953,7 @@ export async function applyBulkUpdatesFromImport({
               id: assetDbId,
               availableToBook: newBool,
               organizationId,
+              userId,
             });
             changesApplied++;
           }
