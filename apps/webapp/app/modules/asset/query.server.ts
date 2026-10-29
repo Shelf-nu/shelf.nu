@@ -1,4 +1,4 @@
-import { AssetStatus, AssetType, Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import type { CustomFieldType } from "@prisma/client";
 
 import type { BarcodeType } from "@prisma/client";
@@ -9,6 +9,11 @@ import { normalizeBarcodeValue } from "~/modules/barcode/validation";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { isSafeSqlIdentifier } from "~/utils/sql";
+import {
+  ENUM_FILTER_VALUES,
+  getUnknownEnumFilterValues,
+} from "./enum-filter-values";
+import type { EnumFilterName } from "./enum-filter-values";
 import { parseFilters } from "./filter-parsing";
 import { LAST_AUDIT_DATE_COLUMN } from "./last-audit-date-access";
 import { bookableListScopeSql } from "./list-scope.server";
@@ -559,30 +564,18 @@ function addDateFilter(
 }
 
 /**
- * The values each Postgres-enum filter accepts. Filter values come straight
- * from the URL, and a value outside the enum fails the
- * `::public."<Enum>"` cast below, which fails the whole query.
- */
-const ENUM_FILTER_VALUES: Record<"status" | "type", readonly string[]> = {
-  status: Object.values(AssetStatus),
-  type: Object.values(AssetType),
-};
-
-/**
  * Throws a 400 naming the accepted values when an enum filter carries a value
  * its Postgres enum does not have, so the caller (a person editing a URL, or a
- * script) gets a plain answer instead of a database error.
+ * script) gets a plain answer instead of a database error. Filter values come
+ * straight from the URL, and a value outside the enum fails the
+ * `::public."<Enum>"` cast below, which fails the whole query.
  *
  * @param name - The enum filter being checked.
  * @param values - The filter's values, already split and trimmed.
  * @throws {ShelfError} 400 when any value is not in the enum.
  */
-function assertEnumFilterValues(
-  name: keyof typeof ENUM_FILTER_VALUES,
-  values: string[]
-): void {
-  const accepted = ENUM_FILTER_VALUES[name];
-  const unknown = values.filter((value) => !accepted.includes(value));
+function assertEnumFilterValues(name: EnumFilterName, values: string[]): void {
+  const unknown = getUnknownEnumFilterValues(name, values);
   if (unknown.length === 0) return;
 
   const archivedHint = unknown.some((value) => /^archived$/i.test(value))
@@ -593,7 +586,9 @@ function assertEnumFilterValues(
     title: `Unknown ${name} filter value`,
     message: `Unknown ${name} ${unknown
       .map((value) => `"${value}"`)
-      .join(", ")}. Use one of: ${accepted.join(", ")}.${archivedHint}`,
+      .join(", ")}. Use one of: ${ENUM_FILTER_VALUES[name].join(
+      ", "
+    )}.${archivedHint}`,
     additionalData: { filter: name, unknown },
     label: "Assets",
     status: 400,
