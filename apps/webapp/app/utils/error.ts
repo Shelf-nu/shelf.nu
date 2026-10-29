@@ -67,6 +67,7 @@ export type FailureReason = {
     | "User onboarding"
     | "Location"
     | "Notification"
+    | "Push"
     | "Organization"
     | "Permission"
     | "QR"

@@ -75,6 +75,78 @@ export const canCustomizePdfDocuments = (
   return tierLimit.canCustomizePdfDocuments;
 };
 
+/**
+ * Determines whether an organization tier allows companion-app push
+ * notifications. Pass the tier limit of the organization's owner.
+ *
+ * @param tierLimit - The tier limits associated with the organization.
+ * @returns `true` if push is included in the tier or premium features are disabled.
+ */
+export const canUsePushNotifications = (
+  tierLimit: { canUsePushNotifications: boolean } | null | undefined
+) => {
+  if (!premiumIsEnabled) return true;
+  if (!tierLimit) return false;
+  return tierLimit.canUsePushNotifications;
+};
+
+/**
+ * Keeps the organizations whose owner's tier allows push. One rule for the
+ * push sender and for the settings screens that tell a person whether push
+ * can reach them. Reads every owner's tier in a single query; an owner with
+ * no limit row counts as a tier without push.
+ *
+ * @param organizationIds - Organizations to check
+ * @returns The ones with push, in their original order
+ * @throws {ShelfError} If the database read fails
+ */
+export async function filterOrganizationsWithPush(
+  organizationIds: string[]
+): Promise<string[]> {
+  if (!premiumIsEnabled) return organizationIds;
+  if (organizationIds.length === 0) return [];
+
+  try {
+    const organizations = await db.organization.findMany({
+      where: { id: { in: organizationIds } },
+      select: {
+        id: true,
+        owner: {
+          select: {
+            tierId: true,
+            tier: {
+              select: {
+                tierLimit: { select: { canUsePushNotifications: true } },
+              },
+            },
+            customTierLimit: { select: { canUsePushNotifications: true } },
+          },
+        },
+      },
+    });
+
+    const allowed = new Set(
+      organizations
+        .filter(({ owner }) =>
+          canUsePushNotifications(
+            owner.tierId === "custom"
+              ? owner.customTierLimit
+              : owner.tier.tierLimit
+          )
+        )
+        .map(({ id }) => id)
+    );
+    return organizationIds.filter((id) => allowed.has(id));
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while checking which plans include push.",
+      additionalData: { organizationIds },
+      label,
+    });
+  }
+}
+
 export async function assertUserCanExportAssets({
   organizationId,
   organizations,
