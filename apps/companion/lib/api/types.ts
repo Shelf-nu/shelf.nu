@@ -3,6 +3,7 @@ import type {
   TimeFormatPreference,
   WeekStartPreference,
 } from "@shelf/datetime";
+import type { LinkTitles } from "@shelf/links";
 import type {
   CustodySourceEntry,
   CustodySourceOption,
@@ -410,8 +411,33 @@ export type AssetDetail = {
       type: string;
       helpText: string | null;
       active: boolean;
+      /** Absent on servers older than the Link format. */
+      format?: MobileCustomFieldFormat;
     };
   }[];
+  /**
+   * The Link-format text fields that apply to this asset (every one, set or
+   * not), ordered by name: the rows of the Documents & links section, which
+   * shows an unset one as "Not linked". Values stay in `customFields`.
+   *
+   * Mirrors `linkFields` of
+   * apps/webapp/app/routes/api+/mobile+/assets.$assetId.ts: active,
+   * non-deleted LINK fields whose categories are empty or include the
+   * asset's category. Sent to every reader. Absent on older servers: the app
+   * then shows no Documents & links section.
+   */
+  linkFields?: { id: string; name: string; helpText: string | null }[];
+  /**
+   * Page titles and names people gave the links in this asset's values,
+   * keyed by the link's key (`parseLink(value).key` from `@shelf/links`, the
+   * same function the server keys them with). Chips without an entry read
+   * what the URL alone says.
+   *
+   * Mirrors `linkTitles` of
+   * apps/webapp/app/routes/api+/mobile+/assets.$assetId.ts. Absent on older
+   * servers.
+   */
+  linkTitles?: LinkTitles;
   /**
    * Aggregated per-status quantity slices for QUANTITY_TRACKED assets.
    * Optional + nullable: absent on pre-quantity servers, `null` for INDIVIDUAL
@@ -1908,6 +1934,20 @@ export type MobileCustomFieldType =
   | "AMOUNT"
   | "OPTION";
 
+/**
+ * How a TEXT custom field's value is read. `LINK` fields hold one web link:
+ * the server refuses any other value with a 400 whose message the edit
+ * screens show, and the asset screen lists them under Documents & links.
+ * `PLAIN` is every other field, of any type.
+ *
+ * Mirrors the `CustomFieldFormat` enum in
+ * packages/database/prisma/schema.prisma, sent by
+ * apps/webapp/app/routes/api+/mobile+/custom-fields.ts and
+ * apps/webapp/app/routes/api+/mobile+/assets.$assetId.ts. The link rule
+ * itself is shared, not mirrored: both apps read it from `@shelf/links`.
+ */
+export type MobileCustomFieldFormat = "PLAIN" | "LINK";
+
 export type MobileCustomFieldDefinition = {
   id: string;
   name: string;
@@ -1915,6 +1955,8 @@ export type MobileCustomFieldDefinition = {
   helpText: string | null;
   required: boolean;
   options: string[] | null;
+  /** Absent on servers older than the Link format: read as `PLAIN`. */
+  format?: MobileCustomFieldFormat;
 };
 
 /**

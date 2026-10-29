@@ -1,9 +1,10 @@
 /**
  * Tests for how custom field values with links read on the asset screen.
  *
- * The `titles` fixtures have the shape the mobile asset detail route sends as
- * `asset.linkTitles`: keyed by the link's key, each with a page title and a
- * custom title.
+ * Fixtures have the shapes the mobile asset detail route sends:
+ * `asset.customFields` entries with `{ raw, valueText }` values,
+ * `asset.linkFields` definitions, and `asset.linkTitles` keyed by the link's
+ * key, each with a page title and a custom title.
  *
  * Runs under Node's test runner via tsx, so the module under test must not
  * import React Native, Expo or `@/`-aliased paths.
@@ -13,7 +14,77 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { containsLink, linkChip } from "./custom-field-links";
+import { containsLink, linkChip, splitLinkFields } from "./custom-field-links";
+
+/** An `asset.customFields` entry for a TEXT field. */
+function storedValue(fieldId: string, raw: string) {
+  return {
+    id: `acfv-${fieldId}`,
+    value: { raw, valueText: raw },
+    customField: { id: fieldId, name: fieldId, type: "TEXT" },
+  };
+}
+
+const SERIAL = storedValue("cf-serial", "SN-0042");
+const MANUAL = storedValue("cf-manual", "https://usa.canon.com/manual.pdf");
+const CERT = storedValue("cf-cert", "   ");
+const OLD_LINK = storedValue("cf-old-link", "https://x.com/a");
+
+const LINK_FIELDS = [
+  { id: "cf-cert", name: "Calibration certificate", helpText: null },
+  { id: "cf-manual", name: "Manual", helpText: "Maker's PDF" },
+  { id: "cf-warranty", name: "Warranty", helpText: null },
+];
+
+test("every listed Link field gets a row in the server's order, set or not", () => {
+  const { linkRows } = splitLinkFields([SERIAL, MANUAL, CERT], LINK_FIELDS);
+  assert.deepEqual(linkRows, [
+    { id: "cf-cert", name: "Calibration certificate", value: null },
+    {
+      id: "cf-manual",
+      name: "Manual",
+      value: "https://usa.canon.com/manual.pdf",
+    },
+    { id: "cf-warranty", name: "Warranty", value: null },
+  ]);
+});
+
+test("listed fields leave Custom Fields; every other value stays", () => {
+  // cf-old-link is not in linkFields (its field no longer applies to the
+  // asset's category), so it must stay visible in Custom Fields.
+  const { otherFields } = splitLinkFields(
+    [SERIAL, MANUAL, CERT, OLD_LINK],
+    LINK_FIELDS
+  );
+  assert.deepEqual(
+    otherFields.map((cf) => cf.customField.id),
+    ["cf-serial", "cf-old-link"]
+  );
+});
+
+test("an older server without linkFields leaves every value in Custom Fields", () => {
+  for (const linkFields of [undefined, []]) {
+    const { linkRows, otherFields } = splitLinkFields(
+      [SERIAL, MANUAL],
+      linkFields
+    );
+    assert.deepEqual(linkRows, []);
+    assert.deepEqual(
+      otherFields.map((cf) => cf.customField.id),
+      ["cf-serial", "cf-manual"]
+    );
+  }
+});
+
+test("a value stored as a bare string still fills its row", () => {
+  const { linkRows } = splitLinkFields(
+    [{ value: "https://x.com/a", customField: { id: "cf-manual" } }],
+    [{ id: "cf-manual", name: "Manual" }]
+  );
+  assert.deepEqual(linkRows, [
+    { id: "cf-manual", name: "Manual", value: "https://x.com/a" },
+  ]);
+});
 
 test("a SharePoint PDF share link with no title reads its kind and provider", () => {
   assert.deepEqual(

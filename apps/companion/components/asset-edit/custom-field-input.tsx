@@ -15,6 +15,8 @@
  * - `OPTION`          — tap-to-open dropdown picker over `field.options`.
  *                       Falls back to a plain text input when options are
  *                       missing (degraded but safe — see below).
+ * - Link-format TEXT: URL keyboard, and a hint on leaving the field when
+ *   the value is not a link (see `LinkFieldInput`).
  * - everything else   — plain single-line `TextInput`.
  *
  * @see {@link file://../../lib/api/types.ts MobileCustomFieldDefinition}
@@ -35,7 +37,8 @@ import DateTimePicker, {
   type DateTimePickerEvent,
 } from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
-import type { MobileCustomFieldType } from "@/lib/api";
+import { parseLinkInput } from "@shelf/links";
+import type { MobileCustomFieldFormat, MobileCustomFieldType } from "@/lib/api";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
@@ -63,6 +66,8 @@ type CustomFieldInputProps = {
     helpText: string | null;
     required?: boolean;
     options?: string[] | null;
+    /** `LINK` gets the link input; absent reads as `PLAIN`. */
+    format?: MobileCustomFieldFormat;
   };
   value: string;
   onChange: (value: string) => void;
@@ -187,6 +192,16 @@ export function CustomFieldInput({
         />
       );
     default: // TEXT and any unknown future types
+      if (field.format === "LINK") {
+        return (
+          <LinkFieldInput
+            value={value}
+            onChange={onChange}
+            accessibilityLabel={accessibilityLabel}
+            accessibilityHint={accessibilityHint}
+          />
+        );
+      }
       return (
         <TextInput
           style={styles.input}
@@ -199,6 +214,67 @@ export function CustomFieldInput({
         />
       );
   }
+}
+
+/**
+ * Single-line input for a Link-format TEXT field.
+ *
+ * Opens the URL keyboard with auto-capitalisation and autocorrect off, so a
+ * pasted or typed link is not mangled. When the person leaves a non-empty
+ * field, `parseLinkInput` from `@shelf/links` checks it and a hint under the
+ * input says what is wrong; typing again clears it. The hint is cosmetic:
+ * the server applies the same rule on save and refuses a non-link with a
+ * message the screen shows.
+ */
+function LinkFieldInput({
+  value,
+  onChange,
+  accessibilityLabel,
+  accessibilityHint,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  accessibilityLabel: string;
+  accessibilityHint: string | undefined;
+}) {
+  const { colors } = useTheme();
+  const styles = useStyles();
+  const [hint, setHint] = useState<string | null>(null);
+
+  const checkLink = () => {
+    const result = value.trim() === "" ? null : parseLinkInput(value);
+    setHint(result && !result.ok ? result.message : null);
+  };
+
+  return (
+    <View>
+      <TextInput
+        style={styles.input}
+        value={value}
+        onChangeText={(next) => {
+          setHint(null);
+          onChange(next);
+        }}
+        onBlur={checkLink}
+        placeholder="https://"
+        placeholderTextColor={colors.placeholderText}
+        keyboardType="url"
+        textContentType="URL"
+        autoCapitalize="none"
+        autoCorrect={false}
+        spellCheck={false}
+        accessibilityLabel={
+          hint ? `${accessibilityLabel}, ${hint}` : accessibilityLabel
+        }
+        accessibilityHint={accessibilityHint}
+      />
+      {hint ? (
+        <Text style={styles.linkHint} accessibilityLiveRegion="polite">
+          {hint}
+        </Text>
+      ) : null}
+    </View>
+  );
 }
 
 /**
@@ -578,6 +654,11 @@ const useStyles = createStyles((colors, shadows) => ({
   textArea: {
     minHeight: 80,
     paddingTop: 12,
+  },
+  linkHint: {
+    fontSize: fontSize.sm,
+    color: colors.errorText,
+    marginTop: spacing.xs,
   },
   switchRow: {
     flexDirection: "row",
