@@ -21578,6 +21578,21 @@ describe("kit holder guards", () => {
     bookingId?: { notIn?: string[] };
     OR?: Array<{ sourceKitId?: { in?: string[] } }>;
   };
+  /** A custody row on a kit member, as the member custody read sees it. */
+  type FakeMemberCustody = {
+    kitId: string;
+    assetId: string;
+    title: string;
+    type: AssetType;
+    archived?: boolean;
+  };
+  type CustodyWhere = {
+    asset?: {
+      type?: AssetType;
+      archivedAt?: null;
+      assetKits?: { some?: { kitId?: { in?: string[] } } };
+    };
+  };
 
   /**
    * A client holding `kits` and the live bookings' `slices`. Every slice is on
@@ -21586,7 +21601,8 @@ describe("kit holder guards", () => {
   function fakeClient(
     kits: FakeKit[],
     slices: FakeSlice[] = [],
-    calls: string[] = []
+    calls: string[] = [],
+    memberCustody: FakeMemberCustody[] = []
   ) {
     const kitMatches = (kit: FakeKit, where: KitWhere = {}) =>
       (!where.id?.in || where.id.in.includes(kit.id)) &&
@@ -21615,6 +21631,22 @@ describe("kit holder guards", () => {
       },
       // No membership rows: every slice names its kit through `sourceKitId`.
       assetKit: { findMany: () => Promise.resolve([]) },
+      custody: {
+        findMany: ({ where }: { where?: CustodyWhere }) => {
+          const asset = where?.asset;
+          const kitIds = asset?.assetKits?.some?.kitId?.in ?? [];
+          return Promise.resolve(
+            memberCustody
+              .filter(
+                (row) =>
+                  kitIds.includes(row.kitId) &&
+                  (asset?.type === undefined || row.type === asset.type) &&
+                  (asset?.archivedAt === undefined || !row.archived)
+              )
+              .map((row) => ({ asset: { id: row.assetId, title: row.title } }))
+          );
+        },
+      },
       bookingAsset: {
         findMany: ({ where }: { where?: SliceWhere }) => {
           const kitIds = where?.OR?.find((or) => or.sourceKitId)?.sourceKitId
@@ -21774,6 +21806,63 @@ describe("kit holder guards", () => {
           assignArgs
         )
       ).rejects.toThrow("Cannot assign custody.");
+    });
+
+    it("refuses a kit whose individual member is already in someone's custody", async () => {
+      // Without this the assign reaches the one-custody-per-asset trigger and
+      // the user gets a 500 instead of a refusal naming the asset.
+      const err = await assertKitsCustodyAssignable(
+        fakeClient(
+          [caseKit],
+          [],
+          [],
+          [
+            {
+              kitId: "kit-case",
+              assetId: "asset-r5",
+              title: "Canon R5",
+              type: AssetType.INDIVIDUAL,
+            },
+          ]
+        ),
+        assignArgs
+      ).catch((e) => e);
+
+      expect(err).toBeInstanceOf(ShelfError);
+      expect(err).toMatchObject({ status: 400, shouldBeCaptured: false });
+      expect(err.message).toBe(
+        "Cannot assign custody. Some assets in the kit are already in custody: Canon R5. Release their custody first."
+      );
+    });
+
+    it("lets quantity-tracked and archived members in custody through", async () => {
+      // The kit takes only a quantity-tracked member's remaining units, and
+      // archived members are left out of kit custody.
+      await expect(
+        assertKitsCustodyAssignable(
+          fakeClient(
+            [caseKit],
+            [],
+            [],
+            [
+              {
+                kitId: "kit-case",
+                assetId: "asset-cables",
+                title: "XLR cables",
+                type: AssetType.QUANTITY_TRACKED,
+              },
+              {
+                kitId: "kit-case",
+                assetId: "asset-old",
+                title: "Old tripod",
+                type: AssetType.INDIVIDUAL,
+                archived: true,
+              },
+            ]
+          ),
+          assignArgs
+        )
+      ).resolves.toBeUndefined();
     });
   });
 });
