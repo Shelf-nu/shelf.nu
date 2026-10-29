@@ -53,6 +53,13 @@ type OrgState = {
   organizations: Organization[];
   currentOrg: Organization | null;
   setCurrentOrg: (org: Organization) => void;
+  /**
+   * Switches to a workspace for this visit only, without recording it as the
+   * person's choice, so the next launch lands where it otherwise would. For
+   * switches the app makes on the person's behalf, such as opening a tapped
+   * push.
+   */
+  visitOrg: (org: Organization) => void;
   userProfile: UserProfile | null;
   /**
    * The acting user's format preferences, resolved to concrete values (every
@@ -213,6 +220,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       organizations,
       currentOrg,
       setCurrentOrg: handleSetCurrentOrg,
+      visitOrg: applyLandingOrg,
       userProfile,
       formatPrefs,
       isLoading,
@@ -223,6 +231,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       organizations,
       currentOrg,
       handleSetCurrentOrg,
+      applyLandingOrg,
       userProfile,
       formatPrefs,
       isLoading,
