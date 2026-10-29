@@ -3003,11 +3003,11 @@ type KitForDeletion = {
  *         Custody rows after the cascade drop to `AVAILABLE`. Assets
  *         with surviving operator custody (Phase 2 multi-custodian)
  *         keep `IN_CUSTODY` so we don't lie about state.
- *   3. Outside the tx (best-effort, audit-only):
- *      a. Write asset notes: members of an in-custody kit get the custody
- *        release line naming their kit's custodian, members of any other
- *        kit get a line saying the deletion removed them from the kit.
- *      b. Delete each kit's stored image (see `deleteKitImage`).
+ *      d. Write one history line per member: the custody release line for
+ *         a member whose custody the deletion released, otherwise a line
+ *         saying the deletion removed it from the kit.
+ *   3. Outside the tx (best-effort): delete each kit's stored image (see
+ *      `deleteKitImage`).
  *
  * @param args.kits - Pre-fetched kits with the shape above. Caller is
  *   responsible for org-scoping the read.
@@ -3194,64 +3194,52 @@ async function performKitDeletion({
         organizationId
       );
     }
-  });
 
-  // One history line per member, per deleted kit. A member of an in-custody
-  // kit gets the custody release line, which names the kit and its own
-  // released unit count ("custody of 50 units"). A member of any other kit
-  // gets a line saying the deletion removed it from the kit.
-  // why: org-scoping is implicit: `kits`/`k.assets` are derived from the
-  // org-scoped kit reads at the call sites, never request input.
-  const noteData = kits.flatMap((k) => {
-    const kitName = stripMarkdocDelimiters(k.name);
-    const kitCustody = k.custody;
-    if (kitCustody) {
-      const custodianDisplay = kitCustody.custodian
+    // One history line per member, per deleted kit, written with the delete
+    // so the two commit or roll back together. A member whose custody this
+    // deletion released gets the release line, naming the kit and its own
+    // released unit count ("custody of 50 units"). Every other member gets a
+    // line saying the deletion removed it from the kit: members of a kit with
+    // no custody, and members of an in-custody kit that held no inherited
+    // custody row (archived members, a quantity-tracked slice with no units
+    // in custody).
+    // why: org-scoping is implicit: `kits`/`k.assets` are derived from the
+    // org-scoped kit reads at the call sites, never request input.
+    const noteData = kits.flatMap((k) => {
+      const kitName = stripMarkdocDelimiters(k.name);
+      const kitCustody = k.custody;
+      const custodianDisplay = kitCustody?.custodian
         ? wrapCustodianForNote({ teamMember: kitCustody.custodian })
         : "**Unknown Custodian**";
       return k.assets.map((asset) => {
-        const count = formatUnitCount(
-          asset,
-          releasedQty.get(releasedQtyKey(kitCustody.id, asset.id))
-        );
-        const custodyPhrase = count ? `custody of ${count}` : "custody";
+        const releaseKey = kitCustody
+          ? releasedQtyKey(kitCustody.id, asset.id)
+          : null;
+        if (releaseKey && releasedQty.has(releaseKey)) {
+          const count = formatUnitCount(asset, releasedQty.get(releaseKey));
+          const custodyPhrase = count ? `custody of ${count}` : "custody";
+          return {
+            content: `${actorLink} released ${custodianDisplay}'s ${custodyPhrase} when kit **${kitName}** was deleted.`,
+            type: "UPDATE" as const,
+            userId,
+            assetId: asset.id,
+          };
+        }
+        const count = formatUnitCount(asset, asset.kitQuantity);
         return {
-          content: `${actorLink} released ${custodianDisplay}'s ${custodyPhrase} when kit **${kitName}** was deleted.`,
+          content: `${actorLink} deleted kit **${kitName}**, which removed ${
+            count ?? "this asset"
+          } from it.`,
           type: "UPDATE" as const,
           userId,
           assetId: asset.id,
         };
       });
-    }
-    return k.assets.map((asset) => {
-      const count = formatUnitCount(asset, asset.kitQuantity);
-      return {
-        content: `${actorLink} deleted kit **${kitName}**, which removed ${
-          count ?? "this asset"
-        } from it.`,
-        type: "UPDATE" as const,
-        userId,
-        assetId: asset.id,
-      };
     });
-  });
-
-  // The kits are already deleted, so a failed note write is logged, not
-  // thrown: the caller must not report a completed delete as failed.
-  if (noteData.length > 0) {
-    try {
-      await db.note.createMany({ data: noteData });
-    } catch (cause) {
-      Logger.error(
-        new ShelfError({
-          cause,
-          message: "Failed to write the history lines for deleted kits",
-          additionalData: { kitIds: kitIdsToDelete, organizationId },
-          label,
-        })
-      );
+    if (noteData.length > 0) {
+      await tx.note.createMany({ data: noteData });
     }
-  }
+  });
 
   const kitWithImages = kits.filter((k) => !!k.image);
   await Promise.all(

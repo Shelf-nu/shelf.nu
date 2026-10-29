@@ -1346,7 +1346,7 @@ describe("bulkDeleteKits", () => {
     ]);
   });
 
-  it("reports the delete as done when its history lines cannot be written", async () => {
+  it("writes members' history lines in the deletion transaction", async () => {
     //@ts-expect-error missing vitest type
     db.kit.findMany.mockResolvedValue([
       {
@@ -1357,23 +1357,71 @@ describe("bulkDeleteKits", () => {
         custody: null,
       },
     ]);
+    const tx = { ...db, note: { createMany: vitest.fn() } };
+    // why: hands the callback its own client, so a write through it can be
+    // told apart from one made outside the transaction
     //@ts-expect-error missing vitest type
-    db.note.createMany.mockRejectedValueOnce(new Error("connection reset"));
-    // why: keeps the expected error log out of the test output
-    const loggerSpy = vitest
-      .spyOn(Logger, "error")
-      .mockImplementation(() => {});
-    onTestFinished(() => loggerSpy.mockRestore());
+    db.$transaction.mockImplementationOnce(
+      (callback: (client: typeof tx) => unknown) => callback(tx)
+    );
 
-    // Resolves rather than rejects: the kits are already deleted.
     await bulkDeleteKits({
       kitIds: ["kit-1"],
       confirmation: "1",
       organizationId: "org-1",
       userId: "user-1",
     });
-    expect(db.kit.deleteMany).toHaveBeenCalled();
-    expect(loggerSpy).toHaveBeenCalledTimes(1);
+
+    expect(tx.note.createMany).toHaveBeenCalledTimes(1);
+    expect(db.note.createMany).not.toHaveBeenCalled();
+  });
+
+  it("writes a removal line, not a release line, for an in-custody kit's member that held no custody", async () => {
+    //@ts-expect-error missing vitest type
+    db.kit.findMany.mockResolvedValue([
+      {
+        id: "kit-A",
+        name: "Box A",
+        image: null,
+        assetKits: [
+          { quantity: 1, asset: { id: "drill-1", title: "Drill" } },
+          // Archived, so the kit's custody never reached it.
+          { quantity: 1, asset: { id: "old-1", title: "Old" } },
+        ],
+        custody: {
+          id: "kc-A",
+          custodian: { id: "tm-bob", name: "Bob", user: { id: "user-bob" } },
+        },
+      },
+    ]);
+    //@ts-expect-error missing vitest type
+    db.custody.findMany.mockResolvedValueOnce([
+      { assetId: "drill-1", teamMemberId: "tm-bob", kitCustodyId: "kc-A" },
+    ]);
+    //@ts-expect-error missing vitest type
+    db.custody.findMany.mockResolvedValueOnce([]);
+
+    await bulkDeleteKits({
+      kitIds: ["kit-A"],
+      confirmation: "1",
+      organizationId: "org-1",
+      userId: "user-1",
+    });
+
+    const notes = (db.note.createMany as ReturnType<typeof vitest.fn>).mock
+      .calls[0][0].data as { assetId: string; content: string }[];
+    expect(notes).toEqual([
+      expect.objectContaining({
+        assetId: "drill-1",
+        content: expect.stringContaining("custody when kit **Box A**"),
+      }),
+      expect.objectContaining({
+        assetId: "old-1",
+        content: expect.stringContaining(
+          "deleted kit **Box A**, which removed this asset from it."
+        ),
+      }),
+    ]);
   });
 
   it("should not emit events when no kits have assets", async () => {
