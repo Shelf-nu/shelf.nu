@@ -347,14 +347,13 @@ describe("bulkCheckoutBookings", () => {
     // The check-out committed; only its follow-up work threw.
     findFirstMock.mockResolvedValue({ status: BookingStatus.ONGOING } as never);
 
-    const error = await bulkCheckoutBookings(args(["b1", "b2", "b3"])).catch(
-      (cause: unknown) => cause as ShelfError
-    );
-
-    expect(error.message).toBe(
-      '"Booking b2" was checked out, but a step after it failed: Could not schedule the check-in reminder. The 2 bookings up to and including it were checked out. The 1 booking after it was not touched.'
-    );
-    expect(error.additionalData).toMatchObject({ processedCount: 2 });
+    await expect(
+      bulkCheckoutBookings(args(["b1", "b2", "b3"]))
+    ).rejects.toMatchObject({
+      message:
+        '"Booking b2" was checked out, but a step after it failed: Could not schedule the check-in reminder. The 2 bookings up to and including it were checked out. The 1 booking after it was not touched.',
+      additionalData: expect.objectContaining({ processedCount: 2 }),
+    });
     expect(findFirstMock).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: "b2", organizationId: ORG } })
     );
