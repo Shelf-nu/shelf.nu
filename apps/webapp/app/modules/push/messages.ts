@@ -76,8 +76,9 @@ type AuditNotice = "ASSIGNED" | AuditReminder | "OVERDUE";
 /**
  * What each event's push is built from. Every booking event pushes to the
  * custodian alone, so each carries the dates; an update that changes the
- * custodian tells the new one they hold it and the replaced one they do not. Audit reminders and overdue notices
- * reach several people, so none of them carries a time.
+ * custodian tells the new one they hold it and the replaced one they do not.
+ * Audit reminders and overdue notices reach several people, so none of them
+ * carries a time.
  */
 type PushContexts = Record<
   `BOOKING_${BookingEventType}`,
