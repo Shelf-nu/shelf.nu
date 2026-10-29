@@ -7297,6 +7297,27 @@ describe("available for bookings: activity trail", () => {
     expect(recordEvent).not.toHaveBeenCalled();
   });
 
+  it("writes no note and no event when the asset is archived after the pre-check", async () => {
+    stubActor();
+    // why: the before-read inside the transaction excludes archived rows, so
+    // an asset archived after the pre-check reads back as missing.
+    vitest.mocked(db.asset.findUnique).mockResolvedValueOnce(null);
+
+    await updateAssetBookingAvailability({
+      id: "a1",
+      organizationId: "org-1",
+      availableToBook: true,
+      userId: "user-1",
+    });
+
+    expect(db.asset.findUnique).toHaveBeenCalledWith({
+      where: { id: "a1", organizationId: "org-1", archivedAt: null },
+      select: { availableToBook: true },
+    });
+    expect(createNote).not.toHaveBeenCalled();
+    expect(recordEvent).not.toHaveBeenCalled();
+  });
+
   it("records one note and one event per asset the bulk action actually changes", async () => {
     stubActor();
     // why: the before-state read inside the transaction. a2 is already

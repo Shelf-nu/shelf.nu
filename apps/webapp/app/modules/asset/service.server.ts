@@ -237,6 +237,7 @@ import {
   type ArchivedFilter,
 } from "./utils.server";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
+import type { FieldChangeEventInput } from "../activity-event/types";
 import type { Column } from "../asset-index-settings/helpers";
 import {
   createAssetModelsIfNotExists,
@@ -6336,6 +6337,43 @@ export async function createAssetsFromContentImport({
 }
 
 /**
+ * The `ASSET_AVAILABLE_TO_BOOK_CHANGED` event for one asset, shared by the
+ * single and bulk writers so both leave the same trail.
+ *
+ * The switch is a boolean and callers emit only for assets whose value really
+ * changes, so the previous value is always the opposite of the new one.
+ *
+ * @param args.organizationId - The workspace the asset belongs to
+ * @param args.userId - The acting user
+ * @param args.assetId - The asset whose switch changed
+ * @param args.availableToBook - The value the switch was set to
+ * @returns The event input for `recordEvent` / `recordEvents`
+ */
+function buildAvailableToBookChangeEvent({
+  organizationId,
+  userId,
+  assetId,
+  availableToBook,
+}: {
+  organizationId: Asset["organizationId"];
+  userId: User["id"];
+  assetId: Asset["id"];
+  availableToBook: boolean;
+}): FieldChangeEventInput {
+  return {
+    organizationId,
+    actorUserId: userId,
+    action: "ASSET_AVAILABLE_TO_BOOK_CHANGED",
+    entityType: "ASSET",
+    entityId: assetId,
+    assetId,
+    field: "availableToBook",
+    fromValue: !availableToBook,
+    toValue: availableToBook,
+  };
+}
+
+/**
  * Turns an asset's "Available for bookings" switch on or off.
  *
  * When the value actually changes, the write, an UPDATE note on the asset and
@@ -6400,17 +6438,12 @@ export async function updateAssetBookingAvailability({
           tx
         );
         await recordEvent(
-          {
+          buildAvailableToBookChangeEvent({
             organizationId,
-            actorUserId: userId,
-            action: "ASSET_AVAILABLE_TO_BOOK_CHANGED",
-            entityType: "ASSET",
-            entityId: id,
+            userId,
             assetId: id,
-            field: "availableToBook",
-            fromValue: before.availableToBook,
-            toValue: availableToBook,
-          },
+            availableToBook,
+          }),
           tx
         );
       }
@@ -9076,17 +9109,14 @@ export async function bulkMarkAvailability({
         });
 
         await recordEvents(
-          changingIds.map((assetId) => ({
-            organizationId,
-            actorUserId: userId,
-            action: "ASSET_AVAILABLE_TO_BOOK_CHANGED" as const,
-            entityType: "ASSET" as const,
-            entityId: assetId,
-            assetId,
-            field: "availableToBook",
-            fromValue: !availableToBook,
-            toValue: availableToBook,
-          })),
+          changingIds.map((assetId) =>
+            buildAvailableToBookChangeEvent({
+              organizationId,
+              userId,
+              assetId,
+              availableToBook,
+            })
+          ),
           tx
         );
 
