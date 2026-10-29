@@ -23,6 +23,9 @@ if (window.env?.SENTRY_DSN) {
     release: window.env.SENTRY_RELEASE || undefined,
     environment: window.env.NODE_ENV,
     tunnel: SENTRY_TUNNEL_PATH,
+    // Sentry Logs, for client events worth counting but not worth an issue,
+    // such as a page that reloaded itself after a failed download.
+    enableLogs: true,
     integrations: [Sentry.reactRouterTracingIntegration()],
     tracesSampleRate: 0.1,
     beforeSendTransaction(event) {
