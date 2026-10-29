@@ -69,13 +69,19 @@ function trimUrlEnd(candidate: string): string {
   return candidate.slice(0, end);
 }
 
-/** The parsed URL when `url` is a linkable http(s) URL, else null. */
+/**
+ * The parsed URL when `url` is a linkable http(s) URL, else null. The host is
+ * lowercased here because the URL implementation Expo installs on the phone
+ * keeps the host's case, and keys must match the server's.
+ */
 function readUrl(url: string): URL | null {
   if (url.length > MAX_LINK_LENGTH) return null;
   try {
     const parsed = new URL(url);
     const isWeb = parsed.protocol === "http:" || parsed.protocol === "https:";
-    return isWeb && parsed.hostname !== "" ? parsed : null;
+    if (!isWeb || parsed.hostname === "") return null;
+    parsed.hostname = parsed.hostname.toLowerCase();
+    return parsed;
   } catch {
     return null;
   }
