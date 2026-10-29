@@ -21613,6 +21613,10 @@ describe("kit holder guards", () => {
             (or.status !== undefined && kit.status === or.status) ||
             (or.id?.in !== undefined && or.id.in.includes(kit.id))
         ));
+    // why: the guards take their Prisma client as an argument and these cases
+    // test the hold decisions, not SQL. An in-memory client that applies the
+    // filters the guards send keeps them DB-free while still checking those
+    // filters.
     return {
       // The kit row lock: records the ids it was asked to lock, in order.
       $queryRaw: (_sql: TemplateStringsArray, ...values: unknown[]) => {
