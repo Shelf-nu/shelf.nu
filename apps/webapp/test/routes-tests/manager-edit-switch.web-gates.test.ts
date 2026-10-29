@@ -29,6 +29,7 @@ import {
   bulkCreateAssetsFromModel,
   bulkMarkAvailability,
   bulkUpdateAssetCategory,
+  bulkUpdateAssetMinQuantity,
   bulkUpdateAssetLocation,
   bulkUpdateAssetModel,
   createAsset,
@@ -67,6 +68,7 @@ import { action as bulkRemoveFromKitsAction } from "~/routes/api+/assets.bulk-re
 import { action as bulkUpdateAssetModelAction } from "~/routes/api+/assets.bulk-update-asset-model";
 import { action as bulkUpdateCategoryAction } from "~/routes/api+/assets.bulk-update-category";
 import { action as bulkUpdateLocationAction } from "~/routes/api+/assets.bulk-update-location";
+import { action as bulkUpdateReorderPointAction } from "~/routes/api+/assets.bulk-update-reorder-point";
 import { action as generateSequentialIdsAction } from "~/routes/api+/generate-sequential-ids";
 import { action as kitsBulkAction } from "~/routes/api+/kits.bulk-actions";
 import { action as linkQrToAssetAction } from "~/routes/qr+/_private+/$qrId_.link.asset";
@@ -130,6 +132,7 @@ vi.mock("~/modules/asset/service.server", () => ({
   bulkMarkAvailability: vi.fn(async () => undefined),
   bulkUpdateAssetCategory: vi.fn(async () => undefined),
   bulkUpdateAssetLocation: vi.fn(async () => undefined),
+  bulkUpdateAssetMinQuantity: vi.fn(async () => 1),
   bulkUpdateAssetModel: vi.fn(async () => ({
     linked: true,
     resolved: 1,
@@ -569,6 +572,21 @@ const OPENED_BY_THE_SWITCH: GatedRoute[] = [
 
 /** Routes that share a granted pair but stay closed to a Manager. */
 const CLOSED_EITHER_WAY: GatedRoute[] = [
+  {
+    route: "api+/assets.bulk-update-reorder-point.ts action",
+    call: post(
+      bulkUpdateReorderPointAction,
+      "/api/assets/bulk-update-reorder-point",
+      { "assetIds[0]": "asset-1", minQuantity: "4" }
+    ),
+    service: bulkUpdateAssetMinQuantity,
+    receives: expect.objectContaining({
+      assetIds: ["asset-1"],
+      minQuantity: 4,
+      organizationId: ORG_ID,
+    }),
+    status: 200,
+  },
   {
     route: "api+/assets.bulk-update-category.ts action",
     call: post(bulkUpdateCategoryAction, "/api/assets/bulk-update-category", {

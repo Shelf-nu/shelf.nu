@@ -16,11 +16,14 @@ const { useLoaderDataMock } = vi.hoisted(() => ({
   useLoaderDataMock: vi.fn(),
 }));
 
-// why: the component reads custom field definitions from the route loader;
-// the rest of react-router stays real because the shared Button renders Link
+// why: the component reads custom field definitions from the route loader
+// and the member's roles from the layout loader (absent here, which reads as
+// "may not manage custom fields"); the rest of react-router stays real
+// because the shared Button renders Link
 vi.mock("react-router", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useLoaderData: () => useLoaderDataMock(),
+  useRouteLoaderData: () => undefined,
   useNavigation: () => ({ state: "idle" }),
 }));
 
