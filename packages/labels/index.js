@@ -470,7 +470,7 @@ function reservationFailed(models) {
     return `Could not reserve ${requested} × ${assetModelName}. Try again from the booking.`;
   }
   return `Could not reserve ${models.length} models (${namedModels(
-    models.map((m) => m.assetModelName)
+    models.map((m) => `${m.requested} × ${m.assetModelName}`)
   )}). Try again from the booking.`;
 }
 

@@ -472,7 +472,19 @@ test("a reservation that failed is worded as an error, not a shortfall", () => {
       { assetModelName: "Tripod", requested: 2, reserved: 0, failed: true },
       { assetModelName: "Lens", requested: 1, reserved: 0, failed: true },
     ]),
-    "Only 6 of 10 × Camera could be reserved for the new dates. Could not reserve 2 models (Tripod, Lens). Try again from the booking."
+    "Only 6 of 10 × Camera could be reserved for the new dates. Could not reserve 2 models (2 × Tripod, 1 × Lens). Try again from the booking."
+  ); // Twenty models from one failed batch still fit in a toast: the first three
+  // are named with their quantities, the rest counted.
+  assert.equal(
+    modelReservationsReduced(
+      ["A", "B", "C", "D", "E"].map((assetModelName) => ({
+        assetModelName,
+        requested: 2,
+        reserved: 0,
+        failed: true,
+      }))
+    ),
+    "Could not reserve 5 models (2 × A, 2 × B, 2 × C and 2 more). Try again from the booking."
   );
 });
 
