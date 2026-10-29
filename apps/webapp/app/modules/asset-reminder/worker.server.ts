@@ -4,6 +4,7 @@ import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { ShelfError } from "~/utils/error";
+import { isLastAttempt } from "~/utils/job-retry";
 import { Logger } from "~/utils/logger";
 import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import { wrapDateForNote } from "~/utils/markdoc-wrappers";
@@ -451,16 +452,7 @@ export async function regierAssetWorkers() {
       try {
         await handler(job);
       } catch (cause) {
-        // why: pg-boss increments retrycount at fetch time, so with N retries
-        // the handler observes retrycount = 0, 1, 2, ... N — the final attempt
-        // has retrycount === retrylimit. Using `- 1` here double-logs (fires on
-        // both the second-to-last AND the final attempt).
-        const isLastRetry =
-          job.retrycount != null &&
-          job.retrylimit != null &&
-          job.retrycount >= job.retrylimit;
-
-        if (isLastRetry) {
+        if (isLastAttempt(job)) {
           Logger.error(
             new ShelfError({
               cause,
