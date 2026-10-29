@@ -61,7 +61,7 @@ const SWITCH_COPY: Record<
   },
   audits: {
     label: "Audits",
-    help: "Audits assigned to you, with reminders before they are due and a notice when they are overdue.",
+    help: "Audits assigned to you, with reminders before they are due, and a notice when an audit you are assigned to or created is overdue.",
   },
   stockAndReminders: {
     label: "Stock and reminders",
