@@ -1,3 +1,4 @@
+import Markdoc from "@markdoc/markdoc";
 import type { RenderableTreeNode } from "@markdoc/markdoc";
 import type { CustomField, CustomFieldType } from "@prisma/client";
 import { format } from "date-fns";
@@ -10,7 +11,7 @@ import {
   parseDateOnlyString,
 } from "./client-hints";
 import { ShelfError, isLikeShelfError } from "./error";
-import { parseMarkdownToReact } from "./md";
+import { linkifyBareUrls } from "./markdoc-linkify";
 import {
   optionalNumberFromString,
   requiredNumberFromString,
@@ -530,14 +531,17 @@ export { formatInvalidNumericMessage as formatInvalidNumericCustomFieldMessage }
  * @param prefs - Optional resolved format prefs; when supplied, DATE values
  *   render in the user's configured order (absolute, no tz conversion).
  *   When omitted, falls back to `PPP` (server / prefs-less contexts).
- * @returns A string or renderable Markdoc node
+ * @returns A string, or for MULTILINE_TEXT a renderable Markdoc node with
+ *   bare URLs linked
  */
 export const getCustomFieldDisplayValue = (
   value: ShelfAssetCustomFieldValueType["value"],
   prefs?: ResolvedFormatPrefs
 ): string | RenderableTreeNode => {
   if (value.valueMultiLineText) {
-    return parseMarkdownToReact(value.raw as string);
+    return Markdoc.transform(
+      linkifyBareUrls(Markdoc.parse(value.raw as string))
+    );
   }
 
   if (Object.hasOwnProperty.call(value, "valueBoolean")) {

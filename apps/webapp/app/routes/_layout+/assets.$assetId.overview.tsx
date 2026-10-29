@@ -30,6 +30,7 @@ import { Switch } from "~/components/forms/switch";
 import Icon from "~/components/icons/icon";
 import ContextualModal from "~/components/layout/contextual-modal";
 import type { HeaderData } from "~/components/layout/header/types";
+import { TextWithLinks } from "~/components/links/text-with-links";
 import { LocationBadge } from "~/components/location/location-badge";
 import { LocationSelect } from "~/components/location/location-select";
 import { ScanDetails } from "~/components/location/scan-details";
@@ -101,7 +102,6 @@ import { getClientHint } from "~/utils/client-hints";
 import { ASSET_DESCRIPTION_MAX_LENGTH } from "~/utils/constants";
 import { formatCurrency } from "~/utils/currency";
 import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
-import { buildCustomFieldLinkHref } from "~/utils/custom-field-link";
 import {
   buildAssetOverviewCustomFields,
   buildCustomFieldValue,
@@ -111,7 +111,6 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { error, getParams, payload, parseData } from "~/utils/http.server";
-import { isLink } from "~/utils/misc";
 import {
   userCanViewSpecificCustody,
   userHasCustodyViewPermission,
@@ -1520,16 +1519,8 @@ export default function AssetOverview() {
                                   }
                                   allowExternalLinks
                                 />
-                              ) : isLink(customFieldDisplayValue as string) ? (
-                                <Button
-                                  variant="link-gray"
-                                  target="_blank"
-                                  to={buildCustomFieldLinkHref(
-                                    customFieldDisplayValue as string
-                                  )}
-                                >
-                                  {customFieldDisplayValue as string}
-                                </Button>
+                              ) : def.type === CustomFieldType.TEXT ? (
+                                <TextWithLinks value={rawValue} />
                               ) : def.type === CustomFieldType.AMOUNT ? (
                                 formatCurrency({
                                   value: fieldValue!.raw as number,

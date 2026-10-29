@@ -1,5 +1,5 @@
 /**
- * Appending Shelf's referrer to a custom-field URL.
+ * Appending Shelf's referrer to a link found in a custom field value.
  *
  * The naive form, `${value}?ref=shelf-webapp`, breaks the two cases a real URL
  * most often has: one that already carries a query string gets a second `?`, and
@@ -20,57 +20,43 @@ describe("buildCustomFieldLinkHref", () => {
   });
 
   it("adds to an existing query string rather than starting a second one", () => {
-    const href = buildCustomFieldLinkHref("https://example.com/docs?page=2");
-
-    expect(href).toContain("page=2");
-    expect(href).toContain("ref=shelf-webapp");
-    // A second "?" is what the naive concatenation produces, and it makes the
-    // rest of the URL part of one malformed parameter.
-    expect(href.match(/\?/g)).toHaveLength(1);
+    expect(buildCustomFieldLinkHref("https://example.com/docs?page=2")).toBe(
+      "https://example.com/docs?page=2&ref=shelf-webapp"
+    );
   });
 
   it("keeps a fragment after the query, not around it", () => {
-    const href = buildCustomFieldLinkHref("https://example.com/docs#install");
-
-    expect(href).toBe("https://example.com/docs?ref=shelf-webapp#install");
+    expect(buildCustomFieldLinkHref("https://example.com/docs#install")).toBe(
+      "https://example.com/docs?ref=shelf-webapp#install"
+    );
   });
 
   it("handles a URL with both a query and a fragment", () => {
-    const href = buildCustomFieldLinkHref(
-      "https://example.com/docs?page=2#install"
-    );
+    expect(
+      buildCustomFieldLinkHref("https://example.com/docs?page=2#install")
+    ).toBe("https://example.com/docs?page=2&ref=shelf-webapp#install");
+  });
 
-    expect(href).toContain("page=2");
-    expect(href).toContain("ref=shelf-webapp");
-    expect(href.endsWith("#install")).toBe(true);
-    expect(href.match(/\?/g)).toHaveLength(1);
+  it("keeps the rest of the query exactly as written", () => {
+    // A share link's token must reach the service byte for byte.
+    expect(
+      buildCustomFieldLinkHref(
+        "https://contoso.sharepoint.com/:b:/s/Lab/EaBc12?e=4%3aXy+z"
+      )
+    ).toBe(
+      "https://contoso.sharepoint.com/:b:/s/Lab/EaBc12?e=4%3aXy+z&ref=shelf-webapp"
+    );
   });
 
   it("does not add the referrer twice", () => {
-    const href = buildCustomFieldLinkHref(
-      "https://example.com/docs?ref=shelf-webapp"
-    );
-
-    expect(href.match(/ref=shelf-webapp/g)).toHaveLength(1);
+    expect(
+      buildCustomFieldLinkHref("https://example.com/docs?ref=shelf-webapp")
+    ).toBe("https://example.com/docs?ref=shelf-webapp");
   });
 
   it("preserves a referrer the value already set to something else", () => {
-    const href = buildCustomFieldLinkHref(
-      "https://example.com/docs?ref=partner"
-    );
-
-    expect(href).toContain("ref=partner");
-    expect(href).toContain("ref=shelf-webapp");
-  });
-
-  it("falls back for a value that is not an absolute URL", () => {
-    // Custom field values are free text, so this is ordinary input rather than
-    // an edge case.
-    const href = buildCustomFieldLinkHref("example.com/docs?page=2#install");
-
-    expect(href).toContain("page=2");
-    expect(href).toContain("ref=shelf-webapp");
-    expect(href.endsWith("#install")).toBe(true);
-    expect(href.match(/\?/g)).toHaveLength(1);
+    expect(
+      buildCustomFieldLinkHref("https://example.com/docs?ref=partner")
+    ).toBe("https://example.com/docs?ref=partner&ref=shelf-webapp");
   });
 });

@@ -9,9 +9,6 @@ import _ from "lodash";
 export const validEmail = (val: string) =>
   /^([A-Z0-9_+-]+\.?)*[A-Z0-9_+-]@([A-Z0-9][A-Z0-9-]*\.)+[A-Z]{2,}$/i.test(val);
 
-export const isLink = (val: string) =>
-  /\b(?:https?):\/\/[-\w+&@#/%?=~|$!:,.;]*[\w+&@#/%=~|$]/.test(val);
-
 export const isValidDomain = (val: string) =>
   /^([a-zA-Z0-9][a-zA-Z0-9-]{1,61}[a-zA-Z0-9]\.)+[a-zA-Z]{2,}$/.test(val);
 
