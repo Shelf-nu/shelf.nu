@@ -223,13 +223,15 @@ export async function sendPush(message: PushMessage): Promise<void> {
  * on the last follow-up, is logged and the job completes, because trying
  * again would fail the same way.
  *
- * A follow-up runs the same tier, preference and device checks, narrowed to
- * its listed devices, so a device signed out, disabled or taken over by
- * someone else since the first try is skipped.
+ * A recipient who is no longer a member of the push's workspace is skipped.
+ *
+ * A follow-up runs the same tier, membership, preference and device checks,
+ * narrowed to its listed devices, so a device signed out, disabled or taken
+ * over by someone else since the first try is skipped.
  *
  * @param job - The send job, as `sendPush` or an earlier run queued it
- * @throws {ShelfError} When loading the tier, the preferences or the devices
- *   fails, so pg-boss retries
+ * @throws {ShelfError} When loading the tier, the memberships, the preferences
+ *   or the devices fails, so pg-boss retries
  */
 export async function deliverPush({
   message,
@@ -250,8 +252,24 @@ export async function deliverPush({
     return;
   }
 
+  // Only current members hear about the workspace: revoking access leaves a
+  // user on the bookings and audits they were linked to.
+  const memberships = await db.userOrganization.findMany({
+    where: { organizationId, userId: { in: message.userIds } },
+    select: { userId: true },
+  });
+  const memberIds = new Set(memberships.map(({ userId }) => userId));
+  const members = message.userIds.filter((userId) => memberIds.has(userId));
+  if (members.length === 0) {
+    Logger.info(
+      "push.send skipped: no recipient is a member of the workspace",
+      logContext
+    );
+    return;
+  }
+
   const recipients = await filterRecipientsByPreference({
-    userIds: message.userIds,
+    userIds: members,
     category,
   });
   if (recipients.length === 0) {

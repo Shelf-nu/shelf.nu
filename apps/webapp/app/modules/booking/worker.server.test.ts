@@ -27,6 +27,13 @@ vitest.mock("~/database/db.server", () => ({
       findUnique: vitest.fn().mockResolvedValue(null),
       upsert: vitest.fn(),
     },
+    // Every recipient the resolver asks about is a member of the workspace
+    userOrganization: {
+      findMany: vitest.fn(
+        ({ where }: { where: { userId: { in: string[] } } }) =>
+          Promise.resolve(where.userId.in.map((userId) => ({ userId })))
+      ),
+    },
   },
 }));
 

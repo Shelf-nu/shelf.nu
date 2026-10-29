@@ -22,6 +22,7 @@ import type {
   TimeFormatPreference,
   WeekStartPreference,
 } from "@prisma/client";
+import { db } from "~/database/db.server";
 import type { BookingForEmail } from "~/emails/types";
 import { getBookingNotificationSettingsForOrg } from "~/modules/booking-settings/service.server";
 import { getOrganizationNotificationAudience } from "~/modules/organization/service.server";
@@ -98,6 +99,9 @@ export type NotificationRecipient = {
  * resolution (custodian -> creator -> admins -> always-notify -> per-booking)
  * determines which `reason` label a user gets if they appear in multiple
  * categories.
+ *
+ * **Members only:** a recipient who is no longer a member of the workspace is
+ * dropped, whichever link put them on the list.
  *
  * **Editor exclusion:** The user who triggered the action (`editorUserId`)
  * is removed from the final list for immediate (non-scheduled) notifications,
@@ -241,7 +245,22 @@ export async function getBookingNotificationRecipients({
       }
     }
 
-    // 7. Exclude the editor from immediate (non-scheduled) notifications.
+    // 7. Keep only current members of the workspace. Revoking access unlinks
+    //    a user's team members but leaves them as a booking's custodian or
+    //    creator, and those links must not keep notifying them.
+    const memberships = await db.userOrganization.findMany({
+      where: {
+        organizationId,
+        userId: { in: [...recipients.values()].map(({ userId }) => userId) },
+      },
+      select: { userId: true },
+    });
+    const memberIds = new Set(memberships.map(({ userId }) => userId));
+    for (const [email, recipient] of recipients) {
+      if (!memberIds.has(recipient.userId)) recipients.delete(email);
+    }
+
+    // 8. Exclude the editor from immediate (non-scheduled) notifications.
     //    Scheduled jobs (reminders, overdue) have no human editor, so
     //    skipping this step ensures all relevant parties are notified.
     //    Exception: the "creator" reason means the user explicitly opted in
@@ -260,7 +279,7 @@ export async function getBookingNotificationRecipients({
       }
     }
 
-    // 8. Return only entries with valid emails
+    // 9. Return only entries with valid emails
     return Array.from(recipients.values()).filter(
       (r) => r.email && r.email.length > 0
     );

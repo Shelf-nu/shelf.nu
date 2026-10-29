@@ -15,6 +15,7 @@ import {
   pushDb,
   pushStore,
   resetPushStore,
+  seedMemberships,
   seedOrganization,
   seedPreferences,
   seedPushToken,
@@ -164,6 +165,8 @@ beforeEach(() => {
   resetPushStore();
   seedOrganization({ id: "org-paid", userId: "owner-paid" }, "tier_1");
   seedOrganization({ id: "org-free", userId: "owner-free" }, "free");
+  seedMemberships("user-1", ["org-paid", "org-free"]);
+  seedMemberships("user-2", ["org-paid", "org-free"]);
   expoSend.mockImplementation(acceptChunk);
 });
 
@@ -388,6 +391,23 @@ describe("isSafePushUrl", () => {
 });
 
 describe("deliverPush", () => {
+  it("skips a recipient who is no longer a member of the workspace", async () => {
+    seedPushToken({ token: LIVE_TOKEN, userId: "user-1" });
+    seedPushToken({ token: OTHER_TOKEN, userId: "user-revoked" });
+
+    await sendAndDeliver({ userIds: ["user-1", "user-revoked"] });
+
+    expect(requestTokens()).toEqual([[LIVE_TOKEN]]);
+  });
+
+  it("sends nothing when no recipient is a member of the workspace", async () => {
+    seedPushToken({ token: OTHER_TOKEN, userId: "user-revoked" });
+
+    await sendAndDeliver({ userIds: ["user-revoked"] });
+
+    expect(expoSend).not.toHaveBeenCalled();
+  });
+
   it("sends nothing for a workspace on the free tier, and does for a paid one", async () => {
     seedPushToken({ token: LIVE_TOKEN, userId: "user-1" });
 

@@ -3,6 +3,7 @@ import type {
   TimeFormatPreference,
   WeekStartPreference,
 } from "@prisma/client";
+import { db } from "~/database/db.server";
 import type { BookingForEmail } from "~/emails/types";
 import { getBookingNotificationSettingsForOrg } from "~/modules/booking-settings/service.server";
 import { getOrganizationNotificationAudience } from "~/modules/organization/service.server";
@@ -39,6 +40,16 @@ vitest.mock("~/modules/booking-settings/service.server", () => ({
 vitest.mock("~/modules/organization/service.server", () => ({
   getOrganizationNotificationAudience: vitest.fn(),
 }));
+
+// why: external database call; the membership check reads UserOrganization
+vitest.mock("~/database/db.server", () => ({
+  db: { userOrganization: { findMany: vitest.fn() } },
+}));
+
+/** Users whose access to the workspace was revoked. */
+const revokedUserIds = new Set<string>();
+
+const mockedFindMemberships = vitest.mocked(db.userOrganization.findMany);
 
 const mockedGetSettings = vitest.mocked(getBookingNotificationSettingsForOrg);
 const mockedGetAdmins = vitest.mocked(getOrganizationNotificationAudience);
@@ -128,6 +139,39 @@ describe("getBookingNotificationRecipients", () => {
     vitest.clearAllMocks();
     mockedGetSettings.mockResolvedValue(defaultSettings());
     mockedGetAdmins.mockResolvedValue([]);
+    revokedUserIds.clear();
+    // Everyone asked about is a member unless the test revoked them
+    mockedFindMemberships.mockImplementation(((args: {
+      where: { userId: { in: string[] } };
+    }) =>
+      Promise.resolve(
+        args.where.userId.in
+          .filter((userId) => !revokedUserIds.has(userId))
+          .map((userId) => ({ userId }))
+      )) as never);
+  });
+
+  it("leaves out a custodian and a creator whose workspace access was revoked", async () => {
+    mockedGetSettings.mockResolvedValue({
+      ...defaultSettings(),
+      notifyBookingCreator: true,
+    });
+    revokedUserIds.add("custodian-user-1");
+    revokedUserIds.add("creator-user-1");
+
+    const result = await getBookingNotificationRecipients({
+      booking: buildMockBooking(),
+      eventType: "CHECKOUT_REMINDER",
+      organizationId: "org-1",
+      isScheduledJob: true,
+    });
+
+    expect(result).toEqual([]);
+    expect(mockedFindMemberships).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ organizationId: "org-1" }),
+      })
+    );
   });
 
   it("always includes the custodian", async () => {
