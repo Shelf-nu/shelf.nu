@@ -715,7 +715,19 @@ export function buildAssetOverviewCustomFields<
   );
 }
 
-//header = "cf:name,type:text"
+/**
+ * Reads the field definition a CSV column header declares, e.g.
+ * `cf:Serial number,type:text` or `cf:Manual,type:text,format:link`.
+ *
+ * The type defaults to text. A `format:link` segment makes a text column a
+ * Link field; on any other type it is ignored, since only text fields can
+ * hold the Link format. The type is not checked here (see the import
+ * preflight).
+ *
+ * @param header - A column header starting with `cf:`
+ * @returns The definition to create the field with when it does not exist
+ * @see {@link customFieldCsvHeader} for the header written for a field
+ */
 export const getDefinitionFromCsvHeader = (
   header: string
 ): Pick<
@@ -730,17 +742,37 @@ export const getDefinitionFromCsvHeader = (
   let type =
     defArr.find((e) => e.toLowerCase().startsWith("type:"))?.substring(5) ||
     "text"; //"text"
-
   type = type.trim().replace(/\s+/g, "_").toUpperCase();
+  const format = defArr
+    .find((e) => e.toLowerCase().startsWith("format:"))
+    ?.substring(7)
+    .trim()
+    .toUpperCase();
+
   return {
     name,
     active: true,
     helpText: "",
     required: false,
     type: type as CustomFieldType,
-    format: "PLAIN",
+    format: type === "TEXT" && format === "LINK" ? "LINK" : "PLAIN",
   };
 };
+
+/**
+ * The CSV column header for a field, in the form `getDefinitionFromCsvHeader`
+ * reads: `cf:Manual,type:TEXT,format:LINK` for a Link field,
+ * `cf:Serial number,type:TEXT` otherwise.
+ *
+ * @param def - The field's name, type and format
+ * @returns The header text
+ */
+export function customFieldCsvHeader(
+  def: Pick<CustomField, "name" | "type" | "format">
+): string {
+  const header = `cf:${def.name},type:${def.type}`;
+  return def.format === "LINK" ? `${header},format:${def.format}` : header;
+}
 
 // order of the keys control the UI form dorpdown order, so dont change unless u know what you are doing
 export const FIELD_TYPE_NAME: { [key in CustomFieldType]: string } = {

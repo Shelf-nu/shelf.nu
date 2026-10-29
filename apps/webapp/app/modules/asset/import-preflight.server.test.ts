@@ -146,6 +146,26 @@ describe("validateContentImportRows", () => {
     ]);
   });
 
+  it("checks a format:link column against the field it creates", () => {
+    const { errors } = validateContentImportRows({
+      data: [row({ "cf:Manual,type:text,format:link": "see shelf" })],
+      existingCustomFields: [],
+    });
+
+    expect(errors.map((error) => error.message)).toEqual([
+      "Custom field 'Manual': Enter just the link, with no spaces or other text. The value we found is: 'see shelf'.",
+    ]);
+  });
+
+  it("ignores format:link on a column for an existing plain text field", () => {
+    const { errors } = validateContentImportRows({
+      data: [row({ "cf:Serial,type:text,format:link": "see shelf" })],
+      existingCustomFields: [{ name: "Serial", type: "TEXT", format: "PLAIN" }],
+    });
+
+    expect(errors).toEqual([]);
+  });
+
   it("refuses a file over the row cap without validating rows", () => {
     const { errors } = validateContentImportRows({
       data: Array.from({ length: MAX_CONTENT_IMPORT_ROWS + 1 }, () => row()),

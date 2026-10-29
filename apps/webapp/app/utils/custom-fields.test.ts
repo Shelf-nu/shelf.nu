@@ -5,7 +5,9 @@ import type { ResolvedFormatPrefs } from "~/utils/date-format";
 import {
   buildAssetOverviewCustomFields,
   buildCustomFieldValue,
+  customFieldCsvHeader,
   getCustomFieldDisplayValue,
+  getDefinitionFromCsvHeader,
   isImportableCustomFieldDate,
   mergedSchema,
   toCustomFieldZodSchema,
@@ -463,5 +465,41 @@ describe("toCustomFieldZodSchema for Link fields", () => {
       schema.safeParse({ "cf-manual": "www.example.com/a.pdf" }).success
     ).toBe(true);
     expect(schema.safeParse({ "cf-manual": "" }).success).toBe(true);
+  });
+});
+
+describe("custom field CSV headers", () => {
+  it("reads format:link on a text column as a Link field", () => {
+    expect(
+      getDefinitionFromCsvHeader("cf:Manual, type:text, format:link")
+    ).toMatchObject({ name: "Manual", type: "TEXT", format: "LINK" });
+  });
+
+  it("reads a header without a format as plain text", () => {
+    expect(getDefinitionFromCsvHeader("cf:Serial,type:text")).toMatchObject({
+      name: "Serial",
+      type: "TEXT",
+      format: "PLAIN",
+    });
+  });
+
+  it("ignores format:link on a column that is not single-line text", () => {
+    expect(
+      getDefinitionFromCsvHeader("cf:Notes,type:multiline text,format:link")
+    ).toMatchObject({ type: "MULTILINE_TEXT", format: "PLAIN" });
+  });
+
+  it("writes headers that read back as the same field", () => {
+    const link = { name: "Manual", type: "TEXT", format: "LINK" } as const;
+    const plain = { name: "Serial", type: "TEXT", format: "PLAIN" } as const;
+
+    expect(customFieldCsvHeader(link)).toBe("cf:Manual,type:TEXT,format:LINK");
+    expect(customFieldCsvHeader(plain)).toBe("cf:Serial,type:TEXT");
+    expect(
+      getDefinitionFromCsvHeader(customFieldCsvHeader(link))
+    ).toMatchObject(link);
+    expect(
+      getDefinitionFromCsvHeader(customFieldCsvHeader(plain))
+    ).toMatchObject(plain);
   });
 });
