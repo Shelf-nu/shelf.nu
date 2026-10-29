@@ -993,6 +993,71 @@ describe("compareCustomField", () => {
         newValue: "https://example.com/manual.pdf",
       });
     });
+
+    it("sees no change in a Link cell that matches the stored link once normalized", () => {
+      const linkCfDef = {
+        ...textCfDef,
+        name: "Manual",
+        format: "LINK" as const,
+      };
+      const asset = makeAsset({
+        customFields: [
+          {
+            id: "cfv1",
+            value: { raw: "https://www.example.com/manual.pdf" },
+            customField: { name: "Manual" } as any,
+          },
+        ],
+      });
+
+      expect(
+        compareCustomField(
+          linkCfDef,
+          "www.example.com/manual.pdf",
+          asset,
+          "Manual"
+        )
+      ).toBeNull();
+      // A plain text field compares the cell as typed.
+      expect(
+        compareCustomField(
+          { ...linkCfDef, format: "PLAIN" as const },
+          "www.example.com/manual.pdf",
+          asset,
+          "Manual"
+        )?.newValue
+      ).toBe("www.example.com/manual.pdf");
+    });
+
+    it("shows a changed Link cell as the link that will be stored", () => {
+      const linkCfDef = {
+        ...textCfDef,
+        name: "Manual",
+        format: "LINK" as const,
+      };
+      const asset = makeAsset({
+        customFields: [
+          {
+            id: "cfv1",
+            value: { raw: "https://www.example.com/manual-v1.pdf" },
+            customField: { name: "Manual" } as any,
+          },
+        ],
+      });
+
+      expect(
+        compareCustomField(
+          linkCfDef,
+          "www.example.com/manual-v2.pdf",
+          asset,
+          "Manual"
+        )
+      ).toEqual({
+        field: "Manual",
+        currentValue: "https://www.example.com/manual-v1.pdf",
+        newValue: "https://www.example.com/manual-v2.pdf",
+      });
+    });
   });
 
   describe("BOOLEAN", () => {

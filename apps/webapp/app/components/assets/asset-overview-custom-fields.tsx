@@ -15,6 +15,7 @@ import { CustomFieldFormat, CustomFieldType } from "@prisma/client";
 import type { LinkTitles } from "@shelf/links";
 import Input from "~/components/forms/input";
 import { Switch } from "~/components/forms/switch";
+import { linkInputProps } from "~/components/links/link-input-props";
 import { TextWithLinks } from "~/components/links/text-with-links";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { Card } from "~/components/shared/card";
@@ -254,10 +255,6 @@ function CustomFieldRow({
               />
             );
           default:
-            // A Link field gets the URL keyboard on phones.
-            // It stays type="text": the browser's own url
-            // check would refuse "www.example.com/a.pdf",
-            // which the server accepts and stores as https.
             return (
               <Input
                 label={def.name}
@@ -265,14 +262,7 @@ function CustomFieldRow({
                 name="fieldValue"
                 defaultValue={rawValue}
                 className="w-full"
-                {...(def.format === "LINK"
-                  ? {
-                      inputMode: "url",
-                      placeholder: "https://",
-                      autoComplete: "off",
-                      spellCheck: false,
-                    }
-                  : {})}
+                {...linkInputProps(def)}
               />
             );
         }

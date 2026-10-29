@@ -740,13 +740,16 @@ export function compareCustomField(
   switch (cfDef.type) {
     case "TEXT":
     case "OPTION": {
-      if (csvValue !== currentStr) {
-        // Same rule as every other write: a Link field takes web links only.
-        const link = cfDef.format === "LINK" ? parseLinkInput(csvValue) : null;
+      // Same rule as every other write: a Link field takes web links only and
+      // stores them as `parseLinkInput` writes them, so the cell is compared
+      // in that form (`www.x.com/a.pdf` matches `https://www.x.com/a.pdf`).
+      const link = cfDef.format === "LINK" ? parseLinkInput(csvValue) : null;
+      const newValue = link?.ok ? link.url : csvValue;
+      if (newValue !== currentStr) {
         return {
           field: displayName,
           currentValue: currentStr || "(empty)",
-          newValue: csvValue,
+          newValue,
           ...(link &&
             !link.ok && {
               warning: `"${csvValue}" is not a web link. ${link.message}`,
