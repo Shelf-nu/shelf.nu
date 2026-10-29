@@ -22500,16 +22500,27 @@ describe("booking emails name who acted", () => {
       lastName: "Next",
       displayName: null,
     };
-    //@ts-expect-error missing vitest type
-    db.booking.findUniqueOrThrow.mockResolvedValue(draft);
-    //@ts-expect-error missing vitest type
-    db.booking.update.mockResolvedValue({
+    const reserved = {
       ...draft,
       status: BookingStatus.RESERVED,
       custodianUserId: newCustodian.id,
       custodianUser: newCustodian,
       from: new Date("2027-03-05T09:00:00.000Z"),
       to: new Date("2027-03-06T15:00:00.000Z"),
+    };
+    // The first read is the draft; the read after the commit is the booking
+    // as reserved.
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(reserved);
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValueOnce(draft);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      id: reserved.id,
+      status: reserved.status,
+      custodianUserId: reserved.custodianUserId,
+      from: reserved.from,
+      to: reserved.to,
     });
     //@ts-expect-error missing vitest type
     db.bookingAsset.count.mockResolvedValueOnce(1);
@@ -22568,6 +22579,74 @@ describe("booking emails name who acted", () => {
         title: "You were removed from a booking",
       }),
     ]);
+  });
+
+  it("returns the reserved row without the relations its notifications read", async () => {
+    const draft = {
+      ...mockBookingData,
+      ...EMAIL_FIELDS,
+      status: BookingStatus.DRAFT,
+      bookingAssets: [
+        {
+          asset: {
+            id: "asset-1",
+            title: "Asset 1",
+            status: "AVAILABLE",
+            availableToBook: true,
+            bookingAssets: [],
+          },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-plain-1",
+          checkedOutAt: null,
+          checkedInAt: null,
+        },
+      ],
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(draft);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockImplementation(({ where }) =>
+      Promise.resolve({
+        id: where.id,
+        status: BookingStatus.RESERVED,
+        from: futureFromDate,
+        to: futureToDate,
+      })
+    );
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.count.mockResolvedValueOnce(1);
+    mockBerlinRecipient();
+
+    const result = await reserveBooking({
+      id: "booking-1",
+      name: "Test Booking",
+      organizationId: "org-1",
+      custodianUserId: "user-2",
+      custodianTeamMemberId: "team-2",
+      from: futureFromDate,
+      to: futureToDate,
+      hints: mockClientHints,
+      alertsOrgOnReservation: false,
+      tags: [],
+      userId: "user-1",
+    });
+
+    // The web action sends this row to the browser, so the write loads no
+    // relations: the custodian's user row, the recipients' and the owner's
+    // emails stay on the server.
+    expect(
+      vitest.mocked(db.booking.update).mock.calls[0][0]
+    ).not.toHaveProperty("include");
+    expect(result).not.toHaveProperty("custodianUser");
+    expect(result).not.toHaveProperty("organization");
+    // The notifications read the booking again after the commit, org-scoped.
+    expect(db.booking.findUniqueOrThrow).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: { id: "booking-1", organizationId: "org-1" },
+      })
+    );
+    expect(sendEmail).toHaveBeenCalledOnce();
   });
 
   describe("custodian is the editor: email sent, no push", () => {
@@ -22716,5 +22795,84 @@ describe("booking emails name who acted", () => {
       "🔔 Checkin reminder (Test Booking) - shelf.nu",
     ]);
     expectCustodianPushes(["Booking extended (Test Booking)"]);
+  });
+
+  describe("checkout with under an hour to checkin", () => {
+    /** A reserved booking that ends 30 minutes after the checkout. */
+    function mockReservedBookingEndingSoon() {
+      const reserved = {
+        ...mockBookingData,
+        ...EMAIL_FIELDS,
+        status: BookingStatus.RESERVED,
+        from: new Date(ACTED_AT.getTime() - 60 * 60 * 1000),
+        to: new Date(ACTED_AT.getTime() + 30 * 60 * 1000),
+        bookingAssets: [
+          {
+            asset: {
+              id: "asset-1",
+              assetKits: [],
+              title: "Asset 1",
+              status: "AVAILABLE",
+              bookingAssets: [],
+            },
+            assetId: "asset-1",
+            quantity: 1,
+            id: "ba-soon-1",
+            checkedOutAt: null,
+            checkedInAt: null,
+          },
+        ],
+      };
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue(reserved);
+      //@ts-expect-error missing vitest type
+      db.booking.update.mockResolvedValue({
+        ...reserved,
+        status: BookingStatus.ONGOING,
+      });
+      (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+        (args?: { where?: { id?: { in?: string[] } } }) =>
+          Promise.resolve((args?.where?.id?.in ?? []).map((id) => ({ id })))
+      );
+      (
+        db.partialBookingCheckout.findMany as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue([]);
+      mockBerlinRecipient();
+      return reserved;
+    }
+
+    it("pushes the checkin reminder to the custodian when someone else checks out", async () => {
+      const reserved = mockReservedBookingEndingSoon();
+
+      await checkoutBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        hints: mockClientHints,
+        from: reserved.from,
+        to: reserved.to,
+        userId: "user-1",
+        provenance: { surface: "web", method: "quick" },
+      });
+
+      expectSubjects(["🔔 Checkin reminder (Test Booking) - shelf.nu"]);
+      expectCustodianPushes(["🔔 Checkin reminder (Test Booking)"]);
+    });
+
+    it("emails but does not push the custodian who checks out themself", async () => {
+      const reserved = mockReservedBookingEndingSoon();
+
+      await checkoutBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        hints: mockClientHints,
+        from: reserved.from,
+        to: reserved.to,
+        userId: "user-2",
+        provenance: { surface: "web", method: "quick" },
+      });
+
+      expectSubjects(["🔔 Checkin reminder (Test Booking) - shelf.nu"]);
+      expect(sendPush).not.toHaveBeenCalled();
+    });
   });
 });

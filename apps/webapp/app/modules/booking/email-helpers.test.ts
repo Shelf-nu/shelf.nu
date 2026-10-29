@@ -198,7 +198,7 @@ const booking = {
   _count: { bookingAssets: 2 },
 };
 
-/** The update push to the new custodian. */
+/** The update push to the custodian, for an update that kept them. */
 const updatePush = {
   userIds: ["custodian-2"],
   organizationId: "org-1",
@@ -206,6 +206,12 @@ const updatePush = {
   title: "📝 Booking updated (Field kit)",
   body: "Details changed. Tap to review.",
   url: "/bookings/booking-1?orgId=org-1",
+};
+
+/** The update push to the new custodian, for an update that made them so. */
+const handoverPush = {
+  ...updatePush,
+  body: "You are now the custodian. Tap to review.",
 };
 
 /** The removal push to the custodian the update replaced. */
@@ -303,7 +309,7 @@ describe("sendBookingUpdatedEmail", () => {
     expect(toOld.html).toContain("Jo Display on 09/30/2026, 10:15 AM");
   });
 
-  it("pushes the update to the new custodian and the removal to the one they replaced", async () => {
+  it("pushes the handover to the new custodian and the removal to the one they replaced", async () => {
     await sendBookingUpdatedEmail({
       bookingId: "booking-1",
       organizationId: "org-1",
@@ -314,7 +320,7 @@ describe("sendBookingUpdatedEmail", () => {
     });
 
     expect(vitest.mocked(sendPush).mock.calls).toEqual([
-      [updatePush],
+      [handoverPush],
       [removedPush],
     ]);
   });
@@ -330,6 +336,18 @@ describe("sendBookingUpdatedEmail", () => {
     });
 
     expect(mockedSendEmail).toHaveBeenCalledOnce();
+    expect(vitest.mocked(sendPush).mock.calls).toEqual([[handoverPush]]);
+  });
+
+  it("pushes the generic update to a custodian the update kept", async () => {
+    await sendBookingUpdatedEmail({
+      bookingId: "booking-1",
+      organizationId: "org-1",
+      userId: "editor-1",
+      changes: ["Description changed"],
+      hints: { timeZone: "UTC", locale: "en-US" },
+    });
+
     expect(vitest.mocked(sendPush).mock.calls).toEqual([[updatePush]]);
   });
 
@@ -393,7 +411,7 @@ describe("sendBookingUpdatedEmail", () => {
         })
       );
       expect(vitest.mocked(sendPush).mock.calls).toEqual([
-        [updatePush],
+        [handoverPush],
         [removedPush],
       ]);
     });
@@ -411,7 +429,7 @@ describe("sendBookingUpdatedEmail", () => {
       expect(mockedSendEmail.mock.calls.map(([payload]) => payload.to)).toEqual(
         ["new-custodian@example.com", "old-custodian@example.com"]
       );
-      expect(vitest.mocked(sendPush).mock.calls).toEqual([[updatePush]]);
+      expect(vitest.mocked(sendPush).mock.calls).toEqual([[handoverPush]]);
     });
   });
 });

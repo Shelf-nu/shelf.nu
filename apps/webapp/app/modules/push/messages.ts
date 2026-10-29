@@ -75,15 +75,18 @@ type AuditNotice = "ASSIGNED" | AuditReminder | "OVERDUE";
 
 /**
  * What each event's push is built from. Every booking event pushes to the
- * custodian alone, so each carries the dates; the custodian an update
- * replaced gets their own removal push. Audit reminders and overdue notices
+ * custodian alone, so each carries the dates; an update that changes the
+ * custodian tells the new one they hold it and the replaced one they do not. Audit reminders and overdue notices
  * reach several people, so none of them carries a time.
  */
 type PushContexts = Record<
   `BOOKING_${BookingEventType}`,
   BookingPeriodPushContext
 > &
-  Record<"BOOKING_CUSTODIAN_REMOVED", BookingPushContext> &
+  Record<
+    "BOOKING_CUSTODIAN_ASSIGNED" | "BOOKING_CUSTODIAN_REMOVED",
+    BookingPushContext
+  > &
   Record<`AUDIT_${Exclude<AuditNotice, "ASSIGNED">}`, AuditPushContext> &
   Record<"AUDIT_ASSIGNED", AuditAssignedPushContext> &
   Record<"ASSET_REMINDER", AssetReminderPushContext>;
@@ -226,6 +229,8 @@ export const PUSH_MESSAGES: {
     bookingPush(c, "DELETE", bookingPeriod(c), bookingsListUrl(c)),
   BOOKING_UPDATE: (c) =>
     bookingPush(c, "UPDATE", "Details changed. Tap to review."),
+  BOOKING_CUSTODIAN_ASSIGNED: (c) =>
+    bookingPush(c, "UPDATE", "You are now the custodian. Tap to review."),
   BOOKING_CUSTODIAN_REMOVED: (c) => ({
     organizationId: c.organizationId,
     category: "bookings",

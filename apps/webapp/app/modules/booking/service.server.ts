@@ -2701,10 +2701,6 @@ export async function reserveBooking({
         // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingFound id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) at L1020; this is the write on that same proven id
         where: { id: bookingFound.id },
         data: dataToUpdate,
-        // The notifications below read the booking as reserved: a reservation
-        // can change the custodian and the dates, and `bookingFound` still
-        // holds the draft's.
-        include: BOOKING_INCLUDE_FOR_RESERVATION_EMAIL,
       });
     }, LONG_TRANSACTION_OPTIONS);
 
@@ -2769,12 +2765,19 @@ export async function reserveBooking({
       }
     }
 
-    // Resolve notification recipients and send emails, from the booking as
-    // reserved so a changed custodian or date reaches the right people.
-    // Forwarded so the broadcast fires only for reservations whose maker's
-    // role triggers it.
+    // The notifications read the booking as reserved: a reservation can change
+    // the custodian and the dates, and `bookingFound` still holds the draft's.
+    // Read after the commit so the transaction stays short, and kept apart
+    // from the return value, which callers may send to the browser.
+    const reservedBooking = await db.booking.findUniqueOrThrow({
+      where: { id: updatedBooking.id, organizationId },
+      include: BOOKING_INCLUDE_FOR_RESERVATION_EMAIL,
+    });
+
+    // Resolve notification recipients and send emails. Forwarded so the
+    // broadcast fires only for reservations whose maker's role triggers it.
     const recipients = await getBookingNotificationRecipients({
-      booking: updatedBooking,
+      booking: reservedBooking,
       eventType: "RESERVATION",
       organizationId,
       editorUserId: userId,
@@ -2782,16 +2785,16 @@ export async function reserveBooking({
     });
 
     if (recipients.length > 0) {
-      const custodian = updatedBooking.custodianUser
-        ? resolveUserDisplayName(updatedBooking.custodianUser)
-        : updatedBooking.custodianTeamMember?.name ?? "";
+      const custodian = reservedBooking.custodianUser
+        ? resolveUserDisplayName(reservedBooking.custodianUser)
+        : reservedBooking.custodianTeamMember?.name ?? "";
 
       // Only forward outstanding requests so the email doesn't render
       // fulfilled historical rows. `fulfilledAt
       // IS NULL` is the canonical outstanding filter in the new schema;
       // each row shows the STILL-PENDING unit count
       // (`quantity - fulfilledQuantity`).
-      const outstandingModelRequests = updatedBooking.modelRequests
+      const outstandingModelRequests = reservedBooking.modelRequests
         .filter((req) => req.fulfilledAt === null)
         .map((req) => ({
           quantity: req.quantity - req.fulfilledQuantity,
@@ -2806,17 +2809,17 @@ export async function reserveBooking({
       await sendBookingEmailToAllRecipients({
         eventType: "RESERVATION",
         recipients,
-        booking: updatedBooking,
+        booking: reservedBooking,
         buildText: (textArgs) =>
           assetReservedEmailContent({
             ...textArgs,
-            bookingName: updatedBooking.name,
-            assetsCount: updatedBooking._count.bookingAssets,
+            bookingName: reservedBooking.name,
+            assetsCount: reservedBooking._count.bookingAssets,
             custodian,
             from,
             to,
-            bookingId: updatedBooking.id,
-            customEmailFooter: updatedBooking.organization.customEmailFooter,
+            bookingId: reservedBooking.id,
+            customEmailFooter: reservedBooking.organization.customEmailFooter,
             modelRequests: outstandingModelRequests,
           }),
         buildHeading: () => `Booking reservation for ${custodian}`,
@@ -2824,13 +2827,13 @@ export async function reserveBooking({
         actor,
         actorUserId: userId,
         templateProps: {
-          assets: updatedBooking.bookingAssets,
+          assets: reservedBooking.bookingAssets,
           // Forward any outstanding `BookingModelRequest` rows so the
           // reservation email can render a "Requested models" section.
           // The include widening on
           // `BOOKING_INCLUDE_FOR_RESERVATION_EMAIL` guarantees
           // `modelRequests` is present on the loaded booking.
-          modelRequests: updatedBooking.modelRequests,
+          modelRequests: reservedBooking.modelRequests,
         },
       });
     }
@@ -2839,10 +2842,10 @@ export async function reserveBooking({
     // custodian, as a booking update does.
     if (
       bookingFound.custodianUserId &&
-      bookingFound.custodianUserId !== updatedBooking.custodianUserId
+      bookingFound.custodianUserId !== reservedBooking.custodianUserId
     ) {
       sendBookingPushToReplacedCustodian({
-        booking: updatedBooking,
+        booking: reservedBooking,
         replacedCustodianUserId: bookingFound.custodianUserId,
         actorUserId: userId,
       });
@@ -2890,11 +2893,14 @@ export async function reserveBooking({
  *   a non-null `to`
  * @param hints - Client hints forwarded to the scheduled jobs and email
  * @param organizationId - Booking's organization (for recipient resolution)
+ * @param actorUserId - The user who checked the booking out; an immediate
+ *   reminder emails them but does not push them about their own checkout
  */
 async function scheduleCheckinReminderForBooking(
   booking: { id: string; to: Date | null },
   hints: ClientHint,
-  organizationId: string
+  organizationId: string,
+  actorUserId: string | undefined
 ) {
   const effectiveTo = booking.to;
   if (!effectiveTo) {
@@ -2924,7 +2930,8 @@ async function scheduleCheckinReminderForBooking(
       bookingForEmail,
       bookingForEmail._count.bookingAssets,
       hints,
-      organizationId
+      organizationId,
+      { actorUserId }
     );
 
     const when = new Date(effectiveTo);
@@ -3633,7 +3640,8 @@ async function runCheckoutSideEffects({
   await scheduleCheckinReminderForBooking(
     { id: bookingFound.id, to: effectiveTo ?? null },
     hints,
-    organizationId
+    organizationId,
+    userId
   );
 
   /** Hydrate the full booking with relations for the return payload only. */
@@ -11153,7 +11161,8 @@ export async function partialCheckoutBooking({
         await scheduleCheckinReminderForBooking(
           { id: bookingFound.id, to: bookingFound.to },
           hints,
-          organizationId
+          organizationId,
+          userId
         );
       }
     }

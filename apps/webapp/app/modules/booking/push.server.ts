@@ -58,6 +58,8 @@ function pushUnlessActor(
  * @param args.hints - The acting user's hints, the fallback for unset prefs
  * @param args.actorUserId - The user who acted, never pushed about it;
  *   `undefined` for a scheduled job, which has no actor
+ * @param args.custodianChanged - `true` for an update that made them the
+ *   custodian, which their push says instead of the generic update wording
  */
 export function sendBookingPushToCustodian({
   eventType,
@@ -65,27 +67,32 @@ export function sendBookingPushToCustodian({
   recipients,
   hints,
   actorUserId,
+  custodianChanged = false,
 }: {
   eventType: BookingEventType;
   booking: BookingForPush;
   recipients: NotificationRecipient[];
   hints: ClientHint;
   actorUserId: string | undefined;
+  custodianChanged?: boolean;
 }): void {
   const custodian = recipients.find(({ reason }) => reason === "custodian");
   if (!custodian) return;
 
   const prefs = resolveFormatPrefs(custodian, hints);
+  const context = {
+    bookingId: booking.id,
+    organizationId: booking.organizationId,
+    bookingName: booking.name,
+    from: formatDate(booking.from, prefs, { includeTime: true }),
+    to: formatDate(booking.to, prefs, { includeTime: true }),
+  };
   pushUnlessActor(
     custodian.userId,
     actorUserId,
-    PUSH_MESSAGES[`BOOKING_${eventType}`]({
-      bookingId: booking.id,
-      organizationId: booking.organizationId,
-      bookingName: booking.name,
-      from: formatDate(booking.from, prefs, { includeTime: true }),
-      to: formatDate(booking.to, prefs, { includeTime: true }),
-    })
+    custodianChanged
+      ? PUSH_MESSAGES.BOOKING_CUSTODIAN_ASSIGNED(context)
+      : PUSH_MESSAGES[`BOOKING_${eventType}`](context)
   );
 }
 

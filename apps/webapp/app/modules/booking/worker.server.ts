@@ -130,6 +130,20 @@ const checkinReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
       });
     });
 
+  // Schedule the overdue handler before notifying, so a scheduling failure
+  // that makes pg-boss retry the job does not email and push twice. Only an
+  // ongoing booking gets one: an OVERDUE or still RESERVED booking does not.
+  if (booking.to && booking.status === BookingStatus.ONGOING) {
+    const when = new Date(booking.to);
+    await scheduleNextBookingJob({
+      data: {
+        ...data,
+        eventType: BOOKING_SCHEDULER_EVENTS_ENUM.overdueHandler,
+      },
+      when,
+    });
+  }
+
   /**
    * We need to meet some conditions to send the reminder, most important the booking needs to be ongoing so we dont send check-in reminder for assets that are not even checked out yet
    */
@@ -141,20 +155,6 @@ const checkinReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
       data.hints,
       booking.organizationId
     );
-  }
-
-  //schedule the next job
-  // if the booking is ongoing and has a to date, we schedule the overdue handler
-  // this is to make sure we dont schedule the overdue handler if the booking is already OVERDUE && still RESERVED
-  if (booking.to && booking.status === BookingStatus.ONGOING) {
-    const when = new Date(booking.to);
-    await scheduleNextBookingJob({
-      data: {
-        ...data,
-        eventType: BOOKING_SCHEDULER_EVENTS_ENUM.overdueHandler,
-      },
-      when,
-    });
   }
 };
 

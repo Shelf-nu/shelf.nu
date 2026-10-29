@@ -203,13 +203,15 @@ export const checkinReminderEmailContent = (args: BasicEmailContentArgs) =>
  * @param organizationId - Used to resolve org-level notification settings
  * @param options.push - `false` when the caller has already pushed about this
  *   booking, so the custodian gets one push per booking event
+ * @param options.actorUserId - The user whose checkout triggered the reminder,
+ *   never pushed about it; absent for the scheduled job, which has no actor
  */
 export async function sendCheckinReminder(
   booking: BookingForEmail,
   assetCount: number,
   hints: ClientHint,
   organizationId: string,
-  { push = true }: { push?: boolean } = {}
+  { push = true, actorUserId }: { push?: boolean; actorUserId?: string } = {}
 ) {
   const recipients = await getBookingNotificationRecipients({
     booking,
@@ -269,7 +271,7 @@ export async function sendCheckinReminder(
       booking,
       recipients,
       hints,
-      actorUserId: undefined,
+      actorUserId,
     });
   }
 }
@@ -385,8 +387,9 @@ export const bookingUpdatedEmailContent = (
  * Every copy, the old custodian's included, carries an "Updated by" line
  * naming `userId`.
  *
- * The custodian gets the update push, and the custodian this update replaced
- * gets a removal push; neither is pushed when they made the change.
+ * The custodian gets the update push, worded as a handover when this update
+ * made them the custodian, and the custodian it replaced gets a removal push;
+ * neither is pushed when they made the change.
  *
  * Skips sending entirely if `changes` is empty (no meaningful update).
  */
@@ -558,6 +561,9 @@ export async function sendBookingUpdatedEmail({
       recipients,
       hints,
       actorUserId: userId,
+      custodianChanged:
+        !!oldCustodianEmail &&
+        booking.custodianUser?.email !== oldCustodianEmail,
     });
     if (replacedCustodianUserId) {
       sendBookingPushToReplacedCustodian({

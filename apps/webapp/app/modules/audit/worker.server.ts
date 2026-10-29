@@ -40,14 +40,8 @@ const reminder24h = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
     audit.status !== AuditStatus.COMPLETED &&
     audit.status !== AuditStatus.CANCELLED
   ) {
-    sendAuditReminderEmail({
-      audit,
-      assignees: audit.assignments,
-      hints: data.hints,
-      reminder: "REMINDER_24H",
-    });
-
-    // Schedule 4h reminder
+    // Schedule the 4h reminder before notifying, so a scheduling failure
+    // that makes pg-boss retry does not notify twice
     const when4h = new Date(audit.dueDate.getTime() - 4 * 60 * 60 * 1000);
     await scheduleNextAuditJob({
       data: {
@@ -55,6 +49,13 @@ const reminder24h = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
         eventType: AUDIT_SCHEDULER_EVENTS_ENUM.reminder4h,
       },
       when: when4h,
+    });
+
+    sendAuditReminderEmail({
+      audit,
+      assignees: audit.assignments,
+      hints: data.hints,
+      reminder: "REMINDER_24H",
     });
   }
 };
@@ -86,14 +87,8 @@ const reminder4h = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
     audit.status !== AuditStatus.COMPLETED &&
     audit.status !== AuditStatus.CANCELLED
   ) {
-    sendAuditReminderEmail({
-      audit,
-      assignees: audit.assignments,
-      hints: data.hints,
-      reminder: "REMINDER_4H",
-    });
-
-    // Schedule 1h reminder
+    // Schedule the 1h reminder before notifying, so a scheduling failure
+    // that makes pg-boss retry does not notify twice
     const when1h = new Date(audit.dueDate.getTime() - 1 * 60 * 60 * 1000);
     await scheduleNextAuditJob({
       data: {
@@ -101,6 +96,13 @@ const reminder4h = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
         eventType: AUDIT_SCHEDULER_EVENTS_ENUM.reminder1h,
       },
       when: when1h,
+    });
+
+    sendAuditReminderEmail({
+      audit,
+      assignees: audit.assignments,
+      hints: data.hints,
+      reminder: "REMINDER_4H",
     });
   }
 };
@@ -132,20 +134,21 @@ const reminder1h = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
     audit.status !== AuditStatus.COMPLETED &&
     audit.status !== AuditStatus.CANCELLED
   ) {
-    sendAuditReminderEmail({
-      audit,
-      assignees: audit.assignments,
-      hints: data.hints,
-      reminder: "REMINDER_1H",
-    });
-
-    // Schedule overdue notice at due date time
+    // Schedule the overdue notice at the due date, before notifying, so a
+    // scheduling failure that makes pg-boss retry does not notify twice
     await scheduleNextAuditJob({
       data: {
         ...data,
         eventType: AUDIT_SCHEDULER_EVENTS_ENUM.overdueNotice,
       },
       when: audit.dueDate,
+    });
+
+    sendAuditReminderEmail({
+      audit,
+      assignees: audit.assignments,
+      hints: data.hints,
+      reminder: "REMINDER_1H",
     });
   }
 };

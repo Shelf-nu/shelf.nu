@@ -57,6 +57,7 @@ const MESSAGES = {
   BOOKING_EXTEND: PUSH_MESSAGES.BOOKING_EXTEND({ ...BOOKING, ...PERIOD }),
   BOOKING_DELETE: PUSH_MESSAGES.BOOKING_DELETE({ ...BOOKING, ...PERIOD }),
   BOOKING_UPDATE: PUSH_MESSAGES.BOOKING_UPDATE({ ...BOOKING, ...PERIOD }),
+  BOOKING_CUSTODIAN_ASSIGNED: PUSH_MESSAGES.BOOKING_CUSTODIAN_ASSIGNED(BOOKING),
   BOOKING_CUSTODIAN_REMOVED: PUSH_MESSAGES.BOOKING_CUSTODIAN_REMOVED(BOOKING),
   AUDIT_ASSIGNED: PUSH_MESSAGES.AUDIT_ASSIGNED({
     ...AUDIT,
@@ -89,6 +90,7 @@ describe("PUSH_MESSAGES", () => {
         "BOOKING_CHECKIN",
         "BOOKING_CHECKIN_REMINDER",
         "BOOKING_CHECKOUT_REMINDER",
+        "BOOKING_CUSTODIAN_ASSIGNED",
         "BOOKING_CUSTODIAN_REMOVED",
         "BOOKING_DELETE",
         "BOOKING_EXTEND",
@@ -192,6 +194,16 @@ describe("PUSH_MESSAGES", () => {
       category: "bookings",
       title: "📝 Booking updated (Camera kit)",
       body: "Details changed. Tap to review.",
+      url: "/bookings/booking-1?orgId=org-1",
+    });
+  });
+
+  it("tells a new custodian they hold the booking, under the update title", () => {
+    expect(MESSAGES.BOOKING_CUSTODIAN_ASSIGNED).toEqual({
+      organizationId: "org-1",
+      category: "bookings",
+      title: MESSAGES.BOOKING_UPDATE.title,
+      body: "You are now the custodian. Tap to review.",
       url: "/bookings/booking-1?orgId=org-1",
     });
   });
