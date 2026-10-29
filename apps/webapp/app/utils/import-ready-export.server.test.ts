@@ -1,4 +1,9 @@
-import { AssetType, ConsumptionType, CustomFieldType } from "@prisma/client";
+import {
+  AssetType,
+  ConsumptionType,
+  CustomFieldFormat,
+  CustomFieldType,
+} from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 import type { AdvancedIndexAsset } from "~/modules/asset/types";
 import { ASSET_CSV_HEADERS } from "~/modules/asset/utils.server";
@@ -602,7 +607,12 @@ describe("export -> update-importer round trip (final review fix)", () => {
   // `alwaysInclude` fails a test immediately.
   it("the real Import-ready 'all columns' header row is fully recognized by the update importer", () => {
     const orgCustomFields = [
-      { id: "cf1", name: "Serial", type: CustomFieldType.TEXT },
+      {
+        id: "cf1",
+        name: "Serial",
+        type: CustomFieldType.TEXT,
+        format: CustomFieldFormat.PLAIN,
+      },
     ];
 
     const [headerRow] = buildImportReadyRows({

@@ -5,6 +5,7 @@ import type {
   CustomFieldFormat,
   CustomFieldType,
 } from "@prisma/client";
+import { parseLinkInput } from "@shelf/links";
 import { format } from "date-fns";
 import type { ZodRawShape } from "zod";
 import { z } from "zod";
@@ -58,6 +59,15 @@ const getSchema = ({
 
   return {
     text,
+    // Blank stays allowed (or refused by `required` above); anything else must
+    // pass the same rule `buildCustomFieldValue` applies on the server.
+    link: text.superRefine((value, ctx) => {
+      if (!value?.trim()) return;
+      const input = parseLinkInput(value);
+      if (!input.ok) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: input.message });
+      }
+    }),
     multiline_text: text,
     date: text,
     boolean: z
@@ -84,7 +94,7 @@ const getSchema = ({
     number: required
       ? requiredNumberFromString({ fieldName: field_name })
       : optionalNumberFromString({ blank: null, fieldName: field_name }),
-  } as Record<CustomFieldZodSchema["type"], z.ZodTypeAny>;
+  } satisfies Record<CustomFieldZodSchema["type"], z.ZodTypeAny>;
 };
 
 export type CustomFieldZodSchema = {
@@ -92,6 +102,7 @@ export type CustomFieldZodSchema = {
   name: string;
   type:
     | "text"
+    | "link"
     | "number"
     | "date"
     | "boolean"
@@ -102,6 +113,32 @@ export type CustomFieldZodSchema = {
   required: boolean;
   options?: CustomField["options"];
 };
+
+/**
+ * Describes one custom field definition for `mergedSchema`, the asset form's
+ * validation. A Link-format TEXT field validates as a web link.
+ *
+ * @param def - An active custom field definition
+ * @returns The field's entry for `mergedSchema({ customFields })`
+ */
+export function toCustomFieldZodSchema(
+  def: Pick<
+    CustomField,
+    "id" | "name" | "helpText" | "required" | "type" | "format" | "options"
+  >
+): CustomFieldZodSchema {
+  return {
+    id: def.id,
+    name: def.name,
+    helpText: def.helpText ?? "",
+    required: def.required,
+    type:
+      def.format === "LINK"
+        ? "link"
+        : (def.type.toLowerCase() as CustomFieldZodSchema["type"]),
+    options: def.options,
+  };
+}
 
 function buildSchema(fields: CustomFieldZodSchema[]) {
   let schema = z.object({});
@@ -146,40 +183,23 @@ export const mergedSchema = <T extends ZodRawShape>({
 export const extractCustomFieldValuesFromPayload = ({
   payload,
   customFieldDef,
-  isDuplicate,
 }: {
   payload: { [key: string]: any };
   customFieldDef: CustomField[];
-  isDuplicate?: boolean;
 }): ShelfAssetCustomFieldValueType[] => {
   /** Get the custom fields keys and values */
   const customFieldsKeys = Object.keys(payload).filter((key) =>
     key.startsWith("cf-")
   );
 
-  return customFieldsKeys
-    .map((key) => {
-      const id = key.split("-")[1];
-      const fieldDef = customFieldDef.find((v) => v.id === id)!;
-      //making sure that duplicate creation is handled.
-      if (!fieldDef && isDuplicate) {
-        return null;
-      }
-      const value = buildCustomFieldValue({ raw: payload[key] }, fieldDef!);
-      return { id, value } as ShelfAssetCustomFieldValueType;
-    })
-    .filter((v) => v !== null) as ShelfAssetCustomFieldValueType[];
+  return customFieldsKeys.map((key) => {
+    const id = key.split("-")[1];
+    const fieldDef = customFieldDef.find((v) => v.id === id)!;
+    const value = buildCustomFieldValue({ raw: payload[key] }, fieldDef);
+    return { id, value } as ShelfAssetCustomFieldValueType;
+  });
 };
 
-/**
- * Builds a custom field value based on the field definition and raw input
- * For date fields, ensures dates are stored in ISO format required by DB constraints
- * while preserving the intended date regardless of timezone
- *
- * @param value - The raw value and any additional field-specific values
- * @param def - The custom field definition
- * @returns Formatted custom field value or undefined if no valid value
- */
 const NUMERIC_VALUE_GUIDANCE =
   "Expected format: Plain numbers with optional decimal separator (e.g., 600, 600.50, or 600,50). Currency symbols will be automatically removed.";
 
@@ -210,10 +230,14 @@ function formatInvalidNumericMessage(
  * (`getDefinitionFromCsvHeader`) has no database row behind it, so it carries
  * no `id`. A persisted `CustomField` satisfies this shape too, and its `id`
  * travels to Sentry when a numeric value is rejected.
+ *
+ * `format` is required so every hand-written select that feeds
+ * `buildCustomFieldValue` must fetch it: a select without it would skip the
+ * Link rule.
  */
 export type CustomFieldDefinitionForValue = Pick<
   CustomField,
-  "name" | "type"
+  "name" | "type" | "format"
 > & {
   id?: string;
 };
@@ -415,6 +439,21 @@ export function parseYesNo(value: string): boolean | undefined {
   return undefined;
 }
 
+/**
+ * Builds the stored value for one custom field from raw input. Every write
+ * path (forms, inline edit, imports, the mobile API) goes through here, so a
+ * type's rule holds everywhere.
+ *
+ * DATE values are stored with an ISO `valueDate` at UTC midnight, keeping the
+ * intended day in every time zone. A Link-format TEXT field stores the
+ * normalized link (`www.x.com/a.pdf` becomes `https://www.x.com/a.pdf`).
+ *
+ * @param value - The raw value and any additional field-specific values
+ * @param def - The custom field definition
+ * @returns The value to store, or undefined when the input is blank
+ * @throws {ShelfError} When the input does not fit the field: not a number,
+ *   not a YYYY-MM-DD day, or (400) not a web link for a Link field
+ */
 export const buildCustomFieldValue = (
   value: ShelfAssetCustomFieldValueType["value"],
   def: CustomFieldDefinitionForValue
@@ -498,6 +537,23 @@ export const buildCustomFieldValue = (
       case "NUMBER": {
         const { numericValue, normalizedText } = sanitizeNumericInput(raw, def);
         return { raw: numericValue, valueText: normalizedText };
+      }
+      case "TEXT": {
+        if (def.format !== "LINK") break;
+        const input = parseLinkInput(String(raw));
+        if (!input.ok) {
+          throw new ShelfError({
+            cause: null,
+            title: "Not a link",
+            message: `Custom field '${def.name}': ${
+              input.message
+            }. The value we found is: '${String(raw)}'.`,
+            label: "Custom fields",
+            status: 400,
+            shouldBeCaptured: false,
+          });
+        }
+        return { raw: input.url, valueText: input.url };
       }
     }
 

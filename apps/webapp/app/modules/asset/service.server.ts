@@ -132,7 +132,6 @@ import {
 } from "~/utils/cookies.server";
 import {
   buildCustomFieldValue,
-  extractCustomFieldValuesFromPayload,
   formatInvalidNumericCustomFieldMessage,
   getDefinitionFromCsvHeader,
 } from "~/utils/custom-fields";
@@ -5161,30 +5160,6 @@ export async function uploadDuplicateAssetMainImage(
   }
 }
 
-export function createCustomFieldsPayloadFromAsset(
-  asset: Prisma.AssetGetPayload<{
-    include: {
-      custody: { include: { custodian: true } };
-      tags: true;
-      customFields: true;
-    };
-  }>
-) {
-  if (!asset?.customFields || asset?.customFields?.length === 0) {
-    return {};
-  }
-
-  return (
-    asset.customFields?.reduce(
-      (obj, { customFieldId, value }) => {
-        const rawValue = (value as { raw: string })?.raw ?? value ?? "";
-        return { ...obj, [`cf-${customFieldId}`]: rawValue };
-      },
-      {} as Record<string, any>
-    ) || {}
-  );
-}
-
 /**
  * Deletes the copies `duplicateAsset` created before a later copy failed, so a
  * duplicate request never leaves part of its copies behind.
@@ -5358,13 +5333,20 @@ export async function duplicateAsset({
       }),
     };
 
-    const customFieldValues = createCustomFieldsPayloadFromAsset(asset);
-
-    const extractedCustomFieldValues = extractCustomFieldValuesFromPayload({
-      payload: { ...payload, ...customFieldValues },
-      customFieldDef: customFields,
-      isDuplicate: true,
-    });
+    // A copy carries each active field's stored value exactly as it is.
+    // Rebuilding it from `raw` would hold old values to today's rules, so a
+    // value saved before its field became a Link field would block the copy.
+    const activeFieldIds = new Set(customFields.map((field) => field.id));
+    const copiedCustomFieldValues = asset.customFields
+      .filter(({ customFieldId }) => activeFieldIds.has(customFieldId))
+      .map(
+        ({ customFieldId, value }) =>
+          ({
+            id: customFieldId,
+            // Stored values were built by `buildCustomFieldValue`.
+            value: value as unknown as ShelfAssetCustomFieldValueType["value"],
+          }) as ShelfAssetCustomFieldValueType
+      );
 
     // All copies are created or none are. Each `createAsset` commits its own
     // transaction and retries on a sequential-id collision, which an
@@ -5378,7 +5360,7 @@ export async function duplicateAsset({
             title: `${asset.title} (copy${
               amountOfDuplicates > 1 ? ` ${i + 1}` : ""
             })`,
-            customFieldsValues: extractedCustomFieldValues,
+            customFieldsValues: copiedCustomFieldValues,
           })
         );
       }
@@ -5886,7 +5868,7 @@ export async function createAssetsFromContentImport({
     // conflict it goes on to reject.
     const existingCustomFields = await db.customField.findMany({
       where: { organizationId, deletedAt: null },
-      select: { name: true, type: true },
+      select: { name: true, type: true, format: true },
     });
 
     const { errors: rowErrors, totalErrors } = validateContentImportRows({

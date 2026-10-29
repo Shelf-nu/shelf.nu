@@ -5,6 +5,7 @@ import {
   type AssetIndexSettings,
 } from "@prisma/client";
 import { describe, expect, it, vi, vitest, beforeEach } from "vitest";
+import { createCustomField } from "@factories";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
 import { db } from "~/database/db.server";
@@ -813,6 +814,47 @@ describe("duplicateAsset", () => {
         quantity: 1,
       },
     });
+  });
+
+  it("copies stored custom field values as they are, even ones a Link field would refuse now", async () => {
+    vi.mocked(getActiveCustomFields).mockResolvedValue([
+      createCustomField({ id: "cfmanual", name: "Manual", format: "LINK" }),
+    ]);
+    // why: createAsset proves the custom fields belong to the org.
+    vi.mocked(db.customField.findMany).mockResolvedValueOnce([
+      { id: "cfmanual" },
+    ] as never);
+
+    await duplicateAsset({
+      asset: makeSource({
+        customFields: [
+          {
+            customFieldId: "cfmanual",
+            value: { raw: "see shelf", valueText: "see shelf" },
+          },
+          {
+            customFieldId: "cfinactive",
+            value: { raw: "kept off", valueText: "kept off" },
+          },
+        ] as unknown as SourceAsset["customFields"],
+      }),
+      userId: "user-1",
+      amountOfDuplicates: 1,
+      organizationId: "org-1",
+    });
+
+    expect(createdRows()).toEqual([
+      expect.objectContaining({
+        customFields: {
+          create: [
+            {
+              customFieldId: "cfmanual",
+              value: { raw: "see shelf", valueText: "see shelf" },
+            },
+          ],
+        },
+      }),
+    ]);
   });
 
   it("refuses to copy a quantity-tracked asset with no units in stock", async () => {

@@ -8,6 +8,7 @@ import {
   getCustomFieldDisplayValue,
   isImportableCustomFieldDate,
   mergedSchema,
+  toCustomFieldZodSchema,
   type CustomFieldZodSchema,
 } from "./custom-fields";
 
@@ -379,5 +380,88 @@ describe("isImportableCustomFieldDate", () => {
       }
       expect(isImportableCustomFieldDate(raw)).toBe(stored);
     }
+  });
+});
+
+/**
+ * A Link-format TEXT field takes web links only, on every write path, because
+ * every path builds its value here. A plain TEXT field keeps any text.
+ */
+describe("buildCustomFieldValue for Link fields", () => {
+  const linkField = {
+    id: "cf_manual",
+    name: "Manual",
+    type: "TEXT",
+    format: "LINK",
+  } as const;
+
+  it("stores a link without a scheme as an https link", () => {
+    expect(
+      buildCustomFieldValue({ raw: " www.example.com/a.pdf " }, linkField)
+    ).toEqual({
+      raw: "https://www.example.com/a.pdf",
+      valueText: "https://www.example.com/a.pdf",
+    });
+  });
+
+  it("refuses text that is not a link with a 400 naming the field and the value", () => {
+    let thrown: unknown;
+    try {
+      buildCustomFieldValue({ raw: "see shelf" }, linkField);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toMatchObject({
+      status: 400,
+      shouldBeCaptured: false,
+      message:
+        "Custom field 'Manual': Enter just the link, with no spaces or other text. The value we found is: 'see shelf'.",
+    });
+  });
+
+  it("leaves a blank value unset", () => {
+    expect(buildCustomFieldValue({ raw: "  " }, linkField)).toBeUndefined();
+  });
+
+  it("keeps any text in a plain TEXT field", () => {
+    expect(
+      buildCustomFieldValue(
+        { raw: "see shelf" },
+        { ...linkField, format: "PLAIN" }
+      )
+    ).toEqual({ raw: "see shelf", valueText: "see shelf" });
+  });
+});
+
+describe("toCustomFieldZodSchema for Link fields", () => {
+  const schema = mergedSchema({
+    baseSchema: z.object({}),
+    customFields: [
+      toCustomFieldZodSchema({
+        id: "manual",
+        name: "Manual",
+        helpText: null,
+        required: false,
+        type: "TEXT",
+        format: "LINK",
+        options: [],
+      }),
+    ],
+  });
+
+  it("refuses text that is not a web link", () => {
+    const result = schema.safeParse({ "cf-manual": "see shelf" });
+
+    expect(result.error?.issues.map((issue) => issue.message)).toEqual([
+      "Enter just the link, with no spaces or other text",
+    ]);
+  });
+
+  it("accepts a web link and a blank optional value", () => {
+    expect(
+      schema.safeParse({ "cf-manual": "www.example.com/a.pdf" }).success
+    ).toBe(true);
+    expect(schema.safeParse({ "cf-manual": "" }).success).toBe(true);
   });
 });

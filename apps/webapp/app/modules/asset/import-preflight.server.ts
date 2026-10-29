@@ -89,7 +89,8 @@ function cell(
  * @param args.data - Parsed CSV rows from `extractCSVDataFromContentImport`
  * @param args.existingCustomFields - Non-deleted custom fields already in the
  *   workspace, matching `upsertCustomField`'s own lookup, used to catch a
- *   header whose declared type contradicts one
+ *   header whose declared type contradicts one, and to check values against
+ *   an existing field's own format
  * @returns The problems found and how many there were. An empty `errors` means
  *   the file is safe to import.
  */
@@ -99,7 +100,7 @@ export function validateContentImportRows({
   maxRows = MAX_CONTENT_IMPORT_ROWS,
 }: {
   data: CreateAssetFromContentImportPayload[];
-  existingCustomFields: Pick<CustomField, "name" | "type">[];
+  existingCustomFields: Pick<CustomField, "name" | "type" | "format">[];
   /** Largest number of data rows accepted; defaults to the synchronous cap. */
   maxRows?: number;
 }): ImportPreflightResult {
@@ -123,10 +124,10 @@ export function validateContentImportRows({
   // Custom field names are matched case-insensitively everywhere else
   // (`upsertCustomField` looks them up with `mode: "insensitive"`), so the
   // lookup key is lowercased here to agree with it.
-  const existingTypeByName = new Map(
+  const existingByName = new Map(
     existingCustomFields.map((field) => [
       field.name.trim().toLowerCase(),
-      field.type,
+      field,
     ])
   );
 
@@ -239,7 +240,8 @@ export function validateContentImportRows({
         continue;
       }
 
-      const existingType = existingTypeByName.get(fieldKey);
+      const existing = existingByName.get(fieldKey);
+      const existingType = existing?.type;
 
       // `upsertCustomField` refuses to change an existing field's type, so a
       // contradicting header fails the import however well-formed its values
@@ -302,7 +304,12 @@ export function validateContentImportRows({
       }
 
       try {
-        buildCustomFieldValue({ raw: asset[key] }, definition);
+        // An existing field keeps its own format whatever the header says,
+        // so its values are checked against that.
+        buildCustomFieldValue(
+          { raw: asset[key] },
+          existing ? { ...definition, format: existing.format } : definition
+        );
       } catch (cause) {
         errors.push({
           row,

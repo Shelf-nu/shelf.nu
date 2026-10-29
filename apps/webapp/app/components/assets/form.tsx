@@ -41,8 +41,7 @@ import {
 } from "~/utils/asset-description";
 import { resolveCancelTo } from "~/utils/cancel-destination";
 import { ASSET_DESCRIPTION_MAX_LENGTH } from "~/utils/constants";
-import type { CustomFieldZodSchema } from "~/utils/custom-fields";
-import { mergedSchema } from "~/utils/custom-fields";
+import { mergedSchema, toCustomFieldZodSchema } from "~/utils/custom-fields";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
@@ -356,17 +355,9 @@ const AssetFormInner = ({
     { id?: string; type: Barcode["type"]; value: string }[]
   >(barcodes ?? []);
 
-  const customFields = useLoaderData<typeof loader>().customFields.map(
-    (cf) =>
-      cf.active && {
-        id: cf.id,
-        name: cf.name,
-        helpText: cf?.helpText || "",
-        required: cf.required,
-        type: cf.type.toLowerCase() as "text" | "number" | "date" | "boolean",
-        options: cf.options,
-      }
-  ) as CustomFieldZodSchema[];
+  const customFields = useLoaderData<typeof loader>()
+    .customFields.filter((cf) => cf.active)
+    .map(toCustomFieldZodSchema);
 
   // Bulk mode tightens a few fields (assetModelId, nameTemplate,
   // count). Same `mergedSchema` pipeline either way — both base

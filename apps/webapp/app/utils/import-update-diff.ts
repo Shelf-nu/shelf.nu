@@ -8,6 +8,7 @@
  * @see {@link file://./import-update.server.ts} Orchestration (server)
  */
 import type { CustomField } from "@prisma/client";
+import { parseLinkInput } from "@shelf/links";
 import {
   ASSET_DESCRIPTION_MAX_LENGTH_LABEL,
   isAssetDescriptionTooLong,
@@ -158,7 +159,7 @@ export function isBackupExportHeaderRow(headers: string[]): boolean {
  */
 export function analyzeUpdateHeaders(
   headers: string[],
-  orgCustomFields: Pick<CustomField, "id" | "name" | "type">[]
+  orgCustomFields: Pick<CustomField, "id" | "name" | "type" | "format">[]
 ): HeaderAnalysis {
   const updatableColumns: ParsedColumn[] = [];
   const ignoredColumns: string[] = [];
@@ -304,6 +305,7 @@ export function analyzeUpdateHeaders(
           cfDef: {
             name: cf.name,
             type: cf.type,
+            format: cf.format,
             helpText: "",
             required: false,
             active: true,
@@ -711,7 +713,7 @@ export function compareCoreField(
 /**
  * Compares a custom field value between the CSV cell and the existing asset.
  *
- * @param cfDef - Custom field definition (name, type)
+ * @param cfDef - Custom field definition (name, type, format)
  * @param csvValue - Trimmed value from the CSV cell
  * @param asset - Existing asset loaded from the database
  * @param displayName - Human-readable column name for the change record
@@ -739,10 +741,16 @@ export function compareCustomField(
     case "TEXT":
     case "OPTION": {
       if (csvValue !== currentStr) {
+        // Same rule as every other write: a Link field takes web links only.
+        const link = cfDef.format === "LINK" ? parseLinkInput(csvValue) : null;
         return {
           field: displayName,
           currentValue: currentStr || "(empty)",
           newValue: csvValue,
+          ...(link &&
+            !link.ok && {
+              warning: `"${csvValue}" is not a web link. ${link.message}`,
+            }),
         };
       }
       return null;
