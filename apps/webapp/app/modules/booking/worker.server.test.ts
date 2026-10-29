@@ -501,6 +501,26 @@ describe("checkout reminder and overdue pushes", () => {
     });
   });
 
+  it.each([
+    BookingStatus.CANCELLED,
+    BookingStatus.ONGOING,
+    BookingStatus.ARCHIVED,
+  ])("sends no checkout reminder for a %s booking", async (status) => {
+    //@ts-expect-error missing vitest type
+    db.booking.findFirstOrThrow.mockResolvedValue({ ...booking, status });
+
+    await workerHandler({
+      data: {
+        id: "booking-1",
+        hints,
+        eventType: BOOKING_SCHEDULER_EVENTS_ENUM.checkoutReminder,
+      },
+    });
+
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(sendPush).not.toHaveBeenCalled();
+  });
+
   it("pushes the checkout reminder once, to the custodian alone", async () => {
     //@ts-expect-error missing vitest type
     db.booking.findFirstOrThrow.mockResolvedValue({

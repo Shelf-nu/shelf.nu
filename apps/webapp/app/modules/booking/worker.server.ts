@@ -49,7 +49,10 @@ const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
       });
     });
 
-  if (booking.from && booking.to) {
+  // Only a reserved booking is waiting to be checked out. Cancelling or
+  // checking out cancels this job on a best-effort basis, so a job that still
+  // runs for any other status notifies nobody.
+  if (booking.status === BookingStatus.RESERVED && booking.from && booking.to) {
     // Resolve recipients with isScheduledJob: true so no editor is excluded
     // (scheduled jobs have no human actor to filter out)
     const recipients = await getBookingNotificationRecipients({
