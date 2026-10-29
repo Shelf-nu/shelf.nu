@@ -123,6 +123,10 @@ model User {
   // Native-app SSO web-delegated login — single-use session-handoff codes
   mobileAuthCodes MobileAuthCode[]
 
+  // Companion-app push notifications: the devices to reach, and the switches
+  pushTokens             PushToken[]
+  notificationPreference NotificationPreference?
+
   // Updates feature
   createdUpdates Update[]
   updateReads    UserUpdateRead[]
@@ -1311,6 +1315,7 @@ model TierLimit {
   canHideShelfBranding Boolean  @default(false)
   canUseReports        Boolean  @default(false)
   canUseRecurringReminders Boolean @default(false)
+  canUsePushNotifications Boolean @default(false)
   maxCustomFields      Int      @default(0)
   maxOrganizations     Int      @default(1)
   createdAt            DateTime @default(now())
@@ -1328,6 +1333,7 @@ model CustomTierLimit {
   canHideShelfBranding Boolean  @default(true)
   canUseReports        Boolean  @default(true)
   canUseRecurringReminders Boolean @default(true)
+  canUsePushNotifications Boolean @default(true)
   maxCustomFields      Int      @default(1000)
   maxOrganizations     Int      @default(1)
   isEnterprise         Boolean  @default(false) // Set this to true for enterprise users. It is used to control some visuals in the app
@@ -2122,6 +2128,56 @@ model MobileAuthCode {
   @@index([userId])
   // For periodic cleanup of expired, unredeemed rows
   @@index([expiresAt])
+}
+
+/// The operating system a companion-app push token was issued for.
+enum DevicePlatform {
+  IOS
+  ANDROID
+}
+
+/// One Expo push token per installed companion app. A token identifies a
+/// device, not a person: when someone else signs in on the same phone, the
+/// row moves to them. Pushes go only to rows where `disabledAt` is null.
+/// @see apps/webapp/app/modules/push/service.server.ts
+model PushToken {
+  id String @id @default(cuid())
+
+  // The `ExponentPushToken[...]` string the Expo push service addresses.
+  token String @unique
+
+  platform   DevicePlatform
+  deviceName String?
+  appVersion String?
+
+  // Refreshed on every registration, so stale devices are visible.
+  lastSeenAt DateTime
+
+  // Set when Expo reports the device as no longer registered.
+  disabledAt DateTime?
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  userId String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+/// A person's push notification switches. A missing row means every switch
+/// is on, so no backfill is needed. The three category columns are named
+/// after `PushCategory` in apps/webapp/app/modules/push/types.ts.
+model NotificationPreference {
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  userId String @id
+
+  pushEnabled       Boolean @default(true)
+  bookings          Boolean @default(true)
+  audits            Boolean @default(true)
+  stockAndReminders Boolean @default(true)
+
+  updatedAt DateTime @updatedAt
 }
 
 model Kit {

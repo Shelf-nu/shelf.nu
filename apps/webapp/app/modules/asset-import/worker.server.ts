@@ -29,6 +29,7 @@ import { db } from "~/database/db.server";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { MAX_CACHE_SIZE } from "~/utils/import.image-cache.server";
 import type { CachedImage } from "~/utils/import.image-cache.server";
+import { isLastAttempt } from "~/utils/job-retry";
 import { Logger } from "~/utils/logger";
 import { isValidImageUrl } from "~/utils/misc";
 import { threeDaysFromNow } from "~/utils/one-week-from-now";
@@ -347,19 +348,6 @@ export async function runRowsStep(
     processedRows: result.nextProcessedRows,
     totalRows,
   });
-}
-
-/**
- * Whether pg-boss will not retry this job again if it throws.
- *
- * @param job - The running job
- */
-function isLastAttempt(job: PgBoss.JobWithMetadata<AssetImportJobData>) {
-  return (
-    job.retrycount != null &&
-    job.retrylimit != null &&
-    job.retrycount >= job.retrylimit
-  );
 }
 
 /**
