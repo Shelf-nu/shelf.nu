@@ -1,10 +1,11 @@
 /**
  * Tests for how custom field values with links read on the asset screen.
  *
- * Fixtures have the shapes the mobile asset detail route sends:
- * `asset.customFields` entries with `{ raw, valueText }` values,
- * `asset.linkFields` definitions, and `asset.linkTitles` keyed by the link's
- * key, each with a page title and a custom title.
+ * Fixtures have the shapes the mobile asset detail route sends (its route
+ * test pins the same ones): `asset.customFields` entries with
+ * `{ raw, valueText }` values, `asset.linkFields` definitions, and
+ * `asset.fieldLinkTitles` keyed by custom field id, each with a page title
+ * and a custom title.
  *
  * Runs under Node's test runner via tsx, so the module under test must not
  * import React Native, Expo or `@/`-aliased paths.
@@ -99,15 +100,15 @@ test("a SharePoint PDF share link with no title reads its kind and provider", ()
   );
 });
 
-test("a fetched page title leads the chip, keyed without the #fragment", () => {
-  const titles = {
-    "https://www.bhphotovideo.com/c/product/123": {
-      pageTitle: "Canon EOS R5",
-      customTitle: null,
-    },
+test("a fetched page title leads the chip", () => {
+  const fieldLinkTitles = {
+    "cf-shop": { pageTitle: "Canon EOS R5", customTitle: null },
   };
   assert.deepEqual(
-    linkChip("https://www.bhphotovideo.com/c/product/123#specs", titles),
+    linkChip(
+      "https://www.bhphotovideo.com/c/product/123#specs",
+      fieldLinkTitles["cf-shop"]
+    ),
     {
       primary: "Canon EOS R5",
       meta: "bhphotovideo.com",
@@ -119,13 +120,11 @@ test("a fetched page title leads the chip, keyed without the #fragment", () => {
 });
 
 test("a name given in the workspace wins over the page title", () => {
-  const titles = {
-    "https://usa.canon.com/manual.pdf": {
-      pageTitle: "EOS R5 Instruction Manual",
-      customTitle: "R5 manual (rev B)",
-    },
+  const title = {
+    pageTitle: "EOS R5 Instruction Manual",
+    customTitle: "R5 manual (rev B)",
   };
-  assert.deepEqual(linkChip("https://usa.canon.com/manual.pdf", titles), {
+  assert.deepEqual(linkChip("https://usa.canon.com/manual.pdf", title), {
     primary: "R5 manual (rev B)",
     meta: "PDF · usa.canon.com",
     label: "R5 manual (rev B), PDF, usa.canon.com",
@@ -134,11 +133,26 @@ test("a name given in the workspace wins over the page title", () => {
   });
 });
 
+test("a field's title reaches a link whose host is not ASCII", () => {
+  // The server keys this link by its punycode host, which the URL
+  // implementation on the phone does not produce; the field id needs no key.
+  const fieldLinkTitles = {
+    "cf-handbook": { pageTitle: "Handbuch EOS R5", customTitle: null },
+  };
+  assert.equal(
+    linkChip(
+      "https://bücher.example/Handbuch.pdf",
+      fieldLinkTitles["cf-handbook"]
+    )?.primary,
+    "Handbuch EOS R5"
+  );
+});
+
 test("a Dropbox file shows its file name when no title is known", () => {
   assert.equal(
     linkChip(
       "https://www.dropbox.com/scl/fi/abc/Cal%20cert%202026.pdf?rlkey=x",
-      {}
+      undefined
     )?.label,
     "Cal cert 2026.pdf, PDF, Dropbox"
   );

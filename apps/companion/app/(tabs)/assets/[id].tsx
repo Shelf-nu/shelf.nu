@@ -889,7 +889,10 @@ export default function AssetDetailScreen() {
           />
 
           {/* ── Documents & links ──────────────────────── */}
-          <DocumentsLinksSection rows={linkRows} titles={asset.linkTitles} />
+          <DocumentsLinksSection
+            rows={linkRows}
+            titles={asset.fieldLinkTitles}
+          />
 
           {/* ── Details Card ───────────────────────────── */}
           <View style={styles.infoSection}>
@@ -1181,7 +1184,7 @@ export default function AssetDetailScreen() {
           <CustomFieldsSection
             customFields={otherFields}
             currency={asset.organization?.currency || "USD"}
-            linkTitles={asset.linkTitles}
+            fieldLinkTitles={asset.fieldLinkTitles}
           />
 
           {/* ── Activity / Notes ───────────────────────── */}

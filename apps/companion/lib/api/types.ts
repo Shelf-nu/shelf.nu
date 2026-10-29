@@ -3,7 +3,7 @@ import type {
   TimeFormatPreference,
   WeekStartPreference,
 } from "@shelf/datetime";
-import type { LinkTitles } from "@shelf/links";
+import type { FieldLinkTitles } from "@shelf/links";
 import type {
   CustodySourceEntry,
   CustodySourceOption,
@@ -429,15 +429,15 @@ export type AssetDetail = {
   linkFields?: { id: string; name: string; helpText: string | null }[];
   /**
    * Page titles and names people gave the links in this asset's values,
-   * keyed by the link's key (`parseLink(value).key` from `@shelf/links`, the
-   * same function the server keys them with). Chips without an entry read
-   * what the URL alone says.
+   * keyed by custom field id. The server keys them because this app's URL
+   * implementation cannot reproduce link keys for every host. A chip whose
+   * field has no entry reads what the URL alone says.
    *
-   * Mirrors `linkTitles` of
+   * Mirrors `fieldLinkTitles` of
    * apps/webapp/app/routes/api+/mobile+/assets.$assetId.ts. Absent on older
    * servers.
    */
-  linkTitles?: LinkTitles;
+  fieldLinkTitles?: FieldLinkTitles;
   /**
    * Aggregated per-status quantity slices for QUANTITY_TRACKED assets.
    * Optional + nullable: absent on pre-quantity servers, `null` for INDIVIDUAL

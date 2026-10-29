@@ -12,7 +12,7 @@
  */
 import { memo } from "react";
 import { View, Text } from "react-native";
-import type { LinkTitles } from "@shelf/links";
+import type { FieldLinkTitles } from "@shelf/links";
 import type { AssetDetail } from "@/lib/api";
 import { containsLink } from "@/lib/custom-field-links";
 import { createStyles } from "@/lib/create-styles";
@@ -31,8 +31,8 @@ type CustomField = AssetDetail["customFields"][0];
 interface CustomFieldsSectionProps {
   customFields: CustomField[];
   currency: string;
-  /** `asset.linkTitles`: titles for values that are exactly one link. */
-  linkTitles?: LinkTitles;
+  /** `asset.fieldLinkTitles`: titles by custom field id. */
+  fieldLinkTitles?: FieldLinkTitles;
 }
 
 function formatCustomFieldValue(
@@ -83,13 +83,13 @@ function formatCustomFieldValue(
  * @param props - Component props.
  * @param props.customFields - The rows to show, in order.
  * @param props.currency - Workspace currency for AMOUNT values.
- * @param props.linkTitles - Titles for link chips.
+ * @param props.fieldLinkTitles - Titles for link chips, by custom field id.
  * @returns The section, or null.
  */
 export const CustomFieldsSection = memo(function CustomFieldsSection({
   customFields,
   currency,
-  linkTitles,
+  fieldLinkTitles,
 }: CustomFieldsSectionProps) {
   const styles = useStyles();
   const { formatDate } = useDateFormatter();
@@ -118,7 +118,7 @@ export const CustomFieldsSection = memo(function CustomFieldsSection({
                 {type === "TEXT" ? (
                   <TextWithLinks
                     value={value}
-                    titles={linkTitles}
+                    title={fieldLinkTitles?.[cf.customField.id]}
                     style={styles.customFieldStackedValue}
                     numberOfLines={3}
                   />

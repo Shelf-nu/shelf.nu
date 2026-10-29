@@ -15,8 +15,9 @@
  *   shown to viewers who may see all custody or who hold that booking.
  * - The projection. Rows destructured off the query result stay off the wire.
  * - Links. `linkFields` lists the Link fields for the Documents & links
- *   section, and `linkTitles` carries the titles for the links in the active
- *   values, in the shape the chip tests render.
+ *   section, and `fieldLinkTitles` carries the titles for the links in the
+ *   active values, keyed by custom field id on the server (the companion's
+ *   `custom-field-links.test.ts` renders the same shape).
  *
  * The visibility helpers from `mobile-custody-visibility.server`, the booking
  * read gate and the name resolvers are NOT mocked, so the real logic runs end
@@ -125,10 +126,15 @@ vitest.mock("~/modules/custom-field/service.server", () => ({
 }));
 
 // why: link titles are read from LinkPreview rows in Postgres (and links due a
-// fetch are queued); each case states what the workspace knows.
-vitest.mock("~/modules/link-preview/service.server", () => ({
-  getLinkTitles: vitest.fn().mockResolvedValue({}),
-}));
+// fetch are queued); each case states what the workspace knows. Keying them
+// by field (`linkTitlesByField`) stays real.
+vitest.mock(
+  "~/modules/link-preview/service.server",
+  async (importOriginal) => ({
+    ...(await importOriginal<Record<string, unknown>>()),
+    getLinkTitles: vitest.fn().mockResolvedValue({}),
+  })
+);
 
 // why: we need to control error formatting without running real error logic
 vitest.mock("~/utils/error", () => ({
@@ -1347,7 +1353,7 @@ describe("Link fields on GET /api/mobile/assets/:assetId", () => {
     ]);
   });
 
-  it("sends the titles of the links in the asset's active values", async () => {
+  it("sends the titles of the links in the asset's active values by field id", async () => {
     const field = {
       name: "Manual",
       type: "TEXT",
@@ -1364,11 +1370,32 @@ describe("Link fields on GET /api/mobile/assets/:assetId", () => {
       value: { raw: SHOP_URL, valueText: SHOP_URL },
       customField: { ...field, id: "cf-retired", active: false },
     };
+    // A non-ASCII host: the server keys it in punycode, which the phone's URL
+    // implementation cannot reproduce.
+    const handbook = {
+      id: "cfv-handbook",
+      value: {
+        raw: "https://bücher.example/Handbuch.pdf",
+        valueText: "https://bücher.example/Handbuch.pdf",
+      },
+      customField: { ...field, id: "cf-handbook", active: true },
+    };
+    const serial = {
+      id: "cfv-serial",
+      value: { raw: "SN-0042", valueText: "SN-0042" },
+      customField: { ...field, id: "cf-serial", format: "PLAIN", active: true },
+    };
     assetFindUniqueMock.mockResolvedValue({
       ...buildAsset(),
-      customFields: [manual, retired],
+      customFields: [manual, retired, handbook, serial],
     } as unknown as AssetFixture);
-    vitest.mocked(getLinkTitles).mockResolvedValue(LINK_TITLES);
+    vitest.mocked(getLinkTitles).mockResolvedValue({
+      ...LINK_TITLES,
+      "https://xn--bcher-kva.example/Handbuch.pdf": {
+        pageTitle: "Handbuch EOS R5",
+        customTitle: null,
+      },
+    });
 
     const response = await loader(
       createLoaderArgs({
@@ -1381,8 +1408,12 @@ describe("Link fields on GET /api/mobile/assets/:assetId", () => {
     // A deactivated field's value is not shown, so its link is not read.
     expect(getLinkTitles).toHaveBeenCalledWith({
       organizationId: "org-1",
-      values: [manual],
+      values: [manual, handbook, serial],
     });
-    expect(body.asset.linkTitles).toEqual(LINK_TITLES);
+    expect(body.asset.fieldLinkTitles).toEqual({
+      "cf-manual": { pageTitle: "EOS R5 user manual", customTitle: null },
+      "cf-handbook": { pageTitle: "Handbuch EOS R5", customTitle: null },
+    });
+    expect(body.asset).not.toHaveProperty("linkTitles");
   });
 });

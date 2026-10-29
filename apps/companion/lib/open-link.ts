@@ -20,7 +20,11 @@
  * @see {@link file://./open-link.test.ts}
  */
 
-/** The host the app claims for Universal Links and App Links (`app.json`). */
+/**
+ * The host the app claims for Universal Links and App Links (`app.json`).
+ * Listed in `.claude/rules/companion-deep-link-allowlist.md`: change both
+ * together.
+ */
 const CLAIMED_WEB_HOST = "app.shelf.nu";
 
 const COMPANION_REF = "shelf-companion";

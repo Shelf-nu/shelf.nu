@@ -3,8 +3,8 @@
  * consume them, so a route and the component reading its payload are pinned
  * to one shape.
  *
- * - `LINK_TITLES` is `linkTitles` as the asset overview, the advanced index
- *   and the mobile asset detail send it.
+ * - `LINK_TITLES` is `linkTitles` as the asset overview and the advanced
+ *   index send it, and what `getLinkTitles` returns.
  * - `LINK_TITLE_SAVED` is the body of a successful POST /api/link-titles.
  *
  * @see {@link file://../../app/modules/link-preview/service.server.ts}

@@ -45,7 +45,10 @@ import {
   serializeDisplayCode,
 } from "~/modules/barcode/display";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
-import { getLinkTitles } from "~/modules/link-preview/service.server";
+import {
+  getLinkTitles,
+  linkTitlesByField,
+} from "~/modules/link-preview/service.server";
 import { USER_NAME_SELECT } from "~/modules/user/fields";
 import {
   canSeeBooking,
@@ -273,12 +276,16 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       return data({ error: { message: "Asset not found" } }, { status: 404 });
     }
 
+    // The values the screen shows: those of active fields.
+    const shownValues = storedAsset.customFields.filter(
+      ({ customField }) => customField.active
+    );
+
     // Read together: none depends on another.
     // - `linkFields`: the Link fields that apply to this asset, set or not,
     //   for the "Documents & links" section. Every reader gets them, as on
     //   the web overview: the section lists empty ones as "Not linked".
-    // - `linkTitles`: titles for the links in the values the screen shows
-    //   (active fields only). Never throws.
+    // - `linkTitles`: titles for the links in the values shown. Never throws.
     const [[refreshedAsset], linkFields, linkTitles] = await Promise.all([
       refreshExpiredAssetImages([storedAsset], {
         organizationId,
@@ -293,12 +300,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           .map(({ id, name, helpText }) => ({ id, name, helpText }))
           .sort((a, b) => a.name.localeCompare(b.name))
       ),
-      getLinkTitles({
-        organizationId,
-        values: storedAsset.customFields.filter(
-          ({ customField }) => customField.active
-        ),
-      }),
+      getLinkTitles({ organizationId, values: shownValues }),
     ]);
 
     // The companion prints `custodian.name` as it arrives, in the custody
@@ -681,8 +683,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         // ordered by name, whether or not they have a value.
         linkFields,
         // Additive: page titles and workspace names for the links in
-        // `customFields`, keyed by `parseLink(value).key` from @shelf/links.
-        linkTitles,
+        // `customFields`, keyed by custom field id. Keyed on the server: the
+        // phone's URL implementation cannot reproduce link keys for every
+        // host (see `FieldLinkTitles` in @shelf/links).
+        fieldLinkTitles: linkTitlesByField(shownValues, linkTitles),
       },
     });
   } catch (cause) {

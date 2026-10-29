@@ -12,7 +12,7 @@
  */
 import { memo } from "react";
 import { Text, View } from "react-native";
-import type { LinkTitles } from "@shelf/links";
+import type { FieldLinkTitles } from "@shelf/links";
 import type { LinkFieldRow } from "@/lib/custom-field-links";
 import { borderRadius, fontSize, spacing } from "@/lib/constants";
 import { createStyles } from "@/lib/create-styles";
@@ -23,7 +23,7 @@ import { TextWithLinks } from "@/components/links/text-with-links";
  *
  * @param props - Component props.
  * @param props.rows - One row per Link field, in display order.
- * @param props.titles - `asset.linkTitles`, for the chips' titles.
+ * @param props.titles - `asset.fieldLinkTitles`, for the chips' titles.
  * @returns The section, or null.
  */
 export const DocumentsLinksSection = memo(function DocumentsLinksSection({
@@ -31,7 +31,7 @@ export const DocumentsLinksSection = memo(function DocumentsLinksSection({
   titles,
 }: {
   rows: readonly LinkFieldRow[];
-  titles?: LinkTitles;
+  titles?: FieldLinkTitles;
 }) {
   const styles = useStyles();
 
@@ -52,7 +52,7 @@ export const DocumentsLinksSection = memo(function DocumentsLinksSection({
             {row.value ? (
               <TextWithLinks
                 value={row.value}
-                titles={titles}
+                title={titles?.[row.id]}
                 style={styles.value}
                 numberOfLines={3}
               />

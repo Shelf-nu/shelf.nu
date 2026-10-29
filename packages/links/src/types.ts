@@ -89,6 +89,14 @@ export interface LinkTitle {
 /** Titles keyed by `LinkKey`. JSON turns the brand into a plain string key. */
 export type LinkTitles = Readonly<Record<string, LinkTitle>>;
 
+/**
+ * API contract: the title of the link stored in each custom field's value,
+ * keyed by custom field id. Sent to the phone instead of {@link LinkTitles},
+ * because the URL implementation Expo installs does no IDNA: the phone would
+ * key a link with a non-ASCII host differently from the server.
+ */
+export type FieldLinkTitles = Readonly<Record<string, LinkTitle>>;
+
 /** The words on a link chip. */
 export interface ChipText {
   /** The main line: a title, a file name, the kind, or the host. */

@@ -9,7 +9,7 @@
  */
 import { memo, useMemo } from "react";
 import type { StyleProp, TextStyle } from "react-native";
-import type { LinkTitles } from "@shelf/links";
+import type { LinkTitle } from "@shelf/links";
 import { linkChip } from "@/lib/custom-field-links";
 import { LinkChip } from "./link-chip";
 import { LinkedText } from "./linked-text";
@@ -19,23 +19,23 @@ import { LinkedText } from "./linked-text";
  *
  * @param props - Component props.
  * @param props.value - The stored text value.
- * @param props.titles - `asset.linkTitles`, for the chip's title.
+ * @param props.title - The value's entry in `asset.fieldLinkTitles`, if any.
  * @param props.style - Text style when the value is not a single link.
  * @param props.numberOfLines - Lines shown before that text is clipped.
  * @returns The chip or the text.
  */
 export const TextWithLinks = memo(function TextWithLinks({
   value,
-  titles,
+  title,
   style,
   numberOfLines,
 }: {
   value: string;
-  titles?: LinkTitles;
+  title?: LinkTitle;
   style?: StyleProp<TextStyle>;
   numberOfLines?: number;
 }) {
-  const chip = useMemo(() => linkChip(value, titles), [value, titles]);
+  const chip = useMemo(() => linkChip(value, title), [value, title]);
   if (chip) return <LinkChip chip={chip} />;
   return (
     <LinkedText text={value} style={style} numberOfLines={numberOfLines} />

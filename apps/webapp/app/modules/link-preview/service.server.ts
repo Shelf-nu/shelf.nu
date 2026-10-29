@@ -22,7 +22,13 @@
 
 import { CustomFieldFormat, CustomFieldType, Prisma } from "@prisma/client";
 import { cleanLinkTitle, MAX_LINK_LENGTH, parseLink } from "@shelf/links";
-import type { LinkKey, LinkTitle, LinkTitles, ParsedLink } from "@shelf/links";
+import type {
+  FieldLinkTitles,
+  LinkKey,
+  LinkTitle,
+  LinkTitles,
+  ParsedLink,
+} from "@shelf/links";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import type { ErrorLabel } from "~/utils/error";
@@ -133,6 +139,32 @@ export async function getLinkTitles({
     }
   }
   return titles;
+}
+
+/**
+ * The title of the link in each value, keyed by the value's custom field id,
+ * for a client that must not compute link keys itself. Values that are not
+ * one link, or whose link has no title, are left out.
+ *
+ * @param values - Custom field values with their field's id and type
+ * @param titles - What `getLinkTitles` returned for the same values
+ * @returns Titles by custom field id
+ */
+export function linkTitlesByField(
+  values: readonly (LinkTitleSource & {
+    readonly customField: { id: string };
+  })[],
+  titles: LinkTitles
+): FieldLinkTitles {
+  const byField: Record<string, LinkTitle> = {};
+  for (const { value, customField } of values) {
+    if (customField.type !== CustomFieldType.TEXT) continue;
+    const text = textOf(value);
+    const link = text === null ? null : parseLink(text);
+    const title = link ? titles[link.key] : undefined;
+    if (title) byField[customField.id] = title;
+  }
+  return byField;
 }
 
 /**
