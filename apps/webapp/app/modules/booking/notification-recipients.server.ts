@@ -38,7 +38,7 @@ import { Logger } from "~/utils/logger";
  * - `OVERDUE` — booking has passed its end date without checkin
  * - `CANCEL` — booking was cancelled by a user
  * - `REVERT_TO_DRAFT` — a reserved booking was sent back to draft
- * - `EXTEND` — booking end date was extended
+ * - `EXTEND`: booking end date was changed
  * - `DELETE` — booking was permanently deleted
  * - `UPDATE` — booking fields or assets were modified
  */

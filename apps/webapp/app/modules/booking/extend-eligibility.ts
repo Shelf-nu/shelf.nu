@@ -1,8 +1,9 @@
 /**
- * Booking extension eligibility
+ * Booking end-date change eligibility
  *
- * The state rules `extendBooking` applies before it measures a new end: the
- * booking has started (ONGOING or OVERDUE), and something on it is still out.
+ * The state rules `extendBooking` applies before it measures a new end, later
+ * or earlier: the booking has started (ONGOING or OVERDUE), and something on
+ * it is still out.
  * Kept pure and in one place so the mobile booking detail offers "Extend
  * booking" on exactly the bookings the service accepts, and the extend
  * endpoints refuse the same statuses the service does.
@@ -13,14 +14,14 @@
  */
 import { AssetStatus, BookingStatus } from "@prisma/client";
 
-/** Statuses a booking can be extended from. */
+/** Statuses in which a booking's end date can change. */
 export const EXTENDABLE_BOOKING_STATUSES: readonly BookingStatus[] = [
   BookingStatus.ONGOING,
   BookingStatus.OVERDUE,
 ];
 
 /**
- * Whether a booking in this status can be extended.
+ * Whether a booking in this status can have its end date changed.
  *
  * @param status - The booking's status
  * @returns `true` for ONGOING and OVERDUE
@@ -45,7 +46,7 @@ type ExtendSlice = {
  *
  * @param assets - The assets on the booking
  * @param checkedInAssetIds - Assets returned through partial check-in
- * @returns The assets an extension keeps out
+ * @returns The assets a new end keeps out
  */
 export function getAssetsStillOutForExtend<T extends ExtendAsset>(
   assets: T[],
@@ -80,8 +81,8 @@ export function getKitMembershipIdsStillOut(slices: ExtendSlice[]): string[] {
 }
 
 /**
- * Whether anything on the booking is still out, so an extension has something
- * to keep. A booking with everything returned is completed, not extended.
+ * Whether anything on the booking is still out, so a new end has something to
+ * keep. A booking with everything returned is completed, not given a new end.
  *
  * @param args.assets - The assets on the booking
  * @param args.checkedInAssetIds - Assets returned through partial check-in
