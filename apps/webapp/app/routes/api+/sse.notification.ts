@@ -1,3 +1,12 @@
+/**
+ * SSE stream of toast notifications for the logged-in user.
+ *
+ * Payloads are read from this machine's local emitter, which the notification
+ * bus feeds with toasts published by ANY machine, so the action that sent a
+ * toast need not have run here.
+ *
+ * @see {@link file://./../../utils/emitter/notification-bus.server.ts}
+ */
 import type { LoaderFunctionArgs } from "react-router";
 import { eventStream } from "remix-utils/sse/server";
 import { emitter } from "~/utils/emitter/emitter.server";

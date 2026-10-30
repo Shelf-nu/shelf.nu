@@ -280,17 +280,29 @@ declare global {
  * `DIRECT_URL` and the real emitter. Idempotent: the global survives dev hot
  * reloads, and a second call on a started bus does nothing.
  *
+ * Without a direct connection string no bus is created and toasts stay on
+ * this machine, because a pooled connection cannot hold a LISTEN session.
+ *
+ * @param connectionString - Direct (non-pooled) Postgres URL; defaults to `DIRECT_URL`
  * @returns Resolves once the first connect attempt has finished; never rejects
  */
-export async function startNotificationBus(): Promise<void> {
+export async function startNotificationBus(
+  connectionString: string | undefined = DIRECT_URL
+): Promise<void> {
+  if (!connectionString) {
+    Logger.info(
+      "DIRECT_URL is not set: toast notifications reach browsers on this server only."
+    );
+    return;
+  }
   if (!global.notificationBus) {
     global.notificationBus = createNotificationBus({
-      createClient: () => new pg.Client({ connectionString: DIRECT_URL }),
+      createClient: () => new pg.Client({ connectionString }),
       emitLocal: (payload) => {
         emitter.emit("notification", payload);
       },
       logError: (error) => Logger.error(error),
-      connectionSecrets: connectionSecretsFrom(DIRECT_URL ?? ""),
+      connectionSecrets: connectionSecretsFrom(connectionString),
     });
   }
   await global.notificationBus.start();

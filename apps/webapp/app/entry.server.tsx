@@ -15,6 +15,7 @@ import { regierAssetWorkers } from "./modules/asset-reminder/worker.server";
 import { registerAuditWorkers } from "./modules/audit/worker.server";
 import { registerBookingWorkers } from "./modules/booking/worker.server";
 import { registerPushWorkers } from "./modules/push/worker.server";
+import { startNotificationBus } from "./utils/emitter/notification-bus.server";
 import { ShelfError } from "./utils/error";
 import { Logger } from "./utils/logger";
 import * as schedulerService from "./utils/scheduler.server";
@@ -146,6 +147,17 @@ schedulerService
     );
   });
 // === end: register scheduler and workers ===
+
+// Cross-machine toast delivery; boot never waits on the database connection
+startNotificationBus().catch((cause) => {
+  Logger.error(
+    new ShelfError({
+      cause,
+      message: "Notification bus crash",
+      label: "Notification",
+    })
+  );
+});
 
 /**
  * Handle errors that are not handled by a loader or action try/catch block.

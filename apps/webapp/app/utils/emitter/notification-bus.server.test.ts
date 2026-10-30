@@ -11,9 +11,12 @@
 import { EventEmitter } from "node:events";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ShelfError } from "../error";
+import { emitter } from "./emitter.server";
 import {
   createNotificationBus,
   NOTIFICATION_CHANNEL,
+  publishNotification,
+  startNotificationBus,
   type BusClient,
   type NotificationBus,
 } from "./notification-bus.server";
@@ -241,5 +244,23 @@ describe("createNotificationBus", () => {
     await vi.advanceTimersByTimeAsync(30000);
 
     expect(createClient).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("startNotificationBus without a direct connection string", () => {
+  it("creates no bus and publishNotification keeps using the local emitter", async () => {
+    const received: string[] = [];
+    const listener = (payload: string) => received.push(payload);
+    emitter.on("notification", listener);
+
+    try {
+      await startNotificationBus("");
+      publishNotification("local-only");
+    } finally {
+      emitter.off("notification", listener);
+    }
+
+    expect(global.notificationBus).toBeUndefined();
+    expect(received).toEqual(["local-only"]);
   });
 });
