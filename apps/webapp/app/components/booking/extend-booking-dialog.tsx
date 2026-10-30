@@ -295,7 +295,8 @@ function HorizonNotice({
       )}{" "}
       needs {namedItems(blockedBy)}.
       <div className="mt-1 text-xs text-gray-500">
-        Reservations by model are checked when you submit.
+        Reservations by model and the stock of quantity items are checked when
+        you submit.
       </div>
       {suggestedEnd ? (
         <div className="mt-2">
