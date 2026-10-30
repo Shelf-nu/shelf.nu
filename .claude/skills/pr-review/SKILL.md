@@ -230,6 +230,9 @@ Keys and indexes: <one bullet each: foreign keys with their on-delete, unique an
 | --- | --- | --- | --- |
 | Organization | new column | paidPdfDocumentsSeededAt | timestamp, nullable |
 
+Constraints, indexes and other statements on existing tables:
+- `CustomField_format_needs_text` CHECK: `"format" = 'PLAIN' OR "type" = 'TEXT'`
+
 **Data writes**
 - <table>: <what it writes, to which rows, in production terms>
 
@@ -272,14 +275,18 @@ Rules:
     Default empty when there is none), followed by its keys, indexes and RLS.
     A new table without RLS says `RLS MISSING` there.
   - Each new enum: one line with its values.
-  - Every column, constraint, index or enum change on a table that already
-    existed goes in the "Changes to existing tables" table. Drops and renames
-    are in bold.
+  - Every column added, altered, renamed or dropped on a table that already
+    existed is a row of the "Changes to existing tables" table. Drops and
+    renames are in bold.
+  - Constraints, indexes, foreign keys and `other` statements on existing
+    tables are bullets under that table, never table rows: their SQL is long
+    and would make the row wider than the terminal.
+  - Keep every table cell under about 40 characters so no table wraps in an
+    80 to 120 column terminal. Anything longer goes in a bullet below it.
   - Each data write is a bullet saying in plain words which rows it touches
     and how many in production terms ("every workspace", "workspaces whose
     owner is on a paid tier"), read from its SQL.
-  - An `other` statement goes in the existing-tables table with its `detail`
-    quoted.
+  - An `other` statement is a bullet quoting its `detail`.
   - Leave out any sub-heading with nothing under it, `Prisma:` when
     `db.schema` is null, and `Names:` when nothing is new or renamed. Put a
     blank line before every table so it renders.
