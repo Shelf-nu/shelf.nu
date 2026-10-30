@@ -90,6 +90,14 @@ const checkinMock = vi.mocked(checkinBooking);
 const questionsMock = vi.mocked(getCheckoutSourceQuestions);
 const notesMock = vi.mocked(createNotes);
 
+/**
+ * A window that has not ended, so a RESERVED fixture is a live reservation.
+ * A past `to` would make it an expired reservation, which bulk check-out
+ * refuses.
+ */
+const FROM = new Date("2099-08-01T09:00:00Z");
+const TO = new Date("2099-08-05T17:00:00Z");
+
 /** One selected booking as the selection query returns it. */
 function selected(
   id: string,
@@ -100,8 +108,8 @@ function selected(
     id,
     name: `Booking ${id}`,
     status,
-    from: new Date("2026-08-01T09:00:00Z"),
-    to: new Date("2026-08-05T17:00:00Z"),
+    from: FROM,
+    to: TO,
     modelRequests: [],
     ...overrides,
   };
@@ -174,8 +182,8 @@ describe("bulkCheckoutBookings", () => {
         userId: ME,
         hints: HINTS,
         intentChoice: "without-adjusted-date",
-        from: new Date("2026-08-01T09:00:00Z"),
-        to: new Date("2026-08-05T17:00:00Z"),
+        from: FROM,
+        to: TO,
         // An admin sees every booking, so a refusal may name other members'.
         seesAllBookings: true,
         provenance: { surface: "web", method: "quick" },
@@ -232,6 +240,28 @@ describe("bulkCheckoutBookings", () => {
       /"Booking b1" still has reserved units with no asset assigned/
     );
     expect(checkoutMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses the whole batch when a booking is an expired reservation", async () => {
+    findManyMock.mockResolvedValue([
+      selected("b1", BookingStatus.RESERVED),
+      selected("b2", BookingStatus.RESERVED, {
+        from: new Date("2020-01-01T09:00:00Z"),
+        to: new Date("2020-01-02T17:00:00Z"),
+      }),
+    ] as never);
+
+    await expect(
+      bulkCheckoutBookings(args(["b1", "b2"]))
+    ).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringMatching(
+        /"Booking b2" has passed its reservation dates.*Nothing was changed/
+      ),
+    });
+    // Refused before any write, and before the per-booking location lookups.
+    expect(checkoutMock).not.toHaveBeenCalled();
+    expect(questionsMock).not.toHaveBeenCalled();
   });
 
   it("refuses the whole batch when a booking needs a from-location choice", async () => {

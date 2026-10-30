@@ -11,8 +11,9 @@
  * 2. The whole batch is refused when it holds more than
  *    `MAX_BULK_CHECK_IN_OUT_BOOKINGS` bookings, or, naming the bookings, when
  *    any booking has the wrong status, still has reserved model units with no
- *    asset assigned (check-out only), or needs a "From location" choice the
- *    list cannot ask (check-out only). Nothing is changed.
+ *    asset assigned (check-out only), is an expired reservation whose
+ *    passed dates need a choice (check-out only), or needs a "From location"
+ *    choice the list cannot ask (check-out only). Nothing is changed.
  * 3. Each booking then runs through the same `checkoutBooking` /
  *    `checkinBooking` the booking page's one-click buttons use, one at a time.
  *    Each call takes its own locked transaction, re-runs its own guards and
@@ -50,6 +51,7 @@ import type { RoleAccess } from "~/utils/permissions/role-access";
 import type { BookingMethodProvenance } from "./checkout-method";
 import { getCheckoutSourceQuestions } from "./checkout-source-location.server";
 import { MAX_BULK_CHECK_IN_OUT_BOOKINGS } from "./constants";
+import { isReservationExpired } from "./helpers";
 import {
   assertSelectAllWithinOwnership,
   checkinBooking,
@@ -351,9 +353,10 @@ async function processOneByOne({
  * Refused as a whole, before any write, when the caller is held to the
  * explicit check-out flow, when the selection is over
  * `MAX_BULK_CHECK_IN_OUT_BOOKINGS`, or when any selected booking is not
- * RESERVED, still has unassigned reserved model units, or needs a "From
- * location" choice (a pool at two or more placements), which only the booking
- * page can ask. Then each booking goes through {@link checkoutBooking} in
+ * RESERVED, still has unassigned reserved model units, is an expired
+ * reservation (its end has passed: as overdue or a new end date is the
+ * operator's choice), or needs a "From location" choice (a pool at two or
+ * more placements). The booking page asks both questions; the list cannot. Then each booking goes through {@link checkoutBooking} in
  * turn, which writes the same asset notes it writes for the booking page.
  *
  * @param args - See {@link BulkCheckInOutArgs}
@@ -395,6 +398,24 @@ export async function bulkCheckoutBookings(
         rule: `still ${
           withUnassignedUnits.length === 1 ? "has" : "have"
         } reserved units with no asset assigned`,
+        organizationId,
+      });
+    }
+
+    // A reservation whose end has passed needs a choice the list cannot ask:
+    // check it out as overdue, or with a new end date. The booking page's
+    // check-out asks it, so the batch sends those bookings there.
+    const expiredReservations = bookings.filter((booking) =>
+      isReservationExpired(booking.status, booking.to)
+    );
+    if (expiredReservations.length > 0) {
+      refuseBatch({
+        bookings: expiredReservations,
+        rule: `${expiredReservations.length === 1 ? "has" : "have"} passed ${
+          expiredReservations.length === 1 ? "its" : "their"
+        } reservation dates, and only the booking page can ask how to check ${
+          expiredReservations.length === 1 ? "it" : "them"
+        } out`,
         organizationId,
       });
     }

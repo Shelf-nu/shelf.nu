@@ -8,7 +8,10 @@ import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu"
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { useRoleAccess } from "~/hooks/use-role-access";
 import { MAX_BULK_CHECK_IN_OUT_BOOKINGS } from "~/modules/booking/constants";
-import { isBookingArchivable } from "~/modules/booking/helpers";
+import {
+  isBookingArchivable,
+  isReservationExpired,
+} from "~/modules/booking/helpers";
 import type { BookingsIndexLoaderData } from "~/routes/_layout+/bookings._index";
 import { isFormProcessing } from "~/utils/form";
 import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
@@ -109,6 +112,12 @@ function ConditionalDropdown() {
   const everyBookingReserved =
     selectedBookings.length > 0 &&
     selectedRows.every((b) => b.status === BookingStatus.RESERVED);
+  // An expired reservation's passed dates need a choice only the booking page
+  // asks (as overdue, or a new end date), so the batch does not take it. The
+  // server refuses it too, by name, including the rows a select-all hides.
+  const someReservationExpired = selectedRows.some((b) =>
+    isReservationExpired(b.status, b.to)
+  );
   const everyBookingInProgress =
     selectedBookings.length > 0 &&
     selectedRows.every(
@@ -142,6 +151,8 @@ function ConditionalDropdown() {
     ? "This workspace requires explicit check-out for your role. Open each booking and scan or select its assets."
     : !everyBookingReserved
     ? "Some of the selected bookings are not reserved. You can only check out reserved bookings."
+    : someReservationExpired
+    ? "Some of the selected reservations have passed their dates. Open each one to check it out."
     : overBulkCheckInOutCap
     ? overCapReason
     : null;

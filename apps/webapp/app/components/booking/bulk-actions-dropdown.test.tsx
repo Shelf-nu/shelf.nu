@@ -69,7 +69,10 @@ vi.mock("~/hooks/use-booking-settings", () => ({
 }));
 
 /** The selection the mocked `useAtomValue` returns. */
-let mockSelectedBookings: { id: string; status: BookingStatus }[] = [];
+/** A selected row: the fields the dropdown reads off it. */
+type SelectedRow = { id: string; status: BookingStatus; to?: Date | string };
+
+let mockSelectedBookings: SelectedRow[] = [];
 
 // why: the selection lives in a jotai atom whose `onMount` resets it at
 // subscription time, so a seeded selection would be wiped before render.
@@ -113,7 +116,7 @@ function setup({
   totalItems = 2,
 }: {
   roles: OrganizationRoles[];
-  bookings: { id: string; status: BookingStatus }[];
+  bookings: SelectedRow[];
   isLoading?: boolean;
   settings?: ExplicitScanSettings;
   /** The list's total, which a select-all stands for */
@@ -209,6 +212,29 @@ describe("BulkActionsDropdown: bulk Check out", () => {
         new RegExp(`at most ${MAX_BULK_CHECK_IN_OUT_BOOKINGS} bookings at once`)
       ).length
     ).toBeGreaterThan(0);
+  });
+
+  it("disables Check out with the expired reason when a selected reservation's dates have passed", () => {
+    setup({
+      roles: [OrganizationRoles.ADMIN],
+      bookings: [
+        {
+          id: "b1",
+          status: BookingStatus.RESERVED,
+          to: "2099-01-01T00:00:00Z",
+        },
+        {
+          id: "b2",
+          status: BookingStatus.RESERVED,
+          to: "2020-01-01T00:00:00Z",
+        },
+      ],
+    });
+
+    expect(item(/^check out$/i)).toHaveAttribute("aria-disabled", "true");
+    expect(
+      screen.getByText(/passed their dates.*open each one to check it out/i)
+    ).toBeTruthy();
   });
 
   it("disables Check out with the status reason when a draft is in the selection", () => {
