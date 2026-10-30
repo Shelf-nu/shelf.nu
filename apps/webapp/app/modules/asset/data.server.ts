@@ -32,7 +32,10 @@ import { Logger } from "~/utils/logger";
 import { parseMarkdownToReact } from "~/utils/md";
 import { isPersonalOrg } from "~/utils/organization";
 import type { RoleAccess } from "~/utils/permissions/role-access";
-import { resolveCanImportAssets } from "~/utils/subscription.server";
+import {
+  canExportAssets,
+  resolveCanImportAssets,
+} from "~/utils/subscription.server";
 import type { UserNameFields } from "~/utils/user";
 import { resolveUserDisplayName } from "~/utils/user";
 import {
@@ -79,6 +82,7 @@ import {
   getTeamMemberForForm,
   getTeamMembersForNotify,
 } from "../team-member/service.server";
+import { getOrganizationTierLimit } from "../tier/service.server";
 
 interface Props {
   request: Request;
@@ -276,8 +280,9 @@ export async function simpleModeLoader({
   const hasActiveFilters = computeHasActiveFilters(searchParams);
   const view = searchParams.get("view") ?? "table";
 
-  /** Query the import gate, assets, presets, permissions and more, in parallel */
+  /** Query the tier limit, import gate, assets, presets, permissions and more, in parallel */
   let [
+    tierLimit,
     canImport,
     {
       search,
@@ -303,6 +308,8 @@ export async function simpleModeLoader({
     notifyData,
     savedFilterPresets,
   ] = await Promise.all([
+    // The export gate reads the tier directly; the import gate resolves its own.
+    getOrganizationTierLimit({ organizationId, organizations }),
     resolveCanImportAssets({ organizationId, organizations, userId, role }),
     getPaginatedAndFilterableAssets({
       request,
@@ -517,6 +524,7 @@ export async function simpleModeLoader({
       modelName,
       hasActiveFilters,
       canImportAssets: canImport,
+      canExportAssets: canExportAssets(tierLimit),
       searchFieldLabel: "Search assets",
       searchFieldTooltip: {
         title: "Search your asset database",
@@ -803,7 +811,7 @@ export async function advancedModeLoader({
   // categories, locations, asset models). Its output is only used in the final
   // response payload — no other query depends on it. Running it inside
   // Promise.all lets it overlap with the asset query instead of blocking it.
-  /** Query entities, the import gate, assets and more, in parallel */
+  /** Query entities, the tier limit, import gate, assets and more, in parallel */
   const [
     {
       tags,
@@ -815,6 +823,7 @@ export async function advancedModeLoader({
       assetModels,
       totalAssetModels,
     },
+    tierLimit,
     advCanImport,
     assetsOrRollup,
     customFields,
@@ -836,6 +845,8 @@ export async function advancedModeLoader({
       selectedLocationIds: selectedLocation,
       selectedAssetModelIds: selectedAssetModel,
     }),
+    // The export gate reads the tier directly; the import gate resolves its own.
+    getOrganizationTierLimit({ organizationId, organizations }),
     resolveCanImportAssets({ organizationId, organizations, userId, role }),
     isModelView
       ? getAssetModelRollupPage({
@@ -1040,6 +1051,7 @@ export async function advancedModeLoader({
       modelName,
       hasActiveFilters,
       canImportAssets: advCanImport,
+      canExportAssets: canExportAssets(tierLimit),
       searchFieldLabel: "Search assets",
       searchFieldTooltip: {
         title: "Search your asset database",
