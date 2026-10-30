@@ -8,8 +8,12 @@
  * not include them, the same page shows the unlock page instead of the cards,
  * and the loader sends no report data.
  *
+ * A workspace that also has the Advanced Reports add-on gets a "Build your own"
+ * card above the built-in reports, leading to the report builder.
+ *
  * @see {@link file://../../modules/reports/registry.ts}
  * @see {@link file://../../components/reports/unlock-reports-page.tsx}
+ * @see {@link file://./reports.builder.tsx}
  */
 
 import { ArrowRight, Lock } from "lucide-react";
@@ -18,8 +22,11 @@ import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 
 import Header from "~/components/layout/header";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
+import { SavedReportCard } from "~/components/reports/builder/saved-report-card";
 import { ReportIcon } from "~/components/reports/report-icon";
 import { UnlockReportsPage } from "~/components/reports/unlock-reports-page";
+
+import { BUILDER_REPORT_DEF } from "~/modules/reports/builder/spec";
 
 import {
   REPORTS,
@@ -27,6 +34,7 @@ import {
   getEnabledReports,
   getReportsByCategory,
 } from "~/modules/reports/registry";
+import { listSavedReports } from "~/modules/reports/saved/service.server";
 import type { ReportDefinition } from "~/modules/reports/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
@@ -36,8 +44,12 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { isOrganizationOwner, requirePermission } from "~/utils/roles.server";
-import { workspaceCanUseReports } from "~/utils/subscription.server";
+import {
+  canUseAdvancedReports,
+  workspaceCanUseReports,
+} from "~/utils/subscription.server";
 import { tw } from "~/utils/tw";
+import { resolveUserDisplayName } from "~/utils/user";
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: appendToMetaTitle(data?.header?.title || "Reports") },
@@ -60,13 +72,17 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   try {
     // The role check runs first, so a role that may not see reports gets the
     // role error whatever the plan.
-    const { organizationId, organizations, userOrganizations } =
-      await requirePermission({
-        userId,
-        request,
-        entity: PermissionEntity.reports,
-        action: PermissionAction.read,
-      });
+    const {
+      organizationId,
+      organizations,
+      userOrganizations,
+      currentOrganization,
+    } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.reports,
+      action: PermissionAction.read,
+    });
 
     // Standard header object for app Header component
     const header = {
@@ -91,12 +107,29 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       });
     }
 
+    // The builder card and the saved reports appear only for a workspace with
+    // the add-on; the builder page itself explains the add-on to anyone else.
+    const builderEnabled = canUseAdvancedReports(currentOrganization);
+    const savedReports = builderEnabled
+      ? (await listSavedReports({ organizationId })).map(
+          ({ id, name, query, updatedAt, createdBy }) => ({
+            id,
+            name,
+            query,
+            updatedAt,
+            savedBy: resolveUserDisplayName(createdBy),
+          })
+        )
+      : [];
+
     return data({
       canUseReports: true as const,
       header,
       reports: REPORTS,
       reportsByCategory: getReportsByCategory(),
       categories: REPORT_CATEGORIES,
+      builderEnabled,
+      savedReports,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
@@ -126,7 +159,8 @@ export default function ReportsIndex() {
     );
   }
 
-  const { reportsByCategory, categories } = loaderData;
+  const { reportsByCategory, categories, builderEnabled, savedReports } =
+    loaderData;
 
   // Filter to only show categories with reports
   const visibleCategories = Object.entries(reportsByCategory).filter(
@@ -144,6 +178,42 @@ export default function ReportsIndex() {
       {/* Content area matching app patterns */}
       <ListContentWrapper>
         <div className="space-y-6">
+          {builderEnabled ? (
+            <section>
+              <div className="mb-3">
+                <h3 className="text-sm font-medium text-gray-900">
+                  Build your own
+                </h3>
+                <p className="text-xs text-gray-500">
+                  Pick the data, group it, choose a measure and filter it your
+                  way
+                </p>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                <ReportCard report={BUILDER_REPORT_DEF} />
+              </div>
+            </section>
+          ) : null}
+
+          {builderEnabled && savedReports.length > 0 ? (
+            <section>
+              <div className="mb-3">
+                <h3 className="text-sm font-medium text-gray-900">
+                  Your reports
+                </h3>
+                <p className="text-xs text-gray-500">
+                  Reports saved in this workspace. Open one to run it with
+                  today&apos;s data.
+                </p>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {savedReports.map((report) => (
+                  <SavedReportCard key={report.id} report={report} />
+                ))}
+              </div>
+            </section>
+          ) : null}
+
           {visibleCategories.map(([categoryKey, reports]) => {
             const category = categories[categoryKey as keyof typeof categories];
 
@@ -227,7 +297,7 @@ function ReportCard({ report }: { report: ReportDefinition }) {
 
       {/* Arrow indicator for enabled reports */}
       {report.enabled && (
-        <div className="absolute right-4 top-1/2 -translate-y-1/2 opacity-0 transition-opacity group-hover:opacity-100">
+        <div className="group-hover:opacity-100 absolute right-4 top-1/2 -translate-y-1/2 opacity-0 transition-opacity">
           <ArrowRight className="size-4 text-gray-400" />
         </div>
       )}

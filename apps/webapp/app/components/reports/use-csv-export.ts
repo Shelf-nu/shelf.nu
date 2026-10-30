@@ -26,8 +26,14 @@ import { useSearchParams } from "~/hooks/search-params";
  *                   `reportId` query param on the export endpoint).
  * @param timeframePreset - Current timeframe preset (used for the
  *                          filename only).
+ * @param exportPath - Route that builds the CSV. The fixed reports share
+ *                     `/reports/export`; the report builder has its own.
  */
-export function useCsvExport(reportId: string, timeframePreset: string) {
+export function useCsvExport(
+  reportId: string,
+  timeframePreset: string,
+  exportPath = "/reports/export"
+) {
   const [isExporting, setIsExporting] = useState(false);
   const showNotification = useSetAtom(showNotificationAtom);
   const [searchParams] = useSearchParams();
@@ -43,7 +49,7 @@ export function useCsvExport(reportId: string, timeframePreset: string) {
     const dateStr = new Date().toISOString().split("T")[0];
     const fileName = `${reportId}-${timeframePreset}-${dateStr}.csv`;
 
-    const exportUrl = `/reports/export/${fileName}?${exportParams.toString()}`;
+    const exportUrl = `${exportPath}/${fileName}?${exportParams.toString()}`;
 
     try {
       // Fetch the CSV
@@ -81,7 +87,7 @@ export function useCsvExport(reportId: string, timeframePreset: string) {
     } finally {
       setIsExporting(false);
     }
-  }, [reportId, timeframePreset, searchParams, showNotification]);
+  }, [reportId, timeframePreset, exportPath, searchParams, showNotification]);
 
   return { isExporting, handleExport };
 }

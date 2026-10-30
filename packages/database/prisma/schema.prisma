@@ -135,6 +135,7 @@ model User {
   customTierLimit CustomTierLimit?
 
   assetFilterPresets AssetFilterPreset[]
+  savedReports       SavedReport[]
   assetModels        AssetModel[]
   consumptionLogs    ConsumptionLog[]
 
@@ -387,6 +388,26 @@ model AssetFilterPreset {
 
   @@unique([organizationId, ownerId, name], map: "asset_filter_presets_owner_name_unique")
   @@index([organizationId, ownerId], map: "asset_filter_presets_owner_lookup_idx")
+}
+
+/// A report built with the Advanced Reports builder and kept for the whole
+/// workspace. `query` is the builder page's URL query string (data set,
+/// grouping, measure, filters, timeframe); opening the report navigates to
+/// `/reports/builder?<query>`, so the URL grammar validates it on read.
+model SavedReport {
+  id             String   @id @default(cuid())
+  organizationId String
+  createdById    String
+  name           String
+  query          String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy    User         @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, name], map: "saved_reports_org_name_unique")
+  @@index([organizationId], map: "saved_reports_org_idx")
 }
 
 model AssetIndexSettings {
@@ -1127,6 +1148,11 @@ model Organization {
   auditsEnabledAt  DateTime? // Track when audit feature was enabled
   usedAuditTrial   Boolean   @default(false) // Set once a 7-day free audit trial is activated (prevents reuse)
 
+  // Advanced Reports add-on (per-organization; the report builder under /reports/builder)
+  advancedReportsEnabled   Boolean   @default(false) // If true, this organization can use the report builder
+  advancedReportsEnabledAt DateTime? // Track when the add-on was enabled
+  usedAdvancedReportsTrial Boolean   @default(false) // Set once a free trial is activated (prevents reuse)
+
   // This is used to disable the workspace for the user. It is set to true when the user leaves the workspace
   workspaceDisabled Boolean @default(false) // If true, the workspace is disabled and the user cannot access it
 
@@ -1148,6 +1174,7 @@ model Organization {
   assetIndexSettings AssetIndexSettings[]
   assetReminders     AssetReminder[]
   assetFilterPresets AssetFilterPreset[]
+  savedReports       SavedReport[]
 
   auditSessions      AuditSession[]
   auditImages        AuditImage[]
