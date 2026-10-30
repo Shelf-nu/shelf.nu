@@ -33,9 +33,9 @@
  */
 
 import type { ReactNode } from "react";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { act, render, screen, fireEvent } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { AssetStatusBadge } from "./asset-status-badge";
 import type { QuantityAwareAsset, QuantityBreakdown } from "./quantity-data";
@@ -76,6 +76,14 @@ vi.mock("~/hooks/use-api-query", () => ({
 // only need the trigger (Badge text) to render — wrap the Radix
 // components in passthrough renderers so the badge text reaches the
 // DOM without needing to drive the hover lifecycle.
+// why: `DateS` reads the user's format preferences from the root loader data,
+// which this component test does not mount. The dates are not under test.
+vi.mock("~/components/shared/date", () => ({
+  DateS: ({ date }: { date: Date | string }) => (
+    <span>{new Date(date).toISOString()}</span>
+  ),
+}));
+
 vi.mock("../../shared/hover-card", () => ({
   HoverCard: ({ children }: { children: ReactNode }) => <>{children}</>,
   HoverCardTrigger: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -381,6 +389,59 @@ describe("AssetStatusBadge", () => {
       if (root) fireEvent.mouseEnter(root);
 
       expect(breakdownFetchEnabled("asset-idx-3")).toBe(false);
+    });
+  });
+  describe("a reservation ending while the page is open", () => {
+    const NOW = new Date("2026-10-20T12:00:00Z").getTime();
+
+    beforeEach(() => {
+      // why: the badge schedules its refresh against the clock, so pin and
+      // advance it
+      vi.useFakeTimers();
+      vi.setSystemTime(NOW);
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("stops counting it once its end passes, with no new data", () => {
+      render(
+        <MemoryRouter>
+          <AssetStatusBadge
+            id="asset-expiring-1"
+            status="AVAILABLE"
+            availableToBook
+            asset={{
+              type: "QUANTITY_TRACKED",
+              quantity: 10,
+              custody: [],
+              assetKits: [],
+              bookingAssets: [
+                {
+                  quantity: 10,
+                  assetKitId: null,
+                  booking: {
+                    id: "b-ending",
+                    name: "Ending soon",
+                    status: "RESERVED",
+                    from: new Date(NOW - 60 * 60 * 1000),
+                    to: new Date(NOW + 60_000),
+                  },
+                },
+              ],
+            }}
+          />
+        </MemoryRouter>
+      );
+      expect(screen.getByText("Reserved")).toBeInTheDocument();
+
+      act(() => {
+        vi.advanceTimersByTime(2 * 60_000);
+      });
+
+      expect(screen.queryByText("Reserved")).not.toBeInTheDocument();
+      expect(screen.getByText("Available")).toBeInTheDocument();
     });
   });
 });

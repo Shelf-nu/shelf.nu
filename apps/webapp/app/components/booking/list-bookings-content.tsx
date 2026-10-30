@@ -192,6 +192,7 @@ export default function ListBookingsContent({
                 <BookingStatusBadge
                   status={item.status}
                   custodianUserId={item.custodianUserId || undefined}
+                  to={item.to}
                 />
               </div>
             </div>

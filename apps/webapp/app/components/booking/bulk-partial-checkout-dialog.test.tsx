@@ -37,6 +37,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { CheckoutSourceQuestion } from "~/modules/booking/checkout-source-location";
 import BulkPartialCheckoutDialog from "./bulk-partial-checkout-dialog";
+import { REVERT_TO_DRAFT_RESCHEDULE_HINT } from "./checkout-dialog";
+import type * as CheckoutDialogModule from "./checkout-dialog";
 
 // why: react-router hooks need a router context — stub them so we can drive
 // loader/action data per test. The dialog only reads `useLoaderData`,
@@ -62,16 +64,20 @@ vi.mock("~/components/custom-form", () => ({
 // why: the confirming branch renders CheckoutDialog, whose react-router
 // dependencies this harness does not mount. The stub renders a marker carrying
 // the unassigned units it would confirm, so a test can tell the confirming
-// branch from the plain submit button.
-vi.mock("./checkout-dialog", () => ({
+// branch from the plain submit button. The module's other exports stay real.
+vi.mock("./checkout-dialog", async (importOriginal) => ({
+  ...(await importOriginal<typeof CheckoutDialogModule>()),
   default: ({
     unassignedUnits,
+    expiredRescheduleHint,
   }: {
     unassignedUnits?: Array<{ name: string; count: number }>;
+    expiredRescheduleHint?: string;
   }) => (
     <div
       data-testid="checkout-dialog-mock"
       data-unassigned={JSON.stringify(unassignedUnits ?? [])}
+      data-expired-hint={expiredRescheduleHint ?? ""}
     />
   ),
 }));
@@ -664,6 +670,10 @@ describe("BulkPartialCheckoutDialog — items that cannot go out again", () => {
     renderDialog();
 
     expect(screen.getByTestId("checkout-dialog-mock")).toBeInTheDocument();
+    // Nothing unassigned: the header's Check out can give new dates.
+    expect(screen.getByTestId("checkout-dialog-mock").dataset.expiredHint).toBe(
+      ""
+    );
     expect(
       document.querySelector(
         'button[type="submit"][name="intent"][value="partial-checkout"]'
@@ -712,6 +722,9 @@ describe("BulkPartialCheckoutDialog — unassigned model reservations", () => {
     expect(JSON.parse(dialog.dataset.unassigned ?? "[]")).toEqual([
       { name: "Dell Latitude", count: 2 },
     ]);
+    // Its header Check out leads to the fulfil flow, which sets no new end
+    // date, so an expired prompt points at reverting to draft instead.
+    expect(dialog.dataset.expiredHint).toBe(REVERT_TO_DRAFT_RESCHEDULE_HINT);
   });
 
   it("does not ask again once the booking is underway", () => {

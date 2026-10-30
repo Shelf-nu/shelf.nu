@@ -226,6 +226,9 @@ export function BookingQuickActions({ booking }: BookingQuickActionsProps) {
   const dialogBooking = {
     id: booking.id,
     name: booking.name,
+    // `status` and `to` let the check-out dialog spot an expired reservation
+    // and ask how to check it out; without them the server refuses it.
+    status: booking.status,
     from: new Date(booking.from ?? Date.now()),
     to: new Date(booking.to ?? Date.now()),
   };

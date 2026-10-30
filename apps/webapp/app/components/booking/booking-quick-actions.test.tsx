@@ -18,7 +18,7 @@
  */
 import type { ComponentProps, ReactNode } from "react";
 import { BookingStatus, OrganizationRoles } from "@prisma/client";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { accessFor } from "@helpers/role-access";
 import type { ExplicitScanSettings } from "~/utils/permissions/role-access";
@@ -89,6 +89,23 @@ vi.mock("react-router", async () => {
 // why: the dialogs read navigation state to disable their buttons; nothing in
 // flight here.
 vi.mock("~/hooks/use-disabled", () => ({ useDisabled: () => false }));
+
+// why: the check-out dialog proposes an expired reservation's new end date in
+// the user's resolved timezone, read from the root loader data this test does
+// not mount. The dates are not under test.
+vi.mock("~/hooks/use-date-formatter", () => ({
+  useDateFormatter: () => ({
+    prefs: {
+      dateFormat: "MM_DD_YYYY",
+      timeFormat: "H12",
+      weekStartsOn: 0,
+      timeZone: "UTC",
+    },
+    formatDate: (value: string | Date) => String(value),
+    formatTime: (value: string | Date) => String(value),
+    formatDateTime: (value: string | Date) => String(value),
+  }),
+}));
 
 type RowBooking = ComponentProps<typeof BookingQuickActions>["booking"];
 
@@ -276,6 +293,22 @@ describe("BookingQuickActions: what the row renders", () => {
     });
 
     expect(screen.getByRole("button", { name: /check out/i })).toBeEnabled();
+  });
+
+  it("asks how to check out an expired reservation instead of posting a bare check-out", () => {
+    // RESERVED with its end already passed: the server refuses a check-out
+    // that does not say how to handle the passed dates, so the row's dialog
+    // has to ask.
+    renderRow({
+      from: new Date("2020-01-01T09:00:00Z"),
+      to: new Date("2020-01-02T17:00:00Z"),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /check out/i }));
+
+    expect(
+      screen.getByText("Reservation dates have passed")
+    ).toBeInTheDocument();
   });
 
   it("hides both check-out buttons when the workspace requires explicit check-out for the viewer", () => {

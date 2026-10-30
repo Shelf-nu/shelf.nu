@@ -114,6 +114,7 @@ vi.mock("~/components/booking/checkout-dialog", () => ({
     WITH_ADJUSTED_DATE: "with-adjusted-date",
     WITHOUT_ADJUSTED_DATE: "without-adjusted-date",
   },
+  REVERT_TO_DRAFT_RESCHEDULE_HINT: "Revert the booking to draft.",
 }));
 
 const useRouteLoaderDataMock = vi.mocked(useRouteLoaderData);
@@ -228,6 +229,7 @@ function renderDrawer(
     bookingId: "booking-1",
     bookingName: "Nishanth",
     bookingFrom: new Date("2099-01-01T10:00:00Z").toISOString(),
+    bookingTo: new Date("2099-01-01T18:00:00Z").toISOString(),
     bookingStatus: "RESERVED",
     checksOutScannedOnly: options.checksOutScannedOnly ?? false,
     expectedModelRequests,
