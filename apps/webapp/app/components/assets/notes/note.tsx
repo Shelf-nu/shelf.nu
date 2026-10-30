@@ -56,7 +56,7 @@ const Update = ({ note }: { note: NoteWithUser; when?: boolean }) => (
       <Tag>
         <DateS date={note.createdAt} includeTime />
       </Tag>{" "}
-      <SystemNoteViewer content={note.content} />
+      <SystemNoteViewer content={note.content} linkChips />
     </div>
   </div>
 );
@@ -101,7 +101,7 @@ const Comment = ({
           a deliberate feature here. System notes (the `Update` variant above)
           get the default `false` — their text is assembled by us from entity
           names, so an external link in one was injected. */}
-      <MarkdownViewer content={note.content} allowExternalLinks />
+      <MarkdownViewer content={note.content} allowExternalLinks linkChips />
     </div>
   </>
 );

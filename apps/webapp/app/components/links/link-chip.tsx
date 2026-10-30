@@ -37,7 +37,7 @@ export function LinkChip({
       aria-label={label}
       title={link.url}
       className={tw(
-        "inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-2xl border border-gray-200 bg-white px-2 py-0.5 align-middle text-gray-700",
+        "link-chip inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-2xl border border-gray-200 bg-white px-2 py-0.5 align-middle text-gray-700",
         "hover:border-gray-300 hover:bg-gray-50 hover:text-gray-900",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500",
         compact ? "max-w-[260px] text-xs" : "text-sm"
@@ -46,7 +46,7 @@ export function LinkChip({
       <LinkIcon icon={link.icon} className="text-gray-500" />
       <span className="truncate font-medium">{primary}</span>
       {meta ? (
-        <span className="max-w-[24ch] shrink-0 truncate text-gray-500">
+        <span className="max-w-[24ch] shrink-0 truncate font-normal text-gray-500">
           {meta}
         </span>
       ) : null}

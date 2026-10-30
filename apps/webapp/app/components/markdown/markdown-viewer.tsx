@@ -2,6 +2,7 @@ import React from "react";
 import type { ComponentProps, ComponentType } from "react";
 import type { RenderableTreeNodes } from "@markdoc/markdoc";
 import { renderers } from "@markdoc/markdoc";
+import { chipBareUrls } from "~/utils/link-chips-in-markdoc";
 import { markdocConfig } from "~/utils/markdoc.config";
 import { parseMarkdownToReact } from "~/utils/md";
 import { sanitizeMarkdocTree } from "~/utils/sanitize-markdoc-tree";
@@ -13,6 +14,7 @@ import { CategoryBadgeComponent } from "./category-badge-component";
 import { DateComponent } from "./date-component";
 import { DescriptionComponent } from "./description-component";
 import { KitsListComponent } from "./kits-list-component";
+import { LinkChipComponent } from "./link-chip-component";
 import { LinkComponent } from "./link-component";
 import { TagComponent } from "./tag-component";
 
@@ -48,6 +50,12 @@ interface Props {
    * Dangerous schemes and off-origin images are blocked regardless.
    */
   allowExternalLinks?: boolean;
+  /**
+   * Show bare http(s) URLs in the text as link chips (activity notes). Links
+   * written as Markdown keep their own text. Chips are always http(s), so this
+   * is safe for system notes too.
+   */
+  linkChips?: boolean;
 }
 
 // Default components map including our custom components
@@ -57,6 +65,7 @@ const defaultComponents = {
   AuditImagesComponent,
   KitsListComponent,
   LinkComponent,
+  LinkChipComponent,
   BookingStatusComponent,
   DescriptionComponent,
   CategoryBadgeComponent,
@@ -87,6 +96,7 @@ export const MarkdownViewer = ({
   className,
   disablePortal,
   allowExternalLinks = false,
+  linkChips = false,
 }: Props) => {
   const styles = tw("pm-doc", className);
 
@@ -120,8 +130,9 @@ export const MarkdownViewer = ({
         ? parseMarkdownToReact(content, markdocConfig)
         : content;
 
-    return sanitizeMarkdocTree(tree, { allowExternalLinks });
-  }, [content, allowExternalLinks]);
+    const sanitized = sanitizeMarkdocTree(tree, { allowExternalLinks });
+    return linkChips ? chipBareUrls(sanitized) : sanitized;
+  }, [content, allowExternalLinks, linkChips]);
 
   return (
     <div className={styles}>

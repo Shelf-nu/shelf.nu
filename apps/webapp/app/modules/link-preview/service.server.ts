@@ -21,7 +21,12 @@
  */
 
 import { CustomFieldFormat, CustomFieldType, Prisma } from "@prisma/client";
-import { cleanLinkTitle, MAX_LINK_LENGTH, parseLink } from "@shelf/links";
+import {
+  cleanLinkTitle,
+  MAX_LINK_LENGTH,
+  parseLink,
+  segmentText,
+} from "@shelf/links";
 import type {
   FieldLinkTitles,
   LinkKey,
@@ -94,6 +99,48 @@ export async function getLinkTitles({
   values: readonly LinkTitleSource[];
 }): Promise<LinkTitles> {
   const { keys, fetchable } = linkKeysOf(values);
+  return readTitlesAndClaim(organizationId, keys, fetchable);
+}
+
+/**
+ * Titles for the web links written in activity notes, keyed by `LinkKey`.
+ *
+ * Every http(s) URL `segmentText` finds in the notes is read, and links never
+ * fetched or due again are claimed for the worker, like a Link field's value:
+ * a person wrote the link in the note, so its title is shown. Never throws.
+ *
+ * @param args.organizationId - Workspace whose rows are read and claimed
+ * @param args.texts - The note contents (Markdown) shown on the page
+ * @returns Titles for links that have a page title or a custom name
+ */
+export async function getNoteLinkTitles({
+  organizationId,
+  texts,
+}: {
+  organizationId: string;
+  texts: readonly string[];
+}): Promise<LinkTitles> {
+  const keys = new Set<LinkKey>();
+  for (const text of texts) {
+    for (const segment of segmentText(text)) {
+      if (segment.type !== "link") continue;
+      const link = parseLink(segment.url);
+      if (link && isStorable(link.key)) keys.add(link.key);
+    }
+  }
+  return readTitlesAndClaim(organizationId, keys, keys);
+}
+
+/**
+ * Reads the workspace's rows for `keys` and claims the `fetchable` ones that
+ * were never fetched or are due (at most {@link MAX_CLAIMS_PER_READ}), without
+ * waiting for the claim. Never throws.
+ */
+async function readTitlesAndClaim(
+  organizationId: string,
+  keys: ReadonlySet<LinkKey>,
+  fetchable: ReadonlySet<LinkKey>
+): Promise<LinkTitles> {
   if (keys.size === 0) return {};
 
   let rows: {

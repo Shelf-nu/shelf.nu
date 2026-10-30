@@ -22,7 +22,11 @@ import { server } from "@mocks";
 import { db } from "~/database/db.server";
 import { Logger } from "~/utils/logger";
 import { scheduler } from "~/utils/scheduler.server";
-import { getLinkTitles, runLinkPreviewJob } from "./service.server";
+import {
+  getLinkTitles,
+  getNoteLinkTitles,
+  runLinkPreviewJob,
+} from "./service.server";
 import type { LinkTitleSource } from "./service.server";
 
 // why: LinkPreview rows live in the database; each test sets what it returns
@@ -507,5 +511,42 @@ describe("runLinkPreviewJob", () => {
     await runLinkPreviewJob({ previewId: "lp-gone", organizationId: ORG });
 
     expect(db.linkPreview.updateMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("getNoteLinkTitles", () => {
+  it("reads and claims every web link written in the notes, once each", async () => {
+    vi.mocked(db.linkPreview.findMany).mockResolvedValue([
+      row(MANUAL, { pageTitle: "EOS R5 user manual" }),
+    ] as never);
+    vi.mocked(db.$queryRaw).mockResolvedValue([{ id: "lp-sheet" }]);
+
+    const titles = await getNoteLinkTitles({
+      organizationId: ORG,
+      texts: [
+        `Manual: ${MANUAL} (rev B)`,
+        `Sheet ${SHEET}, and the manual again ${MANUAL}.`,
+        "No link here",
+      ],
+    });
+    await settleClaim();
+
+    expect(titles).toEqual({
+      [MANUAL]: { pageTitle: "EOS R5 user manual", customTitle: null },
+    });
+    expect(vi.mocked(db.linkPreview.findMany).mock.calls[0][0]).toMatchObject({
+      where: { organizationId: ORG, url: { in: [MANUAL, SHEET] } },
+    });
+    expect(claimQuery()?.values).toEqual([ORG, "15 minutes", [SHEET]]);
+  });
+
+  it("reads nothing for notes without a web link", async () => {
+    const titles = await getNoteLinkTitles({
+      organizationId: ORG,
+      texts: ["Calibrated today", "see binder 3", "javascript:alert(1)"],
+    });
+
+    expect(titles).toEqual({});
+    expect(db.linkPreview.findMany).not.toHaveBeenCalled();
   });
 });
