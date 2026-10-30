@@ -37,7 +37,7 @@
  */
 import type { ReactNode } from "react";
 import { BookingStatus } from "@prisma/client";
-import { ChevronsRightIcon } from "lucide-react";
+import { ArrowRightFromLineIcon, LogInIcon, LogOutIcon } from "lucide-react";
 import { useFetcher } from "react-router";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useDisabled } from "~/hooks/use-disabled";
@@ -56,7 +56,6 @@ import { userHasPermission } from "~/utils/permissions/permission.validator.clie
 import { isExplicitScanRequired } from "~/utils/permissions/role-access";
 import CheckinDialog from "./checkin-dialog";
 import CheckoutDialog from "./checkout-dialog";
-import { CheckInIcon, CheckOutIcon } from "../icons/library";
 import { Button } from "../shared/button";
 
 /** What the row buttons read off a bookings-list row. */
@@ -89,14 +88,17 @@ type BookingQuickActionsProps = {
 export const ASSIGN_UNITS_FIRST_REASON =
   "Open the booking to assign the reserved units first.";
 
+/** The heading of that reason's hover card, naming the blocked action. */
+const CHECK_OUT_BLOCKED_TITLE = "Can't check out yet";
+
 /** Each action's tooltip and accessible name, and its icon. */
 const ACTIONS = {
-  checkOut: { label: "Check out", icon: <CheckOutIcon className="size-4" /> },
+  checkOut: { label: "Check out", icon: <LogOutIcon className="size-4" /> },
   checkOutRemaining: {
     label: "Check out remaining",
-    icon: <ChevronsRightIcon className="size-4" />,
+    icon: <ArrowRightFromLineIcon className="size-4" />,
   },
-  checkIn: { label: "Check in", icon: <CheckInIcon className="size-4" /> },
+  checkIn: { label: "Check in", icon: <LogInIcon className="size-4" /> },
 } satisfies Record<string, { label: string; icon: ReactNode }>;
 
 /**
@@ -215,8 +217,11 @@ export function BookingQuickActions({ booking }: BookingQuickActionsProps) {
   }
 
   const unassignedUnits = countUnassignedModelUnits(booking.modelRequests);
+  // The hover card names the action, since the row's buttons are icons only.
   const checkOutDisabled =
-    unassignedUnits > 0 ? { reason: ASSIGN_UNITS_FIRST_REASON } : false;
+    unassignedUnits > 0
+      ? { title: CHECK_OUT_BLOCKED_TITLE, reason: ASSIGN_UNITS_FIRST_REASON }
+      : false;
 
   const dialogBooking = {
     id: booking.id,
@@ -226,9 +231,13 @@ export function BookingQuickActions({ booking }: BookingQuickActionsProps) {
   };
 
   return (
-    <div className="flex items-center gap-2">
+    <>
+      {/* Outside the flex row and not displayed: an empty form is still a
+          flex item, and the gap would put space before the first button.
+          The buttons reach it through `form={formId}`. */}
       <fetcher.Form
         id={formId}
+        className="hidden"
         method="post"
         action={`/bookings/${booking.id}/overview`}
       >
@@ -239,50 +248,52 @@ export function BookingQuickActions({ booking }: BookingQuickActionsProps) {
         <input type="hidden" name="returnJson" value="true" />
       </fetcher.Form>
 
-      {buttons.checkOut ? (
-        busy ? (
-          <BusyActionButton {...ACTIONS.checkOut} />
-        ) : (
-          <CheckoutDialog
-            booking={dialogBooking}
-            formId={formId}
-            intent="checkOut"
-            variant="icon"
-            {...ACTIONS.checkOut}
-            disabled={checkOutDisabled}
-          />
-        )
-      ) : null}
+      <div className="flex items-center gap-2">
+        {buttons.checkOut ? (
+          busy ? (
+            <BusyActionButton {...ACTIONS.checkOut} />
+          ) : (
+            <CheckoutDialog
+              booking={dialogBooking}
+              formId={formId}
+              intent="checkOut"
+              variant="icon"
+              {...ACTIONS.checkOut}
+              disabled={checkOutDisabled}
+            />
+          )
+        ) : null}
 
-      {buttons.checkOutRemaining ? (
-        busy ? (
-          <BusyActionButton {...ACTIONS.checkOutRemaining} />
-        ) : (
-          <CheckoutDialog
-            booking={dialogBooking}
-            formId={formId}
-            intent="checkOutRemaining"
-            variant="icon"
-            {...ACTIONS.checkOutRemaining}
-            // The booking has started: adjusting the start date no longer
-            // applies, the same as the header's "Check out remaining".
-            suppressEarlyCheckoutPrompt
-          />
-        )
-      ) : null}
+        {buttons.checkOutRemaining ? (
+          busy ? (
+            <BusyActionButton {...ACTIONS.checkOutRemaining} />
+          ) : (
+            <CheckoutDialog
+              booking={dialogBooking}
+              formId={formId}
+              intent="checkOutRemaining"
+              variant="icon"
+              {...ACTIONS.checkOutRemaining}
+              // The booking has started: adjusting the start date no longer
+              // applies, the same as the header's "Check out remaining".
+              suppressEarlyCheckoutPrompt
+            />
+          )
+        ) : null}
 
-      {buttons.checkIn ? (
-        busy ? (
-          <BusyActionButton {...ACTIONS.checkIn} />
-        ) : (
-          <CheckinDialog
-            booking={dialogBooking}
-            formId={formId}
-            variant="icon"
-            {...ACTIONS.checkIn}
-          />
-        )
-      ) : null}
-    </div>
+        {buttons.checkIn ? (
+          busy ? (
+            <BusyActionButton {...ACTIONS.checkIn} />
+          ) : (
+            <CheckinDialog
+              booking={dialogBooking}
+              formId={formId}
+              variant="icon"
+              {...ACTIONS.checkIn}
+            />
+          )
+        ) : null}
+      </div>
+    </>
   );
 }
