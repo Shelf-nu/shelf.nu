@@ -257,59 +257,163 @@ describe("getBookingIdsWithUnavailableAssets — scoping", () => {
  * partial check-in exclusion runs on its result.
  */
 describe("getBookingIdsWithItemsToCheckOut", () => {
-  /** A booking as the lookup returns it. */
-  function lookupRow(
-    id: string,
-    candidateAssetIds: string[],
-    partiallyCheckedIn: string[] = []
-  ) {
+  /** One slice as the lookup returns it. */
+  type Slice = {
+    id: string;
+    assetId: string;
+    quantity: number;
+    assetKitId: string | null;
+    checkedOutAt: Date | null;
+    checkedInAt: Date | null;
+    asset: { type: "INDIVIDUAL" | "QUANTITY_TRACKED"; status: string };
+  };
+
+  const OUT = new Date("2026-10-01T09:00:00Z");
+  const BACK = new Date("2026-10-02T09:00:00Z");
+
+  /** A slice with sensible defaults: one unit, standalone, never sent out. */
+  function slice(overrides: Partial<Slice> & Pick<Slice, "id" | "assetId">) {
     return {
-      id,
-      bookingAssets: candidateAssetIds.map((assetId) => ({ assetId })),
-      partialCheckins: partiallyCheckedIn.length
-        ? [{ assetIds: partiallyCheckedIn }]
-        : [],
+      quantity: 1,
+      assetKitId: null,
+      checkedOutAt: null,
+      checkedInAt: null,
+      asset: { type: "INDIVIDUAL" as const, status: "AVAILABLE" },
+      ...overrides,
     };
   }
 
-  it("flags an underway booking that still has an item the server would send", async () => {
-    findManyMock.mockResolvedValue([lookupRow("booking-1", ["asset-1"])]);
+  /** A booking as the lookup returns it. */
+  function lookupRow(
+    id: string,
+    {
+      slices = [],
+      checkouts = [],
+      returned = [],
+    }: {
+      slices?: Slice[];
+      checkouts?: {
+        assetIds: string[];
+        quantities: number[];
+        bookingAssetIds: string[];
+      }[];
+      returned?: string[];
+    } = {}
+  ) {
+    return {
+      id,
+      bookingAssets: slices,
+      partialCheckouts: checkouts,
+      partialCheckins: returned.length ? [{ assetIds: returned }] : [],
+    };
+  }
 
-    const flagged = await getBookingIdsWithItemsToCheckOut({
-      bookingIds: ["booking-1"],
+  async function flagged(row: ReturnType<typeof lookupRow>) {
+    findManyMock.mockResolvedValue([row]);
+    return getBookingIdsWithItemsToCheckOut({
+      bookingIds: [row.id],
       organizationId: ORG_ID,
     });
+  }
 
-    expect(flagged).toEqual(new Set(["booking-1"]));
+  it("flags a booking with an individual item that is free to go out", async () => {
+    const ids = await flagged(
+      lookupRow("b1", { slices: [slice({ id: "s1", assetId: "a1" })] })
+    );
+
+    expect(ids).toEqual(new Set(["b1"]));
   });
 
-  it("does not flag a booking whose only candidate item came back by a partial check-in", async () => {
-    findManyMock.mockResolvedValue([
-      lookupRow("booking-1", ["asset-1"], ["asset-1"]),
-    ]);
+  it("does not flag an item a partial check-in already returned", async () => {
+    const ids = await flagged(
+      lookupRow("b1", {
+        slices: [slice({ id: "s1", assetId: "a1" })],
+        returned: ["a1"],
+      })
+    );
 
-    const flagged = await getBookingIdsWithItemsToCheckOut({
-      bookingIds: ["booking-1"],
-      organizationId: ORG_ID,
-    });
-
-    expect(flagged.size).toBe(0);
+    expect(ids.size).toBe(0);
   });
 
   it("does not flag a booking with no candidate slice, such as an item busy elsewhere", async () => {
     // An individual item in custody or out on another booking is not
     // Available, so the query returns no slice for it.
-    findManyMock.mockResolvedValue([lookupRow("booking-1", [])]);
+    const ids = await flagged(lookupRow("b1"));
 
-    const flagged = await getBookingIdsWithItemsToCheckOut({
-      bookingIds: ["booking-1"],
-      organizationId: ORG_ID,
-    });
-
-    expect(flagged.size).toBe(0);
+    expect(ids.size).toBe(0);
   });
 
-  it("asks only for the slices the server's Check out remaining would take", async () => {
+  it("does not flag a quantity-tracked slice sent out in full with one click", async () => {
+    const ids = await flagged(
+      lookupRow("b1", {
+        slices: [
+          slice({
+            id: "s1",
+            assetId: "q1",
+            quantity: 10,
+            checkedOutAt: OUT,
+            asset: { type: "QUANTITY_TRACKED", status: "CHECKED_OUT" },
+          }),
+        ],
+      })
+    );
+
+    expect(ids.size).toBe(0);
+  });
+
+  it("flags a quantity-tracked slice only partly sent out by scanning", async () => {
+    const ids = await flagged(
+      lookupRow("b1", {
+        slices: [
+          slice({
+            id: "s1",
+            assetId: "q1",
+            quantity: 10,
+            checkedOutAt: OUT,
+            asset: { type: "QUANTITY_TRACKED", status: "CHECKED_OUT" },
+          }),
+        ],
+        checkouts: [
+          { assetIds: ["q1"], quantities: [3], bookingAssetIds: ["s1"] },
+        ],
+      })
+    );
+
+    expect(ids).toEqual(new Set(["b1"]));
+  });
+
+  it("flags a quantity-tracked slice that came back in full while a sibling slice is still out", async () => {
+    // Two slices of one pool, sent out together with one click. A partial
+    // check-in returned the kit slice in full; the standalone slice still
+    // owes its units, so the asset is not on the check-in's list. The server
+    // offers to send the returned slice again, so the row has to as well.
+    const ids = await flagged(
+      lookupRow("b1", {
+        slices: [
+          slice({
+            id: "s-loose",
+            assetId: "q1",
+            quantity: 4,
+            checkedOutAt: OUT,
+            asset: { type: "QUANTITY_TRACKED", status: "CHECKED_OUT" },
+          }),
+          slice({
+            id: "s-kit",
+            assetId: "q1",
+            quantity: 2,
+            assetKitId: "ak1",
+            checkedOutAt: OUT,
+            checkedInAt: BACK,
+            asset: { type: "QUANTITY_TRACKED", status: "CHECKED_OUT" },
+          }),
+        ],
+      })
+    );
+
+    expect(ids).toEqual(new Set(["b1"]));
+  });
+
+  it("asks for underway bookings, their candidate slices and both kinds of session", async () => {
     findManyMock.mockResolvedValue([]);
 
     await getBookingIdsWithItemsToCheckOut({
@@ -327,29 +431,29 @@ describe("getBookingIdsWithItemsToCheckOut", () => {
     });
     expect(select).toMatchObject({
       bookingAssets: {
+        // Every slice of a quantity-tracked pool (the claim attribution needs
+        // the siblings), and individual items only while they are Available.
         where: {
           OR: [
-            // A quantity-tracked slice with units not yet sent out.
-            {
-              asset: { type: "QUANTITY_TRACKED" },
-              checkedOutQuantity: { lt: "BookingAsset.quantity" },
-            },
-            // An individual item that is free to go out now.
+            { asset: { type: "QUANTITY_TRACKED" } },
             { asset: { type: "INDIVIDUAL", status: "AVAILABLE" } },
           ],
         },
+      },
+      partialCheckouts: {
+        select: { assetIds: true, quantities: true, bookingAssetIds: true },
       },
       partialCheckins: { select: { assetIds: true } },
     });
   });
 
   it("skips the query for an empty page", async () => {
-    const flagged = await getBookingIdsWithItemsToCheckOut({
+    const ids = await getBookingIdsWithItemsToCheckOut({
       bookingIds: [],
       organizationId: ORG_ID,
     });
 
-    expect(flagged.size).toBe(0);
+    expect(ids.size).toBe(0);
     expect(findManyMock).not.toHaveBeenCalled();
   });
 });
@@ -377,7 +481,18 @@ describe("decorateBookingsForList", () => {
           return Promise.resolve(
             itemsToCheckOut.map((id) => ({
               id,
-              bookingAssets: [{ assetId: `${id}-asset` }],
+              bookingAssets: [
+                {
+                  id: `${id}-slice`,
+                  assetId: `${id}-asset`,
+                  quantity: 1,
+                  assetKitId: null,
+                  checkedOutAt: null,
+                  checkedInAt: null,
+                  asset: { type: "INDIVIDUAL", status: "AVAILABLE" },
+                },
+              ],
+              partialCheckouts: [],
               partialCheckins: [],
             }))
           );

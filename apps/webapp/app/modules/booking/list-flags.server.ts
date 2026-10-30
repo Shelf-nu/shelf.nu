@@ -28,6 +28,11 @@ import { AssetStatus, AssetType, BookingStatus } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
+import type { CheckoutSession } from "./checkout-attribution";
+import {
+  checkoutSessionsToLogsByAsset,
+  computeSlicesRemainingToCheckOut,
+} from "./checkout-attribution";
 import {
   decorateBookingsWithStockConflicts,
   type BookingForStockConflictLookup,
@@ -132,24 +137,91 @@ const UNDERWAY_BOOKING_STATUSES: BookingStatus[] = [
   BookingStatus.OVERDUE,
 ];
 
+/** One underway booking as {@link getBookingIdsWithItemsToCheckOut} reads it. */
+type BookingForItemsToCheckOut = {
+  bookingAssets: Array<{
+    id: string;
+    assetId: string;
+    quantity: number;
+    assetKitId: string | null;
+    checkedOutAt: Date | null;
+    checkedInAt: Date | null;
+    asset: { type: AssetType };
+  }>;
+  partialCheckouts: CheckoutSession[];
+  partialCheckins: Array<{ assetIds: string[] }>;
+};
+
+/**
+ * Whether one underway booking still has something "Check out remaining"
+ * would send. See {@link getBookingIdsWithItemsToCheckOut} for the rule; the
+ * candidate slices are already narrowed by its query.
+ *
+ * @param booking - The booking's candidate slices and its sessions
+ * @returns `true` when at least one item would go out
+ */
+function hasItemsToCheckOut(booking: BookingForItemsToCheckOut): boolean {
+  const returned = new Set(
+    booking.partialCheckins.flatMap((checkin) => checkin.assetIds)
+  );
+  const pending = booking.bookingAssets.filter(
+    (slice) => !returned.has(slice.assetId)
+  );
+
+  // Available individual items go out as they are.
+  if (pending.some((slice) => slice.asset.type === AssetType.INDIVIDUAL)) {
+    return true;
+  }
+
+  // Quantity-tracked slices, grouped per pool: the claims attribute across
+  // all of a pool's slices on the booking, never one slice at a time.
+  const slicesByAsset = new Map<string, typeof pending>();
+  for (const slice of pending) {
+    if (slice.asset.type !== AssetType.QUANTITY_TRACKED) continue;
+    const group = slicesByAsset.get(slice.assetId) ?? [];
+    group.push(slice);
+    slicesByAsset.set(slice.assetId, group);
+  }
+  if (slicesByAsset.size === 0) return false;
+
+  const claimsByAsset = checkoutSessionsToLogsByAsset(
+    booking.partialCheckouts,
+    (assetId) => slicesByAsset.has(assetId)
+  );
+  for (const [assetId, slices] of slicesByAsset) {
+    const remaining = computeSlicesRemainingToCheckOut({
+      slices,
+      checkoutClaims: claimsByAsset.get(assetId) ?? [],
+      // The query only reads ONGOING and OVERDUE bookings.
+      isActiveBooking: true,
+    });
+    if ([...remaining.values()].some((units) => units > 0)) return true;
+  }
+  return false;
+}
+
 /**
  * Returns the subset of `bookingIds` whose "Check out remaining" would find
  * something to send.
  *
  * Mirrors the server's own rule (`getRemainingCheckoutPayload`), so the row
- * never offers a button the action then refuses:
+ * never offers a button the action refuses and never hides one it would
+ * carry out:
  *
- * - a QUANTITY_TRACKED slice with units not yet sent out
- *   (`checkedOutQuantity` below its booked `quantity`; a partly-out slice
- *   counts, since the server tops it off);
+ * - a QUANTITY_TRACKED slice with units left to send, measured the way the
+ *   server measures it: booked quantity minus the scan-session claims
+ *   attributed to the slice, with a slice the button sent out in full
+ *   reading 0 (`computeSlicesRemainingToCheckOut`). A slice that fully came
+ *   back while a sibling slice is still out counts again, as on the server;
  * - an INDIVIDUAL item that is Available now. One in someone's custody or out
  *   on another booking cannot go out, so it does not count;
- * - either way, not an item a partial check-in already returned on this
+ * - either way, not an asset a partial check-in already returned on this
  *   booking: the server never sends those out again.
  *
- * The query narrows each booking to its candidate slices; the partial
- * check-in exclusion runs on the result, because the returned ids live in an
- * array on the check-in rows. One bounded query per page.
+ * One bounded query per page. The query narrows to candidate slices (every
+ * slice of a pool, since claim attribution needs the siblings, and only
+ * Available individual items); the rest is the server's pure helpers, run in
+ * memory.
  *
  * @param args.bookingIds - Booking ids on the current page
  * @param args.organizationId - Caller's organization, which scopes the query
@@ -184,10 +256,7 @@ export async function getBookingIdsWithItemsToCheckOut({
         bookingAssets: {
           where: {
             OR: [
-              {
-                asset: { type: AssetType.QUANTITY_TRACKED },
-                checkedOutQuantity: { lt: db.bookingAsset.fields.quantity },
-              },
+              { asset: { type: AssetType.QUANTITY_TRACKED } },
               {
                 asset: {
                   type: AssetType.INDIVIDUAL,
@@ -196,24 +265,24 @@ export async function getBookingIdsWithItemsToCheckOut({
               },
             ],
           },
-          select: { assetId: true },
+          select: {
+            id: true,
+            assetId: true,
+            quantity: true,
+            assetKitId: true,
+            checkedOutAt: true,
+            checkedInAt: true,
+            asset: { select: { type: true } },
+          },
+        },
+        partialCheckouts: {
+          select: { assetIds: true, quantities: true, bookingAssetIds: true },
         },
         partialCheckins: { select: { assetIds: true } },
       },
     });
 
-    return new Set(
-      rows
-        .filter((row) => {
-          const returned = new Set(
-            row.partialCheckins.flatMap((checkin) => checkin.assetIds)
-          );
-          return row.bookingAssets.some(
-            (slice) => !returned.has(slice.assetId)
-          );
-        })
-        .map((row) => row.id)
-    );
+    return new Set(rows.filter(hasItemsToCheckOut).map((row) => row.id));
   } catch (cause) {
     throw new ShelfError({
       cause,
