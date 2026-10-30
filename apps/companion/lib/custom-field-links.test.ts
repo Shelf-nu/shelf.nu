@@ -14,7 +14,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { containsLink, linkChip } from "./custom-field-links";
+import {
+  containsLink,
+  customFieldLinkDisplay,
+  linkChip,
+} from "./custom-field-links";
 
 test("a SharePoint PDF share link with no title reads its kind and provider", () => {
   assert.deepEqual(
@@ -98,4 +102,56 @@ test("a value needs link room when a URL appears anywhere in it", () => {
   assert.equal(containsLink("Shelf 3, bin 12"), false);
   assert.equal(containsLink("www.example.com/manual.pdf"), false);
   assert.equal(containsLink("javascript:alert(1)"), false);
+});
+
+test("a TEXT link reads its title by the custom field's id, not the value's", () => {
+  const fieldLinkTitles = {
+    "cf-manual": { pageTitle: "EOS R5 manual", customTitle: null },
+  };
+
+  assert.deepEqual(
+    customFieldLinkDisplay(
+      { type: "TEXT", id: "cf-manual" },
+      "https://canon.example/r5.pdf",
+      fieldLinkTitles
+    ),
+    { kind: "chips", title: fieldLinkTitles["cf-manual"] }
+  );
+});
+
+test("a TEXT link with no title known yet is still drawn as chips", () => {
+  assert.deepEqual(
+    customFieldLinkDisplay(
+      { type: "TEXT", id: "cf-other" },
+      "https://canon.example/r5.pdf",
+      { "cf-manual": { pageTitle: "EOS R5 manual", customTitle: null } }
+    ),
+    { kind: "chips", title: undefined }
+  );
+});
+
+test("a MULTILINE_TEXT value with a URL keeps its URLs tappable in place", () => {
+  assert.deepEqual(
+    customFieldLinkDisplay(
+      { type: "MULTILINE_TEXT", id: "cf-notes" },
+      "Manual: https://canon.example/r5.pdf",
+      undefined
+    ),
+    { kind: "linked-text" }
+  );
+});
+
+test("plain text, and links in other field types, draw a plain row", () => {
+  assert.equal(
+    customFieldLinkDisplay({ type: "TEXT", id: "cf-sn" }, "SN-1234", undefined),
+    null
+  );
+  assert.equal(
+    customFieldLinkDisplay(
+      { type: "OPTION", id: "cf-brand" },
+      "https://canon.example",
+      undefined
+    ),
+    null
+  );
 });

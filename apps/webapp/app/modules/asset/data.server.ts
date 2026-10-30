@@ -964,11 +964,21 @@ export async function advancedModeLoader({
   /**
    * Titles for the links in the page's text field values, read while the
    * images and booking rows below load: it needs only the values, and never
-   * throws.
+   * throws. Only columns the user shows are read, since a hidden column's
+   * chips never render and reading them would queue fetches nobody sees.
    */
+  const visibleCustomFieldNames = new Set(
+    (settings.columns as Column[])
+      .filter((column) => column.visible && column.name.startsWith("cf_"))
+      .map((column) => column.name.slice("cf_".length))
+  );
   const linkTitlesRead = getLinkTitles({
     organizationId,
-    values: assets.flatMap((asset) => asset.customFields),
+    values: assets.flatMap((asset) =>
+      (asset.customFields ?? []).filter((value) =>
+        visibleCustomFieldNames.has(value.customField.name)
+      )
+    ),
   });
 
   // Refresh expired signed URLs before returning so users never see broken images.

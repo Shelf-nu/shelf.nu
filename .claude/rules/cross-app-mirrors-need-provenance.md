@@ -56,6 +56,7 @@ Existing mirrors:
 | `components/asset-edit/custom-field-input.tsx` → `OPTION_SEARCH_THRESHOLD` + the option filter | `apps/webapp/app/components/assets/assets-index/advanced-filters/value-field.tsx` → `ENUM_SEARCH_THRESHOLD` + its filter         | a pure `packages/*` custom-field module (none yet) |
 | `lib/push/routing.ts` → `PUSH_CATEGORIES` + `PushPayload`                                      | `apps/webapp/app/modules/push/types.ts` + `toExpoMessage` in `modules/push/service.server.ts` (lands with PUSH-2)                | a pure `packages/*` push module (none yet)         |
 | `lib/push/preferences.ts` → `NotificationPreferences`                                          | `apps/webapp/app/modules/push/types.ts` (lands with PUSH-2)                                                                      | a pure `packages/*` push module (none yet)         |
+| `lib/open-link.ts` → `COMPANION_REF` and the add-once `ref` rule                               | `apps/webapp/app/utils/custom-field-link.ts` → `buildCustomFieldLinkHref`                                                        | `@shelf/links`                                     |
 
 The permissions mirror is gone — it was extracted to `@shelf/permissions`
 (packages/permissions). If you create a new mirror, add it to this table; when

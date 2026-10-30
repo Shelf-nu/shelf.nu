@@ -129,7 +129,10 @@ function CustomFieldRow({
                 content={customFieldDisplayValue as RenderableTreeNode}
                 allowExternalLinks
               />
-            ) : def.type === CustomFieldType.TEXT ? (
+            ) : def.type === CustomFieldType.TEXT ||
+              def.type === CustomFieldType.OPTION ? (
+              // An option is free text an admin typed, so it can hold a link
+              // too, as on the asset index. Only Link-format fields rename.
               <TextWithLinks
                 value={rawValue}
                 titles={titles}

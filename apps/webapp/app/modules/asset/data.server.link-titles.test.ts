@@ -3,9 +3,11 @@
  * Advanced assets index loader: titles for the link chips in custom field
  * columns.
  *
- * The loader hands every custom field value on the page to `getLinkTitles`
- * (which reads and claims the ones that are a single web link) and returns
- * the answer as `linkTitles`, the same fixture the chip tests render.
+ * The loader hands the custom field values of the columns the user shows to
+ * `getLinkTitles` (which reads and claims the ones that are a single web
+ * link) and returns the answer as `linkTitles`, the same fixture the chip
+ * tests render. A hidden column's values are never read: its chips never
+ * render.
  *
  * Every other read is stubbed so the loader runs to the end.
  *
@@ -143,10 +145,10 @@ vi.mock("../link-preview/service.server", () => ({
 import { advancedModeLoader } from "./data.server";
 
 /** One custom field value as the index's SQL returns it. */
-function value(fieldId: string, raw: string) {
+function value(fieldId: string, fieldName: string, raw: string) {
   return {
     value: { raw, valueText: raw },
-    customField: { id: fieldId, name: fieldId, type: "TEXT" },
+    customField: { id: fieldId, name: fieldName, type: "TEXT" },
   };
 }
 
@@ -163,7 +165,10 @@ async function load() {
     user: { firstName: "A", lastName: "B", displayName: null },
     settings: {
       mode: "ADVANCED",
-      columns: [{ name: "cf_Manual", visible: true, position: 1 }] as Column[],
+      columns: [
+        { name: "cf_Manual", visible: true, position: 1 },
+        { name: "cf_Supplier", visible: false, position: 2 },
+      ] as Column[],
     },
     canSeeAllCustody: true,
     access: ctx.access,
@@ -185,24 +190,31 @@ describe("advancedModeLoader: link titles", () => {
         {
           id: "asset-1",
           customFields: [
-            value("cf-manual", MANUAL_URL),
-            value("cf-supplier", "https://www.example.com/supplier"),
+            value("cf-manual", "Manual", MANUAL_URL),
+            value(
+              "cf-supplier",
+              "Supplier",
+              "https://www.example.com/supplier"
+            ),
           ],
         },
-        { id: "asset-2", customFields: [value("cf-manual", SHOP_URL)] },
+        {
+          id: "asset-2",
+          customFields: [value("cf-manual", "Manual", SHOP_URL)],
+        },
       ],
     });
     mockGetLinkTitles.mockResolvedValue(LINK_TITLES);
   });
 
-  it("reads titles for every value on the page and returns them", async () => {
+  it("reads titles for the values in shown columns only and returns them", async () => {
     const payload = await load();
 
     const { organizationId, values } = mockGetLinkTitles.mock.calls[0][0];
     expect(organizationId).toBe("org-1");
     expect(
       values.map((entry: { value: { raw: string } }) => entry.value.raw)
-    ).toEqual([MANUAL_URL, "https://www.example.com/supplier", SHOP_URL]);
+    ).toEqual([MANUAL_URL, SHOP_URL]);
     expect(payload.linkTitles).toEqual(LINK_TITLES);
   });
 });

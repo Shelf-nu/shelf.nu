@@ -14,7 +14,7 @@ import { memo } from "react";
 import { View, Text } from "react-native";
 import type { FieldLinkTitles } from "@shelf/links";
 import type { AssetDetail } from "@/lib/api";
-import { containsLink } from "@/lib/custom-field-links";
+import { customFieldLinkDisplay } from "@/lib/custom-field-links";
 import { createStyles } from "@/lib/create-styles";
 import {
   fontSize,
@@ -101,12 +101,13 @@ export const CustomFieldsSection = memo(function CustomFieldsSection({
       <Text style={styles.sectionTitle}>Custom Fields</Text>
       <View style={styles.customFieldsCard}>
         {customFields.map((cf) => {
-          const type = cf.customField.type;
           const value = formatCustomFieldValue(cf, formatDate, currency);
-          const hasLink =
-            (type === "TEXT" || type === "MULTILINE_TEXT") &&
-            containsLink(value);
-          if (hasLink) {
+          const linkDisplay = customFieldLinkDisplay(
+            cf.customField,
+            value,
+            fieldLinkTitles
+          );
+          if (linkDisplay) {
             return (
               <View
                 key={cf.id}
@@ -115,10 +116,10 @@ export const CustomFieldsSection = memo(function CustomFieldsSection({
                 <Text style={styles.customFieldStackedLabel}>
                   {cf.customField.name}
                 </Text>
-                {type === "TEXT" ? (
+                {linkDisplay.kind === "chips" ? (
                   <TextWithLinks
                     value={value}
-                    title={fieldLinkTitles?.[cf.customField.id]}
+                    title={linkDisplay.title}
                     style={styles.customFieldStackedValue}
                     numberOfLines={3}
                   />

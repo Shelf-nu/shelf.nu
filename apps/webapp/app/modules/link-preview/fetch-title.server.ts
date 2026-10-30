@@ -11,6 +11,8 @@
  */
 
 import type { ParsedLink } from "@shelf/links";
+import { ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 import { BlockedAddressError, safeFetchPrefix } from "~/utils/ssrf.server";
 import { classifyHead, isHtmlContentType } from "./policy";
 import type { PageTitleResult } from "./policy";
@@ -51,6 +53,19 @@ export async function fetchPageTitle(
     });
     return classifyHead({ link, ...page });
   } catch (cause) {
+    // The guarded fetch reports every network, timeout, size and refused-host
+    // failure as a ShelfError. Anything else is a fault in this code (the head
+    // parser, for one), so it is logged instead of reading as "no title".
+    if (!(cause instanceof ShelfError)) {
+      Logger.error(
+        new ShelfError({
+          cause,
+          message: "Unexpected error while reading a link's page title",
+          additionalData: { host: link.host },
+          label: "Link preview",
+        })
+      );
+    }
     return {
       outcome: "UNREACHABLE",
       permanent: cause instanceof BlockedAddressError,
