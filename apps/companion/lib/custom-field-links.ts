@@ -20,7 +20,6 @@ import {
   parseLink,
   segmentText,
   type ChipText,
-  type FieldLinkTitles,
   type LinkIconId,
   type LinkTitle,
 } from "@shelf/links";
@@ -64,36 +63,4 @@ export function linkChip(
  */
 export function containsLink(value: string): boolean {
   return segmentText(value).some((segment) => segment.type === "link");
-}
-
-/**
- * How one custom field row shows its links on the asset screen.
- * - `chips`: a TEXT value, drawn by `TextWithLinks` with the field's title.
- * - `linked-text`: a MULTILINE_TEXT value, whose URLs are tappable in place.
- */
-export type CustomFieldLinkDisplay =
-  | { readonly kind: "chips"; readonly title: LinkTitle | undefined }
-  | { readonly kind: "linked-text" };
-
-/**
- * Decides whether a custom field row shows links, and which title its chip
- * reads. The title comes from `asset.fieldLinkTitles`, keyed by the custom
- * field's id (the server keys it so the app never computes link keys).
- *
- * @param field.type - The custom field's type
- * @param field.id - The custom field's id (not the value row's id)
- * @param value - The value as the row displays it
- * @param fieldLinkTitles - `asset.fieldLinkTitles` from the asset payload
- * @returns How to draw the row's links, or null for a plain row
- */
-export function customFieldLinkDisplay(
-  field: { readonly type: string; readonly id: string },
-  value: string,
-  fieldLinkTitles: FieldLinkTitles | undefined
-): CustomFieldLinkDisplay | null {
-  if (field.type !== "TEXT" && field.type !== "MULTILINE_TEXT") return null;
-  if (!containsLink(value)) return null;
-  return field.type === "TEXT"
-    ? { kind: "chips", title: fieldLinkTitles?.[field.id] }
-    : { kind: "linked-text" };
 }

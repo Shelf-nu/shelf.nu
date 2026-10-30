@@ -1,5 +1,5 @@
 import { AssetStatus } from "@prisma/client";
-import { BookingStatus, CustomFieldFormat } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
 import type {
   MetaFunction,
   ActionFunctionArgs,
@@ -83,10 +83,7 @@ import {
 import { getRemindersForOverviewPage } from "~/modules/asset-reminder/service.server";
 import { getAssetAuditHistory } from "~/modules/audit/asset-audit-history.server";
 import { getCustodyCardHolderUserId } from "~/modules/custody/utils";
-import {
-  getActiveCustomFields,
-  getAssetCustomFieldValues,
-} from "~/modules/custom-field/service.server";
+import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { moveAssetKitUnits } from "~/modules/kit/service.server";
 import { getLinkTitles } from "~/modules/link-preview/service.server";
 import { generateQrObj } from "~/modules/qr/utils.server";
@@ -104,7 +101,6 @@ import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import {
   buildAssetOverviewCustomFields,
   buildCustomFieldValue,
-  storedCustomFieldTexts,
 } from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -746,23 +742,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
               label: "Assets",
               status: 400,
             });
-          }
-
-          // A Link field may still hold a value saved before it became a Link
-          // field; submitted unchanged, it is kept as stored instead of
-          // refused, as the full edit form does.
-          if (fieldDef.format === CustomFieldFormat.LINK) {
-            const [stored] = await getAssetCustomFieldValues({
-              assetId: id,
-              organizationId,
-              customFieldIds: [customFieldId],
-            });
-            const storedText = storedCustomFieldTexts(
-              stored ? [stored] : []
-            ).get(customFieldId);
-            if (storedText !== undefined && storedText === fieldValue) {
-              return payload({ success: true });
-            }
           }
 
           const builtValue = buildCustomFieldValue(

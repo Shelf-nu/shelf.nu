@@ -101,29 +101,6 @@ beforeEach(() => {
 });
 
 describe("getLinkTitles: reading", () => {
-  it("reads links in OPTION values too, since their options are typed text", async () => {
-    vi.mocked(db.linkPreview.findMany).mockResolvedValue([
-      row(SHOP, { pageTitle: "Canon EOS R5" }),
-    ] as never);
-
-    const titles = await getLinkTitles({
-      organizationId: ORG,
-      values: [
-        {
-          value: { raw: SHOP, valueOption: SHOP },
-          customField: { type: "OPTION" },
-        },
-      ],
-    });
-
-    expect(vi.mocked(db.linkPreview.findMany).mock.calls[0][0]).toMatchObject({
-      where: { organizationId: ORG, url: { in: [SHOP] } },
-    });
-    expect(titles).toEqual({
-      [SHOP]: { pageTitle: "Canon EOS R5", customTitle: null },
-    });
-  });
-
   it("returns titles keyed by LinkKey for links in TEXT values of any field", async () => {
     vi.mocked(db.linkPreview.findMany).mockResolvedValue([
       row(MANUAL, { pageTitle: "EOS R5 user manual" }),
@@ -503,8 +480,7 @@ describe("runLinkPreviewJob", () => {
   });
 
   it("gives up for good on a stored link with a password, without a request", async () => {
-    // A stored key can hold a user name or password; such a link is never
-    // fetched.
+    // A key stored before links with a user name or password were refused.
     vi.mocked(db.linkPreview.findFirst).mockResolvedValue({
       url: "https://user:secret@files.example.com/manual.pdf",
       attempts: 0,

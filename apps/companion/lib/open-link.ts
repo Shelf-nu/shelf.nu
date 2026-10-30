@@ -27,11 +27,6 @@
  */
 const CLAIMED_WEB_HOST = "app.shelf.nu";
 
-/**
- * The `ref` attribution added to outside links opened from the app. Mirrors
- * `ref=shelf-webapp` in `apps/webapp/app/utils/custom-field-link.ts`: same
- * parameter name, added once, existing query kept. Change both together.
- */
 const COMPANION_REF = "shelf-companion";
 
 /** Where a link opens, and the exact URL to open. */

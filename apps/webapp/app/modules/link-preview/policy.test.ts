@@ -294,8 +294,6 @@ describe("classifyHead: pages without a usable title", () => {
     "How to sign in to the calibration portal",
     "Logistics handbook",
     "Access control panel manual",
-    "Sign-in sheet",
-    "Login instructions for the tool crib",
   ])("reads %j as a title, not a sign-in page", (title) => {
     const html = `<head><title>${title}</title></head>`;
 

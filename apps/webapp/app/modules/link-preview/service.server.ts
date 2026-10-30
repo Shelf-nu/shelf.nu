@@ -77,11 +77,11 @@ export type LinkPreviewJob = {
 };
 
 /**
- * One custom field value as a loader holds it. Only TEXT and OPTION values
- * are read for links.
+ * One custom field value as a loader holds it. Only TEXT values are read for
+ * links.
  */
 export interface LinkTitleSource {
-  /** `AssetCustomFieldValue.value`; TEXT and OPTION keep their text in `raw`. */
+  /** `AssetCustomFieldValue.value`; a TEXT value keeps its text in `raw`. */
   readonly value: unknown;
   readonly customField: { readonly type: CustomFieldType };
 }
@@ -216,7 +216,7 @@ export function linkTitlesByField(
 ): FieldLinkTitles {
   const byField: Record<string, LinkTitle> = {};
   for (const { value, customField } of values) {
-    if (!holdsLinkText(customField.type)) continue;
+    if (customField.type !== CustomFieldType.TEXT) continue;
     const text = textOf(value);
     const link = text === null ? null : parseLink(text);
     const title = link ? titles[link.key] : undefined;
@@ -364,16 +364,7 @@ function isStorable(key: LinkKey): boolean {
   return key.length <= MAX_LINK_LENGTH;
 }
 
-/**
- * Whether a field's values are free text that can be a link: TEXT, and OPTION,
- * whose options are text an admin typed. The asset page and the index render
- * both as chips, so both are read and claimed for titles.
- */
-function holdsLinkText(type: CustomFieldType): boolean {
-  return type === CustomFieldType.TEXT || type === CustomFieldType.OPTION;
-}
-
-/** The text of a TEXT or OPTION value, or null when the value has none. */
+/** The text of a TEXT value, or null when the value has none. */
 function textOf(value: unknown): string | null {
   if (typeof value !== "object" || value === null || !("raw" in value)) {
     return null;
@@ -382,13 +373,13 @@ function textOf(value: unknown): string | null {
 }
 
 /**
- * Keys of every TEXT or OPTION value that is one storable link, as a set so a link
+ * Keys of every TEXT value that is one storable link, as a set so a link
  * repeated across values is read and claimed once.
  */
 function linkKeysOf(values: readonly LinkTitleSource[]): Set<LinkKey> {
   const keys = new Set<LinkKey>();
   for (const { value, customField } of values) {
-    if (!holdsLinkText(customField.type)) continue;
+    if (customField.type !== CustomFieldType.TEXT) continue;
     const text = textOf(value);
     const link = text === null ? null : parseLink(text);
     if (link && isStorable(link.key)) keys.add(link.key);

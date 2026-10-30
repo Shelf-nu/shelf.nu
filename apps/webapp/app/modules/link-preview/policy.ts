@@ -96,14 +96,12 @@ const SIGN_IN_WORDS =
   "(?:sign[ -]?in|log[ -]?in|sign[ -]?on|single sign[ -]?on|access denied)";
 
 /**
- * A sign-in page's title: one of {@link SIGN_IN_WORDS} alone, followed by
- * "to ..." ("Sign in to your account") or by a separator ("Login | Example
- * Corp"), or after a separator at its end ("Example Corp - Sign In"). A
- * document that only starts with the words ("Sign-in sheet", "Login
- * instructions") keeps its title.
+ * A sign-in page's title: one of {@link SIGN_IN_WORDS} alone or leading the
+ * title ("Sign in to your account"), or after a separator at its end
+ * ("Example Corp - Sign In", "Example Corp | Login").
  */
 const SIGN_IN_TITLE = new RegExp(
-  String.raw`^${SIGN_IN_WORDS}(?:\s+to\b.*|\s*[-|:\u00b7\u2013\u2014].*)?$|[-|:\u00b7\u2013\u2014]\s*${SIGN_IN_WORDS}$`,
+  String.raw`^${SIGN_IN_WORDS}\b|[-|:\u00b7\u2013\u2014]\s*${SIGN_IN_WORDS}$`,
   "i"
 );
 
