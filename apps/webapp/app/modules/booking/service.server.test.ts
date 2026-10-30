@@ -10659,10 +10659,68 @@ describe("extendBooking", () => {
     // why: the service refuses an end in the past, so each case pins "now"
     vitest.useFakeTimers({ toFake: ["Date"] });
     vitest.setSystemTime(EXTEND_NOW);
+    // why: the booking row lock is a raw `FOR UPDATE` read. By default it
+    // answers with the status the case loaded, i.e. nothing changed between
+    // the read and the lock; the race cases override it.
+    (
+      db.$queryRaw as unknown as ReturnType<typeof vitest.fn>
+    ).mockImplementation(async () => {
+      const loads = (
+        db.booking.findUniqueOrThrow as unknown as ReturnType<typeof vitest.fn>
+      ).mock.results;
+      const loaded = (await loads.at(-1)?.value) as
+        | { status?: string }
+        | undefined;
+      return [{ status: loaded?.status ?? "ONGOING" }];
+    });
   });
 
   afterEach(() => {
     vitest.useRealTimers();
+    (db.$queryRaw as unknown as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      [{ status: "ONGOING" }]
+    );
+  });
+
+  it("locks the booking row before any stock row, and refuses when its status moved on", async () => {
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...extendableBookingData,
+      status: BookingStatus.ONGOING,
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-lock",
+          checkedOutAt: new Date("2025-01-01T10:00:00.000Z"),
+          checkedInAt: null,
+        },
+      ],
+      partialCheckins: [],
+    });
+    // A check-in completed the booking between the read and the lock.
+    restoreMockImplementationAfterTest(db.$queryRaw).fn.mockResolvedValue([
+      { status: BookingStatus.COMPLETE },
+    ]);
+
+    const error = await extendBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      newEndDate: new Date("2025-01-03T17:00:00Z"),
+      hints: mockClientHints,
+      userId: "user-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
+      roles: [OrganizationRoles.ADMIN],
+    }).catch((e: ShelfError) => e);
+
+    expect((error as ShelfError).status).toBe(400);
+    expect((error as ShelfError).message).toContain(
+      "The booking changed while you were changing its end date"
+    );
+    // Nothing past the lock ran: no clash read, no write.
+    expect(db.booking.findMany).not.toHaveBeenCalled();
+    expect(db.booking.update).not.toHaveBeenCalled();
   });
 
   it("should extend booking successfully", async () => {
@@ -11837,15 +11895,6 @@ describe("extendBooking", () => {
   describe("quantity-tracked items", () => {
     const CABLE_ID = "asset-cable";
 
-    beforeEach(() => {
-      // why: the pool is row-locked with a raw `FOR UPDATE` read before it is
-      // measured; the raw query answers with the locked row for this case
-      // and goes back to its prior behaviour afterwards.
-      restoreMockImplementationAfterTest(db.$queryRaw).fn.mockResolvedValue([
-        { id: CABLE_ID },
-      ]);
-    });
-
     /** A running booking holding 3 of the cables, with the slice out. */
     function bookingWithCablesOut() {
       return {
@@ -12071,6 +12120,13 @@ describe("extendBooking", () => {
         >;
       const read = db.asset.findMany as unknown as ReturnType<typeof vitest.fn>;
       expect(lock).toHaveBeenCalledWith(expect.anything(), [CABLE_ID], "org-1");
+      // The booking row is locked first, the order check-in takes them in.
+      const bookingLock = db.$queryRaw as unknown as ReturnType<
+        typeof vitest.fn
+      >;
+      expect(bookingLock.mock.invocationCallOrder[0]).toBeLessThan(
+        lock.mock.invocationCallOrder[0]
+      );
       expect(lock.mock.invocationCallOrder[0]).toBeLessThan(
         read.mock.invocationCallOrder[0]
       );
@@ -12107,8 +12163,8 @@ describe("extendBooking", () => {
         db.bookingAsset.findMany as unknown as ReturnType<typeof vitest.fn>
       ).mock.calls.find(
         // The reservations read is the one that leaves this booking out.
-        ([args]: [{ where?: { bookingId?: unknown } }]) =>
-          args?.where?.bookingId
+        (call) =>
+          (call[0] as { where?: { bookingId?: unknown } })?.where?.bookingId
       )![0];
       expect(where.booking.OR[1].AND).toEqual([
         { from: { lt: new Date("2025-01-03T17:00:00Z") } },

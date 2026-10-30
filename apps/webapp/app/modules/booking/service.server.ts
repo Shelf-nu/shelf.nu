@@ -13532,9 +13532,32 @@ export async function extendBooking({
     /** The preferences a refusal names the requested day in */
     const refusalPrefs = prefs ?? resolveFormatPrefs(null, hints);
 
+    /** The answer when the booking moved on between the read above and the write */
+    const bookingChangedError = () =>
+      new ShelfError({
+        // `cause: null`: a Prisma not-found cause would turn this into a 404,
+        // and the booking does exist; its row just moved on.
+        cause: null,
+        label,
+        message:
+          "The booking changed while you were changing its end date. Reload it and try again.",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+
     /** Wrap conflict detection and update in a transaction to prevent race conditions */
     const updatedBooking = await db.$transaction(
       async (tx) => {
+        // The booking row is locked before any stock row, the order check-out
+        // and check-in take them in, so a check-in of this booking and this
+        // change queue behind each other instead of deadlocking.
+        const lockedStatus = await lockBookingForStatusCheck(
+          tx,
+          booking.id,
+          organizationId
+        );
+        if (lockedStatus !== booking.status) throw bookingChangedError();
+
         // Only a later end adds time to the booking's window; an earlier end
         // shrinks it and cannot overlap anything it did not already overlap.
         if (movesLater) {
@@ -13736,9 +13759,9 @@ export async function extendBooking({
           });
         }
 
-        // The row must still be exactly as read when the lock is taken: an
-        // end-date change that landed since the read above, a booking closed,
-        // or the overdue job flipping it meanwhile leaves no row to update. So
+        // The row must still be exactly as read: an end-date change that
+        // landed between the read above and the lock leaves no row to update
+        // (the status is already checked under the lock). So
         // the note and the events below, built from that read, describe the
         // change this write made. The new end is in the future, so the live
         // status reads ONGOING either way.
@@ -13765,18 +13788,7 @@ export async function extendBooking({
             include: BOOKING_INCLUDE_FOR_EMAIL,
           })
           .catch((cause) => {
-            if (isNotFoundError(cause)) {
-              // `cause: null`: a Prisma not-found cause would turn this into a
-              // 404, and the booking does exist; its row just moved on.
-              throw new ShelfError({
-                cause: null,
-                label,
-                message:
-                  "The booking changed while you were changing its end date. Reload it and try again.",
-                status: 400,
-                shouldBeCaptured: false,
-              });
-            }
+            if (isNotFoundError(cause)) throw bookingChangedError();
             throw cause;
           });
       },
