@@ -123,6 +123,10 @@ model User {
   // Native-app SSO web-delegated login — single-use session-handoff codes
   mobileAuthCodes MobileAuthCode[]
 
+  // Companion-app push notifications: the devices to reach, and the switches
+  pushTokens             PushToken[]
+  notificationPreference NotificationPreference?
+
   // Updates feature
   createdUpdates Update[]
   updateReads    UserUpdateRead[]
@@ -416,6 +420,40 @@ model AssetIndexSettings {
   @@unique([userId, organizationId])
   // Index for foreign key
   @@index([organizationId])
+}
+
+/// The document a PdfDocument lays out. Only the booking PDF has saved
+/// layouts today; the check-in receipt and the audit receipt can join as new
+/// kinds.
+enum PdfDocumentKind {
+  BOOKING
+}
+
+/// A saved layout for a generated PDF, kept per workspace under a name: which
+/// columns, rows and header lines print, and in what order the rows come. A
+/// row is a layout, not a generated file; the person generating a PDF picks a
+/// layout by name.
+model PdfDocument {
+  id   String          @id @default(cuid())
+  name String
+  kind PdfDocumentKind @default(BOOKING)
+
+  /// The layout's switches. Read through `parseBookingDocumentConfig`, which
+  /// fills any key a stored row lacks from the Checklist document's values.
+  config Json @default("{}")
+
+  /// The document the PDF dialog offers first. One per workspace and kind,
+  /// enforced by a partial unique index in raw SQL (migration
+  /// 20261028120000_add_pdf_documents).
+  isDefault Boolean @default(false)
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  organizationId String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organizationId, kind, name])
 }
 
 enum AssetIndexMode {
@@ -1114,6 +1152,7 @@ model Organization {
   auditSessions      AuditSession[]
   auditImages        AuditImage[]
   assetImports       AssetImport[]
+  pdfDocuments       PdfDocument[]
 
   usersWithLastSelected User[] @relation("lastSelectedOrg")
   
@@ -1136,6 +1175,11 @@ model Organization {
   // Whether the booking checklist and audit receipt PDFs print the QR image.
   // Off means the sheet cannot be scanned in place of the label on the item.
   showQrCodesOnPdfs Boolean @default(true)
+
+  // When the workspace was given the PDF documents of a paid plan (the
+  // Check-out receipt). Null until its tier first includes PDF documents; set
+  // once, so a document an admin deleted is never seeded back.
+  paidPdfDocumentsSeededAt DateTime?
 
   // Custom footer text appended to workspace emails
   customEmailFooter String? @db.VarChar(500)
@@ -1310,6 +1354,9 @@ model TierLimit {
   canImportNRM         Boolean  @default(false)
   canHideShelfBranding Boolean  @default(false)
   canUseReports        Boolean  @default(false)
+  canUseRecurringReminders Boolean @default(false)
+  canCustomizePdfDocuments Boolean @default(false)
+  canUsePushNotifications Boolean @default(false)
   maxCustomFields      Int      @default(0)
   maxOrganizations     Int      @default(1)
   createdAt            DateTime @default(now())
@@ -1326,6 +1373,9 @@ model CustomTierLimit {
   canImportNRM         Boolean  @default(true)
   canHideShelfBranding Boolean  @default(true)
   canUseReports        Boolean  @default(true)
+  canUseRecurringReminders Boolean @default(true)
+  canCustomizePdfDocuments Boolean @default(true)
+  canUsePushNotifications Boolean @default(true)
   maxCustomFields      Int      @default(1000)
   maxOrganizations     Int      @default(1)
   isEnterprise         Boolean  @default(false) // Set this to true for enterprise users. It is used to control some visuals in the app
@@ -2122,6 +2172,56 @@ model MobileAuthCode {
   @@index([expiresAt])
 }
 
+/// The operating system a companion-app push token was issued for.
+enum DevicePlatform {
+  IOS
+  ANDROID
+}
+
+/// One Expo push token per installed companion app. A token identifies a
+/// device, not a person: when someone else signs in on the same phone, the
+/// row moves to them. Pushes go only to rows where `disabledAt` is null.
+/// @see apps/webapp/app/modules/push/service.server.ts
+model PushToken {
+  id String @id @default(cuid())
+
+  // The `ExponentPushToken[...]` string the Expo push service addresses.
+  token String @unique
+
+  platform   DevicePlatform
+  deviceName String?
+  appVersion String?
+
+  // Refreshed on every registration, so stale devices are visible.
+  lastSeenAt DateTime
+
+  // Set when Expo reports the device as no longer registered.
+  disabledAt DateTime?
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  userId String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+/// A person's push notification switches. A missing row means every switch
+/// is on, so no backfill is needed. The three category columns are named
+/// after `PushCategory` in apps/webapp/app/modules/push/types.ts.
+model NotificationPreference {
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  userId String @id
+
+  pushEnabled       Boolean @default(true)
+  bookings          Boolean @default(true)
+  audits            Boolean @default(true)
+  stockAndReminders Boolean @default(true)
+
+  updatedAt DateTime @updatedAt
+}
+
 model Kit {
   id String @id @default(cuid())
 
@@ -2295,12 +2395,34 @@ model AssetLocation {
   @@index([assetKitId])
 }
 
+// Units for reminder recurrence cadences ("every N <unit>"). Stored as
+// unit + interval (not presets) so future custom cadences need no migration.
+enum ReminderRecurrenceUnit {
+  DAY
+  WEEK
+  MONTH
+  YEAR
+}
+
 model AssetReminder {
   id                       String       @id @default(cuid())
   name                     String
   message                  String
   alertDateTime            DateTime
   activeSchedulerReference String?
+
+  // Recurrence (null unit/interval = one-shot reminder, the default). For an
+  // active recurring reminder, alertDateTime always holds the NEXT occurrence:
+  // the worker advances it in place each time the reminder fires, keeping every
+  // "upcoming" surface and the status/edit/cancel guards correct without forks.
+  recurrenceUnit     ReminderRecurrenceUnit?
+  recurrenceInterval Int?
+  // IANA zone captured from client hints at create/edit so "every month at
+  // 09:00" stays wall-clock-stable across DST. Null = UTC math (legacy rows).
+  recurrenceTimezone String?
+  // Optional series end (inclusive). Null = repeat until deleted.
+  recurrenceEndsAt DateTime?
+
   organization             Organization @relation(fields: [organizationId], references: [id])
   organizationId           String
   asset                    Asset        @relation(fields: [assetId], references: [id], onDelete: Cascade)
@@ -2851,6 +2973,7 @@ enum ActivityAction {
   ASSET_MIN_QUANTITY_CHANGED
   ASSET_CUSTOM_FIELD_CHANGED
   ASSET_PREFERRED_BARCODE_CHANGED
+  ASSET_AVAILABLE_TO_BOOK_CHANGED
   ASSET_ARCHIVED
   ASSET_UNARCHIVED
   ASSET_DELETED

@@ -67,6 +67,7 @@ export type FailureReason = {
     | "User onboarding"
     | "Location"
     | "Notification"
+    | "Push"
     | "Organization"
     | "Permission"
     | "QR"
@@ -109,6 +110,7 @@ export type FailureReason = {
     | "Activity"
     | "Consumption Log"
     | "Update"
+    | "PDF documents"
     | "Analytics";
   /**
    * The message intended for the user.

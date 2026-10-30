@@ -7,6 +7,7 @@ import type {
   CustodySourceEntry,
   CustodySourceOption,
 } from "@shelf/quantity-control";
+import type { NotificationPreferences } from "../push/preferences";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -417,6 +418,19 @@ export type AssetDetail = {
    * assets or QUANTITY_TRACKED assets with no activity. See type docs.
    */
   quantityBreakdown?: AssetQuantityBreakdown | null;
+  /**
+   * Units free to hand over right now, the figure the web labels "Free now":
+   * total minus custody, units in kits and units out. Reservations are NOT
+   * subtracted.
+   *
+   * Mirrors the `freeNow` field of
+   * apps/webapp/app/routes/api+/mobile+/assets.$assetId.ts, which reads the
+   * availability engine (`getAssetQuantityRows` in
+   * apps/webapp/app/modules/asset/quantity-breakdown.server.ts). Sent for every
+   * QUANTITY_TRACKED asset, even when `quantityBreakdown` is null; `null` for
+   * INDIVIDUAL assets; absent on older servers. See `resolveFreeNowFigure`.
+   */
+  freeNow?: number | null;
   /**
    * Number of custody holders hidden from the caller for privacy (e.g.
    * self-service users only see their own rows). When > 0 the detail screen
@@ -1282,6 +1296,19 @@ export type BookingMutationResponse = {
    * servers that predate archiving.
    */
   droppedArchivedCount?: number;
+  /**
+   * Duplicate only: models the copy reserved fewer units of than the source
+   * had open, because the dates have fewer free or, when `failed`, because the
+   * reservation could not be written. Absent on other mutations and on servers
+   * that predate copying reservations.
+   */
+  reducedModelReservations?: {
+    assetModelId: string;
+    assetModelName: string;
+    requested: number;
+    reserved: number;
+    failed?: boolean;
+  }[];
 };
 
 /**
@@ -2032,4 +2059,45 @@ export type AssetBookingsResponse = {
   perPage: number;
   totalCount: number;
   totalPages: number;
+};
+
+// ── Push notifications ─────────────────────────────────
+
+/**
+ * Body of `POST /api/mobile/push-token`: this device, for the signed-in
+ * person. Repeating it refreshes the server's `lastSeenAt`, and a token
+ * another person registered moves to the caller.
+ *
+ * @see {@link file://../../../webapp/app/routes/api+/mobile+/push-token.ts}
+ */
+export type RegisterPushTokenPayload = {
+  /** The `ExponentPushToken[...]` string from `getExpoPushTokenAsync`. */
+  token: string;
+  platform: "IOS" | "ANDROID";
+  /** `expo-device` model name, at most 120 characters; null when unknown. */
+  deviceName: string | null;
+  /** This build's version, at most 20 characters; null when unknown. */
+  appVersion: string | null;
+};
+
+/** Answer of both `POST` and `DELETE /api/mobile/push-token`. */
+export type PushTokenResponse = { ok: true };
+
+/**
+ * Answer of `GET /api/mobile/notification-preferences`.
+ *
+ * @see {@link file://../../../webapp/app/routes/api+/mobile+/notification-preferences.ts}
+ */
+export type NotificationPreferencesResponse = {
+  /** The four switches; all on for someone who never changed them. */
+  preferences: NotificationPreferences;
+  /** Whether any of the caller's workspaces' plans include push. */
+  pushAvailable: boolean;
+  /** Ids of the caller's workspaces whose plans include push. */
+  organizationsWithPush: string[];
+};
+
+/** Answer of `PUT /api/mobile/notification-preferences`: all four switches. */
+export type UpdateNotificationPreferencesResponse = {
+  preferences: NotificationPreferences;
 };

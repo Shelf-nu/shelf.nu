@@ -9,35 +9,41 @@ import {
 } from "./last-audit-date-access";
 import type { LastAuditDateAccess } from "./last-audit-date-access";
 import type { BookableListScope } from "./list-scope.server";
-import { generateWhereClause, parseFiltersWithHierarchy } from "./query.server";
-import type { AllowedCustodianFilterIds } from "./utils.server";
+import { getAssetListWhereForSelectAll } from "./list-where.server";
 import {
-  getArchivedFilterFromParams,
-  getAssetsWhereInput,
-} from "./utils.server";
+  detectPoolKeys,
+  generateWhereClause,
+  parseFiltersWithHierarchy,
+  POOL_AGGREGATE_JOIN,
+} from "./query.server";
+import type { AllowedCustodianFilterIds } from "./utils.server";
+import { getArchivedFilterFromParams } from "./utils.server";
 import type { Column } from "../asset-index-settings/helpers";
 
 const label = "Assets";
 
 /**
  * Builds the raw SQL that resolves asset IDs for an advanced-filter bulk
- * operation. Extracted so the join/column shape is unit-testable without a DB —
- * raw SQL can't be typechecked, so a string assertion is the regression guard
- * (see `.claude/rules/raw-sql-respects-prisma-map.md` and the co-located test).
+ * operation. Kept separate so the join/column shape is unit-testable without a
+ * DB: raw SQL can't be typechecked, so a string assertion is the regression
+ * guard (see `.claude/rules/raw-sql-respects-prisma-map.md` and the co-located
+ * test).
  *
  * The joins mirror the main paginated query because {@link generateWhereClause}
- * may reference the joined aliases (c.name, l.name, t.id, tm.name, …). Asset
- * placement lives on the `AssetLocation` pivot — there is no `Asset.locationId`
- * FK — so location is joined via a LATERAL primary-pick (oldest pivot row),
- * exactly like the index query. The previous `LEFT JOIN "Location" l ON
- * a."locationId" = l.id` referenced a dropped column and 500'd on every
- * advanced-mode select-all (SHELF-WEBAPP-21X).
+ * may reference the joined aliases (c.name, l.name, t.id, tm.name, ...). Asset
+ * placement lives on the `AssetLocation` pivot (there is no `Asset.locationId`
+ * column), so location is joined via a LATERAL primary-pick (oldest pivot row),
+ * exactly like the index query.
  *
  * @param whereClause - The `Prisma.Sql` WHERE fragment from generateWhereClause.
+ * @param options.withPool - Whether `whereClause` may reference the `pool`
+ *   LATERAL (a Free now / Reserved / Stock status filter, or the low stock
+ *   toggle). Adds {@link POOL_AGGREGATE_JOIN} when `true`.
  * @returns The composed `Prisma.Sql` SELECT query.
  */
 export function buildAdvancedFilteredAssetIdsQuery(
-  whereClause: Prisma.Sql
+  whereClause: Prisma.Sql,
+  { withPool }: { withPool: boolean }
 ): Prisma.Sql {
   return Prisma.sql`
     SELECT DISTINCT a.id
@@ -59,6 +65,11 @@ export function buildAdvancedFilteredAssetIdsQuery(
     LEFT JOIN public."Custody" cu ON cu."assetId" = a.id
     LEFT JOIN public."TeamMember" tm ON cu."teamMemberId" = tm.id
     LEFT JOIN public."User" u ON tm."userId" = u.id
+    -- The pool aggregates the index query uses, required exactly when the
+    -- WHERE may reference pool.*: without them that WHERE fails with
+    -- "missing FROM-clause entry for table pool", and with them every asset
+    -- pays five correlated aggregates the WHERE never reads.
+    ${withPool ? POOL_AGGREGATE_JOIN : Prisma.empty}
     ${whereClause}
   `;
 }
@@ -75,7 +86,9 @@ export function buildAdvancedFilteredAssetIdsQuery(
  * @param organizationId - Organization to scope query
  * @param filters - URL search params string with advanced filters
  * @param settings - Asset index settings with columns configuration
- * @param bookableScope - The caller's list scope; `null` selects every asset
+ * @param bookableScope - The caller's list scope; `null` selects every asset.
+ *   Applied in the same SQL the advanced index uses, so select-all matches the
+ *   rows a Base or Self Service member was shown.
  * @param timeZone - Acting user's IANA timezone; forwarded to
  *   {@link generateWhereClause} so built-in date-column filters truncate the
  *   day in the user's tz (avoids an off-by-one). Defaults to "UTC".
@@ -91,7 +104,7 @@ async function getAdvancedFilteredAssetIds({
   organizationId,
   filters,
   settings,
-  bookableScope = null,
+  bookableScope,
   timeZone = "UTC",
   honorArchivedView = false,
   lastAuditDateAccess,
@@ -99,7 +112,7 @@ async function getAdvancedFilteredAssetIds({
   organizationId: string;
   filters: string;
   settings: AssetIndexSettings;
-  bookableScope?: BookableListScope | null;
+  bookableScope: BookableListScope | null;
   timeZone?: string;
   honorArchivedView?: boolean;
   lastAuditDateAccess: LastAuditDateAccess;
@@ -158,7 +171,11 @@ async function getAdvancedFilteredAssetIds({
     // Minimal query: only SELECT id, but include the same joins the main
     // paginated query uses, because the WHERE clause may reference joined
     // aliases (c.name, l.name, t.id, tm.name, etc.).
-    const query = buildAdvancedFilteredAssetIdsQuery(whereClause);
+    // Same gate as the index's cheap phase: the WHERE reads pool.* only for
+    // the low stock toggle or a pool column filter. No sort applies here.
+    const query = buildAdvancedFilteredAssetIdsQuery(whereClause, {
+      withPool: lowStockOnly || detectPoolKeys(parsedFilters, []),
+    });
 
     const results = await db.$queryRaw<Array<{ id: string }>>(query);
     return results.map((r) => r.id);
@@ -192,6 +209,8 @@ async function getAdvancedFilteredAssetIds({
  *   filter query so built-in date-column filters truncate the day in the
  *   user's tz (avoids an off-by-one). Defaults to "UTC".
  * @param lastAuditDateAccess - How the caller may use the last audit date
+ * @param bookableScope - The caller's list scope, `null` for a member who sees
+ *   every asset
  * @returns Promise resolving to array of asset IDs to operate on
  *
  * @example
@@ -222,6 +241,7 @@ export async function resolveAssetIdsForBulkOperation({
   timeZone = "UTC",
   allowedTeamMemberIds,
   lastAuditDateAccess,
+  bookableScope,
   honorArchivedView = false,
 }: {
   assetIds: Asset["id"][];
@@ -252,6 +272,13 @@ export async function resolveAssetIdsForBulkOperation({
    * to a caller who may not see it. Resolve it with `lastAuditDateAccessFor`.
    */
   lastAuditDateAccess: LastAuditDateAccess;
+  /**
+   * The caller's list scope, from `resolveBookableListScope({ access, userId })`:
+   * `null` for members who see every asset. Required, with no default, so
+   * every caller states an answer: a Base or Self Service member's list hides
+   * assets outside their scope, and "select all" must not reach them either.
+   */
+  bookableScope: BookableListScope | null;
 }): Promise<string[]> {
   // Case 1: Specific selection - return IDs as-is
   if (!assetIds.includes(ALL_SELECTED_KEY)) {
@@ -267,8 +294,8 @@ export async function resolveAssetIdsForBulkOperation({
   if (isAdvancedMode && currentSearchParams) {
     /**
      * The advanced syntax carries its own custodian filter (`custody:is:…`),
-     * which never passes through `getAssetsWhereInput` — so the allow-list has
-     * to be honoured separately here.
+     * which never passes through the simple-mode list where, so the allow-list
+     * has to be honoured separately here.
      *
      * `/assets` flips a restricted role's saved mode back to SIMPLE, but only
      * when they actually visit it; a demoted user whose stored mode is still
@@ -283,23 +310,35 @@ export async function resolveAssetIdsForBulkOperation({
       return [];
     }
 
-    // ADVANCED MODE: Use dedicated function for advanced filters
+    // ADVANCED MODE: Use dedicated function for advanced filters. The list
+    // scope goes into the same `generateWhereClause` the advanced index uses.
     return getAdvancedFilteredAssetIds({
       organizationId,
       filters: currentSearchParams,
       settings,
+      bookableScope,
       timeZone,
       honorArchivedView,
       lastAuditDateAccess,
     });
   } else {
-    // SIMPLE MODE: Use simple where clause
-    // Note: getAssetsWhereInput will safely ignore any advanced filter syntax
-    const where = getAssetsWhereInput({
+    // SIMPLE MODE: the simple index's own where, built from the same URL and
+    // options as its loader, so select-all matches the rows the list showed.
+    // Every bulk action comes from the /assets index, whose loader honours the
+    // low stock toggle. Advanced syntax in a stale URL is read the way the
+    // simple list reads it: a non-enum `status` (such as `is:AVAILABLE`) is
+    // ignored, params the simple list has no filter for (custom fields,
+    // `custody`, `tags`) are ignored, and an operator value under a shared
+    // key (`category=is:x`, `location=is:x`) is matched as a literal id, so
+    // it selects nothing, exactly as the list would show nothing.
+    const where = await getAssetListWhereForSelectAll({
       organizationId,
       currentSearchParams,
       allowedTeamMemberIds,
+      bookableScope,
+      locationIdsOverride: undefined,
       honorArchivedView,
+      honorLowStockFilter: true,
     });
 
     const assets = await db.asset.findMany({

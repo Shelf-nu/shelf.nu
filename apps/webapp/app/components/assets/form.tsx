@@ -8,6 +8,7 @@ import {
   PopoverContent,
 } from "@radix-ui/react-popover";
 import {
+  ASSET_QUANTITY_FIGURE_LABELS,
   ASSET_TYPE_LABELS,
   CONSUMPTION_TYPE_DESCRIPTIONS,
   CONSUMPTION_TYPE_LABELS,
@@ -218,6 +219,22 @@ export const NewAssetBulkFormSchema = NewAssetFormSchema.extend({
       .max(100, "Count must be at most 100")
   ),
 });
+
+/**
+ * Starting value of the Value input for a stored valuation.
+ *
+ * Zero is a real valuation and must show as 0. Only a missing valuation
+ * leaves the field blank, because the form schema reads a blank field as
+ * "no value" and saving it would clear the stored 0.
+ *
+ * @param valuation - The asset's stored valuation, if any.
+ * @returns The number to show, or `""` for no valuation.
+ */
+export function valuationInputDefault(
+  valuation: Asset["valuation"] | undefined
+): number | "" {
+  return valuation ?? "";
+}
 
 /** Pass props of the values to be used as default for the form fields */
 
@@ -930,14 +947,14 @@ const AssetFormInner = ({
         <When truthy={isQtyTracked}>
           <div className="flex flex-col gap-2">
             <FormRow
-              rowLabel="Quantity"
+              rowLabel={ASSET_QUANTITY_FIGURE_LABELS.TOTAL}
               className="border-b-0 pb-[10px]"
               subHeading="Total number of items in this pool."
               required={true}
             >
               <Input
                 type="number"
-                label="Quantity"
+                label={ASSET_QUANTITY_FIGURE_LABELS.TOTAL}
                 hideLabel
                 name="quantity"
                 disabled={disabled}
@@ -1431,7 +1448,7 @@ const AssetFormInner = ({
               step="any"
               min={0}
               className="w-full"
-              defaultValue={valuation || ""}
+              defaultValue={valuationInputDefault(valuation)}
             />
             <span className="absolute bottom-0 border-r px-3 py-2.5 text-[16px] text-gray-600 lg:bottom-[11px]">
               {currency}

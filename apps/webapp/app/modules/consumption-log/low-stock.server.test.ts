@@ -1,6 +1,7 @@
 /**
  * Behavior tests for the debounced, state-transition low-stock notifier
- * (`checkAndNotifyLowStock` in `low-stock.server.ts`).
+ * (`checkAndNotifyLowStock` in `low-stock.server.ts`) and its silent bulk
+ * marker reconciler (`syncLowStockMarkers`).
  *
  * These assert the OBSERVABLE effects of the notifier: which recipients get
  * emailed, whether the in-app notification fires, how the
@@ -12,8 +13,10 @@
  *
  * @see {@link file://./low-stock.server.ts} - the module under test
  */
+import type { Prisma } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vitest } from "vitest";
 import { db } from "~/database/db.server";
+import { Logger } from "~/utils/logger";
 
 // why: assert email dispatch without sending real mail.
 const sendEmailMock = vitest.fn();
@@ -66,10 +69,11 @@ vitest.mock("~/database/db.server", () => ({
     asset: {
       findFirst: vitest.fn(),
       update: vitest.fn(),
-      count: vitest.fn(),
-      // The column reference the low-stock predicate compares quantity to.
-      fields: { minQuantity: "Asset.minQuantity" },
+      updateMany: vitest.fn(),
     },
+    assetKit: { aggregate: vitest.fn() },
+    // The "other low items" count runs the advanced list's predicate in SQL.
+    $queryRaw: vitest.fn(),
     custody: { aggregate: vitest.fn(), findMany: vitest.fn() },
     organization: { findUnique: vitest.fn() },
     consumptionLog: { findFirst: vitest.fn(), findMany: vitest.fn() },
@@ -79,7 +83,18 @@ vitest.mock("~/database/db.server", () => ({
   },
 }));
 
-import { checkAndNotifyLowStock } from "./low-stock.server";
+const checkedOutBreakdownMock = vitest
+  .fn()
+  .mockResolvedValue({ total: 0, standalone: 0 });
+vitest.mock("~/modules/booking/checked-out.server", () => ({
+  computeCheckedOutBreakdownForAsset: (...args: unknown[]) =>
+    checkedOutBreakdownMock(...args),
+}));
+
+import {
+  checkAndNotifyLowStock,
+  syncLowStockMarkers,
+} from "./low-stock.server";
 import { MOVE_CATEGORY, OPENING_BALANCE_CATEGORY } from "./stock-ledger";
 
 const ASSET_ID = "asset-1";
@@ -91,8 +106,9 @@ const assetUpdateMock = db.asset.update as ReturnType<typeof vitest.fn>;
 const custodyAggregateMock = db.custody.aggregate as ReturnType<
   typeof vitest.fn
 >;
+const kitAggregateMock = db.assetKit.aggregate as ReturnType<typeof vitest.fn>;
 const custodyFindManyMock = db.custody.findMany as ReturnType<typeof vitest.fn>;
-const assetCountMock = db.asset.count as ReturnType<typeof vitest.fn>;
+const assetCountMock = db.$queryRaw as ReturnType<typeof vitest.fn>;
 const orgFindUniqueMock = db.organization.findUnique as ReturnType<
   typeof vitest.fn
 >;
@@ -141,8 +157,10 @@ beforeEach(() => {
   // resetAllMocks drops every implementation, so each test starts from these
   // stable defaults and overrides only what it exercises.
   assetUpdateMock.mockResolvedValue({});
-  assetCountMock.mockResolvedValue(0);
+  assetCountMock.mockResolvedValue([{ count: 0 }]);
   custodyAggregateMock.mockResolvedValue({ _sum: { quantity: 0 } });
+  kitAggregateMock.mockResolvedValue({ _sum: { quantity: 0 } });
+  checkedOutBreakdownMock.mockResolvedValue({ total: 0, standalone: 0 });
   custodyFindManyMock.mockResolvedValue([]);
   orgFindUniqueMock.mockResolvedValue({
     name: "Acme",
@@ -582,6 +600,44 @@ describe("checkAndNotifyLowStock: never rejects", () => {
   });
 });
 
+describe("checkAndNotifyLowStock, the same figure as the Stock status column", () => {
+  it("subtracts kit units and standalone checked-out units, not just custody", async () => {
+    // 10 owned, floor 5. Custody alone (0) says Enough; the column subtracts
+    // 3 in kits and 3 out on a booking and says Running low at 4. The alert
+    // must agree with the column, or a row can be flagged and never emailed.
+    findFirstMock.mockResolvedValue(assetRow({ quantity: 10, minQuantity: 5 }));
+    kitAggregateMock.mockResolvedValue({ _sum: { quantity: 3 } });
+    checkedOutBreakdownMock.mockResolvedValue({ total: 5, standalone: 3 });
+
+    await checkAndNotifyLowStock({
+      assetId: ASSET_ID,
+      userId: USER_ID,
+      organizationId: ORG_ID,
+    });
+
+    expect(sendEmailMock).toHaveBeenCalledTimes(1);
+    expect(lowStockAlertHtmlMock).toHaveBeenCalledWith(
+      expect.objectContaining({ available: 4 })
+    );
+  });
+
+  it("reads direct custody only, leaving kit-inherited custody to the kit figure", async () => {
+    findFirstMock.mockResolvedValue(assetRow({ quantity: 10, minQuantity: 5 }));
+
+    await checkAndNotifyLowStock({
+      assetId: ASSET_ID,
+      userId: USER_ID,
+      organizationId: ORG_ID,
+    });
+
+    expect(custodyAggregateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ kitCustodyId: null }),
+      })
+    );
+  });
+});
+
 describe("checkAndNotifyLowStock: the facts each copy is rendered from", () => {
   /** The moment the notifier runs; the log row below is one minute older. */
   const NOW = new Date("2026-09-24T20:54:00.000Z");
@@ -693,7 +749,7 @@ describe("checkAndNotifyLowStock: the facts each copy is rendered from", () => {
       { quantity: 2, location: { name: "Ogden warehouse" } },
       { quantity: 1, location: null },
     ]);
-    assetCountMock.mockResolvedValue(1);
+    assetCountMock.mockResolvedValue([{ count: 1 }]);
     logsAre([consumeRow]);
 
     await checkAndNotifyLowStock({
@@ -717,16 +773,15 @@ describe("checkAndNotifyLowStock: the facts each copy is rendered from", () => {
 
     // The count uses the same predicate as the list the mail links to, and
     // leaves this asset out.
-    expect(assetCountMock).toHaveBeenCalledWith({
-      where: {
-        organizationId: ORG_ID,
-        id: { not: ASSET_ID },
-        archivedAt: null,
-        type: "QUANTITY_TRACKED",
-        minQuantity: { not: null },
-        quantity: { lte: "Asset.minQuantity" },
-      },
-    });
+    const [countSql, ...countValues] = assetCountMock.mock.calls[0] as [
+      TemplateStringsArray,
+      ...unknown[],
+    ];
+    const countText = JSON.stringify([countSql, countValues]);
+    expect(countText).toContain('a.\\"minQuantity\\" IS NOT NULL');
+    expect(countText).toContain('a.\\"archivedAt\\" IS NULL');
+    expect(countText).toContain(ORG_ID);
+    expect(countText).toContain(ASSET_ID);
     // Placements and custody sources are org-scoped.
     expect(placementsMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1039,7 +1094,7 @@ describe("checkAndNotifyLowStock: the facts each copy is rendered from", () => {
     placementsMock.mockResolvedValue([
       { quantity: 14, assetKitId: null, location: { name: "Ogden warehouse" } },
     ]);
-    assetCountMock.mockResolvedValue(2);
+    assetCountMock.mockResolvedValue([{ count: 2 }]);
 
     await checkAndNotifyLowStock({
       assetId: ASSET_ID,
@@ -1081,5 +1136,134 @@ describe("checkAndNotifyLowStock: the facts each copy is rendered from", () => {
     expect(sendEmailMock).toHaveBeenCalledWith(
       expect.objectContaining({ to: "admin2@acme.test" })
     );
+  });
+});
+
+describe("syncLowStockMarkers", () => {
+  const assetUpdateManyMock = db.asset.updateMany as ReturnType<
+    typeof vitest.fn
+  >;
+  const queryRawMock = db.$queryRaw as ReturnType<typeof vitest.fn>;
+
+  /** A row of the reconciler's single read. */
+  function markerRow(id: string, is_low: boolean, marked: boolean) {
+    return { id, is_low, marked };
+  }
+
+  beforeEach(() => {
+    assetUpdateManyMock.mockResolvedValue({ count: 1 });
+  });
+
+  it("stamps a low, unmarked asset and clears a marked one that is not low", async () => {
+    queryRawMock.mockResolvedValue([
+      markerRow("low-unmarked", true, false),
+      markerRow("fine-marked", false, true),
+    ]);
+
+    await syncLowStockMarkers({
+      assetIds: ["low-unmarked", "fine-marked"],
+      organizationId: ORG_ID,
+    });
+
+    expect(assetUpdateManyMock).toHaveBeenCalledTimes(2);
+    expect(assetUpdateManyMock).toHaveBeenCalledWith({
+      where: { id: { in: ["low-unmarked"] }, organizationId: ORG_ID },
+      data: { lowStockNotifiedAt: expect.any(Date) },
+    });
+    expect(assetUpdateManyMock).toHaveBeenCalledWith({
+      where: { id: { in: ["fine-marked"] }, organizationId: ORG_ID },
+      data: { lowStockNotifiedAt: null },
+    });
+  });
+
+  it("clears a marked asset whose threshold was removed", async () => {
+    // The read reports an asset without a threshold as not low, so its stale
+    // marker clears exactly like a recovered asset's.
+    queryRawMock.mockResolvedValue([markerRow("no-min-marked", false, true)]);
+
+    await syncLowStockMarkers({
+      assetIds: ["no-min-marked"],
+      organizationId: ORG_ID,
+    });
+
+    expect(assetUpdateManyMock).toHaveBeenCalledTimes(1);
+    expect(assetUpdateManyMock).toHaveBeenCalledWith({
+      where: { id: { in: ["no-min-marked"] }, organizationId: ORG_ID },
+      data: { lowStockNotifiedAt: null },
+    });
+  });
+
+  it("leaves still-low marked and fine unmarked assets alone", async () => {
+    queryRawMock.mockResolvedValue([
+      markerRow("low-marked", true, true),
+      markerRow("fine-unmarked", false, false),
+    ]);
+
+    await syncLowStockMarkers({
+      assetIds: ["low-marked", "fine-unmarked"],
+      organizationId: ORG_ID,
+    });
+
+    expect(assetUpdateManyMock).not.toHaveBeenCalled();
+  });
+
+  it("reads Free now with the index's pool SQL, scoped to the workspace", async () => {
+    // Raw SQL is not typechecked; the read must use the index's Free now
+    // figure and scope to the workspace's active quantity-tracked assets.
+    queryRawMock.mockResolvedValue([]);
+
+    await syncLowStockMarkers({ assetIds: ["a-1"], organizationId: ORG_ID });
+
+    const query = queryRawMock.mock.calls[0][0] as Prisma.Sql;
+    const sql = query.strings.join("?");
+    expect(sql).toContain(") pool ON TRUE");
+    expect(sql).toContain(
+      "GREATEST(COALESCE(a.quantity, 0) - pool.in_custody - pool.in_kits - pool.checked_out, 0)"
+    );
+    expect(sql).toContain('a."minQuantity" IS NOT NULL');
+    expect(sql).toContain('a."organizationId" = ?');
+    expect(sql).toContain('a."archivedAt" IS NULL');
+    expect(sql).toContain("a.type = 'QUANTITY_TRACKED'");
+    expect(query.values).toContain(ORG_ID);
+    expect(query.values).toContainEqual(["a-1"]);
+  });
+
+  it("makes no queries for an empty selection", async () => {
+    await syncLowStockMarkers({ assetIds: [], organizationId: ORG_ID });
+
+    expect(queryRawMock).not.toHaveBeenCalled();
+    expect(assetUpdateManyMock).not.toHaveBeenCalled();
+  });
+
+  it("sends no email or in-app notice", async () => {
+    queryRawMock.mockResolvedValue([
+      markerRow("low-unmarked", true, false),
+      markerRow("fine-marked", false, true),
+    ]);
+
+    await syncLowStockMarkers({
+      assetIds: ["low-unmarked", "fine-marked"],
+      organizationId: ORG_ID,
+    });
+
+    expect(sendEmailMock).not.toHaveBeenCalled();
+    expect(sendNotificationMock).not.toHaveBeenCalled();
+  });
+
+  it("logs a database failure instead of throwing", async () => {
+    // why: spy so the test can see the log without printing it; the caller's
+    // threshold write has already committed, so the failure must not escape.
+    const loggerSpy = vitest
+      .spyOn(Logger, "error")
+      .mockImplementation(() => undefined);
+    queryRawMock.mockRejectedValue(new Error("connection reset"));
+
+    await expect(
+      syncLowStockMarkers({ assetIds: ["a-1"], organizationId: ORG_ID })
+    ).resolves.toBeUndefined();
+
+    expect(loggerSpy).toHaveBeenCalledTimes(1);
+    expect(assetUpdateManyMock).not.toHaveBeenCalled();
+    loggerSpy.mockRestore();
   });
 });

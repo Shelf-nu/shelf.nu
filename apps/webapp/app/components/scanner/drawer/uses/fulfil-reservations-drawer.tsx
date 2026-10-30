@@ -81,6 +81,8 @@ import {
 } from "~/atoms/qr-scanner";
 import CheckoutDialog, {
   CheckoutIntentEnum,
+  REVERT_TO_DRAFT_RESCHEDULE_HINT,
+  type CheckoutDialogBooking,
 } from "~/components/booking/checkout-dialog";
 import type { ModelProgress } from "~/components/booking/model-pending-rows";
 import { buildPendingModelRows } from "~/components/booking/model-pending-rows";
@@ -106,6 +108,7 @@ import { createBlockers } from "../blockers-factory";
 import ConfigurableDrawer from "../configurable-drawer";
 import { DefaultLoadingState, GenericItemRow, Tr } from "../generic-item-row";
 import { ScanItemGroup } from "../scan-item-group";
+import { ScannedAssetIdentifiers } from "../scanned-asset-identifiers";
 
 /**
  * Zod schema for the fulfil-and-checkout form payload.
@@ -457,9 +460,11 @@ export default function FulfilReservationsDrawer({
       renderItem={(data) => (
         <ScannedAssetRowBody
           asset={data as AssetFromQr}
+          scannedCode={row.qrId}
           bucket={row.bucket}
           viaKitName={row.viaKitName}
           claimedModelName={row.claimedModelName}
+          matchedModelName={row.matchedModelName}
         />
       )}
     />
@@ -612,6 +617,9 @@ export default function FulfilReservationsDrawer({
             id: session.bookingId,
             name: session.bookingName,
             from: new Date(session.bookingFrom),
+            // For the expired-reservation prompt; see `CheckoutDialog`.
+            status: session.bookingStatus,
+            to: session.bookingTo,
           }}
           assetIds={assetIdsToSubmit}
           kitIds={kitIdsToSubmit}
@@ -725,7 +733,7 @@ function PendingModelRow({ assetModelName }: { assetModelName: string }) {
  * Body of a scanned-asset row (rendered inside `GenericItemRow`'s
  * `renderItem` slot). Branches on `bucket` for the status chip:
  *
- * - `"matched"`   → green "Ready" chip.
+ * - `"matched"`   → green chip naming the model whose unit it fills.
  * - `"viaKit"`    → blue chip naming the scanned kit it arrives with. Not a
  *   warning and not a second assignment: the kit row is what assigns it, and
  *   this row says so rather than looking like an idle duplicate.
@@ -741,14 +749,19 @@ function PendingModelRow({ assetModelName }: { assetModelName: string }) {
  */
 function ScannedAssetRowBody({
   asset,
+  scannedCode,
   bucket,
   viaKitName,
   claimedModelName,
+  matchedModelName,
 }: {
   asset: AssetFromQr;
+  /** The code the operator scanned to add this row. */
+  scannedCode: string;
   bucket: ScannedAssetRow["bucket"];
   viaKitName?: string;
   claimedModelName?: string;
+  matchedModelName?: string;
 }) {
   return (
     <div className="flex items-center gap-2">
@@ -761,6 +774,10 @@ function ScannedAssetRowBody({
         <span className="word-break whitespace-break-spaces font-medium text-gray-800">
           {asset.title}
         </span>
+        <ScannedAssetIdentifiers
+          sequentialId={asset.sequentialId}
+          scannedCode={scannedCode}
+        />
         <div className="flex flex-wrap items-center gap-1">
           <span className={assetTypePillClass}>asset</span>
           {bucket === "matched" ? (
@@ -768,8 +785,11 @@ function ScannedAssetRowBody({
               color={BADGE_COLORS.green.bg}
               textColor={BADGE_COLORS.green.text}
               withDot={false}
+              className="max-w-full"
             >
-              Ready
+              {matchedModelName
+                ? `Ready, counts toward ${matchedModelName}`
+                : "Ready"}
             </Badge>
           ) : bucket === "viaKit" ? (
             <Badge
@@ -953,8 +973,8 @@ function AlreadyIncludedRows({
  * Props for {@link FulfilCheckoutForm}.
  */
 type FulfilCheckoutFormProps = {
-  /** Booking summary for `CheckoutDialog`'s early-checkout detection. */
-  booking: { id: string; name: string; from: Date };
+  /** Booking summary for `CheckoutDialog`'s early and expired prompts. */
+  booking: CheckoutDialogBooking;
   /** Matched + unmatched scanned asset ids to attach to the booking. */
   assetIds: string[];
   /** Scanned kit ids to attach to the booking as kit-driven rows. */
@@ -1067,6 +1087,12 @@ function FulfilCheckoutForm({
           unassignedUnits={unassignedUnits}
           sourceQuestions={sourceQuestions}
           suppressEarlyCheckoutPrompt={suppressEarlyCheckoutPrompt}
+          // A booking waiting on model units checks out here, and its header
+          // Check out leads back to this drawer, so new dates come from
+          // reverting it to draft.
+          expiredRescheduleHint={REVERT_TO_DRAFT_RESCHEDULE_HINT}
+          // The drawer lists what goes out, so it is the confirmation step.
+          confirm={false}
           // `grow` (the CheckoutDialog default) makes the button stretch
           // across the drawer — with the disabled primary-300 tint this
           // reads as an alarming peach block. Size to content instead.

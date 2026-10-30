@@ -78,6 +78,7 @@ import {
   checkoutSessionsToLogsByAsset,
   computeUnitsStillOutBySlice,
 } from "~/modules/booking/checkout-attribution";
+import { isReservationExpired } from "~/modules/booking/helpers";
 import {
   computeAvailableQuantity,
   type AvailableQuantityClient,
@@ -251,7 +252,8 @@ export type AssetAvailability = {
    * and are reported via `checkedOut` / "Checked out (bookings)", so they are
    * deliberately excluded here — otherwise a checked-out booking would both
    * inflate this "committed, still on the shelf" figure AND be miscounted as
-   * an "upcoming booking" in the tooltip.
+   * an "upcoming booking" in the tooltip. An expired reservation (RESERVED,
+   * end passed, never checked out) is not upcoming and is excluded too.
    */
   reservedTotal: number;
   /** Count of distinct UPCOMING (RESERVED) bookings contributing to `reservedTotal`. */
@@ -294,7 +296,7 @@ type GetAssetAvailabilityArgs = {
  * ```
  * physicalAvailable = total − inCustody − inKits − checkedOut
  * bookable           = total − inCustody − inKits − reserved
- * reservedTotal      = Σ(remaining across RESERVED-status bookings only)
+ * reservedTotal      = Σ(remaining across RESERVED bookings whose end is ahead)
  * ```
  *
  * `checkedOut` feeds ONLY `physicalAvailable` (the physical-now headline) —
@@ -438,8 +440,13 @@ export async function getAssetAvailability({
         // are physically out (or in progress) and surface via `checkedOut` /
         // "Checked out (bookings)"; counting them here would double-report and
         // inflate the booking count (e.g. show "2 upcoming bookings" when one
-        // is already checked out).
-        if (row.booking?.status === BookingStatus.RESERVED) {
+        // is already checked out). An expired reservation (end passed, never
+        // checked out) is not upcoming either, so it is left out, as on every
+        // other quantity surface (`isReservationExpired`).
+        if (
+          row.booking?.status === BookingStatus.RESERVED &&
+          !isReservationExpired(row.booking.status, row.booking.to)
+        ) {
           reservedTotal += remaining;
           reservingBookingIds.add(row.bookingId);
         }
@@ -825,9 +832,13 @@ export async function getAssetAvailabilityBatch(
         );
 
         // Informational "Reserved (bookings)" = UPCOMING (RESERVED) bookings
-        // only — ONGOING/OVERDUE units surface via `checkedOut`. See the
-        // singular primitive's matching comment.
-        if (row.booking?.status === BookingStatus.RESERVED) {
+        // only. ONGOING/OVERDUE units surface via `checkedOut`, and an
+        // expired reservation is not upcoming. See the singular primitive's
+        // matching comment.
+        if (
+          row.booking?.status === BookingStatus.RESERVED &&
+          !isReservationExpired(row.booking.status, row.booking.to)
+        ) {
           reservedTotalByAsset.set(
             row.assetId,
             (reservedTotalByAsset.get(row.assetId) ?? 0) + remaining

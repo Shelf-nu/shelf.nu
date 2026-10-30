@@ -145,6 +145,10 @@ const Input = forwardRef(function Input(
     className: inputClasses,
     onChange,
     ref,
+    // A field with an error is invalid for assistive tech too, not just red
+    // (also when `hideErrorText` moves the message elsewhere). An explicit
+    // `aria-invalid` from the caller in `rest` still wins.
+    "aria-invalid": error ? true : undefined,
     ...rest,
   };
 

@@ -82,7 +82,7 @@ import { randomUsernameFromEmail } from "~/utils/user";
 import { USER_WITH_SSO_DETAILS_SELECT } from "./fields";
 import { lockMembership } from "./membership-lock.server";
 import type { UpdateUserPayload } from "./types";
-import { defaultFields } from "../asset-index-settings/helpers";
+import { defaultColumnsForWorkspace } from "../asset-index-settings/helpers";
 import { ensureAssetIndexModeForRole } from "../asset-index-settings/service.server";
 import { defaultUserCategories } from "../category/default-categories";
 import {
@@ -90,6 +90,7 @@ import {
   normalizeInviteEmail,
 } from "../invite/helpers";
 import { getOrganizationsBySsoDomain } from "../organization/service.server";
+import { pdfDocumentsForNewWorkspace } from "../pdf-document/service.server";
 import { USER_CONTACT_SELECT } from "../user-contact/constants";
 import {
   getUserContactById,
@@ -1133,11 +1134,19 @@ export async function createUser(
                         user: { connect: { id: userId } },
                       },
                     },
+                    // A new account starts on the free tier, which has no PDF
+                    // documents unless premium features are off.
+                    ...pdfDocumentsForNewWorkspace({
+                      canCustomize: !config.enablePremiumFeatures,
+                    }),
                     // Creating asset index settings for new users' personal org
                     assetIndexSettings: {
                       create: {
                         mode: AssetIndexMode.ADVANCED,
-                        columns: defaultFields,
+                        // A new workspace has no assets yet, so no quantity-tracked ones.
+                        columns: defaultColumnsForWorkspace({
+                          hasQuantityAssets: false,
+                        }),
                         user: {
                           connect: {
                             id: userId,

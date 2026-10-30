@@ -816,6 +816,12 @@ export type FulfilSessionInfo = {
   /** ISO string — drives `isBookingEarlyCheckout` in the submit path. */
   bookingFrom: string;
   /**
+   * ISO string, or null for a booking with no end yet. With `bookingStatus`
+   * it drives the expired-reservation prompt (`isReservationExpired`) in the
+   * submit path.
+   */
+  bookingTo: string | null;
+  /**
    * Booking status when the scanner opened. Only a RESERVED booking's first
    * check-out can move its start date, so only then is the operator asked.
    */
@@ -894,3 +900,21 @@ export const endFulfilSessionAtom = atom(null, (_get, set) => {
  * `useBookingAssignSessionInitialization`.
  */
 export const assignAlreadyIncludedAtom = atom<AlreadyIncludedRow[]>([]);
+
+/**
+ * One model the booking reserves, whether or not its units are all filled.
+ */
+export type ReservedModel = { assetModelId: string; assetModelName: string };
+
+/**
+ * Every model the booking reserves in the current Scan to Assign session,
+ * fully filled ones included.
+ *
+ * Kept apart from `expectedModelRequestsAtom`, which lists only reservations
+ * still owed and drives matching and progress. This one answers a different
+ * question: whether an extra scan's model is reserved at all, so a scan of a
+ * model whose units are all filled reads as over the reserved count rather
+ * than as an unreserved model. Seeded and cleared by
+ * `useBookingAssignSessionInitialization`.
+ */
+export const assignReservedModelsAtom = atom<ReservedModel[]>([]);

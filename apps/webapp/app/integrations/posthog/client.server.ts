@@ -24,6 +24,7 @@
 
 import { PostHog } from "posthog-node";
 
+import type { ImportFailureReason } from "~/modules/import-mapping/failure";
 import type { SignupIntentEventProperties } from "~/modules/signup-intent/analytics";
 import { POSTHOG_API_KEY, POSTHOG_HOST } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
@@ -118,6 +119,55 @@ export type ServerAnalyticsEvent =
         totalCount?: number;
         /** Which report, for `sheet: "report"` only. */
         reportId?: string;
+        /**
+         * The saved PDF document shown when the preview opens, for
+         * `booking_checklist` only. The person may still close the preview
+         * without printing. `null` for a workspace without PDF documents,
+         * whose preview shows the built-in Checklist.
+         */
+        documentId?: string | null;
+        /** That document's name, alongside `documentId`. */
+        documentName?: string | null;
+      };
+    }
+  | {
+      /** The asset importer proposed a column mapping for an uploaded file. */
+      event: "import_mapping_proposed";
+      properties: {
+        organizationId: string;
+        /** Columns in the file. */
+        columns: number;
+        /** Columns proposed with low confidence. */
+        lowConfidence: number;
+      };
+    }
+  | {
+      /** The user confirmed a reviewed mapping and started the import. */
+      event: "import_mapping_confirmed";
+      properties: {
+        organizationId: string;
+        columns: number;
+        /** Columns whose destination the user changed in the review. */
+        changedByUser: number;
+        /** Custom fields the mapping will create. */
+        newCustomFields: number;
+      };
+    }
+  | {
+      /** An asset content import finished and created its assets. */
+      event: "import_completed";
+      properties: {
+        organizationId: string;
+        /** Assets created. */
+        rows: number;
+      };
+    }
+  | {
+      /** An import (or its mapping step) was refused after the access gates. */
+      event: "import_failed";
+      properties: {
+        organizationId: string;
+        reason: ImportFailureReason;
       };
     };
 

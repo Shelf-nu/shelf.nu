@@ -34,10 +34,9 @@ export default function ExtendBookingDialog({
   const [open, setOpen] = useState(false);
   const fetcher = useFetcherWithReset<DataOrErrorResponse>();
   const disabled = useDisabled(fetcher);
-  // TIMEZONE FIX: validate the new end date in the user's RESOLVED pref zone.
-  // The server action parses the submitted value with that same zone, so using
-  // the browser hint here made the two disagree for anyone with an explicit
-  // timezone preference.
+  // Validate the new end date in the user's RESOLVED pref zone: the server
+  // action parses the submitted value in that same zone, and the browser hint
+  // differs from it for anyone with an explicit timezone preference.
   const prefs = useFormatPrefs();
   const { booking } = useLoaderData<BookingPageLoaderData>();
   const workingHoursData = useWorkingHours();
@@ -89,7 +88,7 @@ export default function ExtendBookingDialog({
         width="full"
         onClick={handleOpen}
       >
-        Extend booking
+        Change end date
       </Button>
 
       <DialogPortal>
@@ -106,9 +105,11 @@ export default function ExtendBookingDialog({
           }
         >
           <div className="px-6 pb-4">
-            <h3 className="mb-1">Extend booking</h3>
+            <h3 className="mb-1">Change end date</h3>
             <p className="mb-4">
-              Change the end date of your booking to a date in the future.
+              Pick a new end date for this booking. Items stay checked out until
+              they are checked in; if they come back after the new end, the
+              booking becomes overdue.
             </p>
 
             <fetcher.Form ref={zo.ref} method="POST">

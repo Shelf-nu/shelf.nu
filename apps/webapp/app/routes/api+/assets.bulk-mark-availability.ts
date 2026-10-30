@@ -1,6 +1,7 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { BulkMarkAvailabilitySchema } from "~/components/assets/bulk-mark-availability-dialog";
 import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
+import { resolveBookableListScope } from "~/modules/asset/list-scope.server";
 import { bulkMarkAvailability } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
@@ -59,12 +60,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
     );
 
     await bulkMarkAvailability({
+      userId,
       organizationId,
       assetIds,
       type,
       currentSearchParams,
       settings,
       lastAuditDateAccess: lastAuditDateAccessFor(access, currentOrganization),
+      bookableScope: resolveBookableListScope({ access, userId }),
       timeZone,
     });
 

@@ -179,6 +179,12 @@ describe("POST /api/mobile/bookings/checkout", () => {
       organizationId: "org-1",
       hints: { timeZone: "UTC", locale: "en-US" },
       userId: "user-1",
+      // A self-service caller with the workspace toggle off sees only their
+      // own bookings, so a model-pool refusal keeps other members' unnamed.
+      seesAllBookings: false,
+      // The phone keeps the stored dates: no early-start adjustment, and an
+      // expired reservation goes out as overdue (see the route doc).
+      intentChoice: "without-adjusted-date",
       from: BOOKING_FROM,
       to: BOOKING_TO,
       // "Check Out All Assets" is the phone's one tap; the server states it.

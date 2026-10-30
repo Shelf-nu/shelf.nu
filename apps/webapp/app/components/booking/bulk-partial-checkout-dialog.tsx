@@ -36,6 +36,7 @@ import {
 import { useDisabled } from "~/hooks/use-disabled";
 import {
   makeCheckoutEligibility,
+  isReservationExpired,
   shouldPromptEarlyCheckout,
 } from "~/modules/booking/helpers";
 import type {
@@ -47,7 +48,9 @@ import { flattenSelectedBookingItems } from "~/utils/booking-assets";
 import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { numberInputWheelGuard } from "~/utils/number-input-wheel-guard";
 import { tw } from "~/utils/tw";
-import CheckoutDialog from "./checkout-dialog";
+import CheckoutDialog, {
+  REVERT_TO_DRAFT_RESCHEDULE_HINT,
+} from "./checkout-dialog";
 import { CheckoutSourceSelect } from "./checkout-source-select";
 import { AssetImage } from "../assets/asset-image/component";
 import { Form } from "../custom-form";
@@ -341,7 +344,16 @@ export default function BulkPartialCheckoutDialog({
           count: request.quantity - request.fulfilledQuantity,
         }))
       : [];
-  const needsConfirmation = isEarlyCheckout || unassignedUnits.length > 0;
+  // Any first batch on a RESERVED booking whose end date has passed: the
+  // server refuses it without a choice, so the dialog has to ask. Not only
+  // the final batch, because the first batch is what moves the booking out of
+  // RESERVED.
+  const isExpiredCheckout = Boolean(
+    selectedAssetIds.length > 0 &&
+      isReservationExpired(booking.status, booking.to)
+  );
+  const needsConfirmation =
+    isEarlyCheckout || isExpiredCheckout || unassignedUnits.length > 0;
 
   function handleCloseDialog() {
     setOpen(false);
@@ -823,6 +835,8 @@ export default function BulkPartialCheckoutDialog({
                   id: booking.id,
                   name: booking.name,
                   from: booking.from,
+                  status: booking.status,
+                  to: booking.to,
                 }}
                 intent="partial-checkout"
                 label={isEarlyCheckout ? undefined : "Check out items"}
@@ -831,7 +845,18 @@ export default function BulkPartialCheckoutDialog({
                 formId="bulk-partial-checkout-form"
                 fullWidth
                 unassignedUnits={unassignedUnits}
+                // With units still unassigned, the header's Check out leads to
+                // the fulfil flow, which sets no new end date.
+                expiredRescheduleHint={
+                  unassignedUnits.length > 0
+                    ? REVERT_TO_DRAFT_RESCHEDULE_HINT
+                    : undefined
+                }
                 suppressEarlyCheckoutPrompt={!isEarlyCheckout}
+                // This dialog is already the confirmation step. It renders
+                // CheckoutDialog only for early or unassigned check-outs, so
+                // this guards a plain one from asking a second time.
+                confirm={false}
               />
             ) : (
               <Button

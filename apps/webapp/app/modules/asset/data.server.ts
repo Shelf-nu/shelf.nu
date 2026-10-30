@@ -11,6 +11,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import type { AllowedModelNames } from "~/routes/api+/model-filters";
+import { redactTopBookingForViewer } from "~/utils/booking-visibility.server";
 import { bookingCustodianIsSelf } from "~/utils/bookings";
 import { getClientHint } from "~/utils/client-hints";
 import {
@@ -30,13 +31,11 @@ import { getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import { parseMarkdownToReact } from "~/utils/md";
 import { isPersonalOrg } from "~/utils/organization";
-import {
-  PermissionAction,
-  PermissionEntity,
-} from "~/utils/permissions/permission.data";
-import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import type { RoleAccess } from "~/utils/permissions/role-access";
-import { canExportAssets, canImportAssets } from "~/utils/subscription.server";
+import {
+  canExportAssets,
+  resolveCanImportAssets,
+} from "~/utils/subscription.server";
 import type { UserNameFields } from "~/utils/user";
 import { resolveUserDisplayName } from "~/utils/user";
 import {
@@ -281,9 +280,10 @@ export async function simpleModeLoader({
   const hasActiveFilters = computeHasActiveFilters(searchParams);
   const view = searchParams.get("view") ?? "table";
 
-  /** Query tierLimit, assets, presets, permissions & more — all in parallel */
+  /** Query the tier limit, import gate, assets, presets, permissions and more, in parallel */
   let [
     tierLimit,
+    canImport,
     {
       search,
       totalAssets,
@@ -307,12 +307,10 @@ export async function simpleModeLoader({
     teamMembersForFormData,
     notifyData,
     savedFilterPresets,
-    canImport,
   ] = await Promise.all([
-    getOrganizationTierLimit({
-      organizationId,
-      organizations,
-    }),
+    // The export gate reads the tier directly; the import gate resolves its own.
+    getOrganizationTierLimit({ organizationId, organizations }),
+    resolveCanImportAssets({ organizationId, organizations, userId, role }),
     getPaginatedAndFilterableAssets({
       request,
       organizationId,
@@ -397,14 +395,6 @@ export async function simpleModeLoader({
     listPresetsForUser({
       organizationId,
       ownerId: userId,
-    }),
-    // Import permission — only depends on organizationId, userId, role
-    hasPermission({
-      organizationId,
-      userId,
-      roles: role ? [role] : [],
-      entity: PermissionEntity.asset,
-      action: PermissionAction.import,
     }),
   ]);
 
@@ -533,7 +523,7 @@ export async function simpleModeLoader({
       totalPages,
       modelName,
       hasActiveFilters,
-      canImportAssets: canImportAssets(tierLimit) && canImport,
+      canImportAssets: canImport,
       canExportAssets: canExportAssets(tierLimit),
       searchFieldLabel: "Search assets",
       searchFieldTooltip: {
@@ -821,7 +811,7 @@ export async function advancedModeLoader({
   // categories, locations, asset models). Its output is only used in the final
   // response payload — no other query depends on it. Running it inside
   // Promise.all lets it overlap with the asset query instead of blocking it.
-  /** Query entities, tierLimit, assets & more — all in parallel */
+  /** Query entities, the tier limit, import gate, assets and more, in parallel */
   const [
     {
       tags,
@@ -834,6 +824,7 @@ export async function advancedModeLoader({
       totalAssetModels,
     },
     tierLimit,
+    advCanImport,
     assetsOrRollup,
     customFields,
     teamMembersData,
@@ -845,7 +836,6 @@ export async function advancedModeLoader({
     totalBookings,
     advNotifyData,
     advSavedFilterPresets,
-    advCanImport,
   ] = await Promise.all([
     getEntitiesWithSelectedValues({
       organizationId,
@@ -855,10 +845,9 @@ export async function advancedModeLoader({
       selectedLocationIds: selectedLocation,
       selectedAssetModelIds: selectedAssetModel,
     }),
-    getOrganizationTierLimit({
-      organizationId,
-      organizations,
-    }),
+    // The export gate reads the tier directly; the import gate resolves its own.
+    getOrganizationTierLimit({ organizationId, organizations }),
+    resolveCanImportAssets({ organizationId, organizations, userId, role }),
     isModelView
       ? getAssetModelRollupPage({
           request,
@@ -966,14 +955,6 @@ export async function advancedModeLoader({
       organizationId,
       ownerId: userId,
     }),
-    // Import permission — only depends on organizationId, userId, role
-    hasPermission({
-      organizationId,
-      userId,
-      roles: role ? [role] : [],
-      entity: PermissionEntity.asset,
-      action: PermissionAction.import,
-    }),
   ]);
 
   const { search, totalAssets, perPage, page, assets, totalPages, cookie } =
@@ -1051,10 +1032,16 @@ export async function advancedModeLoader({
       // (`assets._index.tsx` refuses it to restricted roles), so this is a
       // no-op in practice — applied so the rule lives with the payload rather
       // than depending on a gate two files away.
-      items: redactCustodianForViewer(refreshedAssets, {
-        canSeeAllCustody,
-        userId,
-      }),
+      // The biggest upcoming booking a row names for its stock verdict is
+      // redacted by the same reasoning, for a viewer limited to their own
+      // bookings.
+      items: redactTopBookingForViewer(
+        redactCustodianForViewer(refreshedAssets, {
+          canSeeAllCustody,
+          userId,
+        }),
+        { canSeeAllBookings: access.bookings.seeAll }
+      ),
       search,
       page,
       totalItems: isModelView ? totalGroupsForPayload : totalAssets,
@@ -1063,7 +1050,7 @@ export async function advancedModeLoader({
       totalPages,
       modelName,
       hasActiveFilters,
-      canImportAssets: canImportAssets(tierLimit) && advCanImport,
+      canImportAssets: advCanImport,
       canExportAssets: canExportAssets(tierLimit),
       searchFieldLabel: "Search assets",
       searchFieldTooltip: {

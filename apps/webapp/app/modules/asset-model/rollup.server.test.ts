@@ -167,6 +167,30 @@ describe("getAssetModelRollup", () => {
     expect(lastQueryText()).toContain(") custody_agg ON TRUE");
   });
 
+  it("joins the pool figures when a Free now, Reserved or Stock status filter is active", async () => {
+    // why: those predicates read `pool.*`, an alias from a LATERAL join, so a
+    // missing join is a missing FROM-clause error, as with custody above.
+    await getAssetModelRollup({
+      ...baseArgs,
+      filters: [
+        {
+          name: "reserved",
+          type: "number",
+          operator: "gt",
+          value: 0,
+        },
+      ] as unknown as GetAssetModelRollupArgs["filters"],
+    });
+
+    expect(lastQueryText()).toContain(") pool ON TRUE");
+  });
+
+  it("omits the pool figures when no pool filter is active", async () => {
+    await getAssetModelRollup(baseArgs);
+
+    expect(lastQueryText()).not.toContain(") pool ON TRUE");
+  });
+
   it("omits the custody aggregation when no custody filter is active", async () => {
     await getAssetModelRollup(baseArgs);
 

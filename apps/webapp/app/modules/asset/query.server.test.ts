@@ -13,6 +13,9 @@ import {
   generateCustomFieldSelect,
   generateWhereClause,
   parseSortingOptions,
+  POOL_AGGREGATE_JOIN,
+  POOL_AVAILABLE_EXPR,
+  POOL_STOCK_STATUS_EXPR,
 } from "./query.server";
 
 // why: mocking location descendants to avoid database queries during tests
@@ -86,8 +89,8 @@ describe("parseSortingOptions", () => {
     });
 
     // Regression test using the exact PoC shape from the GHSA-69xv-wmgg-3qp3
-    // report. The split(":") only takes the first colon, so the entire
-    // "asc,(SELECT ...)" string lands in `direction` and must be rejected.
+    // report. The spec has one colon, so the entire "asc,(SELECT ...)"
+    // string lands in `direction` and must be rejected.
     it("rejects the reporter's exact PoC subquery payload", () => {
       expect(() =>
         parseSortingOptions([
@@ -154,53 +157,136 @@ describe("parseSortingOptions", () => {
   });
 
   describe("custom field (cf_*) validation", () => {
-    it("permits a simple custom field name", () => {
+    it("sorts by a simple custom field name", () => {
       const { orderByClause, customFieldSortings } = parseSortingOptions([
         "cf_Manufacturer:asc:TEXT",
       ]);
-      expect(customFieldSortings).toHaveLength(1);
-      expect(customFieldSortings[0].alias).toBe("cf_Manufacturer");
-      expect(orderByClause).toContain("cf_Manufacturer");
-    });
-
-    it("normalizes whitespace in custom field name to underscores", () => {
-      const { customFieldSortings } = parseSortingOptions([
-        "cf_legit name:asc:TEXT",
+      expect(customFieldSortings).toEqual([
+        {
+          name: "Manufacturer",
+          valueKey: "raw",
+          alias: "cf_sort_0",
+          fieldType: "TEXT",
+        },
       ]);
-      expect(customFieldSortings).toHaveLength(1);
-      expect(customFieldSortings[0].alias).toBe("cf_legit_name");
+      expect(orderByClause).toContain("cf_sort_0");
     });
 
-    it("drops a custom field name containing injection chars", () => {
+    it.each([
+      ["Weight (kg)", "NUMBER"],
+      ["S/N", "TEXT"],
+      ["Cost (USD)", "AMOUNT"],
+      ["Kaufdatum", "DATE"],
+      ["legit name", "TEXT"],
+    ])(
+      "sorts by the custom field %s whatever characters its name holds",
+      (name, type) => {
+        const { orderByClause, customFieldSortings } = parseSortingOptions([
+          `cf_${name}:desc:${type}`,
+        ]);
+        expect(customFieldSortings).toHaveLength(1);
+        // The name travels as data for the bound parameter, unchanged.
+        expect(customFieldSortings[0].name).toBe(name);
+        expect(customFieldSortings[0].alias).toBe("cf_sort_0");
+        expect(orderByClause).not.toBe(DEFAULT_FALLBACK_ORDER_BY);
+        expect(orderByClause).toContain("cf_sort_0");
+        expect(orderByClause).not.toContain(name);
+      }
+    );
+
+    it("keeps an injection attempt out of the SQL text", () => {
       const { orderByClause, customFieldSortings } = parseSortingOptions([
         "cf_x;DROP TABLE:asc:TEXT",
       ]);
-      expect(customFieldSortings).toHaveLength(0);
-      expect(orderByClause).toBe(DEFAULT_FALLBACK_ORDER_BY);
+      // Sorting on a field with that literal name is harmless: the name is
+      // only ever a bound parameter, and the alias is fixed.
+      expect(customFieldSortings[0]).toMatchObject({
+        name: "x;DROP TABLE",
+        alias: "cf_sort_0",
+      });
       expect(orderByClause).not.toContain("DROP");
     });
 
-    it("drops a custom field name containing parentheses", () => {
+    it.each([
+      ["cf_Ratio: target:asc:NUMBER", "Ratio: target", "NUMBER"],
+      ["cf_Ratio: target:desc", "Ratio: target", undefined],
+      ["cf_a:b:c:asc:TEXT", "a:b:c", "TEXT"],
+    ])(
+      "keeps the colons of a custom field name in %s",
+      (spec, name, fieldType) => {
+        const { customFieldSortings } = parseSortingOptions([spec]);
+        expect(customFieldSortings).toEqual([
+          { name, valueKey: "raw", alias: "cf_sort_0", fieldType },
+        ]);
+      }
+    );
+
+    it("gives each custom field sort its own alias", () => {
       const { orderByClause, customFieldSortings } = parseSortingOptions([
-        "cf_Cost (USD):asc:AMOUNT",
+        "cf_S/N:asc:TEXT",
+        "name:asc",
+        "cf_Weight (kg):desc:NUMBER",
+      ]);
+      expect(customFieldSortings.map((cf) => cf.alias)).toEqual([
+        "cf_sort_0",
+        "cf_sort_1",
+      ]);
+      expect(orderByClause.indexOf("cf_sort_0")).toBeLessThan(
+        orderByClause.indexOf("cf_sort_1")
+      );
+    });
+
+    it("skips a custom field sort with no name", () => {
+      const { orderByClause, customFieldSortings } = parseSortingOptions([
+        "cf_:asc:TEXT",
       ]);
       expect(customFieldSortings).toHaveLength(0);
       expect(orderByClause).toBe(DEFAULT_FALLBACK_ORDER_BY);
     });
 
-    it("uses direct sort for DATE fields", () => {
+    it("uses direct sort for DATE fields, empty values last", () => {
       const { orderByClause } = parseSortingOptions(["cf_x:asc:DATE"]);
-      expect(orderByClause).toBe('ORDER BY cf_x asc, "assetId" ASC');
+      expect(orderByClause).toBe(
+        'ORDER BY cf_sort_0 asc NULLS LAST, "assetId" ASC'
+      );
     });
 
-    it("uses ::numeric cast for AMOUNT fields", () => {
-      const { orderByClause } = parseSortingOptions(["cf_x:asc:AMOUNT"]);
-      expect(orderByClause).toBe('ORDER BY cf_x::numeric asc, "assetId" ASC');
+    it.each(["AMOUNT", "NUMBER"])(
+      "sorts %s fields as numbers through a guarded cast",
+      (type) => {
+        const { orderByClause } = parseSortingOptions([`cf_x:desc:${type}`]);
+        expect(orderByClause).toBe(
+          `ORDER BY (CASE WHEN cf_sort_0 ~ '^\\s*[-+]?([0-9]+(\\.[0-9]*)?|\\.[0-9]+)\\s*$' THEN cf_sort_0::numeric END) desc NULLS LAST, "assetId" ASC`
+        );
+      }
+    );
+
+    it.each([
+      ["name:asc:TEXT", "assetTitle"],
+      ["cf_a:b:asc", "cf_sort_0"],
+    ])("reads direction and type from the end of %s", (spec, column) => {
+      const { orderByClause } = parseSortingOptions([spec]);
+      expect(orderByClause).toContain(column);
+    });
+
+    it("keeps a trailing colon segment in the name when there is no type", () => {
+      const { customFieldSortings } = parseSortingOptions(["cf_a:b:asc"]);
+      expect(customFieldSortings[0]).toMatchObject({
+        name: "a:b",
+        fieldType: undefined,
+      });
+    });
+
+    it("rejects an invalid direction after a custom field name", () => {
+      expect(() => parseSortingOptions(["cf_x:bogus"])).toThrow(ShelfError);
     });
 
     it("falls through to natural sort for unknown fieldType", () => {
       const { orderByClause } = parseSortingOptions(["cf_x:asc:bogusType"]);
-      expect(orderByClause).toContain("LOWER(regexp_replace(cf_x");
+      expect(orderByClause).toContain(
+        "LOWER(regexp_replace(NULLIF(cf_sort_0, '')"
+      );
+      expect(orderByClause).toContain("NULLIF(cf_sort_0, '') asc NULLS LAST");
     });
   });
 
@@ -208,7 +294,7 @@ describe("parseSortingOptions", () => {
     it("emits valid terms while skipping invalid ones in the same array", () => {
       const { orderByClause, customFieldSortings } = parseSortingOptions([
         "updatedAt:desc",
-        "cf_x;DROP:asc:TEXT",
+        "barcode_x;DROP:asc",
         "name:asc",
       ]);
       expect(customFieldSortings).toHaveLength(0);
@@ -241,6 +327,20 @@ describe("parseSortingOptions", () => {
       // A numeric column compare, so 10 sorts above 9.
       expect(orderByInner).toBe('"assetQuantity" desc, "assetId" ASC');
     });
+
+    it.each(["asc", "desc"])(
+      "sorts valuation %s by total value, individual assets' NULL quantity as 1, no value last",
+      (direction) => {
+        const { orderByInner } = parseSortingOptions([
+          `valuation:${direction}`,
+        ]);
+        // Without the COALESCE, value × NULL is NULL and every individual
+        // asset ties on the sort key.
+        expect(orderByInner).toBe(
+          `("assetValue" * COALESCE("assetQuantity", 1)) ${direction} NULLS LAST, "assetId" ASC`
+        );
+      }
+    );
 
     it("sorts unit of measure with the natural text sort", () => {
       const { orderByInner } = parseSortingOptions(["unitOfMeasure:asc"]);
@@ -308,10 +408,30 @@ describe("generateCustomFieldSelect", () => {
 
   it("emits a SELECT subquery for a safe alias", () => {
     const result = generateCustomFieldSelect([
-      { name: "Manufacturer", valueKey: "raw", alias: "cf_Manufacturer" },
+      { name: "Manufacturer", valueKey: "raw", alias: "cf_sort_0" },
     ]);
     expect(result.strings.join("?")).toContain("AS ");
-    expect(result.strings.join("?")).toContain("cf_Manufacturer");
+    expect(result.strings.join("?")).toContain("cf_sort_0");
+  });
+
+  it("selects under the alias the ORDER BY sorts on, with the name bound", () => {
+    const { orderByClause, customFieldSortings } = parseSortingOptions([
+      "cf_Weight (kg):desc:NUMBER",
+    ]);
+    const result = generateCustomFieldSelect(customFieldSortings);
+    const sqlText = result.strings.join("?");
+
+    expect(sqlText).toContain("AS cf_sort_0");
+    expect(orderByClause).toContain("cf_sort_0");
+    expect(sqlText).not.toContain("Weight (kg)");
+    expect(result.values).toContain("Weight (kg)");
+  });
+
+  it("reads values only from custom fields that are not deleted", () => {
+    const result = generateCustomFieldSelect([
+      { name: "S/N", valueKey: "raw", alias: "cf_sort_0" },
+    ]);
+    expect(result.strings.join("?")).toContain('cf."deletedAt" IS NULL');
   });
 
   // Defense-in-depth: even though parseSortingOptions already validates
@@ -361,6 +481,83 @@ describe("generateWhereClause - search fail-closed", () => {
     const sql = getSqlString(result);
     expect(sql).toContain("ILIKE");
     expect(sql).not.toContain("AND FALSE");
+  });
+});
+
+describe("generateWhereClause - enum filter values", () => {
+  const columns = [
+    { name: "status" as const, visible: true, position: 0 },
+    { name: "type" as const, visible: true, position: 1 },
+  ];
+
+  /** Runs the builder and returns what it threw, or null. */
+  function thrownBy(query: string): ShelfError | null {
+    try {
+      generateWhereClause("org-1", null, parseFilters(query, columns));
+      return null;
+    } catch (error) {
+      return error as ShelfError;
+    }
+  }
+
+  it("answers an unknown status with a 400 naming the valid ones", () => {
+    const error = thrownBy("status=is:ARCHIVED");
+    expect(error).toBeInstanceOf(ShelfError);
+    expect(error?.status).toBe(400);
+    expect(error?.shouldBeCaptured).toBe(false);
+    expect(error?.message).toContain('Unknown status "ARCHIVED"');
+    expect(error?.message).toContain("AVAILABLE, IN_CUSTODY, CHECKED_OUT");
+    expect(error?.message).toContain("archived=archived");
+  });
+
+  it.each(["status=isNot:LOST", "status=containsAny:AVAILABLE,LOST"])(
+    "rejects an unknown value in %s",
+    (query) => {
+      const error = thrownBy(query);
+      expect(error?.status).toBe(400);
+      expect(error?.message).toContain('"LOST"');
+      expect(error?.message).not.toContain("archived=archived");
+    }
+  );
+
+  it.each(["type=is:KIT", "type=isNot:KIT"])(
+    "answers an unknown asset type in %s with a 400",
+    (query) => {
+      const error = thrownBy(query);
+      expect(error?.status).toBe(400);
+      expect(error?.message).toContain("INDIVIDUAL, QUANTITY_TRACKED");
+    }
+  );
+
+  it("quotes each unknown value on its own", () => {
+    const error = thrownBy("status=containsAny:LOST,FOO");
+    expect(error?.message).toContain('Unknown status "LOST", "FOO".');
+  });
+
+  it("ignores empty items in a status list", () => {
+    const result = generateWhereClause(
+      "org-1",
+      null,
+      parseFilters("status=containsAny:AVAILABLE,", columns)
+    );
+    expect(result.values).toContain("AVAILABLE");
+    expect(result.values).not.toContain("");
+  });
+
+  it("still casts known values in the SQL", () => {
+    const result = generateWhereClause(
+      "org-1",
+      null,
+      parseFilters(
+        "status=containsAny:AVAILABLE, IN_CUSTODY&type=is:INDIVIDUAL",
+        columns
+      )
+    );
+    expect(getSqlString(result)).toContain('::public."AssetStatus"[]');
+    expect(getSqlString(result)).toContain('::public."AssetType"');
+    expect(result.values).toEqual(
+      expect.arrayContaining(["AVAILABLE", "IN_CUSTODY", "INDIVIDUAL"])
+    );
   });
 });
 
@@ -979,6 +1176,12 @@ describe("assetQueryFragment", () => {
     return sql.strings.join("?");
   }
 
+  it("includes a booking custodian's team member id, which the badge links to", () => {
+    const sql = getFragmentSqlString(assetQueryFragment());
+
+    expect(sql).toContain("'id', btm.id");
+  });
+
   describe("asset model cover image", () => {
     // why: raw SQL is opaque to typecheck — Prisma.sql is just a string, and the
     // row type is a user-supplied cast. Asserting the column names is the only
@@ -1105,6 +1308,12 @@ describe("assetQueryFragment", () => {
       expect(outerOnly).not.toMatch(
         /LEFT JOIN public\."User" u ON tm\."userId" = u\.id/
       );
+    });
+
+    it("includes each custodian's team member id, which the badge links to", () => {
+      const sql = getJoinsSqlString(assetQueryJoins);
+
+      expect(sql).toContain("'id', tm.id");
     });
 
     it("includes per-custody quantity in the aggregated jsonb objects", () => {
@@ -1437,7 +1646,127 @@ describe("generateWhereClause - lowStockOnly", () => {
     );
     expect(sql).toContain(`a."type" = 'QUANTITY_TRACKED'`);
     expect(sql).toContain(`a."minQuantity" IS NOT NULL`);
-    expect(sql).toContain(`a."quantity" <= a."minQuantity"`);
+    // Compares AVAILABLE against the threshold, via the shared pool expression.
+    expect(sql).toContain(`pool.in_custody`);
+    expect(sql).toContain(`<= a."minQuantity"`);
+  });
+
+  it("compares AVAILABLE, not total quantity, against the threshold", () => {
+    // why: this is the defect the unification closes, and a total-based
+    // predicate would pass every other assertion in this file. The toggle used
+    // to read `a."quantity" <= a."minQuantity"`, which disagreed with the
+    // low-stock EMAIL (available-based) the moment any unit was in custody:
+    // 6 total, 2 in custody, threshold 5 → the alert fired and this filter
+    // could not find the row. Two of the three thresholded assets in the dev
+    // workspace were invisible to the old predicate.
+    const sql = getSqlString(
+      generateWhereClause(orgId, null, [], undefined, null, "UTC", true)
+    );
+    expect(sql).not.toContain(`a."quantity" <= a."minQuantity"`);
+  });
+});
+
+describe("generateWhereClause - Free now filter", () => {
+  it("leaves individually-tracked assets out of a Free now number filter", () => {
+    // why: an individual asset has no pool. Before the type guard its Free now
+    // came out as 0, so "Free now is 0" listed every individual asset while
+    // their cells showed a dash.
+    const filter: Filter = {
+      name: "available",
+      type: "number",
+      operator: "is",
+      value: 0,
+    };
+    const sql = getSqlString(
+      generateWhereClause("test-org-id", null, [filter])
+    );
+
+    expect(sql).toContain(
+      `CASE WHEN a."type" = 'QUANTITY_TRACKED' THEN GREATEST(COALESCE(a.quantity, 0)`
+    );
+  });
+});
+
+describe("POOL_AGGREGATE_JOIN, the SQL twin of getAssetAvailability", () => {
+  const sql = POOL_AGGREGATE_JOIN.strings.join("?");
+
+  it("counts direct custody only, leaving kit-inherited rows to in_kits", () => {
+    // A kit in custody writes Custody rows tagged kitCustodyId for its members;
+    // those units are already in AssetKit.quantity. Summing both painted every
+    // member of a kit in custody as None free.
+    expect(sql).toContain(`cu_q."kitCustodyId" IS NULL`);
+  });
+
+  it("keeps kit-driven booking slices out of every booking figure", () => {
+    // A booked kit writes BookingAsset rows tagged assetKitId for its members.
+    // Reserved, checked-out, the peak and the top booking all read standalone
+    // slices only; a member of a reserved kit read Short before this.
+    expect(sql).toContain(`(ba."assetKitId" IS NULL) AS standalone`);
+    expect(sql).toContain(
+      `FROM slices WHERE standalone AND ahead AND status = 'RESERVED'), 0) AS reserved,`
+    );
+    expect(sql).toMatch(
+      /FROM slices WHERE standalone AND ahead AND remaining > 0/
+    );
+  });
+
+  it("counts what is still out as what left minus what came back", () => {
+    // Mirror of computeUnitsStillOutBySlice. What left: the whole slice for an
+    // all-at-once checkout, otherwise the larger of the session claims and the
+    // stored counter.
+    // One trip's reading: session claims, else the whole slice when the slice
+    // itself is stamped as checked out. Never the asset's global status.
+    expect(sql).toContain(
+      `WHEN oc.claimed > 0 THEN LEAST(oc.quantity, oc.claimed)`
+    );
+    expect(sql).toContain(
+      `WHEN oc.checked_out_at IS NOT NULL THEN oc.quantity`
+    );
+    expect(sql).not.toContain(`a.status = 'CHECKED_OUT'`);
+    // The cumulative counter floors both readings, so a slice sent out a
+    // second time, by either checkout, still counts.
+    expect(sql).toMatch(/END,\s+oc\.counter\s+\) AS departed/);
+    // What came back comes off the slice, never below zero or above booked.
+    expect(sql).toContain(`LEAST(od.quantity, GREATEST(od.departed - (`);
+    // Untagged claims and returns fill standalone slices first, then by id in
+    // the byte order JavaScript compares these ids in.
+    expect(sql).toContain(
+      `ORDER BY NOT ob.standalone, ob.slice_id COLLATE "C"`
+    );
+    expect(sql).toContain(
+      `ORDER BY NOT od.standalone, od.slice_id COLLATE "C"`
+    );
+  });
+
+  it("looks up each slice's booking by key rather than joining every active booking", () => {
+    // Without the fence the planner joins every RESERVED / ONGOING / OVERDUE
+    // booking in the database once per asset. Same result, several times the
+    // cost on the Stock status sort, which runs this for every asset.
+    expect(sql).toMatch(
+      /CROSS JOIN LATERAL \(\s+SELECT b\.name, b\.status, b\."from", b\."to"\s+FROM public\."Booking" b\s+WHERE b\.id = ba\."bookingId"[\s\S]*?OFFSET 0\s+\) bk/
+    );
+  });
+
+  it("nets the ledger against what a booking still owes", () => {
+    expect(sql).toContain(
+      `cl.category IN ('RETURN', 'CONSUME', 'LOSS', 'DAMAGE')`
+    );
+    expect(sql).toContain(
+      `GREATEST(act.quantity - COALESCE(booked_logs.q, 0), 0) AS remaining`
+    );
+  });
+
+  it("sweeps bookings as intervals for the peak, releases before claims at a tie", () => {
+    // peakConcurrent in SQL: +qty at start, -qty at end, running sum ordered by
+    // (t, delta) so a booking ending exactly when another starts never overlaps.
+    expect(sql).toContain(
+      `SUM(delta) OVER (ORDER BY t, delta ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)`
+    );
+    expect(sql).toContain(`GREATEST(COALESCE(from_at, now()), now()) AS t`);
+    expect(sql).toContain(
+      `CASE WHEN bk.status = 'OVERDUE' THEN 'infinity'::timestamptz ELSE bk."to" END AS end_at`
+    );
+    expect(sql).not.toContain("largest_booking");
   });
 });
 
@@ -1742,7 +2071,9 @@ describe("custodian display name", () => {
     // the custody JSON projection and inside BOOKING_CUSTODIAN_NAME's COALESCE,
     // so a bare `toContain` over the whole query stays green even when the
     // grouping column is removed — which is the only thing this guards.
-    const groupBy = sql.match(/GROUP BY [^\n]*/)?.[0] ?? "";
+    // Anchor on `a.id`: the per-asset pool LATERAL carries its own GROUP BY
+    // earlier in the text, and the outer clause is the one under test.
+    const groupBy = sql.match(/GROUP BY a\.id[^\n]*/)?.[0] ?? "";
 
     expect(groupBy).toContain('bu."displayName"');
   });
@@ -1865,5 +2196,199 @@ describe("lastAuditDate filter and sort", () => {
 
     expect(slimCte(["lastAuditDate:asc"])).toContain('AS "lastAuditDate"');
     expect(slimCte(["name:asc"])).not.toContain('AS "lastAuditDate"');
+  });
+});
+
+describe("assetReturnFragment argument count", () => {
+  /**
+   * The top-level arguments of each `jsonb_build_object(` call in `sql`.
+   * Nested calls and parenthesised expressions count as one argument.
+   */
+  function topLevelArgumentCounts(sql: string): number[] {
+    const counts: number[] = [];
+    const opener = "jsonb_build_object(";
+    let index = sql.indexOf(opener);
+    while (index !== -1) {
+      let depth = 1;
+      let args = 1;
+      let inString = false;
+      for (let i = index + opener.length; i < sql.length && depth > 0; i++) {
+        const char = sql[i];
+        if (char === "'" || char === '"') inString = !inString;
+        if (inString) continue;
+        if (char === "(") depth++;
+        if (char === ")") depth--;
+        if (char === "," && depth === 1) args++;
+      }
+      counts.push(args);
+      index = sql.indexOf(opener, index + opener.length);
+    }
+    return counts;
+  }
+
+  it("keeps every jsonb_build_object call under Postgres's 100-argument cap", () => {
+    // why: one object holding every asset key passed the cap once the stock
+    // columns and the last audit date were both added, and the advanced index
+    // failed with "cannot pass more than 100 arguments to a function".
+    const sql = assetReturnFragment({
+      withBookings: true,
+      withBarcodes: true,
+      withLastAuditDate: true,
+    }).strings.join("?");
+
+    const counts = topLevelArgumentCounts(sql);
+    expect(counts.length).toBeGreaterThan(1);
+    for (const count of counts) {
+      expect(count).toBeLessThanOrEqual(100);
+    }
+  });
+});
+
+describe("parseSortingOptions - pool columns", () => {
+  it.each(["asc", "desc"])(
+    "sorts Stock status %s by severity, with individual assets last",
+    (direction) => {
+      const { orderByInner } = parseSortingOptions([
+        `stockStatus:${direction}`,
+      ]);
+      const sql = orderByInner.replace(/\s+/g, " ");
+
+      expect(sql).toContain('CASE "assetStockStatus"');
+      // Worst first: Short, then None free, Low, Enough, No threshold
+      expect(sql).toContain("WHEN 'SHORT' THEN 0");
+      expect(sql).toContain("WHEN 'NONE_FREE' THEN 1");
+      expect(sql).toContain("WHEN 'LOW' THEN 2");
+      expect(sql).toContain("WHEN 'ENOUGH' THEN 3");
+      expect(sql).toContain("WHEN 'NO_THRESHOLD' THEN 4");
+      expect(sql).toMatch(new RegExp(`END ${direction} NULLS LAST`));
+    }
+  );
+
+  it.each([
+    ["available", "assetAvailable"],
+    ["reserved", "assetReservedDisplay"],
+  ])(
+    "sorts %s by its pool alias, with individual assets last",
+    (column, alias) => {
+      expect(parseSortingOptions([`${column}:asc`]).orderByInner).toContain(
+        `"${alias}" asc NULLS LAST`
+      );
+      expect(parseSortingOptions([`${column}:desc`]).orderByInner).toContain(
+        `"${alias}" desc NULLS LAST`
+      );
+    }
+  );
+});
+
+describe("generateWhereClause - Stock status filter", () => {
+  /** A Stock status filter with the given operator and value. */
+  function stockStatusFilter(
+    operator: Filter["operator"],
+    value: string
+  ): Filter {
+    return { name: "stockStatus", type: "enum", operator, value };
+  }
+
+  it("matches one verdict with 'is'", () => {
+    const result = generateWhereClause("org-1", null, [
+      stockStatusFilter("is", "LOW"),
+    ]);
+    const sql = getSqlString(result);
+
+    expect(sql).toContain("THEN 'SHORT'");
+    expect(sql).toMatch(/END\) = \?/);
+    expect(result.values).toContain("LOW");
+  });
+
+  it("keeps individual assets out of 'is not', since they have no verdict", () => {
+    const result = generateWhereClause("org-1", null, [
+      stockStatusFilter("isNot", "ENOUGH"),
+    ]);
+    const sql = getSqlString(result);
+
+    expect(sql).toMatch(/END\) IS NOT NULL AND \(CASE/);
+    expect(sql).toMatch(/END\) != \?/);
+    expect(result.values).toContain("ENOUGH");
+  });
+
+  it("matches any of several verdicts with 'contains any'", () => {
+    const result = generateWhereClause("org-1", null, [
+      stockStatusFilter("containsAny", "SHORT, NONE_FREE"),
+    ]);
+    const sql = getSqlString(result);
+
+    expect(sql).toMatch(/END\) = ANY\(ARRAY\[/);
+    expect(result.values).toEqual(
+      expect.arrayContaining(["SHORT", "NONE_FREE"])
+    );
+  });
+
+  it("leaves the clause unchanged for an empty 'contains any'", () => {
+    const base = generateWhereClause("org-1", null, []);
+    const result = generateWhereClause("org-1", null, [
+      stockStatusFilter("containsAny", ""),
+    ]);
+
+    expect(getSqlString(result)).toBe(getSqlString(base));
+    expect(result.values).toEqual(base.values);
+  });
+});
+
+describe("generateWhereClause - Reserved filter", () => {
+  it("filters Reserved through the same expression the column shows", () => {
+    const filter: Filter = {
+      name: "reserved",
+      type: "number",
+      operator: "gt",
+      value: 2,
+    };
+    const result = generateWhereClause("org-1", null, [filter]);
+
+    expect(getSqlString(result)).toContain(
+      `(CASE WHEN a.type = 'INDIVIDUAL' THEN pool.reserved_all ELSE pool.reserved END)::float > ?`
+    );
+    expect(result.values).toContain(2);
+  });
+});
+
+describe("POOL_STOCK_STATUS_EXPR", () => {
+  /** The expression with whitespace collapsed, for order assertions. */
+  const sql = POOL_STOCK_STATUS_EXPR.sql.replace(/\s+/g, " ");
+
+  it("judges the verdicts most urgent first", () => {
+    // SHORT before NONE_FREE: an over-committed pool is usually also empty,
+    // and the over-commitment is what needs acting on. NO_THRESHOLD before
+    // ENOUGH: a pool with no floor must never read as fine.
+    const order = [
+      "'SHORT'",
+      "'NONE_FREE'",
+      "'LOW'",
+      "'NO_THRESHOLD'",
+      "'ENOUGH'",
+    ].map((verdict) => sql.indexOf(verdict));
+
+    expect(order.every((at) => at >= 0)).toBe(true);
+    expect([...order].sort((x, y) => x - y)).toEqual(order);
+  });
+
+  it("gives individually-tracked assets no verdict", () => {
+    expect(sql).toContain("WHEN a.type <> 'QUANTITY_TRACKED' THEN NULL");
+  });
+
+  it("judges SHORT on custody, kits and the booking peak against the total", () => {
+    expect(sql).toContain(
+      "WHEN (pool.in_custody + pool.in_kits + pool.peak_booked) > COALESCE(a.quantity, 0) THEN 'SHORT'"
+    );
+  });
+
+  it("uses the same Free now arithmetic as the Free now column", () => {
+    const freeNow =
+      "GREATEST(COALESCE(a.quantity, 0) - pool.in_custody - pool.in_kits - pool.checked_out, 0)";
+
+    expect(POOL_AVAILABLE_EXPR.sql).toContain(freeNow);
+    expect(sql).toContain(`WHEN ${freeNow} <= 0 THEN 'NONE_FREE'`);
+    expect(sql).toContain(
+      `WHEN a."minQuantity" IS NOT NULL AND ${freeNow} <= a."minQuantity" THEN 'LOW'`
+    );
   });
 });

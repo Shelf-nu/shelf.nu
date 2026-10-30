@@ -19,6 +19,7 @@ import {
   USER_ID,
   USER_PASSWORD,
 } from "@mocks/user";
+import { config } from "~/config/shelf.config";
 import { db, type ExtendedPrismaClient } from "~/database/db.server";
 import { captureServerEvent } from "~/integrations/posthog/client.server";
 
@@ -31,8 +32,9 @@ import {
   findUserByEmail,
   findUserById,
 } from "./service.server";
-import { defaultFields } from "../asset-index-settings/helpers";
+import { defaultColumnsForWorkspace } from "../asset-index-settings/helpers";
 import { ensureAssetIndexModeForRole } from "../asset-index-settings/service.server";
+import { pdfDocumentsForNewWorkspace } from "../pdf-document/service.server";
 
 // @vitest-environment node
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
@@ -286,10 +288,20 @@ describe(createUserAccountForTesting.name, () => {
                   user: { connect: { id: USER_ID } },
                 },
               },
+              ...pdfDocumentsForNewWorkspace({
+                canCustomize: !config.enablePremiumFeatures,
+              }),
+              // Stamped at creation when the plan includes PDF documents.
+              paidPdfDocumentsSeededAt: config.enablePremiumFeatures
+                ? null
+                : expect.any(Date),
               assetIndexSettings: {
                 create: {
                   mode: AssetIndexMode.ADVANCED,
-                  columns: defaultFields,
+                  // A brand-new personal workspace has no quantity-tracked assets.
+                  columns: defaultColumnsForWorkspace({
+                    hasQuantityAssets: false,
+                  }),
                   user: {
                     connect: {
                       id: USER_ID,

@@ -1,21 +1,58 @@
-import type { Prisma, User } from "@prisma/client";
+import type { AssetReminder, Prisma, User } from "@prisma/client";
 import type PgBoss from "pg-boss";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
+import { PUSH_MESSAGES } from "~/modules/push/messages";
+import { sendPush } from "~/modules/push/service.server";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { ShelfError } from "~/utils/error";
+import { isLastAttempt } from "~/utils/job-retry";
 import { Logger } from "~/utils/logger";
 import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
+import { wrapDateForNote } from "~/utils/markdoc-wrappers";
 import { rolesWhere } from "~/utils/permissions/role-access";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
-import { assetAlertEmailHtmlString, assetAlertEmailText } from "./emails";
+import {
+  ADVANCE_CLOCK_EPSILON_MS,
+  advanceRecurringReminder,
+  orgCanUseRecurringReminders,
+} from "./chain.server";
+import {
+  assetAlertEmailHtmlString,
+  assetAlertEmailText,
+  SERIES_STOP_MESSAGES,
+  type SeriesStopReason,
+} from "./emails";
+import { isRecurringReminder } from "./recurrence";
+import {
+  ASSETS_EVENT_TYPE_MAP,
+  recurringReminderJobOptions,
+  scheduleAssetReminder,
+} from "./scheduler.server";
 import type { AssetsEventType, AssetsSchedulerData } from "./scheduler.server";
 import { createNote } from "../note/service.server";
+
+/**
+ * Marks a failure of the recurring-reminder advance step. Like every handler
+ * failure it reaches pg-boss, which retries the job (recurring jobs are sent
+ * with a wider retry budget, see `recurringReminderJobOptions`). The advance
+ * step runs BEFORE any notification is sent, so a retry caused by it cannot
+ * double-email.
+ */
+export class RecurringAdvanceError extends Error {
+  constructor(cause: unknown, reminderId: string) {
+    super(`Failed to advance recurring reminder ${reminderId}`);
+    this.name = "RecurringAdvanceError";
+    this.cause = cause;
+  }
+}
 
 const ASSET_REMINDER_INCLUDES_FOR_EMAIL = {
   teamMembers: {
     select: {
       user: {
         select: {
+          id: true,
           email: true,
           firstName: true,
           lastName: true,
@@ -38,14 +75,37 @@ const ASSET_REMINDER_INCLUDES_FOR_EMAIL = {
 
 type UserToEmail = Pick<
   User,
-  "email" | "firstName" | "lastName" | "displayName"
+  "id" | "email" | "firstName" | "lastName" | "displayName"
 > & {
   isOwner?: boolean;
 };
 
+/**
+ * A reminder job as the worker receives it. `retrycount` is present because
+ * the worker registers with `includeMetadata: true`.
+ */
+type ReminderJob = PgBoss.Job<AssetsSchedulerData> & { retrycount?: number };
+
+/**
+ * Re-queues the row's current (future) occurrence. The singletonKey makes it
+ * a no-op when that job already exists.
+ */
+async function rearmCurrentOccurrence(
+  reminder: Pick<AssetReminder, "id" | "alertDateTime">
+) {
+  await scheduleAssetReminder({
+    data: {
+      reminderId: reminder.id,
+      eventType: ASSETS_EVENT_TYPE_MAP.REMINDER,
+    },
+    when: reminder.alertDateTime,
+    options: recurringReminderJobOptions(reminder.id, reminder.alertDateTime),
+  });
+}
+
 const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
   AssetsEventType,
-  (job: PgBoss.Job<AssetsSchedulerData>) => Promise<void>
+  (job: ReminderJob) => Promise<void>
 > = {
   REMINDER: async (job) => {
     const reminder = await db.assetReminder.findFirst({
@@ -67,18 +127,99 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
       return;
     }
 
+    const now = new Date();
+    const isRecurring = isRecurringReminder(reminder);
+    /** Whether a recurring row still holds the occurrence this job fires. */
+    const dueNow =
+      !isRecurring ||
+      reminder.alertDateTime.getTime() <=
+        now.getTime() + ADVANCE_CLOCK_EPSILON_MS;
+
+    /**
+     * A retry of a recurring job whose row already points at a later
+     * occurrence: an earlier attempt advanced the series (and so swapped the
+     * reference to the next job) and then failed before notifying. It still
+     * owes this occurrence's notification. An edit cancels the job, so a
+     * superseded job never reaches a retry.
+     */
+    const isRetryAfterAdvance =
+      isRecurring && !dueNow && (job.retrycount ?? 0) > 0;
+
+    /**
+     * The row still tracks this job (or no job). For a row already holding a
+     * future occurrence this means the advance committed but scheduling the
+     * next job did not land, so that occurrence must be re-armed. After a full
+     * advance the row tracks the next job instead.
+     */
+    const rowTracksThisJob =
+      !reminder.activeSchedulerReference ||
+      !job.id ||
+      reminder.activeSchedulerReference === job.id;
+
+    /**
+     * Stale-job guard: when the row tracks a DIFFERENT live job than the one
+     * firing, this job was superseded (an edit whose cancel silently failed,
+     * or a reconciliation re-arm), and firing it would double-notify or
+     * corrupt the chain. A null reference is permissive (unknown state: fire).
+     */
+    if (
+      reminder.activeSchedulerReference &&
+      job.id &&
+      reminder.activeSchedulerReference !== job.id &&
+      !isRetryAfterAdvance
+    ) {
+      Logger.warn(
+        new ShelfError({
+          cause: null,
+          message:
+            "Skipping stale asset reminder job (superseded by a newer schedule).",
+          additionalData: {
+            ...job.data,
+            jobId: job.id,
+            activeSchedulerReference: reminder.activeSchedulerReference,
+          },
+          label: "Asset Scheduler",
+          shouldBeCaptured: false,
+        })
+      );
+      return;
+    }
+
     /**
      * An archived asset is out of service: its reminders stay quiet, with no
-     * email and no "System has sent" note. The reminder row is kept, and fires
-     * as usual if the asset is reinstated before its time.
+     * email and no "System has sent" note. The reminder row is kept.
      *
-     * Clearing `activeSchedulerReference` records the skip: no job is left to
-     * deliver this reminder, and the reminders list reads a past-due reminder
-     * with no reference as "Not sent", whatever the asset's state later. The
-     * write is conditioned on this job, so a reminder rescheduled meanwhile
-     * keeps its new job.
+     * A one-shot reminder fires as usual if the asset is reinstated before its
+     * time. Clearing `activeSchedulerReference` records the skip: no job is
+     * left to deliver this reminder, and the reminders list reads a past-due
+     * reminder with no reference as "Not sent", whatever the asset's state
+     * later. The write is conditioned on this job, so a reminder rescheduled
+     * meanwhile keeps its new job.
+     *
+     * A recurring series instead advances silently to its next occurrence, so
+     * it keeps running while the asset is archived and resumes notifying once
+     * the asset is reinstated. Skipping without advancing would leave a dead
+     * chain that boot reconciliation keeps re-arming. A row already pointing
+     * at a future occurrence was advanced by an earlier attempt, so only its
+     * job is re-armed.
      */
     if (reminder.asset.archivedAt) {
+      if (isRecurring) {
+        try {
+          if (dueNow) {
+            await advanceRecurringReminder({ reminder, now });
+          } else if (rowTracksThisJob) {
+            await rearmCurrentOccurrence(reminder);
+          }
+        } catch (cause) {
+          throw new RecurringAdvanceError(cause, reminder.id);
+        }
+        Logger.info(
+          `Asset reminder ${reminder.id} occurrence skipped: asset ${reminder.assetId} is archived.`
+        );
+        return;
+      }
+
       await db.assetReminder.updateMany({
         where: {
           id: reminder.id,
@@ -92,6 +233,79 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
       );
       return;
     }
+
+    /**
+     * Recurring series: advance the row to the next occurrence and schedule
+     * the next job BEFORE notifying. If this critical step fails the error
+     * escapes the wrapper as RecurringAdvanceError so pg-boss retries the
+     * job; no email has gone out yet, so a retry cannot double-send.
+     */
+    let nextOccurrence: Date | null = null;
+    let seriesPaused = false;
+    let seriesEnded = false;
+
+    if (isRecurring) {
+      try {
+        if (dueNow) {
+          const { next, advanced, paused, ended } =
+            await advanceRecurringReminder({ reminder, now });
+
+          /**
+           * The CAS lost: the row's date changed after this job read it. Only
+           * an edit does that while the job runs (boot reconciliation leaves
+           * rows whose job is still live alone), so the occurrence this job
+           * was about to announce no longer exists.
+           */
+          if (!advanced && !ended) {
+            Logger.info(
+              `Asset reminder ${reminder.id} changed while its job ran. Skipping the superseded occurrence.`
+            );
+            return;
+          }
+
+          nextOccurrence = next;
+          seriesPaused = paused;
+          seriesEnded = ended;
+        } else {
+          /**
+           * The row already points at a FUTURE occurrence: an earlier attempt
+           * of this job advanced it. When the row still tracks this job (or
+           * nothing), scheduling the next job did not durably succeed, so it
+           * is re-armed here instead of waiting for boot reconciliation. On a
+           * retry after a full advance the row tracks the next job already.
+           */
+          if (rowTracksThisJob) {
+            await rearmCurrentOccurrence(reminder);
+          }
+          nextOccurrence = reminder.alertDateTime;
+          seriesPaused = !(await orgCanUseRecurringReminders(
+            reminder.organizationId
+          ));
+        }
+      } catch (cause) {
+        throw new RecurringAdvanceError(cause, reminder.id);
+      }
+    }
+
+    /**
+     * A plan without recurring reminders silences the series: the first
+     * occurrence after the downgrade still notifies and says so, every later
+     * one (its job was scheduled with `pausedByPlan`) only advances.
+     */
+    if (seriesPaused && job.data.pausedByPlan) {
+      Logger.info(
+        `Asset reminder ${reminder.id} occurrence skipped: the workspace plan does not include recurring reminders.`
+      );
+      return;
+    }
+    if (seriesPaused) nextOccurrence = null;
+
+    /** Set when nothing more will be sent after this occurrence. */
+    const seriesStatus: SeriesStopReason | undefined = seriesEnded
+      ? "ended"
+      : seriesPaused
+      ? "paused"
+      : undefined;
 
     const usersToSendEmail = reminder.teamMembers
       .filter((tm) => !!tm.user)
@@ -119,6 +333,7 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
           },
         },
         select: {
+          id: true,
           email: true,
           firstName: true,
           lastName: true,
@@ -140,9 +355,37 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
       });
     }
 
+    /**
+     * Note text reflects the chain state so users can see why a series
+     * continues, ended, or stopped, straight from the asset activity.
+     */
+    // Reminder names are user-supplied and render as literal text here.
+    let noteContent = `**System** has sent **${stripMarkdocDelimiters(
+      reminder.name
+    )}** reminder.`;
+    if (nextOccurrence) {
+      // The date tag renders in each viewer's own date format and timezone.
+      noteContent += ` Next reminder scheduled for ${wrapDateForNote(
+        nextOccurrence
+      )}.`;
+    } else if (seriesStatus) {
+      noteContent += ` ${SERIES_STOP_MESSAGES[seriesStatus]}`;
+    }
+
     /** Sending alert mails to all associated users. */
     await Promise.all([
       ...usersToSendEmail.map(async (user) => {
+        /**
+         * The recipient's own date format and timezone for the next-reminder
+         * line. A failed lookup falls back to the series' timezone rather than
+         * failing the send, which would retry and duplicate other emails.
+         */
+        const prefs = nextOccurrence
+          ? await resolveUserFormatPrefsById(user.id, null).catch(
+              () => undefined
+            )
+          : undefined;
+
         const html = await assetAlertEmailHtmlString({
           asset: reminder.asset,
           user,
@@ -150,6 +393,9 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
           workspaceName: reminder.organization.name,
           isOwner: user.isOwner,
           customEmailFooter: reminder.organization.customEmailFooter,
+          nextOccurrence,
+          prefs,
+          seriesStatus,
         });
 
         sendEmail({
@@ -162,6 +408,9 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
             workspaceName: reminder.organization.name,
             isOwner: user.isOwner,
             customEmailFooter: reminder.organization.customEmailFooter,
+            nextOccurrence,
+            prefs,
+            seriesStatus,
           }),
           html,
         });
@@ -174,12 +423,21 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
         organizationId: reminder.organizationId,
         userId: reminder.createdById,
         type: "UPDATE",
-        // Reminder names are user-supplied and render as literal text here.
-        content: `**System** has sent **${stripMarkdocDelimiters(
-          reminder.name
-        )}** reminder.`,
+        content: noteContent,
       }),
     ]);
+
+    // After the emails and the note, so a job that fails and is retried
+    // pushes only once
+    void sendPush({
+      userIds: usersToSendEmail.map(({ id }) => id),
+      ...PUSH_MESSAGES.ASSET_REMINDER({
+        assetId: reminder.asset.id,
+        organizationId: reminder.organizationId,
+        reminderName: reminder.name,
+        assetTitle: reminder.asset.title,
+      }),
+    });
   },
 };
 
@@ -190,9 +448,8 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
  * On handler failure we log (last-retry only, mirroring the email worker's
  * noise control in `emails/email.worker.server.ts`) and **rethrow** so
  * pg-boss marks the job failed and retries it per the bounded `retryLimit`
- * set on enqueue in `scheduler.server.ts`. Previously the catch swallowed the
- * error and returned, so pg-boss marked the job COMPLETED even on failure —
- * silently losing the reminder with no retry.
+ * set on enqueue in `scheduler.server.ts`. Swallowing the error would make
+ * pg-boss mark the job COMPLETED and lose the reminder with no retry.
  *
  * @throws {ShelfError} Rethrows the wrapped cause after logging, so pg-boss
  * treats the job as failed and retries it.
@@ -209,16 +466,7 @@ export async function regierAssetWorkers() {
       try {
         await handler(job);
       } catch (cause) {
-        // why: pg-boss increments retrycount at fetch time, so with N retries
-        // the handler observes retrycount = 0, 1, 2, ... N — the final attempt
-        // has retrycount === retrylimit. Using `- 1` here double-logs (fires on
-        // both the second-to-last AND the final attempt).
-        const isLastRetry =
-          job.retrycount != null &&
-          job.retrylimit != null &&
-          job.retrycount >= job.retrylimit;
-
-        if (isLastRetry) {
+        if (isLastAttempt(job)) {
           Logger.error(
             new ShelfError({
               cause,

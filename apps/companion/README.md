@@ -124,7 +124,7 @@ The monorepo approach is what Expo recommends for apps that share a backend.
 
 | Tool      | Version        | Install                                                      |
 | --------- | -------------- | ------------------------------------------------------------ |
-| Node.js   | >= 22.20.0     | `nvm install 22`                                             |
+| Node.js   | >= 24.22.1     | `nvm install 24`                                             |
 | pnpm      | 9.15.9         | `corepack enable && corepack prepare pnpm@9.15.9 --activate` |
 | Xcode     | 16.4+ (stable) | App Store                                                    |
 | CocoaPods | Any            | `sudo gem install cocoapods`                                 |
@@ -323,7 +323,7 @@ apps/companion/
 │   │   ├── scanner.tsx     # QR + barcode scanner
 │   │   ├── home.tsx        # Dashboard
 │   │   ├── custody.tsx     # Custody management
-│   │   └── settings.tsx    # Theme, org switch, logout
+│   │   └── settings/       # Theme, org switch, notifications, logout
 │   └── _layout.tsx         # Root layout with providers
 ├── components/             # Shared UI components
 ├── lib/                    # Core libraries
@@ -342,7 +342,7 @@ apps/companion/
 
 ---
 
-## API Endpoints (27 routes)
+## API Endpoints (32 routes)
 
 All at `/api/mobile/*` — JWT Bearer auth required.
 
@@ -376,6 +376,10 @@ All at `/api/mobile/*` — JWT Bearer auth required.
 | `/api/mobile/categories`               | GET    | Category list (cached)                  |
 | `/api/mobile/locations`                | GET    | Location list (cached)                  |
 | `/api/mobile/team-members`             | GET    | Team member list (cached)               |
+| `/api/mobile/push-token`               | POST   | Register this device for push           |
+| `/api/mobile/push-token`               | DELETE | Forget this device (sign-out)           |
+| `/api/mobile/notification-preferences` | GET    | Push switches + plan availability       |
+| `/api/mobile/notification-preferences` | PUT    | Save push switches                      |
 
 ---
 
@@ -413,4 +417,4 @@ reads them as off, which only under-offers.
 | Scanner    | expo-camera (QR + barcode types)  |
 | E2E Tests  | Maestro                           |
 | iOS Min    | iOS 15.1                          |
-| Node       | >= 22.20.0                        |
+| Node       | >= 24.22.1                        |

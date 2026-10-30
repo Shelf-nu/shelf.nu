@@ -5,13 +5,14 @@ import {
   TagUseFor,
   type Prisma,
 } from "@prisma/client";
+import { DateTime } from "luxon";
+import { Outlet, useMatches, data, redirect } from "react-router";
 import type {
   ActionFunctionArgs,
   LinksFunction,
   LoaderFunctionArgs,
   MetaFunction,
 } from "react-router";
-import { Outlet, useMatches, data, redirect } from "react-router";
 import { z } from "zod";
 import { BulkRemoveAssetsAndKitSchema } from "~/components/booking/bulk-remove-asset-and-kit-dialog";
 import { CheckinIntentEnum } from "~/components/booking/checkin-dialog";
@@ -110,6 +111,7 @@ import { canAssignModelUnits } from "~/utils/booking-model-requests";
 import { calculateTotalValueOfAssets } from "~/utils/bookings";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint } from "~/utils/client-hints";
+import { DATE_TIME_FORMAT } from "~/utils/constants";
 import {
   setCookie,
   updateCookieWithPerPage,
@@ -120,6 +122,8 @@ import { DeleteConfirmationSchema } from "~/utils/delete-confirmation";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import {
   ShelfError,
+  VALIDATION_ERROR,
+  badRequest,
   isZodValidationError,
   makeShelfError,
 } from "~/utils/error";
@@ -1199,6 +1203,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       checkedInAssetIds,
       checkedOutAssetIds: sliceCheckedOutAssetIds,
       bookingStatus: booking.status,
+      archivedWithoutCheckin: booking.archivedWithoutCheckin,
       countKitsAsSingleUnit,
     });
 
@@ -1461,7 +1466,7 @@ const INTENT_VERB = {
   cancel: "cancel",
   removeKit: "remove kits from",
   "revert-to-draft": "revert",
-  "extend-booking": "extend",
+  "extend-booking": "change the end date of",
   "bulk-remove-asset-or-kit": "remove items from",
   "partial-checkin": "check in",
   "partial-checkout": "check out",
@@ -1482,7 +1487,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   try {
     const formData = await request.formData();
     logMissingFormIntent({ formData, request, bookingId: id, userId });
-    const { intent, checkoutIntentChoice, checkinIntentChoice } = parseData(
+    const {
+      intent,
+      checkoutIntentChoice,
+      expiredCheckoutNewTo,
+      checkinIntentChoice,
+    } = parseData(
       formData,
       z.object({
         intent: z.enum([
@@ -1508,6 +1518,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           .optional()
           .transform((val) => (val === "yes" ? true : false)),
         checkoutIntentChoice: z.nativeEnum(CheckoutIntentEnum).optional(),
+        // The end date picked in the expired-reservation prompt, validated
+        // in the `checkOut` case with the extend schema.
+        expiredCheckoutNewTo: z.string().optional(),
         checkinIntentChoice: z.nativeEnum(CheckinIntentEnum).optional(),
       }),
       {
@@ -1812,6 +1825,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             access.policy.notifications.reservationAlertsAdmins,
           tags,
           userId,
+          seesAllBookings: access.bookings.seeAll,
         });
 
         sendNotification({
@@ -1830,32 +1844,67 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         // explicit flow (scan or select) for this caller.
         assertQuickCheckoutAllowed({ access, bookingSettings });
 
+        const checkoutHints = getClientHint(request);
+
+        /**
+         * The end date picked for an expired reservation is a new booking
+         * window, so it passes the rules an extension passes: read in the
+         * acting user's resolved timezone, inside working hours, within the
+         * workspace's maximum length measured from now (the new start), with
+         * the caller's time-limit bypass honoured. See
+         * `resolveExpiredCheckoutState`.
+         *
+         * A refusal is reported under `expiredCheckoutNewTo`, not the extend
+         * schema's `endDate`: the booking form has an End Date field of its
+         * own, and this error belongs to the date picked in the dialog.
+         */
+        let newEndDate: Date | null = null;
+        if (checkoutIntentChoice === CheckoutIntentEnum["with-new-end-date"]) {
+          const prefs = await resolveUserFormatPrefsById(userId, checkoutHints);
+          const parsed = ExtendBookingSchema({
+            workingHours,
+            prefs,
+            bookingSettings,
+            bypassTimeLimits: access.policy.bookings.bypassTimeLimits,
+          }).safeParse({
+            startDate: DateTime.now()
+              .setZone(prefs.timeZone)
+              .toFormat(DATE_TIME_FORMAT),
+            endDate: expiredCheckoutNewTo ?? "",
+          });
+          if (!parsed.success) {
+            const { fieldErrors, formErrors } = parsed.error.flatten();
+            const message =
+              Object.values(fieldErrors).flat()[0] ??
+              formErrors[0] ??
+              "The new end date is not valid.";
+            throw badRequest(message, {
+              title: "Pick another end date",
+              additionalData: {
+                userId,
+                organizationId,
+                [VALIDATION_ERROR]: { expiredCheckoutNewTo: { message } },
+              },
+            });
+          }
+          newEndDate = parsed.data.endDate;
+        }
+
         const booking = await checkoutBooking({
           id,
           organizationId,
-          hints: getClientHint(request),
+          hints: checkoutHints,
           intentChoice: checkoutIntentChoice,
+          newEndDate,
           from: basicBookingInfo.from,
           to: basicBookingInfo.to,
           userId: user.id,
+          seesAllBookings: access.bookings.seeAll,
           // The booking header's one-click "Check out".
           provenance: { surface: "web", method: "quick" },
           // The confirm dialog's "From location" picks, one per pool at two
           // or more placements. Absent when the dialog asked nothing.
           sourceLocations: parseSourceLocationsFromFormData(formData),
-        });
-
-        const actor = wrapUserLinkForNote({ ...user, id: userId });
-        const bookingLink = wrapLinkForNote(
-          `/bookings/${booking.id}`,
-          booking.name
-        );
-        await createNotes({
-          content: `${actor} checked out asset with ${bookingLink}.`,
-          type: "UPDATE",
-          userId: user.id,
-          assetIds: [...new Set(booking.bookingAssets.map((ba) => ba.assetId))],
-          organizationId,
         });
 
         sendNotification({
@@ -1914,21 +1963,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           "specificAssetIds[]"
         ) as string[];
 
-        // Only assets that were actually checked out get a check-in note —
-        // progressive checkout can leave never-checked-out assets in the booking.
-        // Post-pivot, asset → booking lookup goes via the `BookingAsset` pivot.
-        const checkedOutAssetIdsBeforeCheckin = (
-          await db.asset.findMany({
-            // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: check-in must cover every asset already out on the booking, archived ones included
-            where: {
-              bookingAssets: { some: { bookingId: id } },
-              organizationId,
-              status: AssetStatus.CHECKED_OUT,
-            },
-            select: { id: true },
-          })
-        ).map((a) => a.id);
-
         const booking = await checkinBooking({
           id,
           organizationId,
@@ -1943,25 +1977,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           // guard above is right to refuse it.
           provenance: { surface: "web", method: "quick" },
         });
-
-        // Only write notes for assets that were actually checked out before
-        // this check-in. With progressive checkout, a booking may still have
-        // un-checked-out assets at check-in time — those shouldn't get a
-        // "checked in" note. Falls back to no-op when nothing was out.
-        if (checkedOutAssetIdsBeforeCheckin.length > 0) {
-          const actor = wrapUserLinkForNote({ ...user, id: userId });
-          const bookingLink = wrapLinkForNote(
-            `/bookings/${booking.id}`,
-            booking.name
-          );
-          await createNotes({
-            content: `${actor} checked in asset with ${bookingLink}.`,
-            type: "UPDATE",
-            userId: user.id,
-            assetIds: checkedOutAssetIdsBeforeCheckin,
-            organizationId,
-          });
-        }
 
         sendNotification({
           title: "Booking checked-in",
@@ -2203,7 +2218,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         // `endDate` is already a zoned `Date` produced by the schema's
         // `coerceLocalDate(timeZone)`, so no further parsing is needed here.
-        await extendBooking({
+        const { jobsRescheduled } = await extendBooking({
           id,
           organizationId,
           hints,
@@ -2215,12 +2230,22 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
               ?.roles ?? [],
         });
 
-        sendNotification({
-          title: "Booking extended",
-          message: "Your booking has been extended to new end date.",
-          icon: { name: "success", variant: "success" },
-          senderId: userId,
-        });
+        sendNotification(
+          jobsRescheduled
+            ? {
+                title: "End date changed",
+                message: "The booking now ends on the new end date.",
+                icon: { name: "success", variant: "success" },
+                senderId: userId,
+              }
+            : {
+                title: "End date changed, reminder not scheduled",
+                message:
+                  "The booking now ends on the new end date, but its check-in reminder could not be scheduled, so it will not turn overdue on its own. Change the end date again to retry.",
+                icon: { name: "x", variant: "error" },
+                senderId: userId,
+              }
+        );
 
         return payload({ success: true });
       }

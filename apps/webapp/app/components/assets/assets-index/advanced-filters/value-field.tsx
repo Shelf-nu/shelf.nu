@@ -7,6 +7,8 @@ import {
   PopoverPortal,
   PopoverTrigger,
 } from "@radix-ui/react-popover";
+import { STOCK_STATUS_LABELS } from "@shelf/labels";
+import { STOCK_STATUSES } from "@shelf/quantity-control";
 import { parseISO } from "date-fns";
 import { Search } from "lucide-react";
 import { useLoaderData } from "react-router";
@@ -131,6 +133,9 @@ function resolveFilterDefault(
   if (filter.type === "enum") {
     if (filter.name === "type") return "INDIVIDUAL";
     if (filter.name === "status") return Object.values(AssetStatus)[0];
+    // The picker shows its first option when empty, so the filter starts on
+    // it too, or the row would read SHORT while filtering on nothing.
+    if (filter.name === "stockStatus") return STOCK_STATUSES[0];
     if (filter.name.startsWith("cf_")) {
       const options =
         customFields.find((f) => f?.name === filter.name.slice(3))?.options ??
@@ -786,32 +791,38 @@ function EnumField({
   }
 
   /**
-   * Scrolls the option identified by `index` into view. Called from the
-   * keyboard handler itself (no useEffect) so the scroll is tied to the
-   * user action rather than a state-change listener.
+   * Moves the keyboard highlight to the option at `index` and scrolls it into
+   * view. Called from the keyboard handler itself (no useEffect) so the
+   * scroll is tied to the user action rather than a state-change listener.
+   *
+   * Without a search box the option rows hold focus, and a focused row
+   * selects itself on Enter or Space, so focus moves with the highlight.
+   * With a search box focus stays in the box, so typing keeps working, and
+   * Enter picks the highlighted row through `handleKeyDown`.
    */
-  function scrollOptionIntoView(index: number) {
-    const selectedElement = document.getElementById(`enum-option-${index}`);
-    selectedElement?.scrollIntoView({ block: "nearest" });
+  function highlightOption(index: number) {
+    setSelectedIndex(index);
+    const optionElement = document.getElementById(`enum-option-${index}`);
+    if (!hasSearch) {
+      optionElement?.focus();
+    }
+    optionElement?.scrollIntoView({ block: "nearest" });
   }
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     switch (event.key) {
       case "ArrowDown": {
         event.preventDefault();
-        const next =
+        highlightOption(
           selectedIndex < visibleOptions.length - 1
             ? selectedIndex + 1
-            : selectedIndex;
-        setSelectedIndex(next);
-        scrollOptionIntoView(next);
+            : selectedIndex
+        );
         break;
       }
       case "ArrowUp": {
         event.preventDefault();
-        const next = selectedIndex > 0 ? selectedIndex - 1 : selectedIndex;
-        setSelectedIndex(next);
-        scrollOptionIntoView(next);
+        highlightOption(selectedIndex > 0 ? selectedIndex - 1 : selectedIndex);
         break;
       }
       case " ": // Space key, unless it is typing into the search box
@@ -867,6 +878,19 @@ function EnumField({
               "z-[999999] mt-2 max-h-[400px] min-w-[250px] overflow-scroll rounded-md border border-gray-200 bg-white"
             )}
             onKeyDown={handleKeyDown}
+            onOpenAutoFocus={(event) => {
+              // Without a search box, open on the highlighted option rather
+              // than the first focusable row, so focus and highlight agree.
+              // With no option to focus (an empty list), Radix keeps its
+              // default and focuses the popover itself.
+              if (hasSearch) return;
+              const option = document.getElementById(
+                `enum-option-${selectedIndex}`
+              );
+              if (!option) return;
+              event.preventDefault();
+              option.focus();
+            }}
           >
             {hasSearch ? (
               <div className="flex items-center border-b">
@@ -905,6 +929,9 @@ function EnumField({
                     role="button"
                     tabIndex={0}
                     onClick={() => handleOptionClick(option.id)}
+                    // Tab moves focus between rows too; keep the highlight on
+                    // the focused row.
+                    onFocus={() => setSelectedIndex(index)}
                     onKeyDown={handleActivationKeyPress(() =>
                       handleOptionClick(option.id)
                     )}
@@ -939,6 +966,38 @@ function StatusEnumField({
   const options: EnumOption[] = Object.values(AssetStatus).map((status) => ({
     id: status,
     label: userFriendlyAssetStatus(status),
+  }));
+
+  return (
+    <EnumField
+      value={value}
+      options={options}
+      handleChange={handleChange}
+      multiSelect={multiSelect}
+      name={name}
+      disabled={disabled}
+    />
+  );
+}
+
+/**
+ * The Stock status verdicts, worst first, named as the column's badge names
+ * them. The column shows a dash when no min quantity is set; the picker needs
+ * a word for it.
+ */
+function StockStatusEnumField({
+  value,
+  handleChange,
+  multiSelect,
+  name,
+  disabled = false,
+}: Omit<EnumFieldProps, "options">) {
+  const options: EnumOption[] = STOCK_STATUSES.map((status) => ({
+    id: status,
+    label:
+      status === "NO_THRESHOLD"
+        ? "No min quantity set"
+        : STOCK_STATUS_LABELS[status],
   }));
 
   return (
@@ -2030,6 +2089,21 @@ function ValueEnumField({
     return (
       <>
         <AssetModelEnumField
+          value={value}
+          handleChange={handleChange}
+          multiSelect={multiSelect}
+          name={name}
+          disabled={disabled}
+        />
+        {error && <div className="mt-1 text-[12px] text-red-500">{error}</div>}
+      </>
+    );
+  }
+
+  if (fieldName === "stockStatus") {
+    return (
+      <>
+        <StockStatusEnumField
           value={value}
           handleChange={handleChange}
           multiSelect={multiSelect}

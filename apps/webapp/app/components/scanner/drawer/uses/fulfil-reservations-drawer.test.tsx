@@ -95,14 +95,17 @@ vi.mock("~/components/booking/checkout-dialog", () => ({
   default: ({
     disabled,
     unassignedUnits,
+    confirm,
   }: {
     disabled?: boolean;
     unassignedUnits?: Array<{ name: string; count: number }>;
+    confirm?: boolean;
   }) => (
     <button
       type="submit"
       disabled={disabled}
       data-unassigned={JSON.stringify(unassignedUnits ?? [])}
+      data-confirm={String(confirm ?? true)}
     >
       Check out
     </button>
@@ -111,6 +114,7 @@ vi.mock("~/components/booking/checkout-dialog", () => ({
     WITH_ADJUSTED_DATE: "with-adjusted-date",
     WITHOUT_ADJUSTED_DATE: "without-adjusted-date",
   },
+  REVERT_TO_DRAFT_RESCHEDULE_HINT: "Revert the booking to draft.",
 }));
 
 const useRouteLoaderDataMock = vi.mocked(useRouteLoaderData);
@@ -225,6 +229,7 @@ function renderDrawer(
     bookingId: "booking-1",
     bookingName: "Nishanth",
     bookingFrom: new Date("2099-01-01T10:00:00Z").toISOString(),
+    bookingTo: new Date("2099-01-01T18:00:00Z").toISOString(),
     bookingStatus: "RESERVED",
     checksOutScannedOnly: options.checksOutScannedOnly ?? false,
     expectedModelRequests,
@@ -307,6 +312,15 @@ describe("FulfilReservationsDrawer layout", () => {
 
     expect(checkoutButton).toBeTruthy();
     expect(getScrollingList().contains(checkoutButton)).toBe(false);
+  });
+
+  it("does not ask for a second confirmation, since the drawer is the confirm step", () => {
+    renderDrawer(40);
+
+    expect(screen.getByRole("button", { name: "Check out" })).toHaveAttribute(
+      "data-confirm",
+      "false"
+    );
   });
 
   it("lets the header yield height so the pinned action cannot be pushed off", () => {
@@ -619,6 +633,27 @@ describe("FulfilReservationsDrawer kit scans", () => {
     expect(submittedValues("assetIds")).toEqual([]);
   });
 
+  it("names the model a loose scan fills, and the code that was scanned", () => {
+    renderDrawer(1, {
+      scannedAssets: {
+        "qr-flag": {
+          id: "asset-flag",
+          title: "Flag",
+          sequentialId: "SAM-0007",
+          type: "INDIVIDUAL",
+          assetModelId: "model-0",
+          assetKits: [],
+        },
+      },
+    });
+
+    expect(
+      screen.getByText('Ready, counts toward Matthews 24" x 36" Black Flag 0')
+    ).toBeTruthy();
+    expect(screen.getByText("SAM-0007")).toBeTruthy();
+    expect(screen.getByText("qr-flag")).toBeTruthy();
+  });
+
   it("blocks a loose scan of a unit that belongs to a kit", () => {
     renderDrawer(1, {
       scannedAssets: {
@@ -730,7 +765,7 @@ describe("FulfilReservationsDrawer kit scans", () => {
     // So the asset's own row reports where it arrives from rather than
     // claiming a unit of its own — one camera, one reserved unit.
     expect(screen.getByText("Arrives with Grip Kit")).toBeTruthy();
-    expect(screen.queryByText("Ready")).toBeNull();
+    expect(screen.queryByText(/^Ready/)).toBeNull();
     // Both still submit: the server decides which row carries it.
     expect(submittedValues("assetIds")).toEqual(["asset-flag"]);
     expect(submittedValues("kitIds")).toEqual(["kit-grip"]);

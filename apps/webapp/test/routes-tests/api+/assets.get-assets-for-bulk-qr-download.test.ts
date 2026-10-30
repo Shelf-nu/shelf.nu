@@ -236,6 +236,8 @@ describe("bulk QR download select-all", () => {
         assetIds: ["all-selected"],
         currentSearchParams: expect.stringContaining("status=is%3AAVAILABLE"),
         settings: expect.objectContaining({ mode: "ADVANCED" }),
+        // An admin's list shows every asset, so select-all is not scoped.
+        bookableScope: null,
       })
     );
     // The filter syntax never reaches Prisma: assets are read by resolved id.
@@ -283,6 +285,8 @@ describe("bulk QR download select-all", () => {
         settings: expect.objectContaining({ mode: "SIMPLE" }),
         // A restricted role never gets the unrestricted custody sentinel.
         allowedTeamMemberIds: [],
+        // Nor codes for assets outside the list it was shown.
+        bookableScope: { holderUserId: "user-1" },
       })
     );
   });
