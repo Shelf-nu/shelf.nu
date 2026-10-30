@@ -184,7 +184,16 @@ export default function AuditsIndexPage() {
     useLoaderData<typeof loader>();
   return (
     <>
-      <Header>{canCreateAudits && <NewAuditInfoDialog />}</Header>
+      <Header>
+        {canCreateAudits ? (
+          <>
+            <NewAuditInfoDialog />
+            <Button to="/audits/new" variant="primary">
+              New audit
+            </Button>
+          </>
+        ) : null}
+      </Header>
       <ListContentWrapper>
         <Filters
           slots={{
