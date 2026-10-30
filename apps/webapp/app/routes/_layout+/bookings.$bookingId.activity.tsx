@@ -19,6 +19,7 @@ import {
   createBookingNote,
   deleteBookingNote,
 } from "~/modules/booking-note/service.server";
+import { getTextLinkTitles } from "~/modules/link-preview/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { canSeeBooking } from "~/utils/booking-authorization.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -92,7 +93,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       title: `${booking.name}'s activity`,
     };
 
-    return payload({ booking: { ...booking, notes: bookingNotes }, header });
+    /** Titles for the web links in the notes, for their chips. */
+    const linkTitles = await getTextLinkTitles({
+      organizationId,
+      texts: bookingNotes.map((note) => note.content),
+    });
+
+    return payload({
+      booking: { ...booking, notes: bookingNotes },
+      header,
+      linkTitles,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause);
     throw data(error(reason), { status: reason.status });

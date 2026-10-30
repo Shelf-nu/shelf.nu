@@ -5,7 +5,6 @@ import type {
   Kit,
   OrganizationRoles,
 } from "@prisma/client";
-import { CustomFieldFormat } from "@prisma/client";
 import type { LinkTitles } from "@shelf/links";
 import { data, redirect } from "react-router";
 import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
@@ -965,27 +964,11 @@ export async function advancedModeLoader({
   /**
    * Titles for the links in the page's text field values, read while the
    * images and booking rows below load: it needs only the values, and never
-   * throws. Every TEXT value is read, as on the asset page, so a link named in
-   * a plain field shows its name here too; only Link-format values are
-   * claimed for a fetch. The rows carry each value's field id but not its
-   * format, which comes from the active fields loaded above, so the raw SQL
-   * stays unchanged.
+   * throws.
    */
-  const formatByFieldId = new Map(
-    customFields.map((field) => [field.id, field.format])
-  );
   const linkTitlesRead = getLinkTitles({
     organizationId,
-    values: assets.flatMap((asset) =>
-      asset.customFields.map(({ value, customField }) => ({
-        value,
-        customField: {
-          type: customField.type,
-          format:
-            formatByFieldId.get(customField.id) ?? CustomFieldFormat.PLAIN,
-        },
-      }))
-    ),
+    values: assets.flatMap((asset) => asset.customFields),
   });
 
   // Refresh expired signed URLs before returning so users never see broken images.

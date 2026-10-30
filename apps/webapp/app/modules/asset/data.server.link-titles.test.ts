@@ -3,12 +3,9 @@
  * Advanced assets index loader: titles for the link chips in custom field
  * columns.
  *
- * The page's rows carry each value's field id and type but not its format, so
- * the loader reads each value's format from the active field definitions it
- * already loads, hands every value to `getLinkTitles` (which claims only the
- * Link-format ones), and returns the answer as `linkTitles`, the same fixture
- * the chip tests render. Plain text values are read too, so a link named in a
- * plain field shows its name in the index as it does on the asset page.
+ * The loader hands every custom field value on the page to `getLinkTitles`
+ * (which reads and claims the ones that are a single web link) and returns
+ * the answer as `linkTitles`, the same fixture the chip tests render.
  *
  * Every other read is stubbed so the loader runs to the end.
  *
@@ -198,29 +195,14 @@ describe("advancedModeLoader: link titles", () => {
     mockGetLinkTitles.mockResolvedValue(LINK_TITLES);
   });
 
-  it("reads titles for every value, each with its field's format, and returns them", async () => {
+  it("reads titles for every value on the page and returns them", async () => {
     const payload = await load();
 
-    expect(mockGetLinkTitles).toHaveBeenCalledWith({
-      organizationId: "org-1",
-      values: [
-        {
-          value: { raw: MANUAL_URL, valueText: MANUAL_URL },
-          customField: { type: "TEXT", format: "LINK" },
-        },
-        {
-          value: {
-            raw: "https://www.example.com/supplier",
-            valueText: "https://www.example.com/supplier",
-          },
-          customField: { type: "TEXT", format: "PLAIN" },
-        },
-        {
-          value: { raw: SHOP_URL, valueText: SHOP_URL },
-          customField: { type: "TEXT", format: "LINK" },
-        },
-      ],
-    });
+    const { organizationId, values } = mockGetLinkTitles.mock.calls[0][0];
+    expect(organizationId).toBe("org-1");
+    expect(
+      values.map((entry: { value: { raw: string } }) => entry.value.raw)
+    ).toEqual([MANUAL_URL, "https://www.example.com/supplier", SHOP_URL]);
     expect(payload.linkTitles).toEqual(LINK_TITLES);
   });
 });

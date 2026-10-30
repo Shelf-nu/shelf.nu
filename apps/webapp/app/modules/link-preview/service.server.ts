@@ -7,7 +7,7 @@
  *
  * Titles are claimed where they are read, never where values are written:
  * `getLinkTitles` is called by the loaders that render link chips, and it
- * claims links from Link-format fields that were never fetched or are due
+ * claims links that were never fetched or are due
  * again, then queues one job per claimed row. Only stored values reach it, so
  * no request can make the server fetch a URL of its choosing. The worker runs
  * `runLinkPreviewJob`, and people name links with `setLinkTitle`. The two
@@ -20,7 +20,7 @@
  * @see {@link file://../../routes/api+/link-titles.ts} the rename endpoint
  */
 
-import { CustomFieldFormat, CustomFieldType, Prisma } from "@prisma/client";
+import { CustomFieldType, Prisma } from "@prisma/client";
 import {
   cleanLinkTitle,
   MAX_LINK_LENGTH,
@@ -63,32 +63,27 @@ export type LinkPreviewJob = {
 };
 
 /**
- * One custom field value as a loader holds it, with what its field says about
- * fetching. Only TEXT values are read for links.
+ * One custom field value as a loader holds it. Only TEXT values are read for
+ * links.
  */
 export interface LinkTitleSource {
   /** `AssetCustomFieldValue.value`; a TEXT value keeps its text in `raw`. */
   readonly value: unknown;
-  readonly customField: {
-    readonly type: CustomFieldType;
-    /** Links in a Link-format field have their page title fetched. */
-    readonly format: CustomFieldFormat;
-  };
+  readonly customField: { readonly type: CustomFieldType };
 }
 
 /**
  * Titles for the links among these custom field values, keyed by `LinkKey`.
  *
  * Reads the workspace's rows for every TEXT value that is one link. Links
- * from Link-format fields that were never fetched, or whose next fetch is
- * due, are claimed (at most {@link MAX_CLAIMS_PER_READ}) and queued for the
- * worker, so their titles appear on a later load. The claim runs in the
- * background: the titles return without waiting for it. Links from plain
- * fields are never claimed. Never throws: a failure is logged and the titles
- * read so far (or none) are returned.
+ * that were never fetched, or whose next fetch is due, are claimed (at most
+ * {@link MAX_CLAIMS_PER_READ}) and queued for the worker, so their titles
+ * appear on a later load. The claim runs in the background: the titles
+ * return without waiting for it. Never throws: a failure is logged and the
+ * titles read so far (or none) are returned.
  *
  * @param args.organizationId - Workspace whose rows are read and claimed
- * @param args.values - Custom field values with their field's type and format
+ * @param args.values - Custom field values with their field's type
  * @returns Titles for links that have a page title or a custom name
  */
 export async function getLinkTitles({
@@ -98,22 +93,23 @@ export async function getLinkTitles({
   organizationId: string;
   values: readonly LinkTitleSource[];
 }): Promise<LinkTitles> {
-  const { keys, fetchable } = linkKeysOf(values);
-  return readTitlesAndClaim(organizationId, keys, fetchable);
+  const keys = linkKeysOf(values);
+  return readTitlesAndClaim(organizationId, keys, keys);
 }
 
 /**
- * Titles for the web links written in activity notes, keyed by `LinkKey`.
+ * Titles for the web links written in free text (activity notes, asset
+ * descriptions), keyed by `LinkKey`.
  *
- * Every http(s) URL `segmentText` finds in the notes is read, and links never
- * fetched or due again are claimed for the worker, like a Link field's value:
- * a person wrote the link in the note, so its title is shown. Never throws.
+ * Every http(s) URL `segmentText` finds in the texts is read, and links never
+ * fetched or due again are claimed for the worker, as for custom field
+ * values. Never throws.
  *
  * @param args.organizationId - Workspace whose rows are read and claimed
- * @param args.texts - The note contents (Markdown) shown on the page
+ * @param args.texts - The texts shown on the page (notes are Markdown)
  * @returns Titles for links that have a page title or a custom name
  */
-export async function getNoteLinkTitles({
+export async function getTextLinkTitles({
   organizationId,
   texts,
 }: {
@@ -363,22 +359,18 @@ function textOf(value: unknown): string | null {
 }
 
 /**
- * Keys of every TEXT value that is one storable link (`keys`), and the subset
- * that comes from Link-format fields (`fetchable`). Sets, so a link repeated
- * across values is read and claimed once.
+ * Keys of every TEXT value that is one storable link, as a set so a link
+ * repeated across values is read and claimed once.
  */
-function linkKeysOf(values: readonly LinkTitleSource[]) {
+function linkKeysOf(values: readonly LinkTitleSource[]): Set<LinkKey> {
   const keys = new Set<LinkKey>();
-  const fetchable = new Set<LinkKey>();
   for (const { value, customField } of values) {
     if (customField.type !== CustomFieldType.TEXT) continue;
     const text = textOf(value);
     const link = text === null ? null : parseLink(text);
-    if (!link || !isStorable(link.key)) continue;
-    keys.add(link.key);
-    if (customField.format === CustomFieldFormat.LINK) fetchable.add(link.key);
+    if (link && isStorable(link.key)) keys.add(link.key);
   }
-  return { keys, fetchable };
+  return keys;
 }
 
 /**

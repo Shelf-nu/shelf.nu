@@ -29,6 +29,7 @@ import { Switch } from "~/components/forms/switch";
 import Icon from "~/components/icons/icon";
 import ContextualModal from "~/components/layout/contextual-modal";
 import type { HeaderData } from "~/components/layout/header/types";
+import { TextWithLinkChips } from "~/components/links/text-with-link-chips";
 import { LocationBadge } from "~/components/location/location-badge";
 import { LocationSelect } from "~/components/location/location-select";
 import { ScanDetails } from "~/components/location/scan-details";
@@ -84,7 +85,10 @@ import { getAssetAuditHistory } from "~/modules/audit/asset-audit-history.server
 import { getCustodyCardHolderUserId } from "~/modules/custody/utils";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { moveAssetKitUnits } from "~/modules/kit/service.server";
-import { getLinkTitles } from "~/modules/link-preview/service.server";
+import {
+  getLinkTitles,
+  getTextLinkTitles,
+} from "~/modules/link-preview/service.server";
 import { generateQrObj } from "~/modules/qr/utils.server";
 import { getLastScanForViewer } from "~/modules/scan/service.server";
 import { getTeamMembersForQuantityCustody } from "~/modules/team-member/service.server";
@@ -400,8 +404,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     /**
      * Read together, neither depending on the other:
-     * - `linkTitles`: the titles of the links among the values shown, for
-     *   their chips. Never throws.
+     * - `linkTitles`: the titles of the links among the values shown and in
+     *   the description, for their chips. Never throws.
      * - Editor data, only for users who can update the asset. View-only users
      *   see static display rows and never enter edit mode, so the
      *   categories and locations are skipped for them. Tags are read-only on
@@ -409,7 +413,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      */
     const [linkTitles, allCustomFieldDefs, categoriesData, locationsData] =
       await Promise.all([
-        getLinkTitles({ organizationId, values: customFields }),
+        Promise.all([
+          getLinkTitles({ organizationId, values: customFields }),
+          getTextLinkTitles({
+            organizationId,
+            texts: asset.description ? [asset.description] : [],
+          }),
+        ]).then(([fieldTitles, descriptionTitles]) => ({
+          ...fieldTitles,
+          ...descriptionTitles,
+        })),
         canEditAsset
           ? getActiveCustomFields({
               organizationId,
@@ -1225,7 +1238,14 @@ export default function AssetOverview() {
                 isEmpty={!asset.description}
                 renderDisplay={() => (
                   <div className="whitespace-pre-wrap text-gray-600">
-                    {asset.description || "No description"}
+                    {asset.description ? (
+                      <TextWithLinkChips
+                        text={asset.description}
+                        titles={linkTitles}
+                      />
+                    ) : (
+                      "No description"
+                    )}
                   </div>
                 )}
                 renderEditor={() => (

@@ -72,13 +72,15 @@ vi.mock("~/modules/custom-field/service.server", async (importOriginal) => ({
   getActiveCustomFields: mockGetActiveCustomFields,
 }));
 
-const { mockGetLinkTitles } = vi.hoisted(() => ({
+const { mockGetLinkTitles, mockGetTextLinkTitles } = vi.hoisted(() => ({
   mockGetLinkTitles: vi.fn(),
+  mockGetTextLinkTitles: vi.fn(),
 }));
 // why: the titles are read from LinkPreview rows in Postgres (and links due a
 // fetch are queued); the test records which values the loader hands over.
 vi.mock("~/modules/link-preview/service.server", () => ({
   getLinkTitles: mockGetLinkTitles,
+  getTextLinkTitles: mockGetTextLinkTitles,
 }));
 
 import { getCategoriesForCreateAndEdit } from "~/modules/asset/service.server";
@@ -130,6 +132,7 @@ describe("asset overview loader: custom fields", () => {
     mockGetAsset.mockResolvedValue(camera);
     mockGetActiveCustomFields.mockResolvedValue([manual, serial]);
     mockGetLinkTitles.mockResolvedValue({});
+    mockGetTextLinkTitles.mockResolvedValue({});
   });
 
   it("sends a member who cannot edit no field definitions", async () => {
@@ -187,6 +190,31 @@ describe("asset overview loader: custom fields", () => {
       values: [manualValue, cameraOnly],
     });
     expect(result.linkTitles).toEqual(LINK_TITLES);
+  });
+
+  it("adds the titles of the links in the asset's description", async () => {
+    const description = "Manual: https://www.example.com/manual.pdf (rev B)";
+    mockGetAsset.mockResolvedValue({ ...camera, description });
+    mockGetLinkTitles.mockResolvedValue({});
+    mockGetTextLinkTitles.mockResolvedValue({
+      "https://www.example.com/manual.pdf": {
+        pageTitle: "X200 manual",
+        customTitle: null,
+      },
+    });
+
+    const result = await load();
+
+    expect(mockGetTextLinkTitles).toHaveBeenCalledWith({
+      organizationId: "org-1",
+      texts: [description],
+    });
+    expect(result.linkTitles).toEqual({
+      "https://www.example.com/manual.pdf": {
+        pageTitle: "X200 manual",
+        customTitle: null,
+      },
+    });
   });
 
   it("starts the editor data without waiting for the link titles", async () => {

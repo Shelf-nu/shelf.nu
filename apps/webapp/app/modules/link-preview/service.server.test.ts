@@ -3,7 +3,7 @@
 // happy-dom would shadow Response and ignore the guarded dispatcher.
 /**
  * Tests for the link preview service: which links `getLinkTitles` reads and
- * which it claims (Link-format fields only, due rows only, capped per read),
+ * which it claims (due rows only, capped per read),
  * that it returns without waiting for the claim, the claim SQL it sends, that
  * queue and database failures never reach the loader, and what
  * `runLinkPreviewJob` records for a fetched page.
@@ -24,7 +24,7 @@ import { Logger } from "~/utils/logger";
 import { scheduler } from "~/utils/scheduler.server";
 import {
   getLinkTitles,
-  getNoteLinkTitles,
+  getTextLinkTitles,
   runLinkPreviewJob,
 } from "./service.server";
 import type { LinkTitleSource } from "./service.server";
@@ -58,14 +58,11 @@ const MANUAL = "https://www.example-maker.com/manuals/eos-r5";
 const SHEET = "https://contoso.sharepoint.com/:x:/s/Lab/EcAl26?e=k3";
 const SHOP = "https://www.example-shop.com/c/product/1234";
 
-/** A TEXT value from a field with the given format. */
-function text(
-  raw: string,
-  format: "PLAIN" | "LINK" = "PLAIN"
-): LinkTitleSource {
+/** A TEXT custom field value. */
+function text(raw: string): LinkTitleSource {
   return {
     value: { raw, valueText: raw },
-    customField: { type: "TEXT", format },
+    customField: { type: "TEXT" },
   };
 }
 
@@ -119,14 +116,14 @@ describe("getLinkTitles: reading", () => {
       organizationId: ORG,
       values: [
         // The key drops the fragment, so this reads the MANUAL row.
-        text(`${MANUAL}#page=3`, "PLAIN"),
-        text(SHEET, "LINK"),
+        text(`${MANUAL}#page=3`),
+        text(SHEET),
         text(SHOP),
         // Text around a URL is not one link, and only TEXT values are read.
-        text("Manual: https://www.example.com/a (rev B)", "LINK"),
+        text("Manual: https://www.example.com/a (rev B)"),
         {
           value: { raw: "https://www.example.com/b", valueMultiLineText: {} },
-          customField: { type: "MULTILINE_TEXT", format: "PLAIN" },
+          customField: { type: "MULTILINE_TEXT" },
         },
       ],
     });
@@ -150,7 +147,7 @@ describe("getLinkTitles: reading", () => {
     vi.mocked(db.linkPreview.findMany).mockRejectedValue(new Error("down"));
 
     await expect(
-      getLinkTitles({ organizationId: ORG, values: [text(MANUAL, "LINK")] })
+      getLinkTitles({ organizationId: ORG, values: [text(MANUAL)] })
     ).resolves.toEqual({});
     expect(vi.mocked(Logger.error).mock.calls[0][0]).toMatchObject({
       message: "Failed to read link titles",
@@ -160,12 +157,12 @@ describe("getLinkTitles: reading", () => {
 });
 
 describe("getLinkTitles: claiming", () => {
-  it("claims only links from Link-format fields and queues each claimed row once", async () => {
+  it("claims every link in a text value and queues each claimed row once", async () => {
     vi.mocked(db.$queryRaw).mockResolvedValue([{ id: "lp-sheet" }]);
 
     await getLinkTitles({
       organizationId: ORG,
-      values: [text(MANUAL, "PLAIN"), text(SHOP), text(SHEET, "LINK")],
+      values: [text(SHEET), text(SHEET)],
     });
     await settleClaim();
 
@@ -179,7 +176,7 @@ describe("getLinkTitles: claiming", () => {
   });
 
   it("claims through an upsert that moves the lease only on rows that are due", async () => {
-    await getLinkTitles({ organizationId: ORG, values: [text(SHEET, "LINK")] });
+    await getLinkTitles({ organizationId: ORG, values: [text(SHEET)] });
 
     const sql = claimQuery()?.strings.join("?").replace(/\s+/g, " ");
     expect(sql).toContain(
@@ -205,7 +202,7 @@ describe("getLinkTitles: claiming", () => {
 
     await getLinkTitles({
       organizationId: ORG,
-      values: [due, later, finished, fresh].map((url) => text(url, "LINK")),
+      values: [due, later, finished, fresh].map((url) => text(url)),
     });
 
     expect(claimQuery()?.values[2]).toEqual([due, fresh]);
@@ -216,7 +213,7 @@ describe("getLinkTitles: claiming", () => {
       row(SHEET, { nextFetchAt: new Date(Date.now() + 60 * 60_000) }),
     ] as never);
 
-    await getLinkTitles({ organizationId: ORG, values: [text(SHEET, "LINK")] });
+    await getLinkTitles({ organizationId: ORG, values: [text(SHEET)] });
 
     expect(db.$queryRaw).not.toHaveBeenCalled();
     expect(scheduler.send).not.toHaveBeenCalled();
@@ -230,7 +227,7 @@ describe("getLinkTitles: claiming", () => {
 
     await getLinkTitles({
       organizationId: ORG,
-      values: urls.map((url) => text(url, "LINK")),
+      values: urls.map((url) => text(url)),
     });
 
     expect(claimQuery()?.values[2]).toEqual(urls.slice(0, 20));
@@ -242,7 +239,7 @@ describe("getLinkTitles: claiming", () => {
 
     await getLinkTitles({
       organizationId: ORG,
-      values: [text(long, "LINK"), text(SHEET, "LINK")],
+      values: [text(long), text(SHEET)],
     });
 
     expect(db.linkPreview.findMany).toHaveBeenCalledWith(
@@ -262,7 +259,7 @@ describe("getLinkTitles: claiming", () => {
 
     const titles = getLinkTitles({
       organizationId: ORG,
-      values: [text(MANUAL, "LINK"), text(SHEET, "LINK")],
+      values: [text(MANUAL), text(SHEET)],
     });
     const first = await Promise.race([
       titles,
@@ -279,7 +276,7 @@ describe("getLinkTitles: claiming", () => {
     vi.mocked(db.linkPreview.findMany).mockResolvedValue([
       row(MANUAL, { pageTitle: "EOS R5 user manual" }),
     ] as never);
-    const values = [text(MANUAL, "LINK"), text(SHEET, "LINK")];
+    const values = [text(MANUAL), text(SHEET)];
     const expected = {
       [MANUAL]: { pageTitle: "EOS R5 user manual", customTitle: null },
     };
@@ -514,14 +511,14 @@ describe("runLinkPreviewJob", () => {
   });
 });
 
-describe("getNoteLinkTitles", () => {
+describe("getTextLinkTitles", () => {
   it("reads and claims every web link written in the notes, once each", async () => {
     vi.mocked(db.linkPreview.findMany).mockResolvedValue([
       row(MANUAL, { pageTitle: "EOS R5 user manual" }),
     ] as never);
     vi.mocked(db.$queryRaw).mockResolvedValue([{ id: "lp-sheet" }]);
 
-    const titles = await getNoteLinkTitles({
+    const titles = await getTextLinkTitles({
       organizationId: ORG,
       texts: [
         `Manual: ${MANUAL} (rev B)`,
@@ -541,7 +538,7 @@ describe("getNoteLinkTitles", () => {
   });
 
   it("reads nothing for notes without a web link", async () => {
-    const titles = await getNoteLinkTitles({
+    const titles = await getTextLinkTitles({
       organizationId: ORG,
       texts: ["Calibrated today", "see binder 3", "javascript:alert(1)"],
     });
