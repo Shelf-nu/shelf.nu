@@ -250,32 +250,96 @@ describe("getBookingIdsWithUnavailableAssets — scoping", () => {
 });
 
 /**
- * The row's "Check out remaining" button is offered only while a slice still
- * has units to send out. The rule is a Prisma `where`, so the test reads the
- * argument the module hands the client.
+ * The row's "Check out remaining" button is offered only when the server's
+ * "Check out remaining" would find something to send: a quantity-tracked
+ * slice with units left, or an individual item that is Available and was not
+ * returned by a partial check-in. The query narrows to candidate slices; the
+ * partial check-in exclusion runs on its result.
  */
 describe("getBookingIdsWithItemsToCheckOut", () => {
-  it("asks for underway bookings with a slice not yet fully checked out", async () => {
-    findManyMock.mockResolvedValue([{ id: "booking-1" }]);
+  /** A booking as the lookup returns it. */
+  function lookupRow(
+    id: string,
+    candidateAssetIds: string[],
+    partiallyCheckedIn: string[] = []
+  ) {
+    return {
+      id,
+      bookingAssets: candidateAssetIds.map((assetId) => ({ assetId })),
+      partialCheckins: partiallyCheckedIn.length
+        ? [{ assetIds: partiallyCheckedIn }]
+        : [],
+    };
+  }
+
+  it("flags an underway booking that still has an item the server would send", async () => {
+    findManyMock.mockResolvedValue([lookupRow("booking-1", ["asset-1"])]);
 
     const flagged = await getBookingIdsWithItemsToCheckOut({
-      bookingIds: ["booking-1", "booking-2"],
+      bookingIds: ["booking-1"],
       organizationId: ORG_ID,
     });
 
     expect(flagged).toEqual(new Set(["booking-1"]));
-    const [{ where }] = findManyMock.mock.calls[0] as [
-      { where: Record<string, unknown> },
+  });
+
+  it("does not flag a booking whose only candidate item came back by a partial check-in", async () => {
+    findManyMock.mockResolvedValue([
+      lookupRow("booking-1", ["asset-1"], ["asset-1"]),
+    ]);
+
+    const flagged = await getBookingIdsWithItemsToCheckOut({
+      bookingIds: ["booking-1"],
+      organizationId: ORG_ID,
+    });
+
+    expect(flagged.size).toBe(0);
+  });
+
+  it("does not flag a booking with no candidate slice, such as an item busy elsewhere", async () => {
+    // An individual item in custody or out on another booking is not
+    // Available, so the query returns no slice for it.
+    findManyMock.mockResolvedValue([lookupRow("booking-1", [])]);
+
+    const flagged = await getBookingIdsWithItemsToCheckOut({
+      bookingIds: ["booking-1"],
+      organizationId: ORG_ID,
+    });
+
+    expect(flagged.size).toBe(0);
+  });
+
+  it("asks only for the slices the server's Check out remaining would take", async () => {
+    findManyMock.mockResolvedValue([]);
+
+    await getBookingIdsWithItemsToCheckOut({
+      bookingIds: ["booking-1", "booking-2"],
+      organizationId: ORG_ID,
+    });
+
+    const [{ where, select }] = findManyMock.mock.calls[0] as [
+      { where: Record<string, unknown>; select: Record<string, unknown> },
     ];
-    expect(where).toMatchObject({
+    expect(where).toEqual({
       id: { in: ["booking-1", "booking-2"] },
       organizationId: ORG_ID,
       status: { in: ["ONGOING", "OVERDUE"] },
-      // A partly-out quantity-tracked slice still counts: its checkedOutAt is
-      // set, but checkedOutQuantity is below the booked quantity.
+    });
+    expect(select).toMatchObject({
       bookingAssets: {
-        some: { checkedOutQuantity: { lt: "BookingAsset.quantity" } },
+        where: {
+          OR: [
+            // A quantity-tracked slice with units not yet sent out.
+            {
+              asset: { type: "QUANTITY_TRACKED" },
+              checkedOutQuantity: { lt: "BookingAsset.quantity" },
+            },
+            // An individual item that is free to go out now.
+            { asset: { type: "INDIVIDUAL", status: "AVAILABLE" } },
+          ],
+        },
       },
+      partialCheckins: { select: { assetIds: true } },
     });
   });
 
@@ -297,8 +361,8 @@ describe("decorateBookingsForList", () => {
   ] as unknown as Parameters<typeof decorateBookingsForList>[0]["bookings"];
 
   /**
-   * The two lookups share `db.booking.findMany`; tell them apart by the
-   * predicate each one sends.
+   * The two lookups share `db.booking.findMany`; tell them apart by what each
+   * one selects. The items lookup also reads the partial check-ins.
    */
   function answerLookups({
     unavailable,
@@ -308,12 +372,17 @@ describe("decorateBookingsForList", () => {
     itemsToCheckOut: string[];
   }) {
     findManyMock.mockImplementation(
-      ({ where }: { where: { bookingAssets: { some: unknown } } }) => {
-        const asksForBooked =
-          "checkedOutQuantity" in (where.bookingAssets.some as object);
-        return Promise.resolve(
-          (asksForBooked ? itemsToCheckOut : unavailable).map((id) => ({ id }))
-        );
+      ({ select }: { select: Record<string, unknown> }) => {
+        if ("partialCheckins" in select) {
+          return Promise.resolve(
+            itemsToCheckOut.map((id) => ({
+              id,
+              bookingAssets: [{ assetId: `${id}-asset` }],
+              partialCheckins: [],
+            }))
+          );
+        }
+        return Promise.resolve(unavailable.map((id) => ({ id })));
       }
     );
   }

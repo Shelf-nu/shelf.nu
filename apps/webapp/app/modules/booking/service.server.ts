@@ -20437,6 +20437,7 @@ export async function checkoutRemainingAssets({
       cause: null,
       status: 400,
       label,
+      title: "Nothing left to check out",
       message: "There are no remaining items to check out for this booking.",
       shouldBeCaptured: false,
     });

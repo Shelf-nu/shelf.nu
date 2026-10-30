@@ -23,7 +23,7 @@
  * @see {@link file://./stock-conflicts.server.ts}
  * @see {@link file://./../../components/booking/list-bookings-content.tsx}
  */
-import { AssetType, BookingStatus } from "@prisma/client";
+import { AssetStatus, AssetType, BookingStatus } from "@prisma/client";
 
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
@@ -133,16 +133,23 @@ const UNDERWAY_BOOKING_STATUSES: BookingStatus[] = [
 ];
 
 /**
- * Returns the subset of `bookingIds` that still hold units to send out: a
- * `BookingAsset` slice whose `checkedOutQuantity` is below its booked
- * `quantity`.
+ * Returns the subset of `bookingIds` whose "Check out remaining" would find
+ * something to send.
  *
- * The row's "Check out remaining" button is offered on an ONGOING or OVERDUE
- * booking only while such a slice exists. It reads the slice counter rather
- * than the `checkedOutAt` stamp because a quantity-tracked slice can be partly
- * out: the stamp is set on the first units, while the server's "Check out
- * remaining" still tops the slice off to its booked quantity. One bounded
- * query per page.
+ * Mirrors the server's own rule (`getRemainingCheckoutPayload`), so the row
+ * never offers a button the action then refuses:
+ *
+ * - a QUANTITY_TRACKED slice with units not yet sent out
+ *   (`checkedOutQuantity` below its booked `quantity`; a partly-out slice
+ *   counts, since the server tops it off);
+ * - an INDIVIDUAL item that is Available now. One in someone's custody or out
+ *   on another booking cannot go out, so it does not count;
+ * - either way, not an item a partial check-in already returned on this
+ *   booking: the server never sends those out again.
+ *
+ * The query narrows each booking to its candidate slices; the partial
+ * check-in exclusion runs on the result, because the returned ids live in an
+ * array on the check-in rows. One bounded query per page.
  *
  * @param args.bookingIds - Booking ids on the current page
  * @param args.organizationId - Caller's organization, which scopes the query
@@ -171,16 +178,42 @@ export async function getBookingIdsWithItemsToCheckOut({
         // is exported and must be safe on its own terms.
         organizationId,
         status: { in: UNDERWAY_BOOKING_STATUSES },
-        bookingAssets: {
-          some: {
-            checkedOutQuantity: { lt: db.bookingAsset.fields.quantity },
-          },
-        },
       },
-      select: { id: true },
+      select: {
+        id: true,
+        bookingAssets: {
+          where: {
+            OR: [
+              {
+                asset: { type: AssetType.QUANTITY_TRACKED },
+                checkedOutQuantity: { lt: db.bookingAsset.fields.quantity },
+              },
+              {
+                asset: {
+                  type: AssetType.INDIVIDUAL,
+                  status: AssetStatus.AVAILABLE,
+                },
+              },
+            ],
+          },
+          select: { assetId: true },
+        },
+        partialCheckins: { select: { assetIds: true } },
+      },
     });
 
-    return new Set(rows.map((row) => row.id));
+    return new Set(
+      rows
+        .filter((row) => {
+          const returned = new Set(
+            row.partialCheckins.flatMap((checkin) => checkin.assetIds)
+          );
+          return row.bookingAssets.some(
+            (slice) => !returned.has(slice.assetId)
+          );
+        })
+        .map((row) => row.id)
+    );
   } catch (cause) {
     throw new ShelfError({
       cause,

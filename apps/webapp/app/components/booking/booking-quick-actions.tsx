@@ -71,8 +71,8 @@ export type BookingQuickActionsBooking = {
   /** Reserved model units, to disable Check out while some are unassigned. */
   modelRequests: CountableModelRequest[];
   /**
-   * Whether a slice of this booking still has units to send out, as the list
-   * loader resolved it. Decides "Check out remaining" on a booking that is
+   * Whether the booking's "Check out remaining" would find something to send,
+   * as the list loader resolved it by the server's own rule. Decides "Check out remaining" on a booking that is
    * underway. Absent on a loader that does not resolve it, which reads as
    * "nothing left to check out".
    */
