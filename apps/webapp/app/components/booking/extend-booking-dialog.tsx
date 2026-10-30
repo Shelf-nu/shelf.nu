@@ -1,14 +1,34 @@
-import { useCallback, useEffect, useState } from "react";
+/**
+ * The Change end date dialog of a running booking.
+ *
+ * Before the person picks anything it states the horizon: how long every
+ * item still out is free, and which reservation needs what after that, with
+ * a one-click end just before it. A submit past the horizon comes back as a
+ * refusal that names each reservation in the way and the items it holds.
+ *
+ * @see {@link file://../../modules/booking/next-reservations.server.ts} the horizon
+ * @see {@link file://../../modules/booking/extend-horizon.ts} the suggested end
+ * @see {@link file://../../routes/_layout+/bookings.$bookingId.overview.tsx} the action
+ */
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { CalendarIcon } from "lucide-react";
 import { useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
+import { useDateFormatter } from "~/hooks/use-date-formatter";
 import { useDisabled } from "~/hooks/use-disabled";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
 import { useRoleAccess } from "~/hooks/use-role-access";
 import { useWorkingHours } from "~/hooks/use-working-hours";
+import type { ClashingBooking } from "~/modules/booking/clashing-bookings";
+import {
+  readClashRefusal,
+  suggestEndBeforeClash,
+} from "~/modules/booking/extend-horizon";
+import type { ExtendHorizon } from "~/modules/booking/next-reservations.server";
 import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId.overview";
+import { wallClockWireInZone } from "~/utils/date-format";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
 import { tw } from "~/utils/tw";
@@ -24,21 +44,29 @@ import {
 
 type ExtendBookingDialogProps = {
   className?: string;
+  /** The current end as the picker's naive wire string, in the pref zone. */
   currentEndDate: string;
 };
+
+/** Items named per booking before "+N more"; keeps the dialog short. */
+const MAX_ITEMS_NAMED = 3;
+/** Bookings listed in a refusal before "+N more bookings". */
+const MAX_BOOKINGS_LISTED = 5;
 
 export default function ExtendBookingDialog({
   className,
   currentEndDate,
 }: ExtendBookingDialogProps) {
   const [open, setOpen] = useState(false);
+  // The picker is uncontrolled; a suggested end re-seeds it through its key.
+  const [seededEndDate, setSeededEndDate] = useState<string | null>(null);
   const fetcher = useFetcherWithReset<DataOrErrorResponse>();
   const disabled = useDisabled(fetcher);
   // Validate the new end date in the user's RESOLVED pref zone: the server
   // action parses the submitted value in that same zone, and the browser hint
   // differs from it for anyone with an explicit timezone preference.
   const prefs = useFormatPrefs();
-  const { booking } = useLoaderData<BookingPageLoaderData>();
+  const { booking, nextReservations } = useLoaderData<BookingPageLoaderData>();
   const workingHoursData = useWorkingHours();
   const bookingSettings = useBookingSettings();
   const { isLoading = true, error } = workingHoursData;
@@ -61,6 +89,7 @@ export default function ExtendBookingDialog({
 
   const handleClose = useCallback(() => {
     setOpen(false);
+    setSeededEndDate(null);
     fetcher.reset();
   }, [fetcher]);
 
@@ -74,11 +103,23 @@ export default function ExtendBookingDialog({
     [fetcher?.data, handleClose]
   );
 
-  /** This handles server side errors in case client side validation fails */
+  const horizon = nextReservations?.horizon ?? null;
+  const suggestedEnd = useMemo(() => {
+    if (!horizon) return null;
+    return suggestEndBeforeClash({
+      currentEnd: new Date(booking.to),
+      clashStart: new Date(horizon.freeUntil),
+      timeZone: prefs.timeZone,
+    });
+  }, [horizon, booking.to, prefs.timeZone]);
 
+  /** This handles server side errors in case client side validation fails */
   const validationErrors = getValidationErrors<ExtendBookingSchemaType>(
     fetcher?.data?.error
   );
+  const refusal = readClashRefusal(fetcher?.data?.error?.additionalData);
+  const pickerValue = seededEndDate ?? currentEndDate;
+
   return (
     <>
       <Button
@@ -112,15 +153,29 @@ export default function ExtendBookingDialog({
               booking becomes overdue.
             </p>
 
+            <When truthy={!!horizon}>
+              <HorizonNotice
+                horizon={horizon!}
+                suggestedEnd={suggestedEnd}
+                disabled={disabled}
+                onUseSuggested={(wire) => {
+                  // A refusal answered the date that was replaced, so it goes.
+                  fetcher.reset();
+                  setSeededEndDate(wire);
+                }}
+                timeZone={prefs.timeZone}
+              />
+            </When>
+
             <fetcher.Form ref={zo.ref} method="POST">
               <div className="required-input-label mb-1 text-text-sm font-medium text-gray-700">
                 New end date
               </div>
 
               <DateTimePicker
-                key={currentEndDate}
+                key={pickerValue}
                 mode="datetime"
-                defaultValue={currentEndDate}
+                defaultValue={pickerValue}
                 label="End Date"
                 hideLabel
                 name={zo.fields.endDate()}
@@ -134,30 +189,15 @@ export default function ExtendBookingDialog({
               />
 
               <When truthy={!!fetcher?.data?.error}>
-                <div className="text-sm text-error-500">
+                <div className="mb-4 text-sm text-error-500">
                   {fetcher?.data?.error?.message}
                 </div>
-                {fetcher.data?.error?.additionalData?.clashingBookings && (
-                  <ul className="mb-4 mt-1 list-inside list-disc pl-4">
-                    {(
-                      fetcher.data.error.additionalData.clashingBookings as {
-                        id: string;
-                        name: string;
-                      }[]
-                    ).map((booking) => (
-                      <li key={booking.id}>
-                        <Button
-                          variant="link-gray"
-                          className={"text-error-500 no-underline"}
-                          target="_blank"
-                          to={`/bookings/${booking.id}`}
-                        >
-                          {booking.name}
-                        </Button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                {refusal ? (
+                  <ClashList
+                    bookings={refusal.clashingBookings}
+                    freeUntil={horizon ? null : refusal.freeUntil}
+                  />
+                ) : null}
               </When>
 
               <WorkingHoursInfo
@@ -197,4 +237,125 @@ export default function ExtendBookingDialog({
       </DialogPortal>
     </>
   );
+}
+
+/**
+ * "Free until" and what the first reservation needs, with the one-click end
+ * just before it.
+ */
+function HorizonNotice({
+  horizon,
+  suggestedEnd,
+  disabled,
+  onUseSuggested,
+  timeZone,
+}: {
+  horizon: ExtendHorizon;
+  suggestedEnd: Date | null;
+  disabled: boolean;
+  onUseSuggested: (wire: string) => void;
+  timeZone: string;
+}) {
+  const { formatDateTime } = useDateFormatter();
+  return (
+    <div className="mb-4 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700">
+      <span className="font-medium text-gray-900">
+        All items are free until {formatDateTime(horizon.freeUntil)}.
+      </span>{" "}
+      After that,{" "}
+      <Button
+        to={`/bookings/${horizon.blockedBy.id}`}
+        target="_blank"
+        variant="inherit"
+        className="font-medium underline"
+      >
+        {horizon.blockedBy.name}
+      </Button>{" "}
+      needs {namedItems(horizon.blockedBy)}.
+      {suggestedEnd ? (
+        <div className="mt-2">
+          <Button
+            type="button"
+            variant="secondary"
+            size="xs"
+            disabled={disabled}
+            onClick={() =>
+              onUseSuggested(wallClockWireInZone(suggestedEnd, timeZone))
+            }
+          >
+            Use {formatDateTime(suggestedEnd)}
+          </Button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** The reservations in the way of the end just asked for. */
+function ClashList({
+  bookings,
+  freeUntil,
+}: {
+  bookings: ClashingBooking[];
+  freeUntil: string | null;
+}) {
+  const { formatDate, formatDateTime } = useDateFormatter();
+  const listed = bookings.slice(0, MAX_BOOKINGS_LISTED);
+  const rest = bookings.length - listed.length;
+  return (
+    <div className="mb-4">
+      <ul className="divide-y divide-gray-200 rounded-md border border-gray-200 text-sm">
+        {listed.map((b) => (
+          <li
+            key={b.id}
+            className="flex items-start justify-between gap-3 px-3 py-2"
+          >
+            <div className="min-w-0">
+              <Button
+                variant="link"
+                className="font-medium"
+                target="_blank"
+                to={`/bookings/${b.id}`}
+              >
+                {b.name}
+              </Button>
+              {b.items.length > 0 ? (
+                <div className="text-gray-600">{namedItems(b)}</div>
+              ) : null}
+            </div>
+            {b.from ? (
+              <span className="shrink-0 text-gray-500">
+                from {formatDate(b.from)}
+              </span>
+            ) : null}
+          </li>
+        ))}
+        {rest > 0 ? (
+          <li className="px-3 py-2 text-gray-500">
+            +{rest} more {rest === 1 ? "booking" : "bookings"}
+          </li>
+        ) : null}
+      </ul>
+      {freeUntil ? (
+        <p className="mt-2 text-sm text-gray-600">
+          Free until {formatDateTime(freeUntil)}.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The first few shared items by name, then "+N more".
+ *
+ * @param booking - A clashing booking with its shared items
+ * @returns "Cam 1, Cam 2, Kit A (kit) +4 more"
+ */
+function namedItems(booking: ClashingBooking): string {
+  const names = booking.items.map((item) =>
+    item.kind === "kit" ? `${item.name} (kit)` : item.name
+  );
+  const shown = names.slice(0, MAX_ITEMS_NAMED);
+  const rest = names.length - shown.length;
+  return rest > 0 ? `${shown.join(", ")} +${rest} more` : shown.join(", ");
 }

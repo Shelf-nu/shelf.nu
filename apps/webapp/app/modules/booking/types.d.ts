@@ -76,7 +76,8 @@ interface BaseBookingLoaderResponse {
 export type BookingLoaderResponse = BaseBookingLoaderResponse & ResponsePayload;
 
 /**
- * Minimum type for clashing bookings
- * This is used to represent bookings that clash with the current booking when extending or modifying a booking.
+ * A booking that blocks a later end date, with the items it shares.
+ * Shaped by `describeClashingBookings` and carried in the extend refusal's
+ * `additionalData.clashingBookings`.
  */
-export type ClashingBooking = Pick<Booking, "id" | "name">;
+export type { ClashingBooking } from "./clashing-bookings";

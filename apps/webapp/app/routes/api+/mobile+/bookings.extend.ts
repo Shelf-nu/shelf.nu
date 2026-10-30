@@ -187,8 +187,8 @@ export async function action({ request }: ActionFunctionArgs) {
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     // The phone shows only `error.message`, so a clash names the bookings in
-    // the way inside it.
-    const clashing = clashingBookingNames(reason.additionalData);
+    // the way inside it, each with the items it holds.
+    const clashing = clashingBookingLabels(reason.additionalData);
     const message =
       clashing.length > 0
         ? `${reason.message} ${clashing.join(", ")}`
@@ -198,18 +198,25 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 /**
- * Names of the bookings an extension would overlap, read from the service's
- * `additionalData.clashingBookings`.
+ * Labels of the bookings an extension would overlap, read from the service's
+ * `additionalData.clashingBookings`: the booking's name, followed by the
+ * shared items in parentheses when the payload names them.
  *
  * @param additionalData - The error's additional data, of any shape
- * @returns The clashing bookings' names; empty when the error is not a clash
+ * @returns One label per clashing booking; empty when the error is not a clash
  */
-function clashingBookingNames(additionalData: unknown): string[] {
+function clashingBookingLabels(additionalData: unknown): string[] {
   if (typeof additionalData !== "object" || additionalData === null) return [];
   const clashing = (additionalData as { clashingBookings?: unknown })
     .clashingBookings;
   if (!Array.isArray(clashing)) return [];
-  return clashing.flatMap((b: { name?: unknown } | null) =>
-    typeof b?.name === "string" ? [b.name] : []
-  );
+  return clashing.flatMap((b: { name?: unknown; items?: unknown } | null) => {
+    if (typeof b?.name !== "string") return [];
+    const items = Array.isArray(b.items)
+      ? b.items.flatMap((item: { name?: unknown } | null) =>
+          typeof item?.name === "string" ? [item.name] : []
+        )
+      : [];
+    return [items.length > 0 ? `${b.name} (${items.join(", ")})` : b.name];
+  });
 }

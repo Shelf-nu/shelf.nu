@@ -44,6 +44,7 @@ import { tw } from "~/utils/tw";
 import { AvailabilityBadge } from "./availability-label";
 import KitRowActionsDropdown from "./kit-row-actions-dropdown";
 import ListAssetContent from "./list-asset-content";
+import { NextReservationBadge } from "./next-reservation-badge";
 import { AssetCodeBadge } from "../assets/asset-code-badge";
 import { CategoryBadge } from "../assets/category-badge";
 import KitImage from "../kits/kit-image";
@@ -280,6 +281,11 @@ export default function KitRow({
               tooltipTitle="Kit is already booked"
               tooltipContent="This kit is already added to a booking that is overlapping the selected time period."
             />
+          </When>
+          {/* While the kit is out, the booking it is promised to next
+              decides by when it has to be back. */}
+          <When truthy={isInProgress}>
+            <NextReservationBadge kind="kit" id={kit.id} />
           </When>
           {/*
             Deliberately the count of RENDERED slices, never the kit's

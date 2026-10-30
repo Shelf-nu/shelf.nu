@@ -11725,7 +11725,7 @@ describe("extendBooking", () => {
         roles: [OrganizationRoles.ADMIN],
       })
     ).rejects.toThrow(
-      "Cannot extend booking because the extended period is overlapping"
+      "These bookings reserve items this booking still has out"
     );
   });
 
@@ -12024,7 +12024,7 @@ describe("extendBooking", () => {
         roles: [OrganizationRoles.ADMIN],
       })
     ).rejects.toThrow(
-      "Cannot extend booking because the extended period is overlapping"
+      "These bookings reserve items this booking still has out"
     );
   });
 
@@ -12196,7 +12196,7 @@ describe("extendBooking", () => {
       });
 
       await expect(extendBooking(extendParams())).rejects.toThrow(
-        "Cannot extend booking because the extended period is overlapping"
+        "These bookings reserve items this booking still has out"
       );
       expect(db.booking.update).not.toHaveBeenCalled();
     });

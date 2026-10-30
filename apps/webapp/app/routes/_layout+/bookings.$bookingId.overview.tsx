@@ -52,6 +52,7 @@ import {
   loadSliceSourceLocations,
 } from "~/modules/booking/checkout-source-location.server";
 import { sendBookingUpdatedEmail } from "~/modules/booking/email-helpers";
+import { loadNextReservations } from "~/modules/booking/next-reservations.server";
 import {
   assertBookingDeleteConfirmed,
   archiveBooking,
@@ -232,6 +233,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             totalTeamMembersForNotify: 0,
           }),
     ]);
+
+    // What the items still out are promised to next: the extend horizon for
+    // the Change end date dialog and the next reservation per item row.
+    // Empty for bookings that are not running.
+    const nextReservations = await loadNextReservations({
+      organizationId,
+      bookingId: booking.id,
+    });
 
     // Exclude custodian from the notification recipients picker since
     // the custodian is always notified and doesn't need to be added
@@ -1255,6 +1264,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
          * case, and reads this alongside the slice markers.
          */
         hasDispositionedUnits: dispositionLogs.length > 0,
+        nextReservations,
         // Shaped view for first paint (same field names the component reads),
         // post-enriched with per-row qty disposition data (Polish-6 multi-row).
         items: enrichedItems,

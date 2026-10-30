@@ -130,7 +130,11 @@ import {
 } from "~/utils/booking-authorization.server";
 import { canUserRemoveBookingAssets } from "~/utils/bookings";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
-import { getClientHint, type ClientHint } from "~/utils/client-hints";
+import {
+  getClientHint,
+  getDateTimeFormatFromHints,
+  type ClientHint,
+} from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import {
   getFiltersFromRequest,
@@ -221,6 +225,11 @@ import {
   untaggedCheckinPlacementSources,
 } from "./checkout-source-location";
 import { recordCheckoutSourceLocations } from "./checkout-source-location.server";
+import {
+  findClashingReservations,
+  resolveHeldKits,
+} from "./clash-reservations.server";
+import { earliestClashStart } from "./clashing-bookings";
 import {
   ADDABLE_BOOKING_STATUSES,
   BOOKING_COMMON_INCLUDE,
@@ -13334,6 +13343,24 @@ const END_DATE_CHANGE_COPY = {
 >;
 
 /**
+ * The day an extend refusal names, in the acting user's locale and time zone
+ * when the caller has them, UTC otherwise.
+ *
+ * @param at - The requested end
+ * @param hints - The caller's client hints; an invalid zone falls back to UTC
+ * @returns The day, e.g. "1 Jan 2027"
+ */
+function formatExtendDay(at: Date, hints?: ClientHint): string {
+  const options = { day: "numeric", month: "short", year: "numeric" } as const;
+  const utc = { locale: "en-US", timeZone: "UTC" };
+  try {
+    return getDateTimeFormatFromHints(hints ?? utc, options).format(at);
+  } catch {
+    return getDateTimeFormatFromHints(utc, options).format(at);
+  }
+}
+
+/**
  * Moves the end of an ongoing or overdue booking, later or earlier.
  *
  * Only the dates move: items stay checked out until they are checked in, and
@@ -13513,62 +13540,41 @@ export async function extendBooking({
          * through any of its memberships, not only the ones this booking's
          * slices point at.
          */
-        let heldKitMembershipIds: string[] = [];
-        if (kitMembershipIdsStillOut.length > 0) {
-          const heldMemberships = await tx.assetKit.findMany({
-            where: { id: { in: kitMembershipIdsStillOut }, organizationId },
-            select: { kitId: true },
-          });
-          const heldKitIds = [...new Set(heldMemberships.map((m) => m.kitId))];
-          if (heldKitIds.length > 0) {
-            const memberships = await tx.assetKit.findMany({
-              where: { kitId: { in: heldKitIds }, organizationId },
-              select: { id: true },
-            });
-            heldKitMembershipIds = memberships.map((m) => m.id);
-          }
-        }
-
-        const activeAssetsClause: Prisma.BookingAssetWhereInput = {
-          assetId: { in: activeAssets.map((a) => a.id) },
-        };
-
-        /** Checking if the booking period is clashing with any other booking containing the same active asset(s) or kit(s).*/
-        const clashingBookings: ClashingBooking[] = await tx.booking.findMany({
-          where: {
-            id: { not: booking.id },
-            organizationId,
-            status: {
-              in: [BookingStatus.RESERVED],
-            },
-            bookingAssets: {
-              some:
-                heldKitMembershipIds.length > 0
-                  ? {
-                      OR: [
-                        activeAssetsClause,
-                        { assetKitId: { in: heldKitMembershipIds } },
-                      ],
-                    }
-                  : activeAssetsClause,
-            },
-            // Check for bookings that start within the added time
-            from: {
-              gt: booking.to,
-              lte: newEndDate,
-            },
-          },
-          select: { id: true, name: true },
+        const heldKits = await resolveHeldKits({
+          client: tx,
+          organizationId,
+          membershipIdsStillOut: kitMembershipIdsStillOut,
         });
 
-        if (clashingBookings?.length > 0) {
+        /**
+         * Reservations starting inside the added days that hold any of the
+         * same assets, or any membership of a kit still out. Each names the
+         * shared items, so the refusal tells the person what to free.
+         */
+        const clashingBookings: ClashingBooking[] =
+          await findClashingReservations({
+            client: tx,
+            organizationId,
+            bookingId: booking.id,
+            activeAssetIds: activeAssets.map((a) => a.id),
+            heldKits,
+            after: booking.to,
+            until: newEndDate,
+          });
+
+        if (clashingBookings.length > 0) {
           throw new ShelfError({
             cause: null,
             label,
-            message:
-              "Cannot extend booking because the extended period is overlapping with the following bookings:",
+            message: `Can't extend to ${formatExtendDay(
+              newEndDate,
+              hints
+            )}. These bookings reserve items this booking still has out:`,
             additionalData: {
-              clashingBookings: [...clashingBookings],
+              clashingBookings,
+              // The first clash starts here; a later end before it is free
+              // of named-item clashes.
+              freeUntil: earliestClashStart(clashingBookings),
             },
             shouldBeCaptured: false,
           });

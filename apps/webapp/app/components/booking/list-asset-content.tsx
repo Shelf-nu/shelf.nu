@@ -35,6 +35,7 @@ import {
   PendingReturnBadge,
 } from "./availability-label";
 import { FulfilsModelBadge } from "./fulfils-model-badge";
+import { NextReservationBadge } from "./next-reservation-badge";
 import { RemovedFromKitBadge } from "./removed-from-kit-badge";
 import { ArchivedBadge } from "../assets/archived-badge";
 import { AssetCodeBadge } from "../assets/asset-code-badge";
@@ -114,7 +115,7 @@ export default function ListAssetContent({
         entityKind: "asset",
       })
     : null;
-  const { isFinished } = useBookingStatusHelpers(booking.status);
+  const { isFinished, isInProgress } = useBookingStatusHelpers(booking.status);
   const user = useUserData();
 
   /**
@@ -580,6 +581,11 @@ export default function ListAssetContent({
         {!isFinished ? (
           <div className="flex flex-wrap items-center gap-1">
             <AvailabilityLabel asset={item} isCheckedOut={isCheckedOut} />
+            {/* While the booking runs, the booking this item is promised to
+                next decides by when it has to be back. */}
+            <When truthy={isInProgress}>
+              <NextReservationBadge kind="asset" id={item.id} />
+            </When>
             {stockBadgeVariant === "insufficient" ? (
               <InsufficientStockBadge
                 bookedQuantity={qtyBooked}
