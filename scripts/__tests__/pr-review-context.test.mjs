@@ -32,6 +32,7 @@ import {
   summarizeSchemaDiff,
   extractDbChanges,
   createTableColumns,
+  createTableConstraints,
 } from "../pr-review-context.mjs";
 
 test("globToRegExp: ** matches zero or more directories", () => {
@@ -804,6 +805,7 @@ test("extractDbChanges: lists every statement of the PdfDocument migration", () 
     [
       ["create enum", "PdfDocumentKind"],
       ["create table", "PdfDocument"],
+      ["add constraint", "PdfDocument"],
       ["add foreign key", "PdfDocument(organizationId)"],
       ["create unique index", "PdfDocument_one_default"],
       ["row level security", "PdfDocument"],
@@ -811,10 +813,10 @@ test("extractDbChanges: lists every statement of the PdfDocument migration", () 
       ["insert rows", "PdfDocument"],
     ]
   );
-  const [, table, fk, index] = db.migrations[0].statements;
+  const [, table, , fk, index] = db.migrations[0].statements;
   assert.equal(
     table.detail,
-    "id TEXT, name TEXT, kind PdfDocumentKind, note TEXT null"
+    "id text, name text, kind PdfDocumentKind, note text null"
   );
   assert.equal(
     fk.detail,
@@ -886,21 +888,58 @@ test("createTableColumns: name, type, nullability and default per column, constr
     CONSTRAINT "PdfDocument_pkey" PRIMARY KEY ("id")
 `),
     [
-      { name: "id", type: "TEXT", nullable: false, default: "" },
+      { name: "id", type: "text", nullable: false, default: "" },
       {
         name: "kind",
         type: "PdfDocumentKind",
         nullable: false,
         default: "'BOOKING'",
       },
-      { name: "config", type: "JSONB", nullable: false, default: "'{}'" },
-      { name: "note", type: "TEXT", nullable: true, default: "" },
+      { name: "config", type: "jsonb", nullable: false, default: "'{}'" },
+      { name: "note", type: "text", nullable: true, default: "" },
       {
         name: "createdAt",
-        type: "TIMESTAMP(3)",
+        type: "timestamp(3)",
         nullable: false,
         default: "CURRENT_TIMESTAMP",
       },
     ]
+  );
+});
+
+test("createTableConstraints: inline checks and keys are listed, not dropped", () => {
+  const body = `
+    "id" TEXT NOT NULL,
+    "url" TEXT NOT NULL,
+
+    CONSTRAINT "LinkPreview_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "LinkPreview_url_length" CHECK (char_length("url") <= 2048)
+`;
+  assert.deepEqual(createTableConstraints("LinkPreview", body), [
+    {
+      action: "add constraint",
+      target: "LinkPreview",
+      detail: "LinkPreview_pkey: PRIMARY KEY (id)",
+    },
+    {
+      action: "add constraint",
+      target: "LinkPreview",
+      detail: "LinkPreview_url_length: CHECK (char_length(url) <= 2048)",
+    },
+  ]);
+  assert.deepEqual(
+    classifySqlStatement(`CREATE TABLE "LinkPreview" (${body})`).map(
+      (s) => s.action
+    ),
+    ["create table", "add constraint", "add constraint"]
+  );
+});
+
+test("createTableColumns: an enum type keeps its name, built-in types are lower case", () => {
+  assert.deepEqual(
+    createTableColumns(
+      `"outcome" "LinkPreviewOutcome",\n"n" INTEGER NOT NULL`
+    ).map((c) => c.type),
+    ["LinkPreviewOutcome", "integer"]
   );
 });

@@ -385,21 +385,28 @@ const ON_DELETE =
 /** An optionally quoted, optionally schema-qualified SQL identifier. */
 const IDENT = String.raw`((?:"[^"]+"|[\w]+)(?:\.(?:"[^"]+"|[\w]+))?)`;
 
+/** Splits a `CREATE TABLE` body into its column and constraint definitions. */
+const tableBodyParts = (body) =>
+  body
+    .split(/,\s*\n/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+/** A table constraint written inside `CREATE TABLE` (primary key, check, ...). */
+const TABLE_CONSTRAINT =
+  /^(CONSTRAINT|PRIMARY|UNIQUE|FOREIGN|CHECK|EXCLUDE)\b/i;
+
 /**
  * Lists the columns of a `CREATE TABLE` body, skipping table constraints, so
  * the report can preview the table one column per row.
  * @param {string} body - the text between the outer parentheses
  * @returns {Array<{name: string, type: string, nullable: boolean, default: string}>}
- *   `default` is the SQL default expression, or "" when there is none
+ *   built-in types are lower case and user types (enums) keep their name as
+ *   written; `default` is the SQL default expression, or "" when there is none
  */
 export function createTableColumns(body) {
-  return body
-    .split(/,\s*\n/)
-    .map((part) => part.trim())
-    .filter(
-      (part) =>
-        part && !/^(CONSTRAINT|PRIMARY|UNIQUE|FOREIGN|CHECK)\b/i.test(part)
-    )
+  return tableBodyParts(body)
+    .filter((part) => !TABLE_CONSTRAINT.test(part))
     .map((part) => {
       const match =
         /^("[^"]+"|\w+)\s+("[^"]+"|[\w]+(?:\(\d+(?:,\s*\d+)?\))?(?:\[\])?)(.*)$/s.exec(
@@ -416,9 +423,35 @@ export function createTableColumns(body) {
       const fallback = /DEFAULT (.+?)(?: NOT NULL| NULL|$)/i.exec(rest);
       return {
         name: unquote(match[1]),
-        type: unquote(match[2]),
+        type: match[2].startsWith('"')
+          ? unquote(match[2])
+          : match[2].toLowerCase(),
         nullable: !/NOT NULL/i.test(rest),
         default: fallback ? fallback[1].trim() : "",
+      };
+    });
+}
+
+/**
+ * Lists the table constraints written inside a `CREATE TABLE` body, in the
+ * same shape `ALTER TABLE ... ADD CONSTRAINT` produces, so a check or key
+ * declared inline is reported like one added afterwards.
+ * @param {string} table - the table being created
+ * @param {string} body - the text between the outer parentheses
+ * @returns {Array<{action: string, target: string, detail: string}>}
+ */
+export function createTableConstraints(table, body) {
+  return tableBodyParts(body)
+    .filter((part) => TABLE_CONSTRAINT.test(part))
+    .map((part) => {
+      const flat = part.replace(/\s+/g, " ");
+      const named = /^CONSTRAINT ("[^"]+"|\w+) (.*)$/i.exec(flat);
+      return {
+        action: "add constraint",
+        target: table,
+        detail: named
+          ? `${unquote(named[1])}: ${unquote(named[2])}`
+          : unquote(flat),
       };
     });
 }
@@ -444,7 +477,8 @@ export function classifySqlStatement(statement) {
   ) {
     const open = statement.indexOf("(");
     const close = statement.lastIndexOf(")");
-    const columns = createTableColumns(statement.slice(open + 1, close));
+    const body = statement.slice(open + 1, close);
+    const columns = createTableColumns(body);
     return [
       {
         action: "create table",
@@ -454,6 +488,7 @@ export function classifySqlStatement(statement) {
           .join(", "),
         columns,
       },
+      ...createTableConstraints(unquote(m[1]), body),
     ];
   }
   if ((m = new RegExp(`^DROP TABLE (?:IF EXISTS )?${IDENT}`, "i").exec(sql)))

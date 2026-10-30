@@ -268,7 +268,7 @@ Rules:
   summarise, merge, or write "and N more": the user approves the schema from
   this section. Layout:
   - Each `create table` gets its own heading and a column table built from
-    its `columns` (one row per column; type in lower case; Null `yes`/`no`;
+    its `columns` (one row per column; type exactly as given; Null `yes`/`no`;
     Default empty when there is none), followed by its keys, indexes and RLS.
     A new table without RLS says `RLS MISSING` there.
   - Each new enum: one line with its values.
