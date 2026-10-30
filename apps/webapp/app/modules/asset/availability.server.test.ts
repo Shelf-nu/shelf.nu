@@ -11,7 +11,7 @@
  * (inline `db` mock with `$transaction` routing the callback through the same
  * mock, plus per-method `mockResolvedValue` overrides per test).
  */
-import { describe, expect, it, vitest } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vitest } from "vitest";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 
@@ -278,6 +278,17 @@ describe("overCommittedWindows", () => {
 /* -------------------------------------------------------------------------- */
 
 describe("getAssetAvailability", () => {
+  // why: the RESERVED fixtures below carry fixed 2026 dates, and a RESERVED
+  // booking whose end has passed is an expired reservation that the
+  // informational total leaves out. Pinning "now" before every fixture keeps
+  // them upcoming whatever day the suite runs.
+  beforeAll(() => {
+    vitest.useFakeTimers({ toFake: ["Date"] });
+    vitest.setSystemTime(new Date("2025-12-01T00:00:00Z"));
+  });
+  afterAll(() => {
+    vitest.useRealTimers();
+  });
   const ASSET_ID = "asset1";
   const ORG_ID = "org1";
 
@@ -402,6 +413,41 @@ describe("getAssetAvailability", () => {
 
     expect(a.checkedOut).toBe(4);
     expect(a.physicalAvailable).toBe(6);
+  });
+
+  it("leaves an expired reservation out of the informational reserved total", async () => {
+    resetMocks();
+    // One live reservation (end ahead) and one expired one (RESERVED, end
+    // passed, never checked out). Only the live one is "upcoming".
+    // @ts-expect-error mocked
+    db.bookingAsset.findMany.mockResolvedValue([
+      {
+        bookingId: "live",
+        quantity: 2,
+        booking: {
+          from: new Date(Date.now() + 60 * 60 * 1000),
+          to: new Date(Date.now() + 2 * 60 * 60 * 1000),
+          status: "RESERVED",
+        },
+      },
+      {
+        bookingId: "expired",
+        quantity: 3,
+        booking: {
+          from: new Date("2025-01-01T00:00:00Z"),
+          to: new Date("2025-01-02T00:00:00Z"),
+          status: "RESERVED",
+        },
+      },
+    ]);
+
+    const a = await getAssetAvailability({
+      assetId: ASSET_ID,
+      organizationId: ORG_ID,
+    });
+
+    expect(a.reservedTotal).toBe(2);
+    expect(a.reservingBookingCount).toBe(1);
   });
 
   it("excludes the current booking from the reserved query", async () => {
@@ -774,6 +820,17 @@ describe("getAssetAvailability", () => {
 /* -------------------------------------------------------------------------- */
 
 describe("getAssetAvailabilityBatch", () => {
+  // why: the RESERVED fixtures below carry fixed 2026 dates, and a RESERVED
+  // booking whose end has passed is an expired reservation that the
+  // informational total leaves out. Pinning "now" before every fixture keeps
+  // them upcoming whatever day the suite runs.
+  beforeAll(() => {
+    vitest.useFakeTimers({ toFake: ["Date"] });
+    vitest.setSystemTime(new Date("2025-12-01T00:00:00Z"));
+  });
+  afterAll(() => {
+    vitest.useRealTimers();
+  });
   const ORG_ID = "org1";
 
   /**
@@ -845,6 +902,46 @@ describe("getAssetAvailabilityBatch", () => {
     // is asset-on-active-booking, kit-driven or not).
     const reservedCall = client.bookingAsset.findMany.mock.calls[1];
     expect(reservedCall?.[0]?.where?.assetKitId).toBeNull();
+  });
+
+  it("leaves an expired reservation out of the informational reserved total", async () => {
+    const client = createMockBatchClient();
+    client.asset.findMany.mockResolvedValue([{ id: "a1", quantity: 10 }]);
+    // First call is the checked-out read, second the reserved rows.
+    client.bookingAsset.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          assetId: "a1",
+          bookingId: "live",
+          quantity: 2,
+          booking: {
+            from: new Date("2026-01-01T00:00:00Z"),
+            to: new Date("2026-01-02T00:00:00Z"),
+            status: "RESERVED",
+          },
+        },
+        {
+          assetId: "a1",
+          bookingId: "expired",
+          quantity: 3,
+          booking: {
+            from: new Date("2025-01-01T00:00:00Z"),
+            to: new Date("2025-01-02T00:00:00Z"),
+            status: "RESERVED",
+          },
+        },
+      ]);
+
+    const result = await getAssetAvailabilityBatch(["a1"], {
+      organizationId: ORG_ID,
+      window: null,
+      db: client,
+    });
+
+    expect(client.bookingAsset.findMany).toHaveBeenCalledTimes(2);
+    expect(result.get("a1")?.reservedTotal).toBe(2);
+    expect(result.get("a1")?.reservingBookingCount).toBe(1);
   });
 
   it("scopes the total (asset.findMany) and inCustody (custody.groupBy) queries to the caller's organization", async () => {

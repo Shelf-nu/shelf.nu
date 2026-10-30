@@ -164,6 +164,9 @@ describe("POST /api/mobile/bookings/partial-checkout", () => {
       checkouts: undefined,
       userId: "user-1",
       hints: { timeZone: "UTC", locale: "en-US" },
+      // The phone keeps the stored dates: an expired reservation's first scan
+      // goes out as overdue (see `resolveExpiredCheckoutState`).
+      intentChoice: "without-adjusted-date",
       // Legacy clients omit `method` too; it is recorded as null, never guessed.
       provenance: { surface: "phone", method: null },
       // No `sourceLocations` in the body: no answers, so the default applies.
@@ -258,6 +261,7 @@ describe("POST /api/mobile/bookings/partial-checkout", () => {
       userId: "user-1",
       // Body-supplied timeZone overrides the Accept-Language/cookie hints.
       hints: expect.objectContaining({ timeZone: "Europe/Berlin" }),
+      intentChoice: "without-adjusted-date",
       provenance: { surface: "phone", method: null },
       sourceLocations: new Map(),
     });

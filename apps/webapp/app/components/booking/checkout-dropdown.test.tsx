@@ -20,6 +20,23 @@ let menuOpen = false;
 // need a data router's loader data. Each test sets the starting open state,
 // and the menu applies every close Radix asks for, as the real hook does on a
 // phone after a QR auto-open, so a dialog inside the menu has to survive it.
+// why: the dialog proposes an expired reservation's new end date in the
+// user's resolved timezone, read from root loader data this test does not
+// mount. No expired booking is rendered here.
+vi.mock("~/hooks/use-date-formatter", () => ({
+  useDateFormatter: () => ({
+    prefs: {
+      dateFormat: "MM_DD_YYYY",
+      timeFormat: "H12",
+      weekStartsOn: 0,
+      timeZone: "UTC",
+    },
+    formatDate: (value: string | Date) => String(value),
+    formatTime: (value: string | Date) => String(value),
+    formatDateTime: (value: string | Date) => String(value),
+  }),
+}));
+
 vi.mock("~/hooks/use-controlled-dropdown-menu", () => ({
   useControlledDropdownMenu: () => {
     const [open, setOpen] = useState(menuOpen);

@@ -229,6 +229,7 @@ import {
   BOOKING_SCHEDULER_EVENTS_ENUM,
   BOOKING_WITH_ASSETS_INCLUDE,
   BOOKINGS_LIST_ASSETS_INCLUDE,
+  bookingStatusFilterWhereParams,
 } from "./constants";
 import type {
   ReservationEmailAsset,
@@ -302,6 +303,7 @@ import {
 import { createNotes } from "../note/service.server";
 
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
+import { USER_NAME_SELECT } from "../user/fields";
 import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Booking";
@@ -3739,6 +3741,7 @@ async function runCheckoutSideEffects({
   hints,
   organizationId,
   isExpired,
+  rescheduled,
   provenance,
   bookingSliceIds,
   departedSlices,
@@ -3751,6 +3754,8 @@ async function runCheckoutSideEffects({
   hints: ClientHint;
   organizationId: Booking["organizationId"];
   isExpired: boolean;
+  /** The dates a reschedule moved, when the check-out committed one. */
+  rescheduled?: RescheduledDates | null;
   /** How the check-out was made, for the activity line; see {@link checkoutBooking}. */
   provenance?: BookingMethodProvenance;
   /**
@@ -3798,6 +3803,14 @@ async function runCheckoutSideEffects({
       unscannedSliceIds,
       slices: departedSlices,
     });
+    if (rescheduled) {
+      await recordRescheduledWindow({
+        bookingId: bookingFound.id,
+        organizationId,
+        userId,
+        dates: rescheduled,
+      });
+    }
   }
 
   /** We cancel just in case there is something pending */
@@ -3832,10 +3845,226 @@ async function runCheckoutSideEffects({
   });
 }
 
+/**
+ * The window a check-out validates and commits.
+ *
+ * Normally the booking's own stored dates. When an expired reservation is
+ * checked out "with a new end date", it is the shifted window instead, so
+ * every window-scoped guard (conflicts, kit holds, the pool availability
+ * read) judges the dates the booking is about to hold rather than a window
+ * that ended weeks ago and overlaps nothing.
+ */
+type CheckoutWindow = { from: Booking["from"]; to: Booking["to"] };
+
+/**
+ * Writes a rescheduled window onto a booking update. The window becomes the
+ * plan: `originalFrom`/`originalTo` move with it, because the reservation it
+ * replaces was never executed and the operator and custodian are agreeing to
+ * this period at the counter. Compliance and the check-in receipt then
+ * measure the return against the period the gear actually went out for. The
+ * replaced period is kept on the activity trail, not on the row: the
+ * `BOOKING_DATES_CHANGED` events commit with the check-out, and the note
+ * follows ({@link recordRescheduledWindow}).
+ *
+ * @param data - The update the check-out is about to commit
+ * @param window - The window to commit, or null when nothing moves
+ */
+function applyRescheduledWindow(
+  data: Prisma.BookingUpdateInput,
+  window: { from: Date; to: Date } | null
+) {
+  if (!window) return;
+  data.originalFrom = window.from;
+  data.originalTo = window.to;
+  data.from = window.from;
+  data.to = window.to;
+}
+
+/**
+ * The gate every first check-out of a RESERVED booking passes: what to do
+ * when the reservation's end date is already behind us.
+ *
+ * Checking such a reservation out lands it in OVERDUE, with no reminders and
+ * a compliance report that measures the return against an end date that
+ * passed before the gear left. That outcome is a choice the operator makes,
+ * never a default, the twin of the early-check-out prompt:
+ *
+ * - no choice, or the early-check-out value → 400. The web dialog asks; the
+ *   phone routes pass `without-adjusted-date`.
+ * - `without-adjusted-date` → `isExpired: true`: OVERDUE on the click.
+ * - `with-new-end-date` → the window moves to start now (minute-aligned)
+ *   and end at `newEndDate`, which the route has already validated against
+ *   the workspace's booking rules. The booking lands ONGOING with its
+ *   reminders. Only the full check-out may take this branch
+ *   (`allowReschedule`): it is a new reservation over the new window, and
+ *   the full check-out is the one path that judges every asset, kit, pool
+ *   and model unit of the booking against it. A scan or a selected batch
+ *   refuses it and points at the header's Check out.
+ *
+ * Expiry keys on `to` alone (`isBookingExpired`); a late pickup whose end is
+ * still ahead is a normal check-out. A booking that is no longer RESERVED
+ * is never expired here: OVERDUE is its own state, and a DRAFT check-out
+ * stays what it is.
+ *
+ * @param args.status - The booking's stored status, when the caller has it
+ * @param args.from - The booking's stored start
+ * @param args.to - The booking's stored end
+ * @param args.intentChoice - The operator's answer, when the caller asked
+ * @param args.newEndDate - The validated end the operator picked
+ * @param args.allowReschedule - Whether this path may commit a new window
+ * @returns Whether the check-out lands in OVERDUE, and the window it commits
+ *   when it is a reschedule
+ * @throws {ShelfError} 400 when the reservation is expired and no usable
+ *   choice was made, when a reschedule is asked of a path that cannot
+ *   commit one, or when the picked end is not after the check-out moment
+ */
+export function resolveExpiredCheckoutState({
+  status,
+  from,
+  to,
+  intentChoice,
+  newEndDate,
+  allowReschedule = true,
+}: {
+  status?: BookingStatus;
+  from: Date | null;
+  to: Date | null;
+  intentChoice?: CheckoutIntentEnum;
+  newEndDate?: Date | null;
+  allowReschedule?: boolean;
+}): {
+  /** `true` → the booking lands in OVERDUE and nothing is scheduled. */
+  isExpired: boolean;
+  /** The window to commit; set only on a reschedule. */
+  rescheduledWindow: { from: Date; to: Date } | null;
+} {
+  const notExpired = { isExpired: false, rescheduledWindow: null };
+  if (status !== undefined && status !== BookingStatus.RESERVED) {
+    return notExpired;
+  }
+  if (!to || !isBookingExpired({ to })) return notExpired;
+
+  if (intentChoice === CheckoutIntentEnum["without-adjusted-date"]) {
+    return { isExpired: true, rescheduledWindow: null };
+  }
+
+  if (intentChoice === CheckoutIntentEnum["with-new-end-date"]) {
+    if (!allowReschedule) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+        title: "Check out the whole booking to pick a new end date",
+        message:
+          "A new end date applies to the whole booking. Use Check out on the booking page, or check these items out as overdue.",
+        additionalData: { reason: "expired-reservation-checkout" },
+      });
+    }
+
+    const newFrom = DateTime.now().startOf("minute").toJSDate();
+    const plannedLengthMs = from
+      ? Math.max(to.getTime() - from.getTime(), 0)
+      : 0;
+    const newTo = newEndDate ?? new Date(newFrom.getTime() + plannedLengthMs);
+
+    if (newTo.getTime() <= newFrom.getTime()) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+        title: "End date must be later",
+        message: "The new end date has to be after the check-out time.",
+        additionalData: { reason: "expired-reservation-checkout" },
+      });
+    }
+
+    return {
+      isExpired: false,
+      rescheduledWindow: { from: newFrom, to: newTo },
+    };
+  }
+
+  throw new ShelfError({
+    cause: null,
+    label,
+    status: 400,
+    shouldBeCaptured: false,
+    title: "Reservation dates have passed",
+    message:
+      "This booking's reserved period has already ended. Reload the page, then check it out with a new end date or as overdue.",
+    additionalData: { reason: "expired-reservation-checkout" },
+  });
+}
+
+/**
+ * The dates a reschedule moved, for the activity trail.
+ * See {@link recordRescheduledWindow}.
+ */
+type RescheduledDates = {
+  previous: { from: Date | null; to: Date | null };
+  window: { from: Date; to: Date };
+};
+
+/**
+ * Writes the system note naming both periods of a rescheduled window. The
+ * `BOOKING_DATES_CHANGED` events are not written here: they commit with the
+ * date move inside the check-out transaction. The note is best-effort: it runs
+ * after the commit, so a failure is logged and never reported as a failed
+ * check-out, and the check-in reminder is still scheduled.
+ *
+ * @param args.bookingId - The booking that moved
+ * @param args.organizationId - Its workspace
+ * @param args.userId - Who checked it out
+ * @param args.dates - The previous and the committed window
+ */
+async function recordRescheduledWindow({
+  bookingId,
+  organizationId,
+  userId,
+  dates,
+}: {
+  bookingId: string;
+  organizationId: string;
+  userId: string;
+  dates: RescheduledDates;
+}) {
+  /** A reservation always has both dates; the fallback only types the note. */
+  const stamp = (date: Date | null) =>
+    date ? `**${wrapDateForNote(date)}**` : "no date";
+  try {
+    const user = await getUserByID(userId, {
+      select: { id: true, ...USER_NAME_SELECT } satisfies Prisma.UserSelect,
+    });
+    await createSystemBookingNote({
+      bookingId,
+      organizationId,
+      content: `${wrapUserLinkForNote(
+        user
+      )} checked out an expired reservation with a new period: ${stamp(
+        dates.previous.from
+      )} to ${stamp(dates.previous.to)} became ${stamp(
+        dates.window.from
+      )} to ${stamp(dates.window.to)}.`,
+    });
+  } catch (err) {
+    Logger.error(
+      new ShelfError({
+        cause: err,
+        message: "Failed to write the rescheduled window's note",
+        additionalData: { bookingId },
+        label,
+      })
+    );
+  }
+}
+
 export async function checkoutBooking({
   id,
   organizationId,
   intentChoice,
+  newEndDate,
   hints,
   from,
   to,
@@ -3851,6 +4080,11 @@ export async function checkoutBooking({
    */
   seesAllBookings?: boolean;
   intentChoice?: CheckoutIntentEnum;
+  /**
+   * The end date the operator picked when checking out an expired
+   * reservation with a new window; see {@link resolveExpiredCheckoutState}.
+   */
+  newEndDate?: Date | null;
   from?: Date | null;
   to?: Date | null;
   userId?: string;
@@ -3868,6 +4102,27 @@ export async function checkoutBooking({
   sourceLocations?: SourceLocationSubmission;
 }) {
   try {
+    /**
+     * A reschedule changes the window the conflict include below has to
+     * judge, and that include is part of the read. Every route passes
+     * `from`/`to` as the booking's own stored dates (read org-scoped for the
+     * conflict guard), so the window is previewed from them when the
+     * operator asked for one; the row's own status and dates settle the
+     * state once it is read, and a preview the row cannot take is refused
+     * below rather than committed against the wrong window.
+     */
+    const previewWindow =
+      to && intentChoice === CheckoutIntentEnum["with-new-end-date"]
+        ? resolveExpiredCheckoutState({
+            from: from ?? null,
+            to,
+            intentChoice,
+            newEndDate,
+          }).rescheduledWindow
+        : null;
+    const conflictFrom = previewWindow?.from ?? from;
+    const conflictTo = previewWindow?.to ?? to;
+
     const bookingFound = await db.booking
       .findUniqueOrThrow({
         where: { id, organizationId },
@@ -3879,8 +4134,8 @@ export async function checkoutBooking({
                   bookingAssets: {
                     ...createBookingConflictConditions({
                       currentBookingId: id,
-                      fromDate: from,
-                      toDate: to,
+                      fromDate: conflictFrom,
+                      toDate: conflictTo,
                     }),
                     select: {
                       id: true,
@@ -3948,8 +4203,36 @@ export async function checkoutBooking({
       actorUserId: userId,
     });
 
+    const { isExpired, rescheduledWindow } = resolveExpiredCheckoutState({
+      status: bookingFound.status,
+      from: bookingFound.from,
+      to: bookingFound.to,
+      intentChoice,
+      newEndDate,
+    });
+    /**
+     * The conflict include above judged the previewed window. If the row is
+     * no longer a reservation the new window does not apply, and committing
+     * the stored dates against a check judged on other dates is not safe.
+     */
+    if (previewWindow && !rescheduledWindow) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+        message:
+          "The booking changed while you were checking it out. Reload it and try again.",
+      });
+    }
+    /** The window every guard below judges; see {@link CheckoutWindow}. */
+    const checkoutWindow: CheckoutWindow = rescheduledWindow ?? {
+      from: bookingFound.from,
+      to: bookingFound.to,
+    };
+
     /** Server-side conflict validation to prevent race conditions */
-    if (from && to && bookingFound.bookingAssets) {
+    if (conflictFrom && conflictTo && bookingFound.bookingAssets) {
       const conflictedAssets = bookingFound.bookingAssets
         .map((ba) => ba.asset)
         .filter((asset) => hasAssetBookingConflicts(asset, id));
@@ -3980,8 +4263,8 @@ export async function checkoutBooking({
     await assertKitsNotBookedElsewhere({
       slices: bookingFound.bookingAssets,
       bookingId: id,
-      from,
-      to,
+      from: checkoutWindow.from,
+      to: checkoutWindow.to,
       organizationId,
       action: "check out booking",
     });
@@ -4039,15 +4322,19 @@ export async function checkoutBooking({
     );
 
     /**
-     * This checks if the booking end date is in the past
-     * We need this because sometimes the user can checkout a booking
-     * that is already overdue for check in
+     * `isExpired` was settled up front by {@link resolveExpiredCheckoutState}:
+     * an expired reservation the operator confirmed "as overdue" lands in
+     * OVERDUE; a reschedule or a normal check-out lands ONGOING.
      */
-    const isExpired = isBookingExpired({ to: bookingFound.to! });
-
     const dataToUpdate: Prisma.BookingUpdateInput = {
       status: isExpired ? BookingStatus.OVERDUE : BookingStatus.ONGOING,
     };
+
+    /**
+     * Reschedule of an expired reservation. Exclusive with the early branch
+     * below: early needs a future start, expired a past end.
+     */
+    applyRescheduledWindow(dataToUpdate, rescheduledWindow);
 
     /**
      * The kits this check-out takes off the shelf, so their status can be
@@ -4153,6 +4440,74 @@ export async function checkoutBooking({
           bookingId: id,
         });
 
+        /**
+         * The expired-reservation answer was given for a RESERVED row. If the
+         * row moved on meanwhile (another operator's click, a retry after a
+         * success), landing it OVERDUE or rewriting its dates would act on a
+         * state nobody looked at. The check-out itself still goes through
+         * `assertBookingIsOpen`; only the answer is withdrawn.
+         */
+        if (
+          (isExpired || rescheduledWindow) &&
+          lockedStatus !== BookingStatus.RESERVED
+        ) {
+          throw new ShelfError({
+            cause: null,
+            label,
+            status: 400,
+            shouldBeCaptured: false,
+            message:
+              "The booking changed while you were checking it out. Reload it and try again.",
+          });
+        }
+
+        /**
+         * A reschedule is a new reservation over the new window, so it is
+         * measured the way reserving one is: the units the booking still owes
+         * by model, then its units booked by name, against the model pools
+         * other bookings draw from over that window. Assets and kits are
+         * judged by the conflict guards above, quantity pools by the windowed
+         * guard below.
+         *
+         * The request guard runs first so one sorted pass covers every
+         * `AssetModel` row this transaction locks (`alsoLockAssetModelIds`),
+         * as in `reserveBooking`.
+         */
+        if (rescheduledWindow) {
+          const namedIndividualAssets = bookingFound.bookingAssets
+            .map((ba) => ba.asset)
+            .filter((asset) => asset.type === AssetType.INDIVIDUAL);
+
+          await assertOutstandingModelRequestsFit({
+            bookingId: bookingFound.id,
+            organizationId,
+            from: rescheduledWindow.from,
+            to: rescheduledWindow.to,
+            action: "check out booking",
+            alsoLockAssetModelIds: namedIndividualAssets
+              .map((asset) => asset.assetModelId)
+              .filter((assetModelId): assetModelId is string => !!assetModelId),
+            tx,
+            hints,
+            userId,
+            revealOtherBookings: seesAllBookings,
+          });
+
+          await assertModelUnitsNotReservedElsewhere({
+            assets: namedIndividualAssets,
+            bookingId: bookingFound.id,
+            bookingStatus: lockedStatus,
+            windowChanged: true,
+            organizationId,
+            from: rescheduledWindow.from,
+            to: rescheduledWindow.to,
+            tx,
+            hints,
+            userId,
+            revealOtherBookings: seesAllBookings,
+          });
+        }
+
         ({ departedSlices } = await checkoutBookingWritesWithinTx(tx, {
           bookingId: bookingFound.id,
           // The status this transaction holds, not the pre-transaction read:
@@ -4168,10 +4523,11 @@ export async function checkoutBooking({
           dataToUpdate,
           kitIds,
           hasKits,
-          // Booking's own committed window — windows the QT availability
-          // guard (see the doc comment on `checkoutBookingWritesWithinTx`).
-          from: bookingFound.from,
-          to: bookingFound.to,
+          // The window this check-out commits (the booking's own, or the
+          // shifted one on a reschedule). It windows the QT availability
+          // guard; see the doc comment on `checkoutBookingWritesWithinTx`.
+          from: checkoutWindow.from,
+          to: checkoutWindow.to,
           checkedOutById: userId ?? null,
           sourceLocations,
           hints,
@@ -4213,6 +4569,26 @@ export async function checkoutBooking({
             tx
           );
         }
+
+        // A reschedule moves both dates: one BOOKING_DATES_CHANGED per date,
+        // committed with the move itself, as the reports read them. The
+        // human-readable note follows after the commit.
+        if (rescheduledWindow) {
+          await recordEvents(
+            (["from", "to"] as const).map((field) => ({
+              organizationId,
+              actorUserId: userId ?? null,
+              action: "BOOKING_DATES_CHANGED" as const,
+              entityType: "BOOKING" as const,
+              entityId: bookingFound.id,
+              bookingId: bookingFound.id,
+              field,
+              fromValue: bookingFound[field]?.toISOString() ?? null,
+              toValue: rescheduledWindow[field].toISOString(),
+            })),
+            tx
+          );
+        }
       },
       { timeout: 15000 }
     );
@@ -4237,6 +4613,12 @@ export async function checkoutBooking({
       hints,
       organizationId,
       isExpired,
+      rescheduled: rescheduledWindow
+        ? {
+            previous: { from: bookingFound.from, to: bookingFound.to },
+            window: rescheduledWindow,
+          }
+        : null,
       provenance,
       bookingSliceIds: bookingFound.bookingAssets.map((ba) => ba.id),
       departedSlices,
@@ -4291,7 +4673,7 @@ export async function checkoutBooking({
  * @param args.assetIds - Scanned asset IDs (QRs resolved to assets). May include off-model scans; those bypass the model-request drain and land as direct BookingAssets.
  * @param args.kitIds - Optional scanned kit IDs, forwarded for note attribution + kit status sync. The members that land on the booking come from `kitSlices`, not from these ids.
  * @param args.kitSlices - Optional kit-driven slice specs for those kits. Their INDIVIDUAL members discharge matching model requests like any other unit of their model.
- * @param args.checkoutIntentChoice - If `"with-adjusted-date"` and the booking is an early checkout, `booking.from` is rewritten to "now" and the original value preserved on `booking.originalFrom`. Same semantics as `checkoutBooking`'s `intentChoice`.
+ * @param args.checkoutIntentChoice - If `"with-adjusted-date"` and the booking is an early checkout, `booking.from` is rewritten to "now" and the original value preserved on `booking.originalFrom`. Same semantics as `checkoutBooking`'s `intentChoice`. On an expired reservation it must be `"without-adjusted-date"`: this path cannot reschedule; see `resolveExpiredCheckoutState`.
  * @param args.hints - Client hints used for scheduler timestamps + check-in reminder emails post-commit.
  * @param args.from - Optional booking.from for conflict detection (mirrors `checkoutBooking`'s pre-tx conflict guard).
  * @param args.to - Optional booking.to for conflict detection.
@@ -4348,6 +4730,16 @@ export async function fulfilModelRequestsAndCheckout({
 }) {
   try {
     /**
+     * The expired-reservation gate, as in `checkoutBooking`, but this path
+     * never commits a new window: the scanned units join the booking inside
+     * the transaction against the stored dates, so a reschedule here could
+     * not judge them. A reschedule is refused and pointed at the header's
+     * Check out.
+     */
+    const conflictFrom = from;
+    const conflictTo = to;
+
+    /**
      * Pre-tx: hydrate the booking with the same include shape
      * `checkoutBooking` uses so we can run the conflict + custody guards
      * against the pre-existing asset set. The newly scanned assets are
@@ -4365,8 +4757,8 @@ export async function fulfilModelRequestsAndCheckout({
                   bookingAssets: {
                     ...createBookingConflictConditions({
                       currentBookingId: bookingId,
-                      fromDate: from,
-                      toDate: to,
+                      fromDate: conflictFrom,
+                      toDate: conflictTo,
                     }),
                     select: {
                       id: true,
@@ -4393,8 +4785,18 @@ export async function fulfilModelRequestsAndCheckout({
         });
       });
 
+    // This path never reschedules (`allowReschedule: false`), so every guard
+    // below judges the booking's stored window.
+    const { isExpired } = resolveExpiredCheckoutState({
+      status: bookingFound.status,
+      from: bookingFound.from,
+      to: bookingFound.to,
+      intentChoice: checkoutIntentChoice,
+      allowReschedule: false,
+    });
+
     /** Server-side conflict validation on pre-existing assets */
-    if (from && to && bookingFound.bookingAssets) {
+    if (conflictFrom && conflictTo && bookingFound.bookingAssets) {
       const conflictedAssets = bookingFound.bookingAssets
         .map((ba) => ba.asset)
         .filter((asset) => hasAssetBookingConflicts(asset, bookingId));
@@ -4420,8 +4822,8 @@ export async function fulfilModelRequestsAndCheckout({
     await assertKitsNotBookedElsewhere({
       slices: bookingFound.bookingAssets,
       bookingId,
-      from,
-      to,
+      from: bookingFound.from,
+      to: bookingFound.to,
       organizationId,
       action: "check out booking",
     });
@@ -4457,7 +4859,6 @@ export async function fulfilModelRequestsAndCheckout({
       });
     }
 
-    const isExpired = isBookingExpired({ to: bookingFound.to! });
     const isEarlyCheckout = isBookingEarlyCheckout(bookingFound.from!);
 
     /**
@@ -4465,7 +4866,8 @@ export async function fulfilModelRequestsAndCheckout({
      * adjustment). We intentionally match `checkoutBooking`'s existing
      * timezone-aware date rewrite so the two code paths produce
      * byte-identical `from`/`originalFrom` values when the operator
-     * chooses `"with-adjusted-date"`.
+     * chooses `"with-adjusted-date"`. `isExpired` was settled up front by
+     * `resolveExpiredCheckoutState`.
      */
     const dataToUpdate: Prisma.BookingUpdateInput = {
       status: isExpired ? BookingStatus.OVERDUE : BookingStatus.ONGOING,
@@ -4631,8 +5033,9 @@ export async function fulfilModelRequestsAndCheckout({
           dataToUpdate,
           kitIds: unionKitIds,
           hasKits,
-          // Booking's own committed window — windows the QT availability
-          // guard (see the doc comment on `checkoutBookingWritesWithinTx`).
+          // The booking's own committed window: it windows the QT
+          // availability guard (see the doc comment on
+          // `checkoutBookingWritesWithinTx`).
           from: bookingFound.from,
           to: bookingFound.to,
           checkedOutById: userId ?? null,
@@ -9636,6 +10039,21 @@ export async function partialCheckoutBooking({
       });
     }
 
+    /**
+     * The expired-reservation gate, for the first scan of a RESERVED booking
+     * (the only batch that moves it out of RESERVED). A booking already
+     * underway is never "expired" here: OVERDUE is its own state.
+     */
+    const { isExpired } = resolveExpiredCheckoutState({
+      status: bookingFound.status,
+      from: bookingFound.from,
+      to: bookingFound.to,
+      intentChoice,
+      // A batch judges only its own items against the stored window; a new
+      // window for the whole booking is the full check-out's job.
+      allowReschedule: false,
+    });
+
     // Deduplicate booking assets — a single asset can appear on multiple
     // BookingAsset pivot rows for qty-tracked bookings (slices per kit /
     // location). The progressive-checkout flow treats assets as opaque IDs,
@@ -11020,12 +11438,9 @@ export async function partialCheckoutBooking({
         // First scan marks the booking checked out: RESERVED → ONGOING/OVERDUE.
         let bookingStatusChanged = false;
         if (bookingFound.status === BookingStatus.RESERVED) {
-          const expired = bookingFound.to
-            ? isBookingExpired({ to: bookingFound.to })
-            : false;
-
+          // `isExpired` was settled up front by `resolveExpiredCheckoutState`.
           const transitionData: Prisma.BookingUpdateInput = {
-            status: expired ? BookingStatus.OVERDUE : BookingStatus.ONGOING,
+            status: isExpired ? BookingStatus.OVERDUE : BookingStatus.ONGOING,
           };
 
           // Early checkout: if the booking hasn't started yet and the user chose
@@ -11146,9 +11561,7 @@ export async function partialCheckoutBooking({
 
         const statusNote = bookingStatusChanged
           ? ` and checked out the booking (status changed to ${
-              bookingFound.to && isBookingExpired({ to: bookingFound.to })
-                ? "Overdue"
-                : "Ongoing"
+              isExpired ? "Overdue" : "Ongoing"
             })`
           : "";
 
@@ -11371,12 +11784,10 @@ export async function partialCheckoutBooking({
 
       await cancelScheduler(bookingFound);
 
-      const expired = bookingFound.to
-        ? isBookingExpired({ to: bookingFound.to })
-        : false;
-      if (!expired && bookingFound.to) {
+      const effectiveTo = bookingFound.to;
+      if (!isExpired && effectiveTo) {
         await scheduleCheckinReminderForBooking(
-          { id: bookingFound.id, to: bookingFound.to },
+          { id: bookingFound.id, to: effectiveTo },
           hints,
           organizationId,
           userId
@@ -13726,6 +14137,12 @@ export type BookingsWhereParams = {
   organizationId: Organization["id"];
   search?: string | null;
   statuses?: Booking["status"][] | null;
+  /**
+   * Only reservations whose end date has passed with no check-out: the list's
+   * "Expired" option (`EXPIRED_BOOKINGS_FILTER`). Set with `statuses` =
+   * `[RESERVED]`; see `getBookingsListWhereParams`.
+   */
+  expiredOnly?: boolean;
   /** Bookings holding any of these assets. Set this or `kitId`, not both. */
   assetIds?: Asset["id"][] | null;
   /**
@@ -13810,6 +14227,7 @@ export function buildBookingsWhere(
     userId,
     search,
     statuses,
+    expiredOnly,
     custodianScope,
     custodianTeamMemberIds,
     writableBy,
@@ -13959,6 +14377,14 @@ export function buildBookingsWhere(
     };
   }
 
+  // "Expired": the reservation's whole window is behind us. The stored status
+  // is still RESERVED (nothing in the lifecycle moves it), so the date is the
+  // whole filter. Mirrors `isReservationExpired`.
+  if (expiredOnly) {
+    where.status = BookingStatus.RESERVED;
+    where.to = { lt: new Date() };
+  }
+
   if (assetIds?.length) {
     where.bookingAssets = {
       some: {
@@ -14056,6 +14482,10 @@ export function getBookingsListWhereParams({
 }): BookingsWhereParams {
   const { search, status, teamMemberIds, tags } = getParamsValues(searchParams);
 
+  // "Expired" is RESERVED narrowed by date; see `bookingStatusFilterWhereParams`.
+  const { statuses: pickedStatuses, expiredOnly } =
+    bookingStatusFilterWhereParams(status);
+
   const filters = {
     organizationId,
     userId,
@@ -14063,22 +14493,23 @@ export function getBookingsListWhereParams({
     custodianScope,
     custodianTeamMemberIds: teamMemberIds,
     tags,
+    expiredOnly,
   };
 
   switch (list.kind) {
     case "index":
       // No status picked: buildBookingsWhere's default applies.
-      return { ...filters, statuses: status ? [status] : null };
+      return { ...filters, statuses: pickedStatuses ?? null };
     case "kit":
       return {
         ...filters,
-        statuses: status ? [status] : BOOKINGS_TAB_DEFAULT_STATUSES,
+        statuses: pickedStatuses ?? BOOKINGS_TAB_DEFAULT_STATUSES,
         kitId: list.kitId,
       };
     case "asset":
       return {
         ...filters,
-        statuses: status ? [status] : BOOKINGS_TAB_DEFAULT_STATUSES,
+        statuses: pickedStatuses ?? BOOKINGS_TAB_DEFAULT_STATUSES,
         assetIds: [list.assetId],
       };
   }

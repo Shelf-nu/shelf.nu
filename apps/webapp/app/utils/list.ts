@@ -4,6 +4,7 @@ import type {
   SortingOptions,
 } from "~/components/list/filters/sort-by";
 import type { ListItemData } from "~/components/list/list-item";
+import { EXPIRED_BOOKINGS_FILTER } from "~/modules/booking/constants";
 
 export const getParamsValues = (searchParams: URLSearchParams) => ({
   page: Number(searchParams.get("page") || "1"),
@@ -28,6 +29,11 @@ export const getParamsValues = (searchParams: URLSearchParams) => ({
   status: (() => {
     const raw = searchParams.get("status");
     if (!raw || raw === "ALL") return null;
+    // "Expired" is the bookings list's derived option (RESERVED with the end
+    // date passed), accepted beside the enum. See `EXPIRED_BOOKINGS_FILTER`.
+    if (raw.toLowerCase() === EXPIRED_BOOKINGS_FILTER.toLowerCase()) {
+      return EXPIRED_BOOKINGS_FILTER;
+    }
     // Normalize to valid BookingStatus enum value (handles lowercase URLs)
     return (
       Object.values(BookingStatus).find(
