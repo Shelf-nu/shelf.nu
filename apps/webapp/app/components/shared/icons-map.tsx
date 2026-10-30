@@ -12,6 +12,7 @@ import {
   PackagePlus,
   QrCode,
   SlidersHorizontal,
+  TextCursorInput,
   Ungroup,
 } from "lucide-react";
 import { Spinner } from "./spinner";
@@ -123,6 +124,7 @@ export type IconType =
   // so every BulkDialogType must also be an IconType. Reuses the graph glyph:
   // a reorder point is a line you draw across a level.
   | "reorder-point"
+  | "custom-field"
   | "lock"
   | "activate"
   | "deactivate"
@@ -197,6 +199,7 @@ export const iconsMap: IconsMap = {
   bookings: <BookingsIcon />,
   graph: <GraphIcon />,
   "reorder-point": <GraphIcon />,
+  "custom-field": <TextCursorInput />,
   scanQR: <ScanQRIcon />,
   switch: <SwitchIcon />,
   kit: <Package />,
