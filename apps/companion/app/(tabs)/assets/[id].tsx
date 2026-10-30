@@ -47,7 +47,6 @@ import { pushIntoTab } from "@/lib/navigation";
 import { useAssetScreenNavigation } from "@/lib/asset-host-stack";
 import { buildBookingCustodyRows } from "@/lib/asset-custody-rows";
 import { resolveFreeNowFigure } from "@/lib/asset-free-now";
-import { splitLinkFields } from "@/lib/custom-field-links";
 import { TeamMemberPicker } from "@/components/team-member-picker";
 import { LocationPicker } from "@/components/location-picker";
 import { QuantityInputSheet } from "@/components/quantity-input-sheet";
@@ -73,7 +72,6 @@ import { QuickActions } from "@/components/asset-detail/quick-actions";
 import { NotesSection } from "@/components/asset-detail/notes-section";
 import { CodeSection } from "@/components/shared/code-section";
 import { CustomFieldsSection } from "@/components/asset-detail/custom-fields-section";
-import { DocumentsLinksSection } from "@/components/asset-detail/documents-links-section";
 import { AssetBookingsSection } from "@/components/asset-detail/asset-bookings-section";
 import { InfoRow } from "@/components/shared/info-row";
 import { ArchivedNotice } from "@/components/shared/archived-notice";
@@ -562,12 +560,6 @@ export default function AssetDetailScreen() {
   const activeCustomFields = asset.customFields.filter(
     (cf) => cf.customField.active !== false
   );
-  // Link-format fields show under Documents & links; the rest under Custom
-  // Fields. Each field appears in exactly one of the two.
-  const { linkRows, otherFields } = splitLinkFields(
-    activeCustomFields,
-    asset.linkFields
-  );
 
   // ── Quantity display (additive, QUANTITY_TRACKED assets only) ────────
   // Every value below is guarded so an INDIVIDUAL asset — or a pre-quantity
@@ -888,12 +880,6 @@ export default function AssetDetailScreen() {
             archivedReason={archivedReason}
           />
 
-          {/* ── Documents & links ──────────────────────── */}
-          <DocumentsLinksSection
-            rows={linkRows}
-            titles={asset.fieldLinkTitles}
-          />
-
           {/* ── Details Card ───────────────────────────── */}
           <View style={styles.infoSection}>
             {asset.category && (
@@ -1182,7 +1168,7 @@ export default function AssetDetailScreen() {
 
           {/* ── Custom Fields ──────────────────────────── */}
           <CustomFieldsSection
-            customFields={otherFields}
+            customFields={activeCustomFields}
             currency={asset.organization?.currency || "USD"}
             fieldLinkTitles={asset.fieldLinkTitles}
           />

@@ -341,8 +341,8 @@ export const CustomFieldForm = ({
                   <div className="mt-2 flex-1 grow rounded border px-6 py-4 text-[14px] text-gray-600">
                     <p>
                       Every value must be a web link, like
-                      https://example.com/manual.pdf. Link fields show under
-                      &ldquo;Documents &amp; links&rdquo; on the asset page.
+                      https://example.com/manual.pdf. It shows as a short link
+                      with the page title when Shelf can read it.
                     </p>
                     {isEdit && format !== CustomFieldFormat.LINK ? (
                       <p className="mt-2">

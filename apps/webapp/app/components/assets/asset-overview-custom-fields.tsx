@@ -1,12 +1,12 @@
 /**
- * The custom field cards on the asset overview: "Documents & links" for
- * Link-format fields, and the custom fields card for every other field. Both
- * render their rows with `CustomFieldRow`, which shows a value and, for users
- * who can edit, its inline editor.
+ * The custom fields card on the asset overview: one row per field, sorted by
+ * name, each showing its value and, for users who can edit, its inline
+ * editor. A TEXT value reads through `TextWithLinks`, so a whole link shows
+ * as a chip; on a Link-format field, editors can also name that link.
  *
  * @see {@link file://../../routes/_layout+/assets.$assetId.overview.tsx}
- * @see {@link file://../../utils/custom-fields.ts} `buildAssetOverviewCustomFields`
- *   and `splitOverviewCustomFields`, which build and split the rows
+ * @see {@link file://../../utils/custom-fields.ts} `buildAssetOverviewCustomFields`,
+ *   which builds the rows
  */
 import { useState } from "react";
 import type { RenderableTreeNode } from "@markdoc/markdoc";
@@ -35,10 +35,8 @@ import { tw } from "~/utils/tw";
 /** One overview row, whatever the stored value's exact row type. */
 type OverviewRow = AssetOverviewCustomField<StoredCustomFieldValueForDisplay>;
 
-/** Props shared by both cards. */
-type CustomFieldCardProps = {
-  /** The card's rows, from `splitOverviewCustomFields` */
-  rows: OverviewRow[];
+/** What every row of the card shares. */
+type CustomFieldRowProps = {
   /** The loader's `linkTitles`, for the words on link chips */
   titles: LinkTitles;
   /** Whether the user may edit this asset at all */
@@ -50,39 +48,15 @@ type CustomFieldCardProps = {
 };
 
 /**
- * The asset's Link fields under a "Documents & links" heading, set or not.
- * People who can edit the asset can name a link from its chip. Renders
- * nothing when the asset has no Link fields.
+ * The asset's custom fields. Renders nothing when none has a value and the
+ * user cannot fill any in.
+ *
+ * @param props.rows - The rows, from `buildAssetOverviewCustomFields`
  */
-export function DocumentsAndLinksCard({
+export function CustomFieldsCard({
   rows,
   ...rowProps
-}: CustomFieldCardProps) {
-  if (rows.length === 0) return null;
-  return (
-    <Card className="my-3 px-[-4] py-[-5] md:border">
-      <div className="border-b px-4 py-3">
-        <h5>Documents &amp; links</h5>
-      </div>
-      <ul className="item-information">
-        {rows.map((row) => (
-          <CustomFieldRow
-            key={row.def.id}
-            row={row}
-            canRename={rowProps.canEditAsset}
-            {...rowProps}
-          />
-        ))}
-      </ul>
-    </Card>
-  );
-}
-
-/**
- * The asset's other custom fields. Renders nothing when none has a value and
- * the user cannot fill any in.
- */
-export function CustomFieldsCard({ rows, ...rowProps }: CustomFieldCardProps) {
+}: CustomFieldRowProps & { rows: OverviewRow[] }) {
   const hasRows =
     rows.some((row) => row.storedValue) ||
     (rowProps.canEditAsset && rows.length > 0);
@@ -106,7 +80,6 @@ export function CustomFieldsCard({ rows, ...rowProps }: CustomFieldCardProps) {
  * who can edit it.
  *
  * @param props.row - The field and its stored value
- * @param props.canRename - Offer "Name this link" beside a link chip
  */
 function CustomFieldRow({
   row: { def, storedValue, isEditable },
@@ -114,11 +87,7 @@ function CustomFieldRow({
   canEditAsset,
   locale,
   currency,
-  canRename = false,
-}: Omit<CustomFieldCardProps, "rows"> & {
-  row: OverviewRow;
-  canRename?: boolean;
-}) {
+}: CustomFieldRowProps & { row: OverviewRow }) {
   const { prefs } = useDateFormatter();
   const hasValue = !!storedValue;
   /**
@@ -135,13 +104,8 @@ function CustomFieldRow({
     ? getCustomFieldDisplayValue(fieldValue!, prefs)
     : null;
 
-  /*
-   * An empty Link field reads "Not linked" for everyone: the card is a
-   * checklist of what is missing. Other empty fields show only to people
-   * who can fill them in.
-   */
-  const isLink = def.format === CustomFieldFormat.LINK;
-  if (!hasValue && !canEditField && !isLink) return null;
+  /* Hide "Not set" rows from users who can't fill them in */
+  if (!hasValue && !canEditField) return null;
 
   return (
     <InlineEditableField
@@ -169,7 +133,9 @@ function CustomFieldRow({
               <TextWithLinks
                 value={rawValue}
                 titles={titles}
-                canRename={canRename}
+                canRename={
+                  canEditAsset && def.format === CustomFieldFormat.LINK
+                }
               />
             ) : def.type === CustomFieldType.AMOUNT ? (
               formatCurrency({
@@ -182,9 +148,7 @@ function CustomFieldRow({
             )}
           </div>
         ) : (
-          <span className="text-gray-400">
-            {isLink ? "Not linked" : "Not set"}
-          </span>
+          <span className="text-gray-400">Not set</span>
         )
       }
       renderEditor={() => {

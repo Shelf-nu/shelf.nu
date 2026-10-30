@@ -1,4 +1,4 @@
-import { AssetStatus, CustomFieldFormat } from "@prisma/client";
+import { AssetStatus } from "@prisma/client";
 import { BookingStatus } from "@prisma/client";
 import type {
   MetaFunction,
@@ -13,10 +13,7 @@ import {
   AssetLastAuditCard,
   LAST_AUDIT_CARD_RECENT_LIMIT,
 } from "~/components/assets/asset-last-audit-card";
-import {
-  CustomFieldsCard,
-  DocumentsAndLinksCard,
-} from "~/components/assets/asset-overview-custom-fields";
+import { CustomFieldsCard } from "~/components/assets/asset-overview-custom-fields";
 import { AssetReminderCards } from "~/components/assets/asset-reminder-cards";
 import { AssetsFilterLink } from "~/components/assets/assets-filter-link";
 import { CategoryBadge } from "~/components/assets/category-badge";
@@ -103,7 +100,6 @@ import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import {
   buildAssetOverviewCustomFields,
   buildCustomFieldValue,
-  splitOverviewCustomFields,
 } from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -403,12 +399,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       : asset.customFields;
 
     /**
-     * Read together, none depending on another:
-     * - `activeCustomFieldDefs`: the active fields that apply to this asset.
-     *   Loaded for EVERY reader: its Link fields feed the "Documents & links"
-     *   card, which lists them unset ones included, so it decides which rows
-     *   are displayed and must not be permission-gated. Editors also get the
-     *   whole list below for edit mode.
+     * Read together, neither depending on the other:
      * - `linkTitles`: the titles of the links among the values shown, for
      *   their chips. Never throws.
      * - Editor data, only for users who can update the asset. View-only users
@@ -416,13 +407,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      *   categories and locations are skipped for them. Tags are read-only on
      *   the overview page, so they are skipped for everyone.
      */
-    const [activeCustomFieldDefs, linkTitles, categoriesData, locationsData] =
+    const [linkTitles, allCustomFieldDefs, categoriesData, locationsData] =
       await Promise.all([
-        getActiveCustomFields({
-          organizationId,
-          category: asset.categoryId,
-        }),
         getLinkTitles({ organizationId, values: customFields }),
+        canEditAsset
+          ? getActiveCustomFields({
+              organizationId,
+              category: asset.categoryId,
+            })
+          : [],
         canEditAsset
           ? getCategoriesForCreateAndEdit({
               request,
@@ -438,18 +431,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             })
           : { locations: [], totalLocations: 0 },
       ]);
-
-    /** The Link fields, trimmed to what a row needs: view-only users get it. */
-    const linkDefinitions = activeCustomFieldDefs
-      .filter((def) => def.format === CustomFieldFormat.LINK)
-      .map(({ id, name, type, format, options }) => ({
-        id,
-        name,
-        type,
-        format,
-        options,
-      }));
-    const allCustomFieldDefs = canEditAsset ? activeCustomFieldDefs : [];
 
     const { categories, totalCategories } = categoriesData;
     const { locations, totalLocations } = locationsData;
@@ -549,7 +530,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       locations,
       totalLocations,
       allCustomFieldDefs,
-      linkDefinitions,
       linkTitles,
       moveDestinations,
       unplacedQuantity,
@@ -953,7 +933,6 @@ export default function AssetOverview() {
     quantityData,
     overCommitment,
     allCustomFieldDefs,
-    linkDefinitions,
     linkTitles,
     moveDestinations,
     unplacedQuantity,
@@ -985,23 +964,18 @@ export default function AssetOverview() {
       : undefined;
 
   /**
-   * The custom field rows, sorted by name, split between the "Documents &
-   * links" card (Link fields) and the custom fields card. Each row pairs a
-   * definition with its stored value (or null if not set), so fields keep
-   * their place whether or not they have values.
+   * The custom field rows, sorted by name. Each row pairs a definition with
+   * its stored value (or null if not set), so fields keep their place whether
+   * or not they have values.
    *
    * The asset's own values are the primary source: `allCustomFieldDefs` is
    * loaded ONLY for users who can update the asset, so a list built from it
    * alone would show nothing to members without that grant.
-   * `linkDefinitions` is loaded for everyone.
    */
-  const { linkRows, otherRows } = splitOverviewCustomFields(
-    buildAssetOverviewCustomFields({
-      storedValues: asset?.customFields ?? [],
-      editableDefinitions: allCustomFieldDefs ?? [],
-      listedDefinitions: linkDefinitions,
-    })
-  );
+  const customFieldRows = buildAssetOverviewCustomFields({
+    storedValues: asset?.customFields ?? [],
+    editableDefinitions: allCustomFieldDefs ?? [],
+  });
 
   const location = asset ? getPrimaryLocation(asset) : null;
   usePosition();
@@ -1048,17 +1022,10 @@ export default function AssetOverview() {
       <ContextualModal />
       <div className="mx-[-16px] mt-[-16px] block md:mx-0 lg:flex ">
         <div className="max-w-full flex-1 overflow-hidden">
-          <DocumentsAndLinksCard
-            rows={linkRows}
-            titles={linkTitles}
-            canEditAsset={canEditAsset}
-            locale={locale}
-            currency={asset.organization.currency}
-          />
           <Card className="my-3 max-w-full px-[-4] py-[-5] md:border">
             <ul className="item-information">
               <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-                <span className="w-1/4 text-[14px] font-medium text-gray-900">
+                <span className="w-1/4 text-[14px] font-medium text-gray-900 md:min-w-min md:pr-4">
                   ID
                 </span>
                 <div className="mt-1 w-3/5 text-gray-600 md:mt-0">
@@ -1067,7 +1034,7 @@ export default function AssetOverview() {
               </li>
               {asset?.sequentialId ? (
                 <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-                  <span className="w-1/4 text-[14px] font-medium text-gray-900">
+                  <span className="w-1/4 text-[14px] font-medium text-gray-900 md:min-w-min md:pr-4">
                     Asset ID
                   </span>
                   <div className="mt-1 w-3/5 text-gray-600 md:mt-0">
@@ -1077,7 +1044,7 @@ export default function AssetOverview() {
               ) : null}
               {asset?.qrCodes?.[0] ? (
                 <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-                  <span className="w-1/4 text-[14px] font-medium text-gray-900">
+                  <span className="w-1/4 text-[14px] font-medium text-gray-900 md:min-w-min md:pr-4">
                     Shelf QR ID
                   </span>
                   <div className="mt-1 w-3/5 text-gray-600 md:mt-0">
@@ -1086,7 +1053,7 @@ export default function AssetOverview() {
                 </li>
               ) : null}
               <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-                <span className="w-1/4 text-[14px] font-medium text-gray-900">
+                <span className="w-1/4 text-[14px] font-medium text-gray-900 md:min-w-min md:pr-4">
                   Created
                 </span>
                 <div className="mt-1 w-3/5 text-gray-600 md:mt-0">
@@ -1129,7 +1096,7 @@ export default function AssetOverview() {
                  * pivot row max, the inline `LocationSelect` is fine).
                  */
                 <li className="group/field w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-                  <span className="w-1/4 text-[14px] font-medium text-gray-900">
+                  <span className="w-1/4 text-[14px] font-medium text-gray-900 md:min-w-min md:pr-4">
                     Location
                   </span>
                   <div className="relative mt-1 flex items-start gap-2 md:mt-0 md:w-3/5">
@@ -1280,7 +1247,7 @@ export default function AssetOverview() {
                   follow-up PR (TagsAutocomplete needs a multi-select
                   DynamicSelect variant for compact inline contexts). */}
               <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-                <span className="w-1/4 text-[14px] font-medium text-gray-900">
+                <span className="w-1/4 text-[14px] font-medium text-gray-900 md:min-w-min md:pr-4">
                   Tags
                 </span>
                 <div className="mt-1 text-gray-600 md:mt-0 md:w-3/5">
@@ -1366,7 +1333,7 @@ export default function AssetOverview() {
                     });
                     return (
                       <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-                        <span className="w-1/4 text-[14px] font-medium text-gray-900">
+                        <span className="w-1/4 text-[14px] font-medium text-gray-900 md:min-w-min md:pr-4">
                           Total value
                         </span>
                         <div className="mt-1 text-gray-600 md:mt-0 md:w-3/5">
@@ -1385,7 +1352,7 @@ export default function AssetOverview() {
 
               {asset?.assetModel ? (
                 <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-                  <span className="w-1/4 text-[14px] font-medium text-gray-900">
+                  <span className="w-1/4 text-[14px] font-medium text-gray-900 md:min-w-min md:pr-4">
                     Asset Model
                   </span>
                   <div className="mt-1 text-gray-600 md:mt-0 md:w-3/5">
@@ -1492,7 +1459,7 @@ export default function AssetOverview() {
           </Card>
 
           <CustomFieldsCard
-            rows={otherRows}
+            rows={customFieldRows}
             titles={linkTitles}
             canEditAsset={canEditAsset}
             locale={locale}

@@ -1,12 +1,11 @@
 /**
- * The asset overview's two custom field cards, fed by the same row pipeline
- * the route uses (`buildAssetOverviewCustomFields` then
- * `splitOverviewCustomFields`).
+ * The asset overview's custom fields card, fed by the same row builder the
+ * route uses (`buildAssetOverviewCustomFields`).
  *
- * A member who cannot edit sees every Link field in "Documents & links", the
- * empty ones as "Not linked", while plain fields stay in the custom fields
- * card and empty plain fields stay hidden from them. Only editors can name a
- * link from its chip.
+ * Link fields are rows of the one card, in name order with every other
+ * field: a set one shows its link as a chip, and an empty one reads "Not set"
+ * for an editor and stays hidden from a member who cannot edit, like a plain
+ * field. Only editors can name a link from its chip.
  *
  * @see {@link file://./asset-overview-custom-fields.tsx}
  */
@@ -16,13 +15,9 @@ import { describe, expect, it, vi } from "vitest";
 import { LINK_TITLES, MANUAL_URL } from "@helpers/link-titles";
 import {
   buildAssetOverviewCustomFields,
-  splitOverviewCustomFields,
   type CustomFieldDefinitionForDisplay,
 } from "~/utils/custom-fields";
-import {
-  CustomFieldsCard,
-  DocumentsAndLinksCard,
-} from "./asset-overview-custom-fields";
+import { CustomFieldsCard } from "./asset-overview-custom-fields";
 
 // why: the hook reads the root loader's request info, which a stubbed router
 // does not have; no row here is a DATE, so the prefs are never read.
@@ -44,123 +39,122 @@ const serial = definition("cf-serial", "Serial number", "PLAIN");
 const notes = definition("cf-notes", "Notes", "PLAIN");
 
 /**
- * Renders both cards the way the overview does, inside a router, with the
- * loader's `linkTitles` fixture.
+ * Renders the card the way the overview does, inside a router, with the
+ * loader's `linkTitles` fixture. Manual (Link) and Serial number (plain) are
+ * set; Calibration certificate (Link) and Notes (plain) are empty.
  */
-function renderCards({
+function renderCard({
   canEditAsset,
   manualUrl = "https://contoso.sharepoint.com/:b:/s/Lab/EaBc12",
 }: {
   canEditAsset: boolean;
   manualUrl?: string;
 }) {
-  const { linkRows, otherRows } = splitOverviewCustomFields(
-    buildAssetOverviewCustomFields({
-      storedValues: [
-        {
-          value: { raw: manualUrl, valueText: manualUrl },
-          customField: manual,
-        },
-        {
-          value: { raw: "ABC-123", valueText: "ABC-123" },
-          customField: serial,
-        },
-      ],
-      editableDefinitions: canEditAsset
-        ? [manual, certificate, serial, notes]
-        : [],
-      listedDefinitions: [manual, certificate],
-    })
-  );
-  const props = {
-    titles: LINK_TITLES,
-    canEditAsset,
-    locale: "en-US",
-    currency: "USD" as const,
-  };
+  const rows = buildAssetOverviewCustomFields({
+    storedValues: [
+      {
+        value: { raw: "ABC-123", valueText: "ABC-123" },
+        customField: serial,
+      },
+      {
+        value: { raw: manualUrl, valueText: manualUrl },
+        customField: manual,
+      },
+    ],
+    editableDefinitions: canEditAsset
+      ? [serial, notes, manual, certificate]
+      : [],
+  });
   const Stub = createRoutesStub([
     {
       path: "/",
       Component: () => (
-        <>
-          <DocumentsAndLinksCard rows={linkRows} {...props} />
-          <CustomFieldsCard rows={otherRows} {...props} />
-        </>
+        <CustomFieldsCard
+          rows={rows}
+          titles={LINK_TITLES}
+          canEditAsset={canEditAsset}
+          locale="en-US"
+          currency="USD"
+        />
       ),
     },
   ]);
   render(<Stub initialEntries={["/"]} />);
 }
 
-/** The card element that holds `text`. */
-function cardOf(text: string) {
-  return screen.getByText(text).closest<HTMLElement>(".card")!;
+/** The card's rows, each read as its label and its displayed value. */
+async function cardRows() {
+  const label = await screen.findByText("Serial number");
+  const card = label.closest<HTMLElement>(".card")!;
+  return within(card)
+    .getAllByRole("listitem")
+    .map((row) => ({
+      label: row.firstElementChild?.textContent,
+      value: row.firstElementChild?.nextElementSibling?.textContent,
+    }));
 }
 
-describe("asset overview custom field cards", () => {
-  it("lists every Link field for a member who cannot edit, empty ones as Not linked", async () => {
-    renderCards({ canEditAsset: false });
+describe("asset overview custom fields card", () => {
+  it("shows a Link value as a chip among the other fields, in name order", async () => {
+    renderCard({ canEditAsset: false });
 
-    const documents = await screen.findByRole("heading", {
-      name: "Documents & links",
-    });
-    const card = within(documents.closest<HTMLElement>(".card")!);
-    expect(card.getByText("Calibration certificate")).toBeInTheDocument();
-    expect(card.getByText("Not linked")).toBeInTheDocument();
-    expect(card.getByRole("link", { name: "PDF, SharePoint" })).toHaveAttribute(
+    expect(await cardRows()).toEqual([
+      { label: "Manual", value: "PDFSharePoint" },
+      { label: "Serial number", value: "ABC-123" },
+    ]);
+    expect(
+      screen.getByRole("link", { name: "PDF, SharePoint" })
+    ).toHaveAttribute(
       "href",
       "https://contoso.sharepoint.com/:b:/s/Lab/EaBc12?ref=shelf-webapp"
     );
-    expect(card.queryByText("Serial number")).toBeNull();
-    expect(screen.queryByRole("button", { name: /^Edit / })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Name this link" })).toBeNull();
   });
 
   it("names a Link field's chip with the title the loader sent for it", async () => {
-    renderCards({ canEditAsset: false, manualUrl: MANUAL_URL });
+    renderCard({ canEditAsset: false, manualUrl: MANUAL_URL });
 
-    const documents = await screen.findByRole("heading", {
-      name: "Documents & links",
-    });
     expect(
-      within(documents.closest<HTMLElement>(".card")!).getByRole("link", {
+      await screen.findByRole("link", {
         name: "EOS R5 user manual, PDF, example-maker.com",
       })
     ).toHaveAttribute("href", `${MANUAL_URL}?ref=shelf-webapp`);
   });
 
-  it("keeps plain fields in the custom fields card and hides empty ones from a member who cannot edit", async () => {
-    renderCards({ canEditAsset: false });
+  it("hides empty Link and plain fields from a member who cannot edit", async () => {
+    renderCard({ canEditAsset: false });
 
-    await screen.findByText("Serial number");
-    const card = within(cardOf("Serial number"));
-    expect(card.getByText("ABC-123")).toBeInTheDocument();
-    expect(card.queryByText("Manual")).toBeNull();
-    expect(screen.queryByText("Notes")).toBeNull();
+    expect((await cardRows()).map((row) => row.label)).toEqual([
+      "Manual",
+      "Serial number",
+    ]);
     expect(screen.queryByText("Not set")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Edit / })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Name this link" })).toBeNull();
   });
 
-  it("offers editors an editor for an empty Link field", async () => {
-    renderCards({ canEditAsset: true });
+  it("shows an editor an empty Link field as Not set, like a plain field", async () => {
+    renderCard({ canEditAsset: true });
 
+    expect(await cardRows()).toEqual([
+      { label: "Calibration certificate", value: "Not set" },
+      { label: "Manual", value: "PDFSharePoint" },
+      { label: "Notes", value: "Not set" },
+      { label: "Serial number", value: "ABC-123" },
+    ]);
     expect(
-      await screen.findByRole("button", {
-        name: "Edit Calibration certificate",
-      })
+      screen.getByRole("button", { name: "Edit Calibration certificate" })
     ).toBeInTheDocument();
-    expect(within(cardOf("Notes")).getByText("Not set")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Edit Notes" })
+    ).toBeInTheDocument();
   });
 
-  it("lets editors name a link from its chip in Documents & links", async () => {
-    renderCards({ canEditAsset: true });
+  it("lets editors name a Link field's link from its chip", async () => {
+    renderCard({ canEditAsset: true });
 
-    const documents = await screen.findByRole("heading", {
-      name: "Documents & links",
-    });
+    await cardRows();
     expect(
-      within(documents.closest<HTMLElement>(".card")!).getAllByRole("button", {
-        name: "Name this link",
-      })
+      screen.getAllByRole("button", { name: "Name this link" })
     ).toHaveLength(1);
   });
 });

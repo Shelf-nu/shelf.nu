@@ -741,23 +741,17 @@ export type AssetOverviewCustomField<
  *   an empty `value` are treated as unset
  * @param params.editableDefinitions - Active definitions the user may fill in;
  *   pass an empty array for view-only users
- * @param params.listedDefinitions - Active definitions every reader gets a row
- *   for, set or not (Link fields: the "Documents & links" card lists what is
- *   missing). Not permission-gated; such a row is editable only when its
- *   definition is also in `editableDefinitions`.
- * @returns One entry per distinct definition, sorted by name. No input array
- *   is mutated.
+ * @returns One entry per distinct definition, sorted by name. Neither input
+ *   array is mutated.
  */
 export function buildAssetOverviewCustomFields<
   TStored extends StoredCustomFieldValueForDisplay,
 >({
   storedValues,
   editableDefinitions,
-  listedDefinitions = [],
 }: {
   storedValues: TStored[];
   editableDefinitions: CustomFieldDefinitionForDisplay[];
-  listedDefinitions?: CustomFieldDefinitionForDisplay[];
 }): AssetOverviewCustomField<TStored>[] {
   const editableIds = new Set(editableDefinitions.map((def) => def.id));
   const rows = new Map<string, AssetOverviewCustomField<TStored>>();
@@ -776,35 +770,11 @@ export function buildAssetOverviewCustomFields<
     rows.set(def.id, { def, storedValue: null, isEditable: true });
   }
 
-  for (const def of listedDefinitions) {
-    if (rows.has(def.id)) continue;
-    rows.set(def.id, { def, storedValue: null, isEditable: false });
-  }
-
   // Spread before sorting: `.sort()` is in-place, and these entries reference
   // arrays owned by the loader payload.
   return [...rows.values()].sort((a, b) =>
     a.def.name.localeCompare(b.def.name)
   );
-}
-
-/**
- * Splits the asset overview's custom field rows between its two cards: Link
- * fields go to "Documents & links", every other field to the custom fields
- * card. Each row lands in exactly one list, in the order given.
- *
- * @param rows - Rows from `buildAssetOverviewCustomFields`
- * @returns `linkRows` and `otherRows`
- */
-export function splitOverviewCustomFields<
-  TRow extends { def: Pick<CustomFieldDefinitionForDisplay, "format"> },
->(rows: TRow[]): { linkRows: TRow[]; otherRows: TRow[] } {
-  const linkRows: TRow[] = [];
-  const otherRows: TRow[] = [];
-  for (const row of rows) {
-    (row.def.format === "LINK" ? linkRows : otherRows).push(row);
-  }
-  return { linkRows, otherRows };
 }
 
 /**

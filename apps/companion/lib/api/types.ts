@@ -416,18 +416,6 @@ export type AssetDetail = {
     };
   }[];
   /**
-   * The Link-format text fields that apply to this asset (every one, set or
-   * not), ordered by name: the rows of the Documents & links section, which
-   * shows an unset one as "Not linked". Values stay in `customFields`.
-   *
-   * Mirrors `linkFields` of
-   * apps/webapp/app/routes/api+/mobile+/assets.$assetId.ts: active,
-   * non-deleted LINK fields whose categories are empty or include the
-   * asset's category. Sent to every reader. Absent on older servers: the app
-   * then shows no Documents & links section.
-   */
-  linkFields?: { id: string; name: string; helpText: string | null }[];
-  /**
    * Page titles and names people gave the links in this asset's values,
    * keyed by custom field id. The server keys them because this app's URL
    * implementation cannot reproduce link keys for every host. A chip whose
@@ -1950,8 +1938,7 @@ export type MobileCustomFieldType =
 /**
  * How a TEXT custom field's value is read. `LINK` fields hold one web link:
  * the server refuses any other value with a 400 whose message the edit
- * screens show, and the asset screen lists them under Documents & links.
- * `PLAIN` is every other field, of any type.
+ * screens show. `PLAIN` is every other field, of any type.
  *
  * Mirrors the `CustomFieldFormat` enum in
  * packages/database/prisma/schema.prisma, sent by

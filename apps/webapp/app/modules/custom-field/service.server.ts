@@ -861,7 +861,6 @@ export async function getAssetCustomFieldValues({
  * @param params.organizationId - The organization ID to fetch custom fields for
  * @param params.category - Optional category ID to filter by. When provided, returns fields specific to this category AND uncategorized fields
  * @param params.includeAllCategories - When true, ignores category filtering and returns ALL active custom fields. Takes precedence over category param
- * @param params.format - Optional: only fields with this format (e.g. LINK for the "Documents & links" card)
  *
  * @returns Array of CustomField objects that are active and match the category filtering criteria
  *
@@ -883,12 +882,10 @@ export async function getActiveCustomFields({
   organizationId,
   category,
   includeAllCategories = false,
-  format,
 }: {
   organizationId: string;
   category?: string | null;
   includeAllCategories?: boolean;
-  format?: CustomFieldFormat;
 }) {
   try {
     return await db.customField.findMany({
@@ -896,7 +893,6 @@ export async function getActiveCustomFields({
         organizationId,
         active: { equals: true },
         deletedAt: null,
-        format,
         /**
          * Category filtering logic:
          * - If includeAllCategories: no category filtering
@@ -920,12 +916,7 @@ export async function getActiveCustomFields({
       cause,
       message:
         "Failed to get active custom fields. Please try again or contact support.",
-      additionalData: {
-        organizationId,
-        category,
-        includeAllCategories,
-        format,
-      },
+      additionalData: { organizationId, category, includeAllCategories },
       label,
     });
   }

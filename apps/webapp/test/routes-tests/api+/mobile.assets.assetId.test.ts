@@ -14,10 +14,10 @@
  *   asset is checked out on, picked with the web asset overview's filter and
  *   shown to viewers who may see all custody or who hold that booking.
  * - The projection. Rows destructured off the query result stay off the wire.
- * - Links. `linkFields` lists the Link fields for the Documents & links
- *   section, and `fieldLinkTitles` carries the titles for the links in the
- *   active values, keyed by custom field id on the server (the companion's
- *   `custom-field-links.test.ts` renders the same shape).
+ * - Links. Each value names its field's `format`, and `fieldLinkTitles`
+ *   carries the titles for the links in the active values, keyed by custom
+ *   field id on the server (the companion's `custom-field-links.test.ts`
+ *   renders the same shape).
  *
  * The visibility helpers from `mobile-custody-visibility.server`, the booking
  * read gate and the name resolvers are NOT mocked, so the real logic runs end
@@ -119,12 +119,6 @@ vitest.mock("~/utils/subscription.server", () => ({
   canUseBarcodes: vitest.fn(() => true),
 }));
 
-// why: the Link field definitions come from Postgres; each case states which
-// fields the workspace has.
-vitest.mock("~/modules/custom-field/service.server", () => ({
-  getActiveCustomFields: vitest.fn().mockResolvedValue([]),
-}));
-
 // why: link titles are read from LinkPreview rows in Postgres (and links due a
 // fetch are queued); each case states what the workspace knows. Keying them
 // by field (`linkTitlesByField`) stays real.
@@ -159,10 +153,8 @@ import {
 import { db } from "~/database/db.server";
 import { getAssetQuantityRows } from "~/modules/asset/quantity-breakdown.server";
 import { getCustodySourceOptions } from "~/modules/asset/custody-source.server";
-import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { getLinkTitles } from "~/modules/link-preview/service.server";
 import { canUseBarcodes } from "~/utils/subscription.server";
-import { createCustomField } from "@factories";
 import { LINK_TITLES, MANUAL_URL, SHOP_URL } from "@helpers/link-titles";
 import { accessFor } from "@helpers/role-access";
 
@@ -1311,7 +1303,7 @@ describe("Link fields on GET /api/mobile/assets/:assetId", () => {
       authUser: { id: "auth-user-1", email: mockUser.email },
     } as Awaited<ReturnType<typeof requireMobileAuth>>);
     requireOrganizationAccessMock.mockResolvedValue("org-1");
-    // A member without asset:update or custody view still gets the fields.
+    // A member without asset:update or custody view gets the titles too.
     getMobileUserContextMock.mockResolvedValue({
       canUseBarcodes: false,
       canUseAudits: false,
@@ -1319,38 +1311,31 @@ describe("Link fields on GET /api/mobile/assets/:assetId", () => {
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
   });
 
-  it("lists the Link fields for the asset's category by name, for every reader", async () => {
-    assetFindUniqueMock.mockResolvedValue({
-      ...buildAsset(),
-      category: { id: "cat-cameras", name: "Cameras", color: "#000000" },
-    } as unknown as AssetFixture);
-    vitest.mocked(getActiveCustomFields).mockResolvedValue([
-      createCustomField({
-        id: "cf-manual",
-        name: "Manual",
-        format: "LINK",
-        helpText: "The maker's PDF",
-      }),
-      createCustomField({ id: "cf-cert", name: "Calibration certificate" }),
-    ]);
+  it("selects each value's field format, which decides the links fetched for a title", async () => {
+    // why: a mocked database returns whatever the fixture holds, so the query
+    // is what this pins. Without `format`, no Link field's page is fetched.
+    assetFindUniqueMock.mockResolvedValue(buildAsset());
 
-    const response = await loader(
+    await loader(
       createLoaderArgs({
         request: createDetailRequest(),
         params: { assetId: "asset-1" },
       })
     );
-    const body = await (response as unknown as Response).json();
 
-    expect(getActiveCustomFields).toHaveBeenCalledWith({
-      organizationId: "org-1",
-      category: "cat-cameras",
-      format: "LINK",
-    });
-    expect(body.asset.linkFields).toEqual([
-      { id: "cf-cert", name: "Calibration certificate", helpText: null },
-      { id: "cf-manual", name: "Manual", helpText: "The maker's PDF" },
-    ]);
+    expect(db.asset.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          customFields: {
+            select: expect.objectContaining({
+              customField: {
+                select: expect.objectContaining({ type: true, format: true }),
+              },
+            }),
+          },
+        }),
+      })
+    );
   });
 
   it("sends the titles of the links in the asset's active values by field id", async () => {

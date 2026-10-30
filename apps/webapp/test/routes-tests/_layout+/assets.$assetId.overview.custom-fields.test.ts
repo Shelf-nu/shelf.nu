@@ -1,15 +1,13 @@
 // @vitest-environment node
 /**
- * Asset overview loader: the Link fields behind the "Documents & links" card.
+ * Asset overview loader: the custom field data behind the custom fields card.
  *
- * The card lists every Link field that applies to the asset, unset ones as
- * "Not linked", for every reader. So the Link definitions decide which rows
- * are displayed and must load for a member who cannot edit the asset, while
- * the editor-only definitions stay skipped for them.
- *
- * The loader also sends `linkTitles` for the links among the values shown,
- * the same fixture the chip tests render, and reads them in the same batch as
- * the editor data.
+ * The rows come from the asset's own values, so a member who cannot edit the
+ * asset gets no field definitions at all; an editor gets every definition
+ * that applies, Link fields among them, for the "Not set" rows. The loader
+ * also sends `linkTitles` for the links among the values shown, the same
+ * fixture the chip tests render, and reads them in the same batch as the
+ * editor data.
  *
  * @see {@link file://./../../../app/routes/_layout+/assets.$assetId.overview.tsx}
  * @see {@link file://./../../../app/components/assets/asset-overview-custom-fields.tsx}
@@ -121,13 +119,12 @@ async function load() {
     params: { assetId: "asset-1" },
     context: { getSession: () => ({ userId: "user-1" }) },
   } as unknown as Parameters<typeof loader>[0])) as unknown as {
-    linkDefinitions: unknown[];
     allCustomFieldDefs: unknown[];
     linkTitles: unknown;
   };
 }
 
-describe("asset overview loader: Documents & links", () => {
+describe("asset overview loader: custom fields", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetAsset.mockResolvedValue(camera);
@@ -135,38 +132,26 @@ describe("asset overview loader: Documents & links", () => {
     mockGetLinkTitles.mockResolvedValue({});
   });
 
-  it("sends the Link fields to a member who cannot edit the asset", async () => {
+  it("sends a member who cannot edit no field definitions", async () => {
     grant([OrganizationRoles.BASE]);
 
     const result = await load();
 
-    expect(mockGetActiveCustomFields).toHaveBeenCalledWith({
-      organizationId: "org-1",
-      category: "cat-cameras",
-    });
-    expect(result.linkDefinitions).toEqual([
-      {
-        id: "cf-manual",
-        name: "Manual",
-        type: "TEXT",
-        format: "LINK",
-        options: [],
-      },
-    ]);
     expect(result.allCustomFieldDefs).toEqual([]);
+    expect(mockGetActiveCustomFields).not.toHaveBeenCalled();
   });
 
-  it("sends the same Link fields to an editor, beside the editable definitions", async () => {
+  it("sends an editor every definition for the asset's category, Link fields included", async () => {
     grant([OrganizationRoles.ADMIN]);
 
     const result = await load();
 
-    expect(result.linkDefinitions).toEqual([
-      expect.objectContaining({ id: "cf-manual", format: "LINK" }),
-    ]);
-    expect(result.allCustomFieldDefs).toHaveLength(2);
-    // One read serves both: the Link fields are picked from the full list.
     expect(mockGetActiveCustomFields).toHaveBeenCalledTimes(1);
+    expect(mockGetActiveCustomFields).toHaveBeenCalledWith({
+      organizationId: "org-1",
+      category: "cat-cameras",
+    });
+    expect(result.allCustomFieldDefs).toEqual([manual, serial]);
   });
 
   it("sends the titles of the links among the values the page shows", async () => {

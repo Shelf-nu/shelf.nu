@@ -9,7 +9,7 @@
  * @see {@link file://./assets.ts} the list twin of this route
  * @see {@link file://./../../../modules/asset/service.server.ts} refreshExpiredAssetImages
  */
-import { AssetStatus, CustomFieldFormat } from "@prisma/client";
+import { AssetStatus } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { getQuantityData } from "~/components/assets/asset-status-badge/quantity-data";
@@ -44,7 +44,6 @@ import {
   resolveDisplayCode,
   serializeDisplayCode,
 } from "~/modules/barcode/display";
-import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import {
   getLinkTitles,
   linkTitlesByField,
@@ -281,25 +280,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       ({ customField }) => customField.active
     );
 
-    // Read together: none depends on another.
-    // - `linkFields`: the Link fields that apply to this asset, set or not,
-    //   for the "Documents & links" section. Every reader gets them, as on
-    //   the web overview: the section lists empty ones as "Not linked".
-    // - `linkTitles`: titles for the links in the values shown. Never throws.
-    const [[refreshedAsset], linkFields, linkTitles] = await Promise.all([
+    // Read together, neither depending on the other. `linkTitles` holds the
+    // titles for the links in the values shown, and never throws.
+    const [[refreshedAsset], linkTitles] = await Promise.all([
       refreshExpiredAssetImages([storedAsset], {
         organizationId,
         ...ASSET_IMAGE_RESIGN_LIMITS,
       }),
-      getActiveCustomFields({
-        organizationId,
-        category: storedAsset.category?.id ?? null,
-        format: CustomFieldFormat.LINK,
-      }).then((fields) =>
-        fields
-          .map(({ id, name, helpText }) => ({ id, name, helpText }))
-          .sort((a, b) => a.name.localeCompare(b.name))
-      ),
       getLinkTitles({ organizationId, values: shownValues }),
     ]);
 
@@ -679,9 +666,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         // workspace without alternative barcodes must not receive barcode
         // rows, matching every other mobile barcode surface.
         barcodes: barcodesAllowed ? detailBarcodes : [],
-        // Additive: Link-format custom fields that apply to this asset,
-        // ordered by name, whether or not they have a value.
-        linkFields,
         // Additive: page titles and workspace names for the links in
         // `customFields`, keyed by custom field id. Keyed on the server: the
         // phone's URL implementation cannot reproduce link keys for every
