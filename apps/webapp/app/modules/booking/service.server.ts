@@ -13623,47 +13623,68 @@ export async function extendBooking({
            * booking's own claim is excluded from the read, so it competes
            * against everyone else and not against itself.
            */
+          // Units held through a kit are already taken off the pool as the
+          // kit's allocation; counting them here would deduct them twice. Only
+          // slices still out keep units away past the current end. A partly
+          // checked-out slice claims all of its units: the ones not yet out
+          // stay reserved to this booking until it ends.
+          const countedSlices = booking.bookingAssets.filter(
+            (ba) =>
+              quantityAssetIdsStillOut.has(ba.assetId) &&
+              !ba.assetKitId &&
+              ba.checkedOutAt &&
+              !ba.checkedInAt
+          );
           const quantityUnitsOut = new Map<
             string,
             { units: number; title: string; unit: string | null }
           >();
-          for (const ba of booking.bookingAssets) {
-            if (!quantityAssetIdsStillOut.has(ba.assetId)) continue;
-            // Units held through a kit are already taken off the pool as the
-            // kit's allocation; counting them here would deduct them twice.
-            if (ba.assetKitId) continue;
-            // Only slices still out keep units away past the current end. A
-            // partly checked-out slice claims all of its units: the ones not
-            // yet out stay reserved to this booking until it ends.
-            if (!ba.checkedOutAt || ba.checkedInAt) continue;
-            const entry = quantityUnitsOut.get(ba.assetId) ?? {
-              units: 0,
-              title: ba.asset.title,
-              unit: ba.asset.unitOfMeasure,
-            };
-            entry.units += ba.quantity;
-            quantityUnitsOut.set(ba.assetId, entry);
-          }
-          if (quantityUnitsOut.size > 0) {
+          if (countedSlices.length > 0) {
+            const countedAssetIds = [
+              ...new Set(countedSlices.map((ba) => ba.assetId)),
+            ];
             // Units already back through a partial check-in, consumed, lost or
             // damaged are no longer out, so they ask nothing of the pool.
-            const returned = await tx.consumptionLog.groupBy({
-              by: ["assetId"],
+            const returnLogs = await tx.consumptionLog.findMany({
               where: {
                 bookingId: booking.id,
-                assetId: { in: [...quantityUnitsOut.keys()] },
+                assetId: { in: countedAssetIds },
                 category: { in: [...RESERVATION_REDUCING_CATEGORIES] },
               },
-              _sum: { quantity: true },
+              select: { assetId: true, bookingAssetId: true, quantity: true },
             });
-            for (const group of returned) {
-              const entry = quantityUnitsOut.get(group.assetId);
-              if (!entry) continue;
-              entry.units = Math.max(
-                0,
-                entry.units - (group._sum.quantity ?? 0)
-              );
-              if (entry.units === 0) quantityUnitsOut.delete(group.assetId);
+            for (const assetId of countedAssetIds) {
+              // Attributed over the asset's full slice set, kit slices and
+              // returned ones included, the way the check-in paths do it: a
+              // log tagged to another slice stays there, and untagged units
+              // fill each slice only up to what it sent out.
+              const returnedBySlice = attributeDispositionsByBookingAsset({
+                bookingAssetRows: booking.bookingAssets
+                  .filter((ba) => ba.assetId === assetId)
+                  .map((ba) => ({
+                    id: ba.id,
+                    quantity: resolveSentUnits(ba),
+                    assetKitId: ba.assetKitId,
+                  })),
+                consumptionLogs: returnLogs.filter(
+                  (log) => log.assetId === assetId
+                ),
+              });
+              for (const ba of countedSlices) {
+                if (ba.assetId !== assetId) continue;
+                const units = Math.max(
+                  0,
+                  ba.quantity - (returnedBySlice.get(ba.id) ?? 0)
+                );
+                if (units === 0) continue;
+                const entry = quantityUnitsOut.get(assetId) ?? {
+                  units: 0,
+                  title: ba.asset.title,
+                  unit: ba.asset.unitOfMeasure,
+                };
+                entry.units += units;
+                quantityUnitsOut.set(assetId, entry);
+              }
             }
           }
           if (quantityUnitsOut.size > 0) {

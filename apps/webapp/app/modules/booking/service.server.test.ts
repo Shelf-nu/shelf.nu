@@ -12015,22 +12015,50 @@ describe("extendBooking", () => {
       expect(db.booking.update).toHaveBeenCalled();
     });
 
+    /**
+     * The return / disposition logs this booking holds for the cable. Both
+     * reads of them answer from the same rows: the itemised one and the
+     * per-asset sum.
+     */
+    function mockBookingReturnLogs(
+      logs: { bookingAssetId: string | null; quantity: number }[]
+    ) {
+      const forBooking = (args?: { where?: { bookingId?: unknown } }) =>
+        args?.where?.bookingId === "booking-1";
+      // why: the logs are rows the pool read must attribute to slices; only
+      // this booking's own logs are answered, other reads stay empty.
+      restoreMockImplementationAfterTest(
+        db.consumptionLog.findMany
+      ).fn.mockImplementation((args?: { where?: { bookingId?: unknown } }) =>
+        Promise.resolve(
+          forBooking(args) ? logs.map((l) => ({ ...l, assetId: CABLE_ID })) : []
+        )
+      );
+      restoreMockImplementationAfterTest(
+        db.consumptionLog.groupBy
+      ).fn.mockImplementation((args?: { where?: { bookingId?: unknown } }) =>
+        Promise.resolve(
+          forBooking(args)
+            ? [
+                {
+                  assetId: CABLE_ID,
+                  _sum: { quantity: logs.reduce((n, l) => n + l.quantity, 0) },
+                },
+              ]
+            : []
+        )
+      );
+    }
+
     it("counts only the units still out after a partial return", async () => {
       expect.assertions(1);
       //@ts-expect-error missing vitest type
       db.booking.findUniqueOrThrow.mockResolvedValue(bookingWithCablesOut());
       mockCableStock(30);
       mockOtherReservation(28);
-      // why: two of the three cables came back through a partial check-in.
-      restoreMockImplementationAfterTest(
-        db.consumptionLog.groupBy
-      ).fn.mockImplementation((args?: { where?: { bookingId?: string } }) =>
-        Promise.resolve(
-          args?.where?.bookingId === "booking-1"
-            ? [{ assetId: CABLE_ID, _sum: { quantity: 2 } }]
-            : []
-        )
-      );
+      // why: two of the three cables came back through a partial check-in,
+      // logged without a slice tag as older and mobile check-ins write them.
+      mockBookingReturnLogs([{ bookingAssetId: null, quantity: 2 }]);
 
       await extendBooking({
         id: "booking-1",
@@ -12043,6 +12071,48 @@ describe("extendBooking", () => {
       });
 
       expect(db.booking.update).toHaveBeenCalled();
+    });
+
+    it("does not let units returned on a kit slice free the loose units still out", async () => {
+      const booking = bookingWithCablesOut();
+      const [cable] = booking.bookingAssets;
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue({
+        ...booking,
+        bookingAssets: [
+          // Three loose cables are still out.
+          cable,
+          // Two more went out in a kit and are back.
+          {
+            ...cable,
+            id: "ba-cable-kit",
+            assetKitId: "membership-1",
+            quantity: 2,
+            checkedInAt: new Date("2025-01-01T11:00:00.000Z"),
+          },
+        ],
+      });
+      mockCableStock(30);
+      mockOtherReservation(28);
+      mockBookingReturnLogs([{ bookingAssetId: "ba-cable-kit", quantity: 2 }]);
+      // why: the kit resolution reads memberships; the kit is back, so none.
+      restoreMockImplementationAfterTest(
+        db.assetKit.findMany
+      ).fn.mockResolvedValue([]);
+
+      await expect(
+        extendBooking({
+          id: "booking-1",
+          organizationId: "org-1",
+          newEndDate: new Date("2025-01-03T17:00:00Z"),
+          hints: mockClientHints,
+          userId: "user-1",
+          access: accessFor([OrganizationRoles.ADMIN]),
+          roles: [OrganizationRoles.ADMIN],
+        })
+      ).rejects.toThrow(
+        '"ethernet cable" has 3 units out on this booking, but only 2 of 30 are free'
+      );
     });
 
     it("refuses when the pool cannot hold this booking's units alongside the others", async () => {
