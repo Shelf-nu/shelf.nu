@@ -11734,15 +11734,11 @@ describe("extendBooking", () => {
 
     beforeEach(() => {
       // why: the pool is row-locked with a raw `FOR UPDATE` read before it is
-      // measured; the mocked client has no raw query, so it answers with the
-      // locked row.
-      (db as unknown as { $queryRaw: unknown }).$queryRaw = vitest
-        .fn()
-        .mockResolvedValue([{ id: CABLE_ID }]);
-    });
-
-    afterEach(() => {
-      delete (db as unknown as { $queryRaw?: unknown }).$queryRaw;
+      // measured; the raw query answers with the locked row for this case
+      // and goes back to its prior behaviour afterwards.
+      restoreMockImplementationAfterTest(db.$queryRaw).fn.mockResolvedValue([
+        { id: CABLE_ID },
+      ]);
     });
 
     /** A running booking holding 3 of the cables, with the slice out. */
