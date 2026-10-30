@@ -230,13 +230,15 @@ describe("bulkSetAssetCustomField", () => {
       expect.objectContaining({
         assetId: "a1",
         type: "UPDATE",
-        content: expect.stringContaining("set **Brand** to **Westermo**"),
+        content: expect.stringContaining(
+          'set {% name text="Brand" /%} to {% name text="Westermo" chips=true /%}'
+        ),
       }),
       expect.objectContaining({
         assetId: "a2",
         type: "UPDATE",
         content: expect.stringContaining(
-          "updated **Brand** from **Siemens** to **Westermo**"
+          'updated {% name text="Brand" /%} from {% name text="Siemens" chips=true /%} to {% name text="Westermo" chips=true /%}'
         ),
       }),
     ]);

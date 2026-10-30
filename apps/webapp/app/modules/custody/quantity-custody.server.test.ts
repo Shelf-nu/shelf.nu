@@ -612,7 +612,7 @@ describe("assignQuantityToCustodian", () => {
     });
     expect(createNote).toHaveBeenCalledTimes(1);
     expect(createNote).toHaveBeenCalledWith({
-      content: `${ACTOR} assigned **3** unit(s) to **Jane Doe**.`,
+      content: `${ACTOR} assigned **3** unit(s) to {% name text="Jane Doe" /%}.`,
       type: "UPDATE",
       userId: "user-1",
       assetId: "q1",
@@ -671,17 +671,17 @@ describe("releaseQuantityFromCustodian", () => {
     [
       "returned to stock",
       { consumed: 0, returned: 3 },
-      `${ACTOR} released **3** unit(s) from **Jane Doe**'s custody.`,
+      `${ACTOR} released **3** unit(s) from {% name text="Jane Doe" /%}'s custody.`,
     ],
     [
       "used up",
       { consumed: 3, returned: 0 },
-      `${ACTOR} marked **3** unit(s) held by **Jane Doe** as consumed. Stock reduced permanently.`,
+      `${ACTOR} marked **3** unit(s) held by {% name text="Jane Doe" /%} as consumed. Stock reduced permanently.`,
     ],
     [
       "split",
       { consumed: 1, returned: 2 },
-      `${ACTOR} ended **Jane Doe**'s hold on **3** unit(s): **1** consumed and **2** returned to stock.`,
+      `${ACTOR} ended {% name text="Jane Doe" /%}'s hold on **3** unit(s): **1** consumed and **2** returned to stock.`,
     ],
   ])(
     "words the note from what was persisted when the units are %s",

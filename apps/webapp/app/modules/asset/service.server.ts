@@ -157,13 +157,13 @@ import * as importImageCacheServer from "~/utils/import.image-cache.server";
 import type { CachedImage } from "~/utils/import.image-cache.server";
 import { getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
-import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import {
   wrapUserLinkForNote,
   wrapCustodianForNote,
   wrapAssetsWithDataForNote,
   wrapAssetWithCountForNote,
   wrapLinkForNote,
+  wrapNameForNote,
 } from "~/utils/markdoc-wrappers";
 import { isValidImageUrl } from "~/utils/misc";
 import { threeDaysFromNow } from "~/utils/one-week-from-now";
@@ -3601,16 +3601,16 @@ async function noteModelShortfallsOnBookings(
 
   const what =
     archivedTitles.length === 1
-      ? `**${stripMarkdocDelimiters(archivedTitles[0])}**`
+      ? wrapNameForNote(archivedTitles[0])
       : `${archivedTitles.length} assets`;
 
   await createSystemBookingNotes(
     {
       notes: shortfalls.map((shortfall) => ({
         bookingId: shortfall.bookingId,
-        content: `${actorLink} archived ${what}. This booking's reservation of **${stripMarkdocDelimiters(
+        content: `${actorLink} archived ${what}. This booking's reservation of ${wrapNameForNote(
           shortfall.modelName
-        )}** is now ${shortfall.short} ${
+        )} is now ${shortfall.short} ${
           shortfall.short === 1 ? "unit" : "units"
         } short for its dates. Reduce it to what can be assigned.`,
       })),
@@ -7396,8 +7396,8 @@ export async function bulkCheckOutAssets({
 
       const custodianDisplay = custodianTeamMember
         ? wrapCustodianForNote({ teamMember: custodianTeamMember })
-        : // Free-form fallback name, rendered as literal bold text.
-          `**${stripMarkdocDelimiters(custodianName)}**`;
+        : // Free-form fallback name, inside a `name` tag like every typed value.
+          wrapNameForNote(custodianName);
 
       // why: `assets` is individual-only — QUANTITY_TRACKED were filtered out
       // above (they have no Custody.quantity in this path), so no unit count
@@ -7659,20 +7659,21 @@ export async function bulkCheckInAssets({
       await tx.note.createMany({
         data: assets.map((asset) => {
           const primaryCustody = getPrimaryCustody(asset.custody);
-          // Actor name, custodian name and asset title are all user-supplied
-          // and render as literal text in this Markdoc note.
-          const actorName = stripMarkdocDelimiters(
+          // Actor name, custodian name and asset title are all user-supplied,
+          // so each goes inside a `name` tag. The note is on the asset's own
+          // page, so its title is not a link.
+          const actorName = wrapNameForNote(
             `${user.firstName?.trim() ?? ""} ${user.lastName ?? ""}`
           );
-          const custodianName = stripMarkdocDelimiters(
+          const custodianName = wrapNameForNote(
             primaryCustody
               ? resolveTeamMemberName(primaryCustody.custodian)
               : "Unknown Custodian"
           );
           return {
-            content: `**${actorName}** has released **${custodianName}'s** custody over **${stripMarkdocDelimiters(
-              asset.title ?? ""
-            )}**`,
+            content: `${actorName} has released ${custodianName}'s custody over ${wrapNameForNote(
+              asset.title
+            )}`,
             type: "UPDATE",
             userId,
             assetId: asset.id,

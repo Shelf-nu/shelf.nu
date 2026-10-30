@@ -96,7 +96,7 @@ export const UserNotes = ({
       {hasNotes || optimisticNote ? (
         <LinkTitlesProvider value={linkTitles}>
           <ul className="notes-list mt-8 w-full">
-            {/* Optimistic note has a placeholder ID — don't render actions until the real note exists */}
+            {/* Optimistic note has a placeholder ID: no actions until the real note exists */}
             {optimisticNote && (
               <Note
                 key={optimisticNote.id}

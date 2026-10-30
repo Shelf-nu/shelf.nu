@@ -188,6 +188,25 @@ export const markdocConfig: Config = {
       },
       selfClosing: true,
     },
+    name: {
+      render: "NameComponent",
+      description:
+        "Renders text a person typed (a name, a code, a value) as bold literal text",
+      attributes: {
+        text: {
+          type: String,
+          required: true,
+          description: "The text to show, exactly as typed",
+        },
+        chips: {
+          type: Boolean,
+          required: false,
+          description:
+            "Show the web links in the text as link chips (custom field values)",
+        },
+      },
+      selfClosing: true,
+    },
     audit_images: {
       render: "AuditImagesComponent",
       description:

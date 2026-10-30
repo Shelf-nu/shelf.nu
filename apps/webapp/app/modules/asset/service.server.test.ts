@@ -6,6 +6,7 @@ import {
 } from "@prisma/client";
 import { describe, expect, it, vi, vitest, beforeEach } from "vitest";
 import { createCustomField } from "@factories";
+import { URL_SHAPED_VALUE, expectValueOnlyInTag } from "@helpers/note-tags";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
 import { db } from "~/database/db.server";
@@ -6595,7 +6596,7 @@ describe("archiveAsset", () => {
           expect.objectContaining({
             bookingId: "b1",
             content: expect.stringContaining(
-              "This booking's reservation of **Sony A7** is now 1 unit short for its dates."
+              'This booking\'s reservation of {% name text="Sony A7" /%} is now 1 unit short for its dates.'
             ),
           }),
         ],
@@ -6603,6 +6604,41 @@ describe("archiveAsset", () => {
       },
       expect.anything()
     );
+  });
+
+  it("keeps a URL-shaped model name inside a name tag in the shortfall note", async () => {
+    mockFindFirst.mockResolvedValue({
+      id: "a1",
+      type: "INDIVIDUAL",
+      status: "AVAILABLE",
+      archivedAt: null,
+      assetModelId: "model-1",
+    });
+    mockUpdateMany.mockResolvedValue({ count: 1 });
+
+    // why: a model named like a URL leaves "Shoot" one unit short.
+    vitest
+      .mocked(findModelReservationsShortAfterArchive)
+      .mockResolvedValueOnce([
+        {
+          bookingId: "b1",
+          bookingName: "Shoot",
+          modelName: URL_SHAPED_VALUE,
+          short: 1,
+        },
+      ]);
+
+    await archiveAsset({
+      id: "a1",
+      organizationId: "org-1",
+      actorUserId: "u1",
+      confirmModelShortfall: true,
+    });
+
+    const [{ notes }] = vitest
+      .mocked(createSystemBookingNotes)
+      .mock.calls.at(-1)!;
+    expectValueOnlyInTag(notes[0].content, URL_SHAPED_VALUE, ["name"]);
   });
 
   it("writes an Activity note naming who archived the asset", async () => {

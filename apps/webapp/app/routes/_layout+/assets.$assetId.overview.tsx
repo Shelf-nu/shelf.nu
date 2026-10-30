@@ -85,10 +85,7 @@ import { getAssetAuditHistory } from "~/modules/audit/asset-audit-history.server
 import { getCustodyCardHolderUserId } from "~/modules/custody/utils";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { moveAssetKitUnits } from "~/modules/kit/service.server";
-import {
-  getLinkTitles,
-  getTextLinkTitles,
-} from "~/modules/link-preview/service.server";
+import { getLinkTitles } from "~/modules/link-preview/service.server";
 import { generateQrObj } from "~/modules/qr/utils.server";
 import { getLastScanForViewer } from "~/modules/scan/service.server";
 import { getTeamMembersForQuantityCustody } from "~/modules/team-member/service.server";
@@ -413,16 +410,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      */
     const [linkTitles, allCustomFieldDefs, categoriesData, locationsData] =
       await Promise.all([
-        Promise.all([
-          getLinkTitles({ organizationId, values: customFields }),
-          getTextLinkTitles({
-            organizationId,
-            texts: asset.description ? [asset.description] : [],
-          }),
-        ]).then(([fieldTitles, descriptionTitles]) => ({
-          ...fieldTitles,
-          ...descriptionTitles,
-        })),
+        getLinkTitles({
+          organizationId,
+          values: customFields,
+          texts: asset.description ? [asset.description] : [],
+        }),
         canEditAsset
           ? getActiveCustomFields({
               organizationId,

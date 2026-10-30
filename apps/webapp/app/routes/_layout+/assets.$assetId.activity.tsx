@@ -7,7 +7,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import TextualDivider from "~/components/shared/textual-divider";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { getAsset } from "~/modules/asset/service.server";
-import { getTextLinkTitles } from "~/modules/link-preview/service.server";
+import { getLinkTitles } from "~/modules/link-preview/service.server";
 import { getPaginatedAndFilterableAssetNotes } from "~/modules/note/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie, userPrefs } from "~/utils/cookies.server";
@@ -101,9 +101,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
 
     /** Titles for the web links in the notes on this page, for their chips. */
-    const linkTitles = await getTextLinkTitles({
+    const linkTitles = await getLinkTitles({
       organizationId,
-      texts: items.map((note) => note.content),
+      notes: items,
     });
 
     const header: HeaderData = {

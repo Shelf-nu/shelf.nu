@@ -61,4 +61,49 @@ describe("SystemNoteViewer", () => {
     expect(container.textContent).toContain("updated the asset description .");
     expect(container.textContent).not.toContain("first line");
   });
+
+  describe("web links", () => {
+    const offSite = (container: HTMLElement) =>
+      Array.from(container.querySelectorAll("a")).filter((a) =>
+        (a.getAttribute("href") ?? "").startsWith("https://evil.example")
+      );
+
+    it("never links a name that looks like a URL", () => {
+      const { container, getByText } = renderSystemNote(
+        '{% link to="/settings/team/users/u1" text="Sam Lee" /%} changed booking name from {% name text="Shoot" /%} to {% name text="https://evil.example/login" /%}.'
+      );
+
+      expect(getByText("https://evil.example/login")).toBeVisible();
+      expect(offSite(container)).toHaveLength(0);
+    });
+
+    it("never links a bare URL in an older note's text", () => {
+      const { container } = renderSystemNote(
+        "Sam changed booking name from **Shoot** to **https://evil.example/login**."
+      );
+
+      expect(container.textContent).toContain("https://evil.example/login");
+      expect(offSite(container)).toHaveLength(0);
+    });
+
+    it("does not bring back a Markdown link the sanitizer unwrapped", () => {
+      const { container } = renderSystemNote(
+        "renamed to **[https://evil.example/login](https://evil.example/login)**."
+      );
+
+      expect(offSite(container)).toHaveLength(0);
+    });
+
+    it("shows a custom field value its writer marked as a chip", () => {
+      const { container } = renderSystemNote(
+        '{% link to="/settings/team/users/u1" text="Sam Lee" /%} set {% name text="Manual" /%} to {% name text="https://docs.example.com/manual.pdf" chips=true /%}.'
+      );
+
+      const chip = container.querySelector(
+        'a[href^="https://docs.example.com/manual.pdf"]'
+      );
+      expect(chip).not.toBeNull();
+      expect(chip).toHaveAttribute("target", "_blank");
+    });
+  });
 });

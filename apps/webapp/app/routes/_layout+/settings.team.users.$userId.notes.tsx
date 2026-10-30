@@ -21,7 +21,7 @@ import TextualDivider from "~/components/shared/textual-divider";
 import { UserNotes } from "~/components/user/notes";
 import { db } from "~/database/db.server";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
-import { getTextLinkTitles } from "~/modules/link-preview/service.server";
+import { getLinkTitles } from "~/modules/link-preview/service.server";
 import { getTeamMemberNotes } from "~/modules/team-member-note/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -80,9 +80,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
 
     /** Titles for the web links in the notes, for their chips. */
-    const linkTitles = await getTextLinkTitles({
+    const linkTitles = await getLinkTitles({
       organizationId,
-      texts: notes.map((note) => note.content),
+      notes,
     });
 
     const header: HeaderData = {

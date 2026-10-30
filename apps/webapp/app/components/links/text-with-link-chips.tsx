@@ -5,8 +5,9 @@
  *
  * @see {@link file://./link-chip.tsx}
  */
-import { parseLink, segmentText, type LinkTitles } from "@shelf/links";
+import { parseLink, type LinkTitles } from "@shelf/links";
 import { LinkChip } from "./link-chip";
+import { textRuns } from "./text-runs";
 
 /**
  * Renders `text` with its http(s) URLs replaced by link chips.
@@ -23,15 +24,10 @@ export function TextWithLinkChips({
 }) {
   return (
     <>
-      {segmentText(text).map((segment, index) => {
+      {textRuns(text).map(({ start, segment }) => {
         const link = segment.type === "link" ? parseLink(segment.url) : null;
-        // why: segments are a fixed split of one string, never reordered
-        // eslint-disable-next-line react/no-array-index-key
-        if (!link) return <span key={index}>{segment.text}</span>;
-        return (
-          // eslint-disable-next-line react/no-array-index-key
-          <LinkChip key={index} link={link} title={titles?.[link.key]} />
-        );
+        if (!link) return <span key={start}>{segment.text}</span>;
+        return <LinkChip key={start} link={link} title={titles?.[link.key]} />;
       })}
     </>
   );

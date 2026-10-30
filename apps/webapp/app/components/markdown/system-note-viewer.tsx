@@ -27,8 +27,6 @@ type SystemNoteViewerProps = {
   className?: string;
   /** Render audit image previews inline instead of in a portal. */
   disablePortal?: boolean;
-  /** Show bare web links in the note as link chips. */
-  linkChips?: boolean;
 };
 
 /**
@@ -42,7 +40,6 @@ export function SystemNoteViewer({
   content,
   className,
   disablePortal,
-  linkChips,
 }: SystemNoteViewerProps) {
   const encoded = useMemo(
     () => encodeRawTagAttributeValues(content),
@@ -54,7 +51,6 @@ export function SystemNoteViewer({
       content={encoded}
       className={className}
       disablePortal={disablePortal}
-      linkChips={linkChips}
     />
   );
 }

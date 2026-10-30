@@ -56,7 +56,7 @@ const Update = ({ note }: { note: NoteWithUser; when?: boolean }) => (
       <Tag>
         <DateS date={note.createdAt} includeTime />
       </Tag>{" "}
-      <SystemNoteViewer content={note.content} linkChips />
+      <SystemNoteViewer content={note.content} />
     </div>
   </div>
 );

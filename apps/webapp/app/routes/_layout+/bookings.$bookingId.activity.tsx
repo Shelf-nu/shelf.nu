@@ -19,7 +19,7 @@ import {
   createBookingNote,
   deleteBookingNote,
 } from "~/modules/booking-note/service.server";
-import { getTextLinkTitles } from "~/modules/link-preview/service.server";
+import { getLinkTitles } from "~/modules/link-preview/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { canSeeBooking } from "~/utils/booking-authorization.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -94,9 +94,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     };
 
     /** Titles for the web links in the notes, for their chips. */
-    const linkTitles = await getTextLinkTitles({
+    const linkTitles = await getLinkTitles({
       organizationId,
-      texts: bookingNotes.map((note) => note.content),
+      notes: bookingNotes,
     });
 
     return payload({

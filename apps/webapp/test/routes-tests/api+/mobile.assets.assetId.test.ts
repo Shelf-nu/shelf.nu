@@ -1311,9 +1311,13 @@ describe("Link fields on GET /api/mobile/assets/:assetId", () => {
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
   });
 
-  it("selects each value's field format, which decides the links fetched for a title", async () => {
+  it("selects each value's field format, which the companion's asset detail contract carries", async () => {
     // why: a mocked database returns whatever the fixture holds, so the query
-    // is what this pins. Without `format`, no Link field's page is fetched.
+    // is what this pins. Titles are read for every TEXT value whatever its
+    // format, so `format` is not about fetching. It is selected because each
+    // value in the payload names its field's format: the companion types it on
+    // `AssetDetail.customFields[].customField.format`
+    // (apps/companion/lib/api/types.ts) to tell a Link field from plain text.
     assetFindUniqueMock.mockResolvedValue(buildAsset());
 
     await loader(
@@ -1400,5 +1404,7 @@ describe("Link fields on GET /api/mobile/assets/:assetId", () => {
       "cf-handbook": { pageTitle: "Handbuch EOS R5", customTitle: null },
     });
     expect(body.asset).not.toHaveProperty("linkTitles");
+    // The per-value Link list is gone: the companion finds links itself.
+    expect(body.asset.linkFields).toBeUndefined();
   });
 });

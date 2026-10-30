@@ -263,9 +263,10 @@ export async function noteBookedQuantityChanges({
         createSystemBookingNote({
           bookingId,
           organizationId,
-          content: `${actor} adjusted booked quantity for **${stripMarkdocDelimiters(
-            change.assetTitle
-          )}** from **${change.previousQuantity}** to **${
+          content: `${actor} adjusted booked quantity for ${wrapLinkForNote(
+            `/assets/${change.assetId}`,
+            stripMarkdocDelimiters(change.assetTitle)
+          )} from **${change.previousQuantity}** to **${
             change.quantity
           }**${suffix}.`,
         }),

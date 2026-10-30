@@ -16,6 +16,7 @@ import { DescriptionComponent } from "./description-component";
 import { KitsListComponent } from "./kits-list-component";
 import { LinkChipComponent } from "./link-chip-component";
 import { LinkComponent } from "./link-component";
+import { NameComponent } from "./name-component";
 import { TagComponent } from "./tag-component";
 
 const RawBlockComponent = ({ raw }: { raw: string }) => (
@@ -51,9 +52,10 @@ interface Props {
    */
   allowExternalLinks?: boolean;
   /**
-   * Show bare http(s) URLs in the text as link chips (activity notes). Links
-   * written as Markdown keep their own text. Chips are always http(s), so this
-   * is safe for system notes too.
+   * Show bare http(s) URLs in the text as link chips (comments). Links written
+   * as Markdown keep their own text. Applies only with `allowExternalLinks`: a
+   * chip links off-site, which system notes never do from bare text (their
+   * writers mark the values that may, with the `name` tag's `chips`).
    */
   linkChips?: boolean;
 }
@@ -66,6 +68,7 @@ const defaultComponents = {
   KitsListComponent,
   LinkComponent,
   LinkChipComponent,
+  NameComponent,
   BookingStatusComponent,
   DescriptionComponent,
   CategoryBadgeComponent,
@@ -131,7 +134,9 @@ export const MarkdownViewer = ({
         : content;
 
     const sanitized = sanitizeMarkdocTree(tree, { allowExternalLinks });
-    return linkChips ? chipBareUrls(sanitized) : sanitized;
+    return linkChips && allowExternalLinks
+      ? chipBareUrls(sanitized)
+      : sanitized;
   }, [content, allowExternalLinks, linkChips]);
 
   return (

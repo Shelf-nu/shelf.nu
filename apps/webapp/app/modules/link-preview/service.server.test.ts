@@ -22,11 +22,7 @@ import { server } from "@mocks";
 import { db } from "~/database/db.server";
 import { Logger } from "~/utils/logger";
 import { scheduler } from "~/utils/scheduler.server";
-import {
-  getLinkTitles,
-  getTextLinkTitles,
-  runLinkPreviewJob,
-} from "./service.server";
+import { getLinkTitles, runLinkPreviewJob } from "./service.server";
 import type { LinkTitleSource } from "./service.server";
 
 // why: LinkPreview rows live in the database; each test sets what it returns
@@ -511,14 +507,14 @@ describe("runLinkPreviewJob", () => {
   });
 });
 
-describe("getTextLinkTitles", () => {
-  it("reads and claims every web link written in the notes, once each", async () => {
+describe("getLinkTitles: texts and notes", () => {
+  it("reads and claims every web link in a plain text (a description), once each", async () => {
     vi.mocked(db.linkPreview.findMany).mockResolvedValue([
       row(MANUAL, { pageTitle: "EOS R5 user manual" }),
     ] as never);
     vi.mocked(db.$queryRaw).mockResolvedValue([{ id: "lp-sheet" }]);
 
-    const titles = await getTextLinkTitles({
+    const titles = await getLinkTitles({
       organizationId: ORG,
       texts: [
         `Manual: ${MANUAL} (rev B)`,
@@ -537,13 +533,85 @@ describe("getTextLinkTitles", () => {
     expect(claimQuery()?.values).toEqual([ORG, "15 minutes", [SHEET]]);
   });
 
-  it("reads nothing for notes without a web link", async () => {
-    const titles = await getTextLinkTitles({
+  it("reads nothing for texts without a web link", async () => {
+    const titles = await getLinkTitles({
       organizationId: ORG,
       texts: ["Calibrated today", "see binder 3", "javascript:alert(1)"],
     });
 
     expect(titles).toEqual({});
     expect(db.linkPreview.findMany).not.toHaveBeenCalled();
+  });
+
+  it("claims only the links a comment shows as chips, not Markdown links, code or tag attributes", async () => {
+    await getLinkTitles({
+      organizationId: ORG,
+      notes: [
+        {
+          type: "COMMENT",
+          content: `See [the manual](${MANUAL}), \`${SHOP}\`, {% link to="${SHOP}/tag" text="x" /%} and ${SHEET}`,
+        },
+      ],
+    });
+    await settleClaim();
+
+    expect(vi.mocked(db.linkPreview.findMany).mock.calls[0][0]).toMatchObject({
+      where: { organizationId: ORG, url: { in: [SHEET] } },
+    });
+    expect(claimQuery()?.values).toEqual([ORG, "15 minutes", [SHEET]]);
+  });
+
+  it("claims a system note's links only from values its writer marked as chips", async () => {
+    await getLinkTitles({
+      organizationId: ORG,
+      notes: [
+        {
+          type: "UPDATE",
+          content: `Sam set {% name text="Manual" /%} to {% name text="${MANUAL}" chips=true /%}.`,
+        },
+        {
+          type: "UPDATE",
+          content: `Sam changed booking name from **Shoot** to **${SHOP}**, then {% name text="${SHEET}" /%}.`,
+        },
+      ],
+    });
+    await settleClaim();
+
+    expect(claimQuery()?.values).toEqual([ORG, "15 minutes", [MANUAL]]);
+  });
+
+  it("claims at most 10 links of one text, and still reads the rest", async () => {
+    const urls = Array.from(
+      { length: 12 },
+      (_, index) => `https://www.example-docs.com/page-${index}`
+    );
+
+    await getLinkTitles({
+      organizationId: ORG,
+      notes: [{ type: "COMMENT", content: urls.join(" ") }],
+    });
+    await settleClaim();
+
+    expect(vi.mocked(db.linkPreview.findMany).mock.calls[0][0]).toMatchObject({
+      where: { organizationId: ORG, url: { in: urls } },
+    });
+    expect(claimQuery()?.values).toEqual([
+      ORG,
+      "15 minutes",
+      urls.slice(0, 10),
+    ]);
+  });
+
+  it("reads and claims in the workspace it was given", async () => {
+    await getLinkTitles({
+      organizationId: "org-2",
+      notes: [{ type: "COMMENT", content: `Manual ${MANUAL}` }],
+    });
+    await settleClaim();
+
+    expect(vi.mocked(db.linkPreview.findMany).mock.calls[0][0]).toMatchObject({
+      where: { organizationId: "org-2" },
+    });
+    expect(claimQuery()?.values).toEqual(["org-2", "15 minutes", [MANUAL]]);
   });
 });

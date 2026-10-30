@@ -1,17 +1,23 @@
 /**
  * Link previews
  *
- * Page titles for web links in custom field values, one `LinkPreview` row per
- * workspace and `LinkKey`, so a manual linked from many assets is fetched once
- * and named once.
+ * Page titles for the web links Shelf shows as link chips (custom field
+ * values, asset descriptions, comments and the values system notes mark as
+ * chips), one `LinkPreview` row per workspace and `LinkKey`, so a manual linked
+ * from many places is fetched once and named once.
  *
- * Titles are claimed where they are read, never where values are written:
+ * Titles are claimed where they are read, never where text is written:
  * `getLinkTitles` is called by the loaders that render link chips, and it
- * claims links that were never fetched or are due
- * again, then queues one job per claimed row. Only stored values reach it, so
- * no request can make the server fetch a URL of its choosing. The worker runs
- * `runLinkPreviewJob`, and people name links with `setLinkTitle`. The two
- * write disjoint columns, so a rename racing a fetch loses nothing.
+ * claims the shown links that were never fetched or are due again, then
+ * queues one job per claimed row. Anyone who can write a comment or a field
+ * value can therefore make the server fetch a public URL they chose, later and
+ * at most once per due time. The limits are: only links a page shows as chips
+ * are claimed, at most {@link MAX_CLAIMS_PER_TEXT} per text and
+ * {@link MAX_CLAIMS_PER_READ} per page view, a claim is leased so concurrent
+ * views do not repeat it, and every fetch goes through the SSRF guard
+ * (`safeFetchPrefix`: public addresses only, a byte cap and a timeout). The
+ * worker runs `runLinkPreviewJob`, and people name links with `setLinkTitle`.
+ * The two write disjoint columns, so a rename racing a fetch loses nothing.
  *
  * Titles are decoration: reading them never throws into a loader.
  *
@@ -37,6 +43,7 @@ import type {
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import type { ErrorLabel } from "~/utils/error";
+import { chipUrlsInNote } from "~/utils/link-chips-in-markdoc";
 import { Logger } from "~/utils/logger";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import { fetchPageTitle } from "./fetch-title.server";
@@ -53,6 +60,13 @@ const LEASE = "15 minutes";
 
 /** At most this many links are claimed by one read, so one page view stays cheap. */
 const MAX_CLAIMS_PER_READ = 20;
+
+/**
+ * At most this many links of one text (a comment, a description) are claimed,
+ * so a text full of links cannot fill the queue. Its other links still show
+ * titles fetched before.
+ */
+const MAX_CLAIMS_PER_TEXT = 10;
 
 /** The payload of a link preview job. */
 export type LinkPreviewJob = {
@@ -73,58 +87,58 @@ export interface LinkTitleSource {
 }
 
 /**
- * Titles for the links among these custom field values, keyed by `LinkKey`.
+ * Titles for the links a page shows as chips, keyed by `LinkKey`.
  *
- * Reads the workspace's rows for every TEXT value that is one link. Links
- * that were never fetched, or whose next fetch is due, are claimed (at most
- * {@link MAX_CLAIMS_PER_READ}) and queued for the worker, so their titles
- * appear on a later load. The claim runs in the background: the titles
- * return without waiting for it. Never throws: a failure is logged and the
- * titles read so far (or none) are returned.
+ * Reads the workspace's rows for every link shown: each TEXT custom field
+ * value that is one link, each web link in a plain text (a description), and
+ * each link a note renders as a chip (`chipUrlsInNote`). Links that were never
+ * fetched, or whose next fetch is due, are claimed (at most
+ * {@link MAX_CLAIMS_PER_TEXT} per text and {@link MAX_CLAIMS_PER_READ} in all)
+ * and queued for the worker, so their titles appear on a later load. The
+ * claim runs in the background: the titles return without waiting for it.
+ * Never throws: a failure is logged and the titles read so far (or none) are
+ * returned.
  *
  * @param args.organizationId - Workspace whose rows are read and claimed
  * @param args.values - Custom field values with their field's type
+ * @param args.texts - Plain texts shown with chips (asset descriptions)
+ * @param args.notes - Activity notes shown, with their type
  * @returns Titles for links that have a page title or a custom name
  */
 export async function getLinkTitles({
   organizationId,
-  values,
+  values = [],
+  texts = [],
+  notes = [],
 }: {
   organizationId: string;
-  values: readonly LinkTitleSource[];
+  values?: readonly LinkTitleSource[];
+  texts?: readonly string[];
+  notes?: readonly { type: "COMMENT" | "UPDATE"; content: string }[];
 }): Promise<LinkTitles> {
   const keys = linkKeysOf(values);
-  return readTitlesAndClaim(organizationId, keys, keys);
-}
-
-/**
- * Titles for the web links written in free text (activity notes, asset
- * descriptions), keyed by `LinkKey`.
- *
- * Every http(s) URL `segmentText` finds in the texts is read, and links never
- * fetched or due again are claimed for the worker, as for custom field
- * values. Never throws.
- *
- * @param args.organizationId - Workspace whose rows are read and claimed
- * @param args.texts - The texts shown on the page (notes are Markdown)
- * @returns Titles for links that have a page title or a custom name
- */
-export async function getTextLinkTitles({
-  organizationId,
-  texts,
-}: {
-  organizationId: string;
-  texts: readonly string[];
-}): Promise<LinkTitles> {
-  const keys = new Set<LinkKey>();
-  for (const text of texts) {
-    for (const segment of segmentText(text)) {
-      if (segment.type !== "link") continue;
-      const link = parseLink(segment.url);
-      if (link && isStorable(link.key)) keys.add(link.key);
+  const fetchable = new Set(keys);
+  const addText = (urls: readonly string[]) => {
+    let claimable = MAX_CLAIMS_PER_TEXT;
+    for (const url of urls) {
+      const link = parseLink(url);
+      if (!link || !isStorable(link.key)) continue;
+      keys.add(link.key);
+      if (claimable > 0 && !fetchable.has(link.key)) {
+        fetchable.add(link.key);
+        claimable--;
+      }
     }
+  };
+  for (const text of texts) {
+    addText(
+      segmentText(text).flatMap((segment) =>
+        segment.type === "link" ? [segment.url] : []
+      )
+    );
   }
-  return readTitlesAndClaim(organizationId, keys, keys);
+  for (const note of notes) addText(chipUrlsInNote(note));
+  return readTitlesAndClaim(organizationId, keys, fetchable);
 }
 
 /**

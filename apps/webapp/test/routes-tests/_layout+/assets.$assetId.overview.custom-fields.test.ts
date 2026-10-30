@@ -72,15 +72,13 @@ vi.mock("~/modules/custom-field/service.server", async (importOriginal) => ({
   getActiveCustomFields: mockGetActiveCustomFields,
 }));
 
-const { mockGetLinkTitles, mockGetTextLinkTitles } = vi.hoisted(() => ({
+const { mockGetLinkTitles } = vi.hoisted(() => ({
   mockGetLinkTitles: vi.fn(),
-  mockGetTextLinkTitles: vi.fn(),
 }));
 // why: the titles are read from LinkPreview rows in Postgres (and links due a
 // fetch are queued); the test records which values the loader hands over.
 vi.mock("~/modules/link-preview/service.server", () => ({
   getLinkTitles: mockGetLinkTitles,
-  getTextLinkTitles: mockGetTextLinkTitles,
 }));
 
 import { getCategoriesForCreateAndEdit } from "~/modules/asset/service.server";
@@ -132,7 +130,6 @@ describe("asset overview loader: custom fields", () => {
     mockGetAsset.mockResolvedValue(camera);
     mockGetActiveCustomFields.mockResolvedValue([manual, serial]);
     mockGetLinkTitles.mockResolvedValue({});
-    mockGetTextLinkTitles.mockResolvedValue({});
   });
 
   it("sends a member who cannot edit no field definitions", async () => {
@@ -185,18 +182,20 @@ describe("asset overview loader: custom fields", () => {
 
     // A field outside the asset's category is not on the page, so its link
     // is neither read nor queued for a fetch.
-    expect(mockGetLinkTitles).toHaveBeenCalledWith({
-      organizationId: "org-1",
-      values: [manualValue, cameraOnly],
-    });
+    expect(mockGetLinkTitles).toHaveBeenCalledTimes(1);
+    expect(mockGetLinkTitles).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: "org-1",
+        values: [manualValue, cameraOnly],
+      })
+    );
     expect(result.linkTitles).toEqual(LINK_TITLES);
   });
 
   it("adds the titles of the links in the asset's description", async () => {
     const description = "Manual: https://www.example.com/manual.pdf (rev B)";
     mockGetAsset.mockResolvedValue({ ...camera, description });
-    mockGetLinkTitles.mockResolvedValue({});
-    mockGetTextLinkTitles.mockResolvedValue({
+    mockGetLinkTitles.mockResolvedValue({
       "https://www.example.com/manual.pdf": {
         pageTitle: "X200 manual",
         customTitle: null,
@@ -205,10 +204,13 @@ describe("asset overview loader: custom fields", () => {
 
     const result = await load();
 
-    expect(mockGetTextLinkTitles).toHaveBeenCalledWith({
-      organizationId: "org-1",
-      texts: [description],
-    });
+    expect(mockGetLinkTitles).toHaveBeenCalledTimes(1);
+    expect(mockGetLinkTitles).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: "org-1",
+        texts: [description],
+      })
+    );
     expect(result.linkTitles).toEqual({
       "https://www.example.com/manual.pdf": {
         pageTitle: "X200 manual",

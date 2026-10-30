@@ -14,8 +14,7 @@ import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import type { ErrorLabel } from "~/utils/error";
 import { Logger } from "~/utils/logger";
-import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
-import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
+import { wrapNameForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import {
   PermissionAction,
   PermissionEntity,
@@ -571,15 +570,14 @@ export async function getLastScanForViewer({
  *
  * A barcode or SAM ID names its value, because an asset can carry several
  * barcodes and the note should say which one was scanned. The value is
- * stripped of Markdoc delimiters: it is user-controlled and the note is
- * rendered through Markdoc.
+ * user-controlled, so it goes inside a `name` tag, never bare text.
  */
 function describeScannedCode(codeType: ScanCodeType, code: string) {
   switch (codeType) {
     case ScanCodeType.BARCODE:
-      return `the asset barcode **${stripMarkdocDelimiters(code)}**`;
+      return `the asset barcode ${wrapNameForNote(code)}`;
     case ScanCodeType.SAM_ID:
-      return `the asset SAM ID **${stripMarkdocDelimiters(code)}**`;
+      return `the asset SAM ID ${wrapNameForNote(code)}`;
     case ScanCodeType.QR:
       return "the asset QR code";
   }
@@ -643,9 +641,11 @@ export async function createScanNote({
       });
       const actor = wrapUserLinkForNote({ ...scanningUser, id: userId });
       const message = manuallyGenerated
-        ? `${actor} manually updated the GPS coordinates to *${stripMarkdocDelimiters(
-            String(latitude)
-          )}, ${stripMarkdocDelimiters(String(longitude))}*.`
+        ? // Manually entered coordinates are typed text, so they go inside a
+          // `name` tag like every other typed value.
+          `${actor} manually updated the GPS coordinates to ${wrapNameForNote(
+            `${String(latitude)}, ${String(longitude)}`
+          )}.`
         : `${actor} performed a scan of ${scannedCode}.`;
 
       return await createNote({
