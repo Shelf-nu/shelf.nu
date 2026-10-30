@@ -31,6 +31,8 @@ interface ProviderSpec<P extends LinkProvider> {
   readonly kind: KindRule;
   /** The provider's own word for a kind, e.g. "Google Sheet". */
   readonly kindLabels?: Readonly<Partial<Record<NamedKind, string>>>;
+  /** Text the provider puts before its page titles, removed for display. */
+  readonly titlePrefixes?: readonly string[];
   /** Text the provider appends to its page titles, removed for display. */
   readonly titleSuffixes?: readonly string[];
 }
@@ -115,6 +117,8 @@ export const PROVIDERS: ProviderRegistry = {
         ["/s/", "file"],
       ],
     },
+    titlePrefixes: ["Dropbox - "],
+    titleSuffixes: [" - Simplify your life"],
   },
   box: {
     id: "box",

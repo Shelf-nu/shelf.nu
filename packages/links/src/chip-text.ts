@@ -41,14 +41,19 @@ export function linkChipText(
 /**
  * Makes untrusted title text displayable: turns control characters into
  * spaces, strips bidi controls, collapses whitespace, removes the provider's
- * title suffix (" - Google Drive") when `link` is given, and caps the result
+ * title prefix and suffix (" - Google Drive", "Dropbox - ") when `link` is given, and caps the result
  * at 120 characters. Null when nothing is left or the title is just the host.
  */
 export function cleanLinkTitle(raw: string, link?: ParsedLink): string | null {
   let title = normalizeDisplayText(raw);
-  const suffixes = link?.provider
-    ? PROVIDERS[link.provider].titleSuffixes ?? []
-    : [];
+  const provider = link?.provider ? PROVIDERS[link.provider] : null;
+  for (const prefix of provider?.titlePrefixes ?? []) {
+    if (title.startsWith(prefix)) {
+      title = title.slice(prefix.length).trimStart();
+      break;
+    }
+  }
+  const suffixes = provider?.titleSuffixes ?? [];
   for (const suffix of suffixes) {
     if (title.endsWith(suffix)) {
       title = title.slice(0, -suffix.length).trimEnd();

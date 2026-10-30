@@ -217,3 +217,25 @@ test("cleanLinkTitle returns null when nothing useful is left", () => {
   assert.equal(cleanLinkTitle("www.BHPhotoVideo.com", shop), null);
   assert.equal(cleanLinkTitle("bhphotovideo.com"), "bhphotovideo.com");
 });
+
+test("cleanLinkTitle removes Dropbox's prefix and slogan only for a Dropbox link", () => {
+  const dropbox = parseLink(
+    "https://www.dropbox.com/scl/fi/abc123/Calibration-data-2026.xlsx?rlkey=x"
+  );
+  assert.ok(dropbox);
+  assert.equal(
+    cleanLinkTitle(
+      "Dropbox - Calibration-data-2026.xlsx - Simplify your life",
+      dropbox
+    ),
+    "Calibration-data-2026.xlsx"
+  );
+  assert.equal(
+    cleanLinkTitle("Dropbox - Invalid Link - Simplify your life", dropbox),
+    "Invalid Link"
+  );
+  assert.equal(
+    cleanLinkTitle("Dropbox - Invalid Link - Simplify your life", shop),
+    "Dropbox - Invalid Link - Simplify your life"
+  );
+});
