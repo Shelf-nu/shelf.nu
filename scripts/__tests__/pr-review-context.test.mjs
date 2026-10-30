@@ -1038,3 +1038,24 @@ test("splitSqlStatements: a backslash-escaped quote in an E-string cannot hide t
   // A plain string keeps backslashes literal and ends at the next quote.
   assert.equal(splitSqlStatements(`SELECT 'C:\\'; SELECT 2`).length, 2);
 });
+
+test("classifySqlStatement: sql keeps the statement as written, whitespace in literals included", () => {
+  const [entry] = classifySqlStatement(
+    `UPDATE "T"\n  SET x = 1\n  WHERE code = 'A  B'`
+  );
+  assert.equal(entry.sql, `UPDATE "T"\n  SET x = 1\n  WHERE code = 'A  B'`);
+  assert.equal(entry.detail, `UPDATE "T" SET x = 1 WHERE code = 'A B'`);
+});
+
+test("classifySqlStatement: a WITH that writes to two tables lists both writes, main one first", () => {
+  const sql = `WITH moved AS (DELETE FROM "Old" RETURNING *) INSERT INTO "Archive" SELECT * FROM moved`;
+  const entries = classifySqlStatement(sql);
+  assert.deepEqual(
+    entries.map((e) => [e.action, e.target]),
+    [
+      ["insert rows", "Archive"],
+      ["delete rows", "Old"],
+    ]
+  );
+  assert.ok(entries.every((e) => e.sql === sql));
+});

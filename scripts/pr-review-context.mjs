@@ -735,11 +735,14 @@ export function classifySqlStatement(statement) {
     return [
       { action: "create policy", target: unquote(m[2]), detail: unquote(m[1]) },
     ];
-  const write = dataWrite(sql);
-  // Data writes and unknown statements keep their full SQL in `sql`: the
-  // WHERE or ON CONFLICT past the short `detail` decides which rows they touch.
-  if (write) return [{ ...write, detail: short, sql }];
-  return [{ action: "other", target: "", detail: short, sql }];
+  // Data writes and unknown statements keep the statement as written in
+  // `sql`: the WHERE or ON CONFLICT past the short `detail` decides which rows
+  // they touch, and a literal's own whitespace is part of what it matches.
+  const original = statement.trim();
+  const writes = dataWrites(sql);
+  if (writes.length > 0)
+    return writes.map((write) => ({ ...write, detail: short, sql: original }));
+  return [{ action: "other", target: "", detail: short, sql: original }];
 }
 
 /** The data-writing statements, keyed by the action the report names. */
@@ -766,26 +769,36 @@ function topLevel(sql) {
 }
 
 /**
- * Finds the table a statement writes rows to. A statement opening with
- * `WITH` is judged by its main statement (the top level, outside the CTE
- * bodies), and failing that by any write inside a CTE body, because a
- * data-modifying CTE writes rows too.
+ * Lists every table a statement writes rows to. A plain statement has at most
+ * one. A statement opening with `WITH` can write in its main statement and in
+ * each data-modifying CTE body, and Postgres runs all of them, so each is its
+ * own entry, the main statement's first.
  * @param {string} sql - one statement, whitespace collapsed
- * @returns {{action: string, target: string} | null}
+ * @returns {Array<{action: string, target: string}>} empty when it writes nothing
  */
-function dataWrite(sql) {
-  const find = (text, anchor) => {
-    for (const [action, pattern] of DATA_WRITES) {
-      const m = new RegExp(`${anchor}${pattern}`, "i").exec(text);
-      if (m) return { action, target: unquote(m[1]) };
-    }
-    return null;
-  };
-  const direct = find(sql, "^");
-  if (direct || !/^WITH\b/i.test(sql)) return direct;
+function dataWrites(sql) {
+  for (const [action, pattern] of DATA_WRITES) {
+    const m = new RegExp(`^${pattern}`, "i").exec(sql);
+    if (m) return [{ action, target: unquote(m[1]) }];
+  }
+  if (!/^WITH\b/i.test(sql)) return [];
   // `FOR UPDATE` and `ON UPDATE` are not writes.
-  const word = "(?<!FOR |ON )\\b";
-  return find(topLevel(sql), word) ?? find(sql, word);
+  const findAll = (text) =>
+    DATA_WRITES.flatMap(([action, pattern]) =>
+      [...text.matchAll(new RegExp(`(?<!FOR |ON )\\b${pattern}`, "gi"))].map(
+        (m) => ({ action, target: unquote(m[1]), index: m.index })
+      )
+    ).sort((a, b) => a.index - b.index);
+  const main = findAll(topLevel(sql));
+  const seen = new Set();
+  return [...main, ...findAll(sql)]
+    .map(({ action, target }) => ({ action, target }))
+    .filter(({ action, target }) => {
+      const key = `${action} ${target}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
 }
 
 /**
