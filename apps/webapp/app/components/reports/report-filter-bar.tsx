@@ -62,6 +62,11 @@ type Props = {
   ignoredFilterCount: number;
   /** Pick-lists for the declared filters. */
   filterOptions: ReportFilterOptions;
+  /**
+   * Overrides the per-report rule for showing the timeframe picker. The
+   * report builder passes this: only its bookings dataset has a period.
+   */
+  timeframeVisible?: boolean;
 };
 
 /**
@@ -101,6 +106,7 @@ export function ReportFilterBar({
   activeFilters,
   ignoredFilterCount,
   filterOptions,
+  timeframeVisible,
 }: Props) {
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -114,7 +120,7 @@ export function ReportFilterBar({
     [searchParams, setSearchParams]
   );
 
-  const hasTimeframe = showTimeframePicker(reportId);
+  const hasTimeframe = timeframeVisible ?? showTimeframePicker(reportId);
   const hasIdleThreshold = reportId === "idle-assets";
   const declared = new Set(filterConfigs.map((f) => f.type));
   const renderedConfigs = filterConfigs.filter((f) =>

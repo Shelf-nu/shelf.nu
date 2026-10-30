@@ -12,7 +12,7 @@ import { data, type LoaderFunctionArgs } from "react-router";
 
 import { getQrUrl } from "~/modules/qr/qr-url.server";
 import { auditCompletionReport } from "~/modules/reports/audit-completion.server";
-import { formatDateForCsv } from "~/modules/reports/csv-format";
+import { buildCsv, formatDateForCsv } from "~/modules/reports/csv-format";
 import { resolveReportFilters } from "~/modules/reports/filters.server";
 import {
   resolveTimeframe,
@@ -46,7 +46,6 @@ import type {
   MonthlyBookingTrendRow,
 } from "~/modules/reports/types";
 import { getClientHint } from "~/utils/client-hints";
-import { neutralizeCsvFormula } from "~/utils/csv-cells";
 import { csvResponse } from "~/utils/csv-utf8";
 import { type ResolvedFormatPrefs } from "~/utils/date-format";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
@@ -521,51 +520,6 @@ function formatReturnStatus(
   }
 
   return latenessMs > 0 ? `${value} late` : `${value} early`;
-}
-
-/**
- * Assembles a CSV document, escaping EVERY cell.
- *
- * Escaping lives here and nowhere else. Headers and body cells alike pass
- * through {@link escapeCsvField}, so a contributor adding a column gets a safe
- * cell with no per-field decision to make. Cells carry user-controlled
- * workspace values — custodian and member names, categories, locations — so
- * the guarantee has to be unconditional rather than applied where it looks
- * needed.
- *
- * Callers pass raw values: a cell escaped before it arrives is escaped twice.
- *
- * @param headers - Column headers, escaped like any other cell
- * @param rows - Row cells, already stringified and formatted, NOT escaped
- * @returns The complete CSV document
- */
-function buildCsv(headers: string[], rows: string[][]): string {
-  return [
-    headers.map(escapeCsvField).join(","),
-    ...rows.map((row) => row.map(escapeCsvField).join(",")),
-  ].join("\n");
-}
-
-/**
- * Escape a field for CSV format.
- */
-function escapeCsvField(field: string): string {
-  // Neutralize spreadsheet formula injection (CWE-1236) with the guard every
-  // Shelf CSV export uses. Applied here so every report export is protected.
-  const safeField = neutralizeCsvFormula(field);
-  // `\r` is quoted alongside `\n`: a bare carriage return terminates a record in
-  // consumers that accept CR as a line ending, so an unquoted one lets a
-  // user-controlled value split the row and forge structure — which also puts
-  // the injected content at the start of a "line", back inside formula range.
-  if (
-    safeField.includes(",") ||
-    safeField.includes('"') ||
-    safeField.includes("\n") ||
-    safeField.includes("\r")
-  ) {
-    return `"${safeField.replace(/"/g, '""')}"`;
-  }
-  return safeField;
 }
 
 /**
