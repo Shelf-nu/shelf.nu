@@ -15,7 +15,7 @@
  *
  * @see {@link file://./../../components/booking/explicit-checkout-settings.tsx} - the setting
  * @see {@link file://./../../components/booking/checkout-dropdown.tsx} - the web control it shapes
- * @see {@link file://./../../components/booking/list-row-check-in-out.tsx} - the bookings-list row buttons
+ * @see {@link file://./../../components/booking/booking-quick-actions.tsx} - the bookings-list row buttons
  */
 import { ShelfError } from "~/utils/error";
 import type {

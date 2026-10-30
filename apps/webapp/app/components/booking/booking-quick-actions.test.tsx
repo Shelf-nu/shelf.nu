@@ -1,7 +1,7 @@
 /**
  * Which buttons a bookings-list row offers, by booking status and viewer.
  *
- * Pins the table in `list-row-check-in-out.tsx`: Check out while RESERVED,
+ * Pins the table in `booking-quick-actions.tsx`: Check out while RESERVED,
  * Check out remaining plus Check in while underway with items still booked,
  * Check in alone otherwise, nothing for a closed or draft booking. Also pins
  * the gates around it: the viewer's grant, the workspace's explicit scan
@@ -14,7 +14,7 @@
  * to refuse a from-location case, and the JSON answer "Check out remaining"
  * asks for.
  *
- * @see {@link file://./list-row-check-in-out.tsx}
+ * @see {@link file://./booking-quick-actions.tsx}
  */
 import type { ComponentProps, ReactNode } from "react";
 import { BookingStatus, OrganizationRoles } from "@prisma/client";
@@ -24,9 +24,9 @@ import { accessFor } from "@helpers/role-access";
 import type { ExplicitScanSettings } from "~/utils/permissions/role-access";
 import {
   ASSIGN_UNITS_FIRST_REASON,
-  ListRowCheckInOut,
-  resolveRowCheckInOut,
-} from "./list-row-check-in-out";
+  BookingQuickActions,
+  resolveCheckInOutActions,
+} from "./booking-quick-actions";
 
 /** The roles the viewer holds; both role hooks below read it. */
 let mockRoles: OrganizationRoles[] = [OrganizationRoles.ADMIN];
@@ -90,7 +90,7 @@ vi.mock("react-router", async () => {
 // flight here.
 vi.mock("~/hooks/use-disabled", () => ({ useDisabled: () => false }));
 
-type RowBooking = ComponentProps<typeof ListRowCheckInOut>["booking"];
+type RowBooking = ComponentProps<typeof BookingQuickActions>["booking"];
 
 /** A RESERVED booking with nothing unusual about it. */
 function buildBooking(overrides: Partial<RowBooking> = {}): RowBooking {
@@ -117,22 +117,25 @@ function renderRow(
 ) {
   mockRoles = roles;
   mockBookingSettings = settings;
-  return render(<ListRowCheckInOut booking={buildBooking(overrides)} />);
+  return render(<BookingQuickActions booking={buildBooking(overrides)} />);
 }
 
-/** The visible button labels, in order. */
+/**
+ * Each action button's accessible name, in order. The buttons are icon-only,
+ * so the name is the label a screen reader announces and the tooltip shows.
+ */
 function buttonLabels(): string[] {
   return screen
     .queryAllByRole("button")
-    .map((button) => button.textContent?.trim() ?? "");
+    .map((button) => button.getAttribute("aria-label") ?? "");
 }
 
-describe("resolveRowCheckInOut: which buttons a status gets", () => {
+describe("resolveCheckInOutActions: which buttons a status gets", () => {
   const CAN_BOTH = { canCheckOut: true, canCheckIn: true };
 
   it("offers Check out alone while RESERVED", () => {
     expect(
-      resolveRowCheckInOut({
+      resolveCheckInOutActions({
         booking: { status: BookingStatus.RESERVED, hasItemsToCheckOut: true },
         ...CAN_BOTH,
       })
@@ -143,7 +146,7 @@ describe("resolveRowCheckInOut: which buttons a status gets", () => {
     "offers Check out remaining and Check in while %s with items still booked",
     (status) => {
       expect(
-        resolveRowCheckInOut({
+        resolveCheckInOutActions({
           booking: { status, hasItemsToCheckOut: true },
           ...CAN_BOTH,
         })
@@ -155,7 +158,7 @@ describe("resolveRowCheckInOut: which buttons a status gets", () => {
     "offers Check in alone while %s with everything already out",
     (status) => {
       expect(
-        resolveRowCheckInOut({
+        resolveCheckInOutActions({
           booking: { status, hasItemsToCheckOut: false },
           ...CAN_BOTH,
         })
@@ -165,7 +168,7 @@ describe("resolveRowCheckInOut: which buttons a status gets", () => {
 
   it("reads a loader that did not resolve the flag as nothing left to check out", () => {
     expect(
-      resolveRowCheckInOut({
+      resolveCheckInOutActions({
         booking: { status: BookingStatus.ONGOING },
         ...CAN_BOTH,
       }).checkOutRemaining
@@ -179,7 +182,7 @@ describe("resolveRowCheckInOut: which buttons a status gets", () => {
     BookingStatus.ARCHIVED,
   ])("offers nothing for a %s booking", (status) => {
     expect(
-      resolveRowCheckInOut({
+      resolveCheckInOutActions({
         booking: { status, hasItemsToCheckOut: true },
         ...CAN_BOTH,
       })
@@ -188,7 +191,7 @@ describe("resolveRowCheckInOut: which buttons a status gets", () => {
 
   it("drops the check-out buttons when the viewer may not check out", () => {
     expect(
-      resolveRowCheckInOut({
+      resolveCheckInOutActions({
         booking: { status: BookingStatus.ONGOING, hasItemsToCheckOut: true },
         canCheckOut: false,
         canCheckIn: true,
@@ -198,7 +201,7 @@ describe("resolveRowCheckInOut: which buttons a status gets", () => {
 
   it("drops Check in when the viewer may not check in", () => {
     expect(
-      resolveRowCheckInOut({
+      resolveCheckInOutActions({
         booking: { status: BookingStatus.OVERDUE, hasItemsToCheckOut: false },
         canCheckOut: true,
         canCheckIn: false,
@@ -207,7 +210,7 @@ describe("resolveRowCheckInOut: which buttons a status gets", () => {
   });
 });
 
-describe("ListRowCheckInOut: what the row renders", () => {
+describe("BookingQuickActions: what the row renders", () => {
   it("renders Check out for a RESERVED booking, posting to the booking's overview", () => {
     renderRow();
 
@@ -227,6 +230,11 @@ describe("ListRowCheckInOut: what the row renders", () => {
     renderRow({ status: BookingStatus.ONGOING, hasItemsToCheckOut: true });
 
     expect(buttonLabels()).toEqual(["Check out remaining", "Check in"]);
+    // Icon-only, like the assets index's actions: no visible text in the cell.
+    for (const button of screen.getAllByRole("button")) {
+      expect(button.textContent?.trim()).toBe("");
+      expect(button.querySelector("svg")).not.toBeNull();
+    }
   });
 
   it("renders Check in alone for an OVERDUE booking with everything out", () => {

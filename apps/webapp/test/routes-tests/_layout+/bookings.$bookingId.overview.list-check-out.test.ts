@@ -8,7 +8,7 @@
  * is not held to that check.
  *
  * @see {@link file://./../../../app/routes/_layout+/bookings.$bookingId.overview.tsx}
- * @see {@link file://./../../../app/components/booking/list-row-check-in-out.tsx}
+ * @see {@link file://./../../../app/components/booking/booking-quick-actions.tsx}
  */
 import { OrganizationRoles } from "@prisma/client";
 import { permissionContext } from "@helpers/role-access";

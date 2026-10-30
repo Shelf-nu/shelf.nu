@@ -1,4 +1,4 @@
-import { useRef, useState, type MouseEvent } from "react";
+import { useRef, useState, type MouseEvent, type ReactNode } from "react";
 import type { Booking } from "@prisma/client";
 import { Zap } from "lucide-react";
 import { useDisabled } from "~/hooks/use-disabled";
@@ -57,8 +57,12 @@ type CheckoutDialogProps = {
   /**
    * Rendering context. `"dropdown"` styles the trigger as a left-aligned link
    * row so it sits inside a `DropdownMenuItem` like the check-in flow.
+   * `"icon"` renders a compact secondary button showing only `icon`, with
+   * `label` as its tooltip and accessible name, for a list row's actions.
    */
-  variant?: "default" | "dropdown";
+  variant?: "default" | "dropdown" | "icon";
+  /** The trigger's icon when `variant` is `"icon"`. */
+  icon?: ReactNode;
   /**
    * Skip the early-checkout "adjust start date" prompt and submit directly.
    * Pass `true` when the booking has already started (ONGOING/OVERDUE) — e.g.
@@ -156,6 +160,7 @@ export default function CheckoutDialog({
   intent = "checkOut",
   label = "Check Out",
   variant = "default",
+  icon,
   suppressEarlyCheckoutPrompt = false,
   fullWidth = false,
   unassignedUnits = NO_UNASSIGNED_UNITS,
@@ -194,6 +199,27 @@ export default function CheckoutDialog({
   ) : (
     label
   );
+  /**
+   * The trigger's look. An icon trigger is the list-row action button: small,
+   * secondary, the label carried by its tooltip and accessible name.
+   */
+  const triggerProps =
+    variant === "icon"
+      ? ({
+          size: "sm",
+          variant: "secondary",
+          className: tw("p-2", triggerClassName),
+          "aria-label": label,
+          tooltip: label,
+          children: icon,
+        } as const)
+      : ({
+          className: resolvedTriggerClassName,
+          size: isDropdown ? undefined : "sm",
+          variant: isDropdown ? "link" : "primary",
+          width: isDropdown || fullWidth ? "full" : undefined,
+          children: triggerContent,
+        } as const);
 
   const asksSource = sourceQuestions.length > 0;
   /** No early, unassigned or source reason applies: only the plain confirmation. */
@@ -236,34 +262,20 @@ export default function CheckoutDialog({
   if (isPlainCheckout && !confirm) {
     return (
       <Button
+        {...triggerProps}
         disabled={isDisabled}
-        className={resolvedTriggerClassName}
-        size={isDropdown ? undefined : "sm"}
         type="submit"
         name="intent"
         value={intent}
         form={formId}
-        variant={isDropdown ? "link" : "primary"}
-        width={isDropdown || fullWidth ? "full" : undefined}
-      >
-        {triggerContent}
-      </Button>
+      />
     );
   }
 
   return (
     <AlertDialog open={open} onOpenChange={setOpen}>
       <AlertDialogTrigger asChild>
-        <Button
-          disabled={isDisabled}
-          className={resolvedTriggerClassName}
-          size={isDropdown ? undefined : "sm"}
-          type="button"
-          variant={isDropdown ? "link" : "primary"}
-          width={isDropdown || fullWidth ? "full" : undefined}
-        >
-          {triggerContent}
-        </Button>
+        <Button {...triggerProps} disabled={isDisabled} type="button" />
       </AlertDialogTrigger>
 
       <AlertDialogContent

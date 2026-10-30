@@ -1,8 +1,11 @@
 /**
- * Check-out and check-in buttons for one row of the bookings list.
+ * The Actions column of one bookings-list row: compact icon buttons with a
+ * tooltip each, the bookings twin of the assets index's `AssetQuickActions`.
+ * New row actions belong here, in the same icon-button shape.
  *
- * Lets an operator move a booking along without opening it, the way the
- * booking header does, with the same dialogs and the same server action:
+ * Today it holds check-out and check-in, so an operator can move a booking
+ * along without opening it, the way the booking header does, with the same
+ * dialogs and the same server action:
  *
  * | Status                                  | Buttons                              |
  * | --------------------------------------- | ------------------------------------ |
@@ -27,11 +30,14 @@
  * chose. A refusal reaches the operator as the toast the action's error path
  * sends; the row has no space for an inline error and shows none.
  *
- * @see {@link file://./list-bookings-content.tsx} renders this in the last column
+ * @see {@link file://./list-bookings-content.tsx} renders this in the Actions column
+ * @see {@link file://./../assets/assets-index/asset-quick-actions.tsx} the assets index twin
  * @see {@link file://./../../routes/_layout+/bookings.$bookingId.overview.tsx} the action
  * @see {@link file://./checkout-dialog.tsx} and {@link file://./checkin-dialog.tsx}
  */
+import type { ReactNode } from "react";
 import { BookingStatus } from "@prisma/client";
+import { ChevronsRightIcon } from "lucide-react";
 import { useFetcher } from "react-router";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useDisabled } from "~/hooks/use-disabled";
@@ -50,10 +56,11 @@ import { userHasPermission } from "~/utils/permissions/permission.validator.clie
 import { isExplicitScanRequired } from "~/utils/permissions/role-access";
 import CheckinDialog from "./checkin-dialog";
 import CheckoutDialog from "./checkout-dialog";
+import { CheckInIcon, CheckOutIcon } from "../icons/library";
 import { Button } from "../shared/button";
 
 /** What the row buttons read off a bookings-list row. */
-export type ListRowCheckInOutBooking = {
+export type BookingQuickActionsBooking = {
   id: string;
   name: string;
   status: BookingStatus;
@@ -65,25 +72,52 @@ export type ListRowCheckInOutBooking = {
   /** Reserved model units, to disable Check out while some are unassigned. */
   modelRequests: CountableModelRequest[];
   /**
-   * Whether a slice of this booking is still in the Booked bucket, as the
-   * list loader resolved it. Decides "Check out remaining" on a booking that
-   * is underway. Absent on a loader that does not resolve it, which reads as
+   * Whether a slice of this booking still has units to send out, as the list
+   * loader resolved it. Decides "Check out remaining" on a booking that is
+   * underway. Absent on a loader that does not resolve it, which reads as
    * "nothing left to check out".
    */
   hasItemsToCheckOut?: boolean;
 };
 
-/** Props for {@link ListRowCheckInOut}. */
-type ListRowCheckInOutProps = {
-  booking: ListRowCheckInOutBooking;
+/** Props for {@link BookingQuickActions}. */
+type BookingQuickActionsProps = {
+  booking: BookingQuickActionsBooking;
 };
 
 /** Why a RESERVED booking's Check out is disabled while model units are unassigned. */
 export const ASSIGN_UNITS_FIRST_REASON =
   "Open the booking to assign the reserved units first.";
 
-/** Compact trigger styling: the row has no room for a stretched button. */
-const TRIGGER_CLASS = "whitespace-nowrap";
+/** Each action's tooltip and accessible name, and its icon. */
+const ACTIONS = {
+  checkOut: { label: "Check out", icon: <CheckOutIcon className="size-4" /> },
+  checkOutRemaining: {
+    label: "Check out remaining",
+    icon: <ChevronsRightIcon className="size-4" />,
+  },
+  checkIn: { label: "Check in", icon: <CheckInIcon className="size-4" /> },
+} satisfies Record<string, { label: string; icon: ReactNode }>;
+
+/**
+ * Stands in for an action's dialog trigger while the row's request runs: the
+ * same icon button, disabled, so the cell keeps its shape and one click
+ * cannot post twice.
+ */
+function BusyActionButton({ label, icon }: { label: string; icon: ReactNode }) {
+  return (
+    <Button
+      type="button"
+      size="sm"
+      variant="secondary"
+      className="p-2"
+      aria-label={label}
+      disabled
+    >
+      {icon}
+    </Button>
+  );
+}
 
 /**
  * Decides which buttons a row offers, from the booking and the viewer.
@@ -96,12 +130,12 @@ const TRIGGER_CLASS = "whitespace-nowrap";
  * @param args.canCheckIn - The viewer holds `booking:checkin` and is not held to explicit check-in
  * @returns Which of the three buttons to render
  */
-export function resolveRowCheckInOut({
+export function resolveCheckInOutActions({
   booking,
   canCheckOut,
   canCheckIn,
 }: {
-  booking: Pick<ListRowCheckInOutBooking, "status" | "hasItemsToCheckOut">;
+  booking: Pick<BookingQuickActionsBooking, "status" | "hasItemsToCheckOut">;
   canCheckOut: boolean;
   canCheckIn: boolean;
 }): { checkOut: boolean; checkOutRemaining: boolean; checkIn: boolean } {
@@ -119,12 +153,12 @@ export function resolveRowCheckInOut({
 }
 
 /**
- * Renders the row's check-out and check-in buttons, or nothing when the
- * booking's status or the viewer's reach offers none.
+ * Renders the row's action buttons, or nothing when the booking's status or
+ * the viewer's reach offers none.
  *
- * @param props.booking - The row, see {@link ListRowCheckInOutBooking}
+ * @param props.booking - The row, see {@link BookingQuickActionsBooking}
  */
-export function ListRowCheckInOut({ booking }: ListRowCheckInOutProps) {
+export function BookingQuickActions({ booking }: BookingQuickActionsProps) {
   const roles = useOrganizationRoles();
   const roleAccess = useRoleAccess();
   const bookingSettings = useBookingSettings();
@@ -171,7 +205,11 @@ export function ListRowCheckInOut({ booking }: ListRowCheckInOutProps) {
       direction: "checkin",
     });
 
-  const buttons = resolveRowCheckInOut({ booking, canCheckOut, canCheckIn });
+  const buttons = resolveCheckInOutActions({
+    booking,
+    canCheckOut,
+    canCheckIn,
+  });
   if (!buttons.checkOut && !buttons.checkOutRemaining && !buttons.checkIn) {
     return null;
   }
@@ -188,7 +226,7 @@ export function ListRowCheckInOut({ booking }: ListRowCheckInOutProps) {
   };
 
   return (
-    <div className="flex items-center justify-end gap-2">
+    <div className="flex items-center gap-2">
       <fetcher.Form
         id={formId}
         method="post"
@@ -203,50 +241,45 @@ export function ListRowCheckInOut({ booking }: ListRowCheckInOutProps) {
 
       {buttons.checkOut ? (
         busy ? (
-          <Button type="button" size="sm" disabled className={TRIGGER_CLASS}>
-            Check out
-          </Button>
+          <BusyActionButton {...ACTIONS.checkOut} />
         ) : (
           <CheckoutDialog
             booking={dialogBooking}
             formId={formId}
             intent="checkOut"
-            label="Check out"
+            variant="icon"
+            {...ACTIONS.checkOut}
             disabled={checkOutDisabled}
-            triggerClassName={TRIGGER_CLASS}
           />
         )
       ) : null}
 
       {buttons.checkOutRemaining ? (
         busy ? (
-          <Button type="button" size="sm" disabled className={TRIGGER_CLASS}>
-            Check out remaining
-          </Button>
+          <BusyActionButton {...ACTIONS.checkOutRemaining} />
         ) : (
           <CheckoutDialog
             booking={dialogBooking}
             formId={formId}
             intent="checkOutRemaining"
-            label="Check out remaining"
+            variant="icon"
+            {...ACTIONS.checkOutRemaining}
             // The booking has started: adjusting the start date no longer
             // applies, the same as the header's "Check out remaining".
             suppressEarlyCheckoutPrompt
-            triggerClassName={TRIGGER_CLASS}
           />
         )
       ) : null}
 
       {buttons.checkIn ? (
         busy ? (
-          <Button type="button" size="sm" disabled className={TRIGGER_CLASS}>
-            Check in
-          </Button>
+          <BusyActionButton {...ACTIONS.checkIn} />
         ) : (
           <CheckinDialog
             booking={dialogBooking}
             formId={formId}
-            label="Check in"
+            variant="icon"
+            {...ACTIONS.checkIn}
           />
         )
       ) : null}

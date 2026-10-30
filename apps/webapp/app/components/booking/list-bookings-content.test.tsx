@@ -53,9 +53,9 @@ vi.mock("../shared/date", () => ({
 
 // why: the row's Check out / Check in buttons read three layout-loader hooks
 // and a fetcher, and have their own render test in
-// `list-row-check-in-out.test.tsx`; a stub keeps this test about the pills.
-vi.mock("./list-row-check-in-out", () => ({
-  ListRowCheckInOut: () => <span>row actions</span>,
+// `booking-quick-actions.test.tsx`; a stub keeps this test about the pills.
+vi.mock("./booking-quick-actions", () => ({
+  BookingQuickActions: () => <span>row actions</span>,
 }));
 
 // why: `BookingStatusBadge` (kept REAL below) reads these two hooks; stub
