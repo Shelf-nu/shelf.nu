@@ -339,6 +339,7 @@ describe("runLinkPreviewJob", () => {
     vi.mocked(db.linkPreview.findFirst).mockResolvedValue({
       url: MANUAL,
       attempts: 0,
+      pageTitle: null,
     } as never);
 
     await runLinkPreviewJob({ previewId: "lp-1", organizationId: ORG });
@@ -367,6 +368,7 @@ describe("runLinkPreviewJob", () => {
     vi.mocked(db.linkPreview.findFirst).mockResolvedValue({
       url: MANUAL,
       attempts: 0,
+      pageTitle: "EOS R5 user manual",
     } as never);
 
     await runLinkPreviewJob({ previewId: "lp-1", organizationId: ORG });
@@ -380,7 +382,7 @@ describe("runLinkPreviewJob", () => {
     });
   });
 
-  it("clears the title when a page is gone for good", async () => {
+  it("keeps a known title when the page answers gone, and retries in an hour", async () => {
     // why: MSW answers in place of the maker's site.
     server.use(
       http.get(MANUAL, () => new HttpResponse("gone", { status: 404 }))
@@ -388,6 +390,29 @@ describe("runLinkPreviewJob", () => {
     vi.mocked(db.linkPreview.findFirst).mockResolvedValue({
       url: MANUAL,
       attempts: 0,
+      pageTitle: "EOS R5 user manual",
+    } as never);
+
+    await runLinkPreviewJob({ previewId: "lp-1", organizationId: ORG });
+
+    // No pageTitle in the write: the stored title stays.
+    expect(written()?.data).toEqual({
+      outcome: "UNREACHABLE",
+      attempts: 1,
+      fetchedAt: NOW,
+      nextFetchAt: new Date("2026-10-29T13:00:00.000Z"),
+    });
+  });
+
+  it("gives up for good on a page that is gone and never had a title", async () => {
+    // why: MSW answers in place of the maker's site.
+    server.use(
+      http.get(MANUAL, () => new HttpResponse("gone", { status: 404 }))
+    );
+    vi.mocked(db.linkPreview.findFirst).mockResolvedValue({
+      url: MANUAL,
+      attempts: 0,
+      pageTitle: null,
     } as never);
 
     await runLinkPreviewJob({ previewId: "lp-1", organizationId: ORG });
@@ -409,6 +434,7 @@ describe("runLinkPreviewJob", () => {
     vi.mocked(db.linkPreview.findFirst).mockResolvedValue({
       url: MANUAL,
       attempts: 2,
+      pageTitle: null,
     } as never);
 
     await runLinkPreviewJob({ previewId: "lp-1", organizationId: ORG });
@@ -427,6 +453,7 @@ describe("runLinkPreviewJob", () => {
     vi.mocked(db.linkPreview.findFirst).mockResolvedValue({
       url: MANUAL,
       attempts: 0,
+      pageTitle: null,
     } as never);
 
     await runLinkPreviewJob({ previewId: "lp-1", organizationId: ORG });
@@ -441,6 +468,7 @@ describe("runLinkPreviewJob", () => {
     vi.mocked(db.linkPreview.findFirst).mockResolvedValue({
       url: "http://10.0.0.5/manual.pdf",
       attempts: 0,
+      pageTitle: null,
     } as never);
 
     await runLinkPreviewJob({ previewId: "lp-1", organizationId: ORG });
@@ -459,6 +487,7 @@ describe("runLinkPreviewJob", () => {
     vi.mocked(db.linkPreview.findFirst).mockResolvedValue({
       url: "https://user:secret@files.example.com/manual.pdf",
       attempts: 0,
+      pageTitle: null,
     } as never);
 
     await runLinkPreviewJob({ previewId: "lp-1", organizationId: ORG });

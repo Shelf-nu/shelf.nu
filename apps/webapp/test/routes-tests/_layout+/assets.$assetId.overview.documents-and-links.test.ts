@@ -68,7 +68,7 @@ const { mockGetActiveCustomFields } = vi.hoisted(() => ({
   mockGetActiveCustomFields: vi.fn(),
 }));
 // why: the definitions come from Postgres; the test supplies one Link field
-// and one plain field, and answers by the filter each call asks for.
+// and one plain field.
 vi.mock("~/modules/custom-field/service.server", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   getActiveCustomFields: mockGetActiveCustomFields,
@@ -131,10 +131,7 @@ describe("asset overview loader: Documents & links", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetAsset.mockResolvedValue(camera);
-    mockGetActiveCustomFields.mockImplementation(
-      ({ format }: { format?: string }) =>
-        Promise.resolve(format === "LINK" ? [manual] : [manual, serial])
-    );
+    mockGetActiveCustomFields.mockResolvedValue([manual, serial]);
     mockGetLinkTitles.mockResolvedValue({});
   });
 
@@ -146,7 +143,6 @@ describe("asset overview loader: Documents & links", () => {
     expect(mockGetActiveCustomFields).toHaveBeenCalledWith({
       organizationId: "org-1",
       category: "cat-cameras",
-      format: "LINK",
     });
     expect(result.linkDefinitions).toEqual([
       {
@@ -169,6 +165,8 @@ describe("asset overview loader: Documents & links", () => {
       expect.objectContaining({ id: "cf-manual", format: "LINK" }),
     ]);
     expect(result.allCustomFieldDefs).toHaveLength(2);
+    // One read serves both: the Link fields are picked from the full list.
+    expect(mockGetActiveCustomFields).toHaveBeenCalledTimes(1);
   });
 
   it("sends the titles of the links among the values the page shows", async () => {

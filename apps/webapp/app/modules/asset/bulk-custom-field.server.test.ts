@@ -66,6 +66,7 @@ const field = {
   id: "cf-brand",
   name: "Brand",
   type: "OPTION",
+  format: "PLAIN",
   options: ["Westermo", "Siemens"],
   helpText: null,
   categories: [] as { id: string }[],
@@ -385,6 +386,52 @@ describe("bulkSetAssetCustomField", () => {
 
     it("refuses a blank text value", async () => {
       await expect(setOn("TEXT", "")).rejects.toMatchObject({ status: 400 });
+    });
+  });
+
+  describe("a Link field", () => {
+    /** Runs the action for one empty asset with a Link-format text field. */
+    async function setOnLink(rawValue: string) {
+      vitest.mocked(db.customField.findFirst).mockResolvedValue({
+        ...field,
+        type: "TEXT",
+        format: "LINK",
+        options: [],
+      } as never);
+      vitest
+        .mocked(db.asset.findMany)
+        .mockResolvedValue([asset("a1")] as never);
+      await bulkSetAssetCustomField({
+        ...args,
+        rawValue,
+        assetIds: ["a1"],
+        mode: "EMPTY_ONLY",
+      });
+      return vitest.mocked(db.assetCustomFieldValue.createMany).mock
+        .calls[0][0] as unknown as { data: { value: unknown }[] };
+    }
+
+    it("reads the field's format, which decides the Link rule", async () => {
+      await setOnLink("https://example.com/manual.pdf");
+      expect(db.customField.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          select: expect.objectContaining({ format: true }),
+        })
+      );
+    });
+
+    it("refuses text that is not a web link, and writes nothing", async () => {
+      await expect(setOnLink("see binder 3")).rejects.toMatchObject({
+        status: 400,
+      });
+      expect(db.assetCustomFieldValue.createMany).not.toHaveBeenCalled();
+    });
+
+    it("stores a link typed without a scheme as https", async () => {
+      const { data } = await setOnLink("example.com/manual.pdf");
+      expect(data[0].value).toMatchObject({
+        raw: "https://example.com/manual.pdf",
+      });
     });
   });
 

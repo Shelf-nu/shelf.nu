@@ -144,7 +144,9 @@ export function AdvancedIndexColumn({
               </PopoverContent>
             </PopoverPortal>
           </Popover>
-        ) : field.customField.type === CustomFieldType.TEXT ? (
+        ) : field.customField.type === CustomFieldType.TEXT ||
+          field.customField.type === CustomFieldType.OPTION ? (
+          // An option is free text an admin typed, so it can hold a link too.
           <TextWithLinks
             value={String(fieldValue.raw)}
             titles={linkTitles}

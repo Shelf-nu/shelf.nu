@@ -4,9 +4,11 @@
  * columns.
  *
  * The page's rows carry each value's field id and type but not its format, so
- * the loader picks the Link field values with the active field definitions it
- * already loads, hands only those to `getLinkTitles`, and returns the answer
- * as `linkTitles`, the same fixture the chip tests render.
+ * the loader reads each value's format from the active field definitions it
+ * already loads, hands every value to `getLinkTitles` (which claims only the
+ * Link-format ones), and returns the answer as `linkTitles`, the same fixture
+ * the chip tests render. Plain text values are read too, so a link named in a
+ * plain field shows its name in the index as it does on the asset page.
  *
  * Every other read is stubbed so the loader runs to the end.
  *
@@ -196,7 +198,7 @@ describe("advancedModeLoader: link titles", () => {
     mockGetLinkTitles.mockResolvedValue(LINK_TITLES);
   });
 
-  it("reads titles for the page's Link field values only and returns them", async () => {
+  it("reads titles for every value, each with its field's format, and returns them", async () => {
     const payload = await load();
 
     expect(mockGetLinkTitles).toHaveBeenCalledWith({
@@ -205,6 +207,13 @@ describe("advancedModeLoader: link titles", () => {
         {
           value: { raw: MANUAL_URL, valueText: MANUAL_URL },
           customField: { type: "TEXT", format: "LINK" },
+        },
+        {
+          value: {
+            raw: "https://www.example.com/supplier",
+            valueText: "https://www.example.com/supplier",
+          },
+          customField: { type: "TEXT", format: "PLAIN" },
         },
         {
           value: { raw: SHOP_URL, valueText: SHOP_URL },

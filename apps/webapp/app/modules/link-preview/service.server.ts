@@ -36,6 +36,7 @@ import { Logger } from "~/utils/logger";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import { fetchPageTitle } from "./fetch-title.server";
 import { nextFetchAfter } from "./policy";
+import type { PageTitleResult } from "./policy";
 
 const label: ErrorLabel = "Link preview";
 
@@ -252,7 +253,10 @@ export async function isLinkStoredInWorkspace({
  * `attempts` counts failed fetches in a row since the link last had a title,
  * so a title starts the retry delays over. A transient failure keeps the
  * title the row already has, so a page that is briefly down keeps its name
- * on the chips until it is fetched again.
+ * on the chips until it is fetched again. A page that answers "gone" while
+ * the row has a title is treated as transient too: a page that had a title
+ * is more likely mid-move than deleted, and a final answer would wipe the
+ * title for good.
  *
  * @param job - The claimed row's id and workspace
  * @throws When the database read or write fails
@@ -264,14 +268,22 @@ export async function runLinkPreviewJob({
   const where = { id: previewId, organizationId };
   const row = await db.linkPreview.findFirst({
     where,
-    select: { url: true, attempts: true },
+    select: { url: true, attempts: true, pageTitle: true },
   });
   if (!row) return;
 
   const link = parseLink(row.url);
-  const result = link
+  const fetched: PageTitleResult = link
     ? await fetchPageTitle(link)
-    : ({ outcome: "UNREACHABLE", permanent: true } as const);
+    : { outcome: "UNREACHABLE", permanent: true };
+  const goneWithTitle =
+    link !== null &&
+    row.pageTitle !== null &&
+    fetched.outcome === "UNREACHABLE" &&
+    fetched.permanent;
+  const result: PageTitleResult = goneWithTitle
+    ? { outcome: "UNREACHABLE", permanent: false }
+    : fetched;
   const transient = "permanent" in result && !result.permanent;
   const attempts = result.outcome === "TITLE" ? 0 : row.attempts + 1;
   const fetchedAt = new Date();

@@ -963,28 +963,28 @@ export async function advancedModeLoader({
     : null;
 
   /**
-   * Titles for the page's Link field values, read while the images and
-   * booking rows below load: it needs only the values, and never throws. The
-   * rows carry each value's field id but not its format, which comes from the
-   * active fields loaded above, so the raw SQL stays unchanged.
+   * Titles for the links in the page's text field values, read while the
+   * images and booking rows below load: it needs only the values, and never
+   * throws. Every TEXT value is read, as on the asset page, so a link named in
+   * a plain field shows its name here too; only Link-format values are
+   * claimed for a fetch. The rows carry each value's field id but not its
+   * format, which comes from the active fields loaded above, so the raw SQL
+   * stays unchanged.
    */
-  const linkFieldIds = new Set(
-    customFields
-      .filter((field) => field.format === CustomFieldFormat.LINK)
-      .map((field) => field.id)
+  const formatByFieldId = new Map(
+    customFields.map((field) => [field.id, field.format])
   );
   const linkTitlesRead = getLinkTitles({
     organizationId,
     values: assets.flatMap((asset) =>
-      asset.customFields
-        .filter(({ customField }) => linkFieldIds.has(customField.id))
-        .map(({ value, customField }) => ({
-          value,
-          customField: {
-            type: customField.type,
-            format: CustomFieldFormat.LINK,
-          },
-        }))
+      asset.customFields.map(({ value, customField }) => ({
+        value,
+        customField: {
+          type: customField.type,
+          format:
+            formatByFieldId.get(customField.id) ?? CustomFieldFormat.PLAIN,
+        },
+      }))
     ),
   });
 

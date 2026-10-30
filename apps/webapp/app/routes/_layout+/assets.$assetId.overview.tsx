@@ -404,61 +404,52 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     /**
      * Read together, none depending on another:
-     * - `linkDefinitions`: the Link fields that apply to this asset. Loaded
-     *   for EVERY reader: the "Documents & links" card lists them, unset ones
-     *   included, so this decides which rows are displayed and must not be
-     *   permission-gated. Trimmed to what a row needs, as view-only users
-     *   receive it too.
+     * - `activeCustomFieldDefs`: the active fields that apply to this asset.
+     *   Loaded for EVERY reader: its Link fields feed the "Documents & links"
+     *   card, which lists them unset ones included, so it decides which rows
+     *   are displayed and must not be permission-gated. Editors also get the
+     *   whole list below for edit mode.
      * - `linkTitles`: the titles of the links among the values shown, for
      *   their chips. Never throws.
      * - Editor data, only for users who can update the asset. View-only users
      *   see static display rows and never enter edit mode, so the
-     *   categories, locations and custom field definitions are skipped for
-     *   them. Tags are read-only on the overview page, so they are skipped
-     *   for everyone.
+     *   categories and locations are skipped for them. Tags are read-only on
+     *   the overview page, so they are skipped for everyone.
      */
-    const [
-      linkDefinitions,
-      linkTitles,
-      allCustomFieldDefs,
-      categoriesData,
-      locationsData,
-    ] = await Promise.all([
-      getActiveCustomFields({
-        organizationId,
-        category: asset.categoryId,
-        format: CustomFieldFormat.LINK,
-      }).then((definitions) =>
-        definitions.map(({ id, name, type, format, options }) => ({
-          id,
-          name,
-          type,
-          format,
-          options,
-        }))
-      ),
-      getLinkTitles({ organizationId, values: customFields }),
-      canEditAsset
-        ? getActiveCustomFields({
-            organizationId,
-            category: asset.categoryId,
-          })
-        : [],
-      canEditAsset
-        ? getCategoriesForCreateAndEdit({
-            request,
-            organizationId,
-            defaultCategory: asset.categoryId,
-          })
-        : { categories: [], totalCategories: 0 },
-      canEditAsset
-        ? getLocationsForCreateAndEdit({
-            request,
-            organizationId,
-            defaultLocation: getPrimaryLocation(asset)?.id ?? undefined,
-          })
-        : { locations: [], totalLocations: 0 },
-    ]);
+    const [activeCustomFieldDefs, linkTitles, categoriesData, locationsData] =
+      await Promise.all([
+        getActiveCustomFields({
+          organizationId,
+          category: asset.categoryId,
+        }),
+        getLinkTitles({ organizationId, values: customFields }),
+        canEditAsset
+          ? getCategoriesForCreateAndEdit({
+              request,
+              organizationId,
+              defaultCategory: asset.categoryId,
+            })
+          : { categories: [], totalCategories: 0 },
+        canEditAsset
+          ? getLocationsForCreateAndEdit({
+              request,
+              organizationId,
+              defaultLocation: getPrimaryLocation(asset)?.id ?? undefined,
+            })
+          : { locations: [], totalLocations: 0 },
+      ]);
+
+    /** The Link fields, trimmed to what a row needs: view-only users get it. */
+    const linkDefinitions = activeCustomFieldDefs
+      .filter((def) => def.format === CustomFieldFormat.LINK)
+      .map(({ id, name, type, format, options }) => ({
+        id,
+        name,
+        type,
+        format,
+        options,
+      }));
+    const allCustomFieldDefs = canEditAsset ? activeCustomFieldDefs : [];
 
     const { categories, totalCategories } = categoriesData;
     const { locations, totalLocations } = locationsData;
