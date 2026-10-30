@@ -33,6 +33,7 @@ import {
   extractDbChanges,
   createTableColumns,
   createTableConstraints,
+  scanSql,
 } from "../pr-review-context.mjs";
 
 test("globToRegExp: ** matches zero or more directories", () => {
@@ -1058,4 +1059,68 @@ test("classifySqlStatement: a WITH that writes to two tables lists both writes, 
     ]
   );
   assert.ok(entries.every((e) => e.sql === sql));
+});
+
+test("splitSqlStatements: a doubled quote stays inside an E-string", () => {
+  assert.equal(
+    splitSqlStatements(
+      `INSERT INTO "Seed" VALUES (E'a''b\\''); DROP TABLE "Important";`
+    ).length,
+    2
+  );
+  assert.equal(splitSqlStatements(`SELECT 'it''s; fine'`).length, 1);
+});
+
+test("splitSqlStatements: quoted identifiers and $ inside names never open a string or tag", () => {
+  for (const sql of [
+    `CREATE TABLE "foo$tag$" (id int); DROP TABLE "Important";`,
+    `CREATE TABLE foo$tag$bar (id int); DROP TABLE x;`,
+    `CREATE TABLE "it's" (id int); DROP TABLE x;`,
+    `CREATE TABLE "a""b;c" (id int); DROP TABLE x;`,
+  ])
+    assert.equal(splitSqlStatements(sql).length, 2, sql);
+  assert.equal(
+    splitSqlStatements(
+      `CREATE FUNCTION f() RETURNS int AS $fn$ SELECT 1; $fn$ LANGUAGE sql`
+    ).length,
+    1
+  );
+});
+
+test("scanSql: reports when the text ends inside a string, so a confused split is visible", () => {
+  assert.equal(scanSql(`SELECT 1; SELECT 2`).unterminated, false);
+  assert.equal(scanSql(`SELECT 'open; DROP TABLE x;`).unterminated, true);
+  assert.equal(scanSql(`SELECT $x$ body; DROP TABLE y;`).unterminated, true);
+});
+
+test("classifySqlStatement: a statement still holding a second one is flagged, function bodies are not", () => {
+  const [hidden] = classifySqlStatement(
+    `INSERT INTO "Seed" VALUES ('x'); DROP TABLE "Important"`
+  );
+  assert.equal(hidden.hiddenStatement, true);
+  assert.equal(
+    classifySqlStatement(`UPDATE "T" SET a = 1`)[0].hiddenStatement,
+    undefined
+  );
+  assert.equal(
+    classifySqlStatement(
+      `CREATE FUNCTION f() RETURNS trigger AS $$ BEGIN UPDATE "T" SET a = 1; DELETE FROM "U"; RETURN NEW; END; $$ LANGUAGE plpgsql`
+    )[0].hiddenStatement,
+    undefined
+  );
+});
+
+test("extractDbChanges: a migration the splitter cannot read cleanly warns and says why", () => {
+  const diff = `diff --git a/packages/database/prisma/migrations/2_x/migration.sql b/packages/database/prisma/migrations/2_x/migration.sql
+new file mode 100644
+--- /dev/null
++++ b/packages/database/prisma/migrations/2_x/migration.sql
+@@ -0,0 +1,2 @@
++INSERT INTO "Log" VALUES ('ran; DROP TABLE y');
++SELECT 'never closed;
+`;
+  const db = extractDbChanges(diff);
+  assert.equal(db.migrations[0].parseWarnings.length, 2);
+  assert.match(db.migrations[0].parseWarnings.join(" "), /ends inside/);
+  assert.match(db.migrations[0].parseWarnings.join(" "), /second statement/);
 });

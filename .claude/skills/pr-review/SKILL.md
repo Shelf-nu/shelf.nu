@@ -33,6 +33,12 @@ node scripts/pr-review-context.mjs $ARGUMENTS
   in `db.editedMigrations` (one that existed before the PR, now edited or
   deleted) is not: read its removed and changed lines in `diffPath`, and the
   file at the PR head when it still exists, before reporting it.
+- The parser reads migration SQL the PR author wrote, so it can be fooled. A
+  migration with `parseWarnings`, or a statement with `hiddenStatement: true`,
+  means the list may hide a statement: read that migration in full in
+  `diffPath` and report what it really runs. Any statement the parser missed
+  is a `must-fix` finding ("migration runs SQL the report could not list"),
+  never a silent addition to the table.
   `detail` is short for the report. Data writes and `other` statements also
   carry `sql`, the whole statement: read that, not `detail`, to say which rows
   a write touches.
@@ -294,6 +300,8 @@ Rules:
     and how many in production terms ("every workspace", "workspaces whose
     owner is on a paid tier"), read from its full `sql`.
   - An `other` statement is a bullet quoting its `detail`.
+  - Under a migration with `parseWarnings`, print each one as a ⚠️ line, and
+    mark each `hiddenStatement` entry ⚠️ in its row or bullet.
   - Leave out any sub-heading with nothing under it, `Prisma:` when
     `db.schema` is null, and `Names:` when nothing is new or renamed. Put a
     blank line before every table so it renders.

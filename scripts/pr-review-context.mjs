@@ -324,38 +324,62 @@ export function splitDiff(diff) {
 }
 
 /**
- * Splits SQL into statements on `;`, ignoring semicolons inside quotes
- * (including backslash escapes in E'...' strings) and dollar-quoted bodies
- * (functions, DO blocks, any `$tag$`). Line comments (`--`) and
- * block comments (slash-star, nested ones included, as Postgres allows) are
- * dropped, so the Warnings block Prisma writes at the top of a migration
- * never hides the statement after it.
+ * Scans SQL into statements on `;`, ignoring semicolons inside string
+ * literals (`''` and, in E'...' strings, backslash escapes included), quoted
+ * identifiers (`"..."`, `""` included) and dollar-quoted bodies (functions,
+ * DO blocks, any `$tag$`). A `$` inside a name (`foo$tag$bar`) is part of the
+ * name, as in Postgres. Line comments (`--`) and block comments (slash-star,
+ * nested ones included) are dropped, so the Warnings block Prisma writes at
+ * the top of a migration never hides the statement after it.
+ *
+ * Valid SQL never ends inside a literal, identifier, comment or body, so
+ * `unterminated` means the scan lost track somewhere and its statement
+ * boundaries cannot be trusted.
  * @param {string} sql
- * @returns {string[]} trimmed, non-empty statements without the trailing `;`
+ * @returns {{statements: string[], unterminated: boolean}} trimmed, non-empty statements without the trailing `;`
  */
-export function splitSqlStatements(sql) {
+export function scanSql(sql) {
   const statements = [];
   let current = "";
-  let dollarTag = null;
-  let inQuote = false;
+  /** @type {null | "'" | '"' | "comment" | string} the open literal, identifier, comment or `$tag$` */
+  let open = null;
   // Inside an E'...' string a backslash escapes the next character, `\'` included.
   let escapeString = false;
+  let commentDepth = 0;
   for (let i = 0; i < sql.length; i++) {
     const char = sql[i];
-    if (dollarTag) {
-      if (sql.startsWith(dollarTag, i)) {
-        current += dollarTag;
-        i += dollarTag.length - 1;
-        dollarTag = null;
-      } else current += char;
+    if (open === "comment") {
+      if (sql.startsWith("/*", i)) {
+        commentDepth += 1;
+        i += 1;
+      } else if (sql.startsWith("*/", i)) {
+        commentDepth -= 1;
+        i += 1;
+        if (commentDepth === 0) {
+          open = null;
+          // Keep the words either side of the comment apart.
+          current += " ";
+        }
+      }
       continue;
     }
-    if (inQuote) {
+    if (open === "'" || open === '"') {
       current += char;
-      if (escapeString && char === "\\" && i + 1 < sql.length) {
-        current += sql[i + 1];
-        i += 1;
-      } else if (char === "'") inQuote = false;
+      if (open === "'" && escapeString && char === "\\" && i + 1 < sql.length) {
+        current += sql[++i];
+      } else if (char === open) {
+        // A doubled quote is the quote character itself, not the end.
+        if (sql[i + 1] === open) current += sql[++i];
+        else open = null;
+      }
+      continue;
+    }
+    if (open) {
+      if (sql.startsWith(open, i)) {
+        current += open;
+        i += open.length - 1;
+        open = null;
+      } else current += char;
       continue;
     }
     if (char === "-" && sql[i + 1] === "-") {
@@ -364,32 +388,25 @@ export function splitSqlStatements(sql) {
       continue;
     }
     if (char === "/" && sql[i + 1] === "*") {
-      let depth = 1;
-      i += 2;
-      while (i < sql.length && depth > 0) {
-        if (sql.startsWith("/*", i)) {
-          depth += 1;
-          i += 2;
-        } else if (sql.startsWith("*/", i)) {
-          depth -= 1;
-          i += 2;
-        } else i += 1;
-      }
-      i -= 1;
-      // Keep the words either side of the comment apart.
-      current += " ";
+      open = "comment";
+      commentDepth = 1;
+      i += 1;
       continue;
     }
-    if (char === "'") {
-      inQuote = true;
+    if (char === "'" || char === '"') {
+      open = char;
       // An E prefix that is not the end of an identifier (`name'` is not one).
       escapeString =
-        /[Ee]/.test(sql[i - 1] ?? "") && !/\w/.test(sql[i - 2] ?? "");
+        char === "'" &&
+        /[Ee]/.test(sql[i - 1] ?? "") &&
+        !/[\w$]/.test(sql[i - 2] ?? "");
+      current += char;
+      continue;
     }
-    if (char === "$") {
+    if (char === "$" && !/[\w$]/.test(sql[i - 1] ?? "")) {
       const tag = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(i));
       if (tag) {
-        dollarTag = tag[0];
+        open = tag[0];
         current += tag[0];
         i += tag[0].length - 1;
         continue;
@@ -403,7 +420,16 @@ export function splitSqlStatements(sql) {
     current += char;
   }
   if (current.trim()) statements.push(current.trim());
-  return statements;
+  return { statements, unterminated: open !== null };
+}
+
+/**
+ * Splits SQL into statements. See `scanSql` for what it understands.
+ * @param {string} sql
+ * @returns {string[]}
+ */
+export function splitSqlStatements(sql) {
+  return scanSql(sql).statements;
 }
 
 /** Strips the double quotes Prisma puts around identifiers. */
@@ -488,14 +514,36 @@ export function createTableConstraints(table, body) {
 }
 
 /**
+ * A statement keyword right after a `;` inside one scanned statement: the
+ * scan folded a second statement into the first.
+ */
+const SECOND_STATEMENT =
+  /;\s*(?:CREATE|DROP|ALTER|INSERT|UPDATE|DELETE|TRUNCATE|GRANT|REVOKE|COMMENT)\b/i;
+
+/** Statements whose dollar-quoted body legitimately holds other statements. */
+const HAS_BODY = /^(?:CREATE (?:OR REPLACE )?(?:FUNCTION|PROCEDURE)|DO)\b/i;
+
+/**
  * Classifies one migration statement into what the report lists: the action,
  * the table, type or index it touches, and a one-line detail. Statements the
  * parser does not know come back as `other` with their opening text, so
  * nothing in a migration is ever left out of the list.
  * @param {string} statement - one SQL statement without its `;`
- * @returns {Array<{action: string, target: string, detail: string, sql?: string, columns?: ReturnType<typeof createTableColumns>}>} `columns` only on `create table`; `sql` (the whole statement) only on data writes and `other`; usually one entry; `ALTER TABLE` with several clauses gives one per clause
+ * @returns {Array<{action: string, target: string, detail: string, sql?: string, columns?: ReturnType<typeof createTableColumns>}>} `columns` only on `create table`; `sql` (the whole statement) only on data writes and `other`; `hiddenStatement` when the statement still holds a second one after a `;`; usually one entry; `ALTER TABLE` with several clauses gives one per clause
  */
 export function classifySqlStatement(statement) {
+  const entries = classifyOne(statement);
+  const flat = statement.replace(/\s+/g, " ").trim();
+  if (HAS_BODY.test(flat) || !SECOND_STATEMENT.test(statement)) return entries;
+  return entries.map((entry) => ({ ...entry, hiddenStatement: true }));
+}
+
+/**
+ * Classifies one statement; `classifySqlStatement` adds the hidden-statement flag.
+ * @param {string} statement
+ * @returns {ReturnType<typeof classifySqlStatement>}
+ */
+function classifyOne(statement) {
   const sql = statement.replace(/\s+/g, " ").trim();
   const short = sql.length > 160 ? `${sql.slice(0, 157)}...` : sql;
   let m;
@@ -838,7 +886,7 @@ export function summarizeSchemaDiff({ added, removed }) {
  * can be summarised away. Statements come from added lines only, which is the
  * whole file for a new migration but not for one in `editedMigrations`.
  * @param {string} diff
- * @returns {null | {migrations: Array<{path: string, status: string, statements: Array<{action: string, target: string, detail: string}>}>, schema: ReturnType<typeof summarizeSchemaDiff> | null, editedMigrations: string[]}}
+ * @returns {null | {migrations: Array<{path: string, status: string, parseWarnings: string[], statements: Array<{action: string, target: string, detail: string}>}>, schema: ReturnType<typeof summarizeSchemaDiff> | null, editedMigrations: string[]}}
  *   null when the PR touches neither the schema nor a migration. `editedMigrations`
  *   lists migrations that existed before the PR and are changed or deleted by it.
  */
@@ -848,13 +896,30 @@ export function extractDbChanges(diff) {
   const migrationFiles = files.filter((file) => MIGRATION_SQL.test(file.path));
   if (!schemaFile && migrationFiles.length === 0) return null;
   return {
-    migrations: migrationFiles.map((file) => ({
-      path: file.path,
-      status: file.status,
-      statements: splitSqlStatements(file.added.join("\n")).flatMap(
-        classifySqlStatement
-      ),
-    })),
+    migrations: migrationFiles.map((file) => {
+      const scan = scanSql(file.added.join("\n"));
+      const statements = scan.statements.flatMap(classifySqlStatement);
+      const parseWarnings = [];
+      if (scan.unterminated)
+        parseWarnings.push(
+          "the SQL ends inside a string, quoted name, comment or dollar-quoted body, so its statement boundaries cannot be trusted"
+        );
+      const hidden = new Set(
+        statements.filter((s) => s.hiddenStatement).map((s) => s.target)
+      );
+      if (hidden.size > 0)
+        parseWarnings.push(
+          `a statement on ${[...hidden].join(
+            ", "
+          )} still holds a second statement after a semicolon`
+        );
+      return {
+        path: file.path,
+        status: file.status,
+        statements,
+        parseWarnings,
+      };
+    }),
     schema: schemaFile ? summarizeSchemaDiff(schemaFile) : null,
     editedMigrations: migrationFiles
       .filter((file) => file.status !== "added")
@@ -1201,6 +1266,12 @@ export function collectContext({ run, prArg, startedAt, marker }) {
   }
 
   const db = extractDbChanges(diff);
+  for (const migration of db?.migrations ?? []) {
+    for (const reason of migration.parseWarnings)
+      warnings.push(
+        `The DB change list for ${migration.path} may be incomplete: ${reason}. Read that migration in full before approving it.`
+      );
+  }
   if (db?.editedMigrations.length) {
     warnings.push(
       `This PR changes or deletes migrations that already existed (${db.editedMigrations.join(
