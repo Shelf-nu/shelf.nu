@@ -26,6 +26,11 @@ import {
   httpsRepoUrl,
   editedPrFiles,
   flattenPath,
+  splitDiff,
+  splitSqlStatements,
+  classifySqlStatement,
+  summarizeSchemaDiff,
+  extractDbChanges,
 } from "../pr-review-context.mjs";
 
 test("globToRegExp: ** matches zero or more directories", () => {
@@ -662,4 +667,208 @@ test("artifactDir: artifacts live in .pr-review/<n> at the worktree root", () =>
     ["git rev-parse --show-toplevel", { stdout: "/repo/wt\n" }],
   ]);
   assert.equal(artifactDir(run, 3191), "/repo/wt/.pr-review/3191");
+});
+
+/** Prefixes every line with `+`, as a diff shows a new file's content. */
+const added = (text) =>
+  text
+    .split("\n")
+    .map((line) => `+${line}`)
+    .join("\n");
+
+/** A trimmed copy of the PdfDocument migration, as `gh pr diff` shows a new file. */
+const PDF_MIGRATION_DIFF = `diff --git a/packages/database/prisma/migrations/20261028120000_add_pdf_documents/migration.sql b/packages/database/prisma/migrations/20261028120000_add_pdf_documents/migration.sql
+new file mode 100644
+index 000000000..111111111
+--- /dev/null
++++ b/packages/database/prisma/migrations/20261028120000_add_pdf_documents/migration.sql
+@@ -0,0 +1,30 @@
+${added(`-- PDF documents: saved layouts; a ; in a comment is not a statement end.
+CREATE TYPE "PdfDocumentKind" AS ENUM ('BOOKING');
+
+CREATE TABLE "PdfDocument" (
+    "id" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "kind" "PdfDocumentKind" NOT NULL DEFAULT 'BOOKING',
+    "note" TEXT,
+
+    CONSTRAINT "PdfDocument_pkey" PRIMARY KEY ("id")
+);
+
+ALTER TABLE "PdfDocument" ADD CONSTRAINT "PdfDocument_organizationId_fkey"
+    FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+CREATE UNIQUE INDEX "PdfDocument_one_default" ON "PdfDocument"("organizationId", "kind") WHERE "isDefault";
+ALTER TABLE "PdfDocument" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "Organization" ADD COLUMN "paidPdfDocumentsSeededAt" TIMESTAMP(3);
+INSERT INTO "PdfDocument" ("id", "name") SELECT gen_random_uuid()::text, 'Check; list' FROM "Organization" o;`)}
+diff --git a/packages/database/prisma/schema.prisma b/packages/database/prisma/schema.prisma
+index 222222222..333333333 100644
+--- a/packages/database/prisma/schema.prisma
++++ b/packages/database/prisma/schema.prisma
+@@ -430,3 +430,12 @@ model Organization {
+   name String
++model PdfDocument {
++  id String @id
++}
++enum PdfDocumentKind {
++  BOOKING
++}
+diff --git a/apps/webapp/app/x.ts b/apps/webapp/app/x.ts
+index 444444444..555555555 100644
+--- a/apps/webapp/app/x.ts
++++ b/apps/webapp/app/x.ts
+@@ -1,1 +1,1 @@
+-const a = 1;
++const a = 2;
+`;
+
+test("splitDiff: per-file added and removed lines, and new or deleted files", () => {
+  const files = splitDiff(PDF_MIGRATION_DIFF);
+  assert.deepEqual(
+    files.map((f) => [f.path, f.status]),
+    [
+      [
+        "packages/database/prisma/migrations/20261028120000_add_pdf_documents/migration.sql",
+        "added",
+      ],
+      ["packages/database/prisma/schema.prisma", "modified"],
+      ["apps/webapp/app/x.ts", "modified"],
+    ]
+  );
+  assert.deepEqual(files[2].added, ["const a = 2;"]);
+  assert.deepEqual(files[2].removed, ["const a = 1;"]);
+});
+
+test("splitSqlStatements: ignores semicolons in comments, quotes and dollar-quoted bodies", () => {
+  const sql = `-- a; b
+SELECT 'x;y';
+CREATE FUNCTION f() RETURNS trigger AS $$ BEGIN NEW.a := 1; RETURN NEW; END; $$ LANGUAGE plpgsql;
+UPDATE "T" SET a = 1`;
+  const statements = splitSqlStatements(sql);
+  assert.equal(statements.length, 3);
+  assert.equal(statements[0], "SELECT 'x;y'");
+  assert.match(statements[1], /^CREATE FUNCTION f\(\).*plpgsql$/s);
+});
+
+test("classifySqlStatement: renames, drops and multi-clause ALTER TABLE are each listed", () => {
+  const one = (sql) => classifySqlStatement(sql);
+  assert.deepEqual(one(`ALTER TABLE "PdfDocument" RENAME TO "PdfTemplate"`), [
+    { action: "rename table", target: "PdfDocument", detail: "to PdfTemplate" },
+  ]);
+  assert.deepEqual(one(`ALTER TABLE "Asset" RENAME COLUMN "a" TO "b"`), [
+    { action: "rename column", target: "Asset.a", detail: "to b" },
+  ]);
+  assert.deepEqual(
+    one(
+      `ALTER TABLE "Asset" DROP COLUMN "old",\nADD COLUMN "new" TEXT NOT NULL`
+    ).map((s) => [s.action, s.target]),
+    [
+      ["drop column", "Asset.old"],
+      ["add column", "Asset.new"],
+    ]
+  );
+  assert.deepEqual(
+    one(`ALTER TYPE "ActivityAction" ADD VALUE IF NOT EXISTS 'X'`),
+    [{ action: "add enum value", target: "ActivityAction", detail: "X" }]
+  );
+  assert.deepEqual(one(`DROP TABLE "Old"`), [
+    { action: "drop table", target: "Old", detail: "" },
+  ]);
+  assert.equal(one(`COMMENT ON TABLE "T" IS 'x'`)[0].action, "other");
+});
+
+test("summarizeSchemaDiff: added and removed blocks, a moved block is not a change", () => {
+  assert.deepEqual(
+    summarizeSchemaDiff({
+      added: ["model New {", "model Moved {", "enum E {", '  @@map("new")'],
+      removed: ["model Gone {", "model Moved {"],
+    }),
+    {
+      modelsAdded: ["New"],
+      modelsRemoved: ["Gone"],
+      enumsAdded: ["E"],
+      enumsRemoved: [],
+      mapsChanged: ['+ @@map("new")'],
+    }
+  );
+});
+
+test("extractDbChanges: lists every statement of the PdfDocument migration", () => {
+  const db = extractDbChanges(PDF_MIGRATION_DIFF);
+  assert.equal(db.migrations.length, 1);
+  assert.equal(db.migrations[0].status, "added");
+  assert.deepEqual(db.editedMigrations, []);
+  assert.deepEqual(
+    db.migrations[0].statements.map((s) => [s.action, s.target]),
+    [
+      ["create enum", "PdfDocumentKind"],
+      ["create table", "PdfDocument"],
+      ["add foreign key", "PdfDocument(organizationId)"],
+      ["create unique index", "PdfDocument_one_default"],
+      ["row level security", "PdfDocument"],
+      ["add column", "Organization.paidPdfDocumentsSeededAt"],
+      ["insert rows", "PdfDocument"],
+    ]
+  );
+  const [, table, fk, index] = db.migrations[0].statements;
+  assert.equal(
+    table.detail,
+    "id TEXT, name TEXT, kind PdfDocumentKind, note TEXT null"
+  );
+  assert.equal(
+    fk.detail,
+    "PdfDocument_organizationId_fkey -> Organization, on delete cascade"
+  );
+  assert.equal(
+    index.detail,
+    "on PdfDocument(organizationId, kind) where isDefault"
+  );
+  assert.deepEqual(db.schema.modelsAdded, ["PdfDocument"]);
+  assert.deepEqual(db.schema.enumsAdded, ["PdfDocumentKind"]);
+});
+
+test("extractDbChanges: null without database files; flags an edited existing migration", () => {
+  assert.equal(
+    extractDbChanges("diff --git a/x.ts b/x.ts\n@@ -1 +1 @@\n+a\n"),
+    null
+  );
+  const edited = `diff --git a/packages/database/prisma/migrations/1_x/migration.sql b/packages/database/prisma/migrations/1_x/migration.sql
+index 1..2 100644
+--- a/packages/database/prisma/migrations/1_x/migration.sql
++++ b/packages/database/prisma/migrations/1_x/migration.sql
+@@ -1 +1 @@
+-ALTER TABLE "A" ADD COLUMN "b" TEXT;
++ALTER TABLE "A" ADD COLUMN "c" TEXT;
+`;
+  const db = extractDbChanges(edited);
+  assert.deepEqual(db.editedMigrations, [
+    "packages/database/prisma/migrations/1_x/migration.sql",
+  ]);
+  assert.equal(db.schema, null);
+});
+
+test("collectContext: db is null for a PR without database changes", () => {
+  const { context } = collectContext({
+    run: fakeRun(baseResponses()),
+    startedAt: 1000,
+    marker: "m1",
+  });
+  assert.equal(context.db, null);
+});
+
+test("collectContext: a PR editing an existing migration warns", () => {
+  const diff = `diff --git a/packages/database/prisma/migrations/1_x/migration.sql b/packages/database/prisma/migrations/1_x/migration.sql
+index 1..2 100644
+@@ -1 +1 @@
++UPDATE "A" SET b = 1;
+`;
+  const { context } = collectContext({
+    run: fakeRun([["gh pr diff 3191", { stdout: diff }], ...baseResponses()]),
+    startedAt: 1000,
+    marker: "m1",
+  });
+  assert.equal(context.db.migrations[0].statements[0].action, "update rows");
+  assert.ok(
+    context.warnings.some((w) => w.includes("changes or deletes migrations"))
+  );
 });
