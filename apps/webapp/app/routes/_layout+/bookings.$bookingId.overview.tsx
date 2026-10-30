@@ -240,6 +240,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const nextReservations = await loadNextReservations({
       organizationId,
       bookingId: booking.id,
+      revealOtherBookings: access.bookings.seeAll,
     });
 
     // Exclude custodian from the notification recipients picker since

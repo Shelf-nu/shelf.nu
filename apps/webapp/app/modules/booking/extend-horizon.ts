@@ -29,17 +29,21 @@ import type { ClashingBooking } from "./clashing-bookings";
  * @param currentEnd - The booking's current end (an instant)
  * @param clashStart - The first reservation's start (an instant)
  * @param timeZone - The zone the end time of day is read and written in
- * @returns The suggested end, or `null` when no such end is later than the
- * current one (the clash starts too soon to add a whole day)
+ * @param now - The current instant; an end at or before it cannot be
+ * submitted (an overdue booking's end is already in the past)
+ * @returns The suggested end, or `null` when no such end is later than both
+ * the current end and now (the clash starts too soon to add a whole day)
  */
 export function suggestEndBeforeClash({
   currentEnd,
   clashStart,
   timeZone,
+  now = new Date(),
 }: {
   currentEnd: Date;
   clashStart: Date;
   timeZone: string;
+  now?: Date;
 }): Date | null {
   const endClock = wallClockPartsInZone(currentEnd, timeZone);
   const clashDay = wallClockPartsInZone(clashStart, timeZone);
@@ -50,7 +54,7 @@ export function suggestEndBeforeClash({
   if (candidate >= clashStart) {
     candidate = addDaysInZone(candidate, -1, timeZone);
   }
-  return candidate > currentEnd ? candidate : null;
+  return candidate > currentEnd && candidate > now ? candidate : null;
 }
 
 /** What an extend refusal carries about the bookings in the way. */
@@ -80,10 +84,10 @@ export function readClashRefusal(additionalData: unknown): ClashRefusal | null {
   const bookings = clashingBookings.flatMap((b: unknown) => {
     if (typeof b !== "object" || b === null) return [];
     const row = b as Partial<ClashingBooking>;
-    if (typeof row.id !== "string" || typeof row.name !== "string") return [];
+    if (typeof row.name !== "string") return [];
     return [
       {
-        id: row.id,
+        id: typeof row.id === "string" ? row.id : null,
         name: row.name,
         from: typeof row.from === "string" ? row.from : "",
         items: Array.isArray(row.items)

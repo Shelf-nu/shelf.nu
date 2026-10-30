@@ -23,7 +23,8 @@ export type ClashingBookingItem = {
 
 /** A booking that reserves shared items inside the days being added. */
 export type ClashingBooking = {
-  id: string;
+  /** `null` when the reader may not see other members' bookings. */
+  id: string | null;
   name: string;
   /** The instant the clash starts: this booking's start, as an ISO string. */
   from: string;
@@ -97,6 +98,26 @@ export function describeClashingBookings(
   return bookings.sort(
     (a, b) => a.from.localeCompare(b.from) || a.name.localeCompare(b.name)
   );
+}
+
+/** What a clashing booking is called for a reader who may not see it. */
+export const HIDDEN_BOOKING_NAME = "another booking";
+
+/**
+ * Strip the identity of each clashing booking for a reader who may not see
+ * other members' bookings: the items and the start day stay, the name and
+ * the link go.
+ *
+ * @param bookings - The output of {@link describeClashingBookings}
+ * @param revealOtherBookings - Whether the reader may see other bookings
+ * @returns The same bookings, anonymised unless the reader may see them
+ */
+export function redactClashingBookings(
+  bookings: ClashingBooking[],
+  revealOtherBookings: boolean
+): ClashingBooking[] {
+  if (revealOtherBookings) return bookings;
+  return bookings.map((b) => ({ ...b, id: null, name: HIDDEN_BOOKING_NAME }));
 }
 
 /**

@@ -74,6 +74,7 @@ import {
   assertAssetQuantitiesAvailable,
   getAssetAvailability,
   getAssetAvailabilityBatch,
+  RESERVATION_REDUCING_CATEGORIES,
 } from "~/modules/asset/availability.server";
 import {
   reconcileManualPlacementsForStockDecrease,
@@ -229,7 +230,10 @@ import {
   findClashingReservations,
   resolveHeldKits,
 } from "./clash-reservations.server";
-import { earliestClashStart } from "./clashing-bookings";
+import {
+  earliestClashStart,
+  redactClashingBookings,
+} from "./clashing-bookings";
 import {
   ADDABLE_BOOKING_STATUSES,
   BOOKING_COMMON_INCLUDE,
@@ -13556,7 +13560,7 @@ export async function extendBooking({
          * holding units of it clash only when the pool runs short, which is
          * measured separately below.
          */
-        const clashingBookings: ClashingBooking[] =
+        const clashingBookings: ClashingBooking[] = redactClashingBookings(
           await findClashingReservations({
             client: tx,
             organizationId,
@@ -13567,7 +13571,11 @@ export async function extendBooking({
             heldKits,
             after: booking.to,
             until: newEndDate,
-          });
+          }),
+          // A member who may not see other bookings learns what to free,
+          // not whose booking it is.
+          access.bookings.seeAll
+        );
 
         if (clashingBookings.length > 0) {
           throw new ShelfError({
@@ -13601,6 +13609,9 @@ export async function extendBooking({
         >();
         for (const ba of booking.bookingAssets) {
           if (ba.asset.type !== AssetType.QUANTITY_TRACKED) continue;
+          // Units held through a kit are already taken off the pool as the
+          // kit's allocation; counting them here would deduct them twice.
+          if (ba.assetKitId) continue;
           if (!activeAssets.some((a) => a.id === ba.assetId)) continue;
           const entry = quantityUnitsOut.get(ba.assetId) ?? {
             units: 0,
@@ -13611,11 +13622,36 @@ export async function extendBooking({
           quantityUnitsOut.set(ba.assetId, entry);
         }
         if (quantityUnitsOut.size > 0) {
+          // Units already back through a partial check-in, consumed, lost or
+          // damaged are no longer out, so they ask nothing of the pool.
+          const returned = await tx.consumptionLog.groupBy({
+            by: ["assetId"],
+            where: {
+              bookingId: booking.id,
+              assetId: { in: [...quantityUnitsOut.keys()] },
+              category: { in: [...RESERVATION_REDUCING_CATEGORIES] },
+            },
+            _sum: { quantity: true },
+          });
+          for (const group of returned) {
+            const entry = quantityUnitsOut.get(group.assetId);
+            if (!entry) continue;
+            entry.units = Math.max(0, entry.units - (group._sum.quantity ?? 0));
+            if (entry.units === 0) quantityUnitsOut.delete(group.assetId);
+          }
+        }
+        if (quantityUnitsOut.size > 0) {
           const availabilityByAsset = await getAssetAvailabilityBatch(
             [...quantityUnitsOut.keys()],
             {
               organizationId,
-              window: { from: booking.to, to: newEndDate },
+              window: {
+                // What is already behind us cannot compete for these units:
+                // an overdue booking's end lies in the past, and only the
+                // days from now to the new end are being asked for.
+                from: new Date(Math.max(booking.to.getTime(), Date.now())),
+                to: newEndDate,
+              },
               excludeBookingId: booking.id,
               db: tx,
             }

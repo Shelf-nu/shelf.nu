@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   describeClashingBookings,
   earliestClashStart,
+  redactClashingBookings,
 } from "./clashing-bookings";
 
 describe("describeClashingBookings", () => {
@@ -116,5 +117,31 @@ describe("earliestClashStart", () => {
       ])
     ).toBe("2026-11-01T00:00:00.000Z");
     expect(earliestClashStart([])).toBeUndefined();
+  });
+});
+
+describe("redactClashingBookings", () => {
+  const bookings = [
+    {
+      id: "b",
+      name: "Job",
+      from: "2026-11-12T08:00:00.000Z",
+      items: [{ id: "a-1", name: "Cam 1", kind: "asset" as const }],
+    },
+  ];
+
+  it("keeps the items and the start but drops name and id for a reader who may not see other bookings", () => {
+    expect(redactClashingBookings(bookings, false)).toEqual([
+      {
+        id: null,
+        name: "another booking",
+        from: "2026-11-12T08:00:00.000Z",
+        items: [{ id: "a-1", name: "Cam 1", kind: "asset" }],
+      },
+    ]);
+  });
+
+  it("returns the bookings untouched for a reader who may", () => {
+    expect(redactClashingBookings(bookings, true)).toBe(bookings);
   });
 });

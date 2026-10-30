@@ -11748,7 +11748,7 @@ describe("extendBooking", () => {
               unitOfMeasure: null,
             },
             assetId: CABLE_ID,
-            assetKitId: null,
+            assetKitId: null as string | null,
             quantity: 3,
             id: "ba-cable",
             checkedOutAt: new Date("2025-01-01T10:00:00.000Z"),
@@ -11761,20 +11761,21 @@ describe("extendBooking", () => {
 
     function mockCableStock(total: number) {
       // why: `getAssetAvailabilityBatch` reads the pool size from the asset row.
-      (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
-        (args?: { where?: { id?: { in?: string[] } } }) =>
-          Promise.resolve(
-            (args?.where?.id?.in ?? []).map((id) => ({ id, quantity: total }))
-          )
+      restoreMockImplementationAfterTest(
+        db.asset.findMany
+      ).fn.mockImplementation((args?: { where?: { id?: { in?: string[] } } }) =>
+        Promise.resolve(
+          (args?.where?.id?.in ?? []).map((id) => ({ id, quantity: total }))
+        )
       );
     }
 
     function mockOtherReservation(quantity: number) {
       // why: the pool read lists other bookings' slices of the cable; the
       // clash query must never see this booking, so it never asks by name.
-      (
-        db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
-      ).mockImplementation((args?: { where?: { booking?: unknown } }) =>
+      restoreMockImplementationAfterTest(
+        db.bookingAsset.findMany
+      ).fn.mockImplementation((args?: { where?: { booking?: unknown } }) =>
         Promise.resolve(
           args?.where?.booking
             ? [
@@ -11822,6 +11823,62 @@ describe("extendBooking", () => {
       // The by-name clash query is never asked about a pool item.
       expect(db.booking.findMany).not.toHaveBeenCalled();
       expect(db.asset.findMany).toHaveBeenCalledTimes(1);
+      expect(db.booking.update).toHaveBeenCalled();
+    });
+
+    it("asks nothing of the pool for units held through a kit, which the kit's allocation already covers", async () => {
+      expect.assertions(2);
+      const booking = bookingWithCablesOut();
+      booking.bookingAssets[0].assetKitId = "membership-1";
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue(booking);
+      mockCableStock(0);
+      // why: the kit resolution reads memberships; this case needs none.
+      restoreMockImplementationAfterTest(
+        db.assetKit.findMany
+      ).fn.mockResolvedValue([]);
+
+      await extendBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        newEndDate: new Date("2025-01-03T17:00:00Z"),
+        hints: mockClientHints,
+        userId: "user-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
+        roles: [OrganizationRoles.ADMIN],
+      });
+
+      expect(db.asset.findMany).not.toHaveBeenCalled();
+      expect(db.booking.update).toHaveBeenCalled();
+    });
+
+    it("counts only the units still out after a partial return", async () => {
+      expect.assertions(1);
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue(bookingWithCablesOut());
+      mockCableStock(30);
+      mockOtherReservation(28);
+      // why: two of the three cables came back through a partial check-in.
+      restoreMockImplementationAfterTest(
+        db.consumptionLog.groupBy
+      ).fn.mockImplementation((args?: { where?: { bookingId?: string } }) =>
+        Promise.resolve(
+          args?.where?.bookingId === "booking-1"
+            ? [{ assetId: CABLE_ID, _sum: { quantity: 2 } }]
+            : []
+        )
+      );
+
+      await extendBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        newEndDate: new Date("2025-01-03T17:00:00Z"),
+        hints: mockClientHints,
+        userId: "user-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
+        roles: [OrganizationRoles.ADMIN],
+      });
+
       expect(db.booking.update).toHaveBeenCalled();
     });
 

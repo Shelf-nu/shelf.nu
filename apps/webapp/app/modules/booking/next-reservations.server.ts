@@ -23,7 +23,10 @@ import {
   findClashingReservations,
   resolveHeldKits,
 } from "./clash-reservations.server";
-import type { ClashingBooking } from "./clashing-bookings";
+import {
+  redactClashingBookings,
+  type ClashingBooking,
+} from "./clashing-bookings";
 import {
   getAssetsStillOutForExtend,
   getKitMembershipIdsStillOut,
@@ -32,7 +35,8 @@ import {
 
 /** The booking an item is promised to next, and from when (ISO). */
 export type NextReservation = {
-  bookingId: string;
+  /** `null` when the reader may not see other members' bookings. */
+  bookingId: string | null;
   bookingName: string;
   from: string;
 };
@@ -60,15 +64,19 @@ const NONE: NextReservations = { horizon: null, byAssetId: {}, byKitId: {} };
  *
  * @param organizationId - The workspace the booking belongs to
  * @param bookingId - The booking whose items are measured
+ * @param revealOtherBookings - Whether the reader may see other members'
+ * bookings; otherwise the bookings are reported without name or link
  * @returns The horizon and per-item next reservations; all empty for a
  * booking that is not running, or whose items are all back
  */
 export async function loadNextReservations({
   organizationId,
   bookingId,
+  revealOtherBookings,
 }: {
   organizationId: string;
   bookingId: string;
+  revealOtherBookings: boolean;
 }): Promise<NextReservations> {
   const booking = await db.booking.findFirst({
     where: { id: bookingId, organizationId },
@@ -104,14 +112,17 @@ export async function loadNextReservations({
     membershipIdsStillOut: getKitMembershipIdsStillOut(booking.bookingAssets),
   });
 
-  const clashes = await findClashingReservations({
-    client: db,
-    organizationId,
-    bookingId,
-    activeAssetIds,
-    heldKits,
-    after: booking.to,
-  });
+  const clashes = redactClashingBookings(
+    await findClashingReservations({
+      client: db,
+      organizationId,
+      bookingId,
+      activeAssetIds,
+      heldKits,
+      after: booking.to,
+    }),
+    revealOtherBookings
+  );
   if (clashes.length === 0) return NONE;
 
   const byAssetId: Record<string, NextReservation> = {};

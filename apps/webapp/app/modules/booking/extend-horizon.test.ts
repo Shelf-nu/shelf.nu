@@ -36,6 +36,19 @@ describe("suggestEndBeforeClash", () => {
     ).toBeNull();
   });
 
+  it("offers nothing when the only candidate is already in the past (overdue booking)", () => {
+    expect(
+      suggestEndBeforeClash({
+        // Overdue since 8 Oct 19:00 Amsterdam (17:00Z)
+        currentEnd: new Date("2026-10-08T17:00:00Z"),
+        // Clash 10 Oct 18:00 Amsterdam (16:00Z): candidate is 9 Oct 19:00
+        clashStart: new Date("2026-10-10T16:00:00Z"),
+        timeZone,
+        now: new Date("2026-10-10T10:00:00Z"),
+      })
+    ).toBeNull();
+  });
+
   it("keeps the wall clock across a DST change", () => {
     const suggested = suggestEndBeforeClash({
       // Ends 20 Oct 18:00 CEST (16:00Z)
@@ -60,7 +73,7 @@ describe("readClashRefusal", () => {
             from: "2026-11-12T08:00:00.000Z",
             items: [{ id: "a1", name: "Cam 1", kind: "asset" }, null, 3],
           },
-          { name: "no id" },
+          { id: "no-name" },
         ],
         freeUntil: "2026-11-12T08:00:00.000Z",
       })
@@ -74,6 +87,21 @@ describe("readClashRefusal", () => {
         },
       ],
       freeUntil: "2026-11-12T08:00:00.000Z",
+    });
+  });
+
+  it("keeps a booking the reader may not see, without an id", () => {
+    expect(
+      readClashRefusal({
+        clashingBookings: [
+          { id: null, name: "another booking", from: "", items: [] },
+        ],
+      })
+    ).toEqual({
+      clashingBookings: [
+        { id: null, name: "another booking", from: "", items: [] },
+      ],
+      freeUntil: null,
     });
   });
 

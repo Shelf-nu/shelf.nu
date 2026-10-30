@@ -1,23 +1,28 @@
 /**
  * The Change end date dialog of a running booking.
  *
- * Before the person picks anything it states the horizon: how long every
- * item still out is free, and which reservation needs what after that, with
- * a one-click end just before it. A submit past the horizon comes back as a
- * refusal that names each reservation in the way and the items it holds.
+ * Before the person picks anything it states the horizon: how long nothing
+ * else has the items still out reserved by name, and which reservation
+ * needs what after that, with a one-click end just before it. A submit past
+ * the horizon comes back as a refusal that names each reservation in the way
+ * and the items it holds.
+ *
+ * The fetcher is keyed per booking and every outcome is read through
+ * `useFetcherOutcomeSinceOpen`, so a response answers the opening that sent
+ * it and never an earlier or later one.
  *
  * @see {@link file://../../modules/booking/next-reservations.server.ts} the horizon
  * @see {@link file://../../modules/booking/extend-horizon.ts} the suggested end
  * @see {@link file://../../routes/_layout+/bookings.$bookingId.overview.tsx} the action
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { CalendarIcon } from "lucide-react";
-import { useLoaderData } from "react-router";
+import { useFetcher, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useDateFormatter } from "~/hooks/use-date-formatter";
 import { useDisabled } from "~/hooks/use-disabled";
-import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
+import { useFetcherOutcomeSinceOpen } from "~/hooks/use-fetcher-error-since-open";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
 import { useRoleAccess } from "~/hooks/use-role-access";
 import { useWorkingHours } from "~/hooks/use-working-hours";
@@ -60,13 +65,19 @@ export default function ExtendBookingDialog({
   const [open, setOpen] = useState(false);
   // The picker is uncontrolled; a suggested end re-seeds it through its key.
   const [seededEndDate, setSeededEndDate] = useState<string | null>(null);
-  const fetcher = useFetcherWithReset<DataOrErrorResponse>();
+  // The refusal the person answered by taking the suggested end; it is not
+  // shown again while that same response is still the fetcher's.
+  const [answeredRefusal, setAnsweredRefusal] = useState<unknown>(undefined);
+  const { booking, nextReservations } = useLoaderData<BookingPageLoaderData>();
+  const fetcher = useFetcher<DataOrErrorResponse>({
+    key: `extend-booking-${booking.id}`,
+  });
+  const outcome = useFetcherOutcomeSinceOpen(fetcher, open);
   const disabled = useDisabled(fetcher);
   // Validate the new end date in the user's RESOLVED pref zone: the server
   // action parses the submitted value in that same zone, and the browser hint
   // differs from it for anyone with an explicit timezone preference.
   const prefs = useFormatPrefs();
-  const { booking, nextReservations } = useLoaderData<BookingPageLoaderData>();
   const workingHoursData = useWorkingHours();
   const bookingSettings = useBookingSettings();
   const { isLoading = true, error } = workingHoursData;
@@ -84,23 +95,20 @@ export default function ExtendBookingDialog({
   );
 
   function handleOpen() {
+    setSeededEndDate(null);
+    setAnsweredRefusal(undefined);
     setOpen(true);
   }
 
-  const handleClose = useCallback(() => {
+  function handleClose() {
     setOpen(false);
-    setSeededEndDate(null);
-    fetcher.reset();
-  }, [fetcher]);
+  }
 
   useEffect(
     function closeOnSuccess() {
-      const data = fetcher?.data;
-      if (data && "success" in data && data.success) {
-        handleClose();
-      }
+      if (outcome.status === "accepted") setOpen(false);
     },
-    [fetcher?.data, handleClose]
+    [outcome.status]
   );
 
   const horizon = nextReservations?.horizon ?? null;
@@ -113,11 +121,17 @@ export default function ExtendBookingDialog({
     });
   }, [horizon, booking.to, prefs.timeZone]);
 
+  // A refusal of this opening, unless the person already answered it.
+  const rejected =
+    outcome.status === "rejected" && fetcher.data !== answeredRefusal
+      ? fetcher.data
+      : undefined;
+  const rejectedError =
+    rejected && "error" in rejected ? rejected.error : undefined;
   /** This handles server side errors in case client side validation fails */
-  const validationErrors = getValidationErrors<ExtendBookingSchemaType>(
-    fetcher?.data?.error
-  );
-  const refusal = readClashRefusal(fetcher?.data?.error?.additionalData);
+  const validationErrors =
+    getValidationErrors<ExtendBookingSchemaType>(rejectedError);
+  const refusal = readClashRefusal(rejectedError?.additionalData);
   const pickerValue = seededEndDate ?? currentEndDate;
 
   return (
@@ -153,19 +167,18 @@ export default function ExtendBookingDialog({
               booking becomes overdue.
             </p>
 
-            <When truthy={!!horizon}>
+            {horizon ? (
               <HorizonNotice
-                horizon={horizon!}
+                horizon={horizon}
                 suggestedEnd={suggestedEnd}
                 disabled={disabled}
                 onUseSuggested={(wire) => {
-                  // A refusal answered the date that was replaced, so it goes.
-                  fetcher.reset();
+                  setAnsweredRefusal(fetcher.data);
                   setSeededEndDate(wire);
                 }}
                 timeZone={prefs.timeZone}
               />
-            </When>
+            ) : null}
 
             <fetcher.Form ref={zo.ref} method="POST">
               <div className="required-input-label mb-1 text-text-sm font-medium text-gray-700">
@@ -188,9 +201,9 @@ export default function ExtendBookingDialog({
                 placeholder="Booking"
               />
 
-              <When truthy={!!fetcher?.data?.error}>
+              <When truthy={!!rejectedError}>
                 <div className="mb-4 text-sm text-error-500">
-                  {fetcher?.data?.error?.message}
+                  {rejectedError?.message}
                 </div>
                 {refusal ? (
                   <ClashList
@@ -240,8 +253,11 @@ export default function ExtendBookingDialog({
 }
 
 /**
- * "Free until" and what the first reservation needs, with the one-click end
- * just before it.
+ * How long nothing else has these items reserved by name, what the first
+ * reservation needs, and the one-click end just before it.
+ *
+ * Reservations by model ("any unit of model X") name no item, so they are
+ * outside this horizon; a submit still measures them.
  */
 function HorizonNotice({
   horizon,
@@ -257,21 +273,30 @@ function HorizonNotice({
   timeZone: string;
 }) {
   const { formatDateTime } = useDateFormatter();
+  const { blockedBy } = horizon;
   return (
     <div className="mb-4 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700">
       <span className="font-medium text-gray-900">
-        All items are free until {formatDateTime(horizon.freeUntil)}.
+        No other booking has these items reserved until{" "}
+        {formatDateTime(horizon.freeUntil)}.
       </span>{" "}
       After that,{" "}
-      <Button
-        to={`/bookings/${horizon.blockedBy.id}`}
-        target="_blank"
-        variant="inherit"
-        className="font-medium underline"
-      >
-        {horizon.blockedBy.name}
-      </Button>{" "}
-      needs {namedItems(horizon.blockedBy)}.
+      {blockedBy.id ? (
+        <Button
+          to={`/bookings/${blockedBy.id}`}
+          target="_blank"
+          variant="inherit"
+          className="font-medium underline"
+        >
+          {blockedBy.name}
+        </Button>
+      ) : (
+        blockedBy.name
+      )}{" "}
+      needs {namedItems(blockedBy)}.
+      <div className="mt-1 text-xs text-gray-500">
+        Reservations by model are checked when you submit.
+      </div>
       {suggestedEnd ? (
         <div className="mt-2">
           <Button
@@ -305,20 +330,24 @@ function ClashList({
   return (
     <div className="mb-4">
       <ul className="divide-y divide-gray-200 rounded-md border border-gray-200 text-sm">
-        {listed.map((b) => (
+        {listed.map((b, index) => (
           <li
-            key={b.id}
+            key={b.id ?? `hidden-${index}`}
             className="flex items-start justify-between gap-3 px-3 py-2"
           >
             <div className="min-w-0">
-              <Button
-                variant="link"
-                className="font-medium"
-                target="_blank"
-                to={`/bookings/${b.id}`}
-              >
-                {b.name}
-              </Button>
+              {b.id ? (
+                <Button
+                  variant="link"
+                  className="font-medium"
+                  target="_blank"
+                  to={`/bookings/${b.id}`}
+                >
+                  {b.name}
+                </Button>
+              ) : (
+                <span className="font-medium text-gray-900">{b.name}</span>
+              )}
               {b.items.length > 0 ? (
                 <div className="text-gray-600">{namedItems(b)}</div>
               ) : null}
