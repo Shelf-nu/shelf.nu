@@ -40,6 +40,10 @@ type BulkDialogType =
   | "tag-add"
   | "tag-remove"
   | "cancel"
+  // Bookings-list check-out (RESERVED selection) and check-in (ONGOING /
+  // OVERDUE selection), with the dates kept.
+  | "checkout"
+  | "checkin"
   | "available"
   | "unavailable"
   | "bookings"

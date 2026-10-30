@@ -20,6 +20,8 @@ const DEFAULT_STATE: Record<BulkDialogType, boolean> = {
   archive: false,
   reinstate: false,
   cancel: false,
+  checkout: false,
+  checkin: false,
   available: false,
   unavailable: false,
   bookings: false,
