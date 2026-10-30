@@ -1086,6 +1086,10 @@ function FulfilCheckoutForm({
           unassignedUnits={unassignedUnits}
           sourceQuestions={sourceQuestions}
           suppressEarlyCheckoutPrompt={suppressEarlyCheckoutPrompt}
+          // A booking waiting on model units checks out here, and its header
+          // Check out leads back to this drawer, so new dates come from
+          // reverting it to draft.
+          expiredRescheduleHint="To change its dates instead, revert the booking to draft from the Actions menu on the booking page."
           // The drawer lists what goes out, so it is the confirmation step.
           confirm={false}
           // `grow` (the CheckoutDialog default) makes the button stretch

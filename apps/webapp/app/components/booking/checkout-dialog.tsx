@@ -147,6 +147,14 @@ type CheckoutDialogProps = {
    */
   allowNewEndDate?: boolean;
   /**
+   * Where an overdue-only expired prompt sends the operator for new dates,
+   * appended after "Check these items out as overdue.". Defaults to the
+   * booking page's Check out. A caller whose booking cannot be rescheduled
+   * there passes its own: a booking still waiting on model units checks out
+   * through the fulfil drawer, which its header Check out leads back to.
+   */
+  expiredRescheduleHint?: string;
+  /**
    * Whether a plain check-out (not early, nothing unassigned, no source
    * question) asks once before it submits. Defaults to `true`, so a quick
    * check-out from the booking header opens a "Check out booking" dialog.
@@ -226,6 +234,7 @@ export default function CheckoutDialog({
   unassignedUnits = NO_UNASSIGNED_UNITS,
   sourceQuestions = NO_SOURCE_QUESTIONS,
   allowNewEndDate = false,
+  expiredRescheduleHint = "Or use Check out on the booking page to give the whole booking a new end date.",
   confirm = true,
 }: CheckoutDialogProps) {
   const isNavigating = useDisabled();
@@ -428,7 +437,7 @@ export default function CheckoutDialog({
                   .{" "}
                   {allowNewEndDate
                     ? "Check it out with a new end date, starting now, or check it out as overdue."
-                    : "Check these items out as overdue, or use Check out on the booking page to give the whole booking a new end date."}
+                    : `Check these items out as overdue. ${expiredRescheduleHint}`}
                 </p>
               ) : null}
             </div>

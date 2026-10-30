@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { BookingStatus } from "@prisma/client";
+import { useRerenderAt } from "~/hooks/use-rerender-at";
 import { useReservationIsRequest } from "~/hooks/use-reservation-is-request";
 import { useUserData } from "~/hooks/use-user-data";
 import { isReservationExpired } from "~/modules/booking/helpers";
@@ -36,6 +37,9 @@ export function BookingStatusBadge({
 }) {
   const reservationIsRequest = useReservationIsRequest();
   const user = useUserData();
+  // The Expired label reads the clock, so a page left open re-renders at the
+  // reservation's end. Past, missing or non-RESERVED dates schedule nothing.
+  useRerenderAt(status === BookingStatus.RESERVED && to ? new Date(to) : null);
 
   /**
    * This is used to show the extra info tooltip when the booking is

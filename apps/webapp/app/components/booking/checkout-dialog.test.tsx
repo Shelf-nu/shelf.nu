@@ -531,6 +531,25 @@ describe("CheckoutDialog From location question", () => {
       ).toBeInTheDocument();
     });
 
+    it("says the caller's own way to new dates when the booking page cannot give them", () => {
+      // why: a booking still waiting on model units checks out through the
+      // fulfil drawer, and its header Check out leads back there.
+      renderInForm({
+        booking: expiredBooking,
+        intent: "partial-checkout",
+        expiredRescheduleHint:
+          "To change its dates, revert it to draft from the Actions menu.",
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Check Out" }));
+
+      expect(
+        screen.getByText(/revert it to draft from the Actions menu/)
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByText(/use Check out on the booking page/)
+      ).not.toBeInTheDocument();
+    });
+
     it("does not prompt once the booking is underway", () => {
       // why: an OVERDUE booking past its end is late, its own state; the
       // prompt is for the first check-out of a dead reservation only.
