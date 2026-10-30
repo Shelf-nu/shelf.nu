@@ -1006,6 +1006,7 @@ export default function CreateAssetScreen() {
                     helpText: def.helpText,
                     required: def.required,
                     options: def.options,
+                    format: def.format,
                   }}
                   value={customFieldValues[def.id] ?? ""}
                   onChange={customFieldChangeHandlers[def.id]}

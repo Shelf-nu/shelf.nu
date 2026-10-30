@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import { CustomFieldFormat, CustomFieldType, Prisma } from "@prisma/client";
 import type {
   CustomField,
   Organization,
@@ -6,7 +6,10 @@ import type {
   UserOrganization,
 } from "@prisma/client";
 import { db } from "~/database/db.server";
-import { getDefinitionFromCsvHeader } from "~/utils/custom-fields";
+import {
+  getDefinitionFromCsvHeader,
+  LINK_FORMAT_NEEDS_TEXT_MESSAGE,
+} from "~/utils/custom-fields";
 import type { ErrorLabel } from "~/utils/error";
 import {
   ShelfError,
@@ -46,6 +49,7 @@ export async function createCustomField({
   name,
   helpText,
   type,
+  format,
   required,
   organizationId,
   active,
@@ -60,6 +64,7 @@ export async function createCustomField({
           name,
           helpText,
           type,
+          format,
           required,
           active,
           options,
@@ -304,6 +309,8 @@ export async function updateCustomField(payload: {
   name?: CustomField["name"];
   helpText?: CustomField["helpText"];
   type?: CustomField["type"];
+  /** Allowed only on a TEXT field; refused with a 400 otherwise. */
+  format?: CustomField["format"];
   required?: CustomField["required"];
   active?: CustomField["active"];
   options?: CustomField["options"];
@@ -317,6 +324,7 @@ export async function updateCustomField(payload: {
     id,
     name,
     helpText,
+    format,
     required,
     active,
     options,
@@ -333,6 +341,7 @@ export async function updateCustomField(payload: {
     const data = {
       name,
       helpText,
+      format,
       required,
       active,
       options,
@@ -372,6 +381,21 @@ export async function updateCustomField(payload: {
             additionalData: { id, organizationId },
             label,
             status: 404,
+            shouldBeCaptured: false,
+          });
+        }
+
+        if (
+          format === CustomFieldFormat.LINK &&
+          oldField.type !== CustomFieldType.TEXT
+        ) {
+          throw new ShelfError({
+            cause: null,
+            title: "Link format needs a text field",
+            message: LINK_FORMAT_NEEDS_TEXT_MESSAGE,
+            additionalData: { id, organizationId, type: oldField.type },
+            label,
+            status: 400,
             shouldBeCaptured: false,
           });
         }
@@ -777,6 +801,46 @@ export async function createCustomFieldsIfNotExists({
       label,
       /** No need to capture those. They are mostly related to malformed CSV data */
       shouldBeCaptured: false,
+    });
+  }
+}
+
+/**
+ * Reads what one asset stores for some of its custom fields. The asset edit
+ * action reads its Link fields' values this way, so a stored value that
+ * predates the Link format can be submitted unchanged.
+ *
+ * @param args.assetId - The asset being edited
+ * @param args.organizationId - The caller's workspace; an asset of another
+ *   workspace yields nothing
+ * @param args.customFieldIds - The fields to read
+ * @returns One row per field the asset has a value for
+ * @throws {ShelfError} When the read fails
+ */
+export async function getAssetCustomFieldValues({
+  assetId,
+  organizationId,
+  customFieldIds,
+}: {
+  assetId: string;
+  organizationId: string;
+  customFieldIds: string[];
+}): Promise<{ customFieldId: string; value: Prisma.JsonValue }[]> {
+  try {
+    return await db.assetCustomFieldValue.findMany({
+      where: {
+        assetId,
+        asset: { organizationId },
+        customFieldId: { in: customFieldIds },
+      },
+      select: { customFieldId: true, value: true },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while reading the asset's custom fields.",
+      additionalData: { assetId, organizationId },
+      label,
     });
   }
 }

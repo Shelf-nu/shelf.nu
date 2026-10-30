@@ -44,6 +44,10 @@ import {
   resolveDisplayCode,
   serializeDisplayCode,
 } from "~/modules/barcode/display";
+import {
+  getLinkTitles,
+  linkTitlesByField,
+} from "~/modules/link-preview/service.server";
 import { USER_NAME_SELECT } from "~/modules/user/fields";
 import {
   canSeeBooking,
@@ -257,6 +261,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                 id: true,
                 name: true,
                 type: true,
+                format: true,
                 helpText: true,
                 active: true,
               },
@@ -270,10 +275,20 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       return data({ error: { message: "Asset not found" } }, { status: 404 });
     }
 
-    const [refreshedAsset] = await refreshExpiredAssetImages([storedAsset], {
-      organizationId,
-      ...ASSET_IMAGE_RESIGN_LIMITS,
-    });
+    // The values the screen shows: those of active fields.
+    const shownValues = storedAsset.customFields.filter(
+      ({ customField }) => customField.active
+    );
+
+    // Read together, neither depending on the other. `linkTitles` holds the
+    // titles for the links in the values shown, and never throws.
+    const [[refreshedAsset], linkTitles] = await Promise.all([
+      refreshExpiredAssetImages([storedAsset], {
+        organizationId,
+        ...ASSET_IMAGE_RESIGN_LIMITS,
+      }),
+      getLinkTitles({ organizationId, values: shownValues }),
+    ]);
 
     // The companion prints `custodian.name` as it arrives, in the custody
     // card and in every `custodyList` row. The stored `TeamMember.name` can
@@ -651,6 +666,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         // workspace without alternative barcodes must not receive barcode
         // rows, matching every other mobile barcode surface.
         barcodes: barcodesAllowed ? detailBarcodes : [],
+        // Additive: page titles and workspace names for the links in
+        // `customFields`, keyed by custom field id. Keyed on the server: the
+        // phone's URL implementation cannot reproduce link keys for every
+        // host (see `FieldLinkTitles` in @shelf/links).
+        fieldLinkTitles: linkTitlesByField(shownValues, linkTitles),
       },
     });
   } catch (cause) {

@@ -23,7 +23,7 @@ import {
   updateCustomField,
 } from "~/modules/custom-field/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { FIELD_TYPE_NAME } from "~/utils/custom-fields";
+import { fieldTypeLabel } from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { payload, error, getParams, parseData } from "~/utils/http.server";
@@ -81,7 +81,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const header: HeaderData = {
       title: `Edit | ${customField.name}`,
-      subHeading: FIELD_TYPE_NAME[customField.type],
+      subHeading: fieldTypeLabel(customField),
     };
 
     return payload({
@@ -120,6 +120,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const {
       name,
       helpText,
+      format,
       active,
       required,
       options,
@@ -162,6 +163,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       id,
       name,
       helpText,
+      format,
       active,
       required,
       options,
@@ -208,6 +210,7 @@ export default function CustomFieldEditPage() {
           helpText={customField.helpText}
           required={customField.required}
           type={customField.type}
+          format={customField.format}
           active={customField.active}
           options={customField.options}
           optionUsage={optionUsage}

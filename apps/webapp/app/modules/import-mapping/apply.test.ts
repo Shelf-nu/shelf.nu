@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { ASSET_CSV_HEADERS } from "~/modules/asset/utils.server";
+import { getDefinitionFromCsvHeader } from "~/utils/custom-fields";
 import { extractCSVDataFromContentImport } from "~/utils/import.server";
 import { applyMapping } from "./apply";
+import { proposeByRules } from "./heuristics";
 import type { ColumnMapping } from "./types";
 import {
   MAX_HEADER_LENGTH,
@@ -66,6 +68,27 @@ describe("applyMapping", () => {
       title: "Dell",
       "cf:Serial number, type:text": "5CG3",
       description: "spare",
+    });
+  });
+
+  it("keeps the Link format of an exported Link column through the review", () => {
+    const exported = [
+      ["title", "cf:Manual,type:TEXT,format:LINK"],
+      ["Camera", "https://www.example.com/manual.pdf"],
+    ];
+    const { columns } = proposeByRules(exported[0], [[], []], []);
+    // The review posts the mapping back as JSON, and the route validates it.
+    const posted = columnMappingListSchema.parse(
+      JSON.parse(JSON.stringify(columns))
+    );
+
+    const [header] = applyMapping(exported, posted);
+
+    expect(header).toEqual(["title", "cf:Manual, type:text, format:link"]);
+    expect(getDefinitionFromCsvHeader(header[1])).toMatchObject({
+      name: "Manual",
+      type: "TEXT",
+      format: "LINK",
     });
   });
 

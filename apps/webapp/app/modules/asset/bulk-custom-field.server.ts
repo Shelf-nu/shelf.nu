@@ -27,7 +27,11 @@ import { z } from "zod";
 import { db } from "~/database/db.server";
 import { recordEvents } from "~/modules/activity-event/service.server";
 import { USER_NAME_SELECT } from "~/modules/user/fields";
-import { buildCustomFieldValue, mergedSchema } from "~/utils/custom-fields";
+import {
+  buildCustomFieldValue,
+  mergedSchema,
+  toCustomFieldZodSchema,
+} from "~/utils/custom-fields";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { parseData } from "~/utils/http.server";
@@ -104,7 +108,10 @@ export type BulkSetCustomFieldResult = {
  * @throws {ShelfError} 400 when the value is blank or does not fit the field
  */
 function buildValueForField(
-  field: Pick<CustomField, "id" | "name" | "type" | "options" | "helpText">,
+  field: Pick<
+    CustomField,
+    "id" | "name" | "type" | "format" | "options" | "helpText"
+  >,
   raw: string
 ): ICustomFieldValueJson {
   // The form posts a yes/no answer as `on` or `off`; the shared schema reads
@@ -125,16 +132,9 @@ function buildValueForField(
   const schema = mergedSchema({
     baseSchema: z.object({}),
     customFields: [
-      {
-        id: field.id,
-        // Shown in the error message ("Brand is required"), so the real name.
-        name: field.name,
-        helpText: field.helpText || "",
-        // A yes/no field always has an answer, so it is never "required".
-        required: field.type !== "BOOLEAN",
-        type: field.type.toLowerCase() as "text",
-        options: field.options,
-      },
+      // A Link field validates as a web link, as on the asset form. A yes/no
+      // field always has an answer, so it is never "required".
+      toCustomFieldZodSchema({ ...field, required: field.type !== "BOOLEAN" }),
     ],
   });
 
@@ -142,10 +142,7 @@ function buildValueForField(
   const payload = parseData({ [key]: raw }, schema, {
     shouldBeCaptured: false,
   }) as Record<string, unknown>;
-  const built = buildCustomFieldValue(
-    { raw: payload[key] as string },
-    field as CustomField
-  );
+  const built = buildCustomFieldValue({ raw: payload[key] as string }, field);
 
   if (!built) {
     throw new ShelfError({
@@ -216,6 +213,8 @@ export async function bulkSetAssetCustomField({
         id: true,
         name: true,
         type: true,
+        // Read by buildValueForField: a Link field only takes a web link.
+        format: true,
         options: true,
         helpText: true,
         categories: { select: { id: true } },

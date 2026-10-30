@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { TagUseFor } from "@prisma/client";
+import { CustomFieldFormat, TagUseFor } from "@prisma/client";
 import { archivedAssetBlockedReason } from "@shelf/labels";
 import { useAtomValue } from "jotai";
 import type {
@@ -24,13 +24,18 @@ import {
 import { getPrimaryLocation } from "~/modules/asset/utils";
 import { getAssetModels } from "~/modules/asset-model/service.server";
 
-import { getActiveCustomFields } from "~/modules/custom-field/service.server";
+import {
+  getActiveCustomFields,
+  getAssetCustomFieldValues,
+} from "~/modules/custom-field/service.server";
 import { buildTagsSet } from "~/modules/tag/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { extractBarcodesFromFormData } from "~/utils/barcode-form-data.server";
 import {
   extractCustomFieldValuesFromPayload,
   mergedSchema,
+  storedCustomFieldTexts,
+  toCustomFieldZodSchema,
 } from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
@@ -50,7 +55,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { slugify } from "~/utils/slugify";
 
 export type AssetEditLoaderData = typeof loader;
 
@@ -205,16 +209,25 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         searchParams.get("category") ?? String(formData.get("category")),
     });
 
+    // A Link field may still hold a value saved before it became a Link
+    // field; submitted unchanged, it is kept as stored instead of refused.
+    const linkFieldIds = customFields
+      .filter((field) => field.format === CustomFieldFormat.LINK)
+      .map((field) => field.id);
+    const storedValues = storedCustomFieldTexts(
+      linkFieldIds.length > 0
+        ? await getAssetCustomFieldValues({
+            assetId: id,
+            organizationId,
+            customFieldIds: linkFieldIds,
+          })
+        : []
+    );
+
     const FormSchema = mergedSchema({
       baseSchema: NewAssetFormSchema,
-      customFields: customFields.map((cf) => ({
-        id: cf.id,
-        name: slugify(cf.name),
-        helpText: cf?.helpText || "",
-        required: cf.required,
-        type: cf.type.toLowerCase() as "text" | "number" | "date" | "boolean",
-        options: cf.options,
-      })),
+      customFields: customFields.map(toCustomFieldZodSchema),
+      storedValues,
     });
 
     const parsedData = parseData(formData, FormSchema, {
@@ -224,6 +237,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const customFieldsValues = extractCustomFieldValuesFromPayload({
       payload: parsedData,
       customFieldDef: customFields,
+      storedValues,
     });
 
     const uploadedNewImage = await updateAssetMainImage({

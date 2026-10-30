@@ -50,7 +50,7 @@ export async function validateContentImportFile({
   // the importer goes on to reject.
   const existingCustomFields = await db.customField.findMany({
     where: { organizationId, deletedAt: null },
-    select: { name: true, type: true },
+    select: { name: true, type: true, format: true },
   });
 
   const preflight = validateContentImportRows({

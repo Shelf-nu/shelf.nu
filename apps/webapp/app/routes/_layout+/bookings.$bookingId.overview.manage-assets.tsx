@@ -1089,10 +1089,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         const assetListContent = wrapAssetsWithDataForNote(newAssets, "added");
         const qtyAnnotations = newAssets
           .filter((a) => isQuantityTracked(a) && newQuantities[a.id] != null)
-          // Asset titles are user input rendered as literal text here.
+          // Asset titles are user input: each links to its asset.
           .map(
             (a) =>
-              `**${stripMarkdocDelimiters(a.title)}** (x${newQuantities[a.id]})`
+              `${wrapLinkForNote(
+                `/assets/${a.id}`,
+                stripMarkdocDelimiters(a.title)
+              )} (x${newQuantities[a.id]})`
           )
           .join(", ");
         const qtySuffix = qtyAnnotations

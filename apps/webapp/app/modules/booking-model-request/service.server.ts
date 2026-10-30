@@ -57,7 +57,11 @@ import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
-import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
+import {
+  wrapLinkForNote,
+  wrapNameForNote,
+  wrapUserLinkForNote,
+} from "~/utils/markdoc-wrappers";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
 import type {
   ActivityEventInput,
@@ -2798,24 +2802,25 @@ export async function upsertBookingModelRequest({
     // Activity note — best-effort, outside the tx so a markdoc hiccup
     // can't roll back the upsert. Phrasing depends on whether this was
     // a create, an increase, a decrease, or a no-op:
-    //   - create   : "reserved **N × Model** for this booking."
-    //   - increase : "increased the **Model** reservation from **M** to **N**."
-    //   - decrease : "decreased the **Model** reservation from **M** to **N**."
+    //   - create   : "reserved **N ×** {Model} for this booking."
+    //   - increase : "increased the {Model} reservation from **M** to **N**."
+    //   - decrease : "decreased the {Model} reservation from **M** to **N**."
+    // where {Model} is the model name inside a `name` tag.
     //   - no-op    : skip the note entirely (nothing actually changed)
     const { assetModel, previousQuantity, wasCreated } = result;
-    // Model names are user-supplied and render as literal text in the note.
-    const modelName = stripMarkdocDelimiters(assetModel.name);
+    // Model names are user-supplied, so the name goes inside a `name` tag.
+    const modelName = wrapNameForNote(assetModel.name);
     let content: string | null = null;
     // Same race-safe discriminator the write core's events use: the upsert
     // result, not the stale pre-read. In the lost-race case (wasCreated false but
     // previousQuantity null) the quantity comparisons are unknowable, so
     // the note is skipped — the event trail still records the change.
     if (wasCreated) {
-      content = `{actor} reserved **${quantity} × ${modelName}** for this booking.`;
+      content = `{actor} reserved **${quantity} ×** ${modelName} for this booking.`;
     } else if (previousQuantity != null && quantity > previousQuantity) {
-      content = `{actor} increased the **${modelName}** reservation from **${previousQuantity}** to **${quantity}**.`;
+      content = `{actor} increased the ${modelName} reservation from **${previousQuantity}** to **${quantity}**.`;
     } else if (previousQuantity != null && quantity < previousQuantity) {
-      content = `{actor} decreased the **${modelName}** reservation from **${previousQuantity}** to **${quantity}**.`;
+      content = `{actor} decreased the ${modelName} reservation from **${previousQuantity}** to **${quantity}**.`;
     }
 
     // `actor.link` is null only when the actor lookup failed, in which case
@@ -3383,17 +3388,17 @@ export async function removeBookingModelRequest({
 
     if (cancelled && actor.link) {
       try {
-        // Mirrors the create path's shape ("reserved **3 × Model** for this
+        // Mirrors the create path's shape ("reserved **3 ×** {Model} for this
         // booking") so the pair reads symmetrically in the activity feed.
-        // Model names are user-supplied and render as literal text here.
+        // Model names are user-supplied, so the name goes inside a `name` tag.
         await createSystemBookingNote({
           bookingId,
           organizationId,
           content: `${actor.link} cancelled the **${
             cancelled.quantity
-          } × ${stripMarkdocDelimiters(
+          } ×** ${wrapNameForNote(
             cancelled.assetModelName
-          )}** reservation for this booking.`,
+          )} reservation for this booking.`,
         });
       } catch {
         // non-fatal
@@ -3637,8 +3642,11 @@ export async function materializeModelRequestForAsset({
       : userId
       ? await loadActor(userId)
       : null;
-    const assetLink = wrapLinkForNote(`/assets/${asset.id}`, asset.title);
-    const modelNameForNote = stripMarkdocDelimiters(existing.assetModel.name);
+    const assetLink = wrapLinkForNote(
+      `/assets/${asset.id}`,
+      stripMarkdocDelimiters(asset.title)
+    );
+    const modelNameForNote = wrapNameForNote(existing.assetModel.name);
     // Same sentence either way; only the subject changes, so the feed reads
     // consistently whether or not the caller threaded an actor through.
     const content = actor?.link

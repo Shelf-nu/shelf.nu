@@ -198,7 +198,7 @@ export function InlineEditableField({
         className
       )}
     >
-      <span className="w-1/4 text-[14px] font-medium text-gray-900">
+      <span className="w-1/4 text-[14px] font-medium text-gray-900 md:min-w-min md:pr-4">
         {label}
       </span>
 

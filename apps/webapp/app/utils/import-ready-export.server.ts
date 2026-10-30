@@ -30,6 +30,7 @@ import {
   neutralizeCsvFormula,
   quoteCsvCell,
 } from "~/utils/csv-cells";
+import { customFieldCsvHeader } from "~/utils/custom-fields";
 import { cleanMarkdownFormatting } from "~/utils/markdown-cleaner";
 import { resolveTeamMemberName } from "~/utils/user";
 
@@ -108,7 +109,7 @@ const CORE_IMPORT_FIELDS: Array<{
 export type BuildImportReadyColumnsArgs = {
   columnScope: ColumnScope;
   settingsColumns: Column[];
-  activeCustomFields: Array<Pick<CustomField, "name" | "type">>;
+  activeCustomFields: Array<Pick<CustomField, "name" | "type" | "format">>;
   barcodesEnabled: boolean;
 };
 
@@ -159,7 +160,7 @@ export function buildImportReadyColumns({
     if (includeAll || visibleColumnNames.has(columnName)) {
       columns.push({
         kind: "cf",
-        header: `cf:${cf.name},type:${cf.type}`,
+        header: customFieldCsvHeader(cf),
         name: cf.name,
         cfType: cf.type,
       });

@@ -7,6 +7,7 @@ import {
 } from "@prisma/client";
 import { onTestFinished } from "vitest";
 import type { Mock } from "vitest";
+import { URL_SHAPED_VALUE, expectValueOnlyInTag } from "@helpers/note-tags";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 
 import { db } from "~/database/db.server";
@@ -2610,7 +2611,7 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
       const note = partialCheckoutNoteContent();
       // Kit slice labelled + slice-level totals; fully out → no "still booked".
       expect(note).toContain(
-        "· in kit Kittington (100 of 100 boxes checked out)"
+        '· in kit {% name text="Kittington" /%} (100 of 100 boxes checked out)'
       );
       expect(note).not.toContain("still booked");
     });
@@ -2808,6 +2809,47 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
       expect(note).not.toContain('{% link to="javascript');
       // Still labelled as a kit slice (with the sanitized name).
       expect(note).toContain("in kit");
+    });
+
+    it("keeps a URL-shaped Kit.name inside a name tag in the checkout note", async () => {
+      // Kit.name is free-form user input; a name shaped like a URL must never
+      // reach the note as bare text, where it would become a link.
+      const evilKitName = URL_SHAPED_VALUE;
+      const booking = makeGlovesBooking();
+      // Poison the kit slice's (index 1 = ba-kit) kit name.
+      booking.bookingAssets[1].asset.assetKits = [
+        { id: "ak-kittington", kitId: "kit-1", kit: { name: evilKitName } },
+      ];
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(booking);
+      // In-tx kit-info read: no complete kit named, so the note's items body is
+      // the per-slice fragment (which carries the kit label under test).
+      (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+        (args?: { where?: { id?: { in?: string[] } } }) => {
+          const ids = args?.where?.id?.in ?? [];
+          return Promise.resolve(
+            ids.map((id) => ({
+              id,
+              title: "Gloves",
+              status: AssetStatus.AVAILABLE,
+              bookingAssets: [],
+              assetKits: [],
+            }))
+          );
+        }
+      );
+
+      await partialCheckoutBooking({
+        ...baseParams,
+        checkouts: [
+          { assetId: "asset-gloves", bookingAssetId: "ba-kit", quantity: 50 },
+        ],
+      });
+
+      const note = partialCheckoutNoteContent();
+      expect(note).toBeDefined();
+      expectValueOnlyInTag(note!, URL_SHAPED_VALUE, ["name"]);
     });
 
     /**

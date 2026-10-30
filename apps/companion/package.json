@@ -36,6 +36,7 @@
     "@sentry/react-native": "~7.2.0",
     "@shelf/datetime": "workspace:*",
     "@shelf/labels": "workspace:*",
+    "@shelf/links": "workspace:*",
     "@shelf/permissions": "workspace:*",
     "@shelf/quantity-control": "workspace:*",
     "@supabase/supabase-js": "^2.49.1",

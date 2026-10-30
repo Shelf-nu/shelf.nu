@@ -34,6 +34,16 @@
   color: #ef6820;
 }
 
+/* Link chips (`LinkChip`) inside notes keep their own look: no underline,
+   and the chip's gray text on hover instead of the link orange. */
+.pm-doc a.link-chip {
+  text-decoration: none;
+}
+
+.pm-doc a.link-chip:hover {
+  color: #101828;
+}
+
 .pm-doc hr {
   margin: 1.5rem 0;
   border: 0;

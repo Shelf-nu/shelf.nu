@@ -3,6 +3,7 @@ import type { ExtendedPrismaClient } from "~/database/db.server";
 import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import {
   wrapAssetsWithDataForNote,
+  wrapNameForNote,
   wrapUserLinkForNote,
 } from "~/utils/markdoc-wrappers";
 import type { UserNameFields } from "~/utils/user";
@@ -401,11 +402,15 @@ export async function createAuditUpdateNote({
   // Build the content describing the changes
   const changeDescriptions = changes.map((change) => {
     const fieldLabel = change.field === "name" ? "audit name" : change.field;
-    // `from`/`to` are user-supplied values (the audit name, for one) rendered
-    // as literal text in a Markdoc note.
-    return `- **${fieldLabel}**: "${stripMarkdocDelimiters(
-      String(change.from ?? "")
-    )}" → "${stripMarkdocDelimiters(String(change.to ?? ""))}"`;
+    // `from`/`to` are user-supplied values (the audit name, for one), so each
+    // goes inside a `name` tag; an empty value shows as an empty pair of quotes.
+    const formatValue = (value: unknown) => {
+      const text = String(value ?? "");
+      return text.trim() ? wrapNameForNote(text) : '""';
+    };
+    return `- **${fieldLabel}**: ${formatValue(change.from)} → ${formatValue(
+      change.to
+    )}`;
   });
 
   const content = `${wrapUserLinkForNote({

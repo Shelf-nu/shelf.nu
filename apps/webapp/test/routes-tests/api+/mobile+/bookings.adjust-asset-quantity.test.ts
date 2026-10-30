@@ -265,7 +265,9 @@ describe("POST /api/mobile/bookings/adjust-asset-quantity", () => {
       expect.objectContaining({
         bookingId: BOOKING_ID,
         organizationId: ORG_ID,
-        content: expect.stringContaining("**USB-C cable** from **2** to **5**"),
+        content: expect.stringContaining(
+          `{% link to="/assets/${ASSET_ID}" text="USB-C cable" /%} from **2** to **5**`
+        ),
       })
     );
   });

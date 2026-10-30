@@ -7,6 +7,8 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { URL_SHAPED_VALUE, expectValueOnlyInTag } from "@helpers/note-tags";
+
 import { db } from "~/database/db.server";
 import { assertAssetQuantityAvailable } from "~/modules/asset/availability.server";
 import { createSystemBookingNote } from "~/modules/booking-note/service.server";
@@ -325,6 +327,27 @@ describe("noteBookedQuantityChanges", () => {
     });
     expect(vi.mocked(createNotes).mock.calls[0][0].content).toContain(
       "from **2** to **5** via mobile app."
+    );
+  });
+
+  it("links a URL-shaped asset title in the booking note, never as bare text", async () => {
+    await noteBookedQuantityChanges({
+      ...base,
+      source: "web",
+      changes: [
+        {
+          assetId: "a",
+          assetTitle: URL_SHAPED_VALUE,
+          previousQuantity: 2,
+          quantity: 5,
+        },
+      ],
+    });
+
+    const { content } = vi.mocked(createSystemBookingNote).mock.calls[0][0];
+    expectValueOnlyInTag(content, URL_SHAPED_VALUE, ["link"]);
+    expect(content).toContain(
+      `{% link to="/assets/a" text="${URL_SHAPED_VALUE}" /%}`
     );
   });
 

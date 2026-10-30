@@ -128,9 +128,24 @@ describe("parseYesNo", () => {
 
 describe("analyzeUpdateHeaders", () => {
   const mockCustomFields = [
-    { id: "cf1", name: "Serial Number", type: "TEXT" as const },
-    { id: "cf2", name: "Purchase Date", type: "DATE" as const },
-    { id: "cf3", name: "Notes", type: "MULTILINE_TEXT" as const },
+    {
+      id: "cf1",
+      name: "Serial Number",
+      type: "TEXT" as const,
+      format: "PLAIN" as const,
+    },
+    {
+      id: "cf2",
+      name: "Purchase Date",
+      type: "DATE" as const,
+      format: "PLAIN" as const,
+    },
+    {
+      id: "cf3",
+      name: "Notes",
+      type: "MULTILINE_TEXT" as const,
+      format: "PLAIN" as const,
+    },
   ];
 
   it("identifies Asset ID as primary identifier", () => {
@@ -202,7 +217,10 @@ describe("analyzeUpdateHeaders", () => {
     // the custom field.
     const result = analyzeUpdateHeaders(
       ["Asset ID", "Name", "QR URL"],
-      [...mockCustomFields, { id: "cf4", name: "QR URL", type: "TEXT" }]
+      [
+        ...mockCustomFields,
+        { id: "cf4", name: "QR URL", type: "TEXT", format: "PLAIN" as const },
+      ]
     );
     expect(result.updatableColumns).toEqual(
       expect.arrayContaining([
@@ -874,6 +892,7 @@ describe("compareCustomField", () => {
   const textCfDef = {
     name: "Serial",
     type: "TEXT" as const,
+    format: "PLAIN" as const,
     helpText: "",
     required: false,
     active: true,
@@ -882,6 +901,7 @@ describe("compareCustomField", () => {
   const boolCfDef = {
     name: "Active",
     type: "BOOLEAN" as const,
+    format: "PLAIN" as const,
     helpText: "",
     required: false,
     active: true,
@@ -890,6 +910,7 @@ describe("compareCustomField", () => {
   const dateCfDef = {
     name: "PurchaseDate",
     type: "DATE" as const,
+    format: "PLAIN" as const,
     helpText: "",
     required: false,
     active: true,
@@ -898,6 +919,7 @@ describe("compareCustomField", () => {
   const numberCfDef = {
     name: "Weight",
     type: "NUMBER" as const,
+    format: "PLAIN" as const,
     helpText: "",
     required: false,
     active: true,
@@ -929,6 +951,112 @@ describe("compareCustomField", () => {
         ],
       });
       expect(compareCustomField(textCfDef, "SAME", asset, "Serial")).toBeNull();
+    });
+
+    it("warns about a value that is not a web link in a Link field, so it is skipped", () => {
+      const linkCfDef = {
+        ...textCfDef,
+        name: "Manual",
+        format: "LINK" as const,
+      };
+      const asset = makeAsset({ customFields: [] });
+
+      expect(
+        compareCustomField(linkCfDef, "see shelf", asset, "Manual")
+      ).toEqual({
+        field: "Manual",
+        currentValue: "(empty)",
+        newValue: "see shelf",
+        warning:
+          '"see shelf" is not a web link. Enter just the link, with no spaces or other text',
+      });
+    });
+
+    it("accepts a web link in a Link field", () => {
+      const linkCfDef = {
+        ...textCfDef,
+        name: "Manual",
+        format: "LINK" as const,
+      };
+      const asset = makeAsset({ customFields: [] });
+
+      expect(
+        compareCustomField(
+          linkCfDef,
+          "https://example.com/manual.pdf",
+          asset,
+          "Manual"
+        )
+      ).toEqual({
+        field: "Manual",
+        currentValue: "(empty)",
+        newValue: "https://example.com/manual.pdf",
+      });
+    });
+
+    it("sees no change in a Link cell that matches the stored link once normalized", () => {
+      const linkCfDef = {
+        ...textCfDef,
+        name: "Manual",
+        format: "LINK" as const,
+      };
+      const asset = makeAsset({
+        customFields: [
+          {
+            id: "cfv1",
+            value: { raw: "https://www.example.com/manual.pdf" },
+            customField: { name: "Manual" } as any,
+          },
+        ],
+      });
+
+      expect(
+        compareCustomField(
+          linkCfDef,
+          "www.example.com/manual.pdf",
+          asset,
+          "Manual"
+        )
+      ).toBeNull();
+      // A plain text field compares the cell as typed.
+      expect(
+        compareCustomField(
+          { ...linkCfDef, format: "PLAIN" as const },
+          "www.example.com/manual.pdf",
+          asset,
+          "Manual"
+        )?.newValue
+      ).toBe("www.example.com/manual.pdf");
+    });
+
+    it("shows a changed Link cell as the link that will be stored", () => {
+      const linkCfDef = {
+        ...textCfDef,
+        name: "Manual",
+        format: "LINK" as const,
+      };
+      const asset = makeAsset({
+        customFields: [
+          {
+            id: "cfv1",
+            value: { raw: "https://www.example.com/manual-v1.pdf" },
+            customField: { name: "Manual" } as any,
+          },
+        ],
+      });
+
+      expect(
+        compareCustomField(
+          linkCfDef,
+          "www.example.com/manual-v2.pdf",
+          asset,
+          "Manual"
+        )
+      ).toEqual({
+        field: "Manual",
+        currentValue: "https://www.example.com/manual-v1.pdf",
+        newValue: "https://www.example.com/manual-v2.pdf",
+      });
     });
   });
 
@@ -1859,20 +1987,90 @@ describe("analyzeUpdateHeaders — content-importer vocabulary (Task 2)", () => 
       "cf:Perkins Fiscal Year,type:TEXT",
     ];
     const orgCustomFields = [
-      { id: "cf1", name: "Serial", type: "TEXT" as const },
-      { id: "cf2", name: "Order Number", type: "TEXT" as const },
-      { id: "cf3", name: "LACCD #", type: "TEXT" as const },
-      { id: "cf4", name: "IT Asset #", type: "TEXT" as const },
-      { id: "cf5", name: "Model #", type: "TEXT" as const },
-      { id: "cf6", name: "Perkins Purchase", type: "TEXT" as const },
-      { id: "cf7", name: "Perkins Item Fund ID", type: "TEXT" as const },
-      { id: "cf8", name: "Manufacturer", type: "TEXT" as const },
-      { id: "cf9", name: "Supplier", type: "TEXT" as const },
-      { id: "cf10", name: "Purchase Date", type: "DATE" as const },
-      { id: "cf11", name: "Perkins Fund #", type: "TEXT" as const },
-      { id: "cf12", name: "Perkins Fund ID #", type: "TEXT" as const },
-      { id: "cf13", name: "Perkins Item?", type: "BOOLEAN" as const },
-      { id: "cf14", name: "Perkins Fiscal Year", type: "TEXT" as const },
+      {
+        id: "cf1",
+        name: "Serial",
+        type: "TEXT" as const,
+        format: "PLAIN" as const,
+      },
+      {
+        id: "cf2",
+        name: "Order Number",
+        type: "TEXT" as const,
+        format: "PLAIN" as const,
+      },
+      {
+        id: "cf3",
+        name: "LACCD #",
+        type: "TEXT" as const,
+        format: "PLAIN" as const,
+      },
+      {
+        id: "cf4",
+        name: "IT Asset #",
+        type: "TEXT" as const,
+        format: "PLAIN" as const,
+      },
+      {
+        id: "cf5",
+        name: "Model #",
+        type: "TEXT" as const,
+        format: "PLAIN" as const,
+      },
+      {
+        id: "cf6",
+        name: "Perkins Purchase",
+        type: "TEXT" as const,
+        format: "PLAIN" as const,
+      },
+      {
+        id: "cf7",
+        name: "Perkins Item Fund ID",
+        type: "TEXT" as const,
+        format: "PLAIN" as const,
+      },
+      {
+        id: "cf8",
+        name: "Manufacturer",
+        type: "TEXT" as const,
+        format: "PLAIN" as const,
+      },
+      {
+        id: "cf9",
+        name: "Supplier",
+        type: "TEXT" as const,
+        format: "PLAIN" as const,
+      },
+      {
+        id: "cf10",
+        name: "Purchase Date",
+        type: "DATE" as const,
+        format: "PLAIN" as const,
+      },
+      {
+        id: "cf11",
+        name: "Perkins Fund #",
+        type: "TEXT" as const,
+        format: "PLAIN" as const,
+      },
+      {
+        id: "cf12",
+        name: "Perkins Fund ID #",
+        type: "TEXT" as const,
+        format: "PLAIN" as const,
+      },
+      {
+        id: "cf13",
+        name: "Perkins Item?",
+        type: "BOOLEAN" as const,
+        format: "PLAIN" as const,
+      },
+      {
+        id: "cf14",
+        name: "Perkins Fiscal Year",
+        type: "TEXT" as const,
+        format: "PLAIN" as const,
+      },
     ];
 
     const result = analyzeUpdateHeaders(headers, orgCustomFields);
@@ -1930,7 +2128,12 @@ describe("analyzeUpdateHeaders — content-importer vocabulary (Task 2)", () => 
 
   it("resolves cf:<Name>,type:<TYPE>, cf:<Name>, and bare <Name> to the same custom field", () => {
     const orgCustomFields = [
-      { id: "cf1", name: "Serial", type: "TEXT" as const },
+      {
+        id: "cf1",
+        name: "Serial",
+        type: "TEXT" as const,
+        format: "PLAIN" as const,
+      },
     ];
 
     for (const header of ["cf:Serial,type:TEXT", "cf:Serial", "Serial"]) {
@@ -1953,7 +2156,12 @@ describe("analyzeUpdateHeaders — content-importer vocabulary (Task 2)", () => 
     // The org's "Serial" field is TEXT; the header declares BOOLEAN. The
     // workspace definition wins — no warning, no branch on the mismatch.
     const orgCustomFields = [
-      { id: "cf1", name: "Serial", type: "TEXT" as const },
+      {
+        id: "cf1",
+        name: "Serial",
+        type: "TEXT" as const,
+        format: "PLAIN" as const,
+      },
     ];
     const result = analyzeUpdateHeaders(
       ["ID", "cf:Serial,type:BOOLEAN"],

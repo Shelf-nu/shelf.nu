@@ -5,6 +5,7 @@ import type {
   Kit,
   OrganizationRoles,
 } from "@prisma/client";
+import type { LinkTitles } from "@shelf/links";
 import { data, redirect } from "react-router";
 import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -71,6 +72,7 @@ import {
   getAssetModelRollup,
 } from "../asset-model/rollup.server";
 import { getActiveCustomFields } from "../custom-field/service.server";
+import { getLinkTitles } from "../link-preview/service.server";
 import type { OrganizationFromUser } from "../organization/service.server";
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
 import { getTagsForBookingTagsFilter } from "../tag/service.server";
@@ -507,6 +509,8 @@ export async function simpleModeLoader({
       // read the active sort off one union-typed payload.
       modelSortBy: "name" as const,
       modelSortDirection: "asc" as const,
+      // Simple mode shows no custom field columns, so no link chips.
+      linkTitles: {} as LinkTitles,
       categories,
       tags,
       search,
@@ -957,6 +961,16 @@ export async function advancedModeLoader({
     ? teamMembersData.teamMembers.find((tm) => tm.userId === userId) ?? null
     : null;
 
+  /**
+   * Titles for the links in the page's text field values, read while the
+   * images and booking rows below load: it needs only the values, and never
+   * throws.
+   */
+  const linkTitlesRead = getLinkTitles({
+    organizationId,
+    values: assets.flatMap((asset) => asset.customFields),
+  });
+
   // Refresh expired signed URLs before returning so users never see broken images.
   // With 72h expiration, this path is hit infrequently.
   let refreshedAssets = assets;
@@ -1004,6 +1018,7 @@ export async function advancedModeLoader({
     setCookie(userPrefsCookie),
     ...(filtersCookie ? [setCookie(filtersCookie)] : []),
   ];
+  const linkTitles = await linkTitlesRead;
 
   /** Paging counts describe whatever the list renders — models here, assets
    * otherwise — so the shared pagination component needs no branch. The model
@@ -1056,6 +1071,7 @@ export async function advancedModeLoader({
       totalRollupAssets,
       modelSortBy,
       modelSortDirection,
+      linkTitles,
 
       customFields,
       ...teamMembersData,

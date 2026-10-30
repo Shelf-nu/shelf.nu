@@ -91,7 +91,9 @@ describe("validateContentImportRows", () => {
   it("rejects a header whose type contradicts an existing custom field", () => {
     const { errors } = validateContentImportRows({
       data: [row({ "cf:Price,type:text": "free text" })],
-      existingCustomFields: [{ name: "Price", type: "AMOUNT" }],
+      existingCustomFields: [
+        { name: "Price", type: "AMOUNT", format: "PLAIN" },
+      ],
     });
 
     expect(errors).toHaveLength(1);
@@ -105,7 +107,9 @@ describe("validateContentImportRows", () => {
       data: Array.from({ length: 40 }, () =>
         row({ "cf:Price,type:text": "free text" })
       ),
-      existingCustomFields: [{ name: "Price", type: "AMOUNT" }],
+      existingCustomFields: [
+        { name: "Price", type: "AMOUNT", format: "PLAIN" },
+      ],
     });
 
     expect(errors).toHaveLength(1);
@@ -115,10 +119,51 @@ describe("validateContentImportRows", () => {
   it("matches existing custom fields case-insensitively", () => {
     const { errors } = validateContentImportRows({
       data: [row({ "cf:PRICE,type:text": "free text" })],
-      existingCustomFields: [{ name: "price", type: "AMOUNT" }],
+      existingCustomFields: [
+        { name: "price", type: "AMOUNT", format: "PLAIN" },
+      ],
     });
 
     expect(errors).toHaveLength(1);
+  });
+
+  it("refuses a value that is not a web link for an existing Link field", () => {
+    const { errors } = validateContentImportRows({
+      data: [
+        row({ "cf:Manual,type:text": "https://example.com/manual.pdf" }),
+        row({ "cf:Manual,type:text": "see shelf" }),
+      ],
+      existingCustomFields: [{ name: "Manual", type: "TEXT", format: "LINK" }],
+    });
+
+    expect(errors).toEqual([
+      {
+        row: 3,
+        title: "Invalid custom field value",
+        message:
+          "Custom field 'Manual': Enter just the link, with no spaces or other text. The value we found is: 'see shelf'.",
+      },
+    ]);
+  });
+
+  it("checks a format:link column against the field it creates", () => {
+    const { errors } = validateContentImportRows({
+      data: [row({ "cf:Manual,type:text,format:link": "see shelf" })],
+      existingCustomFields: [],
+    });
+
+    expect(errors.map((error) => error.message)).toEqual([
+      "Custom field 'Manual': Enter just the link, with no spaces or other text. The value we found is: 'see shelf'.",
+    ]);
+  });
+
+  it("ignores format:link on a column for an existing plain text field", () => {
+    const { errors } = validateContentImportRows({
+      data: [row({ "cf:Serial,type:text,format:link": "see shelf" })],
+      existingCustomFields: [{ name: "Serial", type: "TEXT", format: "PLAIN" }],
+    });
+
+    expect(errors).toEqual([]);
   });
 
   it("refuses a file over the row cap without validating rows", () => {

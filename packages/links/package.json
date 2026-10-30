@@ -1,0 +1,23 @@
+{
+  "name": "@shelf/links",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pure, dependency-free web link reading (detection, provider, kind, chip text, input rule, icons) shared by the webapp and the companion app so both show the same link the same way.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test"
+  },
+  "devDependencies": {
+    "@shelf/typescript-config": "workspace:*",
+    "@types/node": "^24.19.2",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
+  }
+}

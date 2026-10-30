@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { AssetType, type CustomFieldType } from "@prisma/client";
+import { URL_SHAPED_VALUE, expectValueOnlyInTag } from "@helpers/note-tags";
 import {
   andAssetWhere,
   applyArchivedFilter,
@@ -481,7 +482,7 @@ describe("getCustomFieldUpdateNoteContent", () => {
     });
 
     expect(result).toBe(
-      '{% link to="/settings/team/users/user-123" text="John Doe" /%} set **Serial Number** to **SN123456**.'
+      '{% link to="/settings/team/users/user-123" text="John Doe" /%} set {% name text="Serial Number" /%} to {% name text="SN123456" chips=true /%}.'
     );
   });
 
@@ -497,7 +498,7 @@ describe("getCustomFieldUpdateNoteContent", () => {
     });
 
     expect(result).toBe(
-      '{% link to="/settings/team/users/user-456" text="Jane Smith" /%} updated **Warranty Status** from **Active** to **Expired**.'
+      '{% link to="/settings/team/users/user-456" text="Jane Smith" /%} updated {% name text="Warranty Status" /%} from {% name text="Active" chips=true /%} to {% name text="Expired" chips=true /%}.'
     );
   });
 
@@ -513,7 +514,7 @@ describe("getCustomFieldUpdateNoteContent", () => {
     });
 
     expect(result).toBe(
-      '{% link to="/settings/team/users/user-789" text="Bob Johnson" /%} removed **Purchase Order** value **PO-2024-001**.'
+      '{% link to="/settings/team/users/user-789" text="Bob Johnson" /%} removed {% name text="Purchase Order" /%} value {% name text="PO-2024-001" chips=true /%}.'
     );
   });
 
@@ -529,7 +530,7 @@ describe("getCustomFieldUpdateNoteContent", () => {
     });
 
     expect(result).toBe(
-      '{% link to="/settings/team/users/user-123" text="John Doe" /%} set **Serial Number** to **SN123456**.'
+      '{% link to="/settings/team/users/user-123" text="John Doe" /%} set {% name text="Serial Number" /%} to {% name text="SN123456" chips=true /%}.'
     );
   });
 
@@ -545,6 +546,25 @@ describe("getCustomFieldUpdateNoteContent", () => {
     });
 
     expect(result).toBe("");
+  });
+
+  it("keeps URL-shaped field names and values inside name tags", () => {
+    const content = getCustomFieldUpdateNoteContent({
+      customFieldName: URL_SHAPED_VALUE,
+      previousValue: URL_SHAPED_VALUE,
+      newValue: "Expired",
+      userId: "user-456",
+      firstName: "Jane",
+      lastName: "Smith",
+      isFirstTimeSet: false,
+    });
+
+    expectValueOnlyInTag(content, URL_SHAPED_VALUE, ["name"]);
+    // The field name never shows chips; the value does.
+    expect(content).toContain(`{% name text="${URL_SHAPED_VALUE}" /%}`);
+    expect(content).toContain(
+      `{% name text="${URL_SHAPED_VALUE}" chips=true /%}`
+    );
   });
 
   it("should handle missing new value for first time set", () => {

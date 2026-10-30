@@ -5,9 +5,14 @@ import type { ResolvedFormatPrefs } from "~/utils/date-format";
 import {
   buildAssetOverviewCustomFields,
   buildCustomFieldValue,
+  customFieldCsvHeader,
+  extractCustomFieldValuesFromPayload,
   getCustomFieldDisplayValue,
+  getDefinitionFromCsvHeader,
   isImportableCustomFieldDate,
   mergedSchema,
+  storedCustomFieldTexts,
+  toCustomFieldZodSchema,
   type CustomFieldZodSchema,
 } from "./custom-fields";
 
@@ -115,6 +120,7 @@ describe("buildAssetOverviewCustomFields", () => {
     id,
     name,
     type: "TEXT" as const,
+    format: "PLAIN" as const,
     options: [],
     helpText: null,
     required: false,
@@ -378,5 +384,195 @@ describe("isImportableCustomFieldDate", () => {
       }
       expect(isImportableCustomFieldDate(raw)).toBe(stored);
     }
+  });
+});
+
+/**
+ * A Link-format TEXT field takes web links only, on every write path, because
+ * every path builds its value here. A plain TEXT field keeps any text.
+ */
+describe("buildCustomFieldValue for Link fields", () => {
+  const linkField = {
+    id: "cf_manual",
+    name: "Manual",
+    type: "TEXT",
+    format: "LINK",
+  } as const;
+
+  it("stores a link without a scheme as an https link", () => {
+    expect(
+      buildCustomFieldValue({ raw: " www.example.com/a.pdf " }, linkField)
+    ).toEqual({
+      raw: "https://www.example.com/a.pdf",
+      valueText: "https://www.example.com/a.pdf",
+    });
+  });
+
+  it("refuses text that is not a link with a 400 naming the field and the value", () => {
+    let thrown: unknown;
+    try {
+      buildCustomFieldValue({ raw: "see shelf" }, linkField);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toMatchObject({
+      status: 400,
+      shouldBeCaptured: false,
+      message:
+        "Custom field 'Manual': Enter just the link, with no spaces or other text. The value we found is: 'see shelf'.",
+    });
+  });
+
+  it("leaves a blank value unset", () => {
+    expect(buildCustomFieldValue({ raw: "  " }, linkField)).toBeUndefined();
+  });
+
+  it("keeps any text in a plain TEXT field", () => {
+    expect(
+      buildCustomFieldValue(
+        { raw: "see shelf" },
+        { ...linkField, format: "PLAIN" }
+      )
+    ).toEqual({ raw: "see shelf", valueText: "see shelf" });
+  });
+});
+
+describe("toCustomFieldZodSchema for Link fields", () => {
+  const schema = mergedSchema({
+    baseSchema: z.object({}),
+    customFields: [
+      toCustomFieldZodSchema({
+        id: "manual",
+        name: "Manual",
+        helpText: null,
+        required: false,
+        type: "TEXT",
+        format: "LINK",
+        options: [],
+      }),
+    ],
+  });
+
+  it("refuses text that is not a web link", () => {
+    const result = schema.safeParse({ "cf-manual": "see shelf" });
+
+    expect(result.error?.issues.map((issue) => issue.message)).toEqual([
+      "Enter just the link, with no spaces or other text",
+    ]);
+  });
+
+  it("accepts a web link and a blank optional value", () => {
+    expect(
+      schema.safeParse({ "cf-manual": "www.example.com/a.pdf" }).success
+    ).toBe(true);
+    expect(schema.safeParse({ "cf-manual": "" }).success).toBe(true);
+  });
+});
+
+describe("editing an asset whose Link field holds an older plain value", () => {
+  const manual: Parameters<typeof toCustomFieldZodSchema>[0] = {
+    id: "manual",
+    name: "Manual",
+    helpText: null,
+    required: false,
+    type: "TEXT",
+    format: "LINK",
+    options: [],
+  };
+  // The asset's stored values, as the edit loader and action read them.
+  const storedValues = storedCustomFieldTexts([
+    {
+      customFieldId: "manual",
+      value: { raw: "see binder 4", valueText: "see binder 4" },
+    },
+  ]);
+  const schema = mergedSchema({
+    baseSchema: z.object({ title: z.string() }),
+    customFields: [toCustomFieldZodSchema(manual)],
+    storedValues,
+  });
+
+  it("accepts the stored value unchanged beside a new title", () => {
+    expect(
+      schema.safeParse({ title: "Camera 2", "cf-manual": "see binder 4" })
+    ).toEqual({
+      success: true,
+      data: { title: "Camera 2", "cf-manual": "see binder 4" },
+    });
+  });
+
+  it("still refuses a changed value that is not a link", () => {
+    const result = schema.safeParse({
+      title: "Camera 2",
+      "cf-manual": "see binder 5",
+    });
+
+    expect(result.error?.issues.map((issue) => issue.message)).toEqual([
+      "Enter just the link, with no spaces or other text",
+    ]);
+  });
+
+  it("leaves the unchanged value out of the write, and builds a changed link", () => {
+    const customFieldDef = [manual as unknown as CustomField];
+
+    expect(
+      extractCustomFieldValuesFromPayload({
+        payload: { title: "Camera 2", "cf-manual": "see binder 4" },
+        customFieldDef,
+        storedValues,
+      })
+    ).toEqual([]);
+    expect(
+      extractCustomFieldValuesFromPayload({
+        payload: { "cf-manual": "www.example.com/manual.pdf" },
+        customFieldDef,
+        storedValues,
+      })
+    ).toEqual([
+      {
+        id: "manual",
+        value: {
+          raw: "https://www.example.com/manual.pdf",
+          valueText: "https://www.example.com/manual.pdf",
+        },
+      },
+    ]);
+  });
+});
+
+describe("custom field CSV headers", () => {
+  it("reads format:link on a text column as a Link field", () => {
+    expect(
+      getDefinitionFromCsvHeader("cf:Manual, type:text, format:link")
+    ).toMatchObject({ name: "Manual", type: "TEXT", format: "LINK" });
+  });
+
+  it("reads a header without a format as plain text", () => {
+    expect(getDefinitionFromCsvHeader("cf:Serial,type:text")).toMatchObject({
+      name: "Serial",
+      type: "TEXT",
+      format: "PLAIN",
+    });
+  });
+
+  it("ignores format:link on a column that is not single-line text", () => {
+    expect(
+      getDefinitionFromCsvHeader("cf:Notes,type:multiline text,format:link")
+    ).toMatchObject({ type: "MULTILINE_TEXT", format: "PLAIN" });
+  });
+
+  it("writes headers that read back as the same field", () => {
+    const link = { name: "Manual", type: "TEXT", format: "LINK" } as const;
+    const plain = { name: "Serial", type: "TEXT", format: "PLAIN" } as const;
+
+    expect(customFieldCsvHeader(link)).toBe("cf:Manual,type:TEXT,format:LINK");
+    expect(customFieldCsvHeader(plain)).toBe("cf:Serial,type:TEXT");
+    expect(
+      getDefinitionFromCsvHeader(customFieldCsvHeader(link))
+    ).toMatchObject(link);
+    expect(
+      getDefinitionFromCsvHeader(customFieldCsvHeader(plain))
+    ).toMatchObject(plain);
   });
 });

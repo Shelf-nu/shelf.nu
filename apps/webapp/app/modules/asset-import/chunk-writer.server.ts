@@ -323,7 +323,10 @@ function toCustodyCreateManyInput(
 function buildCustomFieldValueRows(
   prepared: PreparedRow[],
   fieldIdsByName: Record<string, string>,
-  definitions: Map<string, Pick<CustomField, "id" | "name" | "type">>,
+  definitions: Map<
+    string,
+    Pick<CustomField, "id" | "name" | "type" | "format">
+  >,
   warnings: ImportWarning[]
 ): Prisma.AssetCustomFieldValueCreateManyInput[] {
   const values: Prisma.AssetCustomFieldValueCreateManyInput[] = [];
@@ -675,7 +678,7 @@ export async function writeImportChunk({
                   organizationId,
                   deletedAt: null,
                 },
-                select: { id: true, name: true, type: true },
+                select: { id: true, name: true, type: true, format: true },
               })
             : [];
         const customFieldValues = buildCustomFieldValueRows(
