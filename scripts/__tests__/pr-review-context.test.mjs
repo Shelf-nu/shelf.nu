@@ -943,3 +943,73 @@ test("createTableColumns: an enum type keeps its name, built-in types are lower 
     ["LinkPreviewOutcome", "integer"]
   );
 });
+
+test("splitSqlStatements: drops a Prisma /* Warnings */ block, including nested comments", () => {
+  const sql = `/*
+  Warnings:
+
+  - A unique constraint covering the columns \`[assetId,teamMemberId]\` will be added; it can fail.
+  /* nested */
+*/
+-- DropIndex
+DROP INDEX "Custody_assetId_key";
+SELECT '/* not a comment */'`;
+  const statements = splitSqlStatements(sql);
+  assert.deepEqual(statements, [
+    'DROP INDEX "Custody_assetId_key"',
+    "SELECT '/* not a comment */'",
+  ]);
+  assert.equal(classifySqlStatement(statements[0])[0].action, "drop index");
+});
+
+test("classifySqlStatement: a WITH-prefixed backfill is a data write on its main table", () => {
+  const [entry] = classifySqlStatement(`WITH candidates AS (
+    SELECT ba.id FROM "BookingAsset" ba JOIN "Asset" a ON (a.id = ba."assetId")
+  )
+  UPDATE "BookingAsset" SET "kitId" = c."kitId" FROM candidates c WHERE "BookingAsset".id = c.id`);
+  assert.equal(entry.action, "update rows");
+  assert.equal(entry.target, "BookingAsset");
+});
+
+test("classifySqlStatement: a write inside a CTE body is still a data write", () => {
+  const [entry] = classifySqlStatement(
+    `WITH gone AS (DELETE FROM "Old" WHERE stale RETURNING id) SELECT count(*) FROM gone`
+  );
+  assert.equal(entry.action, "delete rows");
+  assert.equal(entry.target, "Old");
+});
+
+test("classifySqlStatement: data writes and unknown statements keep their full SQL", () => {
+  const where = `WHERE c."kitCustodyId" IS NULL AND c."locationId" IS NULL AND EXISTS (SELECT 1 FROM "AssetLocation" al WHERE al."assetId" = c."assetId")`;
+  const [entry] = classifySqlStatement(
+    `UPDATE "Custody" AS c\n  SET "sourceUnknown" = true\n  ${where}`
+  );
+  assert.equal(entry.action, "update rows");
+  assert.ok(entry.detail.length <= 160);
+  assert.ok(
+    entry.sql.endsWith(
+      `EXISTS (SELECT 1 FROM "AssetLocation" al WHERE al."assetId" = c."assetId")`
+    )
+  );
+  const [other] = classifySqlStatement(
+    `COMMENT ON TABLE "T" IS '${"x".repeat(200)}'`
+  );
+  assert.equal(other.sql.length > 200, true);
+  assert.equal(classifySqlStatement(`DROP TABLE "Old"`)[0].sql, undefined);
+});
+
+test("classifySqlStatement: a NULLS NOT DISTINCT unique index is an index, not other", () => {
+  assert.deepEqual(
+    classifySqlStatement(
+      `CREATE UNIQUE INDEX "Custody_operator_unique" ON "Custody"("assetId", "teamMemberId") NULLS NOT DISTINCT WHERE "kitCustodyId" IS NULL`
+    ),
+    [
+      {
+        action: "create unique index",
+        target: "Custody_operator_unique",
+        detail:
+          "on Custody(assetId, teamMemberId), nulls not distinct where kitCustodyId IS NULL",
+      },
+    ]
+  );
+});

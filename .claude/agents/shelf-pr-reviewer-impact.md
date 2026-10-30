@@ -29,6 +29,8 @@ following the text change your answer, or is it just what the PR changes?
 `diffPath`, the changed file list with areas, rule copies (`copyPath`), the
 PR's stated intent, and `db` when the PR changes the database: every migration
 statement, already parsed. Use it for item 4 rather than re-reading the SQL.
+Data writes and `other` statements carry the whole statement in `sql`; judge
+them from that, never from the shortened `detail`.
 
 ## Checklist
 
@@ -51,7 +53,7 @@ statement, already parsed. Use it for item 4 rather than re-reading the SQL.
    - A migration adding a column that new code reads before migrate deploy
      runs gives 500s in the window.
    - Data that needs a backfill, and every `insert rows` / `update rows` /
-     `delete rows` entry in `db`: how many production rows it touches, and
+     `delete rows` entry in `db` (read its `sql`): how many production rows it touches, and
      whether it is safe to run twice or against a workspace in an odd state.
    - A destructive migration without a rename-first path.
    - New workspace packages need `pnpm install` noted in the PR body.

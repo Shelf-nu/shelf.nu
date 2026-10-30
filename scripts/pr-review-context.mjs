@@ -324,8 +324,11 @@ export function splitDiff(diff) {
 }
 
 /**
- * Splits SQL into statements on `;`, ignoring semicolons inside quotes,
- * dollar-quoted bodies (functions, DO blocks) and `--` comments, which are dropped.
+ * Splits SQL into statements on `;`, ignoring semicolons inside quotes and
+ * dollar-quoted bodies (functions, DO blocks). Line comments (`--`) and
+ * block comments (slash-star, nested ones included, as Postgres allows) are
+ * dropped, so the Warnings block Prisma writes at the top of a migration
+ * never hides the statement after it.
  * @param {string} sql
  * @returns {string[]} trimmed, non-empty statements without the trailing `;`
  */
@@ -352,6 +355,23 @@ export function splitSqlStatements(sql) {
     if (char === "-" && sql[i + 1] === "-") {
       const end = sql.indexOf("\n", i);
       i = end === -1 ? sql.length : end - 1;
+      continue;
+    }
+    if (char === "/" && sql[i + 1] === "*") {
+      let depth = 1;
+      i += 2;
+      while (i < sql.length && depth > 0) {
+        if (sql.startsWith("/*", i)) {
+          depth += 1;
+          i += 2;
+        } else if (sql.startsWith("*/", i)) {
+          depth -= 1;
+          i += 2;
+        } else i += 1;
+      }
+      i -= 1;
+      // Keep the words either side of the comment apart.
+      current += " ";
       continue;
     }
     if (char === "'") inQuote = true;
@@ -462,7 +482,7 @@ export function createTableConstraints(table, body) {
  * parser does not know come back as `other` with their opening text, so
  * nothing in a migration is ever left out of the list.
  * @param {string} statement - one SQL statement without its `;`
- * @returns {Array<{action: string, target: string, detail: string, columns?: ReturnType<typeof createTableColumns>}>} `columns` only on `create table`; usually one entry; `ALTER TABLE` with several clauses gives one per clause
+ * @returns {Array<{action: string, target: string, detail: string, sql?: string, columns?: ReturnType<typeof createTableColumns>}>} `columns` only on `create table`; `sql` (the whole statement) only on data writes and `other`; usually one entry; `ALTER TABLE` with several clauses gives one per clause
  */
 export function classifySqlStatement(statement) {
   const sql = statement.replace(/\s+/g, " ").trim();
@@ -597,7 +617,7 @@ export function classifySqlStatement(statement) {
   }
   if (
     (m = new RegExp(
-      `^CREATE (UNIQUE )?INDEX (?:CONCURRENTLY )?(?:IF NOT EXISTS )?${IDENT} ON ${IDENT}(?: USING (\\w+))?\\s*\\((.*?)\\)(?: WHERE (.*))?$`,
+      `^CREATE (UNIQUE )?INDEX (?:CONCURRENTLY )?(?:IF NOT EXISTS )?${IDENT} ON ${IDENT}(?: USING (\\w+))?\\s*\\((.*?)\\)( NULLS NOT DISTINCT)?(?: WHERE (.*))?$`,
       "i"
     ).exec(sql))
   )
@@ -607,7 +627,9 @@ export function classifySqlStatement(statement) {
         target: unquote(m[2]),
         detail: `on ${unquote(m[3])}(${unquote(m[5])})${
           m[4] ? ` using ${m[4]}` : ""
-        }${m[6] ? ` where ${unquote(m[6])}` : ""}`,
+        }${m[6] ? ", nulls not distinct" : ""}${
+          m[7] ? ` where ${unquote(m[7])}` : ""
+        }`,
       },
     ];
   if (
@@ -702,15 +724,57 @@ export function classifySqlStatement(statement) {
     return [
       { action: "create policy", target: unquote(m[2]), detail: unquote(m[1]) },
     ];
-  if ((m = new RegExp(`^INSERT INTO ${IDENT}`, "i").exec(sql)))
-    return [{ action: "insert rows", target: unquote(m[1]), detail: short }];
-  if ((m = new RegExp(`^UPDATE (?:ONLY )?${IDENT}`, "i").exec(sql)))
-    return [{ action: "update rows", target: unquote(m[1]), detail: short }];
-  if ((m = new RegExp(`^DELETE FROM (?:ONLY )?${IDENT}`, "i").exec(sql)))
-    return [{ action: "delete rows", target: unquote(m[1]), detail: short }];
-  if ((m = new RegExp(`^TRUNCATE (?:TABLE )?${IDENT}`, "i").exec(sql)))
-    return [{ action: "delete rows", target: unquote(m[1]), detail: short }];
-  return [{ action: "other", target: "", detail: short }];
+  const write = dataWrite(sql);
+  // Data writes and unknown statements keep their full SQL in `sql`: the
+  // WHERE or ON CONFLICT past the short `detail` decides which rows they touch.
+  if (write) return [{ ...write, detail: short, sql }];
+  return [{ action: "other", target: "", detail: short, sql }];
+}
+
+/** The data-writing statements, keyed by the action the report names. */
+const DATA_WRITES = [
+  ["insert rows", `INSERT INTO ${IDENT}`],
+  ["update rows", `UPDATE (?:ONLY )?${IDENT}`],
+  ["delete rows", `DELETE FROM (?:ONLY )?${IDENT}`],
+  ["delete rows", `TRUNCATE (?:TABLE )?${IDENT}`],
+];
+
+/**
+ * Removes every parenthesised group, leaving the top level of a statement.
+ * @param {string} sql
+ * @returns {string}
+ */
+function topLevel(sql) {
+  let text = sql;
+  let previous;
+  do {
+    previous = text;
+    text = text.replace(/\([^()]*\)/g, " ");
+  } while (text !== previous);
+  return text;
+}
+
+/**
+ * Finds the table a statement writes rows to. A statement opening with
+ * `WITH` is judged by its main statement (the top level, outside the CTE
+ * bodies), and failing that by any write inside a CTE body, because a
+ * data-modifying CTE writes rows too.
+ * @param {string} sql - one statement, whitespace collapsed
+ * @returns {{action: string, target: string} | null}
+ */
+function dataWrite(sql) {
+  const find = (text, anchor) => {
+    for (const [action, pattern] of DATA_WRITES) {
+      const m = new RegExp(`${anchor}${pattern}`, "i").exec(text);
+      if (m) return { action, target: unquote(m[1]) };
+    }
+    return null;
+  };
+  const direct = find(sql, "^");
+  if (direct || !/^WITH\b/i.test(sql)) return direct;
+  // `FOR UPDATE` and `ON UPDATE` are not writes.
+  const word = "(?<!FOR |ON )\\b";
+  return find(topLevel(sql), word) ?? find(sql, word);
 }
 
 /**
