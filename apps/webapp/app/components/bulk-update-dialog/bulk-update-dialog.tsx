@@ -60,7 +60,8 @@ type BulkDialogType =
   | "start-audit"
   | "add-to-audit"
   | "delete-audit"
-  | "reorder-point";
+  | "reorder-point"
+  | "custom-field";
 
 type CommonBulkDialogProps = {
   type: BulkDialogType;
