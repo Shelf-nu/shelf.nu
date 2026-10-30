@@ -3,6 +3,8 @@ import { readClashRefusal, suggestEndBeforeClash } from "./extend-horizon";
 
 describe("suggestEndBeforeClash", () => {
   const timeZone = "Europe/Amsterdam";
+  // A fixed clock before every candidate, so the cases never age out.
+  const now = new Date("2026-10-01T12:00:00Z");
 
   it("keeps the booking's end time on the day before a morning clash", () => {
     const suggested = suggestEndBeforeClash({
@@ -11,6 +13,7 @@ describe("suggestEndBeforeClash", () => {
       // Next reservation starts 12 Nov 09:00 Amsterdam (08:00Z)
       clashStart: new Date("2026-11-12T08:00:00Z"),
       timeZone,
+      now,
     });
     expect(suggested?.toISOString()).toBe("2026-11-11T17:00:00.000Z");
   });
@@ -21,6 +24,7 @@ describe("suggestEndBeforeClash", () => {
       // 12 Nov 20:00 Amsterdam (19:00Z)
       clashStart: new Date("2026-11-12T19:00:00Z"),
       timeZone,
+      now,
     });
     expect(suggested?.toISOString()).toBe("2026-11-12T17:00:00.000Z");
   });
@@ -32,6 +36,7 @@ describe("suggestEndBeforeClash", () => {
         // 11 Nov 09:00 Amsterdam: the only candidate (11 Nov 18:00) is after it
         clashStart: new Date("2026-11-11T08:00:00Z"),
         timeZone,
+        now,
       })
     ).toBeNull();
   });
@@ -56,6 +61,7 @@ describe("suggestEndBeforeClash", () => {
       // Clash 2 Nov 09:00 CET (08:00Z), after the clocks went back
       clashStart: new Date("2026-11-02T08:00:00Z"),
       timeZone,
+      now,
     });
     // 1 Nov 18:00 CET = 17:00Z
     expect(suggested?.toISOString()).toBe("2026-11-01T17:00:00.000Z");

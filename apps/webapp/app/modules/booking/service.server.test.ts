@@ -11732,6 +11732,19 @@ describe("extendBooking", () => {
   describe("quantity-tracked items", () => {
     const CABLE_ID = "asset-cable";
 
+    beforeEach(() => {
+      // why: the pool is row-locked with a raw `FOR UPDATE` read before it is
+      // measured; the mocked client has no raw query, so it answers with the
+      // locked row.
+      (db as unknown as { $queryRaw: unknown }).$queryRaw = vitest
+        .fn()
+        .mockResolvedValue([{ id: CABLE_ID }]);
+    });
+
+    afterEach(() => {
+      delete (db as unknown as { $queryRaw?: unknown }).$queryRaw;
+    });
+
     /** A running booking holding 3 of the cables, with the slice out. */
     function bookingWithCablesOut() {
       return {

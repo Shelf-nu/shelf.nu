@@ -13641,6 +13641,12 @@ export async function extendBooking({
           }
         }
         if (quantityUnitsOut.size > 0) {
+          // Row locks on the pools, held to commit, so a reservation or
+          // check-out measuring the same pool waits for this end date to
+          // land instead of both committing against one stale read.
+          for (const assetId of quantityUnitsOut.keys()) {
+            await lockAssetForQuantityUpdate(tx, assetId, organizationId);
+          }
           const availabilityByAsset = await getAssetAvailabilityBatch(
             [...quantityUnitsOut.keys()],
             {

@@ -12,7 +12,10 @@
  */
 import { useLoaderData } from "react-router";
 import { useDateFormatter } from "~/hooks/use-date-formatter";
-import type { NextReservations } from "~/modules/booking/next-reservations.server";
+import type {
+  NextReservation,
+  NextReservations,
+} from "~/modules/booking/next-reservations.server";
 import { AvailabilityBadge } from "./availability-label";
 import { Button } from "../shared/button";
 
@@ -27,7 +30,12 @@ export function useNextReservations(): NextReservations | undefined {
 }
 
 /**
- * The next reservation of one asset or kit on the current booking.
+ * The next reservation of one asset or kit on the current booking, or
+ * nothing when the loader names none for it.
+ *
+ * Rows on pages whose loader carries no `nextReservations` render nothing
+ * and touch no formatting preference, so the row works wherever it is
+ * mounted.
  *
  * @param props.kind - Whether `id` names an asset or a kit
  * @param props.id - The asset or kit id
@@ -40,13 +48,23 @@ export function NextReservationBadge({
   id: string;
 }) {
   const nextReservations = useNextReservations();
-  const { formatDateTime } = useDateFormatter();
   const next =
     kind === "kit"
       ? nextReservations?.byKitId[id]
       : nextReservations?.byAssetId[id];
   if (!next) return null;
+  return <NeededBadge kind={kind} next={next} />;
+}
 
+/** The badge itself, formatted in the reader's date preferences. */
+function NeededBadge({
+  kind,
+  next,
+}: {
+  kind: "asset" | "kit";
+  next: NextReservation;
+}) {
+  const { formatDateTime } = useDateFormatter();
   const from = formatDateTime(next.from);
   const badge = (
     <AvailabilityBadge
