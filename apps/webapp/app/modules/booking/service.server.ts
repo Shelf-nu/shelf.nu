@@ -13412,7 +13412,8 @@ export async function extendBooking({
           bookingAssets: {
             include: {
               // `type`, `assetModelId` and `title` feed the model guard that
-              // re-measures the booking against the extended window.
+              // re-measures the booking against the extended window;
+              // `unitOfMeasure` words a quantity shortfall.
               asset: {
                 select: {
                   id: true,
@@ -13420,6 +13421,7 @@ export async function extendBooking({
                   type: true,
                   assetModelId: true,
                   title: true,
+                  unitOfMeasure: true,
                 },
               },
             },
@@ -13548,15 +13550,20 @@ export async function extendBooking({
 
         /**
          * Reservations starting inside the added days that hold any of the
-         * same assets, or any membership of a kit still out. Each names the
-         * shared items, so the refusal tells the person what to free.
+         * same assets by name, or any membership of a kit still out. Each
+         * names the shared items, so the refusal tells the person what to
+         * free. A quantity-tracked asset is a pool, not a name: two bookings
+         * holding units of it clash only when the pool runs short, which is
+         * measured separately below.
          */
         const clashingBookings: ClashingBooking[] =
           await findClashingReservations({
             client: tx,
             organizationId,
             bookingId: booking.id,
-            activeAssetIds: activeAssets.map((a) => a.id),
+            activeAssetIds: activeAssets
+              .filter((a) => a.type !== AssetType.QUANTITY_TRACKED)
+              .map((a) => a.id),
             heldKits,
             after: booking.to,
             until: newEndDate,
@@ -13578,6 +13585,70 @@ export async function extendBooking({
             },
             shouldBeCaptured: false,
           });
+        }
+
+        /**
+         * Quantity-tracked units this booking still has out, measured
+         * against the pool over the added days: the units other bookings
+         * reserve or hold out in that window, at their busiest instant, plus
+         * custody and kit allocations, must leave room for these. This
+         * booking's own claim is excluded from the read, so it competes
+         * against everyone else and not against itself.
+         */
+        const quantityUnitsOut = new Map<
+          string,
+          { units: number; title: string; unit: string | null }
+        >();
+        for (const ba of booking.bookingAssets) {
+          if (ba.asset.type !== AssetType.QUANTITY_TRACKED) continue;
+          if (!activeAssets.some((a) => a.id === ba.assetId)) continue;
+          const entry = quantityUnitsOut.get(ba.assetId) ?? {
+            units: 0,
+            title: ba.asset.title,
+            unit: ba.asset.unitOfMeasure,
+          };
+          entry.units += ba.quantity;
+          quantityUnitsOut.set(ba.assetId, entry);
+        }
+        if (quantityUnitsOut.size > 0) {
+          const availabilityByAsset = await getAssetAvailabilityBatch(
+            [...quantityUnitsOut.keys()],
+            {
+              organizationId,
+              window: { from: booking.to, to: newEndDate },
+              excludeBookingId: booking.id,
+              db: tx,
+            }
+          );
+          const short = [...quantityUnitsOut.entries()].flatMap(
+            ([assetId, { units, title, unit }]) => {
+              const availability = availabilityByAsset.get(assetId);
+              const free = Math.max(0, availability?.bookable ?? 0);
+              const total = availability?.total ?? 0;
+              return units > free
+                ? [{ assetId, title, units, free, total, unit }]
+                : [];
+            }
+          );
+          if (short.length > 0) {
+            const day = formatExtendDay(newEndDate, hints);
+            throw new ShelfError({
+              cause: null,
+              label,
+              message: `Can't extend to ${day}. Not enough units are free until then: ${short
+                .map(
+                  (s) =>
+                    `"${s.title}" has ${s.units} ${
+                      s.unit || "units"
+                    } out on this booking, but only ${s.free} of ${
+                      s.total
+                    } are free`
+                )
+                .join("; ")}.`,
+              additionalData: { quantityShortfalls: short },
+              shouldBeCaptured: false,
+            });
+          }
         }
 
         /**

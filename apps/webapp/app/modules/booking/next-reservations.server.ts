@@ -17,6 +17,7 @@
  * @see {@link file://./clash-reservations.server.ts}
  * @see {@link file://../../routes/_layout+/bookings.$bookingId.overview.tsx}
  */
+import { AssetType } from "@prisma/client";
 import { db } from "~/database/db.server";
 import {
   findClashingReservations,
@@ -80,7 +81,7 @@ export async function loadNextReservations({
           assetKitId: true,
           checkedOutAt: true,
           checkedInAt: true,
-          asset: { select: { id: true, status: true } },
+          asset: { select: { id: true, status: true, type: true } },
         },
       },
       partialCheckins: { select: { assetIds: true } },
@@ -88,10 +89,15 @@ export async function loadNextReservations({
   });
   if (!booking || !isExtendableStatus(booking.status)) return NONE;
 
+  // Only assets held by name. A quantity-tracked asset is a pool shared by
+  // many bookings at once, so another booking's units are not a claim on
+  // these; the extend guard measures that pool separately.
   const activeAssetIds = getAssetsStillOutForExtend(
     booking.bookingAssets.map((ba) => ba.asset),
     booking.partialCheckins.flatMap((c) => c.assetIds)
-  ).map((a) => a.id);
+  )
+    .filter((a) => a.type !== AssetType.QUANTITY_TRACKED)
+    .map((a) => a.id);
   const heldKits = await resolveHeldKits({
     client: db,
     organizationId,

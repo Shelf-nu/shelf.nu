@@ -11729,6 +11729,125 @@ describe("extendBooking", () => {
     );
   });
 
+  describe("quantity-tracked items", () => {
+    const CABLE_ID = "asset-cable";
+
+    /** A running booking holding 3 of the cables, with the slice out. */
+    function bookingWithCablesOut() {
+      return {
+        ...extendableBookingData,
+        status: BookingStatus.ONGOING,
+        bookingAssets: [
+          {
+            asset: {
+              id: CABLE_ID,
+              status: AssetStatus.CHECKED_OUT,
+              type: AssetType.QUANTITY_TRACKED,
+              assetModelId: null,
+              title: "ethernet cable",
+              unitOfMeasure: null,
+            },
+            assetId: CABLE_ID,
+            assetKitId: null,
+            quantity: 3,
+            id: "ba-cable",
+            checkedOutAt: new Date("2025-01-01T10:00:00.000Z"),
+            checkedInAt: null,
+          },
+        ],
+        partialCheckins: [],
+      };
+    }
+
+    function mockCableStock(total: number) {
+      // why: `getAssetAvailabilityBatch` reads the pool size from the asset row.
+      (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+        (args?: { where?: { id?: { in?: string[] } } }) =>
+          Promise.resolve(
+            (args?.where?.id?.in ?? []).map((id) => ({ id, quantity: total }))
+          )
+      );
+    }
+
+    function mockOtherReservation(quantity: number) {
+      // why: the pool read lists other bookings' slices of the cable; the
+      // clash query must never see this booking, so it never asks by name.
+      (
+        db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+      ).mockImplementation((args?: { where?: { booking?: unknown } }) =>
+        Promise.resolve(
+          args?.where?.booking
+            ? [
+                {
+                  assetId: CABLE_ID,
+                  bookingId: "booking-2",
+                  quantity,
+                  booking: {
+                    from: new Date("2025-01-02T09:00:00Z"),
+                    to: new Date("2025-01-02T17:00:00Z"),
+                    status: BookingStatus.RESERVED,
+                  },
+                },
+              ]
+            : []
+        )
+      );
+    }
+
+    it("extends over another booking's reservation of the same cable when the pool has room", async () => {
+      expect.assertions(3);
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue(bookingWithCablesOut());
+      //@ts-expect-error missing vitest type
+      db.booking.findMany.mockResolvedValue([
+        {
+          id: "booking-2",
+          name: "Suresnes",
+          from: new Date("2025-01-02T09:00:00Z"),
+        },
+      ]);
+      mockCableStock(30);
+      mockOtherReservation(1);
+
+      await extendBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        newEndDate: new Date("2025-01-03T17:00:00Z"),
+        hints: mockClientHints,
+        userId: "user-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
+        roles: [OrganizationRoles.ADMIN],
+      });
+
+      // The by-name clash query is never asked about a pool item.
+      expect(db.booking.findMany).not.toHaveBeenCalled();
+      expect(db.asset.findMany).toHaveBeenCalledTimes(1);
+      expect(db.booking.update).toHaveBeenCalled();
+    });
+
+    it("refuses when the pool cannot hold this booking's units alongside the others", async () => {
+      expect.assertions(1);
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue(bookingWithCablesOut());
+      mockCableStock(30);
+      mockOtherReservation(28);
+
+      await expect(
+        extendBooking({
+          id: "booking-1",
+          organizationId: "org-1",
+          newEndDate: new Date("2025-01-03T17:00:00Z"),
+          hints: mockClientHints,
+          userId: "user-1",
+          access: accessFor([OrganizationRoles.ADMIN]),
+          roles: [OrganizationRoles.ADMIN],
+        })
+      ).rejects.toThrow(
+        '"ethernet cable" has 3 units out on this booking, but only 2 of 30 are free'
+      );
+    });
+  });
+
   it("should allow extension when no clashing bookings exist", async () => {
     expect.assertions(1);
 
