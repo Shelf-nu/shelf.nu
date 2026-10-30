@@ -66,13 +66,18 @@ function NeededBadge({
 }) {
   const { formatDateTime } = useDateFormatter();
   const from = formatDateTime(next.from);
+  // On an overdue booking the next reservation may already have started.
+  const alreadyStarted = new Date(next.from).getTime() <= Date.now();
+  const holder = next.bookingId ? next.bookingName : "Another booking";
   const badge = (
     <AvailabilityBadge
-      badgeText={`Needed ${from}`}
+      badgeText={alreadyStarted ? `Needed since ${from}` : `Needed ${from}`}
       tooltipTitle="Reserved next by another booking"
-      tooltipContent={`${
-        next.bookingId ? next.bookingName : "Another booking"
-      } has this ${kind} reserved from ${from}. It has to be checked in before then.`}
+      tooltipContent={
+        alreadyStarted
+          ? `${holder} has had this ${kind} reserved since ${from}. Check it in as soon as possible.`
+          : `${holder} has this ${kind} reserved from ${from}. It has to be checked in before then.`
+      }
     />
   );
 
@@ -84,7 +89,9 @@ function NeededBadge({
       target="_blank"
       variant="inherit"
       className="inline-block rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-500"
-      aria-label={`Needed ${from} by ${next.bookingName}, open that booking`}
+      aria-label={`Needed ${alreadyStarted ? "since" : "from"} ${from} by ${
+        next.bookingName
+      }, open that booking`}
     >
       {badge}
     </Button>

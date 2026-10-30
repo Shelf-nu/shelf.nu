@@ -11,6 +11,7 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { isExtendableStatus } from "~/modules/booking/extend-eligibility";
+import { readClashRefusal } from "~/modules/booking/extend-horizon";
 import { extendBooking } from "~/modules/booking/service.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
@@ -171,6 +172,7 @@ export async function action({ request }: ActionFunctionArgs) {
       organizationId,
       newEndDate: parsed.endDate,
       hints,
+      prefs,
       userId: user.id,
       access,
       roles,
@@ -206,17 +208,10 @@ export async function action({ request }: ActionFunctionArgs) {
  * @returns One label per clashing booking; empty when the error is not a clash
  */
 function clashingBookingLabels(additionalData: unknown): string[] {
-  if (typeof additionalData !== "object" || additionalData === null) return [];
-  const clashing = (additionalData as { clashingBookings?: unknown })
-    .clashingBookings;
-  if (!Array.isArray(clashing)) return [];
-  return clashing.flatMap((b: { name?: unknown; items?: unknown } | null) => {
-    if (typeof b?.name !== "string") return [];
-    const items = Array.isArray(b.items)
-      ? b.items.flatMap((item: { name?: unknown } | null) =>
-          typeof item?.name === "string" ? [item.name] : []
-        )
-      : [];
-    return [items.length > 0 ? `${b.name} (${items.join(", ")})` : b.name];
+  const refusal = readClashRefusal(additionalData);
+  if (!refusal) return [];
+  return refusal.clashingBookings.map((b) => {
+    const items = b.items.map((item) => item.name);
+    return items.length > 0 ? `${b.name} (${items.join(", ")})` : b.name;
   });
 }

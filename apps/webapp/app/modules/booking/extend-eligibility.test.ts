@@ -4,11 +4,12 @@
  *
  * @see {@link file://./extend-eligibility.ts}
  */
-import { AssetStatus, BookingStatus } from "@prisma/client";
+import { AssetStatus, AssetType, BookingStatus } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 import {
   getAssetsStillOutForExtend,
   getKitMembershipIdsStillOut,
+  getQuantityAssetIdsStillOut,
   hasItemsStillOutToExtend,
   isExtendableStatus,
 } from "./extend-eligibility";
@@ -60,7 +61,84 @@ describe("getKitMembershipIdsStillOut", () => {
   });
 });
 
+describe("getQuantityAssetIdsStillOut", () => {
+  const pool = (id: string) => ({
+    id,
+    status: AssetStatus.AVAILABLE,
+    type: AssetType.QUANTITY_TRACKED,
+  });
+
+  it("reads standalone pool slices from their markers, whatever the shared status", () => {
+    expect(
+      getQuantityAssetIdsStillOut({
+        assets: [
+          pool("out"),
+          pool("back"),
+          pool("never"),
+          pool("kit"),
+          { id: "cam", status: AssetStatus.CHECKED_OUT },
+        ],
+        slices: [
+          {
+            assetId: "out",
+            assetKitId: null,
+            checkedOutAt: OUT_AT,
+            checkedInAt: null,
+          },
+          {
+            assetId: "back",
+            assetKitId: null,
+            checkedOutAt: OUT_AT,
+            checkedInAt: BACK_AT,
+          },
+          {
+            assetId: "never",
+            assetKitId: null,
+            checkedOutAt: null,
+            checkedInAt: null,
+          },
+          {
+            assetId: "kit",
+            assetKitId: "ak",
+            checkedOutAt: OUT_AT,
+            checkedInAt: null,
+          },
+          {
+            assetId: "cam",
+            assetKitId: null,
+            checkedOutAt: OUT_AT,
+            checkedInAt: null,
+          },
+        ],
+      })
+    ).toEqual(["out"]);
+  });
+});
+
 describe("hasItemsStillOutToExtend", () => {
+  it("is true while only units of a pool are out", () => {
+    expect(
+      hasItemsStillOutToExtend({
+        assets: [
+          {
+            id: "cable",
+            status: AssetStatus.AVAILABLE,
+            type: AssetType.QUANTITY_TRACKED,
+          },
+        ],
+        checkedInAssetIds: [],
+        slices: [
+          {
+            assetId: "cable",
+            assetKitId: null,
+            checkedOutAt: OUT_AT,
+            checkedInAt: null,
+          },
+        ],
+      })
+    ).toBe(true);
+  });
+
   it("is true while an asset is out", () => {
     expect(
       hasItemsStillOutToExtend({

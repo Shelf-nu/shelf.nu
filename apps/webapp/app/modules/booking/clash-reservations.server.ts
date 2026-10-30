@@ -23,6 +23,7 @@ import { BookingStatus } from "@prisma/client";
 import type { db } from "~/database/db.server";
 import {
   describeClashingBookings,
+  redactClashingBookings,
   type ClashingBooking,
   type KitByMembershipId,
 } from "./clashing-bookings";
@@ -108,6 +109,8 @@ export async function resolveHeldKits({
  * clashes of the added days (exclusive)
  * @param until - Reservations starting after this instant are out of the
  * window (inclusive); omit for no upper bound
+ * @param viewer - Who reads the result: a viewer who may not see other
+ * members' bookings gets them without name or link, except their own
  * @returns The clashing bookings, earliest start first, with shared items
  */
 export async function findClashingReservations({
@@ -118,6 +121,7 @@ export async function findClashingReservations({
   heldKits,
   after,
   until,
+  viewer,
 }: {
   client: ClashClient;
   organizationId: string;
@@ -126,6 +130,7 @@ export async function findClashingReservations({
   heldKits: HeldKits;
   after: Date;
   until?: Date;
+  viewer: { userId: string; seesAllBookings: boolean };
 }): Promise<ClashingBooking[]> {
   if (activeAssetIds.length === 0 && heldKits.membershipIds.length === 0) {
     return [];
@@ -153,6 +158,8 @@ export async function findClashingReservations({
       id: true,
       name: true,
       from: true,
+      creatorId: true,
+      custodianUserId: true,
       bookingAssets: {
         where: sliceClause,
         select: {
@@ -165,5 +172,18 @@ export async function findClashingReservations({
     orderBy: { from: "asc" },
   });
 
-  return describeClashingBookings(rows, heldKits.kitByMembershipId);
+  // The viewer's own bookings, which they may see whatever their role.
+  const ownBookingIds = new Set(
+    rows
+      .filter(
+        (r) =>
+          r.creatorId === viewer.userId || r.custodianUserId === viewer.userId
+      )
+      .map((r) => r.id)
+  );
+  return redactClashingBookings(
+    describeClashingBookings(rows, heldKits.kitByMembershipId),
+    viewer.seesAllBookings,
+    ownBookingIds
+  );
 }

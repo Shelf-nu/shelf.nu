@@ -52,7 +52,11 @@ import {
   loadSliceSourceLocations,
 } from "~/modules/booking/checkout-source-location.server";
 import { sendBookingUpdatedEmail } from "~/modules/booking/email-helpers";
-import { loadNextReservations } from "~/modules/booking/next-reservations.server";
+import { isExtendableStatus } from "~/modules/booking/extend-eligibility";
+import {
+  loadNextReservations,
+  NO_NEXT_RESERVATIONS,
+} from "~/modules/booking/next-reservations.server";
 import {
   assertBookingDeleteConfirmed,
   archiveBooking,
@@ -233,15 +237,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             totalTeamMembersForNotify: 0,
           }),
     ]);
-
-    // What the items still out are promised to next: the extend horizon for
-    // the Change end date dialog and the next reservation per item row.
-    // Empty for bookings that are not running.
-    const nextReservations = await loadNextReservations({
-      organizationId,
-      bookingId: booking.id,
-      revealOtherBookings: access.bookings.seeAll,
-    });
 
     // Exclude custodian from the notification recipients picker since
     // the custodian is always notified and doesn't need to be added
@@ -432,6 +427,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       bookingFlags,
       rawKits,
       modelShortfalls,
+      nextReservations,
     ] = await Promise.all([
       /**
        * We need to fetch the team members for the custodian filter in sidebar.
@@ -634,6 +630,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             organizationId,
           })
         : [],
+
+      /**
+       * What the items still out are promised to next: the extend horizon
+       * for the Change end date dialog and the next reservation per item
+       * row. Only a running booking has items out.
+       */
+      isExtendableStatus(booking.status)
+        ? loadNextReservations({
+            organizationId,
+            bookingId: booking.id,
+            viewer: { userId, seesAllBookings: access.bookings.seeAll },
+          })
+        : NO_NEXT_RESERVATIONS,
     ]);
 
     // Index the enriched assets for lookup during per-slice projection below.
@@ -2233,6 +2242,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           id,
           organizationId,
           hints,
+          prefs,
           newEndDate: endDate,
           userId,
           access,

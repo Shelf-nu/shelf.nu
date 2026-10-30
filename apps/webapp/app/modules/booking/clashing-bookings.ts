@@ -106,18 +106,25 @@ export const HIDDEN_BOOKING_NAME = "another booking";
 /**
  * Strip the identity of each clashing booking for a reader who may not see
  * other members' bookings: the items and the start day stay, the name and
- * the link go.
+ * the link go. The reader's own bookings keep both, since they may open and
+ * change those.
  *
  * @param bookings - The output of {@link describeClashingBookings}
  * @param revealOtherBookings - Whether the reader may see other bookings
+ * @param ownBookingIds - Bookings the reader created or has custody of
  * @returns The same bookings, anonymised unless the reader may see them
  */
 export function redactClashingBookings(
   bookings: ClashingBooking[],
-  revealOtherBookings: boolean
+  revealOtherBookings: boolean,
+  ownBookingIds: ReadonlySet<string> = new Set()
 ): ClashingBooking[] {
   if (revealOtherBookings) return bookings;
-  return bookings.map((b) => ({ ...b, id: null, name: HIDDEN_BOOKING_NAME }));
+  return bookings.map((b) =>
+    b.id && ownBookingIds.has(b.id)
+      ? b
+      : { ...b, id: null, name: HIDDEN_BOOKING_NAME }
+  );
 }
 
 /**

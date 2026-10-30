@@ -131,11 +131,7 @@ import {
 } from "~/utils/booking-authorization.server";
 import { canUserRemoveBookingAssets } from "~/utils/bookings";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
-import {
-  getClientHint,
-  getDateTimeFormatFromHints,
-  type ClientHint,
-} from "~/utils/client-hints";
+import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import {
   getFiltersFromRequest,
@@ -230,10 +226,7 @@ import {
   findClashingReservations,
   resolveHeldKits,
 } from "./clash-reservations.server";
-import {
-  earliestClashStart,
-  redactClashingBookings,
-} from "./clashing-bookings";
+import { earliestClashStart } from "./clashing-bookings";
 import {
   ADDABLE_BOOKING_STATUSES,
   BOOKING_COMMON_INCLUDE,
@@ -263,6 +256,7 @@ import {
 import {
   getAssetsStillOutForExtend,
   getKitMembershipIdsStillOut,
+  getQuantityAssetIdsStillOut,
   isExtendableStatus,
 } from "./extend-eligibility";
 import {
@@ -13347,24 +13341,6 @@ const END_DATE_CHANGE_COPY = {
 >;
 
 /**
- * The day an extend refusal names, in the acting user's locale and time zone
- * when the caller has them, UTC otherwise.
- *
- * @param at - The requested end
- * @param hints - The caller's client hints; an invalid zone falls back to UTC
- * @returns The day, e.g. "1 Jan 2027"
- */
-function formatExtendDay(at: Date, hints?: ClientHint): string {
-  const options = { day: "numeric", month: "short", year: "numeric" } as const;
-  const utc = { locale: "en-US", timeZone: "UTC" };
-  try {
-    return getDateTimeFormatFromHints(hints ?? utc, options).format(at);
-  } catch {
-    return getDateTimeFormatFromHints(utc, options).format(at);
-  }
-}
-
-/**
  * Moves the end of an ongoing or overdue booking, later or earlier.
  *
  * Only the dates move: items stay checked out until they are checked in, and
@@ -13375,6 +13351,9 @@ function formatExtendDay(at: Date, hints?: ClientHint): string {
  * @param params.newEndDate - The new live end (`to`); the planned end is left alone
  * @param params.hints - Client hints, for the note's dates, the check-in
  *   reminder and the scheduled overdue job
+ * @param params.prefs - The date preferences the caller parsed `newEndDate`
+ *   in; a refusal names the requested day in them, so it is the day the
+ *   person picked. Falls back to the preferences the hints suggest
  * @param params.userId - The caller
  * @param params.access - The caller's access, for the ownership gate
  * @param params.roles - Every role on the caller's membership, for the
@@ -13394,12 +13373,14 @@ export async function extendBooking({
   organizationId,
   newEndDate,
   hints,
+  prefs,
   userId,
   access,
   roles,
 }: Pick<Booking, "id" | "organizationId"> & {
   newEndDate: Date;
   hints: ClientHint;
+  prefs?: ResolvedFormatPrefs;
   userId: string;
   access: RoleAccess;
   roles: OrganizationRoles[];
@@ -13526,7 +13507,19 @@ export async function extendBooking({
       booking.bookingAssets
     );
 
-    if (activeAssets.length === 0 && kitMembershipIdsStillOut.length === 0) {
+    /** Quantity-tracked assets with units still out, read from the slice markers */
+    const quantityAssetIdsStillOut = new Set(
+      getQuantityAssetIdsStillOut({
+        assets: booking.bookingAssets.map((ba) => ba.asset),
+        slices: booking.bookingAssets,
+      })
+    );
+
+    if (
+      activeAssets.length === 0 &&
+      kitMembershipIdsStillOut.length === 0 &&
+      quantityAssetIdsStillOut.size === 0
+    ) {
       throw new ShelfError({
         cause: null,
         label,
@@ -13536,242 +13529,262 @@ export async function extendBooking({
       });
     }
 
-    /** Wrap conflict detection and update in a transaction to prevent race conditions */
-    const updatedBooking = await db.$transaction(async (tx) => {
-      // Only a later end adds time to the booking's window; an earlier end
-      // shrinks it and cannot overlap anything it did not already overlap.
-      if (movesLater) {
-        /**
-         * Every membership of the kits still out. A reservation holds a kit
-         * through any of its memberships, not only the ones this booking's
-         * slices point at.
-         */
-        const heldKits = await resolveHeldKits({
-          client: tx,
-          organizationId,
-          membershipIdsStillOut: kitMembershipIdsStillOut,
-        });
+    /** The preferences a refusal names the requested day in */
+    const refusalPrefs = prefs ?? resolveFormatPrefs(null, hints);
 
-        /**
-         * Reservations starting inside the added days that hold any of the
-         * same assets by name, or any membership of a kit still out. Each
-         * names the shared items, so the refusal tells the person what to
-         * free. A quantity-tracked asset is a pool, not a name: two bookings
-         * holding units of it clash only when the pool runs short, which is
-         * measured separately below.
-         */
-        const clashingBookings: ClashingBooking[] = redactClashingBookings(
-          await findClashingReservations({
+    /** Wrap conflict detection and update in a transaction to prevent race conditions */
+    const updatedBooking = await db.$transaction(
+      async (tx) => {
+        // Only a later end adds time to the booking's window; an earlier end
+        // shrinks it and cannot overlap anything it did not already overlap.
+        if (movesLater) {
+          /**
+           * Every membership of the kits still out. A reservation holds a kit
+           * through any of its memberships, not only the ones this booking's
+           * slices point at.
+           */
+          const heldKits = await resolveHeldKits({
             client: tx,
             organizationId,
-            bookingId: booking.id,
-            activeAssetIds: activeAssets
-              .filter((a) => a.type !== AssetType.QUANTITY_TRACKED)
-              .map((a) => a.id),
-            heldKits,
-            after: booking.to,
-            until: newEndDate,
-          }),
-          // A member who may not see other bookings learns what to free,
-          // not whose booking it is.
-          access.bookings.seeAll
-        );
-
-        if (clashingBookings.length > 0) {
-          throw new ShelfError({
-            cause: null,
-            label,
-            message: `Can't extend to ${formatExtendDay(
-              newEndDate,
-              hints
-            )}. These bookings reserve items this booking still has out:`,
-            additionalData: {
-              clashingBookings,
-              // The first clash starts here; a later end before it is free
-              // of named-item clashes.
-              freeUntil: earliestClashStart(clashingBookings),
-            },
-            shouldBeCaptured: false,
+            membershipIdsStillOut: kitMembershipIdsStillOut,
           });
-        }
 
-        /**
-         * Quantity-tracked units this booking still has out, measured
-         * against the pool over the added days: the units other bookings
-         * reserve or hold out in that window, at their busiest instant, plus
-         * custody and kit allocations, must leave room for these. This
-         * booking's own claim is excluded from the read, so it competes
-         * against everyone else and not against itself.
-         */
-        const quantityUnitsOut = new Map<
-          string,
-          { units: number; title: string; unit: string | null }
-        >();
-        for (const ba of booking.bookingAssets) {
-          if (ba.asset.type !== AssetType.QUANTITY_TRACKED) continue;
-          // Units held through a kit are already taken off the pool as the
-          // kit's allocation; counting them here would deduct them twice.
-          if (ba.assetKitId) continue;
-          if (!activeAssets.some((a) => a.id === ba.assetId)) continue;
-          const entry = quantityUnitsOut.get(ba.assetId) ?? {
-            units: 0,
-            title: ba.asset.title,
-            unit: ba.asset.unitOfMeasure,
-          };
-          entry.units += ba.quantity;
-          quantityUnitsOut.set(ba.assetId, entry);
-        }
-        if (quantityUnitsOut.size > 0) {
-          // Units already back through a partial check-in, consumed, lost or
-          // damaged are no longer out, so they ask nothing of the pool.
-          const returned = await tx.consumptionLog.groupBy({
-            by: ["assetId"],
-            where: {
-              bookingId: booking.id,
-              assetId: { in: [...quantityUnitsOut.keys()] },
-              category: { in: [...RESERVATION_REDUCING_CATEGORIES] },
-            },
-            _sum: { quantity: true },
-          });
-          for (const group of returned) {
-            const entry = quantityUnitsOut.get(group.assetId);
-            if (!entry) continue;
-            entry.units = Math.max(0, entry.units - (group._sum.quantity ?? 0));
-            if (entry.units === 0) quantityUnitsOut.delete(group.assetId);
-          }
-        }
-        if (quantityUnitsOut.size > 0) {
-          // Row locks on the pools, held to commit, so a reservation or
-          // check-out measuring the same pool waits for this end date to
-          // land instead of both committing against one stale read.
-          for (const assetId of quantityUnitsOut.keys()) {
-            await lockAssetForQuantityUpdate(tx, assetId, organizationId);
-          }
-          const availabilityByAsset = await getAssetAvailabilityBatch(
-            [...quantityUnitsOut.keys()],
-            {
+          /**
+           * Reservations starting inside the added days that hold any of the
+           * same assets by name, or any membership of a kit still out. Each
+           * names the shared items, so the refusal tells the person what to
+           * free. A quantity-tracked asset is a pool, not a name: two bookings
+           * holding units of it clash only when the pool runs short, which is
+           * measured separately below.
+           */
+          const clashingBookings: ClashingBooking[] =
+            await findClashingReservations({
+              client: tx,
               organizationId,
-              window: {
-                // What is already behind us cannot compete for these units:
-                // an overdue booking's end lies in the past, and only the
-                // days from now to the new end are being asked for.
-                from: new Date(Math.max(booking.to.getTime(), Date.now())),
-                to: newEndDate,
-              },
-              excludeBookingId: booking.id,
-              db: tx,
-            }
-          );
-          const short = [...quantityUnitsOut.entries()].flatMap(
-            ([assetId, { units, title, unit }]) => {
-              const availability = availabilityByAsset.get(assetId);
-              const free = Math.max(0, availability?.bookable ?? 0);
-              const total = availability?.total ?? 0;
-              return units > free
-                ? [{ assetId, title, units, free, total, unit }]
-                : [];
-            }
-          );
-          if (short.length > 0) {
-            const day = formatExtendDay(newEndDate, hints);
-            throw new ShelfError({
-              cause: null,
-              label,
-              message: `Can't extend to ${day}. Not enough units are free until then: ${short
-                .map(
-                  (s) =>
-                    `"${s.title}" has ${s.units} ${
-                      s.unit || "units"
-                    } out on this booking, but only ${s.free} of ${
-                      s.total
-                    } are free`
-                )
-                .join("; ")}.`,
-              additionalData: { quantityShortfalls: short },
-              shouldBeCaptured: false,
+              bookingId: booking.id,
+              activeAssetIds: activeAssets
+                .filter((a) => a.type !== AssetType.QUANTITY_TRACKED)
+                .map((a) => a.id),
+              heldKits,
+              after: booking.to,
+              until: newEndDate,
+              // A member who may not see other bookings learns what to free,
+              // not whose booking it is, unless it is their own.
+              viewer: { userId, seesAllBookings: access.bookings.seeAll },
             });
-          }
-        }
 
-        /**
-         * The days being added may overlap model reservations that other
-         * bookings hold, which the clash check above cannot see: a
-         * `BookingModelRequest` names no asset. Every INDIVIDUAL unit the
-         * booking holds by name is measured again against the pool from
-         * `booking.to` to `newEndDate`. The start is inclusive: a claim
-         * already running at the instant `booking.to` counts, because the
-         * booking holds its units through that instant too. Each claim counts
-         * until its own end, exclusive, so one that ends exactly at
-         * `booking.to` does not, and one that starts at `newEndDate` is never
-         * reached. This is one instant wider than the clash check above,
-         * which looks only at bookings that start strictly after
-         * `booking.to`. Claims lying entirely inside the days the booking
-         * already covers were measured when it was reserved and are not this
-         * change's business. Kit-driven rows are included: the later end
-         * takes the unit off the pool for the added days however it got onto
-         * the booking.
-         */
-        await assertModelUnitsNotReservedElsewhere({
-          assets: booking.bookingAssets
-            .filter((ba) => ba.asset.type === AssetType.INDIVIDUAL)
-            .map((ba) => ba.asset),
-          bookingId: booking.id,
-          bookingStatus: booking.status,
-          windowChanged: true,
-          organizationId,
-          from: booking.to,
-          to: newEndDate,
-          tx,
-          hints,
-          userId,
-          revealOtherBookings: access.bookings.seeAll,
-        });
-      }
-
-      // The row must still be exactly as read when the lock is taken: an
-      // end-date change that landed since the read above, a booking closed,
-      // or the overdue job flipping it meanwhile leaves no row to update. So
-      // the note and the events below, built from that read, describe the
-      // change this write made. The new end is in the future, so the live
-      // status reads ONGOING either way.
-      return tx.booking
-        .update({
-          where: {
-            id: booking.id,
-            organizationId,
-            status: booking.status,
-            to: booking.to,
-          },
-          data: {
-            status: BookingStatus.ONGOING,
-            /**
-             * Only the LIVE end date moves. `originalTo` holds the end date
-             * the booking was planned for, and the end can change only once
-             * the booking has started (ONGOING/OVERDUE), so the plan is
-             * already fixed: moving it here would erase the deadline the
-             * custodian actually agreed to, and with it every late return
-             * from Booking Compliance.
-             */
-            to: newEndDate,
-          },
-          include: BOOKING_INCLUDE_FOR_EMAIL,
-        })
-        .catch((cause) => {
-          if (isNotFoundError(cause)) {
-            // `cause: null`: a Prisma not-found cause would turn this into a
-            // 404, and the booking does exist; its row just moved on.
+          if (clashingBookings.length > 0) {
             throw new ShelfError({
               cause: null,
               label,
-              message:
-                "The booking changed while you were changing its end date. Reload it and try again.",
+              message: `Can't extend to ${formatDate(
+                newEndDate,
+                refusalPrefs
+              )}. These bookings reserve items this booking still has out:`,
+              additionalData: {
+                clashingBookings,
+                // The first clash starts here; a later end before it is free
+                // of named-item clashes.
+                freeUntil: earliestClashStart(clashingBookings),
+              },
               status: 400,
               shouldBeCaptured: false,
             });
           }
-          throw cause;
-        });
-    });
+
+          /**
+           * Quantity-tracked units this booking still has out, measured
+           * against the pool over the added days: the units other bookings
+           * reserve or hold out in that window, at their busiest instant, plus
+           * custody and kit allocations, must leave room for these. This
+           * booking's own claim is excluded from the read, so it competes
+           * against everyone else and not against itself.
+           */
+          const quantityUnitsOut = new Map<
+            string,
+            { units: number; title: string; unit: string | null }
+          >();
+          for (const ba of booking.bookingAssets) {
+            if (!quantityAssetIdsStillOut.has(ba.assetId)) continue;
+            // Units held through a kit are already taken off the pool as the
+            // kit's allocation; counting them here would deduct them twice.
+            if (ba.assetKitId) continue;
+            // Only slices still out keep units away past the current end. A
+            // partly checked-out slice claims all of its units: the ones not
+            // yet out stay reserved to this booking until it ends.
+            if (!ba.checkedOutAt || ba.checkedInAt) continue;
+            const entry = quantityUnitsOut.get(ba.assetId) ?? {
+              units: 0,
+              title: ba.asset.title,
+              unit: ba.asset.unitOfMeasure,
+            };
+            entry.units += ba.quantity;
+            quantityUnitsOut.set(ba.assetId, entry);
+          }
+          if (quantityUnitsOut.size > 0) {
+            // Units already back through a partial check-in, consumed, lost or
+            // damaged are no longer out, so they ask nothing of the pool.
+            const returned = await tx.consumptionLog.groupBy({
+              by: ["assetId"],
+              where: {
+                bookingId: booking.id,
+                assetId: { in: [...quantityUnitsOut.keys()] },
+                category: { in: [...RESERVATION_REDUCING_CATEGORIES] },
+              },
+              _sum: { quantity: true },
+            });
+            for (const group of returned) {
+              const entry = quantityUnitsOut.get(group.assetId);
+              if (!entry) continue;
+              entry.units = Math.max(
+                0,
+                entry.units - (group._sum.quantity ?? 0)
+              );
+              if (entry.units === 0) quantityUnitsOut.delete(group.assetId);
+            }
+          }
+          if (quantityUnitsOut.size > 0) {
+            // Row locks on the pools, held to commit, so a reservation or
+            // check-out measuring the same pool waits for this end date to
+            // land instead of both committing against one stale read. Taken in
+            // sorted id order, like every other multi-pool locker, so two
+            // transactions over the same pools cannot deadlock.
+            await lockEveryAssetForQuantityUpdate(
+              tx,
+              [...quantityUnitsOut.keys()],
+              organizationId
+            );
+            const availabilityByAsset = await getAssetAvailabilityBatch(
+              [...quantityUnitsOut.keys()],
+              {
+                organizationId,
+                window: {
+                  // What is already behind us cannot compete for these units:
+                  // an overdue booking's end lies in the past, and only the
+                  // days from now to the new end are being asked for.
+                  from: new Date(Math.max(booking.to.getTime(), Date.now())),
+                  to: newEndDate,
+                },
+                excludeBookingId: booking.id,
+                db: tx,
+              }
+            );
+            const short = [...quantityUnitsOut.entries()].flatMap(
+              ([assetId, { units, title, unit }]) => {
+                const availability = availabilityByAsset.get(assetId);
+                const free = Math.max(0, availability?.bookable ?? 0);
+                const total = availability?.total ?? 0;
+                return units > free
+                  ? [{ assetId, title, units, free, total, unit }]
+                  : [];
+              }
+            );
+            if (short.length > 0) {
+              const day = formatDate(newEndDate, refusalPrefs);
+              throw new ShelfError({
+                cause: null,
+                label,
+                message: `Can't extend to ${day}. Not enough units are free until then: ${short
+                  .map(
+                    (s) =>
+                      `"${s.title}" has ${s.units} ${
+                        s.unit || (s.units === 1 ? "unit" : "units")
+                      } out on this booking, but only ${s.free} of ${
+                        s.total
+                      } are free`
+                  )
+                  .join("; ")}.`,
+                additionalData: { quantityShortfalls: short },
+                status: 400,
+                shouldBeCaptured: false,
+              });
+            }
+          }
+
+          /**
+           * The days being added may overlap model reservations that other
+           * bookings hold, which the clash check above cannot see: a
+           * `BookingModelRequest` names no asset. Every INDIVIDUAL unit the
+           * booking holds by name is measured again against the pool from
+           * `booking.to` to `newEndDate`. The start is inclusive: a claim
+           * already running at the instant `booking.to` counts, because the
+           * booking holds its units through that instant too. Each claim counts
+           * until its own end, exclusive, so one that ends exactly at
+           * `booking.to` does not, and one that starts at `newEndDate` is never
+           * reached. This is one instant wider than the clash check above,
+           * which looks only at bookings that start strictly after
+           * `booking.to`. Claims lying entirely inside the days the booking
+           * already covers were measured when it was reserved and are not this
+           * change's business. Kit-driven rows are included: the later end
+           * takes the unit off the pool for the added days however it got onto
+           * the booking.
+           */
+          await assertModelUnitsNotReservedElsewhere({
+            assets: booking.bookingAssets
+              .filter((ba) => ba.asset.type === AssetType.INDIVIDUAL)
+              .map((ba) => ba.asset),
+            bookingId: booking.id,
+            bookingStatus: booking.status,
+            windowChanged: true,
+            organizationId,
+            from: booking.to,
+            to: newEndDate,
+            tx,
+            hints,
+            userId,
+            revealOtherBookings: access.bookings.seeAll,
+          });
+        }
+
+        // The row must still be exactly as read when the lock is taken: an
+        // end-date change that landed since the read above, a booking closed,
+        // or the overdue job flipping it meanwhile leaves no row to update. So
+        // the note and the events below, built from that read, describe the
+        // change this write made. The new end is in the future, so the live
+        // status reads ONGOING either way.
+        return tx.booking
+          .update({
+            where: {
+              id: booking.id,
+              organizationId,
+              status: booking.status,
+              to: booking.to,
+            },
+            data: {
+              status: BookingStatus.ONGOING,
+              /**
+               * Only the LIVE end date moves. `originalTo` holds the end date
+               * the booking was planned for, and the end can change only once
+               * the booking has started (ONGOING/OVERDUE), so the plan is
+               * already fixed: moving it here would erase the deadline the
+               * custodian actually agreed to, and with it every late return
+               * from Booking Compliance.
+               */
+              to: newEndDate,
+            },
+            include: BOOKING_INCLUDE_FOR_EMAIL,
+          })
+          .catch((cause) => {
+            if (isNotFoundError(cause)) {
+              // `cause: null`: a Prisma not-found cause would turn this into a
+              // 404, and the booking does exist; its row just moved on.
+              throw new ShelfError({
+                cause: null,
+                label,
+                message:
+                  "The booking changed while you were changing its end date. Reload it and try again.",
+                status: 400,
+                shouldBeCaptured: false,
+              });
+            }
+            throw cause;
+          });
+      },
+      // The clash reads, pool locks and stock reads all run before the
+      // write, so a booking with several pools or kits needs more than
+      // Prisma's 5s default.
+      { timeout: RESERVATION_BATCH_TX_TIMEOUT_MS }
+    );
 
     // The stored end has moved, so the check-in reminder (ONGOING) or the
     // finished job chain (OVERDUE) no longer matches it: cancel the stored

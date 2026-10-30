@@ -64,7 +64,11 @@ export default function ExtendBookingDialog({
 }: ExtendBookingDialogProps) {
   const [open, setOpen] = useState(false);
   // The picker is uncontrolled; a suggested end re-seeds it through its key.
-  const [seededEndDate, setSeededEndDate] = useState<string | null>(null);
+  // `seq` grows on every seeding, so taking the same suggestion again resets
+  // a picker the person has edited since.
+  const [seeded, setSeeded] = useState<{ wire: string; seq: number } | null>(
+    null
+  );
   // The refusal the person answered by taking the suggested end; it is not
   // shown again while that same response is still the fetcher's.
   const [answeredRefusal, setAnsweredRefusal] = useState<unknown>(undefined);
@@ -95,7 +99,7 @@ export default function ExtendBookingDialog({
   );
 
   function handleOpen() {
-    setSeededEndDate(null);
+    setSeeded(null);
     setAnsweredRefusal(undefined);
     setOpen(true);
   }
@@ -132,7 +136,7 @@ export default function ExtendBookingDialog({
   const validationErrors =
     getValidationErrors<ExtendBookingSchemaType>(rejectedError);
   const refusal = readClashRefusal(rejectedError?.additionalData);
-  const pickerValue = seededEndDate ?? currentEndDate;
+  const pickerValue = seeded?.wire ?? currentEndDate;
 
   return (
     <>
@@ -174,7 +178,10 @@ export default function ExtendBookingDialog({
                 disabled={disabled}
                 onUseSuggested={(wire) => {
                   setAnsweredRefusal(fetcher.data);
-                  setSeededEndDate(wire);
+                  setSeeded((prev) => ({
+                    wire,
+                    seq: (prev?.seq ?? 0) + 1,
+                  }));
                 }}
                 timeZone={prefs.timeZone}
               />
@@ -186,7 +193,7 @@ export default function ExtendBookingDialog({
               </div>
 
               <DateTimePicker
-                key={pickerValue}
+                key={`${pickerValue}-${seeded?.seq ?? 0}`}
                 mode="datetime"
                 defaultValue={pickerValue}
                 label="End Date"
@@ -274,26 +281,36 @@ function HorizonNotice({
 }) {
   const { formatDateTime } = useDateFormatter();
   const { blockedBy } = horizon;
+  const from = formatDateTime(horizon.freeUntil);
+  // An overdue booking's end lies in the past, so the reservation after it
+  // may already have started: then the items are owed, not free until.
+  const alreadyStarted = new Date(horizon.freeUntil).getTime() <= Date.now();
+  const blocker = blockedBy.id ? (
+    <Button
+      to={`/bookings/${blockedBy.id}`}
+      target="_blank"
+      variant="inherit"
+      className="font-medium underline"
+    >
+      {blockedBy.name}
+    </Button>
+  ) : (
+    blockedBy.name
+  );
   return (
     <div className="mb-4 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700">
-      <span className="font-medium text-gray-900">
-        No other booking has these items reserved until{" "}
-        {formatDateTime(horizon.freeUntil)}.
-      </span>{" "}
-      After that,{" "}
-      {blockedBy.id ? (
-        <Button
-          to={`/bookings/${blockedBy.id}`}
-          target="_blank"
-          variant="inherit"
-          className="font-medium underline"
-        >
-          {blockedBy.name}
-        </Button>
+      {alreadyStarted ? (
+        <span className="font-medium text-gray-900">
+          Already reserved from {from}: {blocker} needs {namedItems(blockedBy)}.
+        </span>
       ) : (
-        blockedBy.name
-      )}{" "}
-      needs {namedItems(blockedBy)}.
+        <>
+          <span className="font-medium text-gray-900">
+            No other booking has these items reserved until {from}.
+          </span>{" "}
+          After that, {blocker} needs {namedItems(blockedBy)}.
+        </>
+      )}
       <div className="mt-1 text-xs text-gray-500">
         Reservations by model and the stock of quantity items are checked when
         you submit.

@@ -23,10 +23,7 @@ import {
   findClashingReservations,
   resolveHeldKits,
 } from "./clash-reservations.server";
-import {
-  redactClashingBookings,
-  type ClashingBooking,
-} from "./clashing-bookings";
+import { type ClashingBooking } from "./clashing-bookings";
 import {
   getAssetsStillOutForExtend,
   getKitMembershipIdsStillOut,
@@ -57,26 +54,31 @@ export type NextReservations = {
   byKitId: Record<string, NextReservation>;
 };
 
-const NONE: NextReservations = { horizon: null, byAssetId: {}, byKitId: {} };
+/** Nothing promised: what a booking that is not running reports. */
+export const NO_NEXT_RESERVATIONS: NextReservations = {
+  horizon: null,
+  byAssetId: {},
+  byKitId: {},
+};
 
 /**
  * Load the next reservations of a booking's items still out.
  *
  * @param organizationId - The workspace the booking belongs to
  * @param bookingId - The booking whose items are measured
- * @param revealOtherBookings - Whether the reader may see other members'
- * bookings; otherwise the bookings are reported without name or link
+ * @param viewer - Who reads the result: a viewer who may not see other
+ * members' bookings gets them without name or link, except their own
  * @returns The horizon and per-item next reservations; all empty for a
  * booking that is not running, or whose items are all back
  */
 export async function loadNextReservations({
   organizationId,
   bookingId,
-  revealOtherBookings,
+  viewer,
 }: {
   organizationId: string;
   bookingId: string;
-  revealOtherBookings: boolean;
+  viewer: { userId: string; seesAllBookings: boolean };
 }): Promise<NextReservations> {
   const booking = await db.booking.findFirst({
     where: { id: bookingId, organizationId },
@@ -95,7 +97,8 @@ export async function loadNextReservations({
       partialCheckins: { select: { assetIds: true } },
     },
   });
-  if (!booking || !isExtendableStatus(booking.status)) return NONE;
+  if (!booking || !isExtendableStatus(booking.status))
+    return NO_NEXT_RESERVATIONS;
 
   // Only assets held by name. A quantity-tracked asset is a pool shared by
   // many bookings at once, so another booking's units are not a claim on
@@ -112,18 +115,16 @@ export async function loadNextReservations({
     membershipIdsStillOut: getKitMembershipIdsStillOut(booking.bookingAssets),
   });
 
-  const clashes = redactClashingBookings(
-    await findClashingReservations({
-      client: db,
-      organizationId,
-      bookingId,
-      activeAssetIds,
-      heldKits,
-      after: booking.to,
-    }),
-    revealOtherBookings
-  );
-  if (clashes.length === 0) return NONE;
+  const clashes = await findClashingReservations({
+    client: db,
+    organizationId,
+    bookingId,
+    activeAssetIds,
+    heldKits,
+    after: booking.to,
+    viewer,
+  });
+  if (clashes.length === 0) return NO_NEXT_RESERVATIONS;
 
   const byAssetId: Record<string, NextReservation> = {};
   const byKitId: Record<string, NextReservation> = {};
