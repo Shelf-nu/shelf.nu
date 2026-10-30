@@ -6,8 +6,8 @@
  * environment variables. This script reads that document, takes
  * `tool_input.file_path`, and runs the repo-pinned prettier on that single
  * path. It exits quietly when the path is missing, the file does not exist,
- * or prettier declines the file (unsupported type or `.prettierignore`), so
- * an edit never fails because of formatting.
+ * lies outside the repository, or prettier declines the file (unsupported
+ * type or `.prettierignore`), so an edit never fails because of formatting.
  *
  * Wired from `.claude/settings.json` (`hooks.PostToolUse`, matcher
  * `Edit|Write|MultiEdit`).
@@ -18,7 +18,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -63,14 +63,17 @@ const filePath = getEditedFilePath(readStdin());
 if (!filePath) process.exit(0);
 
 const absolute = resolve(repoRoot, filePath);
+
+// Only format files inside this repository. An absolute or traversal path in
+// the payload (`/etc/hosts`, `../../.ssh/config`) must never reach prettier.
+if (!absolute.startsWith(repoRoot + sep)) process.exit(0);
 if (!existsSync(absolute) || !statSync(absolute).isFile()) process.exit(0);
 
 const [bin, baseArgs] = prettierCommand();
-const result = spawnSync(
-  bin,
-  [...baseArgs, "--write", "--ignore-unknown", absolute],
-  { cwd: repoRoot, stdio: ["ignore", "inherit", "inherit"] }
-);
+spawnSync(bin, [...baseArgs, "--write", "--ignore-unknown", absolute], {
+  cwd: repoRoot,
+  stdio: ["ignore", "inherit", "inherit"],
+});
 
 // Formatting is best effort: never block the edit on a prettier failure.
 process.exit(0);
