@@ -48,7 +48,9 @@ import { flattenSelectedBookingItems } from "~/utils/booking-assets";
 import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { numberInputWheelGuard } from "~/utils/number-input-wheel-guard";
 import { tw } from "~/utils/tw";
-import CheckoutDialog from "./checkout-dialog";
+import CheckoutDialog, {
+  REVERT_TO_DRAFT_RESCHEDULE_HINT,
+} from "./checkout-dialog";
 import { CheckoutSourceSelect } from "./checkout-source-select";
 import { AssetImage } from "../assets/asset-image/component";
 import { Form } from "../custom-form";
@@ -843,6 +845,13 @@ export default function BulkPartialCheckoutDialog({
                 formId="bulk-partial-checkout-form"
                 fullWidth
                 unassignedUnits={unassignedUnits}
+                // With units still unassigned, the header's Check out leads to
+                // the fulfil flow, which sets no new end date.
+                expiredRescheduleHint={
+                  unassignedUnits.length > 0
+                    ? REVERT_TO_DRAFT_RESCHEDULE_HINT
+                    : undefined
+                }
                 suppressEarlyCheckoutPrompt={!isEarlyCheckout}
                 // This dialog is already the confirmation step. It renders
                 // CheckoutDialog only for early or unassigned check-outs, so

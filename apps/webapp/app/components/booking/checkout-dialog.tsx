@@ -52,6 +52,14 @@ export type CheckoutDialogBooking = Pick<Booking, "id" | "name" | "from"> & {
   to?: Date | string | null;
 };
 
+/**
+ * The `expiredRescheduleHint` for a booking still waiting on model units. Its
+ * header Check out leads to the fulfil flow, which sets no new end date, so
+ * the only way to new dates is reverting it to draft.
+ */
+export const REVERT_TO_DRAFT_RESCHEDULE_HINT =
+  "To change its dates instead, revert the booking to draft from the Actions menu on the booking page.";
+
 /** The field the expired-reservation prompt posts its picked end date in. */
 export const EXPIRED_CHECKOUT_NEW_TO_FIELD = "expiredCheckoutNewTo";
 

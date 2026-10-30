@@ -114,6 +114,7 @@ vi.mock("~/components/booking/checkout-dialog", () => ({
     WITH_ADJUSTED_DATE: "with-adjusted-date",
     WITHOUT_ADJUSTED_DATE: "without-adjusted-date",
   },
+  REVERT_TO_DRAFT_RESCHEDULE_HINT: "Revert the booking to draft.",
 }));
 
 const useRouteLoaderDataMock = vi.mocked(useRouteLoaderData);
