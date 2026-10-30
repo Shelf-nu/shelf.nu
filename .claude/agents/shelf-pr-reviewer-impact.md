@@ -28,7 +28,9 @@ following the text change your answer, or is it just what the PR changes?
 
 `diffPath`, the changed file list with areas, rule copies (`copyPath`), the
 PR's stated intent, and `db` when the PR changes the database: every migration
-statement, already parsed. Use it for item 4 rather than re-reading the SQL.
+statement, already parsed. Use it for item 4 rather than re-reading the SQL,
+except for a path in `db.editedMigrations`: its list holds only the added
+lines, so read its removed lines in `diffPath` too.
 Data writes and `other` statements carry the whole statement in `sql`; judge
 them from that, never from the shortened `detail`.
 

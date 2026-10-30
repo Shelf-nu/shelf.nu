@@ -1013,3 +1013,28 @@ test("classifySqlStatement: a NULLS NOT DISTINCT unique index is an index, not o
     ]
   );
 });
+
+test("splitSqlStatements: a dollar tag with digits keeps the function body whole", () => {
+  const statements = splitSqlStatements(
+    `CREATE FUNCTION f() RETURNS trigger AS $body1$ BEGIN NEW.a := 1; RETURN NEW; END; $body1$ LANGUAGE plpgsql;\nSELECT 1`
+  );
+  assert.equal(statements.length, 2);
+  assert.match(statements[0], /\$body1\$ LANGUAGE plpgsql$/);
+});
+
+test("splitSqlStatements: a backslash-escaped quote in an E-string cannot hide the next statement", () => {
+  const hidden = splitSqlStatements(
+    `INSERT INTO "Seed" VALUES (E'x\\''); DROP TABLE "Important";`
+  );
+  assert.deepEqual(
+    hidden.flatMap(classifySqlStatement).map((s) => s.action),
+    ["insert rows", "drop table"]
+  );
+  // The DROP is inside the literal here, so Postgres never runs it.
+  const phantom = splitSqlStatements(
+    `INSERT INTO "Seed" VALUES (E'a\\'; DROP TABLE "Important"');`
+  );
+  assert.equal(phantom.length, 1);
+  // A plain string keeps backslashes literal and ends at the next quote.
+  assert.equal(splitSqlStatements(`SELECT 'C:\\'; SELECT 2`).length, 2);
+});

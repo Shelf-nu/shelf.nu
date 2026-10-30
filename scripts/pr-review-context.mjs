@@ -324,8 +324,9 @@ export function splitDiff(diff) {
 }
 
 /**
- * Splits SQL into statements on `;`, ignoring semicolons inside quotes and
- * dollar-quoted bodies (functions, DO blocks). Line comments (`--`) and
+ * Splits SQL into statements on `;`, ignoring semicolons inside quotes
+ * (including backslash escapes in E'...' strings) and dollar-quoted bodies
+ * (functions, DO blocks, any `$tag$`). Line comments (`--`) and
  * block comments (slash-star, nested ones included, as Postgres allows) are
  * dropped, so the Warnings block Prisma writes at the top of a migration
  * never hides the statement after it.
@@ -337,6 +338,8 @@ export function splitSqlStatements(sql) {
   let current = "";
   let dollarTag = null;
   let inQuote = false;
+  // Inside an E'...' string a backslash escapes the next character, `\'` included.
+  let escapeString = false;
   for (let i = 0; i < sql.length; i++) {
     const char = sql[i];
     if (dollarTag) {
@@ -349,7 +352,10 @@ export function splitSqlStatements(sql) {
     }
     if (inQuote) {
       current += char;
-      if (char === "'") inQuote = false;
+      if (escapeString && char === "\\" && i + 1 < sql.length) {
+        current += sql[i + 1];
+        i += 1;
+      } else if (char === "'") inQuote = false;
       continue;
     }
     if (char === "-" && sql[i + 1] === "-") {
@@ -374,9 +380,14 @@ export function splitSqlStatements(sql) {
       current += " ";
       continue;
     }
-    if (char === "'") inQuote = true;
+    if (char === "'") {
+      inQuote = true;
+      // An E prefix that is not the end of an identifier (`name'` is not one).
+      escapeString =
+        /[Ee]/.test(sql[i - 1] ?? "") && !/\w/.test(sql[i - 2] ?? "");
+    }
     if (char === "$") {
-      const tag = /^\$[A-Za-z_]*\$/.exec(sql.slice(i));
+      const tag = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(i));
       if (tag) {
         dollarTag = tag[0];
         current += tag[0];
@@ -811,7 +822,8 @@ export function summarizeSchemaDiff({ added, removed }) {
  * Pulls every database change out of the PR diff so the report can list it in
  * full: each migration with every statement it runs, and the models and enums
  * the Prisma schema gains or loses. Done here, not by an agent, so no change
- * can be summarised away.
+ * can be summarised away. Statements come from added lines only, which is the
+ * whole file for a new migration but not for one in `editedMigrations`.
  * @param {string} diff
  * @returns {null | {migrations: Array<{path: string, status: string, statements: Array<{action: string, target: string, detail: string}>}>, schema: ReturnType<typeof summarizeSchemaDiff> | null, editedMigrations: string[]}}
  *   null when the PR touches neither the schema nor a migration. `editedMigrations`

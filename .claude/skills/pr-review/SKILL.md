@@ -28,7 +28,11 @@ node scripts/pr-review-context.mjs $ARGUMENTS
 - `db` is null unless the PR touches `schema.prisma` or a migration. Otherwise
   it lists every migration with every statement it runs (`action`, `target`,
   `detail`) and the Prisma models and enums added or removed. The script
-  parses it from the diff, so it is complete: report it, never re-derive it.
+  parses it from the diff, so for a new migration it is complete: report it,
+  never re-derive it. It is built from added lines only, so a migration listed
+  in `db.editedMigrations` (one that existed before the PR, now edited or
+  deleted) is not: read its removed and changed lines in `diffPath`, and the
+  file at the PR head when it still exists, before reporting it.
   `detail` is short for the report. Data writes and `other` statements also
   carry `sql`, the whole statement: read that, not `detail`, to say which rows
   a write touches.
