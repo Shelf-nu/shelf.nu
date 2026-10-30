@@ -34,3 +34,5 @@ export * from "./scan";
 /** `createBookingSettings` — the full `getBookingSettingsForOrganization`
  * shape, every switch off, for typed mocks of that service. */
 export * from "./bookingSettings";
+/** `busyBookingPdfMeta`: a booking PDF's data that prints every part of the page. */
+export * from "./booking-pdf-meta";
