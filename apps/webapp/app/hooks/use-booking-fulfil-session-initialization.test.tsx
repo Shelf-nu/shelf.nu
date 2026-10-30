@@ -50,6 +50,7 @@ function session(
     bookingId,
     bookingName: "Shoot day 1",
     bookingFrom: "2026-01-01T09:00:00.000Z",
+    bookingTo: "2026-01-01T17:00:00.000Z",
     bookingStatus: "RESERVED",
     checksOutScannedOnly: false,
     expectedModelRequests: [],

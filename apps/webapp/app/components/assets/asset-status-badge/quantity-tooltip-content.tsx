@@ -16,6 +16,7 @@
 
 import { Link } from "react-router";
 import { DateS } from "~/components/shared/date";
+import { isReservationExpired } from "~/modules/booking/helpers";
 import { tw } from "~/utils/tw";
 import type { BookingAssetRecord, QuantityBreakdown } from "./quantity-data";
 
@@ -90,6 +91,7 @@ export function QuantityTooltipContent({ data }: { data: QuantityBreakdown }) {
   const {
     total,
     inCustody,
+    inKits,
     reserved,
     checkedOut,
     bookingAssets,
@@ -136,12 +138,30 @@ export function QuantityTooltipContent({ data }: { data: QuantityBreakdown }) {
 
   const ongoing: Buckets = makeBuckets();
   const reservedSlices: Buckets = makeBuckets();
+  /**
+   * Reservations whose window has passed. Not a claim on the units (see
+   * `getQuantityData`), so no bullet; counted here, from the rows this card
+   * renders, because on the assets index the rows arrive with the lazy fetch
+   * while the totals come from the index query.
+   */
+  const expiredReservations = new Set<string>();
+  /** When the most recent of them ended, so the line says how stale they are. */
+  let lastExpiredEnd: Date | null = null;
 
   for (const ba of bookingAssets) {
     const bStatus = ba.booking?.status;
     if (bStatus === "ONGOING" || bStatus === "OVERDUE") pushSlice(ongoing, ba);
-    else if (bStatus === "RESERVED") pushSlice(reservedSlices, ba);
+    else if (bStatus === "RESERVED") {
+      if (isReservationExpired(bStatus, ba.booking?.to)) {
+        expiredReservations.add(ba.booking?.id ?? ba.booking?.name ?? "");
+        const end = new Date(ba.booking!.to!);
+        if (!lastExpiredEnd || end > lastExpiredEnd) lastExpiredEnd = end;
+      } else {
+        pushSlice(reservedSlices, ba);
+      }
+    }
   }
+  const expiredReservedBookings = expiredReservations.size;
 
   const sum = (slices: Slice[]) =>
     slices.reduce((acc, s) => acc + s.quantity, 0);
@@ -265,6 +285,24 @@ export function QuantityTooltipContent({ data }: { data: QuantityBreakdown }) {
     // HoverCard shell is `bg-white` — use readable grays in the 600-800
     // range and let the headline stay at default (near-black).
     <div className="space-y-1 text-xs text-gray-800">
+      {/* "Free right now", not "available", every other line in this card
+          describes a booking window in the future, and this one describes the
+          shelf today. Without the time word the card reads as arithmetic that
+          does not close: "12 reserved" above "10 available". Matches the
+          `Free now` column on the assets index.
+
+          First, because it is the line people open the card for. Emerald when
+          non-zero so the "you can still book N" signal pops; muted gray when
+          zero. */}
+      <p
+        className={tw(
+          "font-medium",
+          freeNow > 0 ? "text-emerald-700" : "text-gray-500"
+        )}
+      >
+        {freeNow} free right now
+      </p>
+
       {/* Checked-out summary */}
       {checkedOut > 0 &&
         renderBuckets({
@@ -294,6 +332,23 @@ export function QuantityTooltipContent({ data }: { data: QuantityBreakdown }) {
         </>
       )}
 
+      {/* Reservations whose end date passed with no check-out. They are not
+          in `reserved` and own no bullet, so without this line the card would
+          silently disagree with the bookings list, which still shows them. */}
+      {expiredReservedBookings > 0 ? (
+        <p className="text-gray-500">
+          {expiredReservedBookings} expired{" "}
+          {expiredReservedBookings === 1 ? "reservation" : "reservations"}
+          {lastExpiredEnd ? (
+            <>
+              {" "}
+              (last ended <DateS date={lastExpiredEnd} />)
+            </>
+          ) : null}
+          , not counted
+        </p>
+      ) : null}
+
       {/* Custody line (only when there's also booking data, otherwise
        * show a simpler format) */}
       {inCustody > 0 && (checkedOut > 0 || reserved > 0) && (
@@ -307,22 +362,10 @@ export function QuantityTooltipContent({ data }: { data: QuantityBreakdown }) {
         </p>
       )}
 
-      {/* "Free right now", not "available", every other line in this card
-          describes a booking window in the future, and this one describes the
-          shelf today. Without the time word the card reads as arithmetic that
-          does not close: "12 reserved" above "10 available". Matches the
-          `Free now` column on the assets index.
-
-          Emerald when non-zero so the "you can still book N" signal pops;
-          muted gray when zero. */}
-      <p
-        className={tw(
-          "font-medium",
-          freeNow > 0 ? "text-emerald-700" : "text-gray-500"
-        )}
-      >
-        {freeNow} free right now
-      </p>
+      {/* Units held by kits. Already out of `freeNow`; printed so the numbers
+          add up for an asset that sits in a kit (10 owned, 3 reserved, 2 in
+          kits, 5 free). */}
+      {inKits > 0 ? <p className="text-gray-700">{inKits} in kits</p> : null}
     </div>
   );
 }

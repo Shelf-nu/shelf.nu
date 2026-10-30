@@ -81,6 +81,8 @@ import {
 } from "~/atoms/qr-scanner";
 import CheckoutDialog, {
   CheckoutIntentEnum,
+  REVERT_TO_DRAFT_RESCHEDULE_HINT,
+  type CheckoutDialogBooking,
 } from "~/components/booking/checkout-dialog";
 import type { ModelProgress } from "~/components/booking/model-pending-rows";
 import { buildPendingModelRows } from "~/components/booking/model-pending-rows";
@@ -615,6 +617,9 @@ export default function FulfilReservationsDrawer({
             id: session.bookingId,
             name: session.bookingName,
             from: new Date(session.bookingFrom),
+            // For the expired-reservation prompt; see `CheckoutDialog`.
+            status: session.bookingStatus,
+            to: session.bookingTo,
           }}
           assetIds={assetIdsToSubmit}
           kitIds={kitIdsToSubmit}
@@ -968,8 +973,8 @@ function AlreadyIncludedRows({
  * Props for {@link FulfilCheckoutForm}.
  */
 type FulfilCheckoutFormProps = {
-  /** Booking summary for `CheckoutDialog`'s early-checkout detection. */
-  booking: { id: string; name: string; from: Date };
+  /** Booking summary for `CheckoutDialog`'s early and expired prompts. */
+  booking: CheckoutDialogBooking;
   /** Matched + unmatched scanned asset ids to attach to the booking. */
   assetIds: string[];
   /** Scanned kit ids to attach to the booking as kit-driven rows. */
@@ -1082,6 +1087,10 @@ function FulfilCheckoutForm({
           unassignedUnits={unassignedUnits}
           sourceQuestions={sourceQuestions}
           suppressEarlyCheckoutPrompt={suppressEarlyCheckoutPrompt}
+          // A booking waiting on model units checks out here, and its header
+          // Check out leads back to this drawer, so new dates come from
+          // reverting it to draft.
+          expiredRescheduleHint={REVERT_TO_DRAFT_RESCHEDULE_HINT}
           // The drawer lists what goes out, so it is the confirmation step.
           confirm={false}
           // `grow` (the CheckoutDialog default) makes the button stretch

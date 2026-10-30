@@ -1703,7 +1703,7 @@ describe("POOL_AGGREGATE_JOIN, the SQL twin of getAssetAvailability", () => {
     // slices only; a member of a reserved kit read Short before this.
     expect(sql).toContain(`(ba."assetKitId" IS NULL) AS standalone`);
     expect(sql).toContain(
-      `FROM slices WHERE standalone AND status = 'RESERVED'), 0) AS reserved,`
+      `FROM slices WHERE standalone AND ahead AND status = 'RESERVED'), 0) AS reserved,`
     );
     expect(sql).toMatch(
       /FROM slices WHERE standalone AND ahead AND remaining > 0/

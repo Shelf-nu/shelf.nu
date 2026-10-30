@@ -3,6 +3,7 @@ import { ChevronRight } from "lucide-react";
 import { useMatches } from "react-router";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { EXPIRED_BOOKINGS_FILTER } from "~/modules/booking/constants";
 import type { RouteHandleWithName } from "~/modules/types";
 import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
@@ -50,7 +51,17 @@ export default function BookingFilters({
     <Filters
       className={className}
       slots={{
-        "left-of-search": <StatusFilter statusItems={BookingStatus} />,
+        "left-of-search": (
+          <StatusFilter
+            // "Expired" is a view over RESERVED (end date passed, never
+            // checked out), not a stored status; the list's where-clause
+            // translates it. See `EXPIRED_BOOKINGS_FILTER`.
+            statusItems={{
+              ...BookingStatus,
+              [EXPIRED_BOOKINGS_FILTER]: EXPIRED_BOOKINGS_FILTER,
+            }}
+          />
+        ),
         "right-of-search": hideSortBy ? null : (
           <SortBy
             sortingOptions={BOOKING_SORTING_OPTIONS}

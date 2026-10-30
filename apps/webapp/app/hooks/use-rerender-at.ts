@@ -21,6 +21,9 @@ const MAX_TIMEOUT_MS = 2 ** 31 - 1;
  *
  * @param at - The instant to re-render after. `null`, an invalid date or one
  *   already past schedules nothing.
+ * @returns A counter that changes on each fire. A render alone does not
+ *   recompute a `useMemo`, so a memo over a clock-dependent value lists it
+ *   as a dependency.
  */
 export function useRerenderAt(at: Date | null) {
   /** Bumped on each fire, which also reschedules a capped wait. */
@@ -39,4 +42,6 @@ export function useRerenderAt(at: Date | null) {
     );
     return () => clearTimeout(id);
   }, [atMs, tick]);
+
+  return tick;
 }
