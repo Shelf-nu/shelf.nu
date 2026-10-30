@@ -21,7 +21,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "npx prettier --write \"$FILE_PATH\""
+            "command": "node \"${CLAUDE_PROJECT_DIR:-.}/scripts/prettier-hook.mjs\""
           }
         ]
       }
