@@ -201,22 +201,43 @@ per finding, no theory, no jargon a busy engineer has to decode. No em dashes.
 
 **ELI5:** 2-4 short sentences: what this PR does and whether it does it.
 
-**Intent check:** ✅ <claim> · ❌ <claim>: <why> · 👀 <claim>: <what to check>
+**Intent check:**
+- ✅ <claim>
+- ❌ <claim>: <why>
+- 👀 <claim>: <what to check>
+
 **Scope:** <stats.files> files, <stats.changedLines> changed lines. <unrelated files, or "all files serve the stated goal">
 **CI:** <passing> passing, <failing names>, <pending> pending
 **Safe because:** <the one fact the change's safety depends on> (<checked in code | unproven>)
 
 ### Database changes
 Migration `<folder name>` (<new | EDITS AN EXISTING MIGRATION | deleted>)
-| Change | Name | Details |
-| --- | --- | --- |
-| new table | `PdfDocument` | holds: <what one row is, one phrase>. Columns: id text, name text, ... |
-| new column | `Organization.paidPdfDocumentsSeededAt` | timestamp, nullable |
-| new enum | `PdfDocumentKind` | BOOKING |
-| unique index | `PdfDocument_one_default_per_organization_kind` | (organizationId, kind) where isDefault. Raw SQL only, Prisma does not know it |
-| data write | `PdfDocument` | inserts a "Checklist" row for every workspace |
+
+**New table `PdfDocument`**: <what one row holds, one phrase>
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| id | text | no | |
+| kind | PdfDocumentKind | no | 'BOOKING' |
+
+Keys and indexes: <one bullet each: foreign keys with their on-delete, unique and plain indexes with their columns and any `where`, RLS on or MISSING. Mark raw-SQL-only ones "(raw SQL, Prisma does not know it)">
+
+**New enum `PdfDocumentKind`**: BOOKING
+
+**Changes to existing tables**
+
+| Table | Change | Column | Details |
+| --- | --- | --- | --- |
+| Organization | new column | paidPdfDocumentsSeededAt | timestamp, nullable |
+
+**Data writes**
+- <table>: <what it writes, to which rows, in production terms>
+
 Prisma: models added <names>, removed <names>; enums added <names>, removed <names>
-Names: <one line per new name: ✅ `<name>` says what it holds, or ⚠️ `<name>` holds <X>: see finding <n>>
+
+**Names:**
+- ✅ `<name>`: says what it holds
+- ⚠️ `<name>`: holds <X>, see finding <n>
 
 ### Must fix
 1. **<title>**
@@ -240,17 +261,28 @@ Next: <only the options that apply, see Rules>
 
 Rules:
 
-- **Database changes** appears exactly when `db` is not null, and lists
-  **every** entry in `db.migrations[].statements`, one table row each, in
-  migration order. Never summarise, merge rows, or write "and N more": this
-  section is what the user approves the schema from. Write plain words for the
-  action (`new table`, `new column`, `renamed column`, `dropped column`,
-  `unique index`, `foreign key`, `data write`, ...). Mark drops and renames in
-  bold. For a data write, say in plain words which rows it touches and how
-  many in production terms ("every workspace", "workspaces on a paid tier"),
-  read from its SQL. For an `other` row, quote its `detail`. Leave out
-  `Prisma:` when `db.schema` is null, and the `Names:` line when nothing is new
-  or renamed.
+- **Intent check** is a list, one claim per line, never claims joined on one
+  line.
+- **Database changes** appears exactly when `db` is not null and covers
+  **every** entry in `db.migrations[].statements`, in migration order. Never
+  summarise, merge, or write "and N more": the user approves the schema from
+  this section. Layout:
+  - Each `create table` gets its own heading and a column table built from
+    its `columns` (one row per column; type in lower case; Null `yes`/`no`;
+    Default empty when there is none), followed by its keys, indexes and RLS.
+    A new table without RLS says `RLS MISSING` there.
+  - Each new enum: one line with its values.
+  - Every column, constraint, index or enum change on a table that already
+    existed goes in the "Changes to existing tables" table. Drops and renames
+    are in bold.
+  - Each data write is a bullet saying in plain words which rows it touches
+    and how many in production terms ("every workspace", "workspaces whose
+    owner is on a paid tier"), read from its SQL.
+  - An `other` statement goes in the existing-tables table with its `detail`
+    quoted.
+  - Leave out any sub-heading with nothing under it, `Prisma:` when
+    `db.schema` is null, and `Names:` when nothing is new or renamed. Put a
+    blank line before every table so it renders.
 - The header counts exclude "Spotted along the way" items.
 - Number continuously across all sections so the user can say "fix 1-6, skip 7".
 - Omit empty sections ("Dismissed" included), except "Must fix", which says "None." when empty.

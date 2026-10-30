@@ -386,11 +386,13 @@ const ON_DELETE =
 const IDENT = String.raw`((?:"[^"]+"|[\w]+)(?:\.(?:"[^"]+"|[\w]+))?)`;
 
 /**
- * Lists the columns of a `CREATE TABLE` body as `name TYPE`, skipping constraints.
+ * Lists the columns of a `CREATE TABLE` body, skipping table constraints, so
+ * the report can preview the table one column per row.
  * @param {string} body - the text between the outer parentheses
- * @returns {string[]}
+ * @returns {Array<{name: string, type: string, nullable: boolean, default: string}>}
+ *   `default` is the SQL default expression, or "" when there is none
  */
-function createTableColumns(body) {
+export function createTableColumns(body) {
   return body
     .split(/,\s*\n/)
     .map((part) => part.trim())
@@ -403,9 +405,21 @@ function createTableColumns(body) {
         /^("[^"]+"|\w+)\s+("[^"]+"|[\w]+(?:\(\d+(?:,\s*\d+)?\))?(?:\[\])?)(.*)$/s.exec(
           part
         );
-      if (!match) return part.replace(/\s+/g, " ");
-      const nullable = /NOT NULL/i.test(match[3]) ? "" : " null";
-      return `${unquote(match[1])} ${unquote(match[2])}${nullable}`;
+      if (!match)
+        return {
+          name: part.replace(/\s+/g, " "),
+          type: "",
+          nullable: true,
+          default: "",
+        };
+      const rest = match[3].replace(/\s+/g, " ");
+      const fallback = /DEFAULT (.+?)(?: NOT NULL| NULL|$)/i.exec(rest);
+      return {
+        name: unquote(match[1]),
+        type: unquote(match[2]),
+        nullable: !/NOT NULL/i.test(rest),
+        default: fallback ? fallback[1].trim() : "",
+      };
     });
 }
 
@@ -415,7 +429,7 @@ function createTableColumns(body) {
  * parser does not know come back as `other` with their opening text, so
  * nothing in a migration is ever left out of the list.
  * @param {string} statement - one SQL statement without its `;`
- * @returns {Array<{action: string, target: string, detail: string}>} usually one entry; `ALTER TABLE` with several clauses gives one per clause
+ * @returns {Array<{action: string, target: string, detail: string, columns?: ReturnType<typeof createTableColumns>}>} `columns` only on `create table`; usually one entry; `ALTER TABLE` with several clauses gives one per clause
  */
 export function classifySqlStatement(statement) {
   const sql = statement.replace(/\s+/g, " ").trim();
@@ -435,7 +449,10 @@ export function classifySqlStatement(statement) {
       {
         action: "create table",
         target: unquote(m[1]),
-        detail: columns.join(", "),
+        detail: columns
+          .map((c) => `${c.name} ${c.type}${c.nullable ? " null" : ""}`)
+          .join(", "),
+        columns,
       },
     ];
   }

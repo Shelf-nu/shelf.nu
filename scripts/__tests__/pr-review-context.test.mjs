@@ -31,6 +31,7 @@ import {
   classifySqlStatement,
   summarizeSchemaDiff,
   extractDbChanges,
+  createTableColumns,
 } from "../pr-review-context.mjs";
 
 test("globToRegExp: ** matches zero or more directories", () => {
@@ -870,5 +871,36 @@ index 1..2 100644
   assert.equal(context.db.migrations[0].statements[0].action, "update rows");
   assert.ok(
     context.warnings.some((w) => w.includes("changes or deletes migrations"))
+  );
+});
+
+test("createTableColumns: name, type, nullability and default per column, constraints skipped", () => {
+  assert.deepEqual(
+    createTableColumns(`
+    "id" TEXT NOT NULL,
+    "kind" "PdfDocumentKind" NOT NULL DEFAULT 'BOOKING',
+    "config" JSONB NOT NULL DEFAULT '{}',
+    "note" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "PdfDocument_pkey" PRIMARY KEY ("id")
+`),
+    [
+      { name: "id", type: "TEXT", nullable: false, default: "" },
+      {
+        name: "kind",
+        type: "PdfDocumentKind",
+        nullable: false,
+        default: "'BOOKING'",
+      },
+      { name: "config", type: "JSONB", nullable: false, default: "'{}'" },
+      { name: "note", type: "TEXT", nullable: true, default: "" },
+      {
+        name: "createdAt",
+        type: "TIMESTAMP(3)",
+        nullable: false,
+        default: "CURRENT_TIMESTAMP",
+      },
+    ]
   );
 });
