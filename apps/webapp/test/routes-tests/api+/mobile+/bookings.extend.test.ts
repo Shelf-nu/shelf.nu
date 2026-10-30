@@ -309,10 +309,17 @@ describe("POST /api/mobile/bookings/extend", () => {
       new ShelfError({
         cause: null,
         message:
-          "Cannot extend booking because the extended period is overlapping with the following bookings:",
+          "Can't extend to 2 Jan 2026. These bookings reserve items this booking still has out:",
         label: "Booking",
         additionalData: {
-          clashingBookings: [{ id: "b2", name: "Camera day" }],
+          clashingBookings: [
+            {
+              id: "b2",
+              name: "Camera day",
+              from: "2026-01-02T08:00:00.000Z",
+              items: [{ id: "a1", name: "Cam 1", kind: "asset" }],
+            },
+          ],
         },
       })
     );
@@ -320,7 +327,41 @@ describe("POST /api/mobile/bookings/extend", () => {
     const { body } = await extendToKualaLumpurAfternoon();
 
     expect(body.error.message).toBe(
-      "Cannot extend booking because the extended period is overlapping with the following bookings: Camera day"
+      "Can't extend to 2 Jan 2026. These bookings reserve items this booking still has out: Camera day (Cam 1)"
+    );
+  });
+
+  it("falls back to the bare booking name when a clash names no items", async () => {
+    vi.mocked(extendBooking).mockRejectedValue(
+      new ShelfError({
+        cause: null,
+        message: "Can't extend to 2 Jan 2026. These bookings reserve items:",
+        label: "Booking",
+        additionalData: {
+          clashingBookings: [{ id: "b2", name: "Camera day", items: [] }],
+        },
+      })
+    );
+
+    const { body } = await extendToKualaLumpurAfternoon();
+
+    expect(body.error.message).toBe(
+      "Can't extend to 2 Jan 2026. These bookings reserve items: Camera day"
+    );
+  });
+
+  it("hands the service the zone the end date was parsed in, for the refusal's wording", async () => {
+    vi.mocked(extendBooking).mockResolvedValue({
+      id: "booking-1",
+      name: "Site survey",
+      status: "ONGOING",
+      to: new Date("2030-06-01T06:30:00.000Z"),
+    } as never);
+
+    await extendToKualaLumpurAfternoon();
+
+    expect(vi.mocked(extendBooking).mock.calls[0][0].prefs?.timeZone).toBe(
+      "Asia/Kuala_Lumpur"
     );
   });
 });

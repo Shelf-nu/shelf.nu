@@ -10659,10 +10659,68 @@ describe("extendBooking", () => {
     // why: the service refuses an end in the past, so each case pins "now"
     vitest.useFakeTimers({ toFake: ["Date"] });
     vitest.setSystemTime(EXTEND_NOW);
+    // why: the booking row lock is a raw `FOR UPDATE` read. By default it
+    // answers with the status the case loaded, i.e. nothing changed between
+    // the read and the lock; the race cases override it.
+    (
+      db.$queryRaw as unknown as ReturnType<typeof vitest.fn>
+    ).mockImplementation(async () => {
+      const loads = (
+        db.booking.findUniqueOrThrow as unknown as ReturnType<typeof vitest.fn>
+      ).mock.results;
+      const loaded = (await loads.at(-1)?.value) as
+        | { status?: string }
+        | undefined;
+      return [{ status: loaded?.status ?? "ONGOING" }];
+    });
   });
 
   afterEach(() => {
     vitest.useRealTimers();
+    (db.$queryRaw as unknown as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      [{ status: "ONGOING" }]
+    );
+  });
+
+  it("locks the booking row before any stock row, and refuses when its status moved on", async () => {
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...extendableBookingData,
+      status: BookingStatus.ONGOING,
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-lock",
+          checkedOutAt: new Date("2025-01-01T10:00:00.000Z"),
+          checkedInAt: null,
+        },
+      ],
+      partialCheckins: [],
+    });
+    // A check-in completed the booking between the read and the lock.
+    restoreMockImplementationAfterTest(db.$queryRaw).fn.mockResolvedValue([
+      { status: BookingStatus.COMPLETE },
+    ]);
+
+    const error = await extendBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      newEndDate: new Date("2025-01-03T17:00:00Z"),
+      hints: mockClientHints,
+      userId: "user-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
+      roles: [OrganizationRoles.ADMIN],
+    }).catch((e: ShelfError) => e);
+
+    expect((error as ShelfError).status).toBe(400);
+    expect((error as ShelfError).message).toContain(
+      "The booking changed while you were changing its end date"
+    );
+    // Nothing past the lock ran: no clash read, no write.
+    expect(db.booking.findMany).not.toHaveBeenCalled();
+    expect(db.booking.update).not.toHaveBeenCalled();
   });
 
   it("should extend booking successfully", async () => {
@@ -11725,8 +11783,537 @@ describe("extendBooking", () => {
         roles: [OrganizationRoles.ADMIN],
       })
     ).rejects.toThrow(
-      "Cannot extend booking because the extended period is overlapping"
+      "These bookings reserve items this booking still has out"
     );
+  });
+
+  describe("clash refusal payload", () => {
+    /** A running booking with one camera out, read by `user-1`. */
+    function bookingWithCameraOut() {
+      return {
+        ...extendableBookingData,
+        status: BookingStatus.ONGOING,
+        bookingAssets: [
+          {
+            asset: {
+              id: "cam-1",
+              status: AssetStatus.CHECKED_OUT,
+              type: AssetType.INDIVIDUAL,
+              assetModelId: null,
+              title: "Cam 1",
+              unitOfMeasure: null,
+            },
+            assetId: "cam-1",
+            assetKitId: null,
+            quantity: 1,
+            id: "ba-cam",
+            checkedOutAt: new Date("2025-01-01T10:00:00.000Z"),
+            checkedInAt: null,
+          },
+        ],
+        partialCheckins: [],
+      };
+    }
+
+    /** A reservation of the camera, created and held by `creatorId`. */
+    function reservationBy(creatorId: string) {
+      return {
+        id: `booking-of-${creatorId}`,
+        name: `Shoot of ${creatorId}`,
+        from: new Date("2025-01-02T09:00:00Z"),
+        creatorId,
+        custodianUserId: creatorId,
+        bookingAssets: [
+          { assetId: "cam-1", assetKitId: null, asset: { title: "Cam 1" } },
+        ],
+      };
+    }
+
+    async function refusalFor(
+      role: OrganizationRoles,
+      reservations: unknown[]
+    ): Promise<ShelfError> {
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue(bookingWithCameraOut());
+      //@ts-expect-error missing vitest type
+      db.booking.findMany.mockResolvedValue(reservations);
+      return extendBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        newEndDate: new Date("2025-01-03T17:00:00Z"),
+        hints: mockClientHints,
+        userId: "user-1",
+        access: accessFor([role]),
+        roles: [role],
+      }).then(
+        () => {
+          throw new Error("expected a refusal");
+        },
+        (error: ShelfError) => error
+      );
+    }
+
+    it("is a 400 naming each booking, its start and the shared items, plus the free-until instant", async () => {
+      const error = await refusalFor(OrganizationRoles.ADMIN, [
+        reservationBy("user-2"),
+      ]);
+
+      expect(error.status).toBe(400);
+      expect(error.additionalData).toEqual(
+        expect.objectContaining({
+          clashingBookings: [
+            {
+              id: "booking-of-user-2",
+              name: "Shoot of user-2",
+              from: "2025-01-02T09:00:00.000Z",
+              items: [{ id: "cam-1", name: "Cam 1", kind: "asset" }],
+            },
+          ],
+          freeUntil: "2025-01-02T09:00:00.000Z",
+        })
+      );
+    });
+
+    it("hides other members' bookings from a member who may not see them, but not their own", async () => {
+      const error = await refusalFor(OrganizationRoles.SELF_SERVICE, [
+        reservationBy("user-2"),
+        { ...reservationBy("user-1"), from: new Date("2025-01-02T10:00:00Z") },
+      ]);
+
+      const clashing = (
+        error.additionalData as {
+          clashingBookings: { id: string | null; name: string }[];
+        }
+      ).clashingBookings;
+      expect(clashing.map((b) => [b.id, b.name])).toEqual([
+        [null, "another booking"],
+        ["booking-of-user-1", "Shoot of user-1"],
+      ]);
+    });
+  });
+
+  describe("quantity-tracked items", () => {
+    const CABLE_ID = "asset-cable";
+
+    /** A running booking holding 3 of the cables, with the slice out. */
+    function bookingWithCablesOut() {
+      return {
+        ...extendableBookingData,
+        status: BookingStatus.ONGOING,
+        bookingAssets: [
+          {
+            asset: {
+              id: CABLE_ID,
+              status: AssetStatus.CHECKED_OUT,
+              type: AssetType.QUANTITY_TRACKED,
+              assetModelId: null,
+              title: "ethernet cable",
+              unitOfMeasure: null,
+            },
+            assetId: CABLE_ID,
+            assetKitId: null as string | null,
+            quantity: 3,
+            id: "ba-cable",
+            checkedOutAt: new Date("2025-01-01T10:00:00.000Z"),
+            checkedInAt: null,
+          },
+        ],
+        partialCheckins: [],
+      };
+    }
+
+    function mockCableStock(total: number) {
+      // why: `getAssetAvailabilityBatch` reads the pool size from the asset row.
+      restoreMockImplementationAfterTest(
+        db.asset.findMany
+      ).fn.mockImplementation((args?: { where?: { id?: { in?: string[] } } }) =>
+        Promise.resolve(
+          (args?.where?.id?.in ?? []).map((id) => ({ id, quantity: total }))
+        )
+      );
+    }
+
+    function mockOtherReservation(quantity: number) {
+      // why: the pool read lists other bookings' slices of the cable; the
+      // clash query must never see this booking, so it never asks by name.
+      restoreMockImplementationAfterTest(
+        db.bookingAsset.findMany
+      ).fn.mockImplementation((args?: { where?: { booking?: unknown } }) =>
+        Promise.resolve(
+          args?.where?.booking
+            ? [
+                {
+                  assetId: CABLE_ID,
+                  bookingId: "booking-2",
+                  quantity,
+                  booking: {
+                    from: new Date("2025-01-02T09:00:00Z"),
+                    to: new Date("2025-01-02T17:00:00Z"),
+                    status: BookingStatus.RESERVED,
+                  },
+                },
+              ]
+            : []
+        )
+      );
+    }
+
+    it("extends over another booking's reservation of the same cable when the pool has room", async () => {
+      expect.assertions(3);
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue(bookingWithCablesOut());
+      //@ts-expect-error missing vitest type
+      db.booking.findMany.mockResolvedValue([
+        {
+          id: "booking-2",
+          name: "Suresnes",
+          from: new Date("2025-01-02T09:00:00Z"),
+        },
+      ]);
+      mockCableStock(30);
+      mockOtherReservation(1);
+
+      await extendBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        newEndDate: new Date("2025-01-03T17:00:00Z"),
+        hints: mockClientHints,
+        userId: "user-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
+        roles: [OrganizationRoles.ADMIN],
+      });
+
+      // The by-name clash query is never asked about a pool item.
+      expect(db.booking.findMany).not.toHaveBeenCalled();
+      expect(db.asset.findMany).toHaveBeenCalledTimes(1);
+      expect(db.booking.update).toHaveBeenCalled();
+    });
+
+    it("asks nothing of the pool for units held through a kit, which the kit's allocation already covers", async () => {
+      expect.assertions(2);
+      const booking = bookingWithCablesOut();
+      booking.bookingAssets[0].assetKitId = "membership-1";
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue(booking);
+      mockCableStock(0);
+      // why: the kit resolution reads memberships; this case needs none.
+      restoreMockImplementationAfterTest(
+        db.assetKit.findMany
+      ).fn.mockResolvedValue([]);
+
+      await extendBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        newEndDate: new Date("2025-01-03T17:00:00Z"),
+        hints: mockClientHints,
+        userId: "user-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
+        roles: [OrganizationRoles.ADMIN],
+      });
+
+      expect(db.asset.findMany).not.toHaveBeenCalled();
+      expect(db.booking.update).toHaveBeenCalled();
+    });
+
+    /**
+     * The return / disposition logs this booking holds for the cable. Both
+     * reads of them answer from the same rows: the itemised one and the
+     * per-asset sum.
+     */
+    function mockBookingReturnLogs(
+      logs: { bookingAssetId: string | null; quantity: number }[]
+    ) {
+      const forBooking = (args?: { where?: { bookingId?: unknown } }) =>
+        args?.where?.bookingId === "booking-1";
+      // why: the logs are rows the pool read must attribute to slices; only
+      // this booking's own logs are answered, other reads stay empty.
+      restoreMockImplementationAfterTest(
+        db.consumptionLog.findMany
+      ).fn.mockImplementation((args?: { where?: { bookingId?: unknown } }) =>
+        Promise.resolve(
+          forBooking(args) ? logs.map((l) => ({ ...l, assetId: CABLE_ID })) : []
+        )
+      );
+      restoreMockImplementationAfterTest(
+        db.consumptionLog.groupBy
+      ).fn.mockImplementation((args?: { where?: { bookingId?: unknown } }) =>
+        Promise.resolve(
+          forBooking(args)
+            ? [
+                {
+                  assetId: CABLE_ID,
+                  _sum: { quantity: logs.reduce((n, l) => n + l.quantity, 0) },
+                },
+              ]
+            : []
+        )
+      );
+    }
+
+    it("counts only the units still out after a partial return", async () => {
+      expect.assertions(1);
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue(bookingWithCablesOut());
+      mockCableStock(30);
+      mockOtherReservation(28);
+      // why: two of the three cables came back through a partial check-in,
+      // logged without a slice tag as older and mobile check-ins write them.
+      mockBookingReturnLogs([{ bookingAssetId: null, quantity: 2 }]);
+
+      await extendBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        newEndDate: new Date("2025-01-03T17:00:00Z"),
+        hints: mockClientHints,
+        userId: "user-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
+        roles: [OrganizationRoles.ADMIN],
+      });
+
+      expect(db.booking.update).toHaveBeenCalled();
+    });
+
+    it("does not let units returned on a kit slice free the loose units still out", async () => {
+      const booking = bookingWithCablesOut();
+      const [cable] = booking.bookingAssets;
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue({
+        ...booking,
+        bookingAssets: [
+          // Three loose cables are still out.
+          cable,
+          // Two more went out in a kit and are back.
+          {
+            ...cable,
+            id: "ba-cable-kit",
+            assetKitId: "membership-1",
+            quantity: 2,
+            checkedInAt: new Date("2025-01-01T11:00:00.000Z"),
+          },
+        ],
+      });
+      mockCableStock(30);
+      mockOtherReservation(28);
+      mockBookingReturnLogs([{ bookingAssetId: "ba-cable-kit", quantity: 2 }]);
+      // why: the kit resolution reads memberships; the kit is back, so none.
+      restoreMockImplementationAfterTest(
+        db.assetKit.findMany
+      ).fn.mockResolvedValue([]);
+
+      await expect(
+        extendBooking({
+          id: "booking-1",
+          organizationId: "org-1",
+          newEndDate: new Date("2025-01-03T17:00:00Z"),
+          hints: mockClientHints,
+          userId: "user-1",
+          access: accessFor([OrganizationRoles.ADMIN]),
+          roles: [OrganizationRoles.ADMIN],
+        })
+      ).rejects.toThrow(
+        '"ethernet cable" has 3 units out on this booking, but only 2 of 30 are free'
+      );
+    });
+
+    it("refuses when the pool cannot hold this booking's units alongside the others", async () => {
+      expect.assertions(1);
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue(bookingWithCablesOut());
+      mockCableStock(30);
+      mockOtherReservation(28);
+
+      await expect(
+        extendBooking({
+          id: "booking-1",
+          organizationId: "org-1",
+          newEndDate: new Date("2025-01-03T17:00:00Z"),
+          hints: mockClientHints,
+          userId: "user-1",
+          access: accessFor([OrganizationRoles.ADMIN]),
+          roles: [OrganizationRoles.ADMIN],
+        })
+      ).rejects.toThrow(
+        '"ethernet cable" has 3 units out on this booking, but only 2 of 30 are free'
+      );
+    });
+
+    it("refuses with a 400 that carries the shortfall per pool", async () => {
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue(bookingWithCablesOut());
+      mockCableStock(30);
+      mockOtherReservation(28);
+
+      const error = await extendBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        newEndDate: new Date("2025-01-03T17:00:00Z"),
+        hints: mockClientHints,
+        userId: "user-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
+        roles: [OrganizationRoles.ADMIN],
+      }).catch((e: ShelfError) => e);
+
+      expect((error as ShelfError).status).toBe(400);
+      expect((error as ShelfError).additionalData).toEqual({
+        quantityShortfalls: [
+          {
+            assetId: CABLE_ID,
+            title: "ethernet cable",
+            units: 3,
+            free: 2,
+            total: 30,
+            unit: null,
+          },
+        ],
+      });
+    });
+
+    it("locks the pool before reading it, and leaves this booking out of the read", async () => {
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue(bookingWithCablesOut());
+      mockCableStock(30);
+      mockOtherReservation(1);
+
+      await extendBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        newEndDate: new Date("2025-01-03T17:00:00Z"),
+        hints: mockClientHints,
+        userId: "user-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
+        roles: [OrganizationRoles.ADMIN],
+      });
+
+      const lock =
+        quantityLock.lockEveryAssetForQuantityUpdate as unknown as ReturnType<
+          typeof vitest.fn
+        >;
+      const read = db.asset.findMany as unknown as ReturnType<typeof vitest.fn>;
+      expect(lock).toHaveBeenCalledWith(expect.anything(), [CABLE_ID], "org-1");
+      // The booking row is locked first, the order check-in takes them in.
+      const bookingLock = db.$queryRaw as unknown as ReturnType<
+        typeof vitest.fn
+      >;
+      expect(bookingLock.mock.invocationCallOrder[0]).toBeLessThan(
+        lock.mock.invocationCallOrder[0]
+      );
+      expect(lock.mock.invocationCallOrder[0]).toBeLessThan(
+        read.mock.invocationCallOrder[0]
+      );
+      expect(db.bookingAsset.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            bookingId: { not: "booking-1" },
+          }),
+        })
+      );
+    });
+
+    it("measures an overdue booking's pool from now, not from its past end", async () => {
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue({
+        ...bookingWithCablesOut(),
+        status: BookingStatus.OVERDUE,
+        to: new Date("2025-01-01T10:00:00Z"),
+      });
+      mockCableStock(30);
+      mockOtherReservation(1);
+
+      await extendBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        newEndDate: new Date("2025-01-03T17:00:00Z"),
+        hints: mockClientHints,
+        userId: "user-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
+        roles: [OrganizationRoles.ADMIN],
+      });
+
+      const { where } = (
+        db.bookingAsset.findMany as unknown as ReturnType<typeof vitest.fn>
+      ).mock.calls.find(
+        // The reservations read is the one that leaves this booking out.
+        (call) =>
+          (call[0] as { where?: { bookingId?: unknown } })?.where?.bookingId
+      )![0];
+      expect(where.booking.OR[1].AND).toEqual([
+        { from: { lt: new Date("2025-01-03T17:00:00Z") } },
+        { to: { gt: EXTEND_NOW } },
+      ]);
+    });
+
+    it("measures a partly checked-out pool by its slice, whatever the shared asset status says", async () => {
+      // A pool's status stays AVAILABLE until every booked unit has left;
+      // the slice marker is what says this booking's units are out.
+      const booking = bookingWithCablesOut();
+      const [cable] = booking.bookingAssets;
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue({
+        ...booking,
+        bookingAssets: [
+          {
+            ...cable,
+            asset: { ...cable.asset, status: AssetStatus.AVAILABLE },
+          },
+        ],
+      });
+      mockCableStock(30);
+      mockOtherReservation(28);
+
+      await expect(
+        extendBooking({
+          id: "booking-1",
+          organizationId: "org-1",
+          newEndDate: new Date("2025-01-03T17:00:00Z"),
+          hints: mockClientHints,
+          userId: "user-1",
+          access: accessFor([OrganizationRoles.ADMIN]),
+          roles: [OrganizationRoles.ADMIN],
+        })
+      ).rejects.toThrow("Not enough units are free until then");
+    });
+
+    it("asks nothing of the pool for a slice that never went out", async () => {
+      const booking = bookingWithCablesOut();
+      const [cable] = booking.bookingAssets;
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue({
+        ...booking,
+        bookingAssets: [
+          // The cables are reserved on the booking but never went out.
+          { ...cable, checkedOutAt: null },
+          // A camera keeps the booking extendable.
+          {
+            ...cable,
+            asset: {
+              ...cable.asset,
+              id: "cam-1",
+              type: AssetType.INDIVIDUAL,
+              status: AssetStatus.CHECKED_OUT,
+            },
+            assetId: "cam-1",
+            id: "ba-cam",
+            quantity: 1,
+          },
+        ],
+      });
+      //@ts-expect-error missing vitest type
+      db.booking.findMany.mockResolvedValue([]);
+      mockCableStock(0);
+
+      await extendBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        newEndDate: new Date("2025-01-03T17:00:00Z"),
+        hints: mockClientHints,
+        userId: "user-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
+        roles: [OrganizationRoles.ADMIN],
+      });
+
+      expect(db.asset.findMany).not.toHaveBeenCalled();
+      expect(db.booking.update).toHaveBeenCalled();
+    });
   });
 
   it("should allow extension when no clashing bookings exist", async () => {
@@ -12024,7 +12611,7 @@ describe("extendBooking", () => {
         roles: [OrganizationRoles.ADMIN],
       })
     ).rejects.toThrow(
-      "Cannot extend booking because the extended period is overlapping"
+      "These bookings reserve items this booking still has out"
     );
   });
 
@@ -12196,7 +12783,7 @@ describe("extendBooking", () => {
       });
 
       await expect(extendBooking(extendParams())).rejects.toThrow(
-        "Cannot extend booking because the extended period is overlapping"
+        "These bookings reserve items this booking still has out"
       );
       expect(db.booking.update).not.toHaveBeenCalled();
     });
