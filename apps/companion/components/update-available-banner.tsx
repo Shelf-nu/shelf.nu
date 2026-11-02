@@ -123,6 +123,11 @@ export function UpdateAvailableBanner({ children }: { children: ReactNode }) {
   // can be learned before the next launch.
   const nativeSettledRef = useRef(false);
   const nativeInFlightRef = useRef(false);
+  // The newest server answer, and whether it arrived after the running attempt
+  // read the previous one. An answer that lands mid-attempt is never dropped:
+  // the running attempt loops and evaluates it once it finishes.
+  const latestAnswerRef = useRef(answer);
+  const answerPendingRef = useRef(false);
 
   useEffect(() => {
     let mounted = true;
@@ -174,26 +179,32 @@ export function UpdateAvailableBanner({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    latestAnswerRef.current = answer;
+    answerPendingRef.current = true;
     if (nativeInFlightRef.current) return;
     nativeInFlightRef.current = true;
     void (async () => {
       try {
-        const iosShownStoreVersion =
-          Platform.OS === "ios" ? await readIosShownStoreVersion() : null;
-        if (
-          !shouldAttemptNativeUpdate({
-            platform: Platform.OS,
-            appVersion: getAppVersion(),
-            latestVersion: answer.version,
-            settledThisLaunch: nativeSettledRef.current,
-            iosShownStoreVersion,
-          })
-        ) {
-          return;
+        while (answerPendingRef.current) {
+          answerPendingRef.current = false;
+          const latest = latestAnswerRef.current.version;
+          const iosShownStoreVersion =
+            Platform.OS === "ios" ? await readIosShownStoreVersion() : null;
+          if (
+            !shouldAttemptNativeUpdate({
+              platform: Platform.OS,
+              appVersion: getAppVersion(),
+              latestVersion: latest,
+              settledThisLaunch: nativeSettledRef.current,
+              iosShownStoreVersion,
+            })
+          ) {
+            continue;
+          }
+          const outcome = await runNativeUpdate();
+          if (settlesLaunch(outcome)) nativeSettledRef.current = true;
+          setNativeOutcome(outcome);
         }
-        const outcome = await runNativeUpdate();
-        if (settlesLaunch(outcome)) nativeSettledRef.current = true;
-        setNativeOutcome(outcome);
       } finally {
         nativeInFlightRef.current = false;
       }
