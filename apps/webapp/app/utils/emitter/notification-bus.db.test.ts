@@ -36,6 +36,8 @@ const DELIVERY_TIMEOUT_MS = 2000;
 describe.skipIf(!DATABASE_URL)("notification bus (real database)", () => {
   /** Every error either bus recovered from; the tests expect none */
   const errors: ShelfError[] = [];
+  // why: spies on each simulated machine's local emit, so the test can assert
+  // what Postgres fanned out; the buses and the database are real
   const emittedOnA = vi.fn<(payload: string) => void>();
   let emittedOnB = vi.fn<(payload: string) => void>();
   let busA: NotificationBus;
@@ -83,7 +85,7 @@ describe.skipIf(!DATABASE_URL)("notification bus (real database)", () => {
 
   it("a reconnected bus receives again", async () => {
     await busB.stop();
-    // A fresh spy so the previous test's delivery is not counted
+    // why: a fresh spy so the previous test's delivery is not counted
     emittedOnB = vi.fn<(payload: string) => void>();
     busB = createMachine((payload) => emittedOnB(payload));
     await busB.start();

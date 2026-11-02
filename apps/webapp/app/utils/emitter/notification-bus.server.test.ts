@@ -26,6 +26,8 @@ const NOTIFY_SQL = "SELECT pg_notify($1, $2)";
 
 /** Stands in for a pg.Client: real events, stubbed network calls */
 class FakeClient extends EventEmitter {
+  // why: a real pg client needs a live Postgres; the bus calls only these three
+  // network methods, and notification-bus.db.test.ts covers the real database
   connect = vi.fn(() => Promise.resolve());
   query = vi.fn((_text: string, _values?: unknown[]) => Promise.resolve({}));
   end = vi.fn(() => Promise.resolve());
@@ -41,6 +43,8 @@ const buses: NotificationBus[] = [];
  */
 function setup(configure?: (client: FakeClient) => void) {
   const clients: FakeClient[] = [];
+  // why: the injected factory is the seam that swaps out the external pg
+  // client; the spy counts how many clients the bus builds
   const createClient = vi.fn(() => {
     const client = new FakeClient();
     configure?.(client);
@@ -48,6 +52,8 @@ function setup(configure?: (client: FakeClient) => void) {
     // The fake implements only the members the bus calls
     return client as unknown as BusClient;
   });
+  // why: spies on the injected emitter and logger, so tests assert what was
+  // delivered and reported without the real emitter or Sentry
   const emitLocal = vi.fn<(payload: string) => void>();
   const logError = vi.fn<(error: ShelfError) => void>();
   const logWarning = vi.fn<(error: ShelfError) => void>();
@@ -295,12 +301,16 @@ describe("createNotificationBus", () => {
 
   it("start never rejects when the client cannot be built", async () => {
     vi.useFakeTimers();
+    // why: a real pg.Client cannot be made to throw on construction on demand;
+    // this stands in for one built from a malformed URL
     const createClient = vi.fn((): BusClient => {
       throw new TypeError("Invalid URL");
     });
+    // why: spy on the injected logger to count reported errors
     const logError = vi.fn<(error: ShelfError) => void>();
     const bus = createNotificationBus({
       createClient,
+      // why: required by the bus options, not under test here
       emitLocal: vi.fn(),
       logError,
     });
