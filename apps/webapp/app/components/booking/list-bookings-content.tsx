@@ -25,6 +25,7 @@ import {
 import { resolveUserDisplayName } from "~/utils/user";
 import { AvailabilityBadge } from "./availability-label";
 import { BookingAssetsSidebar } from "./booking-assets-sidebar";
+import { BookingQuickActions } from "./booking-quick-actions";
 import { BookingStatusBadge } from "./booking-status-badge";
 import { UnassignedModelUnitsPill } from "./unassigned-model-units-pill";
 import LineBreakText from "../layout/line-break-text";
@@ -139,6 +140,13 @@ type ListBookingsContentProps = {
      * `~/modules/booking/list-flags.server`.
      */
     hasUnavailableAssets?: boolean;
+    /**
+     * Set by the same decorator: true when the booking's "Check out remaining"
+     * would find something to send, by the server's own rule (see
+     * `getBookingIdsWithItemsToCheckOut`). Decides whether an ONGOING or
+     * OVERDUE row offers "Check out remaining".
+     */
+    hasItemsToCheckOut?: boolean;
   };
   /**
    * History state for the row link, so the booking page can step through
@@ -285,6 +293,11 @@ export default function ListBookingsContent({
       {/* Created by */}
       <Td>
         <UserBadge user={item?.creator} />
+      </Td>
+
+      {/* Row actions, by status and the viewer's reach */}
+      <Td>
+        <BookingQuickActions booking={item} />
       </Td>
     </>
   );

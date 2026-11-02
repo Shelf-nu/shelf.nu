@@ -3,8 +3,14 @@ import { z } from "zod";
 import { BookingsListSchema } from "~/components/booking/bookings-list-fields";
 import { BulkArchiveBookingsSchema } from "~/components/booking/bulk-archive-dialog";
 import { BulkCancelBookingsSchema } from "~/components/booking/bulk-cancel-dialog";
+import { BulkCheckinBookingsSchema } from "~/components/booking/bulk-checkin-dialog";
+import { BulkCheckoutBookingsSchema } from "~/components/booking/bulk-checkout-dialog";
 import { BulkDeleteBookingSchema } from "~/components/booking/bulk-delete-dialog";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
+import {
+  bulkCheckinBookings,
+  bulkCheckoutBookings,
+} from "~/modules/booking/bulk-check-in-out.server";
 import {
   bulkArchiveBookings,
   bulkCancelBookings,
@@ -34,7 +40,13 @@ export async function action({ request, context }: ActionFunctionArgs) {
       formData,
       z
         .object({
-          intent: z.enum(["bulk-delete", "bulk-archive", "bulk-cancel"]),
+          intent: z.enum([
+            "bulk-delete",
+            "bulk-archive",
+            "bulk-cancel",
+            "bulk-checkout",
+            "bulk-checkin",
+          ]),
         })
         .and(CurrentSearchParamsSchema)
     );
@@ -49,6 +61,10 @@ export async function action({ request, context }: ActionFunctionArgs) {
       // `update` is not the gate for them: BASE holds it.
       "bulk-archive": PermissionAction.archive,
       "bulk-cancel": PermissionAction.cancel,
+      // The list's check-out and check-in ask for the same grants the booking
+      // page's one-click buttons ask for.
+      "bulk-checkout": PermissionAction.checkout,
+      "bulk-checkin": PermissionAction.checkin,
     };
 
     // `access` decides whether the bulk query is scoped to the caller's own
@@ -126,6 +142,52 @@ export async function action({ request, context }: ActionFunctionArgs) {
         sendNotification({
           title: "Bookings cancelled",
           message: "Your bookings has been cancelled successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
+        return data(payload({ success: true }));
+      }
+
+      case "bulk-checkout": {
+        const { bookingIds } = parseData(formData, BulkCheckoutBookingsSchema);
+
+        await bulkCheckoutBookings({
+          bookingIds,
+          organizationId,
+          userId,
+          access,
+          hints: getClientHint(request),
+          currentSearchParams,
+          list,
+        });
+
+        sendNotification({
+          title: "Bookings checked out",
+          message: "Your bookings have been checked out successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
+        return data(payload({ success: true }));
+      }
+
+      case "bulk-checkin": {
+        const { bookingIds } = parseData(formData, BulkCheckinBookingsSchema);
+
+        await bulkCheckinBookings({
+          bookingIds,
+          organizationId,
+          userId,
+          access,
+          hints: getClientHint(request),
+          currentSearchParams,
+          list,
+        });
+
+        sendNotification({
+          title: "Bookings checked in",
+          message: "Your bookings have been checked in successfully",
           icon: { name: "success", variant: "success" },
           senderId: userId,
         });

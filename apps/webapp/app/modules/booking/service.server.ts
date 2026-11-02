@@ -16923,7 +16923,7 @@ async function getBookingsListWhere({
  * @param params.action - Verb for the refusal message ("delete", "archive", ...)
  * @throws {ShelfError} 403 when the list holds bookings outside the caller's ownership scope
  */
-async function assertSelectAllWithinOwnership({
+export async function assertSelectAllWithinOwnership({
   bookingIds,
   matchedCount,
   organizationId,
@@ -21033,6 +21033,7 @@ export async function checkoutRemainingAssets({
       cause: null,
       status: 400,
       label,
+      title: "Nothing left to check out",
       message: "There are no remaining items to check out for this booking.",
       shouldBeCaptured: false,
     });
