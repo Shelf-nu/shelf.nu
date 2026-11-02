@@ -204,7 +204,8 @@ describe("handleClientBeforeSend — non-boundary passthrough", () => {
  * rejected object itself lands on `extra.__serialized__`.
  */
 function makeRejectionEvent(serialized: Record<string, unknown>): ErrorEvent {
-  return {
+  const event: ErrorEvent = {
+    type: undefined,
     exception: {
       values: [
         {
@@ -220,7 +221,8 @@ function makeRejectionEvent(serialized: Record<string, unknown>): ErrorEvent {
       ],
     },
     extra: { __serialized__: serialized },
-  } as ErrorEvent;
+  };
+  return event;
 }
 
 /** A route error response as a loader's `throw data(error(reason), { status })` produces it. */
