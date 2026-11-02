@@ -105,13 +105,17 @@ export default function InventoryValueChart() {
                 Inventory value
               </Text>
               {/*
-               * Browsers below container-query support (Safari < 16, Chrome
-               * < 105) keep a fixed size: they ignore the @container layout
-               * too, so the value always has the full card width there.
+               * Where container-query units are supported, the value stays on
+               * one line at its fitted size. Browsers without them (Safari
+               * < 16, Chrome < 105) keep a fixed size and wrap the value
+               * rather than overflow it: the card can be as narrow as a
+               * one-third grid column. Wrapping prefers the space after the
+               * currency code and breaks inside the number only as a last
+               * resort.
                */}
               <p
                 data-testid="inventory-value-amount"
-                className="mb-3 whitespace-nowrap text-[1.375rem] font-semibold leading-tight text-gray-900 [@supports(font-size:1cqi)]:text-[length:var(--value-font-size)]"
+                className="mb-3 text-[1.375rem] font-semibold leading-tight text-gray-900 [overflow-wrap:anywhere] [@supports(font-size:1cqi)]:whitespace-nowrap [@supports(font-size:1cqi)]:text-[length:var(--value-font-size)]"
                 style={
                   {
                     "--value-font-size": getFittedValueFontSize(formattedValue),

@@ -68,7 +68,13 @@ describe("InventoryValueChart", () => {
     const normalize = (text: string | null) => text?.replace(/\s/g, " ");
     expect(normalize(valueElement.textContent)).toBe(normalize(expected));
 
-    expect(valueElement).toHaveClass("whitespace-nowrap");
+    // One line only where the fitted size applies; browsers without
+    // container-query units wrap inside the card instead of overflowing it.
+    expect(valueElement).toHaveClass(
+      "[@supports(font-size:1cqi)]:whitespace-nowrap"
+    );
+    expect(valueElement).toHaveClass("[overflow-wrap:anywhere]");
+    expect(valueElement).not.toHaveClass("whitespace-nowrap");
     expect(valueElement.style.getPropertyValue("--value-font-size")).toBe(
       getFittedValueFontSize(expected)
     );
