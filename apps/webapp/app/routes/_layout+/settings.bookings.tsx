@@ -45,6 +45,7 @@ import { WeeklyScheduleForm } from "~/components/working-hours/weekly-schedule-f
 import {
   markExistingReservationsApproved,
   scheduleExpiryArchiveForExistingReservations,
+  getUnapprovedReservationIds,
 } from "~/modules/booking/service.server";
 import {
   getBookingSettingsForOrganization,
@@ -250,10 +251,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
           }
         );
 
-        // Captured before the setting commits. The two writes are separate, so
-        // a reservation made in between is a real pending request; without this
-        // bound the sweep below would stamp it approved with nobody reviewing it.
-        const approvalCutoff = new Date();
+        // Read before the setting commits. The two writes are separate, so a
+        // reservation made in between is a real pending request; sweeping by
+        // these ids (never by date) keeps it out of the stamp below.
+        const reservationsBeforeSwitch = requireBookingApproval
+          ? await getUnapprovedReservationIds({ organizationId })
+          : [];
 
         await updateBookingSettings({
           organizationId,
@@ -272,7 +275,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
             await markExistingReservationsApproved({
               organizationId,
               userId: authSession.userId,
-              createdBefore: approvalCutoff,
+              bookingIds: reservationsBeforeSwitch,
             });
           } catch (cause) {
             Logger.error(

@@ -13276,34 +13276,72 @@ export async function cancelBooking({
 }
 
 /**
- * Stamps every currently-RESERVED, not-yet-approved booking in the org as
- * approved. Run when the org ENABLES `requireBookingApproval`, so the toggle
- * only applies to NEW requests: without this, every pre-existing reservation
- * (including ones admins made before the feature existed, which have no
- * `approvedAt`) would flip to pending the moment the setting turns on.
+ * The ids of every RESERVED, not-yet-approved booking in the org right now.
+ * Read BEFORE the approval setting is turned on, so the sweep that follows
+ * stamps exactly the reservations that existed when the switch flipped and
+ * never a request made in the gap between the two writes. Keyed by id, not
+ * by creation date: a draft can be older than the switch and still be
+ * reserved after it, and that reservation is a real request.
+ *
+ * @param args.organizationId - The workspace about to require approval
+ * @returns The booking ids to hand to {@link markExistingReservationsApproved}
  */
-export async function markExistingReservationsApproved({
+export async function getUnapprovedReservationIds({
   organizationId,
-  userId,
-  createdBefore,
 }: {
   organizationId: Organization["id"];
-  userId: User["id"];
-  /**
-   * Only sweep reservations that already existed when the setting was turned
-   * on. Callers capture this BEFORE persisting the toggle: the setting commits
-   * first, so a request made in the gap is genuinely pending and must not be
-   * stamped approved without anyone seeing it.
-   */
-  createdBefore: Date;
-}) {
+}): Promise<string[]> {
   try {
-    return await db.booking.updateMany({
+    const rows = await db.booking.findMany({
       where: {
         organizationId,
         status: BookingStatus.RESERVED,
         approvedAt: null,
-        createdAt: { lte: createdBefore },
+      },
+      select: { id: true },
+    });
+    return rows.map((row) => row.id);
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      label,
+      message:
+        "Something went wrong while reading the reservations that predate the approval setting.",
+      additionalData: { organizationId },
+    });
+  }
+}
+
+/**
+ * Stamps the given RESERVED, not-yet-approved bookings as approved. Run when
+ * the org ENABLES `requireBookingApproval`, with the ids read by
+ * {@link getUnapprovedReservationIds} before the setting was written, so the
+ * toggle only applies to NEW requests: without this, every pre-existing
+ * reservation (including ones admins made before the feature existed, which
+ * have no `approvedAt`) would flip to pending the moment the setting turns on.
+ * The status and approval guards stay in the write, so a booking that moved
+ * on or was approved by hand in between is left alone.
+ */
+export async function markExistingReservationsApproved({
+  organizationId,
+  userId,
+  bookingIds,
+}: {
+  organizationId: Organization["id"];
+  userId: User["id"];
+  /** Reservations that existed before the setting was turned on. */
+  bookingIds: string[];
+}) {
+  if (bookingIds.length === 0) {
+    return { count: 0 };
+  }
+  try {
+    return await db.booking.updateMany({
+      where: {
+        id: { in: bookingIds },
+        organizationId,
+        status: BookingStatus.RESERVED,
+        approvedAt: null,
       },
       data: { approvedAt: new Date(), approvedById: userId },
     });

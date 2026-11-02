@@ -821,6 +821,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // Approve button and the `approve-booking` intent resolve, so the phone
     // never draws (or withholds) a decision the server would answer otherwise.
     const canApprove = isPendingApproval && canApprovePerm;
+    // Told BEFORE the reservation: whether this caller's Reserve would land as
+    // a request waiting for a decision. The same rule `reserveBooking` applies
+    // (workspace requires approval, and the caller's role is one whose
+    // reservations alert the workspace), so the app can word its prompt and
+    // its success message as a request instead of a done reservation.
+    const reservationNeedsApproval =
+      booking.status === BookingStatus.DRAFT &&
+      (bookingSettings.requireBookingApproval ?? false) &&
+      access.policy.notifications.reservationAlertsAdmins;
     const canCheckin = writesBooking && canCheckinByState && canCheckinPerm;
     /**
      * Whether the quick "check in all" is offered.
@@ -1087,6 +1096,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         // renders a "Pending approval" badge and hides checkout.
         isPendingApproval,
         canApprove,
+        reservationNeedsApproval,
       },
       checkedInAssetIds,
       // Which assets this booking actually sent out, from the slice markers.

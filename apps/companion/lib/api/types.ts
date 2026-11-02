@@ -1169,6 +1169,13 @@ export type BookingDetail = {
    */
   canApprove?: boolean;
   /**
+   * True on a DRAFT whose reservation by this caller would wait for approval
+   * (workspace requires it, and the caller's role is one whose reservations
+   * do). The screen then words Reserve as a request. Absent on an older
+   * server, which reads as a plain reservation.
+   */
+  reservationNeedsApproval?: boolean;
+  /**
    * Segmented lifecycle progress (Booked / Partial / Fully out / Returned),
    * computed server-side by the SAME shared helper the web booking overview
    * uses, so the mobile progress bar shows identical numbers to web. `null` /

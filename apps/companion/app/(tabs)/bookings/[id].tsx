@@ -751,15 +751,22 @@ function BookingDetailScreen({ id }: { id: string }) {
     startQuantityPicker();
   };
 
+  // A reservation that will wait for approval is a request, and the prompt,
+  // the button and the success message must say so; otherwise the pending
+  // state that follows reads as a failure.
+  const reservationIsRequest = booking?.reservationNeedsApproval === true;
+
   const handleReserve = () => {
     if (!booking || !currentOrg) return;
     Alert.alert(
-      "Reserve Booking",
-      `Reserve "${booking.name}"? This confirms the booking and checks for conflicts.`,
+      reservationIsRequest ? "Request Reservation" : "Reserve Booking",
+      reservationIsRequest
+        ? `Request "${booking.name}"? The items are held while an administrator or manager reviews the request. You will be notified by email.`
+        : `Reserve "${booking.name}"? This confirms the booking and checks for conflicts.`,
       [
         { text: "Cancel", style: "cancel" },
         {
-          text: "Reserve",
+          text: reservationIsRequest ? "Request" : "Reserve",
           onPress: async () => {
             setIsActioning(true);
             const { error: err } = await api.reserveBooking(
@@ -775,9 +782,13 @@ function BookingDetailScreen({ id }: { id: string }) {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             // Mutation changed this booking — force the list to refetch.
             markBookingsListDirty();
-            Alert.alert("Reserved", `"${booking.name}" is now reserved.`, [
-              { text: "OK", onPress: () => fetchBooking() },
-            ]);
+            Alert.alert(
+              reservationIsRequest ? "Request sent" : "Reserved",
+              reservationIsRequest
+                ? `"${booking.name}" is waiting for approval. You will receive an email once it has been reviewed.`
+                : `"${booking.name}" is now reserved.`,
+              [{ text: "OK", onPress: () => fetchBooking() }]
+            );
           },
         },
       ]
@@ -2135,7 +2146,9 @@ function BookingDetailScreen({ id }: { id: string }) {
                       size={18}
                       color={colors.primaryForeground}
                     />
-                    <Text style={styles.actionButtonText}>Reserve</Text>
+                    <Text style={styles.actionButtonText}>
+                      {reservationIsRequest ? "Request reservation" : "Reserve"}
+                    </Text>
                   </TouchableOpacity>
                 )}
               </View>

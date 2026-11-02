@@ -119,6 +119,7 @@ import {
   getActionTextFromTransition,
   getSystemActionText,
   resolveExpiredCheckoutState,
+  markExistingReservationsApproved,
 } from "./service.server";
 
 // @vitest-environment node
@@ -10788,6 +10789,48 @@ function cancelledJobIds(): unknown[] {
   //@ts-expect-error missing vitest type
   return scheduler.cancel.mock.calls.map((call: unknown[]) => call[0]);
 }
+
+describe("markExistingReservationsApproved", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("stamps only the reservations read before the switch, by id, never by date", async () => {
+    // why: a draft older than the switch can still be reserved after it; that
+    // reservation is a real request and must stay pending, so the sweep is
+    // keyed on the ids captured beforehand with the status guards kept.
+    //@ts-expect-error missing vitest type
+    db.booking.updateMany.mockResolvedValue({ count: 2 });
+
+    const result = await markExistingReservationsApproved({
+      organizationId: "org-1",
+      userId: "owner-1",
+      bookingIds: ["booking-a", "booking-b"],
+    });
+
+    expect(result).toEqual({ count: 2 });
+    expect(db.booking.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ["booking-a", "booking-b"] },
+        organizationId: "org-1",
+        status: BookingStatus.RESERVED,
+        approvedAt: null,
+      },
+      data: { approvedAt: expect.any(Date), approvedById: "owner-1" },
+    });
+  });
+
+  it("writes nothing when no reservation predates the switch", async () => {
+    const result = await markExistingReservationsApproved({
+      organizationId: "org-1",
+      userId: "owner-1",
+      bookingIds: [],
+    });
+
+    expect(result).toEqual({ count: 0 });
+    expect(db.booking.updateMany).not.toHaveBeenCalled();
+  });
+});
 
 describe("approveBooking", () => {
   beforeEach(() => {
