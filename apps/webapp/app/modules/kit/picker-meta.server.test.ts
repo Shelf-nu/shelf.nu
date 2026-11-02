@@ -16,7 +16,12 @@
  * @see {@link file://./picker-meta.server.ts}
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// why: `picker-meta.server.ts` imports the db client at module level, but
+// this file tests only the pure `computeKitClaimablePool`, so it needs no
+// database and must never reach one.
+vi.mock("~/database/db.server", () => ({ db: {} }));
 
 import { computeKitClaimablePool } from "./picker-meta.server";
 

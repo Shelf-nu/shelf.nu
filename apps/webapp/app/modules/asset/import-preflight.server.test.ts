@@ -129,7 +129,30 @@ describe("validateContentImportRows", () => {
 
     expect(errors).toHaveLength(1);
     expect(errors[0].row).toBe(0);
-    expect(errors[0].message).toContain(String(MAX_CONTENT_IMPORT_ROWS));
+    expect(errors[0].message).toContain(
+      MAX_CONTENT_IMPORT_ROWS.toLocaleString("en-US")
+    );
+  });
+
+  it("accepts files up to a caller's higher row cap", () => {
+    const data = Array.from({ length: MAX_CONTENT_IMPORT_ROWS + 1 }, () =>
+      row()
+    );
+
+    expect(
+      validateContentImportRows({
+        data,
+        existingCustomFields: [],
+        maxRows: 10_000,
+      }).errors
+    ).toEqual([]);
+    expect(
+      validateContentImportRows({
+        data,
+        existingCustomFields: [],
+        maxRows: 1000,
+      }).errors[0].message
+    ).toContain("1,000");
   });
 
   it("caps the listed errors but still counts the rest", () => {
@@ -218,5 +241,61 @@ describe("validateContentImportRows", () => {
     });
 
     expect(errors).toEqual([]);
+  });
+
+  it.each([[""], ["   "], [undefined]])("requires a title (%j)", (title) => {
+    const { errors } = validateContentImportRows({
+      data: [row(), row({ title } as never)],
+      existingCustomFields: [],
+    });
+
+    expect(errors).toEqual([
+      {
+        row: 3,
+        title: "Title required",
+        message: expect.stringContaining("title column"),
+      },
+    ]);
+  });
+
+  it("names an untitled row by its line in other messages", () => {
+    const { errors } = validateContentImportRows({
+      data: [row({ title: "", description: "a".repeat(5001) })],
+      existingCustomFields: [],
+    });
+
+    expect(errors.map((e) => e.title)).toEqual([
+      "Title required",
+      "Description too long",
+    ]);
+    expect(errors[1].message).toContain("The asset on row 2");
+  });
+
+  it.each([["yes"], ["No"], [" YES "], [""], ["   "]])(
+    "accepts a boolean custom field value of %j",
+    (value) => {
+      const { errors } = validateContentImportRows({
+        data: [row({ "cf:Insured,type:boolean": value })],
+        existingCustomFields: [],
+      });
+
+      expect(errors).toEqual([]);
+    }
+  );
+
+  it("rejects a boolean custom field value other than yes or no", () => {
+    const { errors } = validateContentImportRows({
+      data: [row({ "cf:Insured,type:boolean": "maybe" })],
+      existingCustomFields: [],
+    });
+
+    expect(errors).toEqual([
+      {
+        row: 2,
+        title: "Invalid custom field value",
+        message:
+          'Custom field "Insured" accepts only yes or no. The value we found is: "maybe".',
+      },
+    ]);
   });
 });

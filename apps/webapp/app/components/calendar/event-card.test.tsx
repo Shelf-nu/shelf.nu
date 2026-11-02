@@ -59,8 +59,8 @@ function makeBooking(
     description: null,
     start: "2026-07-10T09:00:00.000Z",
     end: "2026-07-11T09:00:00.000Z",
-    custodian: { name: "Alice", user: null },
-    creator: { name: "Bob", user: null },
+    custodian: { id: "tm-alice", name: "Alice", user: null },
+    creator: { id: null, name: "Bob", user: null },
     tags: [],
     ...overrides,
   };

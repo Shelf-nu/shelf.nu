@@ -19,6 +19,7 @@
 import { lazy, Suspense } from "react";
 import type { AreaChartProps } from "./area-chart";
 import type { BarChartProps } from "./bar-chart";
+import { Spinner } from "../shared/spinner";
 
 /**
  * Loading placeholder for charts.
@@ -27,7 +28,7 @@ import type { BarChartProps } from "./bar-chart";
 function ChartLoadingFallback() {
   return (
     <div className="flex size-full items-center justify-center">
-      <div className="animate-spin size-6 rounded-full border-2 border-gray-200 border-t-gray-900" />
+      <Spinner className="size-6" />
     </div>
   );
 }

@@ -14,24 +14,6 @@ import { resolveTeamMemberName } from "./user";
  * server-side checkout guard (`assertBookingIsApproved`) derives from this
  * same function so UI and service can never disagree.
  */
-/**
- * The `?status=` value of the bookings list filter that lists reservation
- * requests still waiting for a decision. Not a `BookingStatus`: pending is
- * derived (see {@link isBookingPendingApproval}), so the list resolves it
- * server-side into "RESERVED, never approved, in a workspace that requires
- * approval" rather than matching a column.
- */
-export const PENDING_APPROVAL_STATUS_FILTER = "PENDING_APPROVAL";
-
-/**
- * @returns `true` when a raw `?status=` value asks for pending requests
- */
-export function isPendingApprovalStatusFilter(
-  raw: string | null | undefined
-): boolean {
-  return raw?.toUpperCase() === PENDING_APPROVAL_STATUS_FILTER;
-}
-
 export function isBookingPendingApproval({
   status,
   approvedAt,
@@ -118,6 +100,35 @@ export function bookingCustodianIsSelf(
   access: Pick<RoleAccess, "policy">
 ): boolean {
   return access.policy.bookings.custodianPicker === "self";
+}
+
+/**
+ * Whether the caller may write to this booking: every booking for roles with
+ * `bookings.writeAll`, otherwise only ones they created or hold through the
+ * user custody link. The non-throwing form of `validateBookingOwnership`
+ * (`~/utils/booking-authorization.server`), for surfaces that decide which
+ * actions to offer. Pure and client-safe, so the server guard and the UI that
+ * hides what it refuses share one rule.
+ *
+ * @param params.booking - The booking's creator and user custody link
+ * @param params.userId - The caller
+ * @param params.access - The caller's access
+ * @returns `true` when writes to this booking are allowed
+ */
+export function canWriteBooking({
+  booking,
+  userId,
+  access,
+}: {
+  booking: { creatorId: string | null; custodianUserId: string | null };
+  userId: string;
+  access: Pick<RoleAccess, "bookings">;
+}): boolean {
+  return (
+    access.bookings.writeAll ||
+    booking.creatorId === userId ||
+    booking.custodianUserId === userId
+  );
 }
 
 export const bookingStatusColorMap: {

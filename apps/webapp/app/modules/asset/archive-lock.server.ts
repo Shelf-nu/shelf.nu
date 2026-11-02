@@ -41,8 +41,9 @@ type ArchiveLockTx = {
  * booking row (and refuses to archive).
  *
  * Must be called inside an interactive transaction, before the check it is
- * protecting. Ids are locked in a deterministic order so two transactions
- * locking overlapping sets cannot deadlock against each other.
+ * protecting. Ids are locked in byte order (`COLLATE "C"`), the same order
+ * `lockAssetsForQuantityUpdate` uses, so no two lockers of one asset set can
+ * deadlock against each other, whatever collation the database has.
  *
  * Org-scoped for the same reason {@link lockAssetForQuantityUpdate} is: a
  * foreign-org id must not be able to take a real lock on another org's row.
@@ -64,7 +65,7 @@ export async function lockAssetsForArchiveGuard(
   await tx.$queryRaw`
     SELECT id FROM "Asset"
     WHERE id = ANY(${ids}::text[]) AND "organizationId" = ${organizationId}
-    ORDER BY id
+    ORDER BY id COLLATE "C"
     FOR UPDATE
   `;
 }

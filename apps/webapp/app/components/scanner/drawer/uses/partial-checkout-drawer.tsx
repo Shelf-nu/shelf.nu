@@ -34,6 +34,7 @@ import { isQuantityTracked } from "~/modules/asset/utils";
 import {
   countRemainingCheckoutAssets,
   isAssetCheckoutEligible,
+  isReservationExpired,
   shouldPromptEarlyCheckout,
 } from "~/modules/booking/helpers";
 import type { loader } from "~/routes/_layout+/bookings.$bookingId.overview.checkout-assets";
@@ -656,6 +657,14 @@ export default function PartialCheckoutDrawer({
       shouldPromptEarlyCheckout(booking.status, booking.from)
   );
 
+  // The first scan of a RESERVED booking whose end date has passed: the
+  // server refuses it without a choice, so the dialog has to ask (new end
+  // date, or out as overdue). Like the early prompt, only while RESERVED.
+  const isExpiredCheckout = Boolean(
+    submittedAssetIds.length > 0 &&
+      isReservationExpired(booking.status, booking.to)
+  );
+
   // The blocker list is derived in a pure builder so its ids can be pinned by
   // a test; see `partial-checkout-blockers.test.tsx`.
   const { blockerConfigs } = buildPartialCheckoutBlockers({
@@ -868,6 +877,7 @@ export default function PartialCheckoutDrawer({
             selectedBookingAssetIds={selectedBookingAssetIds}
             checkoutsPayload={checkoutsPayload}
             isEarlyCheckout={isEarlyCheckout}
+            isExpiredCheckout={isExpiredCheckout}
             booking={booking}
             isLoading={isLoading}
             hasBlockers={hasBlockers}
@@ -1401,7 +1411,9 @@ type CustomFormProps = {
    */
   checkoutsPayload: CheckoutDispositionInput[];
   isEarlyCheckout: boolean;
-  booking: Pick<Booking, "id" | "name" | "from" | "to">;
+  /** The first scan of an expired reservation; see `CheckoutDialog`. */
+  isExpiredCheckout: boolean;
+  booking: Pick<Booking, "id" | "name" | "from" | "to" | "status">;
   isLoading?: boolean;
   hasBlockers: boolean;
 };
@@ -1411,6 +1423,7 @@ const CustomForm = ({
   selectedBookingAssetIds,
   checkoutsPayload,
   isEarlyCheckout,
+  isExpiredCheckout,
   booking,
   isLoading,
   hasBlockers,
@@ -1464,19 +1477,26 @@ const CustomForm = ({
           Cancel
         </Button>
 
-        {/* Submit button - conditional based on early check-out */}
-        {isEarlyCheckout ? (
+        {/* Submit button - a prompting CheckoutDialog for an early or an
+            expired check-out, a plain submit otherwise */}
+        {isEarlyCheckout || isExpiredCheckout ? (
           <CheckoutDialog
             booking={{
               id: booking.id,
               name: booking.name,
               from: booking.from,
+              status: booking.status,
+              to: booking.to,
             }}
             disabled={
               isLoading || hasBlockers || assetIdsForCheckout.length === 0
             }
             portalContainer={formElement || undefined}
             formId={PARTIAL_CHECKOUT_FORM_ID}
+            // The drawer lists what goes out, so it is the confirmation step.
+            // It renders CheckoutDialog only for early or expired check-outs,
+            // so this guards a plain one from asking a second time.
+            confirm={false}
             // CheckoutDialog's trigger defaults to `grow` (designed for the
             // full-width booking-header bar). Inside this drawer footer the
             // sibling Cancel is `w-auto`, so the default grow makes the

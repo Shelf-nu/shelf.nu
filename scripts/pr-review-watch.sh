@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# pr-review-watch.sh — PR review feed poller for the /pr-review-loop skill.
+# pr-review-watch.sh — PR review feed poller for the /watchdog skill.
 #
 # Turns GitHub review state into a deduplicated, actionable change feed.
 # Contains ALL polling and dedup logic and NO judgement: it decides *that*
@@ -20,7 +20,7 @@
 # discard whatever the skill wrote in that window, including reply prose
 # that cannot be recovered. See decisions_read below.
 #
-# @see .claude/skills/pr-review-loop/SKILL.md
+# @see .claude/skills/watchdog/SKILL.md
 # @see superpowers/2026-07-30-pr-review-loop-design.md
 
 set -uo pipefail

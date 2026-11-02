@@ -1,6 +1,6 @@
 ---
 name: shelf-pr-comment-triager
-description: Verifies a single PR review finding from CodeRabbit, Codex, or Copilot against the current state of the Shelf codebase and returns a structured verdict. Read-only — never edits code and never writes to GitHub. Invoked by the /pr-review-loop skill, one instance per finding, in parallel.
+description: Verifies a single PR review finding from CodeRabbit, Codex, or Copilot against the current state of the Shelf codebase and returns a structured verdict. Read-only — never edits code and never writes to GitHub. Invoked by the /watchdog skill, one instance per finding, in parallel.
 tools: Read, Grep, Glob, Skill
 model: opus
 ---

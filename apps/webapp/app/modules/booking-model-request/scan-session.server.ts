@@ -19,6 +19,7 @@
 import type {
   AlreadyIncludedRow,
   ExpectedModelRequest,
+  ReservedModel,
 } from "~/atoms/qr-scanner";
 import { db } from "~/database/db.server";
 import type { CountableModelRequest } from "~/utils/booking-model-requests";
@@ -68,8 +69,10 @@ export type BookingAssetRowForScanSession = BookingAssetRowForClaim & {
  * @param args.organizationId - Scopes the supplementary asset lookup to the
  *   caller's org, matching every other query in these loaders.
  * @returns `expectedModelRequests` (one entry per outstanding model, `booked`
- *   vs `remaining`) and `alreadyIncluded` (one entry per `BookingAsset` row,
- *   flagged `claimable` where a scan could still answer a reservation).
+ *   vs `remaining`), `reservedModels` (every model the booking reserves,
+ *   fully filled ones included) and `alreadyIncluded` (one entry per
+ *   `BookingAsset` row, flagged `claimable` where a scan could still answer a
+ *   reservation).
  */
 export async function deriveBookingScanSession({
   modelRequests,
@@ -81,6 +84,7 @@ export async function deriveBookingScanSession({
   organizationId: string;
 }): Promise<{
   expectedModelRequests: ExpectedModelRequest[];
+  reservedModels: ReservedModel[];
   alreadyIncluded: AlreadyIncludedRow[];
 }> {
   const expectedModelRequests: ExpectedModelRequest[] =
@@ -90,6 +94,12 @@ export async function deriveBookingScanSession({
       booked: modelRequest.quantity,
       remaining: modelRequest.quantity - modelRequest.fulfilledQuantity,
     }));
+
+  // `@@unique([bookingId, assetModelId])` keeps this one entry per model.
+  const reservedModels: ReservedModel[] = modelRequests.map((modelRequest) => ({
+    assetModelId: modelRequest.assetModelId,
+    assetModelName: modelRequest.assetModel.name,
+  }));
 
   // Model ids for the assets already on the booking. A second read rather
   // than a wider booking include, for the reason in the JSDoc above.
@@ -120,5 +130,5 @@ export async function deriveBookingScanSession({
     type: row.asset.type as "INDIVIDUAL" | "QUANTITY_TRACKED",
   }));
 
-  return { expectedModelRequests, alreadyIncluded };
+  return { expectedModelRequests, reservedModels, alreadyIncluded };
 }

@@ -136,6 +136,7 @@ import {
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
 import { db } from "~/database/db.server";
+import { getAssetQuantityRows } from "~/modules/asset/quantity-breakdown.server";
 import { getCustodySourceOptions } from "~/modules/asset/custody-source.server";
 import { canUseBarcodes } from "~/utils/subscription.server";
 import { accessFor } from "@helpers/role-access";
@@ -929,6 +930,61 @@ describe("GET /api/mobile/assets/:assetId — custody through a booking", () => 
     // Its custody is the quantity breakdown, which still arrives
     expect(body.asset.quantityBreakdown).not.toBeNull();
     expect(body.asset).not.toHaveProperty("bookingAssets");
+  });
+
+  it("sends the engine's Free now figure beside the reservation-aware available", async () => {
+    // 10 owned, 3 in custody, 4 reserved for later: 3 are unpromised, but 7
+    // are on the shelf right now. The engine's figure is the one the web
+    // labels "Free now".
+    assetFindUniqueMock.mockResolvedValue(buildAsset());
+    vitest.mocked(getAssetQuantityRows).mockResolvedValueOnce({
+      type: "QUANTITY_TRACKED",
+      quantity: 10,
+      custody: [{ quantity: 3 }],
+      bookingAssets: [
+        {
+          quantity: 4,
+          assetKitId: null,
+          booking: { id: "booking-2", status: "RESERVED" },
+        },
+      ],
+      freeNow: 7,
+    } as never);
+
+    const body = await loadDetail();
+
+    expect(body.asset.freeNow).toBe(7);
+    expect(body.asset.quantityBreakdown).toMatchObject({ available: 3 });
+    // One field is the contract: the figure is not repeated in the breakdown
+    expect(body.asset.quantityBreakdown).not.toHaveProperty("freeNow");
+  });
+
+  it("sends a Free now of zero when every unit sits in a kit and the breakdown is null", async () => {
+    // 10 owned, all 10 in a kit, nothing in custody, reserved or out: the
+    // breakdown is null (nothing to slice), yet nothing is free to hand over.
+    assetFindUniqueMock.mockResolvedValue(buildAsset());
+    vitest.mocked(getAssetQuantityRows).mockResolvedValueOnce({
+      type: "QUANTITY_TRACKED",
+      quantity: 10,
+      custody: [],
+      bookingAssets: [],
+      assetKits: [
+        { id: "ak-1", quantity: 10, kit: { id: "kit-1", name: "Kit" } },
+      ],
+      freeNow: 0,
+    } as never);
+
+    const body = await loadDetail();
+
+    expect(body.asset.quantityBreakdown).toBeNull();
+    expect(body.asset.freeNow).toBe(0);
+  });
+
+  it("sends a null Free now for an individual asset", async () => {
+    const body = await loadDetail();
+
+    expect(body.asset.freeNow).toBeNull();
+    expect(getAssetQuantityRows).not.toHaveBeenCalled();
   });
 
   it("sends null, and no raw rows, when the asset is on no active booking", async () => {

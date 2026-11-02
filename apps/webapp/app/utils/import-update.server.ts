@@ -24,7 +24,7 @@ import type {
   UpdateAssetPayload,
 } from "~/modules/asset/types";
 import { decodeCsvListCell } from "~/utils/csv-cells";
-import { buildCustomFieldValue } from "~/utils/custom-fields";
+import { buildCustomFieldValue, parseYesNo } from "~/utils/custom-fields";
 import { ShelfError, isLikeShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import {
@@ -33,7 +33,6 @@ import {
   describeBulkUpdateRowFailure,
   isBackupExportHeaderRow,
   normalizeExportedCurrencyValue,
-  parseYesNo,
 } from "./import-update-diff";
 import {
   batchResolveAssetModelNames,
@@ -954,6 +953,7 @@ export async function applyBulkUpdatesFromImport({
               id: assetDbId,
               availableToBook: newBool,
               organizationId,
+              userId,
             });
             changesApplied++;
           }

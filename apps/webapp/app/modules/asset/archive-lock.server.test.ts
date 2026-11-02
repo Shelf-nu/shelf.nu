@@ -51,7 +51,9 @@ describe("lockAssetsForArchiveGuard", () => {
     await lockAssetsForArchiveGuard(tx, ["b", "a", "c"], "org-1");
 
     expect(tx.calls[0].values[0]).toEqual(["a", "b", "c"]);
-    expect(tx.calls[0].sql).toContain("ORDER BY id");
+    // Byte order, as lockAssetsForQuantityUpdate locks the same rows: under
+    // a collation that ignores hyphens the two would disagree.
+    expect(tx.calls[0].sql).toContain('ORDER BY id COLLATE "C"');
   });
 
   it("dedupes ids", async () => {

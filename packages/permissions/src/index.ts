@@ -29,6 +29,7 @@
 
 export {
   ORGANIZATION_ROLES,
+  ROLE_DESCRIPTIONS,
   ROLE_LABELS,
   ROLE_PLURAL_LABELS,
   isOrganizationRole,

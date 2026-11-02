@@ -18,9 +18,11 @@ import {
 import { useHydrated } from "remix-utils/use-hydrated";
 import { AtomsResetHandler } from "~/atoms/atoms-reset-handler";
 import { feedbackModalOpenAtom } from "~/atoms/feedback";
+import { AssetImportNotice } from "~/components/assets/assets-index/asset-import-notice";
 import { ErrorContent } from "~/components/errors";
 
 import FeedbackModal from "~/components/feedback/feedback-modal";
+import { AssetImportCard } from "~/components/layout/asset-import-card";
 import {
   CommandPaletteButton,
   CommandPaletteRoot,
@@ -41,6 +43,15 @@ import { MissingPaymentMethodBanner } from "~/components/subscription/missing-pa
 import { NoSubscription } from "~/components/subscription/no-subscription";
 import { UnpaidInvoiceBanner } from "~/components/subscription/unpaid-invoice-banner";
 import { config } from "~/config/shelf.config";
+import { getActiveAssetImport } from "~/modules/asset-import/service.server";
+import type {
+  AssetImportNoticePayload,
+  AssetImportStatusPayload,
+} from "~/modules/asset-import/types";
+import {
+  isFullImportPayload,
+  shapeActiveImportForViewer,
+} from "~/modules/asset-import/viewer-payload";
 import { revokeAllSessions } from "~/modules/auth/service.server";
 import { getLegacyLoginDecisionForUser } from "~/modules/auth/sso-enforcement.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
@@ -64,6 +75,7 @@ import { isLikeShelfError, makeShelfError, ShelfError } from "~/utils/error";
 import { isRouteError } from "~/utils/http";
 import { payload, error } from "~/utils/http.server";
 import { skipRevalidationOnClientViewChange } from "~/utils/list-view-params";
+import { Logger } from "~/utils/logger";
 import {
   PermissionAction,
   PermissionEntity,
@@ -258,19 +270,57 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     // Run booking settings, working hours, and unread count in parallel —
     // all only depend on organizationId/userId which are available now.
-    const [bookingSettings, workingHours, unreadUpdatesCount] =
-      await Promise.all([
-        getBookingSettingsForOrganization(currentOrganization.id),
-        getWorkingHoursForOrganization(currentOrganization.id),
-        (() => {
-          // Same audience rule as the updates page (announcementRole), so the
-          // badge counts exactly what the list shows.
-          const userRole = announcementRole(currentOrganizationUserRoles);
-          return userRole
-            ? getUnreadCountForUser({ userId: authSession.userId, userRole })
-            : Promise.resolve(0);
-        })(),
-      ]);
+    // A failure here (e.g. the AssetImport table not migrated yet) must not
+    // take every page down: log it and show no import.
+    const activeAssetImportPromise: Promise<
+      AssetImportStatusPayload | AssetImportNoticePayload | null
+    > = hasPermission({
+      organizationId,
+      userId,
+      roles: currentOrganizationUserRoles ?? [],
+      entity: PermissionEntity.asset,
+      action: PermissionAction.import,
+    })
+      .then(async (canImport) =>
+        shapeActiveImportForViewer(
+          await getActiveAssetImport({
+            userId: authSession.userId,
+            organizationId: currentOrganization.id,
+          }),
+          canImport
+        )
+      )
+      .catch((cause: unknown) => {
+        Logger.error(
+          new ShelfError({
+            cause,
+            message: "Could not load the active asset import.",
+            label: "Asset Import",
+            shouldBeCaptured: true,
+          })
+        );
+        return null;
+      });
+    const [
+      bookingSettings,
+      workingHours,
+      unreadUpdatesCount,
+      activeAssetImport,
+    ] = await Promise.all([
+      getBookingSettingsForOrganization(currentOrganization.id),
+      getWorkingHoursForOrganization(currentOrganization.id),
+      (() => {
+        // Same audience rule as the updates page (announcementRole), so the
+        // badge counts exactly what the list shows.
+        const userRole = announcementRole(currentOrganizationUserRoles);
+        return userRole
+          ? getUnreadCountForUser({ userId: authSession.userId, userRole })
+          : Promise.resolve(0);
+      })(),
+      // The import in flight (or just finished for the starter), shown by
+      // the floating card and the assets index notice.
+      activeAssetImportPromise,
+    ]);
 
     return data(
       payload({
@@ -291,6 +341,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         canUseBookings: canUseBookings(currentOrganization),
         canUseAudits: canUseAudits(currentOrganization),
         unreadUpdatesCount,
+        // Explicit annotation keeps the loader's inferred type small.
+        activeAssetImport: activeAssetImport as
+          | AssetImportStatusPayload
+          | AssetImportNoticePayload
+          | null,
         hasUnpaidInvoice: user.hasUnpaidInvoice,
         warnForNoPaymentMethod: user.warnForNoPaymentMethod,
         needsSequentialIdMigration,
@@ -350,6 +405,7 @@ export default function App() {
     minimizedSidebar,
     needsSequentialIdMigration,
     currentOrganizationId,
+    activeAssetImport,
   } = useLoaderData<typeof loader>();
   const isHydrated = useHydrated();
   // Several authenticated routes (assets._index, kits._index, locations.*, …)
@@ -411,10 +467,17 @@ export default function App() {
                   <SidebarTrigger />
                 </div>
               </header>
+              <AssetImportNotice activeAssetImport={activeAssetImport} />
               <Outlet />
             </>
           )}
           <Toaster />
+          {isFullImportPayload(activeAssetImport) ? (
+            <AssetImportCard
+              key={activeAssetImport.id}
+              initial={activeAssetImport}
+            />
+          ) : null}
 
           {/* Sequential ID Migration Modal */}
           {needsSequentialIdMigration ? (

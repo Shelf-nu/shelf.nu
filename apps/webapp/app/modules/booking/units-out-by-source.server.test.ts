@@ -148,8 +148,14 @@ describe("loadBookedOutBySource", () => {
     ];
     const client = {
       bookingAsset: {
+        // The first read is the sourced slices; the second, every slice of
+        // those bookings, carries no source.
         findMany: vi.fn((args: { where: { sourceLocationId?: unknown } }) =>
-          Promise.resolve(args.where.sourceLocationId ? sourced : sourced)
+          Promise.resolve(
+            args.where.sourceLocationId
+              ? sourced
+              : sourced.map(({ sourceLocationId: _source, ...row }) => row)
+          )
         ),
       },
       consumptionLog: {

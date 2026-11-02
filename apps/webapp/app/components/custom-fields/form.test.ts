@@ -87,6 +87,24 @@ describe("CustomFieldSubmissionSchema", () => {
     }
   });
 
+  it("keeps the option renames a save sends", () => {
+    // `updateCustomField` moves assets only along these pairs, so a schema
+    // that stripped them would rename options and strand their assets.
+    const result = CustomFieldSubmissionSchema.safeParse({
+      ...base,
+      type: "OPTION",
+      options: ["Extra large"],
+      optionRenames: [{ from: "Large", to: "Extra large" }],
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.optionRenames).toEqual([
+        { from: "Large", to: "Extra large" },
+      ]);
+    }
+  });
+
   it("accepts a non-OPTION field with no options", () => {
     const result = CustomFieldSubmissionSchema.safeParse({
       ...base,

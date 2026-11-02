@@ -1,8 +1,10 @@
 import { useCallback, useState } from "react";
 import type { Prisma } from "@prisma/client";
+import { RepeatIcon } from "lucide-react";
 import { useParams } from "react-router";
 import colors from "tailwindcss/colors";
 import type { ASSET_REMINDER_INCLUDE_FIELDS } from "~/modules/asset-reminder/fields";
+import { describeRecurrence } from "~/modules/asset-reminder/recurrence";
 import { ArchivedBadge } from "../assets/archived-badge";
 import { List } from "../list";
 import ActionsDropdown from "./actions-dropdown";
@@ -36,6 +38,7 @@ export const REMINDERS_SORTING_OPTIONS = {
  */
 const REMINDER_STATUS_COLORS: Record<ReminderStatus, string> = {
   Pending: colors.yellow["500"],
+  Sending: colors.blue["500"],
   "Reminder sent": colors.green["500"],
   Paused: colors.gray["500"],
   "Not sent": colors.gray["500"],
@@ -130,14 +133,24 @@ function ListContent({
 }: {
   item: Prisma.AssetReminderGetPayload<{
     include: typeof ASSET_REMINDER_INCLUDE_FIELDS;
-  }>;
+  }> & {
+    /** The alert has passed but its job has not run yet (list loader). */
+    deliveryPending?: boolean;
+  };
   extraProps: { isAssetReminderPage: boolean };
 }) {
+  /**
+   * For an ACTIVE recurring reminder, alertDateTime is always the next
+   * occurrence (the worker advances it in place), so it reads like a one-shot
+   * that has not fired yet; once a series ends the date stays in the past.
+   */
   const status = getReminderStatus({
     alertDateTime: item.alertDateTime,
     schedulerReference: item.activeSchedulerReference,
     assetArchivedAt: item.asset.archivedAt,
+    deliveryPending: item.deliveryPending,
   });
+  const recurrenceLabel = describeRecurrence(item);
 
   return (
     <>
@@ -160,6 +173,12 @@ function ListContent({
       </When>
       <Td>
         <DateS date={item.alertDateTime} includeTime />
+        {recurrenceLabel ? (
+          <span className="mt-0.5 flex items-center gap-1 text-xs text-gray-500">
+            <RepeatIcon className="size-3" aria-hidden="true" />
+            {recurrenceLabel}
+          </span>
+        ) : null}
       </Td>
       <Td>
         <Badge color={REMINDER_STATUS_COLORS[status]}>{status}</Badge>

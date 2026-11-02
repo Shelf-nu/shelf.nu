@@ -1,5 +1,6 @@
 import type { BookingSettings } from "@prisma/client";
 import { BookingStatus } from "@prisma/client";
+import { BOOKING_RESERVE_BLOCKED_LABELS } from "@shelf/labels";
 import { addHours, differenceInHours } from "date-fns";
 import { DateTime } from "luxon";
 import { z } from "zod";
@@ -180,6 +181,74 @@ function validateFutureDate(
   }
 
   return { isValid: true };
+}
+
+/**
+ * Why a draft's start date blocks Reserve, or `null` when it does not.
+ *
+ * Applies the same future-date rule as the start-date field of
+ * {@link BookingFormSchema}, so the disabled Reserve button and the server's
+ * refusal always agree. A start that has already passed gets the shared
+ * {@link BOOKING_RESERVE_BLOCKED_LABELS.START_PASSED} wording; a start still
+ * ahead but inside the buffer gets the buffer message.
+ *
+ * @param params.startDate - The start instant the form would submit
+ * @param params.bufferStartTime - The workspace's buffer, in hours
+ * @param params.bypassTimeLimits - The caller's `bookings.bypassTimeLimits`;
+ *   when true only a start in the past blocks
+ * @returns The reason to show on the button, or `null` when the start is fine
+ */
+export function getReserveStartBlockedReason({
+  startDate,
+  bufferStartTime,
+  bypassTimeLimits = false,
+}: {
+  startDate: Date;
+  bufferStartTime: number;
+  bypassTimeLimits?: boolean;
+}): string | null {
+  // An unparseable date is the field's error to report, not the button's
+  if (Number.isNaN(startDate.getTime())) return null;
+
+  const result = validateFutureDate(
+    startDate,
+    bypassTimeLimits ? 0 : bufferStartTime
+  );
+  if (result.isValid) return null;
+
+  return startDate <= new Date()
+    ? BOOKING_RESERVE_BLOCKED_LABELS.START_PASSED
+    : `${result.message}. Move it later to reserve.`;
+}
+
+/**
+ * The next instant at which {@link getReserveStartBlockedReason} changes its
+ * answer for this start, or `null` once nothing is left to change.
+ *
+ * While the start is clear of the buffer that is the buffer's edge; inside the
+ * buffer (or with no buffer, or limits bypassed) it is the start itself, where
+ * the reason becomes {@link BOOKING_RESERVE_BLOCKED_LABELS.START_PASSED}. Lets
+ * a page that stays open re-render exactly when the Reserve button must
+ * change, without polling.
+ *
+ * @param params - Same inputs as {@link getReserveStartBlockedReason}
+ * @returns The next boundary, or `null` when the start has passed or is invalid
+ */
+export function getReserveStartBoundary({
+  startDate,
+  bufferStartTime,
+  bypassTimeLimits = false,
+}: {
+  startDate: Date;
+  bufferStartTime: number;
+  bypassTimeLimits?: boolean;
+}): Date | null {
+  const now = new Date();
+  if (Number.isNaN(startDate.getTime()) || startDate <= now) return null;
+
+  const buffer = bypassTimeLimits ? 0 : bufferStartTime;
+  const bufferEdge = addHours(startDate, -buffer);
+  return buffer > 0 && bufferEdge > now ? bufferEdge : startDate;
 }
 
 interface BookingFormSchemaParams {

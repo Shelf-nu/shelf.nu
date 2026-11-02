@@ -46,6 +46,7 @@
     "expo-constants": "~18.0.13",
     "expo-crypto": "~15.0.9",
     "expo-dev-client": "~6.0.20",
+    "expo-device": "~8.0.10",
     "expo-font": "~14.0.11",
     "expo-haptics": "~15.0.8",
     "expo-image": "^55.0.6",
@@ -53,6 +54,7 @@
     "expo-image-picker": "~17.0.10",
     "expo-linking": "~8.0.11",
     "expo-location": "~19.0.8",
+    "expo-notifications": "~0.32.16",
     "expo-quick-actions": "^6.0.1",
     "expo-router": "~6.0.23",
     "expo-screen-orientation": "~9.0.9",
@@ -73,8 +75,8 @@
     "react-native-web": "~0.21.2"
   },
   "devDependencies": {
-    "@babel/core": "^7.25.2",
-    "@types/node": "^22.19.17",
+    "@babel/core": "^7.29.7",
+    "@types/node": "^24.19.2",
     "@types/react": "^19.2.14",
     "eslint": "^9.0.0",
     "eslint-config-expo": "~10.0.0",

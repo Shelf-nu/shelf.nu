@@ -34,6 +34,24 @@ export const ROLE_LABELS: Record<OrganizationRole, string> = {
 };
 
 /**
+ * One plain sentence on what each role may do, shown under the role's name
+ * wherever a person picks a role (the invite and change-role dialogs). Each
+ * sentence summarises that role's row in `ROLE_POLICIES` and the permission
+ * matrix; keep the two in step when a role's reach changes.
+ */
+export const ROLE_DESCRIPTIONS: Record<OrganizationRole, string> = {
+  OWNER:
+    "Everything an Administrator can do, plus billing, add-ons and ownership of the workspace.",
+  ADMIN:
+    "Manages everything in the workspace: assets, bookings, custody, audits, settings and the team.",
+  MANAGER:
+    "Runs bookings, custody and audits for everyone, but cannot create, edit or delete assets, or change workspace settings or registered team members.",
+  SELF_SERVICE:
+    "Books assets and checks them out and in for themselves, and by default sees only their own bookings and custody.",
+  BASE: "Requests assets through bookings that an Administrator or Manager checks out, and by default sees only their own bookings.",
+};
+
+/**
  * The plural name of each role, for copy that names a group of people
  * ("owners, administrators and managers"). Spelled out per role because not
  * every label pluralizes by adding an "s" ("Self service users", not "Self

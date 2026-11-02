@@ -31,6 +31,7 @@ import {
   action,
   loader,
 } from "~/routes/_layout+/bookings.$bookingId.overview.duplicate";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { requirePermission } from "~/utils/roles.server";
 
 // @vitest-environment node
@@ -167,7 +168,67 @@ describe("bookings.$bookingId.overview.duplicate action", () => {
     vi.mocked(duplicateBooking).mockResolvedValue({
       id: "booking-2",
       name: "My booking (Copy)",
+      droppedArchivedCount: 0,
+      reducedModelReservations: [],
     } as never);
+  });
+
+  /** Submits the dialog with a valid window, as whoever `actAs` set. */
+  function submit() {
+    return action(
+      createActionArgs({
+        request: new Request(
+          "http://localhost/bookings/booking-1/overview/duplicate",
+          {
+            method: "POST",
+            body: new URLSearchParams({
+              startDate: "2099-08-01T09:00",
+              endDate: "2099-08-03T17:00",
+            }),
+          }
+        ),
+        params: { bookingId: "booking-1" },
+        context: mockContext,
+      })
+    );
+  }
+
+  it("tells the user what the copy left out", async () => {
+    actAs(OrganizationRoles.ADMIN);
+    vi.mocked(duplicateBooking).mockResolvedValue({
+      id: "booking-2",
+      name: "My booking (Copy)",
+      droppedArchivedCount: 1,
+      reducedModelReservations: [
+        {
+          assetModelId: "model-camera",
+          assetModelName: "Camera",
+          requested: 4,
+          reserved: 1,
+        },
+      ],
+    } as never);
+
+    await submit();
+
+    expect(sendNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message:
+          'Booking "My booking (Copy)" has been duplicated. 1 archived asset was left out. Only 1 of 4 × Camera could be reserved for the new dates.',
+      })
+    );
+  });
+
+  it("says only that it duplicated when the copy is complete", async () => {
+    actAs(OrganizationRoles.ADMIN);
+
+    await submit();
+
+    expect(sendNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: 'Booking "My booking (Copy)" has been duplicated.',
+      })
+    );
   });
 
   it("hands the caller's access to the service, which guards the copied row", async () => {

@@ -1,12 +1,27 @@
+/**
+ * Toast notification sender
+ *
+ * Serializes a toast and hands it to the notification bus, which delivers it
+ * to the SSE streams of every machine (see `notification-bus.server.ts`). The
+ * SSE route then filters by sender and originating tab.
+ *
+ * @see {@link file://./notification-bus.server.ts}
+ * @see {@link file://./../../routes/api+/sse.notification.ts}
+ */
 import type { NotificationType } from "~/atoms/notifications";
-import { emitter } from "./emitter.server";
+import { publishNotification } from "./notification-bus.server";
 import { ShelfError } from "../error";
 import { getTabId } from "../tab-id.server";
 
+/**
+ * Sends a toast to the browser of `notification.senderId`.
+ *
+ * @param notification - The toast content; `open`, `tabId` and `time` are added here
+ * @throws {ShelfError} If the notification cannot be serialized or published
+ */
 export function sendNotification(notification: Omit<NotificationType, "open">) {
   try {
-    emitter.emit(
-      "notification",
+    publishNotification(
       JSON.stringify({
         ...notification,
         open: true,

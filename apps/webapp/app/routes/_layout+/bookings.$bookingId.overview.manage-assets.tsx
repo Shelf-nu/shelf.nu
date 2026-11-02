@@ -83,10 +83,10 @@ import { useSearchParams } from "~/hooks/search-params";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { getAssetAvailabilityBatch } from "~/modules/asset/availability.server";
 import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
+import { getAssetListWhereForSelectAll } from "~/modules/asset/list-where.server";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
 import { isQuantityTracked } from "~/modules/asset/utils";
-import { getAssetsWhereInput } from "~/modules/asset/utils.server";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import { sendBookingUpdatedEmail } from "~/modules/booking/email-helpers";
 import { buildAddToActiveBookingBlockerWhere } from "~/modules/booking/helpers";
@@ -109,7 +109,6 @@ import {
   resolveLocationFilterIds,
 } from "~/modules/location/child-locations-filter.server";
 import { createNotes } from "~/modules/note/service.server";
-import { scopeCustodianFilterIds } from "~/modules/team-member/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { BADGE_COLORS } from "~/utils/badge-colors";
@@ -778,7 +777,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const hasSelectedAll = assetIds.includes(ALL_SELECTED_KEY);
     if (hasSelectedAll) {
       const searchParams = getCurrentSearchParams(request);
-      const assetsWhere = getAssetsWhereInput({
+      /**
+       * Re-runs the picker list's own query, with the options the loader
+       * passes to `getPaginatedAndFilterableAssets`, so select-all adds
+       * exactly the assets the picker showed: the same search, the
+       * `hideUnavailable` and booking-window rules, and every filter.
+       */
+      const assetsWhere = await getAssetListWhereForSelectAll({
         organizationId,
         currentSearchParams: searchParams.toString(),
         // Same URL, same resolver as the loader: with "Include assets from
@@ -788,16 +793,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           organizationId,
           searchParams,
         }),
-        // `booking: update` is held by BASE and SELF_SERVICE. Select-all here
-        // ADDS the matched assets to the booking, which then lists them — so an
-        // unscoped custodian filter would hand a restricted user a readable
-        // copy of exactly what a colleague holds.
-        allowedTeamMemberIds: await scopeCustodianFilterIds({
-          teamMemberIds: searchParams.getAll("teamMember"),
-          canSeeAllCustody: access.custody.seeAll,
-          userId: authSession?.userId,
-          organizationId,
-        }),
+        // The picker list refuses every custodian filter
+        // (`canSeeAllCustody: false` with no user), so select-all does too.
+        // A custodian filter can therefore never reveal what a colleague
+        // holds, whatever the caller's role.
+        allowedTeamMemberIds: [],
+        // The loader passes no list scope: the picker lists every asset.
+        bookableScope: null,
+        honorArchivedView: false,
+        honorLowStockFilter: false,
       });
 
       const allAssets = await db.asset.findMany({
@@ -1009,6 +1013,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         skipBookingNote: true,
         // Re-checks the add rule against the locked booking status.
         access,
+        hints: getClientHint(request),
       });
 
       /**
@@ -1187,6 +1192,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         skipBookingNote: true,
         // Re-checks the add rule against the locked booking status.
         access,
+        hints: getClientHint(request),
       });
 
       /**

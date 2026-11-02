@@ -21,6 +21,7 @@ import {
   EditWorkspaceSSOSettingsFormSchema,
   WorkspaceEditForms,
 } from "~/components/workspace/edit-form";
+import { PdfDocumentsSettings } from "~/components/workspace/pdf-documents-settings";
 import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
 import {
@@ -29,6 +30,19 @@ import {
   updateOrganization,
   updateOrganizationPermissions,
 } from "~/modules/organization/service.server";
+import {
+  AddDocumentFormSchema,
+  PdfDocumentFormSchema,
+  documentFromForm,
+} from "~/modules/pdf-document/form";
+import {
+  createPdfDocument,
+  deletePdfDocument,
+  duplicatePdfDocument,
+  getPdfDocuments,
+  setDefaultPdfDocument,
+  updatePdfDocument,
+} from "~/modules/pdf-document/service.server";
 import { generateScimToken } from "~/modules/scim/auth.server";
 import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -47,7 +61,11 @@ import {
   getOwnerSubscriptionInfo,
   premiumIsEnabled,
 } from "~/utils/stripe.server";
-import { canHideShelfBranding } from "~/utils/subscription.server";
+import {
+  canCustomizePdfDocuments,
+  canHideShelfBranding,
+  canUseBookings,
+} from "~/utils/subscription.server";
 import { resolveUserDisplayName } from "~/utils/user";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
@@ -135,6 +153,24 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           : Promise.resolve([]),
       ]);
 
+    // PDF documents are a paid feature: a free workspace sees the card with
+    // an upgrade note, and none of its documents are read.
+    const canCustomizeDocuments = canCustomizePdfDocuments(tierLimit);
+    const [pdfDocuments, documentCustomFields] = canCustomizeDocuments
+      ? await Promise.all([
+          getPdfDocuments({ organizationId }),
+          // The custom fields a document can print, for its edit form.
+          db.customField.findMany({
+            where: {
+              organizationId,
+              deletedAt: null,
+            },
+            select: { id: true, name: true, type: true, active: true },
+            orderBy: { name: "asc" },
+          }),
+        ])
+      : [[], []];
+
     const header: HeaderData = {
       title: "General",
     };
@@ -173,6 +209,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       // ENABLE_SCIM is server-only and absent from `getBrowserEnv()`, so a
       // client-side `config.enableScim` would always be false.
       scimEnabled: config.enableScim,
+      canCustomizePdfDocuments: canCustomizeDocuments,
+      // A workspace that cannot have bookings has no booking PDF to lay out.
+      showPdfDocuments: canUseBookings(currentOrganization),
+      pdfDocuments,
+      documentCustomFields,
       scimTokens: scimTokens.map((t) => ({
         id: t.id,
         label: t.label,
@@ -242,6 +283,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
           "transfer-ownership",
           "generateScimToken",
           "deleteScimToken",
+          "add-document",
+          "save-document",
+          "duplicate-document",
+          "default-document",
+          "delete-document",
         ]),
       }),
       {
@@ -250,6 +296,21 @@ export async function action({ context, request }: ActionFunctionArgs) {
         },
       }
     );
+
+    // PDF documents are a paid feature, gated here as well as in the UI: a
+    // hand-made POST from a free workspace must not create or change them.
+    if (intent.endsWith("-document") && !canCustomizePdfDocuments(tierLimit)) {
+      throw new ShelfError({
+        cause: null,
+        title: "Not on your plan",
+        message:
+          "PDF documents are part of paid plans. Upgrade your plan to choose and edit what a booking's PDF prints.",
+        label: "PDF documents",
+        status: 403,
+        shouldBeCaptured: false,
+        additionalData: { organizationId },
+      });
+    }
 
     switch (intent) {
       case "general": {
@@ -590,6 +651,55 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         return redirect("/settings/general");
       }
+      case "add-document": {
+        const { name } = parseData(formData, AddDocumentFormSchema, {
+          additionalData: { userId, organizationId },
+        });
+        const document = await createPdfDocument({ organizationId, name });
+        sendNotification({
+          title: "Document added",
+          message: `"${document.name}" is ready to set up.`,
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+        return payload({ documentId: document.id });
+      }
+      case "save-document": {
+        const form = parseData(formData, PdfDocumentFormSchema, {
+          additionalData: { userId, organizationId },
+        });
+        const { name, config } = documentFromForm(form);
+        await updatePdfDocument({
+          organizationId,
+          documentId: form.documentId,
+          name,
+          config,
+        });
+        sendNotification({
+          title: "Document saved",
+          message: `"${name}" prints with the new settings.`,
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+        return payload({ documentId: form.documentId });
+      }
+      case "duplicate-document":
+      case "default-document":
+      case "delete-document": {
+        const { documentId } = parseData(
+          formData,
+          z.object({ documentId: z.string().min(1) }),
+          { additionalData: { userId, organizationId } }
+        );
+        if (intent === "duplicate-document") {
+          await duplicatePdfDocument({ organizationId, documentId });
+        } else if (intent === "default-document") {
+          await setDefaultPdfDocument({ organizationId, documentId });
+        } else {
+          await deletePdfDocument({ organizationId, documentId });
+        }
+        return payload({ documentId });
+      }
       default: {
         throw new ShelfError({
           cause: null,
@@ -616,6 +726,10 @@ export default function GeneralPage() {
     ownerOtherTeamWorkspacesCount,
     premiumIsEnabled: premiumEnabled,
     isPersonalWorkspace,
+    canCustomizePdfDocuments: canCustomizeDocuments,
+    showPdfDocuments,
+    pdfDocuments,
+    documentCustomFields,
   } = useLoaderData<typeof loader>();
   return (
     <div className="mb-2.5 flex flex-col justify-between">
@@ -625,6 +739,15 @@ export default function GeneralPage() {
         qrIdDisplayPreference={organization.qrIdDisplayPreference}
         scimEnabled={scimEnabled}
         scimTokens={scimTokens}
+        afterGeneral={
+          showPdfDocuments ? (
+            <PdfDocumentsSettings
+              canCustomize={canCustomizeDocuments}
+              documents={pdfDocuments}
+              customFields={documentCustomFields}
+            />
+          ) : null
+        }
       />
 
       <TransferOwnershipCard

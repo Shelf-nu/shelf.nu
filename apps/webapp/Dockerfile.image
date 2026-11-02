@@ -1,5 +1,5 @@
 # Base Node image
-FROM node:22-bookworm-slim AS base
+FROM node:24.22.1-bookworm-slim AS base
 
 # Set for base and all layer that inherit from it
 ENV PORT="8080"
@@ -11,7 +11,7 @@ WORKDIR /src
 RUN apt-get update && \
     apt-get install -y openssl && \
     rm -rf /var/lib/apt/lists/* && \
-    corepack enable && corepack prepare pnpm@9.15.4 --activate
+    corepack enable && corepack prepare pnpm@9.15.9 --activate
 
 # Install dependencies using turbo prune for minimal install
 FROM base AS pruner
@@ -39,9 +39,12 @@ RUN turbo build --filter=@shelf/webapp
 # The Prisma CLI is a devDependency and is removed by `pnpm prune --prod`
 # below, so install a standalone copy (same version as the workspace) that
 # the entrypoint uses to run `prisma migrate deploy` at container start.
+# `allowScripts` approves Prisma's install scripts for npm 11+: the
+# @prisma/engines postinstall downloads the schema engine that migrations need,
+# and an npm that blocks unapproved scripts would otherwise ship without it.
 RUN PRISMA_VERSION="$(cd /src/apps/webapp && node -p "require('prisma/package.json').version")" && \
     mkdir -p /opt/prisma-cli && cd /opt/prisma-cli && \
-    echo '{"name":"prisma-cli","private":true}' > package.json && \
+    echo "{\"name\":\"prisma-cli\",\"private\":true,\"allowScripts\":{\"prisma@${PRISMA_VERSION}\":true,\"@prisma/engines@${PRISMA_VERSION}\":true}}" > package.json && \
     npm install --no-audit --no-fund --omit=dev "prisma@${PRISMA_VERSION}"
 
 RUN pnpm prune --prod

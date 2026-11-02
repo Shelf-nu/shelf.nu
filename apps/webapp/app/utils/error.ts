@@ -48,6 +48,7 @@ export type FailureReason = {
     | "Admin dashboard"
     | "App layout"
     | "Assets"
+    | "Asset Import"
     | "Asset Index Settings"
     | "Auth"
     | "Barcode"
@@ -66,6 +67,7 @@ export type FailureReason = {
     | "User onboarding"
     | "Location"
     | "Notification"
+    | "Push"
     | "Organization"
     | "Permission"
     | "QR"
@@ -108,6 +110,7 @@ export type FailureReason = {
     | "Activity"
     | "Consumption Log"
     | "Update"
+    | "PDF documents"
     | "Analytics";
   /**
    * The message intended for the user.

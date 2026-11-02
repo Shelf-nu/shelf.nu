@@ -60,7 +60,7 @@ Shelf is a platform for tracking physical assets — equipment, devices, tools, 
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) >= 22.20.0
+- [Node.js](https://nodejs.org/) >= 24.22.1
 - [pnpm](https://pnpm.io/) >= 9.15.4
 - A [Supabase](https://supabase.com/) project (free tier works)
 

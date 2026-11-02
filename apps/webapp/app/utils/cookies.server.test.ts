@@ -29,10 +29,26 @@ vi.mock("./env", async () => {
 });
 
 // why: cookies.server transitively imports asset/utils.server, which
-// initializes Prisma at import time.
-vi.mock("~/modules/asset/utils.server", () => ({
-  advancedFilterFormatSchema: {},
-}));
+// initializes Prisma at import time. The stand-in validates the
+// `operator:value` grammar from the same operator list and splitter.
+vi.mock("~/modules/asset/utils.server", async () => {
+  const { filterOperatorSchema } = await import(
+    "~/components/assets/assets-index/advanced-filters/schema"
+  );
+  const { splitFilterParam } = await import("~/modules/asset/filter-param");
+  return {
+    advancedFilterFormatSchema: {
+      safeParse: (value: string) => {
+        const [operator, filterValue] = splitFilterParam(value);
+        return {
+          success:
+            filterValue !== undefined &&
+            filterOperatorSchema.safeParse(operator).success,
+        };
+      },
+    },
+  };
+});
 
 const { expireHostOnlyUserPrefsCookie } = await import("./cookies.server");
 const { isLastAuditDateParam } = await import(
@@ -285,6 +301,236 @@ describe("filter cookies never keep a typed search", () => {
     expect(serializedCookie).toMatch(
       /^org-1_advancedAssetFilter_v2=;.*Max-Age=0/
     );
+  });
+});
+
+describe("the Advanced assets index reads simple-mode filter links", () => {
+  const settings = {
+    columns: [{ name: "category" }, { name: "tags" }, { name: "custody" }],
+  } as never;
+
+  /** Normalizes a URL query and returns the params the redirect lands on. */
+  async function normalized(query: string) {
+    const { filters, redirectNeeded } = await getAdvancedFiltersFromRequest(
+      listRequest(`http://localhost/assets?${query}`),
+      "org-1",
+      settings
+    );
+    return { params: new URLSearchParams(filters), redirectNeeded };
+  }
+
+  it("promotes a bare column value to `is`", async () => {
+    const { params, redirectNeeded } = await normalized("category=cat-1");
+
+    expect(redirectNeeded).toBe(true);
+    expect(params).toEqual(new URLSearchParams("category=is:cat-1"));
+  });
+
+  it("translates `tag` to the tags column", async () => {
+    const { params } = await normalized("tag=tag-1");
+
+    expect(params).toEqual(new URLSearchParams("tags=contains:tag-1"));
+  });
+
+  it("translates `teamMember` to the custody column", async () => {
+    const { params } = await normalized("teamMember=tm-1");
+
+    expect(params).toEqual(new URLSearchParams("custody=is:tm-1"));
+  });
+
+  it("matches any of several values, like the simple index", async () => {
+    const { params } = await normalized(
+      "tag=tag-1&tag=tag-2&teamMember=tm-1&teamMember=tm-2"
+    );
+
+    expect(params).toEqual(
+      new URLSearchParams(
+        "tags=containsAny:tag-1,tag-2&custody=containsAny:tm-1,tm-2"
+      )
+    );
+  });
+
+  it("keeps other filters alongside the translated ones", async () => {
+    const { params } = await normalized("tag=tag-1&status=is:AVAILABLE&page=2");
+
+    expect(params.get("tags")).toBe("contains:tag-1");
+    expect(params.get("status")).toBe("is:AVAILABLE");
+    expect(params.get("page")).toBe("2");
+  });
+
+  it("drops blank and operator-form values of a simple-only key", async () => {
+    const { params } = await normalized("tag=&teamMember=is:tm-1");
+
+    expect(params.toString()).toBe("");
+  });
+
+  it("translates a simple-mode key restored from the saved filters", async () => {
+    const saved = storedValue(
+      await createAdvancedAssetFilterCookie("org-1").serialize("tag=tag-1")
+    );
+
+    const { filters } = await getAdvancedFiltersFromRequest(
+      listRequest("http://localhost/assets", [saved]),
+      "org-1",
+      settings
+    );
+
+    expect(new URLSearchParams(filters)).toEqual(
+      new URLSearchParams("tags=contains:tag-1")
+    );
+  });
+
+  it("leaves an already-Advanced URL untouched", async () => {
+    const { params, redirectNeeded } = await normalized(
+      "tags=contains:tag-1&custody=is:tm-1"
+    );
+
+    expect(redirectNeeded).toBe(false);
+    expect(params).toEqual(
+      new URLSearchParams("tags=contains:tag-1&custody=is:tm-1")
+    );
+  });
+});
+
+describe("the Advanced assets cookie never keeps an enum value the query rejects", () => {
+  const settings = { columns: [{ name: "status" }, { name: "type" }] } as never;
+
+  it("answers the bad URL as typed but saves only the valid filters", async () => {
+    const { filters, serializedCookie } = await getAdvancedFiltersFromRequest(
+      listRequest(
+        "http://localhost/assets?status=is:ARCHIVED&type=is:INDIVIDUAL"
+      ),
+      "org-1",
+      settings
+    );
+
+    // The query still sees the bad value, so the person gets the 400 that
+    // explains it.
+    expect(new URLSearchParams(filters).get("status")).toBe("is:ARCHIVED");
+    const saved = await createAdvancedAssetFilterCookie("org-1").parse(
+      storedValue(serializedCookie as string)
+    );
+    expect(new URLSearchParams(saved)).toEqual(
+      new URLSearchParams("type=is:INDIVIDUAL")
+    );
+  });
+
+  it("forgets the saved filters when the bad value was all the URL held", async () => {
+    const remembered = storedValue(
+      await createAdvancedAssetFilterCookie("org-1").serialize(
+        "status=is:AVAILABLE"
+      )
+    );
+
+    const { serializedCookie } = await getAdvancedFiltersFromRequest(
+      listRequest("http://localhost/assets?status=ARCHIVED", [remembered]),
+      "org-1",
+      settings
+    );
+
+    expect(serializedCookie).toMatch(
+      /^org-1_advancedAssetFilter_v2=;.*Max-Age=0/
+    );
+  });
+
+  it("drops a containsAny filter when any of its values is rejected", async () => {
+    // The query rejects the whole filter, so none of it is worth remembering.
+    const { serializedCookie } = await getAdvancedFiltersFromRequest(
+      listRequest(
+        "http://localhost/assets?status=containsAny:AVAILABLE,archived&type=is:INDIVIDUAL"
+      ),
+      "org-1",
+      settings
+    );
+
+    const saved = await createAdvancedAssetFilterCookie("org-1").parse(
+      storedValue(serializedCookie as string)
+    );
+    expect(new URLSearchParams(saved)).toEqual(
+      new URLSearchParams("type=is:INDIVIDUAL")
+    );
+  });
+
+  it("keeps an enum filter whose values are all accepted", async () => {
+    const { serializedCookie } = await getAdvancedFiltersFromRequest(
+      listRequest(
+        "http://localhost/assets?status=containsAny:AVAILABLE,IN_CUSTODY&type=isNot:INDIVIDUAL"
+      ),
+      "org-1",
+      settings
+    );
+
+    const saved = await createAdvancedAssetFilterCookie("org-1").parse(
+      storedValue(serializedCookie as string)
+    );
+    expect(new URLSearchParams(saved)).toEqual(
+      new URLSearchParams(
+        "status=containsAny:AVAILABLE,IN_CUSTODY&type=isNot:INDIVIDUAL"
+      )
+    );
+  });
+
+  it("restores a cookie that already holds a rejected value without it", async () => {
+    const stuck = storedValue(
+      await createAdvancedAssetFilterCookie("org-1").serialize(
+        "status=is:ARCHIVED&type=is:INDIVIDUAL"
+      )
+    );
+
+    const { filters, redirectNeeded, serializedCookie } =
+      await getAdvancedFiltersFromRequest(
+        listRequest("http://localhost/assets", [stuck]),
+        "org-1",
+        settings
+      );
+
+    expect(redirectNeeded).toBe(true);
+    expect(new URLSearchParams(filters)).toEqual(
+      new URLSearchParams("type=is:INDIVIDUAL")
+    );
+    const saved = await createAdvancedAssetFilterCookie("org-1").parse(
+      storedValue(serializedCookie as string)
+    );
+    expect(new URLSearchParams(saved)).toEqual(
+      new URLSearchParams("type=is:INDIVIDUAL")
+    );
+  });
+
+  it("restores nothing when the rejected value was all the cookie held", async () => {
+    const stuck = storedValue(
+      await createAdvancedAssetFilterCookie("org-1").serialize(
+        "status=is:ARCHIVED"
+      )
+    );
+
+    const { filters, redirectNeeded, serializedCookie } =
+      await getAdvancedFiltersFromRequest(
+        listRequest("http://localhost/assets", [stuck]),
+        "org-1",
+        settings
+      );
+
+    expect(redirectNeeded).toBe(false);
+    expect(filters).toBeUndefined();
+    expect(serializedCookie).toMatch(
+      /^org-1_advancedAssetFilter_v2=;.*Max-Age=0/
+    );
+  });
+
+  it("does not rewrite a restored cookie that needed no cleaning", async () => {
+    const remembered = storedValue(
+      await createAdvancedAssetFilterCookie("org-1").serialize(
+        "status=is:AVAILABLE"
+      )
+    );
+
+    const { serializedCookie } = await getAdvancedFiltersFromRequest(
+      listRequest("http://localhost/assets", [remembered]),
+      "org-1",
+      settings
+    );
+
+    expect(serializedCookie).toBeUndefined();
   });
 });
 

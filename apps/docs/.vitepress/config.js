@@ -84,6 +84,7 @@ export default {
             link: "/tracking-scripts",
           },
           { text: "URL Shortener", link: "/url-shortener" },
+          { text: "Toast Notifications", link: "/notifications" },
         ],
       },
       {
@@ -120,8 +121,8 @@ export default {
             link: "/security-review-agent",
           },
           {
-            text: "PR Review Loop",
-            link: "/pr-review-loop",
+            text: "Watchdog",
+            link: "/watchdog",
           },
           {
             text: "PR Review",
@@ -136,6 +137,10 @@ export default {
           {
             text: "Asset Import (CSV)",
             link: "/asset-import",
+          },
+          {
+            text: "Import Column Mapping",
+            link: "/import-column-mapping",
           },
           {
             text: "Advanced Asset Index",

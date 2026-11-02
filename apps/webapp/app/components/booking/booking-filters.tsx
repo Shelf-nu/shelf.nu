@@ -4,8 +4,11 @@ import { useMatches } from "react-router";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import {
+  EXPIRED_BOOKINGS_FILTER,
+  PENDING_APPROVAL_BOOKINGS_FILTER,
+} from "~/modules/booking/constants";
 import type { RouteHandleWithName } from "~/modules/types";
-import { PENDING_APPROVAL_STATUS_FILTER } from "~/utils/bookings";
 import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { resolveTeamMemberName } from "~/utils/user";
@@ -16,23 +19,29 @@ import { SortBy } from "../list/filters/sort-by";
 import When from "../when/when";
 
 /**
- * The status picker's options when the workspace requires approval: every
- * BookingStatus plus "Pending approval", placed right after RESERVED, the
- * status it narrows. Not a BookingStatus; the list resolves it server-side.
+ * The status picker's options: every BookingStatus plus the derived views the
+ * list resolves server-side. "Expired" (RESERVED, end date passed, never
+ * checked out) is always offered; "Pending approval" (RESERVED, not yet
+ * approved) only when the workspace requires approval, placed right after
+ * RESERVED, the status it narrows. See `bookingStatusFilterWhereParams`.
+ *
+ * @param requireBookingApproval - The workspace's approval toggle
+ * @returns The picker's items, in display order
  */
-const STATUS_ITEMS_WITH_PENDING_APPROVAL: Record<string, string> = {
-  [BookingStatus.DRAFT]: BookingStatus.DRAFT,
-  [BookingStatus.RESERVED]: BookingStatus.RESERVED,
-  [PENDING_APPROVAL_STATUS_FILTER]: PENDING_APPROVAL_STATUS_FILTER,
-  ...Object.fromEntries(
-    Object.values(BookingStatus)
-      .filter(
-        (status) =>
-          status !== BookingStatus.DRAFT && status !== BookingStatus.RESERVED
-      )
-      .map((status) => [status, status])
-  ),
-};
+function statusItemsFor(
+  requireBookingApproval: boolean
+): Record<string, string> {
+  const items: Record<string, string> = {};
+  for (const status of Object.values(BookingStatus)) {
+    items[status] = status;
+    if (status === BookingStatus.RESERVED && requireBookingApproval) {
+      items[PENDING_APPROVAL_BOOKINGS_FILTER] =
+        PENDING_APPROVAL_BOOKINGS_FILTER;
+    }
+  }
+  items[EXPIRED_BOOKINGS_FILTER] = EXPIRED_BOOKINGS_FILTER;
+  return items;
+}
 
 const BOOKING_SORTING_OPTIONS = {
   from: "From Date",
@@ -73,13 +82,7 @@ export default function BookingFilters({
       className={className}
       slots={{
         "left-of-search": (
-          <StatusFilter
-            statusItems={
-              requireBookingApproval
-                ? STATUS_ITEMS_WITH_PENDING_APPROVAL
-                : BookingStatus
-            }
-          />
+          <StatusFilter statusItems={statusItemsFor(requireBookingApproval)} />
         ),
         "right-of-search": hideSortBy ? null : (
           <SortBy

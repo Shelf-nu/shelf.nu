@@ -14,7 +14,12 @@
 
 import { describe, expect, it } from "vitest";
 
-import { REDACTED, TRUNCATED, redactSensitive } from "./redact";
+import {
+  MAX_LOGGED_STRING_LENGTH,
+  REDACTED,
+  TRUNCATED,
+  redactSensitive,
+} from "./redact";
 
 // @vitest-environment node
 
@@ -137,5 +142,45 @@ describe("redactSensitive", () => {
     const deep = { a: { b: { c: { d: { e: { secretless: "value" } } } } } };
 
     expect(JSON.stringify(redactSensitive(deep))).toContain(TRUNCATED);
+  });
+
+  describe("long strings", () => {
+    it("caps a string longer than the limit and says how much it dropped", () => {
+      const huge = "x".repeat(800_000);
+
+      const result = redactSensitive({ mapping: huge }).mapping;
+
+      expect(result.length).toBeLessThan(MAX_LOGGED_STRING_LENGTH + 100);
+      expect(result.startsWith("x".repeat(MAX_LOGGED_STRING_LENGTH))).toBe(
+        true
+      );
+      expect(result).toContain(
+        `[TRUNCATED ${800_000 - MAX_LOGGED_STRING_LENGTH} chars]`
+      );
+    });
+
+    it("leaves a string at the limit untouched", () => {
+      const atLimit = "x".repeat(MAX_LOGGED_STRING_LENGTH);
+
+      expect(redactSensitive(atLimit)).toBe(atLimit);
+    });
+
+    it("caps strings inside arrays and nested objects too", () => {
+      const huge = "y".repeat(MAX_LOGGED_STRING_LENGTH * 3);
+
+      const json = JSON.stringify(
+        redactSensitive({ rows: [huge], data: { note: huge } })
+      );
+
+      expect(json.length).toBeLessThan(MAX_LOGGED_STRING_LENGTH * 2 + 500);
+    });
+
+    it("redacts URL credentials before capping, so a cut cannot expose one", () => {
+      const value = `https://user:hunter2@example.com/${"p".repeat(
+        MAX_LOGGED_STRING_LENGTH
+      )}`;
+
+      expect(redactSensitive(value)).not.toContain("hunter2");
+    });
   });
 });

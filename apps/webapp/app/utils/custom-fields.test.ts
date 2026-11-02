@@ -6,6 +6,7 @@ import {
   buildAssetOverviewCustomFields,
   buildCustomFieldValue,
   getCustomFieldDisplayValue,
+  isImportableCustomFieldDate,
   mergedSchema,
   type CustomFieldZodSchema,
 } from "./custom-fields";
@@ -349,6 +350,33 @@ describe("mergedSchema: optional numeric fields keep blank blank", () => {
     if (result.success) {
       const parsed = result.data as Record<string, unknown>;
       expect(parsed["cf-cf1"]).toBe(0);
+    }
+  });
+});
+
+describe("isImportableCustomFieldDate", () => {
+  it("accepts a real YYYY-MM-DD day, as the importer stores it", () => {
+    expect(isImportableCustomFieldDate("2024-02-29")).toBe(true);
+  });
+
+  it("refuses other formats and days that do not exist", () => {
+    expect(isImportableCustomFieldDate("23/06/2024")).toBe(false);
+    expect(isImportableCustomFieldDate("2026-02-31")).toBe(false);
+    expect(isImportableCustomFieldDate("2023-02-29")).toBe(false);
+  });
+
+  it("agrees with buildCustomFieldValue on every case", () => {
+    for (const raw of ["2024-02-29", "2026-02-31", "03-04-2026"]) {
+      let stored = true;
+      try {
+        buildCustomFieldValue({ raw }, {
+          name: "Bought",
+          type: "DATE",
+        } as Parameters<typeof buildCustomFieldValue>[1]);
+      } catch {
+        stored = false;
+      }
+      expect(isImportableCustomFieldDate(raw)).toBe(stored);
     }
   });
 });

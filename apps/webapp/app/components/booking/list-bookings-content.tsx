@@ -16,6 +16,8 @@
  */
 import type { Prisma } from "@prisma/client";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
+import type { ListContextLinkState } from "~/hooks/use-list-context";
+import { LIST_DETAIL_PATH } from "~/modules/list-navigation/list-context";
 import { BADGE_COLORS } from "~/utils/badge-colors";
 import {
   canAssignModelUnits,
@@ -25,6 +27,7 @@ import { isBookingPendingApproval } from "~/utils/bookings";
 import { resolveUserDisplayName } from "~/utils/user";
 import { AvailabilityBadge } from "./availability-label";
 import { BookingAssetsSidebar } from "./booking-assets-sidebar";
+import { BookingQuickActions } from "./booking-quick-actions";
 import { BookingStatusBadge } from "./booking-status-badge";
 import { UnassignedModelUnitsPill } from "./unassigned-model-units-pill";
 import LineBreakText from "../layout/line-break-text";
@@ -139,7 +142,19 @@ type ListBookingsContentProps = {
      * `~/modules/booking/list-flags.server`.
      */
     hasUnavailableAssets?: boolean;
+    /**
+     * Set by the same decorator: true when the booking's "Check out remaining"
+     * would find something to send, by the server's own rule (see
+     * `getBookingIdsWithItemsToCheckOut`). Decides whether an ONGOING or
+     * OVERDUE row offers "Check out remaining".
+     */
+    hasItemsToCheckOut?: boolean;
   };
+  /**
+   * History state for the row link, so the booking page can step through
+   * this list. Only the bookings index passes it.
+   */
+  extraProps?: { linkState?: ListContextLinkState };
 };
 
 /**
@@ -156,6 +171,7 @@ type ListBookingsContentProps = {
  */
 export default function ListBookingsContent({
   item,
+  extraProps,
 }: ListBookingsContentProps) {
   const { requireBookingApproval } = useBookingSettings();
 
@@ -168,7 +184,8 @@ export default function ListBookingsContent({
             <div className="min-w-[130px]">
               <span className="word-break mb-1 block font-medium">
                 <Button
-                  to={`/bookings/${item.id}`}
+                  to={LIST_DETAIL_PATH.booking(item.id)}
+                  state={extraProps?.linkState}
                   variant="link"
                   className="text-left font-medium text-gray-900 hover:text-gray-700"
                 >
@@ -179,6 +196,7 @@ export default function ListBookingsContent({
                 <BookingStatusBadge
                   status={item.status}
                   custodianUserId={item.custodianUserId || undefined}
+                  to={item.to}
                   isPendingApproval={isBookingPendingApproval({
                     status: item.status,
                     approvedAt: item.approvedAt,
@@ -271,17 +289,24 @@ export default function ListBookingsContent({
       <Td>
         <TeamMemberBadge
           teamMember={{
+            id: item.custodianTeamMemberId,
             name: item.custodianTeamMember
               ? item.custodianTeamMember.name
               : resolveUserDisplayName(item.custodianUser),
             user: item?.custodianUser ?? null,
           }}
+          linkTo="bookings"
         />
       </Td>
 
       {/* Created by */}
       <Td>
         <UserBadge user={item?.creator} />
+      </Td>
+
+      {/* Row actions, by status and the viewer's reach */}
+      <Td>
+        <BookingQuickActions booking={item} />
       </Td>
     </>
   );

@@ -29,7 +29,12 @@ import type { Filter } from "~/components/assets/assets-index/advanced-filters/s
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import type { BookableListScope } from "../asset/list-scope.server";
-import { CUSTODY_AGG_JOIN, generateWhereClause } from "../asset/query.server";
+import {
+  CUSTODY_AGG_JOIN,
+  generateWhereClause,
+  POOL_AGGREGATE_JOIN,
+  POOL_COLUMN_NAMES,
+} from "../asset/query.server";
 import type { ArchivedFilter } from "../asset/types";
 
 /** Sort keys the model view offers. Deliberately separate from the asset
@@ -96,13 +101,25 @@ type AssetModelRollupQueryRow = AssetModelRollupRow & {
  * rather than a wrong result. Added only when such a filter is present: the
  * aggregation runs per asset row and is pure cost when nothing reads it.
  *
+ * Free now, Reserved and Stock status filters test the `pool` LATERAL's
+ * figures the same way, so they get that join on the same terms. The filter
+ * popover stays mounted in the model view, so they can arrive here.
+ *
  * @param filters - Parsed filters for this request.
- * @returns The join fragment, or `Prisma.empty` when no custody filter applies.
+ * @returns The join fragments, or `Prisma.empty` when no such filter applies.
  */
 function buildRollupFilterJoins(filters: Filter[]): Prisma.Sql {
-  const hasCustodyFilter = filters.some((filter) => filter.name === "custody");
+  const poolNames: readonly string[] = POOL_COLUMN_NAMES;
+  const joins = [
+    filters.some((filter) => filter.name === "custody")
+      ? CUSTODY_AGG_JOIN
+      : null,
+    filters.some((filter) => poolNames.includes(filter.name))
+      ? POOL_AGGREGATE_JOIN
+      : null,
+  ].filter((join): join is Prisma.Sql => join !== null);
 
-  return hasCustodyFilter ? CUSTODY_AGG_JOIN : Prisma.empty;
+  return joins.length > 0 ? Prisma.join(joins, " ") : Prisma.empty;
 }
 
 /** Sort expression per key. A whitelist, not interpolation: the key comes

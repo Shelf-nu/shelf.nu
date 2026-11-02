@@ -129,7 +129,10 @@ const CATEGORY_ORDER: ConsumptionCategory[] = [
   "CHECKOUT",
   "RETURN",
   "RESTOCK",
+  "INITIAL",
   "ADJUSTMENT",
+  "MOVE",
+  "OPENING_BALANCE",
 ];
 
 /** One row of the grey facts panel. */
@@ -248,6 +251,14 @@ function movementHead(
       return `${qty} restocked`;
     case "ADJUSTMENT":
       return capitalize ? "Quantity adjusted" : "quantity adjusted";
+    case "INITIAL":
+      return `${qty} added as starting stock`;
+    // The two ledger bookkeeping categories change no total, and the mail's
+    // reads skip them. Worded anyway so every category reads as a sentence.
+    case "MOVE":
+      return `${qty} moved`;
+    case "OPENING_BALANCE":
+      return `${qty} counted when stock history began`;
   }
 }
 
@@ -258,8 +269,10 @@ function movementHead(
  * damaged) and per booking slice, and releasing custody writes a used-up row
  * beside a returned one. Those rows share the acting user and the booking or
  * custodian, and land within {@link MOVEMENT_GROUP_WINDOW_MS} of each other. A
- * row with neither a booking nor a custodian comes from a single-row write (an
- * adjustment, a restock, an asset edit), so it stands alone.
+ * row with neither a booking nor a custodian comes from one write (an
+ * adjustment, a restock, an asset edit). The stock ledger splits such a write
+ * over the places its units left, as rows of one category sharing one
+ * timestamp, so those rows are read together.
  *
  * @param logs - The asset's newest `ConsumptionLog` rows, newest first
  * @returns The newest operation's rows, newest first; empty when there are none
@@ -273,7 +286,14 @@ export function pickLatestMovement(
   }
   const bookingId = newest.booking?.id ?? null;
   if (!bookingId && !newest.custodianId) {
-    return [newest];
+    return logs.filter(
+      (log) =>
+        log.createdAt.getTime() === newest.createdAt.getTime() &&
+        log.category === newest.category &&
+        log.userId === newest.userId &&
+        !log.booking &&
+        !log.custodianId
+    );
   }
   const cutoff = newest.createdAt.getTime() - MOVEMENT_GROUP_WINDOW_MS;
   return logs.filter(

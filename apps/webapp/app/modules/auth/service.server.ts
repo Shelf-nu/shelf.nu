@@ -437,11 +437,27 @@ export async function signInWithSSO(
 }
 
 /**
+ * Whether Supabase refused a one-time code because the address has no account
+ * and accounts are not created from a code (`shouldCreateUser: false`, or
+ * signups disabled on the project).
+ *
+ * @param error - the error `signInWithOtp` returned
+ * @returns true for the "no account here" refusals, false for any other error
+ */
+function isNoAccountForCodeError(error: AuthError): boolean {
+  return (
+    isAuthApiError(error) &&
+    (error.code === "otp_disabled" || error.code === "signup_disabled")
+  );
+}
+
+/**
  * Sends a one-time sign-in code by email.
  *
- * An address that must use SSO is sent nothing, and the function returns
- * exactly as a successful send does: the caller cannot be authenticated yet, so
- * its response must not depend on the account behind the address.
+ * An address that must use SSO is sent nothing, and neither is an address with
+ * no account on an instance that does not create accounts from a code. Both
+ * return exactly as a successful send does: the caller cannot be authenticated
+ * yet, so its response must not depend on the account behind the address.
  *
  * @param email - the address to send the code to
  * @throws {ShelfError} a wrapped Supabase failure
@@ -459,10 +475,19 @@ export async function sendOTP(email: string) {
     });
 
     if (error) {
+      if (isNoAccountForCodeError(error)) {
+        // Supabase's own text ("Signups not allowed for otp") stays in the
+        // server log. Showing it, or any answer of its own, would tell a
+        // stranger which addresses have an account.
+        Logger.info(
+          `OTP not sent: no account for the address (${error.code}: ${error.message})`
+        );
+        return;
+      }
       throw error;
     }
   } catch (cause) {
-    // Read `code` via narrowing instead of `@ts-expect-error` — `cause` is
+    // Read `code` via narrowing instead of `@ts-expect-error`: `cause` is
     // `unknown`, and a bare property access would throw at runtime if it
     // were null/undefined.
     const errorCode =

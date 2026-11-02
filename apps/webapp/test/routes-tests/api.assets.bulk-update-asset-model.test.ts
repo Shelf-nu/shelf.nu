@@ -198,6 +198,8 @@ describe("api/assets/bulk-update-asset-model", () => {
         currentSearchParams: "category=cat-1&status=AVAILABLE",
         settings: { mode: "SIMPLE" },
         lastAuditDateAccess: "available",
+        // An admin sees every asset, so the list scope is null.
+        bookableScope: null,
       });
     });
 

@@ -16,6 +16,8 @@ export * from "./asset";
 export * from "./organization";
 /** `createAssetModel` — an AssetModel row. */
 export * from "./assetModel";
+/** `createCustomField`: a CustomField row (active, TEXT, no options). */
+export * from "./customField";
 /** `createActivityEventInput` — one `recordEvent` payload. */
 export * from "./activityEvent";
 /** Audit session + audit asset factories. `createAuditAsset` requires an
@@ -32,3 +34,5 @@ export * from "./scan";
 /** `createBookingSettings` — the full `getBookingSettingsForOrganization`
  * shape, every switch off, for typed mocks of that service. */
 export * from "./bookingSettings";
+/** `busyBookingPdfMeta`: a booking PDF's data that prints every part of the page. */
+export * from "./booking-pdf-meta";

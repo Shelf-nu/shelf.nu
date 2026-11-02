@@ -200,6 +200,39 @@ export function shouldWarnLongBarcode(
 }
 
 /**
+ * A value that begins with a URI scheme such as `https:`, `mailto:` or `tel:`.
+ * A scheme is never followed by a digit, which keeps `example.com:8080` (a host
+ * and port) from reading as a scheme.
+ */
+const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:(?!\d)/i;
+
+/**
+ * A host-shaped value: optional `www.`, dotted labels, a letters-only TLD, then
+ * an optional port and path. The letters-only TLD keeps ids such as `INV.2024`,
+ * `v1.5` and `ROOM.A` silent, and text with spaces never matches.
+ */
+const BARE_WEB_ADDRESS =
+  /^(www\.)?([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,63}(:\d{1,5})?([/?#]\S*)?$/i;
+
+/**
+ * Explains why an External QR value is probably not what its label encodes:
+ * it reads like a web address but has no protocol ("example.com/abc").
+ * Scanning matches the label's exact text, so "https://example.com/abc" on the
+ * label never matches "example.com/abc" in Shelf. A warning, never an error:
+ * some labels really do encode a bare domain.
+ *
+ * @param value - One External QR value
+ * @returns The warning text, or null when the value looks fine
+ */
+export function getExternalQrValueWarning(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed || HAS_SCHEME.test(trimmed)) return null;
+  if (!BARE_WEB_ADDRESS.test(trimmed)) return null;
+
+  return `"${trimmed}" looks like a web address without "https://". Scanning matches the exact text on the label, so enter the value exactly as the QR code encodes it, for example "https://${trimmed}".`;
+}
+
+/**
  * Validates a barcode value based on its type
  */
 export function validateBarcodeValue(

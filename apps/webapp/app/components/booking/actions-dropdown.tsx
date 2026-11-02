@@ -182,7 +182,6 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
                 (ba: { asset: { id: string } }) => ba.asset
               ),
             }}
-            timeStamp={new Date().getTime()}
           />
           <BookingCheckinReceiptPDF
             booking={booking}

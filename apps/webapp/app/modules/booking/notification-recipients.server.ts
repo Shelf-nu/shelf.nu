@@ -22,6 +22,7 @@ import type {
   TimeFormatPreference,
   WeekStartPreference,
 } from "@prisma/client";
+import { db } from "~/database/db.server";
 import type { BookingForEmail } from "~/emails/types";
 import { getBookingNotificationSettingsForOrg } from "~/modules/booking-settings/service.server";
 import { getOrganizationNotificationAudience } from "~/modules/organization/service.server";
@@ -31,8 +32,11 @@ import { Logger } from "~/utils/logger";
 /**
  * Discriminated set of booking lifecycle events that trigger notifications.
  *
- * - `RESERVATION`: a new booking is confirmed / reserved (or, in orgs
- *   requiring approval, a new request is submitted)
+ * - `RESERVATION`: a new booking is confirmed / reserved. Recipients for a
+ *   reservation request are resolved under this event too (the broadcast
+ *   fires); the sender then titles it `REQUEST_RECEIVED`
+ * - `REQUEST_RECEIVED`: a reservation request was submitted in a workspace
+ *   that requires approval; a title, never a recipient-resolution event
  * - `APPROVED`: an administrator or manager approved a pending reservation request
  * - `CHECKOUT_REMINDER` — scheduled reminder before checkout time
  * - `CHECKIN_REMINDER` — scheduled reminder before checkin time
@@ -40,12 +44,14 @@ import { Logger } from "~/utils/logger";
  * - `OVERDUE` — booking has passed its end date without checkin
  * - `CANCEL` — booking was cancelled by a user
  * - `REVERT_TO_DRAFT` — a reserved booking was sent back to draft
- * - `EXTEND` — booking end date was extended
+ * - `EXTEND`: booking end date was moved later
+ * - `SHORTEN`: booking end date was moved earlier
  * - `DELETE` — booking was permanently deleted
  * - `UPDATE` — booking fields or assets were modified
  */
 export type BookingEventType =
   | "RESERVATION"
+  | "REQUEST_RECEIVED"
   | "APPROVED"
   | "CHECKOUT_REMINDER"
   | "CHECKIN_REMINDER"
@@ -54,6 +60,7 @@ export type BookingEventType =
   | "CANCEL"
   | "REVERT_TO_DRAFT"
   | "EXTEND"
+  | "SHORTEN"
   | "DELETE"
   | "UPDATE";
 
@@ -101,6 +108,9 @@ export type NotificationRecipient = {
  * resolution (custodian -> creator -> admins -> always-notify -> per-booking)
  * determines which `reason` label a user gets if they appear in multiple
  * categories.
+ *
+ * **Members only:** a recipient who is no longer a member of the workspace is
+ * dropped, whichever link put them on the list.
  *
  * **Editor exclusion:** The user who triggered the action (`editorUserId`)
  * is removed from the final list for immediate (non-scheduled) notifications,
@@ -244,7 +254,22 @@ export async function getBookingNotificationRecipients({
       }
     }
 
-    // 7. Exclude the editor from immediate (non-scheduled) notifications.
+    // 7. Keep only current members of the workspace. Revoking access unlinks
+    //    a user's team members but leaves them as a booking's custodian or
+    //    creator, and those links must not keep notifying them.
+    const memberships = await db.userOrganization.findMany({
+      where: {
+        organizationId,
+        userId: { in: [...recipients.values()].map(({ userId }) => userId) },
+      },
+      select: { userId: true },
+    });
+    const memberIds = new Set(memberships.map(({ userId }) => userId));
+    for (const [email, recipient] of recipients) {
+      if (!memberIds.has(recipient.userId)) recipients.delete(email);
+    }
+
+    // 8. Exclude the editor from immediate (non-scheduled) notifications.
     //    Scheduled jobs (reminders, overdue) have no human editor, so
     //    skipping this step ensures all relevant parties are notified.
     //    Exception: the "creator" reason means the user explicitly opted in
@@ -263,7 +288,7 @@ export async function getBookingNotificationRecipients({
       }
     }
 
-    // 8. Return only entries with valid emails
+    // 9. Return only entries with valid emails
     return Array.from(recipients.values()).filter(
       (r) => r.email && r.email.length > 0
     );

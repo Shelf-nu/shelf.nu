@@ -16,6 +16,7 @@ describe("resolveBillingSectionState", () => {
         hasSubscription: false,
         hasWorkspacePlan: false,
         hasPaidAccessThroughOthers: true,
+        canPurchase: true,
       })
     ).toBe("own-plan-options");
   });
@@ -26,6 +27,7 @@ describe("resolveBillingSectionState", () => {
         hasSubscription: false,
         hasWorkspacePlan: false,
         hasPaidAccessThroughOthers: false,
+        canPurchase: true,
       })
     ).toBe("choose-plan");
   });
@@ -36,6 +38,7 @@ describe("resolveBillingSectionState", () => {
         hasSubscription: true,
         hasWorkspacePlan: false,
         hasPaidAccessThroughOthers: false,
+        canPurchase: true,
       })
     ).toBe("no-workspace-plan");
   });
@@ -46,6 +49,7 @@ describe("resolveBillingSectionState", () => {
         hasSubscription: true,
         hasWorkspacePlan: false,
         hasPaidAccessThroughOthers: true,
+        canPurchase: true,
       })
     ).toBe("subscribed");
   });
@@ -58,8 +62,40 @@ describe("resolveBillingSectionState", () => {
           hasSubscription: true,
           hasWorkspacePlan: true,
           hasPaidAccessThroughOthers,
+          canPurchase: true,
         })
       ).toBe("subscribed");
     }
   );
+
+  describe("when the user may not purchase", () => {
+    it.each([
+      { name: "own-plan-options", sub: false, plan: false, others: true },
+      { name: "choose-plan", sub: false, plan: false, others: false },
+      { name: "no-workspace-plan", sub: true, plan: false, others: false },
+    ])(
+      "replaces $name with the purchases-unavailable notice",
+      ({ sub, plan, others }) => {
+        expect(
+          resolveBillingSectionState({
+            hasSubscription: sub,
+            hasWorkspacePlan: plan,
+            hasPaidAccessThroughOthers: others,
+            canPurchase: false,
+          })
+        ).toBe("purchases-unavailable");
+      }
+    );
+
+    it("keeps the subscribed state so the portal and invoices stay reachable", () => {
+      expect(
+        resolveBillingSectionState({
+          hasSubscription: true,
+          hasWorkspacePlan: true,
+          hasPaidAccessThroughOthers: false,
+          canPurchase: false,
+        })
+      ).toBe("subscribed");
+    });
+  });
 });

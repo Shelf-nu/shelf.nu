@@ -9,20 +9,23 @@ export function NameField({
   disabled,
   error,
   onChange,
-  autoFocus = true,
+  focusOnMount = true,
 }: {
   name: string | undefined;
   fieldName?: string;
   disabled?: boolean;
   error?: string;
   onChange: ChangeEventHandler<HTMLInputElement | HTMLTextAreaElement>;
-  /** Focus the field on mount. Default true; false after a Discard. */
-  autoFocus?: boolean;
+  /**
+   * Focus the field on mount. On by default: NameField is the first field of
+   * the new-booking form and the create-booking dialogs. The edit form on a
+   * booking's overview turns it off, because a booking opened to be read must
+   * not take keystrokes (the `[` / `]` record shortcuts, or a stray key that
+   * would edit the name), and that holds after a Discard remount too.
+   */
+  focusOnMount?: boolean;
 }) {
-  // NameField is the first field in every booking form (new + edit + the
-  // create-booking-from-selection dialog), so focus on mount mirrors the
-  // removed autoFocus behaviour.
-  const inputRef = useAutoFocus<HTMLInputElement>({ when: autoFocus });
+  const inputRef = useAutoFocus<HTMLInputElement>({ when: focusOnMount });
   return (
     <FormRow
       rowLabel={"Name"}

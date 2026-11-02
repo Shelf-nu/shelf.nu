@@ -1,7 +1,11 @@
 /**
  * Input — unit tests
  *
- * Verifies the wheel guard wiring of the shared form input:
+ * Verifies the shared form input:
+ *  - A field with an `error` is marked `aria-invalid`, and an explicit
+ *    caller value still wins.
+ *
+ * And its wheel guard wiring:
  *  - `type="number"` inputs ignore the wheel while focused and pass it through
  *    once focus leaves.
  *  - Other input types are untouched.
@@ -68,5 +72,38 @@ describe("Input wheel guard", () => {
 
     expect(onFocus).toHaveBeenCalledTimes(1);
     expect(onBlur).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Input invalid state", () => {
+  it("marks an input with an error as invalid", () => {
+    const { getByLabelText } = render(
+      <Input label="Name" name="name" error="Name is required" />
+    );
+    expect(getByLabelText("Name")).toHaveAttribute("aria-invalid", "true");
+  });
+
+  it("marks a textarea with an error as invalid", () => {
+    const { getByLabelText } = render(
+      <Input label="Notes" name="notes" inputType="textarea" error="Too long" />
+    );
+    expect(getByLabelText("Notes")).toHaveAttribute("aria-invalid", "true");
+  });
+
+  it("leaves a valid input unmarked", () => {
+    const { getByLabelText } = render(<Input label="Name" name="name" />);
+    expect(getByLabelText("Name")).not.toHaveAttribute("aria-invalid");
+  });
+
+  it("keeps an explicit aria-invalid from the caller", () => {
+    const { getByLabelText } = render(
+      <Input
+        label="Name"
+        name="name"
+        error="Name is required"
+        aria-invalid={false}
+      />
+    );
+    expect(getByLabelText("Name")).toHaveAttribute("aria-invalid", "false");
   });
 });

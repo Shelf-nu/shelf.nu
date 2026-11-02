@@ -13,6 +13,7 @@ import type { WorkingHoursData } from "~/modules/working-hours/types";
 import { getOverrideDateKey } from "~/modules/working-hours/utils";
 import { tw } from "~/utils/tw";
 import { Button } from "../shared/button";
+import { Spinner } from "../shared/spinner";
 
 // Overrides are absolute calendar dates, so compare them as YYYY-MM-DD strings
 // against today's local calendar day. `new Date("YYYY-MM-DD")` would parse as
@@ -251,7 +252,7 @@ export const WorkingHoursPreviewDialog = ({
           <div className="p-6">
             {isLoading ? (
               <div className="py-12 text-center">
-                <div className="animate-spin mx-auto mb-4 size-8 rounded-full border-2 border-blue-600 border-t-transparent" />
+                <Spinner className="mx-auto mb-4 size-8" />
                 <p className="text-gray-600">Loading working hours...</p>
               </div>
             ) : !workingHours?.enabled ? (

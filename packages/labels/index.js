@@ -38,6 +38,26 @@ export const ASSET_QTY_STATUS_LABELS = Object.freeze({
   PARTIALLY_RESERVED: "Partially reserved",
 });
 
+// Labels for the quantity FIGURES on a pool (not its status badge).
+//
+// `FREE_NOW` is the physical count: total minus custody, kits and checked-out.
+// It is deliberately NOT called "Available", three different things in this
+// product were called that at once (this figure, the `Available` status badge,
+// and the `Available to book` flag), and only this one is time-bound. Without
+// the word "now" a row reading "Available 10" beside "Reserved 12" looks like a
+// contradiction rather than two facts about different moments.
+//
+// It lives here because the figure is rendered on the assets index, the asset
+// page, the reports PDF and the mobile asset screen. Renaming it in one place
+// and not the others is worse than not renaming it at all: the same number ends
+// up with two names in one product. One constant, one edit.
+export const ASSET_QUANTITY_FIGURE_LABELS = Object.freeze({
+  TOTAL: "Total quantity",
+  FREE_NOW: "Free now",
+  IN_CUSTODY: "In custody",
+  RESERVED: "Reserved",
+});
+
 // Booking-context pseudo-statuses an asset row can show inside a booking
 // (web canonical: the enum path in asset-status-badge/status-labels.ts).
 export const ASSET_BOOKING_PSEUDO_STATUS_LABELS = Object.freeze({
@@ -200,7 +220,7 @@ export function auditAssetStatusLabel(status, isAuditCompleted) {
   return AUDIT_ASSET_STATUS_LABELS[status];
 }
 
-// Why a booking cannot be reserved yet — the three rules web's Reserve button
+// Why a booking cannot be reserved yet: the rules web's Reserve button
 // disables on, in one register for every surface that states them: the web
 // tooltip, the mobile route's 400, the in-transaction guard's 400 and the
 // companion's client-side note.
@@ -215,6 +235,7 @@ export const BOOKING_RESERVE_BLOCKED_LABELS = Object.freeze({
     "This booking holds assets marked as unavailable. Remove them, or make them available again, before reserving.",
   ALREADY_BOOKED:
     "This booking holds assets already booked for that period. Remove them, or change the dates, before reserving.",
+  START_PASSED: "The start time has passed. Move it later to reserve.",
 });
 
 // Refusal shown when emptying a RESERVED booking. Such a booking with nothing
@@ -400,6 +421,80 @@ export function archivedAssetsLeftOut(count) {
   } left out.`;
 }
 
+/** How many short models {@link modelReservationsReduced} names before "and N more". */
+const REDUCED_MODELS_NAMED = 3;
+
+/**
+ * Names the first few models and "and N more".
+ *
+ * @param {string[]} names
+ * @returns {string}
+ */
+function namedModels(names) {
+  const more = names.length - REDUCED_MODELS_NAMED;
+  return `${names.slice(0, REDUCED_MODELS_NAMED).join(", ")}${
+    more > 0 ? ` and ${more} more` : ""
+  }`;
+}
+
+/**
+ * The sentence for models the new dates have too few units of.
+ *
+ * @param {{ assetModelName: string; requested: number; reserved: number }[]} models
+ * @returns {string}
+ */
+function reservedShort(models) {
+  if (models.length === 1) {
+    const [{ assetModelName, requested, reserved }] = models;
+    return reserved === 0
+      ? `None of the ${requested} × ${assetModelName} could be reserved for the new dates.`
+      : `Only ${reserved} of ${requested} × ${assetModelName} could be reserved for the new dates.`;
+  }
+  return `Fewer units are free for the new dates, so ${
+    models.length
+  } models were reserved short: ${namedModels(
+    models.map((m) => `${m.assetModelName} (${m.reserved} of ${m.requested})`)
+  )}.`;
+}
+
+/**
+ * The sentence for models whose reservation could not be written at all. Says
+ * nothing about availability, because the cause was an error, not the pool.
+ *
+ * @param {{ assetModelName: string; requested: number }[]} models
+ * @returns {string}
+ */
+function reservationFailed(models) {
+  if (models.length === 1) {
+    const [{ assetModelName, requested }] = models;
+    return `Could not reserve ${requested} × ${assetModelName}. Try again from the booking.`;
+  }
+  return `Could not reserve ${models.length} models (${namedModels(
+    models.map((m) => `${m.requested} × ${m.assetModelName}`)
+  )}). Try again from the booking.`;
+}
+
+/**
+ * The sentences added to a success message when a copied booking could not
+ * reserve every model unit the source had open: because the new dates have
+ * fewer units free, or because the reservation could not be written
+ * (`failed`), which is worded as an error to retry rather than as a shortfall.
+ *
+ * @param {{ assetModelName: string; requested: number; reserved: number; failed?: boolean }[]} models
+ *   - at least one, each reserved below what was asked
+ * @returns {string}
+ */
+export function modelReservationsReduced(models) {
+  const short = models.filter((m) => !m.failed);
+  const failed = models.filter((m) => m.failed);
+  return [
+    short.length > 0 ? reservedShort(short) : null,
+    failed.length > 0 ? reservationFailed(failed) : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
 /**
  * The refusal when kits with no active asset are put into custody or booked.
  * Such a kit would be held or booked while nothing in it is.
@@ -545,6 +640,25 @@ export const ASSET_TYPE_ADJECTIVES = Object.freeze({
 export const CONSUMPTION_TYPE_ADJECTIVES = Object.freeze({
   ONE_WAY: "used up",
   TWO_WAY: "returnable",
+});
+
+// Stock-status verdicts for the assets-index `Stock status` column. Derived
+// per QUANTITY_TRACKED asset by `POOL_STOCK_STATUS_EXPR` in the webapp's
+// modules/asset/query.server.ts, over the `STOCK_STATUSES` values in
+// @shelf/quantity-control; INDIVIDUAL assets get no verdict and render blank.
+//
+// Deliberately NOT stock-shop words. Shelf serves two cohorts and one of them
+// rents returnable equipment: "Out of stock" on a fully booked camera pool is
+// both the wrong noun and the wrong instruction (buy more vs. wait for the
+// return). NONE_FREE / LOW / ENOUGH read correctly for a consumable and for a
+// pooled asset alike. NO_THRESHOLD has no label on purpose, the cell renders
+// an em dash, because a badge there reads as a level, and "nobody set a floor"
+// is the absence of an opinion, not a healthy one.
+export const STOCK_STATUS_LABELS = Object.freeze({
+  SHORT: "Short",
+  NONE_FREE: "None free",
+  LOW: "Running low",
+  ENOUGH: "Enough",
 });
 
 /**

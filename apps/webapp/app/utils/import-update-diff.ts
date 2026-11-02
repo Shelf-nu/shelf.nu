@@ -14,7 +14,11 @@ import {
 } from "~/utils/asset-description";
 import { countCharacters } from "~/utils/count-characters";
 import { decodeCsvListCell } from "~/utils/csv-cells";
-import { getDefinitionFromCsvHeader } from "~/utils/custom-fields";
+import {
+  getDefinitionFromCsvHeader,
+  isImportableCustomFieldDate,
+  parseYesNo,
+} from "~/utils/custom-fields";
 import { isLikeShelfError, type ShelfError } from "~/utils/error";
 import type {
   AssetChangePreview,
@@ -75,19 +79,6 @@ export function normalizeExportedCurrencyValue(value: string): string {
   }
 
   return v;
-}
-
-/**
- * Normalizes a Yes/No string to a boolean. Case-insensitive, trims whitespace.
- *
- * @param value - Raw string from CSV cell
- * @returns `true` for "yes", `false` for "no", `undefined` for anything else
- */
-export function parseYesNo(value: string): boolean | undefined {
-  const lower = value.trim().toLowerCase();
-  if (lower === "yes") return true;
-  if (lower === "no") return false;
-  return undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -257,8 +248,13 @@ export function analyzeUpdateHeaders(
     // Check if it's a known fixed-field header via the reverse map
     // (case-insensitive — see map construction above).
     const internalField = fieldByLowerHeader.get(lowerHeader);
+    // A workspace custom field outranks the export-only `qrUrl` column with
+    // the same header. The asset export leaves `qrUrl` out in that case, so
+    // the header can only be the custom field.
+    const isCustomFieldNamedQrUrl =
+      internalField === "qrUrl" && cfByName.has(lowerHeader);
 
-    if (internalField) {
+    if (internalField && !isCustomFieldNamedQrUrl) {
       if (UPDATABLE_FIELDS.has(internalField)) {
         updatableColumns.push({
           csvHeader: header,
@@ -797,18 +793,8 @@ export function compareCustomField(
       // Current raw value is also stored as the date string
       const currentDate = currentStr ? currentStr.substring(0, 10) : "";
       if (csvValue !== currentDate) {
-        // Validate format AND that the date is a real calendar date
-        // (new Date normalizes overflow — e.g. Feb 31 → Mar 3 — so we
-        // must check that the parsed date matches the original input)
-        let isValidDate = false;
-        if (/^\d{4}-\d{2}-\d{2}$/.test(csvValue)) {
-          const [y, m, d] = csvValue.split("-").map(Number);
-          const parsed = new Date(Date.UTC(y, m - 1, d));
-          isValidDate =
-            parsed.getUTCFullYear() === y &&
-            parsed.getUTCMonth() === m - 1 &&
-            parsed.getUTCDate() === d;
-        }
+        // Same rule as the importer: YYYY-MM-DD and a real calendar day.
+        const isValidDate = isImportableCustomFieldDate(csvValue);
         return {
           field: displayName,
           currentValue: currentDate || "(empty)",

@@ -107,6 +107,27 @@ describe("edit custom field", () => {
     );
   });
 
+  it("hands the submitted option renames and the acting user to updateCustomField", async () => {
+    // The field names OptionBuilder posts; a rename the action drops would
+    // leave every asset on the old spelling while the option is renamed.
+    await submit({
+      type: "OPTION",
+      "options[0]": "Extra large",
+      "optionRenames[0].from": "Large",
+      "optionRenames[0].to": "Extra large",
+    });
+
+    expect(updateCustomField).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "cf-1",
+        organizationId: "org-1",
+        userId: "user-1",
+        options: ["Extra large"],
+        optionRenames: [{ from: "Large", to: "Extra large" }],
+      })
+    );
+  });
+
   it("does not apply the rule to a persisted non-OPTION field", async () => {
     vi.mocked(getCustomField).mockResolvedValue({
       id: "cf-1",

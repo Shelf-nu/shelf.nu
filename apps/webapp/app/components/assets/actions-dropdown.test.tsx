@@ -13,6 +13,9 @@
  *   the request (`assertNotKitMembers`) and the menu says so before the click.
  *   A quantity-tracked asset in a kit keeps its quantity custody action,
  *   because the units outside every kit can still be handed over on their own.
+ * - "Update location" stays enabled while the asset is checked out. A booking
+ *   owns status and custody, not location, and no server path refuses the
+ *   move. A kit member stays disabled, because its kit owns its location.
  *
  * @see {@link file://./actions-dropdown.tsx}
  * @see {@link file://./../../modules/asset/utils.ts} isIndividualKitMember
@@ -195,6 +198,46 @@ describe("ActionsDropdown: custody of kit members", () => {
 
   it("still disables Update location for a kit member, pointing at the kit", () => {
     renderMenu({ assetKits: IN_CAMERA_KIT });
+
+    const item = screen.getByRole("link", { name: /update location/i });
+    expect(item).toHaveAttribute("aria-disabled", "true");
+    expect(item).toHaveAccessibleDescription(
+      /location is managed by its parent kit/i
+    );
+  });
+});
+
+describe("ActionsDropdown: location of a checked-out asset", () => {
+  beforeEach(() => {
+    caller.roles = [OrganizationRoles.ADMIN];
+    caller.assign = "anyone";
+  });
+
+  it("keeps Update location enabled for a checked-out asset", () => {
+    renderMenu({ status: "CHECKED_OUT" });
+
+    const item = screen.getByRole("link", { name: /update location/i });
+    // A bare `disabled` renders the attribute, a reasoned one `aria-disabled`.
+    expect(item).not.toHaveAttribute("disabled");
+    expect(item).not.toHaveAttribute("aria-disabled");
+    expect(item).toHaveAttribute("href", "/overview/update-location");
+  });
+
+  it("keeps Manage placements enabled for a checked-out quantity-tracked asset", () => {
+    renderMenu({
+      status: "CHECKED_OUT",
+      type: "QUANTITY_TRACKED",
+      quantity: 10,
+    });
+
+    const item = screen.getByRole("link", { name: /manage placements/i });
+    expect(item).not.toHaveAttribute("disabled");
+    expect(item).not.toHaveAttribute("aria-disabled");
+    expect(item).toHaveAttribute("href", "/overview/manage-placements");
+  });
+
+  it("still disables Update location for a checked-out kit member, pointing at the kit", () => {
+    renderMenu({ status: "CHECKED_OUT", assetKits: IN_CAMERA_KIT });
 
     const item = screen.getByRole("link", { name: /update location/i });
     expect(item).toHaveAttribute("aria-disabled", "true");

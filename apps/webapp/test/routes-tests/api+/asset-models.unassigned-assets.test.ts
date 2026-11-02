@@ -372,6 +372,74 @@ describe("unassigned assets endpoint", () => {
     expect(body.assets[0].custody[0].name).toBe("");
   });
 
+  /** One row naming its biggest upcoming booking, as the advanced query does. */
+  function mockShortRow() {
+    vitest.mocked(getAdvancedPaginatedAndFilterableAssets).mockResolvedValue({
+      assets: [
+        {
+          id: "asset-1",
+          custody: [],
+          topBookingId: "booking-of-user-2",
+          topBookingName: "Jane's offsite",
+          topBookingUnits: 6,
+        },
+      ],
+      totalAssets: 1,
+      page: 1,
+      perPage: 20,
+      totalPages: 1,
+    } as never);
+  }
+
+  /** The response body's rows, typed to the top-booking fields under test. */
+  async function topBookingRows(response: Response) {
+    const body = (await response.json()) as {
+      assets: Array<{
+        topBookingId: string | null;
+        topBookingName: string | null;
+        topBookingUnits: number | null;
+      }>;
+    };
+    return body.assets;
+  }
+
+  it("withholds the top booking's id and name from a viewer who may not see every booking", async () => {
+    // BASE with every workspace toggle off: `access.bookings.seeAll` is false,
+    // so the booking (someone else's) must not be named in the response.
+    vitest
+      .mocked(requirePermission)
+      .mockResolvedValue(caller("BASE", { organizationId: "org-1" }) as never);
+    mockShortRow();
+
+    const response = (await loader({
+      context,
+      request: request(),
+      params: {},
+    } as never)) as unknown as Response;
+
+    const [row] = await topBookingRows(response.clone());
+    expect(row.topBookingId).toBeNull();
+    expect(row.topBookingName).toBeNull();
+    // The shortfall is a fact about the asset, so its units still arrive.
+    expect(row.topBookingUnits).toBe(6);
+    expect(await response.text()).not.toContain("Jane's offsite");
+  });
+
+  it("names the top booking to a viewer who may see every booking", async () => {
+    mockShortRow();
+
+    const response = (await loader({
+      context,
+      request: request(),
+      params: {},
+    } as never)) as unknown as Response;
+
+    const [row] = await topBookingRows(response);
+    expect(row.topBookingId).toBe("booking-of-user-2");
+    expect(row.topBookingName).toBe("Jane's offsite");
+    expect(row.topBookingUnits).toBe(6);
+  });
+
   it("drops view-scoped params that do not apply to an asset list", async () => {
     await loader({
       context,

@@ -25,12 +25,11 @@
  * @see {@link file://./checkout-dialog.tsx} - the "Check Out" trigger/flow
  * @see {@link file://./forms/edit-booking-form.tsx} - the call site
  */
-import type { Booking } from "@prisma/client";
 import { ChevronRightIcon, ScanLine } from "lucide-react";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import type { CheckoutSourceQuestion } from "~/modules/booking/checkout-source-location";
 import { tw } from "~/utils/tw";
-import CheckoutDialog from "./checkout-dialog";
+import CheckoutDialog, { type CheckoutDialogBooking } from "./checkout-dialog";
 import type { ButtonProps } from "../shared/button";
 import { Button } from "../shared/button";
 import {
@@ -50,7 +49,8 @@ type CheckoutDropdownProps = {
    * which differs from the generic `disabled` used by the scan option.
    */
   checkOutDisabled?: ButtonProps["disabled"];
-  booking: Pick<Booking, "id" | "name" | "from">;
+  /** With `status` and `to`, so an expired reservation gets its prompt. */
+  booking: CheckoutDialogBooking;
   portalContainer?: HTMLElement;
   /** Form ID for explicit form association when buttons render in a portal */
   formId?: string;
@@ -79,6 +79,8 @@ type CheckoutDropdownProps = {
    * with a "From location" select per pool; see `CheckoutDialog`.
    */
   sourceQuestions?: CheckoutSourceQuestion[];
+  /** See `CheckoutDialog`: the header's full check-out may reschedule. */
+  allowNewEndDate?: boolean;
 };
 
 /**
@@ -103,6 +105,7 @@ export default function CheckoutDropdown({
   canScanCheckOut,
   requireExplicitCheckout,
   sourceQuestions,
+  allowNewEndDate = false,
 }: CheckoutDropdownProps) {
   const {
     ref: dropdownRef,
@@ -209,6 +212,7 @@ export default function CheckoutDropdown({
         label={quickCheckoutLabel}
         suppressEarlyCheckoutPrompt={canCheckOutRemaining}
         sourceQuestions={sourceQuestions}
+        allowNewEndDate={allowNewEndDate && canFullCheckOut}
       />
     );
   }
@@ -270,7 +274,12 @@ export default function CheckoutDropdown({
           portalContainer={portalContainer}
         >
           <div className="fixed bottom-0 left-0">
-            <DropdownMenuItem className="py-1 lg:p-0">
+            {/* The row opens a dialog that lives inside this menu, so selecting
+                it must not close the menu: closing unmounts the dialog. */}
+            <DropdownMenuItem
+              className="py-1 lg:p-0"
+              onSelect={(event) => event.preventDefault()}
+            >
               <CheckoutDialog
                 booking={booking}
                 disabled={quickCheckoutDisabled}
@@ -281,6 +290,7 @@ export default function CheckoutDropdown({
                 variant="dropdown"
                 suppressEarlyCheckoutPrompt={canCheckOutRemaining}
                 sourceQuestions={sourceQuestions}
+                allowNewEndDate={allowNewEndDate && canFullCheckOut}
               />
             </DropdownMenuItem>
             <DropdownMenuItem className="py-1 lg:p-0">

@@ -18,6 +18,18 @@ export declare const ASSET_QTY_STATUS_LABELS: {
   readonly PARTIALLY_RESERVED: "Partially reserved";
 };
 
+/**
+ * Labels for the quantity FIGURES on a pool. `FREE_NOW` is the physical count
+ * and is rendered on four surfaces (assets index, asset page, reports PDF,
+ * mobile asset screen), keep them reading from here so they cannot drift.
+ */
+export declare const ASSET_QUANTITY_FIGURE_LABELS: {
+  readonly TOTAL: string;
+  readonly FREE_NOW: string;
+  readonly IN_CUSTODY: string;
+  readonly RESERVED: string;
+};
+
 export declare const ASSET_BOOKING_PSEUDO_STATUS_LABELS: {
   readonly ALREADY_CHECKED_IN: "Already checked in";
   readonly PARTIALLY_CHECKED_IN: "Partially checked in";
@@ -155,7 +167,7 @@ export declare function auditAssetStatusLabel(
 ): AuditAssetStatusLabel;
 
 /**
- * Why a booking cannot be reserved yet — the three rules web's Reserve button
+ * Why a booking cannot be reserved yet: the rules web's Reserve button
  * disables on, in one register for every surface that states them (web
  * tooltip, mobile route 400, in-transaction guard, companion client note).
  *
@@ -167,6 +179,7 @@ export declare const BOOKING_RESERVE_BLOCKED_LABELS: {
   readonly NOTHING_TO_RESERVE: "Add assets or reserve at least one model on this booking before you reserve it.";
   readonly UNAVAILABLE_ASSETS: "This booking holds assets marked as unavailable. Remove them, or make them available again, before reserving.";
   readonly ALREADY_BOOKED: "This booking holds assets already booked for that period. Remove them, or change the dates, before reserving.";
+  readonly START_PASSED: "The start time has passed. Move it later to reserve.";
 };
 
 /**
@@ -275,6 +288,24 @@ export declare function archivedAssetsRefusal(options: {
 export declare function archivedAssetsLeftOut(count: number): string;
 
 /**
+ * "Only 6 of 10 × Camera could be reserved for the new dates." for one model;
+ * for several, names the first three with their counts and "and N more".
+ * Entries marked `failed` could not be written at all and get their own
+ * sentence, "Could not reserve 4 × Camera. Try again from the booking."
+ *
+ * @param models - at least one, each reserved below what was asked
+ */
+export declare function modelReservationsReduced(
+  models: {
+    assetModelName: string;
+    requested: number;
+    reserved: number;
+    /** The reservation errored, as opposed to the pool being short. */
+    failed?: boolean;
+  }[]
+): string;
+
+/**
  * The refusal when kits with no active asset (only archived ones, or none) are
  * put into custody or booked.
  *
@@ -338,6 +369,13 @@ export declare const ASSET_TYPE_ADJECTIVES: {
 export declare const CONSUMPTION_TYPE_ADJECTIVES: {
   readonly ONE_WAY: "used up";
   readonly TWO_WAY: "returnable";
+};
+
+export declare const STOCK_STATUS_LABELS: {
+  readonly SHORT: "Short";
+  readonly NONE_FREE: "None free";
+  readonly LOW: "Running low";
+  readonly ENOUGH: "Enough";
 };
 
 /**

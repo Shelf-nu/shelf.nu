@@ -7,6 +7,7 @@ import {
   isValidSequentialIdFormat,
   extractSequenceNumber,
   estimateNextSequentialId,
+  getNextSequentialIds,
 } from "./sequential-id.server";
 
 // why: testing pure sequential ID formatting functions without database connection errors
@@ -259,6 +260,40 @@ describe("estimateNextSequentialId (pooler-safe sequence peek)", () => {
     expect(await estimateNextSequentialId("org_123", "EQUIP")).toBe(
       "EQUIP-0006"
     );
+  });
+});
+
+describe("getNextSequentialIds", () => {
+  it("allocates count ids in one statement", async () => {
+    // why: the client is handed in; a stub stands in for the sequence call
+    const tx = {
+      $queryRaw: vi
+        .fn()
+        .mockResolvedValue([{ id: "SAM-0007" }, { id: "SAM-0008" }]),
+    };
+    await expect(getNextSequentialIds("org", 2, tx as never)).resolves.toEqual([
+      "SAM-0007",
+      "SAM-0008",
+    ]);
+    expect(tx.$queryRaw).toHaveBeenCalledOnce();
+  });
+
+  it("orders by the series number, not the id text", async () => {
+    // why: the client is handed in; only the SQL text is inspected
+    const tx = { $queryRaw: vi.fn().mockResolvedValue([]) };
+    await getNextSequentialIds("org", 3, tx as never);
+    const sql = sqlFromCall(tx.$queryRaw.mock.calls[0][0]);
+    expect(sql).toContain("generate_series");
+    expect(sql).toContain("ORDER BY n");
+  });
+
+  it("returns an empty list without querying for count 0", async () => {
+    // why: the client is handed in; asserting it is never touched
+    const tx = { $queryRaw: vi.fn() };
+    await expect(getNextSequentialIds("org", 0, tx as never)).resolves.toEqual(
+      []
+    );
+    expect(tx.$queryRaw).not.toHaveBeenCalled();
   });
 });
 

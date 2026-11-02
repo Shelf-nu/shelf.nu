@@ -1,5 +1,5 @@
 # Base Node image
-FROM node:22-bookworm-slim AS base
+FROM node:24.22.1-bookworm-slim AS base
 
 # Set for base and all layer that inherit from it
 ENV PORT="8080"
@@ -11,7 +11,7 @@ WORKDIR /src
 RUN apt-get update && \
     apt-get install -y openssl && \
     rm -rf /var/lib/apt/lists/* && \
-    corepack enable && corepack prepare pnpm@9.15.4 --activate
+    corepack enable && corepack prepare pnpm@9.15.9 --activate
 
 # Install dependencies using turbo prune for minimal install
 FROM base AS pruner

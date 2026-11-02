@@ -140,6 +140,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         status: true,
         // Feeds the derived pending-approval flag exposed in the response.
         approvedAt: true,
+        archivedWithoutCheckin: true,
         from: true,
         to: true,
         createdAt: true,
@@ -1000,6 +1001,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       checkedInAssetIds,
       checkedOutAssetIds,
       bookingStatus: booking.status,
+      archivedWithoutCheckin: booking.archivedWithoutCheckin,
       countKitsAsSingleUnit: bookingSettings.countKitsAsSingleUnit ?? false,
     });
 

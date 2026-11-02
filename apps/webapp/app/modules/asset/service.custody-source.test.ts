@@ -16,6 +16,7 @@
 /* eslint-disable @typescript-eslint/require-await -- the in-memory stand-in mirrors Prisma's promise-returning delegates without awaiting anything itself */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { adjustQuantity } from "~/modules/consumption-log/service.server";
+import { replayStockLedger } from "~/modules/consumption-log/stock-ledger";
 import type { ShelfError } from "~/utils/error";
 import { UNPLACED_SOURCE, UNRECORDED_SOURCE } from "./custody-source";
 import {
@@ -26,7 +27,9 @@ import {
 import {
   checkOutQuantity,
   moveAssetLocationUnits,
+  placeUnplacedUnits,
   releaseQuantity,
+  replaceAssetPlacements,
 } from "./service.server";
 
 /* -------------------------------------------------------------------------- */
@@ -83,7 +86,7 @@ const { tables, fakeDb, counter } = vi.hoisted(() => {
       ) {
         const c = condition as Record<string, unknown>;
         if ("in" in c) return (c.in as unknown[]).includes(row[key]);
-        if ("not" in c) return row[key] !== c.not;
+        if ("not" in c) return (row[key] ?? null) !== c.not;
         return true;
       }
       return (row[key] ?? null) === condition;
@@ -133,6 +136,8 @@ const { tables, fakeDb, counter } = vi.hoisted(() => {
       },
       findMany: async ({ where }: { where: Record<string, unknown> }) =>
         tables.asset.filter((a) => matches(a, where)),
+      count: async ({ where }: { where?: Record<string, unknown> } = {}) =>
+        tables.asset.filter((a) => matches(a, where)).length,
       update: async ({
         where,
         data,
@@ -189,6 +194,34 @@ const { tables, fakeDb, counter } = vi.hoisted(() => {
           (r) => r.id !== where.id
         );
         return {};
+      },
+      deleteMany: async ({ where }: { where?: Record<string, unknown> }) => {
+        const before = tables.assetLocation.length;
+        tables.assetLocation = tables.assetLocation.filter(
+          (r) => !matches(r, where)
+        );
+        return { count: before - tables.assetLocation.length };
+      },
+      updateMany: async ({
+        where,
+        data,
+      }: {
+        where?: Record<string, unknown>;
+        data: Record<string, unknown>;
+      }) => {
+        const rows = tables.assetLocation.filter((r) => matches(r, where));
+        rows.forEach((row) => applyData(row, data));
+        return { count: rows.length };
+      },
+      createMany: async ({ data }: { data: Record<string, unknown>[] }) => {
+        for (const row of data) {
+          tables.assetLocation.push({
+            id: newId("al"),
+            assetKitId: null,
+            ...row,
+          } as Row);
+        }
+        return { count: data.length };
       },
     },
     custody: {
@@ -276,6 +309,55 @@ const { tables, fakeDb, counter } = vi.hoisted(() => {
         tables.consumptionLog.push(row);
         return row;
       },
+      createMany: async ({ data }: { data: Record<string, unknown>[] }) => {
+        for (const entry of data) {
+          tables.consumptionLog.push({ id: newId("log"), ...entry } as Row);
+        }
+        return { count: data.length };
+      },
+    },
+    /**
+     * The stock ledger's state read (`readStockStates`): each pool's total,
+     * ledger start and manual placements, one row per placement, for the ids
+     * in the first `Prisma.join` value.
+     */
+    $queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      if (!strings.join("").includes("stockLedgerStartedAt")) {
+        throw new Error("unexpected raw query in the in-memory stand-in");
+      }
+      const ids = (values[0] as { values: unknown[] }).values;
+      return tables.asset
+        .filter((a) => ids.includes(a.id) && a.type === "QUANTITY_TRACKED")
+        .flatMap((a) => {
+          const base = {
+            assetId: a.id,
+            total: a.quantity,
+            stockLedgerStartedAt: a.stockLedgerStartedAt ?? null,
+          };
+          const placements = tables.assetLocation.filter(
+            (r) => r.assetId === a.id && r.assetKitId === null
+          );
+          return placements.length === 0
+            ? [{ ...base, locationId: null, placed: null }]
+            : placements.map((r) => ({
+                ...base,
+                locationId: r.locationId,
+                placed: r.quantity,
+              }));
+        });
+    },
+    /**
+     * The stock ledger's only raw write: stamping `stockLedgerStartedAt` on
+     * the assets in the first `Prisma.join` value.
+     */
+    $executeRaw: async (
+      _strings: TemplateStringsArray,
+      ...values: unknown[]
+    ) => {
+      const ids = (values[0] as { values: unknown[] }).values;
+      const rows = tables.asset.filter((a) => ids.includes(a.id));
+      rows.forEach((row) => (row.stockLedgerStartedAt = new Date()));
+      return rows.length;
     },
   };
 
@@ -357,15 +439,21 @@ const FOREIGN = "loc-other-workspace";
 const AHMED = "tm-ahmed";
 const SARA = "tm-sara";
 
-/** Resets the tables to one pool with the given total and placements. */
+/**
+ * Resets the tables to one pool with the given total and placements. Its
+ * stock ledger has started unless `ledgerStarted` is false (a pool from
+ * before the ledger, whose first change writes an opening balance).
+ */
 function seedPool({
   total,
   placements,
   consumptionType = "TWO_WAY",
+  ledgerStarted = true,
 }: {
   total: number;
   placements: Array<[string, number]>;
   consumptionType?: "ONE_WAY" | "TWO_WAY";
+  ledgerStarted?: boolean;
 }) {
   counter.next = 1;
   tables.asset = [
@@ -378,6 +466,9 @@ function seedPool({
       unitOfMeasure: "pcs",
       consumptionType,
       status: "AVAILABLE",
+      stockLedgerStartedAt: ledgerStarted
+        ? new Date("2026-09-01T00:00:00.000Z")
+        : null,
     },
   ];
   tables.location = [
@@ -731,6 +822,7 @@ describe("releaseQuantity: per source", () => {
       expect.objectContaining({
         category: "CONSUME",
         quantity: 10,
+        stockChange: -10,
         locationId: STUDIO,
       }),
     ]);
@@ -754,6 +846,13 @@ describe("releaseQuantity: per source", () => {
 
     expect(tables.asset[0].quantity).toBe(8);
     expect([placed(CAMERA_ROOM), placed(STUDIO)]).toEqual([4, 4]);
+    expect(
+      tables.consumptionLog.map((l) => [
+        l.category,
+        l.locationId,
+        l.stockChange,
+      ])
+    ).toEqual([["CONSUME", null, -2]]);
   });
 
   it("applies per-location lines with their own used-up counts", async () => {
@@ -781,11 +880,16 @@ describe("releaseQuantity: per source", () => {
     expect([placed(CAMERA_ROOM), placed(STUDIO)]).toEqual([4, 3]);
     expect(tables.asset[0].quantity).toBe(7);
     expect(
-      tables.consumptionLog.map((l) => [l.category, l.locationId, l.quantity])
+      tables.consumptionLog.map((l) => [
+        l.category,
+        l.locationId,
+        l.quantity,
+        l.stockChange,
+      ])
     ).toEqual([
-      ["CONSUME", CAMERA_ROOM, 1],
-      ["RETURN", CAMERA_ROOM, 1],
-      ["CONSUME", STUDIO, 2],
+      ["CONSUME", CAMERA_ROOM, 1, -1],
+      ["CONSUME", STUDIO, 2, -2],
+      ["RETURN", CAMERA_ROOM, 1, 0],
     ]);
   });
 
@@ -838,7 +942,11 @@ describe("adjustQuantity: at a location", () => {
     expect(tables.asset[0].quantity).toBe(95);
     expect([placed(CAMERA_ROOM), placed(STUDIO)]).toEqual([60, 35]);
     expect(tables.consumptionLog).toEqual([
-      expect.objectContaining({ category: "RESTOCK", locationId: STUDIO }),
+      expect.objectContaining({
+        category: "RESTOCK",
+        locationId: STUDIO,
+        stockChange: 5,
+      }),
     ]);
   });
 
@@ -1068,6 +1176,188 @@ describe("custodyFromLocationWhere", () => {
         { kitCustodyId: { not: null } },
       ],
     });
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/*                                Stock ledger                                */
+/* -------------------------------------------------------------------------- */
+
+describe("stock ledger", () => {
+  /** The live stock of `pool-1`, in the shape a ledger replay returns. */
+  const liveStock = () => {
+    const byPlace = new Map<string, number>();
+    let placedSum = 0;
+    for (const row of tables.assetLocation) {
+      if (row.assetKitId !== null) continue;
+      byPlace.set(row.locationId as string, row.quantity as number);
+      placedSum += row.quantity as number;
+    }
+    const total = tables.asset[0].quantity as number;
+    if (total - placedSum !== 0) byPlace.set("", total - placedSum);
+    return { total, byPlace };
+  };
+
+  it("writes an opening balance before the first change of a pool from before the ledger", async () => {
+    seedPool({
+      total: 10,
+      placements: [
+        [CAMERA_ROOM, 6],
+        [STUDIO, 3],
+      ],
+      ledgerStarted: false,
+    });
+
+    await moveAssetLocationUnits({
+      assetId: "pool-1",
+      organizationId: ORG,
+      userId: "user-1",
+      fromLocationId: CAMERA_ROOM,
+      toLocationId: STUDIO,
+      quantity: 2,
+    });
+
+    expect(
+      tables.consumptionLog.map((l) => [
+        l.category,
+        l.locationId,
+        l.stockChange,
+      ])
+    ).toEqual([
+      ["OPENING_BALANCE", null, 1],
+      ["OPENING_BALANCE", CAMERA_ROOM, 6],
+      ["OPENING_BALANCE", STUDIO, 3],
+      ["MOVE", CAMERA_ROOM, -2],
+      ["MOVE", STUDIO, 2],
+    ]);
+    expect(tables.asset[0].stockLedgerStartedAt).toBeInstanceOf(Date);
+    expect(replayStockLedger(tables.consumptionLog as never)).toEqual(
+      liveStock()
+    );
+  });
+
+  it("records placing unplaced units as a move out of the unplaced units", async () => {
+    seedPool({
+      total: 10,
+      placements: [[CAMERA_ROOM, 6]],
+      ledgerStarted: false,
+    });
+
+    await placeUnplacedUnits({
+      assetId: "pool-1",
+      organizationId: ORG,
+      userId: "user-1",
+      toLocationId: CAMERA_ROOM,
+      quantity: 3,
+    });
+
+    expect(
+      tables.consumptionLog.map((l) => [
+        l.category,
+        l.locationId,
+        l.stockChange,
+      ])
+    ).toEqual([
+      ["OPENING_BALANCE", null, 4],
+      ["OPENING_BALANCE", CAMERA_ROOM, 6],
+      ["MOVE", null, -3],
+      ["MOVE", CAMERA_ROOM, 3],
+    ]);
+    expect(replayStockLedger(tables.consumptionLog as never)).toEqual(
+      liveStock()
+    );
+  });
+
+  it("records a placement rewrite as moves between the places that changed", async () => {
+    seedPool({
+      total: 10,
+      placements: [
+        [CAMERA_ROOM, 6],
+        [STUDIO, 3],
+      ],
+      ledgerStarted: false,
+    });
+
+    await replaceAssetPlacements({
+      assetId: "pool-1",
+      organizationId: ORG,
+      userId: "user-1",
+      placements: [{ locationId: STUDIO, quantity: 8 }],
+    });
+
+    expect(
+      tables.consumptionLog.map((l) => [
+        l.category,
+        l.locationId,
+        l.stockChange,
+      ])
+    ).toEqual([
+      ["OPENING_BALANCE", null, 1],
+      ["OPENING_BALANCE", CAMERA_ROOM, 6],
+      ["OPENING_BALANCE", STUDIO, 3],
+      ["MOVE", null, 1],
+      ["MOVE", CAMERA_ROOM, -6],
+      ["MOVE", STUDIO, 5],
+    ]);
+    expect(replayStockLedger(tables.consumptionLog as never)).toEqual(
+      liveStock()
+    );
+  });
+
+  it("replays to the live stock after custody, consume, adjust and move", async () => {
+    seedPool({
+      total: 100,
+      placements: [
+        [CAMERA_ROOM, 60],
+        [STUDIO, 30],
+      ],
+      consumptionType: "ONE_WAY",
+      ledgerStarted: false,
+    });
+
+    await assign({ quantity: 10, locationId: STUDIO });
+    await release({ quantity: 4 });
+    await assign({ quantity: 5, locationId: CAMERA_ROOM });
+    await release({ quantity: 5, locationId: CAMERA_ROOM });
+    await adjustQuantity({
+      assetId: "pool-1",
+      quantity: 7,
+      category: "LOSS",
+      direction: "subtract",
+      userId: "user-1",
+      organizationId: ORG,
+      locationId: CAMERA_ROOM,
+    });
+    await adjustQuantity({
+      assetId: "pool-1",
+      quantity: 3,
+      category: "ADJUSTMENT",
+      direction: "add",
+      userId: "user-1",
+      organizationId: ORG,
+    });
+    await moveAssetLocationUnits({
+      assetId: "pool-1",
+      organizationId: ORG,
+      userId: "user-1",
+      fromLocationId: STUDIO,
+      toLocationId: CAMERA_ROOM,
+      quantity: 20,
+    });
+
+    const replayed = replayStockLedger(tables.consumptionLog as never);
+    expect(replayed).toEqual(liveStock());
+    // A move never changes the total.
+    const moveRows = tables.consumptionLog.filter((l) => l.category === "MOVE");
+    expect(
+      moveRows.reduce((sum, l) => sum + (l.stockChange as number), 0)
+    ).toBe(0);
+    // Hand-outs and returns change no stock.
+    expect(
+      tables.consumptionLog
+        .filter((l) => l.category === "CHECKOUT" || l.category === "RETURN")
+        .every((l) => l.stockChange === 0)
+    ).toBe(true);
   });
 });
 

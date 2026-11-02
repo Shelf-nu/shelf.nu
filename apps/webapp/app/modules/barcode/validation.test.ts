@@ -1,5 +1,5 @@
 import { BarcodeType } from "@prisma/client";
-import { validateBarcodeValue } from "./validation";
+import { getExternalQrValueWarning, validateBarcodeValue } from "./validation";
 
 // @vitest-environment node
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
@@ -50,5 +50,33 @@ describe("EAN-13 barcode validation", () => {
   it("should reject EAN-13 with spaces", () => {
     const result = validateBarcodeValue(BarcodeType.EAN13, "1234567890 23");
     expect(result).toContain("only numeric digits");
+  });
+});
+
+describe("getExternalQrValueWarning", () => {
+  it.each([
+    "example.com/abc",
+    "www.example.com",
+    "shop.example.co.uk/item?id=1",
+    "example.com:8080/x",
+  ])("warns for the bare web address %s", (value) => {
+    const warning = getExternalQrValueWarning(value);
+    expect(warning).toContain(`"${value}"`);
+    expect(warning).toContain("https://");
+  });
+
+  it.each([
+    "https://example.com/abc",
+    "http://x.io",
+    "mailto:a@b.com",
+    "INV.2024",
+    "v1.5",
+    "ROOM.A",
+    "ABC-123",
+    "localhost:3000",
+    "some text with spaces",
+    "",
+  ])("stays silent for %j", (value) => {
+    expect(getExternalQrValueWarning(value)).toBeNull();
   });
 });

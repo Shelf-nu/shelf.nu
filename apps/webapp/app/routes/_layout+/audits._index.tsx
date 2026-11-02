@@ -17,6 +17,7 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
+import { CountLink } from "~/components/list/count-link";
 import { Filters } from "~/components/list/filters";
 import type { SortingDirection } from "~/components/list/filters/sort-by";
 import { SortBy } from "~/components/list/filters/sort-by";
@@ -29,6 +30,7 @@ import { UserBadge } from "~/components/shared/user-badge";
 import { Td, Th } from "~/components/table";
 import { db } from "~/database/db.server";
 import { useSearchParams } from "~/hooks/search-params";
+import type { AuditFilterType } from "~/modules/audit/audit-filter-utils";
 import type { AUDIT_LIST_INCLUDE } from "~/modules/audit/service.server";
 import { getAuditsForOrganization } from "~/modules/audit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -389,10 +391,22 @@ const ListItemContent = ({ item }: { item: AuditListItem }) => {
         )}
       </Td>
 
-      <Td className="text-right">{item.expectedAssetCount}</Td>
+      <Td className="text-right">
+        <AuditCountLink
+          count={item.expectedAssetCount}
+          auditId={item.id}
+          filter="EXPECTED"
+          label={`View the expected assets of ${item.name}`}
+        />
+      </Td>
 
       <Td className="text-right">
-        {item.foundAssetCount ?? <EmptyTableValue />}
+        <AuditCountLink
+          count={item.foundAssetCount}
+          auditId={item.id}
+          filter="FOUND"
+          label={`View the found assets of ${item.name}`}
+        />
       </Td>
 
       {/* why: the header is necessarily state-neutral, but this row is not —
@@ -405,12 +419,58 @@ const ListItemContent = ({ item }: { item: AuditListItem }) => {
           item.missingAssetCount ?? 0
         }`}
       >
-        {item.missingAssetCount ?? <EmptyTableValue />}
+        <AuditCountLink
+          count={item.missingAssetCount}
+          auditId={item.id}
+          filter="MISSING"
+          label={`View the ${auditAssetStatusLabel(
+            "PENDING",
+            isAuditCompleted(item)
+          ).toLowerCase()} assets of ${item.name}`}
+        />
       </Td>
 
       <Td className="text-right">
-        {item.unexpectedAssetCount ?? <EmptyTableValue />}
+        <AuditCountLink
+          count={item.unexpectedAssetCount}
+          auditId={item.id}
+          filter="UNEXPECTED"
+          label={`View the unexpected assets of ${item.name}`}
+        />
       </Td>
     </>
   );
 };
+
+/**
+ * An asset count of one audit, linked to its overview filtered to the same
+ * assets (the overview's `auditStatus` filter). A count the audit has not
+ * recorded yet shows the empty placeholder.
+ */
+function AuditCountLink({
+  count,
+  auditId,
+  filter,
+  label,
+}: {
+  count: number | null;
+  auditId: string;
+  /** The overview filter that lists exactly the counted assets */
+  filter: Exclude<AuditFilterType, "ALL">;
+  /** Accessible name of the link */
+  label: string;
+}) {
+  if (count === null) {
+    return <EmptyTableValue />;
+  }
+
+  return (
+    <CountLink
+      count={count}
+      to={`/audits/${auditId}/overview?${new URLSearchParams({
+        auditStatus: filter,
+      })}`}
+      label={label}
+    />
+  );
+}

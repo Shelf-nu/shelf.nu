@@ -23,6 +23,8 @@ const dbMocks = vi.hoisted(() => {
     },
     custody: {
       createMany: vi.fn(),
+      // The holder guard's read of members already in someone's custody.
+      findMany: vi.fn(),
     },
     note: {
       createMany: vi.fn(),
@@ -67,7 +69,10 @@ vi.mock("~/database/db.server", () => ({
           findMany: dbMocks.asset.findMany,
           updateMany: dbMocks.asset.updateMany,
         },
-        custody: { createMany: dbMocks.custody.createMany },
+        custody: {
+          createMany: dbMocks.custody.createMany,
+          findMany: dbMocks.custody.findMany,
+        },
       })
     ),
   },
@@ -159,6 +164,8 @@ beforeEach(() => {
   mockKitUpdate.mockReset();
   // No kit is out on a booking unless a test says so.
   dbMocks.kit.findMany.mockReset().mockResolvedValue([]);
+  // No member is in someone's custody unless a test says so.
+  dbMocks.custody.findMany.mockReset().mockResolvedValue([]);
   mockAssetUpdate.mockReset();
   mockNoteCreateMany.mockReset();
   requirePermissionMock.mockReset();
@@ -257,6 +264,42 @@ describe("kits/$kitId/assets/assign-custody", () => {
 
     expect((response as Response).status).not.toBe(302);
     expect(mockKitUpdate).not.toHaveBeenCalled();
+  });
+
+  it("refuses a kit whose asset is already in someone's custody, with a 400", async () => {
+    requirePermissionMock.mockResolvedValue({
+      organizationId: "org-1",
+      role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
+    } as any);
+    mockGetTeamMember.mockResolvedValue({
+      id: "team-member-123",
+      userId: "user-456",
+      name: "Valid Team Member",
+      user: { id: "user-456", firstName: "Valid", lastName: "Member" },
+    });
+    // why: a member gained custody after the page loaded, so only the guard
+    // inside the transaction sees it.
+    dbMocks.custody.findMany.mockResolvedValue([
+      { asset: { id: "asset-r5", title: "Canon R5" } },
+    ]);
+
+    const formData = new FormData();
+    formData.set(
+      "custodian",
+      JSON.stringify({ id: "team-member-123", name: "Valid Team Member" })
+    );
+    const request = new Request(
+      "https://example.com/kits/kit-123/assets/assign-custody",
+      { method: "POST", body: formData }
+    );
+
+    const response = (await action(createActionArgs({ request }))) as Response;
+
+    // A refusal naming the asset, not the database trigger's 500.
+    expect(response.status).toBe(400);
+    expect(mockKitUpdate).not.toHaveBeenCalled();
+    expect(dbMocks.custody.createMany).not.toHaveBeenCalled();
   });
 
   it("allows assigning custody to team members from the same organization", async () => {

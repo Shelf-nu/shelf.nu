@@ -46,6 +46,7 @@ import {
   buildMonthlyGrowthData,
   checklistOptions,
   getCustodiansOrderedByTotalCustodies,
+  resolveOnboardingChecklist,
 } from "~/utils/dashboard.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";
@@ -61,12 +62,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, currentOrganization } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.dashboard,
-      action: PermissionAction.read,
-    });
+    const { organizationId, currentOrganization, organizations, role } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.dashboard,
+        action: PermissionAction.read,
+      });
 
     const twelveMonthsAgo = new Date();
     twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 11);
@@ -386,6 +388,21 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const totalAssets = assetAggregation._count._all;
     const totalValuation = assetAggregation.totalValuation;
 
+    const onboardingChecklist = {
+      hasAssets: totalAssets > 0,
+      // `directCustodians` is already the "team members holding custody"
+      // query, with the same where clause a custody count would use, and
+      // `take: 20` cannot change a `> 0` test.
+      hasCustodies: directCustodians.length > 0,
+      ...checklistData,
+    };
+    const { showsChecklist, canImportAssets } =
+      await resolveOnboardingChecklist({
+        checklistOptions: onboardingChecklist,
+        skipOnboardingChecklist: Boolean(cookieResult.skipOnboardingChecklist),
+        importEligibility: { organizationId, organizations, userId, role },
+      });
+
     const header: HeaderData = {
       title: "Home",
     };
@@ -409,7 +426,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       totalValuation,
       valueKnownAssets,
       newAssets,
-      skipOnboardingChecklist: cookieResult.skipOnboardingChecklist,
+      showsChecklist,
+      canImportAssets,
       custodiansData: getCustodiansOrderedByTotalCustodies({
         directCustodians,
         bookings: ongoingAndOverdueBookings as any,
@@ -422,15 +440,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             content: parseMarkdownToReact(announcement.content),
           }
         : null,
-      checklistOptions: {
-        hasAssets: totalAssets > 0,
-        // `directCustodians` is already the "team members holding custody"
-        // query, with the same where clause the dropped `custodiesCount`
-        // used — `take: 20` cannot change a `> 0` test — so counting them
-        // again server-side was a redundant round trip.
-        hasCustodies: directCustodians.length > 0,
-        ...checklistData,
-      },
+      checklistOptions: onboardingChecklist,
     });
   } catch (cause) {
     const reason = makeShelfError(cause);
@@ -449,14 +459,12 @@ export const handle = {
 };
 
 export default function HomePage() {
-  const { skipOnboardingChecklist, checklistOptions } =
-    useLoaderData<typeof loader>();
-  const completedAllChecks = Object.values(checklistOptions).every(Boolean);
+  const { showsChecklist } = useLoaderData<typeof loader>();
 
   return (
     <div>
       <Header> </Header>
-      {completedAllChecks || skipOnboardingChecklist ? (
+      {!showsChecklist ? (
         <div className="pb-8">
           <AnnouncementBar />
 

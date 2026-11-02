@@ -432,6 +432,38 @@ describe("checkoutBooking", () => {
     );
   });
 
+  it("formats a refusal for the caller and keeps other bookings unnamed by default", async () => {
+    expect.assertions(1);
+    const tx = openTx();
+    tx.booking.update.mockResolvedValue({ id: BOOKING_ID });
+
+    await checkoutBooking(checkoutParams);
+
+    expect(assertOutstandingModelRequestsFit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        hints,
+        userId: "user-1",
+        revealOtherBookings: false,
+      })
+    );
+  });
+
+  it("names other bookings in a refusal for a caller who sees every booking", async () => {
+    expect.assertions(1);
+    const tx = openTx();
+    tx.booking.update.mockResolvedValue({ id: BOOKING_ID });
+
+    await checkoutBooking({ ...checkoutParams, seesAllBookings: true });
+
+    expect(assertOutstandingModelRequestsFit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        hints,
+        userId: "user-1",
+        revealOtherBookings: true,
+      })
+    );
+  });
+
   it("does not measure them again for a booking that came through RESERVED", async () => {
     expect.assertions(2);
     // @ts-expect-error mocked

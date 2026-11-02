@@ -198,6 +198,31 @@ describe("useUnsavedChanges", () => {
     await screen.findByText("Other page loaded");
   });
 
+  it("blocks a navigation started the moment the form shows dirty", async () => {
+    renderForm();
+    await waitForBaseline();
+    // Click as soon as "dirty" reaches the DOM, before React runs the
+    // commit's passive effects: the guard must already hold by then.
+    const statusEl = screen.getByTestId("status");
+    const observer = new MutationObserver(() => {
+      if (statusEl.textContent !== "dirty") return;
+      observer.disconnect();
+      fireEvent.click(screen.getByRole("link", { name: "Other page" }));
+    });
+    observer.observe(statusEl, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Makita drill 18V" },
+    });
+
+    await waitFor(() => expect(status()).toBe("blocked"), { timeout: 3000 });
+    expect(screen.queryByText("Other page loaded")).not.toBeInTheDocument();
+  });
+
   it("keeps the change when the user stays", async () => {
     renderForm();
     await makeDirtyByTyping();

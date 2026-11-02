@@ -391,6 +391,32 @@ describe("note service", () => {
       expect(result).toBeUndefined();
     });
 
+    it("names both kits when an asset moves from one kit to another", async () => {
+      vi.mocked(db.user.findFirstOrThrow).mockResolvedValue({
+        firstName: "John",
+        lastName: "Doe",
+      } as any);
+
+      await createBulkKitChangeNotes({
+        newlyAddedAssets: [
+          {
+            id: "asset-1",
+            title: "Camera",
+            type: "INDIVIDUAL",
+            kit: { id: "kit-a", name: "Box A" },
+          },
+        ],
+        removedAssets: [],
+        userId: "user-1",
+        kit: { id: "kit-b", name: "Box B" } as any,
+        organizationId: "org-1",
+      });
+
+      const content = vi.mocked(db.note.create).mock.calls[0][0].data.content;
+      // The kit wrapper is mocked in this file to "kit:<name>".
+      expect(content).toBe("@John changed kit from kit:Box A to kit:Box B.");
+    });
+
     it("names the per-kit unit count when a QUANTITY_TRACKED asset is added", async () => {
       vi.mocked(db.user.findFirstOrThrow).mockResolvedValue({
         firstName: "John",

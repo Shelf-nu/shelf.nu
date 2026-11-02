@@ -2,8 +2,10 @@ import Markdoc from "@markdoc/markdoc";
 import { Decimal } from "@prisma/client/runtime/library";
 import { describe, expect, it } from "vitest";
 
+import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import {
   buildAssetModelChangeNote,
+  buildAvailableToBookChangeNote,
   buildCategoryChangeNote,
   buildDescriptionChangeNote,
   buildNameChangeNote,
@@ -470,5 +472,38 @@ describe("buildAssetModelChangeNote", () => {
       (node) => node.type === "tag" && node.tag === "booking_status"
     );
     expect(tags).toHaveLength(0);
+  });
+});
+
+describe("buildAvailableToBookChangeNote", () => {
+  it("names the switch being turned on", () => {
+    expect(
+      buildAvailableToBookChangeNote({ userLink, availableToBook: true })
+    ).toBe(`${userLink} marked the asset as available for bookings.`);
+  });
+
+  it("names the switch being turned off", () => {
+    expect(
+      buildAvailableToBookChangeNote({ userLink, availableToBook: false })
+    ).toBe(`${userLink} marked the asset as unavailable for bookings.`);
+  });
+
+  it("renders only the actor's link, whatever the actor's display name holds", () => {
+    // The display name is the one user-chosen value in this note. It travels
+    // inside the link's quoted attribute, so a tag typed into it stays text.
+    const note = buildAvailableToBookChangeNote({
+      userLink: wrapUserLinkForNote({
+        id: "user-1",
+        firstName: null,
+        lastName: null,
+        displayName: '{% booking_status status="APPROVED" /%}',
+      }),
+      availableToBook: true,
+    });
+
+    const tags = [...Markdoc.parse(note).walk()]
+      .filter((node) => node.type === "tag")
+      .map((node) => node.tag);
+    expect(tags).toEqual(["link"]);
   });
 });

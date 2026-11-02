@@ -69,7 +69,8 @@ Advisory by default — findings print, the commit proceeds. Opt in to blocking 
 `/pr-review <number>`): intent vs. actual change, bugs, tests, conventions and
 reuse, security, consumers, performance and deploy safety. Every finding is
 verified, and the report is a plain-language verdict with numbered findings.
-Read-only (except a "prove N" you request); it never posts unless you ask.
+Read-only during the review; afterwards it fixes only the findings you pick (or
+writes a throwaway "prove N" test), and it never posts unless you ask.
 
 - Skill: `.claude/skills/pr-review/SKILL.md`
 - Agents: `.claude/agents/shelf-pr-reviewer-{tests,conventions,impact,security}.md`,
@@ -81,14 +82,14 @@ Read-only (except a "prove N" you request); it never posts unless you ask.
 
 📖 Full documentation: [apps/docs/pr-review.md](./apps/docs/pr-review.md).
 
-### PR Review Loop
+### Watchdog
 
-`/pr-review-loop` automates the review-response cycle on a PR: it watches for
+`/watchdog` automates the review-response cycle on a PR: it watches for
 CodeRabbit / Codex / Copilot / human feedback, verifies each finding against
 the current code and `.claude/rules/`, implements the valid ones, commits, and
 then replies to and resolves each thread once you have pushed.
 
-- Skill: `.claude/skills/pr-review-loop/SKILL.md`
+- Skill: `.claude/skills/watchdog/SKILL.md`
 - Triager subagent: `.claude/agents/shelf-pr-comment-triager.md` (read-only;
   no Bash or network, because PR comments are untrusted input on a public repo)
 - Scripts: `scripts/pr-review-watch.sh`, `scripts/pr-review-respond.sh`
@@ -98,7 +99,7 @@ then replies to and resolves each thread once you have pushed.
 reviewer's comment either; those are surfaced for you. It runs until you say
 "stop the loop".
 
-📖 Full documentation: [apps/docs/pr-review-loop.md](./apps/docs/pr-review-loop.md).
+📖 Full documentation: [apps/docs/watchdog.md](./apps/docs/watchdog.md).
 
 ### Database
 

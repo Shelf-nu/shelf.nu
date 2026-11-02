@@ -42,6 +42,23 @@ import PartialCheckoutDrawer, {
 // context here — we stub it with deterministic data per test. `Link` /
 // `Form` are reduced to native equivalents so transitive components
 // don't require a data router.
+// why: the check-out dialog proposes an expired reservation's new end date in
+// the user's resolved timezone, read from root loader data this test does not
+// mount. No expired booking is rendered here.
+vi.mock("~/hooks/use-date-formatter", () => ({
+  useDateFormatter: () => ({
+    prefs: {
+      dateFormat: "MM_DD_YYYY",
+      timeFormat: "H12",
+      weekStartsOn: 0,
+      timeZone: "UTC",
+    },
+    formatDate: (value: string | Date) => String(value),
+    formatTime: (value: string | Date) => String(value),
+    formatDateTime: (value: string | Date) => String(value),
+  }),
+}));
+
 vi.mock("react-router", async () => {
   const actual = await vi.importActual<Record<string, unknown>>("react-router");
   return {
@@ -176,8 +193,11 @@ function makeLoaderData(
       id: "booking-1",
       name: "Test Booking",
       status: BookingStatus.RESERVED,
-      from: new Date("2024-01-01T10:00:00Z"),
-      to: new Date("2024-01-05T10:00:00Z"),
+      // A live reservation: started yesterday, ends in four days. A window
+      // already behind us would be an expired reservation, which gets the
+      // reschedule-or-overdue prompt instead of the plain submit.
+      from: new Date(Date.now() - 24 * 60 * 60 * 1000),
+      to: new Date(Date.now() + 4 * 24 * 60 * 60 * 1000),
       custodianUserId: "user-1",
       bookingAssets,
     },
@@ -340,8 +360,11 @@ function makeLoaderDataFromExpected(
       id: "booking-1",
       name: "Test Booking",
       status: BookingStatus.RESERVED,
-      from: new Date("2024-01-01T10:00:00Z"),
-      to: new Date("2024-01-05T10:00:00Z"),
+      // A live reservation: started yesterday, ends in four days. A window
+      // already behind us would be an expired reservation, which gets the
+      // reschedule-or-overdue prompt instead of the plain submit.
+      from: new Date(Date.now() - 24 * 60 * 60 * 1000),
+      to: new Date(Date.now() + 4 * 24 * 60 * 60 * 1000),
       custodianUserId: "user-1",
       bookingAssets,
     },

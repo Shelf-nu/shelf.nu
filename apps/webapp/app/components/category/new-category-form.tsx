@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useId, useMemo } from "react";
 import type { Category } from "@prisma/client";
 import { useZorm } from "react-zorm";
 import z from "zod";
@@ -8,16 +8,22 @@ import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import type { action } from "~/routes/_layout+/categories.new";
 import { getRandomColor } from "~/utils/get-random-color";
 import { getValidationErrors } from "~/utils/http";
+import { hexColorSchema, labelNameSchema } from "~/utils/label-form-fields";
 import { tw } from "~/utils/tw";
 import { zodFieldIsRequired } from "~/utils/zod";
+import {
+  ColorBadgePreview,
+  useColorBadgePreview,
+} from "../forms/color-badge-preview";
 import { ColorInput } from "../forms/color-input";
+import { FormRowErrors, rowErrorId } from "../forms/form-row-errors";
 import Input from "../forms/input";
 import { Button } from "../shared/button";
 
 export const NewCategoryFormSchema = z.object({
-  name: z.string().min(3, "Name is required"),
+  name: labelNameSchema,
   description: z.string(),
-  color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+  color: hexColorSchema,
   preventRedirect: z.string().optional(),
 });
 
@@ -47,6 +53,8 @@ export default function NewCategoryForm({
   const disabled = useDisabled(fetcher);
 
   const color = useMemo(() => getRandomColor(), []);
+  const { previewName, setPreviewName, previewColor, setPreviewColor } =
+    useColorBadgePreview({ entityId: "new", name: "", color });
 
   // Focus the Name field on mount. When this form is rendered inside a
   // dialog the dialog's `data-dialog-initial-focus` handler typically wins;
@@ -73,15 +81,27 @@ export default function NewCategoryForm({
     fetcher.data?.error
   );
 
-  // Compute field-specific errors: prefer Zod client-side validation errors,
-  // fall back to server validation errors only in inline mode
+  // Field errors: client-side Zod errors first, server validation errors as
+  // the fallback when client-side validation is bypassed.
   const nameError =
-    zo.errors.name()?.message ??
-    (hasOnSuccessFunc ? validationErrors?.name?.message : undefined);
+    zo.errors.name()?.message ?? validationErrors?.name?.message;
 
   const colorError =
-    zo.errors.color()?.message ??
-    (hasOnSuccessFunc ? validationErrors?.color?.message : undefined);
+    zo.errors.color()?.message ?? validationErrors?.color?.message;
+
+  // Inline (dialog) mode stacks the fields, so each shows its own error. The
+  // standalone page lays them out in one row, where per-field text would push
+  // that field out of line: there they keep the red outline and the messages
+  // are listed under the buttons instead.
+  const showRowErrors = !hasOnSuccessFunc;
+  const errorsId = useId();
+  const rowErrorProps = (field: string, error: string | undefined) =>
+    showRowErrors
+      ? {
+          hideErrorText: true,
+          "aria-describedby": error ? rowErrorId(errorsId, field) : undefined,
+        }
+      : {};
 
   return (
     <fetcher.Form
@@ -93,43 +113,49 @@ export default function NewCategoryForm({
       ref={zo.ref}
       action={apiUrl}
     >
-      <div className={tw("gap-4 md:flex md:items-center", className)}>
-        <Input
-          ref={nameInputRef}
-          label="Name"
-          placeholder="Category name"
-          className={tw("mb-4 lg:mb-0 lg:max-w-[180px]", inputClassName)}
-          name={zo.fields.name()}
-          disabled={disabled}
-          error={nameError}
-          hideErrorText={!hasOnSuccessFunc}
-          data-dialog-initial-focus
-          required={zodFieldIsRequired(NewCategoryFormSchema.shape.name)}
-        />
-        <Input
-          label="Description"
-          placeholder="Description (optional)"
-          name={zo.fields.description()}
-          disabled={disabled}
-          data-test-id="categoryDescription"
-          className={tw("mb-4 lg:mb-0", inputClassName)}
-          hideErrorText={!hasOnSuccessFunc}
-          required={zodFieldIsRequired(NewCategoryFormSchema.shape.description)}
-        />
-        <div className={tw("mb-6 lg:mb-0", inputClassName)}>
-          <ColorInput
-            name={zo.fields.color()}
+      <div className={tw("flex flex-col", hasOnSuccessFunc && "w-full")}>
+        <div className={tw("gap-4 md:flex md:items-center", className)}>
+          <Input
+            ref={nameInputRef}
+            label="Name"
+            placeholder="Category name"
+            className={tw("mb-4 lg:mb-0 lg:max-w-[180px]", inputClassName)}
+            name={zo.fields.name()}
+            onChange={(e) => setPreviewName(e.target.value)}
             disabled={disabled}
-            error={colorError}
-            hideErrorText={!hasOnSuccessFunc}
-            colorFromServer={color}
-            required={zodFieldIsRequired(NewCategoryFormSchema.shape.color)}
+            error={nameError}
+            {...rowErrorProps("name", nameError)}
+            data-dialog-initial-focus
+            required={zodFieldIsRequired(NewCategoryFormSchema.shape.name)}
           />
-        </div>
+          <Input
+            label="Description"
+            placeholder="Description (optional)"
+            name={zo.fields.description()}
+            disabled={disabled}
+            data-test-id="categoryDescription"
+            className={tw("mb-4 lg:mb-0", inputClassName)}
+            required={zodFieldIsRequired(
+              NewCategoryFormSchema.shape.description
+            )}
+          />
+          <div className={tw("mb-6 lg:mb-0", inputClassName)}>
+            <ColorInput
+              name={zo.fields.color()}
+              disabled={disabled}
+              error={colorError}
+              {...rowErrorProps("color", colorError)}
+              colorFromServer={color}
+              onColorChange={setPreviewColor}
+              required
+            />
+          </div>
 
-        {hasOnSuccessFunc ? (
-          <input type="hidden" name="preventRedirect" value="true" />
-        ) : null}
+          {hasOnSuccessFunc ? (
+            <input type="hidden" name="preventRedirect" value="true" />
+          ) : null}
+        </div>
+        <ColorBadgePreview name={previewName} color={previewColor} />
       </div>
 
       <div className={buttonsClassName}>
@@ -167,9 +193,17 @@ export default function NewCategoryForm({
           </Button>
         </div>
 
-        <div className="mt-3 self-end text-sm text-error-500">
-          {fetcher?.data?.error ? fetcher.data.error.message : " "}
-        </div>
+        {showRowErrors && (nameError || colorError) ? (
+          <FormRowErrors
+            id={errorsId}
+            errors={{ name: nameError, color: colorError }}
+            className="mt-3 self-end text-sm text-error-500"
+          />
+        ) : (
+          <div className="mt-3 self-end text-sm text-error-500">
+            {fetcher?.data?.error ? fetcher.data.error.message : " "}
+          </div>
+        )}
       </div>
     </fetcher.Form>
   );

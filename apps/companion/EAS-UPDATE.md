@@ -13,6 +13,11 @@ of an already-installed build.
 | Asset (image/font) swaps                   | `app.json` native config, config plugins     |
 | Bug fixes in `app/`, `components/`, `lib/` | App version bump (new `runtimeVersion`)      |
 
+Entitlements are a special case of the right-hand column: `ios/Shelf/Shelf.entitlements`
+is hand-maintained (`aps-environment` for push, associated domains for universal
+links) because no prebuild runs here, and a `prebuild:clean` deletes it. See
+[PUSH-NOTIFICATIONS.md](./PUSH-NOTIFICATIONS.md).
+
 If in doubt: touched only files under `apps/companion/{app,components,lib,...}`
 → OTA. Touched `ios/`, `android/`, `app.json` native keys, or added a **native**
 dependency (one with an iOS/Android module) → build. A pure-JS dependency can

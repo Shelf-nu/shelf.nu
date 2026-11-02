@@ -121,6 +121,12 @@ describe("booking scan-assets action", () => {
         expect.objectContaining({
           bookingId: "booking-1",
           assetIds: ["asset-1"],
+          // The caller's access decides whether a model-pool refusal names
+          // other members' bookings; the hints carry its time zone.
+          access: expect.objectContaining({
+            bookings: expect.objectContaining({ seeAll: false }),
+          }),
+          hints: expect.objectContaining({ timeZone: expect.any(String) }),
         })
       );
     }

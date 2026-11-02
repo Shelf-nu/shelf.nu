@@ -358,6 +358,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       custodyAvailable: number;
     } | null = null;
     /**
+     * Units free to hand over right now, the figure the web labels "Free now":
+     * total minus custody, units in kits and units out, from the availability
+     * engine. Reservations are not subtracted. Sent for every QUANTITY_TRACKED
+     * asset, including one whose `quantityBreakdown` is null because its units
+     * sit only in kits; null for INDIVIDUAL assets.
+     */
+    let freeNow: number | null = null;
+    /**
      * Where a pool's units can be taken from (additive). The same summary the
      * web asset page ships to its Assign dialog: `multiSource` is true only
      * for a pool placed at two or more locations, and `options` then lists
@@ -385,6 +393,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         }),
       ]);
       custodySources = sources;
+      freeNow = rows.freeNow;
       const breakdown = getQuantityData(rows);
       quantityBreakdown = breakdown
         ? {
@@ -616,6 +625,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         // assets and for QUANTITY_TRACKED assets with no custody/booking
         // activity (see getQuantityData's null contract).
         quantityBreakdown,
+        // Free now (additive, see above). A top-level field, not part of
+        // `quantityBreakdown`, so it arrives even when the breakdown is null.
+        freeNow,
         // Where the pool's units can be taken from (additive, see above).
         // Null for INDIVIDUAL assets.
         custodySources,

@@ -1,6 +1,11 @@
 import { useMemo, useState } from "react";
 import type { Currency, Prisma } from "@prisma/client";
-import { data, type LoaderFunctionArgs, type MetaFunction } from "react-router";
+import {
+  data,
+  redirect,
+  type LoaderFunctionArgs,
+  type MetaFunction,
+} from "react-router";
 import { useLoaderData } from "react-router";
 import { Form } from "~/components/custom-form";
 import { ShelfSymbolLogo } from "~/components/marketing/logos";
@@ -55,8 +60,18 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     });
 
     const user = await getUserByID(userId, {
-      select: { id: true, customerId: true } satisfies Prisma.UserSelect,
+      select: {
+        id: true,
+        customerId: true,
+        sso: true,
+      } satisfies Prisma.UserSelect,
     });
+
+    // SSO accounts never buy a plan here: billing is managed by the workspace
+    // owner. Redirect before any Stripe call.
+    if (user.sso) {
+      return redirect("/");
+    }
 
     /** Get the Stripe customer */
     const customer = user.customerId

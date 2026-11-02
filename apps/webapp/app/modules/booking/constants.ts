@@ -4,6 +4,59 @@ import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
 import { USER_NAME_SELECT } from "../user/fields";
 
 /**
+ * The bookings list's "Expired" status option: RESERVED bookings whose end
+ * date has passed with no check-out. A view over RESERVED, not a stored
+ * status, so it lives beside the enum rather than in it. `getParamsValues`
+ * accepts it as a status, and `buildBookingsWhere` turns it into
+ * `status = RESERVED AND to < now`. See `isReservationExpired`.
+ */
+export const EXPIRED_BOOKINGS_FILTER = "EXPIRED" as const;
+
+/**
+ * The bookings list's "Pending approval" status option: RESERVED bookings
+ * nobody has approved yet, in a workspace that requires approval. Pending is
+ * derived (see `isBookingPendingApproval`), not a stored status, so like
+ * Expired it lives beside the enum. `getParamsValues` accepts it as a status,
+ * and `buildBookingsWhere` turns it into `status = RESERVED AND approvedAt IS
+ * NULL AND the workspace requires approval`.
+ */
+export const PENDING_APPROVAL_BOOKINGS_FILTER = "PENDING_APPROVAL" as const;
+
+/** What the bookings list's status picker can hold. */
+export type BookingStatusFilter =
+  | BookingStatus
+  | typeof EXPIRED_BOOKINGS_FILTER
+  | typeof PENDING_APPROVAL_BOOKINGS_FILTER;
+
+/**
+ * The where-params a picked status stands for, for every bookings list.
+ *
+ * "Expired" is RESERVED narrowed by date and "Pending approval" is RESERVED
+ * narrowed by approval, so each sets its flag beside `statuses`; a stored
+ * status is itself; nothing picked adds nothing, and the list's default
+ * applies.
+ *
+ * @param status - The picked status, as `getParamsValues` returns it
+ * @returns The params to spread into the list's where-params
+ */
+export function bookingStatusFilterWhereParams(
+  status: BookingStatusFilter | null | undefined
+): {
+  statuses?: BookingStatus[];
+  expiredOnly?: boolean;
+  pendingApprovalOnly?: boolean;
+} {
+  if (!status) return {};
+  if (status === EXPIRED_BOOKINGS_FILTER) {
+    return { statuses: [BookingStatus.RESERVED], expiredOnly: true };
+  }
+  if (status === PENDING_APPROVAL_BOOKINGS_FILTER) {
+    return { statuses: [BookingStatus.RESERVED], pendingApprovalOnly: true };
+  }
+  return { statuses: [status] };
+}
+
+/**
  * Booking statuses an asset or kit can still be added to.
  *
  * DRAFT/RESERVED are not yet started; ONGOING/OVERDUE are active — items added
@@ -178,6 +231,15 @@ export type ReservationEmailModelRequest =
 
 /** Max number of assets to display in booking email notifications */
 export const BOOKING_EMAIL_ASSETS_DISPLAY_LIMIT = 10;
+
+/**
+ * Toast body after a booking is created. Every create path leaves a DRAFT,
+ * which claims no assets or model capacity until it is reserved, and the next
+ * step is worded for both kinds of member: one whose reservation is a request
+ * for review and one who reserves directly.
+ */
+export const DRAFT_CREATED_MESSAGE =
+  "Your booking is saved as a draft and holds nothing yet. Reserve it, or request a reservation, from the booking page when you are ready.";
 
 /** Common relations to include in a booking */
 export const BOOKING_COMMON_INCLUDE = {
@@ -456,3 +518,13 @@ export const BOOKING_ASSET_SORTING_OPTIONS = {
 
 export type BookingAssetSortingOption =
   keyof typeof BOOKING_ASSET_SORTING_OPTIONS;
+
+/**
+ * Most bookings one bulk Check out or Check in from the bookings list takes.
+ *
+ * Each booking runs its own locked check-out or check-in, one after another,
+ * inside a single request, so the batch size bounds how long that request
+ * runs. The server refuses a larger selection before any write, and the
+ * Actions menu disables both items with the same reason.
+ */
+export const MAX_BULK_CHECK_IN_OUT_BOOKINGS = 50;

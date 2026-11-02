@@ -45,7 +45,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userOrganizations,
       request,
     });
-    const totalValue = await getLocationTotalValuation({ locationId: id });
+    const totalValue = await getLocationTotalValuation({
+      locationId: id,
+      organizationId,
+    });
 
     const header: HeaderData = {
       title: `${location.name}'s overview`,

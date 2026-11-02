@@ -1,6 +1,8 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { useFocusEffect } from "@react-navigation/native";
 import { api, type AssetDetail } from "@/lib/api";
 import { announce } from "@/lib/a11y";
+import { assetChangeVersion } from "@/lib/asset-refresh";
 
 interface UseAssetDataReturn {
   asset: AssetDetail | null;
@@ -42,19 +44,47 @@ export function useAssetData(
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchAsset = useCallback(async () => {
-    if (!orgId) return;
-    const { data, error: fetchErr } = await api.asset(assetId, orgId);
-    // Request cancelled (navigation) — ignore
-    if (!data && !fetchErr) return;
-    if (fetchErr || !data) {
-      setError(fetchErr || "Failed to load asset details");
-      setAsset(null);
-    } else {
-      setAsset(data.asset);
-      setError(null);
-    }
-  }, [assetId, orgId]);
+  // Identity of the newest asset request. Every load (mount, pull-to-refresh,
+  // an action's reload, the focus refetch below) takes the next number, and
+  // only the newest may write state, so an older answer that lands late
+  // never replaces a newer one.
+  const latestRequest = useRef(0);
+
+  // The asset-change version this screen's data reflects (see
+  // lib/asset-refresh.ts). Read before each fetch starts, so a change saved
+  // while a request is in flight still triggers the next focus refetch.
+  const seenChangeVersion = useRef(assetChangeVersion(assetId));
+
+  /**
+   * Loads the asset and applies the answer if it is still the newest request.
+   * Every successful load marks the change version it started at as seen.
+   *
+   * @param quiet - On failure, keep the asset on screen instead of switching
+   *   to the error state
+   */
+  const loadAsset = useCallback(
+    async (quiet: boolean) => {
+      if (!orgId) return;
+      const request = ++latestRequest.current;
+      const version = assetChangeVersion(assetId);
+      const { data, error: fetchErr } = await api.asset(assetId, orgId);
+      if (request !== latestRequest.current) return;
+      // Request cancelled (navigation): ignore
+      if (!data && !fetchErr) return;
+      if (fetchErr || !data) {
+        if (quiet) return;
+        setError(fetchErr || "Failed to load asset details");
+        setAsset(null);
+      } else {
+        seenChangeVersion.current = version;
+        setAsset(data.asset);
+        setError(null);
+      }
+    },
+    [assetId, orgId]
+  );
+
+  const fetchAsset = useCallback(() => loadAsset(false), [loadAsset]);
 
   useEffect(() => {
     // why: when orgId is briefly undefined (org context still hydrating)
@@ -63,9 +93,30 @@ export function useAssetData(
     // an "Asset not found" error state. The effect re-runs automatically
     // when orgId resolves because `fetchAsset` closes over it.
     if (!orgId) return;
+    seenChangeVersion.current = assetChangeVersion(assetId);
     setIsLoading(true);
     fetchAsset().finally(() => setIsLoading(false));
-  }, [fetchAsset, orgId]);
+  }, [assetId, fetchAsset, orgId]);
+
+  // Returning to the screen after another screen changed this asset (the
+  // edit form) refetches it in place. Quiet on failure: the asset on screen
+  // stays rather than being swapped for the error state, and the version is
+  // left unseen so the next focus tries again.
+  useFocusEffect(
+    useCallback(() => {
+      if (!orgId) return;
+      if (assetChangeVersion(assetId) === seenChangeVersion.current) return;
+      void loadAsset(true);
+      // loadAsset claims its request number before its first await, so this
+      // is the number of the refetch just started.
+      const request = latestRequest.current;
+      // Leaving the screen, or a workspace switch, drops this refetch if it
+      // is still the newest request; the version stays unseen for next time.
+      return () => {
+        if (latestRequest.current === request) latestRequest.current += 1;
+      };
+    }, [assetId, orgId, loadAsset])
+  );
 
   const onRefresh = async () => {
     setIsRefreshing(true);

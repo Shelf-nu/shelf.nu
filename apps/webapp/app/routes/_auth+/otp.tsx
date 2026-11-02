@@ -248,13 +248,10 @@ export default function OtpPage() {
           type: "error",
         });
       } else {
-        setMessage({
-          message: "Email sent successfully. Please check your inbox.",
-          type: "success",
-        });
+        setMessage({ message: pageData.resentMessage, type: "success" });
       }
     }
-  }, [fetcher]);
+  }, [fetcher, pageData.resentMessage]);
 
   return (
     <>

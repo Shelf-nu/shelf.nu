@@ -23,6 +23,7 @@ import {
   mayHaveCreatedSubscription,
   releaseAddonTrial,
 } from "~/modules/billing/addon-trial-claim.server";
+import { assertUserMayPurchase } from "~/modules/billing/sso-purchase-gate.server";
 import { signalsTeamIntent } from "~/modules/onboarding/constants";
 import { getOrganizationByUserId } from "~/modules/organization/service.server";
 import { getUserByID } from "~/modules/user/service.server";
@@ -46,6 +47,20 @@ export async function loader({ context }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
+    // One read serves the SSO check and the onboarding answer below.
+    const userWithIntel = await getUserByID(userId, {
+      select: {
+        sso: true,
+        businessIntel: { select: { teamSize: true } },
+      } satisfies Prisma.UserSelect,
+    });
+
+    // SSO accounts never buy add-ons here: billing is managed by the workspace
+    // owner. Redirect before any Stripe call.
+    if (userWithIntel.sso) {
+      return redirect("/");
+    }
+
     const [auditPrices, barcodePrices] = await Promise.all([
       getAuditAddonPrices(),
       getBarcodeAddonPrices(),
@@ -72,11 +87,6 @@ export async function loader({ context }: LoaderFunctionArgs) {
     // Read the onboarding "how many people" answer so we can steer the plan
     // choice. Only the known multi-person options count: the field is
     // free-text capable, so answers like "1" must not imply a team.
-    const userWithIntel = await getUserByID(userId, {
-      select: {
-        businessIntel: { select: { teamSize: true } },
-      } satisfies Prisma.UserSelect,
-    });
     const teamSize = userWithIntel.businessIntel?.teamSize ?? null;
     const teamIntent =
       teamSize && signalsTeamIntent(teamSize) ? { teamSize } : null;
@@ -113,6 +123,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
     if (intent !== "personal-with-addons") {
       throw new Error("Invalid intent");
     }
+
+    // The add-on trials bill the personal workspace, which an SSO account
+    // never owns for purchasing. Refuse before any DB write or Stripe call.
+    await assertUserMayPurchase({ userId, target: "personal" });
 
     // The trial flags are deliberately NOT selected here: whether a trial is
     // still available is decided by claiming it, not by reading it first.

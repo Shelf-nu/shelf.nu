@@ -27,6 +27,7 @@
 import { data, redirect, type ActionFunctionArgs } from "react-router";
 import { BookingFormSchema } from "~/components/booking/forms/forms-schema";
 import { CreateBookingForModelsSchema } from "~/modules/asset-model/model-reservations-schema";
+import { DRAFT_CREATED_MESSAGE } from "~/modules/booking/constants";
 import { createBooking } from "~/modules/booking/service.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { buildTagsSet } from "~/modules/tag/service.server";
@@ -202,8 +203,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
     });
 
     sendNotification({
-      title: "Booking saved",
-      message: "Your booking has been saved successfully",
+      title: "Draft created",
+      message: DRAFT_CREATED_MESSAGE,
       icon: { name: "success", variant: "success" },
       senderId: userId,
     });

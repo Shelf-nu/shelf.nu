@@ -512,6 +512,13 @@ describe("manage-kits route validation", () => {
               quantity: 5,
             },
           ],
+          // `bookings.seeAll` decides whether a pool refusal names other
+          // members' bookings; the hints carry the time zone its day is
+          // written in.
+          access: expect.objectContaining({
+            bookings: expect.objectContaining({ seeAll: true }),
+          }),
+          hints: expect.objectContaining({ timeZone: expect.any(String) }),
         })
       );
     });

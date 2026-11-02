@@ -285,6 +285,7 @@ export const assetIndexFields = ({
         quantity: true,
         custodian: {
           select: {
+            id: true,
             name: true,
             userId: true,
             user: {

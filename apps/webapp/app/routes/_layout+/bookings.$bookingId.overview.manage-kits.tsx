@@ -634,6 +634,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         kitSlices,
         // Re-checks the add rule against the locked booking status.
         access,
+        hints: getClientHint(request),
       });
 
       if (newlyAddedKitIds.length > 0) {
