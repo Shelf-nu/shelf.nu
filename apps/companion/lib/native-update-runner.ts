@@ -81,15 +81,19 @@ async function runIos(lib: InAppUpdates): Promise<NativeUpdateOutcome> {
     return "no-store-update";
   }
 
-  // Remembered before the sheet opens: closing the sheet is the dismissal, and
-  // the library reports no outcome beyond "presented".
+  const started = await lib.startUpdate();
+  if (!started) return "unavailable";
+
+  // Remembered only once the sheet is up: closing it is the dismissal, and the
+  // library reports no outcome beyond "presented". A sheet that failed to open
+  // must not count as shown, or later launches would skip both it and the
+  // fallback banner.
   try {
     await AsyncStorage.setItem(IOS_STORE_SHEET_SHOWN_KEY, storeVersion);
   } catch {
     // Non-fatal: the once-per-launch rule still holds for this session.
   }
-  const started = await lib.startUpdate();
-  return started ? "started" : "unavailable";
+  return "started";
 }
 
 /**
