@@ -12,6 +12,7 @@ import { test } from "node:test";
 import {
   isBannerFallbackActive,
   isNewerVersionAdvertised,
+  planPlayUpdate,
   settlesLaunch,
   shouldAttemptNativeUpdate,
   shouldPresentStoreSheet,
@@ -139,4 +140,30 @@ test("the banner is a fallback only when the native flow is unavailable", () => 
   assert.equal(isBannerFallbackActive("no-store-update"), false);
   // Pending: hidden, so the banner never flashes before a native sheet.
   assert.equal(isBannerFallbackActive(null), false);
+});
+
+// ── planPlayUpdate ───────────────────────────────────────
+
+test("starts the flexible flow only when Play offers and allows it", () => {
+  assert.equal(
+    planPlayUpdate({ updateAvailable: true, flexibleAllowed: true }),
+    "start"
+  );
+});
+
+test("an update Play will not deliver flexibly falls back to the banner", () => {
+  assert.equal(
+    planPlayUpdate({ updateAvailable: true, flexibleAllowed: false }),
+    "unavailable"
+  );
+  // The field is absent on some answers; treat that as not allowed.
+  assert.equal(planPlayUpdate({ updateAvailable: true }), "unavailable");
+});
+
+test("no update, or one already downloading, needs nothing this launch", () => {
+  assert.equal(planPlayUpdate({ updateAvailable: false }), "no-store-update");
+  assert.equal(
+    planPlayUpdate({ updateAvailable: true, updateInProgress: true }),
+    "no-store-update"
+  );
 });

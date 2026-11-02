@@ -25,6 +25,7 @@ import { requireOptionalNativeModule } from "expo";
 import * as Sentry from "@sentry/react-native";
 import {
   IOS_STORE_SHEET_SHOWN_KEY,
+  planPlayUpdate,
   shouldPresentStoreSheet,
   type NativeUpdateOutcome,
 } from "./native-update";
@@ -58,11 +59,20 @@ export async function readIosShownStoreVersion(): Promise<string | null> {
   }
 }
 
-/** Starts Play's flexible flow; `false` from the library means no update. */
+/**
+ * Starts Play's flexible flow when Play offers an update and allows it.
+ *
+ * Checked first because `startUpdate` answers `false` both when there is no
+ * update and when the flexible flow is not allowed, and only the second one
+ * needs the fallback banner.
+ */
 async function runAndroid(lib: InAppUpdates): Promise<NativeUpdateOutcome> {
+  const plan = planPlayUpdate(await lib.checkForUpdate());
+  if (plan !== "start") return plan;
   // `false` asks for FLEXIBLE explicitly. Leaving it undefined would let the
   // library pick IMMEDIATE for a high Play priority, which blocks the app.
   const started = await lib.startUpdate(false);
+  // `false` here means Play's answer changed between the two calls.
   return started ? "started" : "no-store-update";
 }
 

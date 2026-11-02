@@ -166,3 +166,36 @@ export function isBannerFallbackActive(
 ): boolean {
   return outcome === "unavailable";
 }
+
+/**
+ * What to do with Google Play's answer to "is there an update?".
+ *
+ * - `start`: Play offers an update and allows the flexible flow.
+ * - `no-store-update`: Play offers nothing yet, or a flexible download this
+ *   app started earlier is still running (Play finishes it on its own).
+ * - `unavailable`: Play offers an update but not through the flexible flow,
+ *   which is the only one this app requests, so the banner must cover it.
+ */
+export type PlayUpdatePlan = "start" | "no-store-update" | "unavailable";
+
+/**
+ * Classifies Google Play's update check for the flexible flow.
+ *
+ * @param updateAvailable - Play has a newer build for this install.
+ * @param updateInProgress - A developer-triggered update is already running.
+ * @param flexibleAllowed - Play allows the flexible flow for that build.
+ *   Absent counts as not allowed.
+ * @returns The plan for this launch.
+ */
+export function planPlayUpdate({
+  updateAvailable,
+  updateInProgress,
+  flexibleAllowed,
+}: {
+  updateAvailable: boolean;
+  updateInProgress?: boolean;
+  flexibleAllowed?: boolean;
+}): PlayUpdatePlan {
+  if (!updateAvailable || updateInProgress) return "no-store-update";
+  return flexibleAllowed ? "start" : "unavailable";
+}
