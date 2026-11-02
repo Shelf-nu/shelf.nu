@@ -163,6 +163,7 @@ export const getAssetOverviewFields = (canUseBarcodes: boolean = false) => {
             helpText: true,
             required: true,
             type: true,
+            format: true,
             categories: true,
             options: true,
           },

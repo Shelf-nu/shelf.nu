@@ -175,6 +175,7 @@ import {
   wrapBookingStatusForNote,
   wrapCustodianForNote,
   wrapDescriptionForNote,
+  wrapNameForNote,
 } from "~/utils/markdoc-wrappers";
 import {
   assertAssetsAreNotArchived,
@@ -1879,9 +1880,9 @@ export async function updateBasicBooking({
       await createSystemBookingNote({
         bookingId: booking.id,
         organizationId,
-        content: `${userLink} changed booking name from **${stripMarkdocDelimiters(
+        content: `${userLink} changed booking name from ${wrapNameForNote(
           booking.name
-        )}** to **${stripMarkdocDelimiters(name)}**.`,
+        )} to ${wrapNameForNote(name)}.`,
       });
       changes.push(`Booking name changed from "${booking.name}" to "${name}"`);
     }
@@ -2060,8 +2061,8 @@ export async function updateBasicBooking({
 
     if (JSON.stringify(oldTagIds) !== JSON.stringify(newTagIds)) {
       // Get tag names for better readability
-      // Tag names are free-form user input and land in Markdoc-rendered note
-      // content as literal text, so strip tag delimiters from each.
+      // Tag names are free-form user input: each is stripped of Markdoc
+      // delimiters here, and the note puts each list inside a `name` tag.
       const oldTagNames =
         booking.tags
           .map((tag) => stripMarkdocDelimiters(tag.name))
@@ -2079,7 +2080,9 @@ export async function updateBasicBooking({
       await createSystemBookingNote({
         bookingId: booking.id,
         organizationId,
-        content: `${userLink} changed booking tags from **${oldTagNames}** to **${newTagNames}**.`,
+        content: `${userLink} changed booking tags from ${wrapNameForNote(
+          oldTagNames
+        )} to ${wrapNameForNote(newTagNames)}.`,
       });
       changes.push(`Tags changed from "${oldTagNames}" to "${newTagNames}"`);
     }
@@ -8005,12 +8008,13 @@ function buildQtyPerAssetCheckoutFragment(
     // Per-slice phrasing — dialog checkouts carry the exact BookingAsset id.
     if (s.bookingAssetId) {
       const sliceLabel = s.assetKitId
-        ? // SECURITY: `kitName` is free-form user input (Kit.name) spliced into
-          // note text that is rendered through Markdoc. Strip Markdoc delimiters
-          // so a kit named e.g. `X{% link to="javascript:..." /%}` cannot inject
-          // a live tag (stored XSS). Sanitize-at-write — see
+        ? // `kitName` is free-form user input (Kit.name), so it goes inside a
+          // `name` tag: delimiters stripped (no injected tag) and never bare
+          // text (a URL-shaped name never becomes a link). See
           // .claude/rules/sanitize-note-content-markdoc.md.
-          `in kit ${stripMarkdocDelimiters(s.kitName ?? "kit") || "kit"}`
+          `in kit ${wrapNameForNote(
+            stripMarkdocDelimiters(s.kitName) || "kit"
+          )}`
         : "standalone";
       // The unit rides on the slice total via `formatUnitCount` ("22 boxes");
       // the checked-out count stays a bare number so the phrase reads
@@ -17199,9 +17203,9 @@ export async function bulkDeleteBookings({
           booking.bookingAssets.map((ba) => ({
             userId,
             assetId: ba.asset.id,
-            content: `**${stripMarkdocDelimiters(
+            content: `${wrapNameForNote(
               resolveUserDisplayName(user)
-            )}** deleted booking **${stripMarkdocDelimiters(booking.name)}**.`,
+            )} deleted booking ${wrapNameForNote(booking.name)}.`,
             type: "UPDATE" as const,
           }))
         )

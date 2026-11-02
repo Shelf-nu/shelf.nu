@@ -9,12 +9,14 @@
  * tag holding either does not parse at all, so the note renders with a hole
  * where the tag should be: "updated the asset description ." for any
  * multi-line description, or a missing user link for a name like
- * `Customer\Barbara`.
+ * `Customer\Barbara`. And Markdoc does not decode HTML entities, so a stored
+ * `&quot;` would reach the page as those six characters.
  *
  * Stored content keeps the raw form, and this module converts it into valid
- * Markdoc right before parsing, for system-generated notes only
- * (`SystemNoteViewer`). Author-written content is left alone: a Markdoc
- * example in a code span must show exactly as typed. Raw is the one encoding
+ * Markdoc right before parsing (`&quot;` becomes the string escape `\"`),
+ * for system-generated notes only (`SystemNoteViewer`). Author-written
+ * content is left alone: a Markdoc example in a code span must show exactly
+ * as typed. Raw is the one encoding
  * every reader of stored notes already understands: the CSV/PDF export
  * (`~/utils/note-sanitizer.server`) and the companion app's activity list
  * read attribute values with plain regexes, so writing Markdoc escapes
@@ -76,8 +78,15 @@ function isBareValueChar(code: number): boolean {
   );
 }
 
-/** True when `content` holds a backslash or a control character. */
+/** The escaped quote the writers store inside a quoted value. */
+const ESCAPED_QUOTE = "&quot;";
+
+/**
+ * True when `content` holds a backslash, a control character or an escaped
+ * quote: something `encodeTag` would change.
+ */
 function hasEncodableChar(content: string): boolean {
+  if (content.includes(ESCAPED_QUOTE)) return true;
   for (let i = 0; i < content.length; i++) {
     const code = content.charCodeAt(i);
     if (code < 0x20 || code === 0x5c) return true;
@@ -196,8 +205,10 @@ function writerTagEnd(
  *
  * Every `"` in such a tag delimits a value, so the quotes simply toggle
  * between tag syntax and value text. Inside a value a backslash becomes `\\`,
- * a line break `\n` (a `\r\n` pair is one break), a tab `\t`, and any other
- * control character, which has no Markdoc escape, a space.
+ * an escaped quote (`&quot;`) `\"`, a line break `\n` (a `\r\n` pair is one
+ * break), a tab `\t`, and any other control character, which has no Markdoc
+ * escape, a space. Markdoc reads `\"` as a quote character inside the string,
+ * so a quote in a value never ends the attribute.
  */
 function encodeTag(tag: string): string {
   let text = "";
@@ -213,6 +224,9 @@ function encodeTag(tag: string): string {
       text += char;
     } else if (char === "\\") {
       text += "\\\\";
+    } else if (tag.startsWith(ESCAPED_QUOTE, i)) {
+      text += '\\"';
+      i += ESCAPED_QUOTE.length - 1;
     } else if (char === "\n") {
       text += "\\n";
     } else if (char === "\r") {
@@ -235,8 +249,8 @@ function encodeTag(tag: string): string {
  * Text outside those tags is never changed. A `{%` that does not open a
  * writer-shaped tag (unclosed, malformed, or holding a Markdoc-style `\"`) is
  * copied through as stored, and the search continues right after it, so later
- * tags are still encoded. Content with no `{%`, or with no backslash and no
- * control character, is returned as the very same string.
+ * tags are still encoded. Content with no `{%`, or with no backslash, control
+ * character or `&quot;`, is returned as the very same string.
  *
  * @param content - Note content as stored in the database
  * @returns The content with every writer-shaped tag's quoted values

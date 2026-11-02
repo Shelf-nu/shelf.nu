@@ -10,6 +10,7 @@ import {
 } from "@radix-ui/react-popover";
 import { Search } from "lucide-react";
 import { useLoaderData, useNavigation } from "react-router";
+import { linkInputProps } from "~/components/links/link-input-props";
 import { useDateFormatter } from "~/hooks/use-date-formatter";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
 import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";
@@ -243,6 +244,7 @@ export default function AssetCustomFields({
                       defaultValue={getCustomFieldVal(field.id)}
                       className="w-full"
                       required={isFieldRequired(field.id)}
+                      {...linkInputProps(field)}
                     />
                   )}
                 </FormRow>
@@ -274,6 +276,7 @@ export default function AssetCustomFields({
                       defaultValue={getCustomFieldVal(field.id)}
                       className="w-full"
                       required={isFieldRequired(field.id)}
+                      {...linkInputProps(field)}
                     />
                   )}
                 </FormRow>

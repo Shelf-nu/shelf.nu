@@ -7,6 +7,7 @@ import {
   wrapCategoryForNote,
   wrapDescriptionForNote,
   wrapLinkForNote,
+  wrapNameForNote,
   wrapUserLinkForNote,
 } from "~/utils/markdoc-wrappers";
 
@@ -91,17 +92,11 @@ export function buildNameChangeNote({
     return null;
   }
 
-  const formatName = (value: string) => {
-    // Strip Markdoc delimiters BEFORE escaping emphasis: asset titles are
-    // free-form user input and escaping `*_~` alone still lets `{% … %}`
-    // through as a live tag.
-    const escaped = stripMarkdocDelimiters(value).replace(/([*_`~])/g, "\\$1");
-    return `**${escaped}**`;
-  };
-
-  return `${userLink} updated the asset name from ${formatName(
+  // Asset titles are free-form user input, and the note is on the asset's own
+  // page, so both names go inside `name` tags rather than links.
+  return `${userLink} updated the asset name from ${wrapNameForNote(
     normalizedPrevious
-  )} to ${formatName(normalizedNext)}.`;
+  )} to ${wrapNameForNote(normalizedNext)}.`;
 }
 
 /**
@@ -110,11 +105,10 @@ export function buildNameChangeNote({
  * Returns `null` when nothing actually changed, so a caller can pass the before
  * and after unconditionally and get no note for a no-op.
  *
- * Model names are user-authored, so both renderings sanitize: a linked name
- * goes through {@link wrapLinkForNote}, which escapes it into a quoted Markdoc
- * attribute, and a deleted model's name — which has no page to link to — goes
- * through {@link stripMarkdocDelimiters} because it is spliced as literal
- * text. Either raw would be a stored-XSS splice, per
+ * Model names are user-authored, so both renderings put the name inside a
+ * tag: a linked name goes through {@link wrapLinkForNote}, and a deleted
+ * model's name, which has no page to link to, goes through
+ * {@link wrapNameForNote}. Neither is ever bare text, per
  * `.claude/rules/sanitize-note-content-markdoc.md`.
  *
  * @param args.userLink - Rendered link to the acting user.
@@ -148,17 +142,20 @@ export function buildAssetModelChangeNote({
 
   // `/edit` is the model's only route — there is no bare detail page — and it
   // is where the asset overview links a model name too. A deleted model has no
-  // page left, so its name is spliced as stripped literal text instead.
+  // page left, so its name goes inside a `name` tag instead.
   const formattedPrevious = hasPrevious
     ? previousDeleted
-      ? stripMarkdocDelimiters(previous.name)
+      ? wrapNameForNote(previous.name)
       : wrapLinkForNote(
           `/settings/asset-models/${previous.id}/edit`,
-          previous.name
+          stripMarkdocDelimiters(previous.name)
         )
     : null;
   const formattedNext = hasNext
-    ? wrapLinkForNote(`/settings/asset-models/${next.id}/edit`, next.name)
+    ? wrapLinkForNote(
+        `/settings/asset-models/${next.id}/edit`,
+        stripMarkdocDelimiters(next.name)
+      )
     : null;
 
   if (hasPrevious && hasNext) {
