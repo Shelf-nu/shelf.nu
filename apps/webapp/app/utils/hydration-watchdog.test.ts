@@ -390,6 +390,20 @@ describe("HYDRATION_WATCHDOG_SCRIPT: the page is slow to hydrate", () => {
     expect(isShowingScreen()).toBe(true);
   });
 
+  it("is not shortened by a wall-clock change while visible", () => {
+    runWatchdog();
+    vi.advanceTimersByTime(15_000);
+    // The system clock jumps an hour ahead (a manual change, an NTP fix).
+    vi.setSystemTime(Date.now() + 3_600_000);
+    setTabVisibility("hidden");
+    setTabVisibility("visible");
+
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS - 15_000 - 1);
+    expect(isShowingScreen()).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(isShowingScreen()).toBe(true);
+  });
+
   it("records what the page looked like when it timed out", () => {
     runWatchdog();
     vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);

@@ -147,7 +147,9 @@ export const HYDRATION_WATCHDOG_SCRIPT = `(function () {
   var settled = false;
   var failed = false;
   var timer;
-  // The timeout clock: it runs only while the tab is visible.
+  // The timeout clock: it runs only while the tab is visible, and measures on
+  // the monotonic clock so a wall-clock change cannot shorten or stretch it.
+  var perf = window.performance;
   var remaining = ${HYDRATION_TIMEOUT_MS};
   var clockStartedAt = null;
   var wasHidden = document.visibilityState === "hidden";
@@ -193,8 +195,11 @@ export const HYDRATION_WATCHDOG_SCRIPT = `(function () {
     return typeof url === "string" && url.indexOf(ORIGIN + "/") === 0;
   }
 
+  function elapsedNow() {
+    return perf && perf.now ? perf.now() : Date.now();
+  }
+
   function diagnostics() {
-    var perf = window.performance;
     var files = 0;
     var last = null;
     try {
@@ -301,7 +306,7 @@ export const HYDRATION_WATCHDOG_SCRIPT = `(function () {
     if (settled || failed || clockStartedAt !== null) {
       return;
     }
-    clockStartedAt = Date.now();
+    clockStartedAt = elapsedNow();
     timer = window.setTimeout(function () {
       fail("timeout", null);
     }, remaining);
@@ -312,7 +317,7 @@ export const HYDRATION_WATCHDOG_SCRIPT = `(function () {
       return;
     }
     window.clearTimeout(timer);
-    remaining -= Date.now() - clockStartedAt;
+    remaining -= elapsedNow() - clockStartedAt;
     clockStartedAt = null;
   }
 
