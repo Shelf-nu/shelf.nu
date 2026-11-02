@@ -17,8 +17,11 @@ import { formatUnitCount } from "~/utils/asset-quantity";
 import { CUSTODY_FILTER_REFUSED } from "~/utils/custody-filter";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { getParamsValues } from "~/utils/list";
-import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
-import { wrapUserLinkForNote, wrapLinkForNote } from "~/utils/markdoc-wrappers";
+import {
+  wrapUserLinkForNote,
+  wrapLinkForNote,
+  wrapNameForNote,
+} from "~/utils/markdoc-wrappers";
 import { splitFilterParam } from "./filter-param";
 import { parseFiltersWithHierarchy } from "./query.server";
 import type { ArchivedFilter, ICustomFieldValueJson } from "./types";
@@ -202,7 +205,8 @@ export function getInitialPlacementNoteContent(asset: {
  *   lastName: "Doe",
  *   isFirstTimeSet: true
  * })
- * // Returns: "**John Doe** set **Serial Number** of **Laptop** to **SN123456**"
+ * // Returns: '{% link to="/settings/team/users/..." text="John Doe" /%} set
+ * //   {% name text="Serial Number" /%} to {% name text="SN123456" chips=true /%}.'
  *
  * // Updating existing value
  * getCustomFieldUpdateNoteContent({
@@ -213,7 +217,9 @@ export function getInitialPlacementNoteContent(asset: {
  *   lastName: "Smith",
  *   isFirstTimeSet: false
  * })
- * // Returns: "**Jane Smith** updated **Status** of **Camera** from **Active** to **Inactive**"
+ * // Returns: '{% link to="/settings/team/users/..." text="Jane Smith" /%} updated
+ * //   {% name text="Status" /%} from {% name text="Active" chips=true /%} to
+ * //   {% name text="Inactive" chips=true /%}.'
  */
 export function getCustomFieldUpdateNoteContent({
   customFieldName,
@@ -241,22 +247,23 @@ export function getCustomFieldUpdateNoteContent({
     firstName,
     lastName,
   });
-  // Custom field NAMES and VALUES are both free-form user input and render
-  // as literal text in this Markdoc note.
-  const fieldName = stripMarkdocDelimiters(customFieldName);
-  const safeNew = stripMarkdocDelimiters(newValue);
-  const safePrevious = stripMarkdocDelimiters(previousValue);
+  // Custom field NAMES and VALUES are both free-form user input, so each goes
+  // inside a `name` tag. Values show their web links as chips, like the asset
+  // page does; field names never do.
+  const fieldName = wrapNameForNote(customFieldName);
+  const safeNew = wrapNameForNote(newValue, { chips: true });
+  const safePrevious = wrapNameForNote(previousValue, { chips: true });
   let message = "";
 
   if (isFirstTimeSet && newValue) {
     // First time setting a value
-    message = `${userLink} set **${fieldName}** to **${safeNew}**.`;
+    message = `${userLink} set ${fieldName} to ${safeNew}.`;
   } else if (previousValue && newValue) {
     // Changing from one value to another
-    message = `${userLink} updated **${fieldName}** from **${safePrevious}** to **${safeNew}**.`;
+    message = `${userLink} updated ${fieldName} from ${safePrevious} to ${safeNew}.`;
   } else if (previousValue && !newValue) {
     // Removing a value
-    message = `${userLink} removed **${fieldName}** value **${safePrevious}**.`;
+    message = `${userLink} removed ${fieldName} value ${safePrevious}.`;
   }
 
   return message;

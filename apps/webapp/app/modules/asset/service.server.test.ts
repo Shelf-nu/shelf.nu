@@ -5,6 +5,8 @@ import {
   type AssetIndexSettings,
 } from "@prisma/client";
 import { describe, expect, it, vi, vitest, beforeEach } from "vitest";
+import { createCustomField } from "@factories";
+import { URL_SHAPED_VALUE, expectValueOnlyInTag } from "@helpers/note-tags";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
 import { db } from "~/database/db.server";
@@ -813,6 +815,47 @@ describe("duplicateAsset", () => {
         quantity: 1,
       },
     });
+  });
+
+  it("copies stored custom field values as they are, even ones a Link field would refuse now", async () => {
+    vi.mocked(getActiveCustomFields).mockResolvedValue([
+      createCustomField({ id: "cfmanual", name: "Manual", format: "LINK" }),
+    ]);
+    // why: createAsset proves the custom fields belong to the org.
+    vi.mocked(db.customField.findMany).mockResolvedValueOnce([
+      { id: "cfmanual" },
+    ] as never);
+
+    await duplicateAsset({
+      asset: makeSource({
+        customFields: [
+          {
+            customFieldId: "cfmanual",
+            value: { raw: "see shelf", valueText: "see shelf" },
+          },
+          {
+            customFieldId: "cfinactive",
+            value: { raw: "kept off", valueText: "kept off" },
+          },
+        ] as unknown as SourceAsset["customFields"],
+      }),
+      userId: "user-1",
+      amountOfDuplicates: 1,
+      organizationId: "org-1",
+    });
+
+    expect(createdRows()).toEqual([
+      expect.objectContaining({
+        customFields: {
+          create: [
+            {
+              customFieldId: "cfmanual",
+              value: { raw: "see shelf", valueText: "see shelf" },
+            },
+          ],
+        },
+      }),
+    ]);
   });
 
   it("refuses to copy a quantity-tracked asset with no units in stock", async () => {
@@ -6553,7 +6596,7 @@ describe("archiveAsset", () => {
           expect.objectContaining({
             bookingId: "b1",
             content: expect.stringContaining(
-              "This booking's reservation of **Sony A7** is now 1 unit short for its dates."
+              'This booking\'s reservation of {% name text="Sony A7" /%} is now 1 unit short for its dates.'
             ),
           }),
         ],
@@ -6561,6 +6604,41 @@ describe("archiveAsset", () => {
       },
       expect.anything()
     );
+  });
+
+  it("keeps a URL-shaped model name inside a name tag in the shortfall note", async () => {
+    mockFindFirst.mockResolvedValue({
+      id: "a1",
+      type: "INDIVIDUAL",
+      status: "AVAILABLE",
+      archivedAt: null,
+      assetModelId: "model-1",
+    });
+    mockUpdateMany.mockResolvedValue({ count: 1 });
+
+    // why: a model named like a URL leaves "Shoot" one unit short.
+    vitest
+      .mocked(findModelReservationsShortAfterArchive)
+      .mockResolvedValueOnce([
+        {
+          bookingId: "b1",
+          bookingName: "Shoot",
+          modelName: URL_SHAPED_VALUE,
+          short: 1,
+        },
+      ]);
+
+    await archiveAsset({
+      id: "a1",
+      organizationId: "org-1",
+      actorUserId: "u1",
+      confirmModelShortfall: true,
+    });
+
+    const [{ notes }] = vitest
+      .mocked(createSystemBookingNotes)
+      .mock.calls.at(-1)!;
+    expectValueOnlyInTag(notes[0].content, URL_SHAPED_VALUE, ["name"]);
   });
 
   it("writes an Activity note naming who archived the asset", async () => {

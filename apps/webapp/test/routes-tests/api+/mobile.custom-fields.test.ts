@@ -231,4 +231,48 @@ describe("GET /api/mobile/custom-fields", () => {
       options: ["new", "used"],
     });
   });
+
+  it("returns each field's format so the app can treat Link fields as links", async () => {
+    (db.customField.findMany as any).mockResolvedValue([
+      {
+        id: "cf-1",
+        name: "Manual",
+        type: "TEXT",
+        format: "LINK",
+        helpText: null,
+        required: false,
+        options: [],
+        updatedAt: new Date("2026-01-01T00:00:00Z"),
+      },
+      {
+        id: "cf-2",
+        name: "Serial Number",
+        type: "TEXT",
+        format: "PLAIN",
+        helpText: null,
+        required: false,
+        options: [],
+        updatedAt: new Date("2026-01-01T00:00:00Z"),
+      },
+    ]);
+
+    const request = createRequest({ orgId: "org-1" });
+    const result = await loader(createLoaderArgs({ request }));
+    const body = await (result as unknown as Response).json();
+
+    expect(db.customField.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({ format: true }),
+      })
+    );
+    expect(
+      body.customFields.map((cf: { name: string; format: string }) => [
+        cf.name,
+        cf.format,
+      ])
+    ).toEqual([
+      ["Manual", "LINK"],
+      ["Serial Number", "PLAIN"],
+    ]);
+  });
 });

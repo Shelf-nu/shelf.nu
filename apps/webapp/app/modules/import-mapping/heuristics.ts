@@ -11,7 +11,7 @@
  * @see {@link file://./types.ts} the mapping shapes
  * @see {@link file://./../../utils/import.server.ts} the importer it feeds
  */
-import { CustomFieldType } from "@prisma/client";
+import { CustomFieldFormat, CustomFieldType } from "@prisma/client";
 import {
   CUSTOM_FIELD_DATE_FORMAT,
   getDefinitionFromCsvHeader,
@@ -99,7 +99,8 @@ function samplesFitField(name: AssetCsvHeader, sample: string[]): boolean {
 const CUSTOM_FIELD_TYPES = new Set<string>(Object.values(CustomFieldType));
 
 /**
- * Reads a header already written in Shelf's `cf:<name>, type:<type>` form.
+ * Reads a header already written in Shelf's `cf:<name>, type:<type>` form,
+ * keeping a `format:link` segment.
  *
  * @returns The custom field target, or `null` when the header is malformed
  */
@@ -109,7 +110,14 @@ function parseCustomFieldHeader(
   const definition = getDefinitionFromCsvHeader(header);
   const name = customFieldNameSchema.safeParse(definition.name);
   if (!name.success || !CUSTOM_FIELD_TYPES.has(definition.type)) return null;
-  return { kind: "customField", name: name.data, type: definition.type };
+  const target = {
+    kind: "customField",
+    name: name.data,
+    type: definition.type,
+  } as const;
+  return definition.format === CustomFieldFormat.LINK
+    ? { ...target, format: definition.format }
+    : target;
 }
 
 /**

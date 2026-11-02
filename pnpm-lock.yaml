@@ -122,6 +122,9 @@ importers:
       '@shelf/labels':
         specifier: workspace:*
         version: link:../../packages/labels
+      '@shelf/links':
+        specifier: workspace:*
+        version: link:../../packages/links
       '@shelf/permissions':
         specifier: workspace:*
         version: link:../../packages/permissions
@@ -254,7 +257,7 @@ importers:
         version: 10.0.0(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3)
       react-doctor:
         specifier: 0.0.39
-        version: 0.0.39(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(eslint@9.39.4(jiti@2.6.1))
+        version: 0.0.39(@emnapi/core@1.10.0)(@emnapi/runtime@1.11.3)(eslint@9.39.4(jiti@2.6.1))
       tsx:
         specifier: ^4.21.0
         version: 4.21.0
@@ -369,6 +372,9 @@ importers:
       '@shelf/labels':
         specifier: workspace:*
         version: link:../../packages/labels
+      '@shelf/links':
+        specifier: workspace:*
+        version: link:../../packages/links
       '@shelf/permissions':
         specifier: workspace:*
         version: link:../../packages/permissions
@@ -483,6 +489,9 @@ importers:
       path-to-regexp:
         specifier: ^8.4.2
         version: 8.4.2
+      pg:
+        specifier: ^8.18.0
+        version: 8.18.0
       pg-boss:
         specifier: ^9.0.3
         version: 9.0.3
@@ -655,6 +664,9 @@ importers:
       '@types/nprogress':
         specifier: ^0.2.3
         version: 0.2.3
+      '@types/pg':
+        specifier: ^8.23.1
+        version: 8.23.1
       '@types/react':
         specifier: ^19.2.14
         version: 19.2.14
@@ -738,7 +750,7 @@ importers:
         version: 6.19.3(magicast@0.3.5)(typescript@6.0.3)
       react-doctor:
         specifier: 0.0.39
-        version: 0.0.39(@emnapi/core@1.10.0)(@emnapi/runtime@1.11.3)(eslint@8.57.1)
+        version: 0.0.39(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(eslint@8.57.1)
       remix-flat-routes:
         specifier: ^0.8.5
         version: 0.8.5
@@ -808,6 +820,21 @@ importers:
         version: 6.0.3
 
   packages/labels: {}
+
+  packages/links:
+    devDependencies:
+      '@shelf/typescript-config':
+        specifier: workspace:*
+        version: link:../../tooling/typescript
+      '@types/node':
+        specifier: ^24.19.2
+        version: 24.19.2
+      tsx:
+        specifier: ^4.21.0
+        version: 4.21.0
+      typescript:
+        specifier: ^6.0.2
+        version: 6.0.3
 
   packages/permissions:
     devDependencies:
@@ -5135,6 +5162,9 @@ packages:
 
   '@types/nprogress@0.2.3':
     resolution: {integrity: sha512-k7kRA033QNtC+gLc4VPlfnue58CM1iQLgn1IMAU8VPHGOj7oIHPp9UlhedEnD/Gl8evoCjwkZjlBORtZ3JByUA==}
+
+  '@types/pg@8.23.1':
+    resolution: {integrity: sha512-fKVHpikPdg4GKks3JuLEhvwSyvwzF23hnabPy6DD8ljVbC7+6J5dQzdv4arV6jqq57djnMgs1HKBxX4P8aBI3A==}
 
   '@types/phoenix@1.6.7':
     resolution: {integrity: sha512-oN9ive//QSBkf19rfDv45M7eZPi0eEXylht2OLEXicu5b4KoQ1OzXIw+xDSGWxSxe1JmepRR/ZH283vsu518/Q==}
@@ -10576,7 +10606,6 @@ packages:
 
   undici@6.29.1:
     resolution: {integrity: sha512-EvRlUt/QqAEvXdQeRMYUfwOQsfzpDztykrG2owGEE/rBOBoYv9uF39ZzsNDh4lTFHhTr2XOZjKkYgueD12ZmGA==}
-
     engines: {node: '>=18.17'}
 
   undici@7.30.1:
@@ -15579,6 +15608,12 @@ snapshots:
       undici-types: 8.9.0
 
   '@types/nprogress@0.2.3': {}
+
+  '@types/pg@8.23.1':
+    dependencies:
+      '@types/node': 24.19.2
+      pg-protocol: 1.11.0
+      pg-types: 2.2.0
 
   '@types/phoenix@1.6.7': {}
 
@@ -20666,10 +20701,10 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  react-doctor@0.0.39(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(eslint@9.39.4(jiti@2.6.1)):
+  react-doctor@0.0.39(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(eslint@8.57.1):
     dependencies:
       commander: 14.0.3
-      eslint-plugin-react-hooks: 7.1.1(eslint@9.39.4(jiti@2.6.1))
+      eslint-plugin-react-hooks: 7.1.1(eslint@8.57.1)
       knip: 6.9.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)
       ora: 9.4.0
       oxlint: 1.62.0
@@ -20683,10 +20718,10 @@ snapshots:
       - oxlint-tsgolint
       - supports-color
 
-  react-doctor@0.0.39(@emnapi/core@1.10.0)(@emnapi/runtime@1.11.3)(eslint@8.57.1):
+  react-doctor@0.0.39(@emnapi/core@1.10.0)(@emnapi/runtime@1.11.3)(eslint@9.39.4(jiti@2.6.1)):
     dependencies:
       commander: 14.0.3
-      eslint-plugin-react-hooks: 7.1.1(eslint@8.57.1)
+      eslint-plugin-react-hooks: 7.1.1(eslint@9.39.4(jiti@2.6.1))
       knip: 6.9.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.11.3)
       ora: 9.4.0
       oxlint: 1.62.0

@@ -7,6 +7,7 @@ paths:
   - "apps/companion/app/**/*.tsx"
   - "apps/companion/app/+native-intent.ts"
   - "apps/companion/lib/resource-path.ts"
+  - "apps/companion/lib/open-link.ts"
 ---
 
 # Companion Deep-Link Allowlist Consistency
@@ -21,6 +22,10 @@ they MUST stay in sync. Touch one → check the other three.
 | 2   | `apps/companion/app.json` → `android.intentFilters[].data`            | `{ "scheme": "https", "host": "app.shelf.nu", "pathPrefix": "/locations/" }` (Android) |
 | 3   | `apps/companion/lib/resource-path.ts`                                 | `locations` in `matchResourcePath`, then a REAL route in `nativeRouteForLink`          |
 | 4   | `apps/companion/lib/deep-links.ts`                                    | a `case "locations":` in `parseDeepLink` + `navigateToLink` (custom-scheme links)      |
+
+**The claimed host** (`app.shelf.nu`) is also written in
+`apps/companion/lib/open-link.ts` (`CLAIMED_WEB_HOST`), which keeps a stored
+link to a claimed host in the in-app browser. Change it with `app.json`.
 
 **Division of labour:** HTTPS universal links are routed natively by
 expo-router via the `+native-intent.ts` rewrite (#3). The JS hook (#4) only

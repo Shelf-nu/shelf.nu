@@ -8,6 +8,7 @@
  */
 import Markdoc from "@markdoc/markdoc";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { URL_SHAPED_VALUE, expectValueOnlyInTag } from "@helpers/note-tags";
 
 const mocks = vi.hoisted(() => ({
   scanFindFirst: vi.fn(),
@@ -305,7 +306,7 @@ describe("recordScan: the note on the asset", () => {
     await recordScan(scanArgs({ source: "WEB_SCANNER", writeNote: true }));
 
     expect(noteContent()).toContain(
-      "performed a scan of the asset barcode **BC-0042**."
+      'performed a scan of the asset barcode {% name text="BC-0042" /%}.'
     );
     expect(mocks.createNote).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -323,7 +324,7 @@ describe("recordScan: the note on the asset", () => {
     );
 
     expect(noteContent()).toContain(
-      "performed a scan of the asset SAM ID **SAM-0007**."
+      'performed a scan of the asset SAM ID {% name text="SAM-0007" /%}.'
     );
   });
 
@@ -344,7 +345,7 @@ describe("recordScan: the note on the asset", () => {
       where: { userId: "user-1", organizationId: "org-1" },
     });
     expect(noteContent()).toBe(
-      "An unknown user has performed a scan of the asset barcode **BC-0042**."
+      'An unknown user has performed a scan of the asset barcode {% name text="BC-0042" /%}.'
     );
     expect(mocks.createNote).toHaveBeenCalledWith(
       expect.objectContaining({ userId: "owner-1", organizationId: "org-1" })
@@ -352,8 +353,8 @@ describe("recordScan: the note on the asset", () => {
   });
 
   it("strips Markdoc tags from the scanned value", async () => {
-    // A non-member's note carries no actor link, so any tag left in it can
-    // only have come from the scanned value.
+    // A non-member's note carries no actor link, so the only tag in it is the
+    // `name` tag that carries the scanned value as inert text.
     mocks.userOrgCount.mockResolvedValue(0);
 
     await recordScan(
@@ -366,7 +367,18 @@ describe("recordScan: the note on the asset", () => {
     const tags = [...Markdoc.parse(noteContent()).walk()].filter(
       (node) => node.type === "tag"
     );
-    expect(tags).toEqual([]);
+    expect(tags.map((node) => node.tag)).toEqual(["name"]);
+  });
+
+  it.each([
+    { codeType: "BARCODE" as const, label: "barcode" },
+    { codeType: "SAM_ID" as const, label: "SAM ID" },
+  ])("keeps a URL-shaped $label inside a name tag", async ({ codeType }) => {
+    await recordScan(
+      scanArgs({ codeType, code: URL_SHAPED_VALUE, writeNote: true })
+    );
+
+    expectValueOnlyInTag(noteContent(), URL_SHAPED_VALUE, ["name"]);
   });
 
   it("strips Markdoc tags from manually entered coordinates", async () => {
@@ -385,9 +397,11 @@ describe("recordScan: the note on the asset", () => {
 
     const content = noteContent();
     expect(content).toContain("manually updated the GPS coordinates");
-    // The actor link is the one tag the note is built with.
+    // The actor link and the `name` tag carrying the coordinates are the
+    // only tags the note is built with.
     const tags = [...Markdoc.parse(content).walk()].filter(
-      (node) => node.type === "tag" && node.tag !== "link"
+      (node) =>
+        node.type === "tag" && node.tag !== "link" && node.tag !== "name"
     );
     expect(tags).toEqual([]);
   });

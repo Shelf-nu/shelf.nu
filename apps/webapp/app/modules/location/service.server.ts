@@ -54,6 +54,7 @@ import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import {
   wrapDescriptionForNote,
   wrapLinkForNote,
+  wrapNameForNote,
   wrapUserLinkForNote,
 } from "~/utils/markdoc-wrappers";
 import { assertAssetsAreNotArchived } from "~/utils/org-validation.server";
@@ -1280,16 +1281,17 @@ async function createLocationEditNotes({
     parentId?: string | null;
   };
 }) {
-  // Strips Markdoc delimiters BEFORE escaping markdown emphasis: location name
-  // and address are free-form user input rendered through Markdoc, so escaping
-  // `*_~` alone still lets `{% … %}` through as a live tag.
-  const escape = (v: string) =>
-    `**${stripMarkdocDelimiters(v).replace(/([*_`~])/g, "\\$1")}**`;
+  // Location name and address are free-form user input, so each goes inside
+  // a `name` tag: never bare text, where a URL-shaped value would become a link.
   const changes: string[] = [];
 
   // Name change
   if (next.name !== undefined && next.name !== previous.name) {
-    changes.push(`- **Name:** ${escape(previous.name)} → ${escape(next.name)}`);
+    changes.push(
+      `- **Name:** ${wrapNameForNote(previous.name)} → ${wrapNameForNote(
+        next.name
+      )}`
+    );
   }
 
   // Description change
@@ -1307,8 +1309,8 @@ async function createLocationEditNotes({
     const prev = previous.address?.trim() || null;
     const curr = next.address?.trim() || null;
     if (prev !== curr) {
-      const prevDisplay = prev ? escape(prev) : "*none*";
-      const currDisplay = curr ? escape(curr) : "*none*";
+      const prevDisplay = prev ? wrapNameForNote(prev) : "*none*";
+      const currDisplay = curr ? wrapNameForNote(curr) : "*none*";
       changes.push(`- **Address:** ${prevDisplay} → ${currDisplay}`);
     }
   }
@@ -1318,7 +1320,7 @@ async function createLocationEditNotes({
     const prevParent = previous.parent
       ? wrapLinkForNote(
           `/locations/${previous.parent.id}`,
-          previous.parent.name
+          stripMarkdocDelimiters(previous.parent.name)
         )
       : "*none*";
 
@@ -1329,7 +1331,10 @@ async function createLocationEditNotes({
         select: { id: true, name: true },
       });
       newParentDisplay = newParent
-        ? wrapLinkForNote(`/locations/${newParent.id}`, newParent.name)
+        ? wrapLinkForNote(
+            `/locations/${newParent.id}`,
+            stripMarkdocDelimiters(newParent.name)
+          )
         : "*unknown*";
     }
 

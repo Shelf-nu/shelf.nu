@@ -10,6 +10,7 @@
  */
 import { ReminderRecurrenceUnit } from "@prisma/client";
 import type { Mock } from "vitest";
+import { URL_SHAPED_VALUE, expectValueOnlyInTag } from "@helpers/note-tags";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import { Logger } from "~/utils/logger";
@@ -210,9 +211,21 @@ describe("REMINDER worker handler", () => {
     expect(sendEmail).toHaveBeenCalledTimes(1);
     expect(createNote).toHaveBeenCalledWith(
       expect.objectContaining({
-        content: "**System** has sent **Calibrate flow meter** reminder.",
+        content:
+          '**System** has sent {% name text="Calibrate flow meter" /%} reminder.',
       })
     );
+  });
+
+  it("keeps a URL-shaped reminder name inside a name tag", async () => {
+    asMock(db.assetReminder.findFirst).mockResolvedValue(
+      buildReminderRow({ name: URL_SHAPED_VALUE })
+    );
+
+    await handler(JOB);
+
+    const [{ content }] = asMock(createNote).mock.calls[0];
+    expectValueOnlyInTag(content, URL_SHAPED_VALUE, ["name"]);
   });
 
   it("skips silently when the reminder row is gone (deleted asset/reminder)", async () => {

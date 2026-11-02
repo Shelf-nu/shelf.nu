@@ -23,6 +23,7 @@ import {
   BOOKING_RESERVE_BLOCKED_LABELS,
 } from "@shelf/labels";
 import { onTestFinished } from "vitest";
+import { URL_SHAPED_VALUE, expectValueOnlyInTag } from "@helpers/note-tags";
 import { accessFor } from "@helpers/role-access";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 
@@ -2335,10 +2336,9 @@ describe("updateBasicBooking", () => {
   it("cannot be used to inject a Markdoc tag via the booking name", async () => {
     expect.assertions(3);
 
-    // The reported vector: booking names are free-form user input and land in
-    // Markdoc-rendered note content, so a name containing `{% … %}` became a
-    // LIVE tag in the activity feed — an attacker-chosen link shown to anyone
-    // viewing the booking. The note must carry the name as inert text.
+    // Booking names are free-form user input and land in Markdoc-rendered note
+    // content, so a name containing `{% … %}` must never become a live tag in
+    // the activity feed. The note carries the name inside a `name` tag.
     const payload = '{% link to="javascript:alert(1)" text="x" /%}';
 
     //@ts-expect-error missing vitest type
@@ -2362,12 +2362,72 @@ describe("updateBasicBooking", () => {
 
     expect(noteCall).toBeDefined();
     const { content } = noteCall![0];
-    // Parsed the way the feed parses it: no tag node may exist.
+    // Parsed the way the feed parses it: only the writer's own tags exist (an
+    // actor link and the two `name` tags), and no link points off the app.
     const tags = [...Markdoc.parse(content).walk()].filter(
       (node) => node.type === "tag"
     );
-    expect(tags).toHaveLength(0);
-    expect(content).not.toContain("{%");
+    expect(tags.filter((node) => node.tag === "name")).toHaveLength(2);
+    expect(
+      tags.filter(
+        (node) =>
+          node.tag === "link" && !String(node.attributes.to).startsWith("/")
+      )
+    ).toEqual([]);
+  });
+
+  it("keeps a URL-shaped booking name inside a name tag in the rename note", async () => {
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      id: "booking-1",
+      status: BookingStatus.DRAFT,
+      custodianUserId: "user-1",
+      name: "Old Name",
+      tags: [],
+    });
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...mockBookingData,
+      name: URL_SHAPED_VALUE,
+    });
+
+    await updateBasicBooking({
+      ...mockUpdateBookingParams,
+      name: URL_SHAPED_VALUE,
+    });
+
+    const noteCall = (
+      bookingNoteService.createSystemBookingNote as ReturnType<typeof vitest.fn>
+    ).mock.calls.find(
+      ([args]) => args?.content?.includes("changed booking name")
+    );
+
+    expect(noteCall).toBeDefined();
+    expectValueOnlyInTag(noteCall![0].content, URL_SHAPED_VALUE, ["name"]);
+  });
+
+  it("keeps URL-shaped tag names inside a name tag in the tags note", async () => {
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      id: "booking-1",
+      status: BookingStatus.DRAFT,
+      custodianUserId: "user-1",
+      name: mockUpdateBookingParams.name,
+      tags: [{ id: "tag-3", name: URL_SHAPED_VALUE }],
+    });
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue(mockBookingData);
+
+    await updateBasicBooking(mockUpdateBookingParams);
+
+    const noteCall = (
+      bookingNoteService.createSystemBookingNote as ReturnType<typeof vitest.fn>
+    ).mock.calls.find(
+      ([args]) => args?.content?.includes("changed booking tags")
+    );
+
+    expect(noteCall).toBeDefined();
+    expectValueOnlyInTag(noteCall![0].content, URL_SHAPED_VALUE, ["name"]);
   });
 
   it("should update booking successfully when status is DRAFT", async () => {
@@ -17959,6 +18019,44 @@ describe("bulkDeleteBookings", () => {
       ),
       "the remaining commitment should keep it checked out"
     ).toBe(true);
+  });
+
+  it("keeps a URL-shaped booking name inside a name tag in the asset notes", async () => {
+    //@ts-expect-error missing vitest type
+    db.booking.findMany.mockResolvedValue([
+      {
+        id: "bk-del-url",
+        name: URL_SHAPED_VALUE,
+        status: BookingStatus.RESERVED,
+        custodianUserId: null,
+        activeSchedulerReference: null,
+        bookingAssets: [{ asset: { id: "asset-1", assetKits: [] } }],
+        from: new Date("2025-01-01T09:00:00Z"),
+        to: new Date("2025-01-02T17:00:00Z"),
+        organization: { customEmailFooter: null },
+        custodianUser: null,
+        custodianTeamMember: null,
+        _count: { bookingAssets: 1 },
+      },
+    ]);
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([]);
+    (db.custody.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([]);
+
+    await bulkDeleteBookings({
+      bookingIds: ["bk-del-url"],
+      confirmation: "1",
+      organizationId: "org-1",
+      userId: "user-1",
+      access: accessFor([OrganizationRoles.OWNER]),
+      hints: mockClientHints,
+    });
+
+    const [{ data }] = (db.note.createMany as ReturnType<typeof vitest.fn>).mock
+      .calls[0];
+    expect(data).toHaveLength(1);
+    expectValueOnlyInTag(data[0].content, URL_SHAPED_VALUE, ["name"]);
   });
 
   /** A booking row in the shape `bulkDeleteBookings` reads, owned by user-1. */

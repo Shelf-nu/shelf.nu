@@ -257,7 +257,7 @@ export interface ParsedColumn {
   /** For custom fields: the definition */
   cfDef?: Pick<
     CustomField,
-    "name" | "type" | "helpText" | "required" | "active"
+    "name" | "type" | "format" | "helpText" | "required" | "active"
   >;
 }
 

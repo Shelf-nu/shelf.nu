@@ -1152,6 +1152,7 @@ model Organization {
   auditSessions      AuditSession[]
   auditImages        AuditImage[]
   assetImports       AssetImport[]
+  linkPreviews       LinkPreview[]
   pdfDocuments       PdfDocument[]
 
   usersWithLastSelected User[] @relation("lastSelectedOrg")
@@ -1390,8 +1391,11 @@ model CustomField {
   required Boolean @default(false)
   active   Boolean @default(true)
 
-  type    CustomFieldType @default(TEXT)
+  type    CustomFieldType   @default(TEXT)
   options String[]
+  /// How a TEXT field's values are read. LINK requires a web link in every
+  /// value; any other type stays PLAIN (enforced by a CHECK constraint).
+  format  CustomFieldFormat @default(PLAIN)
 
   // Relationships
   organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
@@ -1423,6 +1427,13 @@ enum CustomFieldType {
   MULTILINE_TEXT
   AMOUNT
   NUMBER
+}
+
+/// The format of a TEXT custom field. Unlike the type, it can change after the
+/// field exists.
+enum CustomFieldFormat {
+  PLAIN
+  LINK
 }
 
 model AssetCustomFieldValue {
@@ -2731,6 +2742,47 @@ model AssetImport {
 
   @@index([organizationId, status])
   @@index([createdById, organizationId, status])
+}
+
+/// What Shelf knows about one web link used in a workspace's custom fields,
+/// keyed by its `LinkKey` from @shelf/links. Two writers on disjoint columns:
+/// the link preview job (fetch columns) and people (customTitle).
+model LinkPreview {
+  id             String              @id @default(cuid())
+  /// `LinkKey` from @shelf/links, never a raw field value. At most 2048
+  /// characters (CHECK constraint in the migration).
+  url            String
+  pageTitle      String?
+  /// Null until the first fetch finishes.
+  outcome        LinkPreviewOutcome?
+  attempts       Int                 @default(0)
+  fetchedAt      DateTime?
+  /// When the link may be fetched next; null means never again. A claim moves
+  /// it a few minutes ahead, which is also the lease on a fetch in flight.
+  nextFetchAt    DateTime?           @default(now())
+  /// The name a person gave the link in this workspace; wins over pageTitle.
+  customTitle    String?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  organizationId String
+
+  @@unique([organizationId, url])
+}
+
+/// How the last fetch of a link's page went.
+enum LinkPreviewOutcome {
+  /// The page has a title.
+  TITLE
+  /// The page answered but has no title, or is not an HTML page.
+  NO_TITLE
+  /// The link needs a signed-in user.
+  SIGN_IN
+  /// A bot challenge or refusal stood in the way.
+  BLOCKED
+  /// The page could not be reached, or the address is not allowed.
+  UNREACHABLE
 }
 
 model AuditAssignment {

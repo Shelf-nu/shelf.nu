@@ -31,6 +31,7 @@ import {
   type Location,
   type Tag,
   type MobileCustomFieldDefinition,
+  type MobileCustomFieldFormat,
   type MobileCustomFieldType,
 } from "@/lib/api";
 
@@ -93,6 +94,8 @@ export type CustomFieldState = {
   required: boolean;
   /** Allowed values for OPTION fields; null/empty for every other type. */
   options: string[] | null;
+  /** `LINK` for a Link-format TEXT field; absent on older servers. */
+  format?: MobileCustomFieldFormat;
   /** Current string value the user is editing. */
   value: string;
   /** Original saved value at load time. Used to detect dirty state. */
@@ -414,6 +417,7 @@ export function useEditAssetForm(
         helpText: def.helpText,
         required: def.required,
         options: def.options,
+        format: def.format,
         // Prefer the live edit; fall back to the asset's saved value.
         value: customFieldEdits[def.id] ?? originalValue,
         originalValue,

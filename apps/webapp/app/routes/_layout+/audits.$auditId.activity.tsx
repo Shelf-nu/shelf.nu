@@ -12,6 +12,7 @@ import {
   getAuditSessionDetails,
   requireAuditAssigneeForScopedViewer,
 } from "~/modules/audit/service.server";
+import { getLinkTitles } from "~/modules/link-preview/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
 import { error, getParams, payload } from "~/utils/http.server";
@@ -92,12 +93,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       auditSessionId: auditId,
     });
 
+    /** Titles for the web links in the notes, for their chips. */
+    const linkTitles = await getLinkTitles({
+      organizationId,
+      notes,
+    });
+
     const header = { title: `${session.name} · Activity` };
 
     return data(
       payload({
         session: { ...session, notes },
         header,
+        linkTitles,
       })
     );
   } catch (cause) {
