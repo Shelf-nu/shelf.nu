@@ -113,7 +113,7 @@ fly secrets set SUPABASE_URL="https://your-production-project.supabase.co"
 fly secrets set SUPABASE_SERVICE_ROLE="your-production-service-role-key"
 fly secrets set SUPABASE_ANON_PUBLIC="your-production-anon-key"
 fly secrets set DATABASE_URL="postgres://user:pass@host:6543/db?pgbouncer=true&connection_limit=1"
-fly secrets set DIRECT_URL="postgres://user:pass@host:5432/db"
+fly secrets set DIRECT_URL="postgres://user:pass@host:5432/db"  # migrations + toasts across machines
 
 # Email configuration (required)
 fly secrets set SMTP_HOST="smtp.yourhost.com"
@@ -385,6 +385,9 @@ fly scale vm performance-1x
 # Add more instances
 fly scale count 2
 ```
+
+With more than one instance, toast notifications travel between machines through Postgres
+over `DIRECT_URL`, one extra connection per instance. See [Toast Notifications](./notifications.md).
 
 ### Useful Commands
 
