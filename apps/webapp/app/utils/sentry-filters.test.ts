@@ -197,3 +197,79 @@ describe("handleClientBeforeSend — non-boundary passthrough", () => {
     expect(handleClientBeforeSend(event)).toBe(event);
   });
 });
+
+/**
+ * An unhandled rejection as Sentry reports it for a non-Error value: the
+ * message names the keys, the mechanism names the global handler, and the
+ * rejected object itself lands on `extra.__serialized__`.
+ */
+function makeRejectionEvent(serialized: Record<string, unknown>): ErrorEvent {
+  const event: ErrorEvent = {
+    type: undefined,
+    exception: {
+      values: [
+        {
+          type: "UnhandledRejection",
+          value: `Object captured as promise rejection with keys: ${Object.keys(
+            serialized
+          ).join(", ")}`,
+          mechanism: {
+            type: "auto.browser.global_handlers.onunhandledrejection",
+            handled: false,
+          },
+        },
+      ],
+    },
+    extra: { __serialized__: serialized },
+  };
+  return event;
+}
+
+/** A route error response as a loader's `throw data(error(reason), { status })` produces it. */
+function routeErrorResponse(status: number) {
+  return {
+    __type: "RouteErrorResponse",
+    data: { error: "[Object]" },
+    internal: false,
+    status,
+    statusText: "Internal Server Error",
+  };
+}
+
+describe("handleClientBeforeSend: unhandled route error rejections", () => {
+  it.each([403, 404, 429])(
+    "drops an unhandled %i route error response",
+    (status) => {
+      expect(
+        handleClientBeforeSend(makeRejectionEvent(routeErrorResponse(status)))
+      ).toBeNull();
+    }
+  );
+
+  it("drops one without the __type marker (older serializations)", () => {
+    const { __type: _ignored, ...withoutType } = routeErrorResponse(404);
+    expect(handleClientBeforeSend(makeRejectionEvent(withoutType))).toBeNull();
+  });
+
+  it("keeps an unhandled 500 route error response", () => {
+    const event = makeRejectionEvent(routeErrorResponse(500));
+    expect(handleClientBeforeSend(event)).toBe(event);
+  });
+
+  it("keeps a rejected object that is not a route error response", () => {
+    const event = makeRejectionEvent({ status: 404, message: "custom" });
+    expect(handleClientBeforeSend(event)).toBe(event);
+  });
+
+  it("keeps a 404-shaped object that was not an unhandled rejection", () => {
+    const event = {
+      ...makeRejectionEvent(routeErrorResponse(404)),
+      exception: {
+        values: [
+          { type: "Error", value: "boom", mechanism: { type: "generic" } },
+        ],
+      },
+    } as ErrorEvent;
+    expect(handleClientBeforeSend(event)).toBe(event);
+  });
+});
