@@ -13,7 +13,7 @@
  * @see {@link file://./booking-actions-menu.tsx}
  * @see {@link file://./actions-dropdown.tsx}
  */
-import { forwardRef } from "react";
+import { forwardRef, useState } from "react";
 import type { ReactNode } from "react";
 import { BookingStatus, OrganizationRoles } from "@prisma/client";
 import {
@@ -27,6 +27,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { accessFor } from "@helpers/role-access";
+import { Dialog, DialogPortal } from "~/components/layout/dialog";
 import { ActionsDropdown } from "./actions-dropdown";
 import { BookingActionsMenu } from "./booking-actions-menu";
 import { CancelBookingDialog } from "./cancel-booking-dialog";
@@ -157,6 +158,28 @@ vi.mock("./booking-checkin-receipt-pdf", async () => {
   };
 });
 
+/**
+ * A menu entry that owns a layout `Dialog` (`~/components/layout/dialog`), the
+ * way the PDF, revert-to-draft and notification entries do.
+ */
+function LayoutDialogEntry() {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)}>
+        Open details
+      </button>
+      <DialogPortal>
+        <Dialog open={open} onClose={() => setOpen(false)} title="Details">
+          <button type="button" onClick={() => setOpen(false)}>
+            Done
+          </button>
+        </Dialog>
+      </DialogPortal>
+    </>
+  );
+}
+
 /** The desktop (toggling) trigger, which is rendered first. */
 function getTrigger(name: string | RegExp) {
   return screen.getAllByRole("button", { name })[0];
@@ -191,7 +214,8 @@ describe("BookingActionsMenu", () => {
       </BookingActionsMenu>
     );
 
-    fireEvent.click(getTrigger(/^Actions/));
+    const trigger = getTrigger(/^Actions/);
+    fireEvent.click(trigger);
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.getByRole("alertdialog")).toBeInTheDocument();
 
@@ -201,6 +225,42 @@ describe("BookingActionsMenu", () => {
       expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
       expect(document.querySelector("[data-mobile-sheet]")).toBeNull();
     });
+    // The entry that opened the dialog is gone, so focus returns to the trigger.
+    await waitFor(() => {
+      expect(document.activeElement).toBe(trigger);
+    });
+  });
+
+  it("keeps a layout Dialog open after the menu closes, then lets go and reopens fresh", async () => {
+    render(
+      <BookingActionsMenu trigger="button">
+        <LayoutDialogEntry />
+      </BookingActionsMenu>
+    );
+
+    const trigger = getTrigger(/^Actions/);
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("button", { name: "Open details" }));
+
+    // The menu closed, and the layout dialog its entry opened is still there.
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(document.querySelector("dialog[open]")).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+
+    await waitFor(() => {
+      expect(document.querySelector("dialog[open]")).toBeNull();
+      expect(document.querySelector("[data-mobile-sheet]")).toBeNull();
+    });
+
+    // Reopening mounts the menu again, with the dialog closed.
+    fireEvent.click(trigger);
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(document.querySelector("[data-mobile-sheet]")).not.toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Open details" })
+    ).toBeInTheDocument();
+    expect(document.querySelector("dialog[open]")).toBeNull();
   });
 
   it("lets the menu content go when the chosen entry opens no dialog", async () => {

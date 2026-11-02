@@ -14,7 +14,6 @@ import { useLoaderData } from "react-router";
 import { useSearchParams } from "~/hooks/search-params";
 import { isCheckinReceiptAvailable } from "~/modules/booking/checkin-receipt-availability";
 import type { loader } from "~/routes/_layout+/bookings.$bookingId.overview";
-import { tw } from "~/utils/tw";
 import { ArchiveBookingAction } from "./archive-booking-action";
 import { useBookingActions } from "./booking-actions";
 import { BookingActionsMenu } from "./booking-actions-menu";
@@ -34,20 +33,12 @@ import ManageNotificationsDialog from "./manage-notifications-dialog";
 import RevertToDraftDialog from "./revert-to-draft-dialog";
 import { Divider } from "../layout/divider";
 
-/** Props for {@link ActionsDropdown}. */
-interface Props {
-  /** Stretches the trigger's wrapper to the full width of its container. */
-  fullWidth?: boolean;
-}
-
 /**
  * Renders the booking page's Actions menu, in this order: revert to draft,
  * cancel, extend, archive, duplicate, manage notifications, delete, a divider,
  * the booking document and the check-in receipt.
- *
- * @param props - See {@link Props}
  */
-export const ActionsDropdown = ({ fullWidth }: Props) => {
+export const ActionsDropdown = () => {
   const { booking, hasDispositionedUnits, nextReservations } =
     useLoaderData<typeof loader>();
 
@@ -78,56 +69,55 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
   });
 
   return (
-    <div className={tw("grow", fullWidth ? "w-full" : "")}>
-      <BookingActionsMenu trigger="button">
-        {actions.revertToDraft.visible ? (
-          <RevertToDraftDialog booking={booking} />
-        ) : null}
-        {actions.cancel.visible ? (
-          <CancelBookingDialog booking={booking} />
-        ) : null}
-        {actions.extend.visible ? (
-          <ExtendBookingDialog
-            booking={booking}
-            nextReservations={nextReservations}
-          />
-        ) : null}
-        {actions.archive.visible ? (
-          <ArchiveBookingAction booking={{ id: booking.id }} />
-        ) : null}
-        {actions.duplicate.visible ? (
-          <DuplicateBookingAction booking={{ id: booking.id }} />
-        ) : null}
-        {actions.manageNotifications.visible ? (
-          <ManageNotificationsDialog />
-        ) : null}
-        {/* Members whose policy limits delete to drafts see Delete only on a
+    // `grow` on the trigger itself: the header row stretches it on mobile.
+    <BookingActionsMenu trigger="button" triggerClassName="grow">
+      {actions.revertToDraft.visible ? (
+        <RevertToDraftDialog booking={booking} />
+      ) : null}
+      {actions.cancel.visible ? (
+        <CancelBookingDialog booking={booking} />
+      ) : null}
+      {actions.extend.visible ? (
+        <ExtendBookingDialog
+          booking={booking}
+          nextReservations={nextReservations}
+        />
+      ) : null}
+      {actions.archive.visible ? (
+        <ArchiveBookingAction booking={{ id: booking.id }} />
+      ) : null}
+      {actions.duplicate.visible ? (
+        <DuplicateBookingAction booking={{ id: booking.id }} />
+      ) : null}
+      {actions.manageNotifications.visible ? (
+        <ManageNotificationsDialog />
+      ) : null}
+      {/* Members whose policy limits delete to drafts see Delete only on a
             draft; the server applies the same rule (`assertCanDeleteBooking`). */}
-        {actions.delete.visible ? <DeleteBooking booking={booking} /> : null}
+      {actions.delete.visible ? <DeleteBooking booking={booking} /> : null}
 
-        {actions.bookingDocument.visible || actions.checkinReceipt.visible ? (
-          <Divider className="my-2" />
-        ) : null}
-        {actions.bookingDocument.visible ? (
-          <BookingOverviewPDF
-            booking={{
-              id: booking.id,
-              name: booking.name,
-              assetCount: booking.bookingAssets.length,
-            }}
-            assetOrder={assetOrder}
-          />
-        ) : null}
-        {actions.checkinReceipt.visible ? (
-          <BookingCheckinReceiptPDF
-            booking={booking}
-            available={canPrintCheckinReceipt}
-            unavailableReason={unavailableReason}
-            assetOrder={assetOrder}
-            timeStamp={new Date().getTime()}
-          />
-        ) : null}
-      </BookingActionsMenu>
-    </div>
+      {actions.bookingDocument.visible || actions.checkinReceipt.visible ? (
+        <Divider className="my-2" />
+      ) : null}
+      {actions.bookingDocument.visible ? (
+        <BookingOverviewPDF
+          booking={{
+            id: booking.id,
+            name: booking.name,
+            assetCount: booking.bookingAssets.length,
+          }}
+          assetOrder={assetOrder}
+        />
+      ) : null}
+      {actions.checkinReceipt.visible ? (
+        <BookingCheckinReceiptPDF
+          booking={booking}
+          available={canPrintCheckinReceipt}
+          unavailableReason={unavailableReason}
+          assetOrder={assetOrder}
+          timeStamp={new Date().getTime()}
+        />
+      ) : null}
+    </BookingActionsMenu>
   );
 };

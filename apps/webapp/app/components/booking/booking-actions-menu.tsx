@@ -14,7 +14,9 @@
  * as long as a dialog that appeared with that choice is still in the document,
  * and then lets it unmount and hands focus back to the trigger. An entry that
  * opens nothing (a link, a direct submit) releases the content after a short
- * grace period.
+ * grace period. Any dialog that appears within that window counts as the
+ * chosen one (for example the duplicate modal Duplicate's link navigates to);
+ * that only keeps the hidden, inert content mounted a little longer.
  *
  * @see {@link file://./actions-dropdown.tsx} the booking page's menu
  * @see {@link file://./asset-row-actions-dropdown.tsx} the Popover pattern
@@ -46,6 +48,11 @@ export type BookingActionsMenuProps = {
   children: ReactNode;
   /** Which edge of the trigger the menu lines up with. Defaults to `"end"`. */
   align?: "start" | "end";
+  /**
+   * Classes for the trigger element itself (every copy of it), for sizing it
+   * in its container, e.g. `grow` in the booking page header.
+   */
+  triggerClassName?: string;
 };
 
 /** Everything that counts as an open dialog an entry may have opened. */
@@ -80,12 +87,21 @@ const BUTTON_TEST_ID: Record<
   string | undefined
 > = { button: "bookingActionsButton", icon: undefined };
 
+/**
+ * Shows the toggling trigger from `md` up. The "button" look stays a block so
+ * its `flex` button face fills it, as the page header expects.
+ */
+const DESKTOP_ONLY: Record<BookingActionsMenuTriggerLook, string> = {
+  button: "hidden md:block",
+  icon: "hidden md:flex",
+};
+
 /** Props for {@link MenuTrigger}. */
 type MenuTriggerProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   /** Which look to render. */
   look: BookingActionsMenuTriggerLook;
-  /** The e2e selector, see {@link BUTTON_TEST_ID}. */
-  "data-test-id"?: string;
+  /** The e2e selector, see {@link BUTTON_TEST_ID}; on the visible button face. */
+  testId?: string;
 };
 
 /**
@@ -95,9 +111,13 @@ type MenuTriggerProps = ButtonHTMLAttributes<HTMLButtonElement> & {
  * can attach its handlers, `aria-expanded` and `data-state` (which turns the
  * chevron through the `asset-actions` class). Also rendered as the static
  * trigger before hydration, so its size never jumps.
+ *
+ * The "button" look is a plain `<button>` (the element that gets `className`,
+ * so `grow` / `w-full` size it in the header) wrapping the secondary `Button`
+ * face rendered as a `span`.
  */
 const MenuTrigger = forwardRef<HTMLButtonElement, MenuTriggerProps>(
-  function MenuTrigger({ look, className, ...props }, ref) {
+  function MenuTrigger({ look, className, testId, ...props }, ref) {
     if (look === "icon") {
       return (
         <button
@@ -121,17 +141,24 @@ const MenuTrigger = forwardRef<HTMLButtonElement, MenuTriggerProps>(
     }
 
     return (
-      <Button
+      <button
         ref={ref}
         type="button"
-        variant="secondary"
         {...props}
-        className={tw("asset-actions flex", className)}
+        className={tw("asset-actions", className)}
       >
-        <span className="flex items-center gap-2">
-          Actions <ChevronRight className="chev rotate-90" aria-hidden="true" />
-        </span>
-      </Button>
+        <Button
+          variant="secondary"
+          data-test-id={testId}
+          as="span"
+          className="flex"
+        >
+          <span className="flex items-center gap-2">
+            Actions{" "}
+            <ChevronRight className="chev rotate-90" aria-hidden="true" />
+          </span>
+        </Button>
+      </button>
     );
   }
 );
@@ -145,6 +172,7 @@ export function BookingActionsMenu({
   trigger,
   children,
   align = "end",
+  triggerClassName,
 }: BookingActionsMenuProps) {
   /**
    * Static trigger until hydration, so server and client markup agree. Same
@@ -154,12 +182,20 @@ export function BookingActionsMenu({
 
   if (!isHydrated) {
     return (
-      <MenuTrigger look={trigger} data-test-id={BUTTON_TEST_ID[trigger]} />
+      <MenuTrigger
+        look={trigger}
+        className={triggerClassName}
+        testId={BUTTON_TEST_ID[trigger]}
+      />
     );
   }
 
   return (
-    <InteractiveBookingActionsMenu trigger={trigger} align={align}>
+    <InteractiveBookingActionsMenu
+      trigger={trigger}
+      align={align}
+      triggerClassName={triggerClassName}
+    >
       {children}
     </InteractiveBookingActionsMenu>
   );
@@ -175,6 +211,7 @@ function InteractiveBookingActionsMenu({
   trigger,
   children,
   align,
+  triggerClassName,
 }: BookingActionsMenuProps) {
   /**
    * `skipDefault: true`: a QR scan opens the item's own page menu, never a
@@ -255,14 +292,25 @@ function InteractiveBookingActionsMenu({
     }
 
     function release() {
+      // Captured now: the content is about to unmount.
+      const content = contentRef.current;
       setHeld(false);
-      const active = document.activeElement;
-      if (!active || active === document.body) {
+      // A turn later, so it runs after the closing dialog's own focus return
+      // (Radix restores focus from a timeout), which aims at the entry that
+      // opened it. That entry is hidden or gone, so the trigger takes focus.
+      window.setTimeout(() => {
+        const active = document.activeElement;
+        const focusLost =
+          !active ||
+          active === document.body ||
+          !active.isConnected ||
+          Boolean(content?.contains(active));
+        if (!focusLost) return;
         desktopTriggerRef.current?.focus();
         if (document.activeElement !== desktopTriggerRef.current) {
           mobileTriggerRef.current?.focus();
         }
-      }
+      }, 0);
     }
 
     function check() {
@@ -302,9 +350,9 @@ function InteractiveBookingActionsMenu({
           <MenuTrigger
             ref={desktopTriggerRef}
             look={trigger}
-            className="hidden md:flex"
+            className={tw(triggerClassName, DESKTOP_ONLY[trigger])}
             // One element per id: only the toggling trigger carries it.
-            data-test-id={BUTTON_TEST_ID[trigger]}
+            testId={BUTTON_TEST_ID[trigger]}
           />
         </PopoverTrigger>
 
@@ -313,7 +361,7 @@ function InteractiveBookingActionsMenu({
         <MenuTrigger
           ref={mobileTriggerRef}
           look={trigger}
-          className="md:hidden"
+          className={tw(triggerClassName, "md:hidden")}
           aria-haspopup="dialog"
           aria-expanded={open}
           onClick={() => setOpen(true)}
