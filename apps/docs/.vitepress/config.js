@@ -84,6 +84,7 @@ export default {
             link: "/tracking-scripts",
           },
           { text: "URL Shortener", link: "/url-shortener" },
+          { text: "Toast Notifications", link: "/notifications" },
         ],
       },
       {
@@ -102,7 +103,6 @@ export default {
           { text: "Error Handling", link: "/handling-errors" },
           { text: "Select All Pattern", link: "/select-all-pattern" },
           { text: "Utility Hooks", link: "/hooks" },
-          { text: "Toast Notifications", link: "/notifications" },
           { text: "Roles & Permissions", link: "/roles-and-permissions" },
           {
             text: "Scanner Drawer Development",
