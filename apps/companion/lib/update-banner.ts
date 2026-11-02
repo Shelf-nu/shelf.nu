@@ -2,8 +2,10 @@
  * Rules for the soft "new version available" banner.
  *
  * A Shelf server advertises `latestCompanionVersion` on `/api/mobile/config`.
- * When this build is older, the app shows a dismissible banner with a store
- * link. Unlike `minCompanionVersion` it blocks nothing.
+ * When this build is older, the app offers the platform's native update UI
+ * (`./native-update.ts`). This banner, a dismissible notice with a store link,
+ * is the fallback for installs where that native flow is unavailable. Unlike
+ * `minCompanionVersion` it blocks nothing.
  *
  * It exists for installs that over-the-air updates can no longer reach: an
  * update only lands on builds with the same runtime version, so a phone that

@@ -1,5 +1,5 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { AppState, Pressable, Text, View } from "react-native";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { AppState, Platform, Pressable, Text, View } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import {
@@ -20,6 +20,16 @@ import {
   shouldShowUpdateBanner,
   UPDATE_BANNER_DISMISSED_KEY,
 } from "@/lib/update-banner";
+import {
+  isBannerFallbackActive,
+  settlesLaunch,
+  shouldAttemptNativeUpdate,
+  type NativeUpdateOutcome,
+} from "@/lib/native-update";
+import {
+  readIosShownStoreVersion,
+  runNativeUpdate,
+} from "@/lib/native-update-runner";
 
 const useStyles = createStyles((colors) => ({
   root: {
@@ -64,8 +74,14 @@ async function readDismissedVersion(): Promise<string | null> {
 }
 
 /**
- * Wraps the app and shows a dismissible "new version available" banner below
- * it when the active server advertises a newer store version.
+ * Wraps the app and offers an update when the active server advertises a newer
+ * store version.
+ *
+ * The offer is the platform's own UI: Google Play's flexible update flow on
+ * Android, the App Store sheet on iOS (see `lib/native-update.ts`). The
+ * dismissible banner below the app is the fallback for installs where that
+ * native flow is unavailable, and stays hidden while a native attempt is
+ * pending so it never flashes ahead of a native sheet.
  *
  * The banner sits in the layout, not over it, so it never covers a tab bar,
  * a floating button or the last rows of a list. While it shows, it takes the
@@ -86,7 +102,8 @@ async function readDismissedVersion(): Promise<string | null> {
  * (offline, an old server, an unreadable version) simply shows nothing new: an
  * answer already shown stays until the same server says otherwise.
  *
- * @see ../lib/update-banner.ts for when it shows
+ * @see ../lib/native-update.ts for when the native flow runs
+ * @see ../lib/update-banner.ts for when the fallback banner shows
  */
 export function UpdateAvailableBanner({ children }: { children: ReactNode }) {
   const insets = useSafeAreaInsets();
@@ -94,6 +111,15 @@ export function UpdateAvailableBanner({ children }: { children: ReactNode }) {
   const styles = useStyles();
   const [latestVersion, setLatestVersion] = useState<string | null>(null);
   const [dismissedVersion, setDismissedVersion] = useState<string | null>(null);
+  // Bumped on every server answer, so a re-check that returns the same version
+  // can still retry a native attempt that found no store update.
+  const [answerCount, setAnswerCount] = useState(0);
+  const [nativeOutcome, setNativeOutcome] =
+    useState<NativeUpdateOutcome | null>(null);
+  // Launch-wide: the native UI was shown or found unavailable, so nothing new
+  // can be learned before the next launch.
+  const nativeSettledRef = useRef(false);
+  const nativeInFlightRef = useRef(false);
 
   useEffect(() => {
     let mounted = true;
@@ -125,6 +151,7 @@ export function UpdateAvailableBanner({ children }: { children: ReactNode }) {
         if (getActiveServer().baseUrl !== baseUrl) return;
         answeredAt = Date.now();
         setLatestVersion(latest);
+        setAnswerCount((count) => count + 1);
       });
     };
 
@@ -144,15 +171,44 @@ export function UpdateAvailableBanner({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const visible = shouldShowUpdateBanner({
-    // The running bundle's version, which after an OTA comes from the update.
-    // That is still the binary's version: `scripts/check-version-sync.mjs`
-    // keeps `version` equal to `runtimeVersion`, and an update only reaches
-    // binaries with the same runtime version.
-    appVersion: getAppVersion(),
-    latestVersion,
-    dismissedVersion,
-  });
+  useEffect(() => {
+    if (nativeInFlightRef.current) return;
+    nativeInFlightRef.current = true;
+    void (async () => {
+      try {
+        const iosShownStoreVersion =
+          Platform.OS === "ios" ? await readIosShownStoreVersion() : null;
+        if (
+          !shouldAttemptNativeUpdate({
+            platform: Platform.OS,
+            appVersion: getAppVersion(),
+            latestVersion,
+            settledThisLaunch: nativeSettledRef.current,
+            iosShownStoreVersion,
+          })
+        ) {
+          return;
+        }
+        const outcome = await runNativeUpdate();
+        if (settlesLaunch(outcome)) nativeSettledRef.current = true;
+        setNativeOutcome(outcome);
+      } finally {
+        nativeInFlightRef.current = false;
+      }
+    })();
+  }, [latestVersion, answerCount]);
+
+  const visible =
+    isBannerFallbackActive(nativeOutcome) &&
+    shouldShowUpdateBanner({
+      // The running bundle's version, which after an OTA comes from the update.
+      // That is still the binary's version: `scripts/check-version-sync.mjs`
+      // keeps `version` equal to `runtimeVersion`, and an update only reaches
+      // binaries with the same runtime version.
+      appVersion: getAppVersion(),
+      latestVersion,
+      dismissedVersion,
+    });
 
   const dismiss = () => {
     if (!latestVersion) return;

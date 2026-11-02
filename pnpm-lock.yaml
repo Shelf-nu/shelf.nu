@@ -60,6 +60,9 @@ patchedDependencies:
   expo-image@55.0.6:
     hash: xoe2kq4thm7yyrn33j5i3h7acq
     path: patches/expo-image@55.0.6.patch
+  expo-in-app-updates@0.12.0:
+    hash: ikkngrikzhukottieurjmu63za
+    path: patches/expo-in-app-updates@0.12.0.patch
 
 importers:
 
@@ -167,6 +170,9 @@ importers:
       expo-image-picker:
         specifier: ~17.0.10
         version: 17.0.10(expo@54.0.33)
+      expo-in-app-updates:
+        specifier: 0.12.0
+        version: 0.12.0(patch_hash=ikkngrikzhukottieurjmu63za)(expo@54.0.33)
       expo-linking:
         specifier: ~8.0.11
         version: 8.0.11(expo@54.0.33)(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.2.14)(react@19.1.0))(react@19.1.0)
@@ -7016,6 +7022,11 @@ packages:
     peerDependenciesMeta:
       react-native-web:
         optional: true
+
+  expo-in-app-updates@0.12.0:
+    resolution: {integrity: sha512-RqqT0KEqZNbOk5Zxq+JQ7ph7mH/ZNfKOowPyZI8K2YnYBjjNIOyt5PlSZz5/JtmPsBGe6/oKiu1QY+4rGfY+Eg==}
+    peerDependencies:
+      expo: '*'
 
   expo-json-utils@0.15.0:
     resolution: {integrity: sha512-duRT6oGl80IDzH2LD2yEFWNwGIC2WkozsB6HF3cDYNoNNdUvFk6uN3YiwsTsqVM/D0z6LEAQ01/SlYvN+Fw0JQ==}
@@ -17858,6 +17869,10 @@ snapshots:
       sf-symbols-typescript: 2.2.0
     optionalDependencies:
       react-native-web: 0.21.2(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
+
+  expo-in-app-updates@0.12.0(patch_hash=ikkngrikzhukottieurjmu63za)(expo@54.0.33):
+    dependencies:
+      expo: 54.0.33(@babel/core@7.29.7)(@expo/metro-runtime@6.1.2)(expo-router@6.0.23)(graphql@16.13.2)(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.2.14)(react@19.1.0))(react@19.1.0)
 
   expo-json-utils@0.15.0: {}
 
