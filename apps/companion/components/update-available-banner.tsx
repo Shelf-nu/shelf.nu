@@ -184,7 +184,7 @@ export function UpdateAvailableBanner({ children }: { children: ReactNode }) {
           !shouldAttemptNativeUpdate({
             platform: Platform.OS,
             appVersion: getAppVersion(),
-            latestVersion,
+            latestVersion: answer.version,
             settledThisLaunch: nativeSettledRef.current,
             iosShownStoreVersion,
           })
