@@ -38,7 +38,10 @@ import {
   relinkAssetQrCode,
   updateAsset,
 } from "~/modules/asset/service.server";
-import { bulkSetAssetCustomField } from "~/modules/asset/bulk-custom-field.server";
+import {
+  bulkSetAssetCustomField,
+  getBulkSettableCustomFields,
+} from "~/modules/asset/bulk-custom-field.server";
 import { adjustQuantity } from "~/modules/consumption-log/service.server";
 import {
   bulkRemoveAssetsFromKits,
@@ -62,13 +65,19 @@ import { action as manageKitAssetsAction } from "~/routes/_layout+/kits.$kitId.a
 import { action as editKitAction } from "~/routes/_layout+/kits.$kitId_.edit";
 import { action as newKitAction } from "~/routes/_layout+/kits.new";
 import { action as adjustQuantityAction } from "~/routes/api+/assets.adjust-quantity";
-import { action as bulkAddToKitAction } from "~/routes/api+/assets.bulk-add-to-kit";
+import {
+  action as bulkAddToKitAction,
+  loader as bulkAddToKitLoader,
+} from "~/routes/api+/assets.bulk-add-to-kit";
 import { action as bulkAssignTagsAction } from "~/routes/api+/assets.bulk-assign-tags";
 import { action as bulkMarkAvailabilityAction } from "~/routes/api+/assets.bulk-mark-availability";
 import { action as bulkRemoveFromKitsAction } from "~/routes/api+/assets.bulk-remove-from-kits";
 import { action as bulkUpdateAssetModelAction } from "~/routes/api+/assets.bulk-update-asset-model";
 import { action as bulkUpdateCategoryAction } from "~/routes/api+/assets.bulk-update-category";
-import { action as bulkUpdateCustomFieldAction } from "~/routes/api+/assets.bulk-update-custom-field";
+import {
+  action as bulkUpdateCustomFieldAction,
+  loader as bulkUpdateCustomFieldLoader,
+} from "~/routes/api+/assets.bulk-update-custom-field";
 import { action as bulkUpdateLocationAction } from "~/routes/api+/assets.bulk-update-location";
 import { action as bulkUpdateReorderPointAction } from "~/routes/api+/assets.bulk-update-reorder-point";
 import { action as generateSequentialIdsAction } from "~/routes/api+/generate-sequential-ids";
@@ -102,6 +111,8 @@ const dbMock = vi.hoisted(() => {
       ]),
     },
     kit: {
+      // The kits the bulk add-to-kit dialog offers.
+      findMany: vi.fn(async () => [{ id: "kit-1", name: "Camera kit" }]),
       update: vi.fn(async () => ({ name: "Camera kit", custody: null })),
     },
   };
@@ -129,6 +140,7 @@ vi.mock("~/database/db.server", () => ({ db: dbMock }));
 vi.mock("~/modules/asset/bulk-custom-field.server", () => ({
   bulkSetAssetCustomField: vi.fn(async () => ({ changed: 1 })),
   bulkCustomFieldMessage: vi.fn(() => "1 asset updated"),
+  getBulkSettableCustomFields: vi.fn(async () => []),
 }));
 
 // why: every asset write below has its own service tests; these cases only
@@ -581,6 +593,25 @@ const OPENED_BY_THE_SWITCH: GatedRoute[] = [
 
 /** Routes that share a granted pair but stay closed to a Manager. */
 const CLOSED_EITHER_WAY: GatedRoute[] = [
+  {
+    route: "api+/assets.bulk-update-custom-field.ts loader",
+    call: get(
+      bulkUpdateCustomFieldLoader,
+      "/api/assets/bulk-update-custom-field"
+    ),
+    service: getBulkSettableCustomFields,
+    receives: { organizationId: ORG_ID },
+    status: 200,
+  },
+  {
+    route: "api+/assets.bulk-add-to-kit.ts loader",
+    call: get(bulkAddToKitLoader, "/api/assets/bulk-add-to-kit"),
+    service: dbMock.kit.findMany,
+    receives: expect.objectContaining({
+      where: expect.objectContaining({ organizationId: ORG_ID }),
+    }),
+    status: 200,
+  },
   {
     route: "api+/assets.bulk-update-custom-field.ts action",
     call: post(
