@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { AssetType, type CustomFieldType } from "@prisma/client";
+import { URL_SHAPED_VALUE, expectValueOnlyInTag } from "@helpers/note-tags";
 import {
   andAssetWhere,
   applyArchivedFilter,
@@ -12,6 +13,7 @@ import {
   getInitialPlacementNoteContent,
   getKitLocationUpdateNoteContent,
   getLocationUpdateNoteContent,
+  planCustomFieldValueWrites,
 } from "./utils.server";
 
 // @vitest-environment node
@@ -212,6 +214,81 @@ describe("compareCustomFieldValues", () => {
       const result = compareCustomFieldValues(oldValue, newValue, "TEXT");
       expect(result).toBe(true);
     });
+  });
+});
+
+describe("planCustomFieldValueWrites", () => {
+  const stored = [
+    { id: "val-a", customFieldId: "cf-a", value: { raw: "a", valueText: "a" } },
+    { id: "val-b", customFieldId: "cf-b", value: { raw: "b" } },
+  ];
+
+  it("creates a value for a field with no stored row", () => {
+    expect(
+      planCustomFieldValueWrites(stored, [
+        { id: "cf-new", value: { raw: "n" } },
+      ])
+    ).toEqual({
+      toCreate: [{ customFieldId: "cf-new", value: { raw: "n" } }],
+      toUpdate: [],
+      toRemoveFieldIds: [],
+    });
+  });
+
+  it("updates a stored row only when its value differs", () => {
+    expect(
+      planCustomFieldValueWrites(stored, [
+        { id: "cf-a", value: { valueText: "a", raw: "a" } },
+        { id: "cf-b", value: { raw: "changed" } },
+      ])
+    ).toEqual({
+      toCreate: [],
+      toUpdate: [{ valueId: "val-b", value: { raw: "changed" } }],
+      toRemoveFieldIds: [],
+    });
+  });
+
+  it("updates when only a part other than raw changed", () => {
+    expect(
+      planCustomFieldValueWrites(stored, [
+        { id: "cf-a", value: { raw: "a", valueText: "A" } },
+      ]).toUpdate
+    ).toEqual([{ valueId: "val-a", value: { raw: "a", valueText: "A" } }]);
+  });
+
+  it.each([
+    ["first", "old", "new", "val-first"],
+    ["second", "new", "old", "val-second"],
+  ])(
+    "updates a duplicate row that differs when it is the %s one",
+    (_position, firstValue, secondValue, staleRowId) => {
+      expect(
+        planCustomFieldValueWrites(
+          [
+            {
+              id: "val-first",
+              customFieldId: "cf-dup",
+              value: { raw: firstValue },
+            },
+            {
+              id: "val-second",
+              customFieldId: "cf-dup",
+              value: { raw: secondValue },
+            },
+          ],
+          [{ id: "cf-dup", value: { raw: "new" } }]
+        ).toUpdate
+      ).toEqual([{ valueId: staleRowId, value: { raw: "new" } }]);
+    }
+  );
+
+  it("removes a cleared field only when it has a stored row", () => {
+    expect(
+      planCustomFieldValueWrites(stored, [
+        { id: "cf-b", value: null },
+        { id: "cf-never-set", value: null },
+      ])
+    ).toEqual({ toCreate: [], toUpdate: [], toRemoveFieldIds: ["cf-b"] });
   });
 });
 
@@ -481,7 +558,7 @@ describe("getCustomFieldUpdateNoteContent", () => {
     });
 
     expect(result).toBe(
-      '{% link to="/settings/team/users/user-123" text="John Doe" /%} set **Serial Number** to **SN123456**.'
+      '{% link to="/settings/team/users/user-123" text="John Doe" /%} set {% name text="Serial Number" /%} to {% name text="SN123456" chips=true /%}.'
     );
   });
 
@@ -497,7 +574,7 @@ describe("getCustomFieldUpdateNoteContent", () => {
     });
 
     expect(result).toBe(
-      '{% link to="/settings/team/users/user-456" text="Jane Smith" /%} updated **Warranty Status** from **Active** to **Expired**.'
+      '{% link to="/settings/team/users/user-456" text="Jane Smith" /%} updated {% name text="Warranty Status" /%} from {% name text="Active" chips=true /%} to {% name text="Expired" chips=true /%}.'
     );
   });
 
@@ -513,7 +590,7 @@ describe("getCustomFieldUpdateNoteContent", () => {
     });
 
     expect(result).toBe(
-      '{% link to="/settings/team/users/user-789" text="Bob Johnson" /%} removed **Purchase Order** value **PO-2024-001**.'
+      '{% link to="/settings/team/users/user-789" text="Bob Johnson" /%} removed {% name text="Purchase Order" /%} value {% name text="PO-2024-001" chips=true /%}.'
     );
   });
 
@@ -529,7 +606,7 @@ describe("getCustomFieldUpdateNoteContent", () => {
     });
 
     expect(result).toBe(
-      '{% link to="/settings/team/users/user-123" text="John Doe" /%} set **Serial Number** to **SN123456**.'
+      '{% link to="/settings/team/users/user-123" text="John Doe" /%} set {% name text="Serial Number" /%} to {% name text="SN123456" chips=true /%}.'
     );
   });
 
@@ -545,6 +622,25 @@ describe("getCustomFieldUpdateNoteContent", () => {
     });
 
     expect(result).toBe("");
+  });
+
+  it("keeps URL-shaped field names and values inside name tags", () => {
+    const content = getCustomFieldUpdateNoteContent({
+      customFieldName: URL_SHAPED_VALUE,
+      previousValue: URL_SHAPED_VALUE,
+      newValue: "Expired",
+      userId: "user-456",
+      firstName: "Jane",
+      lastName: "Smith",
+      isFirstTimeSet: false,
+    });
+
+    expectValueOnlyInTag(content, URL_SHAPED_VALUE, ["name"]);
+    // The field name never shows chips; the value does.
+    expect(content).toContain(`{% name text="${URL_SHAPED_VALUE}" /%}`);
+    expect(content).toContain(
+      `{% name text="${URL_SHAPED_VALUE}" chips=true /%}`
+    );
   });
 
   it("should handle missing new value for first time set", () => {

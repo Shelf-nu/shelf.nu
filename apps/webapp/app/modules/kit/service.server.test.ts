@@ -8,6 +8,7 @@ import {
   ErrorCorrection,
 } from "@prisma/client";
 import { onTestFinished } from "vitest";
+import { URL_SHAPED_VALUE, expectValueOnlyInTag } from "@helpers/note-tags";
 
 import { db } from "~/database/db.server";
 import type * as AssetUtilsModule from "~/modules/asset/utils.server";
@@ -33,10 +34,14 @@ import {
   bulkRemoveAssetsFromKits,
   moveAssetKitUnits,
   getPaginatedAndFilterableKits,
+  emitAssetKitDetachmentNotes,
 } from "./service.server";
 import { recordEvents } from "../activity-event/service.server";
 import { lockAssetsForArchiveGuard } from "../asset/archive-lock.server";
-import { createSystemBookingNotes } from "../booking-note/service.server";
+import {
+  createSystemBookingNote,
+  createSystemBookingNotes,
+} from "../booking-note/service.server";
 import { lockAssetForQuantityUpdate } from "../consumption-log/quantity-lock.server";
 import {
   createBulkKitChangeNotes,
@@ -829,10 +834,10 @@ describe("deleteKit", () => {
       .calls[0][0].data as { assetId: string; content: string }[];
     expect(rows.map((row) => row.assetId)).toEqual(["drill-1", "pens-1"]);
     expect(rows[0].content).toContain(
-      `deleted kit **${mockKitData.name}**, which removed this asset from it.`
+      `deleted kit {% name text="${mockKitData.name}" /%}, which removed this asset from it.`
     );
     expect(rows[1].content).toContain(
-      `deleted kit **${mockKitData.name}**, which removed 5 pens from it.`
+      `deleted kit {% name text="${mockKitData.name}" /%}, which removed 5 pens from it.`
     );
   });
 
@@ -866,8 +871,39 @@ describe("deleteKit", () => {
     const tags = [...Markdoc.parse(content).walk()].filter(
       (node) => node.type === "tag"
     );
-    // The only legitimate tag is the actor link the line starts with.
-    expect(tags).toHaveLength(1);
+    // The only legitimate tags are the actor link the line starts with and
+    // the `name` tag that carries the kit's name as inert text.
+    expect(tags.map((node) => node.tag)).toEqual(["link", "name"]);
+  });
+
+  it("keeps a URL-shaped deleted kit's name inside a name tag", async () => {
+    //@ts-expect-error missing vitest type
+    db.kit.findUniqueOrThrow.mockResolvedValue({
+      ...mockKitData,
+      name: URL_SHAPED_VALUE,
+      assetKits: [
+        {
+          quantity: 1,
+          asset: {
+            id: "drill-1",
+            title: "Drill",
+            type: AssetType.INDIVIDUAL,
+            unitOfMeasure: null,
+          },
+        },
+      ],
+      custody: null,
+    });
+
+    await deleteKit({
+      id: "kit-1",
+      organizationId: "org-1",
+      actorUserId: "user-actor",
+    });
+
+    const [{ content }] = (db.note.createMany as ReturnType<typeof vitest.fn>)
+      .mock.calls[0][0].data as { content: string }[];
+    expectValueOnlyInTag(content, URL_SHAPED_VALUE, ["name"]);
   });
 
   it("deletes an in-custody kit and emits CUSTODY_RELEASED + flips status + writes notes", async () => {
@@ -1280,8 +1316,12 @@ describe("bulkDeleteKits", () => {
     const notes = (db.note.createMany as ReturnType<typeof vitest.fn>).mock
       .calls[0][0].data as { content: string }[];
     expect(notes.map((note) => note.content)).toEqual([
-      expect.stringContaining("deleted kit **Box A**, which removed 10 pens"),
-      expect.stringContaining("deleted kit **Box B**, which removed 5 pens"),
+      expect.stringContaining(
+        'deleted kit {% name text="Box A" /%}, which removed 10 pens'
+      ),
+      expect.stringContaining(
+        'deleted kit {% name text="Box B" /%}, which removed 5 pens'
+      ),
     ]);
   });
 
@@ -1341,8 +1381,12 @@ describe("bulkDeleteKits", () => {
     const notes = (db.note.createMany as ReturnType<typeof vitest.fn>).mock
       .calls[0][0].data as { content: string }[];
     expect(notes.map((note) => note.content)).toEqual([
-      expect.stringContaining("custody of 10 pens when kit **Box A**"),
-      expect.stringContaining("custody of 5 pens when kit **Box B**"),
+      expect.stringContaining(
+        'custody of 10 pens when kit {% name text="Box A" /%}'
+      ),
+      expect.stringContaining(
+        'custody of 5 pens when kit {% name text="Box B" /%}'
+      ),
     ]);
   });
 
@@ -1413,12 +1457,14 @@ describe("bulkDeleteKits", () => {
     expect(notes).toEqual([
       expect.objectContaining({
         assetId: "drill-1",
-        content: expect.stringContaining("custody when kit **Box A**"),
+        content: expect.stringContaining(
+          'custody when kit {% name text="Box A" /%}'
+        ),
       }),
       expect.objectContaining({
         assetId: "old-1",
         content: expect.stringContaining(
-          "deleted kit **Box A**, which removed this asset from it."
+          'deleted kit {% name text="Box A" /%}, which removed this asset from it.'
         ),
       }),
     ]);
@@ -6214,7 +6260,7 @@ describe("removeKitSlicesFromPlanningBookings", () => {
     // why: kit names and asset titles have no character restrictions and the
     // booking feed renders note content as Markdoc, so a raw splice is a stored
     // tag injection. Assert on the PARSE, not the string.
-    expect.assertions(3);
+    expect.assertions(5);
 
     sliceReads().mockResolvedValueOnce([
       {
@@ -6247,9 +6293,12 @@ describe("removeKitSlicesFromPlanningBookings", () => {
     const tags = [...Markdoc.parse(content).walk()].filter(
       (node) => node.type === "tag"
     );
-    // The only legitimate tag is the actor link this helper builds itself.
-    expect(tags).toHaveLength(1);
-    expect(tags[0].tag).toBe("link");
+    // The actor, the asset and the kit links this helper builds itself, each
+    // pointing inside the app; the injected tags stay text in their attributes.
+    expect(tags.map((tag) => tag.tag)).toEqual(["link", "link", "link"]);
+    for (const tag of tags) {
+      expect(String(tag.attributes.to)).toMatch(/^\//);
+    }
     expect(content).toContain("so it was also removed from this booking.");
   });
 
@@ -6350,9 +6399,39 @@ describe("removeKitSlicesFromPlanningBookings", () => {
     // Asserting the whole clause, not just the verb choice — the two branches
     // place the subjects differently, so each needs its own agreement.
     expect(notes[0].content).toContain(
-      "deleted kit **Rack Kit**, so **Switch A** was removed from this booking."
+      'deleted kit {% name text="Rack Kit" /%}, so {% link to="/assets/switch-a" text="Switch A" /%} was removed from this booking.'
     );
-    expect(notes[0].content).not.toContain("removed **Switch A** from kit");
+    expect(notes[0].content).not.toContain(
+      'removed {% link to="/assets/switch-a" text="Switch A" /%} from kit'
+    );
+  });
+
+  it("links a URL-shaped asset title and kit name, never as bare text", async () => {
+    sliceReads().mockResolvedValueOnce([
+      {
+        ...draftSlice,
+        asset: { ...draftSlice.asset, title: URL_SHAPED_VALUE },
+      },
+    ]);
+    membershipReads().mockResolvedValueOnce([
+      { ...membershipRow, kit: { name: URL_SHAPED_VALUE } },
+    ]);
+
+    const { removeKitSlicesFromPlanningBookings } = await import(
+      "./service.server"
+    );
+    await removeKitSlicesFromPlanningBookings(db, ["ak-1"], {
+      actorUserId: "user-1",
+      organizationId: "org-1",
+    });
+
+    const [{ notes }] = (
+      createSystemBookingNotes as unknown as ReturnType<typeof vitest.fn>
+    ).mock.calls[0];
+    expectValueOnlyInTag(notes[0].content, URL_SHAPED_VALUE, ["link"]);
+    expect(notes[0].content).toContain(
+      `from kit {% link to="/kits/kit-1" text="${URL_SHAPED_VALUE}" /%}`
+    );
   });
 
   it("resolves the note actor on the transaction client, not the global db", async () => {
@@ -7241,7 +7320,7 @@ describe("kit detach flows — helper wiring", () => {
       createSystemBookingNotes as unknown as ReturnType<typeof vitest.fn>
     ).mock.calls[0];
     expect(notes[0].content).toContain(
-      "deleted kit **Rack Kit**, so **Switch A** was removed from this booking."
+      'deleted kit {% name text="Rack Kit" /%}, so {% link to="/assets/switch-a" text="Switch A" /%} was removed from this booking.'
     );
   });
 });
@@ -8381,7 +8460,7 @@ describe("removeDestroyedUnitsFromKits", () => {
           {
             bookingId: "booking-next-week",
             content: expect.stringContaining(
-              "where **3 units** of **Batteries** in kit **Kit A** were not returned, so this booking now holds **2 units** of it."
+              'where **3 units** of {% link to="/assets/asset-pool" text="Batteries" /%} in kit {% link to="/kits/kit-1" text="Kit A" /%} were not returned, so this booking now holds **2 units** of it.'
             ),
           },
         ],
@@ -8495,8 +8574,39 @@ describe("removeDestroyedUnitsFromKits", () => {
     ).mock.calls[0];
     expect(notes).toHaveLength(1);
     expect(notes[0].content).toContain(
-      "so this booking now holds less of **Batteries** in kit **Kit A** (**3 units** fewer, **2 units** left), **Cables** in kit **Kit B** (**2 units** fewer, **3 units** left)."
+      'so this booking now holds less of {% link to="/assets/asset-pool" text="Batteries" /%} in kit {% link to="/kits/kit-1" text="Kit A" /%} (**3 units** fewer, **2 units** left), {% link to="/assets/asset-cable" text="Cables" /%} in kit {% link to="/kits/kit-2" text="Kit B" /%} (**2 units** fewer, **3 units** left).'
     );
+  });
+
+  it("links a URL-shaped asset title and kit name in the capped-slice note", async () => {
+    membershipReads().mockResolvedValueOnce([
+      {
+        ...membership({ stock: 7 }),
+        kit: { name: URL_SHAPED_VALUE },
+        asset: { ...membership({ stock: 7 }).asset, title: URL_SHAPED_VALUE },
+      },
+    ]);
+    kitSums().mockResolvedValueOnce([
+      { assetId: "asset-pool", _sum: { quantity: 5 } },
+    ]);
+    (
+      db.bookingAsset.findMany as unknown as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([
+      {
+        id: "ba-next-week",
+        bookingId: "booking-next-week",
+        assetKitId: "ak-1",
+        quantity: 5,
+      },
+    ]);
+
+    const { removeDestroyedUnitsFromKits } = await import("./service.server");
+    await removeDestroyedUnitsFromKits(db, args(3));
+
+    const [{ notes }] = (
+      createSystemBookingNotes as unknown as ReturnType<typeof vitest.fn>
+    ).mock.calls[0];
+    expectValueOnlyInTag(notes[0].content, URL_SHAPED_VALUE, ["link"]);
   });
 
   it("tells a planning booking the kit's last units were not returned", async () => {
@@ -8545,7 +8655,7 @@ describe("removeDestroyedUnitsFromKits", () => {
           expect.objectContaining({
             bookingId: "booking-next-week",
             content: expect.stringContaining(
-              "checked in another booking where the last units of **Batteries** in kit **Kit A** were not returned, so it was removed from this booking."
+              'checked in another booking where the last units of {% link to="/assets/asset-pool" text="Batteries" /%} in kit {% link to="/kits/kit-1" text="Kit A" /%} were not returned, so it was removed from this booking.'
             ),
           }),
         ],
@@ -8915,5 +9025,42 @@ describe("updateKitAssets — archived assets (issue #382)", () => {
     expect(outcome).not.toMatchObject({ title: "Asset is archived" });
     // Nothing is added or re-quantified, so there is nothing to check.
     expect(archivedGuardCalls()).toHaveLength(0);
+  });
+});
+
+describe("emitAssetKitDetachmentNotes", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("links a URL-shaped asset title and kit name, never as bare text", async () => {
+    await emitAssetKitDetachmentNotes({
+      impact: [
+        {
+          bookingAssetId: "ba-1",
+          bookingId: "booking-1",
+          bookingName: "Shoot",
+          assetId: "asset-1",
+          assetTitle: URL_SHAPED_VALUE,
+          kitId: "kit-1",
+          kitName: URL_SHAPED_VALUE,
+        },
+      ],
+      actor: {
+        id: "user-1",
+        firstName: "Ada",
+        lastName: "Lovelace",
+        displayName: null,
+      },
+      organizationId: "org-1",
+    });
+
+    const [{ content }] = (
+      createSystemBookingNote as unknown as ReturnType<typeof vitest.fn>
+    ).mock.calls[0];
+    expectValueOnlyInTag(content, URL_SHAPED_VALUE, ["link"]);
+    expect(content).toContain(
+      `from kit {% link to="/kits/kit-1" text="${URL_SHAPED_VALUE}" /%}`
+    );
   });
 });

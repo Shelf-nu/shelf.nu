@@ -8,8 +8,7 @@ import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { ShelfError } from "~/utils/error";
 import { isLastAttempt } from "~/utils/job-retry";
 import { Logger } from "~/utils/logger";
-import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
-import { wrapDateForNote } from "~/utils/markdoc-wrappers";
+import { wrapDateForNote, wrapNameForNote } from "~/utils/markdoc-wrappers";
 import { rolesWhere } from "~/utils/permissions/role-access";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import {
@@ -359,10 +358,10 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
      * Note text reflects the chain state so users can see why a series
      * continues, ended, or stopped, straight from the asset activity.
      */
-    // Reminder names are user-supplied and render as literal text here.
-    let noteContent = `**System** has sent **${stripMarkdocDelimiters(
+    // Reminder names are user-supplied, so the name goes inside a `name` tag.
+    let noteContent = `**System** has sent ${wrapNameForNote(
       reminder.name
-    )}** reminder.`;
+    )} reminder.`;
     if (nextOccurrence) {
       // The date tag renders in each viewer's own date format and timezone.
       noteContent += ` Next reminder scheduled for ${wrapDateForNote(

@@ -508,7 +508,7 @@ describe("writeImportChunk", () => {
   it("writes custom field values for fields that still exist", async () => {
     tx.assetImport.updateMany.mockResolvedValue({ count: 1 });
     tx.customField.findMany.mockResolvedValue([
-      { id: "cf-serial", name: "Serial", type: "TEXT" },
+      { id: "cf-serial", name: "Serial", type: "TEXT", format: "PLAIN" },
     ]);
     await writeImportChunk(
       args({
@@ -522,7 +522,7 @@ describe("writeImportChunk", () => {
         organizationId: "org",
         deletedAt: null,
       },
-      select: { id: true, name: true, type: true },
+      select: { id: true, name: true, type: true, format: true },
     });
     expect(tx.assetCustomFieldValue.createMany).toHaveBeenCalledWith({
       data: [
@@ -557,7 +557,7 @@ describe("writeImportChunk", () => {
     tx.assetImport.updateMany.mockResolvedValue({ count: 1 });
     // The field is a DATE now, so "S-1" no longer fits.
     tx.customField.findMany.mockResolvedValue([
-      { id: "cf-serial", name: "Serial", type: "DATE" },
+      { id: "cf-serial", name: "Serial", type: "DATE", format: "PLAIN" },
     ]);
     const result = await writeImportChunk(
       args({
@@ -572,6 +572,27 @@ describe("writeImportChunk", () => {
       expect.objectContaining({
         row: 5,
         message: expect.stringContaining('"S-1"'),
+      }),
+    ]);
+  });
+
+  it("skips a value that is not a link once its field is a Link field", async () => {
+    tx.assetImport.updateMany.mockResolvedValue({ count: 1 });
+    tx.customField.findMany.mockResolvedValue([
+      { id: "cf-manual", name: "Manual", type: "TEXT", format: "LINK" },
+    ]);
+    const result = await writeImportChunk(
+      args({
+        rows: [row("a1", { "cf:Manual,type:TEXT": "see shelf", rowNumber: 4 })],
+        resolved: { ...resolvedFixture, customFields: { Manual: "cf-manual" } },
+      })
+    );
+    expect(result.applied).toBe(true);
+    expect(tx.assetCustomFieldValue.createMany).not.toHaveBeenCalled();
+    expect(result.warnings).toEqual([
+      expect.objectContaining({
+        row: 4,
+        message: expect.stringContaining('"see shelf"'),
       }),
     ]);
   });

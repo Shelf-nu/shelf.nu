@@ -12,6 +12,8 @@
  */
 import Markdoc from "@markdoc/markdoc";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { URL_SHAPED_VALUE, expectValueOnlyInTag } from "@helpers/note-tags";
+import type * as MarkdocWrappersModule from "~/utils/markdoc-wrappers";
 
 import {
   createAssetScanNote,
@@ -23,10 +25,15 @@ import {
   createAssetRemovedFromAuditNote,
   createAssetsRemovedFromAuditNote,
   createAuditImageEvidenceNote,
+  createAuditUpdateNote,
 } from "./helpers.server";
 
 // Mock the markdoc wrappers
-vi.mock("~/utils/markdoc-wrappers", () => ({
+vi.mock("~/utils/markdoc-wrappers", async (importOriginal) => ({
+  // why: `wrapNameForNote` is the sanitising wrapper the update-note tests
+  // assert on, so it keeps its real implementation.
+  wrapNameForNote: (await importOriginal<typeof MarkdocWrappersModule>())
+    .wrapNameForNote,
   // why: We need to mock the markdoc wrapper functions to avoid complex template rendering in tests
   wrapUserLinkForNote: vi.fn(
     (user: {
@@ -1661,5 +1668,33 @@ describe("audit helpers", () => {
         '{% audit_images count=1 ids="img-1" /%}'
       );
     });
+  });
+});
+
+describe("createAuditUpdateNote", () => {
+  it("keeps URL-shaped old and new values inside name tags", async () => {
+    const tx = {
+      user: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "user-1",
+          firstName: "John",
+          lastName: "Doe",
+        }),
+      },
+      auditNote: { create: vi.fn() },
+    };
+
+    await createAuditUpdateNote({
+      auditSessionId: "audit-1",
+      userId: "user-1",
+      changes: [{ field: "name", from: "Q3 audit", to: URL_SHAPED_VALUE }],
+      tx,
+    });
+
+    const [{ data }] = tx.auditNote.create.mock.calls[0];
+    expect(data.content).toContain(
+      '- **audit name**: {% name text="Q3 audit" /%} → '
+    );
+    expectValueOnlyInTag(data.content, URL_SHAPED_VALUE, ["name"]);
   });
 });

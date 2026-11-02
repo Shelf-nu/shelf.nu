@@ -14,6 +14,7 @@ import Markdoc from "@markdoc/markdoc";
 import { AssetType, BookingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vitest } from "vitest";
 import type { Mock } from "vitest";
+import { URL_SHAPED_VALUE, expectValueOnlyInTag } from "@helpers/note-tags";
 import { db } from "~/database/db.server";
 import { createSystemBookingNote } from "~/modules/booking-note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
@@ -2009,6 +2010,30 @@ describe("upsertBookingModelRequest", () => {
     });
   });
 
+  it("keeps a URL-shaped asset-model name inside a name tag", async () => {
+    stageTotal(5);
+    // @ts-expect-error mocked
+    db.assetModel.findUnique.mockResolvedValue({
+      id: MODEL_ID,
+      name: URL_SHAPED_VALUE,
+    });
+
+    await upsertBookingModelRequest({
+      bookingId: BOOKING_ID,
+      assetModelId: MODEL_ID,
+      quantity: 3,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+    });
+
+    const content = (
+      createSystemBookingNote as unknown as {
+        mock: { calls: Array<[{ content: string }]> };
+      }
+    ).mock.calls[0][0].content;
+    expectValueOnlyInTag(content, URL_SHAPED_VALUE, ["name"]);
+  });
+
   it("cannot be used to inject a live Markdoc tag via the asset-model name", async () => {
     expect.assertions(3);
     stageTotal(5);
@@ -2036,12 +2061,12 @@ describe("upsertBookingModelRequest", () => {
 
     // Parse it exactly as the feed does. Pin the count first: `every`
     // is vacuously true on an empty array, so without this a change that
-    // stopped emitting our own links would leave both guards below
-    // asserting nothing. One actor link, and only that.
+    // stopped emitting our own tags would leave both guards below asserting
+    // nothing. One actor link and the `name` tag carrying the model name.
     const tags = markdocTagsIn(content);
-    expect(tags).toHaveLength(1);
-    // The only tag may be the actor link we emit ourselves...
-    expect(tags.every((node) => node.tag === "link")).toBe(true);
+    expect(tags.map((node) => node.tag)).toEqual(["link", "name"]);
+    // The model name stays inert text inside its `name` tag...
+    expect(tags[1].attributes.text).not.toContain("{%");
     // ...and none of them may point anywhere the attacker chose.
     expect(
       tags.every(
@@ -2987,8 +3012,43 @@ describe("removeBookingModelRequest", () => {
       // Every sibling note in this file names the count; cancellation used to
       // be the outlier, reading "cancelled the model-level reservation for
       // Model" with the operator's 3 units nowhere in the trail.
-      expect(content).toContain("**3 × Dell Latitude 5550**");
+      expect(content).toContain(
+        '**3 ×** {% name text="Dell Latitude 5550" /%} reservation'
+      );
       expect(content).toContain("cancelled");
+    });
+
+    it("keeps a URL-shaped asset-model name inside a name tag", async () => {
+      // @ts-expect-error mocked
+      db.booking.findUnique.mockResolvedValue({
+        id: BOOKING_ID,
+        status: BookingStatus.DRAFT,
+      });
+      // @ts-expect-error mocked
+      db.bookingModelRequest.findUnique.mockResolvedValue({
+        id: "req-1",
+        bookingId: BOOKING_ID,
+        assetModelId: MODEL_ID,
+        quantity: 3,
+        fulfilledQuantity: 0,
+        assetModel: {
+          name: URL_SHAPED_VALUE,
+        },
+      });
+
+      await removeBookingModelRequest({
+        bookingId: BOOKING_ID,
+        assetModelId: MODEL_ID,
+        organizationId: ORG_ID,
+        userId: USER_ID,
+      });
+
+      const content = (
+        createSystemBookingNote as unknown as {
+          mock: { calls: Array<[{ content: string }]> };
+        }
+      ).mock.calls[0][0].content;
+      expectValueOnlyInTag(content, URL_SHAPED_VALUE, ["name"]);
     });
 
     it("cannot be used to inject a live Markdoc tag via the asset-model name", async () => {
@@ -3024,12 +3084,12 @@ describe("removeBookingModelRequest", () => {
       ).mock.calls[0][0].content;
 
       // Count first — `every` passes vacuously on an empty array, so this
-      // is what stops both guards below silently covering nothing if the
-      // note ever stopped emitting our own links. One actor link, and only
-      // that.
+      // is what stops the guard below silently covering nothing if the note
+      // ever stopped emitting our own tags. One actor link and the `name` tag
+      // carrying the model name.
       const tags = markdocTagsIn(content);
-      expect(tags).toHaveLength(1);
-      expect(tags.every((node) => node.tag === "link")).toBe(true);
+      expect(tags.map((node) => node.tag)).toEqual(["link", "name"]);
+      expect(tags[1].attributes.text).not.toContain("{%");
       expect(
         tags.every(
           (node) => !/^javascript:/i.test(String(node.attributes?.to ?? ""))
@@ -3380,6 +3440,44 @@ describe("materializeModelRequestForAsset", () => {
     });
   });
 
+  it("keeps a URL-shaped asset-model name and asset title inside tags", async () => {
+    // @ts-expect-error mocked
+    db.bookingModelRequest.findUnique.mockResolvedValue({
+      id: "req-1",
+      bookingId: BOOKING_ID,
+      assetModelId: MODEL_ID,
+      quantity: 3,
+      fulfilledQuantity: 0,
+      fulfilledAt: null,
+      assetModel: {
+        name: URL_SHAPED_VALUE,
+      },
+    });
+
+    await materializeModelRequestForAsset({
+      bookingId: BOOKING_ID,
+      asset: {
+        id: "asset-1",
+        title: URL_SHAPED_VALUE,
+        assetModelId: MODEL_ID,
+        type: AssetType.INDIVIDUAL,
+      },
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      tx,
+    });
+
+    const content = (
+      db.bookingNote.create as unknown as {
+        mock: { calls: Array<[{ data: { content: string } }]> };
+      }
+    ).mock.calls[0][0].data.content;
+    expectValueOnlyInTag(content, URL_SHAPED_VALUE, ["name", "link"]);
+    expect(content).toContain(
+      `{% link to="/assets/asset-1" text="${URL_SHAPED_VALUE}" /%}`
+    );
+  });
+
   it("cannot be used to inject a live Markdoc tag via the asset-model name or asset title", async () => {
     expect.assertions(3);
     // Both values are free-form user input spliced into the scan note.
@@ -3417,12 +3515,14 @@ describe("materializeModelRequestForAsset", () => {
 
     // Count first — `every` passes vacuously on an empty array, so this is
     // what stops both guards below silently covering nothing if the note
-    // ever stopped emitting our own links. This note carries two: the
-    // actor link and the scanned asset's link.
+    // ever stopped emitting our own tags. This note carries four: the actor
+    // link, the scanned asset's link and the model name's two `name` tags.
     const tags = markdocTagsIn(content);
-    expect(tags).toHaveLength(2);
-    // Only the actor and asset links we emit ourselves...
-    expect(tags.every((node) => node.tag === "link")).toBe(true);
+    expect(tags).toHaveLength(4);
+    // Only the links and `name` tags we emit ourselves...
+    expect(
+      tags.every((node) => node.tag === "link" || node.tag === "name")
+    ).toBe(true);
     // ...and none of them points anywhere the attacker chose.
     expect(
       tags.every(

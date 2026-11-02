@@ -5,7 +5,8 @@
  * next to the picker, because its value lives in a hidden input and the
  * browser cannot surface the problem on its own. Picking an option never
  * fires the form `change` event Zorm re-validates on, so the picker itself
- * decides when a selection has resolved the error.
+ * decides when a selection has resolved the error. A Link field's input is a
+ * web address input, like the one on the asset overview.
  */
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
@@ -132,5 +133,45 @@ describe("AssetCustomFields option fields", () => {
       "aria-invalid",
       "true"
     );
+  });
+});
+
+describe("AssetCustomFields text fields", () => {
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+  });
+
+  it("gives a Link field a web address input and leaves a plain one as typed text", () => {
+    const textField = {
+      helpText: "As printed on the label",
+      required: false,
+      type: "TEXT",
+      options: [],
+      active: true,
+    };
+    useLoaderDataMock.mockReturnValue({
+      customFields: [
+        { ...textField, id: "cf-manual", name: "Manual", format: "LINK" },
+        { ...textField, id: "cf-serial", name: "Serial", format: "PLAIN" },
+      ],
+      asset: { customFields: [] },
+    });
+    render(
+      <MemoryRouter>
+        <AssetCustomFields currency="USD" fieldErrors={{}} />
+      </MemoryRouter>
+    );
+
+    const manual = screen.getByRole("textbox", { name: "Manual" });
+    expect(manual).toHaveAttribute("type", "text");
+    expect(manual).toHaveAttribute("inputmode", "url");
+    expect(manual).toHaveAttribute("placeholder", "https://");
+    expect(manual).toHaveAttribute("autocomplete", "off");
+    expect(manual).toHaveAttribute("spellcheck", "false");
+
+    const serial = screen.getByRole("textbox", { name: "Serial" });
+    expect(serial).not.toHaveAttribute("inputmode");
+    expect(serial).toHaveAttribute("placeholder", "As printed on the label");
   });
 });

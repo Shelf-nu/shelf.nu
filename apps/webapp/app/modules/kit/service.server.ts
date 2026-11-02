@@ -70,6 +70,7 @@ import {
   wrapCustodianForNote,
   wrapKitsWithDataForNote,
   wrapLinkForNote,
+  wrapNameForNote,
   wrapUserLinkForNote,
 } from "~/utils/markdoc-wrappers";
 import { oneDayFromNow, threeDaysFromNow } from "~/utils/one-week-from-now";
@@ -710,21 +711,24 @@ export async function removeKitSlicesFromPlanningBookings(
   type Group = {
     bookingId: string;
     organizationId: string;
+    kitId: string;
     kitName: string;
-    assetTitles: string[];
+    assets: Array<{ id: string; title: string }>;
   };
   const groups = new Map<string, Group>();
   for (const row of removed) {
     const key = `${row.bookingId}::${row.kitId}`;
+    const asset = { id: row.assetId, title: row.assetTitle };
     const existing = groups.get(key);
     if (existing) {
-      existing.assetTitles.push(row.assetTitle);
+      existing.assets.push(asset);
     } else {
       groups.set(key, {
         bookingId: row.bookingId,
         organizationId: row.organizationId,
+        kitId: row.kitId,
         kitName: row.kitName,
-        assetTitles: [row.assetTitle],
+        assets: [asset],
       });
     }
   }
@@ -738,29 +742,38 @@ export async function removeKitSlicesFromPlanningBookings(
     Array<{ bookingId: string; content: string }>
   >();
   for (const group of groups.values()) {
-    // Asset titles and the kit name are user-supplied and render as literal
-    // text in this Markdoc note.
-    const safeTitles = group.assetTitles.map(stripMarkdocDelimiters);
+    // Asset titles and the kit name are user-supplied, so each goes inside a
+    // tag: a link to the asset or kit page, or a `name` tag for a deleted kit.
+    const assetLinks = group.assets.map((asset) =>
+      wrapLinkForNote(
+        `/assets/${asset.id}`,
+        stripMarkdocDelimiters(asset.title)
+      )
+    );
     const subjects =
-      safeTitles.length === 1
-        ? `**${safeTitles[0]}**`
-        : `**${safeTitles.length} assets** (${safeTitles
-            .map((t) => `*${t}*`)
-            .join(", ")})`;
+      assetLinks.length === 1
+        ? assetLinks[0]
+        : `**${assetLinks.length} assets** (${assetLinks.join(", ")})`;
     // `kit-deleted` names the subjects after the clause, so it takes the bare
     // verb; the membership wording already named them and needs the pronoun.
-    const verb = safeTitles.length === 1 ? "was" : "were";
-    const pronoun = safeTitles.length === 1 ? "it" : "they";
-    const safeKitName = stripMarkdocDelimiters(group.kitName);
+    const verb = assetLinks.length === 1 ? "was" : "were";
+    const pronoun = assetLinks.length === 1 ? "it" : "they";
+    const safeKitName =
+      reason === "kit-deleted" || !group.kitId
+        ? wrapNameForNote(group.kitName)
+        : wrapLinkForNote(
+            `/kits/${group.kitId}`,
+            stripMarkdocDelimiters(group.kitName)
+          );
     // The two paths differ in what actually happened: on `kit-deleted` the
     // asset never left the kit — the kit stopped existing. Saying "removed X
     // from kit Y" there would describe a membership edit that never occurred.
     const cause =
       reason === "kit-deleted"
-        ? `${actorLink} deleted kit **${safeKitName}**, so ${subjects} ${verb} removed from this booking`
+        ? `${actorLink} deleted kit ${safeKitName}, so ${subjects} ${verb} removed from this booking`
         : reason === "units-not-returned"
-        ? `${actorLink} checked in another booking where the last units of ${subjects} in kit **${safeKitName}** were not returned, so ${pronoun} ${verb} removed from this booking`
-        : `${actorLink} removed ${subjects} from kit **${safeKitName}**, so ${pronoun} ${verb} also removed from this booking`;
+        ? `${actorLink} checked in another booking where the last units of ${subjects} in kit ${safeKitName} were not returned, so ${pronoun} ${verb} removed from this booking`
+        : `${actorLink} removed ${subjects} from kit ${safeKitName}, so ${pronoun} ${verb} also removed from this booking`;
     const content = `${cause}. Nothing has been checked out yet, so the booking follows the kit's contents.`;
     const bucket = notesByOrg.get(group.organizationId);
     if (bucket) {
@@ -1336,33 +1349,46 @@ export async function emitAssetKitDetachmentNotes({
   // booking so we don't spam the booking activity feed.
   type Group = {
     bookingId: string;
+    kitId: string;
     kitName: string;
-    assetTitles: string[];
+    assets: Array<{ id: string; title: string }>;
   };
   const groups = new Map<string, Group>();
   for (const row of impact) {
     const key = `${row.bookingId}::${row.kitId}`;
+    const asset = { id: row.assetId, title: row.assetTitle };
     const existing = groups.get(key);
     if (existing) {
-      existing.assetTitles.push(row.assetTitle);
+      existing.assets.push(asset);
     } else {
       groups.set(key, {
         bookingId: row.bookingId,
+        kitId: row.kitId,
         kitName: row.kitName,
-        assetTitles: [row.assetTitle],
+        assets: [asset],
       });
     }
   }
   for (const group of groups.values()) {
-    // Asset titles and the kit name are user-supplied and render as literal
-    // text in this Markdoc note.
-    const safeTitles = group.assetTitles.map(stripMarkdocDelimiters);
+    // Asset titles and the kit name are user-supplied, so each goes inside a
+    // tag: the assets and the kit (which keeps existing on a membership edit)
+    // link to their pages.
+    const assetLinks = group.assets.map((asset) =>
+      wrapLinkForNote(
+        `/assets/${asset.id}`,
+        stripMarkdocDelimiters(asset.title)
+      )
+    );
     const subjects =
-      safeTitles.length === 1
-        ? `**${safeTitles[0]}**`
-        : `**${safeTitles.length} assets** (${safeTitles
-            .map((t) => `*${t}*`)
-            .join(", ")})`;
+      assetLinks.length === 1
+        ? assetLinks[0]
+        : `**${assetLinks.length} assets** (${assetLinks.join(", ")})`;
+    const kitDisplay = group.kitId
+      ? wrapLinkForNote(
+          `/kits/${group.kitId}`,
+          stripMarkdocDelimiters(group.kitName)
+        )
+      : wrapNameForNote(group.kitName);
     // `createSystemBookingNote` doesn't accept a tx (matches the other
     // booking-note call sites). The note creates outside the kit-delete
     // tx; in the unlikely event the tx rolls back, the note is
@@ -1371,9 +1397,7 @@ export async function emitAssetKitDetachmentNotes({
     await createSystemBookingNote({
       bookingId: group.bookingId,
       organizationId,
-      content: `${actorLink} removed ${subjects} from kit **${stripMarkdocDelimiters(
-        group.kitName
-      )}**. The kit's booked slice has been converted to a standalone reservation in this booking.`,
+      content: `${actorLink} removed ${subjects} from kit ${kitDisplay}. The kit's booked slice has been converted to a standalone reservation in this booking.`,
     });
   }
 }
@@ -1474,20 +1498,27 @@ async function recordPlanningKitSliceCaps(
           const unitCount = (units: number) =>
             formatUnitCount(membership.asset, units) ?? String(units);
           return {
-            // Asset title and kit name are user-supplied literal text here.
-            title: stripMarkdocDelimiters(membership.asset.title),
-            kitName: stripMarkdocDelimiters(membership.kit.name),
+            // Asset title and kit name are user-supplied, so each goes inside
+            // a link tag to its page, never bare text.
+            title: wrapLinkForNote(
+              `/assets/${membership.assetId}`,
+              stripMarkdocDelimiters(membership.asset.title)
+            ),
+            kitName: wrapLinkForNote(
+              `/kits/${membership.kitId}`,
+              stripMarkdocDelimiters(membership.kit.name)
+            ),
             removed: unitCount(removed),
             remaining: unitCount(remaining),
           };
         });
         const cause =
           described.length === 1
-            ? `where **${described[0].removed}** of **${described[0].title}** in kit **${described[0].kitName}** were not returned, so this booking now holds **${described[0].remaining}** of it`
+            ? `where **${described[0].removed}** of ${described[0].title} in kit ${described[0].kitName} were not returned, so this booking now holds **${described[0].remaining}** of it`
             : `where kit units were not returned, so this booking now holds less of ${described
                 .map(
                   (item) =>
-                    `**${item.title}** in kit **${item.kitName}** (**${item.removed}** fewer, **${item.remaining}** left)`
+                    `${item.title} in kit ${item.kitName} (**${item.removed}** fewer, **${item.remaining}** left)`
                 )
                 .join(", ")}`;
         return {
@@ -3208,7 +3239,8 @@ async function performKitDeletion({
     // why: org-scoping is implicit: `kits`/`k.assets` are derived from the
     // org-scoped kit reads at the call sites, never request input.
     const noteData = kits.flatMap((k) => {
-      const kitName = stripMarkdocDelimiters(k.name);
+      // The kit is deleted, so its name is a `name` tag, not a link.
+      const kitName = wrapNameForNote(k.name);
       const kitCustody = k.custody;
       const custodianDisplay = kitCustody?.custodian
         ? wrapCustodianForNote({ teamMember: kitCustody.custodian })
@@ -3221,7 +3253,7 @@ async function performKitDeletion({
           const count = formatUnitCount(asset, releasedQty.get(releaseKey));
           const custodyPhrase = count ? `custody of ${count}` : "custody";
           return {
-            content: `${actorLink} released ${custodianDisplay}'s ${custodyPhrase} when kit **${kitName}** was deleted.`,
+            content: `${actorLink} released ${custodianDisplay}'s ${custodyPhrase} when kit ${kitName} was deleted.`,
             type: "UPDATE" as const,
             userId,
             assetId: asset.id,
@@ -3229,7 +3261,7 @@ async function performKitDeletion({
         }
         const count = formatUnitCount(asset, asset.kitQuantity);
         return {
-          content: `${actorLink} deleted kit **${kitName}**, which removed ${
+          content: `${actorLink} deleted kit ${kitName}, which removed ${
             count ?? "this asset"
           } from it.`,
           type: "UPDATE" as const,
@@ -4397,12 +4429,15 @@ export async function bulkAssignKitCustody({
       const actor = wrapUserLinkForNote({ ...user, id: userId });
       const custodianDisplay = custodianTeamMember
         ? wrapCustodianForNote({ teamMember: custodianTeamMember })
-        : // Free-form fallback name, rendered as literal bold text.
-          `**${stripMarkdocDelimiters(custodianName)}**`;
+        : // Free-form fallback name, inside a `name` tag like every typed value.
+          wrapNameForNote(custodianName);
       await tx.note.createMany({
         data: custodyMembers.map((asset) => {
           const kitLink = asset.kit
-            ? wrapLinkForNote(`/kits/${asset.kit.id}`, asset.kit.name.trim())
+            ? wrapLinkForNote(
+                `/kits/${asset.kit.id}`,
+                stripMarkdocDelimiters(asset.kit.name)
+              )
             : "**Unknown Kit**";
           // For qty-tracked assets, name the unit count actually moved into
           // custody ("custody of 50 units"); INDIVIDUAL phrasing is unchanged.

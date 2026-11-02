@@ -132,7 +132,6 @@ import {
 } from "~/utils/cookies.server";
 import {
   buildCustomFieldValue,
-  extractCustomFieldValuesFromPayload,
   formatInvalidNumericCustomFieldMessage,
   getDefinitionFromCsvHeader,
 } from "~/utils/custom-fields";
@@ -158,13 +157,13 @@ import * as importImageCacheServer from "~/utils/import.image-cache.server";
 import type { CachedImage } from "~/utils/import.image-cache.server";
 import { getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
-import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import {
   wrapUserLinkForNote,
   wrapCustodianForNote,
   wrapAssetsWithDataForNote,
   wrapAssetWithCountForNote,
   wrapLinkForNote,
+  wrapNameForNote,
 } from "~/utils/markdoc-wrappers";
 import { isValidImageUrl } from "~/utils/misc";
 import { threeDaysFromNow } from "~/utils/one-week-from-now";
@@ -232,6 +231,7 @@ import {
   getCustomFieldUpdateNoteContent,
   detectPotentialChanges,
   detectCustomFieldChanges,
+  planCustomFieldValueWrites,
   type CustomFieldChangeInfo,
   getArchivedFilterFromParams,
   type ArchivedFilter,
@@ -2134,10 +2134,6 @@ export async function updateAsset({
         (cf) => !!cf.value
       );
 
-      const customFieldValuesToRemove = customFieldsValuesFromForm.filter(
-        (cf) => !cf.value
-      );
-
       // SECURITY (cross-org IDOR): the create/updateMany writes below connect
       // values to a CustomField by an id sourced from form input. Prove every
       // referenced custom field belongs to this org before writing. (Removals
@@ -2151,65 +2147,42 @@ export async function updateAsset({
       });
 
       /**
-       * Split the writes into create vs update ourselves instead of using a
-       * nested `upsert`. Prisma emulates each nested upsert with a
-       * SELECT-then-write round-trip per field, which is the N+1 reported in
-       * Sentry SHELF-WEBAPP-1KY / SHELF-WEBAPP-1MF. We already loaded the
-       * existing values above (`currentCustomFieldsValuesWithFields`), so we
-       * know which fields exist without asking the database again. Each
-       * custom field has at most one value row per asset, so keying by
-       * `customFieldId` is unambiguous.
+       * Write only what changed. Every nested `updateMany` entry and the
+       * nested `deleteMany` each cost Prisma a lookup query before the write,
+       * and the form submits every field, so unchanged fields and fields that
+       * were already empty are left out. Creates and updates are split here
+       * rather than using a nested `upsert`, which Prisma emulates with a
+       * lookup per field.
        */
-      const existingValueIdByFieldId = new Map(
-        currentCustomFieldsValuesWithFields.map((ccfv) => [
-          ccfv.customFieldId,
-          ccfv.id,
-        ])
-      );
-
-      const customFieldsToCreate = customFieldValuesToAdd
-        .filter(({ id }) => !existingValueIdByFieldId.has(id))
-        .map(({ id, value }) => ({ value, customFieldId: id }));
-
-      /**
-       * Existing values are written with `updateMany` (one entry per row),
-       * NOT a nested `update`. `update` would throw P2025 and abort the whole
-       * asset save if a concurrent edit deleted the value row in the window
-       * between the `findMany` above and this write; `updateMany` matches zero
-       * rows instead of throwing. The concurrent delete then wins (the row
-       * stays gone) rather than 500-ing the user — an acceptable
-       * last-write-wins outcome for this rare interleaving, and it keeps the
-       * per-field existence SELECT eliminated.
-       */
-      const customFieldsToUpdate = customFieldValuesToAdd
-        .filter(({ id }) => existingValueIdByFieldId.has(id))
-        .map(({ id, value }) => ({
-          where: { id: existingValueIdByFieldId.get(id) as string },
-          data: { value },
-        }));
+      const { toCreate, toUpdate, toRemoveFieldIds } =
+        planCustomFieldValueWrites(
+          currentCustomFieldsValuesWithFields,
+          customFieldsValuesFromForm
+        );
 
       Object.assign(data, {
         customFields: {
-          ...(customFieldsToCreate.length > 0
-            ? { create: customFieldsToCreate }
-            : {}),
-          ...(customFieldsToUpdate.length > 0
-            ? { updateMany: customFieldsToUpdate }
-            : {}),
-          ...(customFieldValuesToRemove.length > 0
+          ...(toCreate.length > 0 ? { create: toCreate } : {}),
+          /**
+           * `updateMany`, not a nested `update`: if a concurrent edit deleted
+           * the row after the `findMany` above, `update` throws P2025 and
+           * fails the whole save, while `updateMany` matches zero rows and
+           * the delete wins.
+           */
+          ...(toUpdate.length > 0
             ? {
-                // Collapse N per-field deleteMany filters into ONE `IN`
-                // clause so Prisma issues a single SELECT pre-flight +
-                // single DELETE, not 2N round trips (Sentry N+1
-                // SHELF-WEBAPP-1NZ, 1P0). Prisma's nested `deleteMany`
-                // accepts EITHER a single where OR an array of wheres —
-                // the array form fans out into per-entry queries.
-                deleteMany: {
-                  customFieldId: {
-                    in: customFieldValuesToRemove.map((cf) => cf.id),
-                  },
-                },
+                updateMany: toUpdate.map(({ valueId, value }) => ({
+                  where: { id: valueId },
+                  data: { value },
+                })),
               }
+            : {}),
+          /**
+           * One `deleteMany` with an `IN` filter: the array form of
+           * `deleteMany` runs a lookup and a delete per entry.
+           */
+          ...(toRemoveFieldIds.length > 0
+            ? { deleteMany: { customFieldId: { in: toRemoveFieldIds } } }
             : {}),
         },
       });
@@ -3602,16 +3575,16 @@ async function noteModelShortfallsOnBookings(
 
   const what =
     archivedTitles.length === 1
-      ? `**${stripMarkdocDelimiters(archivedTitles[0])}**`
+      ? wrapNameForNote(archivedTitles[0])
       : `${archivedTitles.length} assets`;
 
   await createSystemBookingNotes(
     {
       notes: shortfalls.map((shortfall) => ({
         bookingId: shortfall.bookingId,
-        content: `${actorLink} archived ${what}. This booking's reservation of **${stripMarkdocDelimiters(
+        content: `${actorLink} archived ${what}. This booking's reservation of ${wrapNameForNote(
           shortfall.modelName
-        )}** is now ${shortfall.short} ${
+        )} is now ${shortfall.short} ${
           shortfall.short === 1 ? "unit" : "units"
         } short for its dates. Reduce it to what can be assigned.`,
       })),
@@ -5161,30 +5134,6 @@ export async function uploadDuplicateAssetMainImage(
   }
 }
 
-export function createCustomFieldsPayloadFromAsset(
-  asset: Prisma.AssetGetPayload<{
-    include: {
-      custody: { include: { custodian: true } };
-      tags: true;
-      customFields: true;
-    };
-  }>
-) {
-  if (!asset?.customFields || asset?.customFields?.length === 0) {
-    return {};
-  }
-
-  return (
-    asset.customFields?.reduce(
-      (obj, { customFieldId, value }) => {
-        const rawValue = (value as { raw: string })?.raw ?? value ?? "";
-        return { ...obj, [`cf-${customFieldId}`]: rawValue };
-      },
-      {} as Record<string, any>
-    ) || {}
-  );
-}
-
 /**
  * Deletes the copies `duplicateAsset` created before a later copy failed, so a
  * duplicate request never leaves part of its copies behind.
@@ -5358,13 +5307,20 @@ export async function duplicateAsset({
       }),
     };
 
-    const customFieldValues = createCustomFieldsPayloadFromAsset(asset);
-
-    const extractedCustomFieldValues = extractCustomFieldValuesFromPayload({
-      payload: { ...payload, ...customFieldValues },
-      customFieldDef: customFields,
-      isDuplicate: true,
-    });
+    // A copy carries each active field's stored value exactly as it is.
+    // Rebuilding it from `raw` would hold old values to today's rules, so a
+    // value saved before its field became a Link field would block the copy.
+    const activeFieldIds = new Set(customFields.map((field) => field.id));
+    const copiedCustomFieldValues = asset.customFields
+      .filter(({ customFieldId }) => activeFieldIds.has(customFieldId))
+      .map(
+        ({ customFieldId, value }) =>
+          ({
+            id: customFieldId,
+            // Stored values were built by `buildCustomFieldValue`.
+            value: value as unknown as ShelfAssetCustomFieldValueType["value"],
+          }) as ShelfAssetCustomFieldValueType
+      );
 
     // All copies are created or none are. Each `createAsset` commits its own
     // transaction and retries on a sequential-id collision, which an
@@ -5378,7 +5334,7 @@ export async function duplicateAsset({
             title: `${asset.title} (copy${
               amountOfDuplicates > 1 ? ` ${i + 1}` : ""
             })`,
-            customFieldsValues: extractedCustomFieldValues,
+            customFieldsValues: copiedCustomFieldValues,
           })
         );
       }
@@ -5886,7 +5842,7 @@ export async function createAssetsFromContentImport({
     // conflict it goes on to reject.
     const existingCustomFields = await db.customField.findMany({
       where: { organizationId, deletedAt: null },
-      select: { name: true, type: true },
+      select: { name: true, type: true, format: true },
     });
 
     const { errors: rowErrors, totalErrors } = validateContentImportRows({
@@ -7414,8 +7370,8 @@ export async function bulkCheckOutAssets({
 
       const custodianDisplay = custodianTeamMember
         ? wrapCustodianForNote({ teamMember: custodianTeamMember })
-        : // Free-form fallback name, rendered as literal bold text.
-          `**${stripMarkdocDelimiters(custodianName)}**`;
+        : // Free-form fallback name, inside a `name` tag like every typed value.
+          wrapNameForNote(custodianName);
 
       // why: `assets` is individual-only — QUANTITY_TRACKED were filtered out
       // above (they have no Custody.quantity in this path), so no unit count
@@ -7677,20 +7633,21 @@ export async function bulkCheckInAssets({
       await tx.note.createMany({
         data: assets.map((asset) => {
           const primaryCustody = getPrimaryCustody(asset.custody);
-          // Actor name, custodian name and asset title are all user-supplied
-          // and render as literal text in this Markdoc note.
-          const actorName = stripMarkdocDelimiters(
+          // Actor name, custodian name and asset title are all user-supplied,
+          // so each goes inside a `name` tag. The note is on the asset's own
+          // page, so its title is not a link.
+          const actorName = wrapNameForNote(
             `${user.firstName?.trim() ?? ""} ${user.lastName ?? ""}`
           );
-          const custodianName = stripMarkdocDelimiters(
+          const custodianName = wrapNameForNote(
             primaryCustody
               ? resolveTeamMemberName(primaryCustody.custodian)
               : "Unknown Custodian"
           );
           return {
-            content: `**${actorName}** has released **${custodianName}'s** custody over **${stripMarkdocDelimiters(
-              asset.title ?? ""
-            )}**`,
+            content: `${actorName} has released ${custodianName}'s custody over ${wrapNameForNote(
+              asset.title
+            )}`,
             type: "UPDATE",
             userId,
             assetId: asset.id,

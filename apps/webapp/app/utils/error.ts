@@ -103,6 +103,7 @@ export type FailureReason = {
     | "Environment" // Related to the environment setup
     | "Image Import"
     | "Image Cache"
+    | "Link preview"
     | "Asset Model"
     | "Asset Reminder"
     | "Asset Scheduler" // Error related to the image import

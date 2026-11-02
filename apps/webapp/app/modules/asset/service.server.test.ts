@@ -5,6 +5,8 @@ import {
   type AssetIndexSettings,
 } from "@prisma/client";
 import { describe, expect, it, vi, vitest, beforeEach } from "vitest";
+import { createCustomField } from "@factories";
+import { URL_SHAPED_VALUE, expectValueOnlyInTag } from "@helpers/note-tags";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
 import { db } from "~/database/db.server";
@@ -813,6 +815,47 @@ describe("duplicateAsset", () => {
         quantity: 1,
       },
     });
+  });
+
+  it("copies stored custom field values as they are, even ones a Link field would refuse now", async () => {
+    vi.mocked(getActiveCustomFields).mockResolvedValue([
+      createCustomField({ id: "cfmanual", name: "Manual", format: "LINK" }),
+    ]);
+    // why: createAsset proves the custom fields belong to the org.
+    vi.mocked(db.customField.findMany).mockResolvedValueOnce([
+      { id: "cfmanual" },
+    ] as never);
+
+    await duplicateAsset({
+      asset: makeSource({
+        customFields: [
+          {
+            customFieldId: "cfmanual",
+            value: { raw: "see shelf", valueText: "see shelf" },
+          },
+          {
+            customFieldId: "cfinactive",
+            value: { raw: "kept off", valueText: "kept off" },
+          },
+        ] as unknown as SourceAsset["customFields"],
+      }),
+      userId: "user-1",
+      amountOfDuplicates: 1,
+      organizationId: "org-1",
+    });
+
+    expect(createdRows()).toEqual([
+      expect.objectContaining({
+        customFields: {
+          create: [
+            {
+              customFieldId: "cfmanual",
+              value: { raw: "see shelf", valueText: "see shelf" },
+            },
+          ],
+        },
+      }),
+    ]);
   });
 
   it("refuses to copy a quantity-tracked asset with no units in stock", async () => {
@@ -2961,10 +3004,9 @@ describe("updateAsset custom-field writes", () => {
     });
   });
 
-  // Regression for Sentry SHELF-WEBAPP-1KY / SHELF-WEBAPP-1MF: persisting custom
-  // field values must not use a nested `upsert`, which makes Prisma issue a
-  // SELECT-then-write per field (N+1). New values become a single `create`,
-  // existing ones an `updateMany` keyed by the value-row id we already loaded
+  // Custom field values must not use a nested `upsert`, which makes Prisma
+  // issue a SELECT-then-write per field. New values become a single `create`,
+  // existing ones an `updateMany` keyed by the value-row id already loaded
   // (`updateMany` so a concurrently-deleted row matches zero rows instead of
   // throwing P2025 and aborting the whole save).
   it("creates new custom-field values and updates existing ones without a nested upsert", async () => {
@@ -3015,6 +3057,56 @@ describe("updateAsset custom-field writes", () => {
     ]);
     // Existence info is read in a single query, not once per field.
     expect(db.assetCustomFieldValue.findMany).toHaveBeenCalledTimes(1);
+  });
+
+  // The form submits every field. Each nested `updateMany` entry and the
+  // nested `deleteMany` cost Prisma a lookup query, so only real changes may
+  // reach them.
+  it("writes only the fields whose value changed", async () => {
+    expect.assertions(3);
+
+    (
+      db.assetCustomFieldValue.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      {
+        id: "val-same",
+        customFieldId: "cf-same",
+        value: { raw: "kept", valueText: "kept" },
+        customField: { id: "cf-same", name: "Same", type: "TEXT" },
+      },
+      {
+        id: "val-cleared",
+        customFieldId: "cf-cleared",
+        value: { raw: "gone" },
+        customField: { id: "cf-cleared", name: "Cleared", type: "TEXT" },
+      },
+    ]);
+    (db.customField.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      [{ id: "cf-same", name: "Same", type: "TEXT" }]
+    );
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      customFieldsValues: [
+        // Same value, keys in a different order.
+        { id: "cf-same", value: { valueText: "kept", raw: "kept" } },
+        // Cleared, and has a stored row.
+        { id: "cf-cleared", value: null },
+        // Empty, and never had a stored row.
+        { id: "cf-never-set", value: null },
+      ],
+    } as any);
+
+    const { customFields } = (db.asset.update as ReturnType<typeof vitest.fn>)
+      .mock.calls[0][0].data;
+
+    expect(customFields.updateMany).toBeUndefined();
+    expect(customFields.create).toBeUndefined();
+    expect(customFields.deleteMany).toEqual({
+      customFieldId: { in: ["cf-cleared"] },
+    });
   });
 });
 
@@ -6553,7 +6645,7 @@ describe("archiveAsset", () => {
           expect.objectContaining({
             bookingId: "b1",
             content: expect.stringContaining(
-              "This booking's reservation of **Sony A7** is now 1 unit short for its dates."
+              'This booking\'s reservation of {% name text="Sony A7" /%} is now 1 unit short for its dates.'
             ),
           }),
         ],
@@ -6561,6 +6653,41 @@ describe("archiveAsset", () => {
       },
       expect.anything()
     );
+  });
+
+  it("keeps a URL-shaped model name inside a name tag in the shortfall note", async () => {
+    mockFindFirst.mockResolvedValue({
+      id: "a1",
+      type: "INDIVIDUAL",
+      status: "AVAILABLE",
+      archivedAt: null,
+      assetModelId: "model-1",
+    });
+    mockUpdateMany.mockResolvedValue({ count: 1 });
+
+    // why: a model named like a URL leaves "Shoot" one unit short.
+    vitest
+      .mocked(findModelReservationsShortAfterArchive)
+      .mockResolvedValueOnce([
+        {
+          bookingId: "b1",
+          bookingName: "Shoot",
+          modelName: URL_SHAPED_VALUE,
+          short: 1,
+        },
+      ]);
+
+    await archiveAsset({
+      id: "a1",
+      organizationId: "org-1",
+      actorUserId: "u1",
+      confirmModelShortfall: true,
+    });
+
+    const [{ notes }] = vitest
+      .mocked(createSystemBookingNotes)
+      .mock.calls.at(-1)!;
+    expectValueOnlyInTag(notes[0].content, URL_SHAPED_VALUE, ["name"]);
   });
 
   it("writes an Activity note naming who archived the asset", async () => {
