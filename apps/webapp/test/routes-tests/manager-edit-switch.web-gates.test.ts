@@ -38,6 +38,7 @@ import {
   relinkAssetQrCode,
   updateAsset,
 } from "~/modules/asset/service.server";
+import { setLinkTitle } from "~/modules/link-preview/service.server";
 import {
   bulkSetAssetCustomField,
   getBulkSettableCustomFields,
@@ -82,6 +83,7 @@ import { action as bulkUpdateLocationAction } from "~/routes/api+/assets.bulk-up
 import { action as bulkUpdateReorderPointAction } from "~/routes/api+/assets.bulk-update-reorder-point";
 import { action as generateSequentialIdsAction } from "~/routes/api+/generate-sequential-ids";
 import { action as kitsBulkAction } from "~/routes/api+/kits.bulk-actions";
+import { action as linkTitlesAction } from "~/routes/api+/link-titles";
 import { action as linkQrToAssetAction } from "~/routes/qr+/_private+/$qrId_.link.asset";
 
 const USER_ID = "user-1";
@@ -141,6 +143,16 @@ vi.mock("~/modules/asset/bulk-custom-field.server", () => ({
   bulkSetAssetCustomField: vi.fn(async () => ({ changed: 1 })),
   bulkCustomFieldMessage: vi.fn(() => "1 asset updated"),
   getBulkSettableCustomFields: vi.fn(async () => []),
+}));
+
+// why: link naming has its own service tests; the case below only pins
+// whether the route reaches it, and with which link.
+vi.mock("~/modules/link-preview/service.server", () => ({
+  isLinkStoredInWorkspace: vi.fn(async () => true),
+  setLinkTitle: vi.fn(async () => ({
+    pageTitle: null,
+    customTitle: "Manual",
+  })),
 }));
 
 // why: every asset write below has its own service tests; these cases only
@@ -389,6 +401,19 @@ type GatedRoute = {
 
 /** Routes the switch opens to a Manager. */
 const OPENED_BY_THE_SWITCH: GatedRoute[] = [
+  {
+    route: "api+/link-titles.ts action",
+    call: post(linkTitlesAction, "/api/link-titles", {
+      url: "https://example.com/manual.pdf",
+      title: "Manual",
+    }),
+    service: setLinkTitle,
+    receives: expect.objectContaining({
+      organizationId: ORG_ID,
+      title: "Manual",
+    }),
+    status: 200,
+  },
   {
     route: "_layout+/assets.new.tsx action (single create)",
     call: post(newAssetAction, "/assets/new", {

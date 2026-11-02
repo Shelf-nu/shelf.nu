@@ -53,6 +53,8 @@ const OPENED_BY_SWITCH = [
   "routes/api+/assets.bulk-update-location.ts",
   // bulk-update-location (kit:update) opens; bulk-delete is kit:delete.
   "routes/api+/kits.bulk-actions.ts",
+  // Names a link stored in an asset's custom field: part of editing values.
+  "routes/api+/link-titles.ts",
   "routes/api+/mobile+/asset.adjust-quantity.ts",
   "routes/api+/mobile+/asset.create.ts",
   "routes/api+/mobile+/asset.manage-placements.ts",
