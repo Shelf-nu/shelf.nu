@@ -1,5 +1,5 @@
 import { BookingStatus } from "@prisma/client";
-import { useLoaderData, useSubmit } from "react-router";
+import { useLoaderData } from "react-router";
 import { ChevronRight } from "~/components/icons/library";
 import {
   DropdownMenu,
@@ -21,10 +21,12 @@ import {
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
+import { ArchiveBookingAction } from "./archive-booking-action";
 import { BookingCheckinReceiptPDF } from "./booking-checkin-receipt-pdf";
 import { BookingOverviewPDF } from "./booking-overview-pdf";
 import { CancelBookingDialog } from "./cancel-booking-dialog";
 import { DeleteBooking } from "./delete-booking";
+import { DuplicateBookingAction } from "./duplicate-booking-action";
 
 import ExtendBookingDialog from "./extend-booking-dialog";
 import ManageNotificationsDialog from "./manage-notifications-dialog";
@@ -53,7 +55,6 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
     isCancelled,
   } = useBookingStatusHelpers(booking.status);
 
-  const submit = useSubmit();
   const roles = useOrganizationRoles();
   const roleAccess = useRoleAccess();
 
@@ -104,7 +105,7 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
           <When
             truthy={(isOngoing || isReserved || isOverdue) && canCancelBooking}
           >
-            <CancelBookingDialog bookingName={booking.name} />
+            <CancelBookingDialog booking={booking} />
           </When>
           <When truthy={canExtendBooking}>
             <ExtendBookingDialog
@@ -121,38 +122,12 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
             }
           >
             <DropdownMenuItem asChild>
-              <Button
-                type="button"
-                variant="link"
-                className="justify-start text-gray-700 hover:cursor-pointer hover:text-gray-700"
-                width="full"
-                as="span"
-                /**
-                 * This button is rendered inside a Radix DropdownMenuPortal,
-                 * which places it outside the parent Form in the DOM.
-                 * We submit manually via onClick instead of relying on
-                 * native form submission.
-                 */
-                onClick={() => {
-                  const formData = new FormData();
-                  formData.append("intent", "archive");
-                  void submit(formData, { method: "post" });
-                }}
-              >
-                Archive
-              </Button>
+              <ArchiveBookingAction booking={{ id: booking.id }} />
             </DropdownMenuItem>
           </When>
 
           <DropdownMenuItem asChild>
-            <Button
-              variant="link"
-              className="justify-start text-gray-700 hover:cursor-pointer hover:text-gray-700"
-              width="full"
-              to="duplicate"
-            >
-              Duplicate booking
-            </Button>
+            <DuplicateBookingAction booking={{ id: booking.id }} />
           </DropdownMenuItem>
 
           <When
