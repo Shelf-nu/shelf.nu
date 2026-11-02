@@ -541,6 +541,86 @@ describe("editing an asset whose Link field holds an older plain value", () => {
   });
 });
 
+/**
+ * Required text-shaped fields (text, Link, multi-line text, date).
+ *
+ * `buildCustomFieldValue` stores nothing for a whitespace-only value, so the
+ * schema must refuse one for a required field, or the field saves empty.
+ */
+describe("mergedSchema: required text fields refuse whitespace", () => {
+  /** Builds the merged schema for one text-shaped field. */
+  function schemaFor(
+    type: "TEXT" | "MULTILINE_TEXT" | "DATE",
+    { required = true, format = "PLAIN" as "PLAIN" | "LINK" } = {}
+  ) {
+    return mergedSchema({
+      baseSchema: z.object({}),
+      customFields: [
+        toCustomFieldZodSchema({
+          id: "cf1",
+          name: "Serial",
+          helpText: null,
+          required,
+          type,
+          format,
+          options: [],
+        }),
+      ],
+    });
+  }
+
+  const requiredFields = [
+    ["plain text", schemaFor("TEXT")],
+    ["Link", schemaFor("TEXT", { format: "LINK" })],
+    ["multi-line text", schemaFor("MULTILINE_TEXT")],
+    ["date", schemaFor("DATE")],
+  ] as const;
+
+  it.each(requiredFields)(
+    "refuses a whitespace-only required %s field, naming it",
+    (_label, schema) => {
+      const result = schema.safeParse({ "cf-cf1": " \t\n " });
+
+      expect(result.error?.issues.map((issue) => issue.message)).toEqual([
+        "Serial is required",
+      ]);
+    }
+  );
+
+  it.each(requiredFields)(
+    "still refuses an empty required %s field",
+    (_label, schema) => {
+      expect(schema.safeParse({ "cf-cf1": "" }).success).toBe(false);
+    }
+  );
+
+  it("keeps a required value as typed, surrounding spaces included", () => {
+    expect(schemaFor("TEXT").safeParse({ "cf-cf1": "  SN-1 " })).toEqual({
+      success: true,
+      data: { "cf-cf1": "  SN-1 " },
+    });
+  });
+
+  it("accepts a link in a required Link field", () => {
+    expect(
+      schemaFor("TEXT", { format: "LINK" }).safeParse({
+        "cf-cf1": "www.example.com/a.pdf",
+      }).success
+    ).toBe(true);
+  });
+
+  it.each([
+    ["plain text", schemaFor("TEXT", { required: false })],
+    ["Link", schemaFor("TEXT", { required: false, format: "LINK" })],
+  ] as const)(
+    "lets an optional %s field stay blank or whitespace",
+    (_label, schema) => {
+      expect(schema.safeParse({ "cf-cf1": "" }).success).toBe(true);
+      expect(schema.safeParse({ "cf-cf1": "   " }).success).toBe(true);
+    }
+  );
+});
+
 describe("custom field CSV headers", () => {
   it("reads format:link on a text column as a Link field", () => {
     expect(

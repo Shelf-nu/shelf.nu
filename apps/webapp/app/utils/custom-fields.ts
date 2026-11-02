@@ -45,9 +45,15 @@ const getSchema = ({
   /** The text the asset stores for this field now, when editing an asset. */
   storedValue?: string;
 }) => {
-  /** If the field is required, we set the correct field type using zod */
+  /**
+   * Text-shaped value (text, Link, multi-line text, date). A required one must
+   * hold more than whitespace: `buildCustomFieldValue` treats a whitespace-only
+   * value as blank and stores nothing, so accepting it would let a required
+   * field be saved empty. The check refines rather than trims, so the text that
+   * passes is stored as typed.
+   */
   const text = required
-    ? z.string(params).min(1, {
+    ? z.string(params).refine((value) => value.trim().length > 0, {
         message: field_name
           ? `${field_name} is required`
           : `This field is required`,
