@@ -10,12 +10,10 @@ import {
 } from "~/components/shared/dropdown";
 import { useSearchParams } from "~/hooks/search-params";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
-import { useFormatPrefs } from "~/hooks/use-format-prefs";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { useRoleAccess } from "~/hooks/use-role-access";
 import { isBookingArchivable } from "~/modules/booking/helpers";
 import type { loader } from "~/routes/_layout+/bookings.$bookingId.overview";
-import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import {
   PermissionAction,
   PermissionEntity,
@@ -48,11 +46,8 @@ interface Props {
 }
 
 export const ActionsDropdown = ({ fullWidth }: Props) => {
-  const { booking, hasDispositionedUnits } = useLoaderData<typeof loader>();
-  // Seed the extend dialog in the RESOLVED preference zone — the same zone this
-  // page displays the booking in and the extend action parses the submission in.
-  // Seeding from the device clock showed a different end date than the page.
-  const prefs = useFormatPrefs();
+  const { booking, hasDispositionedUnits, nextReservations } =
+    useLoaderData<typeof loader>();
   const {
     isCompleted,
     isOngoing,
@@ -120,10 +115,8 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
           </When>
           <When truthy={canExtendBooking}>
             <ExtendBookingDialog
-              currentEndDate={dateForDateTimeInputValue(
-                new Date(booking.to),
-                prefs.timeZone
-              )}
+              booking={booking}
+              nextReservations={nextReservations}
             />
           </When>
           <When

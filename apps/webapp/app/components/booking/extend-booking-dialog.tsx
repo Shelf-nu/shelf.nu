@@ -17,7 +17,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { CalendarIcon } from "lucide-react";
-import { useFetcher, useLoaderData } from "react-router";
+import { useFetcher } from "react-router";
 import { useZorm } from "react-zorm";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useDateFormatter } from "~/hooks/use-date-formatter";
@@ -31,12 +31,17 @@ import {
   readClashRefusal,
   suggestEndBeforeClash,
 } from "~/modules/booking/extend-horizon";
-import type { ExtendHorizon } from "~/modules/booking/next-reservations.server";
-import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId.overview";
+import type {
+  ExtendHorizon,
+  NextReservations,
+} from "~/modules/booking/next-reservations.server";
+import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import { wallClockWireInZone } from "~/utils/date-format";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
 import { tw } from "~/utils/tw";
+import { BookingActionTrigger } from "./booking-action-trigger";
+import type { BookingActionTriggerVariant } from "./booking-action-trigger";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";
 import { DateTimePicker } from "../shared/date-time-picker";
@@ -47,10 +52,18 @@ import {
   type ExtendBookingSchemaType,
 } from "./forms/forms-schema";
 
+/** Props for {@link ExtendBookingDialog}. */
 type ExtendBookingDialogProps = {
+  /** The booking to extend: its id, and its current start and end. */
+  booking: { id: string; from: Date | string; to: Date | string };
+  /**
+   * The horizon the booking page already loaded. Omitted means the dialog
+   * fetches it from `/api/bookings/:id/next-reservations` when it opens.
+   */
+  nextReservations?: NextReservations;
+  /** Menu row or icon button. Defaults to `"menu-item"`. */
+  trigger?: BookingActionTriggerVariant;
   className?: string;
-  /** The current end as the picker's naive wire string, in the pref zone. */
-  currentEndDate: string;
 };
 
 /** Items named per booking before "+N more"; keeps the dialog short. */
@@ -58,9 +71,21 @@ const MAX_ITEMS_NAMED = 3;
 /** Bookings listed in a refusal before "+N more bookings". */
 const MAX_BOOKINGS_LISTED = 5;
 
+/**
+ * Renders the Change end date trigger and its dialog.
+ *
+ * The form posts `intent=extend-booking` to the booking's own overview action,
+ * so it works from any page. While a fetched horizon is loading, or if the
+ * fetch fails, the picker shows without the horizon block and extending is
+ * never blocked.
+ *
+ * @param props - See {@link ExtendBookingDialogProps}
+ */
 export default function ExtendBookingDialog({
+  booking,
+  nextReservations: passedNextReservations,
+  trigger = "menu-item",
   className,
-  currentEndDate,
 }: ExtendBookingDialogProps) {
   const [open, setOpen] = useState(false);
   // The picker is uncontrolled; a suggested end re-seeds it through its key.
@@ -72,10 +97,15 @@ export default function ExtendBookingDialog({
   // The refusal the person answered by taking the suggested end; it is not
   // shown again while that same response is still the fetcher's.
   const [answeredRefusal, setAnsweredRefusal] = useState<unknown>(undefined);
-  const { booking, nextReservations } = useLoaderData<BookingPageLoaderData>();
   const fetcher = useFetcher<DataOrErrorResponse>({
     key: `extend-booking-${booking.id}`,
   });
+  // Only used when the caller passed no horizon (the bookings list).
+  const horizonFetcher = useFetcher<{ nextReservations?: NextReservations }>({
+    key: `next-reservations-${booking.id}`,
+  });
+  const nextReservations =
+    passedNextReservations ?? horizonFetcher.data?.nextReservations;
   const outcome = useFetcherOutcomeSinceOpen(fetcher, open);
   const disabled = useDisabled(fetcher);
   // Validate the new end date in the user's RESOLVED pref zone: the server
@@ -102,6 +132,9 @@ export default function ExtendBookingDialog({
     setSeeded(null);
     setAnsweredRefusal(undefined);
     setOpen(true);
+    if (!passedNextReservations && horizonFetcher.state === "idle") {
+      void horizonFetcher.load(`/api/bookings/${booking.id}/next-reservations`);
+    }
   }
 
   function handleClose() {
@@ -136,19 +169,20 @@ export default function ExtendBookingDialog({
   const validationErrors =
     getValidationErrors<ExtendBookingSchemaType>(rejectedError);
   const refusal = readClashRefusal(rejectedError?.additionalData);
-  const pickerValue = seeded?.wire ?? currentEndDate;
+  // The current end in the RESOLVED pref zone, the zone the page displays the
+  // booking in and the extend action parses the submission in.
+  const pickerValue =
+    seeded?.wire ??
+    dateForDateTimeInputValue(new Date(booking.to), prefs.timeZone);
 
   return (
     <>
-      <Button
-        type="button"
-        variant="link"
-        className="justify-start rounded px-2 py-1.5 text-sm font-medium text-gray-700 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-slate-100 hover:text-gray-700"
-        width="full"
+      <BookingActionTrigger
+        variant={trigger}
+        label="Change end date"
+        icon={<CalendarIcon className="size-4" />}
         onClick={handleOpen}
-      >
-        Change end date
-      </Button>
+      />
 
       <DialogPortal>
         <Dialog
@@ -187,7 +221,11 @@ export default function ExtendBookingDialog({
               />
             ) : null}
 
-            <fetcher.Form ref={zo.ref} method="POST">
+            <fetcher.Form
+              ref={zo.ref}
+              method="POST"
+              action={`/bookings/${booking.id}/overview`}
+            >
               <div className="required-input-label mb-1 text-text-sm font-medium text-gray-700">
                 New end date
               </div>
@@ -234,7 +272,7 @@ export default function ExtendBookingDialog({
               <input
                 type="hidden"
                 name={zo.fields.startDate()}
-                value={booking.from.toISOString()}
+                value={new Date(booking.from).toISOString()}
               />
 
               <div className="flex items-center gap-2">
