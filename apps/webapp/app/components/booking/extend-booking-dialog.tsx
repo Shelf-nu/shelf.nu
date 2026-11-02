@@ -7,6 +7,9 @@
  * the horizon comes back as a refusal that names each reservation in the way
  * and the items it holds.
  *
+ * The horizon comes from props (the booking page passes its loader value) or
+ * is fetched on open from `/api/bookings/:id/next-reservations`.
+ *
  * The fetcher is keyed per booking and every outcome is read through
  * `useFetcherOutcomeSinceOpen`, so a response answers the opening that sent
  * it and never an earlier or later one.
@@ -63,6 +66,7 @@ type ExtendBookingDialogProps = {
   nextReservations?: NextReservations;
   /** Menu row or icon button. Defaults to `"menu-item"`. */
   trigger?: BookingActionTriggerVariant;
+  /** Extra classes for the dialog panel. */
   className?: string;
 };
 

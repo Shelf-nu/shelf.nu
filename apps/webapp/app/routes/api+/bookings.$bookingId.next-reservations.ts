@@ -18,7 +18,10 @@ import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
 import { loadNextReservations } from "~/modules/booking/next-reservations.server";
-import { validateBookingOwnership } from "~/utils/booking-authorization.server";
+import {
+  canSeeBooking,
+  validateBookingOwnership,
+} from "~/utils/booking-authorization.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { error, getParams, payload } from "~/utils/http.server";
 import {
@@ -39,9 +42,9 @@ import { requirePermission } from "~/utils/roles.server";
  * @param args.context - Carries the auth session
  * @param args.request - Read for the active organization
  * @param args.params - Carries `bookingId`
- * @returns `{ nextReservations }`
- * @throws {Response} 403 without `booking:extend` or without ownership, 404
- *   when the booking is not in this workspace
+ * @returns `{ nextReservations }`, or an error body with status 403 (no
+ *   `booking:extend`, not the owner, or cannot see the booking) / 404 (not in
+ *   this workspace)
  */
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { userId } = context.getSession();
@@ -60,7 +63,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // Scoped to the workspace, so an id from another org is a 404 here.
     const booking = await db.booking.findFirst({
       where: { id: bookingId, organizationId },
-      select: { id: true, creatorId: true, custodianUserId: true },
+      select: {
+        id: true,
+        creatorId: true,
+        custodianUserId: true,
+        custodianTeamMember: { select: { userId: true } },
+      },
     });
 
     if (!booking) {
@@ -76,6 +84,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     validateBookingOwnership({ booking, userId, access, action: "extend" });
 
+    // The page's own read gate: a creator who may write the booking but no
+    // longer sees it (not the custodian, and the workspace hides bookings)
+    // must not read its horizon through this route either.
+    if (!canSeeBooking({ access, booking, userId })) {
+      throw new ShelfError({
+        cause: null,
+        label: "Booking",
+        status: 403,
+        message: "You are not authorized to view this booking.",
+        shouldBeCaptured: false,
+      });
+    }
+
     const nextReservations = await loadNextReservations({
       organizationId,
       bookingId: booking.id,
@@ -85,8 +106,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     return data(payload({ nextReservations }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
-    // No notification: a background read behind a dialog that still works
-    // without it.
-    throw data(error(reason, false), { status: reason.status });
+    // Returned, not thrown: a fetcher load that receives a thrown response is
+    // routed to the nearest error boundary, which would replace the page the
+    // dialog sits on. The dialog still works without the horizon.
+    return data(error(reason, false), { status: reason.status });
   }
 }

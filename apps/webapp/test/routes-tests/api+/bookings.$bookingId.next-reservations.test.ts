@@ -57,13 +57,9 @@ function buildArgs(): LoaderFunctionArgs {
   } as unknown as LoaderFunctionArgs;
 }
 
-/** Runs the loader and returns the Response it returned or threw. */
+/** Runs the loader; refusals are returned, not thrown. */
 async function run(): Promise<Response> {
-  try {
-    return (await loader(buildArgs())) as unknown as Response;
-  } catch (thrown) {
-    return thrown as Response;
-  }
+  return (await loader(buildArgs())) as unknown as Response;
 }
 
 beforeEach(() => {
@@ -94,6 +90,23 @@ describe("next reservations loader", () => {
     vi.mocked(requirePermission).mockResolvedValue(
       permissionContext({ roles: ["SELF_SERVICE"] }) as never
     );
+
+    const response = await run();
+
+    expect(response.status).toBe(403);
+    expect(loadNextReservations).not.toHaveBeenCalled();
+  });
+
+  it("a SELF_SERVICE creator who is not the custodian is refused with 403", async () => {
+    vi.mocked(requirePermission).mockResolvedValue(
+      permissionContext({ roles: ["SELF_SERVICE"] }) as never
+    );
+    vi.mocked(db.booking.findFirst).mockResolvedValue({
+      id: "b1",
+      creatorId: "user-1",
+      custodianUserId: "someone-else",
+      custodianTeamMember: { userId: "someone-else" },
+    } as never);
 
     const response = await run();
 

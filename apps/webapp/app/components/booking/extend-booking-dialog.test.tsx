@@ -8,9 +8,12 @@
 import type { ReactNode } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import ExtendBookingDialog from "./extend-booking-dialog";
 
 const load = vi.fn();
+/** What the horizon fetcher (key `next-reservations-*`) answers with. */
+let horizonResponse: unknown;
 
 // why: the real `useFetcher` needs a data router, which a component test does
 // not mount; `load` is what is asserted and `Form` becomes a plain form.
@@ -19,9 +22,9 @@ vi.mock("react-router", async () => {
   return {
     ...actual,
     useNavigation: () => ({ state: "idle" }),
-    useFetcher: () => ({
+    useFetcher: ({ key }: { key?: string } = {}) => ({
       state: "idle",
-      data: undefined,
+      data: key?.startsWith("next-reservations-") ? horizonResponse : undefined,
       load,
       Form: ({ children, ...rest }: { children: ReactNode }) => (
         <form {...rest}>{children}</form>
@@ -84,7 +87,10 @@ const booking = {
 const horizonValue = { horizon: null, byAssetId: {}, byKitId: {} };
 
 describe("ExtendBookingDialog", () => {
-  beforeEach(() => load.mockClear());
+  beforeEach(() => {
+    load.mockClear();
+    horizonResponse = undefined;
+  });
 
   it("posts extend-booking with startDate and endDate to /bookings/b1/overview", () => {
     render(
@@ -102,7 +108,10 @@ describe("ExtendBookingDialog", () => {
     expect(
       form.querySelector('[name="startDate"]')?.getAttribute("value")
     ).toBe(booking.from.toISOString());
-    expect(form.querySelector('[name="endDate"]')).not.toBeNull();
+    // booking.to in the mocked UTC pref zone, as the picker's wire string.
+    expect(
+      (form.querySelector('[name="endDate"]') as HTMLInputElement).value
+    ).toBe(dateForDateTimeInputValue(new Date(booking.to), "UTC"));
   });
 
   it("fetches /api/bookings/b1/next-reservations on open when no horizon is passed", () => {
@@ -121,5 +130,17 @@ describe("ExtendBookingDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Change end date" }));
 
     expect(load).not.toHaveBeenCalled();
+  });
+
+  it("still shows the picker, enabled, when the horizon fetch answers with an error", () => {
+    horizonResponse = { error: { message: "Booking not found." } };
+    render(<ExtendBookingDialog booking={booking} />);
+    fireEvent.click(screen.getByRole("button", { name: "Change end date" }));
+
+    expect(
+      (screen.getByRole("button", { name: "Submit" }) as HTMLButtonElement)
+        .disabled
+    ).toBe(false);
+    expect(screen.queryByText(/No other booking has these items/)).toBeNull();
   });
 });
