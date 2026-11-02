@@ -187,9 +187,13 @@ export function UpdateAvailableBanner({ children }: { children: ReactNode }) {
       try {
         while (answerPendingRef.current) {
           answerPendingRef.current = false;
-          const latest = latestAnswerRef.current.version;
+          const current = latestAnswerRef.current;
           const iosShownStoreVersion =
             Platform.OS === "ios" ? await readIosShownStoreVersion() : null;
+          // A newer answer (another server, a re-check) arrived during the
+          // read: this one is superseded, and the loop picks up the newer one.
+          if (latestAnswerRef.current !== current) continue;
+          const latest = current.version;
           if (
             !shouldAttemptNativeUpdate({
               platform: Platform.OS,
