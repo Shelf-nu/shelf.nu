@@ -1,6 +1,8 @@
 import { render } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 
+import { wrapLinkForNote, wrapNameForNote } from "~/utils/markdoc-wrappers";
+
 import { MarkdownViewer } from "./markdown-viewer";
 import { SystemNoteViewer } from "./system-note-viewer";
 
@@ -37,6 +39,19 @@ describe("SystemNoteViewer", () => {
     );
 
     expect(container.querySelector("a")).toHaveTextContent("Customer\\Barbara");
+  });
+
+  it("shows quotes in names and links as typed", () => {
+    const { container } = renderSystemNote(
+      `${wrapLinkForNote(
+        "/bookings/b1",
+        'Shoot "B"'
+      )} was renamed from ${wrapNameForNote('Camera "A"')}.`
+    );
+
+    expect(container.querySelector("a")).toHaveTextContent('Shoot "B"');
+    expect(container.querySelector("strong")).toHaveTextContent('Camera "A"');
+    expect(container.textContent).not.toContain("&quot;");
   });
 
   it("keeps off-origin links blocked", () => {
