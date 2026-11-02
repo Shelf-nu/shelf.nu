@@ -44,6 +44,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       userId,
       roles: user.userOrganizations[0]?.roles ?? [],
       workspace: null,
+      matrixOnly: true,
       entity: PermissionEntity.asset,
       action: PermissionAction.update,
     });
