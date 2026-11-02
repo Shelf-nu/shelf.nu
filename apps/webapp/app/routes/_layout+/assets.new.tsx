@@ -32,6 +32,7 @@ import { extractBarcodesFromFormData } from "~/utils/barcode-form-data.server";
 import {
   extractCustomFieldValuesFromPayload,
   mergedSchema,
+  toCustomFieldZodSchema,
 } from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
@@ -49,7 +50,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { slugify } from "~/utils/slugify";
 
 const title = "New asset";
 const header = {
@@ -185,14 +185,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       baseSchema: (isBulkSubmit
         ? NewAssetBulkFormSchema
         : NewAssetFormSchema) as typeof NewAssetFormSchema,
-      customFields: customFields.map((cf) => ({
-        id: cf.id,
-        name: slugify(cf.name),
-        helpText: cf?.helpText || "",
-        required: cf.required,
-        type: cf.type.toLowerCase() as "text" | "number" | "date" | "boolean",
-        options: cf.options,
-      })),
+      customFields: customFields.map(toCustomFieldZodSchema),
     });
 
     const payload = parseData(formData, FormSchema);

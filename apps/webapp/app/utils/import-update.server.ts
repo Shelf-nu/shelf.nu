@@ -159,7 +159,7 @@ export async function buildUpdatePreview({
   // Get org custom fields for header analysis
   const orgCustomFields = await db.customField.findMany({
     where: { organizationId, active: true, deletedAt: null },
-    select: { id: true, name: true, type: true },
+    select: { id: true, name: true, type: true, format: true },
   });
 
   const headerAnalysis = analyzeUpdateHeaders(headers, orgCustomFields);
@@ -323,7 +323,7 @@ export async function applyBulkUpdatesFromImport({
 
   const orgCustomFields = await db.customField.findMany({
     where: { organizationId, active: true, deletedAt: null },
-    select: { id: true, name: true, type: true },
+    select: { id: true, name: true, type: true, format: true },
   });
 
   const headerAnalysis = analyzeUpdateHeaders(headers, orgCustomFields);

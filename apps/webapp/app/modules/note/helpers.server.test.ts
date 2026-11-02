@@ -1,6 +1,7 @@
 import Markdoc from "@markdoc/markdoc";
 import { Decimal } from "@prisma/client/runtime/library";
 import { describe, expect, it } from "vitest";
+import { URL_SHAPED_VALUE, expectValueOnlyInTag } from "@helpers/note-tags";
 
 import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import {
@@ -82,33 +83,30 @@ describe("buildNameChangeNote", () => {
     });
 
     expect(result).toBe(
-      `${userLink} updated the asset name from **Old Asset** to **New Asset**.`
+      `${userLink} updated the asset name from {% name text="Old Asset" /%} to {% name text="New Asset" /%}.`
     );
   });
 
-  it("escapes markdown special characters in names", () => {
+  it("keeps markdown special characters as typed inside the name tags", () => {
     const result = buildNameChangeNote({
       userLink,
       previous: "Asset*with*stars",
       next: "Asset_with_underscores",
     });
 
-    expect(result).toContain("\\*");
-    expect(result).toContain("\\_");
     expect(result).toBe(
-      `${userLink} updated the asset name from **Asset\\*with\\*stars** to **Asset\\_with\\_underscores**.`
+      `${userLink} updated the asset name from {% name text="Asset*with*stars" /%} to {% name text="Asset_with_underscores" /%}.`
     );
   });
 
-  it("escapes backticks and tildes", () => {
+  it("keeps a URL-shaped name inside a name tag", () => {
     const result = buildNameChangeNote({
       userLink,
-      previous: "Asset`with`backticks",
-      next: "Asset~with~tildes",
-    });
+      previous: "Old Asset",
+      next: URL_SHAPED_VALUE,
+    })!;
 
-    expect(result).toContain("\\`");
-    expect(result).toContain("\\~");
+    expectValueOnlyInTag(result, URL_SHAPED_VALUE, ["name"]);
   });
 
   it("handles names with whitespace trimming", () => {
@@ -119,7 +117,7 @@ describe("buildNameChangeNote", () => {
     });
 
     expect(result).toBe(
-      `${userLink} updated the asset name from **Old** to **New**.`
+      `${userLink} updated the asset name from {% name text="Old" /%} to {% name text="New" /%}.`
     );
   });
 });
@@ -444,8 +442,8 @@ describe("buildAssetModelChangeNote", () => {
   });
 
   it("cannot be used to inject a Markdoc tag through a deleted model's name", () => {
-    // The deleted-model branch renders the name as literal text rather than a
-    // quoted attribute, so it needs its own delimiter strip.
+    // The deleted-model branch renders the name in a `name` tag rather than a
+    // link, so it is checked on its own.
     const note = buildAssetModelChangeNote({
       userLink,
       previous: { id: "am-4", name: '{% booking_status status="APPROVED" /%}' },
@@ -457,6 +455,17 @@ describe("buildAssetModelChangeNote", () => {
       (node) => node.type === "tag" && node.tag === "booking_status"
     );
     expect(tags).toHaveLength(0);
+  });
+
+  it("keeps a URL-shaped deleted model's name inside a name tag", () => {
+    const note = buildAssetModelChangeNote({
+      userLink,
+      previous: { id: "am-5", name: URL_SHAPED_VALUE },
+      next: null,
+      previousDeleted: true,
+    })!;
+
+    expectValueOnlyInTag(note, URL_SHAPED_VALUE, ["name"]);
   });
 
   it("cannot be used to inject a Markdoc tag through the model name", () => {

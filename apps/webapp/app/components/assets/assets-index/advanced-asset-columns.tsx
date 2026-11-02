@@ -13,6 +13,7 @@ import { Link, useLoaderData } from "react-router";
 import { StockStatusBadge } from "~/components/assets/stock-status-badge";
 import { EventCardContent } from "~/components/calendar/event-card";
 import LineBreakText from "~/components/layout/line-break-text";
+import { TextWithLinks } from "~/components/links/text-with-links";
 import { LocationBadge } from "~/components/location/location-badge";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { Button } from "~/components/shared/button";
@@ -53,10 +54,8 @@ import { type AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { formatAssetValueWithBreakdown } from "~/utils/asset-value";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { formatCurrency } from "~/utils/currency";
-import { buildCustomFieldLinkHref } from "~/utils/custom-field-link";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { cleanMarkdownFormatting } from "~/utils/markdown-cleaner";
-import { isLink } from "~/utils/misc";
 import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import {
@@ -91,7 +90,7 @@ export function AdvancedIndexColumn({
   /** History state for the name link, so the asset page can step through this list. */
   linkState?: ListContextLinkState;
 }) {
-  const { locale, currentOrganization, lastAuditDateAccess } =
+  const { locale, currentOrganization, lastAuditDateAccess, linkTitles } =
     useLoaderData<AssetIndexLoaderData>();
   const { prefs } = useDateFormatter();
   const showAssetImage = useAssetIndexShowImage();
@@ -145,16 +144,14 @@ export function AdvancedIndexColumn({
               </PopoverContent>
             </PopoverPortal>
           </Popover>
-        ) : isLink(customFieldDisplayValue as string) ? (
-          <Button
-            role="link"
-            variant="link"
-            className="text-gray text-end font-normal underline hover:text-gray-600"
-            target="_blank"
-            to={buildCustomFieldLinkHref(customFieldDisplayValue as string)}
-          >
-            {customFieldDisplayValue as string}
-          </Button>
+        ) : field.customField.type === CustomFieldType.TEXT ||
+          field.customField.type === CustomFieldType.OPTION ? (
+          // An option is free text an admin typed, so it can hold a link too.
+          <TextWithLinks
+            value={String(fieldValue.raw)}
+            titles={linkTitles}
+            compact
+          />
         ) : field.customField.type === CustomFieldType.AMOUNT ? (
           formatCurrency({
             value: fieldValue.raw as number,

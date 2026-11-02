@@ -126,4 +126,40 @@ describe("CustomFieldSubmissionSchema", () => {
 
     expect(result.success).toBe(true);
   });
+
+  it("gives a field the Plain text format when none is posted", () => {
+    // The Format picker renders for TEXT only, so every other type posts none.
+    const result = CustomFieldSubmissionSchema.safeParse({
+      ...base,
+      type: "DATE",
+    });
+
+    expect(result.success && result.data.format).toBe("PLAIN");
+  });
+
+  it("accepts the Link format on a single-line text field", () => {
+    const result = CustomFieldSubmissionSchema.safeParse({
+      ...base,
+      type: "TEXT",
+      format: "LINK",
+    });
+
+    expect(result.success && result.data.format).toBe("LINK");
+  });
+
+  it("refuses the Link format on any other type", () => {
+    const result = CustomFieldSubmissionSchema.safeParse({
+      ...base,
+      type: "MULTILINE_TEXT",
+      format: "LINK",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error?.issues).toEqual([
+      expect.objectContaining({
+        path: ["format"],
+        message: "Only single-line text fields can be Link fields",
+      }),
+    ]);
+  });
 });

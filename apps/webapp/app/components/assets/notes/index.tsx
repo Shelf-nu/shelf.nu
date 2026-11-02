@@ -12,6 +12,7 @@
  */
 import { useFetcher, useLoaderData } from "react-router";
 import { StatusFilter } from "~/components/booking/status-filter";
+import { LinkTitlesProvider } from "~/components/links/link-titles-context";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
 import { Pagination } from "~/components/list/pagination";
@@ -45,7 +46,7 @@ import { Note } from "./note";
  * same grants server-side.
  */
 export const Notes = () => {
-  const { asset, items, search, hasNotes, page } =
+  const { asset, items, search, hasNotes, page, linkTitles } =
     useLoaderData<typeof loader>();
   const [searchParams] = useSearchParams();
 
@@ -144,34 +145,36 @@ export const Notes = () => {
 
       {hasResults ? (
         <>
-          <ul className="notes-list mt-8 w-full">
-            {/* Render optimistic note using the same Note component */}
-            {optimisticNote && (
-              <Note
-                key={optimisticNote.id}
-                note={optimisticNote}
-                actionsDropdown={
-                  canDeleteNote ? (
-                    <ActionsDropdown noteId={optimisticNote.id} />
-                  ) : undefined
-                }
-              />
-            )}
-            {/* Render the current page of notes. Deleting only ever removes
+          <LinkTitlesProvider value={linkTitles}>
+            <ul className="notes-list mt-8 w-full">
+              {/* Render optimistic note using the same Note component */}
+              {optimisticNote && (
+                <Note
+                  key={optimisticNote.id}
+                  note={optimisticNote}
+                  actionsDropdown={
+                    canDeleteNote ? (
+                      <ActionsDropdown noteId={optimisticNote.id} />
+                    ) : undefined
+                  }
+                />
+              )}
+              {/* Render the current page of notes. Deleting only ever removes
                 the caller's own note, so the menu shows on those alone, and
                 only for a caller who holds `note:delete`. */}
-            {notes.map((note) => (
-              <Note
-                key={note.id}
-                note={note}
-                actionsDropdown={
-                  canDeleteNote && user && note.userId === user.id ? (
-                    <ActionsDropdown noteId={note.id} />
-                  ) : undefined
-                }
-              />
-            ))}
-          </ul>
+              {notes.map((note) => (
+                <Note
+                  key={note.id}
+                  note={note}
+                  actionsDropdown={
+                    canDeleteNote && user && note.userId === user.id ? (
+                      <ActionsDropdown noteId={note.id} />
+                    ) : undefined
+                  }
+                />
+              ))}
+            </ul>
+          </LinkTitlesProvider>
           <Pagination />
         </>
       ) : hasActiveFilters ? (

@@ -1,5 +1,8 @@
+import { Linking } from "react-native";
 import { router, type Href } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
+import { resolveLinkOpening } from "./open-link";
+import { getActiveServer } from "./server/active-server";
 
 /**
  * Tab index routes. Pushing one of these roots that tab's stack at its list
@@ -66,4 +69,34 @@ export function pushIntoTab(tabRoot: TabRoot, nestedHref?: Href) {
  */
 export function openShelfWebUrl(url: string) {
   return WebBrowser.openBrowserAsync(url);
+}
+
+/**
+ * Open a link a person stored on an asset (a custom field value).
+ *
+ * Shelf's own web pages (`app.shelf.nu` and the connected server) open in the
+ * in-app browser through {@link openShelfWebUrl}; every other http(s) link is
+ * handed to the OS with `ref=shelf-companion`, so a OneDrive, Google Drive or
+ * Office app can take it over. Anything else opens nothing. The rule lives in
+ * `./open-link.ts`.
+ *
+ * Never throws: a link that fails to open leaves the screen as it was.
+ *
+ * @param url - The stored http(s) URL
+ * @returns Resolves once the link has been handed off, or immediately when
+ *   there is nothing to open or opening failed
+ */
+export async function openExternalLink(url: string): Promise<void> {
+  const opening = resolveLinkOpening(url, getActiveServer().baseUrl);
+  if (!opening) return;
+  try {
+    if (opening.opener === "shelf-browser") {
+      await openShelfWebUrl(opening.url);
+    } else {
+      await Linking.openURL(opening.url);
+    }
+  } catch {
+    // Non-fatal by design: the screen stays as it was and the person can tap
+    // the link again.
+  }
 }

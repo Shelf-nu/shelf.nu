@@ -15,6 +15,7 @@ export enum QueueNames {
   addonTrialQueue = "addon-trial-queue",
   assetImportQueue = "asset-import-queue",
   pushQueue = "push-queue",
+  linkPreviewQueue = "link-preview-queue",
 }
 
 let pgBossInstance!: PgBoss;

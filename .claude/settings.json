@@ -21,7 +21,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "f=$(jq -r '.tool_input.file_path // empty'); [ -n \"$f\" ] && [ -f \"$f\" ] && cd \"$CLAUDE_PROJECT_DIR\" && npx prettier --write --ignore-unknown \"$f\" >/dev/null 2>&1 || true"
+            "command": "f=$(jq -r '.tool_input.file_path // empty' 2>/dev/null); case \"$f\" in \"$CLAUDE_PROJECT_DIR\"/*) [ -f \"$f\" ] && cd \"$CLAUDE_PROJECT_DIR\" && npx prettier --write --ignore-unknown \"$f\" >/dev/null 2>&1;; esac; true"
           }
         ]
       }

@@ -68,6 +68,7 @@
     "@shelf/database": "workspace:*",
     "@shelf/datetime": "workspace:*",
     "@shelf/labels": "workspace:*",
+    "@shelf/links": "workspace:*",
     "@shelf/permissions": "workspace:*",
     "@shelf/quantity-control": "workspace:*",
     "@supabase/supabase-js": "^2.103.0",
