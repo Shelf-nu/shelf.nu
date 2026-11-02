@@ -136,17 +136,15 @@ export const assetsApi = {
 
   /**
    * Claim an unclaimed QR code into the caller's CURRENT organization
-   * (`POST /api/mobile/qr/claim`) — the mobile twin of the web claim route.
+   * (`POST /api/mobile/qr/claim`), the mobile twin of the web claim route.
    * The server claims into the org resolved from `orgId` only; mobile
    * deliberately offers no org picker (web does).
    *
    * The server gates on `qr:update`: admins and owners, and managers when the
    * workspace switches on `managersCanEditAssets`. A 403 also covers the
-   * already-claimed race. The server now
-   * rethrows its own guard errors instead of re-wrapping them, so that 403
-   * carries a specific message ("already belongs to an organization") rather
-   * than the old generic "Failed to claim qr code" — but still branch on
-   * status, not message text.
+   * already-claimed race. That 403 carries the server's own guard message
+   * (for example "already belongs to an organization"); branch on the status,
+   * never on the message text.
    *
    * @param orgId - Caller's current workspace id (the claim target).
    * @param qrId - The unclaimed QR id (echoed by the resolve error payload).

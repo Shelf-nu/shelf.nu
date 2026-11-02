@@ -959,8 +959,8 @@ function ScannerContent() {
                 },
               });
             } else if (unclaimedQrId) {
-              // Without `qr:update`, claiming is not allowed for their role —
-              // keep the web bridge. Loop-safe in-app browser via
+              // Without `qr:update`, their role may not claim, so they keep
+              // the web bridge. Loop-safe in-app browser via
               // openShelfWebUrl, never Linking.openURL (claimed App Link).
               setScanResult({
                 type: "not_found",
@@ -1410,7 +1410,7 @@ function ScannerContent() {
 
           // For Shelf QR codes, offer a path forward for the unlinked code:
           // - If claimed to current org → in-app asset creation and/or
-          //   linking an existing asset (`qr:update`) — no claim step needed
+          //   linking an existing asset (`qr:update`), with no claim step
           // - Otherwise → bridge to web
           // Barcodes don't have an external link flow, so no action for those
           type UnlinkedQrAction = {
