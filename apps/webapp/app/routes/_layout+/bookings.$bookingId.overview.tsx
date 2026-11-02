@@ -1861,9 +1861,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           seesAllBookings: access.bookings.seeAll,
         });
 
+        // A reservation request reads as a request, not a done deal: the
+        // service left `approvedAt` empty because the workspace requires
+        // approval for this member's reservations.
+        const isPendingRequest =
+          bookingSettings.requireBookingApproval && booking.approvedAt === null;
         sendNotification({
-          title: "Booking reserved",
-          message: "Your booking has been reserved successfully",
+          title: isPendingRequest ? "Request sent" : "Booking reserved",
+          message: isPendingRequest
+            ? "Your booking request is waiting for approval. You will receive an email once it has been reviewed."
+            : "Your booking has been reserved successfully",
           icon: { name: "success", variant: "success" },
           senderId: userId,
         });

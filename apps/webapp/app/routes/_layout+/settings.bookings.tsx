@@ -725,7 +725,7 @@ export default function GeneralPage() {
         header={{
           title: "Booking approval",
           subHeading:
-            "Control whether booking requests from Base and Self service users need an admin's approval before check-out.",
+            "Control whether booking requests from Base and Self service users need approval by an administrator or manager before check-out.",
         }}
         defaultValue={bookingSettings.requireBookingApproval}
       />
