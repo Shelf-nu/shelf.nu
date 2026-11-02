@@ -326,7 +326,7 @@ describe("resolveBookingActions: who may act", () => {
     ).toBe(false);
   });
 
-  it("keeps the PDFs from a role that may not download others' documents on someone else's booking", () => {
+  it("offers the PDFs to a role that writes every booking on someone else's booking", () => {
     // Only a role that writes every booking can reach another's booking, and
     // every such role may download documents for others.
     const actions = resolveFor(buildBooking({ custodianUserId: OTHER }), {
@@ -336,6 +336,35 @@ describe("resolveBookingActions: who may act", () => {
     expect(actions.bookingDocument.visible).toBe(true);
     expect(actions.checkinReceipt.visible).toBe(true);
   });
+
+  it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
+    "offers the PDFs to a %s viewer holding the booking through the user link",
+    (role) => {
+      const actions = resolveFor(buildBooking({ custodianUserId: ME }), {
+        roles: [role],
+      });
+
+      expect(actions.bookingDocument.visible).toBe(true);
+      expect(actions.checkinReceipt.visible).toBe(true);
+    }
+  );
+
+  it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
+    "keeps the PDFs from a %s viewer holding the booking only through the team-member link",
+    (role) => {
+      // The server's document guard reads the user link alone, so a role that
+      // may not download others' documents does not get them here, although
+      // the booking still offers this viewer its other actions.
+      const actions = resolveFor(
+        buildBooking({ custodianUserId: null, custodianTeamMemberUserId: ME }),
+        { roles: [role] }
+      );
+
+      expect(actions.duplicate.visible).toBe(true);
+      expect(actions.bookingDocument.visible).toBe(false);
+      expect(actions.checkinReceipt.visible).toBe(false);
+    }
+  );
 });
 
 describe("resolveBookingActions: explicit scan mode", () => {

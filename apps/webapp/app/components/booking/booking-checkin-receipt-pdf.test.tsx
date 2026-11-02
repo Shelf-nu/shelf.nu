@@ -20,6 +20,7 @@ import type {
   CheckinReceiptView,
   CheckinReceiptViewRow,
 } from "~/modules/booking/checkin-receipt";
+import { isCheckinReceiptAvailable } from "~/modules/booking/checkin-receipt-availability";
 import type {
   DateFormatOptions,
   ResolvedFormatPrefs,
@@ -29,7 +30,6 @@ import {
   BookingCheckinReceiptPDF,
   BookingCheckinReceiptPreview,
   checkinReceiptUnavailableReason,
-  isCheckinReceiptAvailable,
 } from "./booking-checkin-receipt-pdf";
 
 // why: the header renders `DateS`, which reads the acting user's format prefs
@@ -376,7 +376,11 @@ describe("booking check-in receipt — the sheet", () => {
   });
 });
 
-/** Renders the Actions-menu entry for a booking in the given shape. */
+/**
+ * Renders the Actions-menu entry for a booking in the given shape, disabled
+ * the way the booking page decides it: the receipt rule, and the page's
+ * specific reason when the rule refuses.
+ */
 function renderEntry(
   booking: {
     status: BookingStatus;
@@ -391,14 +395,11 @@ function renderEntry(
     <MemoryRouter>
       <BookingCheckinReceiptPDF
         booking={{ id: "booking-1", name: "Shoot" }}
-        available={isCheckinReceiptAvailable({
-          ...booking,
-          hasDispositionedUnits,
-        })}
-        unavailableReason={checkinReceiptUnavailableReason(
-          booking.bookingAssets
-        )}
-        timeStamp={1757000000000}
+        disabled={
+          !isCheckinReceiptAvailable({ ...booking, hasDispositionedUnits }) && {
+            reason: checkinReceiptUnavailableReason(booking.bookingAssets),
+          }
+        }
       />
     </MemoryRouter>
   );

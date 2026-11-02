@@ -41,7 +41,7 @@ export type BookingActionTriggerProps = Omit<
   to?: string;
 };
 
-/** Today's menu row styling, shared by every action in the Actions dropdown. */
+/** The menu row styling, shared by every action in the Actions dropdown. */
 const MENU_ITEM_CLASS =
   "justify-start rounded-sm px-2 py-1.5 text-sm font-medium text-gray-700 outline-none hover:cursor-pointer hover:bg-slate-100 hover:text-gray-700";
 

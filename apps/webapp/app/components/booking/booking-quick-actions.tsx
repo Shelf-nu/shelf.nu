@@ -53,18 +53,16 @@ import { useFetcher } from "react-router";
 import { useDisabled } from "~/hooks/use-disabled";
 import type { DataOrErrorResponse } from "~/utils/http.server";
 import { ArchiveBookingAction } from "./archive-booking-action";
+import { BookingActionTrigger } from "./booking-action-trigger";
 import { useBookingActions } from "./booking-actions";
 import type { BookingActionsBooking } from "./booking-actions";
 import { BookingActionsMenu } from "./booking-actions-menu";
-import { BookingCheckinReceiptPDF } from "./booking-checkin-receipt-pdf";
-import { BookingOverviewPDF } from "./booking-overview-pdf";
+import { BookingDocumentEntries } from "./booking-document-entries";
 import { CancelBookingDialog } from "./cancel-booking-dialog";
 import CheckinDialog from "./checkin-dialog";
 import CheckoutDialog from "./checkout-dialog";
 import { DuplicateBookingAction } from "./duplicate-booking-action";
 import ExtendBookingDialog from "./extend-booking-dialog";
-import { Divider } from "../layout/divider";
-import { Button } from "../shared/button";
 
 /**
  * What the row buttons read off a bookings-list row: the rules' inputs
@@ -91,23 +89,25 @@ const ACTIONS = {
   checkIn: { label: "Check in", icon: <LogInIcon className="size-4" /> },
 } satisfies Record<string, { label: string; icon: ReactNode }>;
 
+/** Why a row's icon buttons are disabled while its request runs. */
+const BUSY_REASON = "Updating this booking...";
+
 /**
  * Stands in for an action's dialog trigger while the row's request runs: the
- * same icon button, disabled, so the cell keeps its shape and one click
+ * same icon trigger, disabled, so the cell keeps its shape and one click
  * cannot post twice.
+ *
+ * @param props.label - The action's accessible name and tooltip
+ * @param props.icon - The action's icon
  */
 function BusyActionButton({ label, icon }: { label: string; icon: ReactNode }) {
   return (
-    <Button
-      type="button"
-      size="sm"
-      variant="secondary"
-      className="p-2"
-      aria-label={label}
-      disabled
-    >
-      {icon}
-    </Button>
+    <BookingActionTrigger
+      variant="icon"
+      label={label}
+      icon={icon}
+      disabled={{ reason: BUSY_REASON }}
+    />
   );
 }
 
@@ -155,9 +155,6 @@ export function BookingQuickActions({ booking }: BookingQuickActionsProps) {
   ) {
     return null;
   }
-
-  // Stamped into the receipt's file name, fixed for this render.
-  const receiptTimeStamp = new Date().getTime();
 
   const dialogBooking = {
     id: booking.id,
@@ -257,28 +254,10 @@ export function BookingQuickActions({ booking }: BookingQuickActionsProps) {
             {duplicate.visible ? (
               <DuplicateBookingAction booking={{ id: booking.id }} />
             ) : null}
-            {bookingDocument.visible || checkinReceipt.visible ? (
-              <Divider className="my-2" />
-            ) : null}
-            {bookingDocument.visible ? (
-              <BookingOverviewPDF
-                booking={{
-                  id: booking.id,
-                  name: booking.name,
-                  assetCount: booking.assetCount,
-                }}
-              />
-            ) : null}
-            {checkinReceipt.visible ? (
-              <BookingCheckinReceiptPDF
-                booking={{ id: booking.id, name: booking.name }}
-                available={booking.canPrintCheckinReceipt === true}
-                unavailableReason={
-                  checkinReceipt.disabled ? checkinReceipt.disabled.reason : ""
-                }
-                timeStamp={receiptTimeStamp}
-              />
-            ) : null}
+            <BookingDocumentEntries
+              booking={{ id: booking.id, name: booking.name }}
+              actions={{ bookingDocument, checkinReceipt }}
+            />
           </BookingActionsMenu>
         ) : null}
       </div>

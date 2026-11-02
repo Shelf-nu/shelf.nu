@@ -145,17 +145,19 @@ vi.mock("./duplicate-booking-action", () => ({
 vi.mock("./booking-overview-pdf", () => ({
   BookingOverviewPDF: stubEntry("Booking document"),
 }));
-// why: see the extend stub; the stand-in keeps the row's `available` and
-// `unavailableReason` inputs observable as the disabled state and the title.
+// why: see the extend stub; the stand-in keeps the row's `disabled` input
+// observable as the disabled state and the title.
 vi.mock("./booking-checkin-receipt-pdf", () => ({
   BookingCheckinReceiptPDF: ({
-    available,
-    unavailableReason,
+    disabled,
   }: {
-    available: boolean;
-    unavailableReason: string;
+    disabled: false | { reason: string };
   }) => (
-    <button type="button" disabled={!available} title={unavailableReason}>
+    <button
+      type="button"
+      disabled={disabled !== false}
+      title={disabled ? disabled.reason : undefined}
+    >
       Check-in receipt
     </button>
   ),

@@ -472,8 +472,10 @@ describe("decorateBookingsForList", () => {
   ] as unknown as Parameters<typeof decorateBookingsForList>[0]["bookings"];
 
   /**
-   * The two lookups share `db.booking.findMany`; tell them apart by what each
-   * one selects. The items lookup also reads the partial check-ins.
+   * The booking lookups share `db.booking.findMany`; tell them apart by their
+   * `where` and `select`. The unavailable lookup filters slices by asset, the
+   * receipt lookups by slice marker, and the items lookup reads the partial
+   * check-ins.
    */
   function answerLookups({
     unavailable,
@@ -487,28 +489,24 @@ describe("decorateBookingsForList", () => {
         where,
         select,
       }: {
-        where: Record<string, unknown>;
+        where: { bookingAssets?: { some: Record<string, unknown> } };
         select: Record<string, unknown>;
       }) => {
-        if ("bookingAssets" in where) {
+        const slice = where.bookingAssets?.some;
+        if (slice && "asset" in slice) {
           return Promise.resolve(unavailable.map((id) => ({ id })));
         }
-        if (!("partialCheckins" in select)) {
-          // The receipt lookup: booking-2 has been checked in.
+        // The receipt lookups: booking-2 went out and has been checked in.
+        if (slice && "checkedOutAt" in slice) {
           return Promise.resolve([
-            {
-              id: "booking-2",
-              status: "COMPLETE",
-              bookingAssets: [
-                {
-                  assetId: "a",
-                  asset: { type: "INDIVIDUAL" },
-                  checkedOutAt: new Date(),
-                  checkedInAt: new Date(),
-                },
-              ],
-            },
+            { id: "booking-2", status: "COMPLETE", bookingAssets: [] },
           ]);
+        }
+        if (slice && "checkedInAt" in slice) {
+          return Promise.resolve([{ id: "booking-2" }]);
+        }
+        if (!("partialCheckins" in select)) {
+          throw new Error("Unexpected booking lookup");
         }
         return Promise.resolve(
           itemsToCheckOut.map((id) => ({
@@ -582,55 +580,159 @@ describe("getBookingIdsWithCheckinReceipt", () => {
     logFindManyMock.mockReset();
   });
 
-  /** A slice of a booking: a quantity-tracked asset out and not yet in. */
-  const outSlice = (assetId: string, type = "QUANTITY_TRACKED") => ({
-    assetId,
-    asset: { type },
-    checkedOutAt: new Date(),
-    checkedInAt: null,
-  });
+  /**
+   * What the database holds for one booking on the page: its status and its
+   * slices, each with its asset type and two markers.
+   */
+  type StoredBooking = {
+    id: string;
+    status: string;
+    slices: Array<{
+      assetId: string;
+      type: "INDIVIDUAL" | "QUANTITY_TRACKED";
+      checkedOutAt: Date | null;
+      checkedInAt: Date | null;
+    }>;
+  };
 
-  it("flags canPrintCheckinReceipt per booking with one query", async () => {
-    findManyMock.mockResolvedValue([
-      {
-        id: "returned",
-        status: "ONGOING",
-        bookingAssets: [
-          { ...outSlice("a", "INDIVIDUAL"), checkedInAt: new Date() },
-        ],
-      },
-      { id: "still-out", status: "ONGOING", bookingAssets: [outSlice("b")] },
-      {
-        id: "part-returned-quantity",
-        status: "ONGOING",
-        bookingAssets: [outSlice("c")],
-      },
-      {
-        id: "archived-never-out",
-        status: "ARCHIVED",
-        bookingAssets: [
-          { ...outSlice("d"), checkedOutAt: null, checkedInAt: null },
-        ],
-      },
-    ]);
+  /**
+   * Answers the two booking lookups the way Prisma would over `stored`,
+   * evaluating the `some` marker filter and the quantity-tracked slice select
+   * each lookup sends. Any other filter shape throws, so a query that stops
+   * using existence filters fails here instead of passing on a loose mock.
+   */
+  function answerFrom(stored: StoredBooking[]) {
+    findManyMock.mockImplementation(
+      ({
+        where,
+        select,
+      }: {
+        where: {
+          id: { in: string[] };
+          bookingAssets: {
+            some: Record<"checkedOutAt" | "checkedInAt", { not: null }>;
+          };
+        };
+        select: { bookingAssets?: unknown };
+      }) => {
+        const [marker, ...rest] = Object.keys(
+          where.bookingAssets.some
+        ) as Array<"checkedOutAt" | "checkedInAt">;
+        if (rest.length > 0 || where.bookingAssets.some[marker]?.not !== null) {
+          throw new Error(
+            `Unmodelled slice filter: ${JSON.stringify(where.bookingAssets)}`
+          );
+        }
+        const matching = stored.filter(
+          (booking) =>
+            where.id.in.includes(booking.id) &&
+            booking.slices.some((slice) => slice[marker] !== null)
+        );
+        return Promise.resolve(
+          matching.map((booking) =>
+            select.bookingAssets
+              ? {
+                  id: booking.id,
+                  status: booking.status,
+                  bookingAssets: booking.slices
+                    .filter((slice) => slice.type === "QUANTITY_TRACKED")
+                    .map((slice) => ({ assetId: slice.assetId })),
+                }
+              : { id: booking.id }
+          )
+        );
+      }
+    );
+  }
+
+  const OUT = new Date("2026-09-01T09:00:00.000Z");
+  const IN = new Date("2026-09-02T10:00:00.000Z");
+
+  /** The bookings the parity cases cover, one per branch of the rule. */
+  const STORED: StoredBooking[] = [
+    {
+      id: "returned",
+      status: "ONGOING",
+      slices: [
+        {
+          assetId: "a",
+          type: "INDIVIDUAL",
+          checkedOutAt: OUT,
+          checkedInAt: IN,
+        },
+      ],
+    },
+    {
+      id: "still-out",
+      status: "ONGOING",
+      slices: [
+        {
+          assetId: "b",
+          type: "QUANTITY_TRACKED",
+          checkedOutAt: OUT,
+          checkedInAt: null,
+        },
+      ],
+    },
+    {
+      id: "part-returned-quantity",
+      status: "ONGOING",
+      slices: [
+        {
+          assetId: "c",
+          type: "QUANTITY_TRACKED",
+          checkedOutAt: OUT,
+          checkedInAt: null,
+        },
+      ],
+    },
+    {
+      id: "finished-nothing-in",
+      status: "COMPLETE",
+      slices: [
+        {
+          assetId: "e",
+          type: "INDIVIDUAL",
+          checkedOutAt: OUT,
+          checkedInAt: null,
+        },
+      ],
+    },
+    {
+      id: "archived-never-out",
+      status: "ARCHIVED",
+      slices: [
+        {
+          assetId: "d",
+          type: "QUANTITY_TRACKED",
+          checkedOutAt: null,
+          checkedInAt: null,
+        },
+      ],
+    },
+  ];
+
+  it("flags each booking the receipt rule accepts, with three page-wide queries", async () => {
+    answerFrom(STORED);
     logFindManyMock.mockResolvedValue([
       { bookingId: "part-returned-quantity", assetId: "c" },
     ]);
-    const bookingIds = ["returned", "still-out", "part-returned-quantity"];
+    const bookingIds = STORED.map((booking) => booking.id);
 
     const ids = await getBookingIdsWithCheckinReceipt({
       bookingIds,
       organizationId: ORG_ID,
     });
 
-    expect([...ids].sort()).toEqual(["part-returned-quantity", "returned"]);
-    // One query per table for the whole page, never one per row.
-    expect(findManyMock).toHaveBeenCalledTimes(1);
+    expect([...ids].sort()).toEqual([
+      "finished-nothing-in",
+      "part-returned-quantity",
+      "returned",
+    ]);
+    // Two booking lookups and one log lookup for the whole page, never one
+    // per row.
+    expect(findManyMock).toHaveBeenCalledTimes(2);
     expect(logFindManyMock).toHaveBeenCalledTimes(1);
-    expect(findManyMock.mock.calls[0][0].where).toMatchObject({
-      id: { in: bookingIds },
-      organizationId: ORG_ID,
-    });
     expect(logFindManyMock.mock.calls[0][0].where).toMatchObject({
       bookingId: { in: bookingIds },
       booking: { organizationId: ORG_ID },
@@ -638,20 +740,81 @@ describe("getBookingIdsWithCheckinReceipt", () => {
     });
   });
 
+  it("asks with existence filters on the page's ids, reading only quantity-tracked asset ids", async () => {
+    answerFrom([]);
+    logFindManyMock.mockResolvedValue([]);
+    const bookingIds = ["booking-1", "booking-2"];
+
+    await getBookingIdsWithCheckinReceipt({
+      bookingIds,
+      organizationId: ORG_ID,
+    });
+
+    const calls = findManyMock.mock.calls.map(([args]) => args);
+    expect(calls).toEqual(
+      expect.arrayContaining([
+        {
+          where: {
+            id: { in: bookingIds },
+            organizationId: ORG_ID,
+            bookingAssets: { some: { checkedOutAt: { not: null } } },
+          },
+          select: {
+            id: true,
+            status: true,
+            bookingAssets: {
+              where: { asset: { type: "QUANTITY_TRACKED" } },
+              select: { assetId: true },
+            },
+          },
+        },
+        {
+          where: {
+            id: { in: bookingIds },
+            organizationId: ORG_ID,
+            bookingAssets: { some: { checkedInAt: { not: null } } },
+          },
+          select: { id: true },
+        },
+      ])
+    );
+  });
+
   it("does not count a log whose asset is no longer on the booking", async () => {
-    findManyMock.mockResolvedValue([
-      {
-        id: "removed-asset",
-        status: "ONGOING",
-        bookingAssets: [outSlice("c")],
-      },
-    ]);
+    answerFrom([STORED[2]]);
     logFindManyMock.mockResolvedValue([
-      { bookingId: "removed-asset", assetId: "gone" },
+      { bookingId: "part-returned-quantity", assetId: "gone" },
     ]);
 
     const ids = await getBookingIdsWithCheckinReceipt({
-      bookingIds: ["removed-asset"],
+      bookingIds: ["part-returned-quantity"],
+      organizationId: ORG_ID,
+    });
+
+    expect(ids.size).toBe(0);
+  });
+
+  it("does not count a log on an asset the booking holds as an individual item", async () => {
+    answerFrom([
+      {
+        id: "individual-logged",
+        status: "ONGOING",
+        slices: [
+          {
+            assetId: "f",
+            type: "INDIVIDUAL",
+            checkedOutAt: OUT,
+            checkedInAt: null,
+          },
+        ],
+      },
+    ]);
+    logFindManyMock.mockResolvedValue([
+      { bookingId: "individual-logged", assetId: "f" },
+    ]);
+
+    const ids = await getBookingIdsWithCheckinReceipt({
+      bookingIds: ["individual-logged"],
       organizationId: ORG_ID,
     });
 

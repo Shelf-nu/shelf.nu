@@ -28,7 +28,7 @@ import { tw } from "~/utils/tw";
 import { resolveUserDisplayName } from "~/utils/user";
 import { BookingActionTrigger } from "./booking-action-trigger";
 import type { BookingActionTriggerVariant } from "./booking-action-trigger";
-import { NO_ASSETS_PDF_REASON } from "./booking-actions";
+import type { BookingActionDisabled } from "./booking-actions";
 import { AssetCodePrintImage } from "../assets/asset-code-print-image";
 import { AssetCodePrintText } from "../assets/asset-code-print-text";
 import { AssetPrintImage } from "../assets/asset-print-image";
@@ -118,8 +118,9 @@ export function pdfAssetOrderFromSearchParams(
  * `DropdownMenuItem`: selecting an item closes the menu, which would unmount
  * this component and the open dialog with it.
  *
- * @param props.booking - The booking to print and how many assets it holds
- *   (zero disables the trigger)
+ * @param props.booking - The booking to print
+ * @param props.disabled - The trigger's disabled state, as the shared rules
+ *   (`resolveBookingActions`, its `bookingDocument` entry) decide it
  * @param props.assetOrder - The sort to list assets in. Omitted, no sort is
  *   sent and the server default (status, descending) applies; the booking page
  *   passes the sort of its own URL.
@@ -127,18 +128,18 @@ export function pdfAssetOrderFromSearchParams(
  */
 export const BookingOverviewPDF = ({
   booking,
+  disabled,
   assetOrder,
   trigger = "menu-item",
 }: {
   booking: {
     id: Booking["id"];
     name: Booking["name"];
-    assetCount: number;
   };
+  disabled: BookingActionDisabled;
   assetOrder?: PdfAssetOrder;
   trigger?: BookingActionTriggerVariant;
 }) => {
-  const totalAssets = booking.assetCount;
   const componentRef = useRef<HTMLDivElement>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const fetcher = useFetcher<PdfApiResponse>({
@@ -197,8 +198,6 @@ export const BookingOverviewPDF = ({
   const handleCloseDialog = () => {
     setIsDialogOpen(false);
   };
-  const disabled = !totalAssets && { reason: NO_ASSETS_PDF_REASON };
-
   return (
     <>
       {/* The menu row keeps its desktop-only look; the dialog is not built

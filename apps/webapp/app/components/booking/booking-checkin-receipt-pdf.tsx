@@ -5,7 +5,8 @@
  * booked item, whether it came back, when, in what state and who received it,
  * with totals, a completeness stamp and signature lines for the hand-over.
  *
- * Offered from the booking's Actions menu once anything has been checked in.
+ * Offered from the booking's Actions menu and a bookings list row's menu,
+ * enabled once anything has been checked in.
  * Unlike the checklist it carries no code pictures and no tick boxes (the sheet
  * is a record of what happened, not a list of work to do), and it prints no
  * asset values: it is handed to custodians and clients.
@@ -26,12 +27,13 @@ import type {
   CheckinReceiptView,
   CheckinReceiptViewRow,
 } from "~/modules/booking/checkin-receipt";
-import { isCheckinReceiptAvailable } from "~/modules/booking/checkin-receipt-availability";
 import { sanitizeFilename } from "~/utils/sanitize-filename";
 import { tw } from "~/utils/tw";
 import { resolveUserDisplayName } from "~/utils/user";
 import { BookingActionTrigger } from "./booking-action-trigger";
 import type { BookingActionTriggerVariant } from "./booking-action-trigger";
+import { NO_CHECKIN_RECEIPT_REASON } from "./booking-actions";
+import type { BookingActionDisabled } from "./booking-actions";
 import type { PdfAssetOrder } from "./booking-overview-pdf";
 import { AssetCodePrintText } from "../assets/asset-code-print-text";
 import { Dialog, DialogPortal } from "../layout/dialog";
@@ -40,9 +42,6 @@ import { GrayBadge } from "../shared/gray-badge";
 import { PrintColGroup, PrintTableStyles } from "../shared/print-table";
 import { Spinner } from "../shared/spinner";
 import When from "../when/when";
-
-// Re-exported so the receipt entry and its enabled rule import from one place.
-export { isCheckinReceiptAvailable };
 
 type CheckinReceiptApiResponse = { pdfMeta: CheckinReceiptView };
 
@@ -67,13 +66,14 @@ const RECEIPT_TABLE_COLUMNS = [
  * Why a booking has no receipt to print, for the disabled trigger's tooltip.
  *
  * @param bookingAssets - The booking's slices (only `checkedOutAt` is read)
- * @returns The reason shown when {@link isCheckinReceiptAvailable} is `false`
+ * @returns The reason shown when `isCheckinReceiptAvailable`
+ *   (`~/modules/booking/checkin-receipt-availability`) is `false`
  */
 export function checkinReceiptUnavailableReason(
   bookingAssets: Array<{ checkedOutAt: string | Date | null }>
 ): string {
   return bookingAssets.some((ba) => ba.checkedOutAt != null)
-    ? "Nothing has been checked in yet."
+    ? NO_CHECKIN_RECEIPT_REASON
     : "This booking was never checked out.";
 }
 
@@ -85,38 +85,35 @@ export function checkinReceiptUnavailableReason(
  * `DropdownMenuItem`: selecting an item closes the menu, which would unmount
  * this component and the open dialog with it.
  *
+ * The downloaded file's name carries the moment the dialog was opened, so
+ * repeated prints of one booking do not overwrite each other.
+ *
  * @param props.booking - The booking to print
- * @param props.available - Whether the receipt can be generated. The caller
- *   decides: the booking page derives it with {@link isCheckinReceiptAvailable},
- *   the list reads the loader's `canPrintCheckinReceipt`.
- * @param props.unavailableReason - Shown on the disabled trigger; see
- *   {@link checkinReceiptUnavailableReason}
+ * @param props.disabled - The trigger's disabled state, as the shared rules
+ *   (`resolveBookingActions`, its `checkinReceipt` entry) decide it, with the
+ *   reason the viewer is shown
  * @param props.assetOrder - The sort to list rows in. Omitted, no sort is sent
  *   and the server default (status, descending) applies.
- * @param props.timeStamp - Stamped into the downloaded file's name so repeated
- *   prints of one booking do not overwrite each other.
  * @param props.trigger - Menu row (default) or icon button
  */
 export const BookingCheckinReceiptPDF = ({
   booking,
-  available,
-  unavailableReason,
+  disabled,
   assetOrder,
-  timeStamp,
   trigger = "menu-item",
 }: {
   booking: {
     id: Booking["id"];
     name: Booking["name"];
   };
-  available: boolean;
-  unavailableReason: string;
+  disabled: BookingActionDisabled;
   assetOrder?: PdfAssetOrder;
-  timeStamp: number;
   trigger?: BookingActionTriggerVariant;
 }) => {
   const componentRef = useRef<HTMLDivElement>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  /** When the dialog was last opened; stamped into the file name. */
+  const [openedAt, setOpenedAt] = useState(0);
   const fetcher = useFetcher<CheckinReceiptApiResponse>();
 
   const pdfMeta = fetcher.data?.pdfMeta ?? null;
@@ -126,11 +123,12 @@ export const BookingCheckinReceiptPDF = ({
     contentRef: componentRef,
     documentTitle: `checkin-receipt-${sanitizeFilename(
       booking.name
-    )}-${timeStamp}`,
+    )}-${openedAt}`,
   });
 
   const handleOpenDialog = () => {
     setIsDialogOpen(true);
+    setOpenedAt(Date.now());
     // Both values can come off the page's own query string unvalidated, so
     // they are encoded rather than interpolated: one carrying `&` or `#` would
     // otherwise rewrite or truncate the request.
@@ -143,8 +141,6 @@ export const BookingCheckinReceiptPDF = ({
   const handleCloseDialog = () => {
     setIsDialogOpen(false);
   };
-
-  const disabled = !available && { reason: unavailableReason };
 
   return (
     <>

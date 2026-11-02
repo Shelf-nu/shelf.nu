@@ -17,21 +17,15 @@ import type { loader } from "~/routes/_layout+/bookings.$bookingId.overview";
 import { ArchiveBookingAction } from "./archive-booking-action";
 import { useBookingActions } from "./booking-actions";
 import { BookingActionsMenu } from "./booking-actions-menu";
-import {
-  BookingCheckinReceiptPDF,
-  checkinReceiptUnavailableReason,
-} from "./booking-checkin-receipt-pdf";
-import {
-  BookingOverviewPDF,
-  pdfAssetOrderFromSearchParams,
-} from "./booking-overview-pdf";
+import { checkinReceiptUnavailableReason } from "./booking-checkin-receipt-pdf";
+import { BookingDocumentEntries } from "./booking-document-entries";
+import { pdfAssetOrderFromSearchParams } from "./booking-overview-pdf";
 import { CancelBookingDialog } from "./cancel-booking-dialog";
 import { DeleteBooking } from "./delete-booking";
 import { DuplicateBookingAction } from "./duplicate-booking-action";
 import ExtendBookingDialog from "./extend-booking-dialog";
 import ManageNotificationsDialog from "./manage-notifications-dialog";
 import RevertToDraftDialog from "./revert-to-draft-dialog";
-import { Divider } from "../layout/divider";
 
 /**
  * Renders the booking page's Actions menu, in this order: revert to draft,
@@ -96,28 +90,11 @@ export const ActionsDropdown = () => {
             draft; the server applies the same rule (`assertCanDeleteBooking`). */}
       {actions.delete.visible ? <DeleteBooking booking={booking} /> : null}
 
-      {actions.bookingDocument.visible || actions.checkinReceipt.visible ? (
-        <Divider className="my-2" />
-      ) : null}
-      {actions.bookingDocument.visible ? (
-        <BookingOverviewPDF
-          booking={{
-            id: booking.id,
-            name: booking.name,
-            assetCount: booking.bookingAssets.length,
-          }}
-          assetOrder={assetOrder}
-        />
-      ) : null}
-      {actions.checkinReceipt.visible ? (
-        <BookingCheckinReceiptPDF
-          booking={booking}
-          available={canPrintCheckinReceipt}
-          unavailableReason={unavailableReason}
-          assetOrder={assetOrder}
-          timeStamp={new Date().getTime()}
-        />
-      ) : null}
+      <BookingDocumentEntries
+        booking={{ id: booking.id, name: booking.name }}
+        actions={actions}
+        assetOrder={assetOrder}
+      />
     </BookingActionsMenu>
   );
 };

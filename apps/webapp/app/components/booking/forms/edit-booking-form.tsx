@@ -412,13 +412,15 @@ function EditBookingFormInner({
   /**
    * Whether the user can see the booking actions:
    * - Members who write every booking always see them.
-   * - Everyone else only on a booking they hold.
+   * - Everyone else only on a booking they hold, through either of the
+   *   loader booking's custody links (the same ones the Actions menu reads).
    * This also decides whether the name and description fields are disabled.
    */
   const canSeeActions = canActOnBooking({
     booking: {
-      custodianUserId: null,
-      custodianTeamMemberUserId: defaultTeamMember?.userId ?? null,
+      custodianUserId: loaderBooking.custodianUserId,
+      custodianTeamMemberUserId:
+        loaderBooking.custodianTeamMember?.userId ?? null,
     },
     userId,
     access: roleAccess,

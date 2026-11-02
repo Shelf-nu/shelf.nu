@@ -73,11 +73,8 @@ function renderDialog(
       path: "/bookings/booking-1",
       Component: () => (
         <BookingOverviewPDF
-          booking={{
-            id: "booking-1",
-            name: "Campaign Shoot",
-            assetCount: 1,
-          }}
+          booking={{ id: "booking-1", name: "Campaign Shoot" }}
+          disabled={false}
           assetOrder={assetOrder}
         />
       ),
