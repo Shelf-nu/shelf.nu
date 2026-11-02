@@ -47,11 +47,17 @@ import {
   parseSourceLocationsFromFormData,
 } from "~/modules/booking/checkout-source-location";
 import {
+  assertNoCheckoutSourceQuestions,
   getCheckoutSourceQuestions,
   loadMultiPlacedPoolIds,
   loadSliceSourceLocations,
 } from "~/modules/booking/checkout-source-location.server";
 import { sendBookingUpdatedEmail } from "~/modules/booking/email-helpers";
+import { isExtendableStatus } from "~/modules/booking/extend-eligibility";
+import {
+  loadNextReservations,
+  NO_NEXT_RESERVATIONS,
+} from "~/modules/booking/next-reservations.server";
 import {
   assertBookingDeleteConfirmed,
   archiveBooking,
@@ -85,7 +91,10 @@ import {
   stillOutOnOverdueKitSlice,
 } from "~/modules/booking/utils.server";
 import { findModelRequestShortfallsForBooking } from "~/modules/booking-model-request/service.server";
-import { assertQuickCheckoutAllowed } from "~/modules/booking-settings/explicit-checkout";
+import {
+  assertQuickCheckinAllowed,
+  assertQuickCheckoutAllowed,
+} from "~/modules/booking-settings/explicit-checkout";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
@@ -141,10 +150,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
-import {
-  canRemoveBookingItems,
-  isExplicitScanRequired,
-} from "~/utils/permissions/role-access";
+import { canRemoveBookingItems } from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
 import type { Route } from "./+types/bookings.$bookingId.overview";
 
@@ -422,6 +428,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       bookingFlags,
       rawKits,
       modelShortfalls,
+      nextReservations,
     ] = await Promise.all([
       /**
        * We need to fetch the team members for the custodian filter in sidebar.
@@ -624,6 +631,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             organizationId,
           })
         : [],
+
+      /**
+       * What the items still out are promised to next: the extend horizon
+       * for the Change end date dialog and the next reservation per item
+       * row. Only a running booking has items out.
+       */
+      isExtendableStatus(booking.status)
+        ? loadNextReservations({
+            organizationId,
+            bookingId: booking.id,
+            viewer: { userId, seesAllBookings: access.bookings.seeAll },
+          })
+        : NO_NEXT_RESERVATIONS,
     ]);
 
     // Index the enriched assets for lookup during per-slice projection below.
@@ -1255,6 +1275,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
          * case, and reads this alongside the slice markers.
          */
         hasDispositionedUnits: dispositionLogs.length > 0,
+        nextReservations,
         // Shaped view for first paint (same field names the component reads),
         // post-enriched with per-row qty disposition data (Polish-6 multi-row).
         items: enrichedItems,
@@ -1492,6 +1513,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       checkoutIntentChoice,
       expiredCheckoutNewTo,
       checkinIntentChoice,
+      origin,
     } = parseData(
       formData,
       z.object({
@@ -1522,6 +1544,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         // in the `checkOut` case with the extend schema.
         expiredCheckoutNewTo: z.string().optional(),
         checkinIntentChoice: z.nativeEnum(CheckinIntentEnum).optional(),
+        // Which surface posted. The bookings-list row posts `bookings-list`:
+        // its dialog cannot ask the "From location" question, so a check-out
+        // that has one to ask is refused and the operator opens the booking.
+        // The booking page posts nothing.
+        origin: z.enum(["bookings-list"]).optional(),
       }),
       {
         additionalData: { userId },
@@ -1843,6 +1870,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         // The one-click check-out is refused when the workspace requires the
         // explicit flow (scan or select) for this caller.
         assertQuickCheckoutAllowed({ access, bookingSettings });
+        // A bookings-list row cannot ask where multi-placed pools leave from,
+        // so it is refused when there is a question to ask.
+        if (origin === "bookings-list") {
+          await assertNoCheckoutSourceQuestions({
+            organizationId,
+            bookingId: id,
+          });
+        }
 
         const checkoutHints = getClientHint(request);
 
@@ -1926,6 +1961,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         // Being one click, it is refused under the explicit check-out
         // requirement, the same as "Check out".
         assertQuickCheckoutAllowed({ access, bookingSettings });
+        // The same rule as "Check out": a bookings-list row cannot ask where
+        // multi-placed pools leave from.
+        if (origin === "bookings-list") {
+          await assertNoCheckoutSourceQuestions({
+            organizationId,
+            bookingId: id,
+          });
+        }
 
         return await checkoutRemainingAssets({
           formData,
@@ -1940,23 +1983,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       case "checkIn": {
         // Refuse the one-click check-in when the workspace requires the
         // explicit flow for this caller.
-        if (
-          isExplicitScanRequired({
-            access,
-            settings: bookingSettings,
-            direction: "checkin",
-          })
-        ) {
-          throw new ShelfError({
-            cause: null,
-            title: "Not allowed to quick check-in",
-            message:
-              "Explicit check-in is required in this organization. Please use the explicit check-in scanner.",
-            status: 403,
-            label: "Booking",
-            shouldBeCaptured: false,
-          });
-        }
+        assertQuickCheckinAllowed({ access, bookingSettings });
 
         // Extract specific asset IDs if provided (for enhanced completion messaging)
         const specificAssetIds = formData.getAll(
@@ -2222,6 +2249,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           id,
           organizationId,
           hints,
+          prefs,
           newEndDate: endDate,
           userId,
           access,

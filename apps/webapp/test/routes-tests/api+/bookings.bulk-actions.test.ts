@@ -3,7 +3,9 @@
  * the real matrix, and the services receive the caller's access.
  *
  * Archive and cancel need `booking:archive` / `booking:cancel`, which BASE does
- * not hold, so BASE is refused both. Delete passes the caller's access to
+ * not hold, so BASE is refused both. Check-out and check-in need
+ * `booking:checkout` / `booking:checkin`, the grants the booking page's
+ * one-click buttons ask for. Delete passes the caller's access to
  * `bulkDeleteBookings`, which applies the drafts-only rule.
  *
  * The dialogs also post which bookings list they were opened on (a kit's or an
@@ -41,12 +43,20 @@ vi.mock("~/modules/booking/service.server", () => ({
   bulkCancelBookings: vi.fn(),
   bulkDeleteBookings: vi.fn(),
 }));
+vi.mock("~/modules/booking/bulk-check-in-out.server", () => ({
+  bulkCheckoutBookings: vi.fn(),
+  bulkCheckinBookings: vi.fn(),
+}));
 
 // why: the success toast goes through the event emitter
 vi.mock("~/utils/emitter/send-notification.server", () => ({
   sendNotification: vi.fn(),
 }));
 
+import {
+  bulkCheckinBookings,
+  bulkCheckoutBookings,
+} from "~/modules/booking/bulk-check-in-out.server";
 import {
   bulkArchiveBookings,
   bulkCancelBookings,
@@ -102,6 +112,8 @@ describe("POST /api/bookings/bulk-actions", () => {
   it.each([
     ["bulk-archive", bulkArchiveBookings],
     ["bulk-cancel", bulkCancelBookings],
+    ["bulk-checkout", bulkCheckoutBookings],
+    ["bulk-checkin", bulkCheckinBookings],
   ] as const)(
     "refuses BASE %s, which lacks the action's own grant",
     async (intent, service) => {
@@ -121,6 +133,54 @@ describe("POST /api/bookings/bulk-actions", () => {
     expect(
       calls.every(([args]) => args.entity === PermissionEntity.booking)
     ).toBe(true);
+  });
+
+  it("asks for booking:checkout and booking:checkin for the list's check-out and check-in", async () => {
+    asRole(OrganizationRoles.ADMIN);
+    await post("bulk-checkout");
+    await post("bulk-checkin");
+    const calls = requirePermissionMock.mock.calls as [PermissionArgs][];
+    expect(calls.map(([args]) => args.action)).toEqual(["checkout", "checkin"]);
+  });
+
+  it.each([
+    ["bulk-checkout", bulkCheckoutBookings],
+    ["bulk-checkin", bulkCheckinBookings],
+  ] as const)(
+    "hands %s the caller's access and client hints, as the singular paths get them",
+    async (intent, service) => {
+      asRole(OrganizationRoles.SELF_SERVICE);
+      const response = await post(intent);
+      expect(response.status).toBe(200);
+      expect(service).toHaveBeenCalledWith(
+        expect.objectContaining({
+          bookingIds: ["booking-1"],
+          organizationId: "org-1",
+          userId: "user-1",
+          hints: expect.objectContaining({ timeZone: expect.any(String) }),
+          access: expect.objectContaining({
+            bookings: expect.objectContaining({ writeAll: false }),
+          }),
+        })
+      );
+    }
+  );
+
+  it("answers a refused bulk-checkout with the service's own status and message", async () => {
+    asRole(OrganizationRoles.ADMIN);
+    vi.mocked(bulkCheckoutBookings).mockRejectedValueOnce(
+      new ShelfError({
+        cause: null,
+        message: '"Camera" is not reserved. Nothing was changed.',
+        label: "Booking",
+        status: 400,
+      })
+    );
+    const response = await post("bulk-checkout");
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: { message: '"Camera" is not reserved. Nothing was changed.' },
+    });
   });
 
   it("lets SELF_SERVICE bulk-archive, scoped to its own bookings by access", async () => {
@@ -157,6 +217,8 @@ describe("POST /api/bookings/bulk-actions: which list a select all stands for", 
     ["bulk-delete", bulkDeleteBookings],
     ["bulk-archive", bulkArchiveBookings],
     ["bulk-cancel", bulkCancelBookings],
+    ["bulk-checkout", bulkCheckoutBookings],
+    ["bulk-checkin", bulkCheckinBookings],
   ] as const;
 
   it.each(INTENTS)(
