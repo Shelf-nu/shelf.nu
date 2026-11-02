@@ -49,10 +49,32 @@ export function availabilityEventClassNames(
  * @param viewType - FullCalendar view type; time-grid views add the hover class
  * @returns The class list for the bar element
  */
+/**
+ * The bar palette of a reservation request still waiting for a decision:
+ * amber, dashed, so it reads as "not settled yet" next to the solid blue of
+ * an approved reservation. Same hues as the "Pending approval" badge.
+ */
+const PENDING_APPROVAL_CLASSES = [
+  "md:!text-[#B54708]",
+  "md:bg-[#FFFAEB]",
+  "md:border-[#FEDF89]",
+  "md:!border-dashed",
+  "[&_.fc-daygrid-event-dot]:!border-[#B54708]",
+  "[&_.fc-list-event-dot]:!border-[#B54708]",
+  "md:focus:!bg-[#FEF0C7]",
+];
+
 export function getStatusClasses(
   status: BookingStatus,
   oneDayEvent: boolean = false,
-  viewType?: string
+  viewType?: string,
+  options?: {
+    /**
+     * Draw the bar as a pending reservation request (see
+     * `isBookingPendingApproval`) instead of in its status palette.
+     */
+    pendingApproval?: boolean;
+  }
 ) {
   /** Default classes */
   const classes = [
@@ -68,6 +90,9 @@ export function getStatusClasses(
     classes.push("[&>.fc-event-title]:!truncate !bg-transparent");
   }
   let statusClasses: string[] = [];
+  if (options?.pendingApproval) {
+    return [...classes, ...PENDING_APPROVAL_CLASSES];
+  }
   switch (status) {
     case "DRAFT":
     case "ARCHIVED":

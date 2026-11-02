@@ -10638,6 +10638,75 @@ describe("revertBookingToDraft", () => {
       })
     );
   });
+
+  it("tells the custodian what to change when the actor gives a reason", async () => {
+    const custodianUser = {
+      id: "user-2",
+      email: "custodian@example.com",
+      firstName: "Custodian",
+      lastName: "User",
+      displayName: null,
+      dateFormat: null,
+      timeFormat: null,
+      weekStart: null,
+      timeZone: null,
+    };
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.RESERVED,
+      bookingAssets: [],
+    };
+    const draftBooking = {
+      ...mockBooking,
+      status: BookingStatus.DRAFT,
+      custodianUser,
+      custodianTeamMember: null,
+      creator: custodianUser,
+      notificationRecipients: [],
+      organization: {
+        name: "Test Org",
+        customEmailFooter: null,
+        owner: { email: "owner@example.com" },
+      },
+      _count: { bookingAssets: 0 },
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue(draftBooking);
+    vitest.mocked(getBookingNotificationRecipients).mockResolvedValueOnce([
+      {
+        email: custodianUser.email,
+        firstName: custodianUser.firstName,
+        lastName: custodianUser.lastName,
+        userId: custodianUser.id,
+        dateFormat: null,
+        timeFormat: null,
+        weekStart: null,
+        timeZone: null,
+        reason: "custodian",
+      },
+    ]);
+
+    await revertBookingToDraft({
+      id: "booking-1",
+      organizationId: "org-1",
+      userId: "admin-1",
+      hints: mockClientHints,
+      reason: "Pick a shorter slot, the camera is booked after 15:00",
+    });
+
+    // The plain-text body carries the reason, so a reader without HTML
+    // still learns what to change before resubmitting.
+    expect(sendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: "custodian@example.com",
+        text: expect.stringContaining(
+          "What to change: Pick a shorter slot, the camera is booked after 15:00"
+        ),
+      })
+    );
+  });
 });
 
 /**

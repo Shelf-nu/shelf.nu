@@ -835,6 +835,38 @@ function BookingDetailScreen({ id }: { id: string }) {
   // Each is permission/status-gated server-side AND only offered when the
   // detail endpoint's `bookingActions` flag says this role/status may use it.
 
+  // Approve a pending reservation request. Offered only when the detail
+  // endpoint says this caller may decide it (`canApprove`), which is the same
+  // `booking:approve` answer the web button and the endpoint enforce.
+  const handleApprove = () => {
+    if (!booking || !currentOrg) return;
+    Alert.alert(
+      "Approve booking request",
+      `Approve "${booking.name}"? The custodian will be notified by email and the booking can then be checked out.`,
+      [
+        { text: "Not now", style: "cancel" },
+        {
+          text: "Approve",
+          onPress: async () => {
+            setIsActioning(true);
+            const { error: err } = await api.approveBooking(
+              currentOrg.id,
+              booking.id
+            );
+            setIsActioning(false);
+            if (err) {
+              Alert.alert("Couldn't approve", err);
+              return;
+            }
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            markBookingsListDirty();
+            fetchBooking();
+          },
+        },
+      ]
+    );
+  };
+
   const handleCancel = () => {
     if (!booking || !currentOrg) return;
     Alert.alert(
@@ -2217,6 +2249,27 @@ function BookingDetailScreen({ id }: { id: string }) {
                 >
                   {selectMode === "remove" ? "Cancel" : "Select to Remove"}
                 </Text>
+              </TouchableOpacity>
+            )}
+
+            {/* A pending reservation request offers Approve in place of the
+                check-out paths: the server refuses check-out until it is
+                approved, and `canApprove` is the server's own answer on who
+                may decide it. */}
+            {booking.canApprove === true && (
+              <TouchableOpacity
+                style={styles.actionButton}
+                onPress={handleApprove}
+                disabled={isActioning}
+                accessibilityLabel="Approve this booking request"
+                accessibilityRole="button"
+              >
+                <Ionicons
+                  name="checkmark-circle-outline"
+                  size={18}
+                  color={colors.primaryForeground}
+                />
+                <Text style={styles.actionButtonText}>Approve request</Text>
               </TouchableOpacity>
             )}
 

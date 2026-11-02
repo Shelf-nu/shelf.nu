@@ -206,6 +206,19 @@ describe("resolveCheckInOutActions: which buttons a status gets", () => {
     ).toEqual({ checkOut: false, checkOutRemaining: false, checkIn: false });
   });
 
+  it("offers no Check out while the reservation request awaits approval", () => {
+    // why: the service refuses the check-out of a pending request, so the
+    // row would only hand the viewer a 400.
+    expect(
+      resolveCheckInOutActions({
+        booking: { status: BookingStatus.RESERVED },
+        canCheckOut: true,
+        canCheckIn: true,
+        isPendingApproval: true,
+      })
+    ).toEqual({ checkOut: false, checkOutRemaining: false, checkIn: false });
+  });
+
   it("drops the check-out buttons when the viewer may not check out", () => {
     expect(
       resolveCheckInOutActions({

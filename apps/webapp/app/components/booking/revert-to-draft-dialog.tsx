@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { BookingStatus, type Booking } from "@prisma/client";
 import { useDisabled } from "~/hooks/use-disabled";
+import Input from "../forms/input";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";
 
@@ -49,19 +50,29 @@ export default function RevertToDraftDialog({ booking }: RevertToDraftProps) {
               draft?
             </p>
 
-            <form method="post" className="flex w-full items-center gap-4">
+            <form method="post" className="flex w-full flex-col gap-4">
               <input type="hidden" name="intent" value="revert-to-draft" />
-              <Button
-                variant="secondary"
-                className="flex-1"
-                type="button"
-                onClick={handleCloseDialog}
-              >
-                Cancel
-              </Button>
-              <Button className="flex-1" type="submit" disabled={disabled}>
-                Confirm
-              </Button>
+              <Input
+                label="Reason (optional)"
+                name="revertReason"
+                inputType="textarea"
+                placeholder="Tell the custodian what to change before they submit it again"
+                maxLength={500}
+                rows={3}
+              />
+              <div className="flex w-full items-center gap-4">
+                <Button
+                  variant="secondary"
+                  className="flex-1"
+                  type="button"
+                  onClick={handleCloseDialog}
+                >
+                  Cancel
+                </Button>
+                <Button className="flex-1" type="submit" disabled={disabled}>
+                  Confirm
+                </Button>
+              </div>
             </form>
           </div>
         </Dialog>

@@ -2236,11 +2236,25 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         return payload({ success: true });
       }
       case "revert-to-draft": {
+        // The optional note the custodian gets with the "sent back" email.
+        const { revertReason } = parseData(
+          formData,
+          z.object({
+            revertReason: z
+              .string()
+              .trim()
+              .max(500, "Keep the reason under 500 characters")
+              .optional()
+              .transform((value) => (value ? value : undefined)),
+          }),
+          { additionalData: { userId, id, organizationId } }
+        );
         await revertBookingToDraft({
           id,
           organizationId,
           userId,
           hints: getClientHint(request),
+          reason: revertReason,
         });
 
         sendNotification({

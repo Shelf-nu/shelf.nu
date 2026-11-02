@@ -366,10 +366,20 @@ export const cancelledBookingEmailContent = (
  * request back for changes). The booking still exists — the recipient can
  * open it, adjust it and reserve it again.
  */
-export const revertedToDraftEmailContent = (args: BasicEmailContentArgs) =>
+export const revertedToDraftEmailContent = ({
+  reason,
+  ...args
+}: BasicEmailContentArgs & {
+  /** Why it was sent back, when the actor gave one. */
+  reason?: string;
+}) =>
   baseBookingTextEmailContent({
     ...args,
-    emailContent: `Your booking reservation has been reverted to draft: "${args.bookingName}". You can review the booking, make changes and submit it again.`,
+    emailContent: `Your booking reservation has been reverted to draft: "${
+      args.bookingName
+    }". You can review the booking, make changes and submit it again.${
+      reason ? `\n\nWhat to change: ${reason}` : ""
+    }`,
   });
 
 /**

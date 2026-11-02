@@ -42,6 +42,8 @@ type BaseNavItem = {
   badge?: {
     show: boolean;
     variant?: "unread";
+    /** A number to show next to the title, e.g. requests waiting for a decision. */
+    count?: number;
   };
 };
 
@@ -80,8 +82,13 @@ export type NavItem =
  * @returns The top and bottom menu items, hidden entries already removed
  */
 export function useSidebarNavItems() {
-  const { isAdmin, canUseBookings, subscription, unreadUpdatesCount } =
-    useLoaderData<typeof loader>();
+  const {
+    isAdmin,
+    canUseBookings,
+    subscription,
+    unreadUpdatesCount,
+    pendingApprovalCount,
+  } = useLoaderData<typeof loader>();
   const roles = useOrganizationRoles();
   const currentOrganization = useCurrentOrganization();
   const isPersonalOrganization = isPersonalOrg(currentOrganization);
@@ -204,6 +211,12 @@ export function useSidebarNavItems() {
           title: "View Bookings",
           to: "/bookings",
           disabled: bookingDisabled,
+          // Requests waiting for this viewer's decision; the layout loader
+          // sends 0 for everyone who cannot approve.
+          badge: {
+            show: (pendingApprovalCount || 0) > 0,
+            count: pendingApprovalCount || 0,
+          },
         },
         {
           title: "Calendar",

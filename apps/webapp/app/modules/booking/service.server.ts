@@ -129,7 +129,10 @@ import {
   assertCanDuplicateBooking,
   validateBookingOwnership,
 } from "~/utils/booking-authorization.server";
-import { canUserRemoveBookingAssets } from "~/utils/bookings";
+import {
+  canUserRemoveBookingAssets,
+  isBookingPendingApproval,
+} from "~/utils/bookings";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
@@ -400,6 +403,7 @@ async function sendBookingEmailToAllRecipients({
   templateProps?: {
     hideViewButton?: boolean;
     cancellationReason?: string;
+    revertReason?: string;
     changes?: string[];
     assets?: ReservationEmailAsset[];
     modelRequests?: ReservationEmailModelRequest[];
@@ -13547,10 +13551,16 @@ export async function revertBookingToDraft({
   organizationId,
   userId,
   hints,
+  reason,
 }: Pick<Booking, "id" | "organizationId"> & {
   userId?: User["id"];
-  /** Acting user's client hints — fallback prefs for the notification emails. */
+  /** Acting user's client hints, the fallback prefs for the notification emails. */
   hints: ClientHint;
+  /**
+   * Why the booking is sent back, as the actor typed it. Shown in the
+   * custodian's email so they know what to change before resubmitting.
+   */
+  reason?: string;
 }) {
   try {
     const booking = await db.booking
@@ -13660,12 +13670,14 @@ export async function revertBookingToDraft({
               to: draftBooking.to!,
               bookingId: draftBooking.id,
               customEmailFooter: draftBooking.organization.customEmailFooter,
+              reason,
             }),
           buildHeading: () =>
             `Your booking has been reverted to draft: "${draftBooking.name}"`,
           hints,
           actor,
           actorUserId: userId,
+          templateProps: { revertReason: reason },
         });
       }
     } catch (cause) {
@@ -16443,6 +16455,15 @@ export async function getBookingsForCalendar(params: {
       takeAll: true,
     });
 
+    // A pending reservation request is drawn apart from a settled one, so the
+    // calendar tells staff where a decision is waiting without opening it.
+    const calendarApprovalSettings = await db.bookingSettings.findUnique({
+      where: { organizationId },
+      select: { requireBookingApproval: true },
+    });
+    const requireBookingApproval =
+      calendarApprovalSettings?.requireBookingApproval ?? false;
+
     const events = bookings
       .filter((booking) => booking.from && booking.to)
       .map((booking) => {
@@ -16454,6 +16475,11 @@ export async function getBookingsForCalendar(params: {
         if (canSeeAllCustody) {
           title += ` | ${custodianName}`;
         }
+        const isPendingApproval = isBookingPendingApproval({
+          status: booking.status,
+          approvedAt: booking.approvedAt,
+          requireBookingApproval,
+        });
         return {
           title,
           start: (booking.from as Date).toISOString(),
@@ -16462,12 +16488,15 @@ export async function getBookingsForCalendar(params: {
             `bookingId-${booking.id}`,
             ...getStatusClasses(
               booking.status,
-              isOneDayEvent(booking.from as Date, booking.to as Date)
+              isOneDayEvent(booking.from as Date, booking.to as Date),
+              undefined,
+              { pendingApproval: isPendingApproval }
             ),
           ],
           extendedProps: {
             url: `/bookings/${booking.id}`,
             status: booking.status,
+            isPendingApproval,
             id: booking.id,
             name: booking.name,
             description: booking.description,

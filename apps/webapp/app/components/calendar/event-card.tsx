@@ -303,6 +303,7 @@ export function EventCardContent({
           status={booking.status}
           custodianUserId={booking.custodian.user?.id}
           to={booking.end}
+          isPendingApproval={booking.isPendingApproval === true}
         />
       </div>
 

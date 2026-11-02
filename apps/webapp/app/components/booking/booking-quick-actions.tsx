@@ -46,7 +46,7 @@ import { useRoleAccess } from "~/hooks/use-role-access";
 import { useUserData } from "~/hooks/use-user-data";
 import type { CountableModelRequest } from "~/utils/booking-model-requests";
 import { countUnassignedModelUnits } from "~/utils/booking-model-requests";
-import { canWriteBooking } from "~/utils/bookings";
+import { canWriteBooking, isBookingPendingApproval } from "~/utils/bookings";
 import type { DataOrErrorResponse } from "~/utils/http.server";
 import {
   PermissionAction,
@@ -77,6 +77,11 @@ export type BookingQuickActionsBooking = {
    * "nothing left to check out".
    */
   hasItemsToCheckOut?: boolean;
+  /**
+   * When the reservation was approved; null on a request still waiting for a
+   * decision, which offers no check-out while the workspace requires approval.
+   */
+  approvedAt?: Date | string | null;
 };
 
 /** Props for {@link BookingQuickActions}. */
@@ -136,10 +141,16 @@ export function resolveCheckInOutActions({
   booking,
   canCheckOut,
   canCheckIn,
+  isPendingApproval = false,
 }: {
   booking: Pick<BookingQuickActionsBooking, "status" | "hasItemsToCheckOut">;
   canCheckOut: boolean;
   canCheckIn: boolean;
+  /**
+   * A reservation request still waiting for a decision: the server refuses
+   * its check-out, so the row must not offer the button.
+   */
+  isPendingApproval?: boolean;
 }): { checkOut: boolean; checkOutRemaining: boolean; checkIn: boolean } {
   const isReserved = booking.status === BookingStatus.RESERVED;
   const isUnderway =
@@ -147,7 +158,7 @@ export function resolveCheckInOutActions({
     booking.status === BookingStatus.OVERDUE;
 
   return {
-    checkOut: isReserved && canCheckOut,
+    checkOut: isReserved && canCheckOut && !isPendingApproval,
     checkOutRemaining:
       isUnderway && canCheckOut && booking.hasItemsToCheckOut === true,
     checkIn: isUnderway && canCheckIn,
@@ -211,6 +222,11 @@ export function BookingQuickActions({ booking }: BookingQuickActionsProps) {
     booking,
     canCheckOut,
     canCheckIn,
+    isPendingApproval: isBookingPendingApproval({
+      status: booking.status,
+      approvedAt: booking.approvedAt ?? null,
+      requireBookingApproval: bookingSettings.requireBookingApproval,
+    }),
   });
   if (!buttons.checkOut && !buttons.checkOutRemaining && !buttons.checkIn) {
     return null;
