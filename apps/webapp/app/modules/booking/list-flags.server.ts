@@ -28,8 +28,10 @@ import { AssetStatus, AssetType, BookingStatus } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
+import { isCheckinReceiptAvailable } from "./checkin-receipt-availability";
 import type { CheckoutSession } from "./checkout-attribution";
 import {
+  BOOKING_DISPOSITION_CATEGORIES,
   checkoutSessionsToLogsByAsset,
   computeSlicesRemainingToCheckOut,
 } from "./checkout-attribution";
@@ -295,6 +297,80 @@ export async function getBookingIdsWithItemsToCheckOut({
 }
 
 /**
+ * Returns the subset of `bookingIds` whose check-in receipt can be printed.
+ *
+ * Applies {@link isCheckinReceiptAvailable}, the rule the booking page uses,
+ * to each booking's slice markers and to whether any disposition log exists
+ * for it (the same `ConsumptionLog` source as the overview loader's
+ * `hasDispositionedUnits`). Two bounded queries per page, whatever the row
+ * count: the bookings with their markers, and the distinct booking ids that
+ * have a disposition log.
+ *
+ * @param args.bookingIds - Booking ids on the current page
+ * @param args.organizationId - Caller's organization, which scopes both queries
+ * @param args.db - Prisma client or active transaction; defaults to `db`
+ * @returns The ids whose receipt is available
+ * @throws {ShelfError} If a query fails
+ */
+export async function getBookingIdsWithCheckinReceipt({
+  bookingIds,
+  organizationId,
+  db: dbOrTx = db,
+}: {
+  bookingIds: string[];
+  organizationId: string;
+  db?: Pick<typeof db, "booking" | "consumptionLog">;
+}): Promise<Set<string>> {
+  if (bookingIds.length === 0) {
+    return new Set();
+  }
+
+  try {
+    const [bookings, dispositionLogs] = await Promise.all([
+      dbOrTx.booking.findMany({
+        where: { id: { in: bookingIds }, organizationId },
+        select: {
+          id: true,
+          status: true,
+          bookingAssets: { select: { checkedOutAt: true, checkedInAt: true } },
+        },
+      }),
+      dbOrTx.consumptionLog.findMany({
+        where: {
+          bookingId: { in: bookingIds },
+          // A log has no organization column; scope through its booking.
+          booking: { organizationId },
+          category: { in: [...BOOKING_DISPOSITION_CATEGORIES] },
+        },
+        select: { bookingId: true },
+        distinct: ["bookingId"],
+      }),
+    ]);
+
+    const dispositioned = new Set(dispositionLogs.map((log) => log.bookingId));
+    return new Set(
+      bookings
+        .filter((booking) =>
+          isCheckinReceiptAvailable({
+            status: booking.status,
+            bookingAssets: booking.bookingAssets,
+            hasDispositionedUnits: dispositioned.has(booking.id),
+          })
+        )
+        .map((booking) => booking.id)
+    );
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while checking the bookings for a printable check-in receipt.",
+      additionalData: { organizationId, bookingCount: bookingIds.length },
+      label,
+    });
+  }
+}
+
+/**
  * Runs one decorative lookup, degrading to "no booking flagged" on failure.
  *
  * Each flag is cosmetic, so a failing lookup logs and the list renders
@@ -324,8 +400,9 @@ function flagOrNone(
 }
 
 /**
- * Loader helper: decorates a bookings-list page's rows with the two pill flags
- * and the "items still to check out" flag the row's check-out button reads.
+ * Loader helper: decorates a bookings-list page's rows with the two pill flags,
+ * the "items still to check out" flag the row's check-out button reads and the
+ * "check-in receipt printable" flag the row's quick actions read.
  *
  * Runs the lookups concurrently: they are independent, and serialising them
  * would put more round trips on the critical path of every bookings list.
@@ -334,7 +411,7 @@ function flagOrNone(
  *   `{ id, status, from, to }`; extra fields are preserved)
  * @param args.organizationId - Caller's organization, which scopes every query
  * @returns The same rows, each extended with `hasStockConflict`,
- *   `hasUnavailableAssets` and `hasItemsToCheckOut`
+ *   `hasUnavailableAssets`, `hasItemsToCheckOut` and `canPrintCheckinReceipt`
  */
 export async function decorateBookingsForList<
   B extends BookingForStockConflictLookup,
@@ -350,13 +427,14 @@ export async function decorateBookingsForList<
       hasStockConflict: boolean;
       hasUnavailableAssets: boolean;
       hasItemsToCheckOut: boolean;
+      canPrintCheckinReceipt: boolean;
     }
   >
 > {
   const bookingIds = bookings.map((booking) => booking.id);
   const context = { organizationId, bookingCount: bookings.length };
 
-  const [withStockConflicts, unavailableIds, itemsToCheckOutIds] =
+  const [withStockConflicts, unavailableIds, itemsToCheckOutIds, receiptIds] =
     await Promise.all([
       // The stock decorator swallows its own failures; the other two have to
       // swallow theirs too, or a decorative flag takes the list down.
@@ -371,11 +449,17 @@ export async function decorateBookingsForList<
         "Failed to check the bookings for items still to check out; rendering the bookings list without the row's Check out remaining button.",
         context
       ),
+      flagOrNone(
+        getBookingIdsWithCheckinReceipt({ bookingIds, organizationId }),
+        "Failed to check the bookings for a printable check-in receipt; rendering the bookings list without that action.",
+        context
+      ),
     ]);
 
   return withStockConflicts.map((booking) => ({
     ...booking,
     hasUnavailableAssets: unavailableIds.has(booking.id),
     hasItemsToCheckOut: itemsToCheckOutIds.has(booking.id),
+    canPrintCheckinReceipt: receiptIds.has(booking.id),
   }));
 }

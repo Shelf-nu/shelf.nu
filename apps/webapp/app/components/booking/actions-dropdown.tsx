@@ -8,6 +8,7 @@ import {
   DropdownMenuPortal,
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
+import { useSearchParams } from "~/hooks/search-params";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
@@ -22,8 +23,15 @@ import {
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import { ArchiveBookingAction } from "./archive-booking-action";
-import { BookingCheckinReceiptPDF } from "./booking-checkin-receipt-pdf";
-import { BookingOverviewPDF } from "./booking-overview-pdf";
+import {
+  BookingCheckinReceiptPDF,
+  checkinReceiptUnavailableReason,
+  isCheckinReceiptAvailable,
+} from "./booking-checkin-receipt-pdf";
+import {
+  BookingOverviewPDF,
+  pdfAssetOrderFromSearchParams,
+} from "./booking-overview-pdf";
 import { CancelBookingDialog } from "./cancel-booking-dialog";
 import { DeleteBooking } from "./delete-booking";
 import { DuplicateBookingAction } from "./duplicate-booking-action";
@@ -57,6 +65,9 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
 
   const roles = useOrganizationRoles();
   const roleAccess = useRoleAccess();
+  // The PDFs list assets in the order the page is showing them.
+  const [searchParams] = useSearchParams();
+  const assetOrder = pdfAssetOrderFromSearchParams(searchParams);
 
   const canArchiveBooking = userHasPermission({
     roles,
@@ -152,15 +163,23 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
           <Divider className="my-2" />
           <BookingOverviewPDF
             booking={{
-              ...booking,
-              assets: booking.bookingAssets.map(
-                (ba: { asset: { id: string } }) => ba.asset
-              ),
+              id: booking.id,
+              name: booking.name,
+              assetCount: booking.bookingAssets.length,
             }}
+            assetOrder={assetOrder}
           />
           <BookingCheckinReceiptPDF
             booking={booking}
-            hasDispositionedUnits={hasDispositionedUnits}
+            available={isCheckinReceiptAvailable({
+              status: booking.status,
+              bookingAssets: booking.bookingAssets,
+              hasDispositionedUnits,
+            })}
+            unavailableReason={checkinReceiptUnavailableReason(
+              booking.bookingAssets
+            )}
+            assetOrder={assetOrder}
             timeStamp={new Date().getTime()}
           />
         </DropdownMenuContent>

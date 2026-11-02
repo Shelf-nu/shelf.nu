@@ -28,6 +28,8 @@ import type {
 import {
   BookingCheckinReceiptPDF,
   BookingCheckinReceiptPreview,
+  checkinReceiptUnavailableReason,
+  isCheckinReceiptAvailable,
 } from "./booking-checkin-receipt-pdf";
 
 // why: the header renders `DateS`, which reads the acting user's format prefs
@@ -76,13 +78,6 @@ vi.mock("react-router", async () => {
     }),
   };
 });
-
-// why: the entry reads the booking page's sort out of the URL. There is no
-// router-provided query string here, and the sort plays no part in whether the
-// entry is offered.
-vi.mock("~/hooks/search-params", () => ({
-  useSearchParams: () => [new URLSearchParams(), vi.fn()],
-}));
 
 /** A returned individual row, the ordinary case every override starts from. */
 function row(
@@ -395,8 +390,14 @@ function renderEntry(
   return render(
     <MemoryRouter>
       <BookingCheckinReceiptPDF
-        booking={{ id: "booking-1", name: "Shoot", ...booking }}
-        hasDispositionedUnits={hasDispositionedUnits}
+        booking={{ id: "booking-1", name: "Shoot" }}
+        available={isCheckinReceiptAvailable({
+          ...booking,
+          hasDispositionedUnits,
+        })}
+        unavailableReason={checkinReceiptUnavailableReason(
+          booking.bookingAssets
+        )}
         timeStamp={1757000000000}
       />
     </MemoryRouter>

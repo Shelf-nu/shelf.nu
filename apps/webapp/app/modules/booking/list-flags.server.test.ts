@@ -19,6 +19,7 @@ import type { Prisma } from "@prisma/client";
 
 import { db } from "~/database/db.server";
 import {
+  getBookingIdsWithCheckinReceipt,
   getBookingIdsWithItemsToCheckOut,
   decorateBookingsForList,
   getBookingIdsWithUnavailableAssets,
@@ -35,6 +36,9 @@ vitest.mock("~/database/db.server", () => ({
     booking: {
       findMany: vitest.fn().mockResolvedValue([]),
     },
+    consumptionLog: {
+      findMany: vitest.fn().mockResolvedValue([]),
+    },
     // A field reference, compared by identity in the captured `where`.
     bookingAsset: { fields: { quantity: "BookingAsset.quantity" } },
   },
@@ -48,6 +52,9 @@ vitest.mock("./stock-conflicts.server", () => ({
 }));
 
 const findManyMock = db.booking.findMany as unknown as ReturnType<
+  typeof vitest.fn
+>;
+const logFindManyMock = db.consumptionLog.findMany as unknown as ReturnType<
   typeof vitest.fn
 >;
 const stockDecoratorMock =
@@ -477,6 +484,11 @@ describe("decorateBookingsForList", () => {
   }) {
     findManyMock.mockImplementation(
       ({ select }: { select: Record<string, unknown> }) => {
+        if ("status" in select) {
+          // The receipt lookup: nothing has been checked out, so no booking
+          // is printable.
+          return Promise.resolve([]);
+        }
         if ("partialCheckins" in select) {
           return Promise.resolve(
             itemsToCheckOut.map((id) => ({
@@ -502,7 +514,7 @@ describe("decorateBookingsForList", () => {
     );
   }
 
-  it("attaches all three flags, preserving the row's own fields", async () => {
+  it("attaches all four flags, preserving the row's own fields", async () => {
     answerLookups({
       unavailable: ["booking-2"],
       itemsToCheckOut: ["booking-1"],
@@ -520,6 +532,7 @@ describe("decorateBookingsForList", () => {
         hasStockConflict: false,
         hasUnavailableAssets: false,
         hasItemsToCheckOut: true,
+        canPrintCheckinReceipt: false,
       }),
       expect.objectContaining({
         id: "booking-2",
@@ -541,5 +554,66 @@ describe("decorateBookingsForList", () => {
 
     expect(rows.map((row) => row.hasUnavailableAssets)).toEqual([false, false]);
     expect(rows.map((row) => row.hasItemsToCheckOut)).toEqual([false, false]);
+  });
+});
+
+describe("getBookingIdsWithCheckinReceipt", () => {
+  beforeEach(() => {
+    findManyMock.mockReset();
+    logFindManyMock.mockReset();
+  });
+
+  it("flags canPrintCheckinReceipt per booking with one query", async () => {
+    findManyMock.mockResolvedValue([
+      {
+        id: "returned",
+        status: "ONGOING",
+        bookingAssets: [{ checkedOutAt: new Date(), checkedInAt: new Date() }],
+      },
+      {
+        id: "still-out",
+        status: "ONGOING",
+        bookingAssets: [{ checkedOutAt: new Date(), checkedInAt: null }],
+      },
+      {
+        id: "part-returned-quantity",
+        status: "ONGOING",
+        bookingAssets: [{ checkedOutAt: new Date(), checkedInAt: null }],
+      },
+      {
+        id: "archived-never-out",
+        status: "ARCHIVED",
+        bookingAssets: [{ checkedOutAt: null, checkedInAt: null }],
+      },
+    ]);
+    logFindManyMock.mockResolvedValue([
+      { bookingId: "part-returned-quantity" },
+    ]);
+
+    const ids = await getBookingIdsWithCheckinReceipt({
+      bookingIds: ["returned", "still-out", "part-returned-quantity"],
+      organizationId: ORG_ID,
+    });
+
+    expect([...ids].sort()).toEqual(["part-returned-quantity", "returned"]);
+    // One query per table for the whole page, never one per row.
+    expect(findManyMock).toHaveBeenCalledTimes(1);
+    expect(logFindManyMock).toHaveBeenCalledTimes(1);
+    expect(findManyMock.mock.calls[0][0].where).toMatchObject({
+      organizationId: ORG_ID,
+    });
+    expect(logFindManyMock.mock.calls[0][0].where).toMatchObject({
+      booking: { organizationId: ORG_ID },
+    });
+  });
+
+  it("runs no query for an empty page", async () => {
+    expect(
+      await getBookingIdsWithCheckinReceipt({
+        bookingIds: [],
+        organizationId: ORG_ID,
+      })
+    ).toEqual(new Set());
+    expect(findManyMock).not.toHaveBeenCalled();
   });
 });

@@ -62,7 +62,11 @@ const CHECKLIST = {
  * Renders the dialog's menu item on a booking page, with the generate route
  * answering `answer` and recording every URL it is asked for.
  */
-function renderDialog(answer: () => unknown) {
+function renderDialog(
+  answer: () => unknown,
+  assetOrder?: { orderBy: string; orderDirection: string },
+  url = "/bookings/booking-1"
+) {
   const requested: string[] = [];
   const Stub = createRoutesStub([
     {
@@ -72,8 +76,9 @@ function renderDialog(answer: () => unknown) {
           booking={{
             id: "booking-1",
             name: "Campaign Shoot",
-            assets: [{ id: "asset-1" }],
+            assetCount: 1,
           }}
+          assetOrder={assetOrder}
         />
       ),
     },
@@ -85,7 +90,7 @@ function renderDialog(answer: () => unknown) {
       },
     },
   ]);
-  render(<Stub initialEntries={["/bookings/booking-1"]} />);
+  render(<Stub initialEntries={[url]} />);
   fireEvent.click(screen.getAllByRole("button", { name: "Generate PDF" })[0]);
   return requested;
 }
@@ -171,5 +176,40 @@ describe("Generate PDF dialog", () => {
       expect(screen.getByRole("button", { name: "Download PDF" })).toBeVisible()
     );
     expect(new URL(requested.at(-1)!).searchParams.has("document")).toBe(false);
+  });
+
+  it("loads the document without the page's orderBy when no assetOrder is given", async () => {
+    const requested = renderDialog(
+      () => ({
+        error: null,
+        pdfMeta: busyBookingPdfMeta(),
+        document: null,
+        documents: [],
+      }),
+      undefined,
+      "/bookings/booking-1?orderBy=from&orderDirection=asc"
+    );
+
+    await waitFor(() => expect(requested).toHaveLength(1));
+    const params = new URL(requested[0]).searchParams;
+    expect(params.has("orderBy")).toBe(false);
+    expect(params.has("orderDirection")).toBe(false);
+  });
+
+  it("loads with the given assetOrder", async () => {
+    const requested = renderDialog(
+      () => ({
+        error: null,
+        pdfMeta: busyBookingPdfMeta(),
+        document: null,
+        documents: [],
+      }),
+      { orderBy: "name", orderDirection: "asc" }
+    );
+
+    await waitFor(() => expect(requested).toHaveLength(1));
+    const params = new URL(requested[0]).searchParams;
+    expect(params.get("orderBy")).toBe("name");
+    expect(params.get("orderDirection")).toBe("asc");
   });
 });
