@@ -9,6 +9,7 @@
  * @see {@link file://./bulk-partial-checkin-dialog.tsx} final partial check-in
  * @see {@link file://../scanner/drawer/uses/partial-checkin-drawer.tsx} scanner
  */
+import type { ReactNode } from "react";
 import type { Booking } from "@prisma/client";
 import { Zap } from "lucide-react";
 import { useDisabled } from "~/hooks/use-disabled";
@@ -52,8 +53,14 @@ type CheckinDialogProps = {
   onClose?: () => void;
   /** Custom label for the button */
   label?: string;
-  /** Variant for different contexts */
-  variant?: "default" | "dropdown" | "primary";
+  /**
+   * Variant for different contexts. `"icon"` renders a compact secondary
+   * button showing only `icon`, with `label` as its tooltip and accessible
+   * name, for a list row's actions.
+   */
+  variant?: "default" | "dropdown" | "primary" | "icon";
+  /** The trigger's icon when `variant` is `"icon"`. */
+  icon?: ReactNode;
   /** Specific asset IDs for enhanced completion messaging */
   specificAssetIds?: string[];
   /** Render the trigger button full-width to match a sibling full-width button. */
@@ -79,6 +86,7 @@ export default function CheckinDialog({
   intent = "checkIn",
   label = "Check-in",
   variant = "default",
+  icon,
   specificAssetIds,
   fullWidth = false,
 }: CheckinDialogProps) {
@@ -104,26 +112,40 @@ export default function CheckinDialog({
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
-        <Button
-          type="button"
-          disabled={isDisabled}
-          className={tw(
-            "whitespace-nowrap",
-            variant === "dropdown"
-              ? "w-full justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
-              : ""
-          )}
-          variant={variant === "dropdown" ? "link" : "primary"}
-          width={variant === "dropdown" || fullWidth ? "full" : undefined}
-        >
-          {variant === "dropdown" ? (
-            <span className="flex items-center gap-2">
-              <Zap className="size-4" /> {label}
-            </span>
-          ) : (
-            label
-          )}
-        </Button>
+        {variant === "icon" ? (
+          <Button
+            type="button"
+            disabled={isDisabled}
+            size="sm"
+            variant="secondary"
+            className="p-2"
+            aria-label={label}
+            tooltip={label}
+          >
+            {icon}
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            disabled={isDisabled}
+            className={tw(
+              "whitespace-nowrap",
+              variant === "dropdown"
+                ? "w-full justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
+                : ""
+            )}
+            variant={variant === "dropdown" ? "link" : "primary"}
+            width={variant === "dropdown" || fullWidth ? "full" : undefined}
+          >
+            {variant === "dropdown" ? (
+              <span className="flex items-center gap-2">
+                <Zap className="size-4" /> {label}
+              </span>
+            ) : (
+              label
+            )}
+          </Button>
+        )}
       </AlertDialogTrigger>
 
       <AlertDialogContent portalProps={{ container: portalContainer }}>

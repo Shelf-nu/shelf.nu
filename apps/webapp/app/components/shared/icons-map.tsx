@@ -132,6 +132,8 @@ export type IconType =
   | "add-to-audit"
   | "delete-audit"
   | "scan"
+  | "checkout"
+  | "checkin"
   | "tool"
   | "rows"
   | "install"
@@ -206,6 +208,9 @@ export const iconsMap: IconsMap = {
   "assign-custody": <CheckOutIcon />,
   "release-custody": <CheckInIcon />,
   "partial-checkin": <PackageCheck />,
+  // The bookings list's bulk Check out / Check in menu items.
+  checkout: <CheckOutIcon />,
+  checkin: <CheckInIcon />,
   "asset-label": <AssetLabel />,
   "no-permissions": <NoPermissionsIcon />,
   activate: <ActiveSwitchIcon />,

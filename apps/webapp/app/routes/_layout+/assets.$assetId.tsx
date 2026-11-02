@@ -194,8 +194,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             // endpoint and this inline-SSR path feed the SAME component, so a
             // field added to one has to be added to the other or the tooltip
             // silently loses the date on whichever surface was missed.
+            // `to` decides whether a RESERVED slice is an expired
+            // reservation, which the reducer leaves out of `reserved`.
             booking: {
-              select: { id: true, name: true, status: true, from: true },
+              select: {
+                id: true,
+                name: true,
+                status: true,
+                from: true,
+                to: true,
+              },
             },
           },
           // Soonest first, the tooltip caps how many slices it renders, so

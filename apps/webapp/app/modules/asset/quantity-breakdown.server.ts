@@ -80,8 +80,17 @@ export async function getAssetQuantityRows(
           // `from` lets the tooltip say WHEN, which is the fact that reconciles
           // "12 reserved" with "10 free right now", those units have not left
           // the shelf yet. Without it the two lines read as a contradiction.
+          // `to` decides whether a RESERVED slice is an expired reservation
+          // (`isReservationExpired`), which the reducer leaves out of
+          // `reserved`.
           booking: {
-            select: { id: true, name: true, status: true, from: true },
+            select: {
+              id: true,
+              name: true,
+              status: true,
+              from: true,
+              to: true,
+            },
           },
         },
         // Soonest first. The tooltip renders only the first few slices for a

@@ -11,6 +11,7 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { isExtendableStatus } from "~/modules/booking/extend-eligibility";
+import { readClashRefusal } from "~/modules/booking/extend-horizon";
 import { extendBooking } from "~/modules/booking/service.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
@@ -171,6 +172,7 @@ export async function action({ request }: ActionFunctionArgs) {
       organizationId,
       newEndDate: parsed.endDate,
       hints,
+      prefs,
       userId: user.id,
       access,
       roles,
@@ -187,8 +189,8 @@ export async function action({ request }: ActionFunctionArgs) {
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     // The phone shows only `error.message`, so a clash names the bookings in
-    // the way inside it.
-    const clashing = clashingBookingNames(reason.additionalData);
+    // the way inside it, each with the items it holds.
+    const clashing = clashingBookingLabels(reason.additionalData);
     const message =
       clashing.length > 0
         ? `${reason.message} ${clashing.join(", ")}`
@@ -198,18 +200,18 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 /**
- * Names of the bookings an extension would overlap, read from the service's
- * `additionalData.clashingBookings`.
+ * Labels of the bookings an extension would overlap, read from the service's
+ * `additionalData.clashingBookings`: the booking's name, followed by the
+ * shared items in parentheses when the payload names them.
  *
  * @param additionalData - The error's additional data, of any shape
- * @returns The clashing bookings' names; empty when the error is not a clash
+ * @returns One label per clashing booking; empty when the error is not a clash
  */
-function clashingBookingNames(additionalData: unknown): string[] {
-  if (typeof additionalData !== "object" || additionalData === null) return [];
-  const clashing = (additionalData as { clashingBookings?: unknown })
-    .clashingBookings;
-  if (!Array.isArray(clashing)) return [];
-  return clashing.flatMap((b: { name?: unknown } | null) =>
-    typeof b?.name === "string" ? [b.name] : []
-  );
+function clashingBookingLabels(additionalData: unknown): string[] {
+  const refusal = readClashRefusal(additionalData);
+  if (!refusal) return [];
+  return refusal.clashingBookings.map((b) => {
+    const items = b.items.map((item) => item.name);
+    return items.length > 0 ? `${b.name} (${items.join(", ")})` : b.name;
+  });
 }
