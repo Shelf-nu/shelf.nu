@@ -14,6 +14,7 @@ import type { ShelfError } from "../error";
 import { emitter } from "./emitter.server";
 import {
   createNotificationBus,
+  listenerClientConfig,
   NOTIFICATION_CHANNEL,
   publishNotification,
   startNotificationBus,
@@ -49,9 +50,15 @@ function setup(configure?: (client: FakeClient) => void) {
   });
   const emitLocal = vi.fn<(payload: string) => void>();
   const logError = vi.fn<(error: ShelfError) => void>();
-  const bus = createNotificationBus({ createClient, emitLocal, logError });
+  const logWarning = vi.fn<(error: ShelfError) => void>();
+  const bus = createNotificationBus({
+    createClient,
+    emitLocal,
+    logError,
+    logWarning,
+  });
   buses.push(bus);
-  return { bus, clients, createClient, emitLocal, logError };
+  return { bus, clients, createClient, emitLocal, logError, logWarning };
 }
 
 /** Lets chained promise callbacks (connect, LISTEN, catch) run */
@@ -186,7 +193,7 @@ describe("createNotificationBus", () => {
 
   it("backs off and caps the delay", async () => {
     vi.useFakeTimers();
-    const { bus, createClient, logError } = setup((client) => {
+    const { bus, createClient, logError, logWarning } = setup((client) => {
       client.connect.mockRejectedValue(new Error("connection refused"));
     });
     await bus.start();
@@ -203,8 +210,109 @@ describe("createNotificationBus", () => {
       expect(createClient).toHaveBeenCalledTimes(index + 2);
     }
 
-    // Each failed attempt is logged once
-    expect(logError).toHaveBeenCalledTimes(expectedDelays.length + 1);
+    // The first failure is an error, every retry after it a warning
+    expect(logError).toHaveBeenCalledTimes(1);
+    expect(logWarning).toHaveBeenCalledTimes(expectedDelays.length);
+  });
+
+  it("reconnects after a client error", async () => {
+    vi.useFakeTimers();
+    const { bus, clients, createClient, logError } = setup();
+    await bus.start();
+
+    clients[0].emit("error", new Error("socket reset"));
+
+    expect(bus.isListening()).toBe(false);
+    expect(clients[0].end).toHaveBeenCalled();
+    expect(logError).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1000);
+    await flush();
+
+    expect(createClient).toHaveBeenCalledTimes(2);
+    expect(bus.isListening()).toBe(true);
+  });
+
+  it("keeps backing off when a connection drops right after LISTEN", async () => {
+    vi.useFakeTimers();
+    const { bus, clients, createClient, logError, logWarning } = setup();
+    await bus.start();
+
+    clients[0].emit("end");
+    await vi.advanceTimersByTimeAsync(1000);
+    await flush();
+    clients[1].emit("end");
+
+    // The second drop came within the stable window, so the delay grows
+    await vi.advanceTimersByTimeAsync(1999);
+    expect(createClient).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1);
+    await flush();
+    expect(createClient).toHaveBeenCalledTimes(3);
+    expect(logError).toHaveBeenCalledTimes(1);
+    expect(logWarning).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts the backoff over after a stable connection", async () => {
+    vi.useFakeTimers();
+    const { bus, clients, createClient, logError } = setup();
+    await bus.start();
+
+    clients[0].emit("end");
+    await vi.advanceTimersByTimeAsync(1000);
+    await flush();
+    await vi.advanceTimersByTimeAsync(30000);
+    clients[1].emit("end");
+
+    await vi.advanceTimersByTimeAsync(1000);
+    await flush();
+    expect(createClient).toHaveBeenCalledTimes(3);
+    // A drop after a stable connection starts a new streak, so it is an error
+    expect(logError).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not throw when the local emitter throws", async () => {
+    const { bus, clients, emitLocal, logError } = setup();
+    emitLocal.mockImplementation(() => {
+      throw new Error("bad payload");
+    });
+    await bus.start();
+
+    expect(() =>
+      clients[0].emit("notification", {
+        processId: 1,
+        channel: NOTIFICATION_CHANNEL,
+        payload: "not json",
+      })
+    ).not.toThrow();
+    expect(() => bus.publish("x".repeat(8000))).not.toThrow();
+    expect(logError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "Failed to deliver notification on this server",
+      })
+    );
+  });
+
+  it("start never rejects when the client cannot be built", async () => {
+    vi.useFakeTimers();
+    const createClient = vi.fn((): BusClient => {
+      throw new TypeError("Invalid URL");
+    });
+    const logError = vi.fn<(error: ShelfError) => void>();
+    const bus = createNotificationBus({
+      createClient,
+      emitLocal: vi.fn(),
+      logError,
+    });
+    buses.push(bus);
+
+    await expect(bus.start()).resolves.toBeUndefined();
+    await vi.advanceTimersByTimeAsync(30000);
+
+    expect(bus.isListening()).toBe(false);
+    expect(logError).toHaveBeenCalledTimes(1);
+    // The same URL would fail again, so no retry is scheduled
+    expect(createClient).toHaveBeenCalledTimes(1);
   });
 
   it("start never rejects when connect fails", async () => {
@@ -244,6 +352,18 @@ describe("createNotificationBus", () => {
     await vi.advanceTimersByTimeAsync(30000);
 
     expect(createClient).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("listenerClientConfig", () => {
+  it("keeps the idle connection alive and bounds every wait", () => {
+    expect(listenerClientConfig("postgres://u:p@h:5432/db")).toEqual({
+      connectionString: "postgres://u:p@h:5432/db",
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 30000,
+      connectionTimeoutMillis: 10000,
+      query_timeout: 5000,
+    });
   });
 });
 

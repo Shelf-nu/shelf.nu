@@ -21,7 +21,17 @@ export function loader({ context, request }: LoaderFunctionArgs) {
   return eventStream(request.signal, function setup(send) {
     /** Notification is a stringified json object with the shape {@link Notification} */
     function handle(notification: string) {
-      const parsed = JSON.parse(notification);
+      // Payloads arrive from Postgres, where anyone with database access can
+      // NOTIFY the channel, so anything that is not a toast object is ignored
+      let parsed: { senderId?: unknown; tabId?: unknown } | null;
+      try {
+        parsed = JSON.parse(notification);
+      } catch {
+        return;
+      }
+      if (!parsed || typeof parsed !== "object") {
+        return;
+      }
 
       /** We only send the notification if the logged in userId is the same as the senderId.
        * We do this to prevent other users receiving notifications

@@ -13,8 +13,9 @@
  * work through a transaction-mode pooler). It creates no tables, so it is
  * skipped unless `NOTIFICATION_BUS_TEST_DATABASE_URL` is set:
  *
+ *   cd apps/webapp
  *   NOTIFICATION_BUS_TEST_DATABASE_URL="<direct database url>" \
- *     pnpm webapp:test -- --run app/utils/emitter/notification-bus.db.test.ts
+ *     pnpm exec vitest --run app/utils/emitter/notification-bus.db.test.ts
  *
  * @see {@link file://./notification-bus.server.ts}
  */

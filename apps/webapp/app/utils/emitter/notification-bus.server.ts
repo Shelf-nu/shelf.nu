@@ -14,7 +14,8 @@
  * `pg_notify` call fails) the payload is emitted locally instead, so a toast
  * still reaches browsers on the publishing machine. Lost connections are
  * retried with a capped backoff, and `start()` never rejects, so a database
- * outage cannot stop the server from booting.
+ * outage cannot stop the server from booting. While a machine's listener is
+ * down, toasts published on other machines do not reach its browsers.
  *
  * The connection uses `DIRECT_URL` because LISTEN needs a session that stays
  * open: a transaction-mode pooler hands each statement to a different backend
@@ -24,7 +25,7 @@
  * @see {@link file://./send-notification.server.ts} where toasts are sent
  * @see {@link file://../scheduler-error.ts} connection-secret scrubbing
  */
-import pg, { type Client, type Notification } from "pg";
+import pg, { type Client, type ClientConfig, type Notification } from "pg";
 import { emitter } from "./emitter.server";
 import { DIRECT_URL } from "../env";
 import { ShelfError, type AdditionalData } from "../error";
@@ -47,6 +48,13 @@ export const MAX_NOTIFY_PAYLOAD_BYTES = 7900;
 /** Delays between reconnect attempts; the last one repeats until it succeeds */
 const DEFAULT_RECONNECT_DELAYS_MS = [1000, 2000, 5000, 10000, 30000];
 
+/**
+ * How long a connection must stay up before the backoff starts again from the
+ * shortest delay, so a connection that drops right after LISTEN backs off
+ * instead of retrying every second.
+ */
+const STABLE_CONNECTION_MS = 30000;
+
 /** Matches a Postgres connection string inside free-form error text */
 const CONNECTION_STRING_PATTERN = /postgres(?:ql)?:\/\/[^\s"'<>]+/g;
 
@@ -62,8 +70,13 @@ export type NotificationBusDeps = {
   createClient: () => BusClient;
   /** Re-emits a payload on this machine's emitter */
   emitLocal: (payload: string) => void;
-  /** Receives every failure the bus recovers from */
+  /** Receives every failure the bus recovers from, except repeated drops */
   logError: (error: ShelfError) => void;
+  /**
+   * Receives connection failures after the first one of a streak, so an outage
+   * reports one error instead of one per retry; defaults to `logError`
+   */
+  logWarning?: (error: ShelfError) => void;
   /** Delays between reconnect attempts; defaults to 1s, 2s, 5s, 10s, 30s */
   reconnectDelaysMs?: number[];
   /**
@@ -112,6 +125,25 @@ function secretsInErrorText(cause: unknown, depth = 0): string[] {
 }
 
 /**
+ * Client settings for the LISTEN connection. The connection sits idle between
+ * notifications, so TCP keepalive stops load balancers and NAT from silently
+ * dropping it, and the timeouts make a dead socket fail into the local
+ * fallback instead of hanging.
+ *
+ * @param connectionString - Direct (non-pooled) Postgres URL
+ * @returns Options for `new pg.Client`
+ */
+export function listenerClientConfig(connectionString: string): ClientConfig {
+  return {
+    connectionString,
+    keepAlive: true,
+    keepAliveInitialDelayMillis: 30000,
+    connectionTimeoutMillis: 10000,
+    query_timeout: 5000,
+  };
+}
+
+/**
  * Creates a notification bus. The bus is idle until `start()` is called, and
  * publishes locally until its LISTEN connection is up.
  *
@@ -133,6 +165,8 @@ export function createNotificationBus(
   /** Consecutive failed attempts, indexes into `delays` */
   let failedAttempts = 0;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Resets `failedAttempts` once a connection has stayed up long enough */
+  let stableTimer: ReturnType<typeof setTimeout> | null = null;
   /** Set by stop() so an in-flight connect does not resurrect the bus */
   let stopped = false;
 
@@ -140,13 +174,14 @@ export function createNotificationBus(
   function logFailure(
     message: string,
     cause: unknown,
-    additionalData?: AdditionalData
+    additionalData?: AdditionalData,
+    log: (error: ShelfError) => void = deps.logError
   ) {
     const secrets = [
       ...(deps.connectionSecrets ?? []),
       ...secretsInErrorText(cause),
     ].sort((a, b) => b.length - a.length);
-    deps.logError(
+    log(
       new ShelfError({
         // The raw cause can carry the pg client and its connection parameters
         cause: toSchedulerErrorCause(cause, secrets),
@@ -155,6 +190,25 @@ export function createNotificationBus(
         label: "Notification",
       })
     );
+  }
+
+  /**
+   * Re-emits a payload on this machine. A throwing SSE listener must not
+   * escape: inside pg's socket handler it would crash the process.
+   */
+  function emitLocal(payload: string) {
+    try {
+      deps.emitLocal(payload);
+    } catch (cause) {
+      logFailure("Failed to deliver notification on this server", cause);
+    }
+  }
+
+  function clearStableTimer() {
+    if (stableTimer) {
+      clearTimeout(stableTimer);
+      stableTimer = null;
+    }
   }
 
   function scheduleReconnect() {
@@ -169,7 +223,15 @@ export function createNotificationBus(
 
   async function connect(): Promise<void> {
     if (stopped) return;
-    const next = deps.createClient();
+    let next: BusClient;
+    try {
+      next = deps.createClient();
+    } catch (cause) {
+      // A client that cannot be built (a malformed URL) fails the same way on
+      // every retry, so none is scheduled
+      logFailure("Notification bus could not be created", cause);
+      return;
+    }
     client = next;
     /**
      * A dead client can report its failure more than once (a rejected connect
@@ -183,7 +245,14 @@ export function createNotificationBus(
       dropped = true;
       listening = false;
       client = null;
-      logFailure(message, cause);
+      clearStableTimer();
+      // Only the first failure of a streak is an error; retries are warnings
+      logFailure(
+        message,
+        cause,
+        undefined,
+        failedAttempts === 0 ? deps.logError : deps.logWarning ?? deps.logError
+      );
       // Ending a client that is already dead can reject; nothing is left to do
       next.end().catch(() => {});
       scheduleReconnect();
@@ -191,7 +260,7 @@ export function createNotificationBus(
 
     next.on("notification", (message: Notification) => {
       if (message.channel !== NOTIFICATION_CHANNEL || !message.payload) return;
-      deps.emitLocal(message.payload);
+      emitLocal(message.payload);
     });
     // Listening for `error` also keeps an unhandled error event from crashing
     // the process
@@ -213,7 +282,12 @@ export function createNotificationBus(
     // stop() or a drop happened while connecting; this client is no longer ours
     if (dropped || client !== next) return;
     listening = true;
-    failedAttempts = 0;
+    if (failedAttempts > 0) {
+      stableTimer = setTimeout(() => {
+        stableTimer = null;
+        failedAttempts = 0;
+      }, STABLE_CONNECTION_MS);
+    }
   }
 
   return {
@@ -227,7 +301,7 @@ export function createNotificationBus(
     publish(payload) {
       const bytes = Buffer.byteLength(payload, "utf8");
       if (bytes > MAX_NOTIFY_PAYLOAD_BYTES) {
-        deps.emitLocal(payload);
+        emitLocal(payload);
         logFailure("Notification payload is too large to publish", null, {
           bytes,
           maxBytes: MAX_NOTIFY_PAYLOAD_BYTES,
@@ -237,16 +311,18 @@ export function createNotificationBus(
 
       const current = client;
       if (!listening || !current) {
-        deps.emitLocal(payload);
+        emitLocal(payload);
         return;
       }
 
-      // On success the payload comes back through LISTEN on this machine too,
-      // so nothing is emitted locally here
+      // Postgres delivers a session's own notification before the query
+      // completes, so on success the payload has already come back through
+      // LISTEN here. If the connection dies first the query rejects and the
+      // payload is emitted locally: at worst a duplicate toast, never a lost one
       current
         .query("SELECT pg_notify($1, $2)", [NOTIFICATION_CHANNEL, payload])
         .catch((cause: unknown) => {
-          deps.emitLocal(payload);
+          emitLocal(payload);
           logFailure("Failed to publish notification", cause);
         });
     },
@@ -261,6 +337,7 @@ export function createNotificationBus(
         clearTimeout(retryTimer);
         retryTimer = null;
       }
+      clearStableTimer();
       listening = false;
       const current = client;
       client = null;
@@ -297,11 +374,12 @@ export async function startNotificationBus(
   }
   if (!global.notificationBus) {
     global.notificationBus = createNotificationBus({
-      createClient: () => new pg.Client({ connectionString }),
+      createClient: () => new pg.Client(listenerClientConfig(connectionString)),
       emitLocal: (payload) => {
         emitter.emit("notification", payload);
       },
       logError: (error) => Logger.error(error),
+      logWarning: (error) => Logger.warn(error),
       connectionSecrets: connectionSecretsFrom(connectionString),
     });
   }

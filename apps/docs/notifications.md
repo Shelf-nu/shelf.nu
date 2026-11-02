@@ -88,6 +88,12 @@ reconnects after 1, 2, 5, 10 and then every 30 seconds) and for oversized
 payloads (about 8 KB or more). A database outage never makes an action fail
 because of a toast.
 
+The fallback covers the browsers of the server that ran the action. While one
+server's listener is down, toasts sent from other servers do not reach the
+browsers streaming from it until it reconnects. The listener uses TCP
+keepalive, so an idle connection is not silently dropped by a load balancer.
+Repeated reconnect failures are logged as one error followed by warnings.
+
 ## Verifying a deployment
 
 Run a bulk action (for example bulk update of a custom field) five or more
