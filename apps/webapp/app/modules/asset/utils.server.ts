@@ -371,8 +371,8 @@ export type CustomFieldValueWritePlan = {
  *
  * The schema does not enforce one row per (asset, custom field); the app keeps
  * it to one by creating a row only when none is stored. If duplicates exist,
- * the first stored row is the one compared and updated, the same row
- * `detectCustomFieldChanges` reads, and clearing the field deletes them all.
+ * every stored row that differs is updated, so they converge on the submitted
+ * value, and clearing the field deletes them all.
  *
  * @param existingValues - The asset's stored value rows
  * @param formValues - The submitted values, keyed by custom field id (`id`);
@@ -387,11 +387,14 @@ export function planCustomFieldValueWrites(
   }>,
   formValues: Array<{ id: string; value: ICustomFieldValueJson | null }>
 ): CustomFieldValueWritePlan {
-  const existingByFieldId = new Map<string, (typeof existingValues)[number]>();
+  const existingByFieldId = new Map<
+    string,
+    Array<(typeof existingValues)[number]>
+  >();
   for (const row of existingValues) {
-    if (!existingByFieldId.has(row.customFieldId)) {
-      existingByFieldId.set(row.customFieldId, row);
-    }
+    const rows = existingByFieldId.get(row.customFieldId) ?? [];
+    rows.push(row);
+    existingByFieldId.set(row.customFieldId, rows);
   }
   const plan: CustomFieldValueWritePlan = {
     toCreate: [],
@@ -400,13 +403,17 @@ export function planCustomFieldValueWrites(
   };
 
   for (const { id: customFieldId, value } of formValues) {
-    const existing = existingByFieldId.get(customFieldId);
+    const existing = existingByFieldId.get(customFieldId) ?? [];
     if (!value) {
-      if (existing) plan.toRemoveFieldIds.push(customFieldId);
-    } else if (!existing) {
+      if (existing.length > 0) plan.toRemoveFieldIds.push(customFieldId);
+    } else if (existing.length === 0) {
       plan.toCreate.push({ customFieldId, value });
-    } else if (!_.isEqual(existing.value, value)) {
-      plan.toUpdate.push({ valueId: existing.id, value });
+    } else {
+      for (const row of existing) {
+        if (!_.isEqual(row.value, value)) {
+          plan.toUpdate.push({ valueId: row.id, value });
+        }
+      }
     }
   }
 
