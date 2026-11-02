@@ -1,12 +1,11 @@
 /**
- * Behavior tests for the server permission validator after the extraction of
- * the matrix + resolver into `@shelf/permissions`.
- *
- * Guards the properties the extraction must preserve:
- * 1. ADMIN / OWNER allow-all short-circuit (effective behavior that never
- *    lived in the raw matrix).
+ * Behavior tests for the server permission validator, which answers through
+ * the matrix and resolver in `@shelf/permissions`:
+ * 1. ADMIN / OWNER allow-all short-circuit (effective behavior that is not
+ *    in the raw matrix).
  * 2. Matrix-driven denies/grants for BASE / SELF_SERVICE.
- * 3. The 403 ShelfError when the user is not an org member.
+ * 3. The workspace switches, loaded with the roles when not supplied.
+ * 4. The 403 ShelfError when the user is not an org member.
  *
  * @see {@link file://../../../../../packages/permissions/src/index.ts}
  */
@@ -94,9 +93,9 @@ describe("hasPermission", () => {
   it("loads roles from the DB when not supplied and applies the matrix", async () => {
     vi.mocked(db.userOrganization.findFirst).mockResolvedValueOnce({
       roles: [OrganizationRoles.BASE],
-      workspace: null,
-      // why: only `roles` is read by the validator; the rest of the row is
-      // irrelevant to the behavior under test.
+      organization: { managersCanEditAssets: false },
+      // why: the row the roles query selects: the roles and the workspace's
+      // switches.
     } as never);
     await expect(
       hasPermission({
