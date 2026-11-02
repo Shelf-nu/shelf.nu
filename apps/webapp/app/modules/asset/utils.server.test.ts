@@ -256,6 +256,18 @@ describe("planCustomFieldValueWrites", () => {
     ).toEqual([{ valueId: "val-a", value: { raw: "a", valueText: "A" } }]);
   });
 
+  it("compares and updates the first stored row when a field has duplicates", () => {
+    expect(
+      planCustomFieldValueWrites(
+        [
+          { id: "val-first", customFieldId: "cf-dup", value: { raw: "old" } },
+          { id: "val-second", customFieldId: "cf-dup", value: { raw: "new" } },
+        ],
+        [{ id: "cf-dup", value: { raw: "new" } }]
+      ).toUpdate
+    ).toEqual([{ valueId: "val-first", value: { raw: "new" } }]);
+  });
+
   it("removes a cleared field only when it has a stored row", () => {
     expect(
       planCustomFieldValueWrites(stored, [

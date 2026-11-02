@@ -367,8 +367,12 @@ export type CustomFieldValueWritePlan = {
  * The edit form submits every custom field, changed or not, and each nested
  * update or delete costs Prisma a lookup query plus the write. So a field is
  * only written when its stored value actually differs (compared in full, not
- * just `raw`), and only deleted when a stored row exists. Each custom field
- * has at most one value row per asset, so rows are keyed by `customFieldId`.
+ * just `raw`), and only deleted when a stored row exists.
+ *
+ * The schema does not enforce one row per (asset, custom field); the app keeps
+ * it to one by creating a row only when none is stored. If duplicates exist,
+ * the first stored row is the one compared and updated, the same row
+ * `detectCustomFieldChanges` reads, and clearing the field deletes them all.
  *
  * @param existingValues - The asset's stored value rows
  * @param formValues - The submitted values, keyed by custom field id (`id`);
@@ -383,9 +387,12 @@ export function planCustomFieldValueWrites(
   }>,
   formValues: Array<{ id: string; value: ICustomFieldValueJson | null }>
 ): CustomFieldValueWritePlan {
-  const existingByFieldId = new Map(
-    existingValues.map((row) => [row.customFieldId, row])
-  );
+  const existingByFieldId = new Map<string, (typeof existingValues)[number]>();
+  for (const row of existingValues) {
+    if (!existingByFieldId.has(row.customFieldId)) {
+      existingByFieldId.set(row.customFieldId, row);
+    }
+  }
   const plan: CustomFieldValueWritePlan = {
     toCreate: [],
     toUpdate: [],
