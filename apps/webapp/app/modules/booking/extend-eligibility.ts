@@ -12,7 +12,7 @@
  * @see {@link file://../../routes/api+/mobile+/bookings.$bookingId.ts} the `canExtend` flag
  * @see {@link file://../../routes/api+/mobile+/bookings.extend.ts} the mobile extend endpoint
  */
-import { AssetStatus, BookingStatus } from "@prisma/client";
+import { AssetStatus, AssetType, BookingStatus } from "@prisma/client";
 
 /** Statuses in which a booking's end date can change. */
 export const EXTENDABLE_BOOKING_STATUSES: readonly BookingStatus[] = [
@@ -30,11 +30,15 @@ export function isExtendableStatus(status: BookingStatus): boolean {
   return EXTENDABLE_BOOKING_STATUSES.includes(status);
 }
 
-/** The asset fields the "still out" rule reads. */
-type ExtendAsset = { id: string; status: AssetStatus };
+/**
+ * The asset fields the "still out" rules read. `type` lets the quantity rule
+ * pick out pool items; without it no asset is treated as one.
+ */
+type ExtendAsset = { id: string; status: AssetStatus; type?: AssetType };
 
-/** The slice markers the "kit still out" rule reads. */
+/** The slice markers the "kit still out" and "units still out" rules read. */
 type ExtendSlice = {
+  assetId?: string;
   assetKitId: string | null;
   checkedOutAt: Date | null;
   checkedInAt: Date | null;
@@ -81,13 +85,52 @@ export function getKitMembershipIdsStillOut(slices: ExtendSlice[]): string[] {
 }
 
 /**
+ * Quantity-tracked assets this booking still has units of out on a
+ * standalone slice, read from the slice markers.
+ *
+ * A pool item's `Asset.status` is shared by every booking holding its units
+ * and turns CHECKED_OUT only once every booked unit has left, so it cannot
+ * say whether this booking's units are out. The slice can: `checkedOutAt` is
+ * set when its first unit leaves, and `checkedInAt` only once it is fully
+ * reconciled. Kit-driven slices are left to {@link getKitMembershipIdsStillOut}.
+ *
+ * @param args.assets - The assets on the booking, with their `type`
+ * @param args.slices - The booking's BookingAsset rows, with their `assetId`
+ * @returns The ids of the quantity-tracked assets with units still out
+ */
+export function getQuantityAssetIdsStillOut({
+  assets,
+  slices,
+}: {
+  assets: ExtendAsset[];
+  slices: ExtendSlice[];
+}): string[] {
+  const pools = new Set(
+    assets.filter((a) => a.type === AssetType.QUANTITY_TRACKED).map((a) => a.id)
+  );
+  const out = new Set<string>();
+  for (const slice of slices) {
+    if (
+      slice.assetId &&
+      pools.has(slice.assetId) &&
+      !slice.assetKitId &&
+      slice.checkedOutAt &&
+      !slice.checkedInAt
+    ) {
+      out.add(slice.assetId);
+    }
+  }
+  return [...out];
+}
+
+/**
  * Whether anything on the booking is still out, so a new end has something to
  * keep. A booking with everything returned is completed, not given a new end.
  *
  * @param args.assets - The assets on the booking
  * @param args.checkedInAssetIds - Assets returned through partial check-in
  * @param args.slices - The booking's BookingAsset rows
- * @returns `true` when an asset or a kit is still out
+ * @returns `true` when an asset, a kit or units of a pool are still out
  */
 export function hasItemsStillOutToExtend({
   assets,
@@ -100,6 +143,7 @@ export function hasItemsStillOutToExtend({
 }): boolean {
   return (
     getAssetsStillOutForExtend(assets, checkedInAssetIds).length > 0 ||
-    getKitMembershipIdsStillOut(slices).length > 0
+    getKitMembershipIdsStillOut(slices).length > 0 ||
+    getQuantityAssetIdsStillOut({ assets, slices }).length > 0
   );
 }

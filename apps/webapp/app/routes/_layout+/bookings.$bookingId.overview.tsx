@@ -52,6 +52,11 @@ import {
   loadSliceSourceLocations,
 } from "~/modules/booking/checkout-source-location.server";
 import { sendBookingUpdatedEmail } from "~/modules/booking/email-helpers";
+import { isExtendableStatus } from "~/modules/booking/extend-eligibility";
+import {
+  loadNextReservations,
+  NO_NEXT_RESERVATIONS,
+} from "~/modules/booking/next-reservations.server";
 import {
   assertBookingDeleteConfirmed,
   archiveBooking,
@@ -422,6 +427,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       bookingFlags,
       rawKits,
       modelShortfalls,
+      nextReservations,
     ] = await Promise.all([
       /**
        * We need to fetch the team members for the custodian filter in sidebar.
@@ -624,6 +630,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             organizationId,
           })
         : [],
+
+      /**
+       * What the items still out are promised to next: the extend horizon
+       * for the Change end date dialog and the next reservation per item
+       * row. Only a running booking has items out.
+       */
+      isExtendableStatus(booking.status)
+        ? loadNextReservations({
+            organizationId,
+            bookingId: booking.id,
+            viewer: { userId, seesAllBookings: access.bookings.seeAll },
+          })
+        : NO_NEXT_RESERVATIONS,
     ]);
 
     // Index the enriched assets for lookup during per-slice projection below.
@@ -1255,6 +1274,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
          * case, and reads this alongside the slice markers.
          */
         hasDispositionedUnits: dispositionLogs.length > 0,
+        nextReservations,
         // Shaped view for first paint (same field names the component reads),
         // post-enriched with per-row qty disposition data (Polish-6 multi-row).
         items: enrichedItems,
@@ -2222,6 +2242,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           id,
           organizationId,
           hints,
+          prefs,
           newEndDate: endDate,
           userId,
           access,
