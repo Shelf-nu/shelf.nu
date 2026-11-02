@@ -5,6 +5,7 @@ import { data, redirect, redirectDocument, useLoaderData } from "react-router";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import {
   AssetForm,
+  isBulkCreate,
   NewAssetBulkFormSchema,
   NewAssetFormSchema,
 } from "~/components/assets/form";
@@ -67,7 +68,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       action: PermissionAction.create,
       // The bulk-create page (`?bulk=1`) stays closed to the workspace
       // switches: they open single-asset creation only.
-      matrixOnly: new URL(request.url).searchParams.get("bulk") === "1",
+      matrixOnly: isBulkCreate(new URL(request.url).searchParams.get("bulk")),
     });
     /**
      * We need to check if the QR code passed in the URL belongs to the current org
@@ -165,8 +166,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
     // tightens assetModelId + nameTemplate + count when `bulk=1`). Both
     // remain `ZodObject`s so `mergedSchema` can still layer the
     // category-driven custom fields on top.
-    const isBulkSubmit =
-      formData.get("bulk") === "1" || formData.get("bulk") === "true";
+    const isBulkSubmit = isBulkCreate(formData.get("bulk"));
     if (isBulkSubmit) {
       // Bulk create stays closed to the workspace switches: they open
       // single-asset creation only.
@@ -382,11 +382,11 @@ export default function NewAssetPage() {
   // Get category from URL params or use the default passed prop
   const categoryFromUrl = searchParams.get("category");
 
-  // Bulk-create mode flag — set via `?bulk=1` query param from the
+  // Bulk-create mode flag, set via `?bulk=1` query param from the
   // `+New` Popover dropdown on /assets, or from the asset form itself
   // when the user enables bulk-create after selecting a model. The
   // page header label and the form's field layout both branch on this.
-  const bulkMode = searchParams.get("bulk") === "1";
+  const bulkMode = isBulkCreate(searchParams.get("bulk"));
 
   return (
     <div className="relative">

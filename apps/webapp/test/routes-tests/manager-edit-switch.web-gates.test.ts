@@ -719,8 +719,36 @@ const CLOSED_EITHER_WAY: GatedRoute[] = [
     status: 200,
   },
   {
+    route:
+      "_layout+/assets.new.tsx action with bulk=true (bulk create from model)",
+    call: post(newAssetAction, "/assets/new", {
+      bulk: "true",
+      title: "Tripod 1",
+      description: "",
+      category: "uncategorized",
+      assetModelId: "model-1",
+      nameTemplate: "Tripod {n}",
+      count: "3",
+    }),
+    service: bulkCreateAssetsFromModel,
+    receives: expect.objectContaining({
+      assetModelId: "model-1",
+      count: 3,
+      nameTemplate: "Tripod {n}",
+      organizationId: ORG_ID,
+    }),
+    status: 200,
+  },
+  {
     route: "_layout+/assets.new.tsx loader with ?bulk=1",
     call: get(newAssetLoader, "/assets/new?bulk=1"),
+    service: assertWhetherQrBelongsToCurrentOrganization,
+    receives: expect.objectContaining({ organizationId: ORG_ID }),
+    status: 200,
+  },
+  {
+    route: "_layout+/assets.new.tsx loader with ?bulk=true",
+    call: get(newAssetLoader, "/assets/new?bulk=true"),
     service: assertWhetherQrBelongsToCurrentOrganization,
     receives: expect.objectContaining({ organizationId: ORG_ID }),
     status: 200,

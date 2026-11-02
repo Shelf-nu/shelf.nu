@@ -206,6 +206,20 @@ export const NewAssetFormSchema = z.object({
  * the request carries `bulk=1`, so client-side Zorm errors and
  * server-side validation messages line up.
  */
+/**
+ * Whether a `bulk` query param or form field asks for bulk create from a
+ * model. The page link sends `1`; `true` is accepted too. The new-asset
+ * loader, its action and the page all decide through this one function, so
+ * the bulk gate (`matrixOnly: true`) and the bulk schema can never disagree
+ * about what counts as bulk.
+ *
+ * @param value - The raw `bulk` value, `null` when absent
+ * @returns `true` for `"1"` or `"true"`
+ */
+export function isBulkCreate(value: FormDataEntryValue | null): boolean {
+  return value === "1" || value === "true";
+}
+
 export const NewAssetBulkFormSchema = NewAssetFormSchema.extend({
   assetModelId: z.string().min(1, "Please select an asset model"),
   nameTemplate: z
