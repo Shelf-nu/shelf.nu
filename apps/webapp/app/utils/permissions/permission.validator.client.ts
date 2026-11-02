@@ -47,7 +47,7 @@ type UserHasPermissionArgs = {
   workspace?: WorkspaceGrantSettings | null;
 
   /**
-   * `false` answers from the matrix alone: for UI whose server route opts out
+   * `true` answers from the matrix alone: for UI whose server route opts out
    * of the workspace switches the same way.
    */
   matrixOnly?: boolean;

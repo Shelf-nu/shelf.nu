@@ -40,7 +40,7 @@ export type PermissionCheckProps = {
   action: PermissionAction;
   entity: PermissionEntity;
   /**
-   * `false` answers from the matrix alone, ignoring the workspace's
+   * `true` answers from the matrix alone, ignoring the workspace's
    * switches. For routes that share an entity/action pair with a path a
    * switch opens but must stay closed to the role it opens it for.
    */
