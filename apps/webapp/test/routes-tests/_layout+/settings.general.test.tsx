@@ -630,10 +630,13 @@ describe("settings.general transfer-ownership authorization", () => {
     });
   }
 
-  function mockRole(role: OrganizationRoles) {
+  function mockRole(
+    role: OrganizationRoles,
+    type: OrganizationType = OrganizationType.TEAM
+  ) {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
-      currentOrganization: baseOrganization(),
+      currentOrganization: { ...baseOrganization(), type },
       role,
       access: accessFor([role]),
       organizations: [baseOrganization()],
@@ -969,10 +972,13 @@ describe("settings.general managers switch", () => {
     dbMock.user.findUniqueOrThrow.mockResolvedValue({ tierId: "tier_2" });
   });
 
-  function mockRole(role: OrganizationRoles) {
+  function mockRole(
+    role: OrganizationRoles,
+    type: OrganizationType = OrganizationType.TEAM
+  ) {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
-      currentOrganization: baseOrganization(),
+      currentOrganization: { ...baseOrganization(), type },
       role,
       access: accessFor([role]),
       organizations: [baseOrganization()],
@@ -1033,6 +1039,18 @@ describe("settings.general managers switch", () => {
     });
 
     expect(response.init?.status).toBe(403);
+    expect(updateOrganizationManagersCanEditAssets).not.toHaveBeenCalled();
+  });
+
+  it("answers the OWNER of a personal workspace with 400 and leaves the switch alone", async () => {
+    mockRole(OrganizationRoles.OWNER, OrganizationType.PERSONAL);
+
+    const response = await post({
+      intent: "updateManagersCanEditAssets",
+      managersCanEditAssets: "on",
+    });
+
+    expect(response.init?.status).toBe(400);
     expect(updateOrganizationManagersCanEditAssets).not.toHaveBeenCalled();
   });
 

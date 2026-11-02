@@ -469,6 +469,18 @@ export async function action({ context, request }: ActionFunctionArgs) {
           action: "change what Managers can do",
         });
 
+        // The Permissions card only renders on a team workspace; a personal
+        // workspace has no Managers to grant anything to.
+        if (currentOrganization.type !== OrganizationType.TEAM) {
+          throw new ShelfError({
+            cause: null,
+            message: "Manager permissions exist only on team workspaces.",
+            label: "Organization",
+            status: 400,
+            shouldBeCaptured: false,
+          });
+        }
+
         const { managersCanEditAssets } = parseData(
           formData,
           ManagersCanEditAssetsSchema,
