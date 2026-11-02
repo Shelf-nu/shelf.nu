@@ -297,7 +297,13 @@ export default function ListBookingsContent({
 
       {/* Row actions, by status and the viewer's reach */}
       <Td>
-        <BookingQuickActions booking={item} />
+        <BookingQuickActions
+          booking={{
+            ...item,
+            custodianTeamMemberUserId: item.custodianTeamMember?.userId ?? null,
+            assetCount: item._count.bookingAssets,
+          }}
+        />
       </Td>
     </>
   );

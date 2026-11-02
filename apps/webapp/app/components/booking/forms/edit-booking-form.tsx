@@ -50,6 +50,7 @@ import { AbsolutePositionedHeaderActions } from "../../layout/header/absolute-po
 import { Button } from "../../shared/button";
 import When from "../../when/when";
 import { ActionsDropdown } from "../actions-dropdown";
+import { canActOnBooking } from "../booking-actions";
 import BookingProcessSidebar from "../booking-process-sidebar";
 import CheckinDropdown from "../checkin-dropdown";
 import CheckoutDropdown from "../checkout-dropdown";
@@ -414,10 +415,14 @@ function EditBookingFormInner({
    * - Everyone else only on a booking they hold.
    * This also decides whether the name and description fields are disabled.
    */
-  const canSeeActions =
-    roleAccess.bookings.writeAll ||
-    defaultTeamMember?.userId === userId ||
-    defaultTeamMember?.id === userId;
+  const canSeeActions = canActOnBooking({
+    booking: {
+      custodianUserId: null,
+      custodianTeamMemberUserId: defaultTeamMember?.userId ?? null,
+    },
+    userId,
+    access: roleAccess,
+  });
 
   /**
    * Saving a draft keeps it a draft, so both Save buttons say so: a plain

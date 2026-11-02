@@ -1,12 +1,12 @@
 /**
- * Which buttons a bookings-list row offers, by booking status and viewer.
- *
- * Pins the table in `booking-quick-actions.tsx`: Check out while RESERVED,
- * Check out remaining plus Check in while underway with items still booked,
- * Check in alone otherwise, nothing for a closed or draft booking. Also pins
- * the gates around it: the viewer's grant, the workspace's explicit scan
- * requirement per direction, ownership for a member held to their own
- * bookings, and the unassigned-units disable on a RESERVED booking.
+ * What a bookings-list row renders from the rules in `booking-actions.ts`:
+ * Check out while RESERVED, Check out remaining plus Check in while underway
+ * with items still booked, Check in alone otherwise, nothing for a closed or
+ * draft booking. The rules themselves are pinned in `booking-actions.test.ts`;
+ * here the gates are checked end to end through the real hooks' inputs: the
+ * viewer's grant, the workspace's explicit scan requirement per direction,
+ * custody for a member held to their own bookings, and the unassigned-units
+ * disable on a RESERVED booking.
  *
  * The dialogs the buttons open are the real `CheckoutDialog` /
  * `CheckinDialog`; only their trigger buttons are asserted on here. The form
@@ -22,11 +22,8 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { accessFor } from "@helpers/role-access";
 import type { ExplicitScanSettings } from "~/utils/permissions/role-access";
-import {
-  ASSIGN_UNITS_FIRST_REASON,
-  BookingQuickActions,
-  resolveCheckInOutActions,
-} from "./booking-quick-actions";
+import { ASSIGN_UNITS_FIRST_REASON } from "./booking-actions";
+import { BookingQuickActions } from "./booking-quick-actions";
 
 /** The roles the viewer holds; both role hooks below read it. */
 let mockRoles: OrganizationRoles[] = [OrganizationRoles.ADMIN];
@@ -117,8 +114,9 @@ function buildBooking(overrides: Partial<RowBooking> = {}): RowBooking {
     status: BookingStatus.RESERVED,
     from: new Date("2026-08-01T09:00:00Z"),
     to: new Date("2026-08-05T17:00:00Z"),
-    creatorId: ME,
     custodianUserId: ME,
+    custodianTeamMemberUserId: null,
+    assetCount: 2,
     modelRequests: [],
     hasItemsToCheckOut: true,
     ...overrides,
@@ -146,86 +144,6 @@ function buttonLabels(): string[] {
     .queryAllByRole("button")
     .map((button) => button.getAttribute("aria-label") ?? "");
 }
-
-describe("resolveCheckInOutActions: which buttons a status gets", () => {
-  const CAN_BOTH = { canCheckOut: true, canCheckIn: true };
-
-  it("offers Check out alone while RESERVED", () => {
-    expect(
-      resolveCheckInOutActions({
-        booking: { status: BookingStatus.RESERVED, hasItemsToCheckOut: true },
-        ...CAN_BOTH,
-      })
-    ).toEqual({ checkOut: true, checkOutRemaining: false, checkIn: false });
-  });
-
-  it.each([BookingStatus.ONGOING, BookingStatus.OVERDUE])(
-    "offers Check out remaining and Check in while %s with items still booked",
-    (status) => {
-      expect(
-        resolveCheckInOutActions({
-          booking: { status, hasItemsToCheckOut: true },
-          ...CAN_BOTH,
-        })
-      ).toEqual({ checkOut: false, checkOutRemaining: true, checkIn: true });
-    }
-  );
-
-  it.each([BookingStatus.ONGOING, BookingStatus.OVERDUE])(
-    "offers Check in alone while %s with everything already out",
-    (status) => {
-      expect(
-        resolveCheckInOutActions({
-          booking: { status, hasItemsToCheckOut: false },
-          ...CAN_BOTH,
-        })
-      ).toEqual({ checkOut: false, checkOutRemaining: false, checkIn: true });
-    }
-  );
-
-  it("reads a loader that did not resolve the flag as nothing left to check out", () => {
-    expect(
-      resolveCheckInOutActions({
-        booking: { status: BookingStatus.ONGOING },
-        ...CAN_BOTH,
-      }).checkOutRemaining
-    ).toBe(false);
-  });
-
-  it.each([
-    BookingStatus.DRAFT,
-    BookingStatus.COMPLETE,
-    BookingStatus.CANCELLED,
-    BookingStatus.ARCHIVED,
-  ])("offers nothing for a %s booking", (status) => {
-    expect(
-      resolveCheckInOutActions({
-        booking: { status, hasItemsToCheckOut: true },
-        ...CAN_BOTH,
-      })
-    ).toEqual({ checkOut: false, checkOutRemaining: false, checkIn: false });
-  });
-
-  it("drops the check-out buttons when the viewer may not check out", () => {
-    expect(
-      resolveCheckInOutActions({
-        booking: { status: BookingStatus.ONGOING, hasItemsToCheckOut: true },
-        canCheckOut: false,
-        canCheckIn: true,
-      })
-    ).toEqual({ checkOut: false, checkOutRemaining: false, checkIn: true });
-  });
-
-  it("drops Check in when the viewer may not check in", () => {
-    expect(
-      resolveCheckInOutActions({
-        booking: { status: BookingStatus.OVERDUE, hasItemsToCheckOut: false },
-        canCheckOut: true,
-        canCheckIn: false,
-      })
-    ).toEqual({ checkOut: false, checkOutRemaining: false, checkIn: false });
-  });
-});
 
 describe("BookingQuickActions: what the row renders", () => {
   it("renders Check out for a RESERVED booking, posting to the booking's overview", () => {
@@ -355,7 +273,6 @@ describe("BookingQuickActions: what the row renders", () => {
     const { container } = renderRow(
       {
         status: BookingStatus.ONGOING,
-        creatorId: "user-admin",
         custodianUserId: "user-other",
       },
       { roles: [OrganizationRoles.SELF_SERVICE] }
@@ -369,8 +286,21 @@ describe("BookingQuickActions: what the row renders", () => {
       {
         status: BookingStatus.ONGOING,
         hasItemsToCheckOut: false,
-        creatorId: "user-admin",
         custodianUserId: ME,
+      },
+      { roles: [OrganizationRoles.SELF_SERVICE] }
+    );
+
+    expect(buttonLabels()).toEqual(["Check in"]);
+  });
+
+  it("renders the buttons for a SELF_SERVICE viewer who holds the booking through the team-member link", () => {
+    renderRow(
+      {
+        status: BookingStatus.ONGOING,
+        hasItemsToCheckOut: false,
+        custodianUserId: null,
+        custodianTeamMemberUserId: ME,
       },
       { roles: [OrganizationRoles.SELF_SERVICE] }
     );
@@ -381,7 +311,6 @@ describe("BookingQuickActions: what the row renders", () => {
   it("renders the buttons for an ADMIN on anyone's booking", () => {
     renderRow({
       status: BookingStatus.RESERVED,
-      creatorId: "user-other",
       custodianUserId: "user-another",
     });
 
