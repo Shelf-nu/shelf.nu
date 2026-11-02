@@ -31,6 +31,7 @@ import { db } from "~/database/db.server";
 import { useListContextLinkState } from "~/hooks/use-list-context";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useRoleAccess } from "~/hooks/use-role-access";
+import { PENDING_APPROVAL_BOOKINGS_FILTER } from "~/modules/booking/constants";
 import { decorateBookingsForList } from "~/modules/booking/list-flags.server";
 import {
   getBookings,
@@ -51,6 +52,7 @@ import { setCookie, userPrefs } from "~/utils/cookies.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { computeHasActiveFilters } from "~/utils/filter-params";
 import { payload, error } from "~/utils/http.server";
+import { getParamsValues } from "~/utils/list";
 import { parseMarkdownToReact } from "~/utils/md";
 import { isPersonalOrg } from "~/utils/organization";
 import {
@@ -120,6 +122,27 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     if (filters && redirectNeeded) {
       const cookieParams = new URLSearchParams(filters);
       return redirect(`/bookings?${cookieParams.toString()}`);
+    }
+
+    /**
+     * "Pending approval" is only a status while the workspace requires
+     * approval. Once the switch is off the picker no longer offers it, so a
+     * URL or saved filter that still carries it would show the picker at "All"
+     * over an empty list. Drop it and land on the unfiltered list instead.
+     */
+    if (
+      getParamsValues(searchParams).status === PENDING_APPROVAL_BOOKINGS_FILTER
+    ) {
+      const approvalSettings = await db.bookingSettings.findUnique({
+        where: { organizationId },
+        select: { requireBookingApproval: true },
+      });
+      if (!approvalSettings?.requireBookingApproval) {
+        const cleaned = new URLSearchParams(searchParams);
+        cleaned.delete("status");
+        const query = cleaned.toString();
+        return redirect(query ? `/bookings?${query}` : "/bookings");
+      }
     }
 
     const [

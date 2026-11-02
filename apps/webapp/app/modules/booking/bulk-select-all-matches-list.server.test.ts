@@ -62,6 +62,14 @@ vitest.mock("~/database/db.server", () => ({
     },
     tag: { findMany: vitest.fn().mockResolvedValue([]) },
     kit: { findFirst: vitest.fn().mockResolvedValue({ name: "Rack Kit" }) },
+    // why: the index loader drops a "Pending approval" filter when the
+    // workspace does not require approval; the lockstep cases below need the
+    // filter kept, so the workspace requires it unless a case says otherwise.
+    bookingSettings: {
+      findUnique: vitest
+        .fn()
+        .mockResolvedValue({ requireBookingApproval: true }),
+    },
   },
 }));
 
@@ -356,6 +364,34 @@ describe("the Pending approval filter", () => {
       AND: [ONLY_MY_DRAFTS, { custodianTeamMemberId: { in: ["tm-1"] } }],
       ...PENDING_APPROVAL,
     });
+  });
+
+  it("is dropped from the URL when the workspace does not require approval", async () => {
+    // why: with the switch off the picker has no such option, so the filter
+    // would show "All" over an empty list; the loader redirects to the
+    // unfiltered list instead, keeping the rest of the query.
+    vitest
+      .mocked(db.bookingSettings.findUnique)
+      .mockResolvedValueOnce({ requireBookingApproval: false } as never);
+    requirePermissionMock.mockResolvedValue({
+      organizationId: ORG,
+      access: ADMIN,
+      currentOrganization: { id: ORG },
+    } as unknown as Awaited<ReturnType<typeof requirePermission>>);
+
+    const response = await BOOKINGS_INDEX.loader({
+      context: { getSession: () => ({ userId: ME }) },
+      request: new Request(
+        "http://localhost/bookings?status=PENDING_APPROVAL&teamMember=tm-1"
+      ),
+      params: {},
+    } as unknown as LoaderFunctionArgs);
+
+    expect(response).toBeInstanceOf(Response);
+    expect((response as Response).status).toBe(302);
+    expect((response as Response).headers.get("Location")).toBe(
+      "/bookings?teamMember=tm-1"
+    );
   });
 
   it("is not a status: a lowercase value resolves the same way", async () => {
