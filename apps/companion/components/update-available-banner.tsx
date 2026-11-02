@@ -205,9 +205,22 @@ export function UpdateAvailableBanner({ children }: { children: ReactNode }) {
           ) {
             continue;
           }
-          const outcome = await runNativeUpdate();
-          if (settlesLaunch(outcome)) nativeSettledRef.current = true;
-          setNativeOutcome(outcome);
+          const result = await runNativeUpdate(
+            () => latestAnswerRef.current === current
+          );
+          if (result === "started") {
+            // The native UI is on screen whatever the server says now.
+            nativeSettledRef.current = true;
+            setNativeOutcome(result);
+            continue;
+          }
+          // Any other result belongs to this answer only. When a newer one
+          // arrived meanwhile, drop it: the loop evaluates the newer answer.
+          if (result === "superseded" || latestAnswerRef.current !== current) {
+            continue;
+          }
+          if (settlesLaunch(result)) nativeSettledRef.current = true;
+          setNativeOutcome(result);
         }
       } finally {
         nativeInFlightRef.current = false;

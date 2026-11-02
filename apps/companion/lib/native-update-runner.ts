@@ -37,6 +37,16 @@ const NATIVE_MODULE_NAME = "ExpoInAppUpdates";
 type InAppUpdates = typeof import("expo-in-app-updates");
 
 /**
+ * What `runNativeUpdate` resolves to: an outcome, or `superseded` when a newer
+ * server answer arrived before any native UI opened, so nothing was shown and
+ * the caller should evaluate the newer answer instead.
+ */
+export type NativeUpdateResult = NativeUpdateOutcome | "superseded";
+
+/** Whether the server answer this attempt was started for is still current. */
+type IsCurrent = () => boolean;
+
+/**
  * Loads the library, or returns null when this binary lacks its native module.
  *
  * @returns The library's API, or null when the native flow cannot run here.
@@ -66,22 +76,35 @@ export async function readIosShownStoreVersion(): Promise<string | null> {
  * update and when the flexible flow is not allowed, and only the second one
  * needs the fallback banner.
  */
-async function runAndroid(lib: InAppUpdates): Promise<NativeUpdateOutcome> {
+async function runAndroid(
+  lib: InAppUpdates,
+  isCurrent: IsCurrent
+): Promise<NativeUpdateResult> {
   const plan = planPlayUpdate(await lib.checkForUpdate());
   if (plan !== "start") return plan;
+  if (!isCurrent()) return "superseded";
   // `false` asks for FLEXIBLE explicitly. Leaving it undefined would let the
   // library pick IMMEDIATE for a high Play priority, which blocks the app.
   const started = await lib.startUpdate(false);
-  // `false` here means Play's answer changed between the two calls.
-  return started ? "started" : "no-store-update";
+  if (started) return "started";
+  // Play's answer changed between the two calls. Ask again: an update that is
+  // still offered but no longer flexible needs the banner.
+  const retry = planPlayUpdate(await lib.checkForUpdate());
+  return retry === "unavailable" ? "unavailable" : "no-store-update";
 }
 
 /** Presents the App Store sheet once per store version. */
-async function runIos(lib: InAppUpdates): Promise<NativeUpdateOutcome> {
+async function runIos(
+  lib: InAppUpdates,
+  isCurrent: IsCurrent
+): Promise<NativeUpdateResult> {
   const { updateAvailable, storeVersion } = await lib.checkForUpdate();
+  // A lookup with no store version (no result for this storefront, an
+  // unexpected response) says nothing about whether an update exists, so the
+  // banner covers it.
+  if (!storeVersion) return "unavailable";
   const shownStoreVersion = await readIosShownStoreVersion();
   if (
-    !storeVersion ||
     !shouldPresentStoreSheet({
       storeUpdateAvailable: updateAvailable,
       storeVersion,
@@ -91,6 +114,7 @@ async function runIos(lib: InAppUpdates): Promise<NativeUpdateOutcome> {
     return "no-store-update";
   }
 
+  if (!isCurrent()) return "superseded";
   const started = await lib.startUpdate();
   if (!started) return "unavailable";
 
@@ -112,16 +136,21 @@ async function runIos(lib: InAppUpdates): Promise<NativeUpdateOutcome> {
  * Call only after `shouldAttemptNativeUpdate` says so: this function does not
  * check the server's advertised version itself.
  *
+ * @param isCurrent - Asked right before any native UI opens. Answering `false`
+ *   ends the attempt as `superseded` without showing anything. A native call
+ *   already under way cannot be cancelled.
  * @returns How the attempt ended. Never rejects.
  */
-export async function runNativeUpdate(): Promise<NativeUpdateOutcome> {
+export async function runNativeUpdate(
+  isCurrent: IsCurrent
+): Promise<NativeUpdateResult> {
   if (Platform.OS !== "android" && Platform.OS !== "ios") return "unavailable";
   try {
     const lib = await loadInAppUpdates();
     if (!lib) return "unavailable";
     return Platform.OS === "android"
-      ? await runAndroid(lib)
-      : await runIos(lib);
+      ? await runAndroid(lib, isCurrent)
+      : await runIos(lib, isCurrent);
   } catch (error) {
     // Expected on sideloaded or debug Android builds (Play does not own the
     // install) and on devices without Play services. A breadcrumb, not an
