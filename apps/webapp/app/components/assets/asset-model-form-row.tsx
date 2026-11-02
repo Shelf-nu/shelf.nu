@@ -97,27 +97,23 @@ export function AssetModelFormRow({
           selectionMode="set"
           allowClear={true}
           onChange={onChange}
-          extraContent={
-            canCreateAssetModel
-              ? ({ onItemCreated, closePopover }) => (
-                  <InlineEntityCreationDialog
-                    title="Create new asset model"
-                    type="assetModel"
-                    buttonLabel="Create new asset model"
-                    onCreated={(created) => {
-                      if (created?.type !== "assetModel") return;
-                      const model = created.entity;
-                      onItemCreated({
-                        id: model.id,
-                        name: model.name,
-                        metadata: { ...model },
-                      });
-                      closePopover();
-                    }}
-                  />
-                )
-              : undefined
-          }
+          extraContent={({ onItemCreated, closePopover }) => (
+            <InlineEntityCreationDialog
+              title="Create new asset model"
+              type="assetModel"
+              buttonLabel="Create new asset model"
+              onCreated={(created) => {
+                if (created?.type !== "assetModel") return;
+                const model = created.entity;
+                onItemCreated({
+                  id: model.id,
+                  name: model.name,
+                  metadata: { ...model },
+                });
+                closePopover();
+              }}
+            />
+          )}
         />
         {error ? <p className="mt-1 text-sm text-error-500">{error}</p> : null}
       </div>

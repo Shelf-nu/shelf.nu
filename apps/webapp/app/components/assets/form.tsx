@@ -1302,28 +1302,24 @@ const AssetFormInner = ({
             closeOnSelect
             selectionMode="set"
             allowClear={true}
-            extraContent={
-              canCreateInline.category
-                ? ({ onItemCreated, closePopover }) => (
-                    <InlineEntityCreationDialog
-                      title="Create new category"
-                      type="category"
-                      buttonLabel="Create new category"
-                      onCreated={(created) => {
-                        if (created?.type !== "category") return;
-                        const category = created.entity;
-                        onItemCreated({
-                          id: category.id,
-                          name: category.name,
-                          color: category.color,
-                          metadata: { ...category },
-                        });
-                        closePopover();
-                      }}
-                    />
-                  )
-                : undefined
-            }
+            extraContent={({ onItemCreated, closePopover }) => (
+              <InlineEntityCreationDialog
+                title="Create new category"
+                type="category"
+                buttonLabel="Create new category"
+                onCreated={(created) => {
+                  if (created?.type !== "category") return;
+                  const category = created.entity;
+                  onItemCreated({
+                    id: category.id,
+                    name: category.name,
+                    color: category.color,
+                    metadata: { ...category },
+                  });
+                  closePopover();
+                }}
+              />
+            )}
           />
         </FormRow>
 
@@ -1421,27 +1417,23 @@ const AssetFormInner = ({
               countKey="totalLocations"
               closeOnSelect
               allowClear
-              extraContent={
-                canCreateInline.location
-                  ? ({ onItemCreated, closePopover }) => (
-                      <InlineEntityCreationDialog
-                        type="location"
-                        title="Create new location"
-                        buttonLabel="Create new location"
-                        onCreated={(created) => {
-                          if (created?.type !== "location") return;
-                          const location = created.entity;
-                          onItemCreated({
-                            id: location.id,
-                            name: location.name,
-                            metadata: { ...location },
-                          });
-                          closePopover();
-                        }}
-                      />
-                    )
-                  : undefined
-              }
+              extraContent={({ onItemCreated, closePopover }) => (
+                <InlineEntityCreationDialog
+                  type="location"
+                  title="Create new location"
+                  buttonLabel="Create new location"
+                  onCreated={(created) => {
+                    if (created?.type !== "location") return;
+                    const location = created.entity;
+                    onItemCreated({
+                      id: location.id,
+                      name: location.name,
+                      metadata: { ...location },
+                    });
+                    closePopover();
+                  }}
+                />
+              )}
               renderItem={({ name, metadata }) => (
                 <div className="flex items-center gap-2">
                   {metadata?.thumbnailUrl ? (

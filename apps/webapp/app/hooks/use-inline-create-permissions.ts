@@ -7,6 +7,9 @@
  * route it opens checks. No workspace switch opens those grants, so a Manager
  * editing assets picks from existing values only.
  *
+ * `InlineEntityCreationDialog` applies it itself, keyed by its `type`; the
+ * "Create ..." links are gated where the forms render them.
+ *
  * @see {@link file://../components/inline-entity-creation-dialog/inline-entity-creation-dialog.tsx}
  */
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";

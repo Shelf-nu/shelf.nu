@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { AssetModel, Category, Location } from "@prisma/client";
+import { useInlineCreatePermissions } from "~/hooks/use-inline-create-permissions";
 import AssetModelForm from "../asset-model/form";
 import NewCategoryForm from "../category/new-category-form";
 import { Dialog, DialogPortal } from "../layout/dialog";
@@ -43,8 +44,13 @@ type InlineEntityCreationDialogProps = {
 };
 
 /**
- * InlineEntityCreationDialog provides a modal interface for creating locations or categories
- * directly from within dropdown/select components without navigating away.
+ * InlineEntityCreationDialog provides a modal interface for creating locations,
+ * categories or asset models directly from within dropdown/select components
+ * without navigating away.
+ *
+ * It renders nothing for a member without that entity's `create` permission
+ * (`useInlineCreatePermissions`), so callers pass it unconditionally. Inside a
+ * `DynamicSelect`, the empty extra-content row then collapses.
  *
  * The dialog uses a z-index of 9999 because it's rendered inside a popover (z-index ~9998)
  * within the DynamicSelect component. This ensures the dialog appears above the select
@@ -66,6 +72,10 @@ export default function InlineEntityCreationDialog({
   onCreated,
 }: InlineEntityCreationDialogProps) {
   const [open, setOpen] = useState(false);
+  const canCreate = useInlineCreatePermissions()[type];
+
+  if (!canCreate) return null;
+
   function handleOpen() {
     setOpen(true);
   }
