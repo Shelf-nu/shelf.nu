@@ -53,6 +53,49 @@ export function parseLatestCompanionVersion(json: unknown): string | null {
 }
 
 /**
+ * Whether the server advertises a version newer than this build.
+ *
+ * Shared by the banner and the native update prompt (`./native-update.ts`) so
+ * the two never disagree about whether an update exists. Every "cannot tell"
+ * case answers `false`.
+ *
+ * @param appVersion - This build's version; `""` when it cannot be read.
+ * @param latestVersion - The server's advertised version, or null for none.
+ * @returns `true` only when both parse and this build is older.
+ */
+export function isNewerVersionAdvertised({
+  appVersion,
+  latestVersion,
+}: {
+  appVersion: string;
+  latestVersion: string | null;
+}): boolean {
+  if (!latestVersion) return false;
+  const order = compareAppVersions(appVersion, latestVersion);
+  return order !== null && order < 0;
+}
+
+/**
+ * Whether a remembered version (a dismissal, a sheet already shown) covers
+ * `version`, meaning it is the same or newer.
+ *
+ * An unreadable remembered value covers nothing, so a corrupt entry can only
+ * cause one extra prompt, never suppress prompts for good.
+ *
+ * @param remembered - The stored version, or null when none is stored.
+ * @param version - The version being offered now.
+ * @returns `true` when `remembered` parses and is at least `version`.
+ */
+export function isVersionCoveredBy(
+  remembered: string | null,
+  version: string
+): boolean {
+  if (!remembered) return false;
+  const order = compareAppVersions(remembered, version);
+  return order !== null && order >= 0;
+}
+
+/**
  * Whether to show the banner.
  *
  * Every "cannot tell" case answers `false`: a banner that nags about an update
@@ -76,17 +119,10 @@ export function shouldShowUpdateBanner({
   dismissedVersion: string | null;
 }): boolean {
   if (!latestVersion) return false;
-
-  const order = compareAppVersions(appVersion, latestVersion);
-  if (order === null || order >= 0) return false;
-
-  if (dismissedVersion) {
-    // A dismissal covers the version it was given for and anything older, so
-    // only a genuinely newer release brings the banner back.
-    const seen = compareAppVersions(dismissedVersion, latestVersion);
-    if (seen !== null && seen >= 0) return false;
-  }
-  return true;
+  if (!isNewerVersionAdvertised({ appVersion, latestVersion })) return false;
+  // A dismissal covers the version it was given for and anything older, so
+  // only a genuinely newer release brings the banner back.
+  return !isVersionCoveredBy(dismissedVersion, latestVersion);
 }
 
 /**

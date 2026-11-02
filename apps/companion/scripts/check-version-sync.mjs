@@ -10,6 +10,12 @@
  * drifts on the first hurried release bump, at which point updates silently
  * stop reaching some or all installs.
  *
+ * It also asserts the iOS App Store id agrees across its four declarations
+ * (app.json and Info.plist `AppStoreID`, which the native update sheet reads;
+ * `IOS_APP_STORE_ID` in lib/app-update.ts, which the store-link banner opens;
+ * and eas.json `ascAppId`, which submissions go to). A mismatch would send the
+ * sheet and the banner to different listings.
+ *
  * Runs as part of `pnpm --filter @shelf/companion lint` (so CI's lint job
  * catches drift on every PR). Zero dependencies; exits 1 on mismatch.
  *
@@ -102,6 +108,34 @@ if (distinct.length > 1) {
   process.exit(1);
 }
 
+/** Every declaration of the iOS App Store id, as {source: id}. */
+const storeIds = {
+  "app.json (expo.ios.infoPlist.AppStoreID)":
+    appJson.ios?.infoPlist?.AppStoreID,
+  "Info.plist (AppStoreID)": infoPlist.match(
+    /<key>AppStoreID<\/key>\s*<string>([^<]+)<\/string>/
+  )?.[1],
+  "lib/app-update.ts (IOS_APP_STORE_ID)": read("lib/app-update.ts").match(
+    /const IOS_APP_STORE_ID = "([^"]+)";/
+  )?.[1],
+  "eas.json (submit.production.ios.ascAppId)": JSON.parse(read("eas.json"))
+    .submit?.production?.ios?.ascAppId,
+};
+const storeIdValues = Object.values(storeIds);
+
+if (storeIdValues.some((v) => !v) || new Set(storeIdValues).size !== 1) {
+  console.error(
+    "[version-sync] FAILED: the iOS App Store id is missing or differs " +
+      "between declarations, so the native update sheet and the store link " +
+      "would open different listings:"
+  );
+  for (const [source, id] of Object.entries(storeIds)) {
+    console.error(`  ${id ?? "(not found)"}  ${source}`);
+  }
+  process.exit(1);
+}
+
 console.log(
-  `[version-sync] OK — ${versions.length} declarations agree on ${distinct[0]}`
+  `[version-sync] OK: ${versions.length} declarations agree on ${distinct[0]}, ` +
+    `${storeIdValues.length} App Store ids agree on ${storeIdValues[0]}`
 );

@@ -16,7 +16,8 @@ import Constants from "expo-constants";
 
 /**
  * iOS App Store id for Shelf Companion.
- * Must match `submit.production.ios.ascAppId` in `eas.json`.
+ * Must match `submit.production.ios.ascAppId` in `eas.json` and `AppStoreID` in
+ * app.json and Info.plist; `scripts/check-version-sync.mjs` enforces it.
  */
 const IOS_APP_STORE_ID = "6765639874";
 

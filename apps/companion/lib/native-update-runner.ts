@@ -1,12 +1,17 @@
 /**
  * Native in-app update calls, wrapping `expo-in-app-updates`.
  *
- * - Android: starts Google Play's flexible update flow. Play downloads in the
- *   background; when the download finishes the library calls Play's
- *   `completeUpdate()`, which shows Play's install screen and restarts the app.
- *   The immediate (blocking) flow is never requested.
+ * - Android: Google Play's flexible update flow. Play downloads in the
+ *   background and reports `updateDownloaded`; the install happens only when
+ *   the user taps "Restart" (`completeNativeUpdate`). The immediate (blocking)
+ *   flow is never requested.
  * - iOS: looks the app up on the App Store (`AppStoreID` in Info.plist) and,
  *   when the store offers a newer build, presents the App Store product sheet.
+ *
+ * The library is patched (`patches/expo-in-app-updates@0.12.0.patch`): Play
+ * never restarts the app or opens the Play Store on its own, `completeUpdate`
+ * and the `downloaded` check field exist, and the iOS sheet opens above any
+ * modal and resolves `true` only once it is on screen.
  *
  * The native module is resolved with `requireOptionalNativeModule` before the
  * library is imported. The library's own entry calls `requireNativeModule`,
@@ -16,8 +21,8 @@
  *
  * Never throws: every failure is an `unavailable` outcome.
  *
- * @see ./native-update.ts for the pure rules
- * @see ../components/update-available-banner.tsx for the wiring
+ * @see ./native-update-flow.ts for the flows themselves
+ * @see ./native-update-scheduler.ts for when they run
  */
 import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -25,26 +30,19 @@ import { requireOptionalNativeModule } from "expo";
 import * as Sentry from "@sentry/react-native";
 import {
   IOS_STORE_SHEET_SHOWN_KEY,
-  planPlayUpdate,
-  shouldPresentStoreSheet,
-  type NativeUpdateOutcome,
+  type NativeUpdateResult,
 } from "./native-update";
+import {
+  runAppStoreFlow,
+  runPlayFlow,
+  type IsCurrent,
+} from "./native-update-flow";
 
 /** Name the library registers its native module under. */
 const NATIVE_MODULE_NAME = "ExpoInAppUpdates";
 
 /** The library's JS API. */
 type InAppUpdates = typeof import("expo-in-app-updates");
-
-/**
- * What `runNativeUpdate` resolves to: an outcome, or `superseded` when a newer
- * server answer arrived before any native UI opened, so nothing was shown and
- * the caller should evaluate the newer answer instead.
- */
-export type NativeUpdateResult = NativeUpdateOutcome | "superseded";
-
-/** Whether the server answer this attempt was started for is still current. */
-type IsCurrent = () => boolean;
 
 /**
  * Loads the library, or returns null when this binary lacks its native module.
@@ -54,6 +52,16 @@ type IsCurrent = () => boolean;
 async function loadInAppUpdates(): Promise<InAppUpdates | null> {
   if (!requireOptionalNativeModule(NATIVE_MODULE_NAME)) return null;
   return import("expo-in-app-updates");
+}
+
+/** Records a native failure as a breadcrumb: the banner covers the user. */
+function noteUnavailable(message: string, error: unknown) {
+  Sentry.addBreadcrumb({
+    category: "in-app-update",
+    level: "info",
+    message,
+    data: { error: error instanceof Error ? error.message : String(error) },
+  });
 }
 
 /**
@@ -70,67 +78,6 @@ export async function readIosShownStoreVersion(): Promise<string | null> {
 }
 
 /**
- * Starts Play's flexible flow when Play offers an update and allows it.
- *
- * Checked first because `startUpdate` answers `false` both when there is no
- * update and when the flexible flow is not allowed, and only the second one
- * needs the fallback banner.
- */
-async function runAndroid(
-  lib: InAppUpdates,
-  isCurrent: IsCurrent
-): Promise<NativeUpdateResult> {
-  const plan = planPlayUpdate(await lib.checkForUpdate());
-  if (plan !== "start") return plan;
-  if (!isCurrent()) return "superseded";
-  // `false` asks for FLEXIBLE explicitly. Leaving it undefined would let the
-  // library pick IMMEDIATE for a high Play priority, which blocks the app.
-  const started = await lib.startUpdate(false);
-  if (started) return "started";
-  // Play's answer changed between the two calls. Ask again: an update that is
-  // still offered but no longer flexible needs the banner.
-  const retry = planPlayUpdate(await lib.checkForUpdate());
-  return retry === "unavailable" ? "unavailable" : "no-store-update";
-}
-
-/** Presents the App Store sheet once per store version. */
-async function runIos(
-  lib: InAppUpdates,
-  isCurrent: IsCurrent
-): Promise<NativeUpdateResult> {
-  const { updateAvailable, storeVersion } = await lib.checkForUpdate();
-  // A lookup with no store version (no result for this storefront, an
-  // unexpected response) says nothing about whether an update exists, so the
-  // banner covers it.
-  if (!storeVersion) return "unavailable";
-  const shownStoreVersion = await readIosShownStoreVersion();
-  if (
-    !shouldPresentStoreSheet({
-      storeUpdateAvailable: updateAvailable,
-      storeVersion,
-      shownStoreVersion,
-    })
-  ) {
-    return "no-store-update";
-  }
-
-  if (!isCurrent()) return "superseded";
-  const started = await lib.startUpdate();
-  if (!started) return "unavailable";
-
-  // Remembered only once the sheet is up: closing it is the dismissal, and the
-  // library reports no outcome beyond "presented". A sheet that failed to open
-  // must not count as shown, or later launches would skip both it and the
-  // fallback banner.
-  try {
-    await AsyncStorage.setItem(IOS_STORE_SHEET_SHOWN_KEY, storeVersion);
-  } catch {
-    // Non-fatal: the once-per-launch rule still holds for this session.
-  }
-  return "started";
-}
-
-/**
  * Runs the platform's native update flow once.
  *
  * Call only after `shouldAttemptNativeUpdate` says so: this function does not
@@ -139,28 +86,83 @@ async function runIos(
  * @param isCurrent - Asked right before any native UI opens. Answering `false`
  *   ends the attempt as `superseded` without showing anything. A native call
  *   already under way cannot be cancelled.
+ * @param iosShownStoreVersion - The store version the iOS sheet was last shown
+ *   for, as the caller already read it.
  * @returns How the attempt ended. Never rejects.
  */
-export async function runNativeUpdate(
-  isCurrent: IsCurrent
-): Promise<NativeUpdateResult> {
+export async function runNativeUpdate({
+  isCurrent,
+  iosShownStoreVersion,
+}: {
+  isCurrent: IsCurrent;
+  iosShownStoreVersion: string | null;
+}): Promise<NativeUpdateResult> {
   if (Platform.OS !== "android" && Platform.OS !== "ios") return "unavailable";
   try {
     const lib = await loadInAppUpdates();
     if (!lib) return "unavailable";
-    return Platform.OS === "android"
-      ? await runAndroid(lib, isCurrent)
-      : await runIos(lib, isCurrent);
+    if (Platform.OS === "android") {
+      return await runPlayFlow(
+        {
+          checkForUpdate: lib.checkForUpdate,
+          startUpdate: lib.startUpdate,
+        },
+        isCurrent
+      );
+    }
+    return await runAppStoreFlow(
+      {
+        checkForUpdate: lib.checkForUpdate,
+        startUpdate: () => lib.startUpdate(),
+        rememberShown: (storeVersion) =>
+          AsyncStorage.setItem(IOS_STORE_SHEET_SHOWN_KEY, storeVersion),
+      },
+      { isCurrent, shownStoreVersion: iosShownStoreVersion }
+    );
   } catch (error) {
     // Expected on sideloaded or debug Android builds (Play does not own the
     // install) and on devices without Play services. A breadcrumb, not an
     // event: the banner covers the user, and this is not an app fault.
-    Sentry.addBreadcrumb({
-      category: "in-app-update",
-      level: "info",
-      message: "Native update flow unavailable",
-      data: { error: error instanceof Error ? error.message : String(error) },
-    });
+    noteUnavailable("Native update flow unavailable", error);
     return "unavailable";
+  }
+}
+
+/**
+ * Listens for Play's "flexible update downloaded" event. Android only.
+ *
+ * @param onDownloaded - Called once the update is ready to install.
+ * @returns Stops listening. Safe to call before the listener is attached.
+ */
+export function subscribeToUpdateDownloaded(
+  onDownloaded: () => void
+): () => void {
+  if (Platform.OS !== "android") return () => {};
+  let remove: (() => void) | null = null;
+  let stopped = false;
+  void loadInAppUpdates()
+    .then((lib) => {
+      if (!lib || stopped) return;
+      remove = lib.addUpdateListener("updateDownloaded", onDownloaded);
+    })
+    .catch((error) => noteUnavailable("Update listener unavailable", error));
+  return () => {
+    stopped = true;
+    remove?.();
+  };
+}
+
+/**
+ * Installs a downloaded Play update, which restarts the app. Android only.
+ *
+ * Never rejects: if Play refuses, the app keeps running and the next launch
+ * offers the restart again.
+ */
+export async function completeNativeUpdate(): Promise<void> {
+  try {
+    const lib = await loadInAppUpdates();
+    await lib?.completeUpdate();
+  } catch (error) {
+    noteUnavailable("Completing the update failed", error);
   }
 }

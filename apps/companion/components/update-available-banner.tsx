@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { AppState, Platform, Pressable, Text, View } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
@@ -17,19 +17,22 @@ import {
 } from "@/lib/server";
 import {
   isUpdateCheckDue,
-  shouldShowUpdateBanner,
   UPDATE_BANNER_DISMISSED_KEY,
 } from "@/lib/update-banner";
 import {
-  isBannerFallbackActive,
-  settlesLaunch,
-  shouldAttemptNativeUpdate,
+  chooseUpdateBanner,
   type NativeUpdateOutcome,
 } from "@/lib/native-update";
 import {
+  completeNativeUpdate,
   readIosShownStoreVersion,
   runNativeUpdate,
+  subscribeToUpdateDownloaded,
 } from "@/lib/native-update-runner";
+import {
+  createNativeUpdateScheduler,
+  type UpdateAnswer,
+} from "@/lib/native-update-scheduler";
 
 const useStyles = createStyles((colors) => ({
   root: {
@@ -78,10 +81,12 @@ async function readDismissedVersion(): Promise<string | null> {
  * store version.
  *
  * The offer is the platform's own UI: Google Play's flexible update flow on
- * Android, the App Store sheet on iOS (see `lib/native-update.ts`). The
- * dismissible banner below the app is the fallback for installs where that
- * native flow is unavailable, and stays hidden while a native attempt is
- * pending so it never flashes ahead of a native sheet.
+ * Android, the App Store sheet on iOS (see `lib/native-update.ts`). The banner
+ * below the app has two jobs (`chooseUpdateBanner`): on Android it offers
+ * "Restart" once Play has downloaded the update, so the user picks when the
+ * app restarts; elsewhere it is the store-link fallback for installs where the
+ * native flow is unavailable. Nothing shows while a native attempt is pending,
+ * so the store link never flashes ahead of a native sheet.
  *
  * The banner sits in the layout, not over it, so it never covers a tab bar,
  * a floating button or the last rows of a list. While it shows, it takes the
@@ -109,25 +114,32 @@ export function UpdateAvailableBanner({ children }: { children: ReactNode }) {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const styles = useStyles();
-  // The active server's advertised version. Every answer is a new object, so a
-  // re-check that returns the same version still re-runs the native attempt
-  // (one that found no store update may succeed later in the session).
-  const [answer, setAnswer] = useState<{ version: string | null }>({
-    version: null,
-  });
+  // The active server's advertised version. Every answer is a new object, so
+  // a re-check that returns the same version is still handed to the scheduler.
+  const [answer, setAnswer] = useState<UpdateAnswer>({ version: null });
   const latestVersion = answer.version;
   const [dismissedVersion, setDismissedVersion] = useState<string | null>(null);
   const [nativeOutcome, setNativeOutcome] =
     useState<NativeUpdateOutcome | null>(null);
-  // Launch-wide: the native UI was shown or found unavailable, so nothing new
-  // can be learned before the next launch.
-  const nativeSettledRef = useRef(false);
-  const nativeInFlightRef = useRef(false);
-  // The newest server answer, and whether it arrived after the running attempt
-  // read the previous one. An answer that lands mid-attempt is never dropped:
-  // the running attempt loops and evaluates it once it finishes.
-  const latestAnswerRef = useRef(answer);
-  const answerPendingRef = useRef(false);
+  const [restartDismissed, setRestartDismissed] = useState(false);
+  // One scheduler per launch. `setNativeOutcome` is stable, so the scheduler
+  // never needs rebuilding.
+  const [scheduler] = useState(() =>
+    createNativeUpdateScheduler({
+      platform: Platform.OS,
+      getAppVersion,
+      readIosShownStoreVersion,
+      run: runNativeUpdate,
+      onOutcome: setNativeOutcome,
+    })
+  );
+
+  // Play reports a finished flexible download as an event while this process
+  // lives; after a restart it shows up in the next check as `downloaded`.
+  useEffect(
+    () => subscribeToUpdateDownloaded(() => scheduler.report("downloaded")),
+    [scheduler]
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -179,68 +191,29 @@ export function UpdateAvailableBanner({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    latestAnswerRef.current = answer;
-    answerPendingRef.current = true;
-    if (nativeInFlightRef.current) return;
-    nativeInFlightRef.current = true;
-    void (async () => {
-      try {
-        while (answerPendingRef.current) {
-          answerPendingRef.current = false;
-          const current = latestAnswerRef.current;
-          const iosShownStoreVersion =
-            Platform.OS === "ios" ? await readIosShownStoreVersion() : null;
-          // A newer answer (another server, a re-check) arrived during the
-          // read: this one is superseded, and the loop picks up the newer one.
-          if (latestAnswerRef.current !== current) continue;
-          const latest = current.version;
-          if (
-            !shouldAttemptNativeUpdate({
-              platform: Platform.OS,
-              appVersion: getAppVersion(),
-              latestVersion: latest,
-              settledThisLaunch: nativeSettledRef.current,
-              iosShownStoreVersion,
-            })
-          ) {
-            continue;
-          }
-          const result = await runNativeUpdate(
-            () => latestAnswerRef.current === current
-          );
-          if (result === "started") {
-            // The native UI is on screen whatever the server says now.
-            nativeSettledRef.current = true;
-            setNativeOutcome(result);
-            continue;
-          }
-          // Any other result belongs to this answer only. When a newer one
-          // arrived meanwhile, drop it: the loop evaluates the newer answer.
-          if (result === "superseded" || latestAnswerRef.current !== current) {
-            continue;
-          }
-          if (settlesLaunch(result)) nativeSettledRef.current = true;
-          setNativeOutcome(result);
-        }
-      } finally {
-        nativeInFlightRef.current = false;
-      }
-    })();
-  }, [answer]);
+    void scheduler.submit(answer);
+  }, [scheduler, answer]);
 
-  const visible =
-    isBannerFallbackActive(nativeOutcome) &&
-    shouldShowUpdateBanner({
-      // The running bundle's version, which after an OTA comes from the update.
-      // That is still the binary's version: `scripts/check-version-sync.mjs`
-      // keeps `version` equal to `runtimeVersion`, and an update only reaches
-      // binaries with the same runtime version.
-      appVersion: getAppVersion(),
-      latestVersion,
-      dismissedVersion,
-    });
+  const banner = chooseUpdateBanner({
+    outcome: nativeOutcome,
+    // The running bundle's version, which after an OTA comes from the update.
+    // That is still the binary's version: `scripts/check-version-sync.mjs`
+    // keeps `version` equal to `runtimeVersion`, and an update only reaches
+    // binaries with the same runtime version.
+    appVersion: getAppVersion(),
+    latestVersion,
+    dismissedVersion,
+    restartDismissed,
+  });
+  const visible = banner !== null;
+  const isRestart = banner === "restart";
 
   const dismiss = () => {
+    if (isRestart) {
+      // Session only: the next launch offers the restart again.
+      setRestartDismissed(true);
+      return;
+    }
     if (!latestVersion) return;
     setDismissedVersion(latestVersion);
     AsyncStorage.setItem(UPDATE_BANNER_DISMISSED_KEY, latestVersion).catch(
@@ -268,16 +241,26 @@ export function UpdateAvailableBanner({ children }: { children: ReactNode }) {
             color={colors.primaryText}
           />
           <Text style={styles.message}>
-            A new version of Shelf is available
+            {isRestart
+              ? "An update is ready. Restart Shelf to install it."
+              : "A new version of Shelf is available"}
           </Text>
           <Pressable
             style={styles.updateButton}
-            onPress={() => void openAppStore()}
+            onPress={() =>
+              void (isRestart ? completeNativeUpdate() : openAppStore())
+            }
             accessibilityRole="button"
-            accessibilityLabel="Update Shelf"
-            accessibilityHint="Opens the app store"
+            accessibilityLabel={isRestart ? "Restart Shelf" : "Update Shelf"}
+            accessibilityHint={
+              isRestart
+                ? "Installs the update and restarts the app"
+                : "Opens the app store"
+            }
           >
-            <Text style={styles.updateButtonText}>Update</Text>
+            <Text style={styles.updateButtonText}>
+              {isRestart ? "Restart" : "Update"}
+            </Text>
           </Pressable>
           <Pressable
             onPress={dismiss}

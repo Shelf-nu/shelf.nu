@@ -11,7 +11,9 @@ import { test } from "node:test";
 
 import { compareAppVersions } from "./server/contract";
 import {
+  isNewerVersionAdvertised,
   isUpdateCheckDue,
+  isVersionCoveredBy,
   parseLatestCompanionVersion,
   shouldShowUpdateBanner,
   UPDATE_BANNER_RECHECK_MS,
@@ -137,4 +139,32 @@ test("isUpdateCheckDue waits out a fresh answer", () => {
     }),
     true
   );
+});
+
+// ── isNewerVersionAdvertised ─────────────────────────────
+
+test("a newer advertised version counts, the same or an older one does not", () => {
+  const advertised = (appVersion: string, latestVersion: string | null) =>
+    isNewerVersionAdvertised({ appVersion, latestVersion });
+  assert.equal(advertised("1.6.0", "1.7.0"), true);
+  assert.equal(advertised("1.9.0", "1.10.0"), true);
+  assert.equal(advertised("1.7.0", "1.7.0"), false);
+  assert.equal(advertised("1.8.0", "1.7.0"), false);
+  assert.equal(advertised("1.6.0", null), false);
+  // Unreadable versions on either side never prompt.
+  assert.equal(advertised("", "1.7.0"), false);
+  assert.equal(advertised("1.6.0", "latest"), false);
+});
+
+// ── isVersionCoveredBy ──────────────────────────────────
+
+test("a remembered version covers the same version and older ones", () => {
+  assert.equal(isVersionCoveredBy("1.7.0", "1.7.0"), true);
+  assert.equal(isVersionCoveredBy("1.8.0", "1.7.0"), true);
+  assert.equal(isVersionCoveredBy("1.6.0", "1.7.0"), false);
+});
+
+test("nothing remembered, or an unreadable value, covers nothing", () => {
+  assert.equal(isVersionCoveredBy(null, "1.7.0"), false);
+  assert.equal(isVersionCoveredBy("garbage", "1.7.0"), false);
 });

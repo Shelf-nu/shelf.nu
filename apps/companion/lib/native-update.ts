@@ -5,26 +5,35 @@
  * build, the app hands over to the platform's own update UI:
  *
  * - Android: Google Play's flexible update flow, started once per app launch.
- *   Play downloads in the background and installs when the download finishes.
+ *   Play downloads in the background. The app never restarts on its own: once
+ *   the download is ready, the banner offers "Restart" and the user picks the
+ *   moment, so no scan, audit or form is cut off mid-way.
  * - iOS: the App Store product sheet, shown once per store version. The version
  *   the sheet was shown for is remembered, so closing it keeps it away until
  *   the next store release.
  *
- * The in-app banner (`./update-banner.ts`) is only the fallback for when the
+ * The store-link banner (`./update-banner.ts`) is the fallback for when the
  * native flow cannot run at all: no Play services, a sideloaded build, a binary
- * without the native module, or a library error.
+ * without the native module, a sheet that could not open, or a library error.
  *
  * Pure on purpose, like `./update-banner.ts`, so the Node test runner can
- * execute it. The native calls live in `./native-update-runner.ts` and the
- * wiring in `components/update-available-banner.tsx`.
+ * execute it. The native flows live in `./native-update-flow.ts`, the attempt
+ * queue in `./native-update-scheduler.ts`, the library calls in
+ * `./native-update-runner.ts` and the UI in
+ * `components/update-available-banner.tsx`.
  *
- * @see ./server/contract.ts for `compareAppVersions`
+ * @see ./update-banner.ts for `isNewerVersionAdvertised` and `isVersionCoveredBy`
  */
-import { compareAppVersions } from "./server/contract";
+import {
+  isNewerVersionAdvertised,
+  isVersionCoveredBy,
+  shouldShowUpdateBanner,
+} from "./update-banner";
 
 /**
  * AsyncStorage key holding the App Store version the iOS sheet was last shown
- * for. Written before the sheet opens, so closing it counts as dismissing it.
+ * for. Written once the sheet is on screen, so closing it counts as dismissing
+ * it, and a sheet that never appeared is never recorded.
  *
  * Not server-scoped: it describes this install, not the server's data.
  */
@@ -33,46 +42,27 @@ export const IOS_STORE_SHEET_SHOWN_KEY = "shelf_ios_store_sheet_shown_version";
 /**
  * How a native update attempt ended.
  *
- * - `started`: the platform UI was shown (Play flow or App Store sheet).
+ * - `started`: the platform UI is on screen (Play flow or App Store sheet).
+ * - `downloaded`: Android only. A flexible update finished downloading and
+ *   waits for the user to restart the app.
  * - `no-store-update`: the native flow works, but the store does not offer a
- *   newer build to this device yet (staged rollout, review still pending, or
- *   the sheet was already shown for this store version).
- * - `unavailable`: the native flow cannot run on this install.
+ *   newer build to this device yet (staged rollout, review still pending, a
+ *   download still running, or the sheet was already shown for this version).
+ * - `unavailable`: the native flow cannot run on this install, or its UI could
+ *   not be shown.
  */
-export type NativeUpdateOutcome = "started" | "no-store-update" | "unavailable";
+export type NativeUpdateOutcome =
+  | "started"
+  | "downloaded"
+  | "no-store-update"
+  | "unavailable";
 
 /**
- * Whether the server advertises a version newer than this build.
- *
- * Every "cannot tell" case answers `false`, as in `shouldShowUpdateBanner`.
- *
- * @param appVersion - This build's version; `""` when it cannot be read.
- * @param latestVersion - The server's advertised version, or null for none.
- * @returns `true` only when both parse and this build is older.
+ * What one native attempt resolves to: an outcome, or `superseded` when a
+ * newer server answer arrived before any native UI opened, so nothing was
+ * shown and the newer answer is evaluated instead.
  */
-export function isNewerVersionAdvertised({
-  appVersion,
-  latestVersion,
-}: {
-  appVersion: string;
-  latestVersion: string | null;
-}): boolean {
-  if (!latestVersion) return false;
-  const order = compareAppVersions(appVersion, latestVersion);
-  return order !== null && order < 0;
-}
-
-/**
- * Whether a remembered version covers `version`, meaning it is the same or newer.
- *
- * An unreadable remembered value covers nothing, so a corrupt entry can only
- * cause one extra prompt, never suppress prompts for good.
- */
-function isCoveredBy(remembered: string | null, version: string): boolean {
-  if (!remembered) return false;
-  const order = compareAppVersions(remembered, version);
-  return order !== null && order >= 0;
-}
+export type NativeUpdateResult = NativeUpdateOutcome | "superseded";
 
 /**
  * Whether to try the native update flow after the server answers.
@@ -81,8 +71,8 @@ function isCoveredBy(remembered: string | null, version: string): boolean {
  * @param appVersion - This build's version; `""` when it cannot be read.
  * @param latestVersion - The server's advertised version, or null for none.
  * @param settledThisLaunch - Whether an earlier attempt in this app launch
- *   already showed the native UI or found it unavailable. Either way there is
- *   nothing new to learn until the next launch.
+ *   already showed the native UI, found a download ready, or found the flow
+ *   unavailable. Nothing new can be learned until the next launch.
  * @param iosShownStoreVersion - The App Store version the iOS sheet was last
  *   shown for, or null. Ignored on Android.
  * @returns `true` when the native flow should be tried now.
@@ -108,7 +98,7 @@ export function shouldAttemptNativeUpdate({
   if (
     platform === "ios" &&
     latestVersion &&
-    isCoveredBy(iosShownStoreVersion, latestVersion)
+    isVersionCoveredBy(iosShownStoreVersion, latestVersion)
   ) {
     return false;
   }
@@ -135,53 +125,95 @@ export function shouldPresentStoreSheet({
   shownStoreVersion: string | null;
 }): boolean {
   if (!storeUpdateAvailable || !storeVersion) return false;
-  return !isCoveredBy(shownStoreVersion, storeVersion);
+  return !isVersionCoveredBy(shownStoreVersion, storeVersion);
 }
 
 /**
  * Whether an outcome ends native attempts for the rest of this app launch.
  *
  * `no-store-update` does not: the store may start offering the build later in
- * the same session (a rollout step, an App Store release), and the foreground
- * re-check is cheap and shows nothing when there is still no update.
+ * the same session (a rollout step, an App Store release, a download that
+ * finishes), and the foreground re-check is cheap and shows nothing when there
+ * is still no update.
  *
  * @param outcome - How the attempt ended.
- * @returns `true` for `started` and `unavailable`.
+ * @returns `true` for every outcome except `no-store-update`.
  */
 export function settlesLaunch(outcome: NativeUpdateOutcome): boolean {
   return outcome !== "no-store-update";
 }
 
 /**
- * Whether the in-app banner may show as a fallback.
+ * Which banner, if any, sits below the app.
  *
- * Only when the native flow is unavailable. While an attempt is pending
- * (`null`) the banner stays hidden, so it never flashes before a native sheet.
- *
- * @param outcome - The latest attempt's outcome, or null when none finished.
- * @returns `true` only for `unavailable`.
+ * - `restart`: Android downloaded an update; the user restarts to install it.
+ * - `store-link`: the native flow is unavailable, so the banner links to the
+ *   store instead, under the usual dismissal rules.
  */
-export function isBannerFallbackActive(
-  outcome: NativeUpdateOutcome | null
-): boolean {
-  return outcome === "unavailable";
+export type UpdateBannerKind = "restart" | "store-link";
+
+/**
+ * Chooses the banner from the latest native outcome.
+ *
+ * While an attempt is pending (`null`) nothing shows, so the store-link banner
+ * never flashes ahead of a native sheet.
+ *
+ * @param outcome - The latest native outcome, or null when none finished.
+ * @param appVersion - This build's version; `""` when it cannot be read.
+ * @param latestVersion - The server's advertised version, or null for none.
+ * @param dismissedVersion - The advertised version the store-link banner was
+ *   last dismissed for.
+ * @param restartDismissed - Whether the restart banner was closed in this
+ *   launch. It returns on the next launch, while the download still waits.
+ * @returns The banner to show, or null for none.
+ */
+export function chooseUpdateBanner({
+  outcome,
+  appVersion,
+  latestVersion,
+  dismissedVersion,
+  restartDismissed,
+}: {
+  outcome: NativeUpdateOutcome | null;
+  appVersion: string;
+  latestVersion: string | null;
+  dismissedVersion: string | null;
+  restartDismissed: boolean;
+}): UpdateBannerKind | null {
+  // A finished download is real whatever the server says now.
+  if (outcome === "downloaded") return restartDismissed ? null : "restart";
+  if (
+    outcome === "unavailable" &&
+    shouldShowUpdateBanner({ appVersion, latestVersion, dismissedVersion })
+  ) {
+    return "store-link";
+  }
+  return null;
 }
 
 /**
  * What to do with Google Play's answer to "is there an update?".
  *
  * - `start`: Play offers an update and allows the flexible flow.
- * - `no-store-update`: Play offers nothing yet, or a flexible download this
- *   app started earlier is still running (Play finishes it on its own).
+ * - `downloaded`: a flexible update finished downloading and waits for the
+ *   user to restart.
+ * - `no-store-update`: Play offers nothing yet, or a download this app started
+ *   is still running. Its end arrives as the library's `updateDownloaded`
+ *   event in this process, or as `downloaded` on a later check.
  * - `unavailable`: Play offers an update but not through the flexible flow,
  *   which is the only one this app requests, so the banner must cover it.
  */
-export type PlayUpdatePlan = "start" | "no-store-update" | "unavailable";
+export type PlayUpdatePlan =
+  | "start"
+  | "downloaded"
+  | "no-store-update"
+  | "unavailable";
 
 /**
  * Classifies Google Play's update check for the flexible flow.
  *
  * @param updateAvailable - Play has a newer build for this install.
+ * @param downloaded - A flexible update finished downloading.
  * @param updateInProgress - A developer-triggered update is already running.
  * @param flexibleAllowed - Play allows the flexible flow for that build.
  *   Absent counts as not allowed.
@@ -189,13 +221,16 @@ export type PlayUpdatePlan = "start" | "no-store-update" | "unavailable";
  */
 export function planPlayUpdate({
   updateAvailable,
+  downloaded,
   updateInProgress,
   flexibleAllowed,
 }: {
   updateAvailable: boolean;
+  downloaded?: boolean;
   updateInProgress?: boolean;
   flexibleAllowed?: boolean;
 }): PlayUpdatePlan {
+  if (downloaded) return "downloaded";
   if (!updateAvailable || updateInProgress) return "no-store-update";
   return flexibleAllowed ? "start" : "unavailable";
 }

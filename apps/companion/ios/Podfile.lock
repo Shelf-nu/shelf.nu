@@ -2266,7 +2266,7 @@ DEPENDENCIES:
   - "ExpoImage (from `../../../node_modules/.pnpm/expo-image@55.0.6_patch_hash=xoe2kq4thm7yyrn33j5i3h7acq_expo@54.0.33_react-native-web@0.21.2__fwte65lkxe5chqyi53siamicqm/node_modules/expo-image/ios`)"
   - "ExpoImageManipulator (from `../../../node_modules/.pnpm/expo-image-manipulator@14.0.8_expo@54.0.33/node_modules/expo-image-manipulator/ios`)"
   - "ExpoImagePicker (from `../../../node_modules/.pnpm/expo-image-picker@17.0.10_expo@54.0.33/node_modules/expo-image-picker/ios`)"
-  - "ExpoInAppUpdates (from `../../../node_modules/.pnpm/expo-in-app-updates@0.12.0_patch_hash=ikkngrikzhukottieurjmu63za_expo@54.0.33/node_modules/expo-in-app-updates/ios`)"
+  - "ExpoInAppUpdates (from `../../../node_modules/.pnpm/expo-in-app-updates@0.12.0_patch_hash=ycebkup2uus24na34d2ij7zx4q_expo@54.0.33/node_modules/expo-in-app-updates/ios`)"
   - "ExpoKeepAwake (from `../../../node_modules/.pnpm/expo-keep-awake@15.0.8_expo@54.0.33_react@19.1.0/node_modules/expo-keep-awake/ios`)"
   - "ExpoLinking (from `../../../node_modules/.pnpm/expo-linking@8.0.11_expo@54.0.33_react-native@0.81.5_@babel+core@7.29.7_@types+react@19.2.14_react@19.1.0__react@19.1.0/node_modules/expo-linking/ios`)"
   - "ExpoLocation (from `../../../node_modules/.pnpm/expo-location@19.0.8_expo@54.0.33/node_modules/expo-location/ios`)"
@@ -2420,7 +2420,7 @@ EXTERNAL SOURCES:
   ExpoImagePicker:
     :path: "../../../node_modules/.pnpm/expo-image-picker@17.0.10_expo@54.0.33/node_modules/expo-image-picker/ios"
   ExpoInAppUpdates:
-    :path: "../../../node_modules/.pnpm/expo-in-app-updates@0.12.0_patch_hash=ikkngrikzhukottieurjmu63za_expo@54.0.33/node_modules/expo-in-app-updates/ios"
+    :path: "../../../node_modules/.pnpm/expo-in-app-updates@0.12.0_patch_hash=ycebkup2uus24na34d2ij7zx4q_expo@54.0.33/node_modules/expo-in-app-updates/ios"
   ExpoKeepAwake:
     :path: "../../../node_modules/.pnpm/expo-keep-awake@15.0.8_expo@54.0.33_react@19.1.0/node_modules/expo-keep-awake/ios"
   ExpoLinking:

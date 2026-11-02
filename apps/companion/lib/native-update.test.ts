@@ -10,28 +10,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  isBannerFallbackActive,
-  isNewerVersionAdvertised,
+  chooseUpdateBanner,
   planPlayUpdate,
   settlesLaunch,
   shouldAttemptNativeUpdate,
   shouldPresentStoreSheet,
 } from "./native-update";
-
-// ── isNewerVersionAdvertised ─────────────────────────────
-
-test("a newer advertised version counts, the same or an older one does not", () => {
-  const advertised = (appVersion: string, latestVersion: string | null) =>
-    isNewerVersionAdvertised({ appVersion, latestVersion });
-  assert.equal(advertised("1.6.0", "1.7.0"), true);
-  assert.equal(advertised("1.9.0", "1.10.0"), true);
-  assert.equal(advertised("1.7.0", "1.7.0"), false);
-  assert.equal(advertised("1.8.0", "1.7.0"), false);
-  assert.equal(advertised("1.6.0", null), false);
-  // Unreadable versions on either side never prompt.
-  assert.equal(advertised("", "1.7.0"), false);
-  assert.equal(advertised("1.6.0", "latest"), false);
-});
 
 // ── shouldAttemptNativeUpdate ────────────────────────────
 
@@ -126,20 +110,51 @@ test("does not present a store version the sheet was already shown for", () => {
   assert.equal(present(true, "1.7.0", "1.8.0"), false);
 });
 
-// ── settlesLaunch / isBannerFallbackActive ───────────────
+// ── settlesLaunch ────────────────────────────────────
 
 test("only a store without an update leaves the launch open to a re-check", () => {
   assert.equal(settlesLaunch("started"), true);
+  assert.equal(settlesLaunch("downloaded"), true);
   assert.equal(settlesLaunch("unavailable"), true);
   assert.equal(settlesLaunch("no-store-update"), false);
 });
 
-test("the banner is a fallback only when the native flow is unavailable", () => {
-  assert.equal(isBannerFallbackActive("unavailable"), true);
-  assert.equal(isBannerFallbackActive("started"), false);
-  assert.equal(isBannerFallbackActive("no-store-update"), false);
+// ── chooseUpdateBanner ───────────────────────────────────
+
+const banner = (
+  overrides: Partial<Parameters<typeof chooseUpdateBanner>[0]> = {}
+) =>
+  chooseUpdateBanner({
+    outcome: "unavailable",
+    appVersion: "1.6.0",
+    latestVersion: "1.7.0",
+    dismissedVersion: null,
+    restartDismissed: false,
+    ...overrides,
+  });
+
+test("the store link is a fallback only when the native flow is unavailable", () => {
+  assert.equal(banner(), "store-link");
+  assert.equal(banner({ outcome: "started" }), null);
+  assert.equal(banner({ outcome: "no-store-update" }), null);
   // Pending: hidden, so the banner never flashes before a native sheet.
-  assert.equal(isBannerFallbackActive(null), false);
+  assert.equal(banner({ outcome: null }), null);
+});
+
+test("the store link follows the usual version and dismissal rules", () => {
+  assert.equal(banner({ latestVersion: "1.6.0" }), null);
+  assert.equal(banner({ latestVersion: null }), null);
+  assert.equal(banner({ dismissedVersion: "1.7.0" }), null);
+});
+
+test("a finished download offers a restart until closed for this launch", () => {
+  assert.equal(banner({ outcome: "downloaded" }), "restart");
+  // The download is real even when the server no longer advertises a version.
+  assert.equal(
+    banner({ outcome: "downloaded", latestVersion: null }),
+    "restart"
+  );
+  assert.equal(banner({ outcome: "downloaded", restartDismissed: true }), null);
 });
 
 // ── planPlayUpdate ───────────────────────────────────────
@@ -160,7 +175,22 @@ test("an update Play will not deliver flexibly falls back to the banner", () => 
   assert.equal(planPlayUpdate({ updateAvailable: true }), "unavailable");
 });
 
-test("no update, or one already downloading, needs nothing this launch", () => {
+test("a finished download is reported whatever else Play says", () => {
+  assert.equal(
+    planPlayUpdate({ updateAvailable: true, downloaded: true }),
+    "downloaded"
+  );
+  assert.equal(
+    planPlayUpdate({
+      updateAvailable: true,
+      downloaded: true,
+      updateInProgress: true,
+    }),
+    "downloaded"
+  );
+});
+
+test("no update, or one still downloading, needs nothing this launch", () => {
   assert.equal(planPlayUpdate({ updateAvailable: false }), "no-store-update");
   assert.equal(
     planPlayUpdate({ updateAvailable: true, updateInProgress: true }),
