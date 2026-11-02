@@ -67,6 +67,10 @@ export function ManagersCanEditAssetsForm({
       }}
     >
       <h4 className="mt-5 text-text-md">Managers</h4>
+      <p className="text-sm text-gray-600">
+        By default, Managers run bookings, custody and audits for everyone, but
+        cannot change the catalogue.
+      </p>
       <FormRow
         rowLabel={LABEL}
         subHeading={

@@ -90,9 +90,12 @@ describe("ManagersCanEditAssetsForm", () => {
     expect(mockSubmit).not.toHaveBeenCalled();
   });
 
-  it("states what the switch opens and what stays closed", () => {
+  it("states what Managers do by default, what the switch opens and what stays closed", () => {
     render(<ManagersCanEditAssetsForm defaultChecked={false} />);
 
+    screen.getByText(
+      "By default, Managers run bookings, custody and audits for everyone, but cannot change the catalogue."
+    );
     screen.getByText(
       "Switch on to let Managers add and edit assets and kits, update locations and link codes. They still cannot delete, archive, or create categories, locations, tags, custom fields or asset models."
     );
